@@ -2,15 +2,29 @@ use std::collections::HashSet;
 
 pub(crate) mod api;
 pub(crate) mod apply;
+pub(crate) mod eligibility;
 pub(crate) mod embedding;
+pub(crate) mod embedding_jobs;
 pub(crate) mod facts;
 pub(crate) mod indexing;
 pub(crate) mod intent;
+pub(crate) mod jobs;
 #[path = "memory_recent.rs"]
 mod memory_recent;
+pub(crate) mod project_identity;
+pub(crate) mod retention;
 pub(crate) mod retrieval;
+pub(crate) mod retrieval_async;
+pub(crate) mod scope;
 pub(crate) mod service;
+pub(crate) mod settings;
 pub(crate) mod use_policy;
+pub(crate) mod ux;
+pub(crate) mod vector_store;
+
+#[cfg(test)]
+#[path = "memory/memory_wp0_baseline_tests.rs"]
+mod wp0_baseline_tests;
 
 pub(super) use memory_recent::is_transient_assistant_context_text_basic;
 pub(crate) use memory_recent::{
@@ -77,7 +91,7 @@ pub(crate) const RETRIEVAL_SUCCESS_STATE_FAILED: &str = "failed";
 pub(crate) const RETRIEVAL_SUCCESS_STATE_NEUTRAL: &str = "neutral";
 
 pub(crate) const MEMORY_SCOPE_CHAT: &str = "chat";
-pub(crate) const MEMORY_SCOPE_USER: &str = "user";
+pub(crate) const MEMORY_SCOPE_PRINCIPAL: &str = "principal";
 
 // `source_ref` is a stable, source-local identity key for update/dedup flows.
 // It should be machine-oriented and not treated as user-facing display text.
@@ -267,6 +281,25 @@ fn query_recent_memories_for_chat(
     Ok(out)
 }
 
+fn query_recent_memories_for_principal(
+    db: &Connection,
+    principal_id: &str,
+    chat_id: i64,
+    limit: usize,
+) -> anyhow::Result<Vec<(String, String, String)>> {
+    let mut stmt = db.prepare(
+        "SELECT role, content, safety_flag
+         FROM memories
+         WHERE principal_id = ?1 AND chat_id = ?2
+         ORDER BY id DESC
+         LIMIT ?3",
+    )?;
+    let rows = stmt.query_map(params![principal_id, chat_id, limit as i64], |row| {
+        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
 fn query_preferences_for_chat(
     db: &Connection,
     user_id: i64,
@@ -291,6 +324,24 @@ fn query_preferences_for_chat(
         out.push(row?);
     }
     Ok(out)
+}
+
+fn query_preferences_for_principal(
+    db: &Connection,
+    principal_id: &str,
+    limit: usize,
+) -> anyhow::Result<Vec<(String, String)>> {
+    let mut stmt = db.prepare(
+        "SELECT pref_key, pref_value
+         FROM user_preferences
+         WHERE principal_id = ?1 AND scope_kind = 'principal' AND scope_ref = ?1
+         ORDER BY COALESCE(updated_at_ts, CAST(updated_at AS INTEGER)) DESC
+         LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(params![principal_id, limit as i64], |row| {
+        Ok((row.get(0)?, row.get(1)?))
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
 fn query_memories_since_id_for_chat(
@@ -345,11 +396,65 @@ pub(crate) fn insert_memory(
     max_chars: usize,
     write_kind: MemoryWriteKind,
 ) -> anyhow::Result<()> {
+    insert_memory_with_id(
+        state,
+        user_id,
+        chat_id,
+        user_key,
+        channel,
+        external_chat_id,
+        role,
+        content,
+        max_chars,
+        write_kind,
+    )
+    .map(|_| ())
+}
+
+pub(crate) fn insert_memory_with_id(
+    state: &AppState,
+    user_id: i64,
+    chat_id: i64,
+    user_key: Option<&str>,
+    channel: &str,
+    external_chat_id: Option<&str>,
+    role: &str,
+    content: &str,
+    _max_chars: usize,
+    write_kind: MemoryWriteKind,
+) -> anyhow::Result<Option<i64>> {
+    let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
+    insert_memory_with_id_in_connection(
+        state,
+        &db,
+        user_id,
+        chat_id,
+        user_key,
+        channel,
+        external_chat_id,
+        role,
+        content,
+        write_kind,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn insert_memory_with_id_in_connection(
+    state: &AppState,
+    db: &Connection,
+    user_id: i64,
+    chat_id: i64,
+    user_key: Option<&str>,
+    channel: &str,
+    external_chat_id: Option<&str>,
+    role: &str,
+    content: &str,
+    write_kind: MemoryWriteKind,
+) -> anyhow::Result<Option<i64>> {
     let user_key = effective_user_key(user_key, user_id, chat_id);
     if content.trim().is_empty() {
-        return Ok(());
+        return Ok(None);
     }
-    let keep = max_chars.max(128);
     let mut normalized = content.trim().to_string();
     let file_tokens = extract_delivery_file_tokens(content);
     if !file_tokens.is_empty() {
@@ -358,41 +463,50 @@ pub(crate) fn insert_memory(
             normalized = format!("{merged}\n{normalized}");
         }
     }
-    let trimmed = utf8_safe_prefix(&normalized, keep).to_string();
     let should_skip = state.policy.memory.write_filter_enabled
         && should_skip_memory_write(
-            &trimmed,
+            &normalized,
             role,
             state.policy.memory.write_min_chars.max(1),
             &state.policy.memory,
         );
     if should_skip {
-        return Ok(());
+        return Ok(None);
     }
 
     let safety_flag = MEMORY_SAFETY_FLAG_NORMAL.to_string();
     let is_instructional = false;
     let memory_type = infer_memory_type(role, is_instructional, &safety_flag, write_kind);
-    let salience = estimate_memory_salience(&trimmed, is_instructional, &safety_flag, write_kind);
+    let salience =
+        estimate_memory_salience(&normalized, is_instructional, &safety_flag, write_kind);
 
     let now_text = now_ts();
     let now_ts_i64 = now_ts_u64() as i64;
-    let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
-    if is_duplicate_recent_memory(&db, user_id, chat_id, &user_key, role, &trimmed)? {
-        return Ok(());
+    let principal_id = crate::repo::auth::principal_id_for_user_key(db, &user_key)?
+        .ok_or_else(|| anyhow!("memory_principal_not_found"))?;
+    if is_duplicate_recent_memory(db, user_id, chat_id, &user_key, role, &normalized)? {
+        return Ok(None);
     }
 
     db.execute(
-        "INSERT INTO memories (user_id, chat_id, user_key, channel, external_chat_id, role, content, created_at, created_at_ts, memory_type, salience, is_instructional, safety_flag)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+        "INSERT INTO memories (
+            memory_id, user_id, chat_id, user_key, principal_id, scope_kind, scope_ref,
+            channel, external_chat_id, role, content, created_at, created_at_ts, memory_type,
+            salience, is_instructional, safety_flag, origin, row_revision, legacy_scope_inferred
+         ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, 'principal', ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+            ?13, ?14, ?15, 'background_extract', 1, 0
+         )",
         params![
+            format!("memory_{}", uuid::Uuid::new_v4().simple()),
             user_id,
             chat_id,
             user_key,
+            principal_id,
             channel,
             external_chat_id.map(str::trim).filter(|v| !v.is_empty()),
             role,
-            trimmed,
+            normalized,
             now_text,
             now_ts_i64,
             memory_type,
@@ -401,23 +515,23 @@ pub(crate) fn insert_memory(
             safety_flag
         ],
     )?;
+    let memory_id = db.last_insert_rowid();
     if state.policy.memory.hybrid_recall_enabled {
-        let memory_id = db.last_insert_rowid();
         let _ = indexing::index_memory_row(
-            &db,
+            db,
             user_id,
             chat_id,
             &user_key,
             memory_id,
             role,
-            &trimmed,
+            &normalized,
             memory_type,
             salience,
             is_instructional,
             now_ts_i64,
         );
     }
-    Ok(())
+    Ok(Some(memory_id))
 }
 
 const MEMORY_INTENT_EXTRACT_PROMPT_TEMPLATE: &str =
@@ -432,6 +546,9 @@ pub(crate) async fn maybe_extract_memory_intent_with_llm(
 ) -> anyhow::Result<()> {
     let cfg = &state.policy.memory;
     if !cfg.enable_preference_extraction || !cfg.llm_preference_fallback_enabled {
+        return Ok(());
+    }
+    if !settings::task_memory_generation_enabled(state, task) {
         return Ok(());
     }
     let trimmed = content.trim();
@@ -527,13 +644,30 @@ pub(crate) fn count_chat_memory_rounds(
 ) -> anyhow::Result<usize> {
     let user_key = effective_user_key(user_key, user_id, chat_id);
     let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
-    let current_cnt: i64 = db.query_row(
-        "SELECT COUNT(*) FROM memories WHERE user_id = ?1 AND chat_id = ?2 AND user_key = ?3 AND role = 'user'",
-        params![user_id, chat_id, user_key],
-        |row| row.get(0),
-    )?;
+    let principal_id = crate::repo::auth::principal_id_for_user_key(&db, &user_key)?;
+    let scoped_reader =
+        principal_id.is_some() && scope::table_has_scope_contract(&db, "memories").unwrap_or(false);
+    let current_cnt: i64 = if scoped_reader {
+        let principal_id = principal_id.as_deref().expect("scoped principal");
+        db.query_row(
+            "SELECT COUNT(*) FROM memories
+             WHERE principal_id = ?1 AND chat_id = ?2 AND role = 'user'",
+            params![principal_id, chat_id],
+            |row| row.get(0),
+        )?
+    } else {
+        db.query_row(
+            "SELECT COUNT(*) FROM memories
+             WHERE user_id = ?1 AND chat_id = ?2 AND user_key = ?3 AND role = 'user'",
+            params![user_id, chat_id, user_key],
+            |row| row.get(0),
+        )?
+    };
     if current_cnt > 0 {
         return Ok(current_cnt.max(0) as usize);
+    }
+    if scoped_reader {
+        return Ok(0);
     }
     let Some(legacy_chat_id) = legacy_principal_chat_id(&user_key, chat_id) else {
         return Ok(0);
@@ -555,7 +689,15 @@ pub(crate) fn recall_recent_memories(
 ) -> anyhow::Result<Vec<(String, String)>> {
     let user_key = effective_user_key(user_key, user_id, chat_id);
     let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
-    let rows = query_recent_memories_for_chat(&db, user_id, chat_id, &user_key, limit)?;
+    let principal_id = crate::repo::auth::principal_id_for_user_key(&db, &user_key)?;
+    let scoped_reader =
+        principal_id.is_some() && scope::table_has_scope_contract(&db, "memories").unwrap_or(false);
+    let rows = if scoped_reader {
+        let principal_id = principal_id.as_deref().expect("scoped principal");
+        query_recent_memories_for_principal(&db, principal_id, chat_id, limit)?
+    } else {
+        query_recent_memories_for_chat(&db, user_id, chat_id, &user_key, limit)?
+    };
     let mut out = Vec::new();
     for (role, content, safety_flag) in rows {
         if state.policy.memory.safety_filter_enabled
@@ -566,7 +708,7 @@ pub(crate) fn recall_recent_memories(
         }
         out.push((role, content));
     }
-    if out.is_empty() {
+    if !scoped_reader && out.is_empty() {
         if let Some(legacy_chat_id) = legacy_principal_chat_id(&user_key, chat_id) {
             let rows =
                 query_recent_memories_for_chat(&db, user_id, legacy_chat_id, &user_key, limit)?;
@@ -649,7 +791,15 @@ pub(crate) fn recall_user_preferences(
 ) -> anyhow::Result<Vec<(String, String)>> {
     let user_key = effective_user_key(user_key, user_id, chat_id);
     let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
-    let rows = query_preferences_for_chat(&db, user_id, chat_id, &user_key, limit)?;
+    let principal_id = crate::repo::auth::principal_id_for_user_key(&db, &user_key)?;
+    let scoped_reader = principal_id.is_some()
+        && scope::table_has_scope_contract(&db, "user_preferences").unwrap_or(false);
+    let rows = if scoped_reader {
+        let principal_id = principal_id.as_deref().expect("scoped principal");
+        query_preferences_for_principal(&db, principal_id, limit)?
+    } else {
+        query_preferences_for_chat(&db, user_id, chat_id, &user_key, limit)?
+    };
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     for (key, value) in rows {
@@ -657,7 +807,7 @@ pub(crate) fn recall_user_preferences(
             out.push((key, value));
         }
     }
-    if out.is_empty() {
+    if !scoped_reader && out.is_empty() {
         if let Some(legacy_chat_id) = legacy_principal_chat_id(&user_key, chat_id) {
             let rows = query_preferences_for_chat(&db, user_id, legacy_chat_id, &user_key, limit)?;
             for (key, value) in rows {
@@ -679,15 +829,33 @@ pub(crate) fn recall_long_term_summary(
 ) -> anyhow::Result<Option<String>> {
     let user_key = effective_user_key(user_key, user_id, chat_id);
     let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
-    let summary = db
-        .query_row(
-            "SELECT summary FROM long_term_memories WHERE user_id = ?1 AND chat_id = ?2 AND user_key = ?3",
+    let principal_id = crate::repo::auth::principal_id_for_user_key(&db, &user_key)?;
+    let scoped_reader = principal_id.is_some()
+        && scope::table_has_scope_contract(&db, "long_term_memories").unwrap_or(false);
+    let summary = if scoped_reader {
+        let principal_id = principal_id.as_deref().expect("scoped principal");
+        db.query_row(
+            "SELECT summary FROM long_term_memories
+             WHERE principal_id = ?1 AND scope_kind = 'principal' AND scope_ref = ?1
+             ORDER BY COALESCE(updated_at_ts, created_at_ts, 0) DESC, id DESC LIMIT 1",
+            [principal_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+    } else {
+        db.query_row(
+            "SELECT summary FROM long_term_memories
+             WHERE user_id = ?1 AND chat_id = ?2 AND user_key = ?3",
             params![user_id, chat_id, user_key],
             |row| row.get::<_, String>(0),
         )
-        .optional()?;
+        .optional()?
+    };
     if summary.is_some() {
         return Ok(summary);
+    }
+    if scoped_reader {
+        return Ok(None);
     }
     let Some(legacy_chat_id) = legacy_principal_chat_id(&user_key, chat_id) else {
         return Ok(None);
@@ -779,14 +947,39 @@ pub(crate) fn upsert_long_term_summary(
 ) -> anyhow::Result<()> {
     let user_key = effective_user_key(user_key, user_id, chat_id);
     let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
+    let principal_id = crate::repo::auth::principal_id_for_user_key(&db, &user_key)?
+        .ok_or_else(|| anyhow!("memory_principal_not_found"))?;
     let now = now_ts();
     let now_ts_i64 = now_ts_u64() as i64;
     db.execute(
-        "INSERT INTO long_term_memories (user_id, chat_id, user_key, summary, source_memory_id, created_at, updated_at, created_at_ts, updated_at_ts)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?7, ?7)
+        "INSERT INTO long_term_memories (
+            memory_id, user_id, chat_id, user_key, principal_id, scope_kind, scope_ref,
+            summary, source_memory_id, created_at, updated_at, created_at_ts, updated_at_ts,
+            origin, row_revision, legacy_scope_inferred
+         ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, 'principal', ?5, ?6, ?7, ?8, ?8, ?9, ?9,
+            'background_extract', 1, 0
+         )
          ON CONFLICT(user_id, chat_id, user_key)
-         DO UPDATE SET user_key = excluded.user_key, summary = excluded.summary, source_memory_id = excluded.source_memory_id, updated_at = excluded.updated_at, updated_at_ts = excluded.updated_at_ts",
-        params![user_id, chat_id, user_key, summary, source_memory_id, now, now_ts_i64],
+         DO UPDATE SET principal_id = excluded.principal_id,
+                       scope_kind = excluded.scope_kind,
+                       scope_ref = excluded.scope_ref,
+                       summary = excluded.summary,
+                       source_memory_id = excluded.source_memory_id,
+                       updated_at = excluded.updated_at,
+                       updated_at_ts = excluded.updated_at_ts,
+                       row_revision = long_term_memories.row_revision + 1",
+        params![
+            format!("memory_{}", uuid::Uuid::new_v4().simple()),
+            user_id,
+            chat_id,
+            user_key,
+            principal_id,
+            summary,
+            source_memory_id,
+            now,
+            now_ts_i64
+        ],
     )?;
     Ok(())
 }
@@ -960,16 +1153,34 @@ fn upsert_user_preferences(
     now_text: &str,
     now_ts_i64: i64,
 ) -> anyhow::Result<()> {
+    let principal_id = crate::repo::auth::principal_id_for_user_key(db, user_key)?
+        .ok_or_else(|| anyhow!("memory_principal_not_found"))?;
     for (pref_key, pref_value, confidence, source) in extracted_prefs {
         db.execute(
-            "INSERT INTO user_preferences (user_id, chat_id, user_key, pref_key, pref_value, confidence, source, updated_at, updated_at_ts)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            "INSERT INTO user_preferences (
+                memory_id, user_id, chat_id, user_key, principal_id, scope_kind, scope_ref,
+                pref_key, pref_value, confidence, source, updated_at, updated_at_ts,
+                origin, row_revision, legacy_scope_inferred
+             ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, 'principal', ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+                'background_extract', 1, 0
+             )
              ON CONFLICT(user_id, chat_id, user_key, pref_key)
-             DO UPDATE SET user_key=excluded.user_key, pref_value=excluded.pref_value, confidence=excluded.confidence, source=excluded.source, updated_at=excluded.updated_at, updated_at_ts=excluded.updated_at_ts",
+             DO UPDATE SET principal_id=excluded.principal_id,
+                           scope_kind=excluded.scope_kind,
+                           scope_ref=excluded.scope_ref,
+                           pref_value=excluded.pref_value,
+                           confidence=excluded.confidence,
+                           source=excluded.source,
+                           updated_at=excluded.updated_at,
+                           updated_at_ts=excluded.updated_at_ts,
+                           row_revision=user_preferences.row_revision + 1",
             params![
+                format!("memory_{}", uuid::Uuid::new_v4().simple()),
                 user_id,
                 chat_id,
                 user_key,
+                principal_id,
                 pref_key,
                 pref_value,
                 *confidence,
@@ -1020,23 +1231,7 @@ pub(crate) fn upsert_user_preferences_from_route_hint(
 }
 
 fn extract_recall_terms(prompt: &str) -> Vec<String> {
-    let lower = prompt.to_ascii_lowercase();
-    let mut out = lower
-        .split(|c: char| !c.is_alphanumeric() && c != '_')
-        .filter(|w| w.len() >= 3)
-        .map(|w| w.to_string())
-        .collect::<Vec<_>>();
-    let cjk = prompt
-        .chars()
-        .filter(|c| ('\u{4e00}'..='\u{9fff}').contains(c))
-        .collect::<String>();
-    let chars = cjk.chars().collect::<Vec<_>>();
-    for w in chars.windows(2).take(10) {
-        out.push(w.iter().collect::<String>());
-    }
-    out.sort();
-    out.dedup();
-    out
+    embedding::tokenize_text(prompt)
 }
 
 fn score_memory_relevance(role: &str, content: &str, recall_terms: &[String]) -> f32 {

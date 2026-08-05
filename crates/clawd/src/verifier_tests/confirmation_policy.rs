@@ -97,31 +97,14 @@ fn destructive_run_cmd_requires_confirmation_without_resume() {
 fn destructive_run_cmd_uses_authenticated_yolo_policy() {
     let state = test_state();
     let user_key = "rk-verifier-yolo-admin";
-    let db = state.core.db.get().expect("test db");
-    db.execute_batch(
-        "CREATE TABLE IF NOT EXISTS auth_keys (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_key TEXT NOT NULL UNIQUE,
-            role TEXT NOT NULL,
-            enabled INTEGER NOT NULL DEFAULT 1,
-            created_at TEXT NOT NULL DEFAULT '',
-            last_used_at TEXT
-        );",
-    )
-    .expect("auth key table");
-    db.execute(
-        "INSERT INTO auth_keys (user_key, role, enabled, created_at)
-         VALUES (?1, 'admin', 1, 'now')",
-        rusqlite::params![user_key],
-    )
-    .expect("insert admin key");
-    drop(db);
+    state.seed_test_auth_identity(user_key, "admin");
 
     let mut payload = json!({"text": "task"});
     crate::task_execution_policy::stamp_authenticated_submission_policy(
         &mut payload,
         Some(&claw_core::types::AuthIdentity {
             user_key: user_key.to_string(),
+            principal_id: "principal-test-admin".to_string(),
             role: "admin".to_string(),
             user_id: 1,
             chat_id: 2,

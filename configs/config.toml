@@ -67,6 +67,10 @@ default_output_dir = "document"
 global_rpm = 60
 # 单用户每分钟请求数 / Per-user requests per minute.
 user_rpm = 20
+# 为下一次工具结果预留的上下文 token；不会缩短任务总运行时间。
+context_tool_observation_reserve_tokens = 2048
+# 本地 token 估算与厂商 usage 存在误差时使用的最小安全余量。
+context_estimator_safety_margin_tokens = 512
 
 # 用途/Purpose: LLM 路由默认选择（厂商与模型）.
 # 建议修改/Recommended change: 可改.

@@ -36,7 +36,6 @@ pub(crate) use channels::{
 };
 pub(super) use locator::{has_concrete_locator_hint, has_explicit_path_or_url_locator_hint};
 use run_skill_finalize::{finalize_run_skill_confirmation_required, finalize_run_skill_result};
-pub(crate) use runtime_support::spawn_long_term_summary_refresh;
 pub(crate) use runtime_support::{
     maybe_recover_stale_running_tasks_runtime, recover_stale_running_tasks_on_startup,
     spawn_cleanup_worker, spawn_schedule_worker, spawn_worker, start_task_heartbeat,

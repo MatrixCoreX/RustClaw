@@ -49,6 +49,7 @@ fn summary_keeps_compaction_records_out_of_string_projection() {
             "source_refs": [{"ref": "recent_turns_full"}],
             "risk_flags": ["budget_excluded_context", "old_assistant_output_not_instruction"],
         })],
+        memory_settings_snapshot: None,
     };
 
     let summary = bundle.summary();
@@ -114,6 +115,7 @@ fn summary_marks_long_session_context_compaction_trigger() {
         }),
         task_plan_snapshot: None,
         compaction_records: Vec::new(),
+        memory_settings_snapshot: None,
     };
 
     let summary = bundle.summary();

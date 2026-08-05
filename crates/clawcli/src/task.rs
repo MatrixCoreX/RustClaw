@@ -439,6 +439,7 @@ pub(crate) fn submit_conversation_compaction(
     conversation_id: &str,
     session_id: &str,
     resume_task_id: Option<&str>,
+    compaction_focus: Option<&str>,
     options: TaskSubmissionOptions,
 ) -> Result<String> {
     let mut payload = json!({
@@ -450,6 +451,12 @@ pub(crate) fn submit_conversation_compaction(
     });
     if let Some(task_id) = resume_task_id {
         payload["resume_task_id"] = json!(task_id);
+    }
+    if let Some(focus) = compaction_focus
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        payload["compaction_focus"] = json!(focus);
     }
     submit_ask_with_payload(base_url, key, payload, options)
 }

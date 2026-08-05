@@ -1,22 +1,20 @@
 use claw_core::config::MemoryConfig;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::json;
 
-use super::embedding::{embed_text_locally, local_hash_embedding_spec};
-use super::retrieval::{build_topic_tags, vector_to_json};
-#[cfg(test)]
-use super::RETRIEVAL_SOURCE_KNOWLEDGE_FACT;
+use super::retrieval::build_topic_tags;
 use super::{
     retrieval_source_ref_for_memory, retrieval_source_ref_for_memory_fact,
     retrieval_source_ref_for_preference, LLM_SHORT_TERM_MEMORY_PREFIX, MEMORY_FACT_STATUS_ACTIVE,
     MEMORY_ROLE_ASSISTANT, MEMORY_ROLE_SYSTEM, MEMORY_ROLE_USER, MEMORY_SCOPE_CHAT,
-    MEMORY_SCOPE_USER, MEMORY_TYPE_SAFETY_SIGNAL, MEMORY_TYPE_UNFINISHED_GOAL,
-    RETRIEVAL_KIND_ASSISTANT_RESULT, RETRIEVAL_KIND_EPISODIC_EVENT, RETRIEVAL_KIND_SEMANTIC_FACT,
-    RETRIEVAL_KIND_TRIGGER_ANCHOR, RETRIEVAL_KIND_UNFINISHED_GOAL,
-    RETRIEVAL_PRODUCER_MEMORY_PIPELINE, RETRIEVAL_SOURCE_MEMORY, RETRIEVAL_SOURCE_MEMORY_FACT,
-    RETRIEVAL_SOURCE_PREFERENCE, RETRIEVAL_SUCCESS_STATE_NEUTRAL,
+    MEMORY_TYPE_SAFETY_SIGNAL, MEMORY_TYPE_UNFINISHED_GOAL, RETRIEVAL_KIND_ASSISTANT_RESULT,
+    RETRIEVAL_KIND_EPISODIC_EVENT, RETRIEVAL_KIND_SEMANTIC_FACT, RETRIEVAL_KIND_TRIGGER_ANCHOR,
+    RETRIEVAL_KIND_UNFINISHED_GOAL, RETRIEVAL_PRODUCER_MEMORY_PIPELINE, RETRIEVAL_SOURCE_MEMORY,
+    RETRIEVAL_SOURCE_MEMORY_FACT, RETRIEVAL_SOURCE_PREFERENCE, RETRIEVAL_SUCCESS_STATE_NEUTRAL,
     RETRIEVAL_SUCCESS_STATE_SUCCEEDED,
 };
+#[cfg(test)]
+use super::{MEMORY_SCOPE_PRINCIPAL, RETRIEVAL_SOURCE_KNOWLEDGE_FACT};
 
 pub(crate) fn ensure_retrieval_schema(db: &Connection) -> anyhow::Result<()> {
     db.execute_batch(
@@ -134,6 +132,17 @@ pub(crate) fn cleanup_retrieval_index(
 
 pub(crate) fn rebuild_retrieval_index(db: &Connection, _cfg: &MemoryConfig) -> anyhow::Result<()> {
     ensure_retrieval_schema(db)?;
+    super::vector_store::ensure_vector_pipeline_schema(db)?;
+    db.execute(
+        "UPDATE memory_embedding_jobs SET cancel_requested = 1, updated_at_ts = ?1
+         WHERE status IN ('queued', 'retry_wait', 'running')",
+        [crate::now_ts_u64() as i64],
+    )?;
+    db.execute(
+        "UPDATE memory_vector_rows SET status = 'tombstone', updated_at_ts = ?1
+         WHERE status = 'active'",
+        [crate::now_ts_u64() as i64],
+    )?;
     db.execute("DELETE FROM memory_retrieval_index", [])?;
     let _ = db.execute("DELETE FROM memory_retrieval_index_fts", []);
 
@@ -233,6 +242,17 @@ pub(crate) fn index_preference_entries(
                 pref_key
             ],
         )?;
+        let (scope_kind, scope_ref): (String, Option<String>) = db
+            .query_row(
+                "SELECT COALESCE(scope_kind, 'principal'), scope_ref
+                 FROM user_preferences
+                 WHERE user_key = ?1 AND pref_key = ?2
+                 ORDER BY updated_at_ts DESC, id DESC LIMIT 1",
+                params![user_key, pref_key],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .unwrap_or_else(|| ("principal".to_string(), None));
         let text = format!("Preference {pref_key}: {pref_value}");
         insert_index_row(
             db,
@@ -247,7 +267,11 @@ pub(crate) fn index_preference_entries(
             None,
             &text,
             Some(pref_key),
-            Some(&build_preference_metadata_json(pref_key)),
+            Some(&build_preference_metadata_json(
+                pref_key,
+                &scope_kind,
+                scope_ref.as_deref(),
+            )),
             *confidence,
             RETRIEVAL_SUCCESS_STATE_SUCCEEDED,
             Some(source),
@@ -412,47 +436,141 @@ fn insert_index_row(
     ts: i64,
 ) -> anyhow::Result<()> {
     let topic_tags = build_topic_tags(search_text);
-    let vector_json = vector_to_json(&embed_text_locally(search_text));
-    let embedding_spec = local_hash_embedding_spec();
-    db.execute(
-        "INSERT INTO memory_retrieval_index (
-            source_kind, source_memory_id, source_pref_key, source_ref, user_id, chat_id, user_key,
-            memory_kind, role, search_text, trigger_text, topic_tags, vector_json,
-            embedding_model, embedding_dims, embedding_version, metadata_json,
-            salience, success_state, tool_or_skill_name, created_at_ts, updated_at_ts
-         )
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?21)",
-        params![
-            source_kind,
-            source_memory_id,
-            source_pref_key,
-            source_ref,
-            user_id,
-            chat_id,
-            user_key,
-            memory_kind,
-            role,
-            search_text,
-            trigger_text,
-            topic_tags,
-            vector_json,
-            embedding_spec.model_id,
-            embedding_spec.dims as i64,
-            embedding_spec.version,
-            metadata_json.unwrap_or("{}"),
-            salience,
-            success_state,
-            tool_or_skill_name,
-            ts,
-        ],
-    )?;
+    let vector_json = "[]";
+    let embedding_spec = super::embedding::local_hash_embedding_spec();
+    let metadata_json = metadata_json.unwrap_or("{}");
+    if retrieval_scope_contract_available(db)? {
+        let principal_id = crate::repo::auth::principal_id_for_user_key(db, user_key)?;
+        let metadata = serde_json::from_str::<serde_json::Value>(metadata_json).unwrap_or_default();
+        let requested_scope = metadata
+            .get("scope_kind")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("principal");
+        let (scope_kind, scope_ref) = match requested_scope {
+            "project" | "conversation" => (
+                requested_scope,
+                metadata
+                    .get("scope_ref")
+                    .or_else(|| metadata.get("project_ref"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToString::to_string),
+            ),
+            _ => ("principal", principal_id.clone()),
+        };
+        anyhow::ensure!(scope_ref.is_some(), "memory_retrieval_scope_ref_required");
+        db.execute(
+            "INSERT INTO memory_retrieval_index (
+                source_kind, source_memory_id, source_pref_key, source_ref,
+                user_id, chat_id, user_key, principal_id, scope_kind, scope_ref,
+                memory_kind, role, search_text, trigger_text, topic_tags, vector_json,
+                embedding_model, embedding_dims, embedding_version, metadata_json,
+                salience, success_state, tool_or_skill_name, created_at_ts, updated_at_ts
+             ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?24
+             )",
+            params![
+                source_kind,
+                source_memory_id,
+                source_pref_key,
+                source_ref,
+                user_id,
+                chat_id,
+                user_key,
+                principal_id,
+                scope_kind,
+                scope_ref,
+                memory_kind,
+                role,
+                search_text,
+                trigger_text,
+                topic_tags,
+                vector_json,
+                embedding_spec.model_id,
+                embedding_spec.dims as i64,
+                embedding_spec.version,
+                metadata_json,
+                salience,
+                success_state,
+                tool_or_skill_name,
+                ts,
+            ],
+        )?;
+    } else {
+        db.execute(
+            "INSERT INTO memory_retrieval_index (
+                source_kind, source_memory_id, source_pref_key, source_ref, user_id, chat_id,
+                user_key, memory_kind, role, search_text, trigger_text, topic_tags, vector_json,
+                embedding_model, embedding_dims, embedding_version, metadata_json,
+                salience, success_state, tool_or_skill_name, created_at_ts, updated_at_ts
+             ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?21
+             )",
+            params![
+                source_kind,
+                source_memory_id,
+                source_pref_key,
+                source_ref,
+                user_id,
+                chat_id,
+                user_key,
+                memory_kind,
+                role,
+                search_text,
+                trigger_text,
+                topic_tags,
+                vector_json,
+                embedding_spec.model_id,
+                embedding_spec.dims as i64,
+                embedding_spec.version,
+                metadata_json,
+                salience,
+                success_state,
+                tool_or_skill_name,
+                ts,
+            ],
+        )?;
+    }
     let row_id = db.last_insert_rowid();
     let _ = db.execute(
         "INSERT INTO memory_retrieval_index_fts(rowid, search_text, topic_tags)
          VALUES (?1, ?2, ?3)",
         params![row_id, search_text, topic_tags],
     );
+    if retrieval_scope_contract_available(db)? {
+        let principal_id = crate::repo::auth::principal_id_for_user_key(db, user_key)?;
+        let scope = db.query_row(
+            "SELECT COALESCE(scope_kind, 'principal'), scope_ref
+                 FROM memory_retrieval_index WHERE id = ?1",
+            [row_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+        )?;
+        super::vector_store::enqueue_retrieval_embedding(
+            db,
+            row_id,
+            principal_id.as_deref(),
+            &scope.0,
+            scope.1.as_deref(),
+            search_text,
+        )?;
+    }
     Ok(())
+}
+
+fn retrieval_scope_contract_available(db: &Connection) -> anyhow::Result<bool> {
+    let mut stmt = db.prepare("PRAGMA table_info(memory_retrieval_index)")?;
+    let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    let mut has_principal = false;
+    let mut has_scope_ref = false;
+    for column in columns {
+        match column?.as_str() {
+            "principal_id" => has_principal = true,
+            "scope_ref" => has_scope_ref = true,
+            _ => {}
+        }
+    }
+    Ok(has_principal && has_scope_ref)
 }
 
 fn build_chat_scope_metadata_json() -> String {
@@ -462,9 +580,14 @@ fn build_chat_scope_metadata_json() -> String {
     .to_string()
 }
 
-fn build_preference_metadata_json(pref_key: &str) -> String {
+fn build_preference_metadata_json(
+    pref_key: &str,
+    scope_kind: &str,
+    scope_ref: Option<&str>,
+) -> String {
     json!({
-        "scope_kind": MEMORY_SCOPE_CHAT,
+        "scope_kind": scope_kind,
+        "scope_ref": scope_ref,
         "namespace": "preferences",
         "path": pref_key,
         "preference_key": pref_key,
@@ -569,7 +692,17 @@ pub(crate) fn upsert_memory_fact_retrieval_row(
          WHERE source_kind = ?1 AND source_ref = ?2",
         params![RETRIEVAL_SOURCE_MEMORY_FACT, source_ref],
     )?;
-    let metadata = build_memory_fact_metadata_json(namespace, fact_id);
+    let (scope_kind, scope_ref): (String, Option<String>) = db
+        .query_row(
+            "SELECT COALESCE(scope_kind, 'principal'), scope_ref
+             FROM memory_facts WHERE id = ?1",
+            [fact_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?
+        .unwrap_or_else(|| ("principal".to_string(), None));
+    let metadata =
+        build_memory_fact_metadata_json(namespace, fact_id, &scope_kind, scope_ref.as_deref());
     insert_index_row(
         db,
         RETRIEVAL_SOURCE_MEMORY_FACT,
@@ -620,16 +753,22 @@ pub(crate) fn delete_memory_fact_retrieval_rows(
 #[cfg(test)]
 fn build_knowledge_fact_metadata_json(namespace: &str) -> String {
     json!({
-        "scope_kind": MEMORY_SCOPE_USER,
+        "scope_kind": MEMORY_SCOPE_PRINCIPAL,
         "namespace": namespace,
         "path": "conversation",
     })
     .to_string()
 }
 
-fn build_memory_fact_metadata_json(namespace: &str, fact_id: i64) -> String {
+fn build_memory_fact_metadata_json(
+    namespace: &str,
+    fact_id: i64,
+    scope_kind: &str,
+    scope_ref: Option<&str>,
+) -> String {
     json!({
-        "scope_kind": MEMORY_SCOPE_USER,
+        "scope_kind": scope_kind,
+        "scope_ref": scope_ref,
         "namespace": namespace,
         "path": "memory_facts",
         "fact_id": fact_id,

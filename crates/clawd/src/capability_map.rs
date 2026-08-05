@@ -68,6 +68,12 @@ fn planner_capability_hint(mapping: &PlannerCapabilityMapping) -> String {
     if let Some(risk_level) = mapping.risk_level {
         parts.push(format!("risk={}", risk_level_token(risk_level)));
     }
+    if let Some(auto_invocable) = mapping.auto_invocable {
+        parts.push(format!("auto_invocable={auto_invocable}"));
+    }
+    if let Some(requires_confirmation) = mapping.requires_confirmation {
+        parts.push(format!("requires_confirmation={requires_confirmation}"));
+    }
     if mapping.preferred {
         parts.push("preferred=true".to_string());
     }

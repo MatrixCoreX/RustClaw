@@ -29,7 +29,7 @@ fn test_state() -> AppState {
         crate::DEFAULT_AGENT_ID.to_string(),
         AgentRuntimeConfig::from_config(&AgentConfig::default(), Vec::new()),
     )]);
-    AppState {
+    let state = AppState {
         core: crate::CoreServices {
             agents_by_id: Arc::new(std::sync::RwLock::new(Arc::new(agents_by_id))),
             agent_runtime_leases: Arc::new(std::sync::RwLock::new(HashMap::new())),
@@ -52,7 +52,56 @@ fn test_state() -> AppState {
         channels: crate::ChannelConfig::default(),
         reload_ctx: crate::ReloadContext::default(),
         ask_states: crate::AskStateRegistry::default(),
+    };
+    {
+        let db = state.core.db.get().expect("memory test auth db");
+        db.execute_batch(crate::KEY_AUTH_UPGRADE_SQL)
+            .expect("memory test auth schema");
+        db.execute(
+            "INSERT INTO auth_keys (user_key, role, enabled, created_at)
+             VALUES ('test-user', 'user', 1, '1')",
+            [],
+        )
+        .expect("memory test auth key");
+        crate::repo::auth::ensure_principal_identity_schema(&db)
+            .expect("memory test principal schema");
     }
+    state
+}
+
+#[test]
+fn canonical_transcript_is_not_truncated_by_prompt_or_candidate_budget() {
+    let state = test_state();
+    {
+        let db = state.core.db.get().expect("memory schema db");
+        db.execute_batch(crate::INIT_SQL).expect("base schema");
+        crate::db_init::ensure_memory_schema(&db).expect("memory schema");
+        crate::repo::ensure_key_auth_schema(&db).expect("key auth schema");
+        crate::memory::scope::ensure_memory_scope_schema(&db).expect("memory scope schema");
+    }
+    let content = "完整来源".repeat(900);
+    insert_memory(
+        &state,
+        1,
+        2,
+        Some("test-user"),
+        "ui",
+        None,
+        MEMORY_ROLE_USER,
+        &content,
+        128,
+        MemoryWriteKind::Default,
+    )
+    .expect("insert full transcript");
+    let db = state.core.db.get().expect("memory db");
+    let stored: String = db
+        .query_row(
+            "SELECT content FROM memories WHERE user_key = 'test-user' ORDER BY id DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("stored transcript");
+    assert_eq!(stored, content);
 }
 
 fn create_tasks_table(db: &Connection) {
@@ -165,6 +214,13 @@ fn create_memories_table(db: &Connection) {
             user_id INTEGER NOT NULL,
             chat_id INTEGER NOT NULL,
             user_key TEXT,
+            principal_id TEXT,
+            memory_id TEXT,
+            scope_kind TEXT NOT NULL DEFAULT 'principal',
+            scope_ref TEXT,
+            origin TEXT NOT NULL DEFAULT 'imported_legacy',
+            row_revision INTEGER NOT NULL DEFAULT 1,
+            legacy_scope_inferred INTEGER NOT NULL DEFAULT 0,
             channel TEXT NOT NULL DEFAULT 'telegram',
             external_chat_id TEXT,
             role TEXT NOT NULL,
@@ -186,6 +242,13 @@ fn create_user_preferences_table(db: &Connection) {
             user_id INTEGER NOT NULL,
             chat_id INTEGER NOT NULL,
             user_key TEXT NOT NULL,
+            principal_id TEXT,
+            memory_id TEXT,
+            scope_kind TEXT NOT NULL DEFAULT 'principal',
+            scope_ref TEXT,
+            origin TEXT NOT NULL DEFAULT 'imported_legacy',
+            row_revision INTEGER NOT NULL DEFAULT 1,
+            legacy_scope_inferred INTEGER NOT NULL DEFAULT 0,
             pref_key TEXT NOT NULL,
             pref_value TEXT NOT NULL,
             confidence REAL NOT NULL DEFAULT 0,

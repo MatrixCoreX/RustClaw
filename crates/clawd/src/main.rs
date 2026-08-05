@@ -476,6 +476,12 @@ async fn run() -> anyhow::Result<()> {
         repo::child_task_graph::ensure_child_task_graph_schema(&db)?;
         repo::task_plan::ensure_task_plan_schema(&db)?;
         memory::indexing::ensure_retrieval_schema(&db)?;
+        repo::ensure_principal_ownership_schema(&db)?;
+        memory::scope::ensure_memory_scope_schema(&db)?;
+        memory::jobs::ensure_memory_job_schema(&db)?;
+        memory::ux::ensure_memory_ux_schema(&db)?;
+        memory::vector_store::register_configured_profile(&db, &config.memory)?;
+        task_context_builder::context_compaction_lifecycle::ensure_context_compaction_lifecycle_schema(&db)?;
         if config.memory.hybrid_recall_enabled
             && (config.memory.reindex_on_startup
                 || memory::indexing::retrieval_index_is_empty(&db).unwrap_or(true))
@@ -871,6 +877,7 @@ async fn run() -> anyhow::Result<()> {
             maintenance: config.maintenance.clone(),
             memory: memory_runtime,
             routing,
+            limits: config.limits.clone(),
             llm_cost_governance: config.llm.cost_governance.clone(),
             rate_limiter: Arc::new(Mutex::new(RateLimiter::new(
                 config.limits.global_rpm,
@@ -973,6 +980,21 @@ async fn run() -> anyhow::Result<()> {
         config.worker.poll_interval_ms,
         config.worker.concurrency.max(1),
     );
+    match memory::jobs::reconcile_missing_turn_jobs(&state) {
+        Ok(repaired) if repaired > 0 => {
+            info!(
+                repaired,
+                "memory_durable_job_outbox_reconciliation_completed"
+            )
+        }
+        Ok(_) => {}
+        Err(error) => warn!(error = %error, "memory_durable_job_outbox_reconciliation_failed"),
+    }
+    memory::jobs::spawn_memory_job_workers(state.clone(), config.memory.background_job_concurrency);
+    memory::embedding_jobs::spawn_embedding_workers(
+        state.clone(),
+        config.memory.background_job_concurrency,
+    );
     spawn_cleanup_worker(state.clone());
     spawn_schedule_worker(state.clone());
     http::ui_routes::spawn_nni_heartbeat_worker(state.clone());
@@ -998,19 +1020,12 @@ async fn run() -> anyhow::Result<()> {
                 .head(http::task_artifacts::head_task_artifact_content),
         )
         .route("/classifiers/direct", post(classify_direct))
-        .route("/memory", get(get_memory_overview))
-        .route("/memory/recent", get(list_memory_recent_handler))
-        .route("/memory/preferences", get(list_memory_preferences_handler))
+        .merge(http::memory_routes::router())
         .route(
             "/channel/preferences",
             get(communication_preferences::get_handler)
                 .put(communication_preferences::update_handler),
         )
-        .route("/memory/facts", get(list_memory_facts_handler))
-        .route("/memory/:memory_id", delete(delete_memory_handler))
-        .route("/memory/:memory_id/expire", post(expire_memory_handler))
-        .route("/memory/clear", post(clear_memory_handler))
-        .route("/memory/settings", post(update_memory_settings_handler))
         .route(
             "/tasks/conversation-history",
             get(http::conversation_history::list_conversation_history),
@@ -1628,267 +1643,6 @@ fn require_auth_identity_for_api<T: Serialize>(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Auth lookup failed",
             ))
-        }
-    }
-}
-
-async fn get_memory_overview(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> (StatusCode, Json<ApiResponse<memory::api::MemoryOverview>>) {
-    let identity =
-        match require_auth_identity_for_api::<memory::api::MemoryOverview>(&state, &headers) {
-            Ok(identity) => identity,
-            Err(resp) => return resp,
-        };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(err) => {
-            error!("get memory overview db failed: {}", err);
-            return api_err(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
-        }
-    };
-    match memory::api::memory_overview(
-        &db,
-        identity.user_id,
-        identity.chat_id,
-        &identity.user_key,
-        state.policy.memory.long_term_enabled,
-        state.policy.memory.hybrid_recall_enabled,
-    ) {
-        Ok(overview) => api_ok(overview),
-        Err(err) => {
-            error!("get memory overview failed: {}", err);
-            api_err(StatusCode::INTERNAL_SERVER_ERROR, "Memory lookup failed")
-        }
-    }
-}
-
-async fn list_memory_preferences_handler(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> (
-    StatusCode,
-    Json<ApiResponse<Vec<memory::api::MemoryPreferenceItem>>>,
-) {
-    let identity = match require_auth_identity_for_api::<Vec<memory::api::MemoryPreferenceItem>>(
-        &state, &headers,
-    ) {
-        Ok(identity) => identity,
-        Err(resp) => return resp,
-    };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(err) => {
-            error!("list memory preferences db failed: {}", err);
-            return api_err(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
-        }
-    };
-    match memory::api::list_preferences(&db, identity.user_id, identity.chat_id, &identity.user_key)
-    {
-        Ok(items) => api_ok(items),
-        Err(err) => {
-            error!("list memory preferences failed: {}", err);
-            api_err(StatusCode::INTERNAL_SERVER_ERROR, "Memory lookup failed")
-        }
-    }
-}
-
-async fn list_memory_facts_handler(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> (
-    StatusCode,
-    Json<ApiResponse<Vec<memory::api::MemoryFactItem>>>,
-) {
-    let identity =
-        match require_auth_identity_for_api::<Vec<memory::api::MemoryFactItem>>(&state, &headers) {
-            Ok(identity) => identity,
-            Err(resp) => return resp,
-        };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(err) => {
-            error!("list memory facts db failed: {}", err);
-            return api_err(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
-        }
-    };
-    match memory::api::list_facts(&db, identity.user_id, &identity.user_key) {
-        Ok(items) => api_ok(items),
-        Err(err) => {
-            error!("list memory facts failed: {}", err);
-            api_err(StatusCode::INTERNAL_SERVER_ERROR, "Memory lookup failed")
-        }
-    }
-}
-
-async fn list_memory_recent_handler(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> (
-    StatusCode,
-    Json<ApiResponse<Vec<memory::api::MemoryRecentItem>>>,
-) {
-    let identity =
-        match require_auth_identity_for_api::<Vec<memory::api::MemoryRecentItem>>(&state, &headers)
-        {
-            Ok(identity) => identity,
-            Err(resp) => return resp,
-        };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(err) => {
-            error!("list recent memories db failed: {}", err);
-            return api_err(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
-        }
-    };
-    match memory::api::list_recent(
-        &db,
-        identity.user_id,
-        identity.chat_id,
-        &identity.user_key,
-        50,
-    ) {
-        Ok(items) => api_ok(items),
-        Err(err) => {
-            error!("list recent memories failed: {}", err);
-            api_err(StatusCode::INTERNAL_SERVER_ERROR, "Memory lookup failed")
-        }
-    }
-}
-
-async fn delete_memory_handler(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    AxumPath(memory_id): AxumPath<String>,
-) -> (
-    StatusCode,
-    Json<ApiResponse<memory::api::MemoryDeleteResult>>,
-) {
-    let identity =
-        match require_auth_identity_for_api::<memory::api::MemoryDeleteResult>(&state, &headers) {
-            Ok(identity) => identity,
-            Err(resp) => return resp,
-        };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(err) => {
-            error!("delete memory db failed: {}", err);
-            return api_err(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
-        }
-    };
-    match memory::api::delete_memory_object(
-        &db,
-        identity.user_id,
-        identity.chat_id,
-        &identity.user_key,
-        &memory_id,
-        now_ts_u64() as i64,
-    ) {
-        Ok(Some(result)) => api_ok(result),
-        Ok(None) => api_err(StatusCode::NOT_FOUND, "Memory item not found"),
-        Err(err) => {
-            warn!("delete memory failed: {}", err);
-            api_err(StatusCode::BAD_REQUEST, "Invalid memory id")
-        }
-    }
-}
-
-async fn expire_memory_handler(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    AxumPath(memory_id): AxumPath<String>,
-) -> (
-    StatusCode,
-    Json<ApiResponse<memory::api::MemoryExpireResult>>,
-) {
-    let identity =
-        match require_auth_identity_for_api::<memory::api::MemoryExpireResult>(&state, &headers) {
-            Ok(identity) => identity,
-            Err(resp) => return resp,
-        };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(err) => {
-            error!("expire memory db failed: {}", err);
-            return api_err(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
-        }
-    };
-    match memory::api::expire_memory_object(
-        &db,
-        identity.user_id,
-        identity.chat_id,
-        &identity.user_key,
-        &memory_id,
-        now_ts_u64() as i64,
-    ) {
-        Ok(Some(result)) => api_ok(result),
-        Ok(None) => api_err(StatusCode::NOT_FOUND, "Memory item not found"),
-        Err(err) => {
-            warn!("expire memory failed: {}", err);
-            api_err(StatusCode::BAD_REQUEST, "Invalid memory id")
-        }
-    }
-}
-
-async fn clear_memory_handler(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(req): Json<memory::api::MemoryClearRequest>,
-) -> (
-    StatusCode,
-    Json<ApiResponse<memory::api::MemoryClearResult>>,
-) {
-    let identity =
-        match require_auth_identity_for_api::<memory::api::MemoryClearResult>(&state, &headers) {
-            Ok(identity) => identity,
-            Err(resp) => return resp,
-        };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(err) => {
-            error!("clear memory db failed: {}", err);
-            return api_err(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
-        }
-    };
-    match memory::api::clear_memory_scope(
-        &db,
-        identity.user_id,
-        identity.chat_id,
-        &identity.user_key,
-        req.scope,
-        now_ts_u64() as i64,
-    ) {
-        Ok(result) => api_ok(result),
-        Err(err) => {
-            error!("clear memory failed: {}", err);
-            api_err(StatusCode::INTERNAL_SERVER_ERROR, "Memory clear failed")
-        }
-    }
-}
-
-async fn update_memory_settings_handler(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(req): Json<memory::api::MemorySettingsRequest>,
-) -> (
-    StatusCode,
-    Json<ApiResponse<memory::api::MemorySettingsResult>>,
-) {
-    let _identity = match require_auth_identity_for_api::<memory::api::MemorySettingsResult>(
-        &state, &headers,
-    ) {
-        Ok(identity) => identity,
-        Err(resp) => return resp,
-    };
-    match memory::api::update_memory_settings_file(&state.skill_rt.workspace_root, &req) {
-        Ok(result) => api_ok(result),
-        Err(err) => {
-            error!("update memory settings failed: {}", err);
-            api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Memory settings update failed",
-            )
         }
     }
 }

@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-08-05",
+  "scope": "memory_and_context_wp0_baseline_and_final_ratchet",
+  "schema_writers": [
+    {
+      "path": "migrations/001_init.sql",
+      "role": "bootstrap memories and long_term_memories"
+    },
+    {
+      "path": "migrations/002_memory_upgrade.sql",
+      "role": "bootstrap user_preferences"
+    },
+    {
+      "path": "migrations/003_channels_upgrade.sql",
+      "role": "alter memories channel ownership fields"
+    },
+    {
+      "path": "crates/clawd/src/db_init.rs",
+      "role": "runtime compatibility ALTER writer"
+    },
+    {
+      "path": "crates/clawd/src/repo/auth/schema.rs",
+      "role": "auth ownership table rebuild and ALTER writer"
+    },
+    {
+      "path": "crates/clawd/src/memory/facts.rs",
+      "role": "module-owned memory_facts DDL"
+    },
+    {
+      "path": "crates/clawd/src/memory/indexing.rs",
+      "role": "module-owned retrieval index and FTS DDL"
+    }
+  ],
+  "configuration": {
+    "tracked_release_file": "configs/memory.toml",
+    "tracked_key_count": 79,
+    "rust_schema": "crates/claw-core/src/config.rs",
+    "rust_defaults": "crates/claw-core/src/config/defaults.rs",
+    "runtime_settings_writer": "crates/clawd/src/memory/settings.rs",
+    "runtime_settings_effect": "writes revisioned data-root database settings and takes effect without restart",
+    "tracked_config_runtime_write": "forbidden_by_final_ratchet"
+  },
+  "legacy_switches": [
+    {
+      "key": "route_memory_enabled",
+      "status": "declared_without_runtime_call_site",
+      "target": "remove_after_typed_context_policy_migration"
+    },
+    {
+      "key": "route_memory_max_chars",
+      "status": "declared_without_runtime_call_site",
+      "target": "remove_after_typed_context_policy_migration"
+    },
+    {
+      "key": "skill_memory_enabled",
+      "status": "active_compatibility_policy",
+      "call_sites": [
+        "crates/clawd/src/memory/use_policy.rs",
+        "crates/clawd/src/skills/memory_context.rs"
+      ]
+    },
+    {
+      "key": "schedule_memory_include_long_term",
+      "status": "active_compatibility_policy",
+      "call_sites": ["crates/clawd/src/schedule_service.rs"]
+    },
+    {
+      "key": "image_memory_include_long_term",
+      "status": "declared_without_runtime_call_site",
+      "target": "replace_with_unified_context_policy"
+    }
+  ],
+  "runtime_findings": {
+    "principal_identity": "opaque stable principal_id is separated from credential bindings",
+    "fact_scope": "closed conversation/principal/project scope is resolved before every operation",
+    "background_generation": "transactional durable jobs replace detached finalize spawning",
+    "embedding_provider": "typed async local/mock/remote providers are profile and consent gated",
+    "embedding_storage": "checksummed versioned f32 little-endian BLOB vectors",
+    "vector_candidate_generation": "semantic candidates scan the complete eligible scope before limiting",
+    "compaction_threshold": "typed ContextWindowPolicy replaces the fixed percentage",
+    "canonical_truncation": "canonical writes reject or reference oversized content; only projections truncate",
+    "retention": "category and principal scoped retention prevents cross-principal eviction"
+  },
+  "data_loss_probes": {
+    "canonical_write_truncation": "wp0 legacy diagnostic retained; final canonical-write tests prove no truncation",
+    "global_max_rows_cross_principal_eviction": "wp0 legacy diagnostic retained; final fairness tests prove zero cross-principal eviction",
+    "source_delete_orphan_index": "wp0 legacy diagnostic retained; final purge tests prove zero residual projections",
+    "cleanup_job_commit_race": "durable job delete-fence and commit-CAS fault tests pass"
+  },
+  "deprecation_order": [
+    "introduce typed runtime settings and context policy readers",
+    "stop tracked config writes and legacy route reads",
+    "measure legacy reader hits",
+    "remove old fields only after reader hits reach zero"
+  ]
+}

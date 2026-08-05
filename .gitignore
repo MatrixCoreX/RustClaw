@@ -16,6 +16,7 @@
 /.agent-runtime/
 /plan/
 /docs/*
+!/docs/memory_context_architecture_adr.md
 !/docs/architecture/
 !/docs/architecture/*.md
 !/docs/schemas/

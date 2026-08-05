@@ -10,6 +10,15 @@ fn setup_db() -> Connection {
     crate::db_init::ensure_memory_schema(&db).expect("ensure memory schema");
     crate::repo::auth::ensure_key_auth_schema(&db).expect("ensure key auth schema");
     ensure_retrieval_schema(&db).expect("ensure retrieval schema");
+    db.execute(
+        "INSERT INTO auth_keys (user_key, role, enabled, created_at)
+         VALUES ('user:test', 'user', 1, '1')",
+        [],
+    )
+    .expect("insert test auth key");
+    crate::repo::auth::ensure_principal_identity_schema(&db).expect("principal schema");
+    crate::repo::ensure_principal_ownership_schema(&db).expect("ownership schema");
+    crate::memory::scope::ensure_memory_scope_schema(&db).expect("scope schema");
     db
 }
 

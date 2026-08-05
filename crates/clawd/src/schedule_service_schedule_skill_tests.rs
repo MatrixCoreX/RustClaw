@@ -243,15 +243,7 @@ async fn schedule_create_persists_agent_execution_for_ask_tasks_on_every_channel
 async fn schedule_create_inherits_server_validated_admin_execution_policy() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let admin_key = "rk-schedule-admin-policy";
-    {
-        let db = state.core.db.get().expect("db");
-        db.execute(
-            "INSERT INTO auth_keys (user_key, role, enabled, created_at)
-             VALUES (?1, 'admin', 1, '1')",
-            params![admin_key],
-        )
-        .expect("insert admin key");
-    }
+    state.seed_test_auth_identity(admin_key, "admin");
     let identity = crate::resolve_auth_identity_by_key(&state, admin_key)
         .expect("resolve admin key")
         .expect("admin identity");

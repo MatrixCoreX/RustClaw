@@ -238,17 +238,7 @@ async fn dependency_snapshot_requires_ui_authentication() {
 async fn install_endpoint_rejects_unknown_dependency_tokens() {
     const KEY: &str = "rk-dependency-admin-test";
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
-    state
-        .core
-        .db
-        .get()
-        .expect("main db")
-        .execute(
-            "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
-             VALUES (?1, 'admin', 1, '1', NULL)",
-            rusqlite::params![KEY],
-        )
-        .expect("seed auth key");
+    state.seed_test_auth_identity(KEY, "admin");
     let response = axum::Router::new()
         .nest("/v1", build_ui_router())
         .with_state(state)
@@ -275,17 +265,7 @@ async fn install_endpoint_rejects_unknown_dependency_tokens() {
 async fn install_endpoint_requires_admin_role() {
     const KEY: &str = "rk-dependency-user-test";
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
-    state
-        .core
-        .db
-        .get()
-        .expect("main db")
-        .execute(
-            "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
-             VALUES (?1, 'user', 1, '1', NULL)",
-            rusqlite::params![KEY],
-        )
-        .expect("seed auth key");
+    state.seed_test_auth_identity(KEY, "user");
     let response = axum::Router::new()
         .nest("/v1", build_ui_router())
         .with_state(state)
@@ -307,17 +287,7 @@ async fn install_endpoint_requires_admin_role() {
 async fn authenticated_snapshot_reports_bounded_machine_dependency_fields() {
     const KEY: &str = "rk-dependency-snapshot-test";
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
-    state
-        .core
-        .db
-        .get()
-        .expect("main db")
-        .execute(
-            "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
-             VALUES (?1, 'admin', 1, '1', NULL)",
-            rusqlite::params![KEY],
-        )
-        .expect("seed auth key");
+    state.seed_test_auth_identity(KEY, "admin");
     let response = axum::Router::new()
         .nest("/v1", build_ui_router())
         .with_state(state)

@@ -1,8 +1,9 @@
 use crate::memory::retrieval::{MemoryContextMode, RetrievedMemoryItem, StructuredMemoryContext};
 use crate::memory::use_policy::{filter_structured_memory_context, MemoryUseDecision};
 use crate::memory::MEMORY_SAFETY_FLAG_INJECTION_LIKE;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::Digest;
 use tracing::info;
 
 use crate::{AppState, ClaimedTask, LlmProviderRuntime};
@@ -27,7 +28,7 @@ struct LongTermRefreshLlmOut {
     knowledge_candidates: Vec<KnowledgeCandidateLlmOut>,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 struct KnowledgeCandidateLlmOut {
     #[serde(default)]
     should_persist: bool,
@@ -77,6 +78,45 @@ pub(crate) fn prepare_prompt_with_memory_for_policy(
     planner_decision: &MemoryUseDecision,
     chat_decision: &MemoryUseDecision,
 ) -> PromptMemoryContext {
+    let settings = super::settings::revocation_fenced_task_memory_settings(state, task, None);
+    prepare_prompt_with_memory_for_policy_snapshot(
+        state,
+        task,
+        prompt,
+        planner_decision,
+        chat_decision,
+        settings.as_ref(),
+    )
+}
+
+pub(crate) fn prepare_prompt_with_memory_for_policy_snapshot(
+    state: &AppState,
+    task: &ClaimedTask,
+    prompt: &str,
+    planner_decision: &MemoryUseDecision,
+    chat_decision: &MemoryUseDecision,
+    settings: Option<&super::settings::MemoryEffectiveSettings>,
+) -> PromptMemoryContext {
+    let use_memory = settings
+        .map(|settings| settings.use_memory)
+        .unwrap_or(state.policy.memory.long_term_enabled);
+    if !use_memory {
+        let structured = StructuredMemoryContext::default();
+        return PromptMemoryContext {
+            prompt_with_memory: render_policy_memory_block(&structured, planner_decision),
+            chat_prompt_context: render_policy_memory_block(&structured, chat_decision),
+            memory_trace: Some(memory_trace_with_settings(
+                memory_trace_for_structured_context(
+                    "execution",
+                    chat_decision,
+                    &structured,
+                    "<none>",
+                ),
+                settings,
+            )),
+            recalled: Vec::new(),
+        };
+    }
     let recent_limit =
         if planner_decision.needs_recent_recall() || chat_decision.needs_recent_recall() {
             state.policy.memory.prompt_recall_limit.max(1)
@@ -89,11 +129,13 @@ pub(crate) fn prepare_prompt_with_memory_for_policy(
         planner_decision.include_preferences || chat_decision.include_preferences;
     let include_indexed =
         planner_decision.needs_indexed_recall() || chat_decision.needs_indexed_recall();
-    let structured = recall_structured_memory_context_with_options(
+    let conversation_id = crate::conversation_state::task_conversation_id(task);
+    let structured = recall_structured_memory_context_with_scope_options(
         state,
         task.user_key.as_deref(),
         task.user_id,
         task.chat_id,
+        conversation_id.as_deref(),
         prompt,
         recent_limit,
         include_long_term,
@@ -104,11 +146,14 @@ pub(crate) fn prepare_prompt_with_memory_for_policy(
     let chat_structured = filter_structured_memory_context(structured, chat_decision);
     let prompt_with_memory = render_policy_memory_block(&planner_structured, planner_decision);
     let chat_prompt_context = render_policy_memory_block(&chat_structured, chat_decision);
-    let memory_trace = Some(memory_trace_for_structured_context(
-        "execution",
-        chat_decision,
-        &chat_structured,
-        &chat_prompt_context,
+    let memory_trace = Some(memory_trace_with_settings(
+        memory_trace_for_structured_context(
+            "execution",
+            chat_decision,
+            &chat_structured,
+            &chat_prompt_context,
+        ),
+        settings,
     ));
     PromptMemoryContext {
         chat_prompt_context,
@@ -116,6 +161,142 @@ pub(crate) fn prepare_prompt_with_memory_for_policy(
         recalled: crate::memory::retrieval::legacy_pairs_from_structured(&chat_structured),
         prompt_with_memory,
     }
+}
+
+pub(crate) async fn prepare_prompt_with_memory_for_policy_snapshot_async(
+    state: &AppState,
+    task: &ClaimedTask,
+    prompt: &str,
+    planner_decision: &MemoryUseDecision,
+    chat_decision: &MemoryUseDecision,
+    settings: Option<&super::settings::MemoryEffectiveSettings>,
+) -> PromptMemoryContext {
+    let use_memory = settings
+        .map(|settings| settings.use_memory)
+        .unwrap_or(state.policy.memory.long_term_enabled);
+    if !use_memory {
+        return prepare_prompt_with_memory_for_policy_snapshot(
+            state,
+            task,
+            prompt,
+            planner_decision,
+            chat_decision,
+            settings,
+        );
+    }
+    let recent_limit =
+        if planner_decision.needs_recent_recall() || chat_decision.needs_recent_recall() {
+            state.policy.memory.prompt_recall_limit.max(1)
+        } else {
+            0
+        };
+    let include_long_term =
+        planner_decision.include_long_term_summary || chat_decision.include_long_term_summary;
+    let include_preferences =
+        planner_decision.include_preferences || chat_decision.include_preferences;
+    let include_indexed =
+        planner_decision.needs_indexed_recall() || chat_decision.needs_indexed_recall();
+    let conversation_id = crate::conversation_state::task_conversation_id(task);
+    let mut structured = recall_structured_memory_context_with_scope_options(
+        state,
+        task.user_key.as_deref(),
+        task.user_id,
+        task.chat_id,
+        conversation_id.as_deref(),
+        prompt,
+        recent_limit,
+        include_long_term,
+        include_preferences,
+        false,
+    );
+    let mut async_trace = json!({
+        "schema_version": 1,
+        "remote_outbound_count": 0,
+        "fallback_code": "indexed_recall_not_requested",
+    });
+    if include_indexed {
+        match super::retrieval_async::retrieve_for_task(state, task, prompt).await {
+            Ok(outcome) => {
+                structured.similar_triggers = outcome.recall.similar_triggers;
+                structured.relevant_facts = outcome.recall.relevant_facts;
+                structured.knowledge_docs = outcome.recall.knowledge_docs;
+                structured.recent_related_events = outcome.recall.recent_related_events;
+                structured.assistant_results = outcome.recall.assistant_results;
+                structured.unfinished_goals = outcome.recall.unfinished_goals;
+                async_trace = serde_json::to_value(outcome.trace).unwrap_or_else(|_| {
+                    json!({
+                        "schema_version": 1,
+                        "remote_outbound_count": 0,
+                        "fallback_code": "memory_async_trace_encode_failed",
+                    })
+                });
+            }
+            Err(_) => {
+                let local = super::retrieval::retrieve_indexed_memories_for_scope(
+                    state,
+                    task.user_key.as_deref(),
+                    task.user_id,
+                    task.chat_id,
+                    conversation_id.as_deref(),
+                    prompt,
+                )
+                .unwrap_or_default();
+                structured.similar_triggers = local.similar_triggers;
+                structured.relevant_facts = local.relevant_facts;
+                structured.knowledge_docs = local.knowledge_docs;
+                structured.recent_related_events = local.recent_related_events;
+                structured.assistant_results = local.assistant_results;
+                structured.unfinished_goals = local.unfinished_goals;
+                async_trace = json!({
+                    "schema_version": 1,
+                    "remote_outbound_count": 0,
+                    "fallback_code": "memory_async_recall_failed_local_fallback",
+                });
+            }
+        }
+    }
+    let planner_structured = filter_structured_memory_context(structured.clone(), planner_decision);
+    let chat_structured = filter_structured_memory_context(structured, chat_decision);
+    let prompt_with_memory = render_policy_memory_block(&planner_structured, planner_decision);
+    let chat_prompt_context = render_policy_memory_block(&chat_structured, chat_decision);
+    let mut trace = memory_trace_with_settings(
+        memory_trace_for_structured_context(
+            "execution",
+            chat_decision,
+            &chat_structured,
+            &chat_prompt_context,
+        ),
+        settings,
+    );
+    if let Some(object) = trace.as_object_mut() {
+        object.insert("async_recall".to_string(), async_trace);
+    }
+    PromptMemoryContext {
+        chat_prompt_context,
+        memory_trace: Some(trace),
+        recalled: crate::memory::retrieval::legacy_pairs_from_structured(&chat_structured),
+        prompt_with_memory,
+    }
+}
+
+fn memory_trace_with_settings(
+    mut trace: Value,
+    settings: Option<&super::settings::MemoryEffectiveSettings>,
+) -> Value {
+    if let (Some(object), Some(settings)) = (trace.as_object_mut(), settings) {
+        object.insert(
+            "settings_snapshot".to_string(),
+            json!({
+                "schema_version": settings.schema_version,
+                "revision": settings.revision,
+                "policy_digest": settings.policy_digest,
+                "use_memory": settings.use_memory,
+                "generate_memory": settings.generate_memory,
+                "external_context_policy": settings.external_context_policy,
+            }),
+        );
+    }
+    trace
 }
 
 pub(crate) fn memory_trace_for_structured_context(
@@ -264,6 +445,32 @@ fn recall_structured_memory_context_with_options(
     include_preferences: bool,
     include_indexed: bool,
 ) -> StructuredMemoryContext {
+    recall_structured_memory_context_with_scope_options(
+        state,
+        user_key,
+        user_id,
+        chat_id,
+        None,
+        anchor_prompt,
+        recent_limit,
+        include_long_term,
+        include_preferences,
+        include_indexed,
+    )
+}
+
+fn recall_structured_memory_context_with_scope_options(
+    state: &AppState,
+    user_key: Option<&str>,
+    user_id: i64,
+    chat_id: i64,
+    conversation_id: Option<&str>,
+    anchor_prompt: &str,
+    recent_limit: usize,
+    include_long_term: bool,
+    include_preferences: bool,
+    include_indexed: bool,
+) -> StructuredMemoryContext {
     let long_term_summary = if include_long_term && state.policy.memory.long_term_enabled {
         crate::memory::recall_long_term_summary(state, user_key, user_id, chat_id)
             .unwrap_or(None)
@@ -307,11 +514,12 @@ fn recall_structured_memory_context_with_options(
     };
 
     let indexed = if include_indexed && state.policy.memory.hybrid_recall_enabled {
-        crate::memory::retrieval::retrieve_indexed_memories(
+        crate::memory::retrieval::retrieve_indexed_memories_for_scope(
             state,
             user_key,
             user_id,
             chat_id,
+            conversation_id,
             anchor_prompt,
         )
         .unwrap_or_default()
@@ -462,7 +670,20 @@ pub(crate) async fn maybe_refresh_long_term_summary(
     task: &ClaimedTask,
     force_refresh: bool,
 ) -> Result<(), String> {
+    maybe_refresh_long_term_summary_for_range(state, task, force_refresh, None, None).await
+}
+
+pub(crate) async fn maybe_refresh_long_term_summary_for_range(
+    state: &AppState,
+    task: &ClaimedTask,
+    force_refresh: bool,
+    source_range: Option<(i64, i64)>,
+    generation_job_id: Option<&str>,
+) -> Result<(), String> {
     if !state.policy.memory.long_term_enabled {
+        return Ok(());
+    }
+    if !super::settings::task_memory_generation_enabled(state, task) {
         return Ok(());
     }
     if task
@@ -487,15 +708,23 @@ pub(crate) async fn maybe_refresh_long_term_summary(
     if !force_refresh && rounds % state.policy.memory.long_term_every_rounds.max(1) != 0 {
         return Ok(());
     }
-    let source_id = crate::memory::read_long_term_source_memory_id(
-        state,
-        task.user_key.as_deref(),
-        task.user_id,
-        task.chat_id,
-    )
-    .map_err(|err| format!("read long-term source id failed: {err}"))?;
+    let source_id = match source_range {
+        Some((start, end)) => {
+            if start <= 0 || end < start {
+                return Err("memory_job_source_range_invalid".to_string());
+            }
+            start.saturating_sub(1)
+        }
+        None => crate::memory::read_long_term_source_memory_id(
+            state,
+            task.user_key.as_deref(),
+            task.user_id,
+            task.chat_id,
+        )
+        .map_err(|err| format!("read long-term source id failed: {err}"))?,
+    };
     let fetch_limit = state.policy.memory.long_term_source_rounds.max(1) * 2;
-    let entries = crate::memory::recall_memories_since_id(
+    let mut entries = crate::memory::recall_memories_since_id(
         state,
         task.user_key.as_deref(),
         task.user_id,
@@ -504,6 +733,9 @@ pub(crate) async fn maybe_refresh_long_term_summary(
         fetch_limit,
     )
     .map_err(|err| format!("read memories for summary failed: {err}"))?;
+    if let Some((start, end)) = source_range {
+        entries.retain(|(id, _, _, _)| *id >= start && *id <= end);
+    }
     let min_entries = if force_refresh {
         2
     } else {
@@ -604,16 +836,15 @@ pub(crate) async fn maybe_refresh_long_term_summary(
             parse_long_term_refresh_llm_out_legacy(&summary)
         }
     };
-    let trimmed = crate::truncate_text(
-        &parsed.summary,
-        state.policy.memory.long_term_summary_max_chars.max(512),
-    );
+    if parsed.summary.chars().count() > state.policy.memory.long_term_summary_max_chars.max(512) {
+        return Err("long_term_summary_schema_limit_exceeded".to_string());
+    }
     crate::memory::upsert_long_term_summary(
         state,
         task.user_id,
         task.chat_id,
         task.user_key.as_deref(),
-        &trimmed,
+        &parsed.summary,
         latest_id,
     )
     .map_err(|err| format!("write long-term summary failed: {err}"))?;
@@ -623,6 +854,7 @@ pub(crate) async fn maybe_refresh_long_term_summary(
         latest_id,
         &parsed.fact_candidates,
         &parsed.knowledge_candidates,
+        generation_job_id,
     )
     .map_err(|err| format!("write knowledge candidates failed: {err}"))?;
     Ok(())
@@ -677,6 +909,7 @@ fn persist_valid_knowledge_candidates(
     latest_id: i64,
     fact_candidates: &[KnowledgeCandidateLlmOut],
     candidates: &[KnowledgeCandidateLlmOut],
+    generation_job_id: Option<&str>,
 ) -> anyhow::Result<()> {
     let Some(user_key) = task
         .user_key
@@ -699,9 +932,71 @@ fn persist_valid_knowledge_candidates(
     } else {
         fact_candidates
     };
+    let principal_id = crate::repo::auth::principal_id_for_user_key(&db, user_key)?
+        .ok_or_else(|| anyhow::anyhow!("memory_principal_not_found"))?;
     let source_memory_ids = [latest_id];
     for candidate in effective_candidates {
+        let candidate_json = serde_json::to_value(candidate)?;
+        let candidate_bytes = serde_json::to_vec(&candidate_json)?;
+        let candidate_digest = format!("sha256:{:x}", sha2::Sha256::digest(&candidate_bytes));
+        let generation_job_id = generation_job_id.unwrap_or(&task.task_id);
+        let candidate_id = format!("memory_candidate_{}", uuid::Uuid::new_v4().simple());
+        let (safe_candidate_json, sensitive_output) =
+            crate::skill_output_artifact::sensitivity_aware_text_model_view(
+                &candidate_json.to_string(),
+            );
+        let candidate_status = if sensitive_output {
+            "rejected"
+        } else {
+            "pending"
+        };
+        db.execute(
+            "INSERT INTO memory_raw_candidates(
+                candidate_id, generation_job_id, principal_id, scope_kind, scope_ref,
+                candidate_kind, content_json, content_digest, trust_tier, sensitivity,
+                status, evidence_refs_json, created_at_ts, reviewed_at_ts
+             ) VALUES (?1, ?2, ?3, 'principal', ?3, ?4, ?5, ?6,
+                       'model_candidate', ?7, ?8, ?9, ?10, ?11)
+             ON CONFLICT(generation_job_id, content_digest) DO NOTHING",
+            rusqlite::params![
+                candidate_id,
+                generation_job_id,
+                principal_id,
+                candidate.kind.trim(),
+                if sensitive_output {
+                    serde_json::json!({"schema_version": 1, "redacted": true}).to_string()
+                } else {
+                    safe_candidate_json
+                },
+                candidate_digest,
+                if sensitive_output {
+                    "restricted"
+                } else {
+                    "normal"
+                },
+                candidate_status,
+                serde_json::json!([format!("memory:{latest_id}")]).to_string(),
+                crate::now_ts_u64() as i64,
+                if sensitive_output {
+                    Some(crate::now_ts_u64() as i64)
+                } else {
+                    None
+                },
+            ],
+        )?;
+        if sensitive_output {
+            continue;
+        }
         let Some(valid) = validate_knowledge_candidate(latest_id, candidate) else {
+            db.execute(
+                "UPDATE memory_raw_candidates SET status = 'rejected', reviewed_at_ts = ?2
+                 WHERE generation_job_id = ?1 AND content_digest = ?3",
+                rusqlite::params![
+                    generation_job_id,
+                    crate::now_ts_u64() as i64,
+                    candidate_digest
+                ],
+            )?;
             continue;
         };
         let source_ref = format!(
@@ -720,13 +1015,65 @@ fn persist_valid_knowledge_candidates(
             valid.conflict_group.as_deref(),
         );
         fact.expires_at_ts = valid.expires_at_ts;
-        crate::memory::facts::upsert_memory_fact_card(
+        let fact_id = crate::memory::facts::upsert_memory_fact_card(
             &db,
             task.user_id,
             task.chat_id,
             user_key,
             &fact,
             crate::now_ts_u64() as i64,
+        )?;
+        let now = crate::now_ts_u64() as i64;
+        if let Some(fact_id) = fact_id {
+            let evidence_id = format!("memory_evidence_{}", uuid::Uuid::new_v4().simple());
+            db.execute(
+                "INSERT INTO memory_evidence(
+                    evidence_id, principal_id, source_type, source_ref, source_digest,
+                    source_event_start, source_event_end, availability, created_at_ts
+                 ) VALUES (?1, ?2, 'memory', ?3, ?4, ?5, ?5, 'available', ?6)
+                 ON CONFLICT(principal_id, source_type, source_ref, source_digest) DO NOTHING",
+                rusqlite::params![
+                    evidence_id,
+                    principal_id,
+                    latest_id.to_string(),
+                    candidate_digest,
+                    latest_id,
+                    now,
+                ],
+            )?;
+            db.execute(
+                "UPDATE memory_facts SET
+                    content_digest = ?2, idempotency_key = ?3, source_task_id = ?4,
+                    source_event_start = ?5, source_event_end = ?5,
+                    source_refs_json = ?6, evidence_refs_json = ?7,
+                    generation_job_id = ?8, trust_tier = 'model_reviewed_with_user_evidence',
+                    sensitivity = 'normal', observed_at_ts = ?9, valid_from_ts = ?9,
+                    valid_to_ts = ?10, last_verified_at_ts = ?9,
+                    volatility_class = ?11, modified_at_ts = ?9
+                 WHERE id = ?1",
+                rusqlite::params![
+                    fact_id,
+                    format!("sha256:{:x}", sha2::Sha256::digest(valid.fact.as_bytes())),
+                    format!("fact:{principal_id}:{}", candidate_digest),
+                    task.task_id,
+                    latest_id,
+                    serde_json::json!([format!("memory:{latest_id}")]).to_string(),
+                    serde_json::json!([evidence_id]).to_string(),
+                    generation_job_id,
+                    now,
+                    valid.expires_at_ts,
+                    if valid.expires_at_ts.is_some() {
+                        "volatile"
+                    } else {
+                        "stable"
+                    },
+                ],
+            )?;
+        }
+        db.execute(
+            "UPDATE memory_raw_candidates SET status = 'accepted', reviewed_at_ts = ?2
+             WHERE generation_job_id = ?1 AND content_digest = ?3",
+            rusqlite::params![generation_job_id, now, candidate_digest],
         )?;
     }
     Ok(())
@@ -851,6 +1198,31 @@ pub(crate) fn insert_memory(
     )
 }
 
+pub(crate) fn insert_memory_with_id(
+    state: &AppState,
+    user_id: i64,
+    chat_id: i64,
+    user_key: Option<&str>,
+    channel: &str,
+    external_chat_id: Option<&str>,
+    role: &str,
+    content: &str,
+    max_chars: usize,
+) -> anyhow::Result<Option<i64>> {
+    crate::memory::insert_memory_with_id(
+        state,
+        user_id,
+        chat_id,
+        user_key,
+        channel,
+        external_chat_id,
+        role,
+        content,
+        max_chars,
+        crate::memory::MemoryWriteKind::Default,
+    )
+}
+
 pub(crate) fn insert_memory_with_kind(
     state: &AppState,
     user_id: i64,
@@ -864,6 +1236,33 @@ pub(crate) fn insert_memory_with_kind(
     write_kind: crate::memory::MemoryWriteKind,
 ) -> anyhow::Result<()> {
     crate::memory::insert_memory(
+        state,
+        user_id,
+        chat_id,
+        user_key,
+        channel,
+        external_chat_id,
+        role,
+        content,
+        max_chars,
+        write_kind,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn insert_memory_with_kind_and_id(
+    state: &AppState,
+    user_id: i64,
+    chat_id: i64,
+    user_key: Option<&str>,
+    channel: &str,
+    external_chat_id: Option<&str>,
+    role: &str,
+    content: &str,
+    max_chars: usize,
+    write_kind: crate::memory::MemoryWriteKind,
+) -> anyhow::Result<Option<i64>> {
+    crate::memory::insert_memory_with_id(
         state,
         user_id,
         chat_id,

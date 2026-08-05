@@ -186,13 +186,14 @@ pub(crate) fn run_chat(
                     commands::record_chat_session_task(&mut session, &task_id)?;
                     follow_and_render_task(base_url, key, &mut session, jsonl_output)?;
                 }
-                ChatCommand::Compact => {
+                ChatCommand::Compact(compaction_focus) => {
                     let task_id = task::submit_conversation_compaction(
                         base_url,
                         key,
                         &session.conversation_id,
                         &session.session_id,
                         session.active_task_id.as_deref(),
+                        compaction_focus.as_deref(),
                         session_submission_options(&session),
                     )?;
                     commands::record_chat_session_task(&mut session, &task_id)?;

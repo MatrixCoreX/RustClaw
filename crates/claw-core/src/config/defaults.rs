@@ -34,6 +34,14 @@ pub(super) fn default_user_rpm() -> usize {
     20
 }
 
+pub(super) fn default_context_tool_observation_reserve_tokens() -> usize {
+    2_048
+}
+
+pub(super) fn default_context_estimator_safety_margin_tokens() -> usize {
+    512
+}
+
 pub(super) fn default_cleanup_interval_seconds() -> u64 {
     300
 }
@@ -72,6 +80,42 @@ pub(super) fn default_memory_prompt_recall_limit() -> usize {
 
 pub(super) fn default_memory_recall_limit() -> usize {
     8
+}
+
+pub(super) fn default_memory_background_job_concurrency() -> usize {
+    2
+}
+
+pub(super) fn default_memory_background_idle_seconds() -> u64 {
+    5
+}
+
+pub(super) fn default_memory_background_lease_seconds() -> u64 {
+    90
+}
+
+pub(super) fn default_memory_background_max_attempts() -> usize {
+    5
+}
+
+pub(super) fn default_memory_raw_candidate_retention_days() -> u64 {
+    14
+}
+
+pub(super) fn default_memory_raw_candidate_max_rows_per_principal() -> usize {
+    2_000
+}
+
+pub(super) fn default_memory_storage_soft_limit_bytes() -> u64 {
+    512 * 1024 * 1024
+}
+
+pub(super) fn default_memory_principal_max_bytes() -> u64 {
+    64 * 1024 * 1024
+}
+
+pub(super) fn default_memory_principal_background_cost_microunits() -> u64 {
+    1_000_000
 }
 
 pub(super) fn default_memory_item_max_chars() -> usize {
@@ -239,7 +283,7 @@ pub(super) fn default_memory_route_trigger_budget_chars() -> usize {
 }
 
 pub(super) fn default_memory_embedding_model() -> String {
-    "local-hash-v1".to_string()
+    "local-hash-v2".to_string()
 }
 
 pub(super) fn default_memory_embedding_dims() -> usize {
@@ -247,11 +291,67 @@ pub(super) fn default_memory_embedding_dims() -> usize {
 }
 
 pub(super) fn default_memory_embedding_version() -> String {
-    "local-hash-v1".to_string()
+    "local-hash-v2".to_string()
 }
 
 pub(super) fn default_memory_embedding_batch_size() -> usize {
     16
+}
+
+pub(super) fn default_memory_embedding_provider_kind() -> String {
+    "local".to_string()
+}
+
+pub(super) fn default_memory_embedding_normalization() -> String {
+    "unit_length".to_string()
+}
+
+pub(super) fn default_memory_embedding_metric() -> String {
+    "cosine".to_string()
+}
+
+pub(super) fn default_memory_embedding_query_timeout_ms() -> u64 {
+    1_500
+}
+
+pub(super) fn default_memory_embedding_connect_timeout_ms() -> u64 {
+    1_000
+}
+
+pub(super) fn default_memory_embedding_idle_timeout_ms() -> u64 {
+    1_500
+}
+
+pub(super) fn default_memory_embedding_retry_max_attempts() -> usize {
+    5
+}
+
+pub(super) fn default_memory_embedding_circuit_failure_threshold() -> usize {
+    3
+}
+
+pub(super) fn default_memory_embedding_circuit_reset_seconds() -> u64 {
+    30
+}
+
+pub(super) fn default_memory_embedding_query_cache_ttl_seconds() -> u64 {
+    300
+}
+
+pub(super) fn default_memory_embedding_query_cache_max_bytes() -> usize {
+    1_048_576
+}
+
+pub(super) fn default_memory_embedding_max_request_bytes() -> usize {
+    2_097_152
+}
+
+pub(super) fn default_memory_embedding_remote_opt_in_required() -> bool {
+    true
+}
+
+pub(super) fn default_memory_embedding_reindex_batch_delay_ms() -> u64 {
+    25
 }
 
 pub(super) fn default_memory_reindex_on_startup() -> bool {

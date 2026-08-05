@@ -141,6 +141,13 @@ pub(crate) fn append_model_io_log(
     sanitized: bool,
     error: Option<&str>,
 ) {
+    crate::task_context_builder::note_context_token_usage(
+        &provider.config.name,
+        &provider.config.provider_type,
+        &provider.config.model,
+        prompt,
+        usage,
+    );
     // 审计 H3：以前 `debug_log_prompt=false` 时这里直接 return，导致生产环境
     // 完全没有 LLM 审计日志。现在改成无条件写入：
     //   * `debug_log_prompt=true`  → "verbose" 行，包含 prompt / response / payload

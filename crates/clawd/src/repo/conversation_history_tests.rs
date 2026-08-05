@@ -13,6 +13,7 @@ fn state_with_tasks() -> AppState {
             user_id INTEGER NOT NULL,
             chat_id INTEGER NOT NULL,
             user_key TEXT,
+            principal_id TEXT,
             channel TEXT NOT NULL,
             external_chat_id TEXT,
             kind TEXT NOT NULL,
@@ -26,19 +27,27 @@ fn state_with_tasks() -> AppState {
         CREATE TABLE conversation_metadata (
             owner_user_key TEXT NOT NULL,
             owner_user_id INTEGER NOT NULL,
+            owner_principal_id TEXT,
             conversation_id TEXT NOT NULL,
             title TEXT NOT NULL,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             PRIMARY KEY(owner_user_key, conversation_id)
         );
+        CREATE UNIQUE INDEX idx_test_conversation_metadata_principal
+        ON conversation_metadata(owner_principal_id, conversation_id)
+        WHERE owner_principal_id IS NOT NULL;
         CREATE TABLE conversation_archives (
             owner_user_key TEXT NOT NULL,
             owner_user_id INTEGER NOT NULL,
+            owner_principal_id TEXT,
             conversation_id TEXT NOT NULL,
             archived_at TEXT NOT NULL,
             PRIMARY KEY(owner_user_key, conversation_id)
-        );",
+        );
+        CREATE UNIQUE INDEX idx_test_conversation_archives_principal
+        ON conversation_archives(owner_principal_id, conversation_id)
+        WHERE owner_principal_id IS NOT NULL;",
     )
     .unwrap();
     drop(db);
@@ -242,6 +251,7 @@ fn conversation_title_rejects_invalid_machine_refs_and_bounds() {
 fn identity(role: &str) -> AuthIdentity {
     AuthIdentity {
         user_key: "owner-key".to_string(),
+        principal_id: "principal-test-owner".to_string(),
         role: role.to_string(),
         user_id: 42,
         chat_id: 7,

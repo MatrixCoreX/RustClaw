@@ -123,6 +123,33 @@ fn media_download_routes_raw_share_text_to_autonomous_download() {
 }
 
 #[test]
+fn memory_forget_is_action_scoped_non_auto_invocable_and_confirmation_protected() {
+    let state = state_with_workspace_registry();
+    let registry = state.get_skills_registry().expect("skills registry");
+    assert_eq!(
+        registry.resolved_auto_invocable("memory_store", Some("forget")),
+        Some(false)
+    );
+    assert_eq!(
+        registry.resolved_requires_confirmation("memory_store", Some("forget")),
+        Some(true)
+    );
+    assert!(state.skill_invocation_requires_confirmation_policy(
+        "memory_store",
+        Some(&json!({
+            "action": "forget",
+            "scope": "current_principal",
+            "memory_id": "memory_fixture_opaque",
+            "expected_revision": 1
+        })),
+    ));
+    assert!(!state.skill_invocation_requires_confirmation_policy(
+        "memory_store",
+        Some(&json!({"action": "search", "query": "fixture"})),
+    ));
+}
+
+#[test]
 fn map_optional_coordinates_remain_nullable_in_registry_schema() {
     let state = state_with_workspace_registry();
     let registry = state.get_skills_registry().expect("skills registry");

@@ -4,6 +4,7 @@ use crate::{AppState, ClaimedTask};
 
 const ENTRYPOINT: &str = "compact_conversation";
 const MAX_REF_BYTES: usize = 128;
+const MAX_COMPACTION_FOCUS_CHARS: usize = 4_000;
 
 pub(crate) fn is_conversation_compaction_payload(payload: &Value) -> bool {
     payload.get("entrypoint").and_then(Value::as_str) == Some(ENTRYPOINT)
@@ -24,6 +25,7 @@ pub(crate) fn validate_conversation_compaction_payload(
                 | "thread_id"
                 | "session_id"
                 | "resume_task_id"
+                | "compaction_focus"
         )
     }) {
         return Err("conversation_compaction_additional_field_denied");
@@ -49,6 +51,14 @@ pub(crate) fn validate_conversation_compaction_payload(
             "conversation_compaction_resume_task_id_invalid",
         )?;
     }
+    let source = object
+        .get("source")
+        .and_then(Value::as_str)
+        .ok_or("conversation_compaction_source_invalid")?;
+    if !matches!(source, "clawcli_machine" | "ui_machine") {
+        return Err("conversation_compaction_source_invalid");
+    }
+    validate_compaction_focus(object.get("compaction_focus"))?;
     Ok(())
 }
 
@@ -80,17 +90,20 @@ pub(crate) async fn process_conversation_compaction_task(
     })
     .await
     .map_err(|error| anyhow::anyhow!("task_context_build_join_failed:{error}"))?;
-    let provider_window = state
-        .task_llm_providers(task)
-        .iter()
-        .filter_map(|provider| provider.config.context_window_tokens)
-        .min();
-    let mut plan = crate::task_context_builder::force_agent_loop_context_compaction_plan(
-        &bundle,
-        provider_window,
-    )
-    .ok_or_else(|| anyhow::anyhow!("conversation_compaction_context_unavailable"))?;
+    let policy = crate::task_context_builder::ContextWindowPolicy::for_task(state, task);
+    let focus = payload.get("compaction_focus").and_then(Value::as_str);
+    let mut plan =
+        crate::task_context_builder::force_agent_loop_context_compaction_plan_with_policy(
+            &bundle,
+            policy.as_ref(),
+            focus,
+        )
+        .ok_or_else(|| anyhow::anyhow!("conversation_compaction_context_unavailable"))?;
     crate::task_context_builder::hydrate_agent_loop_context_compaction_plan(state, task, &mut plan);
+    let lease =
+        crate::task_context_builder::context_compaction_lifecycle::begin_context_compaction(
+            state, task, &mut plan,
+        )?;
     let pre_compact = crate::agent_hooks::lifecycle_stage_outcome_for_state(
         state,
         &task.task_id,
@@ -112,6 +125,23 @@ pub(crate) async fn process_conversation_compaction_task(
         model_summary,
         model_status_code,
     );
+    let commit =
+        match crate::task_context_builder::context_compaction_lifecycle::complete_context_compaction(
+            state, task, &lease, &record,
+        ) {
+            Ok(commit) => commit,
+            Err(error) => {
+                let _ = crate::task_context_builder::context_compaction_lifecycle::abandon_context_compaction(
+                state,
+                &lease,
+            );
+                return Err(error);
+            }
+        };
+    let record = commit.record;
+    if let Some(last) = bundle.compaction_records.last_mut() {
+        *last = record.clone();
+    }
     let post_compact = crate::agent_hooks::lifecycle_stage_outcome_for_state(
         state,
         &task.task_id,
@@ -211,6 +241,26 @@ fn validate_runtime_payload(payload: &Value) -> anyhow::Result<()> {
         "conversation_compaction_session_id_invalid",
     )
     .map_err(anyhow::Error::msg)?;
+    validate_compaction_focus(object.get("compaction_focus")).map_err(anyhow::Error::msg)?;
+    Ok(())
+}
+
+fn validate_compaction_focus(value: Option<&Value>) -> Result<(), &'static str> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    let focus = value
+        .as_str()
+        .map(str::trim)
+        .filter(|focus| !focus.is_empty())
+        .ok_or("conversation_compaction_focus_invalid")?;
+    if focus.chars().count() > MAX_COMPACTION_FOCUS_CHARS
+        || focus
+            .chars()
+            .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+    {
+        return Err("conversation_compaction_focus_invalid");
+    }
     Ok(())
 }
 

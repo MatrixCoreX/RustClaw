@@ -119,6 +119,7 @@ pub(crate) fn ensure_key_auth_schema(db: &Connection) -> anyhow::Result<()> {
          CREATE INDEX IF NOT EXISTS idx_user_preferences_user_key_chat ON user_preferences(user_key, chat_id, updated_at_ts);
          CREATE INDEX IF NOT EXISTS idx_long_term_memories_user_key_chat_updated_ts ON long_term_memories(user_key, chat_id, updated_at_ts);",
     )?;
+    super::auth_principal::ensure_principal_identity_schema(db)?;
     Ok(())
 }
 

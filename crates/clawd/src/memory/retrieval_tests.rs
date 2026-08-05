@@ -52,6 +52,19 @@ fn test_state() -> AppState {
     }
 }
 
+fn ensure_test_principal_scope(db: &rusqlite::Connection, user_key: &str) {
+    crate::repo::auth::ensure_key_auth_schema(db).expect("test key auth schema");
+    db.execute(
+        "INSERT INTO auth_keys (user_key, role, enabled, created_at)
+         VALUES (?1, 'user', 1, '1') ON CONFLICT(user_key) DO NOTHING",
+        [user_key],
+    )
+    .expect("test auth key");
+    crate::repo::auth::ensure_principal_identity_schema(db).expect("test principal schema");
+    crate::repo::ensure_principal_ownership_schema(db).expect("test ownership schema");
+    crate::memory::scope::ensure_memory_scope_schema(db).expect("test memory scope schema");
+}
+
 #[test]
 fn planner_memory_context_is_strictly_scoped() {
     let ctx = StructuredMemoryContext {
@@ -276,6 +289,7 @@ fn memory_fact_cards_recall_into_relevant_facts_without_reason_text() {
         db.execute_batch(crate::INIT_SQL).expect("init base schema");
         ensure_memory_schema(&db).expect("ensure memory schema");
         ensure_retrieval_schema(&db).expect("ensure retrieval schema");
+        ensure_test_principal_scope(&db, user_key);
         let source_ids = [42_i64];
         let fact = MemoryFactUpsert::from_long_term_summary(
             "user_profile",
@@ -317,6 +331,7 @@ fn retrieval_multilingual_queries_keep_structured_preferences_and_facts() {
         ensure_memory_schema(&db).expect("ensure memory schema");
         crate::repo::auth::ensure_key_auth_schema(&db).expect("ensure key auth schema");
         ensure_retrieval_schema(&db).expect("ensure retrieval schema");
+        ensure_test_principal_scope(&db, user_key);
         db.execute(
             "INSERT INTO user_preferences
              (user_id, chat_id, user_key, pref_key, pref_value, confidence, source, updated_at, updated_at_ts)

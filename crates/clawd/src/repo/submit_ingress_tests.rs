@@ -123,6 +123,7 @@ fn payload_and_task_row_keep_the_same_platform_message_id() {
     crate::ensure_channel_schema(&db).expect("channel schema");
     crate::ensure_task_lease_schema(&db).expect("task lease schema");
     crate::ensure_key_auth_schema(&db).expect("auth schema");
+    crate::repo::ensure_principal_ownership_schema(&db).expect("principal ownership schema");
     drop(db);
 
     let snapshot = build_channel_ingress_snapshot(

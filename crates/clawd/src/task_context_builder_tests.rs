@@ -161,6 +161,7 @@ fn execution_context_is_projected_to_planner_and_chat_prompts() {
         }),
         task_plan_snapshot: None,
         compaction_records: Vec::new(),
+        memory_settings_snapshot: None,
     };
     let mut chat = String::new();
     let mut resolved = "request".to_string();

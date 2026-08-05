@@ -147,7 +147,13 @@ pub(crate) fn list_conversation_history(
                     FROM conversation_metadata
                     WHERE conversation_id =
                             json_extract(tasks.payload_json, '$.conversation_id')
-                      AND owner_user_key = ?1
+                      AND (
+                            owner_principal_id = ?1
+                            OR (
+                                owner_principal_id IS NULL
+                                AND owner_user_key = ?2
+                            )
+                      )
                     ORDER BY CAST(COALESCE(NULLIF(updated_at, ''), '0') AS INTEGER) DESC
                     LIMIT 1
                 )
@@ -155,29 +161,39 @@ pub(crate) fn list_conversation_history(
          WHERE tasks.kind = 'ask'
            AND json_valid(tasks.payload_json)
            AND json_type(tasks.payload_json, '$.conversation_id') = 'text'
-           AND (tasks.user_key = ?1 OR (tasks.user_key IS NULL AND tasks.user_id = ?2))
+           AND (
+                tasks.principal_id = ?1
+                OR (
+                    tasks.principal_id IS NULL
+                    AND (tasks.user_key = ?2 OR (tasks.user_key IS NULL AND tasks.user_id = ?3))
+                )
+           )
            AND NOT EXISTS (
                 SELECT 1
                 FROM conversation_archives
-                WHERE owner_user_key = ?1
+                WHERE (
+                        owner_principal_id = ?1
+                        OR (owner_principal_id IS NULL AND owner_user_key = ?2)
+                      )
                   AND conversation_id = json_extract(tasks.payload_json, '$.conversation_id')
            )
            AND (
-                ?3 IS NULL
-                OR CAST(COALESCE(NULLIF(tasks.created_at, ''), '0') AS INTEGER) < ?3
+                ?4 IS NULL
+                OR CAST(COALESCE(NULLIF(tasks.created_at, ''), '0') AS INTEGER) < ?4
                 OR (
-                    CAST(COALESCE(NULLIF(tasks.created_at, ''), '0') AS INTEGER) = ?3
-                    AND tasks.task_id < ?4
+                    CAST(COALESCE(NULLIF(tasks.created_at, ''), '0') AS INTEGER) = ?4
+                    AND tasks.task_id < ?5
                 )
            )
          ORDER BY CAST(COALESCE(NULLIF(tasks.created_at, ''), '0') AS INTEGER) DESC,
                   tasks.task_id DESC
-         LIMIT ?5",
+         LIMIT ?6",
     )?;
     let cursor_ts = cursor.as_ref().map(|cursor| cursor.created_at);
     let cursor_task_id = cursor.as_ref().map(|cursor| cursor.task_id.as_str());
     let rows = stmt.query_map(
         params![
+            identity.principal_id,
             identity.user_key,
             identity.user_id,
             cursor_ts,
@@ -245,8 +261,19 @@ pub(crate) fn read_conversation_body_range(
          FROM tasks
          WHERE task_id = ?1
            AND kind = 'ask'
-           AND (user_key = ?2 OR (user_key IS NULL AND user_id = ?3))",
-        params![task_id, identity.user_key, identity.user_id],
+           AND (
+                principal_id = ?2
+                OR (
+                    principal_id IS NULL
+                    AND (user_key = ?3 OR (user_key IS NULL AND user_id = ?4))
+                )
+           )",
+        params![
+            task_id,
+            identity.principal_id,
+            identity.user_key,
+            identity.user_id
+        ],
         |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -329,9 +356,20 @@ pub(crate) fn archive_conversation(
             WHERE kind = 'ask'
               AND json_valid(payload_json)
               AND json_extract(payload_json, '$.conversation_id') = ?1
-              AND (user_key = ?2 OR (user_key IS NULL AND user_id = ?3))
+              AND (
+                    principal_id = ?2
+                    OR (
+                        principal_id IS NULL
+                        AND (user_key = ?3 OR (user_key IS NULL AND user_id = ?4))
+                    )
+              )
          )",
-        params![conversation_id, identity.user_key, identity.user_id,],
+        params![
+            conversation_id,
+            identity.principal_id,
+            identity.user_key,
+            identity.user_id,
+        ],
         |row| row.get::<_, i64>(0),
     )? != 0;
     if !visible {
@@ -340,14 +378,17 @@ pub(crate) fn archive_conversation(
     let archived_at = crate::app_helpers::now_ts_u64() as i64;
     db.execute(
         "INSERT INTO conversation_archives (
-            owner_user_key, owner_user_id, conversation_id, archived_at
-         ) VALUES (?1, ?2, ?3, ?4)
-         ON CONFLICT(owner_user_key, conversation_id) DO UPDATE SET
+            owner_user_key, owner_user_id, owner_principal_id, conversation_id, archived_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(owner_principal_id, conversation_id) WHERE owner_principal_id IS NOT NULL
+         DO UPDATE SET
+            owner_user_key = excluded.owner_user_key,
             owner_user_id = excluded.owner_user_id,
             archived_at = excluded.archived_at",
         params![
             identity.user_key,
             identity.user_id,
+            identity.principal_id,
             conversation_id,
             archived_at.to_string(),
         ],
@@ -377,21 +418,23 @@ pub(crate) fn update_conversation_title(
         .db
         .get()
         .map_err(|error| anyhow::anyhow!("conversation_title_db_pool_failed:{error}"))?;
-    if !conversation_exists_for_owner(&db, &identity.user_key, identity.user_id, &conversation_id)?
-    {
+    if !conversation_exists_for_owner(&db, identity, &conversation_id)? {
         anyhow::bail!("conversation_not_found");
     }
     db.execute(
         "INSERT INTO conversation_metadata (
-            owner_user_key, owner_user_id, conversation_id, title, created_at, updated_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?5)
-         ON CONFLICT(owner_user_key, conversation_id) DO UPDATE SET
+            owner_user_key, owner_user_id, owner_principal_id, conversation_id, title, created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+         ON CONFLICT(owner_principal_id, conversation_id) WHERE owner_principal_id IS NOT NULL
+         DO UPDATE SET
+            owner_user_key = excluded.owner_user_key,
             owner_user_id = excluded.owner_user_id,
             title = excluded.title,
             updated_at = excluded.updated_at",
         params![
             identity.user_key,
             identity.user_id,
+            identity.principal_id,
             conversation_id,
             title,
             now,
@@ -408,8 +451,7 @@ pub(crate) fn update_conversation_title(
 
 fn conversation_exists_for_owner(
     db: &rusqlite::Connection,
-    owner_user_key: &str,
-    owner_user_id: i64,
+    identity: &AuthIdentity,
     conversation_id: &str,
 ) -> rusqlite::Result<bool> {
     db.query_row(
@@ -419,9 +461,20 @@ fn conversation_exists_for_owner(
             WHERE kind = 'ask'
               AND json_valid(payload_json)
               AND json_extract(payload_json, '$.conversation_id') = ?1
-              AND (user_key = ?2 OR (user_key IS NULL AND user_id = ?3))
+              AND (
+                    principal_id = ?2
+                    OR (
+                        principal_id IS NULL
+                        AND (user_key = ?3 OR (user_key IS NULL AND user_id = ?4))
+                    )
+              )
          )",
-        params![conversation_id, owner_user_key, owner_user_id],
+        params![
+            conversation_id,
+            identity.principal_id,
+            identity.user_key,
+            identity.user_id
+        ],
         |row| row.get::<_, i64>(0),
     )
     .map(|value| value != 0)

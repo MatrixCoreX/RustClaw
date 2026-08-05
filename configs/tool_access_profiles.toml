@@ -10,6 +10,7 @@ coding = [
   "skill:git_basic", "skill:process_basic", "skill:archive_basic", "skill:fs_search",
   "skill:health_check", "skill:log_analyze", "capability:service_control",
   "skill:task_control", "skill:doc_parse", "skill:transform", "skill:kb",
+  "skill:memory_store",
   "capability:image.preview_generate", "capability:audio.preview_synthesize",
   "capability:video.preview_generate", "capability:music.preview_generate",
   "capability:module.preview_install", "capability:schedule.preview",
@@ -18,5 +19,6 @@ coding = [
 minimal = [
   "skill:run_cmd", "skill:read_file", "skill:write_file", "skill:list_dir",
   "skill:make_dir", "skill:remove_file", "skill:system_basic",
+  "skill:memory_store",
 ]
-messaging = ["skill:system_basic"]
+messaging = ["skill:system_basic", "skill:memory_store"]

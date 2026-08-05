@@ -1,8 +1,7 @@
 #[path = "runtime_support/background_workers.rs"]
 mod background_workers;
 pub(crate) use background_workers::{
-    spawn_cleanup_worker, spawn_long_term_summary_refresh, spawn_schedule_worker, spawn_worker,
-    start_task_heartbeat,
+    spawn_cleanup_worker, spawn_schedule_worker, spawn_worker, start_task_heartbeat,
 };
 
 #[path = "runtime_support/dispatch_result.rs"]

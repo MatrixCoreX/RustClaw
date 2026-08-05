@@ -253,12 +253,12 @@ pub(crate) fn resolve_submit_task_context(
             .map(|v| v.to_string())
             .unwrap_or_else(|| "chat".to_string())
     );
-    let effective_chat_id = if let Some(user_key) = effective_user_key.as_deref() {
+    let effective_chat_id = if let Some(identity) = resolved_identity.as_ref() {
         build_conversation_chat_id(
             channel_kind_name(channel),
             normalized_external_user_id.as_deref(),
             normalized_external_chat_id.as_deref(),
-            user_key,
+            &identity.principal_id,
         )
     } else if channel_allows_public_access(channel)
         && (normalized_external_user_id.is_some() || normalized_external_chat_id.is_some())
@@ -651,16 +651,21 @@ pub(crate) fn insert_submitted_task(
         .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    let principal_id = match user_key {
+        Some(user_key) => crate::repo::auth::principal_id_for_user_key(&db, user_key)?,
+        None => None,
+    };
 
     let inserted = db.execute(
-        "INSERT INTO tasks (task_id, user_id, chat_id, user_key, channel, external_user_id, external_chat_id, message_id, idempotency_key, kind, payload_json, status, result_json, error_text, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'queued', NULL, NULL, ?12, ?12)
+        "INSERT INTO tasks (task_id, user_id, chat_id, user_key, principal_id, channel, external_user_id, external_chat_id, message_id, idempotency_key, kind, payload_json, status, result_json, error_text, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'queued', NULL, NULL, ?13, ?13)
          ON CONFLICT(idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING",
         params![
             task_id.to_string(),
             user_id,
             chat_id,
             user_key,
+            principal_id,
             channel_kind_name(channel),
             external_user_id,
             external_chat_id,

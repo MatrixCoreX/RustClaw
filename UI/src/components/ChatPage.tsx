@@ -111,6 +111,7 @@ export interface ChatPageProps {
   chatTeachingRuns: ChatTeachingRunSummary[];
   activeChatTeachingRunId: string | null;
   chatSending: boolean;
+  chatCompacting: boolean;
   chatWorking: boolean;
   chatActivity: ChatActivitySummary;
   chatRecording: boolean;
@@ -143,6 +144,7 @@ export interface ChatPageProps {
   onCancelVoiceRecording: () => unknown | Promise<unknown>;
   onAudioInputDeviceChange: (deviceId: string) => void;
   onSendMessage: () => unknown | Promise<unknown>;
+  onCompactContext: (focus?: string) => boolean | Promise<boolean>;
   onQueryChatTeachingLlmDebug: (taskId?: string) => unknown | Promise<unknown>;
 }
 
@@ -166,6 +168,7 @@ export function ChatPage({
   chatTeachingRuns,
   activeChatTeachingRunId,
   chatSending,
+  chatCompacting,
   chatWorking,
   chatActivity,
   chatRecording,
@@ -198,6 +201,7 @@ export function ChatPage({
   onCancelVoiceRecording,
   onAudioInputDeviceChange,
   onSendMessage,
+  onCompactContext,
   onQueryChatTeachingLlmDebug,
 }: ChatPageProps) {
   const [taskHistoryExpanded, setTaskHistoryExpanded] = useState(true);
@@ -206,6 +210,8 @@ export function ChatPage({
   const [renamingThreadId, setRenamingThreadId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [renameSaving, setRenameSaving] = useState(false);
+  const [compactionPanelOpen, setCompactionPanelOpen] = useState(false);
+  const [compactionFocus, setCompactionFocus] = useState("");
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const normalizedThreadSearch = threadSearch.trim().toLowerCase();
   const visibleChatThreads = useMemo(() => {
@@ -589,6 +595,25 @@ export function ChatPage({
             type="button"
             onClick={(event) => {
               event.stopPropagation();
+              setCompactionPanelOpen((open) => !open);
+            }}
+            disabled={chatCompacting || chatWorking || chatMessages.length === 0}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-2.5 py-1.5 text-xs hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+            aria-expanded={compactionPanelOpen}
+            aria-controls="chat-context-compaction-panel"
+            title={t("整理较早的对话，给后续交流留出空间", "Compact older context to make room for later turns")}
+          >
+            {chatCompacting ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <FileArchive className="h-3.5 w-3.5" />
+            )}
+            {chatCompacting ? t("整理中", "Compacting") : t("整理上下文", "Compact")}
+          </button>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
               setChatMaximized((maximized) => !maximized);
             }}
             className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-2.5 py-1.5 text-xs hover:bg-white/10"
@@ -624,6 +649,57 @@ export function ChatPage({
           </button>
         </div>
       </div>
+
+      {compactionPanelOpen ? (
+        <div
+          id="chat-context-compaction-panel"
+          className="rounded-xl border border-white/10 bg-white/5 p-3 shadow-sm"
+        >
+          <div className="mb-2 text-sm font-medium">
+            {t("整理较早的对话内容", "Compact older conversation context")}
+          </div>
+          <p className="mb-2 text-xs text-white/60">
+            {t(
+              "系统会保留当前任务、重要引用和未完成事项。你也可以填写本次特别需要保留的重点。",
+              "Current work, important references, and open items are preserved. You may add a one-time focus for this compaction.",
+            )}
+          </p>
+          <textarea
+            value={compactionFocus}
+            onChange={(event) => setCompactionFocus(event.target.value.slice(0, 4_000))}
+            rows={3}
+            maxLength={4_000}
+            placeholder={t("可选，例如：保留部署步骤和测试结果", "Optional, for example: preserve deployment steps and test results")}
+            className="w-full resize-y rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none focus:border-sky-400/60"
+          />
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <span className="text-xs text-white/45">{compactionFocus.length}/4000</span>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setCompactionPanelOpen(false)}
+                className="rounded-lg border border-white/15 px-3 py-1.5 text-xs hover:bg-white/10"
+              >
+                {t("取消", "Cancel")}
+              </button>
+              <button
+                type="button"
+                disabled={chatCompacting}
+                onClick={async () => {
+                  const completed = await onCompactContext(compactionFocus);
+                  if (completed) {
+                    setCompactionFocus("");
+                    setCompactionPanelOpen(false);
+                  }
+                }}
+                className="rounded-lg bg-sky-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {t("开始整理", "Compact now")}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div
         ref={messageListRef}

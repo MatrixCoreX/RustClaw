@@ -41,17 +41,7 @@ async fn call_api(
 #[tokio::test]
 async fn credential_api_uses_crypto_owned_storage_and_redacts_secrets() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
-    state
-        .core
-        .db
-        .get()
-        .expect("main db")
-        .execute(
-            "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
-             VALUES (?1, 'admin', 1, '1', NULL)",
-            rusqlite::params![TEST_KEY],
-        )
-        .expect("seed auth key");
+    state.seed_test_auth_identity(TEST_KEY, "admin");
     let router = axum::Router::new()
         .nest("/v1", build_ui_router())
         .with_state(state.clone());

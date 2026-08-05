@@ -100,6 +100,8 @@ fn planner_capability_hint_includes_structured_contract() {
         required: vec!["path".to_string()],
         optional: vec!["names_only".to_string()],
         risk_level: Some(SkillRiskLevel::Low),
+        auto_invocable: None,
+        requires_confirmation: None,
         preferred: true,
         once_per_task: Some(false),
         dedup_scope: Some(RegistryDedupScope::Args),

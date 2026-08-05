@@ -196,6 +196,7 @@ export function useChatRuntime({
   const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);
   const [chatTeachingLlmDebugLoading, setChatTeachingLlmDebugLoading] = useState(false);
   const [chatSending, setChatSending] = useState(false);
+  const [chatCompacting, setChatCompacting] = useState(false);
   const [chatWorking, setChatWorking] = useState(false);
   const [chatActivity, setChatActivity] = useState(emptyChatActivity);
   const [chatRecording, setChatRecording] = useState(false);
@@ -1380,6 +1381,86 @@ export function useChatRuntime({
     });
   };
 
+  const compactChatContext = async (focus?: string) => {
+    if (chatSendingValueRef.current || chatCompacting) return false;
+    const thread = activeChatThreadRef.current;
+    const normalizedFocus = focus?.trim() ?? "";
+    if (normalizedFocus.length > 4_000) {
+      setChatError(t("压缩重点不能超过 4000 个字符。", "Compaction focus cannot exceed 4,000 characters."));
+      return false;
+    }
+    setChatCompacting(true);
+    setChatError(null);
+    let submittedTaskId: string | null = null;
+    try {
+      const payload: Record<string, unknown> = {
+        entrypoint: "compact_conversation",
+        source: "ui_machine",
+        conversation_id: thread.id,
+        thread_id: thread.id,
+        session_id: thread.id,
+        ...(thread.lastTaskId ? { resume_task_id: thread.lastTaskId } : {}),
+        ...(normalizedFocus ? { compaction_focus: normalizedFocus } : {}),
+      };
+      const submitRes = await apiFetch("/v1/tasks", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          [CLIENT_ORIGIN_HEADER]: "ui",
+        },
+        body: JSON.stringify({
+          channel: interactionChannel,
+          kind: "ask",
+          ...(activeUserKey ? { user_key: activeUserKey } : {}),
+          ...activeIdentityIds,
+          ...(interactionExternalUserId.trim()
+            ? { external_user_id: interactionExternalUserId.trim() }
+            : {}),
+          ...(interactionExternalChatId.trim()
+            ? { external_chat_id: `${interactionExternalChatId.trim()}--${thread.externalChatId}` }
+            : { external_chat_id: thread.externalChatId }),
+          payload,
+        }),
+      });
+      const submitted = (await submitRes.json()) as ApiResponse<SubmitTaskResponse>;
+      if (!submitRes.ok || !submitted.ok || !submitted.data?.task_id) {
+        throw new Error(submitted.error || `context compaction submit failed (${submitRes.status})`);
+      }
+      submittedTaskId = submitted.data.task_id;
+      onTaskSubmitted(submittedTaskId);
+      await followTaskEventStream(apiFetch, submittedTaskId, async () => undefined);
+      const finalResult = await fetchTaskById(submittedTaskId);
+      onTaskResult(submittedTaskId, finalResult);
+      if (finalResult.status !== "succeeded") {
+        throw new Error(finalResult.error_text || t("压缩没有完成。", "Compaction did not complete."));
+      }
+      updateChatThreadById(thread.id, (current) => ({
+        ...current,
+        lastTaskId: submittedTaskId,
+        messages: appendThreadMessages(current.messages, {
+          id: `context-compacted-${submittedTaskId}`,
+          role: "system",
+          text: t(
+            "已整理较早的对话内容；当前任务、重要引用和未完成事项会继续保留。",
+            "Earlier conversation context was compacted. Current work, important references, and open items remain available.",
+          ),
+          ts: Date.now(),
+        }),
+        updatedAt: Date.now(),
+      }));
+      return true;
+    } catch (error) {
+      setChatError(
+        error instanceof Error
+          ? error.message
+          : t("压缩上下文失败。", "Failed to compact context."),
+      );
+      return false;
+    } finally {
+      setChatCompacting(false);
+    }
+  };
+
   const handleChatInputKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -1401,6 +1482,7 @@ export function useChatRuntime({
     activeChatAgentId,
     activeChatCanChangeAgent,
     chatSending,
+    chatCompacting,
     chatWorking,
     chatActivity,
     chatRecording,
@@ -1425,6 +1507,7 @@ export function useChatRuntime({
     cancelChatVoiceRecording,
     setChatAudioInputDeviceId,
     sendChatMessage,
+    compactChatContext,
     queryChatTeachingLlmDebug,
     chatThreads: chatThreadSummaries,
     activeChatThreadId: chatThreadState.activeThreadId,

@@ -1,0 +1,17 @@
+-- Migration id: 009_principal_ownership_v1
+--
+-- SQLite does not support `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` on every
+-- supported runtime version. The versioned migration executor in
+-- `repo/principal_ownership.rs` owns the idempotent ALTER statements. This file
+-- is the immutable, digest-bound manifest for that executor.
+--
+-- principal_id: tasks, scheduled_jobs, channel_bindings,
+-- pending_channel_bind_sessions, webd_login_accounts, memories,
+-- long_term_memories, user_preferences, memory_facts,
+-- memory_retrieval_index, followup_frames, clarify_states,
+-- observed_facts_states, conversation_states
+-- owner_principal_id: conversation_metadata, conversation_archives
+-- unique owner scope: (owner_principal_id, conversation_id) for metadata/archive
+--
+-- Existing rows are backfilled only through auth_keys.user_key -> principal_id.
+-- Rows without a verified mapping remain NULL for the centralized legacy reader.

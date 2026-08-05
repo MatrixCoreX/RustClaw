@@ -69,6 +69,8 @@ fn state_with_goal_task(task_id: &str, payload: Value) -> crate::AppState {
         ],
     )
     .expect("insert task");
+    crate::repo::ensure_principal_ownership_schema(&db)
+        .expect("bind route fixture to stable principal");
     drop(db);
     state
 }

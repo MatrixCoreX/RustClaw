@@ -123,10 +123,6 @@ async fn finalize_ask_success(
         answer_messages,
         is_llm_reply,
         agent_display_name_hint,
-    );
-    crate::worker::spawn_long_term_summary_refresh(
-        state.clone(),
-        task.clone(),
         should_refresh_long_term_memory,
     );
     info!("{}", crate::LOG_CALL_WRAP);
@@ -347,10 +343,6 @@ pub(crate) async fn finalize_ask_direct_success(
         &[],
         false,
         agent_display_name_hint,
-    );
-    crate::worker::spawn_long_term_summary_refresh(
-        state.clone(),
-        task.clone(),
         should_refresh_long_term_memory,
     );
     info!("{}", crate::LOG_CALL_WRAP);

@@ -72,6 +72,8 @@ pub(crate) async fn run_native_model_turn_with_fallback(
     let call_started_at = std::time::Instant::now();
     let mut last_error = NO_ELIGIBLE_LLM_PROVIDER_ERR.to_string();
     let mut recoverable_blocker = None;
+    let mut attempted_provider_count = 0_u64;
+    let mut context_length_error_count = 0_u64;
     let model_event_index = Arc::new(AtomicU64::new(0));
 
     for provider in routing_plan.providers {
@@ -91,6 +93,7 @@ pub(crate) async fn run_native_model_turn_with_fallback(
             return Err(TASK_LLM_COST_POLICY_BLOCKED_ERR.to_string());
         }
         let provider_started_at = std::time::Instant::now();
+        attempted_provider_count = attempted_provider_count.saturating_add(1);
         info!(
             "{} [MODEL_TURN] stage=request task_id={} provider={} prompt_source={} native_tools=true",
             crate::highlight_tag("llm"),
@@ -189,6 +192,9 @@ pub(crate) async fn run_native_model_turn_with_fallback(
                 return Ok(Some(output.turn));
             }
             Err(err) => {
+                if err.kind == ProviderErrorKind::ContextLengthExceeded {
+                    context_length_error_count = context_length_error_count.saturating_add(1);
+                }
                 provider
                     .latency
                     .note_sample(provider_started_at.elapsed().as_millis() as u64);
@@ -261,6 +267,9 @@ pub(crate) async fn run_native_model_turn_with_fallback(
         call_started_at.elapsed().as_millis() as u64,
     );
     stop_llm_task_lease_heartbeat(&mut heartbeat_stop);
+    if attempted_provider_count > 0 && context_length_error_count == attempted_provider_count {
+        return Err(super::CONTEXT_LENGTH_EXCEEDED_ERR.to_string());
+    }
     Err(last_error)
 }
 

@@ -42,6 +42,7 @@ function props(): ComponentProps<typeof ChatPage> {
     chatTeachingRuns: [],
     activeChatTeachingRunId: null,
     chatSending: false,
+    chatCompacting: false,
     chatWorking: false,
     chatActivity: emptyChatActivity(),
     chatRecording: false,
@@ -74,6 +75,7 @@ function props(): ComponentProps<typeof ChatPage> {
     onCancelVoiceRecording: () => {},
     onAudioInputDeviceChange: () => {},
     onSendMessage: () => {},
+    onCompactContext: async () => true,
     onQueryChatTeachingLlmDebug: () => {},
   };
 }
@@ -86,6 +88,7 @@ test("renders task rename and delete as directly operable controls", () => {
   assert.match(markup, /aria-label="收起任务历史"/);
   assert.match(markup, /aria-expanded="true"/);
   assert.match(markup, /aria-controls="chat-task-history-content"/);
+  assert.match(markup, /整理上下文/);
 });
 
 test("renders progressive controls for older history and long messages", () => {

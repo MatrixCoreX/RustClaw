@@ -13,17 +13,19 @@ pub enum ProviderFailureClass {
     ProviderRetryableResponse,
     RateLimited,
     QuotaExhausted,
+    ContextLengthExceeded,
     ProviderNonRetryableBusiness,
     LocalNonRetryable,
 }
 
 impl ProviderFailureClass {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Timeout,
         Self::TransportRetryable,
         Self::ProviderRetryableResponse,
         Self::RateLimited,
         Self::QuotaExhausted,
+        Self::ContextLengthExceeded,
         Self::ProviderNonRetryableBusiness,
         Self::LocalNonRetryable,
     ];
@@ -35,6 +37,7 @@ impl ProviderFailureClass {
             Self::ProviderRetryableResponse => "provider_retryable_response",
             Self::RateLimited => "rate_limited",
             Self::QuotaExhausted => "quota_exhausted",
+            Self::ContextLengthExceeded => "context_length_exceeded",
             Self::ProviderNonRetryableBusiness => "provider_non_retryable_business",
             Self::LocalNonRetryable => "local_non_retryable",
         }
@@ -47,6 +50,7 @@ impl ProviderFailureClass {
             "provider_retryable_response" => Some(Self::ProviderRetryableResponse),
             "rate_limited" => Some(Self::RateLimited),
             "quota_exhausted" => Some(Self::QuotaExhausted),
+            "context_length_exceeded" => Some(Self::ContextLengthExceeded),
             "provider_non_retryable_business" => Some(Self::ProviderNonRetryableBusiness),
             "local_non_retryable" => Some(Self::LocalNonRetryable),
             _ => None,
@@ -74,6 +78,9 @@ impl ProviderFailureClass {
             }
             Self::ProviderNonRetryableBusiness => {
                 ProviderFailurePolicy::terminal(self, "provider.non_retryable_business")
+            }
+            Self::ContextLengthExceeded => {
+                ProviderFailurePolicy::terminal(self, "provider.context_length_exceeded")
             }
             Self::LocalNonRetryable => {
                 ProviderFailurePolicy::terminal(self, "provider.local_non_retryable")

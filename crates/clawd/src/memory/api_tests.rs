@@ -1,11 +1,8 @@
-use std::fs;
-
 use rusqlite::{params, Connection};
 
 use super::{
     clear_memory_scope, delete_memory_object, expire_memory_object, list_facts, list_preferences,
-    memory_overview, update_memory_settings_file, MemoryClearScope, MemoryCounts,
-    MemorySettingsRequest,
+    memory_overview, MemoryClearScope, MemoryCounts,
 };
 use crate::memory::facts::{upsert_memory_fact_card, MemoryFactUpsert};
 
@@ -15,7 +12,25 @@ fn setup_db() -> Connection {
     crate::db_init::ensure_memory_schema(&db).expect("ensure memory schema");
     crate::repo::auth::ensure_key_auth_schema(&db).expect("ensure key auth schema");
     crate::memory::indexing::ensure_retrieval_schema(&db).expect("ensure retrieval schema");
+    db.execute(
+        "INSERT INTO auth_keys (user_key, role, enabled, created_at)
+         VALUES ('user:test', 'user', 1, '1')",
+        [],
+    )
+    .expect("auth key");
+    crate::repo::auth::ensure_principal_identity_schema(&db).expect("principal schema");
+    crate::repo::ensure_principal_ownership_schema(&db).expect("ownership schema");
+    crate::memory::scope::ensure_memory_scope_schema(&db).expect("scope schema");
     db
+}
+
+fn principal_id(db: &Connection) -> String {
+    db.query_row(
+        "SELECT principal_id FROM auth_keys WHERE user_key = 'user:test'",
+        [],
+        |row| row.get(0),
+    )
+    .expect("test principal id")
 }
 
 #[test]
@@ -66,14 +81,17 @@ fn memory_api_lists_preferences_and_facts() {
     );
     upsert_memory_fact_card(&db, 7, 11, "user:test", &fact, 1001).expect("upsert fact");
 
-    let prefs = list_preferences(&db, 7, 11, "user:test").expect("list preferences");
-    let facts = list_facts(&db, 7, "user:test").expect("list facts");
-    let overview = memory_overview(&db, 7, 11, "user:test", true, true).expect("memory overview");
+    crate::repo::ensure_principal_ownership_schema(&db).expect("refresh ownership");
+    crate::memory::scope::ensure_memory_scope_schema(&db).expect("refresh scope");
+    let principal_id = principal_id(&db);
+    let prefs = list_preferences(&db, 11, &principal_id).expect("list preferences");
+    let facts = list_facts(&db, &principal_id).expect("list facts");
+    let overview = memory_overview(&db, 11, &principal_id, true, true).expect("memory overview");
 
     assert_eq!(prefs.len(), 1);
-    assert_eq!(prefs[0].id, "preference:1");
+    assert!(prefs[0].id.starts_with("memory_"));
     assert_eq!(facts.len(), 1);
-    assert_eq!(facts[0].id, "fact:1");
+    assert!(facts[0].id.starts_with("memory_"));
     assert_eq!(facts[0].reason, "explicit durable preference");
     assert_eq!(
         overview.counts,
@@ -104,7 +122,15 @@ fn memory_api_delete_fact_marks_deleted_and_removes_index() {
     );
     upsert_memory_fact_card(&db, 7, 11, "user:test", &fact, 1001).expect("upsert fact");
 
-    let deleted = delete_memory_object(&db, 7, 11, "user:test", "fact:1", 1100)
+    let principal_id = principal_id(&db);
+    let memory_id: String = db
+        .query_row(
+            "SELECT memory_id FROM memory_facts WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("fact memory id");
+    let deleted = delete_memory_object(&db, 7, 11, "user:test", &principal_id, &memory_id, 1100)
         .expect("delete fact")
         .expect("deleted fact");
 
@@ -142,7 +168,15 @@ fn memory_api_expire_fact_marks_expired_and_removes_index() {
     );
     upsert_memory_fact_card(&db, 7, 11, "user:test", &fact, 1001).expect("upsert fact");
 
-    let expired = expire_memory_object(&db, 7, 11, "user:test", "fact:1", 1200)
+    let principal_id = principal_id(&db);
+    let memory_id: String = db
+        .query_row(
+            "SELECT memory_id FROM memory_facts WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("fact memory id");
+    let expired = expire_memory_object(&db, 7, 11, "user:test", &principal_id, &memory_id, 1200)
         .expect("expire fact")
         .expect("expired fact");
 
@@ -237,7 +271,9 @@ fn memory_api_clear_all_removes_scoped_records_and_indexes() {
     );
     upsert_memory_fact_card(&db, 7, 11, "user:test", &fact, 1001).expect("upsert fact");
 
-    let cleared = clear_memory_scope(&db, 7, 11, "user:test", MemoryClearScope::All, 1300)
+    crate::repo::ensure_principal_ownership_schema(&db).expect("refresh clear ownership");
+    crate::memory::scope::ensure_memory_scope_schema(&db).expect("refresh clear scope");
+    let cleared = clear_memory_scope(&db, 11, &principal_id(&db), MemoryClearScope::All, 1300)
         .expect("clear all");
 
     let recent_count: i64 = db
@@ -267,48 +303,4 @@ fn memory_api_clear_all_removes_scoped_records_and_indexes() {
     assert_eq!(pref_count, 0);
     assert_eq!(fact_status, crate::memory::MEMORY_FACT_STATUS_DELETED);
     assert_eq!(index_count, 0);
-}
-
-#[test]
-fn memory_api_settings_updates_bool_without_duplicate_keys() {
-    let root = std::env::temp_dir().join(format!(
-        "agent-runtime-memory-api-test-{}-{}",
-        std::process::id(),
-        crate::now_ts_u64()
-    ));
-    fs::create_dir_all(root.join("configs")).expect("create configs dir");
-    fs::write(
-        root.join("configs/memory.toml"),
-        "# memory settings\nlong_term_enabled = true\nembedding_dims = 24\n",
-    )
-    .expect("write memory config");
-
-    let changed = update_memory_settings_file(
-        &root,
-        &MemorySettingsRequest {
-            long_term_enabled: Some(false),
-        },
-    )
-    .expect("update setting");
-    let unchanged = update_memory_settings_file(
-        &root,
-        &MemorySettingsRequest {
-            long_term_enabled: Some(false),
-        },
-    )
-    .expect("update same setting");
-    let raw = fs::read_to_string(root.join("configs/memory.toml")).expect("read config");
-    let long_term_lines = raw
-        .lines()
-        .filter(|line| line.trim_start().starts_with("long_term_enabled"))
-        .count();
-
-    assert_eq!(changed.long_term_enabled, false);
-    assert_eq!(changed.restart_required, true);
-    assert_eq!(unchanged.long_term_enabled, false);
-    assert_eq!(unchanged.restart_required, false);
-    assert_eq!(long_term_lines, 1);
-    assert!(raw.contains("long_term_enabled = false"));
-
-    let _ = fs::remove_dir_all(root);
 }

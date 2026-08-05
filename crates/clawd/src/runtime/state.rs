@@ -311,6 +311,7 @@ pub(crate) struct PolicyConfig {
     pub(crate) maintenance: MaintenanceConfig,
     pub(crate) memory: MemoryConfig,
     pub(crate) routing: RoutingConfig,
+    pub(crate) limits: claw_core::config::LimitsConfig,
     pub(crate) llm_cost_governance: claw_core::config::LlmCostGovernanceConfig,
     pub(crate) rate_limiter: Arc<Mutex<RateLimiter>>,
     pub(crate) allow_path_outside_workspace: bool,
@@ -345,6 +346,7 @@ impl PolicyConfig {
             maintenance: MaintenanceConfig::default(),
             memory: MemoryConfig::default(),
             routing: RoutingConfig::default(),
+            limits: claw_core::config::LimitsConfig::default(),
             llm_cost_governance: claw_core::config::LlmCostGovernanceConfig::default(),
             rate_limiter: Arc::new(Mutex::new(RateLimiter::new(60, 30))),
             allow_path_outside_workspace: false,
@@ -1083,6 +1085,7 @@ impl AppState {
             maintenance: config.maintenance.clone(),
             memory: memory_runtime,
             routing: config.routing.clone(),
+            limits: config.limits.clone(),
             llm_cost_governance: config.llm.cost_governance.clone(),
             rate_limiter: Arc::new(Mutex::new(RateLimiter::new(
                 config.limits.global_rpm,
@@ -1134,11 +1137,35 @@ impl AppState {
         crate::repo::ensure_key_auth_schema(&conn)
             .expect("ensure_key_auth_schema for test main db");
         crate::ensure_channel_schema(&conn).expect("ensure_channel_schema for test main db");
+        crate::repo::ensure_principal_ownership_schema(&conn)
+            .expect("ensure_principal_ownership_schema for test main db");
         crate::repo::child_task_graph::ensure_child_task_graph_schema(&conn)
             .expect("child_task_graph_schema_test");
         crate::repo::task_plan::ensure_task_plan_schema(&conn).expect("task_plan_schema_test");
         drop(conn);
         self
+    }
+
+    /// Inserts a synthetic authenticated principal through the same versioned
+    /// identity/ownership migration used by production bootstrap. Tests should
+    /// use this instead of leaving a raw `auth_keys` row without a principal.
+    #[cfg(test)]
+    pub(crate) fn seed_test_auth_identity(&self, user_key: &str, role: &str) {
+        let conn = self
+            .core
+            .db
+            .get()
+            .expect("acquire test main-db connection for auth seed");
+        conn.execute_batch(crate::KEY_AUTH_UPGRADE_SQL)
+            .expect("create key auth schema for test identity");
+        conn.execute(
+            "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
+             VALUES (?1, ?2, 1, '1', NULL)",
+            rusqlite::params![user_key, role],
+        )
+        .expect("insert test auth key");
+        crate::repo::ensure_principal_ownership_schema(&conn)
+            .expect("bind test auth key to stable principal");
     }
 
     /// §7.5 Step 4.b.2.4：在已 [`Self::with_seeded_db_schema`] 过的 `AppState`
@@ -1803,9 +1830,21 @@ impl AppState {
         let Some(manifest) = self.skill_manifest(canonical_name) else {
             return false;
         };
-        let requires_confirmation = manifest.requires_confirmation == Some(true)
+        let action = args
+            .and_then(|args| args.get("action"))
+            .and_then(serde_json::Value::as_str);
+        let registry = self.get_skills_registry();
+        let resolved_requires_confirmation = registry
+            .as_ref()
+            .and_then(|registry| registry.resolved_requires_confirmation(canonical_name, action))
+            .or(manifest.requires_confirmation);
+        let resolved_auto_invocable = registry
+            .as_ref()
+            .and_then(|registry| registry.resolved_auto_invocable(canonical_name, action))
+            .or(manifest.auto_invocable);
+        let requires_confirmation = resolved_requires_confirmation == Some(true)
             || matches!(manifest.risk_level, Some(SkillRiskLevel::High))
-            || (manifest.side_effect == Some(true) && manifest.auto_invocable == Some(false));
+            || (manifest.side_effect == Some(true) && resolved_auto_invocable == Some(false));
         if !requires_confirmation {
             return false;
         }

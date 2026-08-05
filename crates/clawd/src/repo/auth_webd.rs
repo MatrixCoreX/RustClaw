@@ -55,6 +55,7 @@ pub(crate) fn upsert_webd_login_account(
     password: &str,
     user_key: &str,
 ) -> anyhow::Result<()> {
+    super::super::principal_ownership::ensure_principal_ownership_schema(db)?;
     let username_norm = username.trim().to_lowercase();
     let uk = normalize_user_key(user_key);
     let password = password.trim();
@@ -95,11 +96,13 @@ pub(crate) fn upsert_webd_login_account(
         params![uk, username_norm],
     )?;
     db.execute(
-        "INSERT INTO webd_login_accounts (username, password_hash, user_key, enabled, created_at, updated_at)
-         VALUES (?1, ?2, ?3, 1, ?4, ?4)
+        "INSERT INTO webd_login_accounts (username, password_hash, user_key, principal_id, enabled, created_at, updated_at)
+         VALUES (?1, ?2, ?3,
+                 (SELECT principal_id FROM auth_keys WHERE user_key = ?3), 1, ?4, ?4)
          ON CONFLICT(username) DO UPDATE SET
            password_hash=excluded.password_hash,
            user_key=excluded.user_key,
+           principal_id=excluded.principal_id,
            enabled=1,
            updated_at=excluded.updated_at",
         params![username_norm, ph, uk, now],

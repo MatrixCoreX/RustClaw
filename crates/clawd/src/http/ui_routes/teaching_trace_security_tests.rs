@@ -4,6 +4,7 @@ use axum::http::HeaderValue;
 fn identity(user_key: &str, role: &str) -> AuthIdentity {
     AuthIdentity {
         user_key: user_key.to_string(),
+        principal_id: format!("principal-test-{user_key}"),
         role: role.to_string(),
         user_id: 1,
         chat_id: 1,
@@ -201,6 +202,8 @@ async fn teaching_trace_endpoint_rejects_cross_user_shared_channel_access() {
         [],
     )
     .expect("task row");
+    crate::repo::ensure_principal_ownership_schema(&db)
+        .expect("bind teaching trace fixture identities");
     drop(db);
 
     let mut headers = HeaderMap::new();
@@ -239,6 +242,8 @@ async fn teaching_trace_endpoint_requires_query_opt_in() {
         [],
     )
     .expect("admin identity");
+    crate::repo::ensure_principal_ownership_schema(&db)
+        .expect("bind teaching trace admin identity");
     drop(db);
 
     let mut headers = HeaderMap::new();
@@ -286,6 +291,8 @@ async fn teaching_trace_endpoint_allows_exact_owner_and_labels_trace_layers() {
         [],
     )
     .expect("task row");
+    crate::repo::ensure_principal_ownership_schema(&db)
+        .expect("bind teaching trace owner identity");
     drop(db);
 
     let mut headers = HeaderMap::new();

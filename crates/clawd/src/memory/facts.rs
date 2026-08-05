@@ -3,7 +3,7 @@ use serde_json::json;
 
 use super::{
     MEMORY_FACT_STATUS_ACTIVE, MEMORY_FACT_STATUS_EXPIRED, MEMORY_FACT_STATUS_SUPERSEDED,
-    MEMORY_SAFETY_FLAG_NORMAL, MEMORY_SCOPE_USER,
+    MEMORY_SAFETY_FLAG_NORMAL, MEMORY_SCOPE_PRINCIPAL,
 };
 
 const SOURCE_KIND_LONG_TERM_SUMMARY: &str = "long_term_summary";
@@ -38,7 +38,7 @@ impl<'a> MemoryFactUpsert<'a> {
         conflict_group: Option<&'a str>,
     ) -> Self {
         Self {
-            scope_kind: MEMORY_SCOPE_USER,
+            scope_kind: MEMORY_SCOPE_PRINCIPAL,
             namespace,
             fact_key,
             fact_value,
@@ -112,7 +112,17 @@ pub(crate) fn upsert_memory_fact_card(
         return Ok(None);
     }
 
-    let scope_kind = normalized_or_default(fact.scope_kind, MEMORY_SCOPE_USER);
+    let scope_kind = normalized_or_default(fact.scope_kind, MEMORY_SCOPE_PRINCIPAL);
+    anyhow::ensure!(
+        matches!(scope_kind, "conversation" | "principal" | "project"),
+        "memory_scope_kind_invalid"
+    );
+    let principal_id = crate::repo::auth::principal_id_for_user_key(db, user_key)?
+        .ok_or_else(|| anyhow::anyhow!("memory_principal_not_found"))?;
+    let scope_ref = match scope_kind {
+        "principal" => principal_id.as_str(),
+        _ => anyhow::bail!("memory_scope_ref_required"),
+    };
     let fact_key = fact.fact_key.trim();
     let fact_value = fact.fact_value.trim();
     let source_kind = normalized_or_default(fact.source_kind, SOURCE_KIND_LONG_TERM_SUMMARY);
@@ -176,16 +186,22 @@ pub(crate) fn upsert_memory_fact_card(
 
     db.execute(
         "INSERT INTO memory_facts (
-            user_id, chat_id, user_key, scope_kind, namespace, fact_key, fact_value, fact_text,
+            memory_id, user_id, chat_id, user_key, principal_id, scope_kind, scope_ref,
+            namespace, fact_key, fact_value, fact_text,
             confidence, source_kind, source_ref, source_memory_ids_json, reason, created_at_ts,
-            updated_at_ts, expires_at_ts, supersedes_fact_id, conflict_group, safety_flag, status
+            updated_at_ts, expires_at_ts, supersedes_fact_id, conflict_group, safety_flag, status,
+            origin, row_revision, legacy_scope_inferred
          )
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14, ?15, ?16, ?17, ?18, ?19)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
+                 ?15, ?16, ?17, ?17, ?18, ?19, ?20, ?21, ?22, 'background_extract', 1, 0)",
         params![
+            format!("memory_{}", uuid::Uuid::new_v4().simple()),
             user_id,
             chat_id,
             user_key,
+            principal_id,
             scope_kind,
+            scope_ref,
             namespace,
             fact_key,
             fact_value,

@@ -20,6 +20,7 @@ fn auth_lifecycle_test_state() -> AppState {
     ensure_key_auth_schema(&db).expect("auth schema");
     crate::repo::child_task_graph::ensure_child_task_graph_schema(&db).expect("child task schema");
     crate::memory::indexing::ensure_retrieval_schema(&db).expect("retrieval schema");
+    crate::repo::ensure_principal_ownership_schema(&db).expect("principal ownership schema");
     drop(db);
     state
 }
@@ -447,6 +448,26 @@ fn admin_rotation_rebinds_crypto_and_kb_storage() {
             params![old_user_key],
         )
         .expect("seed admin key");
+        ensure_principal_identity_schema(&db).expect("backfill admin principal");
+    }
+    let old_identity = resolve_auth_identity_by_key(&state, old_user_key)
+        .expect("resolve old admin")
+        .expect("old admin identity");
+    {
+        let db = state.core.db.get().expect("main db");
+        db.execute(
+            "INSERT INTO memory_runtime_settings (
+                setting_key, setting_scope, principal_id, use_mode, generate_mode,
+                external_context_policy, revision, policy_digest, updated_at,
+                updated_by_principal_id
+             ) VALUES (?1, 'principal', ?2, 'disabled', 'enabled', 'inherit', 1,
+                       'fixture', '1', ?2)",
+            params![
+                format!("principal:{}", old_identity.principal_id),
+                old_identity.principal_id
+            ],
+        )
+        .expect("seed principal memory settings");
     }
     super::super::crypto_storage::upsert_for_user_key(
         &state,
@@ -460,6 +481,23 @@ fn admin_rotation_rebinds_crypto_and_kb_storage() {
     seed_kb_user_data(&state, old_user_key);
 
     let new_user_key = create_auth_key(&state, "admin").expect("rotate admin key");
+    let new_identity = resolve_auth_identity_by_key(&state, &new_user_key)
+        .expect("resolve new admin")
+        .expect("new admin identity");
+    assert_eq!(new_identity.principal_id, old_identity.principal_id);
+    let settings_principal: String = state
+        .core
+        .db
+        .get()
+        .expect("main db")
+        .query_row(
+            "SELECT principal_id FROM memory_runtime_settings
+             WHERE setting_key = ?1",
+            [format!("principal:{}", new_identity.principal_id)],
+            |row| row.get(0),
+        )
+        .expect("principal settings after rotation");
+    assert_eq!(settings_principal, new_identity.principal_id);
 
     assert_eq!(
         super::super::crypto_storage::credential_context_for_user_key(&state, old_user_key)

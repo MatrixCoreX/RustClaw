@@ -315,15 +315,7 @@ fn scheduled_wakeup_enqueues_new_thread_after_previous_task_is_terminal() {
 fn legacy_scheduled_job_revalidates_admin_authority_on_each_wakeup() {
     let state = test_state();
     let admin_key = "rk-scheduled-legacy-admin";
-    {
-        let db = state.core.db.get().expect("get db");
-        db.execute(
-            "INSERT INTO auth_keys (user_key, role, enabled, created_at)
-             VALUES (?1, 'admin', 1, '1')",
-            rusqlite::params![admin_key],
-        )
-        .expect("insert admin key");
-    }
+    state.seed_test_auth_identity(admin_key, "admin");
 
     let mut enabled_payload = json!({"text": "scheduled fixture"});
     stamp_current_admin_policy_for_legacy_scheduled_job(

@@ -272,16 +272,7 @@ async fn planner_run_cmd_deadline_modes_reject_ambiguous_arguments() {
 async fn authenticated_admin_can_explicitly_disable_async_command_deadline() {
     let root = TempDirGuard::new("run_cmd_admin_disable_timeout");
     let state = test_state(root.path.clone());
-    let db = state.core.db.get().expect("db pool");
-    db.execute_batch(crate::KEY_AUTH_UPGRADE_SQL)
-        .expect("create auth schema");
-    db.execute(
-        "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
-         VALUES (?1, 'admin', 1, '123', NULL)",
-        rusqlite::params!["rk-admin-disable-timeout"],
-    )
-    .expect("insert admin key");
-    drop(db);
+    state.seed_test_auth_identity("rk-admin-disable-timeout", "admin");
     let identity = crate::resolve_auth_identity_by_key(&state, "rk-admin-disable-timeout")
         .expect("resolve admin key")
         .expect("admin identity");

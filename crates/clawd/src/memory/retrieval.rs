@@ -1,9 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::anyhow;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::Deserialize;
 
+use super::vector_store::MemoryVectorIndex;
 use crate::memory::{
     retrieval_kind_is_fact_bucket, retrieval_kind_is_knowledge_doc_bucket,
     retrieval_source_is_knowledge, MEMORY_ROLE_ASSISTANT, MEMORY_ROLE_USER,
@@ -103,23 +104,115 @@ pub(crate) fn retrieve_indexed_memories(
     chat_id: i64,
     anchor_prompt: &str,
 ) -> anyhow::Result<IndexedRecall> {
+    retrieve_indexed_memories_for_scope(state, user_key, user_id, chat_id, None, anchor_prompt)
+}
+
+pub(crate) fn retrieve_indexed_memories_for_scope(
+    state: &AppState,
+    user_key: Option<&str>,
+    user_id: i64,
+    chat_id: i64,
+    conversation_id: Option<&str>,
+    anchor_prompt: &str,
+) -> anyhow::Result<IndexedRecall> {
+    retrieve_indexed_memories_with_project_ref(
+        state,
+        user_key,
+        user_id,
+        chat_id,
+        conversation_id,
+        None,
+        anchor_prompt,
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn retrieve_indexed_memories_for_test_scope(
+    state: &AppState,
+    user_key: Option<&str>,
+    user_id: i64,
+    chat_id: i64,
+    conversation_id: Option<&str>,
+    project_scope_ref: Option<&str>,
+    anchor_prompt: &str,
+) -> anyhow::Result<IndexedRecall> {
+    retrieve_indexed_memories_with_project_ref(
+        state,
+        user_key,
+        user_id,
+        chat_id,
+        conversation_id,
+        project_scope_ref,
+        anchor_prompt,
+    )
+}
+
+fn retrieve_indexed_memories_with_project_ref(
+    state: &AppState,
+    user_key: Option<&str>,
+    user_id: i64,
+    chat_id: i64,
+    conversation_id: Option<&str>,
+    project_scope_ref: Option<&str>,
+    anchor_prompt: &str,
+) -> anyhow::Result<IndexedRecall> {
     let scope_user_key = super::effective_user_key(user_key, user_id, chat_id);
     let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
     crate::memory::facts::expire_due_memory_facts(&db, crate::now_ts_u64() as i64)?;
-    let mut candidates = fetch_recent_candidates(
-        &db,
-        user_id,
-        chat_id,
-        &scope_user_key,
-        state
-            .policy
-            .memory
-            .vector_candidate_limit
-            .max(state.policy.memory.fts_candidate_limit)
-            .max(12)
-            * 4,
-    )?;
-    if candidates.is_empty() {
+    let principal_id = crate::repo::auth::principal_id_for_user_key(&db, &scope_user_key)?;
+    let scoped_reader = super::scope::table_has_scope_contract(&db, "memory_retrieval_index")?;
+    let mut access = principal_id
+        .as_deref()
+        .filter(|_| scoped_reader)
+        .map(|principal_id| {
+            super::scope::resolve_memory_access(
+                &db,
+                principal_id,
+                conversation_id,
+                Some(&state.skill_rt.workspace_root),
+            )
+        })
+        .transpose()?;
+    if let (Some(access), Some(project_scope_ref)) = (access.as_mut(), project_scope_ref) {
+        access.project_scope_ref = Some(project_scope_ref.to_string());
+    }
+    let mut semantic_scores: HashMap<(String, i64), f32> = HashMap::new();
+    let mut vector_scope_candidates = Vec::new();
+    if let Some(access) = access.as_ref() {
+        let profile = super::vector_store::local_profile();
+        let query = super::embedding::embed_text_locally(anchor_prompt);
+        let index = super::vector_store::ExactSqliteVectorIndex;
+        let _ = index.tombstone_orphans(&db);
+        if let Ok(neighbors) = index.nearest(
+            &db,
+            access,
+            &profile,
+            &query,
+            state.policy.memory.vector_candidate_limit.max(1),
+        ) {
+            for neighbor in neighbors {
+                if let Some(row) = fetch_scoped_candidate_by_id(&db, access, neighbor.retrieval_id)?
+                {
+                    semantic_scores.insert((row.source_kind.clone(), row.id), neighbor.score);
+                    vector_scope_candidates.push(row);
+                }
+            }
+        }
+    }
+    let candidate_limit = state
+        .policy
+        .memory
+        .vector_candidate_limit
+        .max(state.policy.memory.fts_candidate_limit)
+        .max(12)
+        * 4;
+    let mut candidates = if let Some(access) = access.as_ref() {
+        fetch_scoped_recent_candidates(&db, access, candidate_limit)?
+    } else {
+        fetch_recent_candidates(&db, user_id, chat_id, &scope_user_key, candidate_limit)?
+    };
+    candidates.extend(vector_scope_candidates);
+    if access.is_none() && candidates.is_empty() {
         if let Some(legacy_chat_id) = super::legacy_principal_chat_id(&scope_user_key, chat_id) {
             candidates = fetch_recent_candidates(
                 &db,
@@ -137,14 +230,19 @@ pub(crate) fn retrieve_indexed_memories(
         }
     }
 
-    let fts_rows = fetch_fts_candidates(
-        &db,
-        user_id,
-        chat_id,
-        &scope_user_key,
-        anchor_prompt,
-        state.policy.memory.fts_candidate_limit.max(6) * 2,
-    )?;
+    let fts_limit = state.policy.memory.fts_candidate_limit.max(6) * 2;
+    let fts_rows = if let Some(access) = access.as_ref() {
+        fetch_scoped_fts_candidates(&db, access, anchor_prompt, fts_limit)?
+    } else {
+        fetch_fts_candidates(
+            &db,
+            user_id,
+            chat_id,
+            &scope_user_key,
+            anchor_prompt,
+            fts_limit,
+        )?
+    };
     let kb = state
         .core
         .skill_storage
@@ -196,14 +294,19 @@ pub(crate) fn retrieve_indexed_memories(
                 &row.search_text,
                 &keywords,
             );
-            let vector = if row.embedding_model == embedding_spec.model_id
-                && row.embedding_dims == embedding_spec.dims
-                && row.embedding_version == embedding_spec.version
-            {
-                cosine_similarity(&query_vec, &vector_from_json(&row.vector_json))
-            } else {
-                0.0
-            };
+            let vector = semantic_scores
+                .get(&(row.source_kind.clone(), row.id))
+                .copied()
+                .unwrap_or_else(|| {
+                    if row.embedding_model == embedding_spec.model_id
+                        && row.embedding_dims == embedding_spec.dims
+                        && row.embedding_version == embedding_spec.version
+                    {
+                        cosine_similarity(&query_vec, &vector_from_json(&row.vector_json))
+                    } else {
+                        0.0
+                    }
+                });
             let recency = if newest_ts <= oldest_ts {
                 0.06
             } else {
@@ -308,6 +411,200 @@ pub(crate) fn retrieve_indexed_memories(
         assistant_results,
         unfinished_goals,
     })
+}
+
+fn scoped_filter_params(
+    access: &super::scope::ResolvedMemoryAccess,
+) -> (&str, &str, Option<&str>, Option<&str>) {
+    (
+        access.principal_id.as_str(),
+        access.principal_scope_ref.as_str(),
+        access.conversation_scope_ref.as_deref(),
+        access.project_scope_ref.as_deref(),
+    )
+}
+
+fn fetch_scoped_recent_candidates(
+    db: &Connection,
+    access: &super::scope::ResolvedMemoryAccess,
+    limit: usize,
+) -> anyhow::Result<Vec<RetrievalRow>> {
+    let mut stmt = db.prepare(
+        "SELECT i.id, i.source_kind, i.memory_kind, i.role, i.search_text, i.vector_json,
+                i.embedding_model, i.embedding_dims, i.embedding_version, i.metadata_json,
+                i.salience, i.success_state, COALESCE(i.updated_at_ts, i.created_at_ts, 0)
+         FROM memory_retrieval_index i
+         WHERE i.principal_id = ?1
+           AND ((i.scope_kind = 'principal' AND i.scope_ref = ?2)
+             OR (i.scope_kind = 'conversation' AND ?3 IS NOT NULL AND i.scope_ref = ?3)
+             OR (i.scope_kind = 'project' AND ?4 IS NOT NULL AND i.scope_ref = ?4))
+           AND NOT EXISTS (
+             SELECT 1 FROM memories m
+             WHERE i.source_kind = ?5 AND i.source_memory_id = m.id
+               AND m.memory_type = ?6
+           )
+         ORDER BY COALESCE(i.updated_at_ts, i.created_at_ts, 0) DESC, i.id DESC
+         LIMIT ?7",
+    )?;
+    let (principal_id, principal_ref, conversation_ref, project_ref) = scoped_filter_params(access);
+    let rows = stmt.query_map(
+        params![
+            principal_id,
+            principal_ref,
+            conversation_ref,
+            project_ref,
+            RETRIEVAL_SOURCE_MEMORY,
+            MEMORY_TYPE_SAFETY_SIGNAL,
+            limit as i64
+        ],
+        map_retrieval_row,
+    )?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+fn fetch_scoped_candidate_by_id(
+    db: &Connection,
+    access: &super::scope::ResolvedMemoryAccess,
+    retrieval_id: i64,
+) -> anyhow::Result<Option<RetrievalRow>> {
+    let (principal_id, principal_ref, conversation_ref, project_ref) = scoped_filter_params(access);
+    db.query_row(
+        "SELECT i.id, i.source_kind, i.memory_kind, i.role, i.search_text, i.vector_json,
+                i.embedding_model, i.embedding_dims, i.embedding_version, i.metadata_json,
+                i.salience, i.success_state, COALESCE(i.updated_at_ts, i.created_at_ts, 0)
+         FROM memory_retrieval_index i
+         WHERE i.id = ?1 AND i.principal_id = ?2
+           AND ((i.scope_kind = 'principal' AND i.scope_ref = ?3)
+             OR (i.scope_kind = 'conversation' AND ?4 IS NOT NULL AND i.scope_ref = ?4)
+             OR (i.scope_kind = 'project' AND ?5 IS NOT NULL AND i.scope_ref = ?5))
+           AND NOT EXISTS (
+             SELECT 1 FROM memories m
+             WHERE i.source_kind = ?6 AND i.source_memory_id = m.id
+               AND m.memory_type = ?7
+           )",
+        params![
+            retrieval_id,
+            principal_id,
+            principal_ref,
+            conversation_ref,
+            project_ref,
+            RETRIEVAL_SOURCE_MEMORY,
+            MEMORY_TYPE_SAFETY_SIGNAL,
+        ],
+        map_retrieval_row,
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
+pub(crate) fn materialize_scoped_vector_neighbors(
+    db: &Connection,
+    state: &AppState,
+    access: &super::scope::ResolvedMemoryAccess,
+    neighbors: &[super::vector_store::VectorNeighbor],
+) -> anyhow::Result<IndexedRecall> {
+    let mut recall = IndexedRecall::default();
+    let mut seen = HashSet::new();
+    for neighbor in neighbors {
+        let Some(row) = fetch_scoped_candidate_by_id(db, access, neighbor.retrieval_id)? else {
+            continue;
+        };
+        let source_label = source_label_for_row(&row);
+        let item = RetrievedMemoryItem {
+            role: row.role,
+            text: row.search_text,
+            score: neighbor.score * 0.75 + row.salience.clamp(0.0, 1.0) * 0.25,
+            source_label,
+        };
+        if !seen.insert(format!(
+            "{}:{}",
+            row.memory_kind,
+            normalize_dedup_key(&item.text)
+        )) {
+            continue;
+        }
+        match row.memory_kind.as_str() {
+            RETRIEVAL_KIND_TRIGGER_ANCHOR
+                if recall.similar_triggers.len()
+                    < state.policy.memory.trigger_anchor_limit.max(1) =>
+            {
+                recall.similar_triggers.push(item)
+            }
+            kind if retrieval_kind_is_fact_bucket(kind)
+                && recall.relevant_facts.len() < state.policy.memory.fact_card_limit.max(1) =>
+            {
+                recall.relevant_facts.push(item)
+            }
+            kind if retrieval_kind_is_knowledge_doc_bucket(kind)
+                && recall.knowledge_docs.len() < state.policy.memory.fact_card_limit.max(1) =>
+            {
+                recall.knowledge_docs.push(item)
+            }
+            RETRIEVAL_KIND_EPISODIC_EVENT
+                if item.role.as_deref() != Some(MEMORY_ROLE_ASSISTANT)
+                    && recall.recent_related_events.len()
+                        < state.policy.memory.prompt_recall_limit.max(2) =>
+            {
+                recall.recent_related_events.push(item)
+            }
+            RETRIEVAL_KIND_ASSISTANT_RESULT if recall.assistant_results.len() < 2 => {
+                recall.assistant_results.push(item)
+            }
+            RETRIEVAL_KIND_UNFINISHED_GOAL if recall.unfinished_goals.len() < 2 => {
+                recall.unfinished_goals.push(item)
+            }
+            _ => {}
+        }
+    }
+    Ok(recall)
+}
+
+fn fetch_scoped_fts_candidates(
+    db: &Connection,
+    access: &super::scope::ResolvedMemoryAccess,
+    prompt: &str,
+    limit: usize,
+) -> anyhow::Result<Vec<RetrievalRow>> {
+    if !fts_table_exists(db)? {
+        return Ok(Vec::new());
+    }
+    let query = build_fts_query(prompt);
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut stmt = db.prepare(
+        "SELECT i.id, i.source_kind, i.memory_kind, i.role, i.search_text, i.vector_json,
+                i.embedding_model, i.embedding_dims, i.embedding_version, i.metadata_json,
+                i.salience, i.success_state, COALESCE(i.updated_at_ts, i.created_at_ts, 0)
+         FROM memory_retrieval_index_fts f
+         JOIN memory_retrieval_index i ON i.id = f.rowid
+         WHERE i.principal_id = ?1
+           AND ((i.scope_kind = 'principal' AND i.scope_ref = ?2)
+             OR (i.scope_kind = 'conversation' AND ?3 IS NOT NULL AND i.scope_ref = ?3)
+             OR (i.scope_kind = 'project' AND ?4 IS NOT NULL AND i.scope_ref = ?4))
+           AND f.memory_retrieval_index_fts MATCH ?5
+           AND NOT EXISTS (
+             SELECT 1 FROM memories m
+             WHERE i.source_kind = ?6 AND i.source_memory_id = m.id
+               AND m.memory_type = ?7
+           )
+         LIMIT ?8",
+    )?;
+    let (principal_id, principal_ref, conversation_ref, project_ref) = scoped_filter_params(access);
+    let rows = stmt.query_map(
+        params![
+            principal_id,
+            principal_ref,
+            conversation_ref,
+            project_ref,
+            query,
+            RETRIEVAL_SOURCE_MEMORY,
+            MEMORY_TYPE_SAFETY_SIGNAL,
+            limit as i64
+        ],
+        map_retrieval_row,
+    )?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
 pub(crate) fn legacy_pairs_from_structured(ctx: &StructuredMemoryContext) -> Vec<(String, String)> {
@@ -819,7 +1116,6 @@ fn build_fts_query(prompt: &str) -> String {
     let keywords = super::embedding::tokenize_text(prompt);
     keywords
         .into_iter()
-        .take(8)
         .map(|kw| {
             let safe = kw.replace('"', "");
             format!("\"{safe}\"")
