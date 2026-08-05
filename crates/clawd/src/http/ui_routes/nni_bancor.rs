@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use sha2::{Digest, Sha256};
 
 const NNI_BANCOR_CANDLE_INTERVALS: [u64; 8] = [
@@ -21,12 +22,19 @@ struct NniBancorCandlesQuery {
     end_time_unix: Option<i64>,
 }
 
-fn mask_bancor_device_pubkey(value: &str) -> String {
-    let normalized = value.trim().to_ascii_lowercase();
+fn compact_bancor_device_pubkey(value: &str) -> Option<String> {
+    let normalized = value.trim();
     if normalized.len() == 128 && normalized.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return format!("{}••••••••{}", &normalized[..12], &normalized[120..]);
+        let raw = hex::decode(normalized).ok()?;
+        let mut compressed = Vec::with_capacity(33);
+        compressed.push(if raw[63] & 1 == 0 { 0x02 } else { 0x03 });
+        compressed.extend_from_slice(&raw[..32]);
+        return Some(URL_SAFE_NO_PAD.encode(compressed));
     }
-    "••••••••".to_string()
+
+    let compressed = URL_SAFE_NO_PAD.decode(normalized).ok()?;
+    (compressed.len() == 33 && matches!(compressed[0], 0x02 | 0x03))
+        .then(|| URL_SAFE_NO_PAD.encode(compressed))
 }
 
 fn sanitize_bancor_market_trade_pubkeys(data: &mut Value) {
@@ -37,28 +45,40 @@ fn sanitize_bancor_market_trade_pubkeys(data: &mut Value) {
         let Some(record) = trade.as_object_mut() else {
             continue;
         };
-        let raw_pubkey = record
+        let public_key = record
             .remove("device_pubkey")
             .or_else(|| record.remove("device_public_key"))
             .or_else(|| record.remove("public_key"))
             .and_then(|value| value.as_str().map(str::to_string));
-        let provided_mask = record
-            .get("device_pubkey_masked")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let masked = match raw_pubkey {
-            Some(pubkey) => mask_bancor_device_pubkey(&pubkey),
-            None if provided_mask.len() == 128
-                && provided_mask.bytes().all(|byte| byte.is_ascii_hexdigit()) =>
-            {
-                mask_bancor_device_pubkey(provided_mask)
-            }
-            None if !provided_mask.trim().is_empty() => provided_mask.to_string(),
-            None => "••••••••".to_string(),
-        };
+        let provided_compact = record.remove("device_pubkey_compact");
+        let provided_masked = record.remove("device_pubkey_masked");
+        let compact = public_key
+            .as_deref()
+            .and_then(compact_bancor_device_pubkey)
+            .or_else(|| {
+                provided_compact
+                    .as_ref()
+                    .and_then(Value::as_str)
+                    .and_then(compact_bancor_device_pubkey)
+            })
+            .or_else(|| {
+                provided_masked
+                    .as_ref()
+                    .and_then(Value::as_str)
+                    .and_then(compact_bancor_device_pubkey)
+            })
+            .or_else(|| {
+                provided_masked
+                    .as_ref()
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string)
+            })
+            .unwrap_or_else(|| "••••••••".to_string());
         record.insert(
-            "device_pubkey_masked".to_string(),
-            Value::String(masked),
+            "device_pubkey_compact".to_string(),
+            Value::String(compact),
         );
     }
 }

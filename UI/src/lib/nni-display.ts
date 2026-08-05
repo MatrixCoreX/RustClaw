@@ -15,6 +15,24 @@ export interface NniRuntimeTile {
   idleOpacity: number;
 }
 
+const NNI_RAW_P256_PUBLIC_KEY_HEX_LENGTH = 128;
+
+export function compressedNniPublicKeyBase64Url(value?: string | null): string | null {
+  const normalized = value?.trim().toLowerCase() ?? "";
+  if (
+    normalized.length !== NNI_RAW_P256_PUBLIC_KEY_HEX_LENGTH ||
+    !/^[0-9a-f]+$/.test(normalized)
+  ) {
+    return null;
+  }
+
+  const yIsOdd = Number.parseInt(normalized.slice(-2), 16) % 2 === 1;
+  const compressedHex = `${yIsOdd ? "03" : "02"}${normalized.slice(0, 64)}`;
+  const bytes = compressedHex.match(/.{2}/g)?.map((pair) => Number.parseInt(pair, 16)) ?? [];
+  const binary = String.fromCharCode(...bytes);
+  return globalThis.btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+}
+
 export type NniSimulationControlMode = "enable" | "disable" | null;
 
 function copy(lang: UiLanguage, zh: string, en: string): string {
@@ -38,7 +56,10 @@ export function shortNniValue(value?: string | null): string {
 export function nniPayloadHexField(payload?: NniDevicePayload | null): NniPayloadHexField | null {
   if (!payload) return null;
   if (payload.signature) return { label: "signature", value: payload.signature };
-  if (payload.pubkey) return { label: "pubkey", value: payload.pubkey };
+  if (payload.pubkey) {
+    const compressed = compressedNniPublicKeyBase64Url(payload.pubkey);
+    return { label: "pubkey", value: compressed ?? payload.pubkey, size: compressed ? 33 : undefined };
+  }
   if (payload.device_cert_hex) {
     return { label: "device_cert_hex", value: payload.device_cert_hex, size: payload.device_cert_hex_size };
   }

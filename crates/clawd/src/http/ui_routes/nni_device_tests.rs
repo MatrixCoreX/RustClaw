@@ -133,33 +133,44 @@ async fn nni_bancor_routes_require_ui_authentication() {
 }
 
 #[test]
-fn nni_bancor_market_trade_pubkeys_are_masked_before_ui_delivery() {
-    let pubkey = "ab".repeat(64);
+fn nni_bancor_market_trade_pubkeys_use_lossless_compact_display_format() {
+    let pubkey = concat!(
+        "2b9c9d84fa15f4e178ce58d0a40a9f5e150e9c502e689a24d0c0f221337870c",
+        "726f0e463d730a75401c425bfde0db0c442e314027d83885a84c535eaa35460a0"
+    );
     assert_eq!(
-        mask_bancor_device_pubkey(&pubkey),
-        format!("{}••••••••{}", &pubkey[..12], &pubkey[120..]),
+        compact_bancor_device_pubkey(pubkey).as_deref(),
+        Some("AiucnYT6FfTheM5Y0KQKn14VDpxQLmiaJNDA8iEzeHDH"),
     );
 
     let mut payload = json!({
         "trades": [
             {"trade_id": "raw", "device_pubkey": pubkey},
-            {"trade_id": "mislabelled", "device_pubkey_masked": "cd".repeat(64)},
+            {"trade_id": "mislabelled", "device_pubkey_masked": pubkey},
             {"trade_id": "masked", "device_pubkey_masked": "a2c887498554••••••••331016eb"}
         ]
     });
     sanitize_bancor_market_trade_pubkeys(&mut payload);
     let serialized = payload.to_string();
-    assert!(!serialized.contains(&"ab".repeat(64)));
-    assert!(!serialized.contains(&"cd".repeat(64)));
+    assert!(!serialized.contains(pubkey));
     assert_eq!(
-        payload["trades"][2]["device_pubkey_masked"],
+        payload["trades"][0]["device_pubkey_compact"],
+        Value::String("AiucnYT6FfTheM5Y0KQKn14VDpxQLmiaJNDA8iEzeHDH".to_string()),
+    );
+    assert_eq!(
+        payload["trades"][1]["device_pubkey_compact"],
+        Value::String("AiucnYT6FfTheM5Y0KQKn14VDpxQLmiaJNDA8iEzeHDH".to_string()),
+    );
+    assert_eq!(
+        payload["trades"][2]["device_pubkey_compact"],
         Value::String("a2c887498554••••••••331016eb".to_string()),
     );
     assert!(payload["trades"]
         .as_array()
         .expect("market trades")
         .iter()
-        .all(|trade| trade.get("device_pubkey").is_none()));
+        .all(|trade| trade.get("device_pubkey").is_none()
+            && trade.get("device_pubkey_masked").is_none()));
 }
 
 struct NniRuntimeStateTestWorkspace {

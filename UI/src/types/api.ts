@@ -1300,7 +1300,7 @@ export interface NniBancorTradeRecord {
 }
 
 export interface NniBancorMarketTradeRecord extends NniBancorTradeRecord {
-  device_pubkey_masked: string;
+  device_pubkey_compact: string;
 }
 
 export interface NniBancorMarketTradesResponse {
