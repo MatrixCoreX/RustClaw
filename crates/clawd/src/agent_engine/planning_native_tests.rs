@@ -1594,6 +1594,110 @@ fn native_unknown_tool_for_loadable_capability_retries_through_exact_group_loade
     assert_eq!(repaired.tools.len(), 1);
     assert_eq!(repaired.tools[0].name, "load_capability_groups");
     assert_eq!(repaired.tool_choice, ModelToolChoice::Required);
+
+    let mut empty_loader_repair = turn(
+        vec![ModelToolCall {
+            id: "empty-loader-repair".to_string(),
+            name: "load_capability_groups".to_string(),
+            arguments: json!({}),
+        }],
+        "",
+    );
+    assert_eq!(
+        normalize_exact_capability_group_repair(&mut empty_loader_repair, &signal),
+        Some(vec!["process_basic".to_string()])
+    );
+    assert_eq!(
+        empty_loader_repair.tool_calls[0].arguments,
+        json!({"op": "load_groups", "groups": ["process_basic"]})
+    );
+}
+
+#[test]
+fn native_exact_group_loader_repair_completes_runtime_known_empty_arguments() {
+    let signal = native_contract_repair_signal_with_context(
+        "native_plan_unknown_tool",
+        None,
+        None,
+        &[],
+        &["news_sources".to_string()],
+    );
+
+    for arguments in [
+        json!({}),
+        json!({"groups": []}),
+        json!({"op": "load_groups"}),
+    ] {
+        let mut repaired = turn(
+            vec![ModelToolCall {
+                id: "loader-repair".to_string(),
+                name: "load_capability_groups".to_string(),
+                arguments,
+            }],
+            "",
+        );
+
+        assert_eq!(
+            normalize_exact_capability_group_repair(&mut repaired, &signal),
+            Some(vec!["news_sources".to_string()])
+        );
+        assert_eq!(
+            repaired.tool_calls[0].arguments,
+            json!({"op": "load_groups", "groups": ["news_sources"]})
+        );
+        assert!(matches!(
+            action_from_native_capability_group_load(&repaired.tool_calls[0]),
+            Ok(AgentAction::CallTool { tool, args })
+                if tool == "load_capability_groups"
+                    && args == json!({"op": "load_groups", "groups": ["news_sources"]})
+        ));
+    }
+}
+
+#[test]
+fn native_exact_group_loader_repair_does_not_guess_or_override_model_intent() {
+    let exact_signal = native_contract_repair_signal_with_context(
+        "native_plan_unknown_tool",
+        None,
+        None,
+        &[],
+        &["news_sources".to_string()],
+    );
+    let no_candidate_signal = native_contract_repair_signal_with_context(
+        "native_capability_group_load_groups_invalid",
+        None,
+        None,
+        &[],
+        &[],
+    );
+    for (arguments, signal) in [
+        (json!({}), no_candidate_signal.as_str()),
+        (
+            json!({"op": "search", "query": "financial news"}),
+            exact_signal.as_str(),
+        ),
+        (
+            json!({"groups": ["model_selected_group"]}),
+            exact_signal.as_str(),
+        ),
+        (json!({"unexpected": true}), exact_signal.as_str()),
+    ] {
+        let original = arguments.clone();
+        let mut repaired = turn(
+            vec![ModelToolCall {
+                id: "loader-no-repair".to_string(),
+                name: "load_capability_groups".to_string(),
+                arguments,
+            }],
+            "",
+        );
+
+        assert_eq!(
+            normalize_exact_capability_group_repair(&mut repaired, signal),
+            None
+        );
+        assert_eq!(repaired.tool_calls[0].arguments, original);
+    }
 }
 
 #[test]
