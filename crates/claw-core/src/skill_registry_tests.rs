@@ -551,6 +551,7 @@ fn capability_parses_closed_set_and_secrets_namespace() {
         "exec.sudo",
         "llm.credential_fallback.image_generation_minimax_api_key",
         "secrets.image_generation_minimax_api_key",
+        "secrets.optional.web_search_brave_api_key",
         "secrets.text_openai_api_key",
     ] {
         let cap = Capability::parse(token).unwrap_or_else(|e| {
@@ -568,6 +569,10 @@ fn capability_parse_is_case_insensitive_but_normalizes_to_lowercase() {
         Capability::parse("Secrets.Image_Generation_MiniMax_Api_Key").unwrap(),
         Capability::Secrets("image_generation_minimax_api_key".to_string())
     );
+    assert_eq!(
+        Capability::parse("Secrets.Optional.Web_Search_Brave_Api_Key").unwrap(),
+        Capability::OptionalSecrets("web_search_brave_api_key".to_string())
+    );
 }
 
 #[test]
@@ -580,6 +585,7 @@ fn capability_rejects_unknown_tokens_and_bad_secret_names() {
     assert!(Capability::parse("secrets.").is_err());
     assert!(Capability::parse("secrets.bad-name").is_err());
     assert!(Capability::parse("secrets.has space").is_err());
+    assert!(Capability::parse("secrets.optional.").is_err());
     let too_long = format!("secrets.{}", "a".repeat(65));
     assert!(Capability::parse(&too_long).is_err());
 }
@@ -1552,4 +1558,49 @@ argument_aliases = { source = ["path"], destination = ["path"] }
     )
     .expect_err("duplicate aliases must fail");
     assert!(error.contains("argument alias `path`"));
+}
+
+#[test]
+fn registry_normalizes_and_validates_required_companion_capabilities() {
+    let registry = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "web"
+planner_capabilities = [
+  { name = "Web.Search-Results", required_companions = ["RSS::Latest-News", "rss.latest_news"] },
+]
+
+[[skills]]
+name = "rss"
+planner_capabilities = [
+  { name = "rss.latest_news" },
+]
+"#,
+    )
+    .expect("valid companion capability registry");
+    assert_eq!(
+        registry.planner_capabilities("web")[0].required_companions,
+        vec!["rss.latest_news"]
+    );
+}
+
+#[test]
+fn registry_rejects_unknown_or_self_required_companions() {
+    for (companion, expected) in [
+        ("rss.missing", "requires unknown companion"),
+        ("web.search_results", "cannot require itself"),
+    ] {
+        let source = format!(
+            r#"
+[[skills]]
+name = "web"
+planner_capabilities = [
+  {{ name = "web.search_results", required_companions = ["{companion}"] }},
+]
+"#
+        );
+        let error = SkillsRegistry::load_from_str(&source)
+            .expect_err("invalid companion capability must fail registry load");
+        assert!(error.contains(expected), "{error}");
+    }
 }

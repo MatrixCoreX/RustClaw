@@ -123,6 +123,24 @@ fn media_download_routes_raw_share_text_to_autonomous_download() {
 }
 
 #[test]
+fn registry_resolution_observes_required_companion_capabilities() {
+    let state = state_with_workspace_registry();
+    let (_, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "web.search_results",
+        json!({"query": "current finance news"}),
+    );
+    assert_eq!(
+        record.required_companions,
+        vec!["rss.list_categories", "rss.latest_news"]
+    );
+    assert_eq!(
+        record.dispatch_observation(1, 1, 1)["required_companions"],
+        json!(["rss.list_categories", "rss.latest_news"])
+    );
+}
+
+#[test]
 fn memory_forget_is_action_scoped_non_auto_invocable_and_confirmation_protected() {
     let state = state_with_workspace_registry();
     let registry = state.get_skills_registry().expect("skills registry");
@@ -216,6 +234,7 @@ fn resolver_candidate_rank_prefers_dedicated_low_risk_tool_before_run_cmd() {
             planner_kind: PlannerCapabilityKind::Tool,
             preferred: true,
             risk_level: SkillRiskLevel::High,
+            required_companions: Vec::new(),
         },
         ResolverCandidate {
             skill: "fs_basic".to_string(),
@@ -224,6 +243,7 @@ fn resolver_candidate_rank_prefers_dedicated_low_risk_tool_before_run_cmd() {
             planner_kind: PlannerCapabilityKind::Tool,
             preferred: true,
             risk_level: SkillRiskLevel::Low,
+            required_companions: Vec::new(),
         },
     ];
     candidates.sort_by_key(resolver_candidate_rank);

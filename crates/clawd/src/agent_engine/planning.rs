@@ -34,6 +34,17 @@ use native_capability_tools::{
     native_capability_leaf_tool_name, native_capability_tool_definition,
     native_capability_tool_map, native_group_leaf_tool_name, native_group_tool_definitions,
 };
+#[path = "planning/native_capability_recovery.rs"]
+mod native_capability_recovery;
+use native_capability_recovery::{
+    exact_schema_branch_for_call, normalize_empty_capability_loader_search,
+    normalize_exact_capability_group_repair,
+};
+#[path = "planning/required_companion_capabilities.rs"]
+mod required_companion_capabilities;
+use required_companion_capabilities::{
+    missing_required_companion_capabilities, required_companion_repair_context,
+};
 
 const NATIVE_ACTION_PROTOCOL_PROMPT_LOGICAL_PATH: &str = "prompts/native_action_protocol.md";
 const NATIVE_TURN_CONTEXT_PROMPT_LOGICAL_PATH: &str = "prompts/native_turn_context.md";
@@ -465,6 +476,16 @@ pub(super) async fn plan_round_actions(
     }?;
     if let Some(native_turn) = native_turn_result {
         let mut native_turn = native_turn;
+        if let Some(query_source) =
+            normalize_empty_capability_loader_search(&mut native_turn, user_text)
+        {
+            loop_state.task_observations.push(json!({
+                "owner_layer": "planner",
+                "state": "recovered",
+                "reason_code": "native_capability_catalog_search_arguments_completed",
+                "source": query_source,
+            }));
+        }
         let mut repair_reason_codes = Vec::new();
         let mut repair_progress = NativeRepairProgress::from_loop_state(loop_state);
         loop {
@@ -566,6 +587,15 @@ pub(super) async fn plan_round_actions(
                             "reason_code": "native_capability_group_load_arguments_completed",
                             "source": "runtime_exact_repair_constraint",
                             "groups": groups,
+                        }));
+                    } else if let Some(query_source) =
+                        normalize_empty_capability_loader_search(&mut repaired_turn, user_text)
+                    {
+                        loop_state.task_observations.push(json!({
+                            "owner_layer": "planner",
+                            "state": "recovered",
+                            "reason_code": "native_capability_catalog_search_arguments_completed",
+                            "source": query_source,
                         }));
                     }
                     native_turn = repaired_turn;
@@ -991,7 +1021,7 @@ fn native_planner_request(
 
 #[cfg(test)]
 fn native_contract_repair_signal(error_code: &str) -> String {
-    native_contract_repair_signal_with_context(error_code, None, None, &[], &[])
+    native_contract_repair_signal_with_context(error_code, None, None, &[], &[], &[])
 }
 
 fn native_contract_repair_signal_for_turn(
@@ -1033,6 +1063,14 @@ fn native_contract_repair_signal_for_turn(
             .find(|tool| tool.name == call.name)
             .map(|tool| exact_schema_branch_for_call(&tool.input_schema, call))
     });
+    let companion_context = required_companion_repair_context(
+        error_code,
+        request,
+        all_native_capability_groups,
+        loadable_capability_group_names,
+        loop_state,
+    );
+    let required_companions = companion_context.capabilities;
     let available_tool_names = if error_code == "native_plan_unknown_tool" {
         request
             .tools
@@ -1040,7 +1078,7 @@ fn native_contract_repair_signal_for_turn(
             .map(|tool| tool.name.clone())
             .collect::<Vec<_>>()
     } else {
-        Vec::new()
+        companion_context.available_tool_names
     };
     let suggested_capability_groups = if error_code == "native_plan_unknown_tool" {
         failed_call
@@ -1058,6 +1096,8 @@ fn native_contract_repair_signal_for_turn(
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default()
+    } else if !required_companions.is_empty() {
+        companion_context.suggested_group_names
     } else {
         Vec::new()
     };
@@ -1067,31 +1107,8 @@ fn native_contract_repair_signal_for_turn(
         expected_schema,
         &available_tool_names,
         &suggested_capability_groups,
+        &required_companions,
     )
-}
-
-fn exact_schema_branch_for_call(schema: &Value, call: &ModelToolCall) -> Value {
-    let capability = call.arguments.get("capability").and_then(Value::as_str);
-    schema
-        .get("oneOf")
-        .and_then(Value::as_array)
-        .and_then(|branches| {
-            branches.iter().find(|branch| {
-                let Some(capability) = capability else {
-                    return false;
-                };
-                branch
-                    .pointer("/properties/capability/enum")
-                    .and_then(Value::as_array)
-                    .is_some_and(|values| {
-                        values
-                            .iter()
-                            .any(|value| value.as_str() == Some(capability))
-                    })
-            })
-        })
-        .cloned()
-        .unwrap_or_else(|| schema.clone())
 }
 
 fn native_contract_repair_signal_with_context(
@@ -1100,11 +1117,13 @@ fn native_contract_repair_signal_with_context(
     expected_schema: Option<Value>,
     available_tool_names: &[String],
     suggested_capability_groups: &[String],
+    required_companions: &[String],
 ) -> String {
     let respond_contract_error = error_code.starts_with("native_respond_");
     let missing_native_function_call = error_code == "native_plan_respond_tool_required";
     let loader_contract_error = error_code.starts_with("native_capability_group_load_");
     let unknown_tool_error = error_code == "native_plan_unknown_tool";
+    let companion_error = error_code == "native_plan_required_companion_capability_missing";
     let unknown_load_recovery = unknown_tool_error && !suggested_capability_groups.is_empty();
     let (default_tool_name, mut required_argument_fields, next_action) = if respond_contract_error {
         (
@@ -1129,6 +1148,20 @@ fn native_contract_repair_signal_with_context(
             Vec::new(),
             "retry_with_required_native_function",
         )
+    } else if companion_error {
+        if suggested_capability_groups.is_empty() {
+            (
+                NATIVE_CALL_CAPABILITY_TOOL,
+                Vec::new(),
+                "call_required_companion_capabilities",
+            )
+        } else {
+            (
+                super::capability_discovery::RUNTIME_CAPABILITY_LOADER_TOOL,
+                vec!["groups".to_string()],
+                "load_required_companion_capability_groups",
+            )
+        }
     } else if loader_contract_error {
         (
             super::capability_discovery::RUNTIME_CAPABILITY_LOADER_TOOL,
@@ -1162,6 +1195,8 @@ fn native_contract_repair_signal_with_context(
         None
     } else if unknown_tool_error {
         unknown_load_recovery.then_some(default_tool_name)
+    } else if companion_error {
+        (!suggested_capability_groups.is_empty()).then_some(default_tool_name)
     } else {
         Some(failed_tool_name.unwrap_or(default_tool_name))
     };
@@ -1259,7 +1294,7 @@ fn native_contract_repair_signal_with_context(
             }),
         );
     }
-    if unknown_load_recovery {
+    if unknown_load_recovery || (companion_error && !suggested_capability_groups.is_empty()) {
         argument_constraints.insert(
             "groups".to_string(),
             json!({
@@ -1294,6 +1329,7 @@ fn native_contract_repair_signal_with_context(
             "exact_failed_tool": exact_failed_tool,
             "available_tool_names": available_tool_names,
             "suggested_capability_groups": suggested_capability_groups,
+            "required_companion_capabilities": required_companions,
             "required_argument_fields": required_argument_fields,
             "argument_constraints": Value::Object(argument_constraints),
             "capability_value_source": "RUNTIME_CAPABILITY_MAP",
@@ -1364,6 +1400,23 @@ fn native_contract_retry_request(
         request
             .tools
             .retain(|tool| available_tool_names.contains(tool.name.as_str()));
+    } else if error_code == "native_plan_required_companion_capability_missing"
+        && repair_tool_name.is_none()
+    {
+        let available_tool_names = repair_observation
+            .as_ref()
+            .and_then(|value| {
+                value
+                    .pointer("/protocol_observation/available_tool_names")
+                    .and_then(Value::as_array)
+            })
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect::<BTreeSet<_>>();
+        request
+            .tools
+            .retain(|tool| available_tool_names.contains(tool.name.as_str()));
     } else if let Some(repair_tool_name) = repair_tool_name {
         if exact_failed_tool {
             request.tools.retain(|tool| tool.name == repair_tool_name);
@@ -1380,68 +1433,6 @@ fn native_contract_retry_request(
         .messages
         .push(ModelMessage::text(ModelRole::User, repair_signal));
     request
-}
-
-fn normalize_exact_capability_group_repair(
-    turn: &mut ModelTurnResponse,
-    repair_signal: &str,
-) -> Option<Vec<String>> {
-    if turn.tool_calls.len() != 1 {
-        return None;
-    }
-    let repair_observation = serde_json::from_str::<Value>(repair_signal).ok()?;
-    if repair_observation
-        .pointer("/protocol_observation/error_code")
-        .and_then(Value::as_str)
-        != Some("native_plan_unknown_tool")
-        || repair_observation
-            .pointer("/protocol_observation/tool_name")
-            .and_then(Value::as_str)
-            != Some(super::capability_discovery::RUNTIME_CAPABILITY_LOADER_TOOL)
-    {
-        return None;
-    }
-    let suggested_groups = repair_observation
-        .pointer("/protocol_observation/suggested_capability_groups")?
-        .as_array()?
-        .iter()
-        .map(Value::as_str)
-        .collect::<Option<Vec<_>>>()?
-        .into_iter()
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    if suggested_groups.is_empty()
-        || suggested_groups
-            .iter()
-            .any(|group| !super::capability_discovery::is_capability_group_token(group))
-    {
-        return None;
-    }
-
-    let call = turn.tool_calls.first_mut()?;
-    if call.name != super::capability_discovery::RUNTIME_CAPABILITY_LOADER_TOOL {
-        return None;
-    }
-    let arguments = call.arguments.as_object_mut()?;
-    if arguments.keys().any(|key| key != "op" && key != "groups")
-        || arguments
-            .get("op")
-            .and_then(Value::as_str)
-            .is_some_and(|operation| operation != "load_groups")
-    {
-        return None;
-    }
-    match arguments.get("groups") {
-        None => {}
-        Some(Value::Array(groups)) if groups.is_empty() => {}
-        Some(_) => return None,
-    }
-
-    call.arguments = json!({
-        "op": "load_groups",
-        "groups": suggested_groups,
-    });
-    Some(suggested_groups)
 }
 
 #[cfg(test)]
@@ -1503,6 +1494,15 @@ fn actions_from_native_turn_with_schemas(
             && actions.len() != 1
         {
             return Err("native_respond_mixed_actions".to_string());
+        }
+        if actions
+            .iter()
+            .any(|action| matches!(action, AgentAction::Respond { .. }))
+            && loop_state
+                .map(missing_required_companion_capabilities)
+                .is_some_and(|missing| !missing.is_empty())
+        {
+            return Err("native_plan_required_companion_capability_missing".to_string());
         }
         return Ok(actions);
     }

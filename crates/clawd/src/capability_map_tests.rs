@@ -93,6 +93,7 @@ capabilities = ["fs.read"]
 fn planner_capability_hint_includes_structured_contract() {
     let hint = planner_capability_hint(&PlannerCapabilityMapping {
         name: "filesystem.list_entries".to_string(),
+        required_companions: vec!["filesystem.stat_paths".to_string()],
         action: Some("list_dir".to_string()),
         description: Some("List direct workspace entries in one bounded observation.".to_string()),
         semantic_tags: vec!["directory_listing".to_string()],
@@ -122,7 +123,7 @@ fn planner_capability_hint_includes_structured_contract() {
     });
     assert_eq!(
         hint,
-        "filesystem.list_entries(action=list_dir,purpose=List direct workspace entries in one bounded observation.,semantic_tags=directory_listing,effect=observe,required=path,optional=names_only,risk=low,preferred=true,once_per_task=false,dedup_scope=args,idempotent=true,execution_mode=async_required,async_adapter_kind=media_job_poll,isolation_profile=read_only,network_access=false,filesystem_write=false,external_publish=false,credential_access=false,final_answer_shape=summary_with_evidence)"
+        "filesystem.list_entries(required_companions=filesystem.stat_paths,action=list_dir,purpose=List direct workspace entries in one bounded observation.,semantic_tags=directory_listing,effect=observe,required=path,optional=names_only,risk=low,preferred=true,once_per_task=false,dedup_scope=args,idempotent=true,execution_mode=async_required,async_adapter_kind=media_job_poll,isolation_profile=read_only,network_access=false,filesystem_write=false,external_publish=false,credential_access=false,final_answer_shape=summary_with_evidence)"
     );
 }
 

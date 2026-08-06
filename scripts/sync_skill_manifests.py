@@ -86,8 +86,13 @@ def runtime_environment_allowlist(skill: CargoSkill, entry: dict[str, object]) -
         names.update(ENV_LITERAL.findall(raw))
     capabilities = {str(value) for value in entry.get("capabilities", [])}
     for capability in capabilities:
-        if capability.startswith("secrets."):
-            names.add(capability.removeprefix("secrets.").upper().replace(".", "_"))
+        if capability.startswith("secrets.optional."):
+            secret_name = capability.removeprefix("secrets.optional.")
+        elif capability.startswith("secrets."):
+            secret_name = capability.removeprefix("secrets.")
+        else:
+            continue
+        names.add(secret_name.upper())
     if "llm" in capabilities:
         names.update(
             {
@@ -184,7 +189,9 @@ def capability_request_projection(
 
     capability_tokens = {str(value) for value in entry.get("capabilities", [])}
     credential_refs = sorted(
-        token.removeprefix("secrets.")
+        token.removeprefix("secrets.optional.")
+        if token.startswith("secrets.optional.")
+        else token.removeprefix("secrets.")
         for token in capability_tokens
         if token.startswith("secrets.")
     )

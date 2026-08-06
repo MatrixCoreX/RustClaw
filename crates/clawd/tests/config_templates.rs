@@ -570,16 +570,16 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
     // 内部 dedup+sort 后的结果一致。
     const WEB_SEARCH_CAPABILITIES: &[&str] = &[
         "net",
-        "secrets.baidu_ai_search_api_key",
-        "secrets.brave_search_api_key",
-        "secrets.exa_api_key",
-        "secrets.kagi_api_token",
-        "secrets.mojeek_api_key",
-        "secrets.perplexity_api_key",
-        "secrets.searxng_api_key",
-        "secrets.serpapi_api_key",
-        "secrets.tavily_api_key",
-        "secrets.you_search_api_key",
+        "secrets.optional.baidu_ai_search_api_key",
+        "secrets.optional.brave_search_api_key",
+        "secrets.optional.exa_api_key",
+        "secrets.optional.kagi_api_token",
+        "secrets.optional.mojeek_api_key",
+        "secrets.optional.perplexity_api_key",
+        "secrets.optional.searxng_api_key",
+        "secrets.optional.serpapi_api_key",
+        "secrets.optional.tavily_api_key",
+        "secrets.optional.you_search_api_key",
     ];
     let main_expected_with_caps: &[(&str, &[&str])] = &[
         // 主配置中 image_edit / image_vision 可复用同厂商全局 key，不声明专用

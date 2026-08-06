@@ -38,6 +38,12 @@ fn classify_skill(state: &AppState, skill: &str) -> String {
 
 fn planner_capability_hint(mapping: &PlannerCapabilityMapping) -> String {
     let mut parts = Vec::new();
+    if !mapping.required_companions.is_empty() {
+        parts.push(format!(
+            "required_companions={}",
+            mapping.required_companions.join("|")
+        ));
+    }
     if let Some(action) = mapping.action.as_deref() {
         parts.push(format!("action={action}"));
     }

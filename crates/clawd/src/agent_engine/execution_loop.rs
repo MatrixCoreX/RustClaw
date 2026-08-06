@@ -814,7 +814,45 @@ fn action_observation_boundary(
                 "remaining_action_count": planned_action_count.saturating_sub(executed_action_count),
                 "recovery_action": "replan_from_latest_observation",
             })
+    })
+}
+
+fn record_deferred_plan_tail(
+    loop_state: &mut LoopState,
+    remaining_actions: &[AgentAction],
+    boundary_reason: &str,
+) {
+    let action_refs = remaining_actions
+        .iter()
+        .filter_map(|action| match action {
+            AgentAction::CallCapability { capability, .. } => {
+                Some(format!("capability:{capability}"))
+            }
+            AgentAction::CallTool { tool, .. } => Some(format!("tool:{tool}")),
+            AgentAction::CallSkill { skill, .. } => Some(format!("skill:{skill}")),
+            AgentAction::SynthesizeAnswer { .. } => Some("synthesize_answer".to_string()),
+            AgentAction::Respond { .. } => Some("respond".to_string()),
+            AgentAction::Think { .. } => None,
         })
+        .collect::<Vec<_>>();
+    if action_refs.is_empty() {
+        return;
+    }
+    loop_state.task_observations.push(serde_json::json!({
+        "observation_kind": "deferred_plan_tail",
+        "owner_layer": "execution_scheduler",
+        "state": "continue",
+        "complete": false,
+        "boundary_reason": boundary_reason,
+        "remaining_action_refs": action_refs,
+        "recovery_action": "replan_unfinished_actions_from_latest_observation",
+    }));
+    loop_state.history_compact.push(format!(
+        "round={} deferred_plan_tail boundary={} remaining_action_refs={}",
+        loop_state.round_no,
+        boundary_reason,
+        action_refs.join(",")
+    ));
 }
 
 pub(super) async fn execute_actions_once(
@@ -969,6 +1007,7 @@ pub(super) async fn execute_actions_once(
                     reason_code,
                     remaining_actions.len()
                 );
+                record_deferred_plan_tail(loop_state, remaining_actions, reason_code);
                 stop_signal = Some(reason_code.to_string());
                 break;
             }

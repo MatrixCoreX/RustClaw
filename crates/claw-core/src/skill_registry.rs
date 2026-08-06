@@ -14,7 +14,7 @@ mod overlay;
 mod shape;
 #[path = "skill_registry_validation.rs"]
 mod validation;
-use validation::validate_named_capability;
+use validation::{validate_named_capability, validate_required_companion_capabilities};
 
 /// 技能类型：builtin（clawd 内执行）/ runner（skill-runner 子进程）/ 预留 external
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
@@ -164,6 +164,10 @@ impl CapabilityIsolationProfile {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct PlannerCapabilityMapping {
     pub name: String,
+    /// Capabilities that must also be observed before a successful invocation
+    /// of this capability may be synthesized into a final answer.
+    #[serde(default)]
+    pub required_companions: Vec<String>,
     #[serde(default)]
     pub action: Option<String>,
     #[serde(default)]
@@ -462,6 +466,8 @@ impl PlannerCapabilityKind {
 /// - `exec.sudo`：以提权方式 fork（必须额外 opt-in，独立于 `exec`）。
 /// - `secrets.<name>`：需要某个具名密钥。`<name>` 仅允许 `[a-z0-9_]`，长度
 ///   1..=64，避免拼写漂移。
+/// - `secrets.optional.<name>`：允许注入某个具名密钥；未配置时不阻止技能
+///   启动，适用于同时具备无密钥后端和可选付费后端的技能。
 ///
 /// **关于 `secrets.<name>` 的命名规范（重要 — 与 §P4.4 配合）**：
 ///
@@ -488,6 +494,8 @@ pub enum Capability {
     ExecSudo,
     /// 内部存的是密钥的 canonical name（小写、`[a-z0-9_]`）。
     Secrets(String),
+    /// 可选密钥：broker 有值时注入，无值时继续执行无凭据能力。
+    OptionalSecrets(String),
 }
 
 impl Capability {
@@ -513,40 +521,18 @@ impl Capability {
                     validate_named_capability(name, token, "llm credential fallback")?;
                     return Ok(Self::LlmCredentialFallback(name.to_string()));
                 }
+                if let Some(name) = other.strip_prefix("secrets.optional.") {
+                    validate_named_capability(name, token, "optional secrets capability")?;
+                    validate_secret_capability_name(name, token)?;
+                    return Ok(Self::OptionalSecrets(name.to_string()));
+                }
                 if let Some(name) = other.strip_prefix("secrets.") {
                     validate_named_capability(name, token, "secrets capability")?;
-                    // §P4.1 ↔ image/text 配置独立性：拦截"裸 vendor 名"反模式。
-                    // image_generation / image_edit / image_vision / [llm] 是
-                    // 4 套互相独立的 LLM provider 配置（同一 vendor 在不同用途
-                    // 下可能填不同 key）。`secrets.openai_api_key` 这种命名
-                    // 隐含"vendor-唯一 key"，会让 §P4.4 的 token 注入跨域串货。
-                    // 必须按 `<用途>_<vendor>_api_key` 命名（如
-                    // `secrets.image_generation_minimax_api_key`）。
-                    const KNOWN_VENDORS: &[&str] = &[
-                        "openai",
-                        "google",
-                        "gemini",
-                        "anthropic",
-                        "claude",
-                        "grok",
-                        "xai",
-                        "deepseek",
-                        "qwen",
-                        "minimax",
-                        "mimo",
-                        "xiaomi",
-                    ];
-                    for vendor in KNOWN_VENDORS {
-                        if name == &format!("{vendor}_api_key") || name == *vendor {
-                            return Err(format!(
-                                "secrets capability `{token}` uses bare vendor naming, which conflates the four independent LLM provider configs (image_generation/image_edit/image_vision/text). Rename to `secrets.<usage>_<vendor>_api_key`, e.g. `secrets.image_generation_{vendor}_api_key` or `secrets.text_{vendor}_api_key`."
-                            ));
-                        }
-                    }
+                    validate_secret_capability_name(name, token)?;
                     Ok(Self::Secrets(name.to_string()))
                 } else {
                     Err(format!(
-                        "unknown capability `{token}` (allowed: llm, llm.credential_fallback.<name>, net, fs.read, fs.write, exec, exec.sudo, secrets.<name>)"
+                        "unknown capability `{token}` (allowed: llm, llm.credential_fallback.<name>, net, fs.read, fs.write, exec, exec.sudo, secrets.<name>, secrets.optional.<name>)"
                     ))
                 }
             }
@@ -566,8 +552,34 @@ impl Capability {
             Self::Exec => "exec".to_string(),
             Self::ExecSudo => "exec.sudo".to_string(),
             Self::Secrets(name) => format!("secrets.{name}"),
+            Self::OptionalSecrets(name) => format!("secrets.optional.{name}"),
         }
     }
+}
+
+fn validate_secret_capability_name(name: &str, token: &str) -> Result<(), String> {
+    const KNOWN_VENDORS: &[&str] = &[
+        "openai",
+        "google",
+        "gemini",
+        "anthropic",
+        "claude",
+        "grok",
+        "xai",
+        "deepseek",
+        "qwen",
+        "minimax",
+        "mimo",
+        "xiaomi",
+    ];
+    for vendor in KNOWN_VENDORS {
+        if name == format!("{vendor}_api_key") || name == *vendor {
+            return Err(format!(
+                "secrets capability `{token}` uses bare vendor naming, which conflates the four independent LLM provider configs (image_generation/image_edit/image_vision/text). Rename to `secrets.<usage>_<vendor>_api_key`, e.g. `secrets.image_generation_{vendor}_api_key` or `secrets.text_{vendor}_api_key`."
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -940,6 +952,17 @@ fn normalize_planner_capabilities(
         }
         out.push(PlannerCapabilityMapping {
             name,
+            required_companions: mapping
+                .required_companions
+                .iter()
+                .map(|value| normalize_planner_capability_name(value))
+                .filter(|value| !value.is_empty())
+                .fold(Vec::new(), |mut values, value| {
+                    if !values.contains(&value) {
+                        values.push(value);
+                    }
+                    values
+                }),
             action: trim_optional_string(mapping.action.as_deref())
                 .map(|value| normalize_planner_capability_name(&value)),
             description: trim_optional_string(mapping.description.as_deref()),
@@ -1019,7 +1042,8 @@ fn planner_capability_policy_equivalent(
     alias: &PlannerCapabilityMapping,
     target: &PlannerCapabilityMapping,
 ) -> bool {
-    alias.action == target.action
+    alias.required_companions == target.required_companions
+        && alias.action == target.action
         && alias.effect == target.effect
         && alias.risk_level == target.risk_level
         && alias.auto_invocable == target.auto_invocable
@@ -1601,6 +1625,7 @@ impl SkillsRegistry {
             alias_to_name,
         };
         validate_global_planner_capability_aliases(&registry, path)?;
+        validate_required_companion_capabilities(&registry, path)?;
 
         // §P4.2：声明的 capabilities 必须和 manifest 的 shape 一致，否则
         // 加载失败 — 例如 exec.sudo 不允许自动执行（必须 confirm + high
