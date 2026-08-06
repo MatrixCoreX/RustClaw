@@ -1446,6 +1446,61 @@ pub(super) async fn execute_prepared_skill_action(
             let mutation_not_dispatched = mutation_guard.as_ref().is_some_and(|lease| {
                 super::mutation_ledger::settle_verified_not_applied_mutation(state, lease, &err)
             });
+            if !mutation_not_dispatched {
+                if let Some(lease) = mutation_guard.as_ref() {
+                    match super::mutation_ledger::reconcile_uncertain_mutation_from_registry(
+                        state,
+                        task,
+                        lease,
+                        normalized_skill,
+                        &exec_args,
+                    )
+                    .await
+                    {
+                        Ok(super::mutation_ledger::AutomaticMutationReconciliation::Applied(
+                            record,
+                        )) => {
+                            return super::mutation_ledger::record_completed_without_replay(
+                                state,
+                                task,
+                                loop_state,
+                                &record,
+                                fingerprint,
+                                normalized_skill,
+                                classification_args,
+                                global_step,
+                                step_in_round,
+                            );
+                        }
+                        Ok(
+                            super::mutation_ledger::AutomaticMutationReconciliation::NotApplied(
+                                record,
+                            ),
+                        ) => {
+                            super::support::publish_agent_loop_mutation_reconciliation_checkpoint(
+                                state,
+                                task,
+                                loop_state,
+                                &record.action_ref,
+                                &record.fingerprint_hash,
+                                "not_applied_reapproval_required",
+                            );
+                            return Ok(SkillActionOutcome {
+                                ended_with_user_visible_output: false,
+                                stop_signal: Some("mutation_reapproval_required".to_string()),
+                                continue_in_round: false,
+                            });
+                        }
+                        Ok(
+                            super::mutation_ledger::AutomaticMutationReconciliation::StillUnknown(
+                                _,
+                            )
+                            | super::mutation_ledger::AutomaticMutationReconciliation::NotDeclared,
+                        )
+                        | Err(_) => {}
+                    }
+                }
+            }
             let failure_outcome = handle_skill_step_failure(
                 state,
                 task,

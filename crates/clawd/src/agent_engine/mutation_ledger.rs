@@ -13,6 +13,153 @@ pub(super) enum MutationExecutionGuard {
     Uncertain(crate::repo::TaskMutationRecord),
 }
 
+pub(crate) enum AutomaticMutationReconciliation {
+    NotDeclared,
+    Applied(crate::repo::TaskMutationRecord),
+    NotApplied(crate::repo::TaskMutationRecord),
+    StillUnknown(crate::repo::TaskMutationRecord),
+}
+
+pub(crate) async fn reconcile_uncertain_mutation_from_registry(
+    state: &AppState,
+    task: &ClaimedTask,
+    lease: &crate::repo::TaskMutationLease,
+    normalized_skill: &str,
+    args: &Value,
+) -> Result<AutomaticMutationReconciliation, String> {
+    let action = normalized_action_token(args);
+    let Some(registry) = state.get_skills_registry() else {
+        return Ok(AutomaticMutationReconciliation::NotDeclared);
+    };
+    let Some(source_mapping) = registry
+        .planner_capabilities(normalized_skill)
+        .iter()
+        .find(|mapping| mapping.action.as_deref() == action.as_deref())
+    else {
+        return Ok(AutomaticMutationReconciliation::NotDeclared);
+    };
+    let Some(reconciliation_capability) = source_mapping.reconciliation_capability.as_deref()
+    else {
+        return Ok(AutomaticMutationReconciliation::NotDeclared);
+    };
+    let Some(resolved) = crate::capability_resolver::resolve_capability_action_for_state(
+        state,
+        reconciliation_capability,
+        args.clone(),
+    ) else {
+        return Ok(AutomaticMutationReconciliation::StillUnknown(
+            lease.record.clone(),
+        ));
+    };
+    let (reconciliation_skill, reconciliation_args) = match resolved {
+        crate::AgentAction::CallTool { tool, args } => (tool, args),
+        crate::AgentAction::CallSkill { skill, args } => (skill, args),
+        _ => {
+            return Err("mutation_reconciliation_capability_not_executable".to_string());
+        }
+    };
+    let outcome = match crate::skills::run_skill_with_runner_outcome_with_context(
+        state,
+        task,
+        &reconciliation_skill,
+        reconciliation_args,
+        None,
+    )
+    .await
+    {
+        Ok(outcome) => outcome,
+        Err(_) => {
+            return Ok(AutomaticMutationReconciliation::StillUnknown(
+                lease.record.clone(),
+            ));
+        }
+    };
+    let extra = outcome
+        .extra
+        .as_ref()
+        .and_then(Value::as_object)
+        .ok_or_else(|| "mutation_reconciliation_result_missing".to_string())?;
+    let resolution = match extra.get("disposition").and_then(Value::as_str) {
+        Some("applied") => crate::repo::TaskMutationReconciliation::Applied,
+        Some("not_applied") => crate::repo::TaskMutationReconciliation::NotApplied,
+        Some("still_unknown") => crate::repo::TaskMutationReconciliation::StillUnknown,
+        _ => return Err("mutation_reconciliation_disposition_invalid".to_string()),
+    };
+    let projection = automatic_reconciliation_projection(
+        reconciliation_capability,
+        &reconciliation_skill,
+        extra,
+    );
+    let reconciled = crate::repo::reconcile_task_mutation(
+        &state.core.db,
+        &state.worker.worker_id,
+        task.claim_attempt,
+        &task.task_id,
+        &lease.record.fingerprint_hash,
+        resolution,
+        &projection,
+    )
+    .map_err(|error| error.to_string())?;
+    match reconciled {
+        crate::repo::ReconcileTaskMutationOutcome::Reconciled(reconciled_lease) => {
+            crate::repo::commit_task_mutation(&state.core.db, &reconciled_lease)
+                .map_err(|error| error.to_string())?;
+            let mut record = reconciled_lease.record;
+            record.phase = crate::repo::task_mutation_ledger::TaskMutationPhase::Committed;
+            record.reconciliation = Some(projection);
+            Ok(AutomaticMutationReconciliation::Applied(record))
+        }
+        crate::repo::ReconcileTaskMutationOutcome::RetryReady(retry_lease) => Ok(
+            AutomaticMutationReconciliation::NotApplied(retry_lease.record),
+        ),
+        crate::repo::ReconcileTaskMutationOutcome::Waiting(record) => {
+            Ok(AutomaticMutationReconciliation::StillUnknown(record))
+        }
+        crate::repo::ReconcileTaskMutationOutcome::ReplaySuppressed(record) => {
+            Ok(AutomaticMutationReconciliation::Applied(record))
+        }
+    }
+}
+
+fn automatic_reconciliation_projection(
+    capability: &str,
+    skill: &str,
+    extra: &Map<String, Value>,
+) -> Value {
+    let mut structured_extra = Map::new();
+    for key in [
+        "schema_version",
+        "source_skill",
+        "action",
+        "status",
+        "disposition",
+        "operation_id",
+        "action_ref",
+        "target_ref",
+        "result_ref",
+        "before_version",
+        "after_version",
+        "evidence_digest",
+        "reversible",
+        "observed_at",
+    ] {
+        if let Some(value) = extra.get(key).and_then(safe_machine_scalar) {
+            structured_extra.insert(key.to_string(), value);
+        }
+    }
+    json!({
+        "schema_version": 1,
+        "disposition": extra.get("disposition").and_then(Value::as_str),
+        "status_code": "registry_reconciliation_observed",
+        "reconciliation_capability": capability,
+        "reconciliation_skill": skill,
+        "result_ref": extra.get("result_ref").and_then(Value::as_str),
+        "operation_id": extra.get("operation_id").and_then(Value::as_str),
+        "observed_at": extra.get("observed_at").and_then(Value::as_u64),
+        "structured_extra": Value::Object(structured_extra),
+    })
+}
+
 pub(super) fn prepare_mutation_execution(
     state: &AppState,
     task: &ClaimedTask,
@@ -241,6 +388,7 @@ pub(super) fn record_completed_without_replay(
     global_step: usize,
     step_in_round: usize,
 ) -> Result<SkillActionOutcome, String> {
+    let recorded_result = record.receipt.as_ref().or(record.reconciliation.as_ref());
     let output = json!({
         "schema_version": 1,
         "source": "task_mutation_ledger",
@@ -252,7 +400,7 @@ pub(super) fn record_completed_without_replay(
         "idempotency_key": record.idempotency_key,
         "attempt_no": record.attempt_no,
         "idempotency_replay": true,
-        "recorded_result": record.receipt,
+        "recorded_result": recorded_result,
     })
     .to_string();
     loop_state
@@ -274,7 +422,7 @@ pub(super) fn record_completed_without_replay(
             normalized_skill,
             args,
             &step_result,
-            record.receipt.as_ref(),
+            recorded_result,
         )
         .map_err(|error| error.to_string())?,
     );
@@ -297,6 +445,7 @@ pub(super) fn record_completed_without_replay(
     let structured_extra = record
         .receipt
         .as_ref()
+        .or(record.reconciliation.as_ref())
         .and_then(|outcome| outcome.get("structured_extra"));
     let stop_signal = super::async_start_checkpoint::publish_pending_async_job_start_checkpoint(
         state,
@@ -424,6 +573,7 @@ pub(crate) fn safe_mutation_outcome_projection(structured_extra: Option<&Value>)
     for key in [
         "schema_version",
         "source",
+        "source_skill",
         "action",
         "status",
         "status_code",
@@ -432,6 +582,12 @@ pub(crate) fn safe_mutation_outcome_projection(structured_extra: Option<&Value>)
         "mutation_id",
         "job_id",
         "result_ref",
+        "operation_id",
+        "action_ref",
+        "target_ref",
+        "before_version",
+        "after_version",
+        "evidence_digest",
         "patch_id",
         "before_sha256",
         "after_sha256",

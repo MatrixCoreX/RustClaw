@@ -97,6 +97,41 @@ function toneClassName(tone: Tone): string {
   return "border-red-400/25 bg-red-500/10 text-red-50";
 }
 
+function approvalActionLabel(actionRef: string, t: Translate): string {
+  if (actionRef === "git.push") return t("即将推送这个提交", "Commit to push");
+  if (actionRef === "forge.create_pr") return t("即将创建这个 Pull Request", "Pull request to create");
+  return actionRef;
+}
+
+function approvalFieldLabel(name: string, t: Translate): string {
+  const labels: Record<string, [string, string]> = {
+    connection_id: ["连接", "Connection"],
+    remote: ["本地远端名称", "Local remote"],
+    local_branch: ["本地分支", "Local branch"],
+    remote_branch: ["目标分支", "Target branch"],
+    expected_local_sha: ["确认的完整提交 SHA", "Approved full commit SHA"],
+    expected_remote_sha: ["远端当前 SHA", "Current remote SHA"],
+    expected_remote_url_digest: ["远端地址指纹", "Remote URL fingerprint"],
+    set_upstream: ["成功后设置 upstream", "Set upstream after success"],
+    push_receipt_ref: ["已验证推送收据", "Verified push receipt"],
+    expected_head_sha: ["PR 提交 SHA", "PR commit SHA"],
+    head: ["来源分支", "Head branch"],
+    base: ["目标分支", "Base branch"],
+    title: ["标题", "Title"],
+    body: ["说明", "Description"],
+    draft: ["草稿 PR", "Draft PR"],
+  };
+  const label = labels[name];
+  return label ? t(label[0], label[1]) : name;
+}
+
+function approvalFieldValue(value: string | number | boolean | null, t: Translate): string {
+  if (value === null) return t("不存在（首次创建）", "Does not exist (new target)");
+  if (value === true) return t("是", "Yes");
+  if (value === false) return t("否", "No");
+  return String(value);
+}
+
 function SubagentPanel({
   view,
   t,
@@ -547,6 +582,26 @@ export function TaskResultPanel({
                   </span>
                 ))}
               </div>
+              {approvalRequest.previews.length > 0 ? (
+                <div className="mt-3 space-y-3">
+                  {approvalRequest.previews.map((preview, previewIndex) => (
+                    <div key={`${preview.actionRef}:${previewIndex}`} className="rounded-lg border border-white/10 bg-black/20 p-3">
+                      <p className="text-xs font-semibold">{approvalActionLabel(preview.actionRef, t)}</p>
+                      <dl className="mt-2 grid gap-2 sm:grid-cols-2">
+                        {preview.fields.map((field) => (
+                          <div key={field.name} className={field.name === "body" ? "sm:col-span-2" : ""}>
+                            <dt className="text-[11px] text-amber-50/60">{approvalFieldLabel(field.name, t)}</dt>
+                            <dd className={`mt-0.5 break-all text-xs text-amber-50/90 ${field.name === "body" ? "max-h-40 overflow-auto whitespace-pre-wrap rounded bg-black/20 p-2" : "font-mono"}`}>
+                              {approvalFieldValue(field.value, t)}
+                            </dd>
+                            {field.digest ? <p className="mt-0.5 break-all font-mono text-[10px] text-amber-50/45">digest={field.digest}</p> : null}
+                          </div>
+                        ))}
+                      </dl>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
               <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto]">
                 <input
                   className="theme-input text-xs"

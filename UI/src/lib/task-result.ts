@@ -66,6 +66,10 @@ export interface TaskApprovalRequestView {
   effect: string;
   reasonCode: string;
   allowedDecisions: TaskApprovalDecision[];
+  previews: Array<{
+    actionRef: string;
+    fields: Array<{ name: string; value: string | number | boolean | null; digest?: string }>;
+  }>;
   scopeGrant: {
     available: boolean;
     scopeKind?: string;
@@ -191,6 +195,21 @@ export function buildTaskApprovalRequest(result: TaskQueryResponse): TaskApprova
       )
     : ["approve_once", "deny"];
   const rawScope = asRecord(request.scope_grant);
+  const previews = Array.isArray(request.previews)
+    ? request.previews.flatMap((value) => {
+        const preview = asRecord(value);
+        const actionRef = primitiveKeyValue(preview?.action_ref);
+        const rawFields = asRecord(preview?.fields);
+        const digests = asRecord(preview?.value_digests);
+        if (!actionRef || !rawFields) return [];
+        const fields = Object.entries(rawFields).flatMap(([name, fieldValue]) => {
+          if (!isApprovalPreviewValue(fieldValue)) return [];
+          const digest = primitiveKeyValue(digests?.[name]);
+          return [{ name, value: fieldValue, ...(digest ? { digest } : {}) }];
+        });
+        return fields.length > 0 ? [{ actionRef, fields }] : [];
+      })
+    : [];
   const entries = Array.isArray(rawScope?.entries)
     ? rawScope.entries.flatMap((value) => {
         const entry = asRecord(value);
@@ -218,6 +237,7 @@ export function buildTaskApprovalRequest(result: TaskQueryResponse): TaskApprova
     effect: primitiveKeyValue(request.effect) ?? "unknown",
     reasonCode: primitiveKeyValue(request.reason_code) ?? "unknown",
     allowedDecisions,
+    previews,
     scopeGrant: {
       available:
         rawScope?.available === true &&
@@ -231,6 +251,10 @@ export function buildTaskApprovalRequest(result: TaskQueryResponse): TaskApprova
       entries,
     },
   };
+}
+
+function isApprovalPreviewValue(value: unknown): value is string | number | boolean | null {
+  return value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean";
 }
 
 function primitiveKeyValue(value: unknown): string | null {

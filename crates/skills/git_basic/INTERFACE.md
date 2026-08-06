@@ -27,7 +27,11 @@
 - `diff_cached` — staged (cached) diff
 - `branch` — list all branches
 - `current_branch` — current branch name
-- `remote` — remote URLs (-v)
+- `remote` — local remote URLs plus a credential-free canonical GitHub target
+  and `remote_url_digest` when the URL is eligible for the remote-delivery
+  skills. This remains a local-only observation.
+- `ahead_behind` — compare one local branch with an existing local
+  `refs/remotes/<remote>/<branch>` tracking ref without network access
 - `changed_files` — file names that differ from HEAD
 - `show` — show one commit/object (`--stat`), including a file object selected
   with `<revision>:<repository-path>`
@@ -51,6 +55,9 @@
 | `show_file_at_rev` | `target` | no | string | `HEAD` | Revision. |
 | `show_file_at_rev` | `path` | yes | string | - | Repository-relative file path. |
 | `rev_parse` | `ref` | no | string | `HEAD` | Revision expression to resolve. |
+| `ahead_behind` | `local_branch` | yes | string | - | Exact local branch name. |
+| `ahead_behind` | `remote` | yes | string | - | Remote selector used only to construct the existing local tracking ref. |
+| `ahead_behind` | `remote_branch` | yes | string | - | Exact remote branch name. |
 | `stage` | `paths` | yes | string[] | - | Explicit repository-relative paths; `.` and implicit add-all are rejected. |
 | `commit` | `message` | yes | string | - | Commit message, 1..16384 UTF-8 bytes. |
 | `create_branch` | `branch_name` | yes | string | - | Local branch name validated by Git. |
@@ -71,6 +78,9 @@
   `git_branch_name_invalid`, `git_branch_not_found`,
   `git_checkout_dirty_worktree`, and `git_unexpected_arg`.
 - Successful responses also mirror structured metadata into `extra`, including `schema_version`, `action`, `subcommand`, `exit_code`, `output`, and action-specific machine fields.
+- `ahead_behind` never contacts a remote. It returns `network_observed=false`,
+  `tracking_ref_may_be_stale=true`, and either numeric `ahead`/`behind` or
+  `tracking_ref_exists=false` with null counts.
 
 ## Structured Evidence Contract
 - Success `extra` always includes `schema_version`, `action`, `subcommand`,

@@ -154,6 +154,8 @@ fn test_planner_capability(name: &str, action: &str, preferred: bool) -> Planner
         subprocess: Some(false),
         package_install: Some(false),
         privilege_escalation: Some(false),
+        reconciliation_capability: None,
+        approval_preview_fields: Vec::new(),
         final_answer_shape: None,
     }
 }
@@ -188,6 +190,8 @@ fn quick_index_includes_planner_capability_metadata() {
         subprocess: Some(false),
         package_install: Some(false),
         privilege_escalation: Some(false),
+        reconciliation_capability: None,
+        approval_preview_fields: Vec::new(),
         final_answer_shape: Some("summary_with_evidence".to_string()),
     }]);
     manifest.risk_level = Some(SkillRiskLevel::Medium);
@@ -285,6 +289,8 @@ fn quick_index_catalog_keeps_capability_25_and_schema_field_9_queryable() {
             subprocess: Some(false),
             package_install: Some(false),
             privilege_escalation: Some(false),
+            reconciliation_capability: None,
+            approval_preview_fields: Vec::new(),
             final_answer_shape: None,
         })
         .collect::<Vec<_>>();

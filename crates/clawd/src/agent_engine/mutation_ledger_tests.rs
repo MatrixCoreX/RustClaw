@@ -1,6 +1,7 @@
 use super::{
-    complete_mutation_execution, load_task_mutation_reconciliation_directive,
-    prepare_mutation_execution, record_completed_without_replay, safe_mutation_outcome_projection,
+    automatic_reconciliation_projection, complete_mutation_execution,
+    load_task_mutation_reconciliation_directive, prepare_mutation_execution,
+    record_completed_without_replay, safe_mutation_outcome_projection,
     settle_verified_not_applied_mutation, MutationExecutionGuard,
 };
 
@@ -329,6 +330,35 @@ fn mutation_projection_keeps_exact_replace_receipt_without_diff_content() {
     assert!(projection["structured_extra"].get("path").is_none());
     assert!(projection["structured_extra"].get("diff_preview").is_none());
     assert!(!projection.to_string().contains("must not persist"));
+}
+
+#[test]
+fn registry_reconciliation_projection_keeps_authoritative_receipt_only() {
+    let projection = automatic_reconciliation_projection(
+        "publish.reconcile",
+        "generic_publisher",
+        serde_json::json!({
+            "disposition": "applied",
+            "operation_id": "operation-1",
+            "result_ref": "receipt-v1:synthetic",
+            "action_ref": "publish.create",
+            "target_ref": "owner/repository#object/1",
+            "after_version": "version-1",
+            "evidence_digest": "sha256:abc",
+            "untrusted_text": "must not persist"
+        })
+        .as_object()
+        .expect("object"),
+    );
+    assert_eq!(projection["disposition"], "applied");
+    assert_eq!(projection["result_ref"], "receipt-v1:synthetic");
+    assert_eq!(
+        projection["structured_extra"]["action_ref"],
+        "publish.create"
+    );
+    assert!(projection["structured_extra"]
+        .get("untrusted_text")
+        .is_none());
 }
 
 #[test]

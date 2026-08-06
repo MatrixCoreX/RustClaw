@@ -62,7 +62,15 @@ pub(crate) struct ApprovalBinding {
     pub(crate) arguments_hash: String,
     pub(crate) action_count: usize,
     pub(crate) targets: Vec<String>,
+    pub(crate) previews: Vec<ApprovalActionPreview>,
     pub(crate) scope: Option<ApprovalScopeBinding>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct ApprovalActionPreview {
+    pub(crate) action_ref: String,
+    pub(crate) fields: Map<String, Value>,
+    pub(crate) value_digests: Map<String, Value>,
 }
 
 pub(crate) fn binding_for_confirmation_steps(
@@ -83,6 +91,7 @@ pub(crate) fn binding_for_confirmation_steps(
     let mut argument_bindings = Vec::new();
     let mut targets = Vec::new();
     let mut scope_entries = Vec::new();
+    let mut previews = Vec::new();
     let mut scope_grantable = true;
     for step in steps
         .iter()
@@ -99,6 +108,9 @@ pub(crate) fn binding_for_confirmation_steps(
             "target": target,
         }));
         argument_bindings.push(canonical_approval_arguments(state, step));
+        if let Some(preview) = approval_preview_for_step(state, step) {
+            previews.push(preview);
+        }
         targets.push(target);
         match scope_entry_for_step(state, step) {
             Some(entry) => scope_entries.push(entry),
@@ -126,6 +138,7 @@ pub(crate) fn binding_for_confirmation_steps(
         arguments_hash: sha256_label(canonical_value(&Value::Array(argument_bindings)).to_string()),
         action_count: targets.len(),
         targets,
+        previews,
         scope,
     })
 }
@@ -188,6 +201,7 @@ pub(crate) fn pending_approval_request_json(
         "arguments_hash": binding.arguments_hash,
         "action_count": binding.action_count,
         "targets": binding.targets,
+        "previews": binding.previews,
         "issued_at": now_ts,
         "expires_at": now_ts.saturating_add(APPROVAL_GRANT_TTL_SECONDS),
         "effect": "mutating_or_external_action",
@@ -197,6 +211,51 @@ pub(crate) fn pending_approval_request_json(
         "allowed_decisions": allowed_decisions,
         "scope_grant": scope_grant,
     })
+}
+
+fn approval_preview_for_step(state: &AppState, step: &PlanStep) -> Option<ApprovalActionPreview> {
+    if !matches!(step.action_type.as_str(), "call_skill" | "call_tool") {
+        return None;
+    }
+    let skill = state.resolve_canonical_skill_name(step.skill.trim());
+    let action = step.args.get("action").and_then(Value::as_str)?;
+    let manifest = state.skill_manifest(&skill)?;
+    let mapping = claw_core::skill_registry::select_planner_capability_mapping(
+        &manifest.planner_capabilities,
+        Some(action),
+    )?;
+    if mapping.approval_preview_fields.is_empty() {
+        return None;
+    }
+    let args = step.args.as_object()?;
+    let mut fields = Map::new();
+    let mut value_digests = Map::new();
+    for name in &mapping.approval_preview_fields {
+        let Some(value) = args.get(name) else {
+            continue;
+        };
+        if !approval_preview_value_is_safe(value) {
+            continue;
+        }
+        fields.insert(name.clone(), value.clone());
+        value_digests.insert(
+            name.clone(),
+            Value::String(sha256_label(canonical_value(value).to_string())),
+        );
+    }
+    (!fields.is_empty()).then(|| ApprovalActionPreview {
+        action_ref: mapping.name.clone(),
+        fields,
+        value_digests,
+    })
+}
+
+fn approval_preview_value_is_safe(value: &Value) -> bool {
+    match value {
+        Value::Null | Value::Bool(_) | Value::Number(_) => true,
+        Value::String(value) => value.len() <= 65_536 && !value.contains('\0'),
+        Value::Array(_) | Value::Object(_) => false,
+    }
 }
 
 pub(crate) fn confirmation_step_ids(issues: &[crate::verifier::VerifyIssue]) -> Vec<String> {

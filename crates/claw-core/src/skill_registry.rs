@@ -14,7 +14,11 @@ mod overlay;
 mod shape;
 #[path = "skill_registry_validation.rs"]
 mod validation;
-use validation::{validate_named_capability, validate_required_companion_capabilities};
+use validation::{
+    validate_approval_preview_fields, validate_global_planner_capability_aliases,
+    validate_named_capability, validate_package_version, validate_reconciliation_capabilities,
+    validate_required_companion_capabilities,
+};
 
 /// 技能类型：builtin（clawd 内执行）/ runner（skill-runner 子进程）/ 预留 external
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
@@ -221,6 +225,15 @@ pub struct PlannerCapabilityMapping {
     pub package_install: Option<bool>,
     #[serde(default)]
     pub privilege_escalation: Option<bool>,
+    /// Optional read-only capability used to reconcile an uncertain external
+    /// mutation. The runtime treats this as registry metadata, never as a
+    /// skill-name convention.
+    #[serde(default)]
+    pub reconciliation_capability: Option<String>,
+    /// Registry-declared argument names that the generic approval UI may show.
+    /// Values remain bound by `arguments_hash`; this list is presentation-only.
+    #[serde(default)]
+    pub approval_preview_fields: Vec<String>,
     #[serde(default)]
     pub final_answer_shape: Option<String>,
 }
@@ -531,9 +544,7 @@ impl Capability {
                     validate_secret_capability_name(name, token)?;
                     Ok(Self::Secrets(name.to_string()))
                 } else {
-                    Err(format!(
-                        "unknown capability `{token}` (allowed: llm, llm.credential_fallback.<name>, net, fs.read, fs.write, exec, exec.sudo, secrets.<name>, secrets.optional.<name>)"
-                    ))
+                    Err(format!("skill_registry_capability_unknown:{token}"))
                 }
             }
         }
@@ -757,6 +768,11 @@ pub struct SkillRegistryEntry {
     /// registry-owned; the manifest references this exact registry entry.
     #[serde(default)]
     pub package_manifest: Option<String>,
+    /// Explicit package-manifest version for a repository-maintained package
+    /// that already has an independently released skill version. New bundled
+    /// Cargo skills omit this and inherit the workspace release version.
+    #[serde(default)]
+    pub package_version: Option<String>,
     /// Workspace-relative, user-editable configuration files owned by this
     /// skill. Removing a skill may preserve or delete only these declared files.
     #[serde(default)]
@@ -1000,6 +1016,11 @@ fn normalize_planner_capabilities(
             subprocess: mapping.subprocess.or(Some(false)),
             package_install: mapping.package_install.or(Some(false)),
             privilege_escalation: mapping.privilege_escalation.or(Some(false)),
+            reconciliation_capability: trim_optional_string(
+                mapping.reconciliation_capability.as_deref(),
+            )
+            .map(|value| normalize_planner_capability_name(&value)),
+            approval_preview_fields: normalize_schema_tokens(&mapping.approval_preview_fields),
             final_answer_shape: trim_optional_string(mapping.final_answer_shape.as_deref())
                 .map(|value| normalize_schema_token(&value)),
         });
@@ -1063,6 +1084,8 @@ fn planner_capability_policy_equivalent(
         && alias.subprocess == target.subprocess
         && alias.package_install == target.package_install
         && alias.privilege_escalation == target.privilege_escalation
+        && alias.reconciliation_capability == target.reconciliation_capability
+        && alias.approval_preview_fields == target.approval_preview_fields
         && alias.final_answer_shape == target.final_answer_shape
 }
 
@@ -1134,34 +1157,6 @@ fn validate_planner_capability_aliases(
     Ok(())
 }
 
-fn validate_global_planner_capability_aliases(
-    registry: &SkillsRegistry,
-    path: &Path,
-) -> Result<(), String> {
-    let mut aliases = BTreeMap::<String, (String, String)>::new();
-    for (skill_name, entry) in &registry.by_name {
-        for (alias, target) in &entry.planner_capability_aliases {
-            if let Some((existing_skill, existing_target)) =
-                aliases.insert(alias.clone(), (skill_name.clone(), target.clone()))
-            {
-                return Err(format!(
-                    "duplicate planner capability alias `{alias}` in {}: `{existing_skill}` -> `{existing_target}` and `{skill_name}` -> `{target}`",
-                    path.display()
-                ));
-            }
-        }
-    }
-    for (alias, (skill_name, target)) in &aliases {
-        if let Some((target_skill, next_target)) = aliases.get(target) {
-            return Err(format!(
-                "cross-skill planner capability alias chain `{alias}` ({skill_name}) -> `{target}` ({target_skill}) -> `{next_target}` in {}",
-                path.display()
-            ));
-        }
-    }
-    Ok(())
-}
-
 fn validate_planner_capability_schemas(
     entry: &SkillRegistryEntry,
     path: &Path,
@@ -1181,6 +1176,7 @@ fn validate_planner_capability_schemas(
         }
         planner_capability_argument_schema(input_schema.as_ref(), mapping)
             .map_err(|error| format!("{error} for skill `{}` in {}", entry.name, path.display()))?;
+        validate_approval_preview_fields(entry, mapping, path)?;
     }
     Ok(())
 }
@@ -1545,6 +1541,8 @@ impl SkillsRegistry {
                 &canonical,
                 path,
             )?;
+            entry.package_version = trim_optional_string(entry.package_version.as_deref());
+            validate_package_version(&canonical, entry.package_version.as_deref(), path)?;
             entry.supported_os = normalize_metadata_tokens(&entry.supported_os);
             entry.required_bins = normalize_metadata_tokens(&entry.required_bins);
             entry.optional_bins = normalize_metadata_tokens(&entry.optional_bins);
@@ -1626,6 +1624,7 @@ impl SkillsRegistry {
         };
         validate_global_planner_capability_aliases(&registry, path)?;
         validate_required_companion_capabilities(&registry, path)?;
+        validate_reconciliation_capabilities(&registry, path)?;
 
         // §P4.2：声明的 capabilities 必须和 manifest 的 shape 一致，否则
         // 加载失败 — 例如 exec.sudo 不允许自动执行（必须 confirm + high

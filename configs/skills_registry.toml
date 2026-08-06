@@ -720,6 +720,7 @@ planner_capabilities = [
   { name = "git.current_branch", action = "current_branch", effect = "observe", optional = ["repo"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "git.branch", action = "branch", effect = "observe", optional = ["repo", "cursor", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "git.remote", action = "remote", effect = "observe", optional = ["repo", "cursor", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "git.ahead_behind", action = "ahead_behind", effect = "observe", required = ["local_branch", "remote", "remote_branch"], optional = ["repo"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false },
   { name = "git.changed_files", action = "changed_files", effect = "observe", optional = ["path", "repo", "cursor", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "git.log", action = "log", effect = "observe", optional = ["repo", "cursor", "n", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "git.diff", action = "diff", effect = "observe", optional = ["path", "repo"], risk_level = "medium", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
@@ -732,8 +733,111 @@ planner_capabilities = [
   { name = "git.create_branch", action = "create_branch", effect = "mutate", required = ["branch_name"], optional = ["repo", "start_point"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = true, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false },
   { name = "git.checkout_branch", action = "checkout_branch", effect = "mutate", required = ["branch_name"], optional = ["repo"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = true, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false },
 ]
-input_schema = { type = "object", additionalProperties = false, properties = { action = { type = "string", enum = ["status", "log", "diff", "diff_cached", "branch", "current_branch", "remote", "changed_files", "show", "show_file_at_rev", "rev_parse", "stage", "commit", "create_branch", "checkout_branch"] }, path = { type = "string" }, paths = { type = "array", minItems = 1, maxItems = 512, items = { type = "string" } }, repo = { type = "string", description = "Workspace-relative repository directory or a workspace-contained absolute path." }, target = { type = "string" }, ref = { type = "string" }, message = { type = "string", minLength = 1, maxLength = 16384 }, branch_name = { type = "string", minLength = 1, maxLength = 512 }, start_point = { type = "string", minLength = 1, maxLength = 512 }, cursor = { type = "integer", minimum = 0 }, limit = { type = "integer", minimum = 1, maximum = 200 }, n = { type = "integer", minimum = 1, maximum = 200 } } }
+input_schema = { type = "object", additionalProperties = false, properties = { action = { type = "string", enum = ["status", "log", "diff", "diff_cached", "branch", "current_branch", "remote", "ahead_behind", "changed_files", "show", "show_file_at_rev", "rev_parse", "stage", "commit", "create_branch", "checkout_branch"] }, path = { type = "string" }, paths = { type = "array", minItems = 1, maxItems = 512, items = { type = "string" } }, repo = { type = "string", description = "Workspace-relative repository directory or a workspace-contained absolute path." }, target = { type = "string" }, ref = { type = "string" }, local_branch = { type = "string", minLength = 1, maxLength = 255 }, remote = { type = "string", minLength = 1, maxLength = 96 }, remote_branch = { type = "string", minLength = 1, maxLength = 255 }, message = { type = "string", minLength = 1, maxLength = 16384 }, branch_name = { type = "string", minLength = 1, maxLength = 512 }, start_point = { type = "string", minLength = 1, maxLength = 512 }, cursor = { type = "integer", minimum = 0 }, limit = { type = "integer", minimum = 1, maximum = 200 }, n = { type = "integer", minimum = 1, maximum = 200 } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
+
+[[skills]]
+name = "git_remote_read"
+enabled = false
+kind = "runner"
+planner_kind = "skill"
+group = "system"
+supported_os = ["linux", "macos"]
+install_mode = "on_demand"
+package_manifest = "optional_skills/git_remote_read/skill.toml"
+aliases = []
+timeout_seconds = 90
+prompt_file = "prompts/layers/generated/skills/git_remote_read.md"
+output_kind = "text"
+description = "Observe an allowlisted GitHub remote or fetch exactly one approved remote-tracking branch. Public and authenticated actions are separate."
+description_zh = "查看已准入的 GitHub 远端，或只拉取一个明确的远端跟踪分支；公开与鉴权操作相互独立。"
+semantic_tags = ["git_remote_observe", "git_fetch", "source_control_delivery"]
+capabilities = ["net", "fs.read", "fs.write", "exec", "secrets.github_git_token"]
+risk_level = "high"
+auto_invocable = true
+requires_confirmation = true
+side_effect = true
+required_bins = ["git"]
+confirmation_exempt_when = [
+  { action = "ls_remote_public" },
+  { action = "ls_remote_authenticated" },
+]
+planner_capabilities = [
+  { name = "git.remote_ls_public", action = "ls_remote_public", effect = "observe", required = ["connection_id", "remote", "remote_branch", "expected_remote_url_digest"], optional = ["repo"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = false, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false },
+  { name = "git.remote_ls_authenticated", action = "ls_remote_authenticated", effect = "observe", required = ["connection_id", "remote", "remote_branch", "expected_remote_url_digest"], optional = ["repo"], risk_level = "medium", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = false, external_publish = false, credential_access = true, subprocess = true, package_install = false, privilege_escalation = false },
+  { name = "git.fetch_public", action = "fetch_public", effect = "mutate", required = ["connection_id", "remote", "remote_branch", "expected_remote_url_digest"], optional = ["repo"], risk_level = "high", auto_invocable = false, requires_confirmation = true, once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false },
+  { name = "git.fetch_authenticated", action = "fetch_authenticated", effect = "mutate", required = ["connection_id", "remote", "remote_branch", "expected_remote_url_digest"], optional = ["repo"], risk_level = "high", auto_invocable = false, requires_confirmation = true, once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = false, credential_access = true, subprocess = true, package_install = false, privilege_escalation = false },
+]
+input_schema = { type = "object", additionalProperties = false, required = ["action", "connection_id", "remote", "remote_branch", "expected_remote_url_digest"], properties = { action = { type = "string", enum = ["ls_remote_public", "ls_remote_authenticated", "fetch_public", "fetch_authenticated"] }, repo = { type = "string" }, connection_id = { type = "string", minLength = 1, maxLength = 96 }, remote = { type = "string", minLength = 1, maxLength = 96 }, remote_branch = { type = "string", minLength = 1, maxLength = 255 }, expected_remote_url_digest = { type = "string", pattern = "^sha256:[0-9a-f]{64}$" } } }
+output_schema = { type = "object", required = ["text", "extra"], properties = { text = { type = "string" }, extra = { type = "object" } } }
+
+[[skills]]
+name = "git_remote_publish"
+enabled = false
+kind = "runner"
+planner_kind = "skill"
+group = "system"
+supported_os = ["linux", "macos"]
+install_mode = "on_demand"
+package_manifest = "optional_skills/git_remote_publish/skill.toml"
+aliases = []
+timeout_seconds = 120
+prompt_file = "prompts/layers/generated/skills/git_remote_publish.md"
+output_kind = "text"
+description = "Push one approved commit SHA to one allowlisted GitHub branch, then verify the exact remote SHA. Force, deletion, tags, and multi-ref publication are unavailable."
+description_zh = "把一个已确认的提交 SHA 推送到一个已准入的 GitHub 分支，并回读核验；不支持强推、删除、标签或批量发布。"
+semantic_tags = ["git_push", "source_control_delivery", "external_publish"]
+capabilities = ["net", "fs.read", "fs.write", "exec", "secrets.github_git_token"]
+risk_level = "high"
+auto_invocable = false
+requires_confirmation = true
+side_effect = true
+required_bins = ["git"]
+confirmation_exempt_when = [
+  { action = "reconcile_push" },
+]
+planner_capabilities = [
+  { name = "git.push", action = "push", effect = "external", required = ["connection_id", "remote", "local_branch", "remote_branch", "expected_local_sha", "expected_remote_sha", "expected_remote_url_digest", "set_upstream"], optional = ["repo"], risk_level = "high", auto_invocable = false, requires_confirmation = true, once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = true, credential_access = true, subprocess = true, package_install = false, privilege_escalation = false, reconciliation_capability = "git.push_reconcile", approval_preview_fields = ["connection_id", "remote", "local_branch", "remote_branch", "expected_local_sha", "expected_remote_sha", "expected_remote_url_digest", "set_upstream"] },
+  { name = "git.push_reconcile", action = "reconcile_push", effect = "observe", required = ["connection_id", "remote", "remote_branch", "expected_local_sha", "expected_remote_sha", "expected_remote_url_digest"], optional = ["repo"], risk_level = "medium", preferred = false, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = false, external_publish = false, credential_access = true, subprocess = true, package_install = false, privilege_escalation = false },
+]
+input_schema = { type = "object", additionalProperties = false, required = ["action", "connection_id", "remote", "remote_branch", "expected_local_sha", "expected_remote_sha", "expected_remote_url_digest"], properties = { action = { type = "string", enum = ["push", "reconcile_push"] }, repo = { type = "string" }, connection_id = { type = "string", minLength = 1, maxLength = 96 }, remote = { type = "string", minLength = 1, maxLength = 96 }, local_branch = { type = "string", minLength = 1, maxLength = 255 }, remote_branch = { type = "string", minLength = 1, maxLength = 255 }, expected_local_sha = { type = "string", pattern = "^([0-9a-f]{40}|[0-9a-f]{64})$" }, expected_remote_sha = { anyOf = [ { type = "string", pattern = "^([0-9a-f]{40}|[0-9a-f]{64})$" }, { type = "null" } ] }, expected_remote_url_digest = { type = "string", pattern = "^sha256:[0-9a-f]{64}$" }, set_upstream = { type = "boolean" } } }
+output_schema = { type = "object", required = ["text", "extra"], properties = { text = { type = "string" }, extra = { type = "object" } } }
+
+[[skills]]
+name = "git_forge"
+enabled = false
+kind = "runner"
+planner_kind = "skill"
+group = "system"
+supported_os = ["linux", "macos"]
+install_mode = "on_demand"
+package_manifest = "optional_skills/git_forge/skill.toml"
+aliases = []
+timeout_seconds = 120
+prompt_file = "prompts/layers/generated/skills/git_forge.md"
+output_kind = "text"
+description = "Create and inspect GitHub pull requests only for a repository and head SHA proven by a verified push receipt."
+description_zh = "只对已由推送收据验证的仓库和提交创建或查看 GitHub PR。"
+semantic_tags = ["github_pull_request", "continuous_integration_status", "source_control_delivery"]
+capabilities = ["net", "fs.read", "exec", "secrets.github_git_token", "secrets.github_api_token"]
+risk_level = "high"
+auto_invocable = false
+requires_confirmation = true
+side_effect = true
+required_bins = ["git"]
+confirmation_exempt_when = [
+  { action = "list_prs" },
+  { action = "pr_status" },
+  { action = "reconcile_create_pr" },
+]
+planner_capabilities = [
+  { name = "forge.create_pr", action = "create_pr", effect = "external", required = ["connection_id", "push_receipt_ref", "expected_head_sha", "head", "base", "title", "body", "draft"], risk_level = "high", auto_invocable = false, requires_confirmation = true, once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = false, external_publish = true, credential_access = true, subprocess = true, package_install = false, privilege_escalation = false, reconciliation_capability = "forge.create_pr_reconcile", approval_preview_fields = ["connection_id", "push_receipt_ref", "expected_head_sha", "head", "base", "title", "body", "draft"] },
+  { name = "forge.list_prs", action = "list_prs", effect = "observe", required = ["connection_id", "push_receipt_ref"], optional = ["state", "head"], risk_level = "medium", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = false, external_publish = false, credential_access = true, subprocess = true, package_install = false, privilege_escalation = false },
+  { name = "forge.pr_status", action = "pr_status", effect = "observe", required = ["connection_id", "push_receipt_ref", "number"], risk_level = "medium", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = false, external_publish = false, credential_access = true, subprocess = true, package_install = false, privilege_escalation = false },
+  { name = "forge.create_pr_reconcile", action = "reconcile_create_pr", effect = "observe", required = ["connection_id", "push_receipt_ref", "expected_head_sha", "head", "base"], risk_level = "medium", preferred = false, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = false, external_publish = false, credential_access = true, subprocess = true, package_install = false, privilege_escalation = false },
+]
+input_schema = { type = "object", additionalProperties = false, required = ["action", "connection_id", "push_receipt_ref"], properties = { action = { type = "string", enum = ["create_pr", "list_prs", "pr_status", "reconcile_create_pr"] }, connection_id = { type = "string", minLength = 1, maxLength = 96 }, push_receipt_ref = { type = "string", minLength = 64, maxLength = 16384 }, expected_head_sha = { type = "string", pattern = "^([0-9a-f]{40}|[0-9a-f]{64})$" }, head = { type = "string", minLength = 1, maxLength = 255 }, base = { type = "string", minLength = 1, maxLength = 255 }, title = { type = "string", minLength = 1, maxLength = 256 }, body = { type = "string", maxLength = 65536 }, draft = { type = "boolean" }, state = { type = "string", enum = ["open", "closed", "all"] }, number = { type = "integer", minimum = 1 } } }
+output_schema = { type = "object", required = ["text", "extra"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "install_module"
@@ -1018,6 +1122,7 @@ kind = "runner"
 planner_kind = "skill"
 group = "image"
 package_manifest = "crates/skills/image_vision/skill.toml"
+package_version = "0.1.10"
 supported_os = ["linux", "macos"]
 aliases = ["vision", "image_vision_skill", "vision_image", "image-analyze"]
 timeout_seconds = 90

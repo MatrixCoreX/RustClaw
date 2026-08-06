@@ -92,6 +92,61 @@ fn git_stdout(repository: &Path, args: &[&str]) -> String {
 }
 
 #[test]
+fn ahead_behind_reads_only_existing_tracking_ref() {
+    let fixture = TestRepository::new();
+    let base = fixture.commit_file("base.txt", "base\n", "base");
+    run_git(&fixture.repository, &["checkout", "-q", "-b", "delivery"]);
+    let head = fixture.commit_file("next.txt", "next\n", "next");
+    run_git(
+        &fixture.repository,
+        &["update-ref", "refs/remotes/origin/main", &base],
+    );
+
+    let (_, extra) = execute_with_workspace_root(
+        &fixture.workspace,
+        json!({
+            "action": "ahead_behind",
+            "repo": "repository",
+            "local_branch": "delivery",
+            "remote": "origin",
+            "remote_branch": "main",
+        }),
+    )
+    .expect("ahead/behind observation");
+
+    assert_eq!(extra["local_sha"], head);
+    assert_eq!(extra["tracking_sha"], base);
+    assert_eq!(extra["ahead"], 1);
+    assert_eq!(extra["behind"], 0);
+    assert_eq!(extra["network_observed"], false);
+    assert_eq!(extra["tracking_ref_may_be_stale"], true);
+}
+
+#[test]
+fn ahead_behind_reports_missing_tracking_ref_without_network() {
+    let fixture = TestRepository::new();
+    fixture.commit_file("base.txt", "base\n", "base");
+    run_git(&fixture.repository, &["branch", "delivery"]);
+
+    let (_, extra) = execute_with_workspace_root(
+        &fixture.workspace,
+        json!({
+            "action": "ahead_behind",
+            "repo": "repository",
+            "local_branch": "delivery",
+            "remote": "origin",
+            "remote_branch": "missing",
+        }),
+    )
+    .expect("missing tracking observation");
+
+    assert_eq!(extra["tracking_ref_exists"], false);
+    assert!(extra["ahead"].is_null());
+    assert!(extra["behind"].is_null());
+    assert_eq!(extra["network_observed"], false);
+}
+
+#[test]
 fn error_extra_exposes_machine_contract() {
     let extra = error_extra("execution_failed");
 
@@ -354,13 +409,23 @@ fn parses_git_log_branch_and_remote_structures() {
     );
 
     let remotes = parse_remote_list(
-        "origin\thttps://example.com/repo.git (fetch)\norigin\thttps://example.com/repo.git (push)\n",
+        "origin\thttps://github.com/ExampleOwner/Runtime.git (fetch)\norigin\thttps://github.com/ExampleOwner/Runtime.git (push)\nunsafe\tssh://git@github.com/ExampleOwner/Runtime.git (fetch)\n",
     );
-    assert_eq!(remotes.len(), 2);
+    assert_eq!(remotes.len(), 3);
     assert_eq!(
         remotes[0].get("direction").and_then(|value| value.as_str()),
         Some("fetch")
     );
+    assert_eq!(remotes[0]["remote_delivery_eligible"], true);
+    assert_eq!(
+        remotes[0]["canonical_url"],
+        "https://github.com/exampleowner/runtime.git"
+    );
+    assert!(remotes[0]["remote_url_digest"]
+        .as_str()
+        .is_some_and(|value| value.starts_with("sha256:")));
+    assert_eq!(remotes[2]["remote_delivery_eligible"], false);
+    assert!(remotes[2].get("remote_url_digest").is_none());
 }
 
 #[test]

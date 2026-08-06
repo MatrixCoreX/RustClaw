@@ -271,12 +271,77 @@ fn approval_binding_rejects_changed_command_working_directory() {
 }
 
 #[test]
+fn external_delivery_approval_previews_exact_registry_declared_values() {
+    let state = state_with_workspace_registry();
+    let ids = vec!["push-step".to_string(), "pr-step".to_string()];
+    let local_sha = "a".repeat(40);
+    let remote_sha = "b".repeat(40);
+    let push = PlanStep {
+        step_id: "push-step".to_string(),
+        action_type: "call_skill".to_string(),
+        skill: "git_remote_publish".to_string(),
+        args: json!({
+            "action": "push",
+            "connection_id": "github-main",
+            "remote": "origin",
+            "local_branch": "delivery",
+            "remote_branch": "delivery",
+            "expected_local_sha": local_sha,
+            "expected_remote_sha": remote_sha,
+            "expected_remote_url_digest": "sha256:remote",
+            "set_upstream": true,
+            "repo": "."
+        }),
+        depends_on: Vec::new(),
+        why: String::new(),
+    };
+    let pr_body = "Full approval body\nwith a second line.";
+    let pull_request = PlanStep {
+        step_id: "pr-step".to_string(),
+        action_type: "call_skill".to_string(),
+        skill: "git_forge".to_string(),
+        args: json!({
+            "action": "create_pr",
+            "connection_id": "github-main",
+            "push_receipt_ref": "git-push-v1:synthetic",
+            "expected_head_sha": "a".repeat(40),
+            "head": "delivery",
+            "base": "main",
+            "title": "Deliver reviewed changes",
+            "body": pr_body,
+            "draft": false
+        }),
+        depends_on: vec!["push-step".to_string()],
+        why: String::new(),
+    };
+
+    let binding = binding_for_confirmation_steps(&state, &[push, pull_request], &ids)
+        .expect("external delivery approval binding");
+
+    assert_eq!(binding.previews.len(), 2);
+    assert!(binding.scope.is_none());
+    assert_eq!(binding.previews[0].action_ref, "git.push");
+    assert_eq!(
+        binding.previews[0].fields["expected_local_sha"],
+        "a".repeat(40)
+    );
+    assert!(binding.previews[0].fields.get("repo").is_none());
+    assert_eq!(binding.previews[1].action_ref, "forge.create_pr");
+    assert_eq!(binding.previews[1].fields["body"], pr_body);
+    assert_eq!(
+        binding.previews[1].value_digests["body"],
+        sha256_label(serde_json::to_string(pr_body).expect("canonical body string"))
+    );
+}
+
+#[test]
 fn pending_request_is_task_bound_and_expiring() {
     let binding = ApprovalBinding {
         action_fingerprint: "sha256:action".to_string(),
         arguments_hash: "sha256:args".to_string(),
         action_count: 1,
         targets: vec!["write_file".to_string()],
+        previews: Vec::new(),
         scope: None,
     };
     let request = pending_approval_request_json("task-1", &binding, 100);

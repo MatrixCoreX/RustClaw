@@ -119,6 +119,8 @@ fn planner_capability_hint_includes_structured_contract() {
         subprocess: None,
         package_install: None,
         privilege_escalation: None,
+        reconciliation_capability: None,
+        approval_preview_fields: Vec::new(),
         final_answer_shape: Some("summary_with_evidence".to_string()),
     });
     assert_eq!(

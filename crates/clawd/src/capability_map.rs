@@ -131,6 +131,11 @@ fn planner_capability_hint(mapping: &PlannerCapabilityMapping) -> String {
     if let Some(privilege_escalation) = mapping.privilege_escalation {
         parts.push(format!("privilege_escalation={privilege_escalation}"));
     }
+    if let Some(reconciliation_capability) = mapping.reconciliation_capability.as_deref() {
+        parts.push(format!(
+            "reconciliation_capability={reconciliation_capability}"
+        ));
+    }
     if let Some(final_answer_shape) = mapping.final_answer_shape.as_deref() {
         parts.push(format!("final_answer_shape={final_answer_shape}"));
     }

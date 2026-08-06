@@ -48,6 +48,9 @@ members = [
     "crates/skills/browser_web",
     "optional_skills/crypto",
     "optional_skills/chinese_almanac",
+    "optional_skills/git_forge",
+    "optional_skills/git_remote_publish",
+    "optional_skills/git_remote_read",
     "optional_skills/invest_copy",
     "optional_skills/map_merchant",
     "optional_skills/photo_organize",
@@ -102,6 +105,8 @@ toml_edit = "0.22"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4", "serde"] }
+url = "2"
+wait-timeout = "0.2"
 
 # Full debug symbols make the clawd test binary hundreds of MiB and cause slow,
 # memory-heavy links on developer laptops. Level 1 keeps line information for

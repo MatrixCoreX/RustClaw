@@ -697,7 +697,9 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 name = "claw-core"
 version = "0.1.8"
 dependencies = [
+ "anyhow",
  "config",
+ "fs2",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -706,6 +708,7 @@ dependencies = [
  "tokio",
  "toml 0.8.23",
  "tracing",
+ "url",
  "uuid",
 ]
 
@@ -1560,10 +1563,65 @@ name = "git-basic-skill"
 version = "0.1.8"
 dependencies = [
  "anyhow",
+ "claw-core",
  "serde",
  "serde_json",
  "sha2",
  "toml 0.8.23",
+]
+
+[[package]]
+name = "git-forge-skill"
+version = "0.1.8"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "claw-core",
+ "fs2",
+ "regex",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "url",
+ "uuid",
+ "wait-timeout",
+]
+
+[[package]]
+name = "git-remote-publish-skill"
+version = "0.1.8"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "claw-core",
+ "fs2",
+ "regex",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "url",
+ "uuid",
+ "wait-timeout",
+]
+
+[[package]]
+name = "git-remote-read-skill"
+version = "0.1.8"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "claw-core",
+ "fs2",
+ "regex",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "url",
+ "uuid",
+ "wait-timeout",
 ]
 
 [[package]]
@@ -5149,6 +5207,15 @@ dependencies = [
  "serde",
  "serde_json",
  "toml 0.8.23",
+]
+
+[[package]]
+name = "wait-timeout"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09ac3b126d3914f9849036f826e054cbabdc8519970b8998ddaf3b5bd3c65f11"
+dependencies = [
+ "libc",
 ]
 
 [[package]]

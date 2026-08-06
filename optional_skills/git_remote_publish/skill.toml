@@ -1,0 +1,79 @@
+# AUTO-GENERATED: sync_skill_manifests.py
+schema_version = 2
+
+[package]
+name = "git_remote_publish"
+version = "0.1.8"
+description = "Push one approved commit SHA to one allowlisted GitHub branch, then verify the exact remote SHA. Force, deletion, tags, and multi-ref publication are unavailable."
+protocol = "agent-jsonl-v1"
+supported_os = ["linux", "macos"]
+supported_arch = ["x86_64", "aarch64"]
+license = "MIT"
+source = "optional_skills/git_remote_publish"
+
+[registry]
+name = "git_remote_publish"
+capability_policy_source = "registry"
+
+[build]
+adapter = "cargo"
+source_root = "."
+package = "git-remote-publish-skill"
+binary = "git-remote-publish-skill"
+lockfile = "Cargo.lock"
+network = "approval_required"
+lifecycle_scripts = false
+
+[install]
+host_dependencies = ["git"]
+runtime_assets = []
+
+[run]
+launcher = "native"
+entrypoint = "runtime/bin/git-remote-publish-skill"
+working_directory = "."
+timeout_seconds = 120
+environment_allowlist = ["GITHUB_GIT_TOKEN", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "PATH", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
+smoke_args = {}
+
+[security]
+capability_policy_source = "registry"
+sandbox = "workspace_write"
+runtime_network = false
+inherit_credentials = false
+
+[storage]
+kind = "none"
+schema_version = 1
+migration_owner = "git_remote_publish"
+
+[lifecycle]
+config_files = []
+preserve_data_on_uninstall = true
+update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { "type" = "object", "additionalProperties" = false, "required" = ["action", "connection_id", "remote", "remote_branch", "expected_local_sha", "expected_remote_sha", "expected_remote_url_digest"], "properties" = { "action" = { "type" = "string", "enum" = ["push", "reconcile_push"] }, "repo" = { "type" = "string" }, "connection_id" = { "type" = "string", "minLength" = 1, "maxLength" = 96 }, "remote" = { "type" = "string", "minLength" = 1, "maxLength" = 96 }, "local_branch" = { "type" = "string", "minLength" = 1, "maxLength" = 255 }, "remote_branch" = { "type" = "string", "minLength" = 1, "maxLength" = 255 }, "expected_local_sha" = { "type" = "string", "pattern" = "^([0-9a-f]{40}|[0-9a-f]{64})$" }, "expected_remote_sha" = { "anyOf" = [{ "type" = "string", "pattern" = "^([0-9a-f]{40}|[0-9a-f]{64})$" }, { "type" = "null" }] }, "expected_remote_url_digest" = { "type" = "string", "pattern" = "^sha256:[0-9a-f]{64}$" }, "set_upstream" = { "type" = "boolean" } } }
+output_schema = { "type" = "object", "required" = ["text", "extra"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
+config_entry_points = []
+capabilities = [{ "name" = "git.push", "effect" = "external", "execution_mode" = "sync_short", "required" = ["connection_id", "remote", "local_branch", "remote_branch", "expected_local_sha", "expected_remote_sha", "expected_remote_url_digest", "set_upstream"], "optional" = ["repo"], "timeout_seconds" = 120, "action" = "push" }, { "name" = "git.push_reconcile", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["connection_id", "remote", "remote_branch", "expected_local_sha", "expected_remote_sha", "expected_remote_url_digest"], "optional" = ["repo"], "timeout_seconds" = 120, "action" = "reconcile_push" }]
+
+[capability_request.permissions]
+llm_gateway = false
+network = true
+filesystem_read = true
+filesystem_write = true
+subprocess = true
+package_install = false
+privilege_escalation = false
+external_publish = true
+credential_refs = ["github_git_token"]
+
+[capability_request.artifact_contract]
+kinds = []
+output_fields = []
+
+[capability_request.evidence_contract]
+required = false
+selectors = []
