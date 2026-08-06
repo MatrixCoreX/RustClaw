@@ -1,6 +1,6 @@
 use axum::extract::{Multipart, Path as AxumPath, Query, State};
 use axum::http::{HeaderMap, StatusCode};
-use axum::routing::{get, post, put};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use rusqlite::OptionalExtension;
 use serde::de::DeserializeOwned;
@@ -182,6 +182,18 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         .route(
             "/agents/config",
             get(get_agents_config).post(update_agents_config),
+        )
+        .route(
+            "/git/connections",
+            get(get_git_connections).post(upsert_git_connection_handler),
+        )
+        .route(
+            "/git/connections/:connection_id",
+            delete(delete_git_connection_handler),
+        )
+        .route(
+            "/git/credentials/:credential_name",
+            post(set_git_credential_handler).delete(delete_git_credential_handler),
         )
         .route("/system/host-summary", get(host_system_summary))
         .route("/system/dependencies", get(host_dependencies))
@@ -432,6 +444,7 @@ struct NniDeviceActionRequest {
 
 include!("ui_routes/config_helpers.rs");
 include!("ui_routes/agent_config.rs");
+include!("ui_routes/git_remote_config.rs");
 include!("ui_routes/host_system.rs");
 include!("ui_routes/host_dependencies.rs");
 include!("ui_routes/managed_runtime_assets.rs");
@@ -440,6 +453,9 @@ include!("ui_routes/nni_internal_llm.rs");
 #[cfg(test)]
 #[path = "ui_routes/agent_config_tests.rs"]
 mod agent_config_unit_tests;
+#[cfg(test)]
+#[path = "ui_routes/git_remote_config_tests.rs"]
+mod git_remote_config_tests;
 include!("ui_routes/nni_request_records.rs");
 include!("ui_routes/nni_remote_join.rs");
 include!("ui_routes/nni_rewards.rs");

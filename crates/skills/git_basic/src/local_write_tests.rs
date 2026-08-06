@@ -2,7 +2,10 @@ use super::{execute_local_write, is_local_write_action};
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+static TEST_REPOSITORY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 struct TestRepository {
     root: PathBuf,
@@ -11,12 +14,13 @@ struct TestRepository {
 impl TestRepository {
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
-            "agent-runtime-git-local-write-{}-{}",
+            "agent-runtime-git-local-write-{}-{}-{}",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("clock")
-                .as_nanos()
+                .as_nanos(),
+            TEST_REPOSITORY_SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&root).expect("create repository");
         git(&root, &["init", "--quiet"]);

@@ -466,6 +466,11 @@ test("builds a task-bound approval request from structured resume context", () =
           effect: "mutating_or_external_action",
           reason_code: "explicit_approval_required",
           allowed_decisions: ["approve_once", "always_for_scope", "deny"],
+          previews: [{
+            action_ref: "git.push",
+            fields: { remote_branch: "delivery", expected_local_sha: "a".repeat(40) },
+            value_digests: { remote_branch: "sha256:branch", expected_local_sha: "sha256:commit" },
+          }],
           scope_grant: {
             available: true,
             scope_kind: "session",
@@ -492,6 +497,13 @@ test("builds a task-bound approval request from structured resume context", () =
     effect: "mutating_or_external_action",
     reasonCode: "explicit_approval_required",
     allowedDecisions: ["approve_once", "always_for_scope", "deny"],
+    previews: [{
+      actionRef: "git.push",
+      fields: [
+        { name: "remote_branch", value: "delivery", digest: "sha256:branch" },
+        { name: "expected_local_sha", value: "a".repeat(40), digest: "sha256:commit" },
+      ],
+    }],
     scopeGrant: {
       available: true,
       scopeKind: "session",

@@ -32,6 +32,7 @@ fn binding(arguments_hash: &str) -> ApprovalBinding {
         arguments_hash: arguments_hash.to_string(),
         action_count: 1,
         targets: vec!["write_file".to_string()],
+        previews: Vec::new(),
         scope: None,
     }
 }

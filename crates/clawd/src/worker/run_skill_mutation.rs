@@ -142,6 +142,7 @@ pub(super) fn replay_suppressed_run_skill_outcome(
     let extra = record
         .receipt
         .as_ref()
+        .or(record.reconciliation.as_ref())
         .and_then(|value| value.get("structured_extra"))
         .cloned();
     crate::skills::SkillRunOutcome {

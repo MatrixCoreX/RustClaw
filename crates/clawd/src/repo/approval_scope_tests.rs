@@ -47,6 +47,7 @@ fn signed_scope_grant_matches_only_exact_actor_session_and_scope() {
         arguments_hash: "sha256:args".to_string(),
         action_count: 1,
         targets: vec!["fs_basic".to_string()],
+        previews: Vec::new(),
         scope: Some(scope()),
     };
     let db = state.core.db.get().expect("db");
@@ -87,6 +88,7 @@ fn tampered_scope_grant_signature_fails_closed_and_revocation_is_immediate() {
         arguments_hash: "sha256:args".to_string(),
         action_count: 1,
         targets: vec!["fs_basic".to_string()],
+        previews: Vec::new(),
         scope: Some(scope()),
     };
     let db = state.core.db.get().expect("db");
@@ -144,6 +146,7 @@ fn expired_scope_grant_does_not_match() {
         arguments_hash: "sha256:args".to_string(),
         action_count: 1,
         targets: vec!["fs_basic".to_string()],
+        previews: Vec::new(),
         scope: Some(scope()),
     };
     let db = state.core.db.get().expect("db");

@@ -433,6 +433,12 @@ async fn run() -> anyhow::Result<()> {
     let config_path = resolve_startup_config_path()?;
     let config = AppConfig::load(&config_path)?;
     let workspace_root = std::env::current_dir()?;
+    let credential_store_path =
+        claw_core::git_remote_config::git_credential_store_path(&workspace_root);
+    claw_core::secrets::install_global(Arc::new(claw_core::secrets::EnvFileSecretsBroker::new(
+        credential_store_path,
+    )))
+    .map_err(|_| anyhow::anyhow!("credential_broker_already_installed"))?;
     info!("startup config_path={}", config_path);
     if let Some(skill_name) = resolve_offline_bundled_repair_skill()? {
         let snapshot = http::ui_routes::repair_bundled_skill_admission_offline(

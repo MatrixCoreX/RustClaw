@@ -666,7 +666,7 @@ pub(crate) async fn process_run_skill_task(
             &record.fingerprint_hash,
         );
     }
-    let result = if verification.allowed() {
+    let mut result = if verification.allowed() {
         match &mutation_guard {
             run_skill_mutation::DirectRunSkillMutationGuard::ReplaySuppressed(record) => Ok(
                 run_skill_mutation::replay_suppressed_run_skill_outcome(record),
@@ -677,7 +677,7 @@ pub(crate) async fn process_run_skill_task(
                     state,
                     task,
                     &prepared_input.skill_name,
-                    prepared_input.args,
+                    prepared_input.args.clone(),
                     execution_context.as_ref(),
                 )
                 .await
@@ -692,13 +692,47 @@ pub(crate) async fn process_run_skill_task(
         &result,
     ) {
         if let run_skill_mutation::DirectRunSkillMutationGuard::Acquired(lease) = &mutation_guard {
-            return run_skill_mutation::finalize_direct_run_skill_reconciliation(
+            match crate::agent_engine::mutation_ledger::reconcile_uncertain_mutation_from_registry(
                 state,
                 task,
+                lease,
                 &prepared_input.skill_name,
-                &lease.record.action_ref,
-                &lease.record.fingerprint_hash,
-            );
+                &prepared_input.args,
+            )
+            .await
+            {
+                Ok(crate::agent_engine::mutation_ledger::AutomaticMutationReconciliation::Applied(record)) => {
+                    result = Ok(run_skill_mutation::replay_suppressed_run_skill_outcome(&record));
+                }
+                Ok(crate::agent_engine::mutation_ledger::AutomaticMutationReconciliation::NotApplied(record)) => {
+                    return run_skill_mutation::finalize_direct_run_skill_reconciliation(
+                        state,
+                        task,
+                        &prepared_input.skill_name,
+                        &record.action_ref,
+                        &record.fingerprint_hash,
+                    );
+                }
+                Ok(crate::agent_engine::mutation_ledger::AutomaticMutationReconciliation::StillUnknown(record)) => {
+                    return run_skill_mutation::finalize_direct_run_skill_reconciliation(
+                        state,
+                        task,
+                        &prepared_input.skill_name,
+                        &record.action_ref,
+                        &record.fingerprint_hash,
+                    );
+                }
+                Ok(crate::agent_engine::mutation_ledger::AutomaticMutationReconciliation::NotDeclared)
+                | Err(_) => {
+                    return run_skill_mutation::finalize_direct_run_skill_reconciliation(
+                        state,
+                        task,
+                        &prepared_input.skill_name,
+                        &lease.record.action_ref,
+                        &lease.record.fingerprint_hash,
+                    );
+                }
+            }
         }
     }
 

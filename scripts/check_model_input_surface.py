@@ -27,9 +27,11 @@ MAX_EAGER_NATIVE_GROUPS = 9
 # domain catalogs to the global prompt.
 # Phase 3 adds the machine-owned task_plan group, and Phase 7 extends the
 # existing filesystem group with atomic preview/edit actions. WP6 adds one
-# bounded native memory group with five closed actions. These remain registry
-# contracts rather than a domain catalog in the global prompt.
-MAX_EAGER_PLANNER_CAPABILITIES = 89
+# bounded native memory group with five closed actions. The remote-delivery
+# closure adds one local-only `git.ahead_behind` observation to the existing
+# eager Git group; remote network skills remain disabled and on demand. These
+# remain registry contracts rather than a domain catalog in the global prompt.
+MAX_EAGER_PLANNER_CAPABILITIES = 90
 MARKDOWN_HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$")
 
 
@@ -157,7 +159,7 @@ planner_capabilities = [{ name = "demo.hidden" }]
         assert findings_for(oversized) == [
             f"global_tool_overlay_bytes_grew:{MAX_GLOBAL_TOOL_OVERLAY_BYTES + 1}>{MAX_GLOBAL_TOOL_OVERLAY_BYTES}",
             "eager_native_groups_grew:10>9",
-            "eager_planner_capabilities_grew:90>89",
+            "eager_planner_capabilities_grew:91>90",
         ]
         overlay.write_text("generic protocol\n### visible\n", encoding="utf-8")
         named_heading = inventory(overlay, registry)

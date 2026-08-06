@@ -266,6 +266,9 @@ fn execute_with_workspace_root_and_permissions(
     if local_write::is_local_write_action(&action) {
         return local_write::execute_local_write(&root, obj, &action);
     }
+    if action == "ahead_behind" {
+        return execute_ahead_behind(&root, obj, raw_action);
+    }
     let page = page_spec(obj)?;
 
     let mut input_meta = Map::new();
@@ -406,6 +409,207 @@ fn execute_with_workspace_root_and_permissions(
             "action": action,
             "subcommand": subcmd,
         })))
+    }
+}
+
+fn execute_ahead_behind(
+    root: &Path,
+    obj: &Map<String, Value>,
+    raw_action: &str,
+) -> Result<(String, Value), GitBasicError> {
+    let local_branch = optional_string(obj, "local_branch", "git_branch_name_invalid")?
+        .ok_or_else(|| {
+            GitBasicError::new("git_local_branch_missing", "git_local_branch_missing")
+        })?;
+    let remote = optional_string(obj, "remote", "git_remote_invalid")?
+        .ok_or_else(|| GitBasicError::new("git_remote_missing", "git_remote_missing"))?;
+    let remote_branch = optional_string(obj, "remote_branch", "git_branch_name_invalid")?
+        .ok_or_else(|| {
+            GitBasicError::new("git_remote_branch_missing", "git_remote_branch_missing")
+        })?;
+    validate_branch_name(root, local_branch)?;
+    validate_branch_name(root, remote_branch)?;
+    if remote.len() > 96
+        || remote.starts_with('-')
+        || !remote
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+    {
+        return Err(GitBasicError::new(
+            "git_remote_invalid",
+            "git_remote_invalid",
+        ));
+    }
+    let local_ref = format!("refs/heads/{local_branch}");
+    let tracking_ref = format!("refs/remotes/{remote}/{remote_branch}");
+    let local_sha = resolve_exact_ref(root, &local_ref)?.ok_or_else(|| {
+        GitBasicError::new("git_local_branch_not_found", "git_local_branch_not_found")
+    })?;
+    let tracking_sha = resolve_exact_ref(root, &tracking_ref)?;
+    let observed_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default();
+    let Some(tracking_sha) = tracking_sha else {
+        let output = "tracking_ref_exists=false".to_string();
+        let extra = json!({
+            "schema_version": 1,
+            "action": "ahead_behind",
+            "raw_action": raw_action,
+            "subcommand": "rev-list",
+            "exit_code": 0,
+            "effect": "observe",
+            "local_branch": local_branch,
+            "local_sha": local_sha,
+            "remote": remote,
+            "remote_branch": remote_branch,
+            "tracking_ref": tracking_ref,
+            "tracking_ref_exists": false,
+            "tracking_ref_may_be_stale": true,
+            "network_observed": false,
+            "ahead": Value::Null,
+            "behind": Value::Null,
+            "output": output,
+            "field_value": {
+                "action": "ahead_behind",
+                "tracking_ref_exists": false,
+                "local_branch": local_branch,
+                "remote_branch": remote_branch,
+            },
+            "provenance": {
+                "source": "git_cli",
+                "repository_root": root,
+                "head_revision": local_sha,
+                "observed_at": observed_at,
+                "operation_class": "read_only",
+            },
+        });
+        return Ok((output, extra));
+    };
+    let output = Command::new("git")
+        .current_dir(root)
+        .args([
+            "rev-list",
+            "--left-right",
+            "--count",
+            &format!("{local_sha}...{tracking_sha}"),
+        ])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|error| GitBasicError::new("git_spawn_failed", error.to_string()))?;
+    if !output.status.success() {
+        return Err(GitBasicError::new(
+            "git_ahead_behind_failed",
+            "git_ahead_behind_failed",
+        ));
+    }
+    let counts = String::from_utf8_lossy(&output.stdout);
+    let mut fields = counts.split_whitespace();
+    let ahead = fields
+        .next()
+        .and_then(|value| value.parse::<u64>().ok())
+        .ok_or_else(|| {
+            GitBasicError::new(
+                "git_ahead_behind_output_invalid",
+                "git_ahead_behind_output_invalid",
+            )
+        })?;
+    let behind = fields
+        .next()
+        .and_then(|value| value.parse::<u64>().ok())
+        .ok_or_else(|| {
+            GitBasicError::new(
+                "git_ahead_behind_output_invalid",
+                "git_ahead_behind_output_invalid",
+            )
+        })?;
+    if fields.next().is_some() {
+        return Err(GitBasicError::new(
+            "git_ahead_behind_output_invalid",
+            "git_ahead_behind_output_invalid",
+        ));
+    }
+    let machine_output = format!("ahead={ahead} behind={behind}");
+    let extra = json!({
+        "schema_version": 1,
+        "action": "ahead_behind",
+        "raw_action": raw_action,
+        "subcommand": "rev-list",
+        "exit_code": 0,
+        "effect": "observe",
+        "local_branch": local_branch,
+        "local_sha": local_sha,
+        "remote": remote,
+        "remote_branch": remote_branch,
+        "tracking_ref": tracking_ref,
+        "tracking_sha": tracking_sha,
+        "tracking_ref_exists": true,
+        "tracking_ref_may_be_stale": true,
+        "network_observed": false,
+        "ahead": ahead,
+        "behind": behind,
+        "output": machine_output,
+        "field_value": {
+            "action": "ahead_behind",
+            "local_branch": local_branch,
+            "remote_branch": remote_branch,
+            "ahead": ahead,
+            "behind": behind,
+            "tracking_ref_exists": true,
+        },
+        "provenance": {
+            "source": "git_cli",
+            "repository_root": root,
+            "head_revision": local_sha,
+            "observed_at": observed_at,
+            "operation_class": "read_only",
+        },
+    });
+    Ok((machine_output, extra))
+}
+
+fn validate_branch_name(root: &Path, branch: &str) -> Result<(), GitBasicError> {
+    if branch.len() > 255 || branch.starts_with('-') || branch.chars().any(char::is_control) {
+        return Err(GitBasicError::new(
+            "git_branch_name_invalid",
+            "git_branch_name_invalid",
+        ));
+    }
+    let status = Command::new("git")
+        .current_dir(root)
+        .args(["check-ref-format", "--branch", branch])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map_err(|error| GitBasicError::new("git_spawn_failed", error.to_string()))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(GitBasicError::new(
+            "git_branch_name_invalid",
+            "git_branch_name_invalid",
+        ))
+    }
+}
+
+fn resolve_exact_ref(root: &Path, reference: &str) -> Result<Option<String>, GitBasicError> {
+    let output = Command::new("git")
+        .current_dir(root)
+        .args(["rev-parse", "--verify", "--end-of-options", reference])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|error| GitBasicError::new("git_spawn_failed", error.to_string()))?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let sha = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .to_ascii_lowercase();
+    if matches!(sha.len(), 40 | 64) && sha.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        Ok(Some(sha))
+    } else {
+        Err(GitBasicError::new("git_ref_invalid", "git_ref_invalid"))
     }
 }
 
@@ -1064,14 +1268,27 @@ fn append_remote_list_extra(
     let remotes = parse_remote_list(text);
     let remote_names = unique_remote_names(&remotes);
     let remote_urls = unique_remote_urls(&remotes);
+    let eligible_remote_targets = remotes
+        .iter()
+        .filter(|remote| remote.get("remote_delivery_eligible") == Some(&Value::Bool(true)))
+        .cloned()
+        .collect::<Vec<_>>();
     root.insert("remotes".to_string(), json!(remotes));
     root.insert("remote_names".to_string(), json!(remote_names.clone()));
     root.insert("remote_urls".to_string(), json!(remote_urls.clone()));
     root.insert("remote_count".to_string(), json!(remotes.len()));
+    root.insert(
+        "eligible_remote_targets".to_string(),
+        json!(eligible_remote_targets.clone()),
+    );
     field_value.insert("remotes".to_string(), json!(remote_names.clone()));
     field_value.insert("remote_names".to_string(), json!(remote_names));
     field_value.insert("remote_urls".to_string(), json!(remote_urls));
     field_value.insert("remote_count".to_string(), json!(remotes.len()));
+    field_value.insert(
+        "eligible_remote_targets".to_string(),
+        json!(eligible_remote_targets),
+    );
 }
 
 fn append_show_file_at_rev_extra(
@@ -1114,11 +1331,21 @@ fn parse_remote_list(text: &str) -> Vec<Value> {
                 .next()
                 .map(|value| value.trim_matches(['(', ')']))
                 .unwrap_or("");
-            Some(json!({
+            let mut remote = json!({
                 "name": name,
                 "url": url,
                 "direction": direction,
-            }))
+                "remote_delivery_eligible": false,
+            });
+            if let Ok(canonical) = claw_core::git_remote_config::canonical_github_remote_url(url) {
+                remote["remote_delivery_eligible"] = json!(true);
+                remote["canonical_url"] = json!(canonical.canonical_url);
+                remote["remote_url_digest"] = json!(canonical.url_digest);
+                remote["host"] = json!(canonical.host);
+                remote["owner"] = json!(canonical.owner);
+                remote["repository"] = json!(canonical.repository);
+            }
+            Some(remote)
         })
         .collect()
 }

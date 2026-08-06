@@ -23,7 +23,7 @@ pub(crate) mod loop_control;
 mod loop_state_contract_evidence;
 mod loop_state_seed;
 mod media_artifact_plan;
-mod mutation_ledger;
+pub(crate) mod mutation_ledger;
 pub(crate) use mutation_ledger::{
     load_task_mutation_reconciliation_directive, safe_mutation_outcome_projection,
     settle_verified_not_applied_mutation,

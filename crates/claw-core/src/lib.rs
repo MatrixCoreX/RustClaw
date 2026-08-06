@@ -16,6 +16,7 @@ pub mod channel_progress;
 pub mod channel_provider_error;
 pub mod channel_whatsapp_cloud;
 pub mod config;
+pub mod git_remote_config;
 pub mod hard_rules;
 pub mod model_catalog;
 pub mod model_turn;

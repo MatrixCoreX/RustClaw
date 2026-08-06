@@ -1,0 +1,79 @@
+# AUTO-GENERATED: sync_skill_manifests.py
+schema_version = 2
+
+[package]
+name = "git_forge"
+version = "0.1.8"
+description = "Create and inspect GitHub pull requests only for a repository and head SHA proven by a verified push receipt."
+protocol = "agent-jsonl-v1"
+supported_os = ["linux", "macos"]
+supported_arch = ["x86_64", "aarch64"]
+license = "MIT"
+source = "optional_skills/git_forge"
+
+[registry]
+name = "git_forge"
+capability_policy_source = "registry"
+
+[build]
+adapter = "cargo"
+source_root = "."
+package = "git-forge-skill"
+binary = "git-forge-skill"
+lockfile = "Cargo.lock"
+network = "approval_required"
+lifecycle_scripts = false
+
+[install]
+host_dependencies = ["git"]
+runtime_assets = []
+
+[run]
+launcher = "native"
+entrypoint = "runtime/bin/git-forge-skill"
+working_directory = "."
+timeout_seconds = 120
+environment_allowlist = ["GITHUB_API_TOKEN", "GITHUB_GIT_TOKEN", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "PATH", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
+smoke_args = {}
+
+[security]
+capability_policy_source = "registry"
+sandbox = "required"
+runtime_network = false
+inherit_credentials = false
+
+[storage]
+kind = "none"
+schema_version = 1
+migration_owner = "git_forge"
+
+[lifecycle]
+config_files = []
+preserve_data_on_uninstall = true
+update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { "type" = "object", "additionalProperties" = false, "required" = ["action", "connection_id", "push_receipt_ref"], "properties" = { "action" = { "type" = "string", "enum" = ["create_pr", "list_prs", "pr_status", "reconcile_create_pr"] }, "connection_id" = { "type" = "string", "minLength" = 1, "maxLength" = 96 }, "push_receipt_ref" = { "type" = "string", "minLength" = 64, "maxLength" = 16384 }, "expected_head_sha" = { "type" = "string", "pattern" = "^([0-9a-f]{40}|[0-9a-f]{64})$" }, "head" = { "type" = "string", "minLength" = 1, "maxLength" = 255 }, "base" = { "type" = "string", "minLength" = 1, "maxLength" = 255 }, "title" = { "type" = "string", "minLength" = 1, "maxLength" = 256 }, "body" = { "type" = "string", "maxLength" = 65536 }, "draft" = { "type" = "boolean" }, "state" = { "type" = "string", "enum" = ["open", "closed", "all"] }, "number" = { "type" = "integer", "minimum" = 1 } } }
+output_schema = { "type" = "object", "required" = ["text", "extra"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
+config_entry_points = []
+capabilities = [{ "name" = "forge.create_pr", "effect" = "external", "execution_mode" = "sync_short", "required" = ["connection_id", "push_receipt_ref", "expected_head_sha", "head", "base", "title", "body", "draft"], "optional" = [], "timeout_seconds" = 120, "action" = "create_pr" }, { "name" = "forge.list_prs", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["connection_id", "push_receipt_ref"], "optional" = ["state", "head"], "timeout_seconds" = 120, "action" = "list_prs" }, { "name" = "forge.pr_status", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["connection_id", "push_receipt_ref", "number"], "optional" = [], "timeout_seconds" = 120, "action" = "pr_status" }, { "name" = "forge.create_pr_reconcile", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["connection_id", "push_receipt_ref", "expected_head_sha", "head", "base"], "optional" = [], "timeout_seconds" = 120, "action" = "reconcile_create_pr" }]
+
+[capability_request.permissions]
+llm_gateway = false
+network = true
+filesystem_read = true
+filesystem_write = false
+subprocess = true
+package_install = false
+privilege_escalation = false
+external_publish = true
+credential_refs = ["github_api_token", "github_git_token"]
+
+[capability_request.artifact_contract]
+kinds = []
+output_fields = []
+
+[capability_request.evidence_contract]
+required = false
+selectors = []

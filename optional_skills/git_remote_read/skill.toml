@@ -1,0 +1,79 @@
+# AUTO-GENERATED: sync_skill_manifests.py
+schema_version = 2
+
+[package]
+name = "git_remote_read"
+version = "0.1.8"
+description = "Observe an allowlisted GitHub remote or fetch exactly one approved remote-tracking branch. Public and authenticated actions are separate."
+protocol = "agent-jsonl-v1"
+supported_os = ["linux", "macos"]
+supported_arch = ["x86_64", "aarch64"]
+license = "MIT"
+source = "optional_skills/git_remote_read"
+
+[registry]
+name = "git_remote_read"
+capability_policy_source = "registry"
+
+[build]
+adapter = "cargo"
+source_root = "."
+package = "git-remote-read-skill"
+binary = "git-remote-read-skill"
+lockfile = "Cargo.lock"
+network = "approval_required"
+lifecycle_scripts = false
+
+[install]
+host_dependencies = ["git"]
+runtime_assets = []
+
+[run]
+launcher = "native"
+entrypoint = "runtime/bin/git-remote-read-skill"
+working_directory = "."
+timeout_seconds = 90
+environment_allowlist = ["GITHUB_GIT_TOKEN", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "PATH", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
+smoke_args = {}
+
+[security]
+capability_policy_source = "registry"
+sandbox = "workspace_write"
+runtime_network = false
+inherit_credentials = false
+
+[storage]
+kind = "none"
+schema_version = 1
+migration_owner = "git_remote_read"
+
+[lifecycle]
+config_files = []
+preserve_data_on_uninstall = true
+update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { "type" = "object", "additionalProperties" = false, "required" = ["action", "connection_id", "remote", "remote_branch", "expected_remote_url_digest"], "properties" = { "action" = { "type" = "string", "enum" = ["ls_remote_public", "ls_remote_authenticated", "fetch_public", "fetch_authenticated"] }, "repo" = { "type" = "string" }, "connection_id" = { "type" = "string", "minLength" = 1, "maxLength" = 96 }, "remote" = { "type" = "string", "minLength" = 1, "maxLength" = 96 }, "remote_branch" = { "type" = "string", "minLength" = 1, "maxLength" = 255 }, "expected_remote_url_digest" = { "type" = "string", "pattern" = "^sha256:[0-9a-f]{64}$" } } }
+output_schema = { "type" = "object", "required" = ["text", "extra"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
+config_entry_points = []
+capabilities = [{ "name" = "git.remote_ls_public", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["connection_id", "remote", "remote_branch", "expected_remote_url_digest"], "optional" = ["repo"], "timeout_seconds" = 90, "action" = "ls_remote_public" }, { "name" = "git.remote_ls_authenticated", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["connection_id", "remote", "remote_branch", "expected_remote_url_digest"], "optional" = ["repo"], "timeout_seconds" = 90, "action" = "ls_remote_authenticated" }, { "name" = "git.fetch_public", "effect" = "mutate", "execution_mode" = "sync_short", "required" = ["connection_id", "remote", "remote_branch", "expected_remote_url_digest"], "optional" = ["repo"], "timeout_seconds" = 90, "action" = "fetch_public" }, { "name" = "git.fetch_authenticated", "effect" = "mutate", "execution_mode" = "sync_short", "required" = ["connection_id", "remote", "remote_branch", "expected_remote_url_digest"], "optional" = ["repo"], "timeout_seconds" = 90, "action" = "fetch_authenticated" }]
+
+[capability_request.permissions]
+llm_gateway = false
+network = true
+filesystem_read = true
+filesystem_write = true
+subprocess = true
+package_install = false
+privilege_escalation = false
+external_publish = false
+credential_refs = ["github_git_token"]
+
+[capability_request.artifact_contract]
+kinds = []
+output_fields = []
+
+[capability_request.evidence_contract]
+required = false
+selectors = []

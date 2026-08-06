@@ -319,7 +319,7 @@ planner_capabilities = [
     )
     .expect_err("duplicate aliases must fail");
 
-    assert!(error.contains("duplicate planner capability alias"));
+    assert!(error.contains("planner_capability_alias_duplicate"));
 }
 
 #[test]
@@ -1587,8 +1587,8 @@ planner_capabilities = [
 #[test]
 fn registry_rejects_unknown_or_self_required_companions() {
     for (companion, expected) in [
-        ("rss.missing", "requires unknown companion"),
-        ("web.search_results", "cannot require itself"),
+        ("rss.missing", "planner_required_companion_unknown"),
+        ("web.search_results", "planner_required_companion_self"),
     ] {
         let source = format!(
             r#"
@@ -1602,5 +1602,79 @@ planner_capabilities = [
         let error = SkillsRegistry::load_from_str(&source)
             .expect_err("invalid companion capability must fail registry load");
         assert!(error.contains(expected), "{error}");
+    }
+}
+
+#[test]
+fn registry_accepts_only_read_only_reconciliation_for_external_mutations() {
+    let registry = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "publisher"
+planner_capabilities = [
+  { name = "publish.create", action = "create", effect = "external", idempotent = false, external_publish = true, reconciliation_capability = "publish.reconcile" },
+  { name = "publish.reconcile", action = "reconcile", effect = "observe", idempotent = true, external_publish = false },
+]
+"#,
+    )
+    .expect("valid reconciliation mapping");
+    assert_eq!(
+        registry.planner_capabilities("publisher")[0]
+            .reconciliation_capability
+            .as_deref(),
+        Some("publish.reconcile")
+    );
+
+    for source in [
+        r#"
+[[skills]]
+name = "publisher"
+planner_capabilities = [
+  { name = "publish.create", effect = "external", idempotent = false, external_publish = true, reconciliation_capability = "publish.missing" },
+]
+"#,
+        r#"
+[[skills]]
+name = "publisher"
+planner_capabilities = [
+  { name = "publish.create", effect = "external", idempotent = false, external_publish = true, reconciliation_capability = "publish.reconcile" },
+  { name = "publish.reconcile", effect = "external", idempotent = false, external_publish = true },
+]
+"#,
+    ] {
+        assert!(SkillsRegistry::load_from_str(source).is_err());
+    }
+}
+
+#[test]
+fn registry_approval_preview_is_argument_scoped_and_rejects_secrets() {
+    let valid = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "publisher"
+input_schema = { type = "object", properties = { target = { type = "string" } } }
+planner_capabilities = [
+  { name = "publish.create", effect = "external", required = ["target"], approval_preview_fields = ["target"] },
+]
+"#,
+    )
+    .expect("safe preview field");
+    assert_eq!(
+        valid.planner_capabilities("publisher")[0].approval_preview_fields,
+        vec!["target"]
+    );
+
+    for field in ["api_key", "undeclared"] {
+        let source = format!(
+            r#"
+[[skills]]
+name = "publisher"
+input_schema = {{ type = "object", properties = {{ api_key = {{ type = "string" }}, target = {{ type = "string" }} }} }}
+planner_capabilities = [
+  {{ name = "publish.create", effect = "external", required = ["api_key", "target"], approval_preview_fields = ["{field}"] }},
+]
+"#
+        );
+        assert!(SkillsRegistry::load_from_str(&source).is_err(), "{field}");
     }
 }

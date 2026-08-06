@@ -598,6 +598,36 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
         ("fs_basic", &["fs.read", "fs.write"]),
         ("fs_search", &["fs.read"]),
         ("git_basic", &["fs.read", "fs.write"]),
+        (
+            "git_forge",
+            &[
+                "exec",
+                "fs.read",
+                "net",
+                "secrets.github_api_token",
+                "secrets.github_git_token",
+            ],
+        ),
+        (
+            "git_remote_publish",
+            &[
+                "exec",
+                "fs.read",
+                "fs.write",
+                "net",
+                "secrets.github_git_token",
+            ],
+        ),
+        (
+            "git_remote_read",
+            &[
+                "exec",
+                "fs.read",
+                "fs.write",
+                "net",
+                "secrets.github_git_token",
+            ],
+        ),
         ("http_basic", &["net"]),
         ("image_edit", &["fs.write", "llm", "net"]),
         ("list_dir", &["fs.read"]),
@@ -658,6 +688,36 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
         ("fs_basic", &["fs.read", "fs.write"]),
         ("fs_search", &["fs.read"]),
         ("git_basic", &["fs.read", "fs.write"]),
+        (
+            "git_forge",
+            &[
+                "exec",
+                "fs.read",
+                "net",
+                "secrets.github_api_token",
+                "secrets.github_git_token",
+            ],
+        ),
+        (
+            "git_remote_publish",
+            &[
+                "exec",
+                "fs.read",
+                "fs.write",
+                "net",
+                "secrets.github_git_token",
+            ],
+        ),
+        (
+            "git_remote_read",
+            &[
+                "exec",
+                "fs.read",
+                "fs.write",
+                "net",
+                "secrets.github_git_token",
+            ],
+        ),
         ("http_basic", &["net"]),
         ("image_edit", &["fs.write", "llm", "net"]),
         (
@@ -938,6 +998,59 @@ fn skill_store_optional_skills_are_on_demand_and_disabled_by_default() {
     }
 }
 
+#[test]
+fn git_delivery_skill_store_manifests_project_git_dependency_and_network_consent() {
+    let root = workspace_root();
+    for skill_name in ["git_remote_read", "git_remote_publish", "git_forge"] {
+        let path = root
+            .join("optional_skills")
+            .join(skill_name)
+            .join("skill.toml");
+        let manifest = skill_sdk::PackageManifest::load(&path).expect("load Git skill manifest");
+        assert_eq!(manifest.install.host_dependencies, vec!["git"]);
+        assert_eq!(
+            manifest.build.network,
+            skill_sdk::BuildNetworkPolicy::ApprovalRequired
+        );
+        assert_eq!(manifest.install.runtime_assets, Vec::<String>::new());
+    }
+}
+
+#[test]
+fn git_delivery_permissions_are_action_scoped_and_local_git_stays_unprivileged() {
+    let registry =
+        SkillsRegistry::load_from_path(&workspace_root().join("configs/skills_registry.toml"))
+            .expect("load registry");
+    let local = registry.get("git_basic").expect("local Git skill");
+    assert!(local.fixed_on);
+    assert!(!local.resolved_capabilities.contains(&Capability::Net));
+    assert!(!local
+        .resolved_capabilities
+        .iter()
+        .any(|capability| matches!(capability, Capability::Secrets(_))));
+
+    let remote_read = registry.get("git_remote_read").expect("remote read skill");
+    let mapping = |action: &str| {
+        remote_read
+            .planner_capabilities
+            .iter()
+            .find(|mapping| mapping.action.as_deref() == Some(action))
+            .expect("remote read action")
+    };
+    assert_eq!(mapping("ls_remote_public").credential_access, Some(false));
+    assert_eq!(mapping("fetch_public").credential_access, Some(false));
+    assert_eq!(
+        mapping("ls_remote_authenticated").credential_access,
+        Some(true)
+    );
+    assert_eq!(mapping("fetch_authenticated").credential_access, Some(true));
+    for skill_name in ["git_remote_read", "git_remote_publish", "git_forge"] {
+        let entry = registry.get(skill_name).expect("Git delivery skill");
+        assert!(!entry.enabled);
+        assert_eq!(entry.install_mode.as_deref(), Some("on_demand"));
+    }
+}
+
 /// planner-first 收敛：已移除的技能不应再通过 registry 重新暴露。
 #[test]
 fn removed_skill_stubs_are_absent_from_registries() {
@@ -1005,6 +1118,9 @@ fn provision_secret_envs_matches_manifest_expectation() {
     let main_expected_secrets_envs: HashMap<&str, Vec<&str>> = HashMap::from([
         // §E1.c：image_generate 当前默认 default_vendor=minimax（见 configs/image.toml）。
         ("image_generate", vec!["IMAGE_GENERATION_MINIMAX_API_KEY"]),
+        ("git_forge", vec!["GITHUB_API_TOKEN", "GITHUB_GIT_TOKEN"]),
+        ("git_remote_publish", vec!["GITHUB_GIT_TOKEN"]),
+        ("git_remote_read", vec!["GITHUB_GIT_TOKEN"]),
         (
             "map_merchant",
             vec![
@@ -1017,6 +1133,9 @@ fn provision_secret_envs_matches_manifest_expectation() {
     ]);
     let docker_expected_secrets_envs: HashMap<&str, Vec<&str>> = HashMap::from([
         ("image_generate", vec!["IMAGE_GENERATION_MINIMAX_API_KEY"]),
+        ("git_forge", vec!["GITHUB_API_TOKEN", "GITHUB_GIT_TOKEN"]),
+        ("git_remote_publish", vec!["GITHUB_GIT_TOKEN"]),
+        ("git_remote_read", vec!["GITHUB_GIT_TOKEN"]),
         (
             "map_merchant",
             vec![

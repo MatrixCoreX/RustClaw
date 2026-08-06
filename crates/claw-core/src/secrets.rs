@@ -47,6 +47,12 @@ use uuid::Uuid;
 
 use crate::skill_registry::Capability;
 
+#[path = "secrets_file.rs"]
+mod file;
+pub use file::{
+    delete_file_secret, file_secret_is_configured, set_file_secret, EnvFileSecretsBroker,
+};
+
 /// secret 内容的强类型包装。
 ///
 /// 不实现 [`fmt::Debug`] / [`fmt::Display`] 的明文格式化，避免被 `dbg!` /

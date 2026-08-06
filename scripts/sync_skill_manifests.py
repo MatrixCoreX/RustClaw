@@ -260,6 +260,17 @@ def render_manifest(skill: CargoSkill, entry: dict[str, object], version: str) -
         else ""
     )
     request = capability_request_projection(skill, entry, timeout)
+    host_dependencies = (
+        sorted({str(value) for value in entry.get("required_bins", [])})
+        if entry.get("install_mode") == "on_demand"
+        else []
+    )
+    build_network = "approval_required" if host_dependencies else "deny"
+    install_section = (
+        f'\n\n[install]\nhost_dependencies = {json.dumps(host_dependencies)}\nruntime_assets = []'
+        if host_dependencies
+        else ""
+    )
     progress_frames = (
         "\nprogress_frames = true" if entry.get("progress_frames") is True else ""
     )
@@ -286,8 +297,8 @@ source_root = "."
 package = {json.dumps(skill.package)}
 binary = {json.dumps(skill.binary)}
 lockfile = "Cargo.lock"
-network = "deny"
-lifecycle_scripts = false
+network = {json.dumps(build_network)}
+lifecycle_scripts = false{install_section}
 
 [run]
 launcher = "native"
@@ -342,7 +353,7 @@ selectors = {toml_literal(request["evidence_contract"]["selectors"])}
 
 
 def sync_manifests(skills: dict[str, CargoSkill], entries: list[dict[str, object]], check: bool) -> int:
-    version = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))["workspace"]["package"]["version"]
+    workspace_version = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))["workspace"]["package"]["version"]
     changed = 0
     for entry in entries:
         if entry.get("kind") != "runner":
@@ -360,6 +371,7 @@ def sync_manifests(skills: dict[str, CargoSkill], entries: list[dict[str, object
                 raise ValueError(f"Cargo runner skill has no Cargo source: {name}")
             continue
         path = skill.source_dir / "skill.toml"
+        version = str(entry.get("package_version") or workspace_version)
         expected = render_manifest(skill, entry, str(version))
         current = path.read_text(encoding="utf-8") if path.is_file() else None
         if current is not None and MARKER not in current:

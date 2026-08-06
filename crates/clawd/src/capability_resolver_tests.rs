@@ -1190,7 +1190,7 @@ fn workspace_edit_text_resolves_batch_without_a_second_runtime_action() {
 }
 
 #[test]
-fn local_git_mutations_resolve_from_registry_while_remote_push_is_absent() {
+fn local_and_remote_git_capabilities_resolve_to_separate_registry_skills() {
     let state = state_with_workspace_registry();
     for (capability, action_name, input) in [
         (
@@ -1230,8 +1230,17 @@ fn local_git_mutations_resolve_from_registry_while_remote_push_is_absent() {
 
     let (push, record) =
         resolve_capability_action_with_record_for_state(&state, "git.push", json!({}));
-    assert!(push.is_none());
-    assert_eq!(record.reason_code, "capability_unavailable");
+    let Some(AgentAction::CallSkill { skill, args }) = push else {
+        panic!("expected registry skill action for git.push");
+    };
+    assert_eq!(skill, "git_remote_publish");
+    assert_eq!(args.get("action").and_then(Value::as_str), Some("push"));
+    assert_eq!(
+        record.reason_code,
+        "capability_resolver_registry_mapping_resolved"
+    );
+    assert_eq!(record.source, "registry");
+    assert_eq!(record.capability_ref, "git.push");
 }
 
 #[test]

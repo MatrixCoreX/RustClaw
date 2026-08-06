@@ -68,6 +68,7 @@ pub(super) fn catalog_entries_for_task(
                     "subprocess": capability.subprocess,
                     "package_install": capability.package_install,
                     "privilege_escalation": capability.privilege_escalation,
+                    "reconciliation_capability": capability.reconciliation_capability,
                 },
             });
             let canonical = canonical_json(&contract);
