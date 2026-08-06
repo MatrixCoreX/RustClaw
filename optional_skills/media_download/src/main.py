@@ -1676,6 +1676,31 @@ def respond(
             "review_required": True,
         }
         extra["transcription_review"] = transcription_review
+    if action == "transcribe" and _bool(args, "extract_audio_only", False):
+        extracted_audio = next(
+            (
+                item
+                for item in artifacts
+                if item.get("artifact_role") == "extracted_audio"
+            ),
+            None,
+        )
+        if extracted_audio is not None:
+            extra["processing_outputs"] = {
+                "extracted_audio": extracted_audio,
+            }
+            if not deliver_to_user:
+                audio_path = str(extracted_audio["path"])
+                extra["followup_policy"] = {
+                    "next_action": "preview_transcription",
+                    "capability": "audio.preview_transcribe",
+                    "input_field": "audio_path",
+                    "input_value": audio_path,
+                    "fallback_capability": "media_download.transcribe",
+                    "fallback_input_field": "input_path",
+                    "fallback_input_value": audio_path,
+                    "deliver_intermediate": False,
+                }
     if delivery is not None:
         extra["delivery"] = delivery
     if saved_files is not None:

@@ -53,6 +53,16 @@ fn write(path: &str) -> AgentAction {
     }
 }
 
+fn update_plan() -> AgentAction {
+    AgentAction::CallCapability {
+        capability: "task.plan_update".to_string(),
+        args: serde_json::json!({
+            "plan_revision": 2,
+            "updates": [{"step": 1, "status": "completed"}]
+        }),
+    }
+}
+
 fn dotted_read(path: &str) -> AgentAction {
     AgentAction::CallCapability {
         capability: "batch.dotted_read".to_string(),
@@ -151,6 +161,25 @@ fn runtime_returns_control_after_read_batch_or_material_action() {
     assert_eq!(
         return_control_boundary_after_action(&state, &reads, 2, 8),
         Some("material_action_observed")
+    );
+}
+
+#[test]
+fn task_plan_bookkeeping_does_not_drop_the_verified_action_tail() {
+    let state = state_with_batch_registry();
+    let actions = vec![update_plan(), write("transcript.txt")];
+
+    assert_eq!(
+        return_control_boundary_after_action(&state, &actions, 0, actions.len()),
+        None
+    );
+    assert_eq!(
+        return_control_boundary_after_action(&state, &actions, 1, actions.len()),
+        Some("material_action_observed")
+    );
+    assert_eq!(
+        planner_action_dependencies(Some(&state), &actions),
+        vec![vec![], vec!["step_1".to_string()]]
     );
 }
 

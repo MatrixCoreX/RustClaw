@@ -149,6 +149,64 @@ fn rejects_untrusted_or_failed_async_completion_artifacts() {
 }
 
 #[test]
+fn never_materializes_internal_skill_output_records() {
+    let workspace = TempWorkspace::new();
+    let output = workspace
+        .path()
+        .join(".agent-runtime/artifacts/skill-output/task-1/system_basic.json");
+    fs::create_dir_all(output.parent().unwrap()).unwrap();
+    fs::write(&output, b"{\"internal\":true}").unwrap();
+    let result = json!({
+        "text": "done",
+        "task_journal": {"trace": {"capability_results": [{
+            "status": "ok",
+            "artifacts": [{
+                "id": "skill-output:invocation-1",
+                "path": output.display().to_string(),
+                "media_type": "application/json"
+            }],
+            "data": {}
+        }]}}
+    });
+
+    let materialized =
+        materialize_task_result_artifacts(workspace.path(), "task-internal", &result.to_string())
+            .unwrap();
+    let value: Value = serde_json::from_str(&materialized).unwrap();
+
+    assert!(manifests_from_result(Some(&value)).is_empty());
+}
+
+#[test]
+fn explicit_save_only_capability_never_materializes_its_files() {
+    let workspace = TempWorkspace::new();
+    let output = workspace.path().join("private").join("audio.wav");
+    fs::create_dir_all(output.parent().unwrap()).unwrap();
+    fs::write(&output, b"audio").unwrap();
+    let result = json!({
+        "text": "done",
+        "task_journal": {"trace": {"capability_results": [{
+            "status": "ok",
+            "artifacts": [{
+                "id": "private-audio",
+                "path": output.display().to_string(),
+                "media_type": "audio/wav"
+            }],
+            "data": {"extra": {
+                "delivery": {"intent": "save_only", "deliver_to_user": false}
+            }}
+        }]}}
+    });
+
+    let materialized =
+        materialize_task_result_artifacts(workspace.path(), "task-private", &result.to_string())
+            .unwrap();
+    let value: Value = serde_json::from_str(&materialized).unwrap();
+
+    assert!(manifests_from_result(Some(&value)).is_empty());
+}
+
+#[test]
 fn legacy_manifest_is_normalized_only_by_the_central_decoder() {
     let value = json!({
         "artifacts": [{
