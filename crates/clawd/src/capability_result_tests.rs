@@ -4,6 +4,63 @@ use claw_core::capability_result::{
 use serde_json::json;
 
 #[test]
+fn async_completion_replaces_the_matching_waiting_result() {
+    let mut envelope = super::successful_execution_envelope(
+        "media_download.transcribe",
+        "step_3",
+        &json!({"action": "transcribe"}),
+        "pending",
+        Some(&json!({
+            "pending_async_job": {
+                "job_id": "local_process:job-3",
+                "status": "accepted"
+            }
+        })),
+    );
+    assert_eq!(envelope.status, CapabilityResultStatus::Waiting);
+    assert!(envelope.continuation.is_some());
+
+    assert!(super::settle_waiting_async_result(
+        &mut envelope,
+        "local_process:job-3",
+        &json!({
+            "request_id": "request-3",
+            "status": "ok",
+            "text": "saved",
+            "extra": {
+                "delivery": {"intent": "save_only", "deliver_to_user": false},
+                "saved_files": [{
+                    "artifact_role": "extracted_audio",
+                    "path": "/workspace/audio.wav",
+                    "mime_type": "audio/wav"
+                }],
+                "followup_policy": {
+                    "capability": "audio.preview_transcribe",
+                    "input_field": "audio_path",
+                    "input_value": "/workspace/audio.wav"
+                }
+            },
+            "error_text": null
+        })
+    ));
+
+    assert_eq!(envelope.status, CapabilityResultStatus::Ok);
+    assert_eq!(envelope.continuation, None);
+    assert_eq!(envelope.delivery.intent, CapabilityDeliveryIntent::Silent);
+    assert_eq!(
+        envelope
+            .data
+            .pointer("/extra/followup_policy/input_value")
+            .and_then(serde_json::Value::as_str),
+        Some("/workspace/audio.wav")
+    );
+    assert_eq!(
+        envelope.provenance["source"],
+        "async_job_completion_checkpoint"
+    );
+}
+
+#[test]
 fn successful_result_wraps_json_and_extra_as_untrusted_data() {
     let envelope = super::successful_execution_envelope(
         "fs_basic",

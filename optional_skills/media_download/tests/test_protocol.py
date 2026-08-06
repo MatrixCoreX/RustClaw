@@ -394,6 +394,53 @@ class AdapterTest(unittest.TestCase):
         self.assertNotIn("transcription", response["extra"])
         self.assertNotIn("transcription_review", response["extra"])
 
+    def test_internal_audio_extraction_binds_the_exact_stt_followup_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            artifacts = workspace / "artifacts"
+            workspace.mkdir()
+            video = workspace / "clip.mp4"
+            video.write_bytes(b"video")
+
+            def fake_run(command, **kwargs):
+                output_dir = Path(command[command.index("--output-dir") + 1])
+                output_dir.mkdir(parents=True, exist_ok=True)
+                (output_dir / "clip_audio.wav").write_bytes(b"audio")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            request = {
+                "request_id": "extract-audio-internal-1",
+                "args": {
+                    "action": "transcribe",
+                    "input_path": str(video),
+                    "extract_audio_only": True,
+                    "deliver_to_user": False,
+                },
+                "context": {
+                    "artifact_output_directory": str(artifacts),
+                    "workspace_root": str(workspace),
+                    "locale": "zh-CN",
+                    "permissions": {"allow_path_outside_workspace": False},
+                },
+                "user_id": 1,
+                "chat_id": 1,
+            }
+            with mock.patch.object(self.skill.subprocess, "run", side_effect=fake_run):
+                response = self.skill.respond(request)
+
+        audio_path = response["extra"]["processing_outputs"]["extracted_audio"]["path"]
+        followup = response["extra"]["followup_policy"]
+        self.assertEqual(response["extra"]["artifacts"], [])
+        self.assertEqual(
+            response["extra"]["delivery"],
+            {"intent": "save_only", "deliver_to_user": False},
+        )
+        self.assertEqual(followup["capability"], "audio.preview_transcribe")
+        self.assertEqual(followup["input_field"], "audio_path")
+        self.assertEqual(followup["input_value"], audio_path)
+        self.assertEqual(followup["fallback_input_value"], audio_path)
+
     def test_download_routes_profile_checkpoints_to_private_skill_storage(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

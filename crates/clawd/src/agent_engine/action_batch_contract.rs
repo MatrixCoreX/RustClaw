@@ -5,8 +5,17 @@ use crate::{AgentAction, AppState};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SameTurnActionClass {
     IndependentRead,
+    ControlPlaneBookkeeping,
     MaterialBoundary,
     Discussion,
+}
+
+fn is_control_plane_bookkeeping(action: &AgentAction) -> bool {
+    matches!(
+        action,
+        AgentAction::CallCapability { capability, .. }
+            if matches!(capability.trim(), "task.plan_set" | "task.plan_update")
+    )
 }
 
 fn value_contains_runtime_reference(value: &Value) -> bool {
@@ -96,6 +105,9 @@ fn policy_proves_parallel_read(state: &AppState, executable: &str, args: &Value)
 }
 
 fn classify_action(state: &AppState, action: &AgentAction) -> SameTurnActionClass {
+    if is_control_plane_bookkeeping(action) {
+        return SameTurnActionClass::ControlPlaneBookkeeping;
+    }
     let Some(resolved) = resolved_executable_action(state, action) else {
         return match action {
             AgentAction::Think { .. }
@@ -188,7 +200,9 @@ pub(super) fn planner_action_dependencies(
                         .collect(),
                 );
             }
-            SameTurnActionClass::MaterialBoundary | SameTurnActionClass::Discussion => {
+            SameTurnActionClass::ControlPlaneBookkeeping
+            | SameTurnActionClass::MaterialBoundary
+            | SameTurnActionClass::Discussion => {
                 let prior = if open_parallel_reads.is_empty() {
                     barrier.iter().cloned().collect()
                 } else {
@@ -223,6 +237,7 @@ pub(super) fn return_control_boundary_after_action(
                 Some("independent_read_batch_observed")
             }
         }
+        SameTurnActionClass::ControlPlaneBookkeeping => None,
         SameTurnActionClass::MaterialBoundary => Some("material_action_observed"),
         SameTurnActionClass::Discussion => None,
     }

@@ -10,7 +10,9 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::{
-    channel_delivery_tokens::legacy_delivery_tokens,
+    channel_delivery_tokens::{
+        legacy_delivery_tokens, parse_legacy_delivery_line_ref, LegacyDeliveryLocation,
+    },
     wechat_reply_media::strip_wechat_delivery_lines,
 };
 
@@ -59,6 +61,7 @@ pub fn merge_task_artifact_delivery_messages(
     workspace_root: &Path,
     messages: Vec<String>,
 ) -> Vec<String> {
+    let messages = messages_without_internal_runtime_delivery_lines(messages, workspace_root);
     let preference = task_delivery_preference(result_json);
     if preference == DeliveryPreference::Disabled {
         return messages_without_delivery_lines(messages);
@@ -68,6 +71,7 @@ pub fn merge_task_artifact_delivery_messages(
     if manifests.is_empty() {
         return messages;
     }
+    let messages = messages_without_internal_manifest_delivery_lines(messages, &manifests);
     let explicit_references = messages
         .iter()
         .flat_map(|message| legacy_delivery_tokens(message))
@@ -76,13 +80,11 @@ pub fn merge_task_artifact_delivery_messages(
     let selected_manifests = manifests
         .iter()
         .filter(|manifest| {
-            if explicit_references.is_empty() {
-                !internal_runtime_artifact(manifest)
-            } else {
-                explicit_references
-                    .iter()
-                    .any(|reference| manifest_matches_reference(manifest, reference))
-            }
+            !internal_runtime_artifact(manifest)
+                && (explicit_references.is_empty()
+                    || explicit_references
+                        .iter()
+                        .any(|reference| manifest_matches_reference(manifest, reference)))
         })
         .collect::<Vec<_>>();
     if selected_manifests.is_empty() {
@@ -126,6 +128,76 @@ pub fn merge_task_artifact_delivery_messages(
 
 fn internal_runtime_artifact(manifest: &TaskDeliveryArtifactManifest) -> bool {
     manifest.id.starts_with("skill-output:")
+}
+
+fn messages_without_internal_runtime_delivery_lines(
+    messages: Vec<String>,
+    workspace_root: &Path,
+) -> Vec<String> {
+    messages
+        .into_iter()
+        .map(|message| {
+            message
+                .lines()
+                .filter(|line| {
+                    let Some(token) = parse_legacy_delivery_line_ref(line.trim()) else {
+                        return true;
+                    };
+                    token.location != LegacyDeliveryLocation::LocalFile
+                        || !internal_runtime_delivery_reference(workspace_root, token.reference)
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .filter(|message| !message.trim().is_empty())
+        .collect()
+}
+
+fn messages_without_internal_manifest_delivery_lines(
+    messages: Vec<String>,
+    manifests: &[TaskDeliveryArtifactManifest],
+) -> Vec<String> {
+    messages
+        .into_iter()
+        .map(|message| {
+            message
+                .lines()
+                .filter(|line| {
+                    let Some(token) = parse_legacy_delivery_line_ref(line.trim()) else {
+                        return true;
+                    };
+                    token.location != LegacyDeliveryLocation::LocalFile
+                        || !manifests.iter().any(|manifest| {
+                            internal_runtime_artifact(manifest)
+                                && manifest_matches_reference(manifest, token.reference)
+                        })
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .filter(|message| !message.trim().is_empty())
+        .collect()
+}
+
+fn internal_runtime_delivery_reference(workspace_root: &Path, reference: &str) -> bool {
+    let reference = reference.trim();
+    if reference.starts_with("skill-output:") {
+        return true;
+    }
+    let path = Path::new(reference);
+    let candidate = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        workspace_root.join(path)
+    };
+    let canonical = candidate.canonicalize().unwrap_or(candidate);
+    crate::workspace_state::known_workspace_state_roots(workspace_root)
+        .into_iter()
+        .map(|root| root.join("artifacts").join("skill-output"))
+        .any(|internal_root| {
+            let internal_root = internal_root.canonicalize().unwrap_or(internal_root);
+            canonical.starts_with(internal_root)
+        })
 }
 
 fn manifest_matches_reference(manifest: &TaskDeliveryArtifactManifest, reference: &str) -> bool {

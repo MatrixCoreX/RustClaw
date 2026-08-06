@@ -63,6 +63,13 @@ pub(crate) fn materialize_task_result_artifacts(
     let mut seen_paths = HashSet::new();
     let mut seen_ids = HashSet::new();
     for source in sources.into_iter().take(MAX_TASK_ARTIFACTS * 2) {
+        if source
+            .id
+            .as_deref()
+            .is_some_and(|id| id.starts_with("skill-output:"))
+        {
+            continue;
+        }
         let Some(source_path) = validated_source_path(&workspace, &source.path) else {
             continue;
         };
@@ -257,6 +264,13 @@ fn collect_artifact_sources(result: &Value) -> Vec<ArtifactSource> {
             if !status_ok {
                 continue;
             }
+            if capability_result
+                .pointer("/data/extra/delivery/deliver_to_user")
+                .and_then(Value::as_bool)
+                == Some(false)
+            {
+                continue;
+            }
             collect_sources_from_object(capability_result, &mut sources, true);
             if let Some(data) = capability_result.get("data") {
                 collect_sources_from_object(data, &mut sources, true);
@@ -270,7 +284,13 @@ fn collect_artifact_sources(result: &Value) -> Vec<ArtifactSource> {
         }
     }
     if let Some(final_result) = trusted_async_job_terminal_final_result(result) {
-        collect_sources_from_object(final_result, &mut sources, true);
+        if final_result
+            .pointer("/extra/delivery/deliver_to_user")
+            .and_then(Value::as_bool)
+            != Some(false)
+        {
+            collect_sources_from_object(final_result, &mut sources, true);
+        }
     }
     sources
 }

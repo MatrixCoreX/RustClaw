@@ -135,6 +135,72 @@ pub(crate) fn envelope_for_step_execution(
     )
 }
 
+pub(crate) fn settle_waiting_async_result(
+    result: &mut CapabilityResultEnvelope,
+    job_id: &str,
+    final_result_json: &Value,
+) -> bool {
+    let job_id = job_id.trim();
+    if job_id.is_empty()
+        || !final_result_json.is_object()
+        || result.status != CapabilityResultStatus::Waiting
+        || !result.continuation.as_ref().is_some_and(|continuation| {
+            continuation.kind == ContinuationKind::Poll
+                && continuation.reference.as_deref() == Some(job_id)
+        })
+    {
+        return false;
+    }
+
+    let mut completed = result.clone();
+    let extra = final_result_json.get("extra");
+    completed.status = CapabilityResultStatus::Ok;
+    completed.data = result_data(&final_result_json.to_string(), extra);
+    completed.artifacts = artifact_refs_from_sources(&final_result_json.to_string(), extra);
+    completed.completeness = None;
+    completed.page = None;
+    completed.truncated = false;
+    completed.retry = None;
+    completed.error = None;
+    completed.continuation = None;
+    let step_id = result
+        .provenance
+        .get("step_id")
+        .and_then(Value::as_str)
+        .unwrap_or("async_completion")
+        .to_string();
+    apply_result_metadata(
+        &mut completed,
+        Some(final_result_json),
+        extra,
+        &step_id,
+        "trusted_async_job_completion",
+    );
+    completed.provenance = json!({
+        "source": "async_job_completion_checkpoint",
+        "job_id": sanitized_reference(job_id),
+        "step_id": machine_evidence_id(&step_id),
+        "content_trust": "trusted_async_job_completion",
+    });
+    if let Some(intent) = final_result_json
+        .pointer("/extra/delivery/intent")
+        .and_then(Value::as_str)
+    {
+        completed.delivery.intent = match intent {
+            "artifact" => claw_core::capability_result::CapabilityDeliveryIntent::Artifact,
+            "save_only" | "silent" => {
+                claw_core::capability_result::CapabilityDeliveryIntent::Silent
+            }
+            _ => claw_core::capability_result::CapabilityDeliveryIntent::ModelSynthesis,
+        };
+    }
+    if completed.validate().is_err() {
+        return false;
+    }
+    *result = completed;
+    true
+}
+
 pub(crate) fn selected_exact_machine_result(
     results: &[CapabilityResultEnvelope],
     selector: &str,

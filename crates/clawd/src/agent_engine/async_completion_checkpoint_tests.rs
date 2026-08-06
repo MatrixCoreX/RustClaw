@@ -59,10 +59,35 @@ fn poll_checkpoint() -> TaskCheckpoint {
 
 #[test]
 fn completed_async_job_becomes_next_planner_round_with_terminal_evidence() {
+    let mut pending_checkpoint = poll_checkpoint();
+    let mut pending = claw_core::capability_result::CapabilityResultEnvelope::ok(
+        "media_download.transcribe",
+        Some("transcribe".to_string()),
+        json!({"output": "pending"}),
+    );
+    pending.status = claw_core::capability_result::CapabilityResultStatus::Waiting;
+    pending.continuation = Some(claw_core::capability_result::Continuation {
+        kind: claw_core::capability_result::ContinuationKind::Poll,
+        reference: Some("provider:video:1".to_string()),
+        poll_after_ms: Some(2_000),
+        state: json!({}),
+    });
+    pending_checkpoint.capability_results.push(pending);
     let result = completed_async_job_continuation_result(
         "ask",
-        &poll_checkpoint(),
-        &json!({"status": "Success", "file_id": "file-1"}),
+        &pending_checkpoint,
+        &json!({
+            "status": "ok",
+            "text": "saved",
+            "extra": {
+                "delivery": {"intent": "save_only", "deliver_to_user": false},
+                "followup_policy": {
+                    "capability": "audio.preview_transcribe",
+                    "input_field": "audio_path",
+                    "input_value": "/workspace/audio.wav"
+                }
+            }
+        }),
         100,
     )
     .expect("continuation result");
@@ -79,7 +104,19 @@ fn completed_async_job_becomes_next_planner_round_with_terminal_evidence() {
     );
     assert_eq!(
         checkpoint.boundary_context["agent_loop_resume_state"]["last_output"],
-        json!({"status": "Success", "file_id": "file-1"}).to_string()
+        json!({
+            "status": "ok",
+            "text": "saved",
+            "extra": {
+                "delivery": {"intent": "save_only", "deliver_to_user": false},
+                "followup_policy": {
+                    "capability": "audio.preview_transcribe",
+                    "input_field": "audio_path",
+                    "input_value": "/workspace/audio.wav"
+                }
+            }
+        })
+        .to_string()
     );
     assert_eq!(
         checkpoint.boundary_context["agent_loop_resume_state"]["stage"],
@@ -100,9 +137,36 @@ fn completed_async_job_becomes_next_planner_round_with_terminal_evidence() {
     assert_eq!(
         checkpoint.boundary_context["agent_loop_resume_state"]["executed_step_results"][0]
             ["output"],
-        json!({"status": "Success", "file_id": "file-1"}).to_string()
+        checkpoint.boundary_context["agent_loop_resume_state"]["last_output"]
     );
     assert_eq!(checkpoint.observations.len(), 1);
+    assert_eq!(
+        checkpoint.boundary_context["async_capability_result_settled"],
+        true
+    );
+    assert_eq!(
+        checkpoint.capability_results[0].status,
+        claw_core::capability_result::CapabilityResultStatus::Ok
+    );
+    assert_eq!(checkpoint.capability_results[0].continuation, None);
+    assert_eq!(
+        checkpoint.capability_results[0]
+            .data
+            .pointer("/extra/followup_policy/input_value"),
+        Some(&json!("/workspace/audio.wav"))
+    );
+    let mut resumed_loop = crate::agent_engine::LoopState::new();
+    crate::agent_engine::loop_state_seed::seed_loop_state_from_task_checkpoint(
+        &mut resumed_loop,
+        &checkpoint,
+    );
+    let planner_observation =
+        crate::agent_engine::observed_output::latest_structured_capability_observation(
+            &resumed_loop,
+        )
+        .expect("settled async result remains visible to the resumed planner");
+    assert!(planner_observation.contains("audio.preview_transcribe"));
+    assert!(planner_observation.contains("/workspace/audio.wav"));
     assert_eq!(
         checkpoint.completed_side_effect_refs,
         ["video_generate:hash"]

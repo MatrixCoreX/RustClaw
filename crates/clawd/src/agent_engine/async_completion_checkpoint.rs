@@ -46,10 +46,20 @@ pub(crate) fn completed_async_job_continuation_result(
     successor.checkpoint_id = checkpoint_id.clone();
     successor.pending_async_job = None;
     successor.resume_entrypoint = ResumeEntrypoint::NextPlannerRound;
+    let mut settled_capability_result = false;
+    for result in successor.capability_results.iter_mut().rev() {
+        if crate::capability_result::settle_waiting_async_result(result, job_id, final_result_json)
+        {
+            settled_capability_result = true;
+            break;
+        }
+    }
     successor.observations.push(terminal_observation.clone());
     successor.boundary_context["source"] = json!(COMPLETION_SOURCE);
     successor.boundary_context["previous_checkpoint_id"] = json!(checkpoint.checkpoint_id);
     successor.boundary_context["completed_async_job_id"] = json!(job_id);
+    successor.boundary_context["async_capability_result_settled"] =
+        json!(settled_capability_result);
     successor.boundary_context["async_job_terminal_observation"] = terminal_observation;
     if let Some(resume_state) = successor
         .boundary_context

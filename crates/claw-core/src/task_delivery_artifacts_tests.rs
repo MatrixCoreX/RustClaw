@@ -290,6 +290,67 @@ fn explicit_user_file_excludes_internal_skill_output_artifact() {
 }
 
 #[test]
+fn legacy_internal_skill_output_token_is_removed_without_a_manifest() {
+    let workspace = temp_workspace("task_delivery_internal_legacy_token");
+    let internal = crate::workspace_state::workspace_artifacts_root(&workspace)
+        .join("skill-output")
+        .join("task-legacy")
+        .join("system_basic.json");
+    fs::create_dir_all(internal.parent().expect("internal artifact parent"))
+        .expect("create internal artifact parent");
+    fs::write(&internal, b"internal evidence").expect("write internal evidence");
+
+    let messages = merge_task_artifact_delivery_messages(
+        "task-legacy",
+        None,
+        &workspace,
+        vec![format!(
+            "处理完成\nFILE:{}",
+            internal
+                .canonicalize()
+                .expect("canonical internal")
+                .display()
+        )],
+    );
+
+    assert_eq!(messages, vec!["处理完成"]);
+    fs::remove_dir_all(workspace).ok();
+}
+
+#[test]
+fn explicitly_referenced_internal_manifest_is_still_never_delivered() {
+    let workspace = temp_workspace("task_delivery_internal_explicit");
+    let task_id = "task-internal-explicit";
+    let artifact_id = "skill-output:internal-explicit";
+    write_delivery_artifact(
+        &workspace,
+        task_id,
+        artifact_id,
+        "system_basic.json",
+        b"internal evidence",
+    );
+    let result = result_with_artifact(
+        task_id,
+        artifact_id,
+        "system_basic.json",
+        "file",
+        "application/json",
+        17,
+        None,
+    );
+
+    let messages = merge_task_artifact_delivery_messages(
+        task_id,
+        Some(&result),
+        &workspace,
+        vec!["处理完成\nFILE:system_basic.json".to_string()],
+    );
+
+    assert_eq!(messages, vec!["处理完成"]);
+    fs::remove_dir_all(workspace).ok();
+}
+
+#[test]
 fn internal_skill_output_is_not_auto_delivered_with_prose() {
     let workspace = temp_workspace("task_delivery_internal_default");
     let task_id = "task-internal-default";
