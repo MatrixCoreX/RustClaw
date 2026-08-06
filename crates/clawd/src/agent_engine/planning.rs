@@ -548,7 +548,7 @@ pub(super) async fn plan_round_actions(
                     let repair_source =
                         format!("{native_prompt_source}+inline:native_plan_contract_repair");
                     repair_reason_codes.push(error_code);
-                    native_turn = llm_gateway::run_native_model_turn_with_fallback(
+                    let mut repaired_turn = llm_gateway::run_native_model_turn_with_fallback(
                         state,
                         task,
                         &repair_prompt,
@@ -557,6 +557,18 @@ pub(super) async fn plan_round_actions(
                     )
                     .await?
                     .ok_or_else(|| "native_plan_contract_repair_unavailable".to_string())?;
+                    if let Some(groups) =
+                        normalize_exact_capability_group_repair(&mut repaired_turn, &repair_signal)
+                    {
+                        loop_state.task_observations.push(json!({
+                            "owner_layer": "planner",
+                            "state": "recovered",
+                            "reason_code": "native_capability_group_load_arguments_completed",
+                            "source": "runtime_exact_repair_constraint",
+                            "groups": groups,
+                        }));
+                    }
+                    native_turn = repaired_turn;
                 }
             }
         }
@@ -1368,6 +1380,68 @@ fn native_contract_retry_request(
         .messages
         .push(ModelMessage::text(ModelRole::User, repair_signal));
     request
+}
+
+fn normalize_exact_capability_group_repair(
+    turn: &mut ModelTurnResponse,
+    repair_signal: &str,
+) -> Option<Vec<String>> {
+    if turn.tool_calls.len() != 1 {
+        return None;
+    }
+    let repair_observation = serde_json::from_str::<Value>(repair_signal).ok()?;
+    if repair_observation
+        .pointer("/protocol_observation/error_code")
+        .and_then(Value::as_str)
+        != Some("native_plan_unknown_tool")
+        || repair_observation
+            .pointer("/protocol_observation/tool_name")
+            .and_then(Value::as_str)
+            != Some(super::capability_discovery::RUNTIME_CAPABILITY_LOADER_TOOL)
+    {
+        return None;
+    }
+    let suggested_groups = repair_observation
+        .pointer("/protocol_observation/suggested_capability_groups")?
+        .as_array()?
+        .iter()
+        .map(Value::as_str)
+        .collect::<Option<Vec<_>>>()?
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    if suggested_groups.is_empty()
+        || suggested_groups
+            .iter()
+            .any(|group| !super::capability_discovery::is_capability_group_token(group))
+    {
+        return None;
+    }
+
+    let call = turn.tool_calls.first_mut()?;
+    if call.name != super::capability_discovery::RUNTIME_CAPABILITY_LOADER_TOOL {
+        return None;
+    }
+    let arguments = call.arguments.as_object_mut()?;
+    if arguments.keys().any(|key| key != "op" && key != "groups")
+        || arguments
+            .get("op")
+            .and_then(Value::as_str)
+            .is_some_and(|operation| operation != "load_groups")
+    {
+        return None;
+    }
+    match arguments.get("groups") {
+        None => {}
+        Some(Value::Array(groups)) if groups.is_empty() => {}
+        Some(_) => return None,
+    }
+
+    call.arguments = json!({
+        "op": "load_groups",
+        "groups": suggested_groups,
+    });
+    Some(suggested_groups)
 }
 
 #[cfg(test)]
