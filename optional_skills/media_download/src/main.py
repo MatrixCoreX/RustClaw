@@ -1508,13 +1508,13 @@ def respond(
             )
 
         output_dir = _artifact_output_directory(request)
-        # Downloads may legitimately take a long time for large files or slow
-        # links.  Keep their per-request network timeout, cancellation, and
-        # durable background polling, but never impose a whole-operation
-        # deadline supplied by a planner or an older client.
+        # Downloads and local transcription may legitimately take a long time.
+        # Keep per-request network timeouts, cancellation, and durable background
+        # polling, but never impose a whole-operation deadline supplied by a
+        # planner or an older client for either action.
         operation_timeout = (
             None
-            if action == "download"
+            if action in {"download", "transcribe"}
             else _optional_integer(
                 args,
                 "operation_timeout_seconds",

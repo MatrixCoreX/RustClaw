@@ -571,6 +571,40 @@ class AdapterTest(unittest.TestCase):
 
         self.assertIsNone(run.call_args.kwargs["timeout"])
 
+    def test_transcribe_ignores_an_explicit_operation_deadline(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            input_path = root / "sample.wav"
+            input_path.write_bytes(b"audio")
+            artifacts = root / "artifacts"
+            transcript = artifacts / "sample_transcript.txt"
+            transcript.parent.mkdir(parents=True)
+            transcript.write_text("这是一段用于验证长音频转写不会被固定截止时间终止的文本。", encoding="utf-8")
+            request = {
+                "request_id": "transcribe-explicit-deadline",
+                "args": {
+                    "action": "transcribe",
+                    "input_path": str(input_path),
+                    "operation_timeout_seconds": 5,
+                },
+                "context": {
+                    "artifact_output_directory": str(artifacts),
+                    "workspace_root": str(root),
+                    "permissions": {"allow_path_outside_workspace": False},
+                },
+                "user_id": 1,
+                "chat_id": 1,
+            }
+            artifact = self.skill._artifact(transcript)
+            with mock.patch.object(
+                self.skill,
+                "_run_tool",
+                return_value=("", "", [artifact]),
+            ) as run_tool:
+                self.skill.respond(request)
+
+        self.assertIsNone(run_tool.call_args.args[3])
+
     def test_non_download_operation_honors_an_explicit_deadline(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

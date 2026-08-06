@@ -30,7 +30,14 @@ fn ordinary_free_response_uses_generic_synthesis() {
 
 #[test]
 fn latest_successful_transcription_contract_drives_review() {
+    let mut earlier_result = CapabilityResultEnvelope::ok(
+        "media_download.download",
+        Some("download".to_string()),
+        json!({"extra": {"saved_files": [{"artifact_role": "original_video"}]}}),
+    );
+    earlier_result.delivery.intent = CapabilityDeliveryIntent::Silent;
     let results = vec![
+        earlier_result,
         CapabilityResultEnvelope::ok(
             "audio.transcribe",
             Some("transcribe".to_string()),
@@ -67,7 +74,7 @@ fn latest_successful_transcription_contract_drives_review() {
 
     let contract = transcript_review_contract(&results).expect("review contract");
     assert!(pending_transcript_review(&results));
-    assert_eq!(contract.result_index, 1);
+    assert_eq!(contract.result_index, 2);
     assert_eq!(contract.raw_text, "今天天汽很好");
     assert_eq!(contract.response_language, "zh-CN");
     assert_eq!(contract.inline_max_chars, 200);
@@ -89,6 +96,45 @@ fn latest_successful_transcription_contract_drives_review() {
         Some(&context)
     ));
     assert!(pending_transcript_review(&loop_state.capability_results));
+}
+
+#[test]
+fn transcript_review_requires_its_own_terminal_model_synthesis_result() {
+    let mut silent = CapabilityResultEnvelope::ok(
+        "media_download.transcribe",
+        Some("transcribe".to_string()),
+        json!({
+            "extra": {
+                "transcription_review": {
+                    "required": true,
+                    "raw_text": "待校对文本"
+                }
+            }
+        }),
+    );
+    silent.delivery.intent = CapabilityDeliveryIntent::Silent;
+    assert!(!pending_transcript_review(&[silent]));
+
+    let mut waiting = CapabilityResultEnvelope::ok(
+        "media_download.transcribe",
+        Some("transcribe".to_string()),
+        json!({
+            "extra": {
+                "transcription_review": {
+                    "required": true,
+                    "raw_text": "待校对文本"
+                }
+            }
+        }),
+    );
+    waiting.status = CapabilityResultStatus::Waiting;
+    waiting.continuation = Some(Continuation {
+        kind: ContinuationKind::Poll,
+        reference: Some("job-transcript".to_string()),
+        poll_after_ms: Some(1_000),
+        state: json!({}),
+    });
+    assert!(!pending_transcript_review(&[waiting]));
 }
 
 #[test]

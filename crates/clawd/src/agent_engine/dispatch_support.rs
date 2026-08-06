@@ -80,6 +80,29 @@ pub(super) fn apply_respond_action_outcome(
     ActionLoopDecision::NextAction
 }
 
+pub(super) fn action_requires_transcript_review_synthesis(
+    action: &AgentAction,
+    loop_state: &LoopState,
+) -> bool {
+    !matches!(
+        action,
+        AgentAction::SynthesizeAnswer { .. } | AgentAction::Think { .. }
+    ) && super::capability_result_synthesis::pending_transcript_review(
+        &loop_state.capability_results,
+    )
+}
+
+fn transcript_review_overridden_action_kind(action: &AgentAction) -> &'static str {
+    match action {
+        AgentAction::CallTool { .. } => "call_tool",
+        AgentAction::CallSkill { .. } => "call_skill",
+        AgentAction::CallCapability { .. } => "call_capability",
+        AgentAction::Respond { .. } => "respond",
+        AgentAction::SynthesizeAnswer { .. } => "synthesize_answer",
+        AgentAction::Think { .. } => "think",
+    }
+}
+
 fn unresolved_capability_error(state: &AppState, capability: &str, args: &Value) -> String {
     let (_resolved, record) =
         crate::capability_resolver::resolve_capability_action_with_record_for_state(
@@ -1107,6 +1130,52 @@ pub(super) async fn dispatch_round_action(
     ended_with_user_visible_output: &mut bool,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Result<ActionLoopDecision, String> {
+    if action_requires_transcript_review_synthesis(action, loop_state) {
+        if active_recipe_terminal_discussion_should_replan(actions, loop_state, policy, idx) {
+            record_active_recipe_terminal_discussion_replan(
+                state,
+                task,
+                loop_state,
+                global_step,
+                step_in_round,
+                "synthesize_answer",
+            );
+            *executed_actions += 1;
+            loop_state.total_steps_executed += 1;
+            return Ok(ActionLoopDecision::StopRound(
+                "recoverable_failure_continue_round".to_string(),
+            ));
+        }
+        let evidence_refs = vec!["last_output".to_string()];
+        let synthesis_action = AgentAction::SynthesizeAnswer {
+            evidence_refs: evidence_refs.clone(),
+        };
+        let attempted_action = transcript_review_overridden_action_kind(action);
+        info!(
+            "action_overridden_by_required_transcript_review task_id={} round={} step={} attempted_action={}",
+            task.task_id, loop_state.round_no, step_in_round, attempted_action
+        );
+        if matches!(action, AgentAction::Respond { .. }) {
+            info!(
+                "respond_overridden_by_required_transcript_review task_id={} round={} step={}",
+                task.task_id, loop_state.round_no, step_in_round
+            );
+        }
+        return handle_synthesize_answer_action(
+            state,
+            task,
+            user_text,
+            loop_state,
+            &synthesis_action,
+            global_step,
+            step_in_round,
+            executed_actions,
+            ended_with_user_visible_output,
+            agent_run_context,
+            &evidence_refs,
+        )
+        .await;
+    }
     let requested_capability = match action {
         AgentAction::CallCapability { capability, .. } => Some(capability.as_str()),
         _ => None,

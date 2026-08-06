@@ -182,7 +182,18 @@ pub(crate) fn settle_waiting_async_result(
         "step_id": machine_evidence_id(&step_id),
         "content_trust": "trusted_async_job_completion",
     });
-    if let Some(intent) = final_result_json
+    if final_result_json
+        .pointer("/extra/transcription_review/required")
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
+        // Durable transcription starts are intentionally silent while the
+        // local process is still running. Once the terminal result requests
+        // host review, that stale start-time delivery intent must not suppress
+        // the shared correction and artifact-delivery path.
+        completed.delivery.intent =
+            claw_core::capability_result::CapabilityDeliveryIntent::ModelSynthesis;
+    } else if let Some(intent) = final_result_json
         .pointer("/extra/delivery/intent")
         .and_then(Value::as_str)
     {
