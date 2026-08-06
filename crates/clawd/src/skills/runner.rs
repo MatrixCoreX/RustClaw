@@ -1732,7 +1732,9 @@ fn action_scoped_runner_capabilities(
         Capability::Net => mapping.network_access != Some(false),
         Capability::FsWrite => mapping.filesystem_write != Some(false),
         Capability::Exec | Capability::ExecSudo => mapping.subprocess != Some(false),
-        Capability::Secrets(_) => mapping.credential_access != Some(false),
+        Capability::Secrets(_) | Capability::OptionalSecrets(_) => {
+            mapping.credential_access != Some(false)
+        }
         Capability::FsRead => true,
     });
     capabilities

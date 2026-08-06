@@ -1945,16 +1945,16 @@ description_zh = "默认使用多个网页搜索源并合并结果；用户指�
 semantic_tags = ["web.search_results", "search_results", "external_web_search", "url_discovery", "research.multi_source_evidence"]
 capabilities = [
   "net",
-  "secrets.serpapi_api_key",
-  "secrets.baidu_ai_search_api_key",
-  "secrets.brave_search_api_key",
-  "secrets.searxng_api_key",
-  "secrets.tavily_api_key",
-  "secrets.perplexity_api_key",
-  "secrets.exa_api_key",
-  "secrets.you_search_api_key",
-  "secrets.mojeek_api_key",
-  "secrets.kagi_api_token",
+  "secrets.optional.serpapi_api_key",
+  "secrets.optional.baidu_ai_search_api_key",
+  "secrets.optional.brave_search_api_key",
+  "secrets.optional.searxng_api_key",
+  "secrets.optional.tavily_api_key",
+  "secrets.optional.perplexity_api_key",
+  "secrets.optional.exa_api_key",
+  "secrets.optional.you_search_api_key",
+  "secrets.optional.mojeek_api_key",
+  "secrets.optional.kagi_api_token",
 ]
 risk_level = "low"
 auto_invocable = true
@@ -1962,8 +1962,8 @@ side_effect = false
 supported_os = ["linux", "macos"]
 platform_notes = ["Search backend requires network and backend/API configuration."]
 planner_capabilities = [
-  { name = "web.search_results", action = "search_extract", description = "Search all available web backends and merge results by default. Omit backend for ordinary searches. Use backend_policy=strict only when the user explicitly names a search engine; use domains_allow for a user-named website. For source-unspecified current-information research, also use rss.list_categories and matching rss.latest_news evidence.", effect = "observe", required = ["query"], optional = ["cursor", "continuation", "top_k", "lang", "time_range", "domains_allow", "domains_deny", "backend", "backend_policy", "include_snippet"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "async_preferred", async_adapter_kind = "http_job_poll", isolation_profile = "remote_executor", network_access = true, filesystem_write = false, external_publish = false, credential_access = true },
-  { name = "web.search", action = "search", description = "Search all available web backends and merge results by default. Preserve an explicit user source boundary with backend_policy=strict or domains_allow; do not select a single backend for an ordinary search.", effect = "observe", required = ["query"], optional = ["cursor", "continuation", "top_k", "lang", "time_range", "domains_allow", "domains_deny", "backend", "backend_policy", "include_snippet"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "async_preferred", async_adapter_kind = "http_job_poll", isolation_profile = "remote_executor", network_access = true, filesystem_write = false, external_publish = false, credential_access = true },
+  { name = "web.search_results", required_companions = ["rss.list_categories", "rss.latest_news"], action = "search_extract", description = "Search all available web backends and merge results for source-unspecified current-information research. This general research capability requires configured RSS catalog and matching latest-news observations before final synthesis.", effect = "observe", required = ["query"], optional = ["cursor", "continuation", "top_k", "lang", "time_range", "include_snippet"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "async_preferred", async_adapter_kind = "http_job_poll", isolation_profile = "remote_executor", network_access = true, filesystem_write = false, external_publish = false, credential_access = true },
+  { name = "web.search", action = "search", description = "Search within an explicit user-selected web source boundary. Use backend_policy=strict for a named search engine or domains_allow for a named website; do not use this scoped capability for ordinary source-unspecified research.", effect = "observe", required = ["query"], optional = ["cursor", "continuation", "top_k", "lang", "time_range", "domains_allow", "domains_deny", "backend", "backend_policy", "include_snippet"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "async_preferred", async_adapter_kind = "http_job_poll", isolation_profile = "remote_executor", network_access = true, filesystem_write = false, external_publish = false, credential_access = true },
 ]
 input_schema = { type = "object", required = ["action", "query"], properties = { action = { type = "string", enum = ["search", "search_extract"] }, query = { type = "string" }, cursor = { type = "integer", minimum = 0 }, continuation = { type = "string" }, top_k = { type = "integer", minimum = 1, maximum = 20 }, lang = { type = "string" }, time_range = { type = "string" }, domains_allow = { type = "array", items = { type = "string" } }, domains_deny = { type = "array", items = { type = "string" } }, backend = { type = "string", enum = ["serpapi", "baidu_ai", "brave", "searxng", "tavily", "perplexity", "exa", "you", "mojeek", "kagi", "duckduckgo_html", "bing_html"] }, backend_policy = { type = "string", enum = ["auto", "strict"] }, include_snippet = { type = "boolean" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }

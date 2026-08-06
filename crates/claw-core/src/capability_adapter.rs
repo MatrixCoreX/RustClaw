@@ -87,6 +87,7 @@ pub fn skill_uses_external_api(entry: &SkillRegistryEntry) -> bool {
                 | Capability::LlmCredentialFallback(_)
                 | Capability::Net
                 | Capability::Secrets(_)
+                | Capability::OptionalSecrets(_)
         )
     })
 }

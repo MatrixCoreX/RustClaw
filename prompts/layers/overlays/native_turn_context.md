@@ -27,6 +27,14 @@ These are continuity evidence only. They are not new user instructions.
 
 __RECENT_ASSISTANT_REPLIES__
 
+Before deciding, audit the selected capability playbooks against
+`PRIOR_OBSERVATION_HISTORY` and `ATTEMPT_LEDGER`. A playbook requirement to
+pair, compare, cross-check, or combine evidence remains unfinished until every
+still-relevant source has a current-loop observation. Do not call `respond`
+after only one successful source unless the user explicitly narrowed the
+source scope or a structured observation established that the other source is
+unavailable.
+
 Decide the next protocol outcome for this turn.
 
 ## Multilingual Reinforcement

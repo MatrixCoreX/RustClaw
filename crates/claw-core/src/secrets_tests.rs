@@ -353,6 +353,37 @@ fn provision_translates_secret_name_to_uppercase_env() {
 }
 
 #[test]
+fn provision_injects_present_optional_secrets_and_skips_missing_ones() {
+    let broker = MockBroker::new(&[("web_search_brave_api_key", "brave-secret")]);
+    let caps = vec![
+        Capability::OptionalSecrets("web_search_brave_api_key".to_string()),
+        Capability::OptionalSecrets("web_search_kagi_api_token".to_string()),
+    ];
+
+    let out = provision_secret_envs(&broker, &caps).expect("optional secrets");
+
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].0, "WEB_SEARCH_BRAVE_API_KEY");
+    assert_eq!(out[0].1.expose(), "brave-secret");
+}
+
+#[test]
+fn required_secret_wins_when_same_name_is_also_optional() {
+    let broker = MockBroker::new(&[]);
+    let caps = vec![
+        Capability::OptionalSecrets("web_search_brave_api_key".to_string()),
+        Capability::Secrets("web_search_brave_api_key".to_string()),
+    ];
+
+    let error = provision_secret_envs(&broker, &caps).expect_err("required secret must fail");
+    assert!(matches!(
+        error,
+        ProvisionError::MissingSecrets { missing }
+            if missing == vec!["web_search_brave_api_key".to_string()]
+    ));
+}
+
+#[test]
 fn provision_dedupes_identical_secret_capabilities() {
     // 同一个 secret 名出现两次（manifest 写错时偶发），不应注入两遍。
     let broker = MockBroker::new(&[("text_openai_api_key", "v")]);

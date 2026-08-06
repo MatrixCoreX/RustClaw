@@ -3,7 +3,7 @@ use super::{
     action_observation_boundary, active_tool_event_payload, capture_round_progress_snapshot,
     check_repeat_action_guard, completed_terminal_termination_allows_replay,
     finalize_execute_round_outcome, prior_structured_observation_satisfies_read_only_action,
-    registry_allows_repeated_idempotent_action, safe_command_preview,
+    record_deferred_plan_tail, registry_allows_repeated_idempotent_action, safe_command_preview,
     successful_structured_observation_satisfies_selector, terminal_poll_after_termination_is_fresh,
     terminal_synthesis_can_skip_remaining_actions, waiting_task_allows_repeated_observation,
 };
@@ -44,6 +44,42 @@ fn action_count_is_an_explicit_replan_boundary_not_a_terminal_drop() {
         "replan_from_latest_observation"
     );
     assert!(action_observation_boundary(8, 8, 8).is_none());
+}
+
+#[test]
+fn observation_boundary_preserves_unfinished_machine_action_refs_for_replanning() {
+    let mut loop_state = super::LoopState::new();
+    loop_state.round_no = 3;
+    let remaining = vec![
+        crate::AgentAction::CallCapability {
+            capability: "web.search_results".to_string(),
+            args: serde_json::json!({"query": "must-not-be-copied"}),
+        },
+        crate::AgentAction::Respond {
+            content: "must-not-be-copied".to_string(),
+        },
+        crate::AgentAction::Think {
+            content: "must-not-be-copied".to_string(),
+        },
+    ];
+
+    record_deferred_plan_tail(
+        &mut loop_state,
+        &remaining,
+        "independent_read_batch_observed",
+    );
+
+    assert_eq!(loop_state.task_observations.len(), 1);
+    assert_eq!(
+        loop_state.task_observations[0]["remaining_action_refs"],
+        serde_json::json!(["capability:web.search_results", "respond"])
+    );
+    assert_eq!(
+        loop_state.task_observations[0]["recovery_action"],
+        "replan_unfinished_actions_from_latest_observation"
+    );
+    assert!(loop_state.history_compact[0].contains("capability:web.search_results,respond"));
+    assert!(!loop_state.history_compact[0].contains("must-not-be-copied"));
 }
 
 fn task_fixture(id: &str) -> crate::ClaimedTask {

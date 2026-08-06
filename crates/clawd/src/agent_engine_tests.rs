@@ -126,6 +126,7 @@ fn test_skill_manifest(planner_capabilities: Vec<PlannerCapabilityMapping>) -> S
 fn test_planner_capability(name: &str, action: &str, preferred: bool) -> PlannerCapabilityMapping {
     PlannerCapabilityMapping {
         name: name.to_string(),
+        required_companions: Vec::new(),
         action: Some(action.to_string()),
         description: Some(format!(
             "Owns the {action} result without raw primitive reconstruction"
@@ -161,6 +162,7 @@ fn test_planner_capability(name: &str, action: &str, preferred: bool) -> Planner
 fn quick_index_includes_planner_capability_metadata() {
     let mut manifest = test_skill_manifest(vec![PlannerCapabilityMapping {
         name: "filesystem.list_entries".to_string(),
+        required_companions: Vec::new(),
         action: Some("list_dir".to_string()),
         description: Some("List direct entries with bounded metadata.".to_string()),
         semantic_tags: vec!["directory_listing".to_string()],
@@ -257,6 +259,7 @@ fn quick_index_catalog_keeps_capability_25_and_schema_field_9_queryable() {
     let capabilities = (0..30)
         .map(|index| PlannerCapabilityMapping {
             name: format!("fixture.capability_{index}"),
+            required_companions: Vec::new(),
             action: Some(format!("action_{index}")),
             description: Some(format!("Fixture capability {index}")),
             semantic_tags: vec![format!("tag_{index}")],

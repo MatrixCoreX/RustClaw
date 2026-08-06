@@ -92,6 +92,12 @@ fn native_action_protocol_requires_capability_owned_structured_observations() {
     assert!(prompt.contains("derive counts only from the complete observed array/object"));
     assert!(prompt.contains("Do not call the capability again merely to confirm or"));
     assert!(prompt.contains("restate the same successful result"));
+    assert!(prompt.contains("pair, compare, cross-check"));
+    assert!(prompt.contains("remains an open obligation across model"));
+    assert!(prompt.contains("one successful source does not satisfy the others"));
+    assert!(prompt.contains("user explicitly narrows the source scope"));
+    assert!(prompt.contains("structured capability"));
+    assert!(prompt.contains("remaining source is unavailable"));
     assert!(prompt.contains("Copy the complete capability name exactly"));
     assert!(prompt.contains("Never derive a capability name by combining a skill name"));
     assert!(prompt.contains("most semantically specific capability"));
@@ -121,6 +127,26 @@ fn native_action_protocol_requires_capability_owned_structured_observations() {
     assert!(prompt.contains("structured.visible_text"));
     assert!(prompt.contains("omit the recognized-text portion entirely"));
     assert!(prompt.contains("typed natural-language instructions"));
+}
+
+#[test]
+fn native_turn_context_rechecks_open_playbook_obligations_at_decision_boundary() {
+    let overlay = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../prompts/layers/overlays/native_turn_context.md");
+    let prompt = std::fs::read_to_string(overlay).expect("read native turn context");
+    let normalized = prompt.split_whitespace().collect::<Vec<_>>().join(" ");
+    let audit = prompt
+        .find("Before deciding, audit the selected capability playbooks")
+        .expect("playbook obligation audit");
+    let decision = prompt
+        .find("Decide the next protocol outcome for this turn")
+        .expect("decision boundary");
+
+    assert!(audit < decision);
+    assert!(prompt.contains("pair, compare, cross-check, or combine evidence"));
+    assert!(normalized.contains("every still-relevant source has a current-loop observation"));
+    assert!(prompt.contains("user explicitly narrowed the"));
+    assert!(prompt.contains("structured observation established"));
 }
 
 #[test]

@@ -403,7 +403,11 @@ fn bundled_host_policy_grant_for_entry(
     for credential in &request.permissions.credential_refs {
         if !entry
             .resolved_capabilities
-            .contains(&Capability::Secrets(credential.clone()))
+            .iter()
+            .any(|capability| {
+                capability == &Capability::Secrets(credential.clone())
+                    || capability == &Capability::OptionalSecrets(credential.clone())
+            })
         {
             return Err(format!(
                 "manifest requests ungranted credential reference: {credential}"

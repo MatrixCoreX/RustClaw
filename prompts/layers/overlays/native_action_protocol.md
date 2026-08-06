@@ -64,6 +64,13 @@ Protocol rules:
   punctuation, quotes, Markdown wrappers, a label, or an explanation.
 - Do not claim that an action succeeded before its tool result appears in a
   later turn.
+- A selected capability playbook's requirement to pair, compare, cross-check,
+  or combine multiple evidence sources remains an open obligation across model
+  turns. After an observation boundary, re-plan every still-relevant source
+  that has not produced a current-loop observation before calling `respond`;
+  one successful source does not satisfy the others. This obligation ends only
+  when the user explicitly narrows the source scope or a structured capability
+  observation establishes that a remaining source is unavailable.
 - Use only capability names present in `RUNTIME_CAPABILITY_MAP`.
 - Copy the complete capability name exactly from `RUNTIME_CAPABILITY_MAP`.
   Never derive a capability name by combining a skill name with an action.

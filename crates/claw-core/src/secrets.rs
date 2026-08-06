@@ -564,10 +564,12 @@ pub enum ProvisionError {
     },
 }
 
-/// 把 manifest 上声明的 [`Capability::Secrets`] 翻译成"子进程 env 名 → secret 值"。
+/// 把 manifest 上声明的必需/可选 secret capability 翻译成"子进程 env 名 → secret 值"。
 ///
 /// **设计要点（§P4.4 / §E1.b）**：
-/// - 只处理 `Capability::Secrets(name)`，其余 capability 静默跳过 ——
+/// - `Capability::Secrets(name)` 缺失时 fail-loud；
+/// - `Capability::OptionalSecrets(name)` 仅在 broker 有值时注入；
+/// - 其余 capability 静默跳过 ——
 ///   `Net` / `Llm` / `FsRead` 等是 sandbox/policy 层关心的，不属于本函数；
 /// - env var 名 = `name.to_ascii_uppercase()`；与 [`EnvSecretsBroker`]
 ///   的默认翻译策略保持一致，这样无论 broker 是 env / KMS / vault，子进
@@ -587,24 +589,28 @@ pub fn provision_secret_envs(
     broker: &dyn SecretsBroker,
     capabilities: &[Capability],
 ) -> Result<Vec<(String, SecretValue)>, ProvisionError> {
-    let mut wanted: Vec<&str> = capabilities
-        .iter()
-        .filter_map(|c| match c {
-            Capability::Secrets(name) => Some(name.as_str()),
-            _ => None,
-        })
-        .collect();
-    wanted.sort_unstable();
-    wanted.dedup();
+    let mut wanted = std::collections::BTreeMap::<&str, bool>::new();
+    for capability in capabilities {
+        match capability {
+            Capability::Secrets(name) => {
+                wanted.insert(name, true);
+            }
+            Capability::OptionalSecrets(name) => {
+                wanted.entry(name).or_insert(false);
+            }
+            _ => {}
+        }
+    }
 
     let mut provisioned: Vec<(String, SecretValue)> = Vec::new();
     let mut missing: Vec<String> = Vec::new();
 
-    for canonical in wanted {
+    for (canonical, required) in wanted {
         let env_name = canonical.to_ascii_uppercase();
         match broker.lookup(canonical) {
             Ok(Some(secret)) => provisioned.push((env_name, secret)),
-            Ok(None) => missing.push(canonical.to_string()),
+            Ok(None) if required => missing.push(canonical.to_string()),
+            Ok(None) => {}
             Err(e) => {
                 return Err(ProvisionError::Lookup {
                     name: canonical.to_string(),
