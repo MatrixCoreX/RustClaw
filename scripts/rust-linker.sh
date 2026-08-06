@@ -7,7 +7,7 @@ set -euo pipefail
 if [[ "${APP_DISABLE_BUNDLED_LLD:-0}" != "1" ]] \
   && command -v rustc >/dev/null 2>&1 \
   && command -v clang >/dev/null 2>&1; then
-  rust_host="$(rustc -vV | awk '/^host:/ {print $2; exit}')"
+  rust_host="$(rustc -vV | sed -n 's/^host: //p')"
   rust_sysroot="$(rustc --print sysroot)"
   bundled_lld="${rust_sysroot}/lib/rustlib/${rust_host}/bin/gcc-ld/ld.lld"
   if [[ -x "$bundled_lld" ]]; then
