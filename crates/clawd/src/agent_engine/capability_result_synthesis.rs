@@ -84,7 +84,7 @@ pub(super) fn eligible_for_capability_result_synthesis(
 }
 
 pub(super) fn pending_transcript_review(results: &[CapabilityResultEnvelope]) -> bool {
-    terminal_model_synthesis_results(results) && transcript_review_contract(results).is_some()
+    transcript_review_contract(results).is_some()
 }
 
 fn terminal_model_synthesis_results(results: &[CapabilityResultEnvelope]) -> bool {
@@ -109,11 +109,6 @@ pub(super) async fn synthesize_from_capability_results(
     let transcript_contract = transcript_review_contract(&loop_state.capability_results);
     if transcript_contract.is_none()
         && !eligible_for_capability_result_synthesis(loop_state, agent_run_context)
-    {
-        return Ok(None);
-    }
-    if transcript_contract.is_some()
-        && !terminal_model_synthesis_results(&loop_state.capability_results)
     {
         return Ok(None);
     }
@@ -200,7 +195,10 @@ fn transcript_review_contract(
         .enumerate()
         .rev()
         .find_map(|(result_index, result)| {
-            if result.status != CapabilityResultStatus::Ok {
+            if result.status != CapabilityResultStatus::Ok
+                || result.delivery.intent != CapabilityDeliveryIntent::ModelSynthesis
+                || result.continuation.is_some()
+            {
                 return None;
             }
             let contract = result
@@ -378,6 +376,16 @@ async fn synthesize_reviewed_transcript(
             transcription.insert("reviewed_by_model".to_string(), Value::Bool(true));
             transcription.insert("review_required".to_string(), Value::Bool(false));
             transcription.insert("character_count".to_string(), json!(character_count));
+        }
+        if let Some(review) = extra
+            .get_mut("transcription_review")
+            .and_then(Value::as_object_mut)
+        {
+            review.insert("required".to_string(), Value::Bool(false));
+            review.insert(
+                "reviewed_character_count".to_string(),
+                json!(character_count),
+            );
         }
     }
     loop_state.task_observations.push(json!({

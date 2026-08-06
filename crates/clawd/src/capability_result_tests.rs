@@ -61,6 +61,58 @@ fn async_completion_replaces_the_matching_waiting_result() {
 }
 
 #[test]
+fn async_transcription_review_promotes_silent_completion_to_model_synthesis() {
+    let mut envelope = super::successful_execution_envelope(
+        "media_download",
+        "step_4",
+        &json!({"action": "transcribe"}),
+        "pending",
+        Some(&json!({
+            "pending_async_job": {
+                "job_id": "local_process:transcription-job",
+                "status": "accepted"
+            },
+            "delivery": {"intent": "save_only", "deliver_to_user": false}
+        })),
+    );
+    envelope.delivery.intent = CapabilityDeliveryIntent::Silent;
+
+    assert!(super::settle_waiting_async_result(
+        &mut envelope,
+        "local_process:transcription-job",
+        &json!({
+            "request_id": "request-transcription",
+            "status": "ok",
+            "text": "",
+            "extra": {
+                "delivery": {"intent": "save_only", "deliver_to_user": false},
+                "transcription_review": {
+                    "schema_version": 1,
+                    "required": true,
+                    "raw_text": "raw transcript",
+                    "raw_character_count": 14
+                }
+            },
+            "error_text": null
+        })
+    ));
+
+    assert_eq!(envelope.status, CapabilityResultStatus::Ok);
+    assert_eq!(envelope.continuation, None);
+    assert_eq!(
+        envelope.delivery.intent,
+        CapabilityDeliveryIntent::ModelSynthesis
+    );
+    assert_eq!(
+        envelope
+            .data
+            .pointer("/extra/transcription_review/required")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+}
+
+#[test]
 fn successful_result_wraps_json_and_extra_as_untrusted_data() {
     let envelope = super::successful_execution_envelope(
         "fs_basic",

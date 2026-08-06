@@ -3,9 +3,10 @@ use std::path::Path;
 use std::sync::{Arc, RwLock};
 
 use super::{
-    classify_skill_failure_recovery, preserve_requested_capability_result_identity,
-    strip_internal_execution_args, strip_unsupported_planner_metadata_args,
-    synthesize_answer_allows_direct_fallback, synthesize_bounded_read_range_direct_answer,
+    action_requires_transcript_review_synthesis, classify_skill_failure_recovery,
+    preserve_requested_capability_result_identity, strip_internal_execution_args,
+    strip_unsupported_planner_metadata_args, synthesize_answer_allows_direct_fallback,
+    synthesize_bounded_read_range_direct_answer,
     synthesize_direct_fallback_would_passthrough_multiline_read_range,
     synthesize_direct_observed_fallback_answer,
     synthesize_evidence_policy_direct_observed_fallback_answer, synthesize_failure_observed_facts,
@@ -19,6 +20,69 @@ use crate::{
 };
 use claw_core::config::{AgentConfig, ToolsConfig};
 use claw_core::skill_registry::SkillsRegistry;
+
+#[test]
+fn required_transcript_review_overrides_direct_respond() {
+    let mut loop_state = LoopState::default();
+    let mut earlier = claw_core::capability_result::CapabilityResultEnvelope::ok(
+        "media_download.download",
+        Some("download".to_string()),
+        serde_json::json!({"extra": {"saved_files": []}}),
+    );
+    earlier.delivery.intent = claw_core::capability_result::CapabilityDeliveryIntent::Silent;
+    loop_state.capability_results.push(earlier);
+    loop_state
+        .capability_results
+        .push(claw_core::capability_result::CapabilityResultEnvelope::ok(
+            "media_download.transcribe",
+            Some("transcribe".to_string()),
+            serde_json::json!({
+                "extra": {
+                    "transcription_review": {
+                        "required": true,
+                        "raw_text": "校对后应作为文件交付的长文本",
+                        "delivery": {
+                            "inline_max_characters_exclusive": 200,
+                            "long_text_filename": "transcript.txt"
+                        }
+                    }
+                }
+            }),
+        ));
+
+    assert!(action_requires_transcript_review_synthesis(
+        &AgentAction::Respond {
+            content: "模型试图直接回复原文".to_string(),
+        },
+        &loop_state,
+    ));
+    assert!(action_requires_transcript_review_synthesis(
+        &AgentAction::CallCapability {
+            capability: "filesystem.write_file".to_string(),
+            args: serde_json::json!({"path": "transcript.txt", "content": "原文"}),
+        },
+        &loop_state,
+    ));
+    assert!(action_requires_transcript_review_synthesis(
+        &AgentAction::CallSkill {
+            skill: "fs_basic".to_string(),
+            args: serde_json::json!({"action": "write_file"}),
+        },
+        &loop_state,
+    ));
+    assert!(!action_requires_transcript_review_synthesis(
+        &AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+        &loop_state,
+    ));
+    assert!(!action_requires_transcript_review_synthesis(
+        &AgentAction::Think {
+            content: "继续处理".to_string(),
+        },
+        &loop_state,
+    ));
+}
 
 #[path = "dispatch_support_tests/active_recipe_terminal_discussion.rs"]
 mod active_recipe_terminal_discussion;
