@@ -26,6 +26,7 @@ jobs:
     env:
       RUST_TARGET: x86_64-unknown-linux-gnu
       CARGO_TERM_COLOR: always
+      CARGO_BUILD_JOBS: "2"
       APP_REQUIRE_REFERENCE_ADAPTERS: "1"
 
     steps:
