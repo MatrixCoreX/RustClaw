@@ -84,6 +84,7 @@ jobs:
             perl \
             clang \
             libclang-dev \
+            bubblewrap \
             protobuf-compiler \
             qemu-user
 
