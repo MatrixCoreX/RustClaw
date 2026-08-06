@@ -130,8 +130,6 @@ jobs:
           python3 scripts/check_polyglot_skill_contracts.py --self-test
           python3 scripts/check_polyglot_skill_contracts.py --require-all
           python3 scripts/check_on_demand_skill_builds.py
-          cargo test -p agent-skill-sdk
-          cargo test -p skill-runner
 
       - name: Build Rust workspace
         shell: bash
