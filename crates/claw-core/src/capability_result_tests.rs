@@ -1,9 +1,10 @@
 use serde_json::json;
 
 use super::{
-    ArtifactRef, CapabilityDeliveryIntent, CapabilityResultEnvelope, CapabilityResultStatus,
-    CapabilityResultValidationError, Continuation, ContinuationKind, EvidenceRef,
-    ResultCompleteness, RetryDirective, StructuredError, CAPABILITY_RESULT_SCHEMA_VERSION,
+    ArtifactRef, ArtifactVisibility, CapabilityDeliveryIntent, CapabilityResultEnvelope,
+    CapabilityResultStatus, CapabilityResultValidationError, Continuation, ContinuationKind,
+    EvidenceRef, ResultCompleteness, RetryDirective, StructuredError,
+    CAPABILITY_RESULT_SCHEMA_VERSION,
 };
 
 #[test]
@@ -72,11 +73,19 @@ fn artifact_requires_a_stable_address() {
     let mut envelope =
         CapabilityResultEnvelope::ok("document.generate", Some("generate".to_string()), json!({}));
     envelope.artifacts.push(ArtifactRef {
+        artifact_ref: None,
         id: None,
         path: None,
         uri: None,
         media_type: Some("application/pdf".to_string()),
+        filename: None,
+        artifact_role: None,
+        size_bytes: None,
         sha256: None,
+        visibility: None,
+        owner_task_id: None,
+        producer: None,
+        lease: None,
         metadata: json!({}),
     });
     assert_eq!(
@@ -238,11 +247,19 @@ fn status_continuation_delivery_and_artifact_consistency_are_enforced() {
 
     let mut artifact = CapabilityResultEnvelope::ok("document.generate", None, json!({}));
     artifact.artifacts.push(ArtifactRef {
+        artifact_ref: None,
         id: Some("not a machine id".to_string()),
         path: Some("report.pdf".to_string()),
         uri: None,
         media_type: Some("application/pdf".to_string()),
+        filename: None,
+        artifact_role: None,
+        size_bytes: None,
         sha256: None,
+        visibility: None,
+        owner_task_id: None,
+        producer: None,
+        lease: None,
         metadata: json!({}),
     });
     assert_eq!(
@@ -273,5 +290,38 @@ fn canonical_evidence_identity_is_stable_and_content_addressed() {
     assert_ne!(
         first.evidence_id,
         changed.canonical_evidence_identity().evidence_id
+    );
+}
+
+#[test]
+fn canonical_task_artifact_reference_requires_matching_owner_and_digest() {
+    let mut envelope = CapabilityResultEnvelope::ok("media.inspect", None, json!({}));
+    envelope.artifacts.push(ArtifactRef {
+        artifact_ref: Some("artifact:task/task-1/a_deadbeef".to_string()),
+        id: Some("a_deadbeef".to_string()),
+        path: Some("/workspace/file.bin".to_string()),
+        uri: None,
+        media_type: Some("application/octet-stream".to_string()),
+        filename: Some("file.bin".to_string()),
+        artifact_role: Some("input_media".to_string()),
+        size_bytes: Some(12),
+        sha256: Some("a".repeat(64)),
+        visibility: Some(ArtifactVisibility::InternalProcessing),
+        owner_task_id: Some("task-2".to_string()),
+        producer: Some(json!({"capability": "media.inspect"})),
+        lease: Some(json!({"kind": "task_lifecycle"})),
+        metadata: json!({}),
+    });
+
+    assert_eq!(
+        envelope.validate(),
+        Err(CapabilityResultValidationError::ArtifactOwnershipMismatch)
+    );
+    envelope.artifacts[0].owner_task_id = Some("task-1".to_string());
+    assert!(envelope.validate().is_ok());
+    envelope.artifacts[0].sha256 = Some("bad-digest".to_string());
+    assert_eq!(
+        envelope.validate(),
+        Err(CapabilityResultValidationError::InvalidArtifactRef)
     );
 }

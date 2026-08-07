@@ -107,7 +107,7 @@ pub(in crate::agent_engine) fn latest_structured_capability_observation(
 fn generic_capability_observation(
     result: &claw_core::capability_result::CapabilityResultEnvelope,
 ) -> Option<String> {
-    let data = crate::capability_result::explicit_model_observation(&result.data)
+    let mut data = crate::capability_result::explicit_model_observation(&result.data)
         .map(|observation| {
             serde_json::json!({
                 "model_observation": compact_capability_observation_value(
@@ -118,11 +118,14 @@ fn generic_capability_observation(
             })
         })
         .unwrap_or_else(|| compact_capability_observation_value(&result.data, 0, 6));
+    replace_bound_artifact_paths_with_refs(&mut data, result);
     let projection = serde_json::json!({
         "schema_version": 1,
         "capability": &result.capability,
         "action": &result.action,
         "status": &result.status,
+        "artifact_bindings": planner_artifact_bindings(result),
+        "machine_continuation": planner_machine_continuation(result),
         "data": data,
         "effect": &result.effect,
         "verification": compact_capability_observation_value(&result.verification, 0, 6),
@@ -149,6 +152,98 @@ fn generic_capability_observation(
         .to_string()
     };
     Some(format!("capability_result_observation={serialized}"))
+}
+
+fn replace_bound_artifact_paths_with_refs(
+    value: &mut serde_json::Value,
+    result: &claw_core::capability_result::CapabilityResultEnvelope,
+) {
+    let bindings = result
+        .artifacts
+        .iter()
+        .filter_map(|artifact| {
+            Some((
+                artifact.path.as_deref()?.trim(),
+                artifact.artifact_ref.as_deref()?.trim(),
+            ))
+        })
+        .filter(|(path, reference)| !path.is_empty() && !reference.is_empty())
+        .collect::<Vec<_>>();
+    if bindings.is_empty() {
+        return;
+    }
+    replace_bound_artifact_paths(value, &bindings);
+}
+
+fn replace_bound_artifact_paths(value: &mut serde_json::Value, bindings: &[(&str, &str)]) {
+    match value {
+        serde_json::Value::Array(items) => {
+            for item in items {
+                replace_bound_artifact_paths(item, bindings);
+            }
+        }
+        serde_json::Value::Object(object) => {
+            for item in object.values_mut() {
+                replace_bound_artifact_paths(item, bindings);
+            }
+        }
+        serde_json::Value::String(text) => {
+            for (path, reference) in bindings.iter().copied() {
+                if text.contains(path) {
+                    *text = text.replace(path, reference);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn planner_artifact_bindings(
+    result: &claw_core::capability_result::CapabilityResultEnvelope,
+) -> Vec<serde_json::Value> {
+    result
+        .artifacts
+        .iter()
+        .filter_map(|artifact| {
+            let artifact_ref = artifact.artifact_ref.as_deref()?;
+            Some(serde_json::json!({
+                "artifact_ref": artifact_ref,
+                "artifact_role": artifact.artifact_role,
+                "filename": artifact.filename,
+                "media_type": artifact.media_type,
+                "size_bytes": artifact.size_bytes,
+                "sha256": artifact.sha256,
+                "visibility": artifact.visibility,
+                "owner_task_id": artifact.owner_task_id,
+            }))
+        })
+        .collect()
+}
+
+fn planner_machine_continuation(
+    result: &claw_core::capability_result::CapabilityResultEnvelope,
+) -> Option<serde_json::Value> {
+    let policy = result
+        .data
+        .pointer("/extra/followup_policy")
+        .or_else(|| result.data.pointer("/output/extra/followup_policy"))?
+        .as_object()?;
+    let mut binding = serde_json::Map::new();
+    for key in [
+        "capability",
+        "input_field",
+        "input_value_artifact_ref",
+        "fallback_capability",
+        "fallback_input_field",
+        "fallback_input_value_artifact_ref",
+        "next_action",
+        "deliver_intermediate",
+    ] {
+        if let Some(value) = policy.get(key) {
+            binding.insert(key.to_string(), value.clone());
+        }
+    }
+    (!binding.is_empty()).then_some(serde_json::Value::Object(binding))
 }
 
 fn compact_capability_observation_value(

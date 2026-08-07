@@ -950,6 +950,7 @@ class AdapterTest(unittest.TestCase):
                 "text_conversion_action": "transcribe_audio",
                 "capability": "media_download.transcribe",
                 "input_field": "input_path",
+                "input_value": str(artifacts / "public-video.mp4"),
                 "never_use_image_ocr": True,
             },
         )

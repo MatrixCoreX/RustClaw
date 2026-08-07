@@ -3,12 +3,44 @@ use serde_json::json;
 use claw_core::types::TaskExecutionState;
 
 use super::{
-    checkpoint_resume_directive, paused_checkpoint_recovery_status,
-    paused_checkpoint_resume_readiness, task_execution_state_from_lifecycle,
-    task_query_lifecycle_projection, AsyncJobRef, AsyncJobStatus, CheckpointBudgetCounters,
-    CheckpointResumeDirective, PausedCheckpointRecoveryStatus, PausedCheckpointResumeReadiness,
-    ResumeEntrypoint, ResumeTrigger, TaskCheckpoint, TerminalFailureReason,
+    checkpoint_resume_directive, has_recoverable_resume_execution,
+    paused_checkpoint_recovery_status, paused_checkpoint_resume_readiness,
+    task_execution_state_from_lifecycle, task_query_lifecycle_projection, AsyncJobRef,
+    AsyncJobStatus, CheckpointBudgetCounters, CheckpointResumeDirective,
+    PausedCheckpointRecoveryStatus, PausedCheckpointResumeReadiness, ResumeEntrypoint,
+    ResumeTrigger, TaskCheckpoint, TerminalFailureReason,
 };
+
+#[test]
+fn running_resume_execution_with_matching_checkpoint_is_recoverable() {
+    let recoverable = json!({
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": "running",
+            "checkpoint_id": "ckpt-running",
+            "resume_executor": {
+                "checkpoint_id": "ckpt-running",
+                "executor_state": "executing_planner_resume",
+                "resume_directive": "run_next_planner_round"
+            },
+            "resume_executor_dispatch_claim": {
+                "checkpoint_id": "ckpt-running",
+                "expires_at": 90
+            }
+        },
+        "task_checkpoint": checkpoint_value("ckpt-running", vec!["skill:completed"])
+    });
+    assert!(has_recoverable_resume_execution(&recoverable));
+
+    let mut mismatched = recoverable.clone();
+    mismatched["task_lifecycle"]["checkpoint_id"] = json!("other");
+    assert!(!has_recoverable_resume_execution(&mismatched));
+
+    let plain_running = json!({
+        "task_lifecycle": {"state": "running"}
+    });
+    assert!(!has_recoverable_resume_execution(&plain_running));
+}
 
 #[test]
 fn lifecycle_projection_marks_paused_checkpoint_resume_due_from_machine_time() {

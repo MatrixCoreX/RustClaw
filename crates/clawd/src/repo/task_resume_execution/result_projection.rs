@@ -737,7 +737,7 @@ pub(crate) fn record_claimed_paused_checkpoint_resume_dispatch_result_projection
     Ok(changed > 0)
 }
 
-fn deferred_dispatch_checkpoint_result(
+pub(crate) fn deferred_dispatch_checkpoint_result(
     projection_payload: &Value,
     previous_checkpoint_id: &str,
 ) -> Option<(Value, Value, crate::task_lifecycle::TaskCheckpoint)> {
@@ -749,7 +749,7 @@ fn deferred_dispatch_checkpoint_result(
         "seeded_loop_deferred" => {
             deferred_seeded_loop_checkpoint_result(projection_payload, previous_checkpoint_id)
         }
-        "async_poll_completed" => {
+        "async_poll_completed" | "async_poll_failed" => {
             deferred_async_completion_checkpoint_result(projection_payload, previous_checkpoint_id)
         }
         _ => return None,

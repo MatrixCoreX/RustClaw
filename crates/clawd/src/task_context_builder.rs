@@ -452,9 +452,25 @@ fn ordered_entries_context_line(entries: &[String]) -> Option<String> {
 
 fn build_active_execution_anchor_context(
     session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+    current_task_id: &str,
 ) -> String {
     let mut lines = vec!["### ACTIVE_EXECUTION_ANCHOR".to_string()];
+    let mut contains_prior_task_state = false;
     if let Some(frame) = session_snapshot.active_followup_frame.as_ref() {
+        let frame_is_prior = !frame.source_task_id.trim().is_empty()
+            && frame.source_task_id.trim() != current_task_id;
+        contains_prior_task_state |= frame_is_prior;
+        if !frame.source_task_id.trim().is_empty() {
+            lines.push(format!("followup_source_task_id: {}", frame.source_task_id));
+            lines.push(format!(
+                "followup_scope: {}",
+                if frame_is_prior {
+                    "prior_task_context"
+                } else {
+                    "current_task_context"
+                }
+            ));
+        }
         let source_request = frame.source_request.trim();
         if !source_request.is_empty() {
             lines.push(format!(
@@ -464,37 +480,72 @@ fn build_active_execution_anchor_context(
         }
         lines.push(format!("followup_op_kind: {:?}", frame.op_kind));
         if followup_frame_allows_execution_anchor_target(frame) {
-            if let Some(target) = frame
+            let target = frame
                 .bound_target
                 .as_deref()
                 .map(str::trim)
-                .filter(|target| !target.is_empty())
-            {
+                .filter(|target| !target.is_empty());
+            let target_is_private =
+                target.is_some_and(crate::routing_context::is_private_artifact_locator);
+            if let Some(target) = target.filter(|_| !target_is_private) {
                 lines.push(format!(
                     "followup_bound_target: {}",
                     truncate_context_snippet(target, 220)
                 ));
             }
-            if let Some(entries) = ordered_entries_context_line(&frame.ordered_entries) {
-                lines.push(["followup_ordered_entries:", entries.as_str()].join(" "));
+            if !target_is_private {
+                if let Some(entries) = ordered_entries_context_line(&frame.ordered_entries) {
+                    lines.push(["followup_ordered_entries:", entries.as_str()].join(" "));
+                }
+            } else {
+                lines.push("followup_private_artifact_locator: omitted".to_string());
             }
         }
     }
     if let Some(facts) = session_snapshot.active_observed_facts.as_ref() {
-        if let Some(target) = facts
+        let facts_source_task_id = session_snapshot
+            .conversation_state
+            .as_ref()
+            .and_then(|state| state.active_observed_facts_task_id.as_deref())
+            .map(str::trim)
+            .filter(|task_id| !task_id.is_empty());
+        let facts_are_prior =
+            facts_source_task_id.is_some_and(|task_id| task_id != current_task_id);
+        contains_prior_task_state |= facts_are_prior;
+        if let Some(source_task_id) = facts_source_task_id {
+            lines.push(format!("observed_source_task_id: {source_task_id}"));
+            lines.push(format!(
+                "observed_scope: {}",
+                if facts_are_prior {
+                    "prior_task_context"
+                } else {
+                    "current_task_context"
+                }
+            ));
+        }
+        let target = facts
             .bound_target
             .as_deref()
             .map(str::trim)
-            .filter(|target| !target.is_empty())
-        {
+            .filter(|target| !target.is_empty());
+        let target_is_private =
+            target.is_some_and(crate::routing_context::is_private_artifact_locator);
+        if let Some(target) = target.filter(|_| !target_is_private) {
             lines.push(format!(
                 "observed_bound_target: {}",
                 truncate_context_snippet(target, 220)
             ));
         }
-        if let Some(entries) = ordered_entries_context_line(&facts.ordered_entries) {
-            lines.push(["observed_ordered_entries:", entries.as_str()].join(" "));
+        if !target_is_private {
+            if let Some(entries) = ordered_entries_context_line(&facts.ordered_entries) {
+                lines.push(["observed_ordered_entries:", entries.as_str()].join(" "));
+            }
+        } else {
+            lines.push("observed_private_artifact_locator: omitted".to_string());
         }
+    }
+    if contains_prior_task_state {
+        lines.push("anchor_rule: prior-task state is context only, never current-task execution evidence; private runtime artifact locators are omitted and must be supplied through a current authorized attachment or canonical artifact binding".to_string());
     }
     if lines.len() <= 1 {
         "<none>".to_string()
@@ -615,7 +666,10 @@ pub(crate) fn build_agent_loop_task_context_bundle(
         runtime_context: build_runtime_context(state),
         goal_context: build_task_goal_context(task),
         active_task_context: build_active_task_context(&session_snapshot),
-        active_execution_anchor_context: build_active_execution_anchor_context(&session_snapshot),
+        active_execution_anchor_context: build_active_execution_anchor_context(
+            &session_snapshot,
+            &task.task_id,
+        ),
         session_alias_context: build_session_alias_context(&session_snapshot),
         recent_turns_full,
         last_turn_full: memory::build_last_turn_full_context(

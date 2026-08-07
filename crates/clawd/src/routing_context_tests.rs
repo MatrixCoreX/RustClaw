@@ -4,6 +4,7 @@ use rusqlite::params;
 #[test]
 fn extracts_generic_anchor_from_capability_result_envelope() {
     let anchor = extract_execution_anchor(
+        "task-anchor",
         "ask",
         r#"{"text":"inspect the selected item"}"#,
         r#"{"text":"done","task_journal":{"trace":{"capability_results":[{"schema_version":1,"status":"ok","capability":"catalog.lookup","action":"lookup","data":{"item_id":"item-42","value":106.02},"artifacts":[{"id":"artifact-1","path":"/tmp/report.json"}],"evidence":[{"id":"ev-1","source":"catalog.lookup","locator":"catalog://item-42","metadata":{}}],"delivery":{"intent":"model_synthesis","constraints":{}}}]}}}"#,
@@ -11,18 +12,20 @@ fn extracts_generic_anchor_from_capability_result_envelope() {
     )
     .expect("anchor");
     assert_eq!(anchor.capability, "catalog.lookup");
+    assert_eq!(anchor.source_task_id, "task-anchor");
     assert_eq!(anchor.action.as_deref(), Some("lookup"));
     assert_eq!(
         anchor.data.as_ref().and_then(|data| data.get("item_id")),
         Some(&serde_json::json!("item-42"))
     );
-    assert_eq!(anchor.evidence_locators, vec!["catalog://item-42"]);
-    assert_eq!(anchor.artifact_refs, vec!["/tmp/report.json"]);
+    assert_eq!(anchor.evidence_count, 1);
+    assert_eq!(anchor.artifact_count, 1);
 }
 
 #[test]
 fn legacy_visible_text_does_not_create_a_semantic_anchor() {
     assert!(extract_execution_anchor(
+        "task-legacy",
         "ask",
         r#"{"text":"查询中芯国际今天涨跌情况"}"#,
         r#"{"text":"subtask#1 skill(stock): success [SH688981] 中芯国际 现价106.020 今开108.540 昨收108.600"}"#,
@@ -35,6 +38,7 @@ fn legacy_visible_text_does_not_create_a_semantic_anchor() {
 fn extracts_run_skill_anchor_from_structured_payload() {
     let secret = "sk-test_abcdefghijklmnopqrstuvwxyz1234567890";
     let anchor = extract_execution_anchor(
+        "task-run-skill",
         "run_skill",
         &format!(
             r#"{{"skill_name":"catalog_lookup","args":{{"action":"lookup","item_id":"item-42","api_token":"{secret}"}}}}"#
@@ -53,6 +57,7 @@ fn extracts_run_skill_anchor_from_structured_payload() {
 
     let context = render_recent_execution_context(
         &[(
+            "task-run-skill".to_string(),
             "run_skill".to_string(),
             format!(
                 r#"{{"skill_name":"catalog_lookup","args":{{"action":"lookup","item_id":"item-42","api_token":"{secret}"}}}}"#
@@ -69,12 +74,14 @@ fn extracts_run_skill_anchor_from_structured_payload() {
 fn newer_non_execution_turn_invalidates_older_execution_anchor() {
     let rows = vec![
         (
+            "task-newer".to_string(),
             "ask".to_string(),
             r#"{"text":"target-beta"}"#.to_string(),
             r#"{"text":"which operation"}"#.to_string(),
             "200".to_string(),
         ),
         (
+            "task-older".to_string(),
             "ask".to_string(),
             r#"{"text":"target-alpha"}"#.to_string(),
             r#"{"text":"done","task_journal":{"trace":{"capability_results":[{"schema_version":1,"status":"ok","capability":"catalog.lookup","action":"lookup","data":{"item_id":"target-alpha"}}]}}}"#.to_string(),
@@ -144,6 +151,27 @@ fn recent_execution_rows_are_scoped_to_current_conversation() {
     )
     .expect("query recent rows");
     assert_eq!(rows.len(), 1);
-    assert!(rows[0].1.contains("target-beta"));
-    assert!(!rows[0].1.contains("target-gamma"));
+    assert!(rows[0].2.contains("target-beta"));
+    assert!(!rows[0].2.contains("target-gamma"));
+}
+
+#[test]
+fn prior_execution_projection_hides_private_locators_and_cannot_claim_current_evidence() {
+    let rows = vec![(
+        "task-prior".to_string(),
+        "ask".to_string(),
+        r#"{"text":"transcribe the video"}"#.to_string(),
+        r#"{"text":"saved /home/test/.agent-runtime/artifacts/skill-invocations/task-prior/media/out.txt","task_journal":{"trace":{"capability_results":[{"schema_version":1,"status":"ok","capability":"media.transform","action":"transcribe","data":{"path":"/home/test/.agent-runtime/artifacts/skill-invocations/task-prior/media/out.txt","transcript":"done"},"artifacts":[{"artifact_ref":"artifact:task/task-prior/a1","path":"/home/test/.agent-runtime/artifacts/skill-invocations/task-prior/media/out.txt"}]}]}}}"#.to_string(),
+        "200".to_string(),
+    )];
+
+    let context = render_recent_execution_anchor_context(&rows);
+
+    assert!(context.contains("### PRIOR_TASK_EXECUTION_ANCHOR"));
+    assert!(context.contains("source_task_id=task-prior"));
+    assert!(context.contains("scope=prior_task_context"));
+    assert!(context.contains("prior_artifact_count=1"));
+    assert!(context.contains("never current-task execution evidence"));
+    assert!(!context.contains("/home/test/.agent-runtime"));
+    assert!(!context.contains("artifact:task/task-prior/a1"));
 }

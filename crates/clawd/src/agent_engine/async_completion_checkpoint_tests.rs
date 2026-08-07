@@ -72,9 +72,14 @@ fn completed_async_job_becomes_next_planner_round_with_terminal_evidence() {
         poll_after_ms: Some(2_000),
         state: json!({}),
     });
+    pending.provenance = json!({
+        "task_id": "task-1",
+        "action_fingerprint": "fp-audio-transcribe"
+    });
     pending_checkpoint.capability_results.push(pending);
     let result = completed_async_job_continuation_result(
         "ask",
+        "task-1",
         &pending_checkpoint,
         &json!({
             "status": "ok",
@@ -178,6 +183,7 @@ fn only_ask_agent_loop_poll_checkpoints_continue_planning() {
     let checkpoint = poll_checkpoint();
     assert!(completed_async_job_continuation_result(
         "run_skill",
+        "task-1",
         &checkpoint,
         &json!({"status": "ok"}),
         100
@@ -188,6 +194,7 @@ fn only_ask_agent_loop_poll_checkpoints_continue_planning() {
     non_agent.checkpoint_id = "skill-job:1".to_string();
     assert!(completed_async_job_continuation_result(
         "ask",
+        "task-1",
         &non_agent,
         &json!({"status": "ok"}),
         100
@@ -207,9 +214,88 @@ fn completed_single_action_async_job_projects_terminal_without_provider_round() 
 
     assert!(completed_async_job_continuation_result(
         "ask",
+        "task-1",
         &checkpoint,
         &json!({"status": "ok", "output": "done", "exit_code": 0}),
         100
     )
     .is_none());
+}
+
+#[test]
+fn failed_async_stt_resumes_planner_with_exact_local_fallback_input() {
+    let mut checkpoint = poll_checkpoint();
+    let mut pending = claw_core::capability_result::CapabilityResultEnvelope::ok(
+        "audio.transcribe",
+        Some("transcribe".to_string()),
+        json!({"output": "pending"}),
+    );
+    pending.status = claw_core::capability_result::CapabilityResultStatus::Waiting;
+    pending.continuation = Some(claw_core::capability_result::Continuation {
+        kind: claw_core::capability_result::ContinuationKind::Poll,
+        reference: Some("provider:video:1".to_string()),
+        poll_after_ms: Some(2_000),
+        state: json!({}),
+    });
+    pending.provenance = json!({
+        "task_id": "task-1",
+        "action_fingerprint": "fp-audio-transcribe"
+    });
+    checkpoint.capability_results.push(pending);
+
+    let result = failed_async_job_continuation_result(
+        "ask",
+        "task-1",
+        &checkpoint,
+        &json!({
+            "schema_version": 1,
+            "status": "error",
+            "extra": {
+                "schema_version": 1,
+                "source_skill": "audio_transcribe",
+                "status": "error",
+                "error_code": "provider_request_failed",
+                "message_key": "skill.audio_transcribe.provider_request_failed",
+                "retryable": true,
+                "fallback_capability": "media_download.transcribe",
+                "fallback_input_field": "input_path",
+                "fallback_input_value": "/workspace/extracted.wav"
+            }
+        }),
+        100,
+    )
+    .expect("failed async capability remains recoverable");
+    let resumed = crate::task_lifecycle::task_checkpoint_from_result_json(&result)
+        .expect("successor checkpoint");
+
+    assert_eq!(result["task_lifecycle"]["state"], "background");
+    assert_eq!(
+        result["task_lifecycle"]["resume_reason"],
+        "async_job_failed_continue_recovery"
+    );
+    assert_eq!(
+        resumed.capability_results[0].status,
+        claw_core::capability_result::CapabilityResultStatus::Error
+    );
+    assert_eq!(
+        resumed.capability_results[0]
+            .error
+            .as_ref()
+            .map(|error| error.code.as_str()),
+        Some("provider_request_failed")
+    );
+    assert_eq!(
+        resumed.capability_results[0]
+            .data
+            .pointer("/extra/fallback_input_value"),
+        Some(&json!("/workspace/extracted.wav"))
+    );
+    assert_eq!(
+        resumed.capability_results[0].provenance["task_id"],
+        "task-1"
+    );
+    assert_eq!(
+        resumed.capability_results[0].provenance["action_fingerprint"],
+        "fp-audio-transcribe"
+    );
 }

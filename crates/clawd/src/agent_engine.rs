@@ -72,7 +72,9 @@ pub(crate) fn planner_internal_tool_is_observe_only(tool: &str) -> bool {
     tool == "load_capability_groups"
 }
 
-pub(crate) use self::async_completion_checkpoint::completed_async_job_continuation_result;
+pub(crate) use self::async_completion_checkpoint::{
+    completed_async_job_continuation_result, failed_async_job_continuation_result,
+};
 pub(crate) use self::context_compaction::run_model_assisted_context_compaction;
 use self::execution_loop::execute_actions_once;
 use self::loop_control::{

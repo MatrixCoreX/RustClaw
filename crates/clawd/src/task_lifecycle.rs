@@ -388,6 +388,60 @@ pub(crate) fn paused_checkpoint_recovery_status(
     }
 }
 
+pub(crate) fn has_recoverable_resume_execution(result_json: &Value) -> bool {
+    let lifecycle = task_query_lifecycle_projection("running", Some(result_json), None);
+    let state = lifecycle
+        .get("state")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    if !matches!(state, "running" | "waiting" | "background" | "needs_user") {
+        return false;
+    }
+    let Some(checkpoint_id) = lifecycle
+        .get("checkpoint_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return false;
+    };
+    let Some(checkpoint) = task_checkpoint_from_result_json(result_json) else {
+        return false;
+    };
+    if checkpoint.checkpoint_id != checkpoint_id {
+        return false;
+    }
+    if state != "running" {
+        return true;
+    }
+    if checkpoint.resume_entrypoint == ResumeEntrypoint::AwaitUserInput {
+        return false;
+    }
+
+    [
+        "resume_claim",
+        "resume_executor",
+        "resume_executor_claim",
+        "resume_executor_handoff",
+        "resume_executor_handoff_claim",
+        "resume_executor_dispatch",
+        "resume_executor_dispatch_claim",
+        "resume_executor_dispatch_result",
+        "resume_executor_result_projection_claim",
+    ]
+    .into_iter()
+    .filter_map(|field| lifecycle.get(field))
+    .filter(|value| value.is_object())
+    .any(|value| {
+        value
+            .get("checkpoint_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            == Some(checkpoint_id)
+    })
+}
+
 pub(crate) fn paused_checkpoint_resume_readiness(
     result_json: &Value,
     now_ts: i64,

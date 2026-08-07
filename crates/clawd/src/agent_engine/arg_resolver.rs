@@ -792,6 +792,12 @@ fn angle_bracket_key(input: &str) -> Option<&str> {
 }
 
 pub(super) fn resolve_arg_string(input: &str, loop_state: &LoopState) -> String {
+    if let Some(path) = crate::capability_result::resolve_current_task_artifact_reference(
+        &loop_state.capability_results,
+        input,
+    ) {
+        return path;
+    }
     let replaced = replace_double_brace_placeholders(input, loop_state);
     if let Some(key) = single_brace_key(replaced.trim()) {
         if let Some(v) = loop_state.output_vars.get(key) {

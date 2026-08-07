@@ -137,11 +137,19 @@ fn projects_one_artifact_path_as_file_token() {
     };
     let mut envelope = result(json!({"output": {"status": "created"}}));
     envelope.artifacts.push(ArtifactRef {
+        artifact_ref: None,
         id: Some("report".to_string()),
         path: Some("/workspace/report.docx".to_string()),
         uri: None,
         media_type: None,
+        filename: None,
+        artifact_role: None,
+        size_bytes: None,
         sha256: None,
+        visibility: None,
+        owner_task_id: None,
+        producer: None,
+        lease: None,
         metadata: json!({}),
     });
     assert_eq!(

@@ -6,6 +6,8 @@ use crate::{AppState, ClaimedTask};
 mod dispatch_claim;
 mod resume_lease;
 
+#[cfg(test)]
+pub(crate) use dispatch_claim::deferred_dispatch_checkpoint_result;
 pub(crate) use dispatch_claim::record_claimed_dispatched_paused_checkpoint_resume_execution_result_internal;
 pub(crate) use dispatch_claim::{
     claim_dispatched_paused_checkpoint_resume_execution_internal,

@@ -674,8 +674,14 @@ fn format_last_turn_full_context(
     max_segment_chars: usize,
     max_total_chars: usize,
 ) -> String {
-    let user_text = bounded_context_segment(user_content, max_segment_chars);
-    let assistant_text = bounded_context_segment(assistant_content, max_segment_chars);
+    let user_text = bounded_context_segment(
+        &crate::routing_context::redact_prior_private_artifact_paths(user_content),
+        max_segment_chars,
+    );
+    let assistant_text = bounded_context_segment(
+        &crate::routing_context::redact_prior_private_artifact_paths(assistant_content),
+        max_segment_chars,
+    );
     let formatted = format!(
         "[LAST_TURN_FULL]\nUser: {}\nAssistant: {}\n[/LAST_TURN_FULL]",
         user_text, assistant_text
@@ -731,11 +737,20 @@ pub(crate) fn build_recent_turns_full_context_with_sources(
     let mut source_task_ids = Vec::new();
     for (idx, turn) in turns.iter().enumerate() {
         let relative = -((idx as i64) + 1);
-        let user_view = bounded_context_segment(&turn.user_text, max_segment_chars);
-        let assistant_view = bounded_context_segment(&turn.assistant_text, max_segment_chars);
+        let user_view = bounded_context_segment(
+            &crate::routing_context::redact_prior_private_artifact_paths(&turn.user_text),
+            max_segment_chars,
+        );
+        let assistant_view = bounded_context_segment(
+            &crate::routing_context::redact_prior_private_artifact_paths(&turn.assistant_text),
+            max_segment_chars,
+        );
         let turn_block = format!(
-            "[TURN {}]\nUser: {}\nAssistant: {}\n[/TURN]\n",
-            relative, user_view, assistant_view
+            "[TURN {} source_task_id={} scope=prior_task_context]\nUser: {}\nAssistant: {}\n[/TURN]\n",
+            relative,
+            bounded_context_segment(&turn.task_id, 160),
+            user_view,
+            assistant_view
         );
         if out.len() + turn_block.len() > max_total_chars {
             break;

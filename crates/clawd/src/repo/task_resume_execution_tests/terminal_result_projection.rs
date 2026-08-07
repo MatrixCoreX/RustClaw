@@ -1,5 +1,6 @@
 use super::super::TempDirGuard;
 use super::*;
+use crate::repo::deferred_dispatch_checkpoint_result;
 
 #[test]
 fn async_poll_retry_plan_clears_stale_projection_before_terminal_poll() {
@@ -1065,5 +1066,48 @@ fn completed_agent_loop_async_poll_projects_successor_planner_checkpoint() {
     assert_eq!(
         result["task_journal"]["summary"]["task_metrics"]["tool_calls"],
         1
+    );
+}
+
+#[test]
+fn failed_agent_loop_async_poll_projects_recovery_checkpoint_instead_of_terminalizing() {
+    let projection = json!({
+        "executor_result_status": "async_poll_failed",
+        "continuation_result_json": {
+            "schema_version": 1,
+            "task_lifecycle": {
+                "schema_version": 1,
+                "state": "background",
+                "checkpoint_id": "agent-loop:task-1:failed:completion",
+                "resume_reason": "async_job_failed_continue_recovery",
+                "next_check_after": 100
+            },
+            "task_checkpoint": {
+                "schema_version": 1,
+                "checkpoint_id": "agent-loop:task-1:failed:completion",
+                "boundary_context": {"schema_version": 1},
+                "observations": [],
+                "evidence_refs": [],
+                "artifact_refs": [],
+                "completed_side_effect_refs": [],
+                "budget": {
+                    "round": 1,
+                    "step": 1,
+                    "llm_calls": 1,
+                    "tool_calls": 1,
+                    "elapsed_ms": 10
+                },
+                "resume_entrypoint": "next_planner_round"
+            }
+        }
+    });
+
+    let (_, lifecycle, checkpoint) =
+        deferred_dispatch_checkpoint_result(&projection, "agent-loop:task-1:failed")
+            .expect("failed async capability should resume recovery planning");
+    assert_eq!(lifecycle["state"], "background");
+    assert_eq!(
+        checkpoint.resume_entrypoint,
+        crate::task_lifecycle::ResumeEntrypoint::NextPlannerRound
     );
 }

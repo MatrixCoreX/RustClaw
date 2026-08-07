@@ -56,12 +56,13 @@ pub(crate) async fn maybe_recover_stale_running_tasks_runtime(
     Ok(())
 }
 
-fn resume_execution_lease_seconds(state: &AppState) -> i64 {
+pub(super) fn resume_execution_lease_seconds(state: &AppState) -> i64 {
     state
         .worker
         .worker_task_heartbeat_seconds
-        .clamp(5, 10)
-        .saturating_mul(3) as i64
+        .max(5)
+        .saturating_mul(4)
+        .max(300) as i64
 }
 
 fn prepare_due_paused_checkpoint_resume_work(

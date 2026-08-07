@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-use claw_core::capability_result::{CapabilityResultEnvelope, CapabilityResultStatus};
+use claw_core::capability_result::{
+    ArtifactVisibility, CapabilityResultEnvelope, CapabilityResultStatus,
+};
 use serde_json::{Map as JsonMap, Value};
 
 use crate::agent_engine::{AgentRunContext, LoopState};
@@ -247,6 +249,12 @@ fn project_single_artifact(results: &[CapabilityResultEnvelope]) -> GenericProje
         for path in result
             .artifacts
             .iter()
+            .filter(|artifact| {
+                !matches!(
+                    artifact.visibility,
+                    Some(ArtifactVisibility::InternalProcessing | ArtifactVisibility::Evidence)
+                )
+            })
             .filter_map(|artifact| artifact.path.as_deref())
             .map(str::trim)
             .filter(|path| !path.is_empty())

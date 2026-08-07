@@ -356,6 +356,13 @@ fn collect_sources_from_object(value: &Value, out: &mut Vec<ArtifactSource>, all
 
 fn artifact_source(value: &Value, inherited_mime: Option<&str>) -> Option<ArtifactSource> {
     let object = value.as_object()?;
+    if object
+        .get("visibility")
+        .and_then(Value::as_str)
+        .is_some_and(|visibility| matches!(visibility, "internal_processing" | "evidence"))
+    {
+        return None;
+    }
     let path = object
         .get("path")
         .or_else(|| object.get("output_path"))

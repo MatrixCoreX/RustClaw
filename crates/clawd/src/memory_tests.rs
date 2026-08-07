@@ -183,6 +183,8 @@ fn recent_turn_context_keeps_latest_clarification_target_and_scopes_conversation
     assert!(recent.contains("target-beta"));
     assert!(recent.contains(clarify_assistant_placeholder()));
     assert!(recent.contains("target-alpha"));
+    assert!(recent.contains("[TURN -1 source_task_id=task-latest-target scope=prior_task_context]"));
+    assert!(recent.contains("[TURN -2 source_task_id=task-older-target scope=prior_task_context]"));
     assert!(!recent.contains("target-gamma"));
     assert_eq!(
         sources,

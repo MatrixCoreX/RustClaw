@@ -875,6 +875,60 @@ pub(super) fn structured_observation_path_argument_error(
     ))
 }
 
+fn managed_skill_invocation_owner(value: &str) -> Option<String> {
+    let normalized = value.trim().replace('\\', "/");
+    let parts = normalized.split('/').collect::<Vec<_>>();
+    let marker = parts
+        .windows(2)
+        .position(|parts| parts == ["artifacts", "skill-invocations"])?;
+    parts
+        .get(marker + 2)
+        .map(|owner| owner.trim())
+        .filter(|owner| claw_core::capability_result::is_machine_ref(owner))
+        .map(ToString::to_string)
+}
+
+fn contains_unbound_cross_task_private_artifact(
+    value: &Value,
+    current_task_id: &str,
+    user_text: &str,
+) -> bool {
+    match value {
+        Value::String(value) => managed_skill_invocation_owner(value)
+            .is_some_and(|owner| owner != current_task_id && !user_text.contains(value.trim())),
+        Value::Array(items) => items.iter().any(|value| {
+            contains_unbound_cross_task_private_artifact(value, current_task_id, user_text)
+        }),
+        Value::Object(object) => object.values().any(|value| {
+            contains_unbound_cross_task_private_artifact(value, current_task_id, user_text)
+        }),
+        _ => false,
+    }
+}
+
+pub(super) fn cross_task_private_artifact_argument_error(
+    normalized_skill: &str,
+    current_task_id: &str,
+    user_text: &str,
+    exec_args: &Value,
+) -> Option<String> {
+    if !contains_unbound_cross_task_private_artifact(exec_args, current_task_id, user_text) {
+        return None;
+    }
+    Some(crate::skills::structured_skill_error_from_parts(
+        normalized_skill,
+        "artifact_ownership_mismatch",
+        "clawd.skill.artifact_ownership_mismatch",
+        None,
+        Some(json!({
+            "reason": "cross_task_private_artifact_path",
+            "failure_phase": "pre_dispatch",
+            "recovery_action": "replan_arguments",
+            "retryable": true,
+        })),
+    ))
+}
+
 pub(super) struct PreflightFailureMetadata {
     pub(super) reason: &'static str,
     pub(super) error_code: String,

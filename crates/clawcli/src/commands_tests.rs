@@ -162,6 +162,14 @@ fn task_report_json_exposes_stable_machine_fields() {
                         ]
                     },
                     "trace": {
+                        "capability_results": [{
+                            "status": "ok",
+                            "capability": "media_download.transcribe",
+                            "artifacts": [{
+                                "artifact_ref": "artifact:task/task-report/a_transcript",
+                                "visibility": "internal_processing"
+                            }]
+                        }],
                         "contract_matrix": {
                             "final_answer_shape": "single_path"
                         },
@@ -175,6 +183,12 @@ fn task_report_json_exposes_stable_machine_fields() {
                         "ref": "artifact:report"
                     }
                 ],
+                "artifacts": [{
+                    "artifact_ref": "artifact:task/task-report/a_delivery"
+                }],
+                "task_checkpoint": {
+                    "pending_action": {"capability": "audio.transcribe"}
+                },
                 "changed_files": ["src/lib.rs"],
                 "final_diff_summary": {
                     "file_count": 1,
@@ -238,6 +252,18 @@ fn task_report_json_exposes_stable_machine_fields() {
     assert_eq!(report["execution_state"], "completed");
     assert_eq!(report["lifecycle_state"], "completed");
     assert_eq!(report["terminal"], true);
+    assert_eq!(report["goal_outcome"], report["outcome"]);
+    assert_eq!(
+        report["last_successful_capability"],
+        "media_download.transcribe"
+    );
+    assert_eq!(
+        report["pending_plan_node"]["capability"],
+        "audio.transcribe"
+    );
+    assert_eq!(report["failure_attribution"], serde_json::Value::Null);
+    assert_eq!(report["artifacts"]["typed_count"], 2);
+    assert_eq!(report["artifacts"]["delivery_count"], 1);
     assert_eq!(report["event_count"], 2);
     assert_eq!(report["events"][0]["event_type"], "task_completed");
     assert_eq!(report["llm"]["provider_call_event_count"], 1);

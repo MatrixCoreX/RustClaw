@@ -1,7 +1,31 @@
 use claw_core::capability_result::{
-    CapabilityDeliveryIntent, CapabilityResultStatus, ContinuationKind,
+    ArtifactVisibility, CapabilityDeliveryIntent, CapabilityResultStatus, ContinuationKind,
 };
 use serde_json::json;
+
+struct ArtifactFixture {
+    root: std::path::PathBuf,
+    file: std::path::PathBuf,
+}
+
+impl ArtifactFixture {
+    fn new() -> Self {
+        let root = std::env::temp_dir().join(format!(
+            "agent-capability-artifact-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&root).expect("create artifact fixture");
+        let file = root.join("extracted.wav");
+        std::fs::write(&file, b"fixture audio").expect("write artifact fixture");
+        Self { root, file }
+    }
+}
+
+impl Drop for ArtifactFixture {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
 
 #[test]
 fn async_completion_replaces_the_matching_waiting_result() {
@@ -41,7 +65,9 @@ fn async_completion_replaces_the_matching_waiting_result() {
                 }
             },
             "error_text": null
-        })
+        }),
+        "task-3",
+        Some(1_000)
     ));
 
     assert_eq!(envelope.status, CapabilityResultStatus::Ok);
@@ -58,6 +84,121 @@ fn async_completion_replaces_the_matching_waiting_result() {
         envelope.provenance["source"],
         "async_job_completion_checkpoint"
     );
+}
+
+#[test]
+fn task_bound_artifact_is_typed_owned_digest_checked_and_resolvable() {
+    let fixture = ArtifactFixture::new();
+    let path = fixture.file.to_string_lossy().to_string();
+    let mut envelope = super::successful_execution_envelope(
+        "media_download.transcribe",
+        "step_audio",
+        &json!({"action": "transcribe"}),
+        "saved",
+        Some(&json!({
+            "processing_outputs": {
+                "extracted_audio": {
+                    "path": path,
+                    "filename": "extracted.wav",
+                    "mime_type": "audio/wav",
+                    "artifact_role": "extracted_audio",
+                    "size_bytes": 73_400_320_u64
+                }
+            },
+            "followup_policy": {
+                "capability": "audio.preview_transcribe",
+                "input_field": "audio_path",
+                "input_value": path
+            }
+        })),
+    );
+    super::bind_artifacts_to_task(&mut envelope, "task-artifact-1", "step_audio", Some(9_999));
+
+    let artifact = envelope.artifacts.first().expect("typed artifact");
+    let reference = artifact.artifact_ref.as_deref().expect("artifact ref");
+    assert!(reference.starts_with("artifact:task/task-artifact-1/a_"));
+    assert_eq!(artifact.owner_task_id.as_deref(), Some("task-artifact-1"));
+    assert_eq!(artifact.artifact_role.as_deref(), Some("extracted_audio"));
+    assert_eq!(artifact.size_bytes, Some(13));
+    assert_eq!(artifact.sha256.as_deref().map(str::len), Some(64));
+    assert_eq!(
+        artifact.visibility,
+        Some(claw_core::capability_result::ArtifactVisibility::InternalProcessing)
+    );
+    assert_eq!(
+        envelope
+            .data
+            .pointer("/extra/followup_policy/input_value_artifact_ref"),
+        Some(&json!(reference))
+    );
+    assert_eq!(
+        super::resolve_current_task_artifact_reference(&[envelope.clone()], reference).as_deref(),
+        Some(path.as_str())
+    );
+
+    std::fs::write(&fixture.file, b"changed audio").expect("modify fixture");
+    assert!(
+        super::resolve_current_task_artifact_reference(&[envelope.clone()], reference).is_none()
+    );
+
+    let mut cross_task = envelope;
+    cross_task.artifacts[0].owner_task_id = Some("task-artifact-2".to_string());
+    assert_eq!(
+        cross_task.validate(),
+        Err(claw_core::capability_result::CapabilityResultValidationError::ArtifactOwnershipMismatch)
+    );
+}
+
+#[test]
+fn save_only_delivery_downgrades_declared_artifacts_to_internal_visibility() {
+    let fixture = ArtifactFixture::new();
+    let path = fixture.file.to_string_lossy().to_string();
+    let mut envelope = super::successful_execution_envelope(
+        "media_download.transcribe",
+        "step_private",
+        &json!({"action": "transcribe"}),
+        "saved",
+        Some(&json!({
+            "delivery": {"intent": "save_only", "deliver_to_user": false},
+            "artifacts": [{
+                "path": path,
+                "mime_type": "audio/wav",
+                "artifact_role": "extracted_audio"
+            }]
+        })),
+    );
+    super::bind_artifacts_to_task(&mut envelope, "task-private", "step_private", None);
+
+    assert_eq!(envelope.delivery.intent, CapabilityDeliveryIntent::Silent);
+    assert_eq!(
+        envelope.artifacts[0].visibility,
+        Some(claw_core::capability_result::ArtifactVisibility::InternalProcessing)
+    );
+}
+
+#[test]
+fn artifact_reference_requires_result_provenance_for_the_same_task() {
+    let fixture = ArtifactFixture::new();
+    let path = fixture.file.to_string_lossy().to_string();
+    let mut envelope = super::successful_execution_envelope(
+        "media_download.download",
+        "step_video",
+        &json!({"action": "download"}),
+        "saved",
+        Some(&json!({"artifacts": [{"path": path}]})),
+    );
+    super::bind_artifacts_to_task(&mut envelope, "task-owner", "step_video", None);
+    envelope.provenance["task_id"] = json!("task-owner");
+    let reference = envelope.artifacts[0]
+        .artifact_ref
+        .clone()
+        .expect("artifact ref");
+    assert!(
+        super::resolve_current_task_artifact_reference(&[envelope.clone()], &reference).is_some()
+    );
+
+    envelope.provenance["task_id"] = json!("task-other");
+    assert!(super::resolve_current_task_artifact_reference(&[envelope], &reference).is_none());
 }
 
 #[test]
@@ -94,7 +235,9 @@ fn async_transcription_review_promotes_silent_completion_to_model_synthesis() {
                 }
             },
             "error_text": null
-        })
+        }),
+        "task-transcription",
+        Some(1_000)
     ));
 
     assert_eq!(envelope.status, CapabilityResultStatus::Ok);
@@ -745,6 +888,34 @@ fn machine_output_artifact_refs_are_promoted_to_the_result_envelope() {
     assert_eq!(
         envelope.artifacts[0].metadata["size_bytes"].as_u64(),
         Some(4096)
+    );
+}
+
+#[test]
+fn internal_skill_output_artifact_is_evidence_even_when_listed_for_delivery() {
+    let envelope = super::successful_execution_envelope(
+        "fs_basic",
+        "step_inventory",
+        &json!({"action": "list_dir"}),
+        "inventory complete",
+        Some(&json!({
+            "artifacts": [{
+                "id": "skill-output:task:inventory",
+                "path": ".agent-runtime/artifacts/skill-output/task/inventory.json",
+                "media_type": "application/json",
+                "visibility": "user_delivery",
+                "metadata": {
+                    "provenance": "skill_output",
+                    "size_bytes": 50_000
+                }
+            }]
+        })),
+    );
+
+    assert_eq!(envelope.artifacts.len(), 1);
+    assert_eq!(
+        envelope.artifacts[0].visibility,
+        Some(ArtifactVisibility::Evidence)
     );
 }
 

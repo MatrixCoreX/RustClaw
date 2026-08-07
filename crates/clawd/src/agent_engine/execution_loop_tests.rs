@@ -713,6 +713,56 @@ fn repeat_guard_allows_repeated_respond_delivery() {
 }
 
 #[test]
+fn repeat_guard_reuses_prior_capability_result_instead_of_losing_dependency() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = task_fixture("task-repeat-result");
+    let mut loop_state = super::LoopState::new();
+    let action = crate::AgentAction::CallSkill {
+        skill: "media_download".to_string(),
+        args: serde_json::json!({"action": "download", "url": "https://example.invalid/item"}),
+    };
+    let policy = test_policy(false);
+    let fingerprint = action_fingerprint_for_policy(&state, &policy, &action);
+    loop_state
+        .successful_action_fingerprints
+        .insert(fingerprint.clone(), 1);
+    let mut result = claw_core::capability_result::CapabilityResultEnvelope::ok(
+        "media_download.download",
+        Some("download".to_string()),
+        serde_json::json!({"output": {"status": "saved"}}),
+    );
+    result.provenance = serde_json::json!({
+        "task_id": task.task_id,
+        "action_fingerprint": fingerprint,
+    });
+    loop_state.capability_results.push(result);
+
+    assert_eq!(
+        check_repeat_action_guard(
+            &state,
+            &task,
+            &mut loop_state,
+            &policy,
+            &action,
+            &fingerprint,
+            1,
+        )
+        .as_deref(),
+        Some("completed_action_result_reused")
+    );
+    assert!(loop_state
+        .output_vars
+        .get("agent_loop.repeat_completed_result")
+        .is_some_and(|value| value.contains("evidence:capability_result:")));
+    assert!(loop_state.task_observations.iter().any(|observation| {
+        observation
+            .get("observation_kind")
+            .and_then(serde_json::Value::as_str)
+            == Some("completed_action_result_reused")
+    }));
+}
+
+#[test]
 fn repeat_guard_blocks_identical_non_respond_after_limit() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let task = task_fixture("task-repeat-run-cmd");

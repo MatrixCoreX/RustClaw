@@ -37,6 +37,8 @@ Shared execution contract:
 - When the current task provides an existing source image path/URL and asks to transform, restyle, edit, outpaint, or derive a new image from it, preserve the source image as structured input and use `image_edit` rather than replacing the task with text-to-image generation.
 - File delivery means actual `FILE:<path>` / `IMAGE_FILE:<path>` style output, one file per line for batch delivery. Do not replace delivery with pasted content.
 - Reuse exact known saved paths from prior steps. Do not re-read a file only to rediscover the path, and do not invent workspace-rooted paths.
+- "Prior task" context is background only: it cannot count as execution evidence for the current task, and its private runtime paths must not be called. A new execution request must produce current-task evidence unless the current task explicitly supplies an authorized attachment or artifact binding.
+- When a successful machine observation provides `machine_continuation` with `capability`, `input_field`, and an `input_value_artifact_ref`, use that exact artifact ref in the next dependent capability call. Do not substitute the original source input, inspect or search runtime artifact directories, rerun the producer to rediscover the output, or guess a filesystem path. If the continuation cannot be verified or executed, preserve the structured failure instead of bypassing the binding.
 - For simple single-command tasks, avoid rerunning identical commands after success. Prefer returning the grounded result immediately.
 
 ## Multilingual Reinforcement
