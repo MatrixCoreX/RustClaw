@@ -175,6 +175,17 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   }
   assert.match(html, /0\.5000 USD<\/p><p class="mt-0\.5 text-\[11px\][^>]*>按支付资产分别累计/);
   assert.match(html, /价格 K 线/);
+  assert.match(html, /当前 K 线价格摘要/);
+  assert.match(html, /实时价格/);
+  assert.match(html, /可见最高价/);
+  assert.match(html, /0\.00010010 USD/);
+  assert.match(html, /可见最低价/);
+  assert.match(html, /0\.00009990 USD/);
+  assert.match(html, /data-bancor-chart-layer="live-price-line"/);
+  assert.match(html, /data-bancor-chart-layer="live-price-label"/);
+  assert.match(html, /data-bancor-chart-layer="visible-price-extremes"/);
+  assert.match(html, />H 0\.00010010<\/text>/);
+  assert.match(html, />L 0\.00009990<\/text>/);
   assert.match(html, /<h2[^>]*>交易<\/h2>/);
   assert.match(html, /我的余额/);
   assert.match(html, /点击填入全部 POINT 余额/);

@@ -1482,7 +1482,10 @@ export default function App() {
       refreshCandlesWhileVisible,
       BANCOR_CANDLE_AUTO_REFRESH_SECONDS * 1_000,
     );
-    const marketTimer = window.setInterval(refreshMarketWhileVisible, 60_000);
+    const marketTimer = window.setInterval(
+      refreshMarketWhileVisible,
+      BANCOR_CANDLE_AUTO_REFRESH_SECONDS * 1_000,
+    );
     const handleVisibilityChange = () => {
       if (document.visibilityState !== "visible") return;
       refreshMarketWhileVisible();
