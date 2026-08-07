@@ -3,9 +3,12 @@ import test from "node:test";
 
 import {
   BANCOR_DEFAULT_CANDLE_INTERVAL_SECONDS,
+  BANCOR_DEFAULT_SLIPPAGE_BPS,
+  BANCOR_MAX_SLIPPAGE_BPS,
   calculateBancorEstimatedOutput,
   calculateBancorInputFee,
   formatBancorApiError,
+  parseBancorSlippagePercent,
   validateBancorTradeInput,
 } from "./useBancorRuntime";
 
@@ -37,10 +40,16 @@ test("BANCOR zero-output errors explain how to recover", () => {
   }
 });
 
-test("BANCOR per-trade maximum has a distinct recovery message", () => {
-  const message = formatBancorApiError("nni_bancor_trade_above_maximum", zh, "fallback");
-  assert.match(message, /超过单笔安全上限/);
-  assert.match(message, /减少交易金额/);
+test("BANCOR accepts configurable slippage up to fifty percent", () => {
+  assert.equal(BANCOR_DEFAULT_SLIPPAGE_BPS, 50);
+  assert.equal(BANCOR_MAX_SLIPPAGE_BPS, 5_000);
+  assert.equal(parseBancorSlippagePercent("0"), 0);
+  assert.equal(parseBancorSlippagePercent("0.50"), 50);
+  assert.equal(parseBancorSlippagePercent("5"), 500);
+  assert.equal(parseBancorSlippagePercent("50.00"), 5_000);
+  assert.equal(parseBancorSlippagePercent("50.01"), null);
+  assert.equal(parseBancorSlippagePercent("1.001"), null);
+  assert.equal(parseBancorSlippagePercent("-1"), null);
 });
 
 const market = {

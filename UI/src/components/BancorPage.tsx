@@ -14,7 +14,14 @@ import {
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 
-import { calculateBancorEstimatedOutput, calculateBancorInputFee, formatBancorApiError, validateBancorTradeInput } from "../hooks/useBancorRuntime";
+import {
+  BANCOR_DEFAULT_SLIPPAGE_BPS,
+  calculateBancorEstimatedOutput,
+  calculateBancorInputFee,
+  formatBancorApiError,
+  parseBancorSlippagePercent,
+  validateBancorTradeInput,
+} from "../hooks/useBancorRuntime";
 import type { useBancorRuntime } from "../hooks/useBancorRuntime";
 import type { NniBancorCandle, NniBancorQuoteResponse } from "../types/api";
 
@@ -148,6 +155,7 @@ export function BancorPage({
   const [side, setSide] = useState<"buy" | "sell">("sell");
   const [tradeLayout, setTradeLayout] = useState<"standard" | "swap">("standard");
   const [inputAmount, setInputAmount] = useState("");
+  const [slippagePercent, setSlippagePercent] = useState((BANCOR_DEFAULT_SLIPPAGE_BPS / 100).toFixed(2));
   const {
     market,
     candles,
@@ -185,6 +193,10 @@ export function BancorPage({
   const inputError = inputErrorCode
     ? formatBancorApiError(inputErrorCode, t, t("金额无法交易。", "This amount cannot be traded."))
     : null;
+  const slippageBps = parseBancorSlippagePercent(slippagePercent);
+  const slippageError = slippageBps === null
+    ? t("滑点必须在 0% 到 50% 之间，最多保留两位小数。", "Slippage must be between 0% and 50%, with at most two decimal places.")
+    : null;
   const estimatedInputFee = market && inputAmount.trim()
     ? calculateBancorInputFee(inputAmount, market.fee_bps)
     : null;
@@ -208,6 +220,10 @@ export function BancorPage({
   };
   const changeTradeLayout = (next: "standard" | "swap") => {
     setTradeLayout(next);
+    clearQuote();
+  };
+  const changeSlippage = (value: string) => {
+    setSlippagePercent(value);
     clearQuote();
   };
   const confirmTrade = async () => {
@@ -458,6 +474,41 @@ export function BancorPage({
               onFlip={() => changeSide(side === "sell" ? "buy" : "sell")}
             />
           )}
+          <div className="mt-4 rounded-xl border border-white/8 bg-white/[0.025] p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label htmlFor="bancor-slippage-percent" className="text-sm font-medium text-white/70">
+                {t("滑点保护与警戒", "Slippage protection and warning")}
+              </label>
+              <div className="flex flex-wrap gap-1.5" role="group" aria-label={t("常用滑点", "Common slippage settings")}>
+                {["0.50", "1.00", "3.00", "5.00"].map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    aria-pressed={slippagePercent === value}
+                    className={`rounded-lg border px-2 py-1 text-xs transition ${slippagePercent === value ? "border-sky-300/35 bg-sky-400/15 text-sky-100" : "border-white/8 text-white/50 hover:text-white/75"}`}
+                    onClick={() => changeSlippage(value)}
+                  >
+                    {Number(value).toFixed(2)}%
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="mt-2 flex items-center rounded-lg border border-white/10 bg-black/10 px-3 focus-within:border-sky-400/50">
+              <input
+                id="bancor-slippage-percent"
+                value={slippagePercent}
+                inputMode="decimal"
+                aria-invalid={Boolean(slippageError)}
+                className="min-w-0 flex-1 bg-transparent py-2 text-sm text-white outline-none"
+                onChange={(event) => changeSlippage(event.target.value)}
+              />
+              <span className="text-sm text-white/55">%</span>
+            </div>
+            <p className="mt-2 text-xs leading-5 text-white/45">
+              {t("用于最低到账保护；报价的价格影响超过此值时会标黄警告，但你仍可确认继续。", "Protects the minimum output. A quote whose price impact exceeds this value is highlighted as a warning, but you may still confirm it.")}
+            </p>
+            {slippageError ? <p className="mt-1 text-xs text-red-200" role="alert">{slippageError}</p> : null}
+          </div>
           {inputError ? (
             <p className="mt-2 text-xs leading-5 text-red-200" role="alert">{inputError}</p>
           ) : null}
@@ -471,8 +522,8 @@ export function BancorPage({
           <button
             type="button"
             className="theme-primary-btn mt-4 w-full justify-center"
-            disabled={!tradingReady || !inputAmount.trim() || Boolean(inputErrorCode) || quoteLoading || tradeLoading}
-            onClick={() => void preview(side, inputAmount)}
+            disabled={!tradingReady || !inputAmount.trim() || Boolean(inputErrorCode) || slippageBps === null || quoteLoading || tradeLoading}
+            onClick={() => slippageBps !== null && void preview(side, inputAmount, slippageBps)}
           >
             {quoteLoading
               ? t("正在计算...", "Calculating...")
@@ -1076,6 +1127,7 @@ export function BancorQuoteDialog({
   onConfirm: () => void;
 }) {
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
+  const priceImpactWarning = quote.price_impact_bps > quote.slippage_bps;
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => confirmButtonRef.current?.focus());
@@ -1133,7 +1185,17 @@ export function BancorQuoteDialog({
           <QuoteLine label={t("最低收到", "Minimum output")} value={`${quote.min_output_amount} ${quote.output_asset}`} />
           <QuoteLine label={t("手续费", "Fee")} value={`${quote.fee_amount} ${quote.fee_asset}`} />
           <QuoteLine label={t("价格影响", "Price impact")} value={`${(quote.price_impact_bps / 100).toFixed(2)}%`} />
+          <QuoteLine label={t("滑点保护", "Slippage protection")} value={`${(quote.slippage_bps / 100).toFixed(2)}%`} />
         </div>
+
+        {priceImpactWarning ? (
+          <div className="mx-5 mb-4 rounded-xl border border-amber-300/35 bg-amber-400/10 px-4 py-3 text-sm leading-6 text-amber-50" role="alert">
+            {t(
+              `价格影响 ${(quote.price_impact_bps / 100).toFixed(2)}% 已超过你设置的 ${(quote.slippage_bps / 100).toFixed(2)}% 滑点警戒值。这笔交易会明显改变池内价格；确认后仍可继续。`,
+              `The ${(quote.price_impact_bps / 100).toFixed(2)}% price impact exceeds your ${(quote.slippage_bps / 100).toFixed(2)}% slippage warning threshold. This trade will materially move the pool price; you can still continue after confirming.`,
+            )}
+          </div>
+        ) : null}
 
         {tradeError ? (
           <p className="mx-5 rounded-xl border border-red-400/25 bg-red-500/10 px-4 py-3 text-sm leading-6 text-red-100" role="alert">
@@ -1153,7 +1215,11 @@ export function BancorQuoteDialog({
             onClick={onConfirm}
           >
             <ShieldCheck className="h-4 w-4" />
-            {tradeLoading ? t("正在签名并提交...", "Signing and submitting...") : t("确认签名交易", "Confirm signed trade")}
+            {tradeLoading
+              ? t("正在签名并提交...", "Signing and submitting...")
+              : priceImpactWarning
+                ? t("我已了解风险，继续签名", "I understand the risk; sign and continue")
+                : t("确认签名交易", "Confirm signed trade")}
           </button>
         </footer>
       </section>
