@@ -12,7 +12,7 @@ legacy_state = "migrated_success"
 source_path = "crates/clawd/src/llm_gateway.rs"
 legacy_symbol = "DEFAULT_MAX_LLM_CALLS_PER_TASK"
 expected_after = "continues_until_unified_task_budget_decision"
-test_command = "CARGO_BUILD_JOBS=1 cargo test -p clawd task_budget_contract_tests::productive_model_turn_41_continues_and_checkpoint_restore_keeps_consumption"
+test_command = "cargo test -p clawd task_budget_contract_tests::productive_model_turn_41_continues_and_checkpoint_restore_keeps_consumption"
 
 [[cases]]
 id = "capability_25_and_schema_field_9"
@@ -23,7 +23,7 @@ legacy_state = "migrated_success"
 source_path = "crates/clawd/src/agent_engine/skill_quick_index.rs"
 legacy_symbol = "QUICK_INDEX_MAX_PLANNER_CAPABILITIES"
 expected_after = "canonical_capability_and_schema_are_queryable"
-test_command = "CARGO_BUILD_JOBS=1 cargo test -p clawd quick_index_catalog_keeps_capability_25_and_schema_field_9_queryable"
+test_command = "cargo test -p clawd quick_index_catalog_keeps_capability_25_and_schema_field_9_queryable"
 
 [[cases]]
 id = "three_skill_plan"
@@ -33,7 +33,7 @@ legacy_state = "migrated_success"
 source_path = "crates/clawd/src/agent_engine/planner_skill_context.rs"
 legacy_symbol = "MAX_SCOPED_SKILL_PLAYBOOKS"
 expected_after = "all_required_playbooks_are_retrievable"
-test_command = "CARGO_BUILD_JOBS=1 cargo test -p clawd structured_plan_can_select_three_skill_playbooks_without_a_fixed_count_cap"
+test_command = "cargo test -p clawd structured_plan_can_select_three_skill_playbooks_without_a_fixed_count_cap"
 
 [[cases]]
 id = "context_beyond_24k"
@@ -43,7 +43,7 @@ legacy_state = "migrated_success"
 source_path = "crates/clawd/src/task_context_builder/compaction.rs"
 legacy_symbol = "CONTEXT_COMPACTION_THRESHOLD_CHARS"
 expected_after = "provider_window_decides_and_canonical_source_is_retained"
-test_command = "CARGO_BUILD_JOBS=1 cargo test -p clawd old_character_threshold_does_not_compact_without_provider_pressure"
+test_command = "cargo test -p clawd old_character_threshold_does_not_compact_without_provider_pressure"
 
 [[cases]]
 id = "result_9_and_large_result"
@@ -53,7 +53,7 @@ legacy_state = "migrated_success"
 source_path = "crates/clawd/src/agent_engine/capability_result_synthesis.rs"
 legacy_symbol = "MAX_RESULTS"
 expected_after = "all_results_share_addressable_evidence_refs"
-test_command = "CARGO_BUILD_JOBS=1 cargo test -p clawd result_nine_and_large_result_remain_content_addressed_and_recoverable"
+test_command = "cargo test -p clawd result_nine_and_large_result_remain_content_addressed_and_recoverable"
 
 [[cases]]
 id = "child_depth_2_and_child_17"
@@ -64,7 +64,7 @@ legacy_state = "migrated_success"
 source_path = "crates/clawd/src/child_task_contract.rs"
 legacy_symbol = "DEFAULT_MAX_CHILD_DEPTH"
 expected_after = "dag_nodes_queue_under_global_resources"
-test_command = "CARGO_BUILD_JOBS=1 cargo test -p clawd graph_queues_more_than_sixteen_independent_nodes_without_dropping_any"
+test_command = "cargo test -p clawd graph_queues_more_than_sixteen_independent_nodes_without_dropping_any"
 
 [[cases]]
 id = "repair_4_with_new_evidence"
@@ -74,4 +74,4 @@ legacy_state = "migrated_success"
 source_path = "crates/clawd/src/agent_engine/planning.rs"
 legacy_symbol = "MAX_NATIVE_CONTRACT_REPAIR_ATTEMPTS"
 expected_after = "new_progress_continues_while_stagnation_stops"
-test_command = "CARGO_BUILD_JOBS=1 cargo test -p clawd native_contract_repair_continues_past_four_when_evidence_changes"
+test_command = "cargo test -p clawd native_contract_repair_continues_past_four_when_evidence_changes"

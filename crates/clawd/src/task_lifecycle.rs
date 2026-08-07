@@ -162,6 +162,11 @@ pub(crate) fn task_query_lifecycle_projection(
                     .or_insert(json!(updated_at_ts));
             }
         }
+        let progress = crate::long_task_progress::operation_progress_from_lifecycle(
+            &Value::Object(obj.clone()),
+            updated_at_ts,
+        );
+        obj.insert("operation_progress".to_string(), progress);
     }
     lifecycle
 }
@@ -178,7 +183,7 @@ fn task_execution_state_from_lifecycle_state(state: &str) -> TaskExecutionState 
     match state.trim() {
         "queued" => TaskExecutionState::Queued,
         "running" => TaskExecutionState::Running,
-        "waiting" => TaskExecutionState::Waiting,
+        "waiting" | "pause_requested" => TaskExecutionState::Waiting,
         "background" => TaskExecutionState::Background,
         "needs_confirmation" | "needs_user" => TaskExecutionState::NeedsConfirmation,
         "blocked" => TaskExecutionState::Blocked,
@@ -819,7 +824,7 @@ fn lifecycle_state_from_db_status(db_status: &str) -> &'static str {
 fn lifecycle_state_token_is_active(state: &str) -> bool {
     matches!(
         state.trim(),
-        "queued" | "running" | "waiting" | "background" | "needs_user"
+        "queued" | "running" | "pause_requested" | "waiting" | "background" | "needs_user"
     )
 }
 

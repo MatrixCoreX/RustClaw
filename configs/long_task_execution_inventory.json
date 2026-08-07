@@ -1,0 +1,3261 @@
+{
+  "capabilities": [
+    {
+      "adapter_kind": null,
+      "capability": "archive.list",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "native_progress",
+      "skill": "archive_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "archive.pack",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "native_progress",
+      "skill": "archive_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "archive.read",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "native_progress",
+      "skill": "archive_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "archive.unpack",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "native_progress",
+      "skill": "archive_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "media_job_poll",
+      "capability": "audio.cancel",
+      "execution_mode": "async_required",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "audio_synthesize",
+      "timeout_seconds": 90
+    },
+    {
+      "adapter_kind": "media_job_poll",
+      "capability": "audio.poll",
+      "execution_mode": "async_required",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "audio_synthesize",
+      "timeout_seconds": 90
+    },
+    {
+      "adapter_kind": null,
+      "capability": "audio.preview_synthesize",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "audio_synthesize",
+      "timeout_seconds": 90
+    },
+    {
+      "adapter_kind": "media_job_poll",
+      "capability": "audio.synthesize",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "audio_synthesize",
+      "timeout_seconds": 90
+    },
+    {
+      "adapter_kind": null,
+      "capability": "audio.preview_transcribe",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "audio_transcribe",
+      "timeout_seconds": 86400
+    },
+    {
+      "adapter_kind": "media_job_poll",
+      "capability": "audio.transcribe",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "audio_transcribe",
+      "timeout_seconds": 86400
+    },
+    {
+      "adapter_kind": null,
+      "capability": "browser.back",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "browser_session",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "browser.click",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "browser_session",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "browser.download",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "browser_session",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "browser.navigate",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "browser_session",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "browser.observe_debug",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "browser_session",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "browser.press_key",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "browser_session",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "browser.screenshot",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "browser_session",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "browser.scroll",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "browser_session",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "browser.select",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "browser_session",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "browser.session_close",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "browser_session",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "browser.session_open",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "browser_session",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "browser.snapshot",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "browser_session",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "browser.switch_page",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "browser_session",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "browser.type",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "browser_session",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "browser.wait_for",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "browser_session",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": "browser_job_poll",
+      "capability": "browser.open_extract",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "native_progress",
+      "skill": "browser_web",
+      "timeout_seconds": 180
+    },
+    {
+      "adapter_kind": null,
+      "capability": "almanac.query",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "chinese_almanac",
+      "timeout_seconds": 15
+    },
+    {
+      "adapter_kind": null,
+      "capability": "code.changed_impact",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "code_index",
+      "timeout_seconds": 90
+    },
+    {
+      "adapter_kind": null,
+      "capability": "code.find_definitions",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "code_index",
+      "timeout_seconds": 90
+    },
+    {
+      "adapter_kind": null,
+      "capability": "code.find_references",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "code_index",
+      "timeout_seconds": 90
+    },
+    {
+      "adapter_kind": null,
+      "capability": "code.list_tests",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "code_index",
+      "timeout_seconds": 90
+    },
+    {
+      "adapter_kind": null,
+      "capability": "code.refresh_index",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "code_index",
+      "timeout_seconds": 90
+    },
+    {
+      "adapter_kind": null,
+      "capability": "code.retrieve_context",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "code_index",
+      "timeout_seconds": 90
+    },
+    {
+      "adapter_kind": null,
+      "capability": "code.search_symbols",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "code_index",
+      "timeout_seconds": 90
+    },
+    {
+      "adapter_kind": null,
+      "capability": "config.list_keys",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "config_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "config.read_field",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "config_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "config.read_fields",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "config_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "config.summarize_structure",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "config_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "config.validate",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "config_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "config_basic.read_field",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "config_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "config.apply_change",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "config_edit",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "config.apply_config_change",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "config_edit",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "config.guard",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "config_edit",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "config.guard_after_change",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "config_edit",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "config.guard_config",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "config_edit",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "config.plan_change",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "config_edit",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "config.plan_config_change",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "config_edit",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "config.preview_change",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "config_edit",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "config.read_back",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "config_edit",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "config.restart_if_requested",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "config_edit",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "config.risk",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "config_edit",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "config.set_field",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "config_edit",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "config.validate_after_change",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "config_edit",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "config.write_field",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "config_edit",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "crypto.multi_quote",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "crypto",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "crypto.positions",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "crypto",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "crypto.preview_quote",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "crypto",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "crypto.quote",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "crypto",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "database.execute",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "db_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "database.list",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "db_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "database.list_tables",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "db_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "database.query",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "db_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "database.schema_version",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "db_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "database.user_version",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "db_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "db.list",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "db_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "db.list_tables",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "db_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "db.query",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "db_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "db.schema_version",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "db_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "db.sqlite_query",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "db_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "db.user_version",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "db_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "sqlite.list",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "db_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "sqlite.list_tables",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "db_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "sqlite.query",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "db_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "sqlite.schema_version",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "db_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "sqlite.sqlite_query",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "db_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "sqlite.user_version",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "db_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "doc_parse",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "native_progress",
+      "skill": "doc_parse",
+      "timeout_seconds": 20
+    },
+    {
+      "adapter_kind": null,
+      "capability": "document.parse",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "native_progress",
+      "skill": "doc_parse",
+      "timeout_seconds": 20
+    },
+    {
+      "adapter_kind": null,
+      "capability": "docker.images",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "docker_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "docker.inspect_container",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "docker_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "docker.list_containers",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "docker_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "docker.list_images",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "docker_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "docker.logs",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "poll_status",
+      "skill": "docker_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "docker.ps",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "docker_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "docker.read_logs",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "poll_status",
+      "skill": "docker_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "docker.restart",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "poll_status",
+      "skill": "docker_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "docker.restart_container",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "poll_status",
+      "skill": "docker_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "docker.start",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "poll_status",
+      "skill": "docker_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "docker.start_container",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "poll_status",
+      "skill": "docker_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "docker.stop",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "poll_status",
+      "skill": "docker_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "docker.stop_container",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "poll_status",
+      "skill": "docker_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "docker.version",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "docker_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "docker_basic.images",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "docker_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "docker_basic.logs",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "poll_status",
+      "skill": "docker_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "docker_basic.ps",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "docker_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "docker_basic.restart",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "poll_status",
+      "skill": "docker_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "docker_basic.start",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "poll_status",
+      "skill": "docker_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "docker_basic.stop",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "poll_status",
+      "skill": "docker_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "extension.assess_gap",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "extension_manager",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "extension.permanent_plan",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "extension_manager",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "extension.register_skill",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "poll_status",
+      "skill": "extension_manager",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "extension.scaffold_skill",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "poll_status",
+      "skill": "extension_manager",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "extension.temporary_plan",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "extension_manager",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "extension.validate_skill",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "poll_status",
+      "skill": "extension_manager",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "artifact.read_range",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.append_file",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.append_text",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.apply_patch",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.compare_paths",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.count_entries",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.create_dir",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.create_directory",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.delete_path",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.find_entries",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.find_files",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.find_images",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.find_paths",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.grep_text",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.list_dir",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.list_directory_names",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.list_entries",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.list_file_names",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.list_names",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.make_dir",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.make_directory",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.read_file",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.read_range",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.read_text",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.read_text_range",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.remove_path",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.search_text",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.stat_path",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.stat_paths",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.write_file",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.write_text",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "fs.count_entries",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "fs.find_entries",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "fs_basic.count_entries",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "fs_basic.find_entries",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "fs_basic.read_file",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "fs_basic.read_range",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "fs_basic.read_text",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "workspace.apply_child_patch",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "workspace.apply_patch",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "workspace.diff",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "workspace.edit_text",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "workspace.preview_edit_text",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "workspace.preview_replace_text",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "workspace.reject_child_patch",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "workspace.replace_text",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "workspace.revert_checkpoint",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "workspace.review_child_patch",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "fs_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "git.ahead_behind",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "git_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "git.branch",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "git_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "git.changed_files",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "git_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "git.checkout_branch",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "git_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "git.commit",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "git_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "git.create_branch",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "git_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "git.current_branch",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "git_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "git.diff",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "git_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "git.diff_cached",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "git_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "git.log",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "git_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "git.remote",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "git_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "git.repository_state",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "git_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "git.rev_parse",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "git_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "git.show",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "git_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "git.show_file_at_rev",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "git_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "git.stage",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "git_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "git.status",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "git_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "git_basic",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "git_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "forge.create_pr",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "git_forge",
+      "timeout_seconds": 120
+    },
+    {
+      "adapter_kind": null,
+      "capability": "forge.create_pr_reconcile",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "git_forge",
+      "timeout_seconds": 120
+    },
+    {
+      "adapter_kind": null,
+      "capability": "forge.list_prs",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "git_forge",
+      "timeout_seconds": 120
+    },
+    {
+      "adapter_kind": null,
+      "capability": "forge.pr_status",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "git_forge",
+      "timeout_seconds": 120
+    },
+    {
+      "adapter_kind": null,
+      "capability": "git.push",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "git_remote_publish",
+      "timeout_seconds": 120
+    },
+    {
+      "adapter_kind": null,
+      "capability": "git.push_reconcile",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "git_remote_publish",
+      "timeout_seconds": 120
+    },
+    {
+      "adapter_kind": null,
+      "capability": "git.fetch_authenticated",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "git_remote_read",
+      "timeout_seconds": 90
+    },
+    {
+      "adapter_kind": null,
+      "capability": "git.fetch_public",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "git_remote_read",
+      "timeout_seconds": 90
+    },
+    {
+      "adapter_kind": null,
+      "capability": "git.remote_ls_authenticated",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "git_remote_read",
+      "timeout_seconds": 90
+    },
+    {
+      "adapter_kind": null,
+      "capability": "git.remote_ls_public",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "git_remote_read",
+      "timeout_seconds": 90
+    },
+    {
+      "adapter_kind": null,
+      "capability": "health_check",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "health_check",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "system.health_check",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "health_check",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "http_job_poll",
+      "capability": "http.download",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "http_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "http_job_poll",
+      "capability": "http.get",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "http_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "http_job_poll",
+      "capability": "http.post_json",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "http_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "media_job_poll",
+      "capability": "image.edit",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "image_edit",
+      "timeout_seconds": 180
+    },
+    {
+      "adapter_kind": "media_job_poll",
+      "capability": "image.outpaint",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "image_edit",
+      "timeout_seconds": 180
+    },
+    {
+      "adapter_kind": null,
+      "capability": "image.preview_edit",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "image_edit",
+      "timeout_seconds": 180
+    },
+    {
+      "adapter_kind": "media_job_poll",
+      "capability": "image.restyle",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "image_edit",
+      "timeout_seconds": 180
+    },
+    {
+      "adapter_kind": "media_job_poll",
+      "capability": "image.cancel",
+      "execution_mode": "async_required",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "native_progress",
+      "skill": "image_generate",
+      "timeout_seconds": 180
+    },
+    {
+      "adapter_kind": "media_job_poll",
+      "capability": "image.generate",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "native_progress",
+      "skill": "image_generate",
+      "timeout_seconds": 180
+    },
+    {
+      "adapter_kind": "media_job_poll",
+      "capability": "image.poll",
+      "execution_mode": "async_required",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "native_progress",
+      "skill": "image_generate",
+      "timeout_seconds": 180
+    },
+    {
+      "adapter_kind": null,
+      "capability": "image.preview_generate",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "native_progress",
+      "skill": "image_generate",
+      "timeout_seconds": 180
+    },
+    {
+      "adapter_kind": "media_job_poll",
+      "capability": "image_vision.analyze",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "image_vision",
+      "timeout_seconds": 90
+    },
+    {
+      "adapter_kind": "media_job_poll",
+      "capability": "image_vision.compare",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "image_vision",
+      "timeout_seconds": 90
+    },
+    {
+      "adapter_kind": "media_job_poll",
+      "capability": "image_vision.describe",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "image_vision",
+      "timeout_seconds": 90
+    },
+    {
+      "adapter_kind": "media_job_poll",
+      "capability": "image_vision.extract",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "image_vision",
+      "timeout_seconds": 90
+    },
+    {
+      "adapter_kind": "media_job_poll",
+      "capability": "image_vision.extract_text",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "image_vision",
+      "timeout_seconds": 90
+    },
+    {
+      "adapter_kind": "media_job_poll",
+      "capability": "image_vision.screenshot_summary",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "image_vision",
+      "timeout_seconds": 90
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "module.install",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "poll_status",
+      "skill": "install_module",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "module.preview_install",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "install_module",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "http_job_poll",
+      "capability": "invest_copy.draft",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "invest_copy",
+      "timeout_seconds": 90
+    },
+    {
+      "adapter_kind": "http_job_poll",
+      "capability": "invest_copy.list_investors",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "poll_status",
+      "skill": "invest_copy",
+      "timeout_seconds": 90
+    },
+    {
+      "adapter_kind": null,
+      "capability": "kb.cancel_ingest",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "native_progress",
+      "skill": "kb",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "kb.delete_namespace",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "native_progress",
+      "skill": "kb",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "kb.ingest",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "native_progress",
+      "skill": "kb",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "kb.ingest_job_status",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "native_progress",
+      "skill": "kb",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "kb.list_documents",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "native_progress",
+      "skill": "kb",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "kb.list_namespaces",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "native_progress",
+      "skill": "kb",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "kb.reindex",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "native_progress",
+      "skill": "kb",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "kb.remove_documents",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "native_progress",
+      "skill": "kb",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "kb.resume_ingest",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "native_progress",
+      "skill": "kb",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "kb.search",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "native_progress",
+      "skill": "kb",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "kb.stats",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "native_progress",
+      "skill": "kb",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "log_analyze",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "log_analyze",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "logs.analyze",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "log_analyze",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "map.merchant_recommend",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "map_merchant",
+      "timeout_seconds": 20
+    },
+    {
+      "adapter_kind": null,
+      "capability": "map.preview_merchant_recommend",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "map_merchant",
+      "timeout_seconds": 20
+    },
+    {
+      "adapter_kind": null,
+      "capability": "media_download.capabilities",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "native_progress",
+      "skill": "media_download",
+      "timeout_seconds": 15
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "media_download.download",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "native_progress",
+      "skill": "media_download",
+      "timeout_seconds": null
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "media_download.ocr",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "native_progress",
+      "skill": "media_download",
+      "timeout_seconds": null
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "media_download.prepare_x",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "native_progress",
+      "skill": "media_download",
+      "timeout_seconds": null
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "media_download.resolve",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "native_progress",
+      "skill": "media_download",
+      "timeout_seconds": null
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "media_download.transcribe",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "native_progress",
+      "skill": "media_download",
+      "timeout_seconds": null
+    },
+    {
+      "adapter_kind": null,
+      "capability": "memory.correct",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "memory_store",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "memory.forget",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "memory_store",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "memory.list_recent",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "memory_store",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "memory.save",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "memory_store",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "memory.search",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "memory_store",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "media_job_poll",
+      "capability": "music.cancel",
+      "execution_mode": "async_required",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "music_generate",
+      "timeout_seconds": 360
+    },
+    {
+      "adapter_kind": "media_job_poll",
+      "capability": "music.generate",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "music_generate",
+      "timeout_seconds": 360
+    },
+    {
+      "adapter_kind": "media_job_poll",
+      "capability": "music.poll",
+      "execution_mode": "async_required",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "music_generate",
+      "timeout_seconds": 360
+    },
+    {
+      "adapter_kind": null,
+      "capability": "music.preview_generate",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "music_generate",
+      "timeout_seconds": 360
+    },
+    {
+      "adapter_kind": null,
+      "capability": "office.inspect",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "office_workspace",
+      "timeout_seconds": 120
+    },
+    {
+      "adapter_kind": null,
+      "capability": "office.render",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "office_workspace",
+      "timeout_seconds": 120
+    },
+    {
+      "adapter_kind": null,
+      "capability": "office.render_status",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "office_workspace",
+      "timeout_seconds": 120
+    },
+    {
+      "adapter_kind": null,
+      "capability": "office.validate",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "office_workspace",
+      "timeout_seconds": 120
+    },
+    {
+      "adapter_kind": null,
+      "capability": "presentation.create",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "office_workspace",
+      "timeout_seconds": 120
+    },
+    {
+      "adapter_kind": null,
+      "capability": "presentation.edit",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "office_workspace",
+      "timeout_seconds": 120
+    },
+    {
+      "adapter_kind": null,
+      "capability": "presentation.preview_create",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "office_workspace",
+      "timeout_seconds": 120
+    },
+    {
+      "adapter_kind": null,
+      "capability": "presentation.preview_edit",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "office_workspace",
+      "timeout_seconds": 120
+    },
+    {
+      "adapter_kind": null,
+      "capability": "presentation.read",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "office_workspace",
+      "timeout_seconds": 120
+    },
+    {
+      "adapter_kind": null,
+      "capability": "spreadsheet.create",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "office_workspace",
+      "timeout_seconds": 120
+    },
+    {
+      "adapter_kind": null,
+      "capability": "spreadsheet.edit",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "office_workspace",
+      "timeout_seconds": 120
+    },
+    {
+      "adapter_kind": null,
+      "capability": "spreadsheet.inspect",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "office_workspace",
+      "timeout_seconds": 120
+    },
+    {
+      "adapter_kind": null,
+      "capability": "spreadsheet.preview_create",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "office_workspace",
+      "timeout_seconds": 120
+    },
+    {
+      "adapter_kind": null,
+      "capability": "spreadsheet.preview_edit",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "office_workspace",
+      "timeout_seconds": 120
+    },
+    {
+      "adapter_kind": null,
+      "capability": "spreadsheet.read_range",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "office_workspace",
+      "timeout_seconds": 120
+    },
+    {
+      "adapter_kind": null,
+      "capability": "word.create",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "office_workspace",
+      "timeout_seconds": 120
+    },
+    {
+      "adapter_kind": null,
+      "capability": "word.edit",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "office_workspace",
+      "timeout_seconds": 120
+    },
+    {
+      "adapter_kind": null,
+      "capability": "word.find",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "office_workspace",
+      "timeout_seconds": 120
+    },
+    {
+      "adapter_kind": null,
+      "capability": "word.preview_create",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "office_workspace",
+      "timeout_seconds": 120
+    },
+    {
+      "adapter_kind": null,
+      "capability": "word.preview_edit",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "office_workspace",
+      "timeout_seconds": 120
+    },
+    {
+      "adapter_kind": null,
+      "capability": "word.read",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "office_workspace",
+      "timeout_seconds": 120
+    },
+    {
+      "adapter_kind": null,
+      "capability": "package.detect_manager",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "native_progress",
+      "skill": "package_manager",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "package.install",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "native_progress",
+      "skill": "package_manager",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "package.smart_install",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "native_progress",
+      "skill": "package_manager",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "package.smart_install_preview",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "native_progress",
+      "skill": "package_manager",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "package.uninstall",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "native_progress",
+      "skill": "package_manager",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "photo.apply_organization",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "poll_status",
+      "skill": "photo_organize",
+      "timeout_seconds": 180
+    },
+    {
+      "adapter_kind": null,
+      "capability": "photo.prepare_source_candidates",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "photo_organize",
+      "timeout_seconds": 180
+    },
+    {
+      "adapter_kind": null,
+      "capability": "photo.preview_organization",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "photo_organize",
+      "timeout_seconds": 180
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "process.kill",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "poll_status",
+      "skill": "process_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "process.port_list",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "process_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "process.ps",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "process_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "process.tail_log",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "process_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "http_job_poll",
+      "capability": "rss.discover_sources",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "poll_status",
+      "skill": "rss_fetch",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "http_job_poll",
+      "capability": "rss.fetch_feed",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "poll_status",
+      "skill": "rss_fetch",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "http_job_poll",
+      "capability": "rss.latest_news",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "poll_status",
+      "skill": "rss_fetch",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "rss.list_categories",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "rss_fetch",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "http_job_poll",
+      "capability": "rss.preview_category",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "poll_status",
+      "skill": "rss_fetch",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "http_job_poll",
+      "capability": "rss.promote_category",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "poll_status",
+      "skill": "rss_fetch",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "http_job_poll",
+      "capability": "rss.promote_sources",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "poll_status",
+      "skill": "rss_fetch",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "http_job_poll",
+      "capability": "rss.propose_category",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "poll_status",
+      "skill": "rss_fetch",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "http_job_poll",
+      "capability": "rss.refresh_candidates",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "poll_status",
+      "skill": "rss_fetch",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "rss.source_health",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "rss_fetch",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "run_cmd",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "run_cmd",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "system.inspect_cli_help",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "run_cmd",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "system.preview_background_command",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "run_cmd",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "system.preview_command_permission",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "run_cmd",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "system.run_cmd",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "run_cmd",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "system.run_command",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "run_cmd",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "system.run_command_with_deadline",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "run_cmd",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "system.run_command_without_deadline",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "run_cmd",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "system.shell_run",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "run_cmd",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "system.terminal_poll",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "run_cmd",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "system.terminal_resize",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "run_cmd",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "system.terminal_signal",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "run_cmd",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "system.terminal_start",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "run_cmd",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "system.terminal_terminate",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "run_cmd",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "system.terminal_write",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "run_cmd",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "schedule.create",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "schedule",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "schedule.delete",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "schedule",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "schedule.list",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "schedule",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "schedule.pause",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "schedule",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "schedule.preview",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "schedule",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "schedule.resume",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "schedule",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "service.logs",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "service_control",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "service.restart",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "service_control",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "service.start",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "service_control",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "service.status",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "service_control",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "service.stop",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "service_control",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "service.verify",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "service_control",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "service_control",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "service_control",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "service_control.restart",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "service_control",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "service_control.start",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "service_control",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "service_control.status",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "service_control",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "service_control.stop",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "service_control",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "stock.preview_quote",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "stock",
+      "timeout_seconds": 15
+    },
+    {
+      "adapter_kind": null,
+      "capability": "stock.quote",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "stock",
+      "timeout_seconds": 15
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "agent.subagent",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "read_only",
+      "progress_contract": "poll_status",
+      "skill": "subagent",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "agent.subagent_batch",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "read_only",
+      "progress_contract": "poll_status",
+      "skill": "subagent",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "agent.subagent_persistent",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_worktree",
+      "progress_contract": "poll_status",
+      "skill": "subagent",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "system.count_inventory",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "system_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "system.info",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "system_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "system.inventory_dir",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "system_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "system.read_range",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "system_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "system.runtime_status",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "system_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "system.tree_summary",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "system_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "system_basic.extract_field",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "system_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "system_basic.extract_fields",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "system_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "system_basic.read_text_range",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "system_basic",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "agent.preview_repair_observation",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "task_control",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "agent.preview_retryable_failure_observation",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "task_control",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "coding_workflow.preview_repair",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "task_control",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "session.bind_alias",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "task_control",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "task_control.cancel_all",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "task_control",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "task_control.cancel_one",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "task_control",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "task_control.get",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "task_control",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "task_control.list",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "task_control",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "task_control.list_with_first_detail",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "task_control",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "task_control.pause",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "task_control",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "task_control.preview_provider_failure",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "task_control",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "task_control.preview_resume",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "task_control",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "task_control.resume",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "task_control",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "task.plan_read",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "task_plan",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "task.plan_set",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "task_plan",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "task.plan_update",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "task_plan",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "data.transform",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "transform",
+      "timeout_seconds": 20
+    },
+    {
+      "adapter_kind": null,
+      "capability": "data.transform_records",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "transform",
+      "timeout_seconds": 20
+    },
+    {
+      "adapter_kind": null,
+      "capability": "transform",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "transform",
+      "timeout_seconds": 20
+    },
+    {
+      "adapter_kind": "media_job_poll",
+      "capability": "video.cancel",
+      "execution_mode": "async_required",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "native_progress",
+      "skill": "video_generate",
+      "timeout_seconds": 900
+    },
+    {
+      "adapter_kind": "media_job_poll",
+      "capability": "video.generate",
+      "execution_mode": "async_required",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "native_progress",
+      "skill": "video_generate",
+      "timeout_seconds": 900
+    },
+    {
+      "adapter_kind": "media_job_poll",
+      "capability": "video.poll",
+      "execution_mode": "async_required",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "native_progress",
+      "skill": "video_generate",
+      "timeout_seconds": 900
+    },
+    {
+      "adapter_kind": null,
+      "capability": "video.preview_generate",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "native_progress",
+      "skill": "video_generate",
+      "timeout_seconds": 900
+    },
+    {
+      "adapter_kind": null,
+      "capability": "weather.current",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "weather",
+      "timeout_seconds": 15
+    },
+    {
+      "adapter_kind": null,
+      "capability": "weather.preview_query",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "weather",
+      "timeout_seconds": 15
+    },
+    {
+      "adapter_kind": "http_job_poll",
+      "capability": "web.search",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "web_search_extract",
+      "timeout_seconds": 25
+    },
+    {
+      "adapter_kind": "http_job_poll",
+      "capability": "web.search_results",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "web_search_extract",
+      "timeout_seconds": 25
+    },
+    {
+      "adapter_kind": "http_job_poll",
+      "capability": "x.draft_preview",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "poll_status",
+      "skill": "x",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "http_job_poll",
+      "capability": "x.publish",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "poll_status",
+      "skill": "x",
+      "timeout_seconds": 30
+    }
+  ],
+  "schema_version": 1,
+  "sources": [
+    "configs/skills_registry.toml",
+    "configs/config.toml",
+    "configs/agent_guard.toml"
+  ],
+  "summary": {
+    "capability_count": 351,
+    "execution_modes": {
+      "async_preferred": 69,
+      "async_required": 9,
+      "sync_short": 273
+    },
+    "progress_contracts": {
+      "native_progress": 37,
+      "not_long_tail": 254,
+      "poll_status": 60
+    },
+    "remote_executor_capability_count": 0
+  },
+  "timeout_and_lease_fields": [
+    {
+      "path": "database.busy_timeout_ms",
+      "value": 2000
+    },
+    {
+      "path": "llm.anthropic.timeout_seconds",
+      "value": 60
+    },
+    {
+      "path": "llm.custom.timeout_seconds",
+      "value": 60
+    },
+    {
+      "path": "llm.deepseek.timeout_seconds",
+      "value": 60
+    },
+    {
+      "path": "llm.google.timeout_seconds",
+      "value": 90
+    },
+    {
+      "path": "llm.grok.timeout_seconds",
+      "value": 60
+    },
+    {
+      "path": "llm.mimo.timeout_seconds",
+      "value": 180
+    },
+    {
+      "path": "llm.minimax.timeout_seconds",
+      "value": 180
+    },
+    {
+      "path": "llm.openai.timeout_seconds",
+      "value": 60
+    },
+    {
+      "path": "llm.qwen.timeout_seconds",
+      "value": 60
+    },
+    {
+      "path": "maintenance.audit_retention_days",
+      "value": 14
+    },
+    {
+      "path": "maintenance.tasks_retention_days",
+      "value": 7
+    },
+    {
+      "path": "server.request_timeout_seconds",
+      "value": 30
+    },
+    {
+      "path": "skills.runner_warm_pool_idle_timeout_seconds",
+      "value": 60
+    },
+    {
+      "path": "skills.skill_timeout_seconds",
+      "value": 600
+    },
+    {
+      "path": "tools.cmd_async_retention_seconds",
+      "value": 86400
+    },
+    {
+      "path": "tools.cmd_idle_timeout_seconds",
+      "value": 60
+    },
+    {
+      "path": "tools.cmd_timeout_seconds",
+      "value": 60
+    },
+    {
+      "path": "worker.running_no_progress_timeout_seconds",
+      "value": 1200
+    }
+  ]
+}

@@ -38,6 +38,8 @@ pub(crate) struct TaskControlUpdate {
     pub(crate) task_id: String,
     pub(crate) checkpoint_id: String,
     pub(crate) lifecycle: Value,
+    pub(crate) control_seq: Option<i64>,
+    pub(crate) control_status: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -328,21 +330,149 @@ fn child_steering_event_payload(directive: &Value) -> Value {
     })
 }
 
+#[cfg(test)]
 pub(crate) fn pause_task_by_id(
     state: &AppState,
     task_id: &str,
     pause_seconds: u64,
 ) -> anyhow::Result<Option<TaskControlUpdate>> {
+    pause_task_by_id_with_control(state, task_id, pause_seconds, None, None)
+}
+
+pub(crate) fn pause_task_by_id_with_control(
+    state: &AppState,
+    task_id: &str,
+    pause_seconds: u64,
+    expected_control_seq: Option<i64>,
+    idempotency_key: Option<&str>,
+) -> anyhow::Result<Option<TaskControlUpdate>> {
     let now_ts = crate::now_ts_u64() as i64;
     let pause_seconds = pause_seconds.clamp(1, 604_800) as i64;
-    update_paused_checkpoint_schedule(
+    let directive = super::task_control_mailbox::enqueue_task_control(
+        state,
+        super::task_control_mailbox::EnqueueTaskControl {
+            task_id: task_id.to_string(),
+            action: TASK_CONTROL_KIND_PAUSE.to_string(),
+            issued_by: "task_control_api".to_string(),
+            payload: json!({"pause_seconds": pause_seconds}),
+            idempotency_key: idempotency_key
+                .map(ToOwned::to_owned)
+                .or_else(|| Some(format!("pause:{task_id}:{now_ts}:{pause_seconds}"))),
+            expected_control_seq,
+        },
+    )?;
+    let Some(directive) = directive else {
+        return Ok(None);
+    };
+    if let Some(mut update) = update_paused_checkpoint_schedule(
         state,
         task_id,
         now_ts,
         now_ts.saturating_add(pause_seconds),
         TASK_PAUSED_MESSAGE_KEY,
         None,
+    )? {
+        let _ = super::task_control_mailbox::apply_task_control_directive(
+            state,
+            task_id,
+            directive.control_seq,
+            "pause_checkpoint_rescheduled",
+        )?;
+        update.control_seq = Some(directive.control_seq);
+        update.control_status = "applied".to_string();
+        return Ok(Some(update));
+    }
+    mark_running_task_pause_requested(state, task_id, &directive, pause_seconds)
+}
+
+pub(crate) fn steer_task_by_id(
+    state: &AppState,
+    task_id: &str,
+    user_message: Option<&str>,
+    new_constraints: Option<&Value>,
+    expected_control_seq: Option<i64>,
+    idempotency_key: Option<&str>,
+) -> anyhow::Result<Option<super::task_control_mailbox::TaskControlDirective>> {
+    if user_message
+        .is_some_and(|message| message.trim().chars().count() > MAX_RESUME_USER_MESSAGE_CHARS)
+    {
+        anyhow::bail!("task_steering_message_too_large");
+    }
+    let payload = json!({
+        "user_message": user_message.map(str::trim).filter(|value| !value.is_empty()),
+        "new_constraints": new_constraints,
+    });
+    super::task_control_mailbox::enqueue_task_control(
+        state,
+        super::task_control_mailbox::EnqueueTaskControl {
+            task_id: task_id.to_string(),
+            action: "steer".to_string(),
+            issued_by: "task_control_api".to_string(),
+            payload,
+            idempotency_key: idempotency_key.map(ToOwned::to_owned),
+            expected_control_seq,
+        },
     )
+}
+
+fn mark_running_task_pause_requested(
+    state: &AppState,
+    task_id: &str,
+    directive: &super::task_control_mailbox::TaskControlDirective,
+    pause_seconds: i64,
+) -> anyhow::Result<Option<TaskControlUpdate>> {
+    let db = state
+        .core
+        .db
+        .get()
+        .map_err(|error| anyhow::anyhow!("db pool: {error}"))?;
+    let row = db
+        .query_row(
+            "SELECT result_json FROM tasks WHERE task_id = ?1 AND status = 'running' LIMIT 1",
+            params![task_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?;
+    let Some(raw_result) = row else {
+        return Ok(None);
+    };
+    let mut result = raw_result
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}));
+    let lifecycle = json!({
+        "schema_version": 1,
+        "state": "pause_requested",
+        "source": TASK_CONTROL_SOURCE,
+        "message_key": TASK_PAUSED_MESSAGE_KEY,
+        "can_cancel": true,
+        "can_pause": false,
+        "requested_at": directive.issued_at,
+        "pause_seconds": pause_seconds,
+        "control_request": {
+            "schema_version": 1,
+            "kind": TASK_CONTROL_KIND_PAUSE,
+            "status": TASK_CONTROL_STATUS_PENDING,
+            "control_seq": directive.control_seq,
+            "control_id": directive.control_id,
+            "payload_digest": directive.payload_digest,
+        }
+    });
+    result["task_lifecycle"] = lifecycle.clone();
+    let changed = db.execute(
+        "UPDATE tasks SET result_json = ?2, updated_at = ?3
+         WHERE task_id = ?1 AND status = 'running'
+           AND COALESCE(result_json, '') = COALESCE(?4, '')",
+        params![task_id, result.to_string(), now_ts(), raw_result],
+    )?;
+    Ok((changed == 1).then(|| TaskControlUpdate {
+        task_id: task_id.to_string(),
+        checkpoint_id: String::new(),
+        lifecycle,
+        control_seq: Some(directive.control_seq),
+        control_status: "pending".to_string(),
+    }))
 }
 
 fn cancel_task_records(
@@ -971,6 +1101,8 @@ fn update_paused_checkpoint_schedule(
         task_id: task_id.to_string(),
         checkpoint_id,
         lifecycle,
+        control_seq: None,
+        control_status: TASK_CONTROL_STATUS_PENDING.to_string(),
     }))
 }
 

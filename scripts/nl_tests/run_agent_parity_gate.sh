@@ -308,6 +308,8 @@ echo "AGENT_PARITY_GATE_STEP task_lifecycle_contracts"
 {
   python3 "${ROOT_DIR}/scripts/check_task_lifecycle_contracts.py" --self-test
   python3 "${ROOT_DIR}/scripts/check_task_lifecycle_contracts.py"
+  python3 "${ROOT_DIR}/scripts/check_long_task_execution_inventory.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_long_task_execution_inventory.py"
 } > "${OUT_DIR}/task_lifecycle_contracts.txt"
 
 echo "AGENT_PARITY_GATE_STEP task_event_context_team_contracts"

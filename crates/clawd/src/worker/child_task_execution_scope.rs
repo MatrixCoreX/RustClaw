@@ -13,6 +13,7 @@ pub(super) struct ChildTaskExecutionScope {
     runtime: Option<ExecutionIsolationRuntime>,
     child_task_id: Option<String>,
     parent_owned: bool,
+    primary_task: bool,
 }
 
 impl ChildTaskExecutionScope {
@@ -21,21 +22,36 @@ impl ChildTaskExecutionScope {
         task: &ClaimedTask,
         payload: &Value,
     ) -> anyhow::Result<Self> {
-        if !crate::repo::child_tasks::is_child_subagent_payload(payload) {
+        let child_task = crate::repo::child_tasks::is_child_subagent_payload(payload);
+        let requested_primary_mode = payload
+            .pointer("/execution_workspace/mode")
+            .and_then(Value::as_str)
+            .map(str::trim);
+        let primary_task = !child_task
+            && matches!(
+                requested_primary_mode,
+                Some("independent" | "local_worktree")
+            );
+        if !child_task && !primary_task {
             return Ok(Self {
                 scoped_state: None,
                 permission_profile: None,
                 runtime: None,
                 child_task_id: None,
                 parent_owned: false,
+                primary_task: false,
             });
         }
-        let permission_profile = payload
-            .pointer("/child_task_contract/permission_profile")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or("read_only");
+        let permission_profile = if primary_task {
+            "local_worktree"
+        } else {
+            payload
+                .pointer("/child_task_contract/permission_profile")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("read_only")
+        };
         match permission_profile {
             "read_only" => Ok(Self {
                 scoped_state: None,
@@ -43,6 +59,7 @@ impl ChildTaskExecutionScope {
                 runtime: None,
                 child_task_id: None,
                 parent_owned: false,
+                primary_task,
             }),
             "local_worktree" => {
                 let plan = crate::execution_isolation::plan_execution_isolation(
@@ -66,6 +83,7 @@ impl ChildTaskExecutionScope {
                     runtime: Some(runtime),
                     child_task_id: Some(task.task_id.clone()),
                     parent_owned: false,
+                    primary_task,
                 })
             }
             _ => bail!("child_permission_profile_unsupported"),
@@ -109,19 +127,28 @@ impl ChildTaskExecutionScope {
         }
         Some(json!({
             "schema_version": 1,
-            "owner_layer": "child_task_execution_scope",
+            "owner_layer": if self.primary_task {
+                "primary_task_execution_scope"
+            } else {
+                "child_task_execution_scope"
+            },
             "status": "bound",
             "permission_profile": permission_profile,
-            "workspace_binding": if self.runtime.is_some() {
+            "workspace_binding": if self.runtime.is_some() && self.primary_task {
+                "local/worktree"
+            } else if self.runtime.is_some() {
                 "isolated_worktree"
             } else {
                 "primary_workspace_read_only"
             },
+            "worktree_id": self.child_task_id,
             "workspace_root": workspace_root.display().to_string(),
             "allocation_reused": self.runtime.as_ref().is_some_and(|runtime| runtime.reused),
             "artifact_refs": artifact_refs,
             "patch_artifact": patch_artifact,
-            "cleanup_policy": if self.runtime.is_some() {
+            "cleanup_policy": if self.primary_task {
+                "pinned_until_explicit_apply_or_discard"
+            } else if self.runtime.is_some() {
                 "parent_owned_after_patch_decision"
             } else {
                 "not_required"
@@ -133,6 +160,10 @@ impl ChildTaskExecutionScope {
         if self.runtime.is_some() {
             self.parent_owned = true;
         }
+    }
+
+    pub(super) fn is_primary_task_scope(&self) -> bool {
+        self.primary_task && self.runtime.is_some()
     }
 
     #[cfg(test)]

@@ -171,7 +171,7 @@ command -v clawcli
 只验证 Rust 代码：
 
 ```bash
-CARGO_BUILD_JOBS=1 cargo check --workspace
+cargo check --workspace
 ```
 
 旧的四套 cross 编译入口已归档到 `scripts/archive/cross-build/`，当前部署流程
@@ -435,7 +435,7 @@ Rust：
 
 ```bash
 cargo fmt --all -- --check
-CARGO_BUILD_JOBS=1 cargo test --workspace
+cargo test --workspace
 python3 scripts/check_long_files.py
 python3 scripts/check_cross_platform_contracts.py
 ```

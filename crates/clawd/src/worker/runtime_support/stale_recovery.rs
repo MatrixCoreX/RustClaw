@@ -226,6 +226,187 @@ pub(crate) fn recover_stale_running_tasks_on_startup(
         .collect())
 }
 
+/// Transfers durable resume work from the previous local process generation
+/// to the worker generation created by this startup. A task that already has
+/// a machine resume executor must not wait for the old in-process lease to
+/// expire: that owner cannot still exist after this process has restarted.
+/// Ordinary running work is deliberately excluded and remains governed by
+/// stale/no-progress recovery.
+pub(crate) fn adopt_recoverable_resume_executions_on_startup(
+    db: &Connection,
+    worker_id: &str,
+    lease_seconds: i64,
+) -> anyhow::Result<Vec<String>> {
+    let worker_id = worker_id.trim();
+    if worker_id.is_empty() {
+        anyhow::bail!("startup_resume_worker_id_missing");
+    }
+    let now = now_ts_u64() as i64;
+    let lease_expires_at = now.saturating_add(lease_seconds.max(1));
+    let mut stmt = db.prepare(
+        "SELECT task_id, result_json, lease_owner, COALESCE(claim_attempt, 0)
+         FROM tasks WHERE status = 'running' AND result_json IS NOT NULL",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, i64>(3)?,
+        ))
+    })?;
+    let candidates = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(stmt);
+
+    let mut adopted = Vec::new();
+    for (task_id, raw_result, previous_owner, previous_claim_attempt) in candidates {
+        let mut result = match serde_json::from_str::<Value>(&raw_result) {
+            Ok(value) if crate::task_lifecycle::has_recoverable_resume_execution(&value) => value,
+            _ => continue,
+        };
+        let lifecycle = result
+            .get_mut("task_lifecycle")
+            .and_then(Value::as_object_mut);
+        let Some(lifecycle) = lifecycle else {
+            continue;
+        };
+        let has_resume_claim = lifecycle.get("resume_claim").is_some_and(Value::is_object);
+        let has_resume_executor = [
+            "resume_executor",
+            "resume_executor_claim",
+            "resume_executor_handoff",
+            "resume_executor_handoff_claim",
+            "resume_executor_dispatch",
+            "resume_executor_dispatch_claim",
+            "resume_executor_dispatch_result",
+            "resume_executor_result_projection_claim",
+        ]
+        .into_iter()
+        .any(|key| lifecycle.get(key).is_some_and(Value::is_object));
+        if !has_resume_claim && !has_resume_executor {
+            // The checkpoint has not yet been claimed by the old process.
+            // Release only the dead process lease; the ordinary recovery path
+            // will create the first resume claim when next_check_after is due.
+            let changed = db.execute(
+                "UPDATE tasks
+                 SET updated_at = ?2, lease_owner = NULL, lease_expires_at = 0, claimed_at = 0
+                 WHERE task_id = ?1 AND status = 'running' AND result_json = ?3
+                   AND COALESCE(claim_attempt, 0) = ?4",
+                rusqlite::params![task_id, now.to_string(), raw_result, previous_claim_attempt,],
+            )?;
+            if changed == 1 {
+                adopted.push(task_id);
+            }
+            continue;
+        }
+        let checkpoint_id = lifecycle
+            .get("checkpoint_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned);
+        let Some(checkpoint_id) = checkpoint_id else {
+            continue;
+        };
+        if has_resume_claim && !has_resume_executor {
+            if let Some(claim) = lifecycle
+                .get_mut("resume_claim")
+                .and_then(Value::as_object_mut)
+            {
+                claim.insert("expires_at".to_string(), json!(now));
+                claim.insert("recovery_reason".to_string(), json!("service_restart"));
+            }
+            lifecycle.insert("resume_due".to_string(), json!(true));
+            lifecycle.insert("resume_wait_seconds".to_string(), json!(0));
+            let changed = db.execute(
+                "UPDATE tasks
+                 SET result_json = ?2, updated_at = ?3, lease_owner = NULL,
+                     lease_expires_at = 0, claimed_at = 0
+                 WHERE task_id = ?1 AND status = 'running' AND result_json = ?4
+                   AND COALESCE(claim_attempt, 0) = ?5",
+                rusqlite::params![
+                    task_id,
+                    result.to_string(),
+                    now.to_string(),
+                    raw_result,
+                    previous_claim_attempt,
+                ],
+            )?;
+            if changed == 1 {
+                adopted.push(task_id);
+            }
+            continue;
+        }
+        let claim = lifecycle
+            .entry("resume_claim".to_string())
+            .or_insert_with(|| json!({}))
+            .as_object_mut();
+        let Some(claim) = claim else {
+            continue;
+        };
+        claim.insert("schema_version".to_string(), json!(1));
+        claim.insert("checkpoint_id".to_string(), json!(checkpoint_id.clone()));
+        claim.insert("owner".to_string(), json!(worker_id));
+        claim.insert("owner_layer".to_string(), json!("startup_resume_adoption"));
+        claim.insert("claimed_at".to_string(), json!(now));
+        claim.insert("expires_at".to_string(), json!(lease_expires_at));
+        claim.insert("recovery_reason".to_string(), json!("service_restart"));
+        if let Some(owner) = previous_owner
+            .as_deref()
+            .filter(|owner| *owner != worker_id)
+        {
+            claim.insert("previous_claim_owner".to_string(), json!(owner));
+        }
+        for key in [
+            "resume_executor_claim",
+            "resume_executor_handoff_claim",
+            "resume_executor_dispatch_claim",
+            "resume_executor_result_projection_claim",
+        ] {
+            if let Some(stale_claim) = lifecycle.get_mut(key).and_then(Value::as_object_mut) {
+                stale_claim.insert("expires_at".to_string(), json!(now));
+                stale_claim.insert("recovery_reason".to_string(), json!("service_restart"));
+            }
+        }
+        lifecycle.insert("resume_due".to_string(), json!(true));
+        lifecycle.insert("resume_wait_seconds".to_string(), json!(0));
+        lifecycle.insert(
+            "startup_resume_adoption".to_string(),
+            json!({
+                "schema_version": 1,
+                "checkpoint_id": checkpoint_id,
+                "worker_id": worker_id,
+                "adopted_at": now,
+                "previous_claim_attempt": previous_claim_attempt,
+            }),
+        );
+        let next_claim_attempt = previous_claim_attempt
+            .checked_add(1)
+            .ok_or_else(|| anyhow!("task claim attempt overflow: task_id={task_id}"))?;
+        let changed = db.execute(
+            "UPDATE tasks
+             SET result_json = ?2, updated_at = ?3, lease_owner = ?4,
+                 lease_expires_at = ?5, claimed_at = ?3, claim_attempt = ?6
+             WHERE task_id = ?1 AND status = 'running' AND result_json = ?7
+               AND COALESCE(claim_attempt, 0) = ?8",
+            rusqlite::params![
+                task_id,
+                result.to_string(),
+                now.to_string(),
+                worker_id,
+                lease_expires_at,
+                next_claim_attempt,
+                raw_result,
+                previous_claim_attempt,
+            ],
+        )?;
+        if changed == 1 {
+            adopted.push(task_id);
+        }
+    }
+    Ok(adopted)
+}
+
 pub(crate) fn recover_stale_running_tasks_by_no_progress(
     state: &AppState,
 ) -> anyhow::Result<Vec<String>> {

@@ -58,6 +58,17 @@ pub(super) struct ResumeTaskByIdRequest {
 pub(super) struct PauseTaskByIdRequest {
     task_id: String,
     pause_seconds: Option<u64>,
+    expected_control_seq: Option<i64>,
+    idempotency_key: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct SteerTaskByIdRequest {
+    task_id: String,
+    user_message: Option<String>,
+    new_constraints: Option<Value>,
+    expected_control_seq: Option<i64>,
+    idempotency_key: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -595,12 +606,19 @@ pub(super) async fn pause_task_by_id(
     if target.status.as_str() != "running" {
         return super::api_err::<serde_json::Value>(StatusCode::CONFLICT, "task_not_pauseable");
     }
-    match crate::repo::pause_task_by_id(&state, &target.task_id, req.pause_seconds.unwrap_or(3600))
-    {
+    match crate::repo::pause_task_by_id_with_control(
+        &state,
+        &target.task_id,
+        req.pause_seconds.unwrap_or(3600),
+        req.expected_control_seq,
+        req.idempotency_key.as_deref(),
+    ) {
         Ok(Some(update)) => super::api_ok(json!({
             "status": "task_pause_requested",
             "task_id": update.task_id,
             "checkpoint_id": update.checkpoint_id,
+            "control_seq": update.control_seq,
+            "control_status": update.control_status,
             "task_lifecycle": update.lifecycle,
         })),
         Ok(None) => super::api_err::<serde_json::Value>(StatusCode::CONFLICT, "task_not_pauseable"),
@@ -610,6 +628,59 @@ pub(super) async fn pause_task_by_id(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "task_pause_failed",
             )
+        }
+    }
+}
+
+pub(super) async fn steer_task_by_id(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<SteerTaskByIdRequest>,
+) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
+    let target = match authorized_task_admin_target_by_id(&state, &headers, &req.task_id) {
+        Ok(target) => target,
+        Err(resp) => return resp,
+    };
+    if target.status.as_str() != "running" {
+        return super::api_err::<serde_json::Value>(StatusCode::CONFLICT, "task_not_steerable");
+    }
+    match crate::repo::steer_task_by_id(
+        &state,
+        &target.task_id,
+        req.user_message.as_deref(),
+        req.new_constraints.as_ref(),
+        req.expected_control_seq,
+        req.idempotency_key.as_deref(),
+    ) {
+        Ok(Some(directive)) => {
+            let payload = json!({
+                "schema_version": 1,
+                "status": "task_steering_accepted",
+                "task_id": directive.task_id,
+                "control_seq": directive.control_seq,
+                "control_id": directive.control_id,
+                "control_status": directive.status,
+                "payload_digest": directive.payload_digest,
+            });
+            let _ = crate::task_event_transport::publish_event(
+                &state,
+                &target.task_id,
+                "task_control",
+                payload.clone(),
+            );
+            super::api_ok(payload)
+        }
+        Ok(None) => super::api_err::<serde_json::Value>(StatusCode::CONFLICT, "task_not_steerable"),
+        Err(error) => {
+            let code = error.to_string();
+            let status = if code.contains("version_conflict") {
+                StatusCode::CONFLICT
+            } else if code.contains("too_large") {
+                StatusCode::BAD_REQUEST
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
+            super::api_err::<serde_json::Value>(status, code)
         }
     }
 }

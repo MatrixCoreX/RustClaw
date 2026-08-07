@@ -16,11 +16,13 @@ pub(crate) mod submit;
 pub(crate) mod task_admin;
 pub(crate) mod task_approval;
 pub(crate) mod task_checkpoint_action;
+pub(crate) mod task_control_mailbox;
 mod task_delivery;
 pub(crate) mod task_goal;
 pub(crate) mod task_mutation_ledger;
 pub(crate) mod task_plan;
 pub(crate) mod task_resume_execution;
+pub(crate) mod task_workspace;
 pub(crate) mod tasks;
 
 pub(crate) use approval_scope::{
@@ -68,10 +70,13 @@ pub(crate) use submit::{
     submit_task_audit_detail, task_count_by_status, task_count_by_status_for_user, task_kind_name,
     SubmitTaskAccessError, SubmitTaskContextError, SubmitTaskLimitError,
 };
+#[cfg(test)]
+pub(crate) use task_admin::pause_task_by_id;
 pub(crate) use task_admin::{
     cancel_child_tasks_for_parent, cancel_one_task_for_user_chat, cancel_task_by_id,
-    cancel_tasks_for_user_chat, close_child_task_thread, get_task_admin_target, pause_task_by_id,
-    resume_task_with_input, TaskAdminTarget, TaskResumeControlInput,
+    cancel_tasks_for_user_chat, close_child_task_thread, get_task_admin_target,
+    pause_task_by_id_with_control, resume_task_with_input, steer_task_by_id, TaskAdminTarget,
+    TaskResumeControlInput,
 };
 pub(crate) use task_approval::{
     consume_task_approval_grant, decide_task_approval_request_for_actor,
@@ -79,6 +84,10 @@ pub(crate) use task_approval::{
 };
 pub(crate) use task_checkpoint_action::{
     load_task_checkpoint_action, upsert_task_checkpoint_action, TaskCheckpointAction,
+};
+pub(crate) use task_control_mailbox::{
+    applied_task_steering_directives, apply_task_control_directive,
+    pending_task_control_directives, TaskControlDirective,
 };
 pub(crate) use task_delivery::{get_task_delivery_record, TaskDeliveryRecord};
 pub(crate) use task_goal::{update_task_goal_payload, TaskGoalControlOperation};
@@ -107,6 +116,7 @@ pub(crate) use task_resume_execution::{
     ClaimedDispatchedPausedCheckpointResumeExecution,
     ClaimedHandoffPausedCheckpointResumeExecution, ClaimedPausedCheckpointResumeDispatchResult,
 };
+pub(crate) use task_workspace::record_task_execution_workspace;
 pub(crate) use tasks::{
     check_task_view_access, claim_due_paused_checkpoint_task_internal, claim_next_task,
     claim_ready_paused_checkpoint_resume_executor_internal, get_task_query_record,

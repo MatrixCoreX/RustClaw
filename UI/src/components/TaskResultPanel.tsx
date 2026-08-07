@@ -696,6 +696,24 @@ export function TaskResultPanel({
                 <span className="theme-status-pill rounded-md px-2 py-1 text-xs font-medium">{taskLifecycleView.stateLabel}</span>
               </div>
               <p className="mt-1 text-sm opacity-80">{taskLifecycleView.detail}</p>
+              {taskResult?.lifecycle?.operation_progress ? (
+                <div className="mt-3 rounded-lg border border-white/10 bg-black/15 px-3 py-2 text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-medium">{t("当前阶段", "Current phase")}</span>
+                    <span className="theme-status-pill rounded-md px-2 py-1">
+                      {taskResult.lifecycle.operation_progress.phase_key || t("处理中", "Working")}
+                    </span>
+                  </div>
+                  <p className="mt-1 opacity-75">
+                    {taskResult.lifecycle.operation_progress.total_units != null
+                      ? t(
+                          `已完成 ${taskResult.lifecycle.operation_progress.completed_units ?? 0} / ${taskResult.lifecycle.operation_progress.total_units}`,
+                          `${taskResult.lifecycle.operation_progress.completed_units ?? 0} / ${taskResult.lifecycle.operation_progress.total_units} completed`,
+                        )
+                      : t("任务仍在运行，当前阶段无法可靠估算百分比。", "The task is alive; this phase has no reliable percentage estimate.")}
+                  </p>
+                </div>
+              ) : null}
               <div className="mt-3 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs">
                 <div className="font-medium">{t("下一步", "Next step")}</div>
                 <p className="mt-1 font-medium">{taskLifecycleView.recommendedAction.label}</p>

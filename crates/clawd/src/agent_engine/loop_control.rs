@@ -11,6 +11,98 @@ use super::{
 };
 use crate::{AgentAction, AppState, AskReply, ClaimedTask, IntentOutputContract};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ActiveTaskBoundaryControl {
+    Continue,
+    Pause { control_seq: i64 },
+}
+
+fn append_task_steering_context(
+    user_text: &mut String,
+    directive: &crate::repo::TaskControlDirective,
+) {
+    let envelope = json!({
+        "schema_version": 1,
+        "control_seq": directive.control_seq,
+        "user_message": directive.payload.get("user_message"),
+        "new_constraints": directive.payload.get("new_constraints"),
+    });
+    user_text.push_str("\n\n[active_task_steering]");
+    user_text.push_str(&envelope.to_string());
+}
+
+fn restore_applied_task_steering(state: &AppState, task: &ClaimedTask, user_text: &mut String) {
+    match crate::repo::applied_task_steering_directives(state, &task.task_id, 64) {
+        Ok(directives) => {
+            for directive in directives {
+                append_task_steering_context(user_text, &directive);
+            }
+        }
+        Err(error) => warn!(task_id = task.task_id, %error, "task_steering_restore_failed"),
+    }
+}
+
+fn apply_active_task_boundary_controls(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &mut String,
+) -> Result<ActiveTaskBoundaryControl, String> {
+    let directives = crate::repo::pending_task_control_directives(state, &task.task_id, 32)
+        .map_err(|error| format!("task_control_mailbox_read_failed:{error}"))?;
+    for directive in directives {
+        match directive.action.as_str() {
+            "steer" => {
+                append_task_steering_context(user_text, &directive);
+                crate::repo::apply_task_control_directive(
+                    state,
+                    &task.task_id,
+                    directive.control_seq,
+                    "steering_applied_at_safe_boundary",
+                )
+                .map_err(|error| format!("task_control_apply_failed:{error}"))?;
+                let _ = crate::task_event_transport::publish_claimed_event(
+                    state,
+                    task,
+                    "task_control",
+                    json!({
+                        "schema_version": 1,
+                        "action": "steer",
+                        "control_seq": directive.control_seq,
+                        "control_id": directive.control_id,
+                        "status": "applied",
+                        "payload_digest": directive.payload_digest,
+                    }),
+                );
+            }
+            "pause" => {
+                return Ok(ActiveTaskBoundaryControl::Pause {
+                    control_seq: directive.control_seq,
+                });
+            }
+            "resume" => {
+                let _ = crate::repo::apply_task_control_directive(
+                    state,
+                    &task.task_id,
+                    directive.control_seq,
+                    "resume_observed_while_running",
+                );
+            }
+            "cancel" => return Err(crate::agent_engine::TASK_CANCELED_ERR.to_string()),
+            _ => {}
+        }
+    }
+    Ok(ActiveTaskBoundaryControl::Continue)
+}
+
+pub(super) fn active_task_boundary_control_pending(
+    state: &AppState,
+    task: &ClaimedTask,
+) -> Result<bool, String> {
+    crate::repo::pending_task_control_directives(state, &task.task_id, 1)
+        .map(|directives| !directives.is_empty())
+        .map_err(|error| format!("task_control_mailbox_read_failed:{error}"))
+}
+
 #[path = "loop_control_answer_recovery.rs"]
 mod loop_control_answer_recovery;
 #[path = "loop_control_finalization_gate.rs"]
@@ -625,13 +717,13 @@ fn initialize_task_budget_slice(
     }
     let profile = task_budget_profile(profile);
     let profile_policy = task_budget_policy.profile(profile);
-    loop_state.task_budget_slice = Some(
-        crate::task_budget_contract::TaskBudgetSlice::new_with_policy(
-            profile,
-            profile_policy,
-            task_budget_policy.hard_ceilings.clone(),
-        ),
+    let mut slice = crate::task_budget_contract::TaskBudgetSlice::new_with_policy(
+        profile,
+        profile_policy,
+        task_budget_policy.hard_ceilings.clone(),
     );
+    slice.set_limit_policy(task_budget_policy.limit_policy);
+    loop_state.task_budget_slice = Some(slice);
 }
 
 fn initial_round_for_agent_loop(loop_state: &LoopState) -> usize {
@@ -784,6 +876,7 @@ fn round_requests_continuation(round: &RoundOutcome) -> bool {
                 | "repeat_action_limit"
                 | "repeat_completed_action"
                 | "structured_observation_already_ready"
+                | "active_task_control_boundary"
         )
     })
 }
@@ -941,6 +1034,7 @@ fn observe_task_budget(
         "schema_version": 1,
         "decision": decision.as_str(),
         "profile": slice.profile.as_str(),
+        "limit_policy": slice.limit_policy.as_str(),
         "soft_slice_ms": slice.soft_slice_ms,
         "continuation_index": slice.continuation_index,
         "cumulative_model_turns": slice.cumulative_model_turns,
@@ -1436,11 +1530,32 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
     let mut round = initial_round_for_agent_loop(&loop_state);
     let loop_started_at = Instant::now();
     initialize_task_budget_slice(&mut loop_state, budget_profile, &task_budget_policy);
+    let mut effective_user_text = user_text.to_string();
+    restore_applied_task_steering(state, task, &mut effective_user_text);
     let mut skip_planner_rounds = false;
     loop {
         if !skip_planner_rounds {
             loop {
                 ensure_task_running(state, task)?;
+                if let ActiveTaskBoundaryControl::Pause { control_seq } =
+                    apply_active_task_boundary_controls(state, task, &mut effective_user_text)?
+                {
+                    loop_state.last_stop_signal = Some("user_pause_requested".to_string());
+                    publish_agent_loop_checkpoint_progress(
+                        state,
+                        task,
+                        &mut loop_state,
+                        "user_pause_requested",
+                    );
+                    crate::repo::apply_task_control_directive(
+                        state,
+                        &task.task_id,
+                        control_seq,
+                        "pause_checkpoint_created",
+                    )
+                    .map_err(|error| format!("task_pause_apply_failed:{error}"))?;
+                    break;
+                }
                 loop_state.round_no = round;
                 if task_budget_soft_slice_exhausted(loop_started_at, &loop_state) {
                     let decision = observe_task_budget(
@@ -1512,7 +1627,7 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
                     state,
                     task,
                     goal,
-                    user_text,
+                    &effective_user_text,
                     &mut policy,
                     &task_budget_policy,
                     &mut loop_state,
@@ -1600,7 +1715,7 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
         if loop_state_has_checkpoint_handoff(&loop_state) {
             return Ok(checkpoint_handoff_reply(
                 task,
-                user_text,
+                &effective_user_text,
                 &loop_state,
                 agent_run_context,
             ));
@@ -1609,7 +1724,7 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
         let mut reply = crate::finalize::finalize_loop_reply(
             state,
             task,
-            user_text,
+            &effective_user_text,
             loop_state,
             agent_run_context,
         )
@@ -1617,7 +1732,7 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
         if loop_state_has_checkpoint_handoff(&pre_finalize_loop_state) {
             return Ok(reply);
         }
-        let answer_contract = answer_contract_for_reply(user_text, &reply);
+        let answer_contract = answer_contract_for_reply(&effective_user_text, &reply);
         prefer_terminal_model_answer_for_verifier_candidate(&mut reply, answer_contract.as_ref());
         enforce_post_write_content_evidence_guard(&mut reply);
         enforce_workspace_mutation_validation_success_guard(&mut reply);
@@ -1626,7 +1741,7 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
             state,
             task,
             goal,
-            user_text,
+            &effective_user_text,
             &policy,
             &mut pre_verifier_recovery_loop_state,
             &reply,
@@ -1641,7 +1756,7 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
         attach_answer_verifier_if_missing(
             state,
             task,
-            user_text,
+            &effective_user_text,
             answer_contract.as_ref(),
             &mut reply,
         )
@@ -1667,7 +1782,12 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
         if let Some(verifier) = answer_verifier_retry_summary(&reply, route_result).cloned() {
             if let Some(route) = route_result {
                 if try_bounded_answer_verifier_synthesis_retry(
-                    state, task, user_text, route, &verifier, &mut reply,
+                    state,
+                    task,
+                    &effective_user_text,
+                    route,
+                    &verifier,
+                    &mut reply,
                 )
                 .await
                 {
@@ -1680,7 +1800,11 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
                 missing_evidence_fields = ?verifier.missing_evidence_fields,
                 "answer_verifier_bounded_synthesis_retry_exhausted"
             );
-            mark_reply_failed_after_answer_verifier_exhausted(user_text, &mut reply, &verifier);
+            mark_reply_failed_after_answer_verifier_exhausted(
+                &effective_user_text,
+                &mut reply,
+                &verifier,
+            );
         }
         return Ok(reply);
     }

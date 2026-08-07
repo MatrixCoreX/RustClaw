@@ -597,6 +597,7 @@ fn checkpoint_artifact_refs(loop_state: &super::LoopState) -> Vec<String> {
 fn checkpoint_resume_message_key(resume_reason: &str) -> Option<&'static str> {
     match resume_reason {
         "task_budget_slice_exhausted" => Some("clawd.task.task_budget_slice_exhausted"),
+        "user_pause_requested" => Some("clawd.task.pause_requested"),
         _ => None,
     }
 }
@@ -935,12 +936,17 @@ pub(super) fn publish_agent_loop_checkpoint_progress(
         state.task_llm_call_count(&task.task_id),
         state.task_llm_elapsed_ms(&task.task_id),
     );
+    let next_check_after = if resume_reason == "user_pause_requested" {
+        now_ts.saturating_add(604_800)
+    } else {
+        now_ts.saturating_add(60)
+    };
     let mut payload = build_agent_loop_checkpoint_progress_payload_with_budget(
         task,
         loop_state,
         resume_reason,
         now_ts,
-        now_ts + 60,
+        next_check_after,
         budget,
     );
     attach_task_llm_metrics_checkpoint(state, &task.task_id, &mut payload);

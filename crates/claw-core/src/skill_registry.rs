@@ -10,10 +10,15 @@ use toml::Value as TomlValue;
 
 #[path = "skill_registry_overlay.rs"]
 mod overlay;
+#[path = "skill_registry_resource.rs"]
+mod resource;
 #[path = "skill_registry_shape.rs"]
 mod shape;
 #[path = "skill_registry_validation.rs"]
 mod validation;
+pub use resource::{
+    SkillDispatchQueuePolicy, SkillDispatchQueueScope, SkillResourceClass, SkillResourceRequest,
+};
 use validation::{
     validate_approval_preview_fields, validate_global_planner_capability_aliases,
     validate_named_capability, validate_package_version, validate_reconciliation_capabilities,
@@ -97,40 +102,6 @@ pub enum CapabilityExecutionMode {
     SyncShort,
     AsyncPreferred,
     AsyncRequired,
-}
-
-/// Host-owned queue scope for resource-heavy skill invocations. Missing queue
-/// policy keeps the existing dispatch behavior unchanged.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SkillDispatchQueueScope {
-    User,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SkillDispatchQueuePolicy {
-    pub scope: SkillDispatchQueueScope,
-    /// Empty applies the queue to every action. Non-empty values are canonical
-    /// action tokens selected from the registry input schema.
-    #[serde(default)]
-    pub actions: Vec<String>,
-}
-
-impl SkillDispatchQueuePolicy {
-    pub fn applies_to(&self, action: Option<&str>) -> bool {
-        if self.actions.is_empty() {
-            return true;
-        }
-        let Some(action) = action
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(normalize_schema_token)
-        else {
-            return false;
-        };
-        self.actions.iter().any(|candidate| candidate == &action)
-    }
 }
 
 impl CapabilityExecutionMode {
@@ -678,6 +649,10 @@ pub struct SkillRegistryEntry {
     /// entries without it retain their existing dispatch behavior.
     #[serde(default)]
     pub dispatch_queue: Option<SkillDispatchQueuePolicy>,
+    /// Resource request evaluated by host admission. It is not a permission
+    /// grant and cannot increase host capacity or provider quotas.
+    #[serde(default)]
+    pub resource_request: Option<SkillResourceRequest>,
     /// Whether the package may emit versioned machine progress records before
     /// its final protocol response. Missing keeps the legacy one-result-line
     /// contract.
@@ -1561,6 +1536,14 @@ impl SkillsRegistry {
                     path.display()
                 ));
             }
+            if let Some(request) = entry.resource_request.as_ref() {
+                resource::validate_resource_request(request).map_err(|error| {
+                    format!(
+                        "skill `{canonical}` resource_request {error} in {}",
+                        path.display()
+                    )
+                })?;
+            }
             validate_planner_capability_schemas(&entry, path)?;
             entry.planner_capability_aliases = normalize_planner_capability_aliases(
                 &entry.planner_capability_aliases,
@@ -1742,6 +1725,10 @@ impl SkillsRegistry {
 
     pub fn dispatch_queue(&self, canonical_name: &str) -> Option<&SkillDispatchQueuePolicy> {
         self.get(canonical_name)?.dispatch_queue.as_ref()
+    }
+
+    pub fn resource_request(&self, canonical_name: &str) -> Option<&SkillResourceRequest> {
+        self.get(canonical_name)?.resource_request.as_ref()
     }
 
     /// 所有已注册的 canonical 名称（含未启用）

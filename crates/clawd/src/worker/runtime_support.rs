@@ -35,7 +35,9 @@ pub(super) use resume_execution_lease::{
 
 #[path = "runtime_support/stale_recovery.rs"]
 mod stale_recovery;
-pub(crate) use stale_recovery::recover_stale_running_tasks_on_startup;
+pub(crate) use stale_recovery::{
+    adopt_recoverable_resume_executions_on_startup, recover_stale_running_tasks_on_startup,
+};
 
 #[path = "runtime_support/recovery_flow.rs"]
 mod recovery_flow;

@@ -378,6 +378,7 @@ pub(crate) struct WorkerConfig {
     pub(crate) worker_id: String,
     pub(crate) started_at: Instant,
     pub(crate) queue_limit: usize,
+    pub(crate) remote_executor: claw_core::config::RemoteExecutorConfig,
     pub(crate) worker_task_heartbeat_seconds: u64,
     pub(crate) worker_running_no_progress_timeout_seconds: u64,
     pub(crate) worker_running_recovery_check_interval_seconds: u64,
@@ -451,6 +452,7 @@ impl WorkerConfig {
             worker_id: "worker:test-default".to_string(),
             started_at: Instant::now(),
             queue_limit: 1,
+            remote_executor: claw_core::config::RemoteExecutorConfig::default(),
             worker_task_heartbeat_seconds: 10,
             worker_running_no_progress_timeout_seconds: 300,
             worker_running_recovery_check_interval_seconds: 30,
@@ -1786,6 +1788,15 @@ impl AppState {
         self.get_skills_registry()
             .as_ref()
             .and_then(|registry| registry.max_concurrency(canonical_name))
+    }
+
+    pub(crate) fn skill_resource_request_for_dispatch(
+        &self,
+        canonical_name: &str,
+    ) -> Option<claw_core::skill_registry::SkillResourceRequest> {
+        self.get_skills_registry()
+            .as_ref()
+            .and_then(|registry| registry.resource_request(canonical_name).cloned())
     }
 
     pub(crate) fn mcp_tool(

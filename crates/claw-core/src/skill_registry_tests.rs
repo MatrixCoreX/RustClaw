@@ -180,6 +180,31 @@ max_concurrency = 0
 }
 
 #[test]
+fn registry_validates_and_exposes_resource_requests() {
+    let registry = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "transcriber"
+resource_request = { class = "cpu", cpu_cores = 4, memory_mb = 2048, disk_io_weight = 50 }
+"#,
+    )
+    .expect("valid resource request");
+    let request = registry.resource_request("transcriber").unwrap();
+    assert_eq!(request.class, SkillResourceClass::Cpu);
+    assert_eq!(request.cpu_cores, 4);
+
+    let error = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "invalid"
+resource_request = { class = "memory", memory_mb = 1048577 }
+"#,
+    )
+    .expect_err("unbounded descriptor must fail");
+    assert!(error.contains("memory_mb_out_of_range"));
+}
+
+#[test]
 fn planner_visible_defaults_true_and_can_hide_runtime_backing_tools() {
     let toml = r#"
 [[skills]]

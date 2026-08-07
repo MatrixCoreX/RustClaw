@@ -19,6 +19,7 @@ export interface ManualTaskSubmitPanelProps {
   localContextLoading: boolean;
   localContextError: string | null;
   interactionAskText: string;
+  interactionIndependentWorkspace: boolean;
   interactionSkillName: string;
   interactionSkillArgs: string;
   interactionLoading: boolean;
@@ -31,6 +32,7 @@ export interface ManualTaskSubmitPanelProps {
   onInteractionExternalUserIdChange: (value: string) => void;
   onInteractionExternalChatIdChange: (value: string) => void;
   onInteractionAskTextChange: (value: string) => void;
+  onInteractionIndependentWorkspaceChange: (value: boolean) => void;
   onInteractionSkillNameChange: (value: string) => void;
   onInteractionSkillArgsChange: (value: string) => void;
   onSubmitInteractionTask: () => unknown | Promise<unknown>;
@@ -48,6 +50,7 @@ export function ManualTaskSubmitPanel({
   localContextLoading,
   localContextError,
   interactionAskText,
+  interactionIndependentWorkspace,
   interactionSkillName,
   interactionSkillArgs,
   interactionLoading,
@@ -60,6 +63,7 @@ export function ManualTaskSubmitPanel({
   onInteractionExternalUserIdChange,
   onInteractionExternalChatIdChange,
   onInteractionAskTextChange,
+  onInteractionIndependentWorkspaceChange,
   onInteractionSkillNameChange,
   onInteractionSkillArgsChange,
   onSubmitInteractionTask,
@@ -151,6 +155,23 @@ export function ManualTaskSubmitPanel({
               onChange={(event) => onInteractionAskTextChange(event.target.value)}
               placeholder={t("例如：请汇报当前系统状态", "For example: Please summarize the current system status")}
             />
+          </label>
+          <label className="flex items-start gap-3 rounded-xl border border-white/15 bg-black/10 px-3 py-3">
+            <input
+              type="checkbox"
+              checked={interactionIndependentWorkspace}
+              onChange={(event) => onInteractionIndependentWorkspaceChange(event.target.checked)}
+              className="mt-0.5 h-4 w-4"
+            />
+            <span>
+              <span className="block text-sm font-medium">{t("使用独立工作区", "Use an independent workspace")}</span>
+              <span className="mt-1 block text-xs leading-5 text-white/55">
+                {t(
+                  "适合修改代码：不会直接覆盖当前目录，完成后可先检查改动再决定是否合并。",
+                  "Recommended for code changes: it keeps the current folder untouched so changes can be reviewed before applying.",
+                )}
+              </span>
+            </span>
           </label>
         </div>
       ) : (

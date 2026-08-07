@@ -187,7 +187,13 @@ pub(crate) fn claim_next_task(state: &AppState) -> anyhow::Result<Option<Claimed
                graph_node.child_task_id IS NULL
                OR graph_node.readiness IN ('ready', 'running')
            )
-         ORDER BY task.created_at ASC
+         ORDER BY
+           COALESCE((
+             SELECT MAX(recent.claimed_at)
+             FROM tasks recent
+             WHERE recent.user_id = task.user_id AND recent.claimed_at > 0
+           ), 0) ASC,
+           task.created_at ASC
          LIMIT 1",
     )?;
 
