@@ -1,19 +1,12 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use sha2::{Digest, Sha256};
 
-const BASE58_ALPHABET: &[u8; 58] =
-    b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const BASE58_ALPHABET: &[u8; 58] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
-const NNI_BANCOR_CANDLE_INTERVALS: [u64; 8] = [
-    60,
-    300,
-    900,
-    3_600,
-    14_400,
-    86_400,
-    604_800,
-    31_536_000,
-];
+const NNI_BANCOR_CANDLE_INTERVALS: [u64; 8] =
+    [60, 300, 900, 3_600, 14_400, 86_400, 604_800, 31_536_000];
+const NNI_BANCOR_DEFAULT_SLIPPAGE_BPS: u16 = 50;
+const NNI_BANCOR_MAX_SLIPPAGE_BPS: u16 = 5_000;
 
 #[derive(Debug, Deserialize)]
 struct NniBancorCandlesQuery {
@@ -86,7 +79,8 @@ fn compact_bancor_device_pubkey(value: &str) -> Option<String> {
         return Some(encode_base58(&compressed));
     }
 
-    let compressed = decode_base58(normalized).or_else(|| URL_SAFE_NO_PAD.decode(normalized).ok())?;
+    let compressed =
+        decode_base58(normalized).or_else(|| URL_SAFE_NO_PAD.decode(normalized).ok())?;
     (compressed.len() == 33 && matches!(compressed[0], 0x02 | 0x03))
         .then(|| encode_base58(&compressed))
 }
@@ -130,10 +124,7 @@ fn sanitize_bancor_market_trade_pubkeys(data: &mut Value) {
                     .map(str::to_string)
             })
             .unwrap_or_else(|| "••••••••".to_string());
-        record.insert(
-            "device_pubkey_compact".to_string(),
-            Value::String(compact),
-        );
+        record.insert("device_pubkey_compact".to_string(), Value::String(compact));
     }
 }
 
@@ -388,9 +379,8 @@ async fn nni_bancor_market_trades(
     };
     let mut attempts = Vec::new();
     for node_url in &config.remote_nodes {
-        let endpoint = format!(
-            "{node_url}/v1/nni/server/bancor/trades?page={page}&per_page={per_page}"
-        );
+        let endpoint =
+            format!("{node_url}/v1/nni/server/bancor/trades?page={page}&per_page={per_page}");
         match state
             .core
             .http_client
@@ -483,14 +473,16 @@ async fn nni_bancor_quote(
             )
         }
     };
-    let slippage_bps = request.slippage_bps.unwrap_or(50);
-    if slippage_bps > 2_000 {
-        return nni_join_error(
-            StatusCode::BAD_REQUEST,
-            "nni_bancor_slippage_bps_invalid",
-            json!({"status": "quote_invalid"}),
-        );
-    }
+    let slippage_bps = match normalize_bancor_slippage_bps(request.slippage_bps) {
+        Ok(value) => value,
+        Err(error) => {
+            return nni_join_error(
+                StatusCode::BAD_REQUEST,
+                error,
+                json!({"status": "quote_invalid"}),
+            )
+        }
+    };
     request.slippage_bps = Some(slippage_bps);
     let config = match read_nni_config(&state) {
         Ok(config) => config,
@@ -715,14 +707,16 @@ async fn nni_bancor_trade(
             }
         };
     request.min_output = normalized_min_output;
-    let slippage_bps = request.slippage_bps.unwrap_or(50);
-    if slippage_bps > 2_000 {
-        return nni_join_error(
-            StatusCode::BAD_REQUEST,
-            "nni_bancor_slippage_bps_invalid",
-            json!({"status": "trade_invalid"}),
-        );
-    }
+    let slippage_bps = match normalize_bancor_slippage_bps(request.slippage_bps) {
+        Ok(value) => value,
+        Err(error) => {
+            return nni_join_error(
+                StatusCode::BAD_REQUEST,
+                error,
+                json!({"status": "trade_invalid"}),
+            )
+        }
+    };
     let config = match read_nni_config(&state) {
         Ok(config) => config,
         Err(err) => {
@@ -1073,6 +1067,13 @@ fn normalize_bancor_amount(value: &str) -> Result<(String, String), &'static str
     ))
 }
 
+fn normalize_bancor_slippage_bps(value: Option<u16>) -> Result<u16, &'static str> {
+    let value = value.unwrap_or(NNI_BANCOR_DEFAULT_SLIPPAGE_BPS);
+    (value <= NNI_BANCOR_MAX_SLIPPAGE_BPS)
+        .then_some(value)
+        .ok_or("nni_bancor_slippage_bps_invalid")
+}
+
 fn value_string(value: &Value, field: &str, error: &'static str) -> Result<String, Value> {
     value
         .get(field)
@@ -1104,16 +1105,24 @@ mod nni_bancor_unit_tests {
     }
 
     #[test]
+    fn slippage_allows_explicit_large_trade_protection_up_to_fifty_percent() {
+        assert_eq!(normalize_bancor_slippage_bps(None), Ok(50));
+        assert_eq!(normalize_bancor_slippage_bps(Some(0)), Ok(0));
+        assert_eq!(normalize_bancor_slippage_bps(Some(5_000)), Ok(5_000));
+        assert_eq!(
+            normalize_bancor_slippage_bps(Some(5_001)),
+            Err("nni_bancor_slippage_bps_invalid")
+        );
+    }
+
+    #[test]
     fn candle_query_accepts_only_supported_intervals_and_bounded_limits() {
         let query = NniBancorCandlesQuery {
             interval_seconds: None,
             limit: None,
             end_time_unix: None,
         };
-        assert_eq!(
-            normalize_bancor_candles_query(&query),
-            Ok((300, 120, None))
-        );
+        assert_eq!(normalize_bancor_candles_query(&query), Ok((300, 120, None)));
         for interval_seconds in [604_800, 31_536_000] {
             let supported = NniBancorCandlesQuery {
                 interval_seconds: Some(interval_seconds),

@@ -15,6 +15,8 @@ type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
 const BANCOR_ASSET_SCALE = 10_000n;
 const BANCOR_MAX_UNITS = 9_223_372_036_854_775_807n;
 export const BANCOR_DEFAULT_CANDLE_INTERVAL_SECONDS = 300;
+export const BANCOR_DEFAULT_SLIPPAGE_BPS = 50;
+export const BANCOR_MAX_SLIPPAGE_BPS = 5_000;
 
 function parseBancorInputUnits(value: string): bigint | null {
   const match = /^(0|[1-9][0-9]*)(?:\.([0-9]{1,4}))?$/.exec(value.trim());
@@ -26,6 +28,15 @@ function parseBancorInputUnits(value: string): bigint | null {
 
 function formatBancorUnits(units: bigint): string {
   return `${units / BANCOR_ASSET_SCALE}.${String(units % BANCOR_ASSET_SCALE).padStart(4, "0")}`;
+}
+
+export function parseBancorSlippagePercent(value: string): number | null {
+  const match = /^(0|[1-9][0-9]*)(?:\.([0-9]{1,2}))?$/.exec(value.trim());
+  if (!match) return null;
+  const basisPoints = Number(match[1]) * 100 + Number((match[2] || "").padEnd(2, "0"));
+  return Number.isSafeInteger(basisPoints) && basisPoints <= BANCOR_MAX_SLIPPAGE_BPS
+    ? basisPoints
+    : null;
 }
 
 export function calculateBancorInputFee(inputAmount: string, feeBps: number): string | null {
@@ -118,12 +129,6 @@ export function formatBancorApiError(
       "The trade amount is too small: the amount after fees and the expected output must not be 0.0000. Increase the trade amount.",
     );
   }
-  if (code === "nni_bancor_trade_above_maximum") {
-    return t(
-      "交易金额超过单笔安全上限，请减少交易金额。",
-      "The trade amount exceeds the per-trade safety limit. Reduce the amount.",
-    );
-  }
   if (code === "nni_bancor_account_required") {
     return t(
       "请先刷新“我的余额”，读取 POINT 和 USD 可用余额后再交易。",
@@ -145,9 +150,6 @@ export function formatBancorApiError(
   if (code === "nni_bancor_auto_pause_threshold_reached" || code === "nni_bancor_usd_reserve_floor_reached") {
     return t("USD 储备接近安全下限，市场已自动暂停。请等待管理员检查储备。", "The USD reserve is near its safety limit, so the market paused automatically. Wait for an administrator to review the reserves.");
   }
-  if (code === "nni_bancor_daily_trade_limit_exceeded") {
-    return t("当前设备今天的交易额度已用完，请明天再试。", "This device has reached today's trade limit. Try again tomorrow.");
-  }
   if (code === "nni_bancor_trade_rate_limited" || code === "nni_bancor_ip_rate_limited") {
     return t("请求太频繁，请稍等片刻再试。", "Requests are too frequent. Wait a moment and try again.");
   }
@@ -156,9 +158,6 @@ export function formatBancorApiError(
       "提交成交后网络中断，结果暂时无法确认。请先刷新余额和成交记录，不要立即重复交易。",
       "The connection ended after submission, so the outcome is not yet known. Refresh balances and trade history before trying again.",
     );
-  }
-  if (code === "nni_bancor_price_impact_exceeded") {
-    return t("这笔数量对价格影响过大，请减少交易数量。", "This amount would move the price too much. Reduce the trade size.");
   }
   return code || fallback;
 }
@@ -279,7 +278,11 @@ export function useBancorRuntime({ apiFetch, t }: { apiFetch: ApiFetch; t: Trans
     return fetchCandles(intervalSeconds);
   };
 
-  const preview = async (side: "buy" | "sell", inputAmount: string) => {
+  const preview = async (
+    side: "buy" | "sell",
+    inputAmount: string,
+    slippageBps = BANCOR_DEFAULT_SLIPPAGE_BPS,
+  ) => {
     setError(null);
     setMessage(null);
     setLastTrade(null);
@@ -289,12 +292,17 @@ export function useBancorRuntime({ apiFetch, t }: { apiFetch: ApiFetch; t: Trans
       setError(formatBancorApiError(validationError, t, t("金额无法交易。", "This amount cannot be traded.")));
       return null;
     }
+    if (!Number.isSafeInteger(slippageBps) || slippageBps < 0 || slippageBps > BANCOR_MAX_SLIPPAGE_BPS) {
+      setQuote(null);
+      setError(t("滑点必须在 0% 到 50% 之间，最多保留两位小数。", "Slippage must be between 0% and 50%, with at most two decimal places."));
+      return null;
+    }
     setQuoteLoading(true);
     try {
       const response = await apiFetch("/v1/nni/bancor/quote", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ side, input_amount: inputAmount, slippage_bps: 50 }),
+        body: JSON.stringify({ side, input_amount: inputAmount, slippage_bps: slippageBps }),
       });
       const body = (await response.json()) as ApiResponse<NniBancorQuoteResponse>;
       if (!response.ok || !body.ok || !body.data) throw new Error(readError(body, `Quote failed (${response.status})`));

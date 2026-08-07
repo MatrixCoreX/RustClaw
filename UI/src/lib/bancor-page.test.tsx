@@ -192,6 +192,9 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /aria-label="交易模式"/);
   assert.match(html, /aria-pressed="true"[^>]*>标准<\/button>/);
   assert.match(html, /aria-pressed="false"[^>]*>SWAP<\/button>/);
+  assert.match(html, /滑点保护与警戒/);
+  assert.match(html, /value="0\.50"/);
+  assert.match(html, /价格影响超过此值时会标黄警告/);
   assert.match(html, /class="theme-primary-btn mt-4 w-full justify-center"[^>]*>卖出<\/button>/);
   assert.doesNotMatch(html, /红色表示上涨，绿色表示下跌/);
   assert.match(html, /全部真实 K 线已显示/);
@@ -344,6 +347,47 @@ test("BANCOR quote review and final confirmation use a centered modal", () => {
   assert.match(html, /bancor-sign-trade-btn/);
   assert.match(html, /确认签名交易/);
   assert.match(html, /返回修改/);
+  assert.doesNotMatch(html, /已超过你设置的/);
+});
+
+test("BANCOR quote modal warns but still permits confirmation when price impact exceeds slippage", () => {
+  const html = renderToStaticMarkup(
+    <BancorQuoteDialog
+      t={(zh) => zh}
+      quote={{
+        schema_version: 1,
+        status: "quoted",
+        side: "buy",
+        input_asset: "USD",
+        input_units: "50000000",
+        input_amount: "5000.0000",
+        fee_asset: "USD",
+        fee_units: "250000",
+        fee_amount: "25.0000",
+        curve_input_units: "49750000",
+        curve_input_amount: "4975.0000",
+        output_asset: "POINT",
+        output_units: "332220367278",
+        output_amount: "33222036.7278",
+        price_impact_bps: 3353,
+        fee_bps: 50,
+        market_id: "point-usd-v1",
+        market_version: 3,
+        slippage_bps: 50,
+        min_output_units: "330559265441",
+        min_output_amount: "33055926.5441",
+      }}
+      tradeLoading={false}
+      tradeError={null}
+      onClose={() => undefined}
+      onConfirm={() => undefined}
+    />,
+  );
+
+  assert.match(html, /价格影响 33\.53% 已超过你设置的 0\.50% 滑点警戒值/);
+  assert.match(html, /确认后仍可继续/);
+  assert.match(html, /我已了解风险，继续签名/);
+  assert.match(html, /role="alert"/);
 });
 
 test("BANCOR candlestick periods include weekly and yearly views", () => {
