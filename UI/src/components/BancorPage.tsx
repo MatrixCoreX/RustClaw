@@ -353,6 +353,7 @@ export function BancorPage({
               candles={candles.candles}
               intervalSeconds={candles.interval_seconds}
               priceDecimalPlaces={candles.price_decimal_places}
+              livePrice={market?.marginal_price_usd_per_point}
               formatUnixDateTime={formatUnixDateTime}
               t={t}
             />
@@ -795,12 +796,14 @@ export function CandleChart({
   candles,
   intervalSeconds,
   priceDecimalPlaces,
+  livePrice,
   formatUnixDateTime,
   t,
 }: {
   candles: NniBancorCandle[];
   intervalSeconds: number;
   priceDecimalPlaces: number;
+  livePrice?: string | null;
   formatUnixDateTime: (value?: number | null) => string;
   t: Translate;
 }) {
@@ -856,6 +859,16 @@ export function CandleChart({
   const visibleCount = Math.max(1, Math.min(allValues.length, requestedVisibleCount));
   const visibleWindow = calculateBancorVisibleWindow(allValues.length, visibleCount, offsetFromLatest);
   const values = allValues.slice(visibleWindow.start, visibleWindow.end);
+  const visibleHighIndex = values.reduce(
+    (bestIndex, value, index) => value.high > values[bestIndex].high ? index : bestIndex,
+    0,
+  );
+  const visibleLowIndex = values.reduce(
+    (bestIndex, value, index) => value.low < values[bestIndex].low ? index : bestIndex,
+    0,
+  );
+  const visibleHigh = values[visibleHighIndex];
+  const visibleLow = values[visibleLowIndex];
   const autoPriceDomain = calculateBancorPriceDomain(values);
   const priceDomain = scaleBancorPriceDomain(autoPriceDomain, verticalZoom);
   const priceHigh = priceDomain.high;
@@ -866,10 +879,25 @@ export function CandleChart({
   const bodyWidth = calculateBancorCandleBodyWidth(step);
   const yForPrice = (price: number) => priceTop + ((priceHigh - price) / priceSpan) * (priceBottom - priceTop);
   const last = values.at(-1)!;
+  const parsedLivePrice = Number(livePrice);
+  const hasLivePrice = typeof livePrice === "string" && livePrice.trim() !== "" && Number.isFinite(parsedLivePrice) && parsedLivePrice > 0;
+  const currentPrice = hasLivePrice ? parsedLivePrice : last.close;
+  const currentPriceText = hasLivePrice ? livePrice : last.candle.close;
+  const currentPriceY = yForPrice(currentPrice);
+  const currentPriceIsVisible = currentPriceY >= priceTop && currentPriceY <= priceBottom;
   const focused = hoveredIndex === null ? last : values[Math.min(hoveredIndex, values.length - 1)] ?? last;
   const tickIndexes = new Set([0, Math.floor((values.length - 1) / 2), values.length - 1]);
   const palette = resolveBancorCandlePalette(t);
   const latestColor = last.close >= last.open ? palette.up : palette.down;
+  const currentPriceColor = currentPrice > last.close
+    ? palette.up
+    : currentPrice < last.close
+      ? palette.down
+      : latestColor;
+  const visibleHighX = plotLeft + step * (visibleHighIndex + 0.5);
+  const visibleLowX = plotLeft + step * (visibleLowIndex + 0.5);
+  const visibleHighY = yForPrice(visibleHigh.high);
+  const visibleLowY = yForPrice(visibleLow.low);
   const showMinuteCloseLine = intervalSeconds === 60;
   const minuteCloseLinePoints = showMinuteCloseLine
     ? values
@@ -967,6 +995,20 @@ export function CandleChart({
 
   return (
     <div>
+      <dl className="mb-3 grid grid-cols-3 gap-2" aria-label={t("当前 K 线价格摘要", "Current candlestick price summary")}>
+        <div className="rounded-lg border border-sky-300/15 bg-sky-400/[0.06] px-3 py-2">
+          <dt className="text-[11px] text-white/45">{t("实时价格", "Live price")}</dt>
+          <dd className="mt-0.5 break-all font-mono text-xs font-semibold text-sky-200 sm:text-sm">{currentPriceText} USD</dd>
+        </div>
+        <div className="rounded-lg border border-white/8 bg-white/[0.025] px-3 py-2">
+          <dt className="text-[11px] text-white/45">{t("可见最高价", "Visible high")}</dt>
+          <dd className="mt-0.5 break-all font-mono text-xs font-semibold text-white/80 sm:text-sm">{visibleHigh.candle.high} USD</dd>
+        </div>
+        <div className="rounded-lg border border-white/8 bg-white/[0.025] px-3 py-2">
+          <dt className="text-[11px] text-white/45">{t("可见最低价", "Visible low")}</dt>
+          <dd className="mt-0.5 break-all font-mono text-xs font-semibold text-white/80 sm:text-sm">{visibleLow.candle.low} USD</dd>
+        </div>
+      </dl>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-white/45">
         <div className="min-w-0">
           <span className="text-white/65">{formatUnixDateTime(focused.candle.bucket_start_unix)}</span>
@@ -1017,7 +1059,18 @@ export function CandleChart({
             return <line key={ratio} x1={x} y1={priceTop} x2={x} y2={volumeBottom} stroke="rgba(255,255,255,0.05)" strokeDasharray="3 7" />;
           })}
           <line x1={plotLeft} y1={volumeTop - 10} x2={plotRight} y2={volumeTop - 10} stroke="rgba(255,255,255,0.08)" />
-          <line x1={plotLeft} y1={yForPrice(last.close)} x2={plotRight} y2={yForPrice(last.close)} stroke={latestColor.stroke} strokeOpacity="0.45" strokeDasharray="5 5" />
+          {currentPriceIsVisible ? (
+            <line
+              data-bancor-chart-layer="live-price-line"
+              x1={plotLeft}
+              y1={currentPriceY}
+              x2={plotRight}
+              y2={currentPriceY}
+              stroke={currentPriceColor.stroke}
+              strokeOpacity="0.65"
+              strokeDasharray="5 5"
+            />
+          ) : null}
           {showMinuteCloseLine && values.length > 1 ? (
             <polyline
               data-bancor-chart-layer="one-minute-close-line"
@@ -1061,6 +1114,28 @@ export function CandleChart({
               </g>
             );
           })}
+          <g data-bancor-chart-layer="visible-price-extremes" pointerEvents="none">
+            <line x1={visibleHighX - 5} y1={visibleHighY} x2={visibleHighX + 5} y2={visibleHighY} stroke="rgba(255,255,255,0.65)" />
+            <text
+              x={visibleHighX <= (plotLeft + plotRight) / 2 ? visibleHighX + 7 : visibleHighX - 7}
+              y={Math.max(priceTop + 11, visibleHighY - 7)}
+              textAnchor={visibleHighX <= (plotLeft + plotRight) / 2 ? "start" : "end"}
+              fill="rgba(255,255,255,0.72)"
+              fontSize="10"
+            >
+              H {visibleHigh.candle.high}
+            </text>
+            <line x1={visibleLowX - 5} y1={visibleLowY} x2={visibleLowX + 5} y2={visibleLowY} stroke="rgba(255,255,255,0.65)" />
+            <text
+              x={visibleLowX <= (plotLeft + plotRight) / 2 ? visibleLowX + 7 : visibleLowX - 7}
+              y={Math.min(priceBottom - 2, visibleLowY + 14)}
+              textAnchor={visibleLowX <= (plotLeft + plotRight) / 2 ? "start" : "end"}
+              fill="rgba(255,255,255,0.72)"
+              fontSize="10"
+            >
+              L {visibleLow.candle.low}
+            </text>
+          </g>
           {hoveredX !== null && hoveredY !== null ? (
             <g pointerEvents="none">
               <line x1={hoveredX} y1={priceTop} x2={hoveredX} y2={volumeBottom} stroke="rgba(255,255,255,0.38)" strokeDasharray="4 5" />
@@ -1069,8 +1144,13 @@ export function CandleChart({
               <text x={priceAxisX + 3} y={hoveredY + 4} fill="rgba(255,255,255,0.88)" fontSize="11">{focused.candle.close}</text>
             </g>
           ) : null}
-          <rect x={priceAxisX - 4} y={yForPrice(last.close) - 10} width="96" height="20" rx="3" fill={latestColor.fill} stroke={latestColor.stroke} strokeWidth="1" />
-          <text x={priceAxisX + 3} y={yForPrice(last.close) + 4} fill={latestColor.stroke} fontSize="11">{last.candle.close}</text>
+          {currentPriceIsVisible ? (
+            <g data-bancor-chart-layer="live-price-label" pointerEvents="none">
+              <title>{t("实时价格", "Live price")}</title>
+              <rect x={priceAxisX - 4} y={currentPriceY - 10} width="96" height="20" rx="3" fill={currentPriceColor.fill} stroke={currentPriceColor.stroke} strokeWidth="1" />
+              <text x={priceAxisX + 3} y={currentPriceY + 4} fill={currentPriceColor.stroke} fontSize="11">{currentPriceText}</text>
+            </g>
+          ) : null}
           <text x={plotLeft} y={volumeTop + 5} fill="rgba(255,255,255,0.38)" fontSize="10">VOL · POINT</text>
         </svg>
       </div>
