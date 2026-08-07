@@ -83,6 +83,7 @@ export function useTaskRuntime({
   const [interactionExternalChatId, setInteractionExternalChatId] = useState("");
   const [interactionAdapter, setInteractionAdapter] = useState("");
   const [interactionAskText, setInteractionAskText] = useState("你好，请汇报当前系统状态");
+  const [interactionIndependentWorkspace, setInteractionIndependentWorkspace] = useState(false);
   const [interactionSkillName, setInteractionSkillName] = useState("health_check");
   const [interactionSkillArgs, setInteractionSkillArgs] = useState("{\"target\":\"self\"}");
   const [interactionLoading, setInteractionLoading] = useState(false);
@@ -324,18 +325,37 @@ export function useTaskRuntime({
     }
   };
 
-  const controlTaskById = async (control: "pause" | "resume", controlTaskId: string) => {
+  const controlTaskById = async (
+    control: "steer" | "pause" | "resume",
+    controlTaskId: string,
+    userMessage?: string,
+  ) => {
     const normalizedTaskId = controlTaskId.trim();
     if (!normalizedTaskId) return;
     setTaskControlSubmittingId(`${control}:${normalizedTaskId}`);
     setTaskControlMessage(null);
     setTaskControlError(null);
     try {
-      const path = control === "pause" ? "/v1/tasks/pause-by-task-id" : "/v1/tasks/resume-by-task-id";
+      const path =
+        control === "steer"
+          ? "/v1/tasks/steer-by-task-id"
+          : control === "pause"
+            ? "/v1/tasks/pause-by-task-id"
+            : "/v1/tasks/resume-by-task-id";
       const payload =
-        control === "pause"
-          ? { task_id: normalizedTaskId, pause_seconds: 3600 }
-          : { task_id: normalizedTaskId };
+        control === "steer"
+          ? {
+              task_id: normalizedTaskId,
+              user_message: userMessage?.trim(),
+              idempotency_key: `ui-steer-${crypto.randomUUID()}`,
+            }
+          : control === "pause"
+            ? {
+                task_id: normalizedTaskId,
+                pause_seconds: 3600,
+                idempotency_key: `ui-pause-${crypto.randomUUID()}`,
+              }
+            : { task_id: normalizedTaskId };
       const res = await apiFetch(path, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -346,10 +366,15 @@ export function useTaskRuntime({
         throw new Error(body.error || `task control failed (${res.status})`);
       }
       setTaskControlMessage(
-        control === "pause"
+        control === "steer"
+          ? t("新要求已送达，将在安全步骤边界应用。", "The new direction was accepted and will apply at a safe step boundary.")
+          : control === "pause"
           ? t("任务已暂停，会在稍后再继续。", "Task paused and will continue later.")
           : t("任务恢复请求已提交。", "Task resume request submitted."),
       );
+      if (control === "steer") {
+        setResumeDrafts((prev) => ({ ...prev, [normalizedTaskId]: "" }));
+      }
       await fetchActiveTasks(true);
       if (taskResult?.task_id === normalizedTaskId) {
         void queryTaskById(normalizedTaskId, false);
@@ -576,6 +601,9 @@ export function useTaskRuntime({
       if (interactionKind === "ask") {
         payload = {
           text: interactionAskText.trim(),
+          ...(interactionIndependentWorkspace
+            ? { execution_workspace: { mode: "independent" } }
+            : {}),
         };
       } else {
         let parsedArgs: unknown = interactionSkillArgs;
@@ -749,6 +777,8 @@ export function useTaskRuntime({
     setInteractionAdapter,
     interactionAskText,
     setInteractionAskText,
+    interactionIndependentWorkspace,
+    setInteractionIndependentWorkspace,
     interactionSkillName,
     setInteractionSkillName,
     interactionSkillArgs,

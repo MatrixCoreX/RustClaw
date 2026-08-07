@@ -14,7 +14,8 @@ fn tasks_db() -> Connection {
             updated_at TEXT NOT NULL,
             lease_owner TEXT,
             lease_expires_at INTEGER NOT NULL DEFAULT 0,
-            claimed_at INTEGER NOT NULL DEFAULT 0
+            claimed_at INTEGER NOT NULL DEFAULT 0,
+            claim_attempt INTEGER NOT NULL DEFAULT 0
         );",
     )
     .expect("create tasks table");
@@ -83,4 +84,103 @@ fn stale_worker_lease_preserves_recoverable_running_resume_execution() {
         .expect("read recoverable resume");
     assert_eq!(status, "running");
     assert!(error_text.is_none());
+}
+
+#[test]
+fn startup_adopts_durable_resume_without_waiting_for_old_process_lease() {
+    let db = tasks_db();
+    let old_lease = crate::now_ts_u64() as i64 + 600;
+    db.execute(
+        "INSERT INTO tasks (
+            task_id, status, payload_json, result_json, created_at, updated_at,
+            lease_owner, lease_expires_at, claim_attempt
+         ) VALUES ('resume-adopt', 'running', '{}', ?1, '1', '1',
+                   'worker:old', ?2, 4)",
+        rusqlite::params![running_resume_result("ckpt-adopt"), old_lease],
+    )
+    .expect("insert durable resume");
+
+    let adopted = super::stale_recovery::adopt_recoverable_resume_executions_on_startup(
+        &db,
+        "worker:new",
+        300,
+    )
+    .expect("adopt durable resume");
+    assert_eq!(adopted, vec!["resume-adopt".to_string()]);
+
+    let (owner, attempt, raw): (String, i64, String) = db
+        .query_row(
+            "SELECT lease_owner, claim_attempt, result_json FROM tasks WHERE task_id = 'resume-adopt'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("read adopted resume");
+    let result: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(owner, "worker:new");
+    assert_eq!(attempt, 5);
+    assert_eq!(
+        result["task_lifecycle"]["resume_claim"]["owner"],
+        "worker:new"
+    );
+    assert_eq!(
+        result["task_lifecycle"]["resume_claim"]["recovery_reason"],
+        "service_restart"
+    );
+    assert!(
+        result["task_lifecycle"]["resume_executor_dispatch_claim"]["expires_at"]
+            .as_i64()
+            .is_some_and(|expires_at| expires_at <= crate::now_ts_u64() as i64)
+    );
+}
+
+#[test]
+fn startup_releases_unclaimed_checkpoint_lease_to_normal_recovery() {
+    let db = tasks_db();
+    let old_lease = crate::now_ts_u64() as i64 + 600;
+    let result = json!({
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": "waiting",
+            "checkpoint_id": "ckpt-unclaimed",
+            "next_check_after": 1
+        },
+        "task_checkpoint": {
+            "schema_version": 1,
+            "checkpoint_id": "ckpt-unclaimed",
+            "boundary_context": {},
+            "observations": [],
+            "evidence_refs": [],
+            "artifact_refs": [],
+            "completed_side_effect_refs": [],
+            "budget": {"round": 0, "step": 1, "llm_calls": 0, "tool_calls": 1, "elapsed_ms": 0},
+            "resume_entrypoint": "poll_async_job"
+        }
+    })
+    .to_string();
+    db.execute(
+        "INSERT INTO tasks (
+            task_id, status, payload_json, result_json, created_at, updated_at,
+            lease_owner, lease_expires_at, claim_attempt
+         ) VALUES ('resume-unclaimed', 'running', '{}', ?1, '1', '1',
+                   'worker:old', ?2, 4)",
+        rusqlite::params![result, old_lease],
+    )
+    .unwrap();
+
+    let adopted = super::stale_recovery::adopt_recoverable_resume_executions_on_startup(
+        &db,
+        "worker:new",
+        300,
+    )
+    .unwrap();
+    assert_eq!(adopted, vec!["resume-unclaimed".to_string()]);
+    let (owner, lease): (Option<String>, i64) = db
+        .query_row(
+            "SELECT lease_owner, lease_expires_at FROM tasks WHERE task_id = 'resume-unclaimed'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert!(owner.is_none());
+    assert_eq!(lease, 0);
 }

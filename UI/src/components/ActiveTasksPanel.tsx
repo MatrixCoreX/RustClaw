@@ -40,7 +40,11 @@ export interface ActiveTasksPanelProps {
   onFetchActiveTasks: () => unknown | Promise<unknown>;
   onViewTask: (taskId: string) => unknown | Promise<unknown>;
   onCancelTask: (task: ActiveTaskItem) => unknown | Promise<unknown>;
-  onControlTask: (control: "pause" | "resume", taskId: string) => unknown | Promise<unknown>;
+  onControlTask: (
+    control: "steer" | "pause" | "resume",
+    taskId: string,
+    userMessage?: string,
+  ) => unknown | Promise<unknown>;
   onResumeDraftChange: (taskId: string, value: string) => void;
   onSubmitResume: (taskId: string) => unknown | Promise<unknown>;
 }
@@ -167,6 +171,9 @@ export function ActiveTasksPanel({
             const canCancel = canCancelTask(item);
             const pauseSubmitting = taskControlSubmittingId === `pause:${item.task_id}`;
             const resumeSubmitting = taskControlSubmittingId === `resume:${item.task_id}`;
+            const steerSubmitting = taskControlSubmittingId === `steer:${item.task_id}`;
+            const canSteer = item.status === "running" || item.status === "queued";
+            const operationProgress = item.lifecycle?.operation_progress;
             return (
               <div
                 key={item.task_id}
@@ -198,6 +205,20 @@ export function ActiveTasksPanel({
                       </div>
                     ) : null}
                     <p className="mt-1 text-xs text-white/55">{lifecycleView.detail}</p>
+                    {operationProgress ? (
+                      <div className="mt-2 rounded-lg border border-sky-300/15 bg-sky-400/5 px-3 py-2 text-xs text-sky-50/75">
+                        <span className="font-medium text-sky-50">
+                          {t("当前阶段", "Current phase")}: {operationProgress.phase_key}
+                        </span>
+                        {typeof operationProgress.total_units === "number" && operationProgress.total_units > 0 ? (
+                          <span className="ml-2">
+                            {operationProgress.completed_units}/{operationProgress.total_units}
+                          </span>
+                        ) : (
+                          <span className="ml-2">{t("仍在工作，暂时无法可靠估算百分比", "Working; no reliable percentage is available")}</span>
+                        )}
+                      </div>
+                    ) : null}
                     <div className="mt-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs">
                       <div className="font-medium text-white/80">{t("下一步", "Next step")}</div>
                       <p className="mt-1 font-medium text-white/85">{lifecycleView.recommendedAction.label}</p>
@@ -294,6 +315,37 @@ export function ActiveTasksPanel({
                         </span>
                       ))}
                     </div>
+                  </div>
+                ) : null}
+                {canSteer ? (
+                  <div className="mt-3 rounded-lg border border-sky-400/25 bg-sky-500/10 p-3">
+                    <label className="block space-y-2">
+                      <span className="text-xs font-medium text-sky-50">
+                        {t("调整正在执行的任务", "Adjust this active task")}
+                      </span>
+                      <textarea
+                        className="theme-input min-h-20"
+                        value={resumeDrafts[item.task_id] ?? ""}
+                        onChange={(event) => onResumeDraftChange(item.task_id, event.target.value)}
+                        placeholder={t(
+                          "补充新的要求；系统会在不会破坏当前步骤的位置应用",
+                          "Add new direction; it will apply at the next safe step boundary",
+                        )}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => void onControlTask("steer", item.task_id, resumeDrafts[item.task_id] ?? "")}
+                      disabled={steerSubmitting || !(resumeDrafts[item.task_id] ?? "").trim()}
+                      className="theme-accent-btn mt-3 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {steerSubmitting ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <MessageCircle className="h-3.5 w-3.5" />
+                      )}
+                      {t("提交调整", "Submit adjustment")}
+                    </button>
                   </div>
                 ) : null}
                 {item.lifecycle?.state === "needs_user" ? (

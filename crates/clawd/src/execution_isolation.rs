@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -151,7 +152,8 @@ pub(crate) fn create_execution_isolation(
             create_git_worktree(plan)?;
             write_isolation_marker(plan, created_at_unix)?;
         }
-        "reuse_current_workspace" | "reuse_read_only_workspace" | "delegate_remote_executor" => {}
+        "reuse_current_workspace" | "reuse_read_only_workspace" => {}
+        "delegate_remote_executor" => bail!("remote_executor_unavailable"),
         other => bail!("unknown_isolation_creation_kind:{other}"),
     }
     Ok(execution_isolation_runtime(plan, false))
@@ -197,6 +199,20 @@ pub(crate) fn cleanup_abandoned_isolation_workspaces(
     now_unix: u64,
     older_than_seconds: u64,
 ) -> IsolationCleanupReport {
+    cleanup_abandoned_isolation_workspaces_protected(
+        workspace_root,
+        now_unix,
+        older_than_seconds,
+        &HashSet::new(),
+    )
+}
+
+pub(crate) fn cleanup_abandoned_isolation_workspaces_protected(
+    workspace_root: &Path,
+    now_unix: u64,
+    older_than_seconds: u64,
+    protected_task_keys: &HashSet<String>,
+) -> IsolationCleanupReport {
     let mut report = IsolationCleanupReport::default();
     cleanup_abandoned_family(
         workspace_root,
@@ -204,6 +220,7 @@ pub(crate) fn cleanup_abandoned_isolation_workspaces(
         "create_local_temp_workspace",
         now_unix,
         older_than_seconds,
+        protected_task_keys,
         &mut report,
     );
     cleanup_abandoned_family(
@@ -212,6 +229,7 @@ pub(crate) fn cleanup_abandoned_isolation_workspaces(
         "create_local_git_worktree",
         now_unix,
         older_than_seconds,
+        protected_task_keys,
         &mut report,
     );
     cleanup_abandoned_patch_artifacts(workspace_root, now_unix, older_than_seconds, &mut report);
@@ -390,6 +408,7 @@ fn cleanup_abandoned_family(
     creation_kind: &str,
     now_unix: u64,
     older_than_seconds: u64,
+    protected_task_keys: &HashSet<String>,
     report: &mut IsolationCleanupReport,
 ) {
     let family_root = isolation_base(workspace_root).join(family);
@@ -406,6 +425,14 @@ fn cleanup_abandoned_family(
             report.skipped += 1;
             continue;
         };
+        if marker
+            .get("task_key")
+            .and_then(Value::as_str)
+            .is_some_and(|task_key| protected_task_keys.contains(task_key))
+        {
+            report.skipped += 1;
+            continue;
+        }
         let created_at = marker
             .get("created_at_unix")
             .and_then(Value::as_u64)

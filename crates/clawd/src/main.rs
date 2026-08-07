@@ -64,6 +64,7 @@ mod language_policy;
 mod llm_gateway;
 mod local_process_job;
 mod log_utils;
+mod long_task_progress;
 mod machine_selector;
 mod mcp_admin_routes;
 mod mcp_runtime;
@@ -82,9 +83,12 @@ mod prompt_budget;
 mod prompt_utils;
 mod providers;
 mod read_range_utils;
+mod remote_executor_admission;
+mod remote_executor_contract;
 mod repair_boundary_inventory;
 mod repair_signal;
 mod repo;
+mod resource_scheduler;
 mod routing_context;
 mod runtime;
 mod schedule_service;
@@ -96,6 +100,7 @@ mod skill_availability;
 mod skill_output_artifact;
 mod skill_storage;
 mod skills;
+mod sqlite_busy_retry;
 mod system_health;
 mod task_admin_routes;
 mod task_artifacts;
@@ -217,12 +222,13 @@ use task_admin_routes::{
     cancel_one_task, cancel_task_by_id as cancel_task_by_id_handler, cancel_tasks,
     close_child_task_by_id, goal_by_task_id, list_active_tasks, list_approval_scope_grants,
     list_automation_runs, pause_task_by_id, resume_task_by_id, retry_child_task_by_id,
-    revoke_approval_scope_grant, stop_child_tasks_by_parent,
+    revoke_approval_scope_grant, steer_task_by_id, stop_child_tasks_by_parent,
 };
 pub(crate) use worker::task_payload_value;
 use worker::{
-    recover_stale_running_tasks_on_startup, spawn_channel_terminal_delivery_worker,
-    spawn_cleanup_worker, spawn_schedule_worker, spawn_worker, task_external_chat_id,
+    adopt_recoverable_resume_executions_on_startup, recover_stale_running_tasks_on_startup,
+    spawn_channel_terminal_delivery_worker, spawn_cleanup_worker, spawn_schedule_worker,
+    spawn_worker, task_external_chat_id,
 };
 
 pub(crate) const INIT_SQL: &str = include_str!("../../../migrations/001_init.sql");
@@ -522,18 +528,25 @@ async fn run() -> anyhow::Result<()> {
         eprintln!("Please save it now and use it to bind UI / Telegram / WhatsApp.");
         eprintln!("============================================================");
     }
-    let recovered_task_ids = {
+    let worker_id = format!("worker:{}", Uuid::new_v4());
+    let (recovered_task_ids, adopted_resume_task_ids) = {
         let db = db_pool
             .get()
             .map_err(|e| anyhow::anyhow!("get db conn: {e}"))?;
-        recover_stale_running_tasks_on_startup(
+        let recovered = recover_stale_running_tasks_on_startup(
             &db,
             config.worker.running_no_progress_timeout_seconds.max(1),
-        )
-        .and_then(|recovered| {
-            repo::child_task_graph::reconcile_child_task_graphs_after_restart(&db, &now_ts())?;
-            Ok(recovered)
-        })?
+        )?;
+        let resume_lease_seconds = config
+            .worker
+            .task_heartbeat_seconds
+            .max(5)
+            .saturating_mul(4)
+            .max(300) as i64;
+        let adopted =
+            adopt_recoverable_resume_executions_on_startup(&db, &worker_id, resume_lease_seconds)?;
+        repo::child_task_graph::reconcile_child_task_graphs_after_restart(&db, &now_ts())?;
+        (recovered, adopted)
     };
     if !recovered_task_ids.is_empty() {
         let recovery_detail = json!({
@@ -570,12 +583,34 @@ async fn run() -> anyhow::Result<()> {
             config.worker.running_no_progress_timeout_seconds.max(1)
         );
     }
+    if !adopted_resume_task_ids.is_empty() {
+        info!(
+            "startup durable resume adoption: transferred {} task(s) to the new worker generation",
+            adopted_resume_task_ids.len()
+        );
+    }
     let isolation_cleanup_age_seconds =
         startup_isolation_cleanup_age_seconds(config.worker.running_no_progress_timeout_seconds);
-    let isolation_cleanup = execution_isolation::cleanup_abandoned_isolation_workspaces(
+    let protected_isolation_task_keys = {
+        let db = db_pool
+            .get()
+            .map_err(|error| anyhow::anyhow!("get db conn: {error}"))?;
+        let mut stmt = db.prepare(
+            "SELECT task_id FROM tasks
+             WHERE status IN ('queued', 'running')
+                OR COALESCE(result_json, '') LIKE '%pinned_until_explicit_apply_or_discard%'",
+        )?;
+        let task_keys = stmt
+            .query_map([], |row| row.get::<_, String>(0))?
+            .filter_map(Result::ok)
+            .collect::<HashSet<_>>();
+        task_keys
+    };
+    let isolation_cleanup = execution_isolation::cleanup_abandoned_isolation_workspaces_protected(
         &workspace_root,
         now_ts_u64(),
         isolation_cleanup_age_seconds,
+        &protected_isolation_task_keys,
     );
     if isolation_cleanup.removed > 0
         || isolation_cleanup.artifacts_removed > 0
@@ -897,9 +932,10 @@ async fn run() -> anyhow::Result<()> {
             schedule,
         },
         worker: crate::WorkerConfig {
-            worker_id: format!("worker:{}", Uuid::new_v4()),
+            worker_id,
             started_at: Instant::now(),
             queue_limit: config.worker.queue_limit,
+            remote_executor: config.worker.remote_executor.clone(),
             worker_task_heartbeat_seconds: config.worker.task_heartbeat_seconds.max(5),
             worker_running_no_progress_timeout_seconds: config
                 .worker
@@ -1071,6 +1107,7 @@ async fn run() -> anyhow::Result<()> {
             post(revoke_approval_scope_grant),
         )
         .route("/tasks/pause-by-task-id", post(pause_task_by_id))
+        .route("/tasks/steer-by-task-id", post(steer_task_by_id))
         .route(
             "/tasks/retry-child-by-task-id",
             post(retry_child_task_by_id),

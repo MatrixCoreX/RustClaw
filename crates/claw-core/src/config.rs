@@ -971,6 +971,20 @@ pub struct WorkerConfig {
     pub running_no_progress_timeout_seconds: u64,
     #[serde(default = "default_worker_running_recovery_check_interval_seconds")]
     pub running_recovery_check_interval_seconds: u64,
+    /// Optional delegation to a separately authenticated worker. Remote API
+    /// calls are not remote-executor work and must not use this switch.
+    #[serde(default)]
+    pub remote_executor: RemoteExecutorConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct RemoteExecutorConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub endpoint: Option<String>,
+    #[serde(default)]
+    pub trusted_attestation_digests: Vec<String>,
 }
 
 impl Default for WorkerConfig {
@@ -984,6 +998,7 @@ impl Default for WorkerConfig {
             ),
             running_recovery_check_interval_seconds:
                 default_worker_running_recovery_check_interval_seconds(),
+            remote_executor: RemoteExecutorConfig::default(),
         }
     }
 }

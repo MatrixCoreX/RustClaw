@@ -146,8 +146,10 @@ model_class = "reasoning"
 reasoning_effort = "medium"
 
 [agent.task_budget]
-# Interactive work uses resumable soft slices. These high administrator ceilings are
-# fail-closed emergency boundaries and cannot be raised by planner/model output.
+# Productive resumable work yields a checkpoint at orchestration counters instead
+# of reporting a false business failure. Token/cost, safety, permissions, user
+# cancellation and explicit deadlines remain authoritative policy boundaries.
+limit_policy = "unbounded_progressful"
 admin_max_model_turns = 256
 admin_max_tool_calls = 512
 admin_max_total_tokens = 100000000

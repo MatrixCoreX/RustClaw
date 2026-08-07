@@ -598,3 +598,9 @@ running_recovery_check_interval_seconds = 60
 # 终止只来自显式 deadline、用户取消、单次 tool/provider timeout、资源策略或失联 lease 回收。
 # 模型 turn、工具调用、累计时长、token/cost 和 continuation 的管理员上限
 # 统一配置在 configs/agent_guard.toml 的 [agent.task_budget]。
+
+# 真正的远程执行节点独立于远程 API 调用，默认关闭。开启前必须同时配置
+# endpoint 和受信任的 attestation digest；未配置时不会静默退回本机执行。
+[worker.remote_executor]
+enabled = false
+trusted_attestation_digests = []

@@ -147,6 +147,7 @@ mod credential_fallback;
 #[path = "skills/skills_dispatch_concurrency_tests.rs"]
 mod dispatch_concurrency_tests;
 mod error_contract;
+mod execution_isolation;
 mod memory_context;
 mod result_enrichment;
 mod runtime_environment;
@@ -168,6 +169,7 @@ pub(crate) use error_contract::{
     annotate_structured_skill_error_not_applied, parse_structured_skill_error,
     structured_skill_error_from_parts, StructuredSkillError,
 };
+use execution_isolation::prepare_skill_execution_isolation;
 pub(crate) use memory_context::inject_skill_memory_context;
 use result_enrichment::enrich_runtime_owned_skill_extra;
 pub(crate) use runner::{run_skill_with_runner, run_skill_with_runner_once};
@@ -573,11 +575,6 @@ pub(crate) struct SkillExecutionContext {
     pub(crate) action_ref: String,
     pub(crate) idempotency_key: String,
     pub(crate) attempt_no: i64,
-}
-
-struct SkillExecutionIsolation {
-    state: AppState,
-    artifact_refs: Vec<Value>,
 }
 
 fn prepare_builtin_run_cmd_async_start_args(
@@ -1596,71 +1593,6 @@ fn resolve_skill_timeout(
     }
 }
 
-fn skill_execution_isolation_error(skill_name: &str, detail: String) -> String {
-    structured_skill_error_from_parts(
-        skill_name,
-        "execution_isolation_setup_failed",
-        "execution_isolation_setup_failed",
-        Some(std::env::consts::OS),
-        Some(json!({
-            "reason_code": "execution_isolation_setup_failed",
-            "message_key": "clawd.execution.isolation_setup_failed",
-            "detail": detail,
-        })),
-    )
-}
-
-fn prepare_skill_execution_isolation(
-    state: &AppState,
-    task: &ClaimedTask,
-    skill_name: &str,
-    args: &Value,
-) -> Result<Option<SkillExecutionIsolation>, String> {
-    if crate::task_execution_policy::task_has_unrestricted_admin_authority(state, task) {
-        return Ok(None);
-    }
-    let Some(profile) = action_scoped_isolation_profile(state, skill_name, args) else {
-        return Ok(None);
-    };
-    if let Some(current_profile) =
-        crate::execution_isolation::execution_isolation_root_profile(&state.skill_rt.workspace_root)
-    {
-        let compatible = matches!(
-            (current_profile.as_str(), profile),
-            (
-                "local_worktree",
-                CapabilityIsolationProfile::LocalWorktree | CapabilityIsolationProfile::ReadOnly
-            ) | (
-                "local_temp_workspace",
-                CapabilityIsolationProfile::LocalTempWorkspace
-                    | CapabilityIsolationProfile::ReadOnly
-            )
-        );
-        if compatible {
-            return Ok(None);
-        }
-    }
-    let plan = crate::execution_isolation::plan_execution_isolation(
-        &state.skill_rt.workspace_root,
-        &task.task_id,
-        profile,
-    )
-    .map_err(|err| skill_execution_isolation_error(skill_name, err.to_string()))?;
-    if !plan.requires_cleanup {
-        return Ok(None);
-    }
-    let runtime =
-        crate::execution_isolation::create_execution_isolation(&plan, crate::now_ts_u64())
-            .map_err(|err| skill_execution_isolation_error(skill_name, err.to_string()))?;
-    let mut isolated_state = state.clone();
-    isolated_state.skill_rt.workspace_root = runtime.plan.execution_root.clone();
-    isolated_state.skill_rt.default_locator_search_dir = runtime.plan.execution_root.clone();
-    Ok(Some(SkillExecutionIsolation {
-        state: isolated_state,
-        artifact_refs: runtime.artifact_refs,
-    }))
-}
-
 fn skill_risk_level_token(risk: SkillRiskLevel) -> &'static str {
     match risk {
         SkillRiskLevel::Unknown => "unknown",
@@ -1949,6 +1881,41 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
     );
 
     let dispatch_queue = skill_dispatch_queue_selection(state, task, &skill_name, &args);
+    let resource_request = state.skill_resource_request_for_dispatch(&skill_name);
+    let configured_skill_ceiling = state
+        .skill_max_concurrency_for_dispatch(&skill_name)
+        .unwrap_or(state.skill_rt.skill_global_max_concurrency);
+    let resource_grant =
+        crate::resource_scheduler::host_grant(resource_request.as_ref(), configured_skill_ceiling);
+    if !resource_grant.admitted {
+        return Err(structured_skill_error_from_parts(
+            &skill_name,
+            "resource_admission_unavailable",
+            "resource_admission_unavailable",
+            Some(std::env::consts::OS),
+            Some(json!({
+                "message_key": "clawd.execution.resource_admission_unavailable",
+                "retryable": true,
+                "wait_reason": resource_grant.wait_reason,
+                "resource_grant": resource_grant.projection,
+            })),
+        ));
+    }
+    let _ = crate::task_event_transport::publish_claimed_event(
+        state,
+        task,
+        "resource_admission",
+        json!({
+            "schema_version": 1,
+            "source": "resource_scheduler",
+            "skill_name": skill_name,
+            "resource_grant": resource_grant.projection,
+            "phase_key": "resource_admitted",
+            "progress_kind": "poll_status",
+            "can_pause": true,
+            "can_cancel": true,
+        }),
+    );
     let serialization_key = dispatch_queue
         .as_ref()
         .map(|selection| selection.key.clone())
@@ -1961,22 +1928,35 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
             .available_permits()
             == 0
     });
+    let resource_queue_was_waiting = state
+        .skill_rt
+        .skill_concurrency_gates
+        .semaphore(&skill_name, resource_grant.max_concurrency)
+        .available_permits()
+        == 0
+        || state.skill_rt.skill_semaphore.available_permits() == 0;
     if queue_was_waiting {
         let selection = dispatch_queue.as_ref().expect("queue selection");
         publish_skill_dispatch_queue_progress(state, task, &skill_name, selection.scope, true);
+    }
+    if resource_queue_was_waiting {
+        publish_skill_dispatch_queue_progress(state, task, &skill_name, "host_resource", true);
     }
     let mut dispatch_permits = acquire_skill_dispatch_permits_with_serialization(
         &state.skill_rt.skill_concurrency_gates,
         &state.skill_rt.skill_semaphore,
         &task.task_id,
         &skill_name,
-        state.skill_max_concurrency_for_dispatch(&skill_name),
+        Some(resource_grant.max_concurrency),
         serialization_key.as_deref(),
     )
     .await?;
     if queue_was_waiting {
         let selection = dispatch_queue.as_ref().expect("queue selection");
         publish_skill_dispatch_queue_progress(state, task, &skill_name, selection.scope, false);
+    }
+    if resource_queue_was_waiting {
+        publish_skill_dispatch_queue_progress(state, task, &skill_name, "host_resource", false);
     }
 
     let args = inject_skill_memory_context(execution_state, task, &skill_name, args);

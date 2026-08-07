@@ -38,7 +38,7 @@ CASES = (
     FaultCase(
         "D",
         "subprocess_parent_secret_not_inherited",
-        "skills::tests::run_cmd_does_not_inherit_undeclared_parent_secret",
+        "skills::tests::env_isolation::run_cmd_does_not_inherit_undeclared_parent_secret",
     ),
     FaultCase(
         "D",
@@ -63,7 +63,7 @@ CASES = (
     FaultCase(
         "E",
         "checkpoint_snapshot_bounded",
-        "agent_engine::checkpoint_resume_state::tests::restart_snapshot_is_bounded_and_ignores_unknown_stage_tokens",
+        "agent_engine::checkpoint_resume_state::tests::restart_snapshot_preserves_large_state_and_ignores_unknown_stage_tokens",
     ),
     FaultCase(
         "E",
@@ -73,7 +73,7 @@ CASES = (
     FaultCase(
         "E",
         "administrator_ceiling_is_authoritative",
-        "task_budget_contract::tests::administrator_ceiling_is_terminal_even_with_progress",
+        "task_budget_contract::tests::administrator_orchestration_ceiling_requeues_progressful_work",
     ),
     FaultCase(
         "E",
@@ -83,7 +83,7 @@ CASES = (
     FaultCase(
         "F",
         "expired_event_cursor_bounded",
-        "task_event_transport::tests::bounded_replay_marks_an_expired_cursor",
+        "task_event_transport::tests::irrecoverable_archive_gap_returns_structured_expired_cursor_state",
     ),
     FaultCase(
         "F",
@@ -256,6 +256,36 @@ CASES = (
         package="agent-skill-sdk",
         binary=None,
     ),
+    FaultCase(
+        "N",
+        "progressful_task_crosses_former_continuation_and_elapsed_ceilings",
+        "task_budget_contract::tests::progressful_fixture_crosses_sixty_four_continuations_and_twenty_four_hours",
+    ),
+    FaultCase(
+        "N",
+        "active_control_mailbox_is_idempotent_and_durable",
+        "repo::task_control_mailbox::tests::mailbox_is_monotonic_idempotent_and_restart_durable",
+    ),
+    FaultCase(
+        "N",
+        "startup_adopts_previous_resume_generation",
+        "worker::runtime_support::stale_recovery_tests::startup_adopts_durable_resume_without_waiting_for_old_process_lease",
+    ),
+    FaultCase(
+        "N",
+        "primary_worktree_reuses_scope_and_preserves_dirty_parent",
+        "worker::child_task_execution_scope::tests::primary_task_independent_workspace_is_reused_without_touching_dirty_parent",
+    ),
+    FaultCase(
+        "N",
+        "sqlite_busy_retry_is_bounded",
+        "sqlite_busy_retry::tests::real_sqlite_writer_lock_recovers_after_owner_commits",
+    ),
+    FaultCase(
+        "N",
+        "remote_executor_requires_attested_tls_transport",
+        "remote_executor_admission::tests::admission_requires_allowlisted_attestation_and_protocol",
+    ),
 )
 
 
@@ -332,8 +362,13 @@ def run_case(case: FaultCase, output_dir: Path, index: int, total: int) -> dict[
             stderr=subprocess.STDOUT,
             check=False,
         )
+    log_text = log_path.read_text(encoding="utf-8", errors="replace")
     elapsed_ms = round((time.monotonic() - started) * 1000)
-    status = "passed" if completed.returncode == 0 else "failed"
+    matched_test = any(
+        marker in log_text
+        for marker in ("1 passed", "2 passed", "3 passed", "4 passed", "5 passed")
+    )
+    status = "passed" if completed.returncode == 0 and matched_test else "failed"
     print(
         f"FAULT_RESULT track={case.track} case={case.case_id} "
         f"status={status} exit_code={completed.returncode} elapsed_ms={elapsed_ms}",
@@ -343,6 +378,7 @@ def run_case(case: FaultCase, output_dir: Path, index: int, total: int) -> dict[
         **asdict(case),
         "status": status,
         "exit_code": completed.returncode,
+        "matched_test": matched_test,
         "elapsed_ms": elapsed_ms,
         "log_ref": relative_artifact_ref(log_path, output_dir),
     }

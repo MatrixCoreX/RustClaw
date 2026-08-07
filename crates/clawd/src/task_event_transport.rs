@@ -158,6 +158,7 @@ fn publish_event_internal(
     }
     let event_kind = normalize_machine_token(event_kind).context("invalid task event kind")?;
     let mut payload = payload;
+    crate::long_task_progress::attach_operation_progress_to_event_payload(&mut payload);
     let redacted_fields = redact_event_value(&mut payload, None, 0);
     let timestamp_ms = now_ms();
     let mut context = event_context(&payload);
@@ -174,101 +175,109 @@ fn publish_event_internal(
     });
     let event_hash = value_hash(&fingerprint_source)?;
 
-    let mut db = state.core.db.get().context("task_event_db_pool")?;
-    db.execute_batch(INIT_TASK_EVENT_SQL)?;
-    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    if let Some(task) = active_claim {
-        let claim_is_active = tx
-            .query_row(
-                "SELECT 1
-                 FROM tasks
-                 WHERE task_id = ?1
-                   AND status = 'running'
-                   AND lease_owner = ?2
-                   AND claim_attempt = ?3
-                 LIMIT 1",
-                params![task_id, state.worker.worker_id.as_str(), task.claim_attempt],
-                |_| Ok(()),
-            )
-            .optional()?
-            .is_some();
-        if !claim_is_active {
-            return Err(crate::repo::worker_task_write_rejection(
+    let (event, committed_seq) = crate::sqlite_busy_retry::with_sqlite_busy_retry(
+        crate::sqlite_busy_retry::SqliteBusyRetryPolicy::default(),
+        || {
+            let mut db = state.core.db.get().context("task_event_db_pool")?;
+            db.execute_batch(INIT_TASK_EVENT_SQL)?;
+            let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            if let Some(task) = active_claim {
+                let claim_is_active = tx
+                    .query_row(
+                        "SELECT 1
+                         FROM tasks
+                         WHERE task_id = ?1
+                           AND status = 'running'
+                           AND lease_owner = ?2
+                           AND claim_attempt = ?3
+                         LIMIT 1",
+                        params![task_id, state.worker.worker_id.as_str(), task.claim_attempt],
+                        |_| Ok(()),
+                    )
+                    .optional()?
+                    .is_some();
+                if !claim_is_active {
+                    return Err(crate::repo::worker_task_write_rejection(
+                        &tx,
+                        state,
+                        task_id,
+                        task.claim_attempt,
+                        "publish_claimed_task_event",
+                        &["running"],
+                    ));
+                }
+            }
+            crate::task_event_archive::backfill_hot_suffix(&tx, task_id)?;
+            if let Some(existing) = tx
+                .query_row(
+                    "SELECT event_json
+                     FROM task_event_archive
+                     WHERE task_id = ?1 AND event_hash = ?2",
+                    params![task_id, event_hash],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?
+            {
+                tx.commit()?;
+                return Ok((serde_json::from_str(&existing).ok(), None));
+            }
+            let seq = tx.query_row(
+                "SELECT COALESCE(MAX(seq), 0) + 1
+                 FROM task_event_archive
+                 WHERE task_id = ?1",
+                params![task_id],
+                |row| row.get::<_, u64>(0),
+            )?;
+            let previous_event_hash = crate::task_event_archive::previous_event_hash(&tx, task_id)?;
+            let event = json!({
+                "schema_version": EVENT_SCHEMA_VERSION,
+                "payload_schema_version": EVENT_SCHEMA_VERSION,
+                "seq": seq,
+                "timestamp_ms": timestamp_ms,
+                "task_id": task_id,
+                "thread_id": context.thread_id,
+                "session_id": context.session_id,
+                "parent_task_id": context.parent_task_id,
+                "child_task_id": context.child_task_id,
+                "event_kind": event_kind,
+                "event_type": event_kind,
+                "event_hash": event_hash,
+                "previous_event_hash": previous_event_hash,
+                "payload": payload,
+                "redaction": {
+                    "applied": redacted_fields > 0,
+                    "field_count": redacted_fields,
+                },
+                "artifact_refs": artifact_refs,
+            });
+            let serialized = serde_json::to_string(&event)?;
+            tx.execute(
+                "INSERT INTO task_event_stream(task_id, seq, event_hash, event_json, created_at_ms)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![task_id, seq, event_hash, serialized, timestamp_ms],
+            )?;
+            crate::task_event_archive::insert_event(
                 &tx,
-                state,
                 task_id,
-                task.claim_attempt,
-                "publish_claimed_task_event",
-                &["running"],
-            ));
-        }
-    }
-    crate::task_event_archive::backfill_hot_suffix(&tx, task_id)?;
-    if let Some(existing) = tx
-        .query_row(
-            "SELECT event_json
-             FROM task_event_archive
-             WHERE task_id = ?1 AND event_hash = ?2",
-            params![task_id, event_hash],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?
-    {
-        tx.commit()?;
-        return Ok(serde_json::from_str(&existing).ok());
-    }
-    let seq = tx.query_row(
-        "SELECT COALESCE(MAX(seq), 0) + 1
-         FROM task_event_archive
-         WHERE task_id = ?1",
-        params![task_id],
-        |row| row.get::<_, u64>(0),
-    )?;
-    let previous_event_hash = crate::task_event_archive::previous_event_hash(&tx, task_id)?;
-    let event = json!({
-        "schema_version": EVENT_SCHEMA_VERSION,
-        "payload_schema_version": EVENT_SCHEMA_VERSION,
-        "seq": seq,
-        "timestamp_ms": timestamp_ms,
-        "task_id": task_id,
-        "thread_id": context.thread_id,
-        "session_id": context.session_id,
-        "parent_task_id": context.parent_task_id,
-        "child_task_id": context.child_task_id,
-        "event_kind": event_kind,
-        "event_type": event_kind,
-        "event_hash": event_hash,
-        "previous_event_hash": previous_event_hash,
-        "payload": payload,
-        "redaction": {
-            "applied": redacted_fields > 0,
-            "field_count": redacted_fields,
+                seq,
+                &event_hash,
+                previous_event_hash.as_deref(),
+                &event_kind,
+                &serialized,
+                timestamp_ms,
+            )?;
+            tx.execute(
+                "DELETE FROM task_event_stream WHERE task_id = ?1 AND seq <= ?2",
+                params![task_id, seq.saturating_sub(EVENT_REPLAY_LIMIT)],
+            )?;
+            tx.commit()?;
+            Ok((Some(event), Some(seq)))
         },
-        "artifact_refs": artifact_refs,
-    });
-    let serialized = serde_json::to_string(&event)?;
-    tx.execute(
-        "INSERT INTO task_event_stream(task_id, seq, event_hash, event_json, created_at_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![task_id, seq, event_hash, serialized, timestamp_ms],
     )?;
-    crate::task_event_archive::insert_event(
-        &tx,
-        task_id,
-        seq,
-        &event_hash,
-        previous_event_hash.as_deref(),
-        &event_kind,
-        &serialized,
-        timestamp_ms,
-    )?;
-    tx.execute(
-        "DELETE FROM task_event_stream WHERE task_id = ?1 AND seq <= ?2",
-        params![task_id, seq.saturating_sub(EVENT_REPLAY_LIMIT)],
-    )?;
-    tx.commit()?;
-    state.metrics.task_event_notifier.notify(task_id, seq);
-    Ok(Some(event))
+    if let Some(seq) = committed_seq {
+        state.metrics.task_event_notifier.notify(task_id, seq);
+    }
+    Ok(event)
 }
 
 pub(crate) fn replay_events_after(
@@ -569,7 +578,7 @@ pub(crate) fn publish_task_status_projection(state: &AppState, task_id: &str) {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct EventContext {
     thread_id: Option<String>,
     session_id: Option<String>,

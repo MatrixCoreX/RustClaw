@@ -7,6 +7,7 @@ export interface TaskLifecycleProjection {
   source?: string;
   can_poll?: boolean;
   can_cancel?: boolean;
+  can_pause?: boolean;
   last_heartbeat_ts?: number;
   next_check_after?: number;
   resume_due?: boolean;
@@ -53,6 +54,19 @@ export interface TaskLifecycleProjection {
   required?: boolean;
   permission_profile?: string;
   budget?: Record<string, string | number | boolean | null | undefined>;
+  operation_progress?: {
+    schema_version?: number;
+    phase_key?: string;
+    completed_units?: number;
+    total_units?: number | null;
+    progress_digest?: string;
+    heartbeat_at?: number | null;
+    next_poll_after?: number | null;
+    can_pause?: boolean;
+    can_cancel?: boolean;
+    progress_kind?: "measured" | "poll_status" | "alive_only" | string;
+    detail_ref?: string | null;
+  };
 }
 
 export interface TaskLifecycleView {
@@ -93,6 +107,7 @@ const STATE_LABELS: Record<string, { zh: string; en: string; tone: TaskLifecycle
   running: { zh: "执行中", en: "Running", tone: "running" },
   waiting: { zh: "等待中", en: "Waiting", tone: "attention" },
   background: { zh: "后台运行", en: "Background", tone: "running" },
+  pause_requested: { zh: "正在安全暂停", en: "Pausing safely", tone: "attention" },
   needs_user: { zh: "等待确认", en: "Needs input", tone: "attention" },
   succeeded: { zh: "已完成", en: "Completed", tone: "ok" },
   failed: { zh: "失败", en: "Failed", tone: "failed" },

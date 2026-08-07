@@ -501,6 +501,12 @@ running_recovery_check_interval_seconds = 60
 # No global worker wall-clock timeout. Explicit deadlines, cancellation,
 # adapter/tool timeouts, resource policy and stale-lease recovery are separate.
 
+# True remote workers are separate from remote API calls. Keep disabled unless
+# both an endpoint and a trusted attestation digest are configured.
+[worker.remote_executor]
+enabled = false
+trusted_attestation_digests = []
+
 # 用途/Purpose: 启动期 prompt 校验与 SIGHUP 热重载控制.
 # 建议修改/Recommended change: 生产建议保持 strict_validation_at_startup=true.
 # 风险/Risk: 若镜像/部署未携带 prompts/ 树，严格模式会拒绝启动。

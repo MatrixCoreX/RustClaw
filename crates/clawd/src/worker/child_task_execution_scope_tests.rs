@@ -120,6 +120,58 @@ fn read_only_child_keeps_primary_root_without_allocation() {
 }
 
 #[test]
+fn primary_task_independent_workspace_is_reused_without_touching_dirty_parent() {
+    let repo = TempRepo::new();
+    std::fs::write(repo.path.join("README.md"), "user dirty change\n").unwrap();
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = repo.path.clone();
+    state.skill_rt.default_locator_search_dir = repo.path.clone();
+    let payload = json!({
+        "text": "change code safely",
+        "execution_workspace": {"mode": "independent"}
+    });
+    let task = crate::ClaimedTask {
+        claim_attempt: 1,
+        task_id: "primary-worktree-task".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: payload.to_string(),
+    };
+
+    let mut first = ChildTaskExecutionScope::prepare(&state, &task, &payload).unwrap();
+    let plan = first.plan().unwrap().clone();
+    assert!(first.is_primary_task_scope());
+    assert_eq!(
+        first.projection(&state).unwrap()["workspace_binding"],
+        "local/worktree"
+    );
+    std::fs::write(plan.execution_root.join("README.md"), "isolated change\n").unwrap();
+    assert_eq!(
+        std::fs::read_to_string(repo.path.join("README.md")).unwrap(),
+        "user dirty change\n"
+    );
+    first.retain_for_parent_decision();
+
+    let mut resumed = ChildTaskExecutionScope::prepare(&state, &task, &payload).unwrap();
+    assert_eq!(
+        resumed.state(&state).skill_rt.workspace_root,
+        plan.execution_root
+    );
+    assert_eq!(
+        resumed.projection(&state).unwrap()["allocation_reused"],
+        true
+    );
+    resumed.retain_for_parent_decision();
+    crate::execution_isolation::cleanup_child_worktree_artifacts(&repo.path, &task.task_id)
+        .unwrap();
+}
+
+#[test]
 fn dropped_unretained_child_scope_cleans_worktree_and_patch_artifact() {
     let repo = TempRepo::new();
     let mut state = crate::AppState::test_default_with_fixture_provider();

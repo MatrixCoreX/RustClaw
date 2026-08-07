@@ -669,6 +669,8 @@ export default function App() {
     setInteractionAdapter,
     interactionAskText,
     setInteractionAskText,
+    interactionIndependentWorkspace,
+    setInteractionIndependentWorkspace,
     interactionSkillName,
     setInteractionSkillName,
     interactionSkillArgs,
@@ -2213,6 +2215,7 @@ export default function App() {
               localContextLoading={localContextLoading}
               localContextError={localContextError}
               interactionAskText={interactionAskText}
+              interactionIndependentWorkspace={interactionIndependentWorkspace}
               interactionSkillName={interactionSkillName}
               interactionSkillArgs={interactionSkillArgs}
               interactionLoading={interactionLoading}
@@ -2225,6 +2228,7 @@ export default function App() {
               onInteractionExternalUserIdChange={setInteractionExternalUserId}
               onInteractionExternalChatIdChange={setInteractionExternalChatId}
               onInteractionAskTextChange={setInteractionAskText}
+              onInteractionIndependentWorkspaceChange={setInteractionIndependentWorkspace}
               onInteractionSkillNameChange={setInteractionSkillName}
               onInteractionSkillArgsChange={setInteractionSkillArgs}
               onSubmitInteractionTask={submitInteractionTask}

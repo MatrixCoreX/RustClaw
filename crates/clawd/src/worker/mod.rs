@@ -37,9 +37,9 @@ pub(crate) use channels::{
 pub(super) use locator::{has_concrete_locator_hint, has_explicit_path_or_url_locator_hint};
 use run_skill_finalize::{finalize_run_skill_confirmation_required, finalize_run_skill_result};
 pub(crate) use runtime_support::{
-    maybe_recover_stale_running_tasks_runtime, recover_stale_running_tasks_on_startup,
-    spawn_channel_terminal_delivery_worker, spawn_cleanup_worker, spawn_schedule_worker,
-    spawn_worker, start_task_heartbeat,
+    adopt_recoverable_resume_executions_on_startup, maybe_recover_stale_running_tasks_runtime,
+    recover_stale_running_tasks_on_startup, spawn_channel_terminal_delivery_worker,
+    spawn_cleanup_worker, spawn_schedule_worker, spawn_worker, start_task_heartbeat,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -315,6 +315,16 @@ async fn process_claimed_task_by_kind(
             let mut child_scope =
                 child_task_execution_scope::ChildTaskExecutionScope::prepare(state, task, payload)?;
             let process_result = process_ask_task(child_scope.state(state), task, payload).await;
+            if child_scope.is_primary_task_scope() {
+                if let Some(projection) = child_scope.projection(state) {
+                    crate::repo::record_task_execution_workspace(
+                        state,
+                        &task.task_id,
+                        &projection,
+                    )?;
+                }
+                child_scope.retain_for_parent_decision();
+            }
             if process_result.is_ok() && repo::child_tasks::is_child_subagent_payload(payload) {
                 if child_requires_noninteractive_approval_failure(payload) {
                     let _ = repo::fail_noninteractive_child_approval(

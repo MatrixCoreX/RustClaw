@@ -7,6 +7,28 @@ const TASK_BUDGET_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub(crate) enum TaskBudgetLimitPolicy {
+    UnboundedProgressful,
+    StrictCeilings,
+}
+
+impl Default for TaskBudgetLimitPolicy {
+    fn default() -> Self {
+        Self::UnboundedProgressful
+    }
+}
+
+impl TaskBudgetLimitPolicy {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::UnboundedProgressful => "unbounded_progressful",
+            Self::StrictCeilings => "strict_ceilings",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum BudgetAllocationKind {
     ModelTurn,
     ChildTask,
@@ -208,6 +230,7 @@ impl BudgetProfilePolicy {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TaskBudgetPolicy {
     pub(crate) hard_ceilings: BudgetHardCeilings,
+    pub(crate) limit_policy: TaskBudgetLimitPolicy,
     general: BudgetProfilePolicy,
     fast_read: BudgetProfilePolicy,
     grounded_summary: BudgetProfilePolicy,
@@ -262,6 +285,7 @@ impl Default for TaskBudgetPolicy {
     fn default() -> Self {
         Self {
             hard_ceilings: BudgetHardCeilings::default(),
+            limit_policy: TaskBudgetLimitPolicy::default(),
             general: BudgetProfilePolicy::default_for(TaskBudgetProfile::General),
             fast_read: BudgetProfilePolicy::default_for(TaskBudgetProfile::FastRead),
             grounded_summary: BudgetProfilePolicy::default_for(TaskBudgetProfile::GroundedSummary),
@@ -338,6 +362,8 @@ pub(crate) struct TaskBudgetSlice {
     pub(crate) cumulative_elapsed_ms: u64,
     pub(crate) progress: BudgetProgress,
     pub(crate) hard_ceilings: BudgetHardCeilings,
+    #[serde(default)]
+    pub(crate) limit_policy: TaskBudgetLimitPolicy,
     pub(crate) last_decision: BudgetDecision,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) last_limit_hit: Option<claw_core::adaptive_limits::LimitHit>,
@@ -395,11 +421,16 @@ impl TaskBudgetSlice {
             cumulative_elapsed_ms: 0,
             progress: BudgetProgress::default(),
             hard_ceilings,
+            limit_policy: TaskBudgetLimitPolicy::default(),
             last_decision: BudgetDecision::Continue,
             last_limit_hit: None,
             allocations: Vec::new(),
             delegated_consumed: BudgetUnits::default(),
         }
+    }
+
+    pub(crate) fn set_limit_policy(&mut self, limit_policy: TaskBudgetLimitPolicy) {
+        self.limit_policy = limit_policy;
     }
 
     pub(crate) fn allocate(
@@ -450,31 +481,43 @@ impl TaskBudgetSlice {
         let consumed_tokens = self
             .cumulative_input_tokens
             .saturating_add(self.cumulative_output_tokens);
+        let progressful_orchestration_units = self.limit_policy
+            == TaskBudgetLimitPolicy::UnboundedProgressful
+            && self.progress.observed_progress();
         BudgetUnits {
-            model_turns: self
-                .hard_ceilings
-                .model_turns
-                .saturating_sub(self.cumulative_model_turns)
-                .saturating_sub(self.delegated_consumed.model_turns)
-                .saturating_sub(reserved.model_turns),
-            tool_calls: self
-                .hard_ceilings
-                .tool_calls
-                .saturating_sub(self.cumulative_tool_calls)
-                .saturating_sub(self.delegated_consumed.tool_calls)
-                .saturating_sub(reserved.tool_calls),
+            model_turns: if progressful_orchestration_units {
+                u64::MAX.saturating_sub(reserved.model_turns)
+            } else {
+                self.hard_ceilings
+                    .model_turns
+                    .saturating_sub(self.cumulative_model_turns)
+                    .saturating_sub(self.delegated_consumed.model_turns)
+                    .saturating_sub(reserved.model_turns)
+            },
+            tool_calls: if progressful_orchestration_units {
+                u64::MAX.saturating_sub(reserved.tool_calls)
+            } else {
+                self.hard_ceilings
+                    .tool_calls
+                    .saturating_sub(self.cumulative_tool_calls)
+                    .saturating_sub(self.delegated_consumed.tool_calls)
+                    .saturating_sub(reserved.tool_calls)
+            },
             tokens: self
                 .hard_ceilings
                 .total_tokens
                 .saturating_sub(consumed_tokens)
                 .saturating_sub(self.delegated_consumed.tokens)
                 .saturating_sub(reserved.tokens),
-            elapsed_ms: self
-                .hard_ceilings
-                .elapsed_ms
-                .saturating_sub(self.cumulative_elapsed_ms)
-                .saturating_sub(self.delegated_consumed.elapsed_ms)
-                .saturating_sub(reserved.elapsed_ms),
+            elapsed_ms: if progressful_orchestration_units {
+                u64::MAX.saturating_sub(reserved.elapsed_ms)
+            } else {
+                self.hard_ceilings
+                    .elapsed_ms
+                    .saturating_sub(self.cumulative_elapsed_ms)
+                    .saturating_sub(self.delegated_consumed.elapsed_ms)
+                    .saturating_sub(reserved.elapsed_ms)
+            },
         }
     }
 
@@ -621,10 +664,7 @@ pub(crate) fn evaluate_budget_decision(
     observation: &BudgetObservation,
     progress_advanced: bool,
 ) -> BudgetDecision {
-    if observation.cancelled
-        || observation.policy_terminal
-        || hard_ceiling_reached(slice, observation)
-    {
+    if observation.cancelled || observation.policy_terminal {
         return BudgetDecision::Terminal;
     }
     if observation.needs_user {
@@ -639,6 +679,27 @@ pub(crate) fn evaluate_budget_decision(
     if observation.stagnation_exhausted && !progress_advanced {
         return BudgetDecision::Terminal;
     }
+    if let Some(limit_hit) = administrator_limit_hit(slice, observation) {
+        let is_cost_boundary = matches!(
+            limit_hit.unit,
+            claw_core::adaptive_limits::LimitUnit::Tokens
+                | claw_core::adaptive_limits::LimitUnit::CostUsdNanos
+        );
+        if is_cost_boundary {
+            return BudgetDecision::NeedsUser;
+        }
+        if slice.limit_policy == TaskBudgetLimitPolicy::UnboundedProgressful
+            && observation.resumable
+            && (progress_advanced || observation.progress.observed_progress())
+        {
+            return BudgetDecision::CheckpointRequeue;
+        }
+        return if observation.resumable {
+            BudgetDecision::NeedsUser
+        } else {
+            BudgetDecision::Terminal
+        };
+    }
     if observation.soft_slice_exhausted {
         return if observation.resumable {
             BudgetDecision::CheckpointRequeue
@@ -647,10 +708,6 @@ pub(crate) fn evaluate_budget_decision(
         };
     }
     BudgetDecision::Continue
-}
-
-fn hard_ceiling_reached(slice: &TaskBudgetSlice, observation: &BudgetObservation) -> bool {
-    administrator_limit_hit(slice, observation).is_some()
 }
 
 fn administrator_limit_hit(
@@ -725,6 +782,11 @@ fn administrator_limit_hit(
         }
     };
 
+    let cost_boundary = matches!(boundary.0, LimitUnit::Tokens | LimitUnit::CostUsdNanos);
+    let progressful_recovery = !cost_boundary
+        && slice.limit_policy == TaskBudgetLimitPolicy::UnboundedProgressful
+        && observation.resumable
+        && observation.progress.observed_progress();
     Some(LimitHit {
         schema_version: LIMIT_HIT_SCHEMA_VERSION,
         class: LimitClass::TaskResource,
@@ -733,8 +795,14 @@ fn administrator_limit_hit(
         configured_value: boundary.1,
         observed_value: boundary.2,
         reason_code: boundary.3.to_string(),
-        terminal: true,
-        recovery: LimitRecovery::None,
+        terminal: !progressful_recovery && !cost_boundary && !observation.resumable,
+        recovery: if progressful_recovery {
+            LimitRecovery::CheckpointRequeue
+        } else if cost_boundary || observation.resumable {
+            LimitRecovery::RetryAfter
+        } else {
+            LimitRecovery::None
+        },
     })
 }
 
@@ -749,6 +817,13 @@ pub(crate) fn load_task_budget_policy(workspace_root: &Path) -> TaskBudgetPolicy
 
 fn task_budget_policy_from_toml(root: &TomlValue) -> TaskBudgetPolicy {
     let mut policy = TaskBudgetPolicy::default();
+    policy.limit_policy = match value_at(root, &["agent", "task_budget", "limit_policy"])
+        .and_then(TomlValue::as_str)
+    {
+        Some("strict_ceilings") => TaskBudgetLimitPolicy::StrictCeilings,
+        Some("unbounded_progressful") => TaskBudgetLimitPolicy::UnboundedProgressful,
+        _ => policy.limit_policy,
+    };
     policy.hard_ceilings.model_turns = parse_u64(
         root,
         &["agent", "task_budget", "admin_max_model_turns"],

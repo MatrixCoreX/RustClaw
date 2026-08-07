@@ -164,6 +164,23 @@ CREATE TABLE IF NOT EXISTS scheduled_jobs (
 
 CREATE INDEX IF NOT EXISTS idx_tasks_status_created_at ON tasks(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_tasks_user_id_created_at ON tasks(user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS task_control_mailbox (
+    task_id        TEXT NOT NULL,
+    control_seq    INTEGER NOT NULL,
+    control_id     TEXT NOT NULL UNIQUE,
+    action         TEXT NOT NULL CHECK (action IN ('steer', 'pause', 'resume', 'cancel')),
+    issued_by      TEXT NOT NULL,
+    issued_at      INTEGER NOT NULL,
+    payload_json   TEXT NOT NULL DEFAULT '{}',
+    payload_digest TEXT NOT NULL,
+    status         TEXT NOT NULL CHECK (status IN ('pending', 'applied', 'rejected')),
+    applied_at     INTEGER,
+    result_code    TEXT,
+    PRIMARY KEY (task_id, control_seq)
+);
+CREATE INDEX IF NOT EXISTS idx_task_control_mailbox_pending
+ON task_control_mailbox(task_id, status, control_seq);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_ts ON audit_logs(ts);
 CREATE INDEX IF NOT EXISTS idx_memories_user_chat_created_at ON memories(user_id, chat_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_long_term_memories_updated_at ON long_term_memories(updated_at);

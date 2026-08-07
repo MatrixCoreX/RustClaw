@@ -416,6 +416,40 @@ fn claim_next_task_records_worker_lease_fields() {
 }
 
 #[test]
+fn claim_next_task_fairly_serves_user_without_recent_claim() {
+    let state = state_with_tasks_table();
+    let db = state.core.db.get().unwrap();
+    for (task_id, user_id, created_at, claimed_at) in [
+        ("heavy-user-history", 10_i64, "1", 100_i64),
+        ("heavy-user-next", 10_i64, "2", 0_i64),
+        ("short-other-user", 20_i64, "3", 0_i64),
+    ] {
+        db.execute(
+            "INSERT INTO tasks(
+                task_id, user_id, chat_id, user_key, channel, kind, payload_json,
+                status, created_at, updated_at, claimed_at
+             ) VALUES (?1, ?2, 1, 'key', 'ui', 'ask', '{}', ?3, ?4, ?4, ?5)",
+            rusqlite::params![
+                task_id,
+                user_id,
+                if task_id == "heavy-user-history" {
+                    "succeeded"
+                } else {
+                    "queued"
+                },
+                created_at,
+                claimed_at
+            ],
+        )
+        .unwrap();
+    }
+    drop(db);
+
+    let claimed = claim_next_task(&state).unwrap().unwrap();
+    assert_eq!(claimed.task_id, "short-other-user");
+}
+
+#[test]
 fn cancel_parent_task_cancels_structured_child_tasks_only() {
     let state = state_with_tasks_table();
     insert_task(
@@ -1571,7 +1605,7 @@ fn pause_task_by_id_delays_existing_checkpoint_only() {
 }
 
 #[test]
-fn pause_task_by_id_rejects_running_task_without_checkpoint() {
+fn pause_task_by_id_records_pending_control_without_checkpoint() {
     let state = state_with_tasks_table();
     let task_id = Uuid::new_v4().to_string();
     insert_task(
@@ -1582,9 +1616,13 @@ fn pause_task_by_id_rejects_running_task_without_checkpoint() {
         1234,
     );
 
-    let update = pause_task_by_id(&state, &task_id, 120).expect("pause task");
+    let update = pause_task_by_id(&state, &task_id, 120)
+        .expect("pause task")
+        .expect("running task accepts pending pause");
 
-    assert!(update.is_none());
+    assert_eq!(update.lifecycle["state"], "pause_requested");
+    assert_eq!(update.control_status, "pending");
+    assert!(update.control_seq.is_some());
     let (status, error_text) = stored_task_status_and_error(&state, &task_id);
     assert_eq!(status, "running");
     assert_eq!(error_text, None);

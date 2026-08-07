@@ -908,6 +908,16 @@ pub(super) async fn execute_actions_once(
     let snapshot = capture_round_progress_snapshot(loop_state);
     let mut ended_with_user_visible_output = false;
     let round_steps: Vec<String> = actions.iter().map(plan_step_label).collect();
+    if super::loop_control::active_task_boundary_control_pending(state, task)? {
+        record_deferred_plan_tail(loop_state, actions, "active_task_control_boundary");
+        return Ok(RoundOutcome {
+            executed_actions: 0,
+            had_error: false,
+            stop_signal: Some("active_task_control_boundary".to_string()),
+            next_goal_hint: None,
+            no_progress: false,
+        });
+    }
     if let Some(outcome) = try_execute_independent_read_batch(
         state,
         task,
@@ -931,6 +941,15 @@ pub(super) async fn execute_actions_once(
         .enumerate()
     {
         ensure_task_running(state, task)?;
+        if super::loop_control::active_task_boundary_control_pending(state, task)? {
+            stop_signal = Some("active_task_control_boundary".to_string());
+            record_deferred_plan_tail(
+                loop_state,
+                &actions[idx..actions.len().min(policy.max_actions_per_turn.max(1))],
+                "active_task_control_boundary",
+            );
+            break;
+        }
         let step_in_round = idx + 1;
         let global_step = loop_state.total_steps_executed + 1;
         let fingerprint = super::action_fingerprint_for_policy(state, policy, action);
@@ -1024,6 +1043,15 @@ pub(super) async fn execute_actions_once(
         );
         let executed_limit = policy.max_actions_per_turn.max(1);
         let remaining_actions = &actions[idx + 1..actions.len().min(executed_limit)];
+        if super::loop_control::active_task_boundary_control_pending(state, task)? {
+            record_deferred_plan_tail(
+                loop_state,
+                remaining_actions,
+                "active_task_control_boundary",
+            );
+            stop_signal = Some("active_task_control_boundary".to_string());
+            break;
+        }
         if matches!(
             decision,
             ActionLoopDecision::NextAction | ActionLoopDecision::ContinueRound

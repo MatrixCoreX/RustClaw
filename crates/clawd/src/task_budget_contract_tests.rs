@@ -1,7 +1,8 @@
 use super::{
     profile_for_verified_plan, task_budget_policy_from_toml, BudgetAllocationKind, BudgetDecision,
     BudgetHardCeilings, BudgetObservation, BudgetProfilePolicy, BudgetProgress, BudgetTimeoutClass,
-    BudgetUnits, TaskBudgetProfile, TaskBudgetSlice, VerifiedPlanBudgetFacts,
+    BudgetUnits, TaskBudgetLimitPolicy, TaskBudgetProfile, TaskBudgetSlice,
+    VerifiedPlanBudgetFacts,
 };
 
 fn slice() -> TaskBudgetSlice {
@@ -103,7 +104,7 @@ fn waiting_and_user_input_are_distinct_machine_decisions() {
 }
 
 #[test]
-fn administrator_ceiling_is_terminal_even_with_progress() {
+fn administrator_orchestration_ceiling_requeues_progressful_work() {
     let mut slice = slice();
     let decision = slice.observe(BudgetObservation {
         cumulative_model_turns: 6,
@@ -116,7 +117,8 @@ fn administrator_ceiling_is_terminal_even_with_progress() {
         ..BudgetObservation::default()
     });
 
-    assert_eq!(decision, BudgetDecision::Terminal);
+    assert_eq!(decision, BudgetDecision::CheckpointRequeue);
+    assert!(!slice.last_limit_hit.as_ref().unwrap().terminal);
 }
 
 #[test]
@@ -312,6 +314,10 @@ tool_timeout_class = "long_tail"
     assert_eq!(policy.hard_ceilings.elapsed_ms, 7_200_000);
     assert_eq!(policy.hard_ceilings.continuations, 12);
     assert_eq!(policy.hard_ceilings.non_resumable_tool_runtime_ms, 900_000);
+    assert_eq!(
+        policy.limit_policy,
+        TaskBudgetLimitPolicy::UnboundedProgressful
+    );
 }
 
 #[test]
@@ -456,7 +462,7 @@ fn productive_model_turn_41_continues_and_checkpoint_restore_keeps_consumption()
         resumable: true,
         ..BudgetObservation::default()
     });
-    assert_eq!(decision, BudgetDecision::Terminal);
+    assert_eq!(decision, BudgetDecision::CheckpointRequeue);
     let limit_hit = exhausted
         .last_limit_hit
         .as_ref()
@@ -467,4 +473,54 @@ fn productive_model_turn_41_continues_and_checkpoint_restore_keeps_consumption()
         "administrator_model_turn_budget_exhausted"
     );
     limit_hit.validate().unwrap();
+}
+
+#[test]
+fn progressful_fixture_crosses_sixty_four_continuations_and_twenty_four_hours() {
+    let mut slice = TaskBudgetSlice::new(
+        TaskBudgetProfile::OpsClosedLoop,
+        300_000,
+        BudgetHardCeilings::default(),
+    );
+    slice.continuation_index = 65;
+    slice.cumulative_elapsed_ms = 25 * 60 * 60 * 1_000;
+    slice.progress = BudgetProgress {
+        evidence_count: 64,
+        machine_progress_digest: Some("continuation:64".to_string()),
+        async_continuations: 64,
+        ..BudgetProgress::default()
+    };
+    let decision = slice.observe(BudgetObservation {
+        cumulative_elapsed_ms: 25 * 60 * 60 * 1_000,
+        progress: BudgetProgress {
+            evidence_count: 65,
+            machine_progress_digest: Some("continuation:65".to_string()),
+            async_continuations: 65,
+            ..BudgetProgress::default()
+        },
+        resumable: true,
+        ..BudgetObservation::default()
+    });
+    assert_eq!(decision, BudgetDecision::CheckpointRequeue);
+    assert_eq!(
+        slice.last_limit_hit.as_ref().unwrap().recovery,
+        claw_core::adaptive_limits::LimitRecovery::CheckpointRequeue
+    );
+}
+
+#[test]
+fn cost_boundary_needs_user_and_never_self_raises() {
+    let mut slice = slice();
+    let configured_cost = slice.hard_ceilings.cost_usd_nanos;
+    let decision = slice.observe(BudgetObservation {
+        cumulative_cost_usd_nanos: configured_cost,
+        progress: BudgetProgress {
+            evidence_count: 1,
+            ..BudgetProgress::default()
+        },
+        resumable: true,
+        ..BudgetObservation::default()
+    });
+    assert_eq!(decision, BudgetDecision::NeedsUser);
+    assert_eq!(slice.hard_ceilings.cost_usd_nanos, configured_cost);
 }
