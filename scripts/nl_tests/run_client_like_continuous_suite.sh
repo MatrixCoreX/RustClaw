@@ -2246,6 +2246,42 @@ mkdir -p "$LOG_ROOT"
 RUN_DIR="${LOG_ROOT%/}/run_${RUN_STAMP}"
 mkdir -p "$RUN_DIR"
 TASK_IDS=()
+SCHEDULE_SNAPSHOT_FILE="${RUN_DIR}/scheduled_jobs_before.txt"
+python3 - "$DB_PATH_VALUE" "$SCHEDULE_SNAPSHOT_FILE" <<'PY'
+import sqlite3
+import sys
+from pathlib import Path
+
+db_path, output_path = sys.argv[1:]
+with sqlite3.connect(db_path) as conn:
+    rows = conn.execute("SELECT job_id FROM scheduled_jobs ORDER BY job_id").fetchall()
+Path(output_path).write_text("".join(f"{row[0]}\n" for row in rows), encoding="utf-8")
+PY
+
+cleanup_nl_suite_schedules() {
+  local exit_status=$?
+  python3 - "$DB_PATH_VALUE" "$SCHEDULE_SNAPSHOT_FILE" "$CHANNEL_VALUE" "$EXTERNAL_CHAT_ID_VALUE" <<'PY' || true
+import sqlite3
+import sys
+from pathlib import Path
+
+db_path, snapshot_path, channel, external_chat_id = sys.argv[1:]
+before = set(Path(snapshot_path).read_text(encoding="utf-8").splitlines())
+with sqlite3.connect(db_path) as conn:
+    rows = conn.execute(
+        "SELECT job_id FROM scheduled_jobs "
+        "WHERE channel = ? AND (external_chat_id = ? OR external_chat_id LIKE ?)",
+        (channel, external_chat_id, external_chat_id + "--%"),
+    ).fetchall()
+    created = [str(row[0]) for row in rows if str(row[0]) not in before]
+    if created:
+        conn.executemany("DELETE FROM scheduled_jobs WHERE job_id = ?", ((job_id,) for job_id in created))
+        conn.commit()
+        print(f"NL_SUITE_SCHEDULE_CLEANUP removed={len(created)}")
+PY
+  return "$exit_status"
+}
+trap cleanup_nl_suite_schedules EXIT
 
 echo "CLIENT_LIKE_CONTINUOUS_SUITE"
 echo "base_url=${BASE_URL}"

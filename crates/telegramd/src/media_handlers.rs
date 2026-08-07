@@ -335,7 +335,6 @@ async fn submit_attachment_ask(
             user_id,
             task_id,
             None,
-            state.i18n.t("telegram.msg.process_failed"),
         ),
         Err(err) => {
             warn!(chat_id = msg.chat.id.0, error = %err, "attachment_task_submission_failed");

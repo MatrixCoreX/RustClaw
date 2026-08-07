@@ -21,3 +21,45 @@ fn only_transient_http_statuses_are_retried() {
         assert!(!retryable_status(status), "status={status}");
     }
 }
+
+#[test]
+fn delivery_reconciliation_retries_ambiguous_and_retryable_failures() {
+    let response = |status, accepted, retryable| ChannelTaskDeliveryResponse {
+        schema_version: CHANNEL_TASK_DELIVERY_RESPONSE_SCHEMA_VERSION,
+        status,
+        accepted,
+        delivered: false,
+        receipt: None,
+        error_code: None,
+        message_key: None,
+        retryable,
+    };
+    assert!(delivery_response_is_retryable(&response(
+        ChannelTaskDeliveryStatus::InProgress,
+        false,
+        false,
+    )));
+    assert!(delivery_response_is_retryable(&response(
+        ChannelTaskDeliveryStatus::QueryRequired,
+        false,
+        false,
+    )));
+    assert!(delivery_response_is_retryable(&response(
+        ChannelTaskDeliveryStatus::Failed,
+        false,
+        true,
+    )));
+    assert!(!delivery_response_is_retryable(&response(
+        ChannelTaskDeliveryStatus::Failed,
+        false,
+        false,
+    )));
+    assert!(delivery_response_is_settled(&response(
+        ChannelTaskDeliveryStatus::NotRequired,
+        true,
+        false,
+    )));
+    assert_eq!(delivery_reconcile_delay(1).as_secs(), 1);
+    assert_eq!(delivery_reconcile_delay(6).as_secs(), 30);
+    assert_eq!(delivery_reconcile_delay(99).as_secs(), 30);
+}

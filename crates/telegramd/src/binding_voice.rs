@@ -275,7 +275,6 @@ pub(super) async fn maybe_handle_resume_continuation(
                 user_id,
                 task_id,
                 None,
-                state.i18n.t("telegram.msg.process_failed"),
             );
             Ok(true)
         }

@@ -28,7 +28,17 @@ const {
   updateLoginState,
   validateOutboundFile,
   shouldProcessUpsertMessage,
+  taskDeliveryRetryable,
+  taskDeliverySettled,
 } = require("./index.js");
+
+assert.strictEqual(taskDeliverySettled({ status: "accepted", accepted: true }), true);
+assert.strictEqual(taskDeliverySettled({ status: "not_required", accepted: true }), true);
+assert.strictEqual(taskDeliverySettled({ status: "in_progress", accepted: false }), false);
+assert.strictEqual(taskDeliveryRetryable({ status: "in_progress", retryable: false }), true);
+assert.strictEqual(taskDeliveryRetryable({ status: "query_required", retryable: false }), true);
+assert.strictEqual(taskDeliveryRetryable({ status: "failed", retryable: true }), true);
+assert.strictEqual(taskDeliveryRetryable({ status: "failed", retryable: false }), false);
 
 assert.strictEqual(normalizeDeliverySource(" Scheduled_Task "), "scheduled_task");
 assert.strictEqual(deliverySourceAllowed("scheduled_task", false), false);

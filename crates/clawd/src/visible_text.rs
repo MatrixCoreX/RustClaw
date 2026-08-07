@@ -36,6 +36,18 @@ pub(crate) fn sanitize_user_visible_text(text: &str) -> String {
     redact_runtime_template_placeholders(&redacted)
 }
 
+pub(crate) fn sanitize_channel_failure_reason(text: &str) -> String {
+    static REDACTED_ASSIGNMENT_RE: OnceLock<Regex> = OnceLock::new();
+    let sanitized = sanitize_user_visible_text(text);
+    REDACTED_ASSIGNMENT_RE
+        .get_or_init(|| {
+            Regex::new(r#"\b[A-Za-z][A-Za-z0-9_.-]{0,80}\s*=\s*\[REDACTED\]"#)
+                .expect("valid redacted assignment regex")
+        })
+        .replace_all(&sanitized, REDACTED)
+        .into_owned()
+}
+
 pub(crate) fn sanitize_task_query_response_for_delivery(
     mut task: TaskQueryResponse,
 ) -> TaskQueryResponse {

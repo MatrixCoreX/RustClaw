@@ -161,6 +161,11 @@ fn accepted_receipt_keeps_provider_ids_under_the_stable_idempotency_key() {
     assert_eq!(receipt.idempotency_key, envelope.idempotency_key);
     assert_eq!(receipt.delivery_id, envelope.delivery_id);
     assert_eq!(receipt.provider_message_ids, vec!["101", "102"]);
+    assert_eq!(receipt.parts.len(), 2);
+    assert_eq!(receipt.parts[0].part_index, 0);
+    assert_eq!(receipt.parts[0].provider_message_id.as_deref(), Some("101"));
+    assert_eq!(receipt.parts[1].part_index, 1);
+    assert_eq!(receipt.parts[1].provider_message_id.as_deref(), Some("102"));
     assert_eq!(receipt.status, ChannelDeliveryStatus::Accepted);
     receipt.validate().expect("valid receipt");
 }

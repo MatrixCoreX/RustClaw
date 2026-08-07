@@ -34,7 +34,12 @@ import {
   CLIENT_ORIGIN_HEADER,
 } from "../lib/product-identity";
 import { extractTaskText } from "../lib/task-result";
-import { extractTaskArtifacts, normalizeTaskArtifacts } from "../lib/task-artifacts";
+import {
+  extractTaskArtifactDeliverySummary,
+  extractTaskArtifacts,
+  normalizeTaskArtifactDeliverySummary,
+  normalizeTaskArtifacts,
+} from "../lib/task-artifacts";
 import {
   PcmWavRecordingError,
   shouldRetryVoiceCaptureWithDefault,
@@ -857,6 +862,7 @@ export function useChatRuntime({
             text: resultText,
             ts: Date.now(),
             artifacts: extractTaskArtifacts(result),
+            artifactDelivery: extractTaskArtifactDeliverySummary(result),
           }
         : null;
       updateChatThreadById(threadId, (thread) => ({
@@ -1321,6 +1327,7 @@ export function useChatRuntime({
         text: attachedImages.length > 0 ? formatVisionResultText(finalTaskText) : finalTaskText,
         ts: Date.now(),
         artifacts: extractTaskArtifacts(finalResult),
+        artifactDelivery: extractTaskArtifactDeliverySummary(finalResult),
       };
       updateChatThreadById(submitThreadId, (thread) => ({
         ...thread,
@@ -1877,6 +1884,7 @@ function normalizeStoredChatMessage(raw: unknown): ChatMessage | null {
     text: record.text,
     ts: record.ts,
     artifacts: normalizeTaskArtifacts(record.artifacts),
+    artifactDelivery: normalizeTaskArtifactDeliverySummary(record.artifactDelivery),
     bodyResult: normalizeStoredConversationBodyDescriptor(record.bodyResult),
   };
 }
@@ -1888,6 +1896,7 @@ function stripAttachmentPayloadsFromMessage(message: ChatMessage): ChatMessage {
     text: message.text,
     ts: message.ts,
     artifacts: normalizeTaskArtifacts(message.artifacts),
+    artifactDelivery: normalizeTaskArtifactDeliverySummary(message.artifactDelivery),
     bodyResult: normalizeStoredConversationBodyDescriptor(message.bodyResult),
   };
 }

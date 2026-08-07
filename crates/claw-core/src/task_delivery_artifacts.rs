@@ -18,7 +18,7 @@ use crate::{
 
 const TASK_ARTIFACT_SCHEMA_VERSION: u32 = 2;
 const LEGACY_TASK_ARTIFACT_SCHEMA_VERSION: u32 = 1;
-const MAX_TASK_ARTIFACTS: usize = 32;
+const MAX_TASK_ARTIFACTS: usize = 128;
 const ASYNC_JOB_COMPLETION_SOURCE: &str = "async_job_completion_checkpoint";
 const ASYNC_JOB_TERMINAL_OBSERVATION_POINTERS: &[&str] = &[
     "/task_journal/trace/task_checkpoint/boundary_context/async_job_terminal_observation",

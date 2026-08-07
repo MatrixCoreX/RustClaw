@@ -619,7 +619,7 @@ async fn request_unified_terminal_delivery(
     } else {
         claw_core::channel_delivery::ChannelDeliverySource::ImmediateDaemon
     };
-    match claw_core::channel_delivery_client::request_task_delivery(
+    match claw_core::channel_delivery_client::request_task_delivery_until_settled(
         &state.client,
         &state.config.clawd_base_url,
         task_id,

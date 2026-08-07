@@ -89,7 +89,6 @@ pub(super) async fn handle_message(bot: Bot, msg: Message, state: BotState) -> a
                         identity.user_id,
                         task_id.to_string(),
                         None,
-                        state.i18n.t("telegram.msg.process_failed"),
                     );
                 } else if resume.error_code.is_some() {
                     bot.send_message(
@@ -154,7 +153,6 @@ pub(super) async fn handle_message(bot: Bot, msg: Message, state: BotState) -> a
                                 identity.user_id,
                                 task_id.to_string(),
                                 None,
-                                state.i18n.t("telegram.msg.process_failed"),
                             );
                         } else if resume.error_code.is_some() {
                             bot.send_message(
@@ -307,7 +305,6 @@ pub(super) async fn handle_message(bot: Bot, msg: Message, state: BotState) -> a
                 user_id,
                 task_id,
                 None,
-                state.i18n.t("telegram.msg.process_failed"),
             );
         }
         Err(err) => {

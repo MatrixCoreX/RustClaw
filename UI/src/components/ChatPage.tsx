@@ -779,6 +779,14 @@ export function ChatPage({
                     ))}
                   </div>
                 ) : null}
+                {message.artifactDelivery?.truncated ? (
+                  <p className="mt-2 text-xs text-amber-700 dark:text-amber-200/80">
+                    {t(
+                      `产物较多，本次已展示 ${message.artifactDelivery.delivered_count} 个，共发现 ${message.artifactDelivery.candidate_count} 个。请缩小范围或让助手分批打包。`,
+                      `Many artifacts were produced. Showing ${message.artifactDelivery.delivered_count} of ${message.artifactDelivery.candidate_count}. Narrow the request or ask the assistant to package them in batches.`,
+                    )}
+                  </p>
+                ) : null}
                 {message.bodyResult && !message.bodyResult.complete ? (
                   <div className="mt-3 rounded-lg border border-sky-300/20 bg-sky-500/5 p-2.5 text-xs text-sky-100/80">
                     <p>
