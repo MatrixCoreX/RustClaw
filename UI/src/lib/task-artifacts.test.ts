@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   artifactPreviewKind,
+  extractTaskArtifactDeliverySummary,
   extractTaskArtifacts,
   normalizeTaskArtifacts,
   safeArtifactUrl,
@@ -34,6 +35,30 @@ test("extracts validated task artifacts without interpreting assistant text", ()
   };
 
   assert.deepEqual(extractTaskArtifacts(result), [artifact()]);
+});
+
+test("exposes explicit artifact truncation metadata", () => {
+  const result: TaskQueryResponse = {
+    task_id: "task-1",
+    status: "succeeded",
+    result_json: {
+      artifact_delivery: {
+        schema_version: 1,
+        candidate_count: 140,
+        delivered_count: 128,
+        truncated: true,
+        max_items: 128,
+      },
+    },
+    error_text: null,
+  };
+  assert.deepEqual(extractTaskArtifactDeliverySummary(result), {
+    schema_version: 1,
+    candidate_count: 140,
+    delivered_count: 128,
+    truncated: true,
+    max_items: 128,
+  });
 });
 
 test("rejects external, traversal, malformed, and duplicate artifact records", () => {

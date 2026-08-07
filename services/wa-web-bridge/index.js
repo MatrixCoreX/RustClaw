@@ -634,10 +634,67 @@ async function requestTaskDelivery(taskId, identity, background = false) {
     }),
   });
   const body = await resp.json();
-  if (!resp.ok || !body.ok || !body.data?.accepted) {
-    throw new Error(body.data?.error_code || body.error || "channel_task_delivery_not_accepted");
+  if (!resp.ok) {
+    throw new Error(`channel_task_delivery_http_${resp.status}`);
+  }
+  if (!body.ok || !body.data) {
+    throw new Error(body.data?.error_code || body.error || "channel_task_delivery_request_failed");
   }
   return body.data;
+}
+
+function taskDeliverySettled(result) {
+  return Boolean(result?.accepted) || ["accepted", "delivered", "read", "not_required"].includes(
+    String(result?.status || "")
+  );
+}
+
+function taskDeliveryRetryable(result) {
+  const status = String(result?.status || "");
+  return status === "in_progress" || status === "query_required" ||
+    (status === "failed" && result?.retryable === true);
+}
+
+async function waitForTerminalTask(taskId, identity) {
+  let retryAttempt = 0;
+  for (;;) {
+    try {
+      const task = await queryTask(taskId, identity);
+      if (task.status !== "queued" && task.status !== "running") return task;
+      retryAttempt = 0;
+    } catch (err) {
+      retryAttempt += 1;
+      console.error("background task polling will retry", {
+        error_code: "channel_task_query_retrying",
+        task_id: taskId,
+      });
+    }
+    const delayMs = retryAttempt > 0
+      ? Math.min(30000, 1000 * (2 ** Math.min(retryAttempt - 1, 5)))
+      : 500;
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+}
+
+async function requestTaskDeliveryUntilSettled(taskId, identity, background) {
+  let retryAttempt = 0;
+  for (;;) {
+    try {
+      const result = await requestTaskDelivery(taskId, identity, background);
+      if (taskDeliverySettled(result)) return result;
+      if (!taskDeliveryRetryable(result)) {
+        throw new Error(result?.error_code || "channel_task_delivery_rejected");
+      }
+    } catch (err) {
+      const message = String(err?.message || err);
+      if (/http_(400|401|403|404|422)\b/.test(message) || message === "channel_task_delivery_rejected") {
+        throw err;
+      }
+    }
+    retryAttempt += 1;
+    const delayMs = Math.min(30000, 1000 * (2 ** Math.min(retryAttempt - 1, 5)));
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
 }
 
 function validateOutboundFile(filePath, mediaLabel, maxBytes) {
@@ -755,36 +812,23 @@ async function runExistingTaskFlow(
 ) {
   try {
     await pollTaskResult(taskId, quickWait, identity);
-    await requestTaskDelivery(taskId, identity, false);
+    await requestTaskDeliveryUntilSettled(taskId, identity, false);
   } catch (err) {
-    if (String(err.message || err) === "task_result_wait_timeout") {
-      setTimeout(async () => {
-        try {
-          await pollTaskResult(taskId, 600, identity);
-          await requestTaskDelivery(taskId, identity, true);
-        } catch {
-          console.error("background task delivery failed", {
-            error_code: "channel_task_delivery_failed",
-          });
-          await sendWaMessage(jid, {
-            text: tr(
-              "whatsapp_web.msg.process_failed_safe",
-              ""
-            ),
-          });
-        }
-      }, 200);
-      return;
-    }
-    console.error("task delivery failed", {
-      error_code: "channel_task_delivery_failed",
+    console.error("quick task delivery deferred to background", {
+      error_code: "channel_task_delivery_deferred",
+      task_id: taskId,
     });
-    await sendWaMessage(jid, {
-      text: tr(
-        "whatsapp_web.msg.process_failed_safe",
-        ""
-      ),
-    });
+    setTimeout(async () => {
+      try {
+        await waitForTerminalTask(taskId, identity);
+        await requestTaskDeliveryUntilSettled(taskId, identity, true);
+      } catch (backgroundError) {
+        console.error("background task delivery stopped after non-retryable failure", {
+          error_code: "channel_task_delivery_failed",
+          task_id: taskId,
+        });
+      }
+    }, 200);
   }
 }
 
@@ -1216,4 +1260,6 @@ module.exports = {
   updateLoginState,
   validateOutboundFile,
   shouldProcessUpsertMessage,
+  taskDeliveryRetryable,
+  taskDeliverySettled,
 };

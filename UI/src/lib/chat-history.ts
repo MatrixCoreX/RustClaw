@@ -6,7 +6,10 @@ import type {
   ConversationHistoryTurn,
   TaskQueryResponse,
 } from "../types/api";
-import { normalizeTaskArtifacts } from "./task-artifacts";
+import {
+  normalizeTaskArtifactDeliverySummary,
+  normalizeTaskArtifacts,
+} from "./task-artifacts";
 import { appStorageKey } from "./product-identity";
 
 type Translate = (zh: string, en: string) => string;
@@ -270,6 +273,7 @@ function projectThread(
         text: assistantText,
         ts: completedAt ?? timestampMs(turn.updated_at),
         artifacts: normalizeTaskArtifacts(turn.artifacts),
+        artifactDelivery: normalizeTaskArtifactDeliverySummary(turn.artifact_delivery),
         bodyResult: turn.assistant_text
           ? (turn.assistant_text_result ?? null)
           : (turn.error_text_result ?? null),
@@ -289,7 +293,11 @@ function projectThread(
         task_id: turn.task_id,
         status: turn.status,
         result_json: turn.assistant_text
-          ? { text: turn.assistant_text, artifacts: normalizeTaskArtifacts(turn.artifacts) }
+          ? {
+              text: turn.assistant_text,
+              artifacts: normalizeTaskArtifacts(turn.artifacts),
+              artifact_delivery: turn.artifact_delivery,
+            }
           : null,
         error_text: turn.error_text ?? null,
       },

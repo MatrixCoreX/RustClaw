@@ -131,6 +131,56 @@ pub(crate) async fn deliver_task_result(
     }
 }
 
+pub(crate) async fn deliver_loaded_terminal_task(
+    state: &AppState,
+    record: &TaskDeliveryRecord,
+    request: &ChannelTaskDeliveryRequest,
+) -> anyhow::Result<ChannelTaskDeliveryResponse> {
+    request
+        .validate()
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    let status = crate::parse_task_status(&record.status);
+    if matches!(status, TaskStatus::Queued | TaskStatus::Running) {
+        anyhow::bail!("task_not_terminal");
+    }
+    if record.task.channel == "ui" {
+        anyhow::bail!("task_channel_delivery_not_supported");
+    }
+    let payload = serde_json::from_str::<Value>(&record.task.payload_json)
+        .map_err(|_| anyhow::anyhow!("channel_task_delivery_payload_invalid"))?;
+    let (text, notice) = terminal_delivery_content(state, record, &payload, status.clone());
+    let text = if matches!(status, TaskStatus::Succeeded) {
+        project_terminal_delivery_content(&text, request.content)
+    } else {
+        text
+    };
+    if text.trim().is_empty() {
+        return Ok(ChannelTaskDeliveryResponse {
+            schema_version: CHANNEL_TASK_DELIVERY_RESPONSE_SCHEMA_VERSION,
+            status: ChannelTaskDeliveryStatus::NotRequired,
+            accepted: true,
+            delivered: true,
+            receipt: None,
+            error_code: None,
+            message_key: None,
+            retryable: false,
+        });
+    }
+    let envelope = crate::delivery_service::build_daemon_delivery_envelope(
+        state,
+        &record.task,
+        &payload,
+        &text,
+        request.source,
+        request.content,
+        notice,
+    )
+    .map_err(|_| anyhow::anyhow!("channel_task_delivery_envelope_invalid"))?;
+    crate::delivery_service::deliver_task_envelope(state, &record.task, &payload, &envelope)
+        .await
+        .map(crate::delivery_service::ChannelDeliveryServiceResult::into_task_response)
+}
+
 fn authorized_delivery_request(
     state: &AppState,
     headers: &HeaderMap,
@@ -170,12 +220,33 @@ fn terminal_delivery_content(
         .unwrap_or("und");
     if matches!(status, TaskStatus::Succeeded) {
         let messages = terminal_success_messages(record.result_json.as_ref());
-        let messages = claw_core::task_delivery_artifacts::merge_task_artifact_delivery_messages(
-            &record.task.task_id,
-            record.result_json.as_ref(),
-            &state.skill_rt.workspace_root,
-            messages,
-        );
+        let mut messages =
+            claw_core::task_delivery_artifacts::merge_task_artifact_delivery_messages(
+                &record.task.task_id,
+                record.result_json.as_ref(),
+                &state.skill_rt.workspace_root,
+                messages,
+            );
+        if let Some((delivered_count, candidate_count)) = record
+            .result_json
+            .as_ref()
+            .and_then(|result| result.get("artifact_delivery"))
+            .filter(|summary| summary.get("truncated").and_then(Value::as_bool) == Some(true))
+            .and_then(|summary| {
+                Some((
+                    summary.get("delivered_count")?.as_u64()?,
+                    summary.get("candidate_count")?.as_u64()?,
+                ))
+            })
+        {
+            let notice = claw_core::channel_i18n::common_text_for_locale(
+                locale,
+                "channel.task.artifacts_truncated",
+            )
+            .replace("{delivered_count}", &delivered_count.to_string())
+            .replace("{candidate_count}", &candidate_count.to_string());
+            messages.push(notice);
+        }
         let text = messages
             .into_iter()
             .map(|message| message.trim().to_string())
@@ -238,7 +309,14 @@ fn terminal_delivery_content(
             params: Default::default(),
         });
     }
-    let text = claw_core::channel_i18n::common_text_for_locale(locale, message_key);
+    let generic_text = claw_core::channel_i18n::common_text_for_locale(locale, message_key);
+    let text = failure_detail
+        .as_ref()
+        .map(|detail| {
+            let reason = crate::visible_text::sanitize_channel_failure_reason(&detail.reason);
+            format!("{generic_text}\n\n{reason}")
+        })
+        .unwrap_or(generic_text);
     (text, Some(notice))
 }
 

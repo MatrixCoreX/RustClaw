@@ -93,6 +93,8 @@ pub(crate) struct ConversationHistoryTurn {
     pub(crate) attachment_count: usize,
     pub(crate) attachment_kinds: Vec<String>,
     pub(crate) artifacts: Vec<TaskArtifactManifest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) artifact_delivery: Option<Value>,
     pub(crate) created_at: i64,
     pub(crate) updated_at: i64,
 }
@@ -526,6 +528,19 @@ fn project_turn(row: HistoryRow) -> Option<ConversationHistoryTurn> {
         )
     });
     let artifacts = crate::task_artifacts::manifests_from_result(result.as_ref());
+    let artifact_delivery = result
+        .as_ref()
+        .and_then(|value| value.get("artifact_delivery"))
+        .filter(|summary| summary.get("schema_version").and_then(Value::as_u64) == Some(1))
+        .and_then(|summary| {
+            Some(serde_json::json!({
+                "schema_version": 1,
+                "candidate_count": summary.get("candidate_count")?.as_u64()?,
+                "delivered_count": summary.get("delivered_count")?.as_u64()?,
+                "truncated": summary.get("truncated")?.as_bool()?,
+                "max_items": summary.get("max_items")?.as_u64()?,
+            }))
+        });
     let error_body = row
         .error_text
         .as_deref()
@@ -566,6 +581,7 @@ fn project_turn(row: HistoryRow) -> Option<ConversationHistoryTurn> {
         attachment_count,
         attachment_kinds,
         artifacts,
+        artifact_delivery,
         created_at: row.created_at,
         updated_at: row.updated_at,
     })

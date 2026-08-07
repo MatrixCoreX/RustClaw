@@ -1,4 +1,16 @@
 use super::*;
+
+#[tokio::test]
+async fn channel_send_progress_survives_a_later_part_failure() {
+    let (result, provider_message_ids) = capture_channel_send_progress(async {
+        record_provider_message_id("provider-part-1");
+        Result::<(), String>::Err("later part failed".to_string())
+    })
+    .await;
+
+    assert_eq!(result, Err("later part failed".to_string()));
+    assert_eq!(provider_message_ids, vec!["provider-part-1"]);
+}
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::routing::post;

@@ -79,6 +79,7 @@ export interface ConversationHistoryTurn {
   attachment_count: number;
   attachment_kinds: string[];
   artifacts?: TaskArtifact[];
+  artifact_delivery?: unknown;
   created_at: number;
   updated_at: number;
 }
@@ -1557,6 +1558,13 @@ export interface ChatMessage {
   attachments?: ChatAttachment[];
   images?: ChatAttachment[];
   artifacts?: TaskArtifact[];
+  artifactDelivery?: {
+    schema_version: 1;
+    candidate_count: number;
+    delivered_count: number;
+    truncated: boolean;
+    max_items: number;
+  };
   bodyResult?: ConversationBodyDescriptor | null;
 }
 

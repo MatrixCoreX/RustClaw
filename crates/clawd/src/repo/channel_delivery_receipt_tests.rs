@@ -151,7 +151,7 @@ fn retryable_failure_can_start_a_new_accepted_attempt_without_losing_history() {
 }
 
 #[test]
-fn dispatch_claim_prevents_concurrent_and_post_crash_resends() {
+fn dispatch_claim_prevents_concurrent_resends_and_recovers_after_ambiguity_window() {
     let db = Connection::open_in_memory().expect("open sqlite");
     ensure_channel_delivery_receipt_schema(&db).expect("ensure schema");
     let envelope = envelope();
@@ -172,17 +172,43 @@ fn dispatch_claim_prevents_concurrent_and_post_crash_resends() {
             .expect("observe expired ambiguous claim"),
         ClaimChannelDeliveryDispatchOutcome::QueryRequired
     );
-    assert_eq!(
+    assert!(matches!(
         claim_channel_delivery_dispatch_in_db(&db, &envelope, 200, 30)
-            .expect("query remains required"),
-        ClaimChannelDeliveryDispatchOutcome::QueryRequired
-    );
+            .expect("recover expired ambiguous claim"),
+        ClaimChannelDeliveryDispatchOutcome::Acquired { .. }
+    ));
     let missing_receipt =
         complete_channel_delivery_dispatch_in_db(&db, &envelope.idempotency_key, &lease_token, 140)
             .expect_err("completion requires a receipt");
     assert!(missing_receipt
         .to_string()
         .contains("channel_delivery_dispatch_receipt_required"));
+}
+
+#[test]
+fn retryable_failure_receipt_allows_a_new_dispatch_claim() {
+    let db = Connection::open_in_memory().expect("open sqlite");
+    ensure_channel_delivery_receipt_schema(&db).expect("ensure schema");
+    let envelope = envelope();
+    let lease_token = match claim_channel_delivery_dispatch_in_db(&db, &envelope, 100, 30)
+        .expect("claim dispatch")
+    {
+        ClaimChannelDeliveryDispatchOutcome::Acquired { lease_token } => lease_token,
+        other => panic!("unexpected claim: {other:?}"),
+    };
+    let mut failed = receipt(ChannelDeliveryStatus::Failed, 110);
+    failed.error_code = Some("provider.rate_limited".to_string());
+    failed.diagnostic_id = Some("diag:retryable".to_string());
+    failed.retryable = true;
+    record_channel_delivery_receipt_in_db(&db, &failed).expect("record retryable failure");
+    complete_channel_delivery_dispatch_in_db(&db, &envelope.idempotency_key, &lease_token, 111)
+        .expect("complete failed attempt");
+
+    assert!(matches!(
+        claim_channel_delivery_dispatch_in_db(&db, &envelope, 120, 30)
+            .expect("claim retry attempt"),
+        ClaimChannelDeliveryDispatchOutcome::Acquired { .. }
+    ));
 }
 
 #[test]

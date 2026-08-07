@@ -9,6 +9,8 @@ use uuid::Uuid;
 
 use crate::{now_ts, now_ts_u64, repo, schedule_service, AppState, ScheduledJobDue};
 
+const CHANNEL_TERMINAL_DELIVERY_LEASE_SECONDS: u64 = 300;
+
 pub(crate) fn start_task_heartbeat(
     state: AppState,
     task_id: String,
@@ -87,6 +89,103 @@ pub(crate) fn spawn_schedule_worker(state: AppState) {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
     });
+}
+
+pub(crate) fn spawn_channel_terminal_delivery_worker(state: AppState) {
+    tokio::spawn(async move {
+        loop {
+            match channel_terminal_delivery_once(&state).await {
+                Ok(true) => {}
+                Ok(false) => tokio::time::sleep(Duration::from_millis(500)).await,
+                Err(error) => {
+                    error!(error = %error, "channel terminal delivery worker tick failed");
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+            }
+        }
+    });
+}
+
+async fn channel_terminal_delivery_once(state: &AppState) -> anyhow::Result<bool> {
+    let Some(claim) = repo::claim_due_channel_terminal_delivery(
+        &state.core.db,
+        now_ts_u64(),
+        CHANNEL_TERMINAL_DELIVERY_LEASE_SECONDS,
+    )?
+    else {
+        return Ok(false);
+    };
+    let record = match repo::get_task_delivery_record(state, &claim.task_id)? {
+        Some(record) => record,
+        None => {
+            repo::finish_channel_terminal_delivery(
+                &state.core.db,
+                &claim,
+                false,
+                None,
+                Some("task_not_found"),
+                now_ts_u64(),
+            )?;
+            return Ok(true);
+        }
+    };
+    let request = claw_core::channel_delivery::ChannelTaskDeliveryRequest::daemon(
+        claw_core::channel_delivery::ChannelDeliverySource::BackgroundCompletion,
+    );
+    match crate::http::task_delivery::deliver_loaded_terminal_task(state, &record, &request).await {
+        Ok(response) if response.accepted => repo::finish_channel_terminal_delivery(
+            &state.core.db,
+            &claim,
+            true,
+            None,
+            None,
+            now_ts_u64(),
+        )?,
+        Ok(response)
+            if response.status
+                == claw_core::channel_delivery::ChannelTaskDeliveryStatus::Failed
+                && !response.retryable =>
+        {
+            repo::finish_channel_terminal_delivery(
+                &state.core.db,
+                &claim,
+                false,
+                None,
+                response.error_code.as_deref(),
+                now_ts_u64(),
+            )?
+        }
+        Ok(response) => {
+            let delay = if response.status
+                == claw_core::channel_delivery::ChannelTaskDeliveryStatus::QueryRequired
+            {
+                30
+            } else {
+                5
+            };
+            repo::finish_channel_terminal_delivery(
+                &state.core.db,
+                &claim,
+                false,
+                Some(delay),
+                response.error_code.as_deref(),
+                now_ts_u64(),
+            )?;
+        }
+        Err(error) => {
+            let delay = (1_u64 << claim.attempt_count.saturating_sub(1).min(6)).min(60);
+            let error_code = error.to_string();
+            repo::finish_channel_terminal_delivery(
+                &state.core.db,
+                &claim,
+                false,
+                Some(delay),
+                Some(&error_code),
+                now_ts_u64(),
+            )?;
+        }
+    }
+    Ok(true)
 }
 
 fn stamp_current_admin_policy_for_legacy_scheduled_job(

@@ -1,7 +1,9 @@
 //! Channel text sending with safe chunking (Telegram, WhatsApp Cloud, WhatsApp Web Bridge, Feishu, Lark).
 //! Used when clawd delivers task results directly to a channel (e.g. schedule_triggered notify).
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::{Path, PathBuf};
 
 use reqwest::multipart::{Form, Part};
@@ -86,6 +88,39 @@ const CHANNEL_MEDIA_OUTBOUND_TEMP_DIR: &str = "/tmp/agent-runtime/channel/media/
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ChannelSendOutcome {
     pub(crate) provider_message_ids: Vec<String>,
+}
+
+tokio::task_local! {
+    static CHANNEL_SEND_PROVIDER_MESSAGE_IDS: RefCell<Vec<String>>;
+}
+
+pub(crate) async fn capture_channel_send_progress<F, T>(future: F) -> (T, Vec<String>)
+where
+    F: Future<Output = T>,
+{
+    CHANNEL_SEND_PROVIDER_MESSAGE_IDS
+        .scope(RefCell::new(Vec::new()), async move {
+            let result = future.await;
+            let provider_message_ids =
+                CHANNEL_SEND_PROVIDER_MESSAGE_IDS.with(|ids| ids.borrow().clone());
+            (result, provider_message_ids)
+        })
+        .await
+}
+
+fn record_provider_message_id(provider_message_id: &str) {
+    if provider_message_id.trim().is_empty() {
+        return;
+    }
+    let _ = CHANNEL_SEND_PROVIDER_MESSAGE_IDS.try_with(|ids| {
+        ids.borrow_mut().push(provider_message_id.to_string());
+    });
+}
+
+fn record_provider_message_ids(provider_message_ids: &[String]) {
+    for provider_message_id in provider_message_ids {
+        record_provider_message_id(provider_message_id);
+    }
 }
 
 fn provider_http_error(
@@ -314,7 +349,9 @@ pub(crate) async fn send_telegram_message_for_bot(
                 &response_body,
             ));
         }
-        provider_message_ids.push(telegram_message_id("send_text", &response_body)?);
+        let provider_message_id = telegram_message_id("send_text", &response_body)?;
+        record_provider_message_id(&provider_message_id);
+        provider_message_ids.push(provider_message_id);
     }
     for item in &media {
         let path = materialize_channel_outbound_media(state, item, "telegram").await?;
@@ -396,7 +433,9 @@ pub(crate) async fn send_telegram_message_for_bot(
                 &response_body,
             ));
         }
-        provider_message_ids.push(telegram_message_id("send_media", &response_body)?);
+        let provider_message_id = telegram_message_id("send_media", &response_body)?;
+        record_provider_message_id(&provider_message_id);
+        provider_message_ids.push(provider_message_id);
     }
     Ok(ChannelSendOutcome {
         provider_message_ids,
@@ -545,10 +584,11 @@ pub(crate) async fn send_whatsapp_cloud_text_message(
                 &response_body,
             ));
         }
-        provider_message_ids.extend(
+        let message_ids =
             claw_core::channel_whatsapp_cloud::decode_message_ids("send_text", &response_body)
-                .map_err(|error| error.to_string())?,
-        );
+                .map_err(|error| error.to_string())?;
+        record_provider_message_ids(&message_ids);
+        provider_message_ids.extend(message_ids);
     }
     for item in &media {
         let path = materialize_channel_outbound_media(state, item, "whatsapp-cloud").await?;
@@ -657,10 +697,11 @@ pub(crate) async fn send_whatsapp_cloud_text_message(
                 &response_body,
             ));
         }
-        provider_message_ids.extend(
+        let message_ids =
             claw_core::channel_whatsapp_cloud::decode_message_ids("send_media", &response_body)
-                .map_err(|error| error.to_string())?,
-        );
+                .map_err(|error| error.to_string())?;
+        record_provider_message_ids(&message_ids);
+        provider_message_ids.extend(message_ids);
     }
     Ok(ChannelSendOutcome {
         provider_message_ids,
@@ -727,6 +768,7 @@ async fn send_whatsapp_cloud_template_message(
     let provider_message_ids =
         claw_core::channel_whatsapp_cloud::decode_message_ids("send_template", &response_body)
             .map_err(|error| error.to_string())?;
+    record_provider_message_ids(&provider_message_ids);
     Ok(ChannelSendOutcome {
         provider_message_ids,
     })
@@ -821,15 +863,16 @@ pub(crate) async fn send_whatsapp_web_bridge_text_message(
             ));
         }
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(&response_body) {
-            provider_message_ids.extend(
-                value
-                    .get("message_ids")
-                    .and_then(serde_json::Value::as_array)
-                    .into_iter()
-                    .flatten()
-                    .filter_map(serde_json::Value::as_str)
-                    .map(str::to_string),
-            );
+            let message_ids = value
+                .get("message_ids")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            record_provider_message_ids(&message_ids);
+            provider_message_ids.extend(message_ids);
         }
     }
     Ok(ChannelSendOutcome {
@@ -891,7 +934,8 @@ async fn send_whatsapp_web_bridge_result(
         .into_iter()
         .flatten()
         .filter_map(|value| value.as_str().map(str::to_string))
-        .collect();
+        .collect::<Vec<_>>();
+    record_provider_message_ids(&provider_message_ids);
     Ok(ChannelSendOutcome {
         provider_message_ids,
     })
@@ -960,6 +1004,7 @@ pub(crate) async fn send_wechat_text_message(
         } else {
             chunk
         };
+        let client_id = next_wechat_client_id("clawd-wechat");
         let mut req = state
             .core
             .http_client
@@ -986,7 +1031,7 @@ pub(crate) async fn send_wechat_text_message(
                 "msg": {
                     "from_user_id": "",
                     "to_user_id": to_user_id,
-                    "client_id": next_wechat_client_id("clawd-wechat"),
+                    "client_id": client_id,
                     "message_type": WECHAT_SEND_MESSAGE_TYPE,
                     "message_state": WECHAT_SEND_MESSAGE_STATE,
                     "item_list": [{
@@ -1009,6 +1054,7 @@ pub(crate) async fn send_wechat_text_message(
                 &body,
             ));
         }
+        record_provider_message_id(&client_id);
     }
     let timeout_ms: u64 = 30_000;
     for media in media {
@@ -1424,6 +1470,7 @@ async fn send_feishu_lark_answer(
             &response_body,
         )
         .map_err(|error| error.to_string())?;
+        record_provider_message_id(&message_id);
         outcome.provider_message_ids.push(message_id);
     }
 
@@ -1517,6 +1564,7 @@ async fn send_feishu_lark_answer(
             &response_body,
         )
         .map_err(|error| error.to_string())?;
+        record_provider_message_id(&message_id);
         outcome.provider_message_ids.push(message_id);
     }
     Ok(outcome)

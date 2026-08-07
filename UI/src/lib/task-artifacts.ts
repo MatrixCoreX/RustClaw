@@ -5,9 +5,45 @@ const SHA256 = /^[0-9a-f]{64}$/i;
 
 export type TaskArtifactPreviewKind = "image" | "audio" | "video" | "pdf" | "none";
 
+export interface TaskArtifactDeliverySummary {
+  schema_version: 1;
+  candidate_count: number;
+  delivered_count: number;
+  truncated: boolean;
+  max_items: number;
+}
+
 export function extractTaskArtifacts(result: TaskQueryResponse): TaskArtifact[] {
   if (!result.result_json || typeof result.result_json !== "object") return [];
   return normalizeTaskArtifacts((result.result_json as { artifacts?: unknown }).artifacts);
+}
+
+export function extractTaskArtifactDeliverySummary(
+  result: TaskQueryResponse,
+): TaskArtifactDeliverySummary | undefined {
+  if (!result.result_json || typeof result.result_json !== "object") return undefined;
+  const value = (result.result_json as { artifact_delivery?: unknown }).artifact_delivery;
+  return normalizeTaskArtifactDeliverySummary(value);
+}
+
+export function normalizeTaskArtifactDeliverySummary(
+  value: unknown,
+): TaskArtifactDeliverySummary | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const summary = value as Partial<TaskArtifactDeliverySummary>;
+  if (
+    summary.schema_version !== 1 ||
+    !Number.isSafeInteger(summary.candidate_count) ||
+    !Number.isSafeInteger(summary.delivered_count) ||
+    !Number.isSafeInteger(summary.max_items) ||
+    Number(summary.candidate_count) < 0 ||
+    Number(summary.delivered_count) < 0 ||
+    Number(summary.max_items) < 1 ||
+    typeof summary.truncated !== "boolean"
+  ) {
+    return undefined;
+  }
+  return summary as TaskArtifactDeliverySummary;
 }
 
 export function normalizeTaskArtifacts(value: unknown): TaskArtifact[] {
@@ -52,7 +88,7 @@ export function normalizeTaskArtifacts(value: unknown): TaskArtifact[] {
       preview_url: safeArtifactUrl(record.preview_url) ? record.preview_url : null,
     });
   }
-  return artifacts.slice(0, 32);
+  return artifacts.slice(0, 128);
 }
 
 function canonicalArtifactRef(downloadUrl: unknown, artifactId: unknown): string | null {

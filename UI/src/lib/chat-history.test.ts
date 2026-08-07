@@ -107,6 +107,13 @@ test("uses the persisted custom title instead of inferring it from the first tur
 
 test("restores assistant artifacts from server conversation history", () => {
   const input = page();
+  input.turns[0].artifact_delivery = {
+    schema_version: 1,
+    candidate_count: 140,
+    delivered_count: 128,
+    truncated: true,
+    max_items: 128,
+  };
   input.turns[0].artifacts = [
     {
       schema_version: 1,
@@ -125,6 +132,7 @@ test("restores assistant artifacts from server conversation history", () => {
   const assistant = threads[0].messages.find((message) => message.id === "a-task-2");
 
   assert.equal(assistant?.artifacts?.[0].filename, "report.pdf");
+  assert.equal(assistant?.artifactDelivery?.truncated, true);
   assert.equal(
     threads[0].teachingRuns[1].taskResult.result_json &&
       (threads[0].teachingRuns[1].taskResult.result_json as { artifacts?: unknown[] }).artifacts?.length,

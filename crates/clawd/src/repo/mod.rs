@@ -1,6 +1,7 @@
 pub(crate) mod approval_scope;
 pub(crate) mod audit;
 pub(crate) mod auth;
+pub(crate) mod channel_delivery_outbox;
 pub(crate) mod channel_delivery_receipt;
 mod child_approval;
 pub(crate) mod child_patch;
@@ -38,6 +39,10 @@ pub(crate) use auth::{
     resolve_channel_binding_identity, seed_channel_bindings, update_auth_key_by_id,
     upsert_exchange_credential_for_user_key, upsert_webd_login_account, verify_webd_password_login,
     FactoryResetDbResult, PendingChannelBindSession,
+};
+pub(crate) use channel_delivery_outbox::{
+    claim_due_channel_terminal_delivery, ensure_channel_delivery_outbox_schema,
+    finish_channel_terminal_delivery,
 };
 pub(crate) use channel_delivery_receipt::{
     claim_channel_delivery_dispatch, complete_channel_delivery_dispatch,

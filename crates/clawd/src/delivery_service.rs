@@ -1,10 +1,11 @@
 use anyhow::{anyhow, Context};
 use claw_core::channel_delivery::{
     ChannelConversationWindow, ChannelConversationWindowState, ChannelDeliveryEnvelope,
-    ChannelDeliveryReceipt, ChannelDeliverySource, ChannelDeliveryStatus,
-    ChannelTaskDeliveryContent, ChannelTaskDeliveryResponse, ChannelTaskDeliveryStatus,
-    ChannelTextFormat, ChannelTextSegment, CHANNEL_DELIVERY_RECEIPT_SCHEMA_VERSION,
-    CHANNEL_DELIVERY_SCHEMA_VERSION, CHANNEL_TASK_DELIVERY_RESPONSE_SCHEMA_VERSION,
+    ChannelDeliveryPartReceipt, ChannelDeliveryReceipt, ChannelDeliverySource,
+    ChannelDeliveryStatus, ChannelTaskDeliveryContent, ChannelTaskDeliveryResponse,
+    ChannelTaskDeliveryStatus, ChannelTextFormat, ChannelTextSegment,
+    CHANNEL_DELIVERY_RECEIPT_SCHEMA_VERSION, CHANNEL_DELIVERY_SCHEMA_VERSION,
+    CHANNEL_TASK_DELIVERY_RESPONSE_SCHEMA_VERSION,
 };
 use claw_core::channel_ingress::{
     default_adapter_for_channel, default_reply_target, ChannelReplyTarget,
@@ -293,18 +294,28 @@ pub(crate) async fn deliver_task_envelope(
         .map(|segment| segment.text.as_str())
         .collect::<Vec<_>>()
         .join("\n");
-    let send_result = crate::worker::send_task_channel_message(
-        state,
-        task,
-        payload,
-        &text,
-        &envelope.conversation_window,
-        envelope.source,
-    )
-    .await;
+    let (send_result, observed_provider_message_ids) =
+        crate::channel_send::capture_channel_send_progress(
+            crate::worker::send_task_channel_message(
+                state,
+                task,
+                payload,
+                &text,
+                &envelope.conversation_window,
+                envelope.source,
+            ),
+        )
+        .await;
     let now = crate::now_ts_u64();
     let receipt = match send_result {
-        Ok(outcome) => accepted_delivery_receipt(envelope, outcome, now),
+        Ok(mut outcome) => {
+            for provider_message_id in observed_provider_message_ids {
+                if !outcome.provider_message_ids.contains(&provider_message_id) {
+                    outcome.provider_message_ids.push(provider_message_id);
+                }
+            }
+            accepted_delivery_receipt(envelope, outcome, now)
+        }
         Err(error_text) => {
             let (error_code, message_key, diagnostic_id, provider_error_code, retryable) =
                 delivery_failure_fields(&error_text);
@@ -318,20 +329,48 @@ pub(crate) async fn deliver_task_envelope(
                 diagnostic_id = %diagnostic_id,
                 "channel delivery failed"
             );
+            let partial = !observed_provider_message_ids.is_empty();
+            let mut parts = observed_provider_message_ids
+                .iter()
+                .enumerate()
+                .map(
+                    |(part_index, provider_message_id)| ChannelDeliveryPartReceipt {
+                        part_index: part_index as u32,
+                        status: ChannelDeliveryStatus::Accepted,
+                        provider_message_id: Some(provider_message_id.clone()),
+                        error_code: None,
+                    },
+                )
+                .collect::<Vec<_>>();
+            if partial {
+                parts.push(ChannelDeliveryPartReceipt {
+                    part_index: parts.len() as u32,
+                    status: ChannelDeliveryStatus::Failed,
+                    provider_message_id: None,
+                    error_code: Some(error_code.clone()),
+                });
+            }
             ChannelDeliveryReceipt {
                 schema_version: CHANNEL_DELIVERY_RECEIPT_SCHEMA_VERSION,
                 delivery_id: envelope.delivery_id.clone(),
                 idempotency_key: envelope.idempotency_key.clone(),
                 channel: envelope.channel,
                 adapter: envelope.adapter.clone(),
-                status: ChannelDeliveryStatus::Failed,
-                provider_message_ids: Vec::new(),
-                parts: Vec::new(),
+                status: if partial {
+                    ChannelDeliveryStatus::Partial
+                } else {
+                    ChannelDeliveryStatus::Failed
+                },
+                provider_message_ids: observed_provider_message_ids,
+                parts,
                 error_code: Some(error_code),
                 message_key: Some(message_key),
                 diagnostic_id: Some(diagnostic_id),
                 provider_error_code,
-                retryable,
+                // Replaying a multi-part send from its beginning would duplicate the
+                // provider-accepted prefix. Keep the exact partial receipt for an
+                // operator/part-aware retry instead of doing an unsafe whole-send retry.
+                retryable: retryable && !partial,
                 updated_at_ts: now,
             }
         }
@@ -361,6 +400,19 @@ fn accepted_delivery_receipt(
     outcome: crate::channel_send::ChannelSendOutcome,
     now: u64,
 ) -> ChannelDeliveryReceipt {
+    let parts = outcome
+        .provider_message_ids
+        .iter()
+        .enumerate()
+        .map(
+            |(part_index, provider_message_id)| ChannelDeliveryPartReceipt {
+                part_index: part_index as u32,
+                status: ChannelDeliveryStatus::Accepted,
+                provider_message_id: Some(provider_message_id.clone()),
+                error_code: None,
+            },
+        )
+        .collect();
     ChannelDeliveryReceipt {
         schema_version: CHANNEL_DELIVERY_RECEIPT_SCHEMA_VERSION,
         delivery_id: envelope.delivery_id.clone(),
@@ -369,7 +421,7 @@ fn accepted_delivery_receipt(
         adapter: envelope.adapter.clone(),
         status: ChannelDeliveryStatus::Accepted,
         provider_message_ids: outcome.provider_message_ids,
-        parts: Vec::new(),
+        parts,
         error_code: None,
         message_key: None,
         diagnostic_id: None,

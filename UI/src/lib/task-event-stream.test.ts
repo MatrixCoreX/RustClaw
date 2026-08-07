@@ -69,6 +69,55 @@ assert.equal(requestCount, 2);
 assert.equal(requestPaths[0], "/v1/tasks/task-reconnect/events?cursor=0");
 assert.equal(requestPaths[1], "/v1/tasks/task-reconnect/events?cursor=1");
 
+const fallbackPaths: string[] = [];
+let fallbackStreamCancelled = false;
+const terminalFallbackEvents: Array<{ seq?: number; event_kind: string }> = [];
+await followTaskEventStream(
+  async (path) => {
+    fallbackPaths.push(path);
+    if (path.endsWith("/events?cursor=0")) {
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                'id: 1\ndata: {"schema_version":1,"seq":1,"task_id":"task-terminal-fallback","event_kind":"tool_finished"}\n\n',
+              ),
+            );
+          },
+          cancel() {
+            fallbackStreamCancelled = true;
+          },
+        }),
+        { status: 200 },
+      );
+    }
+    assert.equal(path, "/v1/tasks/task-terminal-fallback");
+    return Response.json({
+      ok: true,
+      data: {
+        task_id: "task-terminal-fallback",
+        status: "succeeded",
+        result_json: { text: "done" },
+        error_text: null,
+      },
+    });
+  },
+  "task-terminal-fallback",
+  (event) => {
+    terminalFallbackEvents.push(event);
+  },
+  undefined,
+  { terminalPollIntervalMs: 1 },
+);
+assert.deepEqual(
+  terminalFallbackEvents.map((event) => [event.seq, event.event_kind]),
+  [[1, "tool_finished"]],
+);
+assert.equal(fallbackPaths[0], "/v1/tasks/task-terminal-fallback/events?cursor=0");
+assert.equal(fallbackPaths[1], "/v1/tasks/task-terminal-fallback");
+assert.equal(fallbackStreamCancelled, true);
+
 const handlerOrder: string[] = [];
 await followTaskEventStream(
   async () =>

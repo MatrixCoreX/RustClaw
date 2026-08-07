@@ -420,7 +420,9 @@ impl ChannelDeliveryReceipt {
                 let has_success = self.parts.iter().any(|part| {
                     matches!(
                         part.status,
-                        ChannelDeliveryStatus::Delivered | ChannelDeliveryStatus::Read
+                        ChannelDeliveryStatus::Accepted
+                            | ChannelDeliveryStatus::Delivered
+                            | ChannelDeliveryStatus::Read
                     )
                 });
                 let has_failure = self

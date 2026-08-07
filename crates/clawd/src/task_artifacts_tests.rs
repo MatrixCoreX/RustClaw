@@ -55,6 +55,9 @@ fn materializes_structured_capability_output_into_task_delivery_storage() {
 
     assert_eq!(manifests.len(), 1);
     assert_eq!(value["text"], "done");
+    assert_eq!(value["artifact_delivery"]["candidate_count"], 1);
+    assert_eq!(value["artifact_delivery"]["delivered_count"], 1);
+    assert_eq!(value["artifact_delivery"]["truncated"], false);
     assert_eq!(manifests[0].filename, "月报.pdf");
     assert_eq!(manifests[0].kind, "pdf");
     assert_eq!(manifests[0].schema_version, TASK_ARTIFACT_SCHEMA_VERSION);

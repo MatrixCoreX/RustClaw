@@ -221,8 +221,8 @@ use task_admin_routes::{
 };
 pub(crate) use worker::task_payload_value;
 use worker::{
-    recover_stale_running_tasks_on_startup, spawn_cleanup_worker, spawn_schedule_worker,
-    spawn_worker, task_external_chat_id,
+    recover_stale_running_tasks_on_startup, spawn_channel_terminal_delivery_worker,
+    spawn_cleanup_worker, spawn_schedule_worker, spawn_worker, task_external_chat_id,
 };
 
 pub(crate) const INIT_SQL: &str = include_str!("../../../migrations/001_init.sql");
@@ -477,6 +477,7 @@ async fn run() -> anyhow::Result<()> {
         ensure_memory_schema(&db)?;
         ensure_channel_schema(&db)?;
         repo::ensure_channel_delivery_receipt_schema(&db)?;
+        repo::ensure_channel_delivery_outbox_schema(&db)?;
         ensure_task_lease_schema(&db)?;
         ensure_key_auth_schema(&db)?;
         repo::child_task_graph::ensure_child_task_graph_schema(&db)?;
@@ -1003,6 +1004,7 @@ async fn run() -> anyhow::Result<()> {
     );
     spawn_cleanup_worker(state.clone());
     spawn_schedule_worker(state.clone());
+    spawn_channel_terminal_delivery_worker(state.clone());
     http::ui_routes::spawn_nni_heartbeat_worker(state.clone());
 
     let api = Router::new()

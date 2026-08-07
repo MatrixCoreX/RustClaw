@@ -12,7 +12,7 @@ use claw_core::task_delivery_artifacts::trusted_async_job_terminal_final_result;
 
 pub(crate) const TASK_ARTIFACT_SCHEMA_VERSION: u32 = 2;
 const LEGACY_TASK_ARTIFACT_SCHEMA_VERSION: u32 = 1;
-const MAX_TASK_ARTIFACTS: usize = 32;
+const MAX_TASK_ARTIFACTS: usize = 128;
 const DEFAULT_MAX_ARTIFACT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -52,7 +52,6 @@ pub(crate) fn materialize_task_result_artifacts(
     if sources.is_empty() {
         return Ok(raw_result.to_string());
     }
-
     let workspace = workspace_root.canonicalize().map_err(|error| {
         anyhow::anyhow!(
             "artifact_workspace_canonicalize_failed:path={} error={error}",
@@ -62,7 +61,8 @@ pub(crate) fn materialize_task_result_artifacts(
     let mut manifests = Vec::new();
     let mut seen_paths = HashSet::new();
     let mut seen_ids = HashSet::new();
-    for source in sources.into_iter().take(MAX_TASK_ARTIFACTS * 2) {
+    let mut candidate_count = 0;
+    for source in sources {
         if source
             .id
             .as_deref()
@@ -83,6 +83,10 @@ pub(crate) fn materialize_task_result_artifacts(
             }
             _ => continue,
         };
+        candidate_count += 1;
+        if manifests.len() >= MAX_TASK_ARTIFACTS {
+            continue;
+        }
         let filename = safe_filename(
             source
                 .filename
@@ -122,9 +126,6 @@ pub(crate) fn materialize_task_result_artifacts(
             preview_url: inline_preview_allowed(&mime_type)
                 .then(|| format!("{base_url}?disposition=inline")),
         });
-        if manifests.len() >= MAX_TASK_ARTIFACTS {
-            break;
-        }
     }
     if manifests.is_empty() {
         return Ok(raw_result.to_string());
@@ -132,7 +133,18 @@ pub(crate) fn materialize_task_result_artifacts(
     let Some(object) = result.as_object_mut() else {
         return Ok(raw_result.to_string());
     };
+    let delivered_count = manifests.len();
     object.insert("artifacts".to_string(), serde_json::to_value(manifests)?);
+    object.insert(
+        "artifact_delivery".to_string(),
+        serde_json::json!({
+            "schema_version": 1,
+            "candidate_count": candidate_count,
+            "delivered_count": delivered_count,
+            "truncated": candidate_count > delivered_count && delivered_count >= MAX_TASK_ARTIFACTS,
+            "max_items": MAX_TASK_ARTIFACTS,
+        }),
+    );
     Ok(serde_json::to_string(&result)?)
 }
 
@@ -296,9 +308,6 @@ fn collect_artifact_sources(result: &Value) -> Vec<ArtifactSource> {
 }
 
 fn collect_sources_from_object(value: &Value, out: &mut Vec<ArtifactSource>, allow_outputs: bool) {
-    if out.len() >= MAX_TASK_ARTIFACTS * 2 {
-        return;
-    }
     let Some(object) = value.as_object() else {
         return;
     };

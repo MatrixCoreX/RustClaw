@@ -38,7 +38,6 @@ pub(super) fn spawn_task_result_delivery(
     user_id: i64,
     task_id: String,
     soft_notice_override_seconds: Option<u64>,
-    fail_prefix: String,
 ) {
     tokio::spawn(async move {
         let _typing_guard = TypingHeartbeatGuard::start(bot.clone(), chat_id);
@@ -186,8 +185,7 @@ pub(super) fn spawn_task_result_delivery(
                 },
                 Err(err) => {
                     warn!(task_id = %task_id, chat_id = chat_id.0, error = %err, "task polling failed");
-                    let _ = bot.send_message(chat_id, fail_prefix.clone()).await;
-                    break;
+                    tokio::time::sleep(Duration::from_millis(poll_interval_ms)).await;
                 }
             }
         }
@@ -226,7 +224,7 @@ async fn request_terminal_delivery_with_content(
     } else {
         claw_core::channel_delivery::ChannelDeliverySource::ImmediateDaemon
     };
-    match claw_core::channel_delivery_client::request_task_delivery_with_content(
+    match claw_core::channel_delivery_client::request_task_delivery_until_settled_with_content(
         &state.client,
         &state.clawd_base_url,
         task_id,

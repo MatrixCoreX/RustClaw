@@ -775,14 +775,24 @@ fn project_recorded_paused_checkpoint_resume_dispatch_results(
                         &projection_payload,
                         now as i64,
                     ) {
-                        Ok(true) => info!(
-                            "runtime paused-checkpoint resume dispatch result projection recorded: task_id={} checkpoint_id={} executor_action={} executor_result_status={} result_projection_state={}",
-                            claimed.task_id,
-                            claimed.checkpoint_id,
-                            claimed.executor_action,
-                            claimed.executor_result_status,
-                            claimed.result_projection_state
-                        ),
+                        Ok(true) => {
+                            info!(
+                                "runtime paused-checkpoint resume dispatch result projection recorded: task_id={} checkpoint_id={} executor_action={} executor_result_status={} result_projection_state={}",
+                                claimed.task_id,
+                                claimed.checkpoint_id,
+                                claimed.executor_action,
+                                claimed.executor_result_status,
+                                claimed.result_projection_state
+                            );
+                            crate::task_event_transport::publish_persisted_task_events(
+                                state,
+                                &claimed.task_id,
+                            );
+                            crate::task_event_transport::publish_task_status_projection(
+                                state,
+                                &claimed.task_id,
+                            );
+                        }
                         Ok(false) => debug!(
                             "runtime paused-checkpoint resume dispatch result projection record skipped: task_id={} checkpoint_id={} executor_action={} executor_result_status={} result_projection_state={}",
                             claimed.task_id,

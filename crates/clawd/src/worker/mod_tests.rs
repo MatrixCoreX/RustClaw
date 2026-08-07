@@ -919,6 +919,7 @@ async fn runtime_recovery_reaches_terminal_state_after_file_backed_restart() {
 
 #[tokio::test]
 async fn runtime_recovery_polls_local_process_checkpoint_to_terminal_result() {
+    const TASK_ID: &str = "00000000-0000-4000-8000-000000000921";
     let state = state_with_runtime_tasks_table();
     let job_dir = TempDirGuard::new("runtime_poll_checkpoint_terminal");
     std::fs::write(job_dir.path.join("exit_code"), "0\n").expect("write exit code");
@@ -954,8 +955,9 @@ async fn runtime_recovery_polls_local_process_checkpoint_to_terminal_result() {
                 task_id, user_id, chat_id, user_key, channel, kind, payload_json,
                 status, result_json, error_text, created_at, updated_at
             )
-            VALUES ('runtime-poll-terminal', 42, 7, 'test-key', 'ui', 'run_skill', ?1, 'running', ?2, NULL, '1', '1')",
+            VALUES (?1, 42, 7, 'test-key', 'ui', 'run_skill', ?2, 'running', ?3, NULL, '1', '1')",
             rusqlite::params![
+                TASK_ID,
                 json!({"skill_name": "run_cmd", "args": {"async_start": true}}).to_string(),
                 due.to_string()
             ],
@@ -967,7 +969,7 @@ async fn runtime_recovery_polls_local_process_checkpoint_to_terminal_result() {
         .await
         .expect("runtime recovery poll projection");
 
-    let (status, result) = task_status_result_json(&state, "runtime-poll-terminal");
+    let (status, result) = task_status_result_json(&state, TASK_ID);
     assert_eq!(status, "succeeded");
     assert_eq!(
         result["task_lifecycle"]["state"], "succeeded",
@@ -983,6 +985,15 @@ async fn runtime_recovery_polls_local_process_checkpoint_to_terminal_result() {
     );
     assert_eq!(result["output"], "APP_POLL_DONE\n", "result={result}");
     assert_eq!(result["exit_code"], 0, "result={result}");
+    let events = crate::task_event_transport::replay_events_after(&state, TASK_ID, 0)
+        .expect("replay runtime recovery events")
+        .events;
+    assert!(
+        events
+            .iter()
+            .any(|event| event["event_kind"] == "task_final"),
+        "terminal recovery must publish task_final without waiting for an SSE reconnect: {events:?}"
+    );
 }
 
 fn runtime_restart_result_json(state: &crate::AppState) -> serde_json::Value {

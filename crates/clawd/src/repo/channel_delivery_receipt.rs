@@ -654,11 +654,19 @@ fn claim_channel_delivery_dispatch_in_db(
         .validate()
         .map_err(|err| anyhow!(err.to_string()))?;
     let idempotency_key = required_idempotency_key(&envelope.idempotency_key)?;
-    if let Some(receipt) = load_channel_delivery_receipt_from_db(db, idempotency_key)? {
+    let existing_receipt = load_channel_delivery_receipt_from_db(db, idempotency_key)?;
+    if let Some(receipt) = existing_receipt.as_ref() {
         ensure_envelope_receipt_identity(envelope, &receipt)?;
-        return Ok(ClaimChannelDeliveryDispatchOutcome::ExistingReceipt(
-            receipt,
-        ));
+        let may_retry = receipt.retryable
+            && matches!(
+                receipt.status,
+                ChannelDeliveryStatus::Failed | ChannelDeliveryStatus::Partial
+            );
+        if !may_retry {
+            return Ok(ClaimChannelDeliveryDispatchOutcome::ExistingReceipt(
+                receipt.clone(),
+            ));
+        }
     }
     let now_ts = i64::try_from(now_ts)
         .map_err(|_| anyhow!("channel_delivery_dispatch_timestamp_out_of_range"))?;
@@ -669,7 +677,7 @@ fn claim_channel_delivery_dispatch_in_db(
     let tx = db.unchecked_transaction()?;
     let existing = tx
         .query_row(
-            "SELECT delivery_id, channel, adapter, state, lease_expires_at_ts
+            "SELECT delivery_id, channel, adapter, state, lease_expires_at_ts, updated_at_ts
              FROM channel_delivery_dispatch_claims
              WHERE idempotency_key = ?1
              LIMIT 1",
@@ -681,12 +689,15 @@ fn claim_channel_delivery_dispatch_in_db(
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
                     row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
                 ))
             },
         )
         .optional()?;
     let outcome =
-        if let Some((delivery_id, stored_channel, adapter, state, lease_expires)) = existing {
+        if let Some((delivery_id, stored_channel, adapter, state, lease_expires, updated_at)) =
+            existing
+        {
             if delivery_id != envelope.delivery_id
                 || stored_channel != channel
                 || adapter != envelope.adapter
@@ -707,8 +718,32 @@ fn claim_channel_delivery_dispatch_in_db(
                     )?;
                     ClaimChannelDeliveryDispatchOutcome::QueryRequired
                 }
-                "query_required" | "receipt_recorded" => {
+                "query_required" if updated_at.saturating_add(lease_seconds) > now_ts => {
                     ClaimChannelDeliveryDispatchOutcome::QueryRequired
+                }
+                "query_required" | "receipt_recorded" => {
+                    let receipt_allows_retry = existing_receipt.as_ref().is_some_and(|receipt| {
+                        receipt.retryable
+                            && matches!(
+                                receipt.status,
+                                ChannelDeliveryStatus::Failed | ChannelDeliveryStatus::Partial
+                            )
+                    });
+                    if state == "receipt_recorded" && !receipt_allows_retry {
+                        ClaimChannelDeliveryDispatchOutcome::QueryRequired
+                    } else {
+                        let lease_token = uuid::Uuid::new_v4().to_string();
+                        tx.execute(
+                            "UPDATE channel_delivery_dispatch_claims
+                             SET state = 'dispatching', lease_token = ?2,
+                                 lease_expires_at_ts = ?3,
+                                 attempt_count = attempt_count + 1,
+                                 updated_at_ts = ?4
+                             WHERE idempotency_key = ?1",
+                            params![idempotency_key, lease_token, lease_expires_at_ts, now_ts,],
+                        )?;
+                        ClaimChannelDeliveryDispatchOutcome::Acquired { lease_token }
+                    }
                 }
                 _ => return Err(anyhow!("channel_delivery_dispatch_state_invalid")),
             }

@@ -28,7 +28,7 @@ CATALOG_SPECS = (
     CatalogSpec("feishud", ("en-US", "zh-CN"), 10),
     CatalogSpec("larkd", ("en-US", "zh-CN"), 10),
     CatalogSpec("whatsapp-cloud", ("en-US", "zh-CN"), 6),
-    CatalogSpec("whatsapp-webd", ("en-US", "zh-CN"), 9),
+    CatalogSpec("whatsapp-webd", ("en-US", "zh-CN"), 8),
 )
 
 PRODUCTION_SOURCE_ROOTS = (
