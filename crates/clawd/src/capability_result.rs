@@ -1,9 +1,11 @@
 use claw_core::capability_result::{
-    is_machine_ref, ArtifactRef, CapabilityResultEnvelope, CapabilityResultStatus,
-    CapabilityResultValidationError, Continuation, ContinuationKind, EvidenceRef,
-    ResultCompleteness, RetryDirective, StructuredError,
+    is_machine_ref, ArtifactRef, ArtifactVisibility, CapabilityResultEnvelope,
+    CapabilityResultStatus, CapabilityResultValidationError, Continuation, ContinuationKind,
+    EvidenceRef, ResultCompleteness, RetryDirective, StructuredError,
 };
 use serde_json::{json, Map as JsonMap, Value};
+use sha2::{Digest, Sha256};
+use std::io::Read;
 
 #[cfg(test)]
 pub(crate) fn successful_execution_envelope(
@@ -139,6 +141,8 @@ pub(crate) fn settle_waiting_async_result(
     result: &mut CapabilityResultEnvelope,
     job_id: &str,
     final_result_json: &Value,
+    task_id: &str,
+    retention_deadline_at: Option<i64>,
 ) -> bool {
     let job_id = job_id.trim();
     if job_id.is_empty()
@@ -152,16 +156,55 @@ pub(crate) fn settle_waiting_async_result(
         return false;
     }
 
+    let original_provenance = result.provenance.as_object().cloned().unwrap_or_default();
     let mut completed = result.clone();
     let extra = final_result_json.get("extra");
-    completed.status = CapabilityResultStatus::Ok;
+    let terminal_failed = final_result_json
+        .get("status")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            final_result_json
+                .pointer("/extra/status")
+                .and_then(Value::as_str)
+        })
+        == Some("error");
+    completed.status = if terminal_failed {
+        CapabilityResultStatus::Error
+    } else {
+        CapabilityResultStatus::Ok
+    };
     completed.data = result_data(&final_result_json.to_string(), extra);
     completed.artifacts = artifact_refs_from_sources(&final_result_json.to_string(), extra);
     completed.completeness = None;
     completed.page = None;
     completed.truncated = false;
     completed.retry = None;
-    completed.error = None;
+    completed.error = terminal_failed.then(|| {
+        let code = final_result_json
+            .pointer("/extra/error_code")
+            .or_else(|| final_result_json.get("error_code"))
+            .and_then(Value::as_str)
+            .filter(|value| is_machine_ref(value))
+            .unwrap_or("async_capability_failed")
+            .to_string();
+        let message_key = final_result_json
+            .pointer("/extra/message_key")
+            .or_else(|| final_result_json.get("message_key"))
+            .and_then(Value::as_str)
+            .filter(|value| is_machine_ref(value))
+            .unwrap_or(code.as_str())
+            .to_string();
+        StructuredError {
+            code,
+            message_key,
+            retryable: final_result_json
+                .pointer("/extra/retryable")
+                .or_else(|| final_result_json.get("retryable"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            details: redact_for_model(final_result_json.clone()),
+        }
+    });
     completed.continuation = None;
     let step_id = result
         .provenance
@@ -176,12 +219,27 @@ pub(crate) fn settle_waiting_async_result(
         &step_id,
         "trusted_async_job_completion",
     );
-    completed.provenance = json!({
-        "source": "async_job_completion_checkpoint",
-        "job_id": sanitized_reference(job_id),
-        "step_id": machine_evidence_id(&step_id),
-        "content_trust": "trusted_async_job_completion",
-    });
+    bind_artifacts_to_task(&mut completed, task_id, &step_id, retention_deadline_at);
+    let mut provenance = original_provenance;
+    provenance.extend(
+        completed
+            .provenance
+            .as_object()
+            .cloned()
+            .unwrap_or_default(),
+    );
+    provenance.insert(
+        "source".to_string(),
+        json!("async_job_completion_checkpoint"),
+    );
+    provenance.insert("job_id".to_string(), json!(sanitized_reference(job_id)));
+    provenance.insert("step_id".to_string(), json!(machine_evidence_id(&step_id)));
+    provenance.insert(
+        "content_trust".to_string(),
+        json!("trusted_async_job_completion"),
+    );
+    provenance.insert("task_id".to_string(), json!(task_id));
+    completed.provenance = Value::Object(provenance);
     if final_result_json
         .pointer("/extra/transcription_review/required")
         .and_then(Value::as_bool)
@@ -210,6 +268,157 @@ pub(crate) fn settle_waiting_async_result(
     }
     *result = completed;
     true
+}
+
+pub(crate) fn bind_artifacts_to_task(
+    envelope: &mut CapabilityResultEnvelope,
+    task_id: &str,
+    step_id: &str,
+    retention_deadline_at: Option<i64>,
+) {
+    let task_id = task_id.trim();
+    if !is_machine_ref(task_id) {
+        return;
+    }
+    if !envelope.provenance.is_object() {
+        envelope.provenance = json!({});
+    }
+    envelope.provenance["task_id"] = json!(task_id);
+    for artifact in &mut envelope.artifacts {
+        if envelope.delivery.intent
+            == claw_core::capability_result::CapabilityDeliveryIntent::Silent
+            && artifact.visibility == Some(ArtifactVisibility::UserDelivery)
+        {
+            artifact.visibility = Some(ArtifactVisibility::InternalProcessing);
+        }
+        let Some(locator) = artifact
+            .path
+            .as_deref()
+            .or(artifact.uri.as_deref())
+            .or(artifact.id.as_deref())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        if artifact.path.as_deref().is_some_and(unsafe_artifact_path) {
+            continue;
+        }
+        if let Some(path) = artifact.path.as_deref() {
+            artifact.sha256 = file_sha256(path);
+            artifact.size_bytes = std::fs::metadata(path).ok().map(|metadata| metadata.len());
+        } else if artifact.sha256.is_none() {
+            artifact.sha256 = Some(format!("{:x}", Sha256::digest(locator.as_bytes())));
+        }
+        let Some(digest) = artifact.sha256.as_deref() else {
+            continue;
+        };
+        let stable_id = format!("a_{}", &digest[..digest.len().min(32)]);
+        artifact.id.get_or_insert_with(|| stable_id.clone());
+        artifact.artifact_ref =
+            claw_core::task_delivery_artifacts::canonical_task_artifact_ref(task_id, &stable_id);
+        artifact.owner_task_id = Some(task_id.to_string());
+        artifact.producer = Some(json!({
+            "capability": envelope.capability,
+            "action": envelope.action,
+            "step_id": machine_evidence_id(step_id),
+        }));
+        artifact.lease = Some(json!({
+            "kind": "task_lifecycle",
+            "state": "active",
+            "retention_deadline_at": retention_deadline_at,
+        }));
+        if artifact.visibility.is_none() {
+            artifact.visibility = Some(ArtifactVisibility::Evidence);
+        }
+        if artifact.filename.is_none() {
+            artifact.filename = artifact.path.as_deref().and_then(|path| {
+                std::path::Path::new(path)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .map(str::to_string)
+            });
+        }
+    }
+    bind_followup_artifact_references(&mut envelope.data, &envelope.artifacts);
+}
+
+pub(crate) fn resolve_current_task_artifact_reference(
+    results: &[CapabilityResultEnvelope],
+    reference: &str,
+) -> Option<String> {
+    let reference = reference.trim();
+    let expected_owner = claw_core::capability_result::task_artifact_reference_owner(reference)?;
+    let artifact = results.iter().rev().find_map(|result| {
+        if result.provenance.get("task_id").and_then(Value::as_str) != Some(expected_owner) {
+            return None;
+        }
+        result.artifacts.iter().find(|artifact| {
+            artifact.artifact_ref.as_deref() == Some(reference)
+                && artifact.owner_task_id.as_deref() == Some(expected_owner)
+        })
+    })?;
+    let path = artifact.path.as_deref()?.trim();
+    if unsafe_artifact_path(path) {
+        return None;
+    }
+    if let Some(expected_digest) = artifact.sha256.as_deref() {
+        if file_sha256(path).as_deref() != Some(expected_digest) {
+            return None;
+        }
+    }
+    Some(path.to_string())
+}
+
+fn unsafe_artifact_path(path: &str) -> bool {
+    let path = path.trim();
+    path.is_empty()
+        || path.split(['/', '\\']).any(|segment| segment == "..")
+        || !(std::path::Path::new(path).is_absolute()
+            || path.as_bytes().get(1).is_some_and(|byte| *byte == b':'))
+}
+
+fn file_sha256(path: &str) -> Option<String> {
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 128 * 1024];
+    loop {
+        let read = file.read(&mut buffer).ok()?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+    }
+    Some(format!("{:x}", digest.finalize()))
+}
+
+fn bind_followup_artifact_references(value: &mut Value, artifacts: &[ArtifactRef]) {
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                bind_followup_artifact_references(item, artifacts);
+            }
+        }
+        Value::Object(object) => {
+            for input_key in ["input_value", "fallback_input_value"] {
+                let Some(path) = object.get(input_key).and_then(Value::as_str) else {
+                    continue;
+                };
+                let Some(reference) = artifacts.iter().find_map(|artifact| {
+                    (artifact.path.as_deref() == Some(path))
+                        .then(|| artifact.artifact_ref.clone())
+                        .flatten()
+                }) else {
+                    continue;
+                };
+                object.insert(format!("{input_key}_artifact_ref"), json!(reference));
+            }
+            for child in object.values_mut() {
+                bind_followup_artifact_references(child, artifacts);
+            }
+        }
+        _ => {}
+    }
 }
 
 pub(crate) fn selected_exact_machine_result(
@@ -571,14 +780,21 @@ fn artifact_refs(extra: Option<&Value>) -> Vec<ArtifactRef> {
         .into_iter()
         .flatten()
     {
-        for key in ["artifacts", "artifact_refs", "output_artifact_refs"] {
+        for (key, visibility) in [
+            ("artifacts", ArtifactVisibility::UserDelivery),
+            ("artifact_refs", ArtifactVisibility::Evidence),
+            ("output_artifact_refs", ArtifactVisibility::Evidence),
+            ("saved_files", ArtifactVisibility::InternalProcessing),
+        ] {
             let Some(items) = object.get(key).and_then(Value::as_array) else {
                 continue;
             };
             for item in items {
-                let Some(artifact) = artifact_ref(item) else {
+                let Some(mut artifact) = artifact_ref(item) else {
                     continue;
                 };
+                artifact.visibility =
+                    Some(effective_artifact_visibility(&artifact, visibility.clone()));
                 if !refs.iter().any(|existing: &ArtifactRef| {
                     existing.id == artifact.id
                         && existing.path == artifact.path
@@ -588,8 +804,66 @@ fn artifact_refs(extra: Option<&Value>) -> Vec<ArtifactRef> {
                 }
             }
         }
+        if let Some(processing_outputs) = object.get("processing_outputs") {
+            collect_nested_artifacts(
+                processing_outputs,
+                ArtifactVisibility::InternalProcessing,
+                &mut refs,
+            );
+        }
     }
     refs
+}
+
+fn effective_artifact_visibility(
+    artifact: &ArtifactRef,
+    default: ArtifactVisibility,
+) -> ArtifactVisibility {
+    let internal_skill_output = artifact
+        .id
+        .as_deref()
+        .is_some_and(|id| id.starts_with("skill-output:"))
+        || artifact
+            .metadata
+            .get("provenance")
+            .and_then(Value::as_str)
+            .is_some_and(|provenance| provenance == "skill_output");
+    if internal_skill_output {
+        ArtifactVisibility::Evidence
+    } else {
+        artifact.visibility.clone().unwrap_or(default)
+    }
+}
+
+fn collect_nested_artifacts(
+    value: &Value,
+    visibility: ArtifactVisibility,
+    refs: &mut Vec<ArtifactRef>,
+) {
+    if let Some(mut artifact) = artifact_ref(value) {
+        artifact.visibility.get_or_insert(visibility.clone());
+        if !refs.iter().any(|existing| {
+            existing.id == artifact.id
+                && existing.path == artifact.path
+                && existing.uri == artifact.uri
+        }) {
+            refs.push(artifact);
+        }
+        return;
+    }
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                collect_nested_artifacts(item, visibility.clone(), refs);
+            }
+        }
+        Value::Object(object) => {
+            for child in object.values() {
+                collect_nested_artifacts(child, visibility.clone(), refs);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn apply_result_metadata(
@@ -653,6 +927,28 @@ fn apply_result_metadata(
         "step_id": machine_evidence_id(step_id),
         "content_trust": content_trust,
     });
+    if let Some(delivery) =
+        result_metadata_value(output, extra, "delivery").and_then(Value::as_object)
+    {
+        envelope.delivery.constraints = redact_for_model(Value::Object(delivery.clone()));
+        envelope.delivery.intent = match delivery.get("intent").and_then(Value::as_str) {
+            Some("exact_machine") => {
+                claw_core::capability_result::CapabilityDeliveryIntent::ExactMachine
+            }
+            Some("artifact")
+                if delivery.get("deliver_to_user").and_then(Value::as_bool) != Some(false) =>
+            {
+                claw_core::capability_result::CapabilityDeliveryIntent::Artifact
+            }
+            Some("save_only" | "silent") => {
+                claw_core::capability_result::CapabilityDeliveryIntent::Silent
+            }
+            _ if delivery.get("deliver_to_user").and_then(Value::as_bool) == Some(false) => {
+                claw_core::capability_result::CapabilityDeliveryIntent::Silent
+            }
+            _ => claw_core::capability_result::CapabilityDeliveryIntent::ModelSynthesis,
+        };
+    }
 
     let retryable = result_metadata_value(output, extra, "retryable")
         .and_then(Value::as_bool)
@@ -722,18 +1018,38 @@ fn artifact_ref(value: &Value) -> Option<ArtifactRef> {
             .map(sanitized_reference)
     };
     let artifact = ArtifactRef {
+        artifact_ref: string("artifact_ref"),
         id: string("id").or_else(|| string("artifact_id")),
         path: string("path").or_else(|| string("output_path")),
         uri: string("uri").or_else(|| string("url")),
         media_type: string("media_type").or_else(|| string("mime_type")),
+        filename: string("filename"),
+        artifact_role: string("artifact_role").or_else(|| string("role")),
+        size_bytes: object.get("size_bytes").and_then(Value::as_u64),
         sha256: string("sha256"),
+        visibility: object
+            .get("visibility")
+            .and_then(Value::as_str)
+            .and_then(|visibility| match visibility {
+                "internal_processing" => Some(ArtifactVisibility::InternalProcessing),
+                "evidence" => Some(ArtifactVisibility::Evidence),
+                "user_delivery" => Some(ArtifactVisibility::UserDelivery),
+                _ => None,
+            }),
+        owner_task_id: string("owner_task_id"),
+        producer: object.get("producer").cloned().filter(Value::is_object),
+        lease: object.get("lease").cloned().filter(Value::is_object),
         metadata: object
             .get("metadata")
             .cloned()
             .map(redact_for_model)
             .unwrap_or_else(|| json!({})),
     };
-    (artifact.id.is_some() || artifact.path.is_some() || artifact.uri.is_some()).then_some(artifact)
+    (artifact.artifact_ref.is_some()
+        || artifact.id.is_some()
+        || artifact.path.is_some()
+        || artifact.uri.is_some())
+    .then_some(artifact)
 }
 
 fn sanitized_reference(value: &str) -> String {

@@ -89,6 +89,8 @@ pub(crate) use task_mutation_ledger::{
     TaskMutationClaimRejected, TaskMutationLease, TaskMutationReconciliation, TaskMutationRecord,
 };
 pub(crate) use task_plan::{read_task_plan, set_task_plan, update_task_plan_steps};
+#[cfg(test)]
+pub(crate) use task_resume_execution::deferred_dispatch_checkpoint_result;
 pub(crate) use task_resume_execution::record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal;
 pub(crate) use task_resume_execution::{
     claim_dispatched_paused_checkpoint_resume_execution_internal,

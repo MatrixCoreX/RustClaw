@@ -1989,5 +1989,8 @@ fn planner_notes_for_repair_success(repair_reason: &str) -> String {
 }
 
 #[cfg(test)]
+#[path = "planning_native_artifact_tests.rs"]
+mod native_artifact_tests;
+#[cfg(test)]
 #[path = "planning_native_tests.rs"]
 mod native_tests;

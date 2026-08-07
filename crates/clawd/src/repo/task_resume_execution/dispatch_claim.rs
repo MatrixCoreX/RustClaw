@@ -6,6 +6,8 @@ use crate::{AppState, ClaimedTask};
 #[path = "result_projection.rs"]
 mod result_projection;
 
+#[cfg(test)]
+pub(crate) use result_projection::deferred_dispatch_checkpoint_result;
 pub(crate) use result_projection::{
     claim_recorded_paused_checkpoint_resume_dispatch_result_internal,
     list_recorded_paused_checkpoint_resume_dispatch_results_internal,

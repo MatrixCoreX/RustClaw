@@ -79,7 +79,7 @@ fn generic_followup_does_not_become_execution_evidence() {
         ..empty_snapshot()
     };
 
-    let context = build_active_execution_anchor_context(&snapshot);
+    let context = build_active_execution_anchor_context(&snapshot, "task-current");
     assert!(context.contains("followup_op_kind: Generic"));
     assert!(!context.contains("followup_bound_target"));
     assert!(!session_snapshot_provides_execution_state_anchor(&snapshot));
@@ -93,15 +93,42 @@ fn read_followup_exports_structured_execution_anchor() {
             op_kind: crate::followup_frame::FollowupOpKind::Read,
             bound_target: Some("/workspace/README.md".to_string()),
             ordered_entries: vec!["README.md".to_string()],
+            source_task_id: "task-current".to_string(),
             ..Default::default()
         }),
         ..empty_snapshot()
     };
 
-    let context = build_active_execution_anchor_context(&snapshot);
+    let context = build_active_execution_anchor_context(&snapshot, "task-current");
     assert!(context.contains("followup_bound_target: /workspace/README.md"));
     assert!(context.contains("followup_ordered_entries: 1:README.md"));
+    assert!(context.contains("followup_scope: current_task_context"));
     assert!(session_snapshot_provides_execution_state_anchor(&snapshot));
+}
+
+#[test]
+fn prior_private_artifact_anchor_keeps_provenance_without_locator() {
+    let private_path =
+        "/workspace/.agent-runtime/artifacts/skill-invocations/task-prior/media/audio.wav";
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        active_followup_frame: Some(crate::followup_frame::FollowupFrame {
+            source_request: "transcribe it".to_string(),
+            op_kind: crate::followup_frame::FollowupOpKind::Read,
+            bound_target: Some(private_path.to_string()),
+            ordered_entries: vec!["audio.wav".to_string()],
+            source_task_id: "task-prior".to_string(),
+            ..Default::default()
+        }),
+        ..empty_snapshot()
+    };
+
+    let context = build_active_execution_anchor_context(&snapshot, "task-current");
+    assert!(context.contains("followup_source_task_id: task-prior"));
+    assert!(context.contains("followup_scope: prior_task_context"));
+    assert!(context.contains("followup_private_artifact_locator: omitted"));
+    assert!(context.contains("prior-task state is context only"));
+    assert!(!context.contains(private_path));
+    assert!(!context.contains("audio.wav"));
 }
 
 #[test]

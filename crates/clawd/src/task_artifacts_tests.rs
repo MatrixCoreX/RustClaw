@@ -181,6 +181,44 @@ fn never_materializes_internal_skill_output_records() {
 }
 
 #[test]
+fn typed_internal_and_evidence_artifacts_are_never_user_delivery() {
+    let workspace = TempWorkspace::new();
+    let internal = workspace.path().join("private").join("audio.wav");
+    let evidence = workspace.path().join("private").join("trace.json");
+    fs::create_dir_all(internal.parent().unwrap()).unwrap();
+    fs::write(&internal, b"audio").unwrap();
+    fs::write(&evidence, b"{}").unwrap();
+    let result = json!({
+        "text": "done",
+        "task_journal": {"trace": {"capability_results": [{
+            "status": "ok",
+            "artifacts": [
+                {
+                    "artifact_ref": "artifact:task/task-private/a_audio",
+                    "owner_task_id": "task-private",
+                    "path": internal.display().to_string(),
+                    "visibility": "internal_processing"
+                },
+                {
+                    "artifact_ref": "artifact:task/task-private/a_trace",
+                    "owner_task_id": "task-private",
+                    "path": evidence.display().to_string(),
+                    "visibility": "evidence"
+                }
+            ],
+            "data": {}
+        }]}}
+    });
+
+    let materialized =
+        materialize_task_result_artifacts(workspace.path(), "task-private", &result.to_string())
+            .unwrap();
+    let value: Value = serde_json::from_str(&materialized).unwrap();
+
+    assert!(manifests_from_result(Some(&value)).is_empty());
+}
+
+#[test]
 fn explicit_save_only_capability_never_materializes_its_files() {
     let workspace = TempWorkspace::new();
     let output = workspace.path().join("private").join("audio.wav");

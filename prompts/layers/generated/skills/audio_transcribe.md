@@ -37,6 +37,7 @@
 ## Actions (from interface)
 - `preview_transcribe`: resolve the input, provider, provider location, model, adapter plan, recommended execution capability, and local fallback without reading the source file or calling a provider.
 - `transcribe`: perform actual configured-provider transcription. Use it after preview selects the remote path. This remains the default when `action` is omitted for protocol compatibility.
+- Actual transcription is admitted as a durable long operation instead of the old 120-second whole-process window. Provider request bounds and explicit user cancellation remain active.
 
 ## Parameter Contract (from interface)
 | Action | Param | Required | Type | Default | Description |
@@ -57,7 +58,7 @@ Provide one audio source: local path or URL.
 - Invalid/unreadable local audio path or invalid URL input.
 - Compatible adapters that require local file upload return clear path-related errors.
 - Native adapters that require public URL input return clear URL/configuration errors.
-- Provider/runtime transcription failures return clear error text plus `fallback_recommended=true` and `fallback_capability=media_download.transcribe` where local fallback applies.
+- Provider/runtime transcription failures return clear error text plus `fallback_recommended=true`, `fallback_capability=media_download.transcribe`, `fallback_input_field=input_path`, and the exact `fallback_input_value` where local fallback applies.
 - Machine-readable failures use `error_code`, `message_key`, and `retryable` (including invalid input/size/configuration/client/request failures); runtime and UI must not parse `error_text` or expose internal transport markers.
 
 ## Request/Response Examples (from interface)

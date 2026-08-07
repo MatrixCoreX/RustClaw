@@ -175,12 +175,27 @@ fn transcript_delivery_switches_to_file_at_two_hundred_characters() {
 #[test]
 fn transcript_revision_schema_accepts_only_complete_review_output() {
     let parsed = crate::prompt_utils::validate_against_schema::<super::TranscriptRevisionOutput>(
-        r#"{"reviewed_text":"校对后的文本。","delivery_message":"校对后的完整文本已作为附件发送。","qualified":true,"confidence":0.9,"reason":"complete"}"#,
+        r#"{"reviewed_text":"校对后的文本。","delivery_message":"校对后的完整文本已作为附件发送。","content_kind":"speech","qualified":true,"confidence":0.9,"reason":"complete"}"#,
         crate::prompt_utils::PromptSchemaId::TranscriptRevision,
     )
     .expect("valid transcript revision output");
 
     assert_eq!(parsed.value.reviewed_text, "校对后的文本。");
+}
+
+#[test]
+fn transcript_revision_schema_preserves_non_speech_as_a_valid_result() {
+    let parsed = crate::prompt_utils::validate_against_schema::<super::TranscriptRevisionOutput>(
+        r#"{"reviewed_text":"[Music]","delivery_message":"已附上审核后的转写文本。","content_kind":"non_speech","qualified":true,"confidence":0.95,"reason":"faithful non-speech marker"}"#,
+        crate::prompt_utils::PromptSchemaId::TranscriptRevision,
+    )
+    .expect("valid non-speech transcript revision output");
+
+    assert_eq!(
+        parsed.value.content_kind,
+        super::TranscriptContentKind::NonSpeech
+    );
+    assert!(parsed.value.qualified);
 }
 
 #[test]

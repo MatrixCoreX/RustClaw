@@ -5,8 +5,9 @@ use std::sync::{Arc, RwLock};
 
 use super::{
     admitted_extra_field_exists, build_auto_sudo_retry_args,
-    contains_unresolved_runtime_template_arg, evidence_policy_action_policy_error,
-    handle_preflight_argument_failure, handle_skill_step_failure, handle_skill_step_success,
+    contains_unresolved_runtime_template_arg, cross_task_private_artifact_argument_error,
+    evidence_policy_action_policy_error, handle_preflight_argument_failure,
+    handle_skill_step_failure, handle_skill_step_success,
     invalidate_latest_validation_after_mutation_attempt, merge_isolation_artifact_refs,
     normalize_subagent_stop_signal, preflight_failure_metadata, preflight_permission_decision,
     record_latest_validation_result, record_subagent_step_execution,
@@ -936,6 +937,53 @@ fn scalar_json_like_filename_path_arg_is_not_rejected() {
     });
 
     assert!(structured_observation_path_argument_error("fs_basic", &args).is_none());
+}
+
+#[test]
+fn prior_task_private_artifact_path_requires_current_binding() {
+    let args = serde_json::json!({
+        "action": "read_text_range",
+        "path": "/srv/app/.agent-runtime/artifacts/skill-invocations/task-prior/media/out.txt",
+    });
+
+    let err = cross_task_private_artifact_argument_error(
+        "system_basic",
+        "task-current",
+        "read the current result",
+        &args,
+    )
+    .expect("unbound prior-task path must be rejected");
+    let parsed = crate::skills::parse_structured_skill_error(&err).expect("structured error");
+    assert_eq!(parsed.error_code, "artifact_ownership_mismatch");
+    assert_eq!(
+        parsed
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.get("recovery_action"))
+            .and_then(|value| value.as_str()),
+        Some("replan_arguments")
+    );
+}
+
+#[test]
+fn current_or_user_explicit_private_artifact_path_is_not_rejected() {
+    let current = "/srv/app/.agent-runtime/artifacts/skill-invocations/task-current/media/out.txt";
+    let prior = "/srv/app/.agent-runtime/artifacts/skill-invocations/task-prior/media/out.txt";
+
+    assert!(cross_task_private_artifact_argument_error(
+        "system_basic",
+        "task-current",
+        "read the current result",
+        &serde_json::json!({"path": current}),
+    )
+    .is_none());
+    assert!(cross_task_private_artifact_argument_error(
+        "system_basic",
+        "task-current",
+        &format!("read this exact file: {prior}"),
+        &serde_json::json!({"path": prior}),
+    )
+    .is_none());
 }
 
 #[test]

@@ -799,10 +799,23 @@ def _content_bundle(
     if image_delivery is not None:
         bundle["image_delivery"] = image_delivery
     if kind == "video":
+        original_video = next(
+            (
+                artifact
+                for artifact in artifacts
+                if artifact.get("artifact_role") == "original_video"
+            ),
+            None,
+        )
         bundle["followup_policy"] = {
             "text_conversion_action": "transcribe_audio",
             "capability": "media_download.transcribe",
             "input_field": "input_path",
+            **(
+                {"input_value": original_video["path"]}
+                if original_video is not None and original_video.get("path")
+                else {}
+            ),
             "never_use_image_ocr": True,
         }
     return bundle

@@ -8,6 +8,7 @@
   "required": [
     "reviewed_text",
     "delivery_message",
+    "content_kind",
     "qualified",
     "confidence",
     "reason"
@@ -20,6 +21,10 @@
     "delivery_message": {
       "type": "string",
       "minLength": 1
+    },
+    "content_kind": {
+      "type": "string",
+      "enum": ["speech", "non_speech", "unusable"]
     },
     "qualified": {
       "type": "boolean"

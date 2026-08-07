@@ -33,6 +33,13 @@ pub(super) fn task_report_json(task: &task::TaskStatusView, include_events: bool
     let session = task_session_projection_json(task);
     let context_budget = context_budget_report_json(&task.raw_data);
     let context_compaction = context_compaction_report_json(&task.raw_data);
+    let typed_artifacts = typed_artifact_refs(&task.raw_data);
+    let delivery_artifact_count = task
+        .raw_data
+        .pointer("/result_json/artifacts")
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .unwrap_or(0);
     json!({
         "report_kind": "agent_task_report",
         "task_id": task.task_id,
@@ -58,9 +65,16 @@ pub(super) fn task_report_json(task: &task::TaskStatusView, include_events: bool
         "context_compaction": context_compaction,
         "coding": coding,
         "outcome": outcome,
+        "goal_outcome": outcome,
+        "last_successful_capability": last_successful_capability(&task.raw_data),
+        "pending_plan_node": pending_plan_node(&task.raw_data),
+        "failure_attribution": failure_attribution(&task.raw_data),
         "artifacts": {
             "ref_count": artifact_refs.len(),
             "refs": artifact_refs,
+            "typed_count": typed_artifacts.len(),
+            "typed_refs": typed_artifacts,
+            "delivery_count": delivery_artifact_count,
         },
     })
 }
@@ -88,6 +102,23 @@ pub(super) fn task_report_text_lines(task: &task::TaskStatusView, report: &Value
         "artifact_ref_count: {}",
         report_u64(report, "/artifacts/ref_count")
     ));
+    lines.push(format!(
+        "typed_artifact_count: {}",
+        report_u64(report, "/artifacts/typed_count")
+    ));
+    lines.push(format!(
+        "delivery_artifact_count: {}",
+        report_u64(report, "/artifacts/delivery_count")
+    ));
+    if let Some(capability) = report
+        .get("last_successful_capability")
+        .and_then(Value::as_str)
+    {
+        lines.push(format!("last_successful_capability: {capability}"));
+    }
+    if let Some(attribution) = report.get("failure_attribution").and_then(Value::as_str) {
+        lines.push(format!("failure_attribution: {attribution}"));
+    }
     lines.push(format!(
         "llm_call_count: {}",
         report_u64(report, "/llm/llm_call_count")
@@ -971,6 +1002,97 @@ pub(super) fn exec_artifact_refs(data: &Value) -> Vec<Value> {
     let mut refs = Vec::new();
     collect_exec_artifact_refs(data, &mut refs, 0);
     refs
+}
+
+fn typed_artifact_refs(data: &Value) -> Vec<Value> {
+    let mut refs = Vec::new();
+    collect_typed_artifact_refs(data, &mut refs, 0);
+    refs
+}
+
+fn collect_typed_artifact_refs(value: &Value, refs: &mut Vec<Value>, depth: usize) {
+    if depth > 12 || refs.len() >= 128 {
+        return;
+    }
+    match value {
+        Value::Object(map) => {
+            if let Some(reference) = map.get("artifact_ref").and_then(Value::as_str) {
+                if reference.starts_with("artifact:task/")
+                    && !refs.iter().any(|existing| existing == reference)
+                {
+                    refs.push(Value::String(reference.to_string()));
+                }
+            }
+            for child in map.values() {
+                collect_typed_artifact_refs(child, refs, depth + 1);
+            }
+        }
+        Value::Array(items) => {
+            for child in items {
+                collect_typed_artifact_refs(child, refs, depth + 1);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn last_successful_capability(data: &Value) -> Value {
+    let mut capabilities = Vec::new();
+    collect_successful_capabilities(data, &mut capabilities, 0);
+    capabilities.pop().map(Value::String).unwrap_or(Value::Null)
+}
+
+fn collect_successful_capabilities(value: &Value, capabilities: &mut Vec<String>, depth: usize) {
+    if depth > 12 || capabilities.len() >= 128 {
+        return;
+    }
+    match value {
+        Value::Object(map) => {
+            if map.get("status").and_then(Value::as_str) == Some("ok") {
+                if let Some(capability) = map.get("capability").and_then(Value::as_str) {
+                    capabilities.push(capability.to_string());
+                }
+            }
+            for child in map.values() {
+                collect_successful_capabilities(child, capabilities, depth + 1);
+            }
+        }
+        Value::Array(items) => {
+            for child in items {
+                collect_successful_capabilities(child, capabilities, depth + 1);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn pending_plan_node(data: &Value) -> Value {
+    [
+        "/result_json/task_checkpoint/pending_action",
+        "/task_checkpoint/pending_action",
+        "/result_json/task_lifecycle/pending_action",
+    ]
+    .into_iter()
+    .find_map(|pointer| {
+        data.pointer(pointer)
+            .filter(|value| !value.is_null())
+            .cloned()
+    })
+    .unwrap_or(Value::Null)
+}
+
+fn failure_attribution(data: &Value) -> Value {
+    first_string_at(
+        data,
+        &[
+            "/failure_attribution",
+            "/result_json/failure_attribution",
+            "/result_json/task_journal/trace/failure_attribution",
+            "/result_json/extra/failure_phase",
+        ],
+    )
+    .map(Value::String)
+    .unwrap_or(Value::Null)
 }
 
 fn collect_exec_artifact_refs(value: &Value, refs: &mut Vec<Value>, depth: usize) {

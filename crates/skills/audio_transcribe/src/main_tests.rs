@@ -17,6 +17,19 @@ fn error_extra_exposes_machine_contract() {
 }
 
 #[test]
+fn provider_failure_preserves_exact_audio_input_for_local_fallback() {
+    let extra = error_extra_with_input(
+        "provider_request_failed",
+        true,
+        Some("/workspace/extracted.wav"),
+    );
+
+    assert_eq!(extra["fallback_capability"], "media_download.transcribe");
+    assert_eq!(extra["fallback_input_field"], "input_path");
+    assert_eq!(extra["fallback_input_value"], "/workspace/extracted.wav");
+}
+
+#[test]
 fn parse_vendor_aliases() {
     assert!(matches!(parse_vendor("openai"), Some(VendorKind::OpenAI)));
     assert!(matches!(parse_vendor("gemini"), Some(VendorKind::Google)));

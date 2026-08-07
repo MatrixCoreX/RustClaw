@@ -767,16 +767,64 @@ fn async_poll_adapter_failure_keeps_machine_error_contract() {
     assert_eq!(payload["error_code"], "provider_job_failed");
     assert_eq!(payload["message_key"], "provider.job.failed");
     assert_eq!(payload["failure_result_json"]["status"], "error");
-    assert_eq!(
-        payload["failure_result_json"]["error_text"],
-        "The provider rejected this media request."
-    );
+    assert!(payload["failure_result_json"].get("error_text").is_none());
     assert_eq!(
         payload["failure_result_json"]["extra"]["error_code"],
         "provider_job_failed"
     );
     assert!(payload.get("text").is_none());
     assert!(payload.get("error_text").is_none());
+}
+
+#[test]
+fn agent_loop_async_failure_carries_recovery_checkpoint_without_prose_routing() {
+    let mut claimed = async_poll_claimed_dispatch(Some(json!({
+        "job_id": "job-async-poll-adapter",
+        "status": "failed",
+        "error_code": "provider_request_failed",
+        "message_key": "skill.audio_transcribe.provider_request_failed",
+        "failure_result_json": {
+            "status": "error",
+            "error_text": "untrusted provider prose",
+            "extra": {
+                "schema_version": 1,
+                "source_skill": "audio_transcribe",
+                "status": "error",
+                "error_code": "provider_request_failed",
+                "message_key": "skill.audio_transcribe.provider_request_failed",
+                "retryable": true,
+                "fallback_capability": "media_download.transcribe",
+                "fallback_input_field": "input_path",
+                "fallback_input_value": "/workspace/extracted.wav"
+            }
+        }
+    })));
+    claimed.checkpoint_id =
+        "agent-loop:task-async-poll-adapter:round-1:step-1:async-job:provider:1".to_string();
+    claimed.task_checkpoint.checkpoint_id = claimed.checkpoint_id.clone();
+    claimed.task_checkpoint.boundary_context = json!({
+        "schema_version": 1,
+        "agent_loop_resume_state": {
+            "schema_version": 1,
+            "stage": "tool_execution",
+            "task_observations": [],
+            "executed_step_results": []
+        }
+    });
+
+    let payload = super::execute_async_poll_dispatch_result(&claimed, 1_000, 30)
+        .expect("failed async result remains recoverable");
+
+    assert_eq!(payload["executor_result_status"], "async_poll_failed");
+    assert_eq!(
+        payload["continuation_result_json"]["task_lifecycle"]["state"],
+        "background"
+    );
+    assert_eq!(
+        payload["failure_result_json"]["extra"]["fallback_input_value"],
+        "/workspace/extracted.wav"
+    );
+    assert!(payload["failure_result_json"].get("error_text").is_none());
 }
 
 #[test]

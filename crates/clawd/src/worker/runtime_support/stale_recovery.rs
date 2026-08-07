@@ -35,6 +35,7 @@ fn recovery_should_preserve_recoverable_state(result_json: Option<&str>, now: i6
     };
     crate::task_lifecycle::paused_checkpoint_recovery_status(&result_json, now)
         .preserve_running_status_for_recovery()
+        || crate::task_lifecycle::has_recoverable_resume_execution(&result_json)
         || result_projection_pending_recovery_state(&result_json)
 }
 

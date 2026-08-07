@@ -9,6 +9,8 @@ __ACTIVE_EXECUTION_ANCHOR__
 
 Context contract:
 - Use this latest structured execution state only for immediate or proximal follow-ups about the current/latest result.
+- Treat entries marked `scope=prior_task_context` as background only, never as current-task execution evidence.
+- Private runtime artifact locators from prior tasks are intentionally omitted; use only a current authorized attachment or canonical artifact binding.
 - Prefer it over older active-task text for references to the current/latest result.
 - If the current request selects an older assistant or execution turn by relative offset, use the matching recent-turn or recent-execution context instead.
 - When the current request semantically selects an item by position from the active ordered list, use that exact listed entry under its bound target.

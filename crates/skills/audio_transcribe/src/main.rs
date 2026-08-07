@@ -208,22 +208,29 @@ fn main() -> anyhow::Result<()> {
         let line = line?;
         let parsed: Result<Req, _> = serde_json::from_str(&line);
         let resp = match parsed {
-            Ok(req) => match execute(&cfg, &workspace_root, req.args, req.context.as_ref()) {
-                Ok((text, extra)) => Resp {
-                    request_id: req.request_id,
-                    status: "ok".to_string(),
-                    text,
-                    extra: Some(extra),
-                    error_text: None,
-                },
-                Err(err) => Resp {
-                    request_id: req.request_id,
-                    status: "error".to_string(),
-                    text: String::new(),
-                    extra: Some(error_extra(err.code, err.retryable)),
-                    error_text: Some(err.message),
-                },
-            },
+            Ok(req) => {
+                let fallback_input = requested_audio_source(&req.args);
+                match execute(&cfg, &workspace_root, req.args, req.context.as_ref()) {
+                    Ok((text, extra)) => Resp {
+                        request_id: req.request_id,
+                        status: "ok".to_string(),
+                        text,
+                        extra: Some(extra),
+                        error_text: None,
+                    },
+                    Err(err) => Resp {
+                        request_id: req.request_id,
+                        status: "error".to_string(),
+                        text: String::new(),
+                        extra: Some(error_extra_with_input(
+                            err.code,
+                            err.retryable,
+                            fallback_input.as_deref(),
+                        )),
+                        error_text: Some(err.message),
+                    },
+                }
+            }
             Err(err) => Resp {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
@@ -239,6 +246,14 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn error_extra(error_code: &str, retryable: bool) -> Value {
+    error_extra_with_input(error_code, retryable, None)
+}
+
+fn error_extra_with_input(
+    error_code: &str,
+    retryable: bool,
+    fallback_input: Option<&str>,
+) -> Value {
     let mut extra = json!({
         "schema_version": 1,
         "source_skill": SKILL_NAME,
@@ -257,6 +272,13 @@ fn error_extra(error_code: &str, retryable: bool) -> Value {
     ) {
         extra["fallback_capability"] = Value::String("media_download.transcribe".to_string());
         extra["fallback_recommended"] = Value::Bool(true);
+        if let Some(input) = fallback_input
+            .map(str::trim)
+            .filter(|input| !input.is_empty())
+        {
+            extra["fallback_input_field"] = Value::String("input_path".to_string());
+            extra["fallback_input_value"] = Value::String(input.to_string());
+        }
     }
     extra
 }

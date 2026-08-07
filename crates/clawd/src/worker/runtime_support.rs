@@ -46,3 +46,11 @@ pub(super) use recovery_flow::sync_recovery_can_claim_dispatch_executor;
 #[cfg(test)]
 #[path = "runtime_support/dispatch_result_tests.rs"]
 mod dispatch_result_tests;
+
+#[cfg(test)]
+#[path = "runtime_support/stale_recovery_tests.rs"]
+mod stale_recovery_tests;
+
+#[cfg(test)]
+#[path = "runtime_support/recovery_flow_tests.rs"]
+mod recovery_flow_tests;

@@ -6,8 +6,44 @@ const COMPLETION_SOURCE: &str = "async_job_completion_checkpoint";
 
 pub(crate) fn completed_async_job_continuation_result(
     task_kind: &str,
+    task_id: &str,
     checkpoint: &TaskCheckpoint,
     final_result_json: &Value,
+    now_ts: i64,
+) -> Option<Value> {
+    terminal_async_job_continuation_result(
+        task_kind,
+        task_id,
+        checkpoint,
+        final_result_json,
+        "succeeded",
+        now_ts,
+    )
+}
+
+pub(crate) fn failed_async_job_continuation_result(
+    task_kind: &str,
+    task_id: &str,
+    checkpoint: &TaskCheckpoint,
+    failure_result_json: &Value,
+    now_ts: i64,
+) -> Option<Value> {
+    terminal_async_job_continuation_result(
+        task_kind,
+        task_id,
+        checkpoint,
+        failure_result_json,
+        "failed",
+        now_ts,
+    )
+}
+
+fn terminal_async_job_continuation_result(
+    task_kind: &str,
+    task_id: &str,
+    checkpoint: &TaskCheckpoint,
+    final_result_json: &Value,
+    terminal_status: &str,
     now_ts: i64,
 ) -> Option<Value> {
     if task_kind != "ask"
@@ -31,13 +67,17 @@ pub(crate) fn completed_async_job_continuation_result(
         .as_ref()
         .map(|job| job.job_id.trim())
         .filter(|job_id| !job_id.is_empty())?;
+    let retention_deadline_at = checkpoint
+        .pending_async_job
+        .as_ref()
+        .and_then(|job| job.retention_deadline_at);
     let checkpoint_id = format!("{}:completion", checkpoint.checkpoint_id);
     let serialized_result = final_result_json.to_string();
     let terminal_observation = json!({
         "schema_version": 1,
         "source": COMPLETION_SOURCE,
         "job_id": job_id,
-        "status": "succeeded",
+        "status": terminal_status,
         "final_result_json": final_result_json,
         "observed_at": now_ts,
     });
@@ -48,8 +88,13 @@ pub(crate) fn completed_async_job_continuation_result(
     successor.resume_entrypoint = ResumeEntrypoint::NextPlannerRound;
     let mut settled_capability_result = false;
     for result in successor.capability_results.iter_mut().rev() {
-        if crate::capability_result::settle_waiting_async_result(result, job_id, final_result_json)
-        {
+        if crate::capability_result::settle_waiting_async_result(
+            result,
+            job_id,
+            final_result_json,
+            task_id,
+            retention_deadline_at,
+        ) {
             settled_capability_result = true;
             break;
         }
@@ -73,6 +118,7 @@ pub(crate) fn completed_async_job_continuation_result(
             json!({
                 "schema_version": 1,
                 "status": "ready_for_planner",
+                "terminal_status": terminal_status,
                 "job_id": job_id,
                 "continue_original_request": true,
                 "repeat_completed_side_effect": false,
@@ -94,7 +140,7 @@ pub(crate) fn completed_async_job_continuation_result(
                 "schema_version": 1,
                 "source": COMPLETION_SOURCE,
                 "job_id": job_id,
-                "status": "succeeded",
+                "status": terminal_status,
                 "final_result_json": final_result_json,
             }));
         }
@@ -104,9 +150,26 @@ pub(crate) fn completed_async_job_continuation_result(
             .and_then(|steps| steps.last_mut())
             .and_then(Value::as_object_mut)
         {
-            last_step.insert("status".to_string(), json!("ok"));
+            last_step.insert(
+                "status".to_string(),
+                json!(if terminal_status == "succeeded" {
+                    "ok"
+                } else {
+                    "error"
+                }),
+            );
             last_step.insert("output".to_string(), json!(serialized_result));
-            last_step.insert("error".to_string(), Value::Null);
+            last_step.insert(
+                "error".to_string(),
+                if terminal_status == "succeeded" {
+                    Value::Null
+                } else {
+                    final_result_json
+                        .pointer("/extra/error_code")
+                        .cloned()
+                        .unwrap_or_else(|| json!("async_capability_failed"))
+                },
+            );
             last_step.insert("finished_at".to_string(), json!(now_ts.max(0) as u64));
         }
     }
@@ -117,7 +180,11 @@ pub(crate) fn completed_async_job_continuation_result(
             "schema_version": 1,
             "state": TaskLifecycleState::Background,
             "source": COMPLETION_SOURCE,
-            "resume_reason": "async_job_completed_continue_planning",
+            "resume_reason": if terminal_status == "succeeded" {
+                "async_job_completed_continue_planning"
+            } else {
+                "async_job_failed_continue_recovery"
+            },
             "next_check_after": now_ts,
             "checkpoint_id": checkpoint_id,
             "previous_checkpoint_id": checkpoint.checkpoint_id,

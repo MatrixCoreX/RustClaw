@@ -42,11 +42,22 @@ struct TranscriptRevisionOutput {
     #[serde(default)]
     delivery_message: String,
     #[serde(default)]
+    content_kind: TranscriptContentKind,
+    #[serde(default)]
     qualified: bool,
     #[serde(default)]
     confidence: f64,
     #[serde(default, rename = "reason")]
     _reason: String,
+}
+
+#[derive(Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum TranscriptContentKind {
+    Speech,
+    NonSpeech,
+    #[default]
+    Unusable,
 }
 
 #[derive(Debug, Clone)]
@@ -302,7 +313,11 @@ async fn synthesize_reviewed_transcript(
         .map_err(|_| "transcript_revision_schema_invalid".to_string())?
         .value;
         let reviewed = parsed.reviewed_text.trim();
-        if !parsed.qualified || reviewed.is_empty() {
+        let valid_non_speech = parsed.content_kind == TranscriptContentKind::NonSpeech;
+        if (!parsed.qualified && !valid_non_speech)
+            || parsed.content_kind == TranscriptContentKind::Unusable
+            || reviewed.is_empty()
+        {
             return Err("transcript_revision_unqualified".to_string());
         }
         if delivery_message.is_empty() {

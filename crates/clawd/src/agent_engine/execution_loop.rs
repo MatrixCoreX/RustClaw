@@ -514,6 +514,36 @@ fn check_repeat_action_guard(
         ) {
             loop_state.rollout_attribution.push(attribution);
         }
+        if let Some(previous) = loop_state.capability_results.iter().rev().find(|result| {
+            result.status == claw_core::capability_result::CapabilityResultStatus::Ok
+                && result
+                    .provenance
+                    .get("action_fingerprint")
+                    .and_then(Value::as_str)
+                    == Some(fingerprint)
+        }) {
+            let identity = previous.canonical_evidence_identity();
+            let reused = json!({
+                "schema_version": 1,
+                "observation_kind": "completed_action_result_reused",
+                "result_ref": identity.evidence_id,
+                "result_sha256": identity.sha256,
+                "capability": previous.capability,
+                "artifact_refs": previous.artifacts.iter().filter_map(|artifact| artifact.artifact_ref.as_deref()).collect::<Vec<_>>(),
+                "data": previous.data,
+            });
+            let serialized = reused.to_string();
+            loop_state.last_output = Some(serialized.clone());
+            loop_state
+                .output_vars
+                .insert("agent_loop.repeat_completed_result".to_string(), serialized);
+            loop_state.task_observations.push(reused);
+            loop_state.history_compact.push(format!(
+                "round={} step={} completed_action_result_reused result_ref={}",
+                loop_state.round_no, step_in_round, identity.evidence_id
+            ));
+            return Some("completed_action_result_reused".to_string());
+        }
         info!(
             "executor_result_error task_id={} round={} step={} type=guard error={}",
             task.task_id,
@@ -745,6 +775,9 @@ async fn try_execute_independent_read_batch(
             fingerprint,
             idx + 1,
         ) {
+            if reason == "completed_action_result_reused" {
+                return Ok(None);
+            }
             return Ok(Some(finalize_execute_round_outcome(
                 loop_state,
                 snapshot,
@@ -942,6 +975,10 @@ pub(super) async fn execute_actions_once(
             &fingerprint,
             step_in_round,
         ) {
+            if reason == "completed_action_result_reused" {
+                executed_actions += 1;
+                continue;
+            }
             stop_signal = Some(reason);
             break;
         }

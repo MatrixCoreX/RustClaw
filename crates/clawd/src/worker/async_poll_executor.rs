@@ -934,6 +934,7 @@ fn async_poll_dispatch_result_payload_from_adapter_result(
             let continuation_result_json =
                 crate::agent_engine::completed_async_job_continuation_result(
                     &claimed.task.kind,
+                    &claimed.task_id,
                     &claimed.task_checkpoint,
                     &final_result_json,
                     now_ts,
@@ -959,13 +960,27 @@ fn async_poll_dispatch_result_payload_from_adapter_result(
                 "async_poll_adapter_failed",
                 "clawd.task.async_poll_adapter_failed",
             );
-            async_poll_failure_payload(
+            let failure_result_json =
+                normalized_async_failure_result(adapter_result, error_code, message_key);
+            let continuation_result_json =
+                crate::agent_engine::failed_async_job_continuation_result(
+                    &claimed.task.kind,
+                    &claimed.task_id,
+                    &claimed.task_checkpoint,
+                    &failure_result_json,
+                    now_ts,
+                );
+            let mut failed = async_poll_failure_payload(
                 payload,
                 "async_poll_failed",
                 error_code,
                 message_key,
-                adapter_result.get("failure_result_json").cloned(),
-            )
+                Some(failure_result_json),
+            )?;
+            if let Some(continuation) = continuation_result_json {
+                failed["continuation_result_json"] = continuation;
+            }
+            Some(failed)
         }
         "expired" => async_poll_failure_payload(
             payload,
@@ -996,6 +1011,47 @@ fn async_poll_dispatch_result_payload_from_adapter_result(
         }
         _ => None,
     }
+}
+
+fn normalized_async_failure_result(
+    adapter_result: &Value,
+    error_code: &str,
+    message_key: &str,
+) -> Value {
+    let source = adapter_result
+        .get("failure_result_json")
+        .filter(|value| value.is_object());
+    let source_extra = source.and_then(|value| value.get("extra"));
+    let mut normalized = source
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    normalized.remove("text");
+    normalized.remove("error_text");
+    normalized.insert("schema_version".to_string(), json!(1));
+    normalized.insert("status".to_string(), json!("error"));
+    let mut extra = source_extra
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    extra.remove("text");
+    extra.remove("error_text");
+    extra
+        .entry("schema_version".to_string())
+        .or_insert(json!(1));
+    extra
+        .entry("source_skill".to_string())
+        .or_insert(json!("async_capability"));
+    extra.insert("status".to_string(), json!("error"));
+    extra
+        .entry("error_code".to_string())
+        .or_insert(json!(error_code));
+    extra
+        .entry("message_key".to_string())
+        .or_insert(json!(message_key));
+    extra.entry("retryable".to_string()).or_insert(json!(false));
+    normalized.insert("extra".to_string(), Value::Object(extra));
+    Value::Object(normalized)
 }
 
 fn base_async_poll_result_payload(

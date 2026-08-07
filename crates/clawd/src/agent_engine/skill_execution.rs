@@ -52,8 +52,9 @@ use skill_execution_observations::{
 };
 use skill_execution_preflight::{
     capability_isolation_artifact_refs, capability_isolation_policy_error,
-    evidence_policy_action_policy_error, handle_preflight_argument_failure,
-    structured_observation_path_argument_error, unresolved_runtime_template_argument_error,
+    cross_task_private_artifact_argument_error, evidence_policy_action_policy_error,
+    handle_preflight_argument_failure, structured_observation_path_argument_error,
+    unresolved_runtime_template_argument_error,
 };
 use skill_execution_subagent::{record_subagent_hook_stage, record_subagent_step_execution};
 #[cfg(test)]
@@ -1028,6 +1029,24 @@ pub(super) async fn execute_prepared_skill_action(
             action_trace_kind,
         );
     }
+    if let Some(err) = cross_task_private_artifact_argument_error(
+        normalized_skill,
+        &task.task_id,
+        user_text,
+        &exec_args,
+    ) {
+        return handle_preflight_argument_failure(
+            state,
+            task,
+            loop_state,
+            global_step,
+            step_in_round,
+            normalized_skill,
+            classification_args,
+            &err,
+            action_trace_kind,
+        );
+    }
     let pre_tool_use_evaluation = crate::agent_hooks::pre_tool_use_outcome_for_state(
         state,
         &task.task_id,
@@ -1382,6 +1401,16 @@ pub(super) async fn execute_prepared_skill_action(
         }
         .to_string(),
     );
+    crate::capability_result::bind_artifacts_to_task(
+        &mut capability_result,
+        &task.task_id,
+        &step_execution.step_id,
+        loop_state
+            .task_checkpoint
+            .as_ref()
+            .and_then(|checkpoint| checkpoint.pointer("/pending_async_job/retention_deadline_at"))
+            .and_then(Value::as_i64),
+    );
     if raw_action_effect.validates {
         capability_result.verification = serde_json::json!({
             "status": match &validation_observation {
@@ -1390,6 +1419,10 @@ pub(super) async fn execute_prepared_skill_action(
                 crate::execution_recipe::ValidationObservation::Inconclusive => "inconclusive",
             },
         });
+    }
+    if let Some(provenance) = capability_result.provenance.as_object_mut() {
+        provenance.insert("task_id".to_string(), json!(task.task_id));
+        provenance.insert("action_fingerprint".to_string(), json!(fingerprint));
     }
     capability_result
         .validate()

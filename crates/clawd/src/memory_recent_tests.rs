@@ -22,3 +22,18 @@ fn last_turn_total_truncation_is_explicit_and_closed() {
     assert!(context.ends_with("[/LAST_TURN_FULL]"));
     assert!(context.len() <= 64);
 }
+
+#[test]
+fn prior_turn_context_omits_private_runtime_artifact_paths() {
+    let private_path =
+        "/workspace/.agent-runtime/artifacts/skill-invocations/task-prior/media/transcript.txt";
+    let context = format_last_turn_full_context(
+        &format!("continue {private_path}"),
+        &format!("saved result at `{private_path}`"),
+        1_000,
+        3_000,
+    );
+
+    assert!(!context.contains(private_path));
+    assert_eq!(context.matches("[prior_task_private_artifact]").count(), 2);
+}

@@ -78,7 +78,17 @@ pub struct EvidenceRef {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactVisibility {
+    InternalProcessing,
+    Evidence,
+    UserDelivery,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ArtifactRef {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact_ref: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -88,7 +98,21 @@ pub struct ArtifactRef {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact_role: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub sha256: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visibility: Option<ArtifactVisibility>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner_task_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub producer: Option<JsonValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lease: Option<JsonValue>,
     #[serde(default)]
     pub metadata: JsonValue,
 }
@@ -357,11 +381,36 @@ impl CapabilityResultEnvelope {
         }
         for artifact in &self.artifacts {
             if artifact.id.as_deref().is_some_and(|id| !is_machine_ref(id))
+                || artifact
+                    .artifact_role
+                    .as_deref()
+                    .is_some_and(|role| !is_machine_ref(role))
+                || artifact
+                    .owner_task_id
+                    .as_deref()
+                    .is_some_and(|task_id| !is_machine_ref(task_id))
+                || (artifact.artifact_ref.is_some()
+                    && artifact
+                        .sha256
+                        .as_deref()
+                        .is_some_and(|digest| !is_sha256(digest)))
+                || artifact
+                    .producer
+                    .as_ref()
+                    .is_some_and(|producer| !producer.is_object())
+                || artifact
+                    .lease
+                    .as_ref()
+                    .is_some_and(|lease| !lease.is_object())
                 || !artifact.metadata.is_object()
             {
                 return Err(CapabilityResultValidationError::InvalidArtifactRef);
             }
-            if artifact.id.as_deref().is_none_or(|id| id.trim().is_empty())
+            if artifact
+                .artifact_ref
+                .as_deref()
+                .is_none_or(|reference| reference.trim().is_empty())
+                && artifact.id.as_deref().is_none_or(|id| id.trim().is_empty())
                 && artifact
                     .path
                     .as_deref()
@@ -372,6 +421,17 @@ impl CapabilityResultEnvelope {
                     .is_none_or(|uri| uri.trim().is_empty())
             {
                 return Err(CapabilityResultValidationError::UnaddressableArtifact);
+            }
+            if let Some(reference_owner) = artifact
+                .artifact_ref
+                .as_deref()
+                .and_then(task_artifact_reference_owner)
+            {
+                if artifact.owner_task_id.as_deref() != Some(reference_owner) {
+                    return Err(CapabilityResultValidationError::ArtifactOwnershipMismatch);
+                }
+            } else if artifact.artifact_ref.is_some() {
+                return Err(CapabilityResultValidationError::InvalidArtifactRef);
             }
         }
         if let Some(completeness) = self.completeness.as_ref() {
@@ -492,6 +552,8 @@ pub enum CapabilityResultValidationError {
     UnaddressableArtifact,
     #[error("capability_result_artifact_ref_invalid")]
     InvalidArtifactRef,
+    #[error("capability_result_artifact_ownership_mismatch")]
+    ArtifactOwnershipMismatch,
     #[error("capability_result_completeness_invalid")]
     InvalidCompleteness,
     #[error("capability_result_partial_recovery_missing")]
@@ -527,6 +589,20 @@ pub fn is_machine_ref(value: &str) -> bool {
 
 fn is_message_key(value: &str) -> bool {
     is_machine_ref(value) && !value.starts_with(':') && !value.ends_with(':')
+}
+
+fn is_sha256(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+pub fn task_artifact_reference_owner(reference: &str) -> Option<&str> {
+    let mut parts = reference.trim().strip_prefix("artifact:task/")?.split('/');
+    let task_id = parts.next()?;
+    let artifact_id = parts.next()?;
+    if parts.next().is_some() || !is_machine_ref(task_id) || !is_machine_ref(artifact_id) {
+        return None;
+    }
+    Some(task_id)
 }
 
 #[cfg(test)]
