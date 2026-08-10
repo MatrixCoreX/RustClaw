@@ -770,8 +770,6 @@ async fn skill_store_http_api_removes_and_reinstalls_optional_skill() {
             "chinese_almanac",
             "crypto",
             "git_forge",
-            "git_remote_publish",
-            "git_remote_read",
             "invest_copy",
             "map_merchant",
             "media_discovery",

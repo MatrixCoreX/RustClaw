@@ -2,8 +2,8 @@
 
 ## Capability Summary
 
-This optional bundled skill observes one administrator-approved GitHub HTTPS
-remote. It can read one exact branch or fetch that branch into one exact local
+This built-in skill observes one administrator-approved GitHub HTTPS remote. It
+can read one exact branch or fetch that branch into one exact local
 remote-tracking ref. Public actions never receive credentials; authenticated
 actions receive only `github_git_token` through the host credential broker.
 

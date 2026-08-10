@@ -9,7 +9,7 @@ protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
 supported_arch = ["x86_64", "aarch64"]
 license = "MIT"
-source = "optional_skills/git_remote_publish"
+source = "crates/skills/git_remote_publish"
 
 [registry]
 name = "git_remote_publish"
@@ -21,12 +21,8 @@ source_root = "."
 package = "git-remote-publish-skill"
 binary = "git-remote-publish-skill"
 lockfile = "Cargo.lock"
-network = "approval_required"
+network = "deny"
 lifecycle_scripts = false
-
-[install]
-host_dependencies = ["git"]
-runtime_assets = []
 
 [run]
 launcher = "native"

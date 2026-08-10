@@ -1,14 +1,14 @@
 [package]
-name = "git-forge-skill"
+name = "git-remote-read-skill"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "git-forge-skill"
+name = "git-remote-read-skill"
 path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
-git-remote-common = { path = "../../crates/git-remote-common", features = ["forge"] }
+git-remote-common = { path = "../../git-remote-common" }
 serde_json.workspace = true

@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/claw-core",
+    "crates/git-remote-common",
     "crates/fs-discovery",
     "crates/wechat-ilink",
     "crates/clawd",
@@ -25,6 +26,8 @@ members = [
     "crates/skills/extension_manager",
     "crates/skills/fs_search",
     "crates/skills/git_basic",
+    "crates/skills/git_remote_publish",
+    "crates/skills/git_remote_read",
     "crates/skills/health_check",
     "crates/skills/http_basic",
     "crates/skills/image_edit",
@@ -49,8 +52,6 @@ members = [
     "optional_skills/crypto",
     "optional_skills/chinese_almanac",
     "optional_skills/git_forge",
-    "optional_skills/git_remote_publish",
-    "optional_skills/git_remote_read",
     "optional_skills/invest_copy",
     "optional_skills/map_merchant",
     "optional_skills/photo_organize",

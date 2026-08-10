@@ -377,6 +377,8 @@ skills_list = [
     "system_basic",
     "http_basic",
     "git_basic",
+    "git_remote_read",
+    "git_remote_publish",
     "install_module",
     "process_basic",
     "package_manager",

@@ -1,5 +1,5 @@
 {
-  "core_skill_count": 43,
+  "core_skill_count": 48,
   "covered_categories": [
     "behavior:archive_roundtrip",
     "behavior:async_cancel",
@@ -18,6 +18,7 @@
     "skill:archive_basic",
     "skill:audio_synthesize",
     "skill:audio_transcribe",
+    "skill:browser_session",
     "skill:browser_web",
     "skill:code_index",
     "skill:config_basic",
@@ -30,6 +31,8 @@
     "skill:fs_basic",
     "skill:fs_search",
     "skill:git_basic",
+    "skill:git_remote_publish",
+    "skill:git_remote_read",
     "skill:health_check",
     "skill:http_basic",
     "skill:image_edit",
@@ -40,6 +43,7 @@
     "skill:list_dir",
     "skill:log_analyze",
     "skill:make_dir",
+    "skill:memory_store",
     "skill:music_generate",
     "skill:office_workspace",
     "skill:package_manager",
@@ -53,6 +57,7 @@
     "skill:subagent",
     "skill:system_basic",
     "skill:task_control",
+    "skill:task_plan",
     "skill:transform",
     "skill:video_generate",
     "skill:web_search_extract",
@@ -63,7 +68,7 @@
   "minimum_proven": true,
   "missing_categories": [],
   "registry": "configs/skills_registry.toml",
-  "required_category_count": 57,
+  "required_category_count": 62,
   "schema_version": 1,
   "selected_cases": [
     "b100_002_fs_list_docs_en",
@@ -74,6 +79,11 @@
     "b100_021_config_edit_apply_fixture_zh",
     "b100_033_process_tail_log_zh",
     "b100_034_git_status_zh",
+    "b100_git_remote_read_missing_connection_zh",
+    "b100_git_remote_publish_missing_connection_en",
+    "b100_task_plan_read_en",
+    "b100_memory_recent_zh",
+    "b100_browser_session_snapshot_en",
     "b100_042_install_module_live_zh",
     "b100_045_service_verify_no_restart_en",
     "b100_048_task_resume_live_en",
@@ -83,7 +93,7 @@
     "b100_062_transform_sort_json_zh",
     "b100_071_http_get_example_en",
     "b100_073_browser_open_example_en",
-    "b100_075_web_search_rust_async_en",
+    "b100_074_web_search_extract_en",
     "b100_078_schedule_live_cleanup_en",
     "b100_079_extension_assess_gap_zh",
     "b100_089_image_vision_local_zh",
@@ -102,8 +112,8 @@
     "b100_107_archive_safe_roundtrip_zh"
   ],
   "selected_non_x_dry_run_count": 0,
-  "selected_row_count": 34,
+  "selected_row_count": 39,
   "selection_algorithm": "exact_minimum_cardinality_set_cover",
   "source": "scripts/nl_tests/cases/nl_cases_basic_skill_100_coverage_20260629.txt",
-  "source_sha256": "ed8c492fbc1636bb49e40c232008f593ae7fec067089b7a9fbda0e57c08b464a"
+  "source_sha256": "e5c1786b68963634d07eb8494d00066ef1828904cf681589b4fb5f19a86d8b3d"
 }

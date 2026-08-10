@@ -2,10 +2,10 @@
 
 ## Capability Summary
 
-This optional bundled skill publishes exactly one approved local commit object
-to exactly one allowlisted GitHub branch over HTTPS. It never derives the
-source from the branch at execution time and does not support force, delete,
-tags, mirror, wildcard or multiple refspecs. Every push requires one-time
+This built-in skill publishes exactly one approved local commit object to
+exactly one allowlisted GitHub branch over HTTPS. It never derives the source
+from the branch at execution time and does not support force, delete, tags,
+mirror, wildcard or multiple refspecs. Every push requires one-time
 confirmation and a separately scoped `github_git_token`.
 
 ## Actions

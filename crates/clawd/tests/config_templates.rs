@@ -1007,21 +1007,25 @@ fn skill_store_optional_skills_are_on_demand_and_disabled_by_default() {
 }
 
 #[test]
-fn git_delivery_skill_store_manifests_project_git_dependency_and_network_consent() {
+fn git_delivery_manifests_separate_core_and_on_demand_build_policy() {
     let root = workspace_root();
-    for skill_name in ["git_remote_read", "git_remote_publish", "git_forge"] {
+    for skill_name in ["git_remote_read", "git_remote_publish"] {
         let path = root
-            .join("optional_skills")
+            .join("crates/skills")
             .join(skill_name)
             .join("skill.toml");
         let manifest = skill_sdk::PackageManifest::load(&path).expect("load Git skill manifest");
-        assert_eq!(manifest.install.host_dependencies, vec!["git"]);
-        assert_eq!(
-            manifest.build.network,
-            skill_sdk::BuildNetworkPolicy::ApprovalRequired
-        );
+        assert_eq!(manifest.build.network, skill_sdk::BuildNetworkPolicy::Deny);
         assert_eq!(manifest.install.runtime_assets, Vec::<String>::new());
     }
+    let forge =
+        skill_sdk::PackageManifest::load(&root.join("optional_skills/git_forge/skill.toml"))
+            .expect("load Git forge manifest");
+    assert_eq!(forge.install.host_dependencies, vec!["git"]);
+    assert_eq!(
+        forge.build.network,
+        skill_sdk::BuildNetworkPolicy::ApprovalRequired
+    );
 }
 
 #[test]
@@ -1052,11 +1056,15 @@ fn git_delivery_permissions_are_action_scoped_and_local_git_stays_unprivileged()
         Some(true)
     );
     assert_eq!(mapping("fetch_authenticated").credential_access, Some(true));
-    for skill_name in ["git_remote_read", "git_remote_publish", "git_forge"] {
+    for skill_name in ["git_remote_read", "git_remote_publish"] {
         let entry = registry.get(skill_name).expect("Git delivery skill");
-        assert!(!entry.enabled);
-        assert_eq!(entry.install_mode.as_deref(), Some("on_demand"));
+        assert!(entry.enabled);
+        assert!(entry.fixed_on);
+        assert_eq!(entry.install_mode, None);
     }
+    let forge = registry.get("git_forge").expect("Git forge skill");
+    assert!(!forge.enabled);
+    assert_eq!(forge.install_mode.as_deref(), Some("on_demand"));
 }
 
 /// planner-first 收敛：已移除的技能不应再通过 registry 重新暴露。

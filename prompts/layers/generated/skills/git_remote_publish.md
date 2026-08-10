@@ -4,14 +4,14 @@
 - Follow this skill's `INTERFACE.md` strictly when selecting actions and parameters.
 
 ## Interface Source
-- Primary source: `optional_skills/git_remote_publish/INTERFACE.md`
+- Primary source: `crates/skills/git_remote_publish/INTERFACE.md`
 - If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
 ## Capability Summary (from interface)
-This optional bundled skill publishes exactly one approved local commit object
-to exactly one allowlisted GitHub branch over HTTPS. It never derives the
-source from the branch at execution time and does not support force, delete,
-tags, mirror, wildcard or multiple refspecs. Every push requires one-time
+This built-in skill publishes exactly one approved local commit object to
+exactly one allowlisted GitHub branch over HTTPS. It never derives the source
+from the branch at execution time and does not support force, delete, tags,
+mirror, wildcard or multiple refspecs. Every push requires one-time
 confirmation and a separately scoped `github_git_token`.
 
 ## Config Entry Points (from interface)
