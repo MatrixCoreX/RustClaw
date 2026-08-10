@@ -5,7 +5,8 @@
 
 <!-- ai-learning-navigation:start -->
 上一页：[Web 入口与核心隔离](10-web-entry-security.zh-CN.md) |
-[架构索引](README.md)
+[架构索引](README.md) |
+下一页：[浏览器媒体发现](12-media-discovery.zh-CN.md)
 
 <!-- ai-learning-navigation:end -->
 

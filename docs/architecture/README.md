@@ -19,6 +19,7 @@ GitHub 的 README 不支持真正的页内分页。Agent Runtime 因此只在仓
 | 9 | [Interactive coding and presentation](09-interactive-coding.md) | [交互式编码与输出呈现](09-interactive-coding.zh-CN.md) |
 | 10 | [Web entry and core isolation](10-web-entry-security.md) | [Web 入口与核心隔离](10-web-entry-security.zh-CN.md) |
 | 11 | [Task artifact delivery](11-task-artifact-delivery.md) | [任务产物交付](11-task-artifact-delivery.zh-CN.md) |
+| 12 | [Browser media discovery](12-media-discovery.md) | [浏览器媒体发现](12-media-discovery.zh-CN.md) |
 
 These files are also the source documents rendered by the UI's Learning / Maintenance
 page. Edit a diagram here instead of copying it into UI source.

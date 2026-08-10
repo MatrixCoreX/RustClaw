@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use super::{
-    admitted_extra_field_exists, build_auto_sudo_retry_args,
+    admitted_extra_field_exists, build_auto_sudo_retry_args, capability_result_name_for_action,
     contains_unresolved_runtime_template_arg, cross_task_private_artifact_argument_error,
     evidence_policy_action_policy_error, handle_preflight_argument_failure,
     handle_skill_step_failure, handle_skill_step_success,
@@ -32,6 +32,27 @@ mod scope_tests;
 
 #[path = "skill_execution_validation_tests.rs"]
 mod validation_tests;
+
+#[test]
+fn capability_result_keeps_the_exact_requested_capability_name() {
+    let action = crate::AgentAction::CallCapability {
+        capability: "media_discovery.run_enabled_once".to_string(),
+        args: serde_json::json!({}),
+    };
+    assert_eq!(
+        capability_result_name_for_action(&action, "media_discovery"),
+        "media_discovery.run_enabled_once"
+    );
+
+    let direct = crate::AgentAction::CallSkill {
+        skill: "media_discovery".to_string(),
+        args: serde_json::json!({}),
+    };
+    assert_eq!(
+        capability_result_name_for_action(&direct, "media_discovery"),
+        "media_discovery"
+    );
+}
 
 #[path = "skill_execution_validation_flow_tests.rs"]
 mod validation_flow_tests;

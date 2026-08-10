@@ -455,6 +455,7 @@ GitHub README 不支持真正的页内分页。详细流程图按顺序维护为
 9. [交互式编码与输出呈现](docs/architecture/09-interactive-coding.zh-CN.md)
 10. [Web 入口与核心隔离](docs/architecture/10-web-entry-security.zh-CN.md)
 11. [任务产物交付](docs/architecture/11-task-artifact-delivery.zh-CN.md)
+12. [浏览器媒体发现](docs/architecture/12-media-discovery.zh-CN.md)
 
 可从[架构索引](docs/architecture/README.md)选择语言并使用上一页/下一页导航。
 完整的[文档索引](docs/README.md)提供全部工程文档的英文与简体中文入口。

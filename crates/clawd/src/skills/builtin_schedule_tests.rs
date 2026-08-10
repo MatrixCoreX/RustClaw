@@ -58,6 +58,30 @@ fn schedule_machine_fields_claim_structured_intent() {
 }
 
 #[test]
+fn schedule_intent_json_preserves_nested_machine_types() {
+    let args = json!({
+        "intent_json": json!({
+            "kind": "create",
+            "schedule": {"type": "interval", "every_minutes": 60},
+            "task": {
+                "kind": "run_skill",
+                "payload": {
+                    "skill_name": "example_skill",
+                    "args": {"action": "run_once", "platforms": ["example"], "scheduled_run": true}
+                }
+            }
+        }).to_string()
+    });
+    let intent = explicit_schedule_intent_from_args(&args, "create", "schedule workflow request")
+        .expect("valid structured intent")
+        .expect("intent json must produce an intent");
+
+    assert_eq!(intent.schedule.every_minutes, 60);
+    assert_eq!(intent.task.payload["args"]["platforms"], json!(["example"]));
+    assert_eq!(intent.task.payload["args"]["scheduled_run"], true);
+}
+
+#[test]
 fn schedule_clarification_proves_mutation_was_not_applied() {
     let mut intent = crate::ScheduleIntentOutput::default();
     intent.needs_clarify = true;

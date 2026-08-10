@@ -67,6 +67,7 @@ planner_capabilities = [
         &policy,
         0,
         &action,
+        Some("system.run_command"),
         "fp-run-cmd-async-start",
         1,
         1,
@@ -111,6 +112,21 @@ planner_capabilities = [
         .and_then(|value| value.pointer("/pending_async_job/job_id"))
         .and_then(serde_json::Value::as_str)
         .is_some_and(|value| value.starts_with("local_process:")));
+    assert_eq!(
+        loop_state
+            .capability_results
+            .last()
+            .map(|result| result.capability.as_str()),
+        Some("system.run_command")
+    );
+    assert_eq!(
+        loop_state
+            .task_checkpoint
+            .as_ref()
+            .and_then(|value| value.pointer("/capability_results/0/capability"))
+            .and_then(serde_json::Value::as_str),
+        Some("system.run_command")
+    );
     let delivered = loop_state
         .executed_step_results
         .last()

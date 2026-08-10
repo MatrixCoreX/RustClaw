@@ -122,6 +122,10 @@ fn first_round_uses_complete_compact_index_without_playbooks() {
         "task_control_line={task_control_line:?}"
     );
     assert!(context.text.contains("coding_workflow.preview_repair"));
+    assert!(
+        context.text.contains("schedule.create_structured"),
+        "fixed-on eager schedule capabilities must remain visible in the first round"
+    );
     let task_control_line = task_control_line.expect("task_control compact-index line");
     assert!(
         task_control_line.contains("provider_cause_policy"),
@@ -176,12 +180,7 @@ fn first_round_uses_complete_compact_index_without_playbooks() {
         &task,
         &BTreeSet::new(),
     );
-    for deferred_skill in [
-        "install_module",
-        "process_basic",
-        "schedule",
-        "video_generate",
-    ] {
+    for deferred_skill in ["install_module", "process_basic", "video_generate"] {
         assert!(
             loadable_groups.iter().any(|skill| skill == deferred_skill),
             "deferred_skill={deferred_skill}; loadable_groups={loadable_groups:?}"

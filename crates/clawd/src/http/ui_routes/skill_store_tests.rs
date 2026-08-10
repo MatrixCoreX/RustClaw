@@ -774,6 +774,7 @@ async fn skill_store_http_api_removes_and_reinstalls_optional_skill() {
             "git_remote_read",
             "invest_copy",
             "map_merchant",
+            "media_discovery",
             "media_download",
             "photo_organize",
             "stock",

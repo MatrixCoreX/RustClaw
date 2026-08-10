@@ -10,17 +10,20 @@ Compile natural-language scheduling requests into structured schedule plans.
 ## Parameter contract
 | Param | Required | Type | Default | Description |
 |-------|----------|------|---------|-------------|
-| `action` | yes | string | - | One of `compile`, `create`, `preview`, `list`, `delete`, `pause`, `resume`. |
-| `text` | for compile/create/preview unless `intent` is complete | string | - | Original user schedule request. |
+| `action` | yes | string | - | One of `compile`, `create`, `preview`, `list`, `delete`, `delete_matching`, `pause`, `resume`. |
+| `text` | for natural-language compile/create/preview unless `intent` is complete | string | - | Original user schedule request. |
 | `intent` | no | object | - | Complete `ScheduleIntentOutput` when already available. |
+| `intent_json` | for create_structured | string | - | Exact serialized machine intent copied from a current capability observation. |
 
 ## Planner capabilities
+- `schedule.create_structured`: create a scheduled job from an observed `intent_json` string. Copy the string unchanged in the parent loop; do not reconstruct nested values, turn it back into natural-language intent, or delegate this mutating call.
 - `schedule.create`: create a scheduled job. Prefer args `{ "text": "<original user request>" }` unless a complete `intent` object is already available.
 - `schedule.preview`: parse or preview a schedule without mutating state. Call this capability with only
   `{ "text": "<original user request>" }`; runtime forces `compile_only` / `dry_run`, so do not add
   `action`, `dry_run`, or `preview_only` to capability args.
 - `schedule.list`: list scheduled jobs.
 - `schedule.delete`: delete scheduled jobs; use `target_job_id` when the user names one.
+- `schedule.delete_matching`: delete only jobs matching structured task ownership fields. Pass `match_task_kind`, `match_skill_name`, `match_task_action`, and `match_platforms`; never derive these fields from localized prose. A shared multi-platform job is retained unless every platform in that job is included in `match_platforms`.
 - `schedule.pause`: pause scheduled jobs; use `target_job_id` when the user names one.
 - `schedule.resume`: resume scheduled jobs; use `target_job_id` when the user names one.
 

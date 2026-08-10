@@ -6,6 +6,7 @@ use claw_core::skill_registry::SkillsRegistry;
 
 use serde_json::json;
 
+use super::templates::{value_contains_unresolved_template, TemplatePlaceholderScope};
 use super::{verify_plan, VerifyInput, VerifyIssueKind, VerifyMode};
 use crate::{
     evidence_policy::FailureAttribution, AgentRuntimeConfig, AppState, ClaimedTask,
@@ -710,6 +711,18 @@ fn observe_mode_rewrites_unresolved_template_args_to_response() {
             .and_then(serde_json::Value::as_str),
         Some("clawd.msg.verify.unresolved_template_arg")
     );
+}
+
+#[test]
+fn serialized_json_with_adjacent_closing_braces_is_not_a_template() {
+    let args = json!({
+        "intent_json": "{\"kind\":\"create\",\"task\":{\"kind\":\"run_skill\",\"payload\":{\"args\":{\"scheduled_run\":true}}}}"
+    });
+
+    assert!(!value_contains_unresolved_template(
+        &args,
+        &TemplatePlaceholderScope::default()
+    ));
 }
 
 #[test]

@@ -67,6 +67,80 @@ fn claimed_task_with_payload(channel: &str, payload: serde_json::Value) -> Claim
     }
 }
 
+fn insert_test_skill_schedule(
+    state: &AppState,
+    job_id: &str,
+    task: &ClaimedTask,
+    platforms: &[&str],
+) {
+    let db = state.core.db.get().expect("db");
+    db.execute(
+        "INSERT INTO scheduled_jobs (
+            job_id, user_id, chat_id, channel, schedule_type, every_minutes,
+            timezone, task_kind, task_payload_json, next_run_at, created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, 'interval', 60, 'Asia/Shanghai', 'run_skill', ?5, 4102444800, '0', '0')",
+        params![
+            job_id,
+            task.user_id,
+            task.chat_id,
+            task.channel,
+            json!({
+                "skill_name": "media_discovery",
+                "args": {"action": "run_once", "platforms": platforms},
+            })
+            .to_string(),
+        ],
+    )
+    .expect("insert test schedule");
+}
+
+#[test]
+fn structured_schedule_cleanup_deletes_owned_jobs_and_retains_shared_platform_jobs() {
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let task = claimed_task_with_payload("ui", json!({"text": "structured cleanup"}));
+    insert_test_skill_schedule(&state, "job-douyin", &task, &["douyin"]);
+    insert_test_skill_schedule(&state, "job-shared", &task, &["douyin", "xiaohongshu"]);
+
+    let first: serde_json::Value = serde_json::from_str(
+        &delete_matching_skill_schedules(
+            &state,
+            &task,
+            &json!({
+                "match_task_kind": "run_skill",
+                "match_skill_name": "media_discovery",
+                "match_task_action": "run_once",
+                "match_platforms": ["douyin"],
+            }),
+        )
+        .expect("delete one-platform schedule"),
+    )
+    .expect("structured cleanup result");
+    assert_eq!(first["deleted_job_ids"], json!(["job-douyin"]));
+    assert_eq!(first["retained_shared_job_ids"], json!(["job-shared"]));
+
+    let second: serde_json::Value = serde_json::from_str(
+        &delete_matching_skill_schedules(
+            &state,
+            &task,
+            &json!({
+                "match_task_kind": "run_skill",
+                "match_skill_name": "media_discovery",
+                "match_task_action": "run_once",
+                "match_platforms": ["douyin", "xiaohongshu"],
+            }),
+        )
+        .expect("delete shared schedule after both platforms stop"),
+    )
+    .expect("structured shared cleanup result");
+    assert_eq!(second["deleted_job_ids"], json!(["job-shared"]));
+
+    let db = state.core.db.get().expect("db");
+    let remaining: i64 = db
+        .query_row("SELECT COUNT(*) FROM scheduled_jobs", [], |row| row.get(0))
+        .expect("count remaining schedules");
+    assert_eq!(remaining, 0);
+}
+
 #[test]
 fn schedule_payload_inherits_wechat_context_token_from_source_task() {
     let task = claimed_task_with_payload(
@@ -592,6 +666,30 @@ fn validate_schedule_run_skill_disabled_skill_fails() {
     let out = validate_schedule_run_skill_with_registry(&reg, &payload);
     assert!(out.is_err());
     assert!(out.unwrap_err().contains("disabled"));
+}
+
+#[test]
+fn validate_schedule_run_skill_uses_runtime_allow_set_for_on_demand_skill() {
+    let reg = test_registry();
+    let payload = json!({
+        "skill_name": "health_check",
+        "args": { "action": "status" }
+    });
+    let enabled = ["health_check".to_string()].into_iter().collect();
+    let out = validate_schedule_run_skill_with_allow_set(&reg, &enabled, &payload).unwrap();
+    assert_eq!(out["skill_name"], "health_check");
+}
+
+#[test]
+fn validate_schedule_run_skill_runtime_allow_set_can_revoke_base_default() {
+    let reg = test_registry();
+    let payload = json!({
+        "skill_name": "rss_fetch",
+        "args": { "action": "latest" }
+    });
+    let enabled = std::collections::HashSet::new();
+    let error = validate_schedule_run_skill_with_allow_set(&reg, &enabled, &payload).unwrap_err();
+    assert!(error.contains("disabled"));
 }
 
 #[test]

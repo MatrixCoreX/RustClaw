@@ -16,11 +16,16 @@ pub(super) async fn execute_schedule_workflow_for_task(
             "text",
             "raw",
             "intent",
+            "intent_json",
             "kind",
             "timezone",
             "schedule",
             "task",
             "target_job_id",
+            "match_task_kind",
+            "match_skill_name",
+            "match_task_action",
+            "match_platforms",
             "mode",
             "dry_run",
             "preview_only",
@@ -31,6 +36,9 @@ pub(super) async fn execute_schedule_workflow_for_task(
             "confidence",
         ],
     )?;
+    if action == "delete_matching" {
+        return crate::schedule_service::delete_matching_skill_schedules(state, task, args);
+    }
     let prompt = schedule_workflow_prompt(map, args);
     let mut intent = explicit_schedule_intent_from_args(args, action, &prompt)?;
     if intent.is_none() {
@@ -77,6 +85,16 @@ pub(super) fn explicit_schedule_intent_from_args(
     action: &str,
     prompt: &str,
 ) -> Result<Option<crate::ScheduleIntentOutput>, String> {
+    if let Some(intent_json) = args.get("intent_json").and_then(Value::as_str) {
+        return serde_json::from_str::<crate::ScheduleIntentOutput>(intent_json)
+            .map(Some)
+            .map_err(|err| {
+                schedule_workflow_error(
+                    "invalid_schedule_intent",
+                    Some(serde_json::json!({ "detail": err.to_string() })),
+                )
+            });
+    }
     if let Some(intent) = args.get("intent").filter(|value| value.is_object()) {
         return serde_json::from_value::<crate::ScheduleIntentOutput>(intent.clone())
             .map(Some)
@@ -153,7 +171,7 @@ pub(super) fn schedule_replan_error(intent: &crate::ScheduleIntentOutput) -> Str
 }
 
 pub(super) fn schedule_args_contain_structured_intent(args: &Value) -> bool {
-    ["kind", "schedule", "task", "target_job_id"]
+    ["intent_json", "kind", "schedule", "task", "target_job_id"]
         .iter()
         .any(|key| args.get(*key).is_some())
 }

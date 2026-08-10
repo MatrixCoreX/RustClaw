@@ -68,7 +68,7 @@ pub(super) fn value_contains_unresolved_template(
     match value {
         serde_json::Value::String(text) => {
             let text = text.trim();
-            if !(text.contains("{{") || text.contains("}}")) {
+            if !text.contains("{{") {
                 return false;
             }
             let Some(refs) = extract_template_refs(text) else {

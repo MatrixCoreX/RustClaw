@@ -352,3 +352,42 @@ output_schema = { type = "object", required = ["text", "extra"], properties = { 
         "output_contract_violation"
     );
 }
+
+#[test]
+fn durable_runner_handoff_is_not_validated_as_terminal_skill_output() {
+    let state = test_state();
+    install_test_registry(
+        &state,
+        r#"
+[[skills]]
+name = "output_fixture"
+enabled = true
+kind = "runner"
+planner_kind = "skill"
+output_schema = { type = "object", required = ["text", "extra"], properties = { text = { type = "string" }, extra = { type = "object", required = ["source_skill"], properties = { source_skill = { type = "string", const = "output_fixture" } } } } }
+"#,
+        &["output_fixture"],
+    );
+    let mut step = crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "output_fixture".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(String::new()),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    };
+    let handoff = json!({
+        "schema_version": 1,
+        "source_skill": "skill_runner",
+        "status": "ok",
+        "action": "durable_background_start",
+        "pending_async_job": { "job_id": "local_process:test", "status": "accepted" }
+    });
+
+    assert!(
+        enforce_skill_output_contract(&state, "output_fixture", &mut step, Some(&handoff),)
+            .is_none()
+    );
+    assert_eq!(step.status, crate::executor::StepExecutionStatus::Ok);
+}

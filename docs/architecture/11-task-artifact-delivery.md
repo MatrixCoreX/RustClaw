@@ -5,7 +5,8 @@
 
 <!-- ai-learning-navigation:start -->
 Previous: [Web entry and core isolation](10-web-entry-security.md) |
-[Architecture index](README.md)
+[Architecture index](README.md) |
+Next: [Browser media discovery](12-media-discovery.md)
 
 <!-- ai-learning-navigation:end -->
 
