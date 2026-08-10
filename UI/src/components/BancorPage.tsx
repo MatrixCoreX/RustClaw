@@ -16,6 +16,8 @@ import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerE
 
 import {
   BANCOR_DEFAULT_SLIPPAGE_BPS,
+  type BancorAmountAdjustment,
+  adjustBancorInputAmount,
   calculateBancorEstimatedOutput,
   calculateBancorInputFee,
   formatBancorApiError,
@@ -441,10 +443,13 @@ export function BancorPage({
                 ))}
               </div>
 
-              <label className="mt-5 block text-sm text-white/70">
-                {t("支付数量", "Amount to pay")} ({inputAsset})
+              <div className="mt-5">
+                <label htmlFor="bancor-standard-input-amount" className="block text-sm text-white/70">
+                  {t("支付数量", "Amount to pay")} ({inputAsset})
+                </label>
                 <div className="mt-2 flex items-center rounded-xl border border-white/10 bg-black/10 px-3 focus-within:border-sky-400/50">
                   <input
+                    id="bancor-standard-input-amount"
                     value={inputAmount}
                     inputMode="decimal"
                     placeholder="0.0000"
@@ -456,7 +461,15 @@ export function BancorPage({
                   />
                   <span className="text-sm font-semibold text-white/55">{inputAsset}</span>
                 </div>
-              </label>
+                <BancorAmountAdjustmentControls
+                  t={t}
+                  value={inputAmount}
+                  onChange={(value) => {
+                    setInputAmount(value);
+                    clearQuote();
+                  }}
+                />
+              </div>
             </>
           ) : (
             <BancorSwapTradePanel
@@ -699,6 +712,7 @@ export function BancorSwapTradePanel({
           />
           <span className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-semibold text-white/80">{inputAsset}</span>
         </label>
+        <BancorAmountAdjustmentControls t={t} value={inputAmount} onChange={onInputChange} />
       </div>
 
       <div className="relative z-10 -my-3 flex justify-center">
@@ -728,6 +742,68 @@ export function BancorSwapTradePanel({
           {t("按当前储备预估，最终到账以服务端签名报价为准。", "Estimated from current reserves; the signed server quote is final.")}
         </p>
       </div>
+    </div>
+  );
+}
+
+export function BancorAmountAdjustmentControls({
+  t,
+  value,
+  onChange,
+}: {
+  t: Translate;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const controls: Array<{
+    adjustment: BancorAmountAdjustment;
+    label: string;
+    title: string;
+  }> = [
+    {
+      adjustment: "decrease_25_percent",
+      label: "−25%",
+      title: t("将当前数量减少 25%", "Reduce the current amount by 25%"),
+    },
+    {
+      adjustment: "decrease_50_percent",
+      label: "−50%",
+      title: t("将当前数量减少 50%", "Reduce the current amount by 50%"),
+    },
+    {
+      adjustment: "decrement",
+      label: "−",
+      title: t("减少 0.0001", "Decrease by 0.0001"),
+    },
+    {
+      adjustment: "increment",
+      label: "+",
+      title: t("增加 0.0001", "Increase by 0.0001"),
+    },
+  ];
+  return (
+    <div
+      className="mt-2 flex flex-wrap justify-end gap-1.5"
+      role="group"
+      aria-label={t("快速调整支付数量", "Quick amount adjustments")}
+    >
+      {controls.map((control) => {
+        const adjusted = adjustBancorInputAmount(value, control.adjustment);
+        const disabled = adjusted === null || adjusted === value;
+        return (
+          <button
+            key={control.adjustment}
+            type="button"
+            className="min-w-10 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-xs font-medium text-white/60 transition hover:border-sky-300/25 hover:bg-sky-400/10 hover:text-sky-100 disabled:cursor-not-allowed disabled:opacity-35"
+            disabled={disabled}
+            aria-label={control.title}
+            title={control.title}
+            onClick={() => adjusted !== null && onChange(adjusted)}
+          >
+            {control.label}
+          </button>
+        );
+      })}
     </div>
   );
 }

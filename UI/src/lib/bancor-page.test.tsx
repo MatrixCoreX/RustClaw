@@ -201,6 +201,11 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.doesNotMatch(html, /价格来自真实成交/);
   assert.match(html, /立即刷新 K 线/);
   assert.match(html, /aria-label="交易模式"/);
+  assert.match(html, /aria-label="快速调整支付数量"/);
+  assert.match(html, /aria-label="将当前数量减少 25%"/);
+  assert.match(html, /aria-label="将当前数量减少 50%"/);
+  assert.match(html, /aria-label="减少 0\.0001"/);
+  assert.match(html, /aria-label="增加 0\.0001"/);
   assert.match(html, /aria-pressed="true"[^>]*>标准<\/button>/);
   assert.match(html, /aria-pressed="false"[^>]*>SWAP<\/button>/);
   assert.match(html, /滑点保护与警戒/);
@@ -248,6 +253,9 @@ test("BANCOR swap mode uses stacked pay and estimated-output windows", () => {
   assert.match(html, /0\.0099/);
   assert.match(html, /切换为 USD 支付/);
   assert.match(html, /最终到账以服务端签名报价为准/);
+  assert.match(html, /aria-label="快速调整支付数量"/);
+  assert.match(html, />−25%<\/button>/);
+  assert.match(html, />−50%<\/button>/);
 });
 
 test("BANCOR candlesticks follow Chinese and English market color conventions", () => {

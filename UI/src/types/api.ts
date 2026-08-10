@@ -1249,6 +1249,8 @@ export interface NniBancorCandlesResponse {
   schema_version: 1;
   status: string;
   market_id: string;
+  market_version?: number;
+  market_created_at_unix?: number;
   interval_seconds: number;
   start_time_unix: number;
   end_time_unix: number;

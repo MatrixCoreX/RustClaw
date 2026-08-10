@@ -307,6 +307,7 @@ pub(crate) fn auth_key_from_headers(headers: &HeaderMap) -> Option<&str> {
 fn api_cors_layer() -> CorsLayer {
     let allowed_headers = vec![
         axum::http::header::CONTENT_TYPE,
+        axum::http::header::IF_NONE_MATCH,
         axum::http::HeaderName::from_static("last-event-id"),
         axum::http::HeaderName::from_static(claw_core::product_identity::AUTH_KEY_HEADER),
         axum::http::HeaderName::from_static(claw_core::product_identity::CLIENT_ORIGIN_HEADER),
@@ -321,6 +322,7 @@ fn api_cors_layer() -> CorsLayer {
             axum::http::Method::OPTIONS,
         ])
         .allow_headers(allowed_headers)
+        .expose_headers([axum::http::header::ETAG])
 }
 
 fn resolve_startup_config_path_from<I>(

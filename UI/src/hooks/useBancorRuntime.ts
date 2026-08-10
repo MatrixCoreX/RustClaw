@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import type {
   ApiResponse,
@@ -9,6 +9,13 @@ import type {
   NniBancorQuoteResponse,
   NniBancorTradeResponse,
 } from "../types/api";
+import {
+  BANCOR_CANDLE_CACHE_MAX_CANDLES,
+  calculateBancorCandleRefreshLimit,
+  mergeBancorCandleResponses,
+  readBancorCandleCache,
+  writeBancorCandleCache,
+} from "../lib/bancor-candle-cache";
 
 type Translate = (zh: string, en: string) => string;
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
@@ -28,6 +35,30 @@ function parseBancorInputUnits(value: string): bigint | null {
 
 function formatBancorUnits(units: bigint): string {
   return `${units / BANCOR_ASSET_SCALE}.${String(units % BANCOR_ASSET_SCALE).padStart(4, "0")}`;
+}
+
+export type BancorAmountAdjustment = "decrease_25_percent" | "decrease_50_percent" | "decrement" | "increment";
+
+export function adjustBancorInputAmount(
+  value: string,
+  adjustment: BancorAmountAdjustment,
+): string | null {
+  const normalized = value.trim();
+  if (normalized === "" && adjustment === "increment") return formatBancorUnits(1n);
+  const match = /^(0|[1-9][0-9]*)(?:\.([0-9]{1,4}))?$/.exec(normalized);
+  if (!match) return null;
+  const fraction = (match[2] || "").padEnd(4, "0");
+  const units = BigInt(match[1]) * BANCOR_ASSET_SCALE + BigInt(fraction || "0");
+  if (units > BANCOR_MAX_UNITS) return null;
+
+  if (adjustment === "increment") {
+    return units < BANCOR_MAX_UNITS ? formatBancorUnits(units + 1n) : null;
+  }
+  if (units <= 0n) return null;
+  if (adjustment === "decrement") return formatBancorUnits(units > 1n ? units - 1n : 1n);
+  const remainingPercent = adjustment === "decrease_25_percent" ? 75n : 50n;
+  const adjusted = (units * remainingPercent) / 100n;
+  return formatBancorUnits(adjusted > 0n ? adjusted : 1n);
 }
 
 export function parseBancorSlippagePercent(value: string): number | null {
@@ -162,7 +193,15 @@ export function formatBancorApiError(
   return code || fallback;
 }
 
-export function useBancorRuntime({ apiFetch, t }: { apiFetch: ApiFetch; t: Translate }) {
+export function useBancorRuntime({
+  apiFetch,
+  cacheScope,
+  t,
+}: {
+  apiFetch: ApiFetch;
+  cacheScope: string;
+  t: Translate;
+}) {
   const [market, setMarket] = useState<NniBancorMarketResponse | null>(null);
   const [candles, setCandles] = useState<NniBancorCandlesResponse | null>(null);
   const [account, setAccount] = useState<NniBancorAccountResponse | null>(null);
@@ -180,6 +219,15 @@ export function useBancorRuntime({ apiFetch, t }: { apiFetch: ApiFetch; t: Trans
   const [tradeLoading, setTradeLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const candleIntervalRef = useRef(BANCOR_DEFAULT_CANDLE_INTERVAL_SECONDS);
+  const candleCacheRef = useRef(new Map<string, {
+    response: NniBancorCandlesResponse;
+    etag: string | null;
+    etagRequestLimit: number | null;
+  }>());
+  const candleRequestsRef = useRef(new Map<string, Promise<NniBancorCandlesResponse | null>>());
+  const candleCacheScopeRef = useRef(cacheScope);
+  candleCacheScopeRef.current = cacheScope;
 
   const readError = (body: ApiResponse<unknown>, fallback: string) => {
     const data = body.data as { attempts?: Array<{ error_code?: string | null }> } | undefined;
@@ -246,34 +294,155 @@ export function useBancorRuntime({ apiFetch, t }: { apiFetch: ApiFetch; t: Trans
     }
   };
 
-  const fetchCandles = async (intervalSeconds = candleIntervalSeconds, silent = false) => {
-    if (!silent) setCandlesLoading(true);
-    try {
+  const fetchCandles = (
+    intervalSeconds = candleIntervalRef.current,
+    silent = false,
+    forceAfterInFlight = false,
+  ): Promise<NniBancorCandlesResponse | null> => {
+    const requestScope = cacheScope;
+    const requestKey = `${requestScope}\n${intervalSeconds}`;
+    const inFlight = candleRequestsRef.current.get(requestKey);
+    if (inFlight) {
+      if (!forceAfterInFlight) return inFlight;
+      return inFlight.then(() => fetchCandles(intervalSeconds, silent));
+    }
+    if (!silent && candleIntervalRef.current === intervalSeconds) setCandlesLoading(true);
+
+    const request = (async () => {
+      let cachedSnapshot = candleCacheRef.current.get(requestKey) ?? null;
+      if (!cachedSnapshot) {
+        const persistent = await readBancorCandleCache(requestScope, intervalSeconds);
+        if (persistent) {
+          cachedSnapshot = {
+            response: persistent.response,
+            etag: persistent.etag,
+            etagRequestLimit: persistent.etagRequestLimit,
+          };
+          candleCacheRef.current.set(requestKey, cachedSnapshot);
+          if (
+            candleCacheScopeRef.current === requestScope
+            && candleIntervalRef.current === intervalSeconds
+          ) {
+            setCandles(persistent.response);
+            setCandlesError(null);
+          }
+        }
+      }
+
+      const refreshLimit = calculateBancorCandleRefreshLimit(
+        cachedSnapshot?.response ?? null,
+        intervalSeconds,
+      );
       const params = new URLSearchParams({
         interval_seconds: String(intervalSeconds),
-        // Load the full server-supported window so sparse real-trade candles
-        // still leave enough history for the chart's horizontal pan.
-        limit: "300",
+        limit: String(refreshLimit),
       });
-      const response = await apiFetch(`/v1/nni/bancor/candles?${params}`);
-      const body = (await response.json()) as ApiResponse<NniBancorCandlesResponse>;
-      if (!response.ok || !body.ok || !body.data) {
-        throw new Error(readError(body, `Candle load failed (${response.status})`));
+      const requestHeaders: Record<string, string> = {};
+      if (
+        cachedSnapshot?.etag
+        && cachedSnapshot.etagRequestLimit === refreshLimit
+      ) {
+        requestHeaders["If-None-Match"] = cachedSnapshot.etag;
       }
-      setCandles(body.data);
-      setCandlesError(null);
-      return body.data;
-    } catch (cause) {
-      if (!silent) {
-        setCandlesError(cause instanceof Error ? cause.message : t("K 线读取失败。", "Candlestick data could not be loaded."));
+
+      try {
+        const response = await apiFetch(`/v1/nni/bancor/candles?${params}`, {
+          cache: "no-store",
+          headers: requestHeaders,
+        });
+        if (response.status === 304) {
+          if (!cachedSnapshot) throw new Error("nni_bancor_candle_cache_miss");
+          const validatedSnapshot = {
+            response: cachedSnapshot.response,
+            etag: response.headers.get("etag") || cachedSnapshot.etag,
+            etagRequestLimit: refreshLimit,
+          };
+          candleCacheRef.current.set(requestKey, validatedSnapshot);
+          void writeBancorCandleCache({
+            scope: requestScope,
+            intervalSeconds,
+            response: validatedSnapshot.response,
+            etag: validatedSnapshot.etag,
+            etagRequestLimit: refreshLimit,
+          });
+          if (
+            candleCacheScopeRef.current === requestScope
+            && candleIntervalRef.current === intervalSeconds
+          ) {
+            setCandles(validatedSnapshot.response);
+            setCandlesError(null);
+          }
+          return validatedSnapshot.response;
+        }
+
+        const body = (await response.json()) as ApiResponse<NniBancorCandlesResponse>;
+        if (!response.ok || !body.ok || !body.data) {
+          throw new Error(readError(body, `Candle load failed (${response.status})`));
+        }
+        const merged = mergeBancorCandleResponses(
+          cachedSnapshot?.response ?? null,
+          body.data,
+          BANCOR_CANDLE_CACHE_MAX_CANDLES,
+        );
+        const updatedSnapshot = {
+          response: merged,
+          etag: response.headers.get("etag"),
+          etagRequestLimit: refreshLimit,
+        };
+        candleCacheRef.current.set(requestKey, updatedSnapshot);
+        void writeBancorCandleCache({
+          scope: requestScope,
+          intervalSeconds,
+          response: merged,
+          etag: updatedSnapshot.etag,
+          etagRequestLimit: refreshLimit,
+        });
+        if (
+          candleCacheScopeRef.current === requestScope
+          && candleIntervalRef.current === intervalSeconds
+        ) {
+          setCandles(merged);
+          setCandlesError(null);
+        }
+        return merged;
+      } catch (cause) {
+        if (
+          !silent
+          && candleCacheScopeRef.current === requestScope
+          && candleIntervalRef.current === intervalSeconds
+        ) {
+          if (cachedSnapshot) {
+            setCandlesError(t(
+              "暂时无法更新，正在显示浏览器中最近保存的 K 线。",
+              "The latest update is unavailable, so the most recently saved candlesticks are shown.",
+            ));
+          } else {
+            setCandlesError(cause instanceof Error ? cause.message : t("K 线读取失败。", "Candlestick data could not be loaded."));
+          }
+        }
+        return cachedSnapshot?.response ?? null;
+      } finally {
+        if (
+          !silent
+          && candleCacheScopeRef.current === requestScope
+          && candleIntervalRef.current === intervalSeconds
+        ) {
+          setCandlesLoading(false);
+        }
       }
-      return null;
-    } finally {
-      if (!silent) setCandlesLoading(false);
-    }
+    })();
+
+    candleRequestsRef.current.set(requestKey, request);
+    void request.finally(() => {
+      if (candleRequestsRef.current.get(requestKey) === request) {
+        candleRequestsRef.current.delete(requestKey);
+      }
+    });
+    return request;
   };
 
   const changeCandleInterval = async (intervalSeconds: number) => {
+    candleIntervalRef.current = intervalSeconds;
     setCandleIntervalSeconds(intervalSeconds);
     return fetchCandles(intervalSeconds);
   };
@@ -342,7 +511,7 @@ export function useBancorRuntime({ apiFetch, t }: { apiFetch: ApiFetch; t: Trans
         fetchMarket(true),
         fetchAccount(1, true),
         fetchMarketTrades(1, true),
-        fetchCandles(candleIntervalSeconds, true),
+        fetchCandles(candleIntervalSeconds, true, true),
       ]);
       return body.data;
     } catch (cause) {

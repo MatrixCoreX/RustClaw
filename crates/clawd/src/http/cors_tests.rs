@@ -1,6 +1,6 @@
 use axum::body::Body;
 use axum::http::{header, Method, Request, StatusCode};
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::Router;
 use tower::ServiceExt;
 
@@ -18,7 +18,7 @@ async fn task_submit_preflight_accepts_ui_client_header() {
                 .header(header::ACCESS_CONTROL_REQUEST_METHOD, "POST")
                 .header(
                     header::ACCESS_CONTROL_REQUEST_HEADERS,
-                    "content-type,x-agent-client,x-agent-key",
+                    "content-type,if-none-match,x-agent-client,x-agent-key",
                 )
                 .body(Body::empty())
                 .expect("build CORS preflight request"),
@@ -32,10 +32,47 @@ async fn task_submit_preflight_accepts_ui_client_header() {
         .get(header::ACCESS_CONTROL_ALLOW_HEADERS)
         .and_then(|value| value.to_str().ok())
         .expect("access-control-allow-headers");
-    for expected in ["content-type", "x-agent-client", "x-agent-key"] {
+    for expected in [
+        "content-type",
+        "if-none-match",
+        "x-agent-client",
+        "x-agent-key",
+    ] {
         assert!(
             allowed.split(',').any(|value| value.trim() == expected),
             "missing {expected} in {allowed}"
         );
     }
+}
+
+#[tokio::test]
+async fn cors_exposes_etag_for_browser_market_cache_validation() {
+    let app = Router::new()
+        .route(
+            "/v1/candles",
+            get(|| async { ([(header::ETAG, "\"candles-v1\"")], StatusCode::OK) }),
+        )
+        .layer(super::api_cors_layer());
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/v1/candles")
+                .header(header::ORIGIN, "http://127.0.0.1:3000")
+                .body(Body::empty())
+                .expect("build CORS cache request"),
+        )
+        .await
+        .expect("execute CORS cache request");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let exposed = response
+        .headers()
+        .get(header::ACCESS_CONTROL_EXPOSE_HEADERS)
+        .and_then(|value| value.to_str().ok())
+        .expect("access-control-expose-headers");
+    assert!(
+        exposed.split(',').any(|value| value.trim() == "etag"),
+        "missing etag in {exposed}"
+    );
 }

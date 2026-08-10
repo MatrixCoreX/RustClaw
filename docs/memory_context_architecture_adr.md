@@ -4,7 +4,7 @@ Status: accepted and implemented through WP6; WP7 closed by evaluation gate
 
 Date: 2026-08-05
 
-Plan: `plan/queued/memory_context_codex_claude_gap_closure_plan_20260804.md`
+Plan: `plan/archived_completed_20260806/memory_context_codex_claude_gap_closure_plan_20260804.md`
 
 ## Decision summary
 

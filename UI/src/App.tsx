@@ -264,7 +264,7 @@ export default function App() {
 
   const apiFetch = (path: string, init?: RequestInit) => safeFetch(path, init, true);
   const publicApiFetch = (path: string, init?: RequestInit) => safeFetch(path, init, false);
-  const bancorRuntime = useBancorRuntime({ apiFetch, t });
+  const bancorRuntime = useBancorRuntime({ apiFetch, cacheScope: apiBase, t });
   const {
     agentConfig,
     agentConfigLoading,

@@ -5,6 +5,7 @@ import {
   BANCOR_DEFAULT_CANDLE_INTERVAL_SECONDS,
   BANCOR_DEFAULT_SLIPPAGE_BPS,
   BANCOR_MAX_SLIPPAGE_BPS,
+  adjustBancorInputAmount,
   calculateBancorEstimatedOutput,
   calculateBancorInputFee,
   formatBancorApiError,
@@ -102,4 +103,16 @@ test("BANCOR swap preview follows the same integer reserve formula as the backen
   assert.equal(calculateBancorEstimatedOutput({ side: "buy", inputAmount: "1.0000", market }), "9949.0100");
   assert.equal(calculateBancorEstimatedOutput({ side: "sell", inputAmount: "100.0000", market }), "0.0099");
   assert.equal(calculateBancorEstimatedOutput({ side: "buy", inputAmount: "0.0001", market }), null);
+});
+
+test("BANCOR amount shortcuts reduce precisely and step by the smallest unit", () => {
+  assert.equal(adjustBancorInputAmount("100.0000", "decrease_25_percent"), "75.0000");
+  assert.equal(adjustBancorInputAmount("100.0000", "decrease_50_percent"), "50.0000");
+  assert.equal(adjustBancorInputAmount("1.0000", "decrement"), "0.9999");
+  assert.equal(adjustBancorInputAmount("1.0000", "increment"), "1.0001");
+  assert.equal(adjustBancorInputAmount("", "increment"), "0.0001");
+  assert.equal(adjustBancorInputAmount("0.0001", "decrement"), "0.0001");
+  assert.equal(adjustBancorInputAmount("0.0001", "decrease_50_percent"), "0.0001");
+  assert.equal(adjustBancorInputAmount("invalid", "increment"), null);
+  assert.equal(adjustBancorInputAmount("922337203685477.5807", "increment"), null);
 });
