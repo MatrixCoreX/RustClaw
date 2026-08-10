@@ -1178,6 +1178,7 @@ export function useChatRuntime({
       const submitBody: Record<string, unknown> = {
         channel: interactionChannel,
         kind: "ask",
+        idempotency_key: `ui:${submitThreadId}:${teachingRunId}`,
         ...(activeUserKey ? { user_key: activeUserKey } : {}),
         ...activeIdentityIds,
         ...(interactionExternalUserId.trim() ? { external_user_id: interactionExternalUserId.trim() } : {}),
@@ -1400,6 +1401,7 @@ export function useChatRuntime({
     setChatError(null);
     let submittedTaskId: string | null = null;
     try {
+      const compactionRequestId = `ui-compact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const payload: Record<string, unknown> = {
         entrypoint: "compact_conversation",
         source: "ui_machine",
@@ -1418,6 +1420,7 @@ export function useChatRuntime({
         body: JSON.stringify({
           channel: interactionChannel,
           kind: "ask",
+          idempotency_key: `ui:${thread.id}:${compactionRequestId}`,
           ...(activeUserKey ? { user_key: activeUserKey } : {}),
           ...activeIdentityIds,
           ...(interactionExternalUserId.trim()
@@ -1629,8 +1632,17 @@ export function mergeServerConversationHistory(
       ...restoredRuns,
     ].sort((left, right) => left.startedAt - right.startedAt);
     const restoredMessageIds = new Set(thread.messages.map((message) => message.id));
+    const replacedLocalMessageIds = new Set(
+      (existing?.teachingRuns ?? [])
+        .filter((run) => Boolean(run.taskId) && restoredTaskIds.has(run.taskId))
+        .flatMap((run) => [run.userMessageId, run.assistantMessageId])
+        .filter((messageId): messageId is string => Boolean(messageId)),
+    );
     const messages = [
-      ...(existing?.messages ?? []).filter((message) => !restoredMessageIds.has(message.id)),
+      ...(existing?.messages ?? []).filter(
+        (message) =>
+          !restoredMessageIds.has(message.id) && !replacedLocalMessageIds.has(message.id),
+      ),
       ...thread.messages,
     ].sort((left, right) => left.ts - right.ts || left.id.localeCompare(right.id));
     const latestRun = teachingRuns[teachingRuns.length - 1] ?? null;

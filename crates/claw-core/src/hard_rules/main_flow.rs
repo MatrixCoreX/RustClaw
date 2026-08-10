@@ -11,8 +11,6 @@ struct MainFlowRulesToml {
     #[serde(default)]
     trade_preview: TradePreviewSection,
     #[serde(default)]
-    duplicate_affirmation: DuplicateAffirmationSection,
-    #[serde(default)]
     runtime_channel: RuntimeChannelSection,
 }
 
@@ -30,14 +28,6 @@ struct TradePreviewSection {
     default_order_type: Option<String>,
     recent_window_secs: Option<i64>,
     recent_scan_limit: Option<i64>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-struct DuplicateAffirmationSection {
-    window_secs: Option<i64>,
-    scan_limit: Option<i64>,
-    #[serde(default)]
-    statuses: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -109,23 +99,6 @@ pub fn load_main_flow_rules(path: &str) -> MainFlowRules {
                 merged.recent_trade_preview_scan_limit = parsed_limit;
             }
         }
-    }
-
-    if let Some(v) = parsed.duplicate_affirmation.window_secs {
-        if v >= 1 {
-            merged.duplicate_affirmation_window_secs = v;
-        }
-    }
-    if let Some(v) = parsed.duplicate_affirmation.scan_limit {
-        if let Ok(parsed_limit) = usize::try_from(v) {
-            if parsed_limit >= 1 {
-                merged.duplicate_affirmation_scan_limit = parsed_limit;
-            }
-        }
-    }
-    let statuses = normalize_list(parsed.duplicate_affirmation.statuses);
-    if !statuses.is_empty() {
-        merged.duplicate_affirmation_statuses = statuses;
     }
 
     let whatsapp_aliases = normalize_list(parsed.runtime_channel.whatsapp_aliases);

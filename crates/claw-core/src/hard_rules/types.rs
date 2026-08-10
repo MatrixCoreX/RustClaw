@@ -6,9 +6,6 @@ pub struct MainFlowRules {
     pub trade_preview_default_order_type: String,
     pub recent_trade_preview_window_secs: i64,
     pub recent_trade_preview_scan_limit: usize,
-    pub duplicate_affirmation_window_secs: i64,
-    pub duplicate_affirmation_scan_limit: usize,
-    pub duplicate_affirmation_statuses: Vec<String>,
     pub runtime_whatsapp_channel_aliases: Vec<String>,
 }
 
@@ -21,13 +18,6 @@ impl MainFlowRules {
             trade_preview_default_order_type: "market".to_string(),
             recent_trade_preview_window_secs: 600,
             recent_trade_preview_scan_limit: 24,
-            duplicate_affirmation_window_secs: 120,
-            duplicate_affirmation_scan_limit: 30,
-            duplicate_affirmation_statuses: vec![
-                "queued".to_string(),
-                "running".to_string(),
-                "succeeded".to_string(),
-            ],
             runtime_whatsapp_channel_aliases: vec!["whatsapp".to_string()],
         }
     }

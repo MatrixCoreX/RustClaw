@@ -16,6 +16,10 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
         warn!("wechatd: inbound message skipped because task context could not be pinned");
         return;
     };
+    let Some(provider_message_id) = inbound_provider_message_id(&msg) else {
+        warn!("wechatd: inbound message skipped because provider identity is missing");
+        return;
+    };
     // Cover CDN download / decrypt / transcode latency before the clawd task heartbeat starts.
     let _media_typing_guard = if extract_text_message(&msg).is_none() {
         start_typing_heartbeat_for_peer(&state, &task_context).await
@@ -35,18 +39,12 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
         } else {
             None
         };
-        let pending_message_id = format!(
-            "{}:{}:{}",
-            from_user_id,
-            msg.create_time_ms.unwrap_or_default(),
-            pending_attachment_kind.unwrap_or("media")
-        );
         let Some(identity) = ensure_bound_before_task(
             &state,
             &task_context,
             &from_user_id,
             None,
-            Some(&pending_message_id),
+            Some(&provider_message_id),
             pending_attachment_kind,
         )
         .await
@@ -91,6 +89,7 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
                         "image/jpeg",
                         bytes.len() as u64,
                         bound_user_key.clone(),
+                        provider_message_id.clone(),
                     )
                     .await;
                 }
@@ -136,6 +135,7 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
                         "video/mp4",
                         bytes.len() as u64,
                         bound_user_key.clone(),
+                        provider_message_id.clone(),
                     )
                     .await;
                 }
@@ -181,6 +181,7 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
                         "application/octet-stream",
                         bytes.len() as u64,
                         bound_user_key.clone(),
+                        provider_message_id.clone(),
                     )
                     .await;
                 }
@@ -247,6 +248,7 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
                         mime_type,
                         data_to_write.len() as u64,
                         bound_user_key.clone(),
+                        provider_message_id.clone(),
                     )
                     .await;
                 }
@@ -282,18 +284,12 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
     })
     .await;
 
-    let pending_message_id = format!(
-        "{}:{}:{}",
-        from_user_id,
-        msg.create_time_ms.unwrap_or_default(),
-        stable_i64_from_string(&text)
-    );
     let Some(identity) = ensure_bound_before_task(
         &state,
         &task_context,
         &from_user_id,
         Some(text.as_str()),
-        Some(&pending_message_id),
+        Some(&provider_message_id),
         None,
     )
     .await
@@ -305,5 +301,6 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
         task_context,
         text,
         Some(identity.user_key),
+        provider_message_id,
     ));
 }

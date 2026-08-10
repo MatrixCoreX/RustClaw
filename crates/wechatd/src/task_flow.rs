@@ -30,6 +30,18 @@ pub(super) enum WechatTaskTerminalKind {
     Timeout,
 }
 
+pub(super) fn wechat_inbound_idempotency_key(
+    account_id: &str,
+    provider_message_id: &str,
+) -> String {
+    format!(
+        "wechat_ilink:{}:{}:{}",
+        account_id.len(),
+        account_id,
+        provider_message_id
+    )
+}
+
 pub(super) fn wechat_task_terminal_kind(status: TaskStatus) -> Option<WechatTaskTerminalKind> {
     match status {
         TaskStatus::Queued | TaskStatus::Running => None,
@@ -347,6 +359,7 @@ pub(super) async fn submit_wechat_task_with_payload(
     user_key: Option<String>,
     kind: TaskKind,
     mut payload: Value,
+    provider_message_id: Option<String>,
     existing_task_id: Option<String>,
 ) {
     let from_user_id = context.scope.peer_id().to_string();
@@ -382,6 +395,9 @@ pub(super) async fn submit_wechat_task_with_payload(
             ))
             .with_locale(state.config.language.clone())
             .with_context_token(context_token.clone());
+            if let Some(message_id) = provider_message_id.as_deref() {
+                ingress = ingress.with_message_id(message_id.to_string());
+            }
             if let Some(attachments) = payload.get("attachments").and_then(Value::as_array) {
                 ingress
                     .attachments
@@ -394,7 +410,9 @@ pub(super) async fn submit_wechat_task_with_payload(
             }
             ingress
         }),
-        idempotency_key: None,
+        idempotency_key: provider_message_id.as_deref().map(|message_id| {
+            wechat_inbound_idempotency_key(&context.account.account_id, message_id)
+        }),
         kind,
         payload,
     };
@@ -650,13 +668,23 @@ pub(super) async fn submit_wechat_task_and_reply(
     context: PinnedWechatTaskContext,
     text: String,
     user_key: Option<String>,
+    provider_message_id: String,
 ) {
     let payload = json!({
         "text": text,
         "channel": "wechat",
         "context_token": context.context_token.clone(),
     });
-    submit_wechat_task_with_payload(state, context, user_key, TaskKind::Ask, payload, None).await;
+    submit_wechat_task_with_payload(
+        state,
+        context,
+        user_key,
+        TaskKind::Ask,
+        payload,
+        Some(provider_message_id),
+        None,
+    )
+    .await;
 }
 
 pub(super) async fn spawn_existing_wechat_task_delivery(
@@ -671,6 +699,7 @@ pub(super) async fn spawn_existing_wechat_task_delivery(
         Some(user_key),
         TaskKind::Ask,
         json!({}),
+        None,
         Some(task_id),
     ));
 }
@@ -683,6 +712,7 @@ pub(super) async fn spawn_inbound_attachment_flow(
     mime_type: &'static str,
     size: u64,
     user_key: String,
+    provider_message_id: String,
 ) {
     let payload = json!({
         "text": "",
@@ -699,6 +729,7 @@ pub(super) async fn spawn_inbound_attachment_flow(
         Some(user_key),
         TaskKind::Ask,
         payload,
+        Some(provider_message_id),
         None,
     ));
 }

@@ -9,10 +9,7 @@ use rusqlite::{params, OptionalExtension};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::{
-    is_affirmation_click_text, main_flow_rules, normalize_affirmation_text,
-    normalize_external_id_opt, now_ts, AppState,
-};
+use crate::{normalize_external_id_opt, now_ts, AppState};
 
 pub(crate) struct SubmitTaskContext {
     pub(crate) resolved_identity: Option<AuthIdentity>,
@@ -95,27 +92,6 @@ fn merge_external_id(
         *target = incoming.map(ToString::to_string);
     }
     Ok(())
-}
-
-pub(crate) fn maybe_find_submit_task_dedup(
-    state: &AppState,
-    kind: &claw_core::types::TaskKind,
-    payload: &Value,
-    effective_user_id: i64,
-    effective_chat_id: i64,
-) -> Option<(Uuid, String)> {
-    if !matches!(kind, claw_core::types::TaskKind::Ask) {
-        return None;
-    }
-    let text = payload.get("text").and_then(|v| v.as_str())?;
-    let existing_id = find_recent_duplicate_affirmation_task(
-        state,
-        effective_user_id,
-        effective_chat_id,
-        text,
-        main_flow_rules(state).duplicate_affirmation_window_secs,
-    )?;
-    Some((existing_id, text.to_string()))
 }
 
 pub(crate) fn find_task_by_idempotency_key(
@@ -407,76 +383,6 @@ pub(crate) fn check_submit_task_limits(
         return Err(SubmitTaskLimitError::QueueFull);
     }
     Ok(())
-}
-
-pub(crate) fn find_recent_duplicate_affirmation_task(
-    state: &AppState,
-    user_id: i64,
-    chat_id: i64,
-    ask_text: &str,
-    window_secs: i64,
-) -> Option<Uuid> {
-    let rules = main_flow_rules(state);
-    if !is_affirmation_click_text(state, ask_text) {
-        return None;
-    }
-    let normalized = normalize_affirmation_text(ask_text);
-    let now = now_ts().parse::<i64>().unwrap_or_default();
-    let db = state.core.db.get().ok()?;
-    let mut stmt = db
-        .prepare(
-            "SELECT task_id, payload_json, status, CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) AS ts
-             FROM tasks
-             WHERE user_id = ?1 AND chat_id = ?2 AND kind = 'ask'
-             ORDER BY ts DESC
-             LIMIT ?3",
-        )
-        .ok()?;
-    let rows = stmt
-        .query_map(
-            params![
-                user_id,
-                chat_id,
-                rules.duplicate_affirmation_scan_limit as i64
-            ],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, i64>(3)?,
-                ))
-            },
-        )
-        .ok()?;
-    for row in rows.flatten() {
-        let (task_id, payload_json, status, ts) = row;
-        let status_lc = status.to_ascii_lowercase();
-        if !rules
-            .duplicate_affirmation_statuses
-            .iter()
-            .any(|s| s == &status_lc)
-        {
-            continue;
-        }
-        if now.saturating_sub(ts) > window_secs {
-            continue;
-        }
-        let Ok(payload) = serde_json::from_str::<Value>(&payload_json) else {
-            continue;
-        };
-        let text = payload
-            .get("text")
-            .and_then(|v| v.as_str())
-            .map(normalize_affirmation_text)
-            .unwrap_or_default();
-        if text == normalized {
-            if let Ok(id) = Uuid::parse_str(&task_id) {
-                return Some(id);
-            }
-        }
-    }
-    None
 }
 
 pub(crate) fn task_kind_name(kind: &claw_core::types::TaskKind) -> &'static str {

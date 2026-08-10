@@ -86,6 +86,36 @@ pub(super) fn stable_i64_from_string(input: &str) -> i64 {
     h
 }
 
+pub(super) fn inbound_provider_message_id(msg: &WeixinMessage) -> Option<String> {
+    if let Some(message_id) = msg.message_id {
+        return Some(message_id.to_string());
+    }
+    if let (Some(session_id), Some(seq)) = (
+        msg.session_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty()),
+        msg.seq,
+    ) {
+        let digest = Sha256::digest(session_id.as_bytes());
+        return Some(format!("session:{}:seq:{seq}", hex::encode(&digest[..16])));
+    }
+    let context_token = msg
+        .context_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let create_time_ms = msg.create_time_ms?;
+    let mut hasher = Sha256::new();
+    hasher.update(msg.from_user_id.as_deref().unwrap_or_default().as_bytes());
+    hasher.update([0]);
+    hasher.update(context_token.as_bytes());
+    hasher.update([0]);
+    hasher.update(create_time_ms.to_string().as_bytes());
+    let digest = hasher.finalize();
+    Some(format!("context:{}", hex::encode(&digest[..16])))
+}
+
 pub(super) fn is_media_item(item: &MessageItem) -> bool {
     matches!(item.r#type, Some(2 | 3 | 4 | 5))
 }

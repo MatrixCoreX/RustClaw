@@ -43,6 +43,7 @@ use qrcodegen::{QrCode, QrCodeEcc};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{info, warn};
 use wechat_ilink::{
@@ -202,11 +203,17 @@ struct GetUpdatesResp {
 #[derive(Debug, Clone, Deserialize)]
 struct WeixinMessage {
     #[serde(default)]
+    seq: Option<u64>,
+    #[serde(default)]
+    message_id: Option<u64>,
+    #[serde(default)]
     from_user_id: Option<String>,
     #[serde(default, rename = "to_user_id")]
     _to_user_id: Option<String>,
     #[serde(default)]
     create_time_ms: Option<u64>,
+    #[serde(default)]
+    session_id: Option<String>,
     #[serde(default)]
     item_list: Option<Vec<MessageItem>>,
     #[serde(default)]

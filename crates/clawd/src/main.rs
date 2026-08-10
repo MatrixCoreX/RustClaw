@@ -125,9 +125,9 @@ mod worker;
 
 pub(crate) use app_helpers::{
     ensure_column_exists, i18n_t_for_language_hint_with_default_vars, i18n_t_with_default,
-    i18n_t_with_default_vars, is_affirmation_click_text, main_flow_rules, mask_secret,
-    normalize_affirmation_text, normalize_exchange_name, normalize_external_id_opt, now_ts,
-    now_ts_u64, parse_resume_context_error, parse_task_status, TASK_STATUS_QUEUED,
+    i18n_t_with_default_vars, main_flow_rules, mask_secret, normalize_exchange_name,
+    normalize_external_id_opt, now_ts, now_ts_u64, parse_resume_context_error, parse_task_status,
+    TASK_STATUS_QUEUED,
 };
 pub(crate) use ask_flow::{analyze_attached_images_for_ask, transcribe_attached_audio_for_ask};
 #[cfg(test)]
@@ -187,11 +187,11 @@ pub(crate) use repo::{
     list_active_tasks_for_user_internal, list_active_tasks_internal,
     list_all_active_tasks_internal, list_auth_keys, mark_pending_channel_bind_session_detected,
     mark_pending_channel_bind_session_expired, mark_pending_channel_bind_session_failed,
-    maybe_find_submit_task_dedup, normalize_user_key, pending_channel_resume_candidate,
-    request_attachment_paths, reset_channel_binding_state_for_user_key,
-    resolve_auth_identity_by_key, resolve_channel_binding_identity, resolve_submit_task_context,
-    stable_i64_from_key, store_pending_channel_request, submit_task_audit_detail,
-    task_count_by_status, task_count_by_status_for_user, task_kind_name, update_auth_key_by_id,
+    normalize_user_key, pending_channel_resume_candidate, request_attachment_paths,
+    reset_channel_binding_state_for_user_key, resolve_auth_identity_by_key,
+    resolve_channel_binding_identity, resolve_submit_task_context, stable_i64_from_key,
+    store_pending_channel_request, submit_task_audit_detail, task_count_by_status,
+    task_count_by_status_for_user, task_kind_name, update_auth_key_by_id,
     upsert_exchange_credential_for_user_key, upsert_webd_login_account, verify_webd_password_login,
     FactoryResetDbResult, PendingChannelBindSession, SubmitTaskAccessError, SubmitTaskContextError,
     SubmitTaskLimitError, TaskAdminTarget, TaskViewerAccessError,
@@ -1395,24 +1395,6 @@ async fn submit_task(
         }
     }
 
-    if let Some((existing_id, text)) = maybe_find_submit_task_dedup(
-        &state,
-        &req.kind,
-        &req.payload,
-        effective_user_id,
-        effective_chat_id,
-    ) {
-        info!(
-            "task_submit dedup: reused recent affirmative task_id={} user_id={} chat_id={} text={}",
-            existing_id,
-            effective_user_id,
-            effective_chat_id,
-            truncate_for_log(&text)
-        );
-        return api_ok(SubmitTaskResponse {
-            task_id: existing_id,
-        });
-    }
     match find_task_by_idempotency_key(
         &state,
         req.idempotency_key.as_deref(),
