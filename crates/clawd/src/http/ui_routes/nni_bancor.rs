@@ -255,16 +255,17 @@ async fn nni_bancor_candles(
     State(state): State<AppState>,
     headers: HeaderMap,
     Query(query): Query<NniBancorCandlesQuery>,
-) -> (StatusCode, Json<ApiResponse<Value>>) {
+) -> axum::response::Response {
     if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
         return (
             status,
-            Json(ApiResponse {
+            Json(ApiResponse::<Value> {
                 ok: resp.ok,
                 data: None,
                 error: resp.error,
             }),
-        );
+        )
+            .into_response();
     }
     let (interval_seconds, limit, end_time_unix) = match normalize_bancor_candles_query(&query) {
         Ok(normalized) => normalized,
@@ -274,6 +275,7 @@ async fn nni_bancor_candles(
                 error,
                 json!({"status": "candle_query_invalid"}),
             )
+            .into_response()
         }
     };
     let config = match read_nni_config(&state) {
@@ -284,6 +286,7 @@ async fn nni_bancor_candles(
                 "nni_config_read_failed",
                 json!({"status": "config_read_failed", "error": err.to_string()}),
             )
+            .into_response()
         }
     };
     let mut attempts = Vec::new();
@@ -294,16 +297,42 @@ async fn nni_bancor_candles(
         if let Some(end_time_unix) = end_time_unix {
             endpoint.push_str(&format!("&end_time_unix={end_time_unix}"));
         }
-        match state
+        let mut request = state
             .core
             .http_client
             .get(&endpoint)
-            .timeout(Duration::from_secs(NNI_REMOTE_JOIN_TIMEOUT_SECONDS))
-            .send()
-            .await
+            .timeout(Duration::from_secs(NNI_REMOTE_JOIN_TIMEOUT_SECONDS));
+        if let Some(if_none_match) = headers
+            .get(axum::http::header::IF_NONE_MATCH)
+            .and_then(|value| value.to_str().ok())
+        {
+            request = request.header("if-none-match", if_none_match);
+        }
+        match request.send().await
         {
             Ok(response) => {
                 let status = response.status();
+                let etag = response
+                    .headers()
+                    .get("etag")
+                    .and_then(|value| value.to_str().ok())
+                    .map(str::to_string);
+                if status == StatusCode::NOT_MODIFIED {
+                    let mut downstream = StatusCode::NOT_MODIFIED.into_response();
+                    downstream.headers_mut().insert(
+                        axum::http::header::CACHE_CONTROL,
+                        axum::http::HeaderValue::from_static("private, no-cache, must-revalidate"),
+                    );
+                    if let Some(etag) = etag
+                        .as_deref()
+                        .and_then(|value| axum::http::HeaderValue::from_str(value).ok())
+                    {
+                        downstream
+                            .headers_mut()
+                            .insert(axum::http::header::ETAG, etag);
+                    }
+                    return downstream;
+                }
                 match response.json::<ApiResponse<Value>>().await {
                     Ok(body) if status.is_success() && body.ok => {
                         if let Some(mut data) = body.data {
@@ -313,14 +342,30 @@ async fn nni_bancor_candles(
                                     Value::String(node_url.clone()),
                                 );
                             }
-                            return (
+                            let mut downstream = (
                                 StatusCode::OK,
                                 Json(ApiResponse {
                                     ok: true,
                                     data: Some(data),
                                     error: None,
                                 }),
+                            )
+                                .into_response();
+                            downstream.headers_mut().insert(
+                                axum::http::header::CACHE_CONTROL,
+                                axum::http::HeaderValue::from_static(
+                                    "private, no-cache, must-revalidate",
+                                ),
                             );
+                            if let Some(etag) = etag
+                                .as_deref()
+                                .and_then(|value| axum::http::HeaderValue::from_str(value).ok())
+                            {
+                                downstream
+                                    .headers_mut()
+                                    .insert(axum::http::header::ETAG, etag);
+                            }
+                            return downstream;
                         }
                     }
                     Ok(body) => attempts.push(json!({
@@ -348,6 +393,7 @@ async fn nni_bancor_candles(
         "nni_bancor_candles_nodes_unavailable",
         json!({"status": "bancor_candles_nodes_unavailable", "attempts": attempts}),
     )
+    .into_response()
 }
 
 async fn nni_bancor_market_trades(
