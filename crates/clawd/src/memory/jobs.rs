@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use anyhow::anyhow;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -584,14 +584,18 @@ fn claim_next_job(
     state: &crate::AppState,
     worker_id: &str,
 ) -> anyhow::Result<Option<MemoryJobSnapshot>> {
-    let db = state
+    let mut db = state
         .core
         .db
         .get()
         .map_err(|error| anyhow!("memory_job_db_pool:{error}"))?;
-    ensure_memory_job_schema(&db)?;
     let now = crate::now_ts_u64() as i64;
-    let tx = db.unchecked_transaction()?;
+    // Schema setup is a startup invariant. Keep idle polling read-only so
+    // multiple workers do not continuously contend for SQLite's writer lock.
+    if !memory_job_claim_needs_write(&db, now)? {
+        return Ok(None);
+    }
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
     tx.execute(
         "UPDATE memory_jobs
          SET status = 'retry_wait', lease_owner = NULL, lease_expires_at_ts = NULL,
@@ -649,6 +653,21 @@ fn claim_next_job(
     let snapshot = load_job(&tx, &job_id)?.ok_or_else(|| anyhow!("memory_job_claim_lost"))?;
     tx.commit()?;
     Ok(Some(snapshot))
+}
+
+fn memory_job_claim_needs_write(db: &Connection, now: i64) -> anyhow::Result<bool> {
+    Ok(db.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM memory_jobs
+            WHERE (status = 'running' AND lease_expires_at_ts IS NOT NULL
+                   AND lease_expires_at_ts <= ?1 AND cancel_requested = 0)
+               OR (cancel_requested = 1 AND status IN ('queued', 'retry_wait'))
+               OR (status IN ('queued', 'retry_wait') AND cancel_requested = 0
+                   AND not_before_ts <= ?1)
+         )",
+        [now],
+        |row| row.get(0),
+    )?)
 }
 
 async fn execute_claimed_job(

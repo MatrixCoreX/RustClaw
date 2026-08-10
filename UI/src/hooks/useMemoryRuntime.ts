@@ -83,7 +83,10 @@ export function useMemoryRuntime({ apiFetch, t }: UseMemoryRuntimeParams) {
       Object.entries(memoryFilters).forEach(([key, value]) => {
         if (value.trim()) pageQuery.set(key, value.trim());
       });
-      const [overviewRes, settingsRes, preferencesRes, factsRes, recentRes, pageRes, disclosureRes, vectorRes] = await Promise.all([
+      const vectorStatusPromise = apiFetch("/v1/memory/vector/status")
+        .then((response) => readApiBody<MemoryVectorStatus>(response, "memory search index"))
+        .catch(() => null);
+      const [overviewRes, settingsRes, preferencesRes, factsRes, recentRes, pageRes, disclosureRes] = await Promise.all([
         apiFetch("/v1/memory"),
         apiFetch("/v1/memory/settings"),
         apiFetch("/v1/memory/preferences"),
@@ -91,9 +94,8 @@ export function useMemoryRuntime({ apiFetch, t }: UseMemoryRuntimeParams) {
         apiFetch("/v1/memory/recent"),
         apiFetch(`/v1/memory/items?${pageQuery.toString()}`),
         apiFetch("/v1/memory/remote-disclosure"),
-        apiFetch("/v1/memory/vector/status"),
       ]);
-      const [overview, settings, preferences, facts, recent, page, disclosure, vectorStatus] = await Promise.all([
+      const [overview, settings, preferences, facts, recent, page, disclosure] = await Promise.all([
         readApiBody<MemoryOverviewResponse>(overviewRes, "memory overview"),
         readApiBody<MemorySettingsResult>(settingsRes, "memory settings"),
         readApiBody<MemoryPreferenceItem[]>(preferencesRes, "memory preferences"),
@@ -101,7 +103,6 @@ export function useMemoryRuntime({ apiFetch, t }: UseMemoryRuntimeParams) {
         readApiBody<MemoryRecentItem[]>(recentRes, "memory recent"),
         readApiBody<MemoryPageResult>(pageRes, "memory items"),
         readApiBody<RemoteMemoryDisclosure>(disclosureRes, "memory remote disclosure"),
-        readApiBody<MemoryVectorStatus>(vectorRes, "memory search index"),
       ]);
       setMemoryOverview(overview);
       setMemorySettings(settings);
@@ -110,7 +111,7 @@ export function useMemoryRuntime({ apiFetch, t }: UseMemoryRuntimeParams) {
       setMemoryRecent(recent);
       setMemoryPage(page);
       setMemoryRemoteDisclosure(disclosure);
-      setMemoryVectorStatus(vectorStatus);
+      setMemoryVectorStatus(await vectorStatusPromise);
       setMemoryError(null);
     } catch (err) {
       const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");

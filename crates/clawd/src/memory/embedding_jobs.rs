@@ -803,7 +803,8 @@ pub(crate) fn profile_paused(
     principal_id: &str,
     profile_id: &str,
 ) -> anyhow::Result<bool> {
-    ensure_embedding_control_schema(db)?;
+    // Control schema setup is a startup invariant. Status reads must not run
+    // migrations because UI polling may overlap background writers.
     Ok(db
         .query_row(
             "SELECT state FROM memory_embedding_controls
