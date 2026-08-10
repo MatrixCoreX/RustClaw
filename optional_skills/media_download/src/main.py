@@ -11,6 +11,8 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 import zipfile
 from typing import Any, Callable
 from urllib.parse import urlsplit
@@ -57,6 +59,10 @@ OCR_IMAGE_EXTENSIONS = {
     ".tiff",
     ".webp",
 }
+IMAGE_TEXT_REVISION_PROMPT = (
+    Path("prompts") / "layers" / "overlays" / "image_text_revision_prompt.md"
+)
+IMAGE_TEXT_REVISION_CHUNK_CHARS = 6_000
 
 
 class SkillFailure(Exception):
@@ -898,6 +904,153 @@ def _inline_short_ocr(
     )
 
 
+def _image_text_revision_prompt() -> str | None:
+    workspace = os.environ.get("WORKSPACE_ROOT", "").strip()
+    if not workspace:
+        return None
+    try:
+        prompt = (Path(workspace) / IMAGE_TEXT_REVISION_PROMPT).read_text(encoding="utf-8")
+    except OSError:
+        return None
+    return prompt if prompt.strip() else None
+
+
+def _split_revision_chunks(text: str) -> list[str]:
+    text = text.strip()
+    if not text:
+        return []
+    chunks: list[str] = []
+    start = 0
+    while start < len(text):
+        end = min(start + IMAGE_TEXT_REVISION_CHUNK_CHARS, len(text))
+        if end < len(text):
+            floor = start + IMAGE_TEXT_REVISION_CHUNK_CHARS // 2
+            boundary = next(
+                (index for index in range(end - 1, floor - 1, -1) if text[index].isspace()),
+                None,
+            )
+            if boundary is not None:
+                end = boundary + 1
+        chunk = text[start:end]
+        if chunk.strip():
+            chunks.append(chunk)
+        start = end
+    return chunks
+
+
+def _internal_llm_revision(prompt: str) -> tuple[str | None, dict[str, Any]]:
+    url = os.environ.get("AGENT_INTERNAL_LLM_URL", "").strip()
+    token = os.environ.get("AGENT_INTERNAL_LLM_TOKEN", "").strip()
+    if not url or not token:
+        return None, {"status": "unavailable", "reviewed_by_model": False}
+    try:
+        configured_timeout = int(os.environ.get("SKILL_TIMEOUT_SECONDS", "60") or "60")
+    except ValueError:
+        configured_timeout = 60
+    timeout = min(max(configured_timeout, 5), 120)
+    body = json.dumps(
+        {
+            "skill_name": SKILL_NAME,
+            "prompt_source": "skills/media_download/image_text_revision",
+            "prompt": prompt,
+            "temperature": 0.0,
+            "max_tokens": 8192,
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=body,
+        headers={
+            "content-type": "application/json",
+            "x-agent-internal-llm-token": token,
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (OSError, ValueError, urllib.error.URLError) as error:
+        return None, {
+            "status": "fallback_raw",
+            "reviewed_by_model": False,
+            "error_code": "model_review_failed",
+            "diagnostics": _diagnostics(str(error)),
+        }
+    data = payload.get("data") if isinstance(payload, dict) and payload.get("ok") is True else None
+    reviewed = data.get("text") if isinstance(data, dict) else None
+    if not isinstance(reviewed, str) or not reviewed.strip():
+        return None, {
+            "status": "fallback_raw",
+            "reviewed_by_model": False,
+            "error_code": "model_review_empty",
+        }
+    return reviewed.strip(), {
+        "status": "reviewed",
+        "reviewed_by_model": True,
+        "provider": data.get("provider"),
+        "model": data.get("model"),
+    }
+
+
+def _review_local_ocr_artifact(
+    artifacts: list[dict[str, Any]],
+) -> dict[str, Any]:
+    artifact = next(
+        (item for item in artifacts if item.get("recognition_source") == "local_ocr"),
+        None,
+    )
+    if artifact is None:
+        return {"status": "skipped_missing_artifact", "reviewed_by_model": False}
+    path = Path(str(artifact.get("path") or ""))
+    try:
+        raw_text = path.read_text(encoding="utf-8").strip()
+    except OSError as error:
+        return {
+            "status": "fallback_raw",
+            "reviewed_by_model": False,
+            "error_code": "ocr_text_read_failed",
+            "diagnostics": _diagnostics(str(error)),
+        }
+    template = _image_text_revision_prompt()
+    chunks = _split_revision_chunks(raw_text)
+    if not template or not chunks:
+        return {
+            "status": "fallback_raw",
+            "reviewed_by_model": False,
+            "error_code": "revision_prompt_or_text_unavailable",
+        }
+    reviewed_chunks: list[str] = []
+    review_metadata: dict[str, Any] = {}
+    for index, chunk in enumerate(chunks):
+        prompt = (
+            template.replace("__CHUNK_INDEX__", str(index + 1))
+            .replace("__CHUNK_COUNT__", str(len(chunks)))
+            .replace("__RAW_RECOGNIZED_TEXT__", chunk)
+        )
+        reviewed, review_metadata = _internal_llm_revision(prompt)
+        if reviewed is None:
+            return {**review_metadata, "chunk_count": len(chunks)}
+        reviewed_chunks.append(reviewed)
+    reviewed_text = "\n\n".join(reviewed_chunks).strip()
+    try:
+        path.write_text(reviewed_text + "\n", encoding="utf-8")
+        artifact["size_bytes"] = path.stat().st_size
+    except OSError as error:
+        return {
+            "status": "fallback_raw",
+            "reviewed_by_model": False,
+            "error_code": "reviewed_text_write_failed",
+            "diagnostics": _diagnostics(str(error)),
+            "chunk_count": len(chunks),
+        }
+    return {
+        **review_metadata,
+        "chunk_count": len(chunks),
+        "raw_character_count": len(raw_text),
+        "reviewed_character_count": len(reviewed_text),
+        "source_language_policy": "preserve_source_language",
+    }
 def _target_transcript_language(
     request: dict[str, Any],
     args: dict[str, Any],
@@ -1597,6 +1750,9 @@ def respond(
         for artifact in artifacts:
             artifact["recognition_source"] = "local_ocr"
             artifact["recognition_engine"] = "tesseract"
+        recognition_review = _review_local_ocr_artifact(artifacts)
+    else:
+        recognition_review = None
     urls = _urls(stdout) if action == "resolve" else []
     if action == "resolve" and not urls:
         raise SkillFailure(
@@ -1722,7 +1878,13 @@ def respond(
         extra["recognition"] = {
             "source": "local_ocr",
             "engine": "tesseract",
+            "reviewed_by_model": bool(
+                recognition_review
+                and recognition_review.get("reviewed_by_model") is True
+            ),
         }
+        if recognition_review is not None:
+            extra["recognition_review"] = recognition_review
         if inline_recognition is not None:
             extra["recognition_delivery"] = inline_recognition
     return _success(

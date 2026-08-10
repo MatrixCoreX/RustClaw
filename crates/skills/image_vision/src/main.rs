@@ -372,6 +372,13 @@ fn execute(
                     ));
                     continue;
                 }
+                let (text, recognition_review) = if action == "extract_text" {
+                    let (reviewed, metadata) =
+                        review_recognized_image_text(cfg, workspace_root, text, timeout_seconds);
+                    (normalize_extracted_text_newlines(&reviewed), Some(metadata))
+                } else {
+                    (text, None)
+                };
                 let mut extra = json!({
                     "provider": vendor_name(vendor),
                     "model": model,
@@ -384,12 +391,20 @@ fn execute(
                     extra["structured"] = structured.to_json_value();
                 }
                 if action == "extract_text" {
+                    let review = recognition_review.unwrap_or_else(
+                        || json!({"status": "fallback_raw", "reviewed_by_model": false}),
+                    );
                     extra["recognition"] = json!({
                         "source": "multimodal_model",
                         "provider": vendor_name(vendor),
                         "model": model,
                         "model_kind": model_kind,
+                        "reviewed_by_model": review
+                            .get("reviewed_by_model")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false),
                     });
+                    extra["recognition_review"] = review;
                     attach_text_artifact(runner_context, obj, &text, &mut extra)?;
                 }
                 return Ok((text, extra));

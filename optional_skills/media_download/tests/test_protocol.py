@@ -820,7 +820,15 @@ class AdapterTest(unittest.TestCase):
         )
         self.assertEqual(
             response["extra"]["recognition"],
-            {"source": "local_ocr", "engine": "tesseract"},
+            {
+                "source": "local_ocr",
+                "engine": "tesseract",
+                "reviewed_by_model": False,
+            },
+        )
+        self.assertEqual(
+            response["extra"]["recognition_review"]["status"],
+            "fallback_raw",
         )
         self.assertEqual(
             response["extra"]["delivery"],
@@ -905,6 +913,155 @@ class AdapterTest(unittest.TestCase):
                 "text": "短OCR结果",
             },
         )
+
+    def test_local_ocr_is_model_reviewed_before_delivery(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "image_text_ocr.txt"
+            path.write_text("今天天汽很好", encoding="utf-8")
+            artifacts = [
+                {
+                    "path": str(path),
+                    "filename": path.name,
+                    "mime_type": "text/plain",
+                    "size_bytes": path.stat().st_size,
+                    "recognition_source": "local_ocr",
+                    "recognition_engine": "tesseract",
+                }
+            ]
+            with (
+                mock.patch.object(
+                    self.skill,
+                    "_image_text_revision_prompt",
+                    return_value="__RAW_RECOGNIZED_TEXT__",
+                ),
+                mock.patch.object(
+                    self.skill,
+                    "_internal_llm_revision",
+                    return_value=(
+                        "今天天气很好。",
+                        {
+                            "status": "reviewed",
+                            "reviewed_by_model": True,
+                            "provider": "test",
+                            "model": "test-model",
+                        },
+                    ),
+                ),
+            ):
+                metadata = self.skill._review_local_ocr_artifact(artifacts)
+
+            self.assertEqual(path.read_text(encoding="utf-8"), "今天天气很好。\n")
+            self.assertEqual(metadata["status"], "reviewed")
+            self.assertTrue(metadata["reviewed_by_model"])
+            self.assertEqual(metadata["raw_character_count"], 6)
+            self.assertEqual(metadata["reviewed_character_count"], 7)
+            self.assertEqual(artifacts[0]["size_bytes"], path.stat().st_size)
+
+    def test_image_revision_chunks_preserve_multilingual_text(self) -> None:
+        source = ("مرحبا" * 1_200) + "\n" + ("नमस्ते" * 100)
+
+        chunks = self.skill._split_revision_chunks(source)
+
+        self.assertGreaterEqual(len(chunks), 2)
+        self.assertTrue(
+            all(
+                len(chunk) <= self.skill.IMAGE_TEXT_REVISION_CHUNK_CHARS
+                for chunk in chunks
+            )
+        )
+        self.assertEqual("".join(chunks), source)
+
+    def test_image_revision_uses_internal_llm_gateway_contract(self) -> None:
+        captured: dict[str, object] = {}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self) -> bytes:
+                return json.dumps(
+                    {
+                        "ok": True,
+                        "data": {
+                            "text": "reviewed text",
+                            "provider": "test-provider",
+                            "model": "test-model",
+                        },
+                    }
+                ).encode("utf-8")
+
+        def fake_urlopen(request, timeout):
+            captured["request"] = request
+            captured["timeout"] = timeout
+            return FakeResponse()
+
+        with (
+            mock.patch.dict(
+                self.skill.os.environ,
+                {
+                    "AGENT_INTERNAL_LLM_URL": "http://127.0.0.1/internal-llm",
+                    "AGENT_INTERNAL_LLM_TOKEN": "test-token",
+                    "SKILL_TIMEOUT_SECONDS": "75",
+                },
+            ),
+            mock.patch.object(
+                self.skill.urllib.request,
+                "urlopen",
+                side_effect=fake_urlopen,
+            ),
+        ):
+            reviewed, metadata = self.skill._internal_llm_revision("test prompt")
+
+        request = captured["request"]
+        request_body = json.loads(request.data.decode("utf-8"))
+        headers = {key.lower(): value for key, value in request.header_items()}
+        self.assertEqual(request.full_url, "http://127.0.0.1/internal-llm")
+        self.assertEqual(captured["timeout"], 75)
+        self.assertEqual(request_body["skill_name"], "media_download")
+        self.assertEqual(
+            request_body["prompt_source"],
+            "skills/media_download/image_text_revision",
+        )
+        self.assertEqual(request_body["prompt"], "test prompt")
+        self.assertEqual(headers["x-agent-internal-llm-token"], "test-token")
+        self.assertEqual(reviewed, "reviewed text")
+        self.assertEqual(metadata["status"], "reviewed")
+        self.assertTrue(metadata["reviewed_by_model"])
+
+    def test_local_ocr_model_failure_preserves_raw_text(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "image_text_ocr.txt"
+            path.write_text("raw text", encoding="utf-8")
+            artifacts = [
+                {
+                    "path": str(path),
+                    "filename": path.name,
+                    "recognition_source": "local_ocr",
+                }
+            ]
+            with (
+                mock.patch.object(
+                    self.skill,
+                    "_image_text_revision_prompt",
+                    return_value="__RAW_RECOGNIZED_TEXT__",
+                ),
+                mock.patch.object(
+                    self.skill,
+                    "_internal_llm_revision",
+                    return_value=(
+                        None,
+                        {"status": "fallback_raw", "reviewed_by_model": False},
+                    ),
+                ),
+            ):
+                metadata = self.skill._review_local_ocr_artifact(artifacts)
+
+            self.assertEqual(path.read_text(encoding="utf-8"), "raw text")
+            self.assertEqual(metadata["status"], "fallback_raw")
+            self.assertFalse(metadata["reviewed_by_model"])
 
     def test_download_returns_new_files_as_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

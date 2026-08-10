@@ -565,6 +565,29 @@ fn extract_text_rejects_structured_output_without_visible_text() {
 }
 
 #[test]
+fn image_text_revision_chunks_are_unicode_safe_and_complete() {
+    let source = format!("{}\n{}", "مرحبا".repeat(1_200), "नमस्ते".repeat(100));
+    let chunks = split_image_text_revision_chunks(&source, 6_000);
+
+    assert!(chunks.len() >= 2);
+    assert!(chunks.iter().all(|chunk| chunk.chars().count() <= 6_000));
+    assert_eq!(chunks.concat(), source);
+}
+
+#[test]
+fn image_text_revision_falls_back_to_raw_text_without_provider() {
+    let raw = "今天天汽很好".to_string();
+    let workspace = tempfile::tempdir().expect("tempdir");
+
+    let (reviewed, metadata) =
+        review_recognized_image_text(&RootConfig::default(), workspace.path(), raw.clone(), 30);
+
+    assert_eq!(reviewed, raw);
+    assert_eq!(metadata["status"], "fallback_raw");
+    assert_eq!(metadata["reviewed_by_model"], false);
+}
+
+#[test]
 fn extract_text_writes_delivery_artifact_by_default() {
     let directory = tempfile::tempdir().expect("tempdir");
     let context = json!({"artifact_output_directory": directory.path()});
