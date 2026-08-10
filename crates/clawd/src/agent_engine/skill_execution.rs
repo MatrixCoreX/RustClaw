@@ -157,6 +157,16 @@ fn remember_skill_metadata(loop_state: &mut LoopState, normalized_skill: &str) {
         .insert("last_skill_name".to_string(), normalized_skill.to_string());
 }
 
+fn capability_result_name_for_action<'a>(
+    action: &'a crate::AgentAction,
+    normalized_skill: &'a str,
+) -> &'a str {
+    match action {
+        crate::AgentAction::CallCapability { capability, .. } => capability,
+        _ => normalized_skill,
+    }
+}
+
 async fn handle_skill_step_success(
     state: &AppState,
     task: &ClaimedTask,
@@ -823,6 +833,7 @@ pub(super) async fn execute_prepared_skill_action(
     policy: &AgentLoopGuardPolicy,
     idx: usize,
     action: &crate::AgentAction,
+    requested_capability: Option<&str>,
     fingerprint: &str,
     global_step: usize,
     step_in_round: usize,
@@ -837,6 +848,10 @@ pub(super) async fn execute_prepared_skill_action(
     action_trace_kind: &str,
 ) -> Result<SkillActionOutcome, String> {
     let classification_args = recovery_args.as_ref().unwrap_or(&exec_args);
+    let result_capability = requested_capability
+        .map(str::trim)
+        .filter(|capability| !capability.is_empty())
+        .unwrap_or_else(|| capability_result_name_for_action(action, normalized_skill));
     if let Some(reason_code) =
         crate::task_execution_policy::execution_policy_authorization_error(state, task)
     {
@@ -1385,7 +1400,7 @@ pub(super) async fn execute_prepared_skill_action(
         (None, _) => true,
     };
     let mut capability_result = crate::capability_result::envelope_for_step_execution(
-        normalized_skill,
+        result_capability,
         classification_args,
         &step_execution,
         structured_extra.as_ref(),

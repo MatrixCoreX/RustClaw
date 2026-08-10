@@ -2,6 +2,7 @@ use chrono::{Datelike, Duration as ChronoDuration, NaiveDateTime, TimeZone, Utc,
 use chrono_tz::Tz;
 use rusqlite::params;
 use serde_json::{json, Value};
+use std::collections::{BTreeSet, HashSet};
 use tracing::{debug, warn};
 use uuid::Uuid;
 
@@ -33,8 +34,18 @@ fn schedule_skill_catalog_hint(
 /// Build a short skill catalog for schedule intent prompt from the loaded registry (same source as runtime).
 /// Injects into `__SKILL_CATALOG__` and `__SKILLS_CATALOG__` (both identical for compatibility).
 pub(crate) fn build_schedule_skill_catalog_from_registry(registry: &SkillsRegistry) -> String {
+    let enabled = registry.enabled_names().into_iter().collect::<HashSet<_>>();
+    build_schedule_skill_catalog_with_allow_set(registry, &enabled)
+}
+
+fn build_schedule_skill_catalog_with_allow_set(
+    registry: &SkillsRegistry,
+    enabled: &HashSet<String>,
+) -> String {
     let mut lines: Vec<String> = Vec::new();
-    for name in registry.enabled_names() {
+    let mut enabled_names = enabled.iter().cloned().collect::<Vec<_>>();
+    enabled_names.sort_unstable();
+    for name in enabled_names {
         let Some(entry) = registry.get(&name) else {
             continue;
         };
@@ -49,7 +60,7 @@ pub(crate) fn build_schedule_skill_catalog_from_registry(registry: &SkillsRegist
     let mut disabled: Vec<String> = registry
         .all_names()
         .into_iter()
-        .filter(|n| registry.get(n).map(|e| !e.enabled).unwrap_or(false))
+        .filter(|name| !enabled.contains(name))
         .collect();
     disabled.sort();
     if !disabled.is_empty() {
@@ -63,11 +74,11 @@ pub(crate) fn build_schedule_skill_catalog_from_registry(registry: &SkillsRegist
 
 /// Build schedule skill catalog from app state (`state.get_skills_registry()`).
 pub(crate) fn build_schedule_skill_catalog(state: &AppState) -> String {
-    state
-        .get_skills_registry()
-        .as_ref()
-        .map(|arc| build_schedule_skill_catalog_from_registry(arc.as_ref()))
-        .unwrap_or_default()
+    let Some(registry) = state.get_skills_registry() else {
+        return String::new();
+    };
+    let enabled = state.get_skills_list();
+    build_schedule_skill_catalog_with_allow_set(registry.as_ref(), enabled.as_ref())
 }
 
 /// Same string as [`build_schedule_skill_catalog`]; name matches prompt assembly wording.
@@ -177,7 +188,9 @@ fn render_schedule_skill_contracts(state: &AppState) -> String {
     };
     let registry = registry_arc.as_ref();
     let mut lines: Vec<String> = Vec::new();
-    for name in registry.enabled_names() {
+    let mut enabled = state.get_skills_list().iter().cloned().collect::<Vec<_>>();
+    enabled.sort_unstable();
+    for name in enabled {
         if let Some(hint) = load_skill_contract_hint(state, registry, &name) {
             lines.push(format!("- {name}: {}", hint.summary));
         }
@@ -194,13 +207,23 @@ pub(crate) fn validate_schedule_run_skill(
     let registry_arc = state
         .get_skills_registry()
         .ok_or_else(|| "skills registry not available".to_string())?;
-    validate_schedule_run_skill_with_registry(registry_arc.as_ref(), payload)
+    let enabled = state.get_skills_list();
+    validate_schedule_run_skill_with_allow_set(registry_arc.as_ref(), enabled.as_ref(), payload)
 }
 
 /// Core validation/normalization using a registry reference. Used by validate_schedule_run_skill and by tests.
 /// Per-action/schema checks remain in skill runtime (or future registry metadata), not in schedule layer.
 pub(crate) fn validate_schedule_run_skill_with_registry(
     registry: &SkillsRegistry,
+    payload: &Value,
+) -> Result<Value, String> {
+    let enabled = registry.enabled_names().into_iter().collect::<HashSet<_>>();
+    validate_schedule_run_skill_with_allow_set(registry, &enabled, payload)
+}
+
+pub(crate) fn validate_schedule_run_skill_with_allow_set(
+    registry: &SkillsRegistry,
+    enabled: &HashSet<String>,
     payload: &Value,
 ) -> Result<Value, String> {
     let obj = payload
@@ -220,10 +243,10 @@ pub(crate) fn validate_schedule_run_skill_with_registry(
         .resolve_canonical(raw_skill)
         .ok_or_else(|| format!("unknown skill: {raw_skill}"))?;
 
-    let entry = registry
-        .get(canonical)
-        .ok_or_else(|| format!("unknown skill: {raw_skill}"))?;
-    if !entry.enabled {
+    if registry.get(canonical).is_none() {
+        return Err(format!("unknown skill: {raw_skill}"));
+    }
+    if !enabled.contains(canonical) {
         return Err(format!("skill is disabled: {canonical}"));
     }
 
@@ -1301,6 +1324,150 @@ pub(crate) async fn try_handle_schedule_request(
         }
         _ => Ok(None),
     }
+}
+
+pub(crate) fn delete_matching_skill_schedules(
+    state: &AppState,
+    task: &ClaimedTask,
+    args: &Value,
+) -> Result<String, String> {
+    let required_string = |key: &str| {
+        args.get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| format!("schedule delete_matching requires `{key}`"))
+    };
+    let match_task_kind = required_string("match_task_kind")?;
+    let match_skill_name = state.resolve_canonical_skill_name(required_string("match_skill_name")?);
+    let match_task_action = required_string("match_task_action")?;
+    let match_platforms = args
+        .get("match_platforms")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "schedule delete_matching requires `match_platforms`".to_string())?
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::trim)
+                .filter(|platform| !platform.is_empty())
+                .map(ToString::to_string)
+                .ok_or_else(|| "schedule delete_matching platforms must be strings".to_string())
+        })
+        .collect::<Result<BTreeSet<_>, _>>()?;
+    if match_platforms.is_empty() {
+        return Err("schedule delete_matching requires at least one platform".to_string());
+    }
+
+    let db = state
+        .core
+        .db
+        .get()
+        .map_err(|error| format!("db pool: {error}"))?;
+    let mut statement = db
+        .prepare(
+            "SELECT job_id, task_kind, task_payload_json
+             FROM scheduled_jobs
+             WHERE user_id = ?1 AND chat_id = ?2",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![task.user_id, task.chat_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+
+    let mut matched_job_ids = Vec::new();
+    let mut retained_shared_job_ids = Vec::new();
+    for row in rows {
+        let (job_id, task_kind, payload_json) = row.map_err(|error| error.to_string())?;
+        if task_kind != match_task_kind {
+            continue;
+        }
+        let Ok(payload) = serde_json::from_str::<Value>(&payload_json) else {
+            continue;
+        };
+        let skill_name = payload
+            .get("skill_name")
+            .and_then(Value::as_str)
+            .map(|name| state.resolve_canonical_skill_name(name));
+        let skill_args = payload.get("args").and_then(Value::as_object);
+        if skill_name.as_deref() != Some(match_skill_name.as_str())
+            || skill_args
+                .and_then(|map| map.get("action"))
+                .and_then(Value::as_str)
+                != Some(match_task_action)
+        {
+            continue;
+        }
+        let scheduled_platforms = skill_args
+            .and_then(|map| map.get("platforms"))
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::trim)
+                    .filter(|platform| !platform.is_empty())
+                    .map(ToString::to_string)
+                    .collect::<BTreeSet<_>>()
+            })
+            .or_else(|| {
+                skill_args
+                    .and_then(|map| map.get("platform"))
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|platform| !platform.is_empty())
+                    .map(|platform| BTreeSet::from([platform.to_string()]))
+            })
+            .unwrap_or_default();
+        if scheduled_platforms.is_empty() || scheduled_platforms.is_disjoint(&match_platforms) {
+            continue;
+        }
+        if scheduled_platforms.is_subset(&match_platforms) {
+            matched_job_ids.push(job_id);
+        } else {
+            retained_shared_job_ids.push(job_id);
+        }
+    }
+    drop(statement);
+
+    let transaction = db
+        .unchecked_transaction()
+        .map_err(|error| error.to_string())?;
+    let mut deleted_job_ids = Vec::new();
+    for job_id in &matched_job_ids {
+        let affected = transaction
+            .execute(
+                "DELETE FROM scheduled_jobs WHERE job_id = ?1 AND user_id = ?2 AND chat_id = ?3",
+                params![job_id, task.user_id, task.chat_id],
+            )
+            .map_err(|error| error.to_string())?;
+        if affected == 1 {
+            deleted_job_ids.push(job_id.clone());
+        }
+    }
+    transaction.commit().map_err(|error| error.to_string())?;
+    serde_json::to_string(&json!({
+        "schema_version": 1,
+        "status": "ok",
+        "action": "delete_matching",
+        "match": {
+            "task_kind": match_task_kind,
+            "skill_name": match_skill_name,
+            "task_action": match_task_action,
+            "platforms": match_platforms,
+        },
+        "matched_job_ids": matched_job_ids,
+        "deleted_job_ids": deleted_job_ids,
+        "retained_shared_job_ids": retained_shared_job_ids,
+        "side_effect_applied": !deleted_job_ids.is_empty(),
+    }))
+    .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

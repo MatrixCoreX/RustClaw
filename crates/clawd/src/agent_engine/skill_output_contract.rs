@@ -325,6 +325,17 @@ pub(super) fn enforce_skill_output_contract(
     if step.status != crate::executor::StepExecutionStatus::Ok {
         return None;
     }
+    // The runner creates this trusted handoff before the skill process has
+    // produced its terminal result. The final result is validated after poll;
+    // applying the business-skill schema here would validate runner metadata
+    // as if it were the skill's terminal envelope.
+    if structured_extra.is_some_and(|extra| {
+        extra.get("source_skill").and_then(Value::as_str) == Some("skill_runner")
+            && extra.get("action").and_then(Value::as_str) == Some("durable_background_start")
+            && extra.get("pending_async_job").is_some_and(Value::is_object)
+    }) {
+        return None;
+    }
     let output = step.output.as_deref()?;
     let contract_error =
         validate_skill_output_contract(state, normalized_skill, output, structured_extra).err()?;

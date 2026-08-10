@@ -1,0 +1,93 @@
+schema_version = 2
+
+[package]
+name = "media_discovery"
+version = "0.1.16"
+description = "Run bounded home-feed, keyword-search, or seed-page browser discovery for Douyin and Xiaohongshu in visible-by-default or explicitly silent mode, preserve rendered video covers, and export ordered source-traceable results without downloading media originals."
+protocol = "agent-jsonl-v1"
+supported_os = ["linux", "macos"]
+supported_arch = ["x86_64", "aarch64"]
+license = "LicenseRef-Proprietary"
+source = "optional_skills/media_discovery"
+
+[registry]
+name = "media_discovery"
+capability_policy_source = "registry"
+
+[build]
+adapter = "node"
+source_root = "optional_skills/media_discovery"
+lockfile = "package-lock.json"
+network = "approval_required"
+lifecycle_scripts = false
+options = { node = ">=20" }
+
+[install]
+host_dependencies = ["node", "chromium", "tesseract"]
+
+[install.resources]
+min_memory_mb = 2048
+min_free_disk_mb = 2048
+
+[run]
+launcher = "node"
+entrypoint = "runtime/src/src/main.mjs"
+working_directory = "."
+timeout_seconds = 10800
+environment_allowlist = ["AGENT_INTERNAL_LLM_TOKEN", "AGENT_INTERNAL_LLM_URL", "DISPLAY", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "PATH", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "WAYLAND_DISPLAY", "WORKSPACE_ROOT", "XAUTHORITY", "XDG_RUNTIME_DIR"]
+smoke_args = { action = "capabilities" }
+
+[security]
+capability_policy_source = "registry"
+sandbox = "workspace_write"
+runtime_network = false
+inherit_credentials = false
+
+[storage]
+kind = "directory"
+schema_version = 1
+migration_owner = "media_discovery"
+
+[lifecycle]
+config_files = []
+preserve_data_on_uninstall = true
+update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { type = "object", required = ["action"], additionalProperties = false, properties = { action = { type = "string", enum = ["capabilities", "preview_enable", "enable", "disable", "run_once", "run_enabled_once", "status", "pause", "resume", "stop_current", "list_runs", "export_results"] }, platform = { type = "string", enum = ["douyin", "xiaohongshu"] }, platforms = { type = "array", minItems = 1, uniqueItems = true, items = { type = "string", enum = ["douyin", "xiaohongshu"] } }, source_mode = { type = "string", enum = ["home_feed", "topics", "seed_urls"] }, topics = { type = "array", maxItems = 20, items = { type = "string", minLength = 1, maxLength = 200 } }, seed_urls = { type = "array", maxItems = 20, items = { type = "string", format = "uri", maxLength = 4096 } }, max_items_per_run = { type = "integer", minimum = 1, maximum = 100 }, max_images_per_post = { type = "integer", minimum = 1, maximum = 100 }, max_run_minutes = { type = "integer", minimum = 5, maximum = 180 }, max_scrolls_per_source = { type = "integer", minimum = 1, maximum = 100 }, interval_minutes = { type = "integer", minimum = 10, maximum = 1440 }, retain_diagnostics_hours = { type = "integer", minimum = 1, maximum = 168 }, recognition_mode = { type = "string", enum = ["ocr_reviewed", "local_ocr", "metadata_only"] }, browser_mode = { type = "string", enum = ["visible", "silent"] }, pacing_min_delay_ms = { type = "integer", minimum = 200, maximum = 5000 }, pacing_max_delay_ms = { type = "integer", minimum = 200, maximum = 8000 }, confirm = { type = "boolean" }, scheduled_run = { type = "boolean", description = "Internal scheduler marker; planners must not set this field." }, limit = { type = "integer", minimum = 1, maximum = 100 }, offset = { type = "integer", minimum = 0, maximum = 100000 } } }
+output_schema = { type = "object", required = ["text", "extra"], properties = { text = { type = "string" }, extra = { type = "object", required = ["schema_version", "source_skill", "status", "action"], properties = { schema_version = { type = "integer" }, source_skill = { type = "string", const = "media_discovery" }, status = { type = "string", enum = ["ok", "error"] }, action = { type = "string" }, error_code = { type = "string" }, message_key = { type = "string" }, retryable = { type = "boolean" }, side_effect_applied = { type = "boolean" }, platforms = {}, platform_states = {}, browser = {}, schedule_spec = {}, schedule_cleanup_required = { type = "boolean" }, schedule_cleanup_spec = { type = "object" }, state = { type = "string" }, lifecycle_state = { type = "string" }, drain_run_id = {}, stop_mode = {}, active_run = {}, run = {}, runs = { type = "array" }, counts = { type = "object" }, artifacts = { type = "array", items = { type = "object" } } } } } }
+config_entry_points = []
+capabilities = [
+  { name = "media_discovery.capabilities", action = "capabilities", effect = "observe", execution_mode = "sync_short", required = [], optional = [], timeout_seconds = 15 },
+  { name = "media_discovery.preview_enable", action = "preview_enable", effect = "observe", execution_mode = "sync_short", required = ["platform|platforms"], optional = ["source_mode", "topics", "seed_urls", "max_items_per_run", "max_images_per_post", "max_run_minutes", "max_scrolls_per_source", "interval_minutes", "retain_diagnostics_hours", "recognition_mode", "browser_mode", "pacing_min_delay_ms", "pacing_max_delay_ms"], timeout_seconds = 15 },
+  { name = "media_discovery.enable", action = "enable", effect = "mutate", execution_mode = "sync_short", required = ["platform|platforms", "confirm"], optional = ["source_mode", "topics", "seed_urls", "max_items_per_run", "max_images_per_post", "max_run_minutes", "max_scrolls_per_source", "interval_minutes", "retain_diagnostics_hours", "recognition_mode", "browser_mode", "pacing_min_delay_ms", "pacing_max_delay_ms"], timeout_seconds = 30 },
+  { name = "media_discovery.disable", action = "disable", effect = "mutate", execution_mode = "sync_short", required = [], optional = ["platform", "platforms"], timeout_seconds = 30 },
+  { name = "media_discovery.run_once", action = "run_once", effect = "mutate", execution_mode = "async_preferred", required = [], optional = ["platform", "platforms", "source_mode", "topics", "seed_urls", "max_items_per_run", "max_images_per_post", "max_run_minutes", "max_scrolls_per_source", "retain_diagnostics_hours", "recognition_mode", "browser_mode", "pacing_min_delay_ms", "pacing_max_delay_ms"], timeout_seconds = 10800 },
+  { name = "media_discovery.run_enabled_once", action = "run_enabled_once", effect = "mutate", execution_mode = "async_preferred", required = [], optional = [], timeout_seconds = 10800 },
+  { name = "media_discovery.status", action = "status", effect = "observe", execution_mode = "sync_short", required = [], optional = [], timeout_seconds = 15 },
+  { name = "media_discovery.pause", action = "pause", effect = "mutate", execution_mode = "sync_short", required = [], optional = ["platform", "platforms"], timeout_seconds = 30 },
+  { name = "media_discovery.resume", action = "resume", effect = "mutate", execution_mode = "sync_short", required = [], optional = ["platform", "platforms"], timeout_seconds = 30 },
+  { name = "media_discovery.stop_current", action = "stop_current", effect = "mutate", execution_mode = "sync_short", required = [], optional = ["platform", "platforms"], timeout_seconds = 30 },
+  { name = "media_discovery.list_runs", action = "list_runs", effect = "observe", execution_mode = "sync_short", required = [], optional = ["limit", "offset"], timeout_seconds = 15 },
+  { name = "media_discovery.export_results", action = "export_results", effect = "observe", execution_mode = "sync_short", required = [], optional = [], timeout_seconds = 30 },
+]
+
+[capability_request.permissions]
+llm_gateway = true
+network = true
+filesystem_read = false
+filesystem_write = true
+subprocess = true
+package_install = false
+privilege_escalation = false
+external_publish = false
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = ["file", "image"]
+output_fields = ["extra.artifacts"]
+
+[capability_request.evidence_contract]
+required = false
+selectors = ["extra.platforms", "extra.state", "extra.run", "extra.counts", "extra.artifacts"]

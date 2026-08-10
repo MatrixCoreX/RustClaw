@@ -485,6 +485,7 @@ pub(super) async fn handle_call_tool_action(
     ended_with_user_visible_output: &mut bool,
     tool: &str,
     args: &Value,
+    requested_capability: Option<&str>,
     action_trace_kind: &'static str,
 ) -> Result<ActionLoopDecision, String> {
     if tool == super::capability_discovery::RUNTIME_CAPABILITY_LOADER_TOOL {
@@ -637,6 +638,7 @@ pub(super) async fn handle_call_tool_action(
         policy,
         idx,
         action,
+        requested_capability,
         fingerprint,
         global_step,
         step_in_round,
@@ -677,6 +679,7 @@ pub(super) async fn handle_call_skill_action(
     ended_with_user_visible_output: &mut bool,
     skill: &str,
     args: &Value,
+    requested_capability: Option<&str>,
     action_trace_kind: &'static str,
 ) -> Result<ActionLoopDecision, String> {
     let mut resolved_args = resolve_arg_value(args, loop_state);
@@ -806,6 +809,7 @@ pub(super) async fn handle_call_skill_action(
         policy,
         idx,
         action,
+        requested_capability,
         fingerprint,
         global_step,
         step_in_round,
@@ -1218,6 +1222,7 @@ pub(super) async fn dispatch_round_action(
                 ended_with_user_visible_output,
                 tool,
                 args,
+                requested_capability,
                 if resolved_from_call_capability {
                     "call_capability"
                 } else {
@@ -1252,6 +1257,7 @@ pub(super) async fn dispatch_round_action(
                 ended_with_user_visible_output,
                 skill,
                 args,
+                requested_capability,
                 if resolved_from_call_capability {
                     "call_capability"
                 } else {
