@@ -10,12 +10,12 @@
 ## Capability Summary (from interface)
 - `image_vision` analyzes one or more images for description, extraction, visible-text transcription, comparison, and screenshot summaries.
 - For a turn containing exactly one user-uploaded image and no typed natural-language instruction, the host uses one `describe` result as the default reply evidence: a concise image description plus `visible_text` when that array is non-empty. If no readable text is visible, the reply contains only the description and does not add an empty OCR section. A typed user instruction overrides this default and defines the requested image operation.
-- For an explicit visible-text recognition request, `extract_text` is the preferred Agent capability because the independently configured image-understanding model can use layout and visual context. It writes a UTF-8 `.txt` task artifact and delivers that file by default. For multiple images, it merges non-empty recognized text in input order into one continuous document without image numbers, filenames, source paths, or per-image headings. Local Tesseract OCR is a fallback when this capability is disabled, not configured, unavailable, or fails, or when the user explicitly requests offline processing.
+- For an explicit visible-text recognition request, `extract_text` is the preferred Agent capability because the independently configured image-understanding model can use layout and visual context. After exact visible-text extraction, the skill runs a separate model-review pass to restore sentence boundaries, paragraphs, punctuation, and highly certain recognition errors without translating or changing facts. Review failure returns the raw recognized text. The final UTF-8 `.txt` artifact is delivered by default. For multiple images, non-empty text remains in input order without source labels. Local Tesseract OCR is the fallback when multimodal recognition is unavailable or local processing is requested.
 - Ordinary image/media download requests must not trigger `extract_text`; without an explicit conversion request, only the original images/videos are downloaded and returned.
 - It never mutates source images and writes generated text only to the runtime-provided task artifact directory.
 - MiniMax M3 image understanding uses its configured OpenAI-compatible chat endpoint with structured image content parts. The skill sends local image bytes as a typed data URL, never as an untyped text marker.
 - It supports Mimo image understanding through OpenAI-compatible chat completions (`mimo-v2.5` / `mimo-v2-omni`); this is image understanding, not image generation.
-- **Output language is owned by this skill end-to-end.** The host (`clawd`) does **not** rewrite `image_vision` result text after the skill returns.
+- **Output language and review are owned by this skill end-to-end.** The host (`clawd`) does **not** add an image-specific rewrite or delivery branch.
 
 ## Config Entry Points (from interface)
 - Independent image-understanding provider/model: `configs/image.toml` -> `[image_vision].default_vendor` / `default_model`. This selection is independent from the main `[llm]` provider/model.
@@ -40,7 +40,8 @@
 3. **Prompt:** The vision request is built with `prompts/image_vision_language_hint_with_target.md` or `image_vision_language_hint_default.md` so the multimodal model is instructed in the chosen language (or default neutral hint when no target is resolved).
 4. **Narrative action schema guard:** For `describe`, `compare`, and `screenshot_summary`, the skill validates the model JSON against authored in-repo schemas before using it. When validation succeeds, the structured payload is exposed under `extra.structured`, and `text` is rendered from that structured result instead of forwarding raw JSON directly.
 5. **Optional same-turn rewrite (narrative actions only):** For `describe`, `compare`, and `screenshot_summary`, when a target language is set, the skill may run an additional OpenAI-compatible **`/v1/chat/completions`** pass using `prompts/image_output_rewrite_prompt.md` to align the final rendered text with `__TARGET_LANGUAGE__`, preserving facts. If that step fails or returns empty output, the skill returns the schema-rendered text unchanged.
-6. **`extract` / `extract_text`:** Rely on the vision prompt + language hints only (no separate rewrite pass), so extraction stays stable. `extract_text` validates page-ordered output, rejects an all-empty recognition result, joins non-empty page text with paragraph separation into one document without per-image source labels, and writes the rendered content to the task artifact directory.
+6. **`extract`:** Relies on the vision prompt and schema only.
+7. **`extract_text`:** Validates exact page-ordered recognition first, then runs `prompts/image_text_revision_prompt.md` as a separate skill-owned text-model pass. That pass preserves source languages and facts while repairing sentence boundaries, paragraph layout, punctuation, obvious OCR errors, and typos. It is chunked without dropping Unicode text. Failure returns the exact raw recognition result. Only the resulting text is written to the task artifact directory.
 
 **Note:** Steps that read `args._memory` require `[memory].skill_memory_enabled` and a runner skill that supports generic memory injection so the host injects the `_memory` blob; when memory injection is off, only explicit args, runner `context`, and defaults apply.
 
@@ -96,7 +97,7 @@ Request:
 ```json
 {"request_id":"demo-3","args":{"action":"extract_text","response_language":"zh-CN","images":[{"path":"artifacts/note-1.jpg"},{"path":"artifacts/note-2.jpg"}]},"context":{"artifact_output_directory":"/runtime/artifacts/invocation"}}
 ```
-Response includes one continuous document in `text` without image labels, a UTF-8 `image_text_ai.txt` entry in `extra.artifacts`, `extra.recognition.source="multimodal_model"`, and `extra.delivery.deliver_to_user=true`. If `deliver_to_user=false`, the file is returned under `extra.saved_files` instead and is not sent.
+Response includes one continuous reviewed document in `text` without image labels, a UTF-8 `image_text_ai.txt` entry in `extra.artifacts`, `extra.recognition.source="multimodal_model"`, `extra.recognition.reviewed_by_model`, structured `extra.recognition_review` diagnostics, and `extra.delivery.deliver_to_user=true`. If review is unavailable, the raw recognized text is returned with `reviewed_by_model=false`. If `deliver_to_user=false`, the file is returned under `extra.saved_files` instead and is not sent.
 
 ## Output Contract
 - Use only actions and params declared in the interface spec.

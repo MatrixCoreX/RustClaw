@@ -455,6 +455,19 @@ pub(super) fn load_image_output_rewrite_prompt_template(
     .0
 }
 
+pub(super) fn load_image_text_revision_prompt_template(
+    workspace_root: &Path,
+    prompt_vendor: &str,
+) -> String {
+    prompt_layers::load_prompt_template_for_vendor(
+        workspace_root,
+        prompt_vendor,
+        "prompts/image_text_revision_prompt.md",
+        include_str!("../../../../prompts/layers/overlays/image_text_revision_prompt.md"),
+    )
+    .0
+}
+
 pub(super) fn openai_compat_chat_rewrite(
     vcfg: &VendorConfig,
     model: &str,
@@ -547,6 +560,112 @@ pub(super) fn maybe_rewrite_image_vision_text_for_target_language(
         }
     }
     vision_output
+}
+
+pub(super) fn review_recognized_image_text(
+    cfg: &RootConfig,
+    workspace_root: &Path,
+    recognized_text: String,
+    task_timeout_seconds: u64,
+) -> (String, Value) {
+    let raw_text = recognized_text.trim();
+    if raw_text.is_empty() {
+        return (recognized_text, json!({"status": "skipped_empty"}));
+    }
+    let chunks = split_image_text_revision_chunks(raw_text, 6_000);
+    let template =
+        load_image_text_revision_prompt_template(workspace_root, preferred_prompt_vendor(cfg));
+    let rewrite_timeout = task_timeout_seconds.clamp(10, 120).min(60);
+    let mut reviewed_chunks = Vec::with_capacity(chunks.len());
+    let mut selected_provider = None;
+    let mut selected_model = None;
+    let mut errors = Vec::new();
+    for (index, chunk) in chunks.iter().enumerate() {
+        let prompt = template
+            .replace("__CHUNK_INDEX__", &(index + 1).to_string())
+            .replace("__CHUNK_COUNT__", &chunks.len().to_string())
+            .replace("__RAW_RECOGNIZED_TEXT__", chunk);
+        let mut reviewed_chunk = None;
+        for vk in vendor_order(None, cfg.image_vision.default_vendor.as_deref()) {
+            let Ok((vname, vcfg)) = resolve_vendor_config(cfg, vk) else {
+                continue;
+            };
+            if check_api_key(vname, &vcfg.api_key).is_err() {
+                continue;
+            }
+            let model = vcfg.model.trim();
+            if model.is_empty() {
+                continue;
+            }
+            match openai_compat_chat_rewrite(
+                &vcfg,
+                model,
+                &prompt,
+                rewrite_timeout,
+                vk == VendorKind::Mimo,
+            ) {
+                Ok(output) => {
+                    let output = strip_think_blocks(&output).trim().to_string();
+                    if !output.is_empty() {
+                        selected_provider.get_or_insert_with(|| vname.to_string());
+                        selected_model.get_or_insert_with(|| model.to_string());
+                        reviewed_chunk = Some(output);
+                        break;
+                    }
+                    errors.push(format!("{vname}: empty response"));
+                }
+                Err(error) => errors.push(format!("{vname}: {}", truncate(&error, 240))),
+            }
+        }
+        let Some(reviewed_chunk) = reviewed_chunk else {
+            return (
+                recognized_text,
+                json!({
+                    "status": "fallback_raw",
+                    "reviewed_by_model": false,
+                    "chunk_count": chunks.len(),
+                    "diagnostics": errors.into_iter().take(8).collect::<Vec<_>>(),
+                }),
+            );
+        };
+        reviewed_chunks.push(reviewed_chunk);
+    }
+    (
+        reviewed_chunks.join("\n\n").trim().to_string(),
+        json!({
+            "status": "reviewed",
+            "reviewed_by_model": true,
+            "provider": selected_provider,
+            "model": selected_model,
+            "chunk_count": chunks.len(),
+            "source_language_policy": "preserve_source_language",
+        }),
+    )
+}
+
+pub(super) fn split_image_text_revision_chunks(text: &str, max_chars: usize) -> Vec<String> {
+    let max_chars = max_chars.max(1);
+    let characters = text.trim().chars().collect::<Vec<_>>();
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    while start < characters.len() {
+        let mut end = (start + max_chars).min(characters.len());
+        if end < characters.len() {
+            let floor = start + max_chars / 2;
+            if let Some(boundary) = (floor..end)
+                .rev()
+                .find(|index| characters[*index].is_whitespace())
+            {
+                end = boundary + 1;
+            }
+        }
+        let chunk = characters[start..end].iter().collect::<String>();
+        if !chunk.trim().is_empty() {
+            chunks.push(chunk);
+        }
+        start = end;
+    }
+    chunks
 }
 
 pub(super) fn strip_think_blocks(text: &str) -> String {
