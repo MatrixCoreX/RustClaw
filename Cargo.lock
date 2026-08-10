@@ -1575,6 +1575,14 @@ name = "git-forge-skill"
 version = "0.1.8"
 dependencies = [
  "anyhow",
+ "git-remote-common",
+ "serde_json",
+]
+
+[[package]]
+name = "git-remote-common"
+version = "0.1.8"
+dependencies = [
  "base64 0.22.1",
  "claw-core",
  "fs2",
@@ -1593,17 +1601,8 @@ name = "git-remote-publish-skill"
 version = "0.1.8"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
- "claw-core",
- "fs2",
- "regex",
- "reqwest 0.12.28",
- "serde",
+ "git-remote-common",
  "serde_json",
- "sha2",
- "url",
- "uuid",
- "wait-timeout",
 ]
 
 [[package]]
@@ -1611,17 +1610,8 @@ name = "git-remote-read-skill"
 version = "0.1.8"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
- "claw-core",
- "fs2",
- "regex",
- "reqwest 0.12.28",
- "serde",
+ "git-remote-common",
  "serde_json",
- "sha2",
- "url",
- "uuid",
- "wait-timeout",
 ]
 
 [[package]]

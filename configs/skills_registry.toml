@@ -802,13 +802,13 @@ output_schema = { type = "object", required = ["text"], properties = { text = { 
 
 [[skills]]
 name = "git_remote_read"
-enabled = false
+enabled = true
+fixed_on = true
 kind = "runner"
 planner_kind = "skill"
 group = "system"
+package_manifest = "crates/skills/git_remote_read/skill.toml"
 supported_os = ["linux", "macos"]
-install_mode = "on_demand"
-package_manifest = "optional_skills/git_remote_read/skill.toml"
 aliases = []
 timeout_seconds = 90
 prompt_file = "prompts/layers/generated/skills/git_remote_read.md"
@@ -837,13 +837,13 @@ output_schema = { type = "object", required = ["text", "extra"], properties = { 
 
 [[skills]]
 name = "git_remote_publish"
-enabled = false
+enabled = true
+fixed_on = true
 kind = "runner"
 planner_kind = "skill"
 group = "system"
+package_manifest = "crates/skills/git_remote_publish/skill.toml"
 supported_os = ["linux", "macos"]
-install_mode = "on_demand"
-package_manifest = "optional_skills/git_remote_publish/skill.toml"
 aliases = []
 timeout_seconds = 120
 prompt_file = "prompts/layers/generated/skills/git_remote_publish.md"

@@ -1,21 +1,16 @@
 [package]
-name = "git-remote-read-skill"
+name = "git-remote-common"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-
-[[bin]]
-name = "git-remote-read-skill"
-path = "src/main.rs"
 
 [features]
 default = []
 forge = ["dep:reqwest"]
 
 [dependencies]
-anyhow.workspace = true
 base64.workspace = true
-claw-core = { path = "../../crates/claw-core" }
+claw-core = { path = "../claw-core" }
 fs2 = "0.4"
 regex.workspace = true
 reqwest = { workspace = true, features = ["blocking"], optional = true }
