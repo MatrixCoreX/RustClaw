@@ -21,6 +21,7 @@ use crate::repo::ClaimChannelDeliveryDispatchOutcome;
 use crate::{AppState, ClaimedTask, RuntimeChannel};
 
 const DELIVERY_DISPATCH_LEASE_SECONDS: u64 = 120;
+const DELIVERY_DISPATCH_HEARTBEAT_SECONDS: u64 = 30;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ChannelDeliveryServiceStatus {
@@ -295,7 +296,10 @@ pub(crate) async fn deliver_task_envelope(
         .collect::<Vec<_>>()
         .join("\n");
     let (send_result, observed_provider_message_ids) =
-        crate::channel_send::capture_channel_send_progress(
+        crate::channel_send::capture_channel_send_progress(send_with_dispatch_lease(
+            state,
+            &envelope.idempotency_key,
+            &lease_token,
             crate::worker::send_task_channel_message(
                 state,
                 task,
@@ -304,7 +308,7 @@ pub(crate) async fn deliver_task_envelope(
                 &envelope.conversation_window,
                 envelope.source,
             ),
-        )
+        ))
         .await;
     let now = crate::now_ts_u64();
     let receipt = match send_result {
@@ -393,6 +397,57 @@ pub(crate) async fn deliver_task_envelope(
         retryable: receipt.retryable,
         receipt: Some(receipt),
     })
+}
+
+async fn send_with_dispatch_lease<F>(
+    state: &AppState,
+    idempotency_key: &str,
+    lease_token: &str,
+    send_future: F,
+) -> Result<crate::channel_send::ChannelSendOutcome, String>
+where
+    F: std::future::Future<Output = Result<crate::channel_send::ChannelSendOutcome, String>>,
+{
+    let heartbeat_period = std::time::Duration::from_secs(DELIVERY_DISPATCH_HEARTBEAT_SECONDS);
+    let mut heartbeat = tokio::time::interval_at(
+        tokio::time::Instant::now() + heartbeat_period,
+        heartbeat_period,
+    );
+    heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    tokio::pin!(send_future);
+
+    loop {
+        tokio::select! {
+            send_result = &mut send_future => return send_result,
+            _ = heartbeat.tick() => {
+                match crate::repo::renew_channel_delivery_dispatch(
+                    &state.core.db,
+                    idempotency_key,
+                    lease_token,
+                    DELIVERY_DISPATCH_LEASE_SECONDS,
+                ) {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        warn!(
+                            event = "channel_delivery_dispatch_lease_lost",
+                            idempotency_key = %idempotency_key,
+                            "channel delivery dispatch lease ownership was lost"
+                        );
+                        return Err("channel_delivery_dispatch_lease_lost".to_string());
+                    }
+                    Err(error) => {
+                        warn!(
+                            event = "channel_delivery_dispatch_lease_renewal_failed",
+                            idempotency_key = %idempotency_key,
+                            diagnostic = %error,
+                            "channel delivery dispatch lease renewal failed"
+                        );
+                        return Err("channel_delivery_dispatch_lease_renewal_failed".to_string());
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn accepted_delivery_receipt(
