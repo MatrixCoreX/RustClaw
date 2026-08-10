@@ -1,5 +1,22 @@
 use super::*;
 
+#[test]
+fn wechat_delivery_part_ids_are_stable_and_part_scoped() {
+    let first = wechat_delivery_client_id("delivery:task-1:terminal", "text", 0);
+    assert_eq!(
+        first,
+        wechat_delivery_client_id("delivery:task-1:terminal", "text", 0)
+    );
+    assert_ne!(
+        first,
+        wechat_delivery_client_id("delivery:task-1:terminal", "text", 1)
+    );
+    assert_ne!(
+        first,
+        wechat_delivery_client_id("delivery:task-1:terminal", "image", 0)
+    );
+}
+
 #[tokio::test]
 async fn channel_send_progress_survives_a_later_part_failure() {
     let (result, provider_message_ids) = capture_channel_send_progress(async {

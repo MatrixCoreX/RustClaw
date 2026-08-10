@@ -114,7 +114,8 @@ export async function followTaskEventStream(
 
     let handlerChain = Promise.resolve();
     const parser = new TaskSseParser((event) => {
-      if (typeof event.seq === "number" && event.seq > cursor) {
+      if (typeof event.seq === "number") {
+        if (event.seq <= cursor) return;
         cursor = event.seq;
       }
       terminal = taskEventClosesLiveStream(event);

@@ -134,6 +134,7 @@ pub(crate) async fn send_task_channel_message(
     task: &crate::ClaimedTask,
     payload: &Value,
     text: &str,
+    delivery_id: &str,
     conversation_window: &claw_core::channel_delivery::ChannelConversationWindow,
     delivery_source: claw_core::channel_delivery::ChannelDeliverySource,
 ) -> Result<crate::channel_send::ChannelSendOutcome, String> {
@@ -188,9 +189,15 @@ pub(crate) async fn send_task_channel_message(
                 .or_else(|| external_chat_id_from_payload(payload))
                 .ok_or_else(|| "missing external_chat_id for wechat task".to_string())?;
             let context_token = ingress_context_token_from_payload(payload);
-            crate::channel_send::send_wechat_text_message(state, &to_user_id, context_token, text)
-                .await
-                .map(|_| crate::channel_send::ChannelSendOutcome::default())
+            crate::channel_send::send_wechat_text_message(
+                state,
+                &to_user_id,
+                context_token,
+                text,
+                delivery_id,
+            )
+            .await
+            .map(|_| crate::channel_send::ChannelSendOutcome::default())
         }
         crate::RuntimeChannel::Feishu => {
             let receive_id = task_external_chat_id(task)

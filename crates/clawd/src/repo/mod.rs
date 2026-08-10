@@ -66,9 +66,9 @@ pub(crate) use submit::{
     build_channel_ingress_snapshot, build_conversation_chat_id, build_submit_task_payload,
     check_submit_task_access, check_submit_task_limits, find_task_by_idempotency_key,
     hydrate_submit_task_from_ingress, insert_submitted_task, is_user_allowed,
-    maybe_find_submit_task_dedup, resolve_submit_task_context, stable_i64_from_key,
-    submit_task_audit_detail, task_count_by_status, task_count_by_status_for_user, task_kind_name,
-    SubmitTaskAccessError, SubmitTaskContextError, SubmitTaskLimitError,
+    resolve_submit_task_context, stable_i64_from_key, submit_task_audit_detail,
+    task_count_by_status, task_count_by_status_for_user, task_kind_name, SubmitTaskAccessError,
+    SubmitTaskContextError, SubmitTaskLimitError,
 };
 #[cfg(test)]
 pub(crate) use task_admin::pause_task_by_id;

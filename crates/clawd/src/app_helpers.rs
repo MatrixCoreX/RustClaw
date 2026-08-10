@@ -194,15 +194,6 @@ pub(crate) fn main_flow_rules(state: &AppState) -> &'static MainFlowRules {
     })
 }
 
-pub(crate) fn normalize_affirmation_text(text: &str) -> String {
-    text.trim().to_ascii_lowercase()
-}
-
-pub(crate) fn is_affirmation_click_text(_state: &AppState, text: &str) -> bool {
-    let t = text.trim().to_ascii_lowercase();
-    matches!(t.as_str(), "y" | "yes")
-}
-
 pub(crate) fn mask_secret(raw: &str) -> String {
     let value = raw.trim();
     if value.is_empty() {

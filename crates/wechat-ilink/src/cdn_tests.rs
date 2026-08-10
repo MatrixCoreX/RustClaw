@@ -14,7 +14,8 @@ use serde_json::{json, Value};
 use tokio::net::TcpListener;
 
 use super::{
-    send_weixin_file_from_file, send_weixin_image_from_file, send_weixin_video_from_file, B64,
+    send_weixin_file_from_file, send_weixin_image_from_file,
+    send_weixin_image_from_file_with_client_id, send_weixin_video_from_file, B64,
 };
 use crate::http::IlinkAuth;
 
@@ -343,5 +344,43 @@ async fn provider_upload_full_url_takes_precedence_over_legacy_url_construction(
 
     let uploads = state.upload_queries.lock().expect("upload paths").clone();
     assert_eq!(uploads, vec!["/upload-full".to_string()]);
+    let _ = tokio::fs::remove_file(path).await;
+}
+
+#[tokio::test]
+async fn caller_can_pin_media_client_id_for_idempotent_delivery() {
+    let (addr, state) = spawn_test_server().await;
+    let path = unique_temp_file("pinned-client-id", "png");
+    tokio::fs::write(&path, b"fake-png")
+        .await
+        .expect("write image");
+
+    send_weixin_image_from_file_with_client_id(
+        &Client::new(),
+        &format!("http://{addr}"),
+        "bot-token",
+        IlinkAuth {
+            sk_route_tag: "",
+            wechat_uin_base64: "",
+        },
+        &format!("http://{addr}"),
+        "wechat-user",
+        Some("ctx-token"),
+        None,
+        Some("delivery-part-stable-id"),
+        &path,
+        "test-channel",
+        30_000,
+    )
+    .await
+    .expect("send image");
+
+    let message = state
+        .sendmessage_body
+        .lock()
+        .expect("message body")
+        .clone()
+        .expect("captured message");
+    assert_eq!(message["msg"]["client_id"], "delivery-part-stable-id");
     let _ = tokio::fs::remove_file(path).await;
 }

@@ -157,6 +157,69 @@ test("incremental server pages merge older turns without replacing newer turns",
   assert.equal(merged.threads[0].lastTaskId, "task-server-thread");
 });
 
+test("server restore replaces local optimistic messages for the same task", () => {
+  const existing = thread("same-task", "succeeded");
+  existing.messages = [
+    { id: "u-local-time", role: "user", text: "question", ts: 10 },
+    { id: "a-local-time", role: "assistant", text: "answer", ts: 11 },
+  ];
+  existing.teachingRuns = [
+    {
+      id: "teach-local",
+      taskId: "task-same-task",
+      userMessageId: "u-local-time",
+      assistantMessageId: "a-local-time",
+      userText: "question",
+      assistantText: "answer",
+      status: "succeeded",
+      startedAt: 10,
+      completedAt: 11,
+    },
+  ];
+  const server: ServerChatThreadProjection = {
+    id: existing.id,
+    externalChatId: existing.externalChatId,
+    title: existing.title,
+    messages: [
+      { id: "u-task-same-task", role: "user", text: "question", ts: 10 },
+      { id: "a-task-same-task", role: "assistant", text: "answer", ts: 11 },
+    ],
+    createdAt: 10,
+    updatedAt: 11,
+    lastTaskId: "task-same-task",
+    teachingRuns: [
+      {
+        id: "teach-task-same-task",
+        taskId: "task-same-task",
+        userMessageId: "u-task-same-task",
+        assistantMessageId: "a-task-same-task",
+        userText: "question",
+        assistantText: "answer",
+        status: "succeeded",
+        startedAt: 10,
+        completedAt: 11,
+        taskResult: {
+          task_id: "task-same-task",
+          status: "succeeded",
+          result_json: { text: "answer" },
+          error_text: null,
+        },
+      },
+    ],
+  };
+
+  const merged = mergeServerConversationHistory(
+    { activeThreadId: existing.id, threads: [existing] },
+    [server],
+    t,
+  );
+
+  assert.deepEqual(
+    merged.threads[0].messages.map((message) => message.id),
+    ["u-task-same-task", "a-task-same-task"],
+  );
+});
+
 test("paged restore drops completed cache copies but preserves drafts and pending tasks", () => {
   const draft = thread("draft", "queued");
   draft.lastTaskId = null;

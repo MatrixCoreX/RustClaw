@@ -44,7 +44,12 @@ const interruptedApiFetch = async (path: string): Promise<Response> => {
   }
   return new Response(
     encoder.encode(
-      'id: 2\ndata: {"schema_version":1,"seq":2,"task_id":"task-reconnect","event_kind":"task_final"}\n\n',
+      [
+        'id: 1\ndata: {"schema_version":1,"seq":1,"task_id":"task-reconnect","event_kind":"tool_started"}',
+        "",
+        'id: 2\ndata: {"schema_version":1,"seq":2,"task_id":"task-reconnect","event_kind":"task_final"}',
+        "",
+      ].join("\n"),
     ),
     { status: 200 },
   );

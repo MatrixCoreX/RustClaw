@@ -696,7 +696,7 @@ fn claim_channel_delivery_dispatch_in_db(
     let tx = db.unchecked_transaction()?;
     let existing = tx
         .query_row(
-            "SELECT delivery_id, channel, adapter, state, lease_expires_at_ts, updated_at_ts
+            "SELECT delivery_id, channel, adapter, state, lease_expires_at_ts
              FROM channel_delivery_dispatch_claims
              WHERE idempotency_key = ?1
              LIMIT 1",
@@ -708,15 +708,12 @@ fn claim_channel_delivery_dispatch_in_db(
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
                     row.get::<_, i64>(4)?,
-                    row.get::<_, i64>(5)?,
                 ))
             },
         )
         .optional()?;
     let outcome =
-        if let Some((delivery_id, stored_channel, adapter, state, lease_expires, updated_at)) =
-            existing
-        {
+        if let Some((delivery_id, stored_channel, adapter, state, lease_expires)) = existing {
             if delivery_id != envelope.delivery_id
                 || stored_channel != channel
                 || adapter != envelope.adapter
@@ -737,10 +734,8 @@ fn claim_channel_delivery_dispatch_in_db(
                     )?;
                     ClaimChannelDeliveryDispatchOutcome::QueryRequired
                 }
-                "query_required" if updated_at.saturating_add(lease_seconds) > now_ts => {
-                    ClaimChannelDeliveryDispatchOutcome::QueryRequired
-                }
-                "query_required" | "receipt_recorded" => {
+                "query_required" => ClaimChannelDeliveryDispatchOutcome::QueryRequired,
+                "receipt_recorded" => {
                     let receipt_allows_retry = existing_receipt.as_ref().is_some_and(|receipt| {
                         receipt.retryable
                             && matches!(
@@ -748,7 +743,7 @@ fn claim_channel_delivery_dispatch_in_db(
                                 ChannelDeliveryStatus::Failed | ChannelDeliveryStatus::Partial
                             )
                     });
-                    if state == "receipt_recorded" && !receipt_allows_retry {
+                    if !receipt_allows_retry {
                         ClaimChannelDeliveryDispatchOutcome::QueryRequired
                     } else {
                         let lease_token = uuid::Uuid::new_v4().to_string();

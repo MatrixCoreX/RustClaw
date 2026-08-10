@@ -428,6 +428,37 @@ pub async fn send_weixin_image_from_file(
     channel_version: &str,
     timeout_ms: u64,
 ) -> Result<(), String> {
+    send_weixin_image_from_file_with_client_id(
+        client,
+        ilink_base_url,
+        token,
+        auth,
+        cdn_base_url,
+        to_user_id,
+        context_token,
+        run_id,
+        None,
+        file_path,
+        channel_version,
+        timeout_ms,
+    )
+    .await
+}
+
+pub async fn send_weixin_image_from_file_with_client_id(
+    client: &Client,
+    ilink_base_url: &str,
+    token: &str,
+    auth: IlinkAuth<'_>,
+    cdn_base_url: &str,
+    to_user_id: &str,
+    context_token: Option<&str>,
+    run_id: Option<&str>,
+    client_id: Option<&str>,
+    file_path: &Path,
+    channel_version: &str,
+    timeout_ms: u64,
+) -> Result<(), String> {
     claw_core::channel_media_limits::validate_local_media_file(
         file_path,
         "wechat_ilink",
@@ -461,7 +492,9 @@ pub async fn send_weixin_image_from_file(
     let body = WechatSendMessageRequest::finish(
         to_user_id,
         context_token.unwrap_or_default(),
-        new_wechat_client_id("image"),
+        client_id
+            .map(str::to_string)
+            .unwrap_or_else(|| new_wechat_client_id("image")),
         run_id.map(str::to_string),
         item,
         channel_version,
@@ -478,6 +511,37 @@ pub async fn send_weixin_video_from_file(
     to_user_id: &str,
     context_token: Option<&str>,
     run_id: Option<&str>,
+    file_path: &Path,
+    channel_version: &str,
+    timeout_ms: u64,
+) -> Result<(), String> {
+    send_weixin_video_from_file_with_client_id(
+        client,
+        ilink_base_url,
+        token,
+        auth,
+        cdn_base_url,
+        to_user_id,
+        context_token,
+        run_id,
+        None,
+        file_path,
+        channel_version,
+        timeout_ms,
+    )
+    .await
+}
+
+pub async fn send_weixin_video_from_file_with_client_id(
+    client: &Client,
+    ilink_base_url: &str,
+    token: &str,
+    auth: IlinkAuth<'_>,
+    cdn_base_url: &str,
+    to_user_id: &str,
+    context_token: Option<&str>,
+    run_id: Option<&str>,
+    client_id: Option<&str>,
     file_path: &Path,
     channel_version: &str,
     timeout_ms: u64,
@@ -509,7 +573,9 @@ pub async fn send_weixin_video_from_file(
     let body = WechatSendMessageRequest::finish(
         to_user_id,
         context_token.unwrap_or_default(),
-        new_wechat_client_id("video"),
+        client_id
+            .map(str::to_string)
+            .unwrap_or_else(|| new_wechat_client_id("video")),
         run_id.map(str::to_string),
         item,
         channel_version,
@@ -526,6 +592,39 @@ pub async fn send_weixin_file_from_file(
     to_user_id: &str,
     context_token: Option<&str>,
     run_id: Option<&str>,
+    file_path: &Path,
+    attachment_display_name: &str,
+    channel_version: &str,
+    timeout_ms: u64,
+) -> Result<(), String> {
+    send_weixin_file_from_file_with_client_id(
+        client,
+        ilink_base_url,
+        token,
+        auth,
+        cdn_base_url,
+        to_user_id,
+        context_token,
+        run_id,
+        None,
+        file_path,
+        attachment_display_name,
+        channel_version,
+        timeout_ms,
+    )
+    .await
+}
+
+pub async fn send_weixin_file_from_file_with_client_id(
+    client: &Client,
+    ilink_base_url: &str,
+    token: &str,
+    auth: IlinkAuth<'_>,
+    cdn_base_url: &str,
+    to_user_id: &str,
+    context_token: Option<&str>,
+    run_id: Option<&str>,
+    client_id: Option<&str>,
     file_path: &Path,
     attachment_display_name: &str,
     channel_version: &str,
@@ -558,7 +657,9 @@ pub async fn send_weixin_file_from_file(
     let body = WechatSendMessageRequest::finish(
         to_user_id,
         context_token.unwrap_or_default(),
-        new_wechat_client_id("file"),
+        client_id
+            .map(str::to_string)
+            .unwrap_or_else(|| new_wechat_client_id("file")),
         run_id.map(str::to_string),
         item,
         channel_version,

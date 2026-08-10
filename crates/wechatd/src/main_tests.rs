@@ -113,9 +113,12 @@ fn login_status_response_omits_session_key_without_active_qr() {
 #[test]
 fn extract_text_message_prefers_text_items() {
     let msg = WeixinMessage {
+        seq: None,
+        message_id: None,
         from_user_id: Some("u1".to_string()),
         _to_user_id: None,
         create_time_ms: None,
+        session_id: None,
         item_list: Some(vec![MessageItem {
             r#type: Some(1),
             ref_msg: None,
@@ -135,9 +138,12 @@ fn extract_text_message_prefers_text_items() {
 #[test]
 fn extract_text_message_falls_back_to_voice_transcript() {
     let msg = WeixinMessage {
+        seq: None,
+        message_id: None,
         from_user_id: Some("u1".to_string()),
         _to_user_id: None,
         create_time_ms: None,
+        session_id: None,
         item_list: Some(vec![MessageItem {
             r#type: Some(3),
             ref_msg: None,
@@ -158,9 +164,12 @@ fn extract_text_message_falls_back_to_voice_transcript() {
 #[test]
 fn quoted_text_uses_language_neutral_marker() {
     let msg = WeixinMessage {
+        seq: None,
+        message_id: None,
         from_user_id: Some("u1".to_string()),
         _to_user_id: None,
         create_time_ms: None,
+        session_id: None,
         item_list: Some(vec![MessageItem {
             r#type: Some(1),
             ref_msg: Some(super::RefMessage {
@@ -191,6 +200,100 @@ fn quoted_text_uses_language_neutral_marker() {
     assert_eq!(
         extract_text_message(&msg).as_deref(),
         Some("[quote: previous | old body]\nnew body")
+    );
+}
+
+#[test]
+fn inbound_message_identity_prefers_provider_message_id() {
+    let msg: WeixinMessage = serde_json::from_value(serde_json::json!({
+        "message_id": 9223372036854775807_u64,
+        "seq": 17,
+        "session_id": "session-a",
+        "context_token": "context-a"
+    }))
+    .expect("parse message");
+
+    assert_eq!(
+        super::inbound_provider_message_id(&msg).as_deref(),
+        Some("9223372036854775807")
+    );
+}
+
+#[test]
+fn inbound_message_identity_fallback_uses_opaque_transport_fields() {
+    let first: WeixinMessage = serde_json::from_value(serde_json::json!({
+        "seq": 17,
+        "session_id": "session-a",
+        "context_token": "context-a"
+    }))
+    .expect("parse first message");
+    let replay: WeixinMessage = serde_json::from_value(serde_json::json!({
+        "seq": 17,
+        "session_id": "session-a",
+        "context_token": "different-context"
+    }))
+    .expect("parse replay");
+    let next: WeixinMessage = serde_json::from_value(serde_json::json!({
+        "seq": 18,
+        "session_id": "session-a",
+        "context_token": "context-a"
+    }))
+    .expect("parse next message");
+
+    let first_id = super::inbound_provider_message_id(&first).expect("first identity");
+    assert_eq!(
+        super::inbound_provider_message_id(&replay).as_deref(),
+        Some(first_id.as_str())
+    );
+    assert_ne!(
+        super::inbound_provider_message_id(&next).as_deref(),
+        Some(first_id.as_str())
+    );
+    assert!(!first_id.contains("session-a"));
+    assert!(!first_id.contains("context-a"));
+}
+
+#[test]
+fn inbound_message_identity_context_fallback_includes_provider_timestamp() {
+    let first: super::WeixinMessage = serde_json::from_value(serde_json::json!({
+        "from_user_id": "peer-1",
+        "create_time_ms": 1000,
+        "context_token": "context-1"
+    }))
+    .expect("first message");
+    let replay: super::WeixinMessage = serde_json::from_value(serde_json::json!({
+        "from_user_id": "peer-1",
+        "create_time_ms": 1000,
+        "context_token": "context-1"
+    }))
+    .expect("replayed message");
+    let next: super::WeixinMessage = serde_json::from_value(serde_json::json!({
+        "from_user_id": "peer-1",
+        "create_time_ms": 1001,
+        "context_token": "context-1"
+    }))
+    .expect("next message");
+
+    let first_id = super::inbound_provider_message_id(&first).expect("first identity");
+    assert_eq!(
+        super::inbound_provider_message_id(&replay).as_deref(),
+        Some(first_id.as_str())
+    );
+    assert_ne!(
+        super::inbound_provider_message_id(&next).as_deref(),
+        Some(first_id.as_str())
+    );
+}
+
+#[test]
+fn inbound_idempotency_key_is_account_scoped() {
+    assert_eq!(
+        super::wechat_inbound_idempotency_key("account-a", "message-7"),
+        "wechat_ilink:9:account-a:message-7"
+    );
+    assert_ne!(
+        super::wechat_inbound_idempotency_key("account-a", "message-7"),
+        super::wechat_inbound_idempotency_key("account-b", "message-7")
     );
 }
 

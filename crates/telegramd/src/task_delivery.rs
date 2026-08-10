@@ -495,7 +495,7 @@ pub(super) async fn submit_task_only(
         }),
         idempotency_key: message_id
             .as_deref()
-            .map(|value| format!("telegram:{}:{value}", state.bot_name)),
+            .map(|value| telegram_inbound_idempotency_key(&state.bot_name, chat_id, value)),
         kind: kind.clone(),
         payload,
     };
@@ -550,6 +550,26 @@ pub(super) async fn submit_task_only(
         user_id, chat_id, kind, task_id, payload_fp
     );
     Ok(task_id.to_string())
+}
+
+fn telegram_inbound_idempotency_key(bot_name: &str, chat_id: i64, message_id: &str) -> String {
+    format!("telegram:{bot_name}:{chat_id}:{message_id}")
+}
+
+#[cfg(test)]
+mod idempotency_tests {
+    use super::telegram_inbound_idempotency_key;
+
+    #[test]
+    fn inbound_idempotency_is_bot_and_chat_scoped() {
+        let first = telegram_inbound_idempotency_key("primary", 100, "7");
+        assert_eq!(first, "telegram:primary:100:7");
+        assert_ne!(first, telegram_inbound_idempotency_key("primary", 200, "7"));
+        assert_ne!(
+            first,
+            telegram_inbound_idempotency_key("secondary", 100, "7")
+        );
+    }
 }
 
 pub(super) async fn cancel_tasks_for_chat(

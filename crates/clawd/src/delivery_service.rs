@@ -305,6 +305,7 @@ pub(crate) async fn deliver_task_envelope(
                 task,
                 payload,
                 &text,
+                &envelope.delivery_id,
                 &envelope.conversation_window,
                 envelope.source,
             ),

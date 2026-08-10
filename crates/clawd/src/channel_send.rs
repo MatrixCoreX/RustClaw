@@ -9,9 +9,9 @@ use std::path::{Path, PathBuf};
 use reqwest::multipart::{Form, Part};
 use serde::Deserialize;
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use toml::Value as TomlValue;
 use tracing::info;
-use uuid::Uuid;
 
 use claw_core::channel_chunk::{chunk_text_for_channel, SEGMENT_PREFIX_MAX_CHARS};
 use claw_core::channel_delivery::{
@@ -33,8 +33,9 @@ use claw_core::wechat_reply_media::{
 use crate::AppState;
 use wechat_ilink::http::IlinkAuth;
 use wechat_ilink::{
-    download_remote_media_to_temp, send_weixin_file_from_file, send_weixin_image_from_file,
-    send_weixin_video_from_file,
+    download_remote_media_to_temp, send_weixin_file_from_file_with_client_id,
+    send_weixin_image_from_file_with_client_id, send_weixin_video_from_file_with_client_id,
+    WechatMessageItem, WechatSendMessageRequest,
 };
 
 /// Feishu 中国站发送配置（定时任务主动推送用，从 configs/channels/feishu.toml 可选加载）
@@ -79,8 +80,6 @@ const TELEGRAM_TEXT_CHUNK_CHARS: usize = 3500;
 
 /// Local transport chunk target. It is not an official WhatsApp Web limit.
 const WHATSAPP_TEXT_CHUNK_CHARS: usize = 3500;
-const WECHAT_SEND_MESSAGE_TYPE: i64 = 2;
-const WECHAT_SEND_MESSAGE_STATE: i64 = 2;
 const CLAWD_WECHAT_CHANNEL_VERSION: &str = env!("CARGO_PKG_VERSION");
 const WECHAT_MEDIA_OUTBOUND_TEMP_DIR: &str = "/tmp/agent-runtime/wechat/media/outbound-temp";
 const CHANNEL_MEDIA_OUTBOUND_TEMP_DIR: &str = "/tmp/agent-runtime/channel/media/outbound-temp";
@@ -210,8 +209,15 @@ fn default_wechat_cdn_base_url() -> String {
     "https://novac2c.cdn.weixin.qq.com/c2c".to_string()
 }
 
-fn next_wechat_client_id(prefix: &str) -> String {
-    format!("{prefix}-{}", Uuid::new_v4().simple())
+fn wechat_delivery_client_id(delivery_id: &str, part_kind: &str, part_index: usize) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(delivery_id.as_bytes());
+    hasher.update([0]);
+    hasher.update(part_kind.as_bytes());
+    hasher.update([0]);
+    hasher.update(part_index.to_string().as_bytes());
+    let digest = hasher.finalize();
+    format!("clawd-wechat-{}", hex::encode(&digest[..16]))
 }
 
 async fn materialize_wechat_outbound_media(
@@ -950,6 +956,7 @@ pub(crate) async fn send_wechat_text_message(
     to_user_id: &str,
     context_token: Option<&str>,
     text: &str,
+    delivery_id: &str,
 ) -> Result<(), String> {
     let context_token = context_token
         .map(str::trim)
@@ -982,7 +989,6 @@ pub(crate) async fn send_wechat_text_message(
     } else {
         stripped.as_str()
     };
-    let url = format!("{base}/ilink/bot/sendmessage");
     let max_chunk = config
         .text_chunk_chars
         .max(1)
@@ -1004,64 +1010,40 @@ pub(crate) async fn send_wechat_text_message(
         } else {
             chunk
         };
-        let client_id = next_wechat_client_id("clawd-wechat");
-        let mut req = state
-            .core
-            .http_client
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .header("AuthorizationType", "ilink_bot_token")
-            .header("Authorization", format!("Bearer {token}"));
-        if let Some(uin) = config.wechat_uin_base64.as_deref() {
-            req = req.header("X-WECHAT-UIN", uin);
-        }
-        if let Some(tag) = config
-            .sk_route_tag
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-        {
-            req = req.header("SKRouteTag", tag);
-        }
-        let resp = req
-            .json(&json!({
-                "base_info": {
-                    "channel_version": env!("CARGO_PKG_VERSION")
-                },
-                "msg": {
-                    "from_user_id": "",
-                    "to_user_id": to_user_id,
-                    "client_id": client_id,
-                    "message_type": WECHAT_SEND_MESSAGE_TYPE,
-                    "message_state": WECHAT_SEND_MESSAGE_STATE,
-                    "item_list": [{
-                        "type": 1,
-                        "text_item": { "text": body }
-                    }],
-                    "context_token": context_token
-                }
-            }))
-            .send()
-            .await
-            .map_err(|error| provider_transport_error("wechat_ilink", "send_text", &error))?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(provider_http_error(
-                "wechat_ilink",
-                "send_text",
-                status,
-                &body,
-            ));
-        }
+        let client_id = wechat_delivery_client_id(delivery_id, "text", i);
+        let request = WechatSendMessageRequest::finish(
+            to_user_id,
+            context_token,
+            client_id.clone(),
+            None,
+            WechatMessageItem::text(body)?,
+            CLAWD_WECHAT_CHANNEL_VERSION,
+        )?;
+        wechat_ilink::post_ilink_json(
+            &state.core.http_client,
+            base,
+            token,
+            auth,
+            "ilink/bot/sendmessage",
+            &request,
+            30_000,
+        )
+        .await?;
         record_provider_message_id(&client_id);
     }
     let timeout_ms: u64 = 30_000;
-    for media in media {
+    for (media_index, media) in media.into_iter().enumerate() {
         let file_path = materialize_wechat_outbound_media(state, &media).await?;
+        let part_kind = match media.kind {
+            WechatOutboundKind::Image => "image",
+            WechatOutboundKind::Video => "video",
+            WechatOutboundKind::Audio => "audio",
+            WechatOutboundKind::File => "file",
+        };
+        let client_id = wechat_delivery_client_id(delivery_id, part_kind, media_index);
         match media.kind {
             WechatOutboundKind::Image => {
-                send_weixin_image_from_file(
+                send_weixin_image_from_file_with_client_id(
                     &state.core.http_client,
                     base,
                     token,
@@ -1070,6 +1052,7 @@ pub(crate) async fn send_wechat_text_message(
                     to_user_id,
                     Some(context_token),
                     None,
+                    Some(&client_id),
                     &file_path,
                     CLAWD_WECHAT_CHANNEL_VERSION,
                     timeout_ms,
@@ -1077,7 +1060,7 @@ pub(crate) async fn send_wechat_text_message(
                 .await?
             }
             WechatOutboundKind::Video => {
-                send_weixin_video_from_file(
+                send_weixin_video_from_file_with_client_id(
                     &state.core.http_client,
                     base,
                     token,
@@ -1086,6 +1069,7 @@ pub(crate) async fn send_wechat_text_message(
                     to_user_id,
                     Some(context_token),
                     None,
+                    Some(&client_id),
                     &file_path,
                     CLAWD_WECHAT_CHANNEL_VERSION,
                     timeout_ms,
@@ -1097,7 +1081,7 @@ pub(crate) async fn send_wechat_text_message(
                     .file_name()
                     .and_then(|s| s.to_str())
                     .unwrap_or("file");
-                send_weixin_file_from_file(
+                send_weixin_file_from_file_with_client_id(
                     &state.core.http_client,
                     base,
                     token,
@@ -1106,6 +1090,7 @@ pub(crate) async fn send_wechat_text_message(
                     to_user_id,
                     Some(context_token),
                     None,
+                    Some(&client_id),
                     &file_path,
                     fname,
                     CLAWD_WECHAT_CHANNEL_VERSION,
@@ -1114,6 +1099,7 @@ pub(crate) async fn send_wechat_text_message(
                 .await?
             }
         }
+        record_provider_message_id(&client_id);
     }
     Ok(())
 }

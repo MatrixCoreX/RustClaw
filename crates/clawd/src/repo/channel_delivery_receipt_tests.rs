@@ -151,7 +151,7 @@ fn retryable_failure_can_start_a_new_accepted_attempt_without_losing_history() {
 }
 
 #[test]
-fn dispatch_claim_prevents_concurrent_resends_and_recovers_after_ambiguity_window() {
+fn dispatch_claim_prevents_concurrent_and_ambiguous_resends() {
     let db = Connection::open_in_memory().expect("open sqlite");
     ensure_channel_delivery_receipt_schema(&db).expect("ensure schema");
     let envelope = envelope();
@@ -172,11 +172,11 @@ fn dispatch_claim_prevents_concurrent_resends_and_recovers_after_ambiguity_windo
             .expect("observe expired ambiguous claim"),
         ClaimChannelDeliveryDispatchOutcome::QueryRequired
     );
-    assert!(matches!(
+    assert_eq!(
         claim_channel_delivery_dispatch_in_db(&db, &envelope, 200, 30)
-            .expect("recover expired ambiguous claim"),
-        ClaimChannelDeliveryDispatchOutcome::Acquired { .. }
-    ));
+            .expect("keep ambiguous dispatch quarantined"),
+        ClaimChannelDeliveryDispatchOutcome::QueryRequired
+    );
     let missing_receipt =
         complete_channel_delivery_dispatch_in_db(&db, &envelope.idempotency_key, &lease_token, 140)
             .expect_err("completion requires a receipt");
