@@ -228,6 +228,25 @@ pub(crate) fn complete_channel_delivery_dispatch(
     complete_channel_delivery_dispatch_in_db(&db, idempotency_key, lease_token, crate::now_ts_u64())
 }
 
+pub(crate) fn renew_channel_delivery_dispatch(
+    pool: &DbPool,
+    idempotency_key: &str,
+    lease_token: &str,
+    lease_seconds: u64,
+) -> anyhow::Result<bool> {
+    let db = pool
+        .get()
+        .context("channel_delivery_receipt_db_pool_failed")?;
+    ensure_channel_delivery_receipt_schema(&db)?;
+    renew_channel_delivery_dispatch_in_db(
+        &db,
+        idempotency_key,
+        lease_token,
+        crate::now_ts_u64(),
+        lease_seconds,
+    )
+}
+
 fn load_channel_delivery_receipt_from_db(
     db: &Connection,
     idempotency_key: &str,
@@ -803,6 +822,33 @@ fn complete_channel_delivery_dispatch_in_db(
         return Err(anyhow!("channel_delivery_dispatch_lease_mismatch"));
     }
     Ok(())
+}
+
+fn renew_channel_delivery_dispatch_in_db(
+    db: &Connection,
+    idempotency_key: &str,
+    lease_token: &str,
+    now_ts: u64,
+    lease_seconds: u64,
+) -> anyhow::Result<bool> {
+    let idempotency_key = required_idempotency_key(idempotency_key)?;
+    if lease_token.trim().is_empty() {
+        return Err(anyhow!("channel_delivery_dispatch_lease_token_required"));
+    }
+    let now_ts = i64::try_from(now_ts)
+        .map_err(|_| anyhow!("channel_delivery_dispatch_timestamp_out_of_range"))?;
+    let lease_seconds = i64::try_from(lease_seconds.max(1))
+        .map_err(|_| anyhow!("channel_delivery_dispatch_lease_out_of_range"))?;
+    let lease_expires_at_ts = now_ts.saturating_add(lease_seconds);
+    let changed = db.execute(
+        "UPDATE channel_delivery_dispatch_claims
+         SET lease_expires_at_ts = ?3, updated_at_ts = ?4
+         WHERE idempotency_key = ?1
+           AND state = 'dispatching'
+           AND lease_token = ?2",
+        params![idempotency_key, lease_token, lease_expires_at_ts, now_ts],
+    )?;
+    Ok(changed == 1)
 }
 
 fn decode_stored_receipt(

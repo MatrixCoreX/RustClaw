@@ -186,6 +186,65 @@ fn dispatch_claim_prevents_concurrent_resends_and_recovers_after_ambiguity_windo
 }
 
 #[test]
+fn active_dispatch_renewal_prevents_large_media_resend_after_the_original_lease() {
+    let db = Connection::open_in_memory().expect("open sqlite");
+    ensure_channel_delivery_receipt_schema(&db).expect("ensure schema");
+    let envelope = envelope();
+    let lease_token = match claim_channel_delivery_dispatch_in_db(&db, &envelope, 100, 30)
+        .expect("claim dispatch")
+    {
+        ClaimChannelDeliveryDispatchOutcome::Acquired { lease_token } => lease_token,
+        other => panic!("unexpected claim: {other:?}"),
+    };
+
+    assert!(renew_channel_delivery_dispatch_in_db(
+        &db,
+        &envelope.idempotency_key,
+        &lease_token,
+        120,
+        30,
+    )
+    .expect("renew active dispatch"));
+    assert_eq!(
+        claim_channel_delivery_dispatch_in_db(&db, &envelope, 135, 30)
+            .expect("observe renewed dispatch"),
+        ClaimChannelDeliveryDispatchOutcome::InProgress
+    );
+
+    let accepted = receipt(ChannelDeliveryStatus::Accepted, 140);
+    record_channel_delivery_receipt_in_db(&db, &accepted).expect("record accepted receipt");
+    complete_channel_delivery_dispatch_in_db(&db, &envelope.idempotency_key, &lease_token, 141)
+        .expect("complete renewed dispatch");
+}
+
+#[test]
+fn dispatch_renewal_rejects_a_non_owner_lease_token() {
+    let db = Connection::open_in_memory().expect("open sqlite");
+    ensure_channel_delivery_receipt_schema(&db).expect("ensure schema");
+    let envelope = envelope();
+    let _lease_token = match claim_channel_delivery_dispatch_in_db(&db, &envelope, 100, 30)
+        .expect("claim dispatch")
+    {
+        ClaimChannelDeliveryDispatchOutcome::Acquired { lease_token } => lease_token,
+        other => panic!("unexpected claim: {other:?}"),
+    };
+
+    assert!(!renew_channel_delivery_dispatch_in_db(
+        &db,
+        &envelope.idempotency_key,
+        "different-owner",
+        120,
+        30,
+    )
+    .expect("reject non-owner renewal"));
+    assert_eq!(
+        claim_channel_delivery_dispatch_in_db(&db, &envelope, 131, 30)
+            .expect("expired original dispatch"),
+        ClaimChannelDeliveryDispatchOutcome::QueryRequired
+    );
+}
+
+#[test]
 fn retryable_failure_receipt_allows_a_new_dispatch_claim() {
     let db = Connection::open_in_memory().expect("open sqlite");
     ensure_channel_delivery_receipt_schema(&db).expect("ensure schema");
