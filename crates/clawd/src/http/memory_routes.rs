@@ -1,3 +1,4 @@
+use anyhow::Context;
 use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{delete, get, post};
@@ -293,35 +294,58 @@ fn vector_control(
 }
 
 fn load_vector_status(state: &AppState, principal_id: &str) -> anyhow::Result<MemoryVectorStatus> {
-    let db = state.core.db.get()?;
-    let profile =
-        crate::memory::vector_store::register_configured_profile(&db, &state.policy.memory)?;
+    crate::sqlite_busy_retry::with_sqlite_busy_retry(
+        crate::sqlite_busy_retry::SqliteBusyRetryPolicy::default(),
+        || load_vector_status_once(state, principal_id),
+    )
+}
+
+fn load_vector_status_once(
+    state: &AppState,
+    principal_id: &str,
+) -> anyhow::Result<MemoryVectorStatus> {
+    let db = state
+        .core
+        .db
+        .get()
+        .context("memory_vector_status_db_pool")?;
+    let configured = crate::memory::vector_store::configured_profile(&state.policy.memory)
+        .context("memory_vector_status_configured_profile")?;
+    let profile = crate::memory::vector_store::load_profile(&db, &configured.profile_id)
+        .context("memory_vector_status_load_profile")?
+        .ok_or_else(|| anyhow::anyhow!("memory_embedding_profile_not_initialized"))?;
     let generation = crate::memory::vector_store::active_generation_for_principal(
         &db,
         principal_id,
         &profile.profile_id,
         profile.generation,
-    )?;
+    )
+    .context("memory_vector_status_generation")?;
     let count = |status: &str| -> anyhow::Result<i64> {
-        Ok(db.query_row(
-            "SELECT COUNT(*) FROM memory_embedding_jobs
+        Ok(db
+            .query_row(
+                "SELECT COUNT(*) FROM memory_embedding_jobs
              WHERE principal_id = ?1 AND profile_id = ?2 AND status = ?3",
-            rusqlite::params![principal_id, profile.profile_id, status],
-            |row| row.get(0),
-        )?)
+                rusqlite::params![principal_id, profile.profile_id, status],
+                |row| row.get(0),
+            )
+            .with_context(|| format!("memory_vector_status_job_count:{status}"))?)
     };
-    let indexed_rows = db.query_row(
-        "SELECT COUNT(*) FROM memory_vector_rows
+    let indexed_rows = db
+        .query_row(
+            "SELECT COUNT(*) FROM memory_vector_rows
          WHERE principal_id = ?1 AND profile_id = ?2 AND generation = ?3
            AND status = 'active'",
-        rusqlite::params![principal_id, profile.profile_id, generation as i64],
-        |row| row.get(0),
-    )?;
+            rusqlite::params![principal_id, profile.profile_id, generation as i64],
+            |row| row.get(0),
+        )
+        .context("memory_vector_status_indexed_rows")?;
     let settings = crate::memory::settings::resolve_principal_memory_settings(
         &db,
         principal_id,
         state.policy.memory.long_term_enabled,
-    )?;
+    )
+    .context("memory_vector_status_settings")?;
     Ok(MemoryVectorStatus {
         schema_version: 1,
         provider_location: if profile.provider_kind == "remote_http" {
@@ -333,7 +357,9 @@ fn load_vector_status(state: &AppState, principal_id: &str) -> anyhow::Result<Me
             &db,
             principal_id,
             &profile.profile_id,
-        )? {
+        )
+        .context("memory_vector_status_profile_paused")?
+        {
             "paused".to_string()
         } else if count("running")? > 0 || count("queued")? > 0 || count("retry_wait")? > 0 {
             "building".to_string()
@@ -348,6 +374,10 @@ fn load_vector_status(state: &AppState, principal_id: &str) -> anyhow::Result<Me
         remote_consent: settings.external_context_policy.as_str().to_string(),
     })
 }
+
+#[cfg(test)]
+#[path = "memory_routes_tests.rs"]
+mod tests;
 
 async fn undo_mutation(
     State(state): State<AppState>,

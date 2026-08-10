@@ -36,8 +36,7 @@ pub(crate) fn ensure_principal_identity_schema(db: &Connection) -> anyhow::Resul
         "ALTER TABLE auth_keys ADD COLUMN principal_id TEXT",
     )?;
     db.execute_batch(
-        "DROP INDEX IF EXISTS idx_auth_keys_principal_id;
-         CREATE INDEX idx_auth_keys_principal_id
+        "CREATE INDEX IF NOT EXISTS idx_auth_keys_principal_id
          ON auth_keys(principal_id) WHERE principal_id IS NOT NULL;",
     )?;
     backfill_principals(db)?;
