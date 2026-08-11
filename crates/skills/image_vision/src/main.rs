@@ -373,9 +373,13 @@ fn execute(
                     continue;
                 }
                 let (text, recognition_review) = if action == "extract_text" {
+                    let raw_recognized_text = text.clone();
                     let (reviewed, metadata) =
                         review_recognized_image_text(cfg, workspace_root, text, timeout_seconds);
-                    (normalize_extracted_text_newlines(&reviewed), Some(metadata))
+                    (
+                        normalize_extracted_text_newlines(&reviewed),
+                        Some((metadata, raw_recognized_text)),
+                    )
                 } else {
                     (text, None)
                 };
@@ -391,9 +395,25 @@ fn execute(
                     extra["structured"] = structured.to_json_value();
                 }
                 if action == "extract_text" {
-                    let review = recognition_review.unwrap_or_else(
-                        || json!({"status": "fallback_raw", "reviewed_by_model": false}),
-                    );
+                    let (mut review, raw_recognized_text) =
+                        recognition_review.unwrap_or_else(|| {
+                            (
+                                json!({"status": "fallback_raw", "reviewed_by_model": false}),
+                                text.clone(),
+                            )
+                        });
+                    if review
+                        .get("reviewed_by_model")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+                    {
+                        attach_raw_text_artifact(
+                            runner_context,
+                            obj,
+                            &raw_recognized_text,
+                            &mut review,
+                        )?;
+                    }
                     extra["recognition"] = json!({
                         "source": "multimodal_model",
                         "provider": vendor_name(vendor),
@@ -580,6 +600,43 @@ fn attach_text_artifact(
         extra["artifacts"] = json!([]);
         extra["saved_files"] = json!([artifact]);
     }
+    Ok(())
+}
+
+fn attach_raw_text_artifact(
+    runner_context: Option<&Value>,
+    obj: &Map<String, Value>,
+    raw_text: &str,
+    review: &mut Value,
+) -> Result<(), String> {
+    if !bool_arg(obj, "save_text_file", true)? {
+        return Ok(());
+    }
+    let output_directory = text_artifact_output_directory(runner_context)?;
+    let output_name = text_output_name(obj)?;
+    let output_path = Path::new(&output_name);
+    let stem = output_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("image_text_ai");
+    let raw_name = format!("{stem}_raw.txt");
+    let raw_path = output_directory.join(&raw_name);
+    let mut bytes = raw_text.as_bytes().to_vec();
+    if !bytes.ends_with(b"\n") {
+        bytes.push(b'\n');
+    }
+    fs::write(&raw_path, &bytes)
+        .map_err(|error| format!("write raw extracted text artifact failed: {error}"))?;
+    review["raw_artifact"] = json!({
+        "path": raw_path,
+        "filename": raw_name,
+        "kind": "text",
+        "mime_type": "text/plain; charset=utf-8",
+        "size_bytes": bytes.len(),
+        "sha256": format!("{:x}", Sha256::digest(&bytes)),
+        "deliver_to_user": false,
+        "recognition_source": "multimodal_model",
+    });
     Ok(())
 }
 

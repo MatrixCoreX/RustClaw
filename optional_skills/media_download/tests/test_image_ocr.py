@@ -1,7 +1,9 @@
 import importlib.util
 from pathlib import Path
+import subprocess
 import sys
 import unittest
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).parents[1] / "src" / "tool" / "image_ocr.py"
@@ -42,6 +44,42 @@ class ImageOcrDocumentTest(unittest.TestCase):
         ]
 
         self.assertEqual(self.image_ocr.render_ocr_results(results), "")
+
+    def test_short_numeric_lines_are_preserved_when_confidence_is_sufficient(self) -> None:
+        tsv = "\n".join(
+            [
+                "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext",
+                "5\t1\t1\t1\t1\t1\t0\t0\t40\t10\t95\t2026",
+                "5\t1\t1\t1\t2\t1\t0\t20\t50\t10\t95\t128.50",
+            ]
+        )
+
+        parsed = self.image_ocr.parse_tesseract_tsv(tsv, min_line_confidence=30)
+
+        self.assertEqual(parsed, "2026\n128.50")
+
+    def test_candidate_score_has_no_script_specific_preference(self) -> None:
+        latin = self.image_ocr.ParsedOcrText("abcd", 90.0)
+        cjk = self.image_ocr.ParsedOcrText("文字内容", 90.0)
+
+        self.assertEqual(
+            self.image_ocr._ocr_candidate_score(latin),
+            self.image_ocr._ocr_candidate_score(cjk),
+        )
+
+    def test_auto_language_uses_all_installed_recognition_data(self) -> None:
+        self.image_ocr.available_tesseract_languages.cache_clear()
+        completed = subprocess.CompletedProcess(
+            ["tesseract", "--list-langs"],
+            0,
+            "List of available languages in /tmp/tessdata (4):\neng\nchi_sim\nara\nosd\n",
+            "",
+        )
+        with mock.patch.object(self.image_ocr.subprocess, "run", return_value=completed):
+            resolved = self.image_ocr.resolve_tesseract_language("tesseract", "auto")
+
+        self.assertEqual(resolved, "ara+chi_sim+eng")
+        self.image_ocr.available_tesseract_languages.cache_clear()
 
 
 if __name__ == "__main__":

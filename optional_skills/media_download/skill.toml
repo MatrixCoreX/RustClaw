@@ -2,7 +2,7 @@ schema_version = 2
 
 [package]
 name = "media_download"
-version = "0.3.14"
+version = "0.3.15"
 description = "Download public media and image articles. Explicit image OCR uses Tesseract followed by skill-owned model review for sentence boundaries, layout, punctuation, and highly certain recognition errors, with raw-text fallback."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]

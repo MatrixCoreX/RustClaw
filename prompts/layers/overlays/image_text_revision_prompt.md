@@ -4,6 +4,9 @@ Requirements:
 - Return only the complete revised text for this chunk, with no commentary or Markdown fence.
 - Keep every passage in its source language. Do not translate.
 - Restore sentence boundaries, paragraph breaks, punctuation, and readable layout when supported by the text.
+- Reflow text by semantic structure rather than by the image's visual line width.
+- Merge visual soft wraps that split one sentence or paragraph. Keep line breaks only when they represent real structure such as a paragraph boundary, heading, list item, table row, code block, verse line, or another clearly line-oriented element.
+- Rejoin a word split only by visual wrapping when the reconstruction is highly certain; otherwise preserve the uncertain fragment.
 - Correct only highly certain recognition mistakes and typographical errors.
 - Preserve all facts, names, numbers, symbols, ordering, uncertainty, and meaningful structure.
 - Do not summarize, omit, expand, infer missing content, or invent text.

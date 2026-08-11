@@ -187,9 +187,18 @@ source of truth; CSV files can always be rebuilt.
   screenshot. If the page already autoplayed, this is not represented as the
   encoded timeline's exact frame zero. Duplicate items never replace an
   existing persisted cover.
-- Tesseract produces the raw text. In `ocr_reviewed` mode, the host-scoped
-  internal LLM gateway may restore layout, punctuation, and highly certain OCR
-  errors without translation, summary, or invention. Failure preserves raw OCR.
+- Tesseract produces the raw text using all installed recognition language
+  data without preferring one writing system. In `ocr_reviewed` mode, the
+  complete text is split into Unicode-safe bounded chunks and sent through the
+  host-scoped internal LLM gateway to restore layout, punctuation, and highly
+  certain OCR errors without translation, summary, or invention. Visual soft
+  wraps caused only by image width are merged, while real paragraphs, headings,
+  lists, tables, code, verse, and other line-oriented structures retain their
+  boundaries. Every chunk
+  must succeed, and the reviewed result must preserve numeric tokens and a
+  bounded amount of source content; otherwise the complete raw OCR text is
+  retained. Immutable records keep both `raw_recognized_text` and the selected
+  `recognized_text`.
 - Login challenges, access denial, and rate limiting produce structured waiting
   or failure states. The skill never bypasses them.
 

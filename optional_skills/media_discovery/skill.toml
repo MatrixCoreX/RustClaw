@@ -2,7 +2,7 @@ schema_version = 2
 
 [package]
 name = "media_discovery"
-version = "0.1.17"
+version = "0.1.18"
 description = "Run bounded home-feed, keyword-search, or seed-page browser discovery for Douyin and Xiaohongshu in visible-by-default or explicitly silent mode, preserve rendered video covers, and export ordered source-traceable results without downloading media originals."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
