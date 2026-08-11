@@ -476,7 +476,7 @@ pub(crate) fn repair_bundled_skill_admission_offline(
     let entry = registry
         .get(skill_name)
         .ok_or_else(|| format!("bundled registry entry is missing: {skill_name}"))?;
-    if entry.install_mode.as_deref() != Some("on_demand") {
+    if !refresh_bundled_install_in_offline_repair(entry.install_mode.as_deref()) {
         return Err(format!(
             "offline admission repair requires an on-demand bundled skill: {skill_name}"
         ));
@@ -507,10 +507,12 @@ pub(crate) fn repair_bundled_skill_admission_offline(
         let entry = registry
             .get(name)
             .ok_or_else(|| format!("skill_admission_base_entry_missing: skill={name}"))?;
-        if entry.install_mode.as_deref() != Some("on_demand") {
-            return Err(format!(
-                "skill_admission_install_mode_invalid: skill={name} expected=on_demand"
-            ));
+        if !refresh_bundled_install_in_offline_repair(entry.install_mode.as_deref()) {
+            // Historical generations may still contain a pin for a bundled
+            // skill that has since become part of the fixed release set. Its
+            // existing verified admission remains unchanged while on-demand
+            // packages are refreshed to their current immutable receipts.
+            continue;
         }
         let verified = package_store
             .verified_current_install(name)
@@ -537,6 +539,10 @@ pub(crate) fn repair_bundled_skill_admission_offline(
     service
         .repair_current_generation(mutations)
         .map_err(|error| error.to_string())
+}
+
+fn refresh_bundled_install_in_offline_repair(install_mode: Option<&str>) -> bool {
+    install_mode == Some("on_demand")
 }
 
 fn bundled_prompt_for_offline_repair(
