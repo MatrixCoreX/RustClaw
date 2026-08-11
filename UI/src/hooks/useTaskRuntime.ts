@@ -66,7 +66,7 @@ export function useTaskRuntime({
   const [resumeSubmittingTaskId, setResumeSubmittingTaskId] = useState<string | null>(null);
   const [resumeTaskMessage, setResumeTaskMessage] = useState<string | null>(null);
   const [resumeTaskError, setResumeTaskError] = useState<string | null>(null);
-  const [cancelingTaskIndex, setCancelingTaskIndex] = useState<number | null>(null);
+  const [cancelingTaskId, setCancelingTaskId] = useState<string | null>(null);
   const [cancelTaskMessage, setCancelTaskMessage] = useState<string | null>(null);
   const [cancelTaskError, setCancelTaskError] = useState<string | null>(null);
   const [taskControlSubmittingId, setTaskControlSubmittingId] = useState<string | null>(null);
@@ -290,22 +290,15 @@ export function useTaskRuntime({
   };
 
   const cancelActiveTask = async (item: ActiveTaskItem) => {
-    if (interactionUserId == null || interactionChatId == null) {
-      setCancelTaskMessage(null);
-      setCancelTaskError(t("本地身份还没有加载完成。", "Local identity is not loaded yet."));
-      return;
-    }
-    setCancelingTaskIndex(item.index);
+    setCancelingTaskId(item.task_id);
     setCancelTaskMessage(null);
     setCancelTaskError(null);
     try {
-      const res = await apiFetch(`/v1/tasks/cancel-one`, {
+      const res = await apiFetch(`/v1/tasks/cancel-by-task-id`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_id: interactionUserId,
-          chat_id: interactionChatId,
-          index: item.index,
+          task_id: item.task_id,
         }),
       });
       const body = (await res.json()) as ApiResponse<{ canceled?: number }>;
@@ -321,7 +314,7 @@ export function useTaskRuntime({
       const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
       setCancelTaskError(message);
     } finally {
-      setCancelingTaskIndex(null);
+      setCancelingTaskId(null);
     }
   };
 
@@ -755,7 +748,7 @@ export function useTaskRuntime({
     resumeSubmittingTaskId,
     resumeTaskMessage,
     resumeTaskError,
-    cancelingTaskIndex,
+    cancelingTaskId,
     cancelTaskMessage,
     cancelTaskError,
     taskControlSubmittingId,

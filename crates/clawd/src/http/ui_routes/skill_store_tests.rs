@@ -8,8 +8,8 @@ use tower::ServiceExt;
 
 use super::{
     activate_imported_bundle, admission_service, begin_skill_store_mutation, build_ui_router,
-    bundled_prompt_for_offline_repair, finish_imported_bundle_activation,
-    imported_bundle_staging_dir, imported_skill_machine_alias,
+    bundled_admission_binding_needs_refresh, bundled_prompt_for_offline_repair,
+    finish_imported_bundle_activation, imported_bundle_staging_dir, imported_skill_machine_alias,
     inspect_declared_runtime_assets_for_target, precompiled_skill_package_root_for,
     precompiled_source_fallback_allowed, refresh_bundled_install_in_offline_repair,
     remove_skill_registry_block, render_skill_store_config, skill_store_install_spec,
@@ -18,6 +18,39 @@ use super::{
 use crate::{reload_skill_views, AppState};
 
 const STORE_TEST_KEY: &str = "skill-store-test-admin";
+
+#[test]
+fn bundled_admission_refresh_detects_changed_or_missing_pinned_packages() {
+    let binding = crate::skill_admission::AdmissionExecutionBinding {
+        version: "1.0.0".to_string(),
+        manifest_digest: "a".repeat(64),
+        install_receipt_digest: "b".repeat(64),
+        policy_digest: Some("c".repeat(64)),
+        admission_receipt_digest: "d".repeat(64),
+    };
+
+    assert!(!bundled_admission_binding_needs_refresh(
+        &binding,
+        "1.0.0",
+        &"a".repeat(64),
+        &"b".repeat(64),
+        true,
+    ));
+    assert!(bundled_admission_binding_needs_refresh(
+        &binding,
+        "1.1.0",
+        &"e".repeat(64),
+        &"f".repeat(64),
+        true,
+    ));
+    assert!(bundled_admission_binding_needs_refresh(
+        &binding,
+        "1.0.0",
+        &"a".repeat(64),
+        &"b".repeat(64),
+        false,
+    ));
+}
 
 #[test]
 fn offline_bundled_repair_resolves_logical_skill_prompt() {

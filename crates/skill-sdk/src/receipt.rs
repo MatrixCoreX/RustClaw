@@ -424,14 +424,6 @@ impl InstallReceiptStore {
             })?;
         let current_path = self.active_install_path(&receipt.skill_name)?;
         let previous_path = skill_root.join("previous.json");
-        let obsolete_pointer = if previous_path.is_file() {
-            let pointer: CurrentInstallPointer =
-                serde_json::from_slice(&fs::read(&previous_path)?)?;
-            validate_pointer(&pointer)?;
-            Some(pointer)
-        } else {
-            None
-        };
         if current_path.is_file() {
             let current = fs::read(&current_path)?;
             atomic_write(&previous_path, &current)?;
@@ -444,17 +436,7 @@ impl InstallReceiptStore {
             install_dir: install_dir_name.to_string(),
             receipt_digest: receipt.digest()?,
         };
-        if obsolete_pointer
-            .as_ref()
-            .is_some_and(|obsolete| obsolete.install_dir != pointer.install_dir)
-        {
-            self.request_version_gc(
-                &receipt.skill_name,
-                &obsolete_pointer.as_ref().unwrap().install_dir,
-            )?;
-        }
         atomic_write_json(&current_path, &pointer)?;
-        let _ = self.garbage_collect_superseded_versions(&receipt.skill_name);
         Ok(())
     }
 
@@ -788,12 +770,6 @@ impl InstallReceiptStore {
         }
         fs::remove_dir_all(skill_root)?;
         Ok(true)
-    }
-
-    fn request_version_gc(&self, skill_name: &str, install_dir: &str) -> SkillSdkResult<()> {
-        let pending_root = self.skill_root(skill_name)?.join("gc-versions");
-        fs::create_dir_all(&pending_root)?;
-        atomic_write(&pending_root.join(install_dir), b"pending\n")
     }
 
     fn garbage_collect_superseded_versions(&self, skill_name: &str) -> SkillSdkResult<()> {

@@ -64,6 +64,27 @@ pub(super) fn extract_skill_provider_model(value: &Value) -> Option<(String, Str
     ))
 }
 
+fn runner_pre_dispatch_error(
+    skill_name: &str,
+    error: &skill_sdk::SkillSdkError,
+    recovery_action: &str,
+) -> String {
+    super::structured_skill_error_from_parts(
+        skill_name,
+        &error.code,
+        "skill execution could not start",
+        Some(std::env::consts::OS),
+        Some(json!({
+            "message_key": "clawd.skill.pre_dispatch_failed",
+            "retryable": false,
+            "failure_phase": "pre_dispatch",
+            "side_effect_applied": false,
+            "recovery_action": recovery_action,
+            "diagnostic_detail": error.detail,
+        })),
+    )
+}
+
 #[derive(Debug, Clone)]
 struct DurableRunnerJobPlan {
     job_id: String,
@@ -746,10 +767,7 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
         )
     }
     .map_err(|error| {
-        format!(
-            "verified skill package unavailable: skill={canonical_skill_name} code={} detail={}",
-            error.code, error.detail
-        )
+        runner_pre_dispatch_error(canonical_skill_name, &error, "refresh_skill_admission")
     })?;
     let expected_execution_binding = pinned_execution_binding
         .as_ref()
@@ -760,10 +778,7 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
     let version_lease = skill_sdk::InstallReceiptStore::new(&package_root)
         .acquire_version_lease(canonical_skill_name, &installed_launch.install_root)
         .map_err(|error| {
-            format!(
-                "skill version lease unavailable: skill={canonical_skill_name} code={} detail={}",
-                error.code, error.detail
-            )
+            runner_pre_dispatch_error(canonical_skill_name, &error, "retry_skill_dispatch")
         })?;
     tracing::debug!(
         skill = canonical_skill_name,
