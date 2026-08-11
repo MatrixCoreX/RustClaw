@@ -185,6 +185,7 @@ export function BancorPage({
   formatUnixDateTime: (value?: number | null) => string;
   nniReady: boolean;
 }) {
+  const tradePanelRef = useRef<HTMLDivElement>(null);
   const [side, setSide] = useState<"buy" | "sell">("sell");
   const [tradeLayout, setTradeLayout] = useState<"standard" | "swap">("standard");
   const [inputAmount, setInputAmount] = useState("");
@@ -262,6 +263,12 @@ export function BancorPage({
   const confirmTrade = async () => {
     const result = await trade();
     if (result) setInputAmount("");
+  };
+  const openTradePanel = () => {
+    const panel = tradePanelRef.current;
+    if (!panel) return;
+    panel.scrollIntoView({ behavior: "smooth", block: "start" });
+    panel.querySelector<HTMLInputElement>('input[inputmode="decimal"]')?.focus({ preventScroll: true });
   };
 
   return (
@@ -388,6 +395,7 @@ export function BancorPage({
               priceDecimalPlaces={candles.price_decimal_places}
               livePrice={market?.marginal_price_usd_per_point}
               formatUnixDateTime={formatUnixDateTime}
+              onTrade={openTradePanel}
               t={t}
             />
           ) : (
@@ -399,7 +407,7 @@ export function BancorPage({
         </div>
         </section>
 
-        <div className="theme-shadow-card h-full p-5 sm:p-6">
+        <div id="bancor-trade-panel" ref={tradePanelRef} className="theme-shadow-card h-full scroll-mt-4 p-5 sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <ArrowDownUp className="h-5 w-5 text-sky-300" />
@@ -735,6 +743,7 @@ export function BancorSwapTradePanel({
         <label className="mt-2 flex items-center gap-3">
           <span className="sr-only">{t("支付数量", "Amount to pay")}</span>
           <input
+            id="bancor-swap-input-amount"
             value={inputAmount}
             inputMode="decimal"
             placeholder="0.0000"
@@ -905,6 +914,7 @@ export function CandleChart({
   priceDecimalPlaces,
   livePrice,
   formatUnixDateTime,
+  onTrade,
   t,
 }: {
   candles: NniBancorCandle[];
@@ -912,6 +922,7 @@ export function CandleChart({
   priceDecimalPlaces: number;
   livePrice?: string | null;
   formatUnixDateTime: (value?: number | null) => string;
+  onTrade?: () => void;
   t: Translate;
 }) {
   const chartRef = useRef<HTMLDivElement>(null);
@@ -1120,6 +1131,10 @@ export function CandleChart({
       event.preventDefault();
       setOffsetFromLatest(0);
     }
+  };
+  const openTradePanel = () => {
+    setMaximized(false);
+    if (onTrade) window.requestAnimationFrame(onTrade);
   };
   const hoveredX = hoveredIndex === null ? null : plotLeft + step * (hoveredIndex + 0.5);
   const hoveredY = hoveredIndex === null ? null : yForPrice(focused.close);
@@ -1331,6 +1346,19 @@ export function CandleChart({
             {maximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
           </button>
         </div>
+      </div>
+      <div className="bancor-maximized-trade-action">
+        <button
+          type="button"
+          className="theme-primary-btn min-h-11 min-w-40 justify-center px-6"
+          disabled={!onTrade}
+          onClick={openTradePanel}
+          aria-controls="bancor-trade-panel"
+          aria-label={t("打开交易面板", "Open trade panel")}
+        >
+          <ArrowDownUp className="h-4 w-4" />
+          {t("交易", "Trade")}
+        </button>
       </div>
     </div>
   );

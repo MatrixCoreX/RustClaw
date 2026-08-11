@@ -1495,9 +1495,28 @@
   max-width: none;
   overflow: auto;
   padding: clamp(0.75rem, 2vw, 1.5rem);
+  padding-bottom: calc(5.75rem + env(safe-area-inset-bottom, 0px));
   background:
     radial-gradient(circle at top, var(--theme-shell-radial), transparent 32%),
     linear-gradient(180deg, var(--theme-shell-start) 0%, var(--theme-shell-end) 100%);
+}
+
+.bancor-maximized-trade-action {
+  display: none;
+}
+
+.bancor-chart-maximized .bancor-maximized-trade-action {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 72;
+  display: flex;
+  justify-content: center;
+  padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid rgb(255 255 255 / 0.1);
+  background: rgb(8 15 28 / 0.92);
+  backdrop-filter: blur(14px);
 }
 
 .chat-activity-sweep::after {

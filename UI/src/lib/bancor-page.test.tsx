@@ -202,6 +202,10 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.doesNotMatch(html, /价格来自真实成交/);
   assert.match(html, /立即刷新 K 线/);
   assert.match(html, /aria-label="交易模式"/);
+  assert.match(html, /id="bancor-trade-panel"/);
+  assert.match(html, /id="bancor-standard-input-amount"/);
+  assert.match(html, /aria-label="打开交易面板"/);
+  assert.match(html, /aria-controls="bancor-trade-panel"/);
   assert.match(html, /aria-label="快速调整支付数量"/);
   assert.match(html, /aria-label="将当前数量减少 25%"/);
   assert.match(html, /aria-label="将当前数量减少 50%"/);
@@ -319,6 +323,8 @@ test("BANCOR one-minute candles connect carried closes and hide empty-minute dot
   assert.match(minuteHtml, /data-bancor-chart-layer="one-minute-close-line"/);
   assert.match(minuteHtml, /<polyline[^>]+stroke="#7dd3fc"/);
   assert.match(minuteHtml, /aria-label="最大化 K 线区域"/);
+  assert.match(minuteHtml, /aria-label="打开交易面板"/);
+  assert.match(minuteHtml, /aria-controls="bancor-trade-panel"/);
   assert.equal((minuteHtml.match(/data-bancor-candle-body="true"/g) ?? []).length, 1);
   assert.doesNotMatch(longerHtml, /one-minute-close-line/);
   assert.equal((longerHtml.match(/data-bancor-candle-body="true"/g) ?? []).length, 2);
