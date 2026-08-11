@@ -9,6 +9,26 @@ use crate::installer::{
 use crate::runtime::SkillRuntimeResolver;
 
 #[test]
+fn package_root_is_canonicalized_before_sandboxed_installation() {
+    let current = std::env::current_dir().expect("current directory");
+    let temp = tempfile::tempdir_in(&current).expect("workspace-local tempdir");
+    let relative_root = temp
+        .path()
+        .strip_prefix(&current)
+        .expect("tempdir below current directory")
+        .join("packages");
+    assert!(!relative_root.is_absolute());
+    let manifest =
+        crate::PackageManifest::from_toml_str(crate::tests::manifest_source()).expect("manifest");
+
+    let prepared =
+        super::prepare_package_root(&manifest, &relative_root).expect("relative package root");
+
+    assert!(prepared.is_absolute());
+    assert!(prepared.is_dir());
+}
+
+#[test]
 fn install_resource_preflight_returns_a_stable_insufficient_code() {
     let temp = tempdir().expect("tempdir");
     let mut manifest =

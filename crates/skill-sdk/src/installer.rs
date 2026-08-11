@@ -178,9 +178,8 @@ impl SkillInstaller {
         manifest.validate_for_platform(&platform)?;
         let allow_network = matches!(manifest.build.network, BuildNetworkPolicy::ApprovalRequired)
             && request.allow_network;
-        fs::create_dir_all(&request.package_root)?;
-        validate_install_resources(&manifest, &request.package_root)?;
-        let store = InstallReceiptStore::new(&request.package_root);
+        let package_root = prepare_package_root(&manifest, &request.package_root)?;
+        let store = InstallReceiptStore::new(&package_root);
         let staging = store.create_staging_dir(&manifest.package.name)?;
         let mut guard = StagingGuard::new(staging.clone());
         let cache_root = store
@@ -316,9 +315,8 @@ impl SkillInstaller {
             None => HostPlatform::current(),
         };
         manifest.validate_for_platform(&platform)?;
-        fs::create_dir_all(&request.package_root)?;
-        validate_install_resources(&manifest, &request.package_root)?;
-        let store = InstallReceiptStore::new(&request.package_root);
+        let package_root = prepare_package_root(&manifest, &request.package_root)?;
+        let store = InstallReceiptStore::new(&package_root);
         let staging = store.create_staging_dir(&manifest.package.name)?;
         let mut guard = StagingGuard::new(staging.clone());
         let destination = staging.join(&manifest.run.entrypoint);
@@ -443,8 +441,7 @@ impl SkillInstaller {
             None => HostPlatform::current(),
         };
         manifest.validate_for_platform(&platform)?;
-        fs::create_dir_all(&request.package_root)?;
-        validate_install_resources(&manifest, &request.package_root)?;
+        let package_root = prepare_package_root(&manifest, &request.package_root)?;
         let source_store = InstallReceiptStore::new(&request.precompiled_root);
         let pointer = source_store
             .current_pointer(&manifest.package.name)
@@ -503,8 +500,7 @@ impl SkillInstaller {
             .phase("precompiled_verify"));
         }
         emit_phase(request.control.as_ref(), "precompiled_verify")?;
-        fs::create_dir_all(&request.package_root)?;
-        let destination_store = InstallReceiptStore::new(&request.package_root);
+        let destination_store = InstallReceiptStore::new(&package_root);
         let staging = destination_store.create_staging_dir(&manifest.package.name)?;
         let mut guard = StagingGuard::new(staging.clone());
         fs::write(staging.join("skill.toml"), manifest.to_toml_string()?)?;
@@ -916,6 +912,35 @@ fn lockfile_digests(
     }
     digests.insert(relative.to_string(), digest_file(&lockfile)?);
     Ok(digests)
+}
+
+fn prepare_package_root(
+    manifest: &PackageManifest,
+    requested_root: &Path,
+) -> SkillSdkResult<PathBuf> {
+    fs::create_dir_all(requested_root).map_err(|error| {
+        SkillSdkError::new(
+            "package_root_unavailable",
+            format!("path={} error={error}", requested_root.display()),
+        )
+        .phase("preflight")
+    })?;
+    let package_root = fs::canonicalize(requested_root).map_err(|error| {
+        SkillSdkError::new(
+            "package_root_unavailable",
+            format!("path={} error={error}", requested_root.display()),
+        )
+        .phase("preflight")
+    })?;
+    if !package_root.is_dir() {
+        return Err(SkillSdkError::new(
+            "package_root_unavailable",
+            package_root.display().to_string(),
+        )
+        .phase("preflight"));
+    }
+    validate_install_resources(manifest, &package_root)?;
+    Ok(package_root)
 }
 
 /// Validate measurable host capacity before any dependency or build mutation.
