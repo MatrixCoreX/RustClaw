@@ -534,7 +534,7 @@ def _build_ocr_command(request: dict[str, Any], args: dict[str, Any], output_dir
             )
         paths.append(path)
 
-    language = _string(args, "language", default="chi_sim+eng", max_length=64) or "chi_sim+eng"
+    language = _string(args, "language", default="auto", max_length=64) or "auto"
     psm = _integer(args, "psm", default=6, minimum=0, maximum=13)
     min_confidence = _number(
         args,
@@ -938,6 +938,43 @@ def _split_revision_chunks(text: str) -> list[str]:
     return chunks
 
 
+def _revision_numeric_tokens(text: str) -> list[str]:
+    tokens: list[str] = []
+    current: list[str] = []
+    for character in text:
+        if character.isnumeric():
+            current.append(character)
+        elif current:
+            tokens.append("".join(current))
+            current = []
+    if current:
+        tokens.append("".join(current))
+    return tokens
+
+
+def _revision_preserves_source(raw_text: str, reviewed_text: str) -> bool:
+    if not reviewed_text.strip():
+        return False
+    if _revision_numeric_tokens(raw_text) != _revision_numeric_tokens(reviewed_text):
+        return False
+    raw_count = sum(1 for character in raw_text if not character.isspace())
+    reviewed_count = sum(1 for character in reviewed_text if not character.isspace())
+    if raw_count < 40:
+        return reviewed_count <= raw_count * 2 + 16
+    return int(raw_count * 0.6) <= reviewed_count <= int(raw_count * 1.5 + 0.999)
+
+
+def _join_reviewed_chunks(source_chunks: list[str], reviewed_chunks: list[str]) -> str:
+    assembled: list[str] = []
+    for index, reviewed in enumerate(reviewed_chunks):
+        assembled.append(reviewed.strip())
+        if index < len(source_chunks) - 1:
+            boundary = re.search(r"\s+$", source_chunks[index])
+            if boundary:
+                assembled.append(boundary.group(0))
+    return "".join(assembled).strip()
+
+
 def _internal_llm_revision(prompt: str) -> tuple[str | None, dict[str, Any]]:
     url = os.environ.get("AGENT_INTERNAL_LLM_URL", "").strip()
     token = os.environ.get("AGENT_INTERNAL_LLM_TOKEN", "").strip()
@@ -1032,8 +1069,19 @@ def _review_local_ocr_artifact(
         if reviewed is None:
             return {**review_metadata, "chunk_count": len(chunks)}
         reviewed_chunks.append(reviewed)
-    reviewed_text = "\n\n".join(reviewed_chunks).strip()
+    reviewed_text = _join_reviewed_chunks(chunks, reviewed_chunks)
+    if not _revision_preserves_source(raw_text, reviewed_text):
+        return {
+            "status": "fallback_raw",
+            "reviewed_by_model": False,
+            "error_code": "revision_integrity_failed",
+            "chunk_count": len(chunks),
+            "raw_character_count": len(raw_text),
+            "reviewed_character_count": len(reviewed_text),
+        }
+    raw_path = path.with_name(f"{path.stem}_raw{path.suffix}")
     try:
+        raw_path.write_text(raw_text + "\n", encoding="utf-8")
         path.write_text(reviewed_text + "\n", encoding="utf-8")
         artifact["size_bytes"] = path.stat().st_size
     except OSError as error:
@@ -1050,7 +1098,17 @@ def _review_local_ocr_artifact(
         "raw_character_count": len(raw_text),
         "reviewed_character_count": len(reviewed_text),
         "source_language_policy": "preserve_source_language",
+        "layout_policy": "semantic_reflow",
+        "raw_artifact": {
+            "path": str(raw_path),
+            "filename": raw_path.name,
+            "mime_type": "text/plain",
+            "size_bytes": raw_path.stat().st_size,
+            "deliver_to_user": False,
+        },
     }
+
+
 def _target_transcript_language(
     request: dict[str, Any],
     args: dict[str, Any],
@@ -1570,7 +1628,7 @@ def _capabilities_extra() -> dict[str, Any]:
         "installed_dependencies": {
             "youtube": ["yt-dlp"],
             "media_processing": ["ffmpeg", "ffprobe"],
-            "ocr": ["tesseract", "chi_sim"],
+            "ocr": ["tesseract", "tesseract_language_data"],
             "browser_fallback": ["chromium_or_chrome"],
             "transcription_alternative": (
                 [

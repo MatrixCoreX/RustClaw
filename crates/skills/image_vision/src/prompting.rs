@@ -572,6 +572,7 @@ pub(super) fn review_recognized_image_text(
     if raw_text.is_empty() {
         return (recognized_text, json!({"status": "skipped_empty"}));
     }
+    let raw_character_count = raw_text.chars().count();
     let chunks = split_image_text_revision_chunks(raw_text, 6_000);
     let template =
         load_image_text_revision_prompt_template(workspace_root, preferred_prompt_vendor(cfg));
@@ -630,17 +631,93 @@ pub(super) fn review_recognized_image_text(
         };
         reviewed_chunks.push(reviewed_chunk);
     }
+    let reviewed_text = join_image_text_revision_chunks(&chunks, &reviewed_chunks);
+    if !image_text_revision_preserves_source(raw_text, &reviewed_text) {
+        return (
+            recognized_text,
+            json!({
+                "status": "fallback_raw",
+                "reviewed_by_model": false,
+                "error_code": "revision_integrity_failed",
+                "chunk_count": chunks.len(),
+                "raw_character_count": raw_character_count,
+                "reviewed_character_count": reviewed_text.chars().count(),
+            }),
+        );
+    }
     (
-        reviewed_chunks.join("\n\n").trim().to_string(),
+        reviewed_text.clone(),
         json!({
             "status": "reviewed",
             "reviewed_by_model": true,
             "provider": selected_provider,
             "model": selected_model,
             "chunk_count": chunks.len(),
+            "raw_character_count": raw_character_count,
+            "reviewed_character_count": reviewed_text.chars().count(),
             "source_language_policy": "preserve_source_language",
+            "layout_policy": "semantic_reflow",
         }),
     )
+}
+
+pub(super) fn image_text_revision_preserves_source(raw_text: &str, reviewed_text: &str) -> bool {
+    if reviewed_text.trim().is_empty()
+        || image_text_numeric_tokens(raw_text) != image_text_numeric_tokens(reviewed_text)
+    {
+        return false;
+    }
+    let raw_count = raw_text
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .count();
+    let reviewed_count = reviewed_text
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .count();
+    if raw_count < 40 {
+        return reviewed_count <= raw_count.saturating_mul(2).saturating_add(16);
+    }
+    reviewed_count.saturating_mul(10) >= raw_count.saturating_mul(6)
+        && reviewed_count.saturating_mul(2) <= raw_count.saturating_mul(3)
+}
+
+fn image_text_numeric_tokens(text: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    for character in text.chars() {
+        if character.is_numeric() {
+            current.push(character);
+        } else if !current.is_empty() {
+            tokens.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
+}
+
+pub(super) fn join_image_text_revision_chunks(
+    source_chunks: &[String],
+    reviewed_chunks: &[String],
+) -> String {
+    let mut assembled = String::new();
+    for (index, reviewed) in reviewed_chunks.iter().enumerate() {
+        assembled.push_str(reviewed.trim());
+        if index < source_chunks.len().saturating_sub(1) {
+            let boundary = source_chunks[index]
+                .chars()
+                .rev()
+                .take_while(|character| character.is_whitespace())
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect::<String>();
+            assembled.push_str(&boundary);
+        }
+    }
+    assembled.trim().to_string()
 }
 
 pub(super) fn split_image_text_revision_chunks(text: &str, max_chars: usize) -> Vec<String> {

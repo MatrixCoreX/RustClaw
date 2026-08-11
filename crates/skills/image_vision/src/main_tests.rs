@@ -588,6 +588,63 @@ fn image_text_revision_falls_back_to_raw_text_without_provider() {
 }
 
 #[test]
+fn image_text_revision_prompt_requires_semantic_reflow() {
+    let workspace = tempfile::tempdir().expect("tempdir");
+    let prompt = load_image_text_revision_prompt_template(workspace.path(), "minimax");
+
+    assert!(prompt.contains("Reflow text by semantic structure"));
+    assert!(prompt.contains("Merge visual soft wraps"));
+    assert!(prompt.contains("paragraph boundary, heading, list item, table row"));
+}
+
+#[test]
+fn image_text_revision_integrity_rejects_changed_numbers_and_large_omissions() {
+    assert!(!image_text_revision_preserves_source(
+        "订单 20260811 金额 128.50",
+        "订单 20260812 金额 128.50"
+    ));
+    assert!(!image_text_revision_preserves_source(
+        &"A long source passage. ".repeat(40),
+        "short"
+    ));
+    assert!(image_text_revision_preserves_source(
+        "今天天汽很好 20260811",
+        "今天天气很好。20260811"
+    ));
+}
+
+#[test]
+fn image_text_revision_reassembles_using_source_boundaries() {
+    let source_chunks = vec!["first section \n".to_string(), "第二部分".to_string()];
+    let reviewed_chunks = vec!["first section".to_string(), "第二部分。".to_string()];
+
+    assert_eq!(
+        join_image_text_revision_chunks(&source_chunks, &reviewed_chunks),
+        "first section \n第二部分。"
+    );
+}
+
+#[test]
+fn extract_text_preserves_raw_artifact_without_delivering_it() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let context = json!({"artifact_output_directory": directory.path()});
+    let args = Map::new();
+    let mut review = json!({"status": "reviewed", "reviewed_by_model": true});
+
+    attach_raw_text_artifact(Some(&context), &args, "原始识别", &mut review)
+        .expect("write raw text artifact");
+
+    assert_eq!(review["raw_artifact"]["deliver_to_user"], false);
+    assert_eq!(review["raw_artifact"]["filename"], "image_text_ai_raw.txt");
+    let path = PathBuf::from(
+        review["raw_artifact"]["path"]
+            .as_str()
+            .expect("raw artifact path"),
+    );
+    assert_eq!(fs::read_to_string(path).expect("raw text"), "原始识别\n");
+}
+
+#[test]
 fn extract_text_writes_delivery_artifact_by_default() {
     let directory = tempfile::tempdir().expect("tempdir");
     let context = json!({"artifact_output_directory": directory.path()});

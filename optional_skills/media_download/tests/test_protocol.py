@@ -839,6 +839,7 @@ class AdapterTest(unittest.TestCase):
             Path(command[command.index("--output") + 1]).name,
             "image_text_ocr.txt",
         )
+        self.assertEqual(command[command.index("--language") + 1], "auto")
 
     def test_ocr_rejects_video_input_before_process_dispatch(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -956,6 +957,12 @@ class AdapterTest(unittest.TestCase):
             self.assertEqual(metadata["raw_character_count"], 6)
             self.assertEqual(metadata["reviewed_character_count"], 7)
             self.assertEqual(artifacts[0]["size_bytes"], path.stat().st_size)
+            raw_artifact = metadata["raw_artifact"]
+            self.assertFalse(raw_artifact["deliver_to_user"])
+            self.assertEqual(
+                Path(raw_artifact["path"]).read_text(encoding="utf-8"),
+                "今天天汽很好\n",
+            )
 
     def test_image_revision_chunks_preserve_multilingual_text(self) -> None:
         source = ("مرحبا" * 1_200) + "\n" + ("नमस्ते" * 100)
@@ -1062,6 +1069,33 @@ class AdapterTest(unittest.TestCase):
             self.assertEqual(path.read_text(encoding="utf-8"), "raw text")
             self.assertEqual(metadata["status"], "fallback_raw")
             self.assertFalse(metadata["reviewed_by_model"])
+
+    def test_local_ocr_integrity_failure_preserves_raw_numbers(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "image_text_ocr.txt"
+            path.write_text("订单 20260811 金额 128.50", encoding="utf-8")
+            artifacts = [{"path": str(path), "recognition_source": "local_ocr"}]
+            with (
+                mock.patch.object(
+                    self.skill,
+                    "_image_text_revision_prompt",
+                    return_value="__RAW_RECOGNIZED_TEXT__",
+                ),
+                mock.patch.object(
+                    self.skill,
+                    "_internal_llm_revision",
+                    return_value=(
+                        "订单 20260812 金额 128.50",
+                        {"status": "reviewed", "reviewed_by_model": True},
+                    ),
+                ),
+            ):
+                metadata = self.skill._review_local_ocr_artifact(artifacts)
+
+            self.assertEqual(metadata["status"], "fallback_raw")
+            self.assertEqual(metadata["error_code"], "revision_integrity_failed")
+            self.assertEqual(path.read_text(encoding="utf-8"), "订单 20260811 金额 128.50")
+            self.assertFalse((path.parent / "image_text_ocr_raw.txt").exists())
 
     def test_download_returns_new_files_as_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

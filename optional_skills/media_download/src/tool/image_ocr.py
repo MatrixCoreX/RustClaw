@@ -8,16 +8,19 @@ from __future__ import annotations
 import argparse
 import csv
 from contextlib import ExitStack
+from functools import lru_cache
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
 
 DEFAULT_DOWNLOAD_DIR = "downloads"
-DEFAULT_LANGUAGE = "chi_sim"
+DEFAULT_LANGUAGE = "auto"
 DEFAULT_PSM = 6
 DEFAULT_OEM = 1
 DEFAULT_PREPROCESS = True
@@ -148,8 +151,6 @@ def parse_tesseract_tsv_result(
         if not _line_confidence_passes(line_confidence, min_line_confidence):
             continue
         line = _join_ocr_words(words)
-        if _is_likely_noise_line(line):
-            continue
         if line:
             rendered.append(line)
             weight = max(len(line), 1)
@@ -189,20 +190,6 @@ def _line_confidence_passes(line_confidence: float, min_line_confidence: float |
     return line_confidence >= min_line_confidence
 
 
-def _is_likely_noise_line(line: str) -> bool:
-    text = line.strip()
-    if not text:
-        return False
-    cjk_count = sum(1 for char in text if _is_cjk(char))
-    digit_count = sum(1 for char in text if char.isdigit())
-    marker_count = sum(1 for char in text if char in "|~`^\\")
-    if marker_count and cjk_count < 2:
-        return True
-    if cjk_count == 0 and digit_count and len(text) <= 8:
-        return True
-    return False
-
-
 def _join_ocr_words(words: list[dict[str, object]]) -> str:
     pieces: list[str] = []
     previous: dict[str, object] | None = None
@@ -220,21 +207,11 @@ def _needs_space_between(previous: dict[str, object], current: dict[str, object]
     current_text = str(current["text"])
     if not previous_text or not current_text:
         return False
-    if _is_cjk(previous_text[-1]) and _is_cjk(current_text[0]):
-        return False
-    if current_text[0] in ",.;:!?%)]}，。；：！？、）】》":
+    if unicodedata.category(current_text[0]).startswith("P"):
         return False
     gap = int(current["left"]) - (int(previous["left"]) + int(previous["width"]))
     height = max(int(previous["height"]), int(current["height"]), 1)
     return gap > height * 0.2
-
-
-def _is_cjk(char: str) -> bool:
-    return (
-        "\u3400" <= char <= "\u4dbf"
-        or "\u4e00" <= char <= "\u9fff"
-        or "\uf900" <= char <= "\ufaff"
-    )
 
 
 def _lanczos_resampling(image_module: object) -> object:
@@ -322,6 +299,7 @@ def tesseract_ocr_image(
             raise ImageOcrError(f"tesseract binary was not found: {tesseract_bin}")
         executable = Path(found)
 
+    resolved_language = resolve_tesseract_language(executable, language)
     with ExitStack() as stack:
         image_candidates = [image_path]
         if preprocess:
@@ -335,7 +313,7 @@ def tesseract_ocr_image(
                 executable,
                 candidate_path,
                 original_path=image_path,
-                language=language,
+                language=resolved_language,
                 psm=psm,
                 min_line_confidence=min_line_confidence,
                 verbose=verbose,
@@ -379,11 +357,39 @@ def _run_tesseract_tsv(
 
 
 def _ocr_candidate_score(candidate: ParsedOcrText) -> float:
-    text = candidate.text
-    cjk_count = sum(1 for char in text if _is_cjk(char))
-    latin_count = sum(1 for char in text if char.isascii() and char.isalpha())
-    marker_count = sum(1 for char in text if char in "|~`^\\")
-    return candidate.confidence + min(cjk_count, 200) * 0.03 - latin_count * 0.4 - marker_count * 1.5
+    visible_count = sum(1 for char in candidate.text if not char.isspace())
+    return candidate.confidence + min(visible_count, 200) * 0.001
+
+
+@lru_cache(maxsize=8)
+def available_tesseract_languages(executable: str) -> tuple[str, ...]:
+    completed = subprocess.run(
+        [executable, "--list-langs"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        raise ImageOcrError("tesseract could not list installed recognition languages")
+    languages = []
+    for line in completed.stdout.splitlines():
+        candidate = line.strip()
+        if not re.fullmatch(r"[A-Za-z0-9_.\-/]+", candidate):
+            continue
+        if candidate in {"osd", "equ"}:
+            continue
+        languages.append(candidate)
+    unique = tuple(sorted(dict.fromkeys(languages)))
+    if not unique:
+        raise ImageOcrError("tesseract has no installed recognition language data")
+    return unique
+
+
+def resolve_tesseract_language(executable: Path | str, requested: str) -> str:
+    language = requested.strip()
+    if language and language.casefold() != "auto":
+        return language
+    return "+".join(available_tesseract_languages(str(executable)))
 
 
 def render_ocr_results(results: list[OcrResult]) -> str:

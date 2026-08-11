@@ -72,7 +72,7 @@ The intermediate WAV and raw local transcript remain under `extra.saved_files` a
 
 ### `ocr`
 
-Run Tesseract OCR for image-only `input_paths`, then call the granted internal LLM gateway inside this skill to restore sentence boundaries, paragraph layout, punctuation, and highly certain recognition errors. The review preserves source languages, facts, names, numbers, ordering, and uncertainty; it never summarizes or invents content. If the gateway, prompt, or model is unavailable, the raw OCR result is retained and delivered instead of failing the action. Multiple inputs remain in source order without image labels. Video/audio inputs are rejected before dispatch. With normal delivery enabled, the final text is inline below 200 characters and uses `image_text_ocr.txt` at 200 or more.
+Run Tesseract OCR for image-only `input_paths`, then call the granted internal LLM gateway inside this skill to restore sentence boundaries, paragraph layout, punctuation, and highly certain recognition errors. The review merges visual soft wraps caused only by image width and preserves line breaks for real paragraphs, headings, lists, tables, code, verse, and other line-oriented structures. When `language` is omitted or `auto`, local OCR uses every installed Tesseract recognition language without script-specific scoring or short-number deletion. The complete review is Unicode-safe and preserves source languages, facts, names, numeric tokens, ordering, and uncertainty; it never summarizes or invents content. If any chunk fails or violates the language-neutral integrity gate, the raw OCR result is retained and delivered instead of failing the action. A successful review keeps the unmodified source in a non-delivered `raw_artifact` for audit. Multiple inputs remain in source order without image labels. Video/audio inputs are rejected before dispatch. With normal delivery enabled, the final text is inline below 200 characters and uses `image_text_ocr.txt` at 200 or more.
 
 ### `prepare_x`
 
@@ -94,7 +94,7 @@ Check or transcode `input_path` for X compatibility. Directories are scanned rec
 | `download` | `save_meta` | no | boolean | `false` | Save extraction metadata JSON. |
 | `download` | `show_info` | no | boolean | `false` | Probe downloaded media information. |
 | `transcribe` | `engine` | no | string | `whisper` | Uses the configured local whisper.cpp CLI/model by default. `funasr` is the privately installed alternative. |
-| `transcribe`, `ocr` | `language` | no | string | action-specific | Spoken language or Tesseract language list. |
+| `transcribe`, `ocr` | `language` | no | string | action-specific | Spoken language or Tesseract language list. OCR defaults to `auto`, which uses installed recognition data. |
 | `transcribe` | `response_language` | no | string | task locale | Target language for the complete model-reviewed transcript. Use only when the user explicitly requests a target language; otherwise omit it. |
 | `transcribe` | `deliver_to_user` | no | boolean | `true` | Set `false` for the internal WAV extraction step before configured STT preview; keep `true` for a user-requested audio-only result. |
 | `transcribe` | `input_path` | yes | string | - | Existing local video/audio file. |
@@ -136,7 +136,7 @@ Success returns `status=ok` and stable `extra` fields:
 - `profile_collection`: present for a successful Douyin/Xiaohongshu profile download; reports `state=complete`, platform, item/completed/failed counts, monotonic cursor, checkpoint sequence, and checkpoint digest. Private checkpoint paths and blobs are not exposed.
 - `article_delivery`: present only for a delivered platform article shorter than 200 characters; reports `mode=inline`, `content_source=platform_post`, `character_count`, and the inline `text`.
 - `recognition`: for `ocr`, identifies `source=local_ocr`, `engine=tesseract`, and whether `reviewed_by_model` succeeded; each OCR artifact also identifies its Tesseract source.
-- `recognition_review`: reports `status=reviewed|fallback_raw|unavailable`, model/provider when available, chunk counts, character counts, and the source-language preservation policy. It is diagnostic evidence and does not alter the normal delivery contract.
+- `recognition_review`: reports `status=reviewed|fallback_raw|unavailable`, model/provider when available, chunk counts, character counts, integrity failures, and the source-language preservation policy. Successful review also exposes a non-delivered `raw_artifact` descriptor. It is diagnostic evidence and does not alter the normal delivery contract.
 - `recognition_delivery`: present only when this skill's local OCR result is shorter than 200 characters and delivered inline; reports `mode=inline`, source, engine, character count, and text.
 - `transcription_review`: for successful local ASR, contains the complete raw text, source engine, target-language hint, correction requirements, and the shared inline/file delivery threshold. It is consumed by the host finalizer and must not be treated as already reviewed text.
 - `output_directory`: runtime-provided task artifact directory.
