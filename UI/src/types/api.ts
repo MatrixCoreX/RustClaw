@@ -342,6 +342,9 @@ export interface ActiveTaskItem {
   task_id: string;
   kind: string;
   status: string;
+  channel: ChannelName;
+  source_user_id: string;
+  external_user_id?: string | null;
   summary: string;
   age_seconds: number;
   lifecycle?: TaskLifecycleProjection | null;

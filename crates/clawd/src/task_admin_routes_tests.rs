@@ -124,6 +124,11 @@ async fn admin_active_task_list_uses_the_same_system_scope_as_health() {
     assert_eq!(status, StatusCode::OK);
     let data = response.data.expect("active tasks response");
     assert_eq!(data["count"], 2);
+    let tasks = data["tasks"].as_array().expect("active task array");
+    assert!(tasks.iter().all(|task| task["channel"] == "ui"));
+    assert!(tasks
+        .iter()
+        .all(|task| task["source_user_id"].as_str().is_some()));
 }
 
 #[tokio::test]

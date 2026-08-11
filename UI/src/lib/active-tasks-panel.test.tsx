@@ -18,6 +18,9 @@ function props(): ActiveTasksPanelProps {
         task_id: "task-cancel-by-id",
         kind: "ask",
         status: "running",
+        channel: "wechat",
+        source_user_id: "42",
+        external_user_id: "wechat-user-17",
         summary: "正在处理",
         age_seconds: 10,
       },
@@ -55,4 +58,12 @@ test("task-id cancellation stays available before interaction identity loads", (
   assert.ok(cancelButton);
   assert.doesNotMatch(cancelButton, /\sdisabled(?:=|\s|>)/);
   assert.match(cancelButton, /取消/);
+});
+
+test("active task cards show their channel and sending user", () => {
+  const markup = renderToStaticMarkup(<ActiveTasksPanel {...props()} />);
+
+  assert.match(markup, /来源: 微信/);
+  assert.match(markup, /用户:/);
+  assert.match(markup, /wechat-user-17/);
 });
