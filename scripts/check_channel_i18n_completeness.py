@@ -40,6 +40,9 @@ PRODUCTION_SOURCE_ROOTS = (
     "crates/whatsapp_webd/src",
     "crates/feishud/src",
     "crates/larkd/src",
+    "crates/skills",
+    "optional_skills",
+    "external_skills",
     "services/wa-web-bridge",
     "configs/channel_commands.toml",
 )

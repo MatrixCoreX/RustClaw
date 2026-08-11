@@ -18,6 +18,7 @@ use claw_core::skill_registry::{
 use crate::{AppState, ClaimedTask};
 
 use super::credential_fallback::provision_skill_secret_envs;
+use super::progress_delivery;
 use super::runner_pool::{WarmPoolCheckout, WarmRunnerKey, WarmRunnerProcess};
 #[path = "runner_support.rs"]
 mod runner_support;
@@ -1417,6 +1418,7 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
     let task_cancellation = state.worker.task_cancellation_token(&task.task_id);
     let mut observed_frames = 0_u64;
     let mut accepted_times = VecDeque::<Instant>::new();
+    let mut last_runtime_notice_at = None;
     loop {
         let read_record = tokio::time::timeout_at(deadline, runner_process.records.next());
         tokio::pin!(read_record);
@@ -1541,7 +1543,7 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
             "render_owner": "ui_cli_channel_projection",
             "skill_name": canonical_skill_name,
             "skill_version": &installed_launch.version,
-            "frame": frame,
+            "frame": &frame,
         });
         if let Err(error) = crate::task_event_transport::publish_claimed_event(
             state,
@@ -1554,6 +1556,24 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
                 error = %error,
                 "skill_progress_event_publish_failed"
             );
+        }
+        let now = Instant::now();
+        if let Some(progress) =
+            progress_delivery::due_runtime_progress_notice(&frame, last_runtime_notice_at, now)
+        {
+            match Box::pin(progress_delivery::deliver_runtime_progress_notice(
+                state, task, &progress,
+            ))
+            .await
+            {
+                Ok(()) => last_runtime_notice_at = Some(now),
+                Err(error) => tracing::warn!(
+                    skill = canonical_skill_name,
+                    sequence = progress.sequence,
+                    error = %error,
+                    "skill_progress_channel_delivery_failed"
+                ),
+            }
         }
     }
 

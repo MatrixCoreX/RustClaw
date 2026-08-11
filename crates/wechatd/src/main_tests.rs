@@ -438,6 +438,40 @@ fn wechat_media_progress_stays_transport_state_without_canned_replies() {
 
     assert!(skill_progress_message(&task, &zh).is_none());
 
+    if let Some(params) = task
+        .skill_progress
+        .as_mut()
+        .and_then(|event| event.pointer_mut("/payload/frame/params"))
+        .and_then(Value::as_object_mut)
+    {
+        params.insert(
+            "notification_delivery".to_string(),
+            serde_json::json!("runtime"),
+        );
+    }
+    task.task_plan = Some(serde_json::json!({
+        "schema_version": 1,
+        "source": "task_plan",
+        "status": "ok",
+        "data_only": true,
+        "render_owner": "ui_cli_channel_projection",
+        "plan_revision": 1,
+        "steps": [{
+            "step_id": "media_precheck",
+            "title": "检查本次媒体任务",
+            "status": "in_progress"
+        }]
+    }));
+    assert!(skill_progress_message(&task, &zh).is_none());
+    if let Some(params) = task
+        .skill_progress
+        .as_mut()
+        .and_then(|event| event.pointer_mut("/payload/frame/params"))
+        .and_then(Value::as_object_mut)
+    {
+        params.remove("notification_delivery");
+    }
+
     task.task_plan = Some(serde_json::json!({
         "schema_version": 1,
         "source": "task_plan",

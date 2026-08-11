@@ -83,6 +83,33 @@ test("renders browser page progress from machine counts", () => {
   assert.equal(view.detail, "Web page reading is complete. Progress 4/4 (100%).");
 });
 
+test("renders background media collection status from audited numeric fields", () => {
+  const view = buildTaskTraceEventView({
+    event_type: "skill_progress",
+    payload: {
+      skill_name: "media_discovery",
+      frame: {
+        kind: "heartbeat",
+        detail_key: "media_discovery.background.status",
+        params: {
+          elapsed_minutes: 15,
+          items: 6,
+          videos: 2,
+          images: 4,
+          duplicates: 1,
+          failures: 0,
+          unsafe_display_text: "must not render",
+        },
+      },
+    },
+  }, "zh");
+
+  assert.ok(view.detail.includes("已运行 15 分钟"));
+  assert.ok(view.detail.includes("视频 2 条"));
+  assert.ok(view.detail.includes("图片 4 张"));
+  assert.equal(view.detail.includes("must not render"), false);
+});
+
 test("restores the latest skill progress event from the task query projection", () => {
   const result: TaskQueryResponse = {
     task_id: "task-progress",

@@ -152,6 +152,7 @@ mod memory_context;
 mod result_enrichment;
 mod runtime_environment;
 pub(crate) use runtime_environment::collect_declared_skill_env_pairs;
+pub(crate) mod progress_delivery;
 pub(crate) mod runner;
 pub(crate) mod runner_pool;
 pub(crate) use async_poll::run_pinned_async_poll_skill_with_runner;

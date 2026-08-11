@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { browserCapability, collectPlatform } from "./browser.mjs";
 import { sourceUrls, SUPPORTED_PLATFORMS } from "./platforms.mjs";
+import { createBackgroundProgressReporter } from "./progress.mjs";
 import {
   beginRun,
   cleanupExpiredDiagnostics,
@@ -253,7 +254,7 @@ async function control(request, args, action) {
   });
 }
 
-async function runOnce(request, args) {
+async function runOnce(request, args, runtime = {}) {
   const root = storageRoot(request);
   const requested = requestedPlatforms(args, true);
   const scheduledRun = args.scheduled_run === true;
@@ -270,6 +271,14 @@ async function runOnce(request, args) {
   });
   if (!run) return success("run_once", { state: "disabled_or_paused", side_effect_applied: false });
   const counts = { items: 0, videos: 0, images: 0, duplicates: 0, failures: 0 };
+  const progressReporter = scheduledRun
+    ? createBackgroundProgressReporter({
+        requestId: request?.request_id,
+        run,
+        counts,
+        writeFrame: runtime.writeProgress,
+      })
+    : { emitIfDue: () => false, stop: () => {} };
   let status = "completed_batch";
   let errorCode = null;
   const leaseHeartbeat = setInterval(() => {
@@ -302,10 +311,12 @@ async function runOnce(request, args) {
             await Promise.all(temporaryPaths.map((file) => fs.unlink(file).catch(() => {})));
           }
           await heartbeat(root, run.run_id, counts);
+          progressReporter.emitIfDue();
         },
         onFailure: async () => {
           counts.failures += 1;
           await heartbeat(root, run.run_id, counts);
+          progressReporter.emitIfDue();
         },
       });
       if (await heartbeat(root, run.run_id, counts)) {
@@ -328,6 +339,7 @@ async function runOnce(request, args) {
     await fs.rename(runTemporary, diagnostic).catch(() => {});
   } finally {
     clearInterval(leaseHeartbeat);
+    progressReporter.stop();
   }
   run.counts = counts;
   const completed = await finishRun(root, run, status, errorCode);
@@ -392,7 +404,7 @@ async function exportResults(request) {
   });
 }
 
-export async function handleRequest(request) {
+export async function handleRequest(request, runtime = {}) {
   const args = request?.args;
   const action = typeof args?.action === "string" ? args.action : "";
   if (!ACTIONS.has(action)) return errorResponse(action || "unknown", new Error("action_unsupported"));
@@ -408,9 +420,9 @@ export async function handleRequest(request) {
     if (action === "preview_enable") return await preview(args);
     if (action === "enable") return await enable(request, args);
     if (["disable", "pause", "resume"].includes(action)) return await control(request, args, action);
-    if (action === "run_once") return await runOnce(request, args);
+    if (action === "run_once") return await runOnce(request, args, runtime);
     if (action === "run_enabled_once") {
-      return await runOnce(request, { action: "run_once", scheduled_run: true });
+      return await runOnce(request, { action: "run_once", scheduled_run: true }, runtime);
     }
     if (action === "status") return await status(request);
     if (action === "stop_current") {
@@ -443,7 +455,9 @@ if (isEntrypoint) {
     let response;
     try {
       request = JSON.parse(line);
-      response = protocolResponse(request, await handleRequest(request));
+      response = protocolResponse(request, await handleRequest(request, {
+        writeProgress: (frame) => process.stdout.write(`${JSON.stringify(frame)}\n`),
+      }));
     } catch (error) {
       response = protocolResponse(request, errorResponse("unknown", error));
     }

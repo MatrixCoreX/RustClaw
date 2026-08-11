@@ -353,6 +353,9 @@ pub(super) fn skill_progress_message(
     let detail_key = payload
         .pointer("/frame/detail_key")
         .and_then(serde_json::Value::as_str)?;
+    if runtime_owns_progress_delivery(payload) {
+        return None;
+    }
     let message_key = match detail_key {
         // Media stages may only project a model-authored task-plan title. The
         // frame itself remains machine data and is never translated here.
@@ -368,6 +371,13 @@ pub(super) fn skill_progress_message(
         _ => "telegram.progress.skill_generic",
     };
     Some((seq, state.i18n.t(message_key)))
+}
+
+fn runtime_owns_progress_delivery(payload: &serde_json::Value) -> bool {
+    payload
+        .pointer("/frame/params/notification_delivery")
+        .and_then(serde_json::Value::as_str)
+        == Some("runtime")
 }
 
 fn model_authored_plan_step_title(task: &TaskQueryResponse, step_id: &str) -> Option<String> {
@@ -558,7 +568,7 @@ fn telegram_inbound_idempotency_key(bot_name: &str, chat_id: i64, message_id: &s
 
 #[cfg(test)]
 mod idempotency_tests {
-    use super::telegram_inbound_idempotency_key;
+    use super::{runtime_owns_progress_delivery, telegram_inbound_idempotency_key};
 
     #[test]
     fn inbound_idempotency_is_bot_and_chat_scoped() {
@@ -569,6 +579,21 @@ mod idempotency_tests {
             first,
             telegram_inbound_idempotency_key("secondary", 100, "7")
         );
+    }
+
+    #[test]
+    fn runtime_owned_progress_is_not_reprojected_by_telegram_polling() {
+        let payload = serde_json::json!({
+            "frame": {
+                "params": {
+                    "notification_delivery": "runtime"
+                }
+            }
+        });
+        assert!(runtime_owns_progress_delivery(&payload));
+        assert!(!runtime_owns_progress_delivery(&serde_json::json!({
+            "frame": { "params": {} }
+        })));
     }
 }
 

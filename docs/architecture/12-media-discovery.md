@@ -68,6 +68,8 @@ flowchart TD
     I[images.csv]
     F[video_covers]
     D[Task artifact delivery]
+    H[15-minute machine status heartbeat]
+    N[UI task event and unified channel notice]
 
     U --> A
     A -->|start| E
@@ -76,6 +78,7 @@ flowchart TD
     A -->|one shot| W --> R
     S -->|next interval| R
     R --> T --> B --> C --> O --> L
+    R -->|while active| H --> N
     A -->|stop| X
     X --> Q
     X --> G --> P --> L
@@ -95,6 +98,14 @@ therefore committed in full before the browser closes. The collector remains
 separate from the manual `media_download` queue. The
 scheduler starts later batches; the skill does not leave an unmanaged detached
 process behind.
+
+While a continuous initial or scheduler-started batch remains active, the skill
+emits a structured status heartbeat every 15 minutes. It contains only machine
+fields for elapsed time and current counts. `clawd` persists it in the task
+event stream for the UI and, for non-UI origins, sends a localized proactive
+notice through the same receipt-backed channel delivery service used by other
+background work. Host-side rate limiting and task/sequence idempotency prevent
+duplicate delivery. One-shot collection does not opt into this reporting path.
 
 ## Screenshot and Recognition Boundary
 

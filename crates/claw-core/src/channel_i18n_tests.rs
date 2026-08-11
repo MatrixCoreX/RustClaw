@@ -114,6 +114,25 @@ fn bundled_common_catalogs_cover_supported_channel_locale_families() {
 }
 
 #[test]
+fn common_status_notice_substitutes_structured_progress_values() {
+    let text = common_text_with_vars_for_locale(
+        "zh-CN",
+        "channel.notice.media_discovery_background_progress",
+        &[
+            ("elapsed_minutes", "15"),
+            ("items", "4"),
+            ("videos", "1"),
+            ("images", "3"),
+            ("duplicates", "2"),
+            ("failures", "0"),
+        ],
+    );
+    assert!(text.contains("15"));
+    assert!(text.contains("视频 1"));
+    assert!(!text.contains("{items}"));
+}
+
+#[test]
 fn common_machine_keys_resolve_to_locale_copy_or_safe_fallback() {
     let localized = common_text_for_locale("zh-CN", "channel.error.payload_too_large");
     assert!(localized.contains("大小限制"));

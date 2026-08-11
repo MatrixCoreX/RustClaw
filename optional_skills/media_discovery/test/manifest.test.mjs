@@ -13,4 +13,5 @@ test("repository package confines the Node build source to this skill", async ()
     /^source_root = "optional_skills\/media_discovery"$/m,
   );
   assert.doesNotMatch(manifest, /^source_root = "\."$/m);
+  assert.match(manifest, /^progress_frames = true$/m);
 });

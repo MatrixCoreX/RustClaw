@@ -1069,8 +1069,21 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
       frame && typeof frame.total === "number" && Number.isSafeInteger(frame.total)
         ? frame.total
         : null;
+    const progressParams =
+      frame?.params && typeof frame.params === "object" && !Array.isArray(frame.params)
+        ? frame.params as Record<string, unknown>
+        : null;
+    const progressCount = (name: string): number => {
+      const value = progressParams?.[name];
+      return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
+    };
     const knownDetail =
-      detailKey === "media_download.precheck.starting"
+      detailKey === "media_discovery.background.status"
+        ? tLocal(
+            `后台采集已运行 ${progressCount("elapsed_minutes")} 分钟，本轮处理 ${progressCount("items")} 项：视频 ${progressCount("videos")} 条、图片 ${progressCount("images")} 张、重复 ${progressCount("duplicates")} 项、失败 ${progressCount("failures")} 项。`,
+            `Background collection has run for ${progressCount("elapsed_minutes")} minutes. This batch processed ${progressCount("items")} item(s): ${progressCount("videos")} video(s), ${progressCount("images")} image(s), ${progressCount("duplicates")} duplicate(s), and ${progressCount("failures")} failure(s).`,
+          )
+        : detailKey === "media_download.precheck.starting"
         ? tLocal("正在检查媒体任务所需条件。", "Checking the media task requirements.")
         : detailKey === "media_download.download.starting"
           ? tLocal("正在下载媒体文件。", "Downloading the media file.")

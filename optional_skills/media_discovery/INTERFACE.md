@@ -40,6 +40,15 @@ closes the browser normally. It never kills the browser to implement this stop.
 This is an on-demand companion skill with private storage and its own dispatch
 queue. It must not block `media_download` manual downloads or OCR work.
 
+Continuous background batches emit one machine-only heartbeat every 15 minutes
+while they remain active. The frame uses
+`detail_key=media_discovery.background.status` with elapsed time and current
+item/video/image/duplicate/failure counts. Runtime persists the frame for UI
+task events and projects the same structured snapshot to the originating
+communication channel through the unified, idempotent delivery service. The
+skill never writes localized notification prose. Explicit one-shot collection
+does not enable these periodic notices.
+
 ## Planner Workflow
 
 - A user request to start continuous collection is a multi-capability workflow:
@@ -144,6 +153,13 @@ Every response has an empty `text` and structured
 in the user's language. Errors additionally provide
 `extra.{error_code,message_key,retryable}`; runtime logic must not parse
 `error_text`.
+
+When `run_enabled_once` or a scheduler-marked `run_once` remains active for at
+least 15 minutes, zero or more `skill_progress` JSONL records precede the final
+response. Their `params.notification_delivery=runtime` marker delegates UI and
+channel presentation to the host; it does not change success, retry, routing,
+or final-result semantics. The host enforces a minimum 900-second delivery
+interval and deduplicates each delivery by task and frame sequence.
 
 `videos.csv` columns:
 

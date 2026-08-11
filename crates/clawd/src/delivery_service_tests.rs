@@ -74,6 +74,40 @@ fn scheduled_envelope_pins_ingress_context_and_stable_idempotency() {
 }
 
 #[test]
+fn proactive_notice_is_localized_from_machine_params() {
+    use std::collections::BTreeMap;
+
+    let state = AppState::test_default_with_fixture_provider();
+    let payload = payload();
+    let task = task(&payload);
+    let mut notice = claw_core::channel_notice::ChannelNotice::status(
+        "media_discovery.background.status",
+        "channel.notice.media_discovery_background_progress",
+        claw_core::channel_notice::ChannelNoticeSeverity::Info,
+    );
+    notice.params = BTreeMap::from([
+        ("elapsed_minutes".to_string(), "15".to_string()),
+        ("items".to_string(), "4".to_string()),
+        ("videos".to_string(), "1".to_string()),
+        ("images".to_string(), "3".to_string()),
+        ("duplicates".to_string(), "0".to_string()),
+        ("failures".to_string(), "0".to_string()),
+    ]);
+
+    let envelope =
+        build_proactive_notice_envelope(&state, &task, &payload, "progress-1", notice.clone())
+            .expect("build proactive notice");
+    assert_eq!(envelope.source, ChannelDeliverySource::ProactiveNotice);
+    assert_eq!(envelope.notice, Some(notice));
+    assert!(envelope.text_segments[0].text.contains("已运行 15 分钟"));
+    assert!(envelope.text_segments[0].text.contains("视频 1 条"));
+    assert_eq!(
+        envelope.history_disposition(),
+        claw_core::channel_delivery::ChannelDeliveryHistoryDisposition::TransportOnly
+    );
+}
+
+#[test]
 fn daemon_content_projections_have_stable_distinct_idempotency_keys() {
     let state = AppState::test_default_with_fixture_provider();
     let payload = payload();
