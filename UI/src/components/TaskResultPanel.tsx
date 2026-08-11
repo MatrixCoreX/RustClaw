@@ -597,7 +597,7 @@ export function TaskResultPanel({
                   </span>
                 ))}
               </div>
-              {approvalRequest.previews.length > 0 ? (
+              {approvalRequest && approvalRequest.previews.length > 0 ? (
                 <div className="mt-3 space-y-3">
                   {approvalRequest.previews.map((preview, previewIndex) => (
                     <div key={`${preview.actionRef}:${previewIndex}`} className="rounded-lg border border-white/10 bg-black/20 p-3">
