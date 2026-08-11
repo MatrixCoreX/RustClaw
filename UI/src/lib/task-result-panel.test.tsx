@@ -92,6 +92,30 @@ test("renders the task plan as a clear step card with raw JSON collapsed", () =>
   assert.match(markup, />v2</);
 });
 
+test("renders a completed goal without requiring an approval request", () => {
+  const base = props();
+  base.taskResult = {
+    task_id: "completed-history-task",
+    status: "succeeded",
+    result_json: null,
+    error_text: null,
+    goal: {
+      schema_version: 1,
+      task_id: "completed-history-task",
+      goal_id: "task:completed-history-task",
+      goal_status: "completed",
+      goal_status_source: "journal_final_status",
+      current_progress: ["final_status=success"],
+    },
+  };
+
+  const markup = renderToStaticMarkup(<TaskResultPanel {...base} />);
+
+  assert.match(markup, /目标进度/);
+  assert.match(markup, /completed/);
+  assert.doesNotMatch(markup, /确认请求/);
+});
+
 test("renders a beginner-facing subagent panel with active and done controls", () => {
   const base = props();
   base.taskResult = {
