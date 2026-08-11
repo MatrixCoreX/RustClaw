@@ -540,6 +540,52 @@ fn persistent_writer_defaults_to_parent_reviewed_local_worktree() {
 }
 
 #[test]
+fn durable_subagent_rejects_unknown_role_with_replan_evidence() {
+    let state = persistent_test_state();
+    let task = crate::ClaimedTask {
+        claim_attempt: 0,
+        task_id: "task-durable-invalid-role".to_string(),
+        user_id: 42,
+        chat_id: 7,
+        user_key: Some("test-key".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: Some("ui-user".to_string()),
+        external_chat_id: Some("ui-chat".to_string()),
+        kind: "ask".to_string(),
+        payload_json: serde_json::json!({"text": "parent task"}).to_string(),
+    };
+    insert_running_parent_task(&state, &task);
+    let mut loop_state = LoopState::new();
+    install_test_task_budget(&mut loop_state);
+    let args = serde_json::json!({
+        "action": "inline_readonly",
+        "role": "unknown_role",
+        "objective": "inspect one capability",
+        "context_refs": ["README.md"],
+        "allowed_capabilities": ["filesystem.read_text_range"]
+    });
+
+    let result = record_durable_readonly_child_task_from_args(
+        &state,
+        &task,
+        &mut loop_state,
+        1,
+        1,
+        &args,
+        &SubagentRuntimeConfig::default(),
+    );
+
+    assert_eq!(result, Err(SUBAGENT_STOP_SIGNAL_INVALID_ROLE));
+    let observation = loop_state.task_observations.last().expect("rejection");
+    assert_eq!(observation["status"], "rejected");
+    assert_eq!(observation["error_code"], "subagent_role_not_allowed");
+    assert_eq!(observation["requested_roles"][0], "unknown_role");
+    assert!(observation["allowed_roles"]
+        .as_array()
+        .is_some_and(|roles| roles.iter().any(|role| role == "worker")));
+}
+
+#[test]
 fn ordinary_batch_materializes_all_children_and_queues_capacity_overflow() {
     let state = persistent_test_state();
     let task = crate::ClaimedTask {

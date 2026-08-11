@@ -249,6 +249,48 @@ fn real_config_native_schemas_preserve_nonempty_and_nested_read_contracts() {
 }
 
 #[test]
+fn subagent_native_schemas_bind_roles_from_runtime_policy() {
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+    let task = crate::ClaimedTask {
+        claim_attempt: 0,
+        task_id: "subagent-native-role-schema".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let group = planner_native_capability_groups_for_task(&state, &task)
+        .into_iter()
+        .find(|group| group.skill_name == "subagent")
+        .expect("subagent native group");
+    let expected = crate::agent_runtime_contract::load_subagent_role_definitions(
+        &state
+            .skill_rt
+            .workspace_root
+            .join("configs/agent_guard.toml"),
+    )
+    .into_iter()
+    .map(|role| Value::String(role.token))
+    .collect::<Vec<_>>();
+
+    assert_eq!(
+        group.capability_argument_schemas["agent.subagent"]["properties"]["role"]["enum"],
+        Value::Array(expected.clone())
+    );
+    assert_eq!(
+        group.capability_argument_schemas["agent.subagent_batch"]["properties"]["children"]
+            ["items"]["properties"]["role"]["enum"],
+        Value::Array(expected)
+    );
+}
+
+#[test]
 fn native_capability_groups_expose_distinct_registry_tools() {
     let state = crate::AppState::test_default_with_fixture_provider()
         .with_prompt_layers_installed()

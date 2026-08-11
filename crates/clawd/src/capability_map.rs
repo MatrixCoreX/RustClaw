@@ -452,7 +452,10 @@ fn planner_native_capability_groups_for_task_filtered(
                     mapping,
                 )
                 .unwrap_or_else(|error| panic!("{error}"));
-                (mapping.name.clone(), schema)
+                (
+                    mapping.name.clone(),
+                    bind_runtime_argument_schema(state, &skill, schema),
+                )
             })
             .collect::<BTreeMap<_, _>>();
         let capability_names = capability_argument_schemas
@@ -521,6 +524,31 @@ fn planner_native_capability_groups_for_task_filtered(
         });
     }
     groups
+}
+
+fn bind_runtime_argument_schema(state: &AppState, skill: &str, mut schema: Value) -> Value {
+    if skill != "subagent" {
+        return schema;
+    }
+    let roles = crate::agent_runtime_contract::load_subagent_role_definitions(
+        &state
+            .skill_rt
+            .workspace_root
+            .join("configs/agent_guard.toml"),
+    )
+    .into_iter()
+    .map(|role| Value::String(role.token))
+    .collect::<Vec<_>>();
+    if roles.is_empty() {
+        return schema;
+    }
+    if let Some(role_schema) = schema.pointer_mut("/properties/role") {
+        role_schema["enum"] = Value::Array(roles.clone());
+    }
+    if let Some(role_schema) = schema.pointer_mut("/properties/children/items/properties/role") {
+        role_schema["enum"] = Value::Array(roles);
+    }
+    schema
 }
 
 fn native_capability_group_tool_name(

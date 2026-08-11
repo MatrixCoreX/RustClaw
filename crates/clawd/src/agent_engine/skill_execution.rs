@@ -811,7 +811,6 @@ async fn compose_policy_block_delivery(
     .await
 }
 
-#[cfg(test)]
 fn normalize_subagent_stop_signal(stop_signal: Option<String>) -> (Option<String>, bool) {
     let recoverable_invalid_role =
         stop_signal.as_deref() == Some(super::subagent_runtime::SUBAGENT_STOP_SIGNAL_INVALID_ROLE);
@@ -960,9 +959,11 @@ pub(super) async fn execute_prepared_skill_action(
             )
             .await;
             super::support::refresh_agent_loop_checkpoint_snapshot(loop_state);
+            let (stop_signal, _recoverable) =
+                normalize_subagent_stop_signal(stop_signal.map(str::to_string));
             return Ok(SkillActionOutcome {
                 ended_with_user_visible_output: false,
-                stop_signal: stop_signal.map(str::to_string),
+                stop_signal,
                 continue_in_round: false,
             });
         }

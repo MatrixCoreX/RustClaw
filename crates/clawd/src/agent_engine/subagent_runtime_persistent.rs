@@ -1,7 +1,10 @@
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use super::{subagent_action_parts_from_args, LoopState, SubagentRuntimeConfig};
+use super::{
+    subagent_action_parts_from_args, LoopState, SubagentRuntimeConfig,
+    SUBAGENT_STOP_SIGNAL_INVALID_ROLE,
+};
 use crate::agent_runtime_contract::SubagentRoleDefinition;
 use crate::child_task_contract::{
     ChildTaskBudget, ChildTaskMergePolicy, ChildTaskPermissionProfile, ChildTaskSpec,
@@ -121,7 +124,14 @@ fn schedule_child_task_specs(
             }
         };
     }
-    let mut specs = child_specs(task, args, config, force_readonly)?;
+    let mut specs = match child_specs(task, args, config, force_readonly) {
+        Ok(specs) => specs,
+        Err(signal) if signal == SUBAGENT_STOP_SIGNAL_INVALID_ROLE => {
+            record_invalid_role_error(loop_state, global_step, step_in_round, args, config);
+            return Err(SUBAGENT_STOP_SIGNAL_INVALID_ROLE);
+        }
+        Err(signal) => return Err(signal),
+    };
     let allocation_ids = allocate_persistent_child_budgets(loop_state, &mut specs)?;
     let write_enabled = specs
         .iter()
@@ -299,7 +309,7 @@ fn persistent_child_spec(
     let role_kind = config
         .resolve_role(role.trim())
         .cloned()
-        .ok_or(SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED)?;
+        .ok_or(SUBAGENT_STOP_SIGNAL_INVALID_ROLE)?;
     let objective = objective.trim();
     if objective.is_empty() {
         return Err(SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED);
@@ -737,6 +747,49 @@ fn record_persistent_schedule_error(
         "execution_mode": "persistent_child_task",
         "error_code": error_code,
         "error_excerpt": error_text.map(|text| bounded_error(&text)),
+        "write_enabled": false,
+        "external_publish_enabled": false,
+        "global_step": global_step,
+        "step_in_round": step_in_round,
+        "round_no": loop_state.round_no,
+    }));
+}
+
+fn record_invalid_role_error(
+    loop_state: &mut LoopState,
+    global_step: usize,
+    step_in_round: usize,
+    args: &Value,
+    config: &SubagentRuntimeConfig,
+) {
+    let requested_roles = args
+        .get("children")
+        .and_then(Value::as_array)
+        .map(|children| {
+            children
+                .iter()
+                .filter_map(|child| child.get("role").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_else(|| {
+            args.get("role")
+                .and_then(Value::as_str)
+                .into_iter()
+                .collect()
+        });
+    loop_state.task_observations.push(json!({
+        "schema_version": 1,
+        "owner_layer": "subagent_runtime",
+        "output_format": "machine_json",
+        "status": "rejected",
+        "action": "subagent_child_task_enqueue",
+        "execution_mode": "persistent_child_task",
+        "error_code": "subagent_role_not_allowed",
+        "requested_roles": requested_roles,
+        "allowed_roles": config.role_definitions
+            .iter()
+            .map(|definition| definition.token.as_str())
+            .collect::<Vec<_>>(),
         "write_enabled": false,
         "external_publish_enabled": false,
         "global_step": global_step,
