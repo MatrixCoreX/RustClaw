@@ -2,7 +2,7 @@ schema_version = 2
 
 [package]
 name = "media_discovery"
-version = "0.1.19"
+version = "0.1.20"
 description = "Run bounded home-feed, keyword-search, or seed-page browser discovery for Douyin and Xiaohongshu in silent-by-default or explicitly visible mode, preserve rendered video covers, and export ordered source-traceable results without downloading media originals."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
@@ -26,7 +26,7 @@ options = { node = ">=20" }
 host_dependencies = ["node", "chromium", "tesseract"]
 
 [install.resources]
-min_memory_mb = 2048
+min_memory_mb = 768
 min_free_disk_mb = 2048
 
 [run]
