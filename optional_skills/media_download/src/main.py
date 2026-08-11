@@ -36,7 +36,6 @@ SUPPORTED_ACTIONS = (
 )
 SUPPORTED_PLATFORMS = ("auto", "douyin", "kuaishou", "xiaohongshu", "tiktok", "youtube")
 MAX_DIAGNOSTIC_CHARS = 4_000
-INLINE_TEXT_MAX_CHARS = 200
 IMAGE_ARCHIVE_THRESHOLD = 9
 SUBPROCESS_TIMEOUT_SLICE_SECONDS = 24 * 60 * 60
 CHILD_PROGRESS_PREFIX = "__MEDIA_DOWNLOAD_PROGRESS__:"
@@ -812,7 +811,8 @@ def _content_bundle(
         count_key = roles.get(role, "other_file_count")
         counts[count_key] += 1
     inline_article_count = 1 if inline_article is not None else 0
-    counts["article_count"] += inline_article_count
+    if counts["article_count"] == 0:
+        counts["article_count"] += inline_article_count
     if counts["image_count"] and counts["article_count"]:
         kind = "image_article"
     elif counts["image_count"]:
@@ -852,81 +852,70 @@ def _content_bundle(
     return bundle
 
 
-def _consume_short_text_artifact(
-    artifacts: list[dict[str, Any]],
+def _read_text_artifact(
     artifact: dict[str, Any] | None,
     *,
     body_marker: str | None = None,
-) -> tuple[list[dict[str, Any]], str | None]:
+) -> str | None:
     if artifact is None:
-        return artifacts, None
+        return None
     path = Path(str(artifact["path"]))
     try:
         document = path.read_text(encoding="utf-8")
     except OSError:
-        return artifacts, None
+        return None
     body = (
         document.partition(body_marker)[2].strip()
         if body_marker and body_marker in document
         else document.strip()
     )
-    if not body or len(body) >= INLINE_TEXT_MAX_CHARS:
-        return artifacts, None
-    try:
-        path.unlink()
-    except OSError:
-        return artifacts, None
-    return (
-        [item for item in artifacts if item is not artifact],
-        body,
-    )
+    return body or None
 
 
-def _inline_short_article(
+def _article_text_delivery(
     artifacts: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+) -> dict[str, Any] | None:
     article = next(
         (item for item in artifacts if item.get("artifact_role") == "article_text"),
         None,
     )
-    remaining, body = _consume_short_text_artifact(
-        artifacts,
+    body = _read_text_artifact(
         article,
         body_marker="\n正文：\n",
     )
     if body is None:
-        return artifacts, None
-    return (
-        remaining,
-        {
-            "mode": "inline",
-            "content_source": "platform_post",
-            "character_count": len(body),
-            "text": body,
-        },
-    )
+        return None
+    assert article is not None
+    return {
+        "mode": "inline_and_artifact",
+        "content_source": "platform_post",
+        "character_count": len(body),
+        "text": body,
+        "artifact_path": article["path"],
+        "artifact_filename": article["filename"],
+    }
 
 
-def _inline_short_ocr(
+def _ocr_text_delivery(
     artifacts: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+) -> dict[str, Any] | None:
     ocr_artifact = next(
         (item for item in artifacts if item.get("recognition_source") == "local_ocr"),
         None,
     )
-    remaining, text = _consume_short_text_artifact(artifacts, ocr_artifact)
+    text = _read_text_artifact(ocr_artifact)
     if text is None:
-        return artifacts, None
-    return (
-        remaining,
-        {
-            "mode": "inline",
-            "source": "local_ocr",
-            "engine": "tesseract",
-            "character_count": len(text),
-            "text": text,
-        },
-    )
+        return None
+    assert ocr_artifact is not None
+    return {
+        "mode": "inline_and_artifact",
+        "source": "local_ocr",
+        "engine": "tesseract",
+        "character_count": len(text),
+        "text": text,
+        "artifact_path": ocr_artifact["path"],
+        "artifact_filename": ocr_artifact["filename"],
+    }
 
 
 def _image_text_revision_prompt() -> str | None:
@@ -1202,9 +1191,9 @@ def _prepare_transcription_review_contract(
         "corrections": ["recognition_errors", "typos", "broken_sentences"],
         "preserve_meaning": True,
         "delivery": {
-            "inline_max_characters_exclusive": INLINE_TEXT_MAX_CHARS,
-            "long_text_format": "text/plain; charset=utf-8",
-            "long_text_filename": "transcript.txt",
+            "mode": "inline_and_artifact",
+            "text_format": "text/plain; charset=utf-8",
+            "text_filename": "transcript.txt",
         },
     }
 
@@ -1644,7 +1633,7 @@ def _capabilities_extra() -> dict[str, Any]:
         "image_article_posts": {
             "platforms": ["douyin", "xiaohongshu"],
             "default_outputs": ["original_images", "article_text"],
-            "inline_text_max_characters_exclusive": INLINE_TEXT_MAX_CHARS,
+            "text_delivery": "inline_and_artifact",
             "individual_delivery_max_images": IMAGE_ARCHIVE_THRESHOLD,
             "large_set_delivery": "ordered_zip",
             "article_included_in_large_set_archive": True,
@@ -1831,6 +1820,7 @@ def respond(
             )
     if action == "ocr":
         for artifact in artifacts:
+            artifact["artifact_role"] = "recognized_text"
             artifact["recognition_source"] = "local_ocr"
             artifact["recognition_engine"] = "tesseract"
         recognition_review = _review_local_ocr_artifact(artifacts)
@@ -1855,16 +1845,16 @@ def respond(
             artifacts,
             output_dir,
         )
-        artifacts, inline_article = _inline_short_article(artifacts)
+        inline_article = _article_text_delivery(artifacts)
     elif action == "ocr" and deliver_to_user:
-        artifacts, inline_recognition = _inline_short_ocr(artifacts)
+        inline_recognition = _ocr_text_delivery(artifacts)
     count = len(urls) if action == "resolve" else len(artifacts)
     noun = "URL" if action == "resolve" else "file"
     text = f"{action} completed with {count} {noun}{'' if count == 1 else 's'}."
     if inline_article is not None:
-        text = f"{text}\n\n{inline_article['text']}"
+        text = inline_article["text"]
     elif inline_recognition is not None:
-        text = f"ocr completed with inline text.\n\n{inline_recognition['text']}"
+        text = inline_recognition["text"]
     result_artifacts = artifacts
     delivery = None
     saved_files = None

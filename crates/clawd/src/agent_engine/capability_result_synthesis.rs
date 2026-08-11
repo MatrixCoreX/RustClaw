@@ -12,7 +12,6 @@ use crate::{AppState, ClaimedTask};
 const PROMPT_LOGICAL_PATH: &str = "prompts/capability_result_synthesis_prompt.md";
 const TRANSCRIPT_REVISION_PROMPT_LOGICAL_PATH: &str = "prompts/transcript_revision_prompt.md";
 const FALLBACK_TRANSCRIPT_REVISION_CHUNK_CHARS: usize = 4_000;
-const DEFAULT_TRANSCRIPT_INLINE_MAX_CHARS: usize = 200;
 #[cfg(test)]
 const MAX_RESULT_JSON_CHARS: usize = 64 * 1024;
 #[cfg(test)]
@@ -41,8 +40,6 @@ struct TranscriptRevisionOutput {
     #[serde(default)]
     reviewed_text: String,
     #[serde(default)]
-    delivery_message: String,
-    #[serde(default)]
     content_kind: TranscriptContentKind,
     #[serde(default)]
     qualified: bool,
@@ -67,8 +64,7 @@ struct TranscriptReviewContract {
     raw_text: String,
     response_language: String,
     source: String,
-    inline_max_chars: usize,
-    long_text_filename: String,
+    text_filename: String,
 }
 
 pub(super) struct CapabilitySynthesis {
@@ -228,14 +224,8 @@ fn transcript_review_contract(
                 .filter(|text| !text.is_empty())?
                 .to_string();
             let delivery = contract.get("delivery").and_then(Value::as_object);
-            let inline_max_chars = delivery
-                .and_then(|delivery| delivery.get("inline_max_characters_exclusive"))
-                .and_then(Value::as_u64)
-                .and_then(|value| usize::try_from(value).ok())
-                .filter(|value| (1..=10_000).contains(value))
-                .unwrap_or(DEFAULT_TRANSCRIPT_INLINE_MAX_CHARS);
-            let long_text_filename = delivery
-                .and_then(|delivery| delivery.get("long_text_filename"))
+            let text_filename = delivery
+                .and_then(|delivery| delivery.get("text_filename"))
                 .and_then(Value::as_str)
                 .map(safe_transcript_filename)
                 .filter(|filename| !filename.is_empty())
@@ -253,8 +243,7 @@ fn transcript_review_contract(
                     .and_then(Value::as_str)
                     .unwrap_or("speech_to_text")
                     .to_string(),
-                inline_max_chars,
-                long_text_filename,
+                text_filename,
             })
         })
 }
@@ -282,7 +271,6 @@ async fn synthesize_reviewed_transcript(
     )
     .map_err(|_| "transcript_revision_prompt_unavailable".to_string())?;
     let mut reviewed_chunks = Vec::with_capacity(chunks.len());
-    let mut delivery_message = String::new();
     let mut confidence = 1.0_f64;
     for (index, chunk) in chunks.iter().enumerate() {
         let chunk_index = (index + 1).to_string();
@@ -321,9 +309,6 @@ async fn synthesize_reviewed_transcript(
         {
             return Err("transcript_revision_unqualified".to_string());
         }
-        if delivery_message.is_empty() {
-            delivery_message = parsed.delivery_message.trim().to_string();
-        }
         confidence = confidence.min(parsed.confidence.clamp(0.0, 1.0));
         reviewed_chunks.push(reviewed.to_string());
     }
@@ -332,41 +317,33 @@ async fn synthesize_reviewed_transcript(
         return Err("transcript_revision_empty".to_string());
     }
     let character_count = reviewed_text.chars().count();
-    let inline_delivery = transcript_delivery_is_inline(character_count, contract.inline_max_chars);
-    let answer = if inline_delivery {
-        reviewed_text.clone()
-    } else {
-        if delivery_message.is_empty() {
-            return Err("transcript_revision_delivery_message_empty".to_string());
-        }
-        let published = crate::skill_output_artifact::publish_task_text_artifact(
-            &state.skill_rt.workspace_root,
-            &task.task_id,
-            "transcript-review",
-            &contract.long_text_filename,
-            &(reviewed_text.clone() + "\n"),
-            json!({
-                "artifact_role": "transcript_text",
-                "reviewed_by_model": true,
-                "target_language": target_language,
-                "source": contract.source,
-                "character_count": character_count,
-            }),
-        )
-        .map_err(|_| "transcript_revision_artifact_write_failed".to_string())?;
-        let artifact = serde_json::from_value::<ArtifactRef>(published.artifact_ref)
-            .map_err(|_| "transcript_revision_artifact_invalid".to_string())?;
-        let result = loop_state
-            .capability_results
-            .get_mut(contract.result_index)
-            .ok_or_else(|| "transcript_revision_result_missing".to_string())?;
-        attach_reviewed_transcript_artifact(
-            result,
-            artifact,
-            &contract.long_text_filename,
-            &delivery_message,
-        )?
-    };
+    let published = crate::skill_output_artifact::publish_task_text_artifact(
+        &state.skill_rt.workspace_root,
+        &task.task_id,
+        "transcript-review",
+        &contract.text_filename,
+        &(reviewed_text.clone() + "\n"),
+        json!({
+            "artifact_role": "transcript_text",
+            "reviewed_by_model": true,
+            "target_language": target_language,
+            "source": contract.source,
+            "character_count": character_count,
+        }),
+    )
+    .map_err(|_| "transcript_revision_artifact_write_failed".to_string())?;
+    let artifact = serde_json::from_value::<ArtifactRef>(published.artifact_ref)
+        .map_err(|_| "transcript_revision_artifact_invalid".to_string())?;
+    let result = loop_state
+        .capability_results
+        .get_mut(contract.result_index)
+        .ok_or_else(|| "transcript_revision_result_missing".to_string())?;
+    let answer = attach_reviewed_transcript_artifact(
+        result,
+        artifact,
+        &contract.text_filename,
+        &reviewed_text,
+    )?;
     if let Some(extra) = loop_state
         .capability_results
         .get_mut(contract.result_index)
@@ -376,7 +353,9 @@ async fn synthesize_reviewed_transcript(
         extra.insert(
             "transcription_delivery".to_string(),
             json!({
-                "mode": if inline_delivery { "inline" } else { "artifact" },
+                "mode": "inline_and_artifact",
+                "text_included": true,
+                "artifact_included": true,
                 "character_count": character_count,
                 "reviewed_by_model": true,
                 "target_language": target_language,
@@ -410,7 +389,7 @@ async fn synthesize_reviewed_transcript(
         "raw_character_count": contract.raw_text.chars().count(),
         "reviewed_character_count": character_count,
         "chunk_count": chunks.len(),
-        "delivery_mode": if inline_delivery { "inline" } else { "artifact" },
+        "delivery_mode": "inline_and_artifact",
     }));
     Ok(CapabilitySynthesis {
         answer,
@@ -423,7 +402,7 @@ fn attach_reviewed_transcript_artifact(
     result: &mut CapabilityResultEnvelope,
     mut artifact: ArtifactRef,
     filename: &str,
-    delivery_message: &str,
+    reviewed_text: &str,
 ) -> Result<String, String> {
     let path = artifact
         .path
@@ -455,11 +434,7 @@ fn attach_reviewed_transcript_artifact(
         .ok_or_else(|| "transcript_revision_delivery_contract_invalid".to_string())?;
     delivery.insert("deliver_to_user".to_string(), Value::Bool(true));
     delivery.insert("intent".to_string(), Value::String("artifact".to_string()));
-    Ok(format!("{delivery_message}\nFILE:{path}"))
-}
-
-fn transcript_delivery_is_inline(character_count: usize, inline_max_chars: usize) -> bool {
-    character_count < inline_max_chars
+    Ok(format!("{reviewed_text}\nFILE:{path}"))
 }
 
 fn normalized_transcript_language(requested: &str, fallback: &str) -> String {

@@ -318,6 +318,59 @@ fn legacy_internal_skill_output_token_is_removed_without_a_manifest() {
 }
 
 #[test]
+fn long_text_is_preserved_when_the_text_artifact_is_delivered() {
+    let workspace = temp_workspace("task_delivery_long_text_and_artifact");
+    let task_id = "task-long-text";
+    let artifact_id = "artifact-transcript";
+    let filename = "transcript.txt";
+    let transcript = "多语言 transcript line\n"
+        .repeat(600)
+        .trim_end()
+        .to_string();
+    let artifact_path = write_delivery_artifact(
+        &workspace,
+        task_id,
+        artifact_id,
+        filename,
+        transcript.as_bytes(),
+    );
+    let result = result_with_artifact(
+        task_id,
+        artifact_id,
+        filename,
+        "file",
+        "text/plain",
+        transcript.len() as u64,
+        Some(true),
+    );
+
+    let messages = merge_task_artifact_delivery_messages(
+        task_id,
+        Some(&result),
+        &workspace,
+        vec![format!("{transcript}\nFILE:{filename}")],
+    );
+
+    assert_eq!(messages.len(), 1);
+    assert!(messages[0].starts_with(&transcript));
+    assert_eq!(
+        messages[0]
+            .chars()
+            .take(transcript.chars().count())
+            .collect::<String>(),
+        transcript
+    );
+    assert!(messages[0].ends_with(&format!(
+        "FILE:{}",
+        artifact_path
+            .canonicalize()
+            .expect("canonical text artifact")
+            .display()
+    )));
+    fs::remove_dir_all(workspace).ok();
+}
+
+#[test]
 fn explicitly_referenced_internal_manifest_is_still_never_delivered() {
     let workspace = temp_workspace("task_delivery_internal_explicit");
     let task_id = "task-internal-explicit";

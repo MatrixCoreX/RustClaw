@@ -21,8 +21,8 @@ test("schema normalization accepts singular platform without natural-language pa
   assert.deepEqual(requestedPlatforms({ platform: "douyin" }), ["douyin"]);
   assert.equal(normalizedConfig({}).source_mode, "home_feed");
   assert.equal(normalizedConfig({}).max_images_per_post, 100);
-  assert.equal(normalizedConfig({}).browser_mode, "visible");
-  assert.equal(normalizedConfig({ browser_mode: "silent" }).browser_mode, "silent");
+  assert.equal(normalizedConfig({}).browser_mode, "silent");
+  assert.equal(normalizedConfig({ browser_mode: "visible" }).browser_mode, "visible");
   assert.throws(() => normalizedConfig({ browser_mode: "hidden" }));
   assert.throws(() => requestedPlatforms({ platform: "unknown" }));
 });

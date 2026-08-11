@@ -9,8 +9,8 @@ Previous: [Task artifact delivery](11-task-artifact-delivery.md) |
 <!-- ai-learning-navigation:end -->
 
 `media_discovery` is an optional Skill Store capability for bounded discovery on
-Douyin and Xiaohongshu. It opens a visible browser by default and uses silent
-mode only when the user explicitly requests it. Both modes recognize only
+Douyin and Xiaohongshu. It runs silently by default and opens a visible browser
+only when the user explicitly requests visible or non-silent operation. Both modes recognize only
 content that the browser has already rendered and export ordered CSV records;
 neither downloads video binaries or original image files.
 
@@ -60,7 +60,7 @@ flowchart TD
     T[Structured source targets<br/>home feed, keywords, or seed URLs]
     G[Mark active batch draining]
     P[Finish and commit the current complete post]
-    B[Persistent browser profile<br/>visible default or explicit silent]
+    B[Persistent browser profile<br/>silent default or explicit visible]
     C[Rendered card or media element screenshot]
     O[Metadata and optional local OCR review]
     L[Private immutable record ledger]
@@ -109,8 +109,8 @@ duplicate delivery. One-shot collection does not opt into this reporting path.
 
 ## Screenshot and Recognition Boundary
 
-`browser_mode=visible` is the default and opens a window. The model may pass
-`browser_mode=silent` only for an explicit no-window request; runtime never
+`browser_mode=silent` is the default and opens no window. The model may pass
+`browser_mode=visible` only for an explicit visible or non-silent request; runtime never
 matches localized words to choose the mode. The skill screenshots a rendered
 content card or media element already present in the page. It does not fetch the
 element's CDN URL to obtain a higher-resolution copy. For video items, the first

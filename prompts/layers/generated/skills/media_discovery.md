@@ -9,8 +9,8 @@
 
 ## Capability Summary (from interface)
 Run bounded browser collection for Douyin and Xiaohongshu. The default
-`browser_mode=visible` opens a browser window; `browser_mode=silent` is allowed
-only when the user explicitly requests no window. The skill screenshots media
+`browser_mode=silent` runs without a browser window; `browser_mode=visible`
+opens one only when the user's request requires visible or non-silent browsing. The skill screenshots media
 elements already rendered in the browser, recognizes visible
 text, and exports exactly two user result files: `videos.csv` and `images.csv`.
 For each video it also preserves the first stable frame observed in the rendered
@@ -96,7 +96,7 @@ does not enable these periodic notices.
 | `max_scrolls_per_source` | no | 1..100, default 10. |
 | `interval_minutes` | no | 10..1440, default 60. |
 | `recognition_mode` | no | `ocr_reviewed` (default), `local_ocr`, or `metadata_only`. |
-| `browser_mode` | no | `visible` (default), or `silent` only after an explicit user request. |
+| `browser_mode` | no | `silent` (default), or `visible` after an explicit visible/non-silent request. |
 | `pacing_min_delay_ms` | no | Lower interaction-delay bound, 200..5000, default 700. |
 | `pacing_max_delay_ms` | no | Upper interaction-delay bound, 200..8000, default 1800 and never below the minimum. |
 | `confirm` | enable | Must be true after runtime approval. |
@@ -122,7 +122,7 @@ Stable examples include `display_unavailable`, `browser_missing`,
 ```
 
 ```json
-{"action":"run_once","platform":"douyin","source_mode":"topics","topics":["AI agent"],"browser_mode":"silent","max_items_per_run":5}
+{"action":"run_once","platform":"douyin","source_mode":"topics","topics":["AI agent"],"max_items_per_run":5}
 ```
 
 ```json

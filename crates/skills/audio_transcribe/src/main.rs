@@ -418,15 +418,19 @@ fn execute(
             "response_language": response_language,
             "corrections": ["recognition_errors", "typos", "broken_sentences"],
             "preserve_meaning": true,
-            "delivery": {
-                "inline_max_characters_exclusive": 200,
-                "long_text_format": "text/plain; charset=utf-8",
-                "long_text_filename": "transcript.txt",
-            },
+            "delivery": transcription_review_delivery(),
         },
         "latency_ms": 0
     });
     Ok(("AUDIO_TRANSCRIPTION_READY".to_string(), extra))
+}
+
+fn transcription_review_delivery() -> Value {
+    json!({
+        "mode": "inline_and_artifact",
+        "text_format": "text/plain; charset=utf-8",
+        "text_filename": "transcript.txt",
+    })
 }
 
 fn resolve_transcription_target<'a>(

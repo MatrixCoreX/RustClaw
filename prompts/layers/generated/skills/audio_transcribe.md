@@ -17,7 +17,7 @@
 - If preview returns `provider_location=remote`, use `audio.transcribe`. If it returns `provider_location=local`, use `media_download.transcribe` instead so local recognition stays inside that skill's private environment.
 - If the configured remote `audio.transcribe` call fails, continue with `media_download.transcribe` on the same local audio source. Do not report final failure until the local fallback also fails.
 - For video input, first call `media_download.transcribe` with `extract_audio_only=true` and `deliver_to_user=false`, then preview/transcribe the returned WAV path.
-- Successful remote and local results both declare `transcription_review`; the shared main-model finalizer corrects recognition errors and broken sentences, uses the user's response language, and applies the same inline/file delivery rule.
+- Successful remote and local results both declare `transcription_review`; the shared main-model finalizer corrects recognition errors and broken sentences, uses the user's response language, and always delivers the complete reviewed text inline and as a UTF-8 text artifact.
 - Keep the user-provided source in a structured audio field. Do not infer paths or URLs from unrelated prose.
 
 
@@ -79,7 +79,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-2","status":"ok","text":"AUDIO_TRANSCRIPTION_READY","extra":{"provider":"openai","provider_location":"remote","model":"gpt-4o-mini-transcribe","model_kind":"compat","audio_path":"recordings/meeting.wav","outputs":[{"type":"text","preview":"Transcription: ..."}],"transcription_review":{"required":true,"source":"configured_stt","raw_text":"Transcription: ...","response_language":"request-language"},"latency_ms":0},"error_text":null}
+{"request_id":"demo-2","status":"ok","text":"AUDIO_TRANSCRIPTION_READY","extra":{"provider":"openai","provider_location":"remote","model":"gpt-4o-mini-transcribe","model_kind":"compat","audio_path":"recordings/meeting.wav","outputs":[{"type":"text","preview":"Transcription: ..."}],"transcription_review":{"required":true,"source":"configured_stt","raw_text":"Transcription: ...","response_language":"request-language","delivery":{"mode":"inline_and_artifact","text_format":"text/plain; charset=utf-8","text_filename":"transcript.txt"}},"latency_ms":0},"error_text":null}
 ```
 
 ### Example 3: preview a local configuration and select the fallback
