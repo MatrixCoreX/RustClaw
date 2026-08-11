@@ -36,6 +36,7 @@ pub(super) async fn execute_async_poll_dispatch_result_with_state(
     if let Some(mut payload) =
         execute_async_poll_dispatch_result(claimed, now_ts, default_retry_after_seconds)
     {
+        project_local_process_progress(state, claimed, &payload).await;
         update_provider_job_version_lease(state, claimed, &mut payload, now_ts);
         return Some(payload);
     }
@@ -53,6 +54,50 @@ pub(super) async fn execute_async_poll_dispatch_result_with_state(
     )?;
     update_provider_job_version_lease(state, claimed, &mut payload, now_ts);
     Some(payload)
+}
+
+async fn project_local_process_progress(
+    state: &AppState,
+    claimed: &repo::ClaimedDispatchedPausedCheckpointResumeExecution,
+    payload: &Value,
+) {
+    let Some(lines) = payload
+        .pointer("/process_observation/stdout")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return;
+    };
+    let Some(adapter) = claimed
+        .task_checkpoint
+        .boundary_context
+        .get("async_poll_adapter")
+        .filter(|value| value.is_object())
+    else {
+        return;
+    };
+    let Some(skill_name) = adapter
+        .get("skill_name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return;
+    };
+    let skill_version = adapter
+        .pointer("/execution_binding/version")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    Box::pin(
+        crate::skills::progress_delivery::project_durable_progress_lines(
+            state,
+            &claimed.task,
+            skill_name,
+            skill_version,
+            lines,
+        ),
+    )
+    .await;
 }
 
 fn update_provider_job_version_lease(

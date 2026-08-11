@@ -110,6 +110,24 @@ pub(crate) fn build_scheduled_delivery_envelope(
     )
 }
 
+pub(crate) fn build_proactive_notice_envelope(
+    state: &AppState,
+    task: &ClaimedTask,
+    payload: &Value,
+    idempotency_suffix: &str,
+    notice: claw_core::channel_notice::ChannelNotice,
+) -> anyhow::Result<ChannelDeliveryEnvelope> {
+    build_delivery_envelope(
+        state,
+        task,
+        payload,
+        "",
+        ChannelDeliverySource::ProactiveNotice,
+        idempotency_suffix,
+        Some(notice),
+    )
+}
+
 pub(crate) fn build_daemon_delivery_envelope(
     state: &AppState,
     task: &ClaimedTask,
@@ -225,6 +243,23 @@ fn build_delivery_envelope(
         }
         _ => base_idempotency_key,
     };
+    let rendered_notice_text = notice.as_ref().map(|notice| {
+        let vars = notice
+            .params
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect::<Vec<_>>();
+        claw_core::channel_i18n::common_text_with_vars_for_locale(
+            &locale,
+            &notice.message_key,
+            &vars,
+        )
+    });
+    let delivery_text = if text.trim().is_empty() {
+        rendered_notice_text.unwrap_or_default()
+    } else {
+        text.to_string()
+    };
     let envelope = ChannelDeliveryEnvelope {
         schema_version: CHANNEL_DELIVERY_SCHEMA_VERSION,
         delivery_id,
@@ -237,7 +272,7 @@ fn build_delivery_envelope(
         conversation_window,
         idempotency_key,
         text_segments: vec![ChannelTextSegment {
-            text: text.to_string(),
+            text: delivery_text,
             format: ChannelTextFormat::Plain,
         }],
         artifacts: Vec::new(),

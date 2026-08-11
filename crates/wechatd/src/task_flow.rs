@@ -113,6 +113,13 @@ pub(super) fn skill_progress_message(
     let detail_key = payload
         .pointer("/frame/detail_key")
         .and_then(Value::as_str)?;
+    if payload
+        .pointer("/frame/params/notification_delivery")
+        .and_then(Value::as_str)
+        == Some("runtime")
+    {
+        return None;
+    }
     let message_key = match detail_key {
         // Media stages may only project a model-authored task-plan title. The
         // frame itself remains machine data and is never translated here.

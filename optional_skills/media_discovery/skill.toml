@@ -2,7 +2,7 @@ schema_version = 2
 
 [package]
 name = "media_discovery"
-version = "0.1.16"
+version = "0.1.17"
 description = "Run bounded home-feed, keyword-search, or seed-page browser discovery for Douyin and Xiaohongshu in visible-by-default or explicitly silent mode, preserve rendered video covers, and export ordered source-traceable results without downloading media originals."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
@@ -36,6 +36,7 @@ working_directory = "."
 timeout_seconds = 10800
 environment_allowlist = ["AGENT_INTERNAL_LLM_TOKEN", "AGENT_INTERNAL_LLM_URL", "DISPLAY", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "PATH", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "WAYLAND_DISPLAY", "WORKSPACE_ROOT", "XAUTHORITY", "XDG_RUNTIME_DIR"]
 smoke_args = { action = "capabilities" }
+progress_frames = true
 
 [security]
 capability_policy_source = "registry"

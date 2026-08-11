@@ -147,6 +147,7 @@ planner_kind = "skill"
 planner_eager_load = true
 group = "video"
 timeout_seconds = 30
+progress_frames = true
 supported_os = ["linux", "macos"]
 install_mode = "on_demand"
 package_manifest = "optional_skills/media_discovery/skill.toml"

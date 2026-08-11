@@ -133,6 +133,14 @@ pub fn common_text_for_locale(locale: &str, key: &str) -> String {
         .unwrap_or_else(|| safe_generic_text_for_locale(locale))
 }
 
+pub fn common_text_with_vars_for_locale(locale: &str, key: &str, vars: &[(&str, &str)]) -> String {
+    let mut text = common_text_for_locale(locale, key);
+    for (name, value) in vars {
+        text = text.replace(&format!("{{{name}}}"), value);
+    }
+    text
+}
+
 pub fn safe_generic_text_for_path(i18n_path: &str) -> String {
     safe_generic_text_for_locale(locale_hint_from_path(i18n_path))
 }

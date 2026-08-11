@@ -46,6 +46,15 @@ closes the browser normally. It never kills the browser to implement this stop.
 This is an on-demand companion skill with private storage and its own dispatch
 queue. It must not block `media_download` manual downloads or OCR work.
 
+Continuous background batches emit one machine-only heartbeat every 15 minutes
+while they remain active. The frame uses
+`detail_key=media_discovery.background.status` with elapsed time and current
+item/video/image/duplicate/failure counts. Runtime persists the frame for UI
+task events and projects the same structured snapshot to the originating
+communication channel through the unified, idempotent delivery service. The
+skill never writes localized notification prose. Explicit one-shot collection
+does not enable these periodic notices.
+
 ## Config Entry Points (from interface)
 - No dedicated config entry points declared.
 
