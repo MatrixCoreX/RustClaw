@@ -541,6 +541,79 @@ pub(crate) fn repair_bundled_skill_admission_offline(
         .map_err(|error| error.to_string())
 }
 
+pub(crate) fn refresh_stale_bundled_skill_admissions_offline(
+    workspace_root: &Path,
+    config: &claw_core::config::AppConfig,
+) -> Result<Option<crate::skill_admission::OverlaySnapshot>, String> {
+    let Some(registry_path) = config.skills.registry_path.as_deref() else {
+        return Ok(None);
+    };
+    let registry_path = if Path::new(registry_path).is_absolute() {
+        PathBuf::from(registry_path)
+    } else {
+        workspace_root.join(registry_path)
+    };
+    let registry = claw_core::skill_registry::SkillsRegistry::load_from_path(&registry_path)?;
+    let service = crate::skill_admission::SkillAdmissionService::from_config(workspace_root, config)
+        .map_err(|error| error.to_string())?;
+    let snapshot = service
+        .catalog_snapshot()
+        .map_err(|error| error.to_string())?;
+    let package_root = workspace_root.join("data/skill-packages");
+    let package_store = skill_sdk::InstallReceiptStore::new(&package_root);
+    let resolver = skill_sdk::SkillRuntimeResolver::new(&package_root);
+
+    for (skill_name, binding) in &snapshot.execution_bindings {
+        if snapshot.source(skill_name)
+            != Some(crate::skill_admission::SkillAdmissionSource::BundledBase)
+        {
+            continue;
+        }
+        let Some(entry) = registry.get(skill_name) else {
+            continue;
+        };
+        if !refresh_bundled_install_in_offline_repair(entry.install_mode.as_deref()) {
+            continue;
+        }
+        let Ok(current) = package_store.verified_current_install(skill_name) else {
+            continue;
+        };
+        let current_receipt_digest = current.receipt.digest().map_err(|error| error.to_string())?;
+        let pinned_available = resolver
+            .pin_exact(
+                skill_name,
+                &binding.version,
+                &binding.manifest_digest,
+                &binding.install_receipt_digest,
+            )
+            .is_ok();
+        if bundled_admission_binding_needs_refresh(
+            binding,
+            &current.receipt.version,
+            &current.receipt.manifest_digest,
+            &current_receipt_digest,
+            pinned_available,
+        ) {
+            return repair_bundled_skill_admission_offline(workspace_root, config, skill_name)
+                .map(Some);
+        }
+    }
+    Ok(None)
+}
+
+fn bundled_admission_binding_needs_refresh(
+    binding: &crate::skill_admission::AdmissionExecutionBinding,
+    current_version: &str,
+    current_manifest_digest: &str,
+    current_receipt_digest: &str,
+    pinned_available: bool,
+) -> bool {
+    !pinned_available
+        || binding.version != current_version
+        || binding.manifest_digest != current_manifest_digest
+        || binding.install_receipt_digest != current_receipt_digest
+}
+
 fn refresh_bundled_install_in_offline_repair(install_mode: Option<&str>) -> bool {
     install_mode == Some("on_demand")
 }

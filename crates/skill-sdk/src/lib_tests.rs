@@ -888,7 +888,19 @@ fn rollback_refuses_a_tampered_previous_install_and_preserves_current() {
     .expect("current third manifest");
     install_version(&third, b"third-version");
     assert!(
-        !first_launch.install_root.exists(),
-        "the version older than the rollback slot is collected after its lease drains"
+        first_launch.install_root.exists(),
+        "activation must preserve versions pinned by immutable admission generations"
+    );
+    assert_eq!(
+        SkillRuntimeResolver::new(store.root())
+            .resolve_pinned(
+                "sample_weather",
+                &first_launch.version,
+                &first_launch.manifest_digest,
+                &first_launch.receipt_digest,
+            )
+            .expect_err("the preserved tampered fixture still fails integrity verification")
+            .code,
+        "launch_artifact_digest_mismatch"
     );
 }

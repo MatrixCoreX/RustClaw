@@ -647,7 +647,7 @@ export default function App() {
     resumeSubmittingTaskId,
     resumeTaskMessage,
     resumeTaskError,
-    cancelingTaskIndex,
+    cancelingTaskId,
     cancelTaskMessage,
     cancelTaskError,
     taskControlSubmittingId,
@@ -2183,7 +2183,7 @@ export default function App() {
               resumeTaskMessage={resumeTaskMessage}
               cancelTaskError={cancelTaskError}
               cancelTaskMessage={cancelTaskMessage}
-              cancelingTaskIndex={cancelingTaskIndex}
+              cancelingTaskId={cancelingTaskId}
               taskControlSubmittingId={taskControlSubmittingId}
               taskControlMessage={taskControlMessage}
               taskControlError={taskControlError}

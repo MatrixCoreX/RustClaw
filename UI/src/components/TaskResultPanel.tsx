@@ -65,6 +65,8 @@ export interface TaskResultPanelProps {
   resumeDrafts: Record<string, string>;
   resumeSubmittingTaskId: string | null;
   taskControlSubmittingId: string | null;
+  taskControlMessage: string | null;
+  taskControlError: string | null;
   onTaskIdChange: (value: string) => void;
   onQueryTask: () => unknown | Promise<unknown>;
   onQueryTaskLlmDebug: (taskId?: string) => unknown | Promise<unknown>;
@@ -336,6 +338,8 @@ export function TaskResultPanel({
   resumeDrafts,
   resumeSubmittingTaskId,
   taskControlSubmittingId,
+  taskControlMessage,
+  taskControlError,
   onTaskIdChange,
   onQueryTask,
   onQueryTaskLlmDebug,
@@ -417,6 +421,17 @@ export function TaskResultPanel({
       {taskError ? (
         <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
           {tSlash("查询失败 / Query failed")}: {taskError}
+        </p>
+      ) : null}
+
+      {taskControlError ? (
+        <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+          {t("任务操作失败", "Task action failed")}: {taskControlError}
+        </p>
+      ) : null}
+      {taskControlMessage ? (
+        <p className="mt-3 rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">
+          {taskControlMessage}
         </p>
       ) : null}
 
@@ -832,7 +847,7 @@ export function TaskResultPanel({
                     className="inline-flex items-center justify-center gap-2 rounded-md border border-white/15 bg-white/5 px-3 py-2 text-xs font-medium transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {approvalDenySubmitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldX className="h-3.5 w-3.5" />}
-                    {t("拒绝这一次", "Deny")}
+                    {t("取消任务", "Cancel task")}
                   </button>
                 </div>
               ) : null}

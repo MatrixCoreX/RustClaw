@@ -1,6 +1,36 @@
 use super::*;
 
 #[test]
+fn package_resolution_failure_is_structured_as_pre_dispatch_no_effect() {
+    let error = skill_sdk::SkillSdkError::new(
+        "launch_pinned_version_missing",
+        "skill=fixture_skill version=1.2.3",
+    );
+    let encoded = runner_pre_dispatch_error("fixture_skill", &error, "refresh_skill_admission");
+    let parsed = crate::skills::parse_structured_skill_error(&encoded)
+        .expect("structured pre-dispatch error");
+
+    assert_eq!(parsed.error_code, "launch_pinned_version_missing");
+    assert_eq!(
+        parsed
+            .extra
+            .as_ref()
+            .and_then(|value| value.get("failure_phase")),
+        Some(&json!("pre_dispatch"))
+    );
+    assert_eq!(
+        parsed
+            .extra
+            .as_ref()
+            .and_then(|value| value.get("side_effect_applied")),
+        Some(&json!(false))
+    );
+    assert!(crate::skills::structured_skill_error_proves_not_applied(
+        &encoded
+    ));
+}
+
+#[test]
 fn local_clawd_base_url_accepts_loopback_test_override() {
     assert_eq!(
         local_clawd_base_url_from_internal_listen(Some("127.0.0.1:59871")),

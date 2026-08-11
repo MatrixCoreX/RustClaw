@@ -781,6 +781,22 @@ async fn run() -> anyhow::Result<()> {
     };
 
     // Phase 4: 统一 skill 视图重建（启动与 reload 复用）
+    match http::ui_routes::refresh_stale_bundled_skill_admissions_offline(&workspace_root, &config)
+    {
+        Ok(Some(refreshed)) => {
+            info!(
+                refreshed_generation = refreshed.generation,
+                "startup: refreshed stale bundled skill admission bindings"
+            );
+        }
+        Ok(None) => {}
+        Err(error) => {
+            warn!(
+                error = %error,
+                "startup: bundled skill admission refresh failed; preserving current generation"
+            );
+        }
+    }
     let admission_overlay =
         load_skill_admission_snapshot(&workspace_root, &config).map_err(|e| {
             error!("startup: skill admission overlay failed: {}", e);

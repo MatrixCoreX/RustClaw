@@ -48,6 +48,8 @@ function props(): TaskResultPanelProps {
     resumeDrafts: {},
     resumeSubmittingTaskId: null,
     taskControlSubmittingId: null,
+    taskControlMessage: null,
+    taskControlError: null,
     onTaskIdChange: () => {},
     onQueryTask: () => {},
     onQueryTaskLlmDebug: () => {},
@@ -60,6 +62,19 @@ function props(): TaskResultPanelProps {
     onControlTaskGoal: () => {},
   };
 }
+
+test("renders task control feedback beside the selected task report", () => {
+  const base = props();
+  base.taskControlMessage = "任务已取消";
+  let markup = renderToStaticMarkup(<TaskResultPanel {...base} />);
+  assert.match(markup, /任务已取消/);
+
+  base.taskControlMessage = null;
+  base.taskControlError = "task_not_active";
+  markup = renderToStaticMarkup(<TaskResultPanel {...base} />);
+  assert.match(markup, /任务操作失败/);
+  assert.match(markup, /task_not_active/);
+});
 
 test("renders the task plan as a clear step card with raw JSON collapsed", () => {
   const markup = renderToStaticMarkup(<TaskResultPanel {...props()} />);

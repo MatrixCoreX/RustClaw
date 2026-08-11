@@ -29,7 +29,7 @@ export interface ActiveTasksPanelProps {
   resumeTaskMessage: string | null;
   cancelTaskError: string | null;
   cancelTaskMessage: string | null;
-  cancelingTaskIndex: number | null;
+  cancelingTaskId: string | null;
   taskControlSubmittingId: string | null;
   taskControlMessage: string | null;
   taskControlError: string | null;
@@ -60,7 +60,7 @@ export function ActiveTasksPanel({
   resumeTaskMessage,
   cancelTaskError,
   cancelTaskMessage,
-  cancelingTaskIndex,
+  cancelingTaskId,
   taskControlSubmittingId,
   taskControlMessage,
   taskControlError,
@@ -291,10 +291,10 @@ export function ActiveTasksPanel({
                     <button
                       type="button"
                       onClick={() => void onCancelTask(item)}
-                      disabled={cancelingTaskIndex === item.index || !canUseInteractionContext || !canCancel}
+                      disabled={cancelingTaskId === item.task_id || !canCancel}
                       className="inline-flex items-center gap-1.5 rounded-md border border-rose-300/35 bg-rose-500/15 px-3 py-2 text-xs font-medium text-rose-50 transition hover:bg-rose-500/25 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {cancelingTaskIndex === item.index ? (
+                      {cancelingTaskId === item.task_id ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
                       ) : (
                         <X className="h-3.5 w-3.5" />
