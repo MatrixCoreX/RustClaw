@@ -11,9 +11,9 @@ use super::{
     bundled_prompt_for_offline_repair, finish_imported_bundle_activation,
     imported_bundle_staging_dir, imported_skill_machine_alias,
     inspect_declared_runtime_assets_for_target, precompiled_skill_package_root_for,
-    precompiled_source_fallback_allowed, remove_skill_registry_block, render_skill_store_config,
-    skill_store_install_spec, skill_store_operation_store, transition_skill_store_operation,
-    write_runtime_config_to_paths,
+    precompiled_source_fallback_allowed, refresh_bundled_install_in_offline_repair,
+    remove_skill_registry_block, render_skill_store_config, skill_store_install_spec,
+    skill_store_operation_store, transition_skill_store_operation, write_runtime_config_to_paths,
 };
 use crate::{reload_skill_views, AppState};
 
@@ -32,6 +32,41 @@ fn offline_bundled_repair_resolves_logical_skill_prompt() {
 
     assert!(prompt.contains("Shared skill prompt contract:"));
     assert!(prompt.contains("You are the `crypto` skill planner."));
+}
+
+#[test]
+fn offline_bundled_repair_allows_fixed_skills_in_historical_generation() {
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("repository root");
+    let registry = claw_core::skill_registry::SkillsRegistry::load_from_path(
+        &repository.join("configs/skills_registry.toml"),
+    )
+    .expect("load registry");
+
+    assert_eq!(
+        registry
+            .get("media_download")
+            .and_then(|entry| entry.install_mode.as_deref()),
+        Some("on_demand")
+    );
+    assert!(refresh_bundled_install_in_offline_repair(
+        registry
+            .get("media_download")
+            .and_then(|entry| entry.install_mode.as_deref())
+    ));
+    assert_eq!(
+        registry
+            .get("git_remote_publish")
+            .and_then(|entry| entry.install_mode.as_deref()),
+        None
+    );
+    assert!(!refresh_bundled_install_in_offline_repair(
+        registry
+            .get("git_remote_publish")
+            .and_then(|entry| entry.install_mode.as_deref())
+    ));
 }
 
 #[test]
