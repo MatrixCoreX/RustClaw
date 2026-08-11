@@ -187,6 +187,39 @@ class AdapterTest(unittest.TestCase):
             )
             self.assertIn(marker, line)
 
+        certifi_line = next(
+            candidate
+            for candidate in requirements.splitlines()
+            if candidate.startswith("certifi==")
+        )
+        self.assertNotIn("sys_platform", certifi_line)
+        self.assertNotIn("platform_machine", certifi_line)
+
+    def test_https_trust_uses_certifi_bundle_when_not_configured(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = Path(directory) / "cacert.pem"
+            bundle.write_text("test certificate bundle", encoding="utf-8")
+            environment: dict[str, str] = {}
+
+            selected = self.skill._configure_https_trust(
+                environment,
+                lambda: str(bundle),
+            )
+
+        self.assertEqual(selected, str(bundle.resolve()))
+        self.assertEqual(environment["SSL_CERT_FILE"], str(bundle.resolve()))
+
+    def test_https_trust_preserves_explicit_bundle(self) -> None:
+        environment = {"SSL_CERT_FILE": "/custom/trust.pem"}
+
+        selected = self.skill._configure_https_trust(
+            environment,
+            lambda: self.fail("certifi must not replace an explicit bundle"),
+        )
+
+        self.assertEqual(selected, "/custom/trust.pem")
+        self.assertEqual(environment["SSL_CERT_FILE"], "/custom/trust.pem")
+
     def test_download_command_disables_system_browser_cookies(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             command = self.skill._build_download_command(

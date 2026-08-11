@@ -14,6 +14,7 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
+from collections.abc import MutableMapping
 from typing import Any, Callable
 from urllib.parse import urlsplit
 
@@ -63,6 +64,30 @@ IMAGE_TEXT_REVISION_PROMPT = (
     Path("prompts") / "layers" / "overlays" / "image_text_revision_prompt.md"
 )
 IMAGE_TEXT_REVISION_CHUNK_CHARS = 6_000
+
+
+def _configure_https_trust(
+    environ: MutableMapping[str, str] | None = None,
+    certifi_where: Callable[[], str] | None = None,
+) -> str | None:
+    environment = os.environ if environ is None else environ
+    configured = environment.get("SSL_CERT_FILE", "").strip()
+    if configured:
+        return configured
+    if certifi_where is None:
+        try:
+            from certifi import where as certifi_where
+        except ImportError:
+            return None
+    bundle = Path(certifi_where()).expanduser()
+    if not bundle.is_file():
+        return None
+    resolved = str(bundle.resolve())
+    environment["SSL_CERT_FILE"] = resolved
+    return resolved
+
+
+_configure_https_trust()
 
 
 class SkillFailure(Exception):
