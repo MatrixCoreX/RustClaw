@@ -8,6 +8,7 @@ import {
   BancorQuoteDialog,
   BancorSwapTradePanel,
   CandleChart,
+  bindBancorWheelZoom,
   calculateBancorCandleBodyWidth,
   calculateBancorChartGeometry,
   calculateBancorDefaultVisibleCount,
@@ -513,6 +514,30 @@ test("BANCOR wheel zoom keeps the pointed candle anchored when history allows it
     visible: 28,
     offsetFromLatest: 0,
   });
+});
+
+test("BANCOR wheel zoom uses a non-passive listener and removes the same listener", () => {
+  let registeredListener: EventListener | null = null;
+  let registeredOptions: AddEventListenerOptions | undefined;
+  let removedListener: EventListener | null = null;
+  const target = {
+    addEventListener(type: "wheel", listener: EventListener, options?: AddEventListenerOptions) {
+      assert.equal(type, "wheel");
+      registeredListener = listener;
+      registeredOptions = options;
+    },
+    removeEventListener(type: "wheel", listener: EventListener) {
+      assert.equal(type, "wheel");
+      removedListener = listener;
+    },
+  };
+
+  const unbind = bindBancorWheelZoom(target, () => undefined);
+
+  assert.ok(registeredListener);
+  assert.equal(registeredOptions?.passive, false);
+  unbind();
+  assert.equal(removedListener, registeredListener);
 });
 
 test("BANCOR candlestick bodies stay close without becoming excessively wide", () => {

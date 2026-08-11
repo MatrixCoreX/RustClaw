@@ -14,7 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 
 import {
   BANCOR_DEFAULT_SLIPPAGE_BPS,
@@ -32,6 +32,10 @@ import type { NniBancorCandle, NniBancorQuoteResponse } from "../types/api";
 type Translate = (zh: string, en: string) => string;
 type BancorRuntime = ReturnType<typeof useBancorRuntime>;
 type CandleColor = { stroke: string; fill: string; volumeFill: string };
+type BancorWheelTarget = {
+  addEventListener: (type: "wheel", listener: EventListener, options?: AddEventListenerOptions) => void;
+  removeEventListener: (type: "wheel", listener: EventListener) => void;
+};
 export const BANCOR_CANDLE_AUTO_REFRESH_SECONDS = 15;
 export const BANCOR_DEFAULT_VISIBLE_CANDLES = 100;
 const BANCOR_MIN_VISIBLE_CANDLES = 6;
@@ -152,6 +156,15 @@ export function calculateBancorDefaultVisibleCount(total: number): number {
     return Math.max(BANCOR_MIN_VISIBLE_CANDLES, safeTotal - BANCOR_DRAG_HISTORY_HEADROOM);
   }
   return BANCOR_DEFAULT_VISIBLE_CANDLES;
+}
+
+export function bindBancorWheelZoom(
+  target: BancorWheelTarget,
+  handler: (event: globalThis.WheelEvent) => void,
+): () => void {
+  const listener: EventListener = (event) => handler(event as globalThis.WheelEvent);
+  target.addEventListener("wheel", listener, { passive: false });
+  return () => target.removeEventListener("wheel", listener);
 }
 
 export function calculateBancorCandleBodyWidth(slotWidth: number): number {
@@ -926,6 +939,7 @@ export function CandleChart({
   t: Translate;
 }) {
   const chartRef = useRef<HTMLDivElement>(null);
+  const wheelHandlerRef = useRef<(event: globalThis.WheelEvent) => void>(() => undefined);
   const dragRef = useRef<{ pointerId: number; startOffset: number; startX: number } | null>(null);
   const previousCandleCountRef = useRef(candles.length);
   const [viewportWidth, setViewportWidth] = useState(900);
@@ -963,6 +977,12 @@ export function CandleChart({
     const observer = new ResizeObserver(updateWidth);
     observer.observe(element);
     return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const element = chartRef.current;
+    if (!element) return;
+    return bindBancorWheelZoom(element, (event) => wheelHandlerRef.current(event));
   }, []);
 
   useEffect(() => {
@@ -1099,7 +1119,7 @@ export function CandleChart({
       }
     }
   };
-  const handleWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
+  const handleWheel = (event: globalThis.WheelEvent) => {
     if (event.altKey) {
       event.preventDefault();
       verticalZoomBy(event.deltaY > 0 ? 1 / 1.35 : 1.35);
@@ -1112,11 +1132,13 @@ export function CandleChart({
       return;
     }
     event.preventDefault();
-    const bounds = event.currentTarget.getBoundingClientRect();
+    const bounds = chartRef.current?.getBoundingClientRect();
+    if (!bounds) return;
     const svgX = ((event.clientX - bounds.left) / Math.max(bounds.width, 1)) * width;
     const anchorRatio = Math.max(0, Math.min(1, (svgX - plotLeft) / Math.max(plotRight - plotLeft, 1)));
     zoomBy(event.deltaY > 0 ? 4 : -4, anchorRatio);
   };
+  wheelHandlerRef.current = handleWheel;
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.key === "ArrowLeft") {
       event.preventDefault();
@@ -1185,7 +1207,6 @@ export function CandleChart({
         onPointerLeave={() => {
           if (!dragRef.current) setHoveredIndex(null);
         }}
-        onWheel={handleWheel}
       >
         <svg
           viewBox={`0 0 ${width} ${height}`}
