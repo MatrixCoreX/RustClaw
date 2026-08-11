@@ -9,6 +9,7 @@ import {
   BancorSwapTradePanel,
   CandleChart,
   bindBancorWheelZoom,
+  balanceValueSizeClass,
   calculateBancorCandleBodyWidth,
   calculateBancorChartGeometry,
   calculateBancorDefaultVisibleCount,
@@ -188,6 +189,8 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, />L 0\.00009990<\/text>/);
   assert.match(html, /<h2[^>]*>交易<\/h2>/);
   assert.match(html, /我的余额/);
+  assert.match(html, /mt-3 grid min-w-0 gap-3/);
+  assert.match(html, /group min-w-0 max-w-full overflow-hidden/);
   assert.match(html, /点击填入全部 POINT 余额/);
   assert.match(html, /点击填入全部 USD 余额/);
   assert.ok(html.indexOf("我的余额") > html.indexOf("<h2 class=\"text-lg font-semibold text-white\">交易</h2>"));
@@ -233,6 +236,12 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.doesNotMatch(html, /a2c887498554407638cbec1d0ccf11264aa1ab7749bd7913fc6753fac72cfbdb/);
   assert.match(html, /grid gap-5 lg:grid-cols-2 lg:items-start/);
   assert.ok(html.indexOf("储备曲线交易公式") > html.indexOf("我的成交记录"));
+});
+
+test("BANCOR balance values shrink by content length without losing precision", () => {
+  assert.equal(balanceValueSizeClass("12.3400"), "text-base sm:text-lg");
+  assert.equal(balanceValueSizeClass("1234567890123.3400"), "text-sm sm:text-base");
+  assert.equal(balanceValueSizeClass("12345678901234567890123.3400"), "text-xs sm:text-sm");
 });
 
 test("BANCOR swap mode uses stacked pay and estimated-output windows", () => {

@@ -454,7 +454,7 @@ export function BancorPage({
                 <RefreshCw className={`h-4 w-4 ${accountLoading ? "animate-spin" : ""}`} />
               </button>
             </div>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div className="mt-3 grid min-w-0 gap-3">
               <BalanceLine
                 label="POINT"
                 value={account?.point_balance ?? "—"}
@@ -746,7 +746,7 @@ export function BancorSwapTradePanel({
           <span>{t("支付", "Pay")}</span>
           <button
             type="button"
-            className="rounded-md px-2 py-1 text-white/50 transition hover:bg-white/5 hover:text-sky-100 disabled:cursor-not-allowed disabled:opacity-45"
+            className="min-w-0 max-w-[78%] break-all rounded-md px-2 py-1 text-right text-[11px] leading-4 text-white/50 transition hover:bg-white/5 hover:text-sky-100 disabled:cursor-not-allowed disabled:opacity-45"
             disabled={!inputBalance}
             onClick={onFillBalance}
           >
@@ -1537,18 +1537,31 @@ function BalanceLine({
   disabled: boolean;
   onClick: () => void;
 }) {
+  const valueSizeClass = balanceValueSizeClass(value);
   return (
     <button
       type="button"
-      className="group rounded-xl border border-white/8 bg-white/[0.025] px-4 py-3 text-left transition enabled:hover:border-sky-300/30 enabled:hover:bg-sky-400/[0.07] disabled:cursor-default"
+      className="group min-w-0 max-w-full overflow-hidden rounded-xl border border-white/8 bg-white/[0.025] px-4 py-3 text-left transition enabled:hover:border-sky-300/30 enabled:hover:bg-sky-400/[0.07] disabled:cursor-default"
       disabled={disabled}
       onClick={onClick}
       title={actionLabel}
       aria-label={`${actionLabel}: ${value}`}
     >
       <span className="text-xs text-white/45">{label}</span>
-      <span className="mt-1 block text-xl font-semibold text-white">{value}</span>
+      <span
+        className={`mt-1 block max-w-full break-all font-mono font-semibold leading-5 text-white ${valueSizeClass}`}
+        title={value}
+      >
+        {value}
+      </span>
       {!disabled ? <span className="mt-1 block text-[11px] text-sky-200/55 transition group-hover:text-sky-100/80">{actionLabel}</span> : null}
     </button>
   );
+}
+
+export function balanceValueSizeClass(value: string): string {
+  const length = Array.from(value.trim()).length;
+  if (length >= 28) return "text-xs sm:text-sm";
+  if (length >= 18) return "text-sm sm:text-base";
+  return "text-base sm:text-lg";
 }
