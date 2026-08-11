@@ -1012,16 +1012,6 @@ export function CandleChart({
   const visibleCount = Math.max(1, Math.min(allValues.length, requestedVisibleCount));
   const visibleWindow = calculateBancorVisibleWindow(allValues.length, visibleCount, offsetFromLatest);
   const values = allValues.slice(visibleWindow.start, visibleWindow.end);
-  const visibleHighIndex = values.reduce(
-    (bestIndex, value, index) => value.high > values[bestIndex].high ? index : bestIndex,
-    0,
-  );
-  const visibleLowIndex = values.reduce(
-    (bestIndex, value, index) => value.low < values[bestIndex].low ? index : bestIndex,
-    0,
-  );
-  const visibleHigh = values[visibleHighIndex];
-  const visibleLow = values[visibleLowIndex];
   const autoPriceDomain = calculateBancorPriceDomain(values);
   const priceDomain = scaleBancorPriceDomain(autoPriceDomain, verticalZoom);
   const priceHigh = priceDomain.high;
@@ -1047,10 +1037,6 @@ export function CandleChart({
     : currentPrice < last.close
       ? palette.down
       : latestColor;
-  const visibleHighX = plotLeft + step * (visibleHighIndex + 0.5);
-  const visibleLowX = plotLeft + step * (visibleLowIndex + 0.5);
-  const visibleHighY = yForPrice(visibleHigh.high);
-  const visibleLowY = yForPrice(visibleLow.low);
   const showMinuteCloseLine = intervalSeconds === 60;
   const minuteCloseLinePoints = showMinuteCloseLine
     ? values
@@ -1166,18 +1152,10 @@ export function CandleChart({
       id="bancor-candle-chart"
       className={maximized ? "bancor-chart-maximized" : undefined}
     >
-      <dl className="mb-3 grid grid-cols-3 gap-2" aria-label={t("当前 K 线价格摘要", "Current candlestick price summary")}>
-        <div className="rounded-lg border border-sky-300/15 bg-sky-400/[0.06] px-3 py-2">
+      <dl className="mb-3" aria-label={t("当前 K 线价格摘要", "Current candlestick price summary")}>
+        <div className="w-fit min-w-40 rounded-lg border border-sky-300/15 bg-sky-400/[0.06] px-3 py-2">
           <dt className="text-[11px] text-white/45">{t("实时价格", "Live price")}</dt>
           <dd className="mt-0.5 break-all font-mono text-xs font-semibold text-sky-200 sm:text-sm">{currentPriceText} USD</dd>
-        </div>
-        <div className="rounded-lg border border-white/8 bg-white/[0.025] px-3 py-2">
-          <dt className="text-[11px] text-white/45">{t("可见最高价", "Visible high")}</dt>
-          <dd className="mt-0.5 break-all font-mono text-xs font-semibold text-white/80 sm:text-sm">{visibleHigh.candle.high} USD</dd>
-        </div>
-        <div className="rounded-lg border border-white/8 bg-white/[0.025] px-3 py-2">
-          <dt className="text-[11px] text-white/45">{t("可见最低价", "Visible low")}</dt>
-          <dd className="mt-0.5 break-all font-mono text-xs font-semibold text-white/80 sm:text-sm">{visibleLow.candle.low} USD</dd>
         </div>
       </dl>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-white/45">
@@ -1284,28 +1262,6 @@ export function CandleChart({
               </g>
             );
           })}
-          <g data-bancor-chart-layer="visible-price-extremes" pointerEvents="none">
-            <line x1={visibleHighX - 5} y1={visibleHighY} x2={visibleHighX + 5} y2={visibleHighY} stroke="rgba(255,255,255,0.65)" />
-            <text
-              x={visibleHighX <= (plotLeft + plotRight) / 2 ? visibleHighX + 7 : visibleHighX - 7}
-              y={Math.max(priceTop + 11, visibleHighY - 7)}
-              textAnchor={visibleHighX <= (plotLeft + plotRight) / 2 ? "start" : "end"}
-              fill="rgba(255,255,255,0.72)"
-              fontSize="10"
-            >
-              H {visibleHigh.candle.high}
-            </text>
-            <line x1={visibleLowX - 5} y1={visibleLowY} x2={visibleLowX + 5} y2={visibleLowY} stroke="rgba(255,255,255,0.65)" />
-            <text
-              x={visibleLowX <= (plotLeft + plotRight) / 2 ? visibleLowX + 7 : visibleLowX - 7}
-              y={Math.min(priceBottom - 2, visibleLowY + 14)}
-              textAnchor={visibleLowX <= (plotLeft + plotRight) / 2 ? "start" : "end"}
-              fill="rgba(255,255,255,0.72)"
-              fontSize="10"
-            >
-              L {visibleLow.candle.low}
-            </text>
-          </g>
           {hoveredX !== null && hoveredY !== null ? (
             <g pointerEvents="none">
               <line x1={hoveredX} y1={priceTop} x2={hoveredX} y2={volumeBottom} stroke="rgba(255,255,255,0.38)" strokeDasharray="4 5" />
