@@ -185,13 +185,14 @@ pub(crate) use repo::{
     get_task_admin_target, get_task_query_record, has_channel_binding_for_user_key,
     hydrate_submit_task_from_ingress, insert_audit_log, insert_submitted_task, is_user_allowed,
     list_active_tasks_for_user_internal, list_active_tasks_internal,
-    list_all_active_tasks_internal, list_auth_keys, mark_pending_channel_bind_session_detected,
-    mark_pending_channel_bind_session_expired, mark_pending_channel_bind_session_failed,
-    normalize_user_key, pending_channel_resume_candidate, request_attachment_paths,
-    reset_channel_binding_state_for_user_key, resolve_auth_identity_by_key,
-    resolve_channel_binding_identity, resolve_submit_task_context, stable_i64_from_key,
-    store_pending_channel_request, submit_task_audit_detail, task_count_by_status,
-    task_count_by_status_for_user, task_kind_name, update_auth_key_by_id,
+    list_all_active_tasks_internal, list_all_task_history_internal, list_auth_keys,
+    list_task_history_for_user_internal, list_task_history_internal,
+    mark_pending_channel_bind_session_detected, mark_pending_channel_bind_session_expired,
+    mark_pending_channel_bind_session_failed, normalize_user_key, pending_channel_resume_candidate,
+    request_attachment_paths, reset_channel_binding_state_for_user_key,
+    resolve_auth_identity_by_key, resolve_channel_binding_identity, resolve_submit_task_context,
+    stable_i64_from_key, store_pending_channel_request, submit_task_audit_detail,
+    task_count_by_status, task_count_by_status_for_user, task_kind_name, update_auth_key_by_id,
     upsert_exchange_credential_for_user_key, upsert_webd_login_account, verify_webd_password_login,
     FactoryResetDbResult, PendingChannelBindSession, SubmitTaskAccessError, SubmitTaskContextError,
     SubmitTaskLimitError, TaskAdminTarget, TaskViewerAccessError,
@@ -221,8 +222,9 @@ pub(crate) use system_health::{
 use task_admin_routes::{
     cancel_one_task, cancel_task_by_id as cancel_task_by_id_handler, cancel_tasks,
     close_child_task_by_id, goal_by_task_id, list_active_tasks, list_approval_scope_grants,
-    list_automation_runs, pause_task_by_id, resume_task_by_id, retry_child_task_by_id,
-    revoke_approval_scope_grant, steer_task_by_id, stop_child_tasks_by_parent,
+    list_automation_runs, list_task_history, pause_task_by_id, resume_task_by_id,
+    retry_child_task_by_id, revoke_approval_scope_grant, steer_task_by_id,
+    stop_child_tasks_by_parent,
 };
 pub(crate) use worker::task_payload_value;
 use worker::{
@@ -1114,6 +1116,7 @@ async fn run() -> anyhow::Result<()> {
             post(http::task_delivery::deliver_task_result),
         )
         .route("/tasks/active", post(list_active_tasks))
+        .route("/tasks/history", post(list_task_history))
         .route("/tasks/automation-runs", post(list_automation_runs))
         .route("/tasks/cancel", post(cancel_tasks))
         .route("/tasks/cancel-one", post(cancel_one_task))
@@ -1767,6 +1770,21 @@ struct ActiveTaskItem {
     age_seconds: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     lifecycle: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize)]
+struct TaskHistoryItem {
+    task_id: String,
+    kind: String,
+    status: String,
+    channel: String,
+    source_user_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    external_user_id: Option<String>,
+    summary: String,
+    created_at_ts: i64,
+    updated_at_ts: i64,
+    duration_seconds: i64,
 }
 
 /// Phase 4: 重载 skill 视图。POST /v1/admin/reload-skills。与现有管理接口一致：需 x-agent-key 鉴权。

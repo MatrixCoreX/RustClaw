@@ -643,6 +643,13 @@ export default function App() {
     activeTasksLoading,
     activeTasksError,
     activeTasksLastUpdated,
+    taskHistory,
+    taskHistoryLoading,
+    taskHistoryLoaded,
+    taskHistoryError,
+    taskHistoryTotal,
+    taskHistoryOffset,
+    taskHistoryLimit,
     resumeDrafts,
     resumeSubmittingTaskId,
     resumeTaskMessage,
@@ -680,6 +687,7 @@ export default function App() {
     interactionSubmittedTaskId,
     fetchTaskById,
     fetchActiveTasks,
+    fetchTaskHistory,
     queryTask,
     queryTaskLlmDebug,
     viewTask,
@@ -2179,6 +2187,13 @@ export default function App() {
               activeTasksLoading={activeTasksLoading}
               activeTasksError={activeTasksError}
               activeTasksLastUpdated={activeTasksLastUpdated}
+              taskHistory={taskHistory}
+              taskHistoryLoading={taskHistoryLoading}
+              taskHistoryLoaded={taskHistoryLoaded}
+              taskHistoryError={taskHistoryError}
+              taskHistoryTotal={taskHistoryTotal}
+              taskHistoryOffset={taskHistoryOffset}
+              taskHistoryLimit={taskHistoryLimit}
               resumeTaskError={resumeTaskError}
               resumeTaskMessage={resumeTaskMessage}
               cancelTaskError={cancelTaskError}
@@ -2195,6 +2210,7 @@ export default function App() {
               resumeSubmittingTaskId={resumeSubmittingTaskId}
               toLocalTime={toLocalTime}
               onFetchActiveTasks={fetchActiveTasks}
+              onFetchTaskHistory={fetchTaskHistory}
               onViewTask={viewTask}
               onCancelTask={cancelActiveTask}
               onControlTask={controlTaskById}

@@ -6,10 +6,14 @@ use uuid::Uuid;
 use crate::{now_ts, now_ts_u64, parse_task_status, AppState, ClaimedTask, TaskQueryResponse};
 
 mod active;
+mod history;
 mod lifecycle_projection;
 
 pub(crate) use active::{
     list_active_tasks_for_user_internal, list_active_tasks_internal, list_all_active_tasks_internal,
+};
+pub(crate) use history::{
+    list_all_task_history_internal, list_task_history_for_user_internal, list_task_history_internal,
 };
 use lifecycle_projection::{
     append_checkpoint_resume_directive_lifecycle_fields, append_task_lease_lifecycle_fields,

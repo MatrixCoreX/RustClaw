@@ -355,6 +355,28 @@ export interface ActiveTasksResponse {
   tasks: ActiveTaskItem[];
 }
 
+export interface TaskHistoryItem {
+  task_id: string;
+  kind: string;
+  status: "succeeded" | "failed" | "canceled" | "timeout";
+  channel: ChannelName;
+  source_user_id: string;
+  external_user_id?: string | null;
+  summary: string;
+  created_at_ts: number;
+  updated_at_ts: number;
+  duration_seconds: number;
+}
+
+export interface TaskHistoryResponse {
+  count: number;
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  tasks: TaskHistoryItem[];
+}
+
 export interface SubmitTaskResponse {
   task_id: string;
 }
