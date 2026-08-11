@@ -3,6 +3,8 @@ import {
   BarChart3,
   ChevronLeft,
   ChevronRight,
+  Maximize2,
+  Minimize2,
   Minus,
   Plus,
   RefreshCw,
@@ -112,6 +114,35 @@ export function calculateBancorVisibleWindow(total: number, visible: number, off
   const offset = Math.max(0, Math.min(maxOffset, Math.floor(offsetFromLatest)));
   const start = Math.max(0, safeTotal - safeVisible - offset);
   return { start, end: Math.min(safeTotal, start + safeVisible), maxOffset, offset };
+}
+
+export function calculateBancorZoomViewport({
+  total,
+  visible,
+  offsetFromLatest,
+  nextVisible,
+  anchorRatio,
+}: {
+  total: number;
+  visible: number;
+  offsetFromLatest: number;
+  nextVisible: number;
+  anchorRatio: number;
+}): { visible: number; offsetFromLatest: number } {
+  const safeTotal = Math.max(0, Math.floor(total));
+  if (safeTotal === 0) return { visible: 0, offsetFromLatest: 0 };
+
+  const currentWindow = calculateBancorVisibleWindow(safeTotal, visible, offsetFromLatest);
+  const safeNextVisible = Math.max(1, Math.min(safeTotal, Math.floor(nextVisible)));
+  const safeAnchorRatio = Number.isFinite(anchorRatio)
+    ? Math.max(0, Math.min(1, anchorRatio))
+    : 0.5;
+  const currentVisible = currentWindow.end - currentWindow.start;
+  const anchoredPosition = currentWindow.start + safeAnchorRatio * currentVisible;
+  const desiredStart = anchoredPosition - safeAnchorRatio * safeNextVisible;
+  const desiredOffset = Math.round(safeTotal - safeNextVisible - desiredStart);
+  const nextWindow = calculateBancorVisibleWindow(safeTotal, safeNextVisible, desiredOffset);
+  return { visible: safeNextVisible, offsetFromLatest: nextWindow.offset };
 }
 
 export function calculateBancorDefaultVisibleCount(total: number): number {
@@ -892,6 +923,7 @@ export function CandleChart({
   const [offsetFromLatest, setOffsetFromLatest] = useState(0);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [maximized, setMaximized] = useState(false);
   const geometry = calculateBancorChartGeometry(viewportWidth);
   const width = geometry.width;
   const height = 396;
@@ -929,6 +961,20 @@ export function CandleChart({
     }
     previousCandleCountRef.current = candles.length;
   }, [candles.length, offsetFromLatest]);
+
+  useEffect(() => {
+    if (!maximized) return;
+    const previousBodyOverflow = document.body.style.overflow;
+    const restoreFromEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setMaximized(false);
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", restoreFromEscape);
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      window.removeEventListener("keydown", restoreFromEscape);
+    };
+  }, [maximized]);
 
   const defaultVisibleCount = calculateBancorDefaultVisibleCount(allValues.length);
   const requestedVisibleCount = visibleCountOverride ?? defaultVisibleCount;
@@ -987,10 +1033,18 @@ export function CandleChart({
     setOffsetFromLatest((current) => clampOffset(current + candlesToOlder));
     setHoveredIndex(null);
   };
-  const zoomBy = (delta: number) => {
+  const zoomBy = (delta: number, anchorRatio = 1) => {
     const current = visibleCountOverride ?? defaultVisibleCount;
     const next = Math.max(Math.min(BANCOR_MIN_VISIBLE_CANDLES, allValues.length), Math.min(maxRequestedVisibleCount, current + delta));
-    setVisibleCountOverride(next);
+    const viewport = calculateBancorZoomViewport({
+      total: allValues.length,
+      visible: current,
+      offsetFromLatest: visibleWindow.offset,
+      nextVisible: next,
+      anchorRatio,
+    });
+    setVisibleCountOverride(viewport.visible);
+    setOffsetFromLatest(viewport.offsetFromLatest);
     setHoveredIndex(null);
   };
   const verticalZoomBy = (factor: number) => {
@@ -1040,16 +1094,17 @@ export function CandleChart({
       verticalZoomBy(event.deltaY > 0 ? 1 / 1.35 : 1.35);
       return;
     }
-    if (event.ctrlKey || event.metaKey) {
-      event.preventDefault();
-      zoomBy(event.deltaY > 0 ? 4 : -4);
-      return;
-    }
     if (Math.abs(event.deltaX) > Math.abs(event.deltaY) || event.shiftKey) {
       event.preventDefault();
       const horizontalDelta = Math.abs(event.deltaX) > 0 ? event.deltaX : event.deltaY;
       panBy(horizontalDelta > 0 ? -2 : 2);
+      return;
     }
+    event.preventDefault();
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const svgX = ((event.clientX - bounds.left) / Math.max(bounds.width, 1)) * width;
+    const anchorRatio = Math.max(0, Math.min(1, (svgX - plotLeft) / Math.max(plotRight - plotLeft, 1)));
+    zoomBy(event.deltaY > 0 ? 4 : -4, anchorRatio);
   };
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.key === "ArrowLeft") {
@@ -1070,7 +1125,10 @@ export function CandleChart({
   const hoveredY = hoveredIndex === null ? null : yForPrice(focused.close);
 
   return (
-    <div>
+    <div
+      id="bancor-candle-chart"
+      className={maximized ? "bancor-chart-maximized" : undefined}
+    >
       <dl className="mb-3 grid grid-cols-3 gap-2" aria-label={t("当前 K 线价格摘要", "Current candlestick price summary")}>
         <div className="rounded-lg border border-sky-300/15 bg-sky-400/[0.06] px-3 py-2">
           <dt className="text-[11px] text-white/45">{t("实时价格", "Live price")}</dt>
@@ -1093,7 +1151,7 @@ export function CandleChart({
         </div>
         <span>
           {visibleWindow.maxOffset > 0
-            ? t("左右拖动查看历史；Ctrl+滚轮横向缩放，Alt+滚轮纵向缩放", "Drag for history; Ctrl+wheel zooms time, Alt+wheel zooms price")
+            ? t("左右拖动查看历史；滚轮横向缩放，Alt+滚轮纵向缩放", "Drag for history; wheel zooms time, Alt+wheel zooms price")
             : t("全部真实 K 线已显示，暂无更多历史", "All real-trade candles are visible; no older history is available")}
         </span>
       </div>
@@ -1260,6 +1318,17 @@ export function CandleChart({
           </button>
           <button type="button" className="theme-icon-btn h-8 w-8" disabled={visibleWindow.offset === 0} onClick={() => panBy(-Math.max(1, Math.floor(visibleCount / 2)))} title={t("查看更新 K 线", "View newer candles")}>
             <ChevronRight className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            className="theme-icon-btn h-8 w-8"
+            onClick={() => setMaximized((current) => !current)}
+            title={maximized ? t("恢复 K 线区域", "Restore candlestick chart") : t("最大化 K 线区域", "Maximize candlestick chart")}
+            aria-label={maximized ? t("恢复 K 线区域", "Restore candlestick chart") : t("最大化 K 线区域", "Maximize candlestick chart")}
+            aria-pressed={maximized}
+            aria-controls="bancor-candle-chart"
+          >
+            {maximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
           </button>
         </div>
       </div>

@@ -12,9 +12,10 @@ import {
   calculateBancorChartGeometry,
   calculateBancorDefaultVisibleCount,
   calculateBancorPriceDomain,
-  scaleBancorPriceDomain,
   calculateBancorVisibleWindow,
+  calculateBancorZoomViewport,
   resolveBancorCandlePalette,
+  scaleBancorPriceDomain,
 } from "../components/BancorPage";
 import type { useBancorRuntime } from "../hooks/useBancorRuntime";
 
@@ -317,6 +318,7 @@ test("BANCOR one-minute candles connect carried closes and hide empty-minute dot
 
   assert.match(minuteHtml, /data-bancor-chart-layer="one-minute-close-line"/);
   assert.match(minuteHtml, /<polyline[^>]+stroke="#7dd3fc"/);
+  assert.match(minuteHtml, /aria-label="最大化 K 线区域"/);
   assert.equal((minuteHtml.match(/data-bancor-candle-body="true"/g) ?? []).length, 1);
   assert.doesNotMatch(longerHtml, /one-minute-close-line/);
   assert.equal((longerHtml.match(/data-bancor-candle-body="true"/g) ?? []).length, 2);
@@ -471,6 +473,39 @@ test("BANCOR candlestick viewport pans from the latest bars toward history", () 
     end: 30,
     maxOffset: 70,
     offset: 70,
+  });
+});
+
+test("BANCOR wheel zoom keeps the pointed candle anchored when history allows it", () => {
+  assert.deepEqual(calculateBancorZoomViewport({
+    total: 300,
+    visible: 100,
+    offsetFromLatest: 80,
+    nextVisible: 60,
+    anchorRatio: 0.25,
+  }), {
+    visible: 60,
+    offsetFromLatest: 110,
+  });
+  assert.deepEqual(calculateBancorZoomViewport({
+    total: 300,
+    visible: 60,
+    offsetFromLatest: 110,
+    nextVisible: 100,
+    anchorRatio: 0.25,
+  }), {
+    visible: 100,
+    offsetFromLatest: 80,
+  });
+  assert.deepEqual(calculateBancorZoomViewport({
+    total: 30,
+    visible: 20,
+    offsetFromLatest: 0,
+    nextVisible: 28,
+    anchorRatio: 1,
+  }), {
+    visible: 28,
+    offsetFromLatest: 0,
   });
 });
 

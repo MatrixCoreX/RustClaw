@@ -1485,6 +1485,21 @@
   min-height: 0;
 }
 
+.bancor-chart-maximized {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  max-width: none;
+  overflow: auto;
+  padding: clamp(0.75rem, 2vw, 1.5rem);
+  background:
+    radial-gradient(circle at top, var(--theme-shell-radial), transparent 32%),
+    linear-gradient(180deg, var(--theme-shell-start) 0%, var(--theme-shell-end) 100%);
+}
+
 .chat-activity-sweep::after {
   position: absolute;
   inset: 0 auto 0 -45%;
