@@ -1,14 +1,15 @@
 use claw_core::capability_result::{
-    CapabilityDelivery, CapabilityDeliveryIntent, CapabilityResultEnvelope, CapabilityResultStatus,
-    Continuation, ContinuationKind, StructuredError,
+    ArtifactRef, ArtifactVisibility, CapabilityDelivery, CapabilityDeliveryIntent,
+    CapabilityResultEnvelope, CapabilityResultStatus, Continuation, ContinuationKind,
+    StructuredError,
 };
 use serde_json::json;
 
 use super::{
-    bounded_result, eligible_for_capability_result_synthesis, normalized_transcript_language,
-    pending_transcript_review, safe_transcript_filename, split_transcript_chunks,
-    synthesis_evidence_catalog, transcript_delivery_is_inline, transcript_review_contract,
-    FALLBACK_TRANSCRIPT_REVISION_CHUNK_CHARS, MAX_RESULT_JSON_CHARS,
+    attach_reviewed_transcript_artifact, bounded_result, eligible_for_capability_result_synthesis,
+    normalized_transcript_language, pending_transcript_review, safe_transcript_filename,
+    split_transcript_chunks, synthesis_evidence_catalog, transcript_delivery_is_inline,
+    transcript_review_contract, FALLBACK_TRANSCRIPT_REVISION_CHUNK_CHARS, MAX_RESULT_JSON_CHARS,
 };
 use crate::agent_engine::{AgentRunContext, LoopState};
 
@@ -170,6 +171,63 @@ fn transcript_delivery_switches_to_file_at_two_hundred_characters() {
     assert!(transcript_delivery_is_inline(199, 200));
     assert!(!transcript_delivery_is_inline(200, 200));
     assert!(!transcript_delivery_is_inline(201, 200));
+}
+
+#[test]
+fn reviewed_transcript_artifact_overrides_save_only_for_explicit_delivery() {
+    let mut result = CapabilityResultEnvelope::ok(
+        "media.transcribe",
+        Some("transcribe".to_string()),
+        json!({
+            "extra": {
+                "delivery": {
+                    "intent": "save_only",
+                    "deliver_to_user": false
+                }
+            }
+        }),
+    );
+    let artifact = serde_json::from_value::<ArtifactRef>(json!({
+        "id": "transcript-review:fixture",
+        "path": ".agent-runtime/artifacts/transcript-review/task/transcript.txt",
+        "media_type": "text/plain; charset=utf-8"
+    }))
+    .expect("artifact fixture");
+
+    let answer = attach_reviewed_transcript_artifact(
+        &mut result,
+        artifact,
+        "transcript.txt",
+        "The reviewed transcript is attached.",
+    )
+    .expect("attach reviewed transcript");
+
+    assert_eq!(result.delivery.intent, CapabilityDeliveryIntent::Artifact);
+    assert_eq!(
+        result.data.pointer("/extra/delivery/deliver_to_user"),
+        Some(&json!(true))
+    );
+    assert_eq!(
+        result.data.pointer("/extra/delivery/intent"),
+        Some(&json!("artifact"))
+    );
+    assert_eq!(result.artifacts.len(), 1);
+    assert_eq!(
+        result.artifacts[0].visibility,
+        Some(ArtifactVisibility::UserDelivery)
+    );
+    assert_eq!(
+        result.artifacts[0].artifact_role.as_deref(),
+        Some("transcript_text")
+    );
+    assert_eq!(
+        result.artifacts[0].filename.as_deref(),
+        Some("transcript.txt")
+    );
+    assert_eq!(
+        answer,
+        "The reviewed transcript is attached.\nFILE:.agent-runtime/artifacts/transcript-review/task/transcript.txt"
+    );
 }
 
 #[test]

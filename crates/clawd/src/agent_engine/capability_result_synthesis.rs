@@ -1,5 +1,6 @@
 use claw_core::capability_result::{
-    ArtifactRef, CapabilityDeliveryIntent, CapabilityResultEnvelope, CapabilityResultStatus,
+    ArtifactRef, ArtifactVisibility, CapabilityDeliveryIntent, CapabilityResultEnvelope,
+    CapabilityResultStatus,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -359,14 +360,12 @@ async fn synthesize_reviewed_transcript(
             .capability_results
             .get_mut(contract.result_index)
             .ok_or_else(|| "transcript_revision_result_missing".to_string())?;
-        if !result
-            .artifacts
-            .iter()
-            .any(|existing| existing == &artifact)
-        {
-            result.artifacts.push(artifact);
-        }
-        delivery_message
+        attach_reviewed_transcript_artifact(
+            result,
+            artifact,
+            &contract.long_text_filename,
+            &delivery_message,
+        )?
     };
     if let Some(extra) = loop_state
         .capability_results
@@ -418,6 +417,45 @@ async fn synthesize_reviewed_transcript(
         confidence,
         evidence_count,
     })
+}
+
+fn attach_reviewed_transcript_artifact(
+    result: &mut CapabilityResultEnvelope,
+    mut artifact: ArtifactRef,
+    filename: &str,
+    delivery_message: &str,
+) -> Result<String, String> {
+    let path = artifact
+        .path
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .ok_or_else(|| "transcript_revision_artifact_path_missing".to_string())?
+        .to_string();
+    artifact.visibility = Some(ArtifactVisibility::UserDelivery);
+    artifact.artifact_role = Some("transcript_text".to_string());
+    artifact.filename = Some(filename.to_string());
+    if !result
+        .artifacts
+        .iter()
+        .any(|existing| existing == &artifact)
+    {
+        result.artifacts.push(artifact);
+    }
+    result.delivery.intent = CapabilityDeliveryIntent::Artifact;
+    let extra = result
+        .data
+        .get_mut("extra")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| "transcript_revision_result_extra_missing".to_string())?;
+    let delivery = extra
+        .entry("delivery")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .ok_or_else(|| "transcript_revision_delivery_contract_invalid".to_string())?;
+    delivery.insert("deliver_to_user".to_string(), Value::Bool(true));
+    delivery.insert("intent".to_string(), Value::String("artifact".to_string()));
+    Ok(format!("{delivery_message}\nFILE:{path}"))
 }
 
 fn transcript_delivery_is_inline(character_count: usize, inline_max_chars: usize) -> bool {
