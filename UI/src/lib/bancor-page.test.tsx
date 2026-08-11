@@ -178,8 +178,14 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   }
   assert.match(html, /0\.5000 USD<\/p><p class="mt-0\.5 text-\[11px\][^>]*>按支付资产分别累计/);
   assert.match(html, /价格 K 线/);
-  assert.match(html, /当前 K 线价格摘要/);
   assert.match(html, /实时价格/);
+  assert.doesNotMatch(html, /当前 K 线价格摘要/);
+  assert.match(html, /aria-label="实时价格"/);
+  const livePriceIndex = html.indexOf("实时价格");
+  const headerPriceIndex = html.indexOf("0.00010000 USD", livePriceIndex);
+  assert.ok(livePriceIndex > html.indexOf("价格 K 线"));
+  assert.ok(headerPriceIndex > livePriceIndex);
+  assert.ok(html.indexOf("每 15 秒自动刷新") > headerPriceIndex);
   assert.doesNotMatch(html, /可见最高价/);
   assert.doesNotMatch(html, /可见最低价/);
   assert.match(html, /data-bancor-chart-layer="live-price-line"/);
@@ -189,13 +195,14 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, />L 0\.00009990<\/text>/);
   assert.match(html, /<h2[^>]*>交易<\/h2>/);
   assert.match(html, /我的余额/);
-  assert.match(html, /mt-3 grid min-w-0 gap-3/);
+  assert.match(html, /mt-2 grid min-w-0 gap-2 sm:grid-cols-2/);
   assert.match(html, /group min-w-0 max-w-full overflow-hidden/);
   assert.match(html, /点击填入全部 POINT 余额/);
   assert.match(html, /点击填入全部 USD 余额/);
   assert.ok(html.indexOf("我的余额") > html.indexOf("<h2 class=\"text-lg font-semibold text-white\">交易</h2>"));
   assert.doesNotMatch(html, /没有成交的时间窗口沿用上一收盘价/);
-  assert.match(html, /grid gap-5 lg:grid-cols-\[minmax\(0,2fr\)_minmax\(20rem,1fr\)\] lg:items-stretch/);
+  assert.match(html, /grid gap-5 lg:grid-cols-\[minmax\(0,2fr\)_minmax\(20rem,1fr\)\] lg:items-start/);
+  assert.match(html, /theme-shadow-card scroll-mt-4 p-4 sm:p-5/);
   assert.ok(
     html.indexOf("<h2 class=\"text-lg font-semibold text-white\">价格 K 线</h2>")
       < html.indexOf("<h2 class=\"text-lg font-semibold text-white\">交易</h2>"),
@@ -218,7 +225,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /滑点保护与警戒/);
   assert.match(html, /value="0\.50"/);
   assert.match(html, /价格影响超过此值时会标黄警告/);
-  assert.match(html, /class="theme-primary-btn mt-4 w-full justify-center"[^>]*>卖出<\/button>/);
+  assert.match(html, /class="theme-primary-btn mt-3 w-full justify-center"[^>]*>卖出<\/button>/);
   assert.doesNotMatch(html, /红色表示上涨，绿色表示下跌/);
   assert.match(html, /全部真实 K 线已显示/);
   assert.match(html, /回到最新/);
