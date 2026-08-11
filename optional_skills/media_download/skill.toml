@@ -2,7 +2,7 @@ schema_version = 2
 
 [package]
 name = "media_download"
-version = "0.3.17"
+version = "0.3.18"
 description = "Download public media and image articles. Text results are delivered as complete inline text plus a UTF-8 artifact. Explicit image OCR uses Tesseract followed by skill-owned model review for sentence boundaries, layout, punctuation, and highly certain recognition errors, with raw-text fallback."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
@@ -27,8 +27,8 @@ host_dependencies = ["git", "ffmpeg", "tesseract", "tesseract_chi_sim", "chromiu
 runtime_assets = ["modelscope_sensevoice_small", "modelscope_fsmn_vad"]
 
 [install.resources]
-min_memory_mb = 4096
-min_free_disk_mb = 6144
+min_memory_mb = 768
+min_free_disk_mb = 2048
 
 [run]
 launcher = "python"
