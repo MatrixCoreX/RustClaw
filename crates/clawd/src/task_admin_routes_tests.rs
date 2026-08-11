@@ -5,10 +5,11 @@ use serde_json::{json, Value};
 
 use super::{
     cancel_task_by_id, close_child_task_by_id, goal_by_task_id, list_active_tasks,
-    list_approval_scope_grants, resume_task_by_id, retry_child_task_by_id,
+    list_approval_scope_grants, list_task_history, resume_task_by_id, retry_child_task_by_id,
     revoke_approval_scope_grant, stop_child_tasks_by_parent, ActiveTasksRequest,
     CancelTaskByIdRequest, CloseChildTaskByIdRequest, GoalByTaskIdRequest, ResumeTaskByIdRequest,
     RetryChildTaskByIdRequest, RevokeApprovalScopeGrantRequest, StopChildTasksByParentRequest,
+    TaskHistoryRequest,
 };
 
 const USER_KEY: &str = "goal-route-test-key";
@@ -129,6 +130,51 @@ async fn admin_active_task_list_uses_the_same_system_scope_as_health() {
     assert!(tasks
         .iter()
         .all(|task| task["source_user_id"].as_str().is_some()));
+}
+
+#[tokio::test]
+async fn admin_task_history_is_global_and_paginated() {
+    let state = state_with_goal_task("history-own", json!({"text": "own history"}));
+    let db = state.core.db.get().expect("get db");
+    db.execute(
+        "UPDATE tasks SET status = 'succeeded', updated_at = '3'
+         WHERE task_id = 'history-own'",
+        [],
+    )
+    .expect("complete own task");
+    db.execute(
+        "INSERT INTO tasks (
+            task_id, user_id, chat_id, user_key, channel, external_user_id, kind,
+            payload_json, status, result_json, error_text, created_at, updated_at
+         ) VALUES (
+            'history-other', 99, 9, 'other-key', 'wechat', 'wechat-history-user',
+            'ask', ?1, 'failed', NULL, 'failed', '2', '4'
+         )",
+        rusqlite::params![json!({"text": "other history"}).to_string()],
+    )
+    .expect("insert other historical task");
+    drop(db);
+
+    let (status, Json(response)) = list_task_history(
+        State(state),
+        auth_headers(),
+        Json(TaskHistoryRequest {
+            user_id: 0,
+            chat_id: 0,
+            limit: Some(1),
+            offset: Some(0),
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    let data = response.data.expect("task history response");
+    assert_eq!(data["count"], 1);
+    assert_eq!(data["total"], 2);
+    assert_eq!(data["has_more"], true);
+    assert_eq!(data["tasks"][0]["task_id"], "history-other");
+    assert_eq!(data["tasks"][0]["channel"], "wechat");
+    assert_eq!(data["tasks"][0]["external_user_id"], "wechat-history-user");
 }
 
 #[tokio::test]

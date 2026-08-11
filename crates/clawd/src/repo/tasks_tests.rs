@@ -5,8 +5,9 @@ use super::{
     claim_due_paused_checkpoint_task_internal, claim_next_task,
     claim_ready_paused_checkpoint_resume_executor_internal, get_task_query_record,
     list_active_tasks_for_user_internal, list_active_tasks_internal,
-    list_all_active_tasks_internal, list_due_paused_checkpoint_tasks_internal,
-    list_ready_paused_checkpoint_resume_executors_internal,
+    list_all_active_tasks_internal, list_all_task_history_internal,
+    list_due_paused_checkpoint_tasks_internal,
+    list_ready_paused_checkpoint_resume_executors_internal, list_task_history_for_user_internal,
     record_paused_checkpoint_resume_executor_state_internal,
     record_paused_checkpoint_resume_work_item_internal, touch_running_task,
     update_task_checkpointed_result, update_task_failure, update_task_failure_with_result,
@@ -1327,6 +1328,51 @@ fn active_task_scopes_cover_exact_chat_user_and_system_views() {
     );
     assert_eq!(user.len(), 2);
     assert_eq!(system.len(), 3);
+}
+
+#[test]
+fn task_history_is_terminal_scoped_and_paginated() {
+    let state = state_with_tasks_table();
+    insert_task(&state, "history-old", "succeeded", None, 100);
+    insert_task(&state, "history-new", "failed", None, 103);
+    insert_task(&state, "history-other", "canceled", None, 102);
+    insert_task(&state, "history-active", "running", None, 104);
+    state
+        .core
+        .db
+        .get()
+        .expect("get db")
+        .execute(
+            "UPDATE tasks
+             SET user_id = 99, chat_id = 9, channel = 'wechat',
+                 external_user_id = 'wechat-history-user'
+             WHERE task_id = 'history-other'",
+            [],
+        )
+        .expect("move historical task to another owner");
+
+    let (first_page, total) =
+        list_all_task_history_internal(&state, 2, 0).expect("list global history");
+    assert_eq!(total, 3);
+    assert_eq!(first_page.len(), 2);
+    assert_eq!(first_page[0].task_id, "history-new");
+    assert_eq!(first_page[1].task_id, "history-other");
+    assert_eq!(first_page[1].channel, "wechat");
+    assert_eq!(
+        first_page[1].external_user_id.as_deref(),
+        Some("wechat-history-user")
+    );
+
+    let (user_history, user_total) =
+        list_task_history_for_user_internal(&state, 42, 20, 0).expect("list user history");
+    assert_eq!(user_total, 2);
+    assert_eq!(
+        user_history
+            .iter()
+            .map(|task| task.task_id.as_str())
+            .collect::<Vec<_>>(),
+        ["history-new", "history-old"]
+    );
 }
 
 #[test]

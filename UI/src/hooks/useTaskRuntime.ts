@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { followTaskEventStream } from "../lib/task-event-stream";
 import { shouldTrackTaskLive } from "../lib/task-lifecycle";
@@ -12,6 +12,8 @@ import type {
   ChannelName,
   ConsolePage,
   SubmitTaskResponse,
+  TaskHistoryItem,
+  TaskHistoryResponse,
   TaskLlmDebugResponse,
   TaskApprovalDecision,
   TaskQueryResponse,
@@ -22,6 +24,7 @@ type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
 type TaskSubmitKind = "ask" | "run_skill";
 
 const TERMINAL_TASK_STATUSES = ["succeeded", "failed", "canceled", "timeout"];
+const TASK_HISTORY_PAGE_SIZE = 20;
 
 function isTaskQueryStatus(status: string): status is TaskQueryResponse["status"] {
   return ["queued", "running", ...TERMINAL_TASK_STATUSES].includes(status);
@@ -62,6 +65,14 @@ export function useTaskRuntime({
   const [activeTasksLoading, setActiveTasksLoading] = useState(false);
   const [activeTasksError, setActiveTasksError] = useState<string | null>(null);
   const [activeTasksLastUpdated, setActiveTasksLastUpdated] = useState<number | null>(null);
+  const [taskHistory, setTaskHistory] = useState<TaskHistoryItem[]>([]);
+  const [taskHistoryLoading, setTaskHistoryLoading] = useState(false);
+  const [taskHistoryLoaded, setTaskHistoryLoaded] = useState(false);
+  const [taskHistoryError, setTaskHistoryError] = useState<string | null>(null);
+  const [taskHistoryTotal, setTaskHistoryTotal] = useState(0);
+  const [taskHistoryOffset, setTaskHistoryOffset] = useState(0);
+  const [taskHistoryLimit, setTaskHistoryLimit] = useState(TASK_HISTORY_PAGE_SIZE);
+  const taskHistoryRequestEpoch = useRef(0);
   const [resumeDrafts, setResumeDrafts] = useState<Record<string, string>>({});
   const [resumeSubmittingTaskId, setResumeSubmittingTaskId] = useState<string | null>(null);
   const [resumeTaskMessage, setResumeTaskMessage] = useState<string | null>(null);
@@ -146,6 +157,50 @@ export function useTaskRuntime({
     } finally {
       if (!silent) {
         setActiveTasksLoading(false);
+      }
+    }
+  };
+
+  const fetchTaskHistory = async (offset = 0): Promise<TaskHistoryItem[]> => {
+    const keyAuthenticated = Boolean(activeUserKey.trim());
+    if (!keyAuthenticated && (interactionUserId == null || interactionChatId == null)) {
+      setTaskHistoryError(t("本地身份还没有加载完成。", "Local identity is not loaded yet."));
+      return [];
+    }
+    const normalizedOffset = Math.max(0, Math.floor(offset));
+    const requestEpoch = ++taskHistoryRequestEpoch.current;
+    setTaskHistoryLoading(true);
+    setTaskHistoryError(null);
+    try {
+      const res = await apiFetch("/v1/tasks/history", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: interactionUserId ?? 0,
+          chat_id: interactionChatId ?? 0,
+          limit: TASK_HISTORY_PAGE_SIZE,
+          offset: normalizedOffset,
+        }),
+      });
+      const body = (await res.json()) as ApiResponse<TaskHistoryResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `task history fetch failed (${res.status})`);
+      }
+      if (requestEpoch !== taskHistoryRequestEpoch.current) return [];
+      setTaskHistory(body.data.tasks ?? []);
+      setTaskHistoryTotal(body.data.total ?? 0);
+      setTaskHistoryOffset(body.data.offset ?? normalizedOffset);
+      setTaskHistoryLimit(body.data.limit ?? TASK_HISTORY_PAGE_SIZE);
+      setTaskHistoryLoaded(true);
+      return body.data.tasks ?? [];
+    } catch (error) {
+      if (requestEpoch !== taskHistoryRequestEpoch.current) return [];
+      const message = error instanceof Error ? error.message : t("未知错误", "Unknown error");
+      setTaskHistoryError(message);
+      return [];
+    } finally {
+      if (requestEpoch === taskHistoryRequestEpoch.current) {
+        setTaskHistoryLoading(false);
       }
     }
   };
@@ -660,6 +715,17 @@ export function useTaskRuntime({
   };
 
   useEffect(() => {
+    taskHistoryRequestEpoch.current += 1;
+    setTaskHistory([]);
+    setTaskHistoryLoading(false);
+    setTaskHistoryLoaded(false);
+    setTaskHistoryError(null);
+    setTaskHistoryTotal(0);
+    setTaskHistoryOffset(0);
+    setTaskHistoryLimit(TASK_HISTORY_PAGE_SIZE);
+  }, [activeUserKey, interactionUserId, interactionChatId]);
+
+  useEffect(() => {
     if (!uiAuthReady) return;
     if (!trackingTaskId) return;
     const controller = new AbortController();
@@ -744,6 +810,13 @@ export function useTaskRuntime({
     activeTasksLoading,
     activeTasksError,
     activeTasksLastUpdated,
+    taskHistory,
+    taskHistoryLoading,
+    taskHistoryLoaded,
+    taskHistoryError,
+    taskHistoryTotal,
+    taskHistoryOffset,
+    taskHistoryLimit,
     resumeDrafts,
     resumeSubmittingTaskId,
     resumeTaskMessage,
@@ -782,6 +855,7 @@ export function useTaskRuntime({
     fetchTaskById,
     fetchTaskLlmDebugById,
     fetchActiveTasks,
+    fetchTaskHistory,
     queryTaskById,
     queryTask,
     queryTaskLlmDebug,

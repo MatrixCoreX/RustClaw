@@ -23,6 +23,14 @@ pub(super) struct ActiveTasksRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub(super) struct TaskHistoryRequest {
+    user_id: i64,
+    chat_id: i64,
+    limit: Option<usize>,
+    offset: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
 pub(super) struct AutomationRunsRequest {
     user_id: i64,
     chat_id: i64,
@@ -299,6 +307,52 @@ pub(super) async fn list_active_tasks(
             super::api_err::<serde_json::Value>(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "List active tasks failed",
+            )
+        }
+    }
+}
+
+pub(super) async fn list_task_history(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<TaskHistoryRequest>,
+) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
+    let limit = req.limit.unwrap_or(20).clamp(1, 50);
+    let offset = req.offset.unwrap_or(0).min(100_000);
+    let provided_key = crate::auth_key_from_headers(&headers)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let history = if provided_key.is_some() {
+        let (identity, _) = match require_task_admin_identity(&state, &headers) {
+            Ok(identity) => identity,
+            Err(response) => return response,
+        };
+        if identity.role == "admin" {
+            crate::list_all_task_history_internal(&state, limit, offset)
+        } else {
+            crate::list_task_history_for_user_internal(&state, identity.user_id, limit, offset)
+        }
+    } else {
+        let effective_user_id = match authorize_task_admin_request(&state, &headers, req.user_id) {
+            Ok(user_id) => user_id,
+            Err(response) => return response,
+        };
+        crate::list_task_history_internal(&state, effective_user_id, req.chat_id, limit, offset)
+    };
+    match history {
+        Ok((tasks, total)) => super::api_ok(json!({
+            "count": tasks.len(),
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset.saturating_add(tasks.len()) < total,
+            "tasks": tasks,
+        })),
+        Err(error) => {
+            error!("List task history failed: {}", error);
+            super::api_err::<serde_json::Value>(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "List task history failed",
             )
         }
     }
