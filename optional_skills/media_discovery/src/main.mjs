@@ -104,7 +104,7 @@ export function normalizedConfig(args) {
   if (!new Set(["ocr_reviewed", "local_ocr", "metadata_only"]).has(recognitionMode)) {
     throw new Error("recognition_mode_invalid");
   }
-  const browserMode = String(args.browser_mode || "visible");
+  const browserMode = String(args.browser_mode || "silent");
   if (!new Set(["visible", "silent"]).has(browserMode)) throw new Error("browser_mode_invalid");
   const pacingMinDelayMs = integer(args.pacing_min_delay_ms, 700, 200, 5000);
   const pacingMaxDelayMs = integer(args.pacing_max_delay_ms, 1800, 200, 8000);

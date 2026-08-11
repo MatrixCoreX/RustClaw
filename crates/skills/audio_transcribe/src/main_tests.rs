@@ -1,6 +1,18 @@
 use super::*;
 
 #[test]
+fn transcription_review_always_requests_text_and_artifact_delivery() {
+    assert_eq!(
+        transcription_review_delivery(),
+        json!({
+            "mode": "inline_and_artifact",
+            "text_format": "text/plain; charset=utf-8",
+            "text_filename": "transcript.txt",
+        })
+    );
+}
+
+#[test]
 fn error_extra_exposes_machine_contract() {
     let extra = error_extra("provider_request_failed", true);
 

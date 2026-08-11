@@ -196,7 +196,7 @@ export async function beginRun(root, requestedPlatforms, options = {}) {
       run_mode: directOneShot ? "one_shot" : options.mode || "enabled_manual",
       platform_configs: platformConfigs,
       browser_modes: Object.fromEntries(
-        platforms.map((platform) => [platform, platformConfigs[platform].browser_mode || "visible"]),
+        platforms.map((platform) => [platform, platformConfigs[platform].browser_mode || "silent"]),
       ),
       started_at: new Date().toISOString(),
       heartbeat_at: new Date().toISOString(),

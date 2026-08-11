@@ -45,7 +45,7 @@ export async function browserCapability() {
   return {
     gui_available: guiAvailable(),
     chromium_executable: await existingExecutable(),
-    default_mode: "visible",
+    default_mode: "silent",
     supported_modes: ["visible", "silent"],
     capture_mode: "browser_element_screenshot",
   };
@@ -234,7 +234,7 @@ export async function collectRenderedImages({
         kind: "image",
         dedup_key: `${itemId}:image:${position}`,
         platform,
-        browser_mode: config.browser_mode || "visible",
+        browser_mode: config.browser_mode || "silent",
         source_mode: discoverySource?.source_mode || config.source_mode || "home_feed",
         search_keyword: discoverySource?.search_keyword || "",
         discovery_source_url: discoverySource?.url || sourcePageUrl,
@@ -356,7 +356,7 @@ async function collectPage(page, root, runId, platform, itemUrl, config, discove
         kind: "video",
         dedup_key: `${itemId}:video`,
         platform,
-        browser_mode: config.browser_mode || "visible",
+        browser_mode: config.browser_mode || "silent",
         source_mode: discoverySource.source_mode,
         search_keyword: discoverySource.search_keyword || "",
         discovery_source_url: discoverySource.url,
@@ -433,7 +433,7 @@ async function collectDouyinFeedCard(page, root, runId, locator, itemId, config,
       kind: "video",
       dedup_key: `douyin:${itemId}:video`,
       platform: "douyin",
-      browser_mode: config.browser_mode || "visible",
+      browser_mode: config.browser_mode || "silent",
       source_mode: discoverySource.source_mode,
       search_keyword: discoverySource.search_keyword || "",
       discovery_source_url: discoverySource.url,
@@ -507,7 +507,7 @@ async function collectDouyinHomeFeed(
 }
 
 export async function collectPlatform({ root, runId, platform, config, limit, shouldStop, onPage, onFailure }) {
-  const browserMode = config.browser_mode || "visible";
+  const browserMode = config.browser_mode || "silent";
   if (browserMode === "visible" && !guiAvailable()) throw new Error("display_unavailable");
   const executablePath = await existingExecutable();
   if (!executablePath) throw new Error("browser_missing");

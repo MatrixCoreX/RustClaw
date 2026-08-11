@@ -42,8 +42,8 @@ fn required_transcript_review_overrides_direct_respond() {
                         "required": true,
                         "raw_text": "校对后应作为文件交付的长文本",
                         "delivery": {
-                            "inline_max_characters_exclusive": 200,
-                            "long_text_filename": "transcript.txt"
+                            "mode": "inline_and_artifact",
+                            "text_filename": "transcript.txt"
                         }
                     }
                 }

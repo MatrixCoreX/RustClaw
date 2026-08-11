@@ -2,12 +2,11 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-runtime.invalid/prompts/schemas/transcript_revision.schema.json",
   "title": "TranscriptRevision",
-  "description": "Schema for model-reviewed speech transcripts and their model-generated delivery message.",
+  "description": "Schema for model-reviewed speech transcripts.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "reviewed_text",
-    "delivery_message",
     "content_kind",
     "qualified",
     "confidence",
@@ -15,10 +14,6 @@
   ],
   "properties": {
     "reviewed_text": {
-      "type": "string",
-      "minLength": 1
-    },
-    "delivery_message": {
       "type": "string",
       "minLength": 1
     },

@@ -53,8 +53,8 @@ class AdapterTest(unittest.TestCase):
         )
         self.assertTrue(response["extra"]["image_article_posts"]["ocr_is_separate"])
         self.assertEqual(
-            response["extra"]["image_article_posts"]["inline_text_max_characters_exclusive"],
-            200,
+            response["extra"]["image_article_posts"]["text_delivery"],
+            "inline_and_artifact",
         )
         self.assertTrue(response["extra"]["transcription_engines"]["whisper"]["default"])
 
@@ -899,7 +899,7 @@ class AdapterTest(unittest.TestCase):
             "media_download.error.ocr_requires_image",
         )
 
-    def test_short_ocr_result_is_delivered_inline(self) -> None:
+    def test_ocr_result_is_delivered_inline_and_as_text_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             workspace = root / "workspace"
@@ -928,23 +928,28 @@ class AdapterTest(unittest.TestCase):
             with mock.patch.object(self.skill.subprocess, "run", side_effect=fake_run):
                 response = self.skill.respond(request)
 
-            self.assertFalse((artifacts / "image_text_ocr.txt").exists())
+            self.assertTrue((artifacts / "image_text_ocr.txt").exists())
 
         self.assertEqual(response["status"], "ok")
-        self.assertEqual(response["extra"]["artifacts"], [])
+        self.assertEqual(len(response["extra"]["artifacts"]), 1)
+        artifact = response["extra"]["artifacts"][0]
+        self.assertEqual(artifact["artifact_role"], "recognized_text")
+        self.assertEqual(artifact["filename"], "image_text_ocr.txt")
         self.assertIn("短OCR结果", response["text"])
         self.assertEqual(
             response["extra"]["delivery"],
-            {"intent": "model_synthesis", "deliver_to_user": True},
+            {"intent": "artifact", "deliver_to_user": True},
         )
         self.assertEqual(
             response["extra"]["recognition_delivery"],
             {
-                "mode": "inline",
+                "mode": "inline_and_artifact",
                 "source": "local_ocr",
                 "engine": "tesseract",
                 "character_count": 6,
                 "text": "短OCR结果",
+                "artifact_path": artifact["path"],
+                "artifact_filename": "image_text_ocr.txt",
             },
         )
 
@@ -1227,7 +1232,7 @@ class AdapterTest(unittest.TestCase):
                 "video_count": 0,
                 "article_count": 1,
                 "other_file_count": 0,
-                "inline_article_count": 0,
+                "inline_article_count": 1,
             },
         )
         artifacts_by_role = {
@@ -1241,6 +1246,11 @@ class AdapterTest(unittest.TestCase):
             "platform_post",
         )
         self.assertIn("original_image", artifacts_by_role)
+        self.assertIn("长" * 200, response["text"])
+        self.assertEqual(
+            response["extra"]["article_delivery"]["mode"],
+            "inline_and_artifact",
+        )
 
     def test_nine_downloaded_images_remain_individual_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1342,7 +1352,7 @@ class AdapterTest(unittest.TestCase):
                 "video_count": 0,
                 "article_count": 1,
                 "other_file_count": 0,
-                "inline_article_count": 0,
+                "inline_article_count": 1,
                 "image_delivery": {
                     "mode": "archive",
                     "threshold": 9,
@@ -1399,14 +1409,18 @@ class AdapterTest(unittest.TestCase):
                 response = self.skill.respond(request)
 
             archive = response["extra"]["artifacts"][0]
-            self.assertFalse((artifacts / article_name).exists())
+            self.assertTrue((artifacts / article_name).exists())
             with zipfile.ZipFile(archive["path"]) as package:
                 archived_names = package.namelist()
                 archived_article = package.read(article_name).decode("utf-8")
 
         self.assertEqual(response["status"], "ok")
-        self.assertEqual(response["extra"]["count"], 1)
+        self.assertEqual(response["extra"]["count"], 2)
         self.assertEqual(archive["artifact_role"], "image_archive")
+        self.assertEqual(
+            response["extra"]["artifacts"][1]["artifact_role"],
+            "article_text",
+        )
         self.assertEqual(archived_names, [*image_names, article_name])
         self.assertIn("短正文不能遗漏。", archived_article)
         self.assertIn("短正文不能遗漏。", response["text"])
@@ -1417,7 +1431,7 @@ class AdapterTest(unittest.TestCase):
             1,
         )
 
-    def test_short_platform_article_is_delivered_inline_only_for_this_skill(self) -> None:
+    def test_platform_article_is_delivered_inline_and_as_text_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             workspace = root / "workspace"
@@ -1451,18 +1465,23 @@ class AdapterTest(unittest.TestCase):
             with mock.patch.object(self.skill.subprocess, "run", side_effect=fake_run):
                 response = self.skill.respond(request)
 
-            self.assertFalse((artifacts / "short_note_article.txt").exists())
+            self.assertTrue((artifacts / "short_note_article.txt").exists())
 
         self.assertEqual(response["status"], "ok")
-        self.assertEqual([item["artifact_role"] for item in response["extra"]["artifacts"]], ["original_image"])
+        self.assertEqual(
+            [item["artifact_role"] for item in response["extra"]["artifacts"]],
+            ["original_image", "article_text"],
+        )
         self.assertIn("这是一段少于二百字的平台原始正文。", response["text"])
         self.assertEqual(
             response["extra"]["article_delivery"],
             {
-                "mode": "inline",
+                "mode": "inline_and_artifact",
                 "content_source": "platform_post",
                 "character_count": 17,
                 "text": "这是一段少于二百字的平台原始正文。",
+                "artifact_path": response["extra"]["artifacts"][1]["path"],
+                "artifact_filename": "short_note_article.txt",
             },
         )
         self.assertEqual(response["extra"]["content_bundle"]["kind"], "image_article")
