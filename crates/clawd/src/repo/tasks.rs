@@ -1536,6 +1536,45 @@ pub(crate) fn claim_ready_paused_checkpoint_resume_executor_internal(
     let Some(obj) = lifecycle.as_object_mut() else {
         return Ok(None);
     };
+    let Some(resume_claim_obj) = obj
+        .get_mut("resume_claim")
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return Ok(None);
+    };
+    let resume_claim_checkpoint_id = resume_claim_obj
+        .get("checkpoint_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    let resume_claim_owner = resume_claim_obj
+        .get("owner")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    if resume_claim_checkpoint_id != checkpoint_id
+        || resume_claim_owner != state.worker.worker_id.as_str()
+    {
+        return Ok(None);
+    }
+    let renewal_count = resume_claim_obj
+        .get("renewal_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+        .saturating_add(1);
+    resume_claim_obj.insert(
+        "expires_at".to_string(),
+        serde_json::json!(lease_expires_at),
+    );
+    resume_claim_obj.insert("renewed_at".to_string(), serde_json::json!(now_ts));
+    resume_claim_obj.insert(
+        "renewal_count".to_string(),
+        serde_json::json!(renewal_count),
+    );
+    resume_claim_obj.insert(
+        "claim_attempt".to_string(),
+        serde_json::json!(task.claim_attempt),
+    );
     let Some(executor_obj) = obj
         .get_mut("resume_executor")
         .and_then(serde_json::Value::as_object_mut)
@@ -1604,7 +1643,8 @@ pub(crate) fn claim_ready_paused_checkpoint_resume_executor_internal(
     let changed = db.execute(
         "UPDATE tasks
          SET result_json = ?2,
-             updated_at = ?3
+             updated_at = ?3,
+             lease_expires_at = ?7
          WHERE task_id = ?1
            AND status = 'running'
            AND result_json = ?4
@@ -1616,7 +1656,8 @@ pub(crate) fn claim_ready_paused_checkpoint_resume_executor_internal(
             now_ts.to_string(),
             raw_result_json,
             state.worker.worker_id.as_str(),
-            task.claim_attempt
+            task.claim_attempt,
+            lease_expires_at
         ],
     )?;
     if changed == 0 {

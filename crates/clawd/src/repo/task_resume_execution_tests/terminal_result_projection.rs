@@ -3,6 +3,124 @@ use super::*;
 use crate::repo::deferred_dispatch_checkpoint_result;
 
 #[test]
+fn reclaiming_expired_async_poll_executor_renews_parent_resume_lease() {
+    let state = state_with_tasks_table();
+    let now = 10_000;
+    let lease_seconds = 30;
+    let task_id = "async-poll-expired-parent-lease";
+    let checkpoint_id = "ckpt-async-expired-parent-lease";
+    let result = json!({
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": "running",
+            "checkpoint_id": checkpoint_id,
+            "next_check_after": now - 10,
+            "resume_claim": {
+                "schema_version": 1,
+                "owner": state.worker.worker_id,
+                "owner_layer": "worker_recovery",
+                "checkpoint_id": checkpoint_id,
+                "claimed_at": now - 60,
+                "expires_at": now - 1
+            },
+            "resume_executor": {
+                "schema_version": 1,
+                "checkpoint_id": checkpoint_id,
+                "executor_state": "executing_async_poll",
+                "resume_trigger": "async_job_poll",
+                "resume_directive": "poll_async_job",
+                "job_id": "local_process:completed-job",
+                "poll_after_seconds": 5,
+                "expires_at": now + 300
+            },
+            "resume_executor_claim": {
+                "schema_version": 1,
+                "checkpoint_id": checkpoint_id,
+                "executor_state": "executing_async_poll",
+                "claimed_at": now - 60,
+                "expires_at": now - 1
+            }
+        },
+        "task_checkpoint": checkpoint_json(
+            checkpoint_id,
+            vec!["run_skill:media_download:async_job:local_process:completed-job"]
+        )
+    });
+    insert_task(&state, task_id, "running", Some(&result), now - 60);
+    {
+        let db = state.core.db.get().expect("get db");
+        db.execute(
+            "UPDATE tasks
+             SET lease_owner = ?2,
+                 lease_expires_at = ?3
+             WHERE task_id = ?1",
+            rusqlite::params![task_id, state.worker.worker_id, now - 1],
+        )
+        .expect("expire parent task lease");
+    }
+
+    let claimed = claim_ready_paused_checkpoint_resume_executor_internal(
+        &state,
+        task_id,
+        checkpoint_id,
+        "executing_async_poll",
+        now,
+        lease_seconds,
+    )
+    .expect("reclaim expired async poll executor")
+    .expect("executor reclaimed");
+    assert_eq!(claimed.executor_state, "executing_async_poll");
+
+    let stored = stored_result_json(&state, task_id);
+    assert_eq!(
+        stored["task_lifecycle"]["resume_claim"]["expires_at"],
+        now + lease_seconds
+    );
+    assert_eq!(stored["task_lifecycle"]["resume_claim"]["renewed_at"], now);
+    assert_eq!(
+        stored["task_lifecycle"]["resume_claim"]["claim_attempt"],
+        CLAIM_ATTEMPT
+    );
+    let task_lease_expires_at: i64 = state
+        .core
+        .db
+        .get()
+        .expect("get db")
+        .query_row(
+            "SELECT lease_expires_at FROM tasks WHERE task_id = ?1",
+            rusqlite::params![task_id],
+            |row| row.get(0),
+        )
+        .expect("read renewed task lease");
+    assert_eq!(task_lease_expires_at, now + lease_seconds);
+
+    let execution_plan = json!({
+        "schema_version": 1,
+        "task_id": task_id,
+        "checkpoint_id": checkpoint_id,
+        "executor_state": claimed.executor_state,
+        "executor_action": "poll_async_job",
+        "resume_directive": "poll_async_job",
+        "resume_trigger": "async_job_poll",
+        "job_id": "local_process:completed-job"
+    });
+    assert!(record_paused_checkpoint_resume_execution_plan_internal(
+        &state,
+        CLAIM_ATTEMPT,
+        task_id,
+        checkpoint_id,
+        "executing_async_poll",
+        &execution_plan,
+        now + 1,
+    )
+    .expect("record recovered async poll plan"));
+    let planned = list_planned_paused_checkpoint_resume_executions_internal(&state, now + 2, 10)
+        .expect("list recovered execution plans");
+    assert_eq!(planned.len(), 1);
+    assert_eq!(planned[0].task_id, task_id);
+}
+
+#[test]
 fn async_poll_retry_plan_clears_stale_projection_before_terminal_poll() {
     let state = state_with_tasks_table();
     let now = 10_000;
