@@ -1943,6 +1943,12 @@ pub(crate) fn check_task_view_access(
             .map_err(TaskViewerAccessError::AuthLookup)?,
         None => None,
     };
+    if viewer_identity
+        .as_ref()
+        .is_some_and(|identity| identity.role.eq_ignore_ascii_case("admin"))
+    {
+        return Ok(());
+    }
     if !channel_allows_shared_ui_task_access(channel) {
         if let Some(expected_key) = expected_key {
             if provided_key != Some(expected_key) {

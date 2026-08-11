@@ -2,7 +2,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 use super::{
-    claim_due_paused_checkpoint_task_internal, claim_next_task,
+    check_task_view_access, claim_due_paused_checkpoint_task_internal, claim_next_task,
     claim_ready_paused_checkpoint_resume_executor_internal, get_task_query_record,
     list_active_tasks_for_user_internal, list_active_tasks_internal,
     list_all_active_tasks_internal, list_all_task_history_internal,
@@ -11,7 +11,8 @@ use super::{
     record_paused_checkpoint_resume_executor_state_internal,
     record_paused_checkpoint_resume_work_item_internal, touch_running_task,
     update_task_checkpointed_result, update_task_failure, update_task_failure_with_result,
-    update_task_success, WorkerTaskWriteRejected, WORKER_LEASE_LOST_STATUS_CODE,
+    update_task_success, TaskViewerAccessError, WorkerTaskWriteRejected,
+    WORKER_LEASE_LOST_STATUS_CODE,
 };
 use crate::child_task_contract::{
     ChildTaskBudget, ChildTaskMergePolicy, ChildTaskPermissionProfile, ChildTaskSpec,
@@ -163,6 +164,48 @@ fn stored_status(state: &crate::AppState, task_id: &str) -> String {
         |row| row.get(0),
     )
     .expect("select task status")
+}
+
+#[test]
+fn admin_can_view_tasks_from_the_global_admin_lists() {
+    let state = state_with_tasks_table();
+    {
+        let db = state.core.db.get().expect("get db");
+        db.execute_batch(
+            "CREATE TABLE auth_keys (
+                user_key TEXT PRIMARY KEY,
+                principal_id TEXT,
+                role TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                last_used_at TEXT
+            );",
+        )
+        .expect("create auth table");
+        db.execute(
+            "INSERT INTO auth_keys (
+                user_key, principal_id, role, enabled, created_at, last_used_at
+             ) VALUES (?1, ?2, 'admin', 1, '1', NULL)",
+            rusqlite::params!["rk-report-admin", "principal-report-admin"],
+        )
+        .expect("insert admin key");
+        db.execute(
+            "INSERT INTO auth_keys (
+                user_key, principal_id, role, enabled, created_at, last_used_at
+             ) VALUES (?1, ?2, 'user', 1, '1', NULL)",
+            rusqlite::params!["rk-report-user", "principal-report-user"],
+        )
+        .expect("insert user key");
+    }
+
+    assert!(
+        check_task_view_access(&state, Some("rk-task-owner"), "ui", Some("rk-report-admin"),)
+            .is_ok()
+    );
+    assert!(matches!(
+        check_task_view_access(&state, Some("rk-task-owner"), "ui", Some("rk-report-user"),),
+        Err(TaskViewerAccessError::TaskOwnerMismatch)
+    ));
 }
 
 #[test]
