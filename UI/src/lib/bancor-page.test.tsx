@@ -183,7 +183,9 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.doesNotMatch(html, /可见最低价/);
   assert.match(html, /data-bancor-chart-layer="live-price-line"/);
   assert.match(html, /data-bancor-chart-layer="live-price-label"/);
-  assert.doesNotMatch(html, /data-bancor-chart-layer="visible-price-extremes"/);
+  assert.match(html, /data-bancor-chart-layer="visible-price-extremes"/);
+  assert.match(html, />H 0\.00010010<\/text>/);
+  assert.match(html, />L 0\.00009990<\/text>/);
   assert.match(html, /<h2[^>]*>交易<\/h2>/);
   assert.match(html, /我的余额/);
   assert.match(html, /点击填入全部 POINT 余额/);
