@@ -6,9 +6,9 @@ import {
   Database,
   FileText,
   LayoutDashboard,
+  ListChecks,
   MessageCircle,
   Network,
-  SquareTerminal,
   Store,
 } from "lucide-react";
 
@@ -446,8 +446,8 @@ export function useConsoleProjections({
       },
       {
         id: "tasks" as const,
-        label: t("手动任务", "Manual Tasks"),
-        icon: <SquareTerminal className="h-4 w-4" />,
+        label: t("任务管理", "Task Management"),
+        icon: <ListChecks className="h-4 w-4" />,
       },
       {
         id: "ai_learning" as const,

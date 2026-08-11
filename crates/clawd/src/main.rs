@@ -1759,6 +1759,10 @@ struct ActiveTaskItem {
     kind: String,
     status: String,
     execution_state: String,
+    channel: String,
+    source_user_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    external_user_id: Option<String>,
     summary: String,
     age_seconds: i64,
     #[serde(skip_serializing_if = "Option::is_none")]

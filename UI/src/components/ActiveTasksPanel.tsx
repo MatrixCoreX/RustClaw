@@ -1,5 +1,6 @@
-import { Activity, CircleAlert, Clock3, Loader2, MessageCircle, Pause, Play, RefreshCw, X } from "lucide-react";
+import { Activity, CircleAlert, Clock3, Loader2, MessageCircle, Pause, Play, RefreshCw, UserRound, X } from "lucide-react";
 
+import { channelLabel } from "../lib/channel-display";
 import { formatDuration } from "../lib/display-format";
 import {
   buildTaskKindLabel,
@@ -174,6 +175,7 @@ export function ActiveTasksPanel({
             const steerSubmitting = taskControlSubmittingId === `steer:${item.task_id}`;
             const canSteer = item.status === "running" || item.status === "queued";
             const operationProgress = item.lifecycle?.operation_progress;
+            const sourceUser = item.external_user_id?.trim() || item.source_user_id;
             return (
               <div
                 key={item.task_id}
@@ -195,6 +197,19 @@ export function ActiveTasksPanel({
                       <span className="text-xs text-white/45">{formatDuration(item.age_seconds)}</span>
                     </div>
                     <p className="mt-2 break-words text-sm text-white/85">{item.summary || item.task_id}</p>
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs text-white/60">
+                      <span className="inline-flex items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-2 py-1">
+                        <MessageCircle className="h-3.5 w-3.5" />
+                        {t("来源", "Source")}: {channelLabel(item.channel, lang)}
+                      </span>
+                      <span className="inline-flex min-w-0 items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-2 py-1">
+                        <UserRound className="h-3.5 w-3.5 shrink-0" />
+                        <span className="shrink-0">{t("用户", "User")}:</span>
+                        <span className="max-w-72 truncate font-mono" title={sourceUser}>
+                          {sourceUser}
+                        </span>
+                      </span>
+                    </div>
                     {childView ? (
                       <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-sky-50/75">
                         {childView.meta.map((meta) => (

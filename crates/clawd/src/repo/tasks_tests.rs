@@ -1249,6 +1249,18 @@ fn list_active_tasks_exposes_lifecycle_projection() {
         "task_checkpoint": checkpoint
     });
     insert_task(&state, "task-active-1", "running", Some(&progress), 2222);
+    state
+        .core
+        .db
+        .get()
+        .expect("get db")
+        .execute(
+            "UPDATE tasks
+             SET channel = 'wechat', external_user_id = 'wechat-user-17'
+             WHERE task_id = 'task-active-1'",
+            [],
+        )
+        .expect("set task source");
     set_task_lease(&state, "task-active-1", "worker:test-active", 2400, 3, 2200);
 
     let tasks = list_active_tasks_internal(&state, 42, 7, None).expect("list active tasks");
@@ -1257,6 +1269,9 @@ fn list_active_tasks_exposes_lifecycle_projection() {
     assert_eq!(tasks[0].task_id, "task-active-1");
     assert_eq!(tasks[0].status, "running");
     assert_eq!(tasks[0].execution_state, "background");
+    assert_eq!(tasks[0].channel, "wechat");
+    assert_eq!(tasks[0].source_user_id, "42");
+    assert_eq!(tasks[0].external_user_id.as_deref(), Some("wechat-user-17"));
     let lifecycle = tasks[0].lifecycle.as_ref().expect("lifecycle projection");
     assert_eq!(lifecycle["state"], "background");
     assert_eq!(lifecycle["execution_state"], "background");

@@ -51,7 +51,10 @@ fn list_active_tasks_scoped_internal(
                 lease_owner,
                 lease_expires_at,
                 claim_attempt,
-                claimed_at
+                claimed_at,
+                channel,
+                user_id,
+                external_user_id
          FROM tasks
          WHERE (?1 IS NULL OR user_id = ?1)
            AND (?2 IS NULL OR chat_id = ?2)
@@ -76,6 +79,9 @@ fn list_active_tasks_scoped_internal(
                 row.get::<_, i64>(8)?,
                 row.get::<_, i64>(9)?,
                 row.get::<_, i64>(10)?,
+                row.get::<_, String>(11)?,
+                row.get::<_, i64>(12)?,
+                row.get::<_, Option<String>>(13)?,
             ))
         },
     )?;
@@ -93,6 +99,9 @@ fn list_active_tasks_scoped_internal(
             lease_expires_at,
             claim_attempt,
             claimed_at,
+            channel,
+            source_user_id,
+            external_user_id,
         ) = row?;
         let ref_ts = if updated_ts > 0 {
             updated_ts
@@ -128,6 +137,9 @@ fn list_active_tasks_scoped_internal(
                 .ok()
                 .and_then(|value| value.as_str().map(ToOwned::to_owned))
                 .unwrap_or_else(|| "failed".to_string()),
+            channel,
+            source_user_id: source_user_id.to_string(),
+            external_user_id: external_user_id.filter(|value| !value.trim().is_empty()),
             summary,
             age_seconds,
             lifecycle: Some(lifecycle),
