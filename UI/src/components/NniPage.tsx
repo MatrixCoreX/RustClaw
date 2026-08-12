@@ -17,6 +17,7 @@ import { useEffect, useRef, useState } from "react";
 import { writeTextToClipboard } from "../lib/auth-keys";
 import { NniHistoryTabs, type NniHistoryView } from "./NniHistoryTabs";
 import { NniNetworkDeviceStats } from "./NniNetworkDeviceStats";
+import { NniPublicKeyDisplay } from "./NniPublicKeyDisplay";
 import { NniRewardsPanel } from "./NniRewardsPanel";
 import {
   NNI_RUNTIME_TILES,
@@ -272,9 +273,10 @@ export function NniPage({
     }
   };
 
-  const copyPrimaryHex = () => {
-    if (!nniPrimaryHex) return;
-    void writeTextToClipboard(nniPrimaryHex.value)
+  const copyPrimaryHex = (value?: string) => {
+    const copyValue = value ?? nniPrimaryHex?.value;
+    if (!copyValue) return;
+    void writeTextToClipboard(copyValue)
       .then(() => onActionMessageChange(t("已复制结果。", "Result copied.")))
       .catch((err) => onActionErrorChange(err instanceof Error ? err.message : t("复制失败", "Copy failed")));
   };
@@ -943,9 +945,13 @@ export function NniPage({
                   <div className="mt-3 grid gap-3 text-xs sm:grid-cols-3">
                     <div>
                       <p className="font-semibold tracking-[0.12em] text-white/35">{t("公钥", "Public key")}</p>
-                      <p className="mt-1 break-all font-mono text-white/75" title={record.device_pubkey || ""}>
-                        {shortNniValue(record.device_pubkey)}
-                      </p>
+                      <NniPublicKeyDisplay
+                        value={record.device_pubkey}
+                        t={t}
+                        shorten={{ head: 10, tail: 8 }}
+                        className="mt-1"
+                        valueClassName="text-xs text-white/75"
+                      />
                     </div>
                     <div>
                       <p className="font-semibold tracking-[0.12em] text-white/35">{t("任务", "Task")}</p>
@@ -1066,8 +1072,8 @@ export function NniPage({
                   : t("执行一个设备签名操作后，这里会显示返回值。", "Run a device signing action to show its result here.")}
               </p>
             </div>
-            {nniPrimaryHex ? (
-              <button type="button" onClick={copyPrimaryHex} className="theme-secondary-btn px-3 py-2 text-xs">
+            {nniPrimaryHex && nniPrimaryHex.label !== "pubkey" ? (
+              <button type="button" onClick={() => copyPrimaryHex()} className="theme-secondary-btn px-3 py-2 text-xs">
                 <Copy className="h-4 w-4" />
                 {t("复制", "Copy")}
               </button>
@@ -1085,7 +1091,19 @@ export function NniPage({
             </p>
           ) : null}
 
-          {nniPrimaryHex ? (
+          {nniPrimaryHex?.label === "pubkey" && nniActionResult?.payload?.pubkey ? (
+            <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3">
+              <p className="text-xs font-semibold text-white/75">pubkey</p>
+              <NniPublicKeyDisplay
+                value={nniActionResult.payload.pubkey}
+                t={t}
+                showByteSize
+                onCopy={copyPrimaryHex}
+                className="mt-3"
+                valueClassName="text-xs leading-6 text-white/75"
+              />
+            </div>
+          ) : nniPrimaryHex ? (
             <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs font-semibold text-white/75">{nniPrimaryHex.label}</p>

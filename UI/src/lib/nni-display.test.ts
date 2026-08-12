@@ -13,6 +13,7 @@ import {
   nniSimulationControlMode,
   nniTimestampSignatureReady,
   parseNniRemoteNodeUrls,
+  rawNniPublicKeyHex,
   shortenHex,
   shortNniValue,
 } from "./nni-display.ts";
@@ -53,6 +54,11 @@ test("shows raw P-256 NNI public keys as lossless compressed Base58", () => {
     compressedNniPublicKeyBase58(rawPublicKey),
     "ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C",
   );
+  assert.equal(
+    rawNniPublicKeyHex("ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C"),
+    rawPublicKey,
+  );
+  assert.equal(rawNniPublicKeyHex("not-a-public-key"), null);
   assert.deepEqual(nniPayloadHexField({ pubkey: rawPublicKey }), {
     label: "pubkey",
     value: "ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C",

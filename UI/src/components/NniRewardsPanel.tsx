@@ -2,6 +2,7 @@ import { ChevronLeft, ChevronRight, Coins, Loader2, RefreshCw, WalletCards } fro
 
 import { shortNniValue } from "../lib/nni-display";
 import type { NniRewardsResponse } from "../types/api";
+import { NniPublicKeyDisplay } from "./NniPublicKeyDisplay";
 
 type Translate = (zh: string, en: string) => string;
 
@@ -105,9 +106,15 @@ export function NniRewardsPanel({
           <p className="mt-3 text-sm font-semibold text-white/90">
             {formatUnixDateTime(rewards?.latest_period_end_unix)}
           </p>
-          <p className="mt-1 font-mono text-xs text-white/45" title={rewards?.device_pubkey ?? ""}>
-            {t("设备", "Device")}: {shortNniValue(rewards?.device_pubkey)}
-          </p>
+          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1 text-xs text-white/45">
+            <span>{t("设备", "Device")}:</span>
+            <NniPublicKeyDisplay
+              value={rewards?.device_pubkey}
+              t={t}
+              shorten={{ head: 10, tail: 8 }}
+              valueClassName="text-xs text-white/45"
+            />
+          </div>
         </div>
       </div>
 

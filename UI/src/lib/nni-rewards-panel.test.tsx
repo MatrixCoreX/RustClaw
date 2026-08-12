@@ -8,7 +8,9 @@ import type { NniRewardsResponse } from "../types/api";
 const rewards: NniRewardsResponse = {
   schema_version: 1,
   status: "heartbeat_rewards",
-  device_pubkey: "aa".repeat(64),
+  device_pubkey:
+    "2b9c9d84fa15f4e178ce58d0a40a9f5e150e9c502e689a24d0c0f221337870c" +
+    "726f0e463d730a75401c425bfde0db0c442e314027d83885a84c535eaa35460a0",
   node_url: "https://nni.example.test",
   reward_point_scale: 10000,
   reward_decimal_places: 4,
@@ -61,4 +63,5 @@ test("renders the signed device reward total and period record", () => {
   assert.match(markup, /\+5000\.0000/);
   assert.match(markup, /3 次，按 1 台设备计奖/);
   assert.match(markup, /每次刷新都会由本机设备签署一次临时挑战/);
+  assert.match(markup, /切换为原始十六进制公钥/);
 });

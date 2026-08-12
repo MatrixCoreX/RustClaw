@@ -28,6 +28,7 @@ import {
 } from "../hooks/useBancorRuntime";
 import type { useBancorRuntime } from "../hooks/useBancorRuntime";
 import type { NniBancorCandle, NniBancorQuoteResponse } from "../types/api";
+import { NniPublicKeyDisplay } from "./NniPublicKeyDisplay";
 
 type Translate = (zh: string, en: string) => string;
 type BancorRuntime = ReturnType<typeof useBancorRuntime>;
@@ -483,9 +484,15 @@ export function BancorPage({
               {t("读取私人余额需要一次新的设备签名。", "Reading private balances requires a fresh device signature.")}
             </p>
             {account?.device_pubkey ? (
-              <p className="mt-1 break-all text-xs text-white/35">
-                {t("设备：", "Device: ")}{account.device_pubkey.slice(0, 12)}…{account.device_pubkey.slice(-8)}
-              </p>
+              <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1 text-xs text-white/35">
+                <span>{t("设备：", "Device: ")}</span>
+                <NniPublicKeyDisplay
+                  value={account.device_pubkey}
+                  t={t}
+                  shorten={{ head: 12, tail: 8 }}
+                  valueClassName="text-white/45"
+                />
+              </div>
             ) : null}
           </div>
 
@@ -693,7 +700,12 @@ export function BancorPage({
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span className="font-medium text-white/85">{record.side === "buy" ? t("买入 POINT", "Buy POINT") : t("卖出 POINT", "Sell POINT")}</span>
-                    <span className="max-w-full truncate font-mono text-[11px] text-white/35">{record.device_pubkey_compact}</span>
+                    <NniPublicKeyDisplay
+                      value={record.device_pubkey_compact}
+                      t={t}
+                      shorten={{ head: 16, tail: 12 }}
+                      valueClassName="text-[11px] text-white/40"
+                    />
                   </div>
                   <p className="mt-1 text-xs text-white/40">{formatUnixDateTime(record.created_at_unix)}</p>
                 </div>
