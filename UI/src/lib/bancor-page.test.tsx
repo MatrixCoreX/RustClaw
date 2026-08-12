@@ -148,6 +148,8 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.doesNotMatch(html, /<h1[^>]*>BANCOR<\/h1>/);
   assert.doesNotMatch(html, /内部 USD/);
   assert.match(html, /浏览器不会接触私钥/);
+  assert.match(html, /ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C/);
+  assert.match(html, /切换为原始十六进制公钥/);
   assert.match(html, /BANCOR 储备曲线公式/);
   assert.match(html, /role="math"/);
   assert.match(html, /有效支付量等于支付量减去手续费/);

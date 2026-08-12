@@ -17,6 +17,13 @@ export interface NniRuntimeTile {
 
 const NNI_RAW_P256_PUBLIC_KEY_HEX_LENGTH = 128;
 const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const P256_FIELD_PRIME = BigInt("0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff");
+const P256_CURVE_B = BigInt("0x5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b");
+
+export interface NniPublicKeyFormats {
+  compact: string;
+  raw: string;
+}
 
 function encodeBase58(bytes: number[]): string {
   const digits: number[] = [];
@@ -44,6 +51,43 @@ function encodeBase58(bytes: number[]): string {
   return encoded;
 }
 
+function decodeBase58(value: string): number[] | null {
+  if (!value) return null;
+  let decoded = 0n;
+  for (const character of value) {
+    const digit = BASE58_ALPHABET.indexOf(character);
+    if (digit < 0) return null;
+    decoded = decoded * 58n + BigInt(digit);
+  }
+
+  const bytes: number[] = [];
+  while (decoded > 0n) {
+    bytes.unshift(Number(decoded & 0xffn));
+    decoded >>= 8n;
+  }
+  for (let index = 0; index < value.length && value[index] === "1"; index += 1) {
+    bytes.unshift(0);
+  }
+  return bytes;
+}
+
+function modulo(value: bigint, modulus: bigint): bigint {
+  const remainder = value % modulus;
+  return remainder >= 0n ? remainder : remainder + modulus;
+}
+
+function modularPower(base: bigint, exponent: bigint, modulus: bigint): bigint {
+  let result = 1n;
+  let factor = modulo(base, modulus);
+  let remaining = exponent;
+  while (remaining > 0n) {
+    if ((remaining & 1n) === 1n) result = (result * factor) % modulus;
+    factor = (factor * factor) % modulus;
+    remaining >>= 1n;
+  }
+  return result;
+}
+
 export function compressedNniPublicKeyBase58(value?: string | null): string | null {
   const normalized = value?.trim().toLowerCase() ?? "";
   if (
@@ -57,6 +101,42 @@ export function compressedNniPublicKeyBase58(value?: string | null): string | nu
   const compressedHex = `${yIsOdd ? "03" : "02"}${normalized.slice(0, 64)}`;
   const bytes = compressedHex.match(/.{2}/g)?.map((pair) => Number.parseInt(pair, 16)) ?? [];
   return encodeBase58(bytes);
+}
+
+export function rawNniPublicKeyHex(value?: string | null): string | null {
+  const compact = value?.trim() ?? "";
+  const bytes = decodeBase58(compact);
+  if (!bytes || bytes.length !== 33 || (bytes[0] !== 0x02 && bytes[0] !== 0x03)) return null;
+
+  const xHex = bytes.slice(1).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  const x = BigInt(`0x${xHex}`);
+  if (x >= P256_FIELD_PRIME) return null;
+
+  const rhs = modulo(x * x * x - 3n * x + P256_CURVE_B, P256_FIELD_PRIME);
+  let y = modularPower(rhs, (P256_FIELD_PRIME + 1n) / 4n, P256_FIELD_PRIME);
+  if ((y * y) % P256_FIELD_PRIME !== rhs) return null;
+
+  const expectedOdd = bytes[0] === 0x03;
+  if (((y & 1n) === 1n) !== expectedOdd) y = P256_FIELD_PRIME - y;
+  if (((y & 1n) === 1n) !== expectedOdd) return null;
+
+  const raw = `${xHex}${y.toString(16).padStart(64, "0")}`;
+  return compressedNniPublicKeyBase58(raw) === compact ? raw : null;
+}
+
+export function nniPublicKeyFormats(value?: string | null): NniPublicKeyFormats | null {
+  const normalized = value?.trim() ?? "";
+  if (!normalized) return null;
+
+  if (/^[0-9a-fA-F]{128}$/.test(normalized)) {
+    const raw = normalized.toLowerCase();
+    const compact = compressedNniPublicKeyBase58(raw);
+    if (!compact || rawNniPublicKeyHex(compact) !== raw) return null;
+    return { compact, raw };
+  }
+
+  const raw = rawNniPublicKeyHex(normalized);
+  return raw ? { compact: normalized, raw } : null;
 }
 
 export type NniSimulationControlMode = "enable" | "disable" | null;
