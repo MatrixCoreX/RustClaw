@@ -972,7 +972,8 @@ fn find_cargo_program_in_environment(
         .collect::<Vec<_>>();
     if let Some(cargo_home) = cargo_home.filter(|value| !value.is_empty()) {
         push_unique_path(&mut directories, PathBuf::from(cargo_home).join("bin"));
-    } else if let Some(home) = home.filter(|value| !value.is_empty()) {
+    }
+    if let Some(home) = home.filter(|value| !value.is_empty()) {
         push_unique_path(
             &mut directories,
             PathBuf::from(home).join(".cargo").join("bin"),
