@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type {
   ApiResponse,
@@ -21,12 +21,14 @@ import {
 type Translate = (zh: string, en: string) => string;
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
 const BANCOR_ASSET_SCALE = 10_000n;
+const BANCOR_AMOUNT_STEP_UNITS = BANCOR_ASSET_SCALE;
 const BANCOR_MAX_UNITS = 9_223_372_036_854_775_807n;
 export const BANCOR_DEFAULT_CANDLE_INTERVAL_SECONDS = 300;
 export const BANCOR_DEFAULT_SLIPPAGE_BPS = 50;
 export const BANCOR_MAX_SLIPPAGE_BPS = 5_000;
 export const BANCOR_MARKET_TRADE_LIMIT = 100;
 export const BANCOR_TRADE_PAGE_SIZE = 10;
+export const BANCOR_SUCCESS_MESSAGE_DURATION_MS = 5_000;
 
 export function projectBancorCandlesForInterval(
   current: NniBancorCandlesResponse | null,
@@ -83,7 +85,7 @@ export function adjustBancorInputAmount(
   adjustment: BancorAmountAdjustment,
 ): string | null {
   const normalized = value.trim();
-  if (normalized === "" && adjustment === "increment") return formatBancorUnits(1n);
+  if (normalized === "" && adjustment === "increment") return formatBancorUnits(BANCOR_AMOUNT_STEP_UNITS);
   const match = /^(0|[1-9][0-9]*)(?:\.([0-9]{1,4}))?$/.exec(normalized);
   if (!match) return null;
   const fraction = (match[2] || "").padEnd(4, "0");
@@ -91,10 +93,16 @@ export function adjustBancorInputAmount(
   if (units > BANCOR_MAX_UNITS) return null;
 
   if (adjustment === "increment") {
-    return units < BANCOR_MAX_UNITS ? formatBancorUnits(units + 1n) : null;
+    return units <= BANCOR_MAX_UNITS - BANCOR_AMOUNT_STEP_UNITS
+      ? formatBancorUnits(units + BANCOR_AMOUNT_STEP_UNITS)
+      : null;
   }
   if (units <= 0n) return null;
-  if (adjustment === "decrement") return formatBancorUnits(units > 1n ? units - 1n : 1n);
+  if (adjustment === "decrement") {
+    return units > BANCOR_AMOUNT_STEP_UNITS
+      ? formatBancorUnits(units - BANCOR_AMOUNT_STEP_UNITS)
+      : formatBancorUnits(units);
+  }
   const remainingPercent = adjustment === "decrease_25_percent" ? 75n : 50n;
   const adjusted = (units * remainingPercent) / 100n;
   return formatBancorUnits(adjusted > 0n ? adjusted : 1n);
@@ -279,6 +287,12 @@ export function useBancorRuntime({
   const candleCacheScopeRef = useRef(cacheScope);
   candleCacheScopeRef.current = cacheScope;
 
+  useEffect(() => {
+    if (!message) return undefined;
+    const timeout = globalThis.setTimeout(() => setMessage(null), BANCOR_SUCCESS_MESSAGE_DURATION_MS);
+    return () => globalThis.clearTimeout(timeout);
+  }, [message]);
+
   const readError = (body: ApiResponse<unknown>, fallback: string) => {
     const data = body.data as { attempts?: Array<{ error_code?: string | null }> } | undefined;
     const code = data?.attempts?.find((attempt) => attempt.error_code)?.error_code || body.error;
@@ -345,7 +359,7 @@ export function useBancorRuntime({
   const fetchCandles = (
     intervalSeconds = candleIntervalRef.current,
     silent = false,
-    forceAfterInFlight = false,
+    forceRefresh = false,
     endTimeUnix?: number,
   ): Promise<NniBancorCandlesResponse | null> => {
     const requestScope = cacheScope;
@@ -353,8 +367,13 @@ export function useBancorRuntime({
     const requestKey = `${cacheKey}\n${endTimeUnix ?? "latest"}`;
     const inFlight = candleRequestsRef.current.get(requestKey);
     if (inFlight) {
-      if (!forceAfterInFlight) return inFlight;
-      return inFlight.then(() => fetchCandles(intervalSeconds, silent, false, endTimeUnix));
+      if (!forceRefresh) return inFlight;
+      return inFlight.then(() => {
+        if (candleRequestsRef.current.get(requestKey) === inFlight) {
+          candleRequestsRef.current.delete(requestKey);
+        }
+        return fetchCandles(intervalSeconds, silent, true, endTimeUnix);
+      });
     }
     const loadingLatest = !silent && endTimeUnix === undefined;
     if (loadingLatest && candleIntervalRef.current === intervalSeconds) setCandlesLoading(true);
@@ -386,6 +405,8 @@ export function useBancorRuntime({
         : BANCOR_CANDLE_REQUEST_MAX_CANDLES;
       const requestHeaders: Record<string, string> = {};
       if (
+        !forceRefresh
+        &&
         endTimeUnix === undefined
         &&
         cachedSnapshot?.etag
@@ -594,13 +615,16 @@ export function useBancorRuntime({
       if (!response.ok || !body.ok || !body.data) throw new Error(readError(body, `Trade failed (${response.status})`));
       setLastTrade(body.data);
       setQuote(null);
-      setMessage(t("交易已完成，余额和市场储备已经更新。", "Trade completed. Balances and market reserves are updated."));
       await Promise.all([
         fetchMarket(true),
         fetchAccount(1, true),
         fetchMarketTrades(true),
-        fetchCandles(candleIntervalSeconds, true, true),
+        fetchCandles(candleIntervalRef.current, true, true),
       ]);
+      setMessage(t(
+        "交易已完成，余额和市场储备已经更新。",
+        "Trade completed. Balances and market reserves are updated.",
+      ));
       return body.data;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t("交易没有完成。", "The trade was not completed."));
