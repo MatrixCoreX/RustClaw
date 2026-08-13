@@ -19,7 +19,9 @@ import {
   calculateBancorZoomViewport,
   isBancorCandleOpen,
   paginateBancorTrades,
+  formatBancorDayChangePercent,
   resolveBancorCandlePalette,
+  resolveBancorDayChangeColor,
   resolveBancorCandleVisualState,
   resolveBancorTradeColor,
   scaleBancorPriceDomain,
@@ -41,6 +43,16 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       usd_reserve_units: "100000000",
       usd_reserve: "10000.0000",
       marginal_price_usd_per_point: "0.00010000",
+      daily_marginal_price: {
+        price_kind: "pool_marginal_usd_per_point" as const,
+        timezone: "UTC" as const,
+        day_start_unix: 1_699_920_000,
+        open_usd_per_point: "0.00009950",
+        high_usd_per_point: "0.00010100",
+        low_usd_per_point: "0.00009900",
+        change_percent: "0.50",
+        trade_count: 17,
+      },
       fee_bps: 50,
       version: 1,
       updated_at_unix: 1_700_000_000,
@@ -142,6 +154,8 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /100000000\.0000 POINT/);
   assert.match(html, /10000\.0000 USD/);
   assert.match(html, /BANCOR储备曲线市场/);
+  assert.match(html, /data-bancor-open-price-change="true"/);
+  assert.match(html, /价格变化计算/);
   assert.equal((html.match(/theme-shadow-card/g) ?? []).length, 6);
   assert.doesNotMatch(html, /theme-card border/);
   assert.match(html, /强制流动性算法/);
@@ -164,6 +178,14 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /均保留 4 位小数/);
   assert.doesNotMatch(html, /市场状态/);
   assert.match(html, /交易手续费/);
+  assert.doesNotMatch(html, /每 1 POINT|Per POINT/);
+  assert.match(html, /data-bancor-daily-marginal-price="UTC"/);
+  assert.match(html, /今日最高/);
+  assert.match(html, /0\.00010100 USD/);
+  assert.match(html, /今日最低/);
+  assert.match(html, /0\.00009900 USD/);
+  assert.match(html, /日涨跌幅/);
+  assert.match(html, /\+0\.50%/);
   assert.match(html, /买入从 USD 扣除，卖出从 POINT 扣除/);
   assert.match(html, /mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3/);
   assert.match(html, /rounded-xl border border-white\/8 bg-white\/\[0\.025\] px-3 py-2\.5/);
@@ -322,6 +344,17 @@ test("BANCOR trade records follow localized market color conventions", () => {
   assert.equal(resolveBancorTradeColor("sell", (zh) => zh), "#34d399");
   assert.equal(resolveBancorTradeColor("buy", (_zh, en) => en), "#34d399");
   assert.equal(resolveBancorTradeColor("sell", (_zh, en) => en), "#f87171");
+});
+
+test("BANCOR daily change formats signed percentages and follows localized colors", () => {
+  assert.equal(formatBancorDayChangePercent("1.25"), "+1.25%");
+  assert.equal(formatBancorDayChangePercent("-0.75"), "-0.75%");
+  assert.equal(formatBancorDayChangePercent("-0.00"), "0.00%");
+  assert.equal(formatBancorDayChangePercent(undefined), "—");
+  assert.equal(resolveBancorDayChangeColor("1.25", (zh) => zh), "#f87171");
+  assert.equal(resolveBancorDayChangeColor("-0.75", (zh) => zh), "#34d399");
+  assert.equal(resolveBancorDayChangeColor("1.25", (_zh, en) => en), "#34d399");
+  assert.equal(resolveBancorDayChangeColor("0.00", (zh) => zh), "var(--theme-chart-neutral)");
 });
 
 test("BANCOR candle visual state never reports a flat or empty interval as up", () => {

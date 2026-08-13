@@ -1,0 +1,125 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { renderToStaticMarkup } from "react-dom/server";
+
+import { BancorPriceChangePage } from "../components/BancorPriceChangePage";
+import { resolveBancorMarketDirectionColor } from "./bancor-market-colors";
+import { calculateBancorPriceChange } from "./bancor-price-change";
+import type { NniBancorMarketResponse } from "../types/api";
+
+const market: NniBancorMarketResponse = {
+  schema_version: 1,
+  status: "open",
+  market_id: "point-usd-v1",
+  point_symbol: "POINT",
+  usd_symbol: "USD",
+  point_scale: 10000,
+  usd_scale: 10000,
+  point_reserve_units: "1000000000000",
+  point_reserve: "100000000.0000",
+  usd_reserve_units: "100000000",
+  usd_reserve: "10000.0000",
+  marginal_price_usd_per_point: "0.00010000",
+  daily_marginal_price: {
+    price_kind: "pool_marginal_usd_per_point",
+    timezone: "UTC",
+    day_start_unix: 1_800_000_000,
+    open_usd_per_point: "0.00010000",
+    high_usd_per_point: "0.00010000",
+    low_usd_per_point: "0.00010000",
+    change_percent: "0.00",
+    trade_count: 0,
+  },
+  fee_bps: 50,
+  version: 8,
+  updated_at_unix: 1_800_000_000,
+};
+
+test("BANCOR buy price-change projection matches the server integer quote and reserve rules", () => {
+  const result = calculateBancorPriceChange({ side: "buy", inputAmount: "1.0000", market });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.deepEqual(result.projection, {
+    side: "buy",
+    inputAsset: "USD",
+    outputAsset: "POINT",
+    inputAmount: "1.0000",
+    feeAmount: "0.0050",
+    effectiveInputAmount: "0.9950",
+    outputAmount: "9949.0100",
+    pointReserveAfter: "99990050.9900",
+    usdReserveAfter: "10000.9950",
+    currentMarginalPrice: "0.00010000",
+    marginalPriceAfter: "0.00010001",
+    marginalPriceChangePercent: "+0.0199%",
+  });
+});
+
+test("BANCOR sell price-change projection keeps fees outside the pool", () => {
+  const result = calculateBancorPriceChange({ side: "sell", inputAmount: "100.0000", market });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.projection.feeAmount, "0.5000");
+  assert.equal(result.projection.effectiveInputAmount, "99.5000");
+  assert.equal(result.projection.outputAmount, "0.0099");
+  assert.equal(result.projection.pointReserveAfter, "100000099.5000");
+  assert.equal(result.projection.usdReserveAfter, "9999.9901");
+  assert.equal(result.projection.marginalPriceAfter, "0.00009999");
+  assert.equal(result.projection.marginalPriceChangePercent, "-0.0002%");
+});
+
+test("BANCOR price-change calculator rejects malformed, zero-output, and missing-market inputs", () => {
+  assert.deepEqual(
+    calculateBancorPriceChange({ side: "buy", inputAmount: "1.00000", market }),
+    { ok: false, error: "amount_invalid" },
+  );
+  assert.deepEqual(
+    calculateBancorPriceChange({ side: "buy", inputAmount: "0.0001", market }),
+    { ok: false, error: "amount_too_small" },
+  );
+  assert.deepEqual(
+    calculateBancorPriceChange({ side: "sell", inputAmount: "1.0000", market: null }),
+    { ok: false, error: "market_invalid" },
+  );
+  assert.deepEqual(
+    calculateBancorPriceChange({
+      side: "sell",
+      inputAmount: "10000000.0000",
+      market: { ...market, fee_bps: 0, point_reserve_units: "9223372036854775807" },
+    }),
+    { ok: false, error: "market_capacity_exceeded" },
+  );
+});
+
+test("BANCOR price-change colors follow Chinese and international market conventions", () => {
+  assert.equal(resolveBancorMarketDirectionColor("up", (zh) => zh), "#f87171");
+  assert.equal(resolveBancorMarketDirectionColor("down", (zh) => zh), "#34d399");
+  assert.equal(resolveBancorMarketDirectionColor("up", (_zh, en) => en), "#34d399");
+  assert.equal(resolveBancorMarketDirectionColor("down", (_zh, en) => en), "#f87171");
+});
+
+test("BANCOR price-change page exposes two local-only beginner calculators", () => {
+  const html = renderToStaticMarkup(
+    <BancorPriceChangePage market={market} onBack={() => undefined} t={(zh) => zh} />,
+  );
+  assert.match(html, /data-bancor-view="price-change-calculator"/);
+  assert.match(html, /仅本地计算/);
+  assert.match(html, /不会签名、提交或成交/);
+  assert.match(html, /data-bancor-calculator-side="buy"/);
+  assert.match(html, /data-bancor-calculator-side="sell"/);
+  assert.match(html, /aria-label="计划支付 USD"/);
+  assert.match(html, /aria-label="计划支付 POINT"/);
+  assert.equal((html.match(/data-bancor-price-change-result="ready"/g) ?? []).length, 2);
+  assert.match(html, /成交后 POINT 储备/);
+  assert.match(html, /成交后 USD 储备/);
+  assert.match(html, /池内边际价变化/);
+  assert.match(html, /返回市场/);
+});
+
+test("BANCOR English calculator renders green gains and red declines", () => {
+  const html = renderToStaticMarkup(
+    <BancorPriceChangePage market={market} onBack={() => undefined} t={(_zh, en) => en} />,
+  );
+  assert.match(html, /color:#34d399[^>]*>\+0\.0199%/);
+  assert.match(html, /color:#f87171[^>]*>-0\.0002%/);
+});

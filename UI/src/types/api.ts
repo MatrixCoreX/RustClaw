@@ -1241,6 +1241,16 @@ export interface NniBancorMarketResponse {
   usd_reserve_units: string;
   usd_reserve: string;
   marginal_price_usd_per_point: string;
+  daily_marginal_price: {
+    price_kind: "pool_marginal_usd_per_point";
+    timezone: "UTC";
+    day_start_unix: number;
+    open_usd_per_point: string;
+    high_usd_per_point: string;
+    low_usd_per_point: string;
+    change_percent: string;
+    trade_count: number;
+  };
   fee_bps: number;
   version: number;
   last_trade_id?: string | null;
