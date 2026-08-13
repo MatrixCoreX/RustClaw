@@ -105,7 +105,7 @@ echo '---'
 pgrep -af "^${CLAWD_BIN}([[:space:]]|$)"
 echo '---'
 if command -v ss >/dev/null 2>&1; then
-  ss -lntp | rg "${PORT}|clawd"
+  ss -lntp | grep -E "${PORT}|clawd"
 else
   lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN
 fi
