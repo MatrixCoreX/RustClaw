@@ -113,6 +113,14 @@ test("BANCOR price-change page exposes two local-only beginner calculators", () 
   assert.match(html, /成交后 POINT 储备/);
   assert.match(html, /成交后 USD 储备/);
   assert.match(html, /池内边际价变化/);
+  assert.match(html, /data-bancor-price-change-formula="true"/);
+  assert.match(html, /价格变化计算公式/);
+  assert.match(html, /买入 POINT（支付 USD）/);
+  assert.match(html, /卖出 POINT（收到 USD）/);
+  assert.match(html, /向上取整的手续费/);
+  assert.match(html, /向下取整的预计到账/);
+  assert.match(html, /ΔP/);
+  assert.match(html, /成交前 \/ 成交后池内边际价/);
   assert.match(html, /返回市场/);
 });
 

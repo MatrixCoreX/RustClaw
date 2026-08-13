@@ -1,5 +1,6 @@
 import { ArrowLeft, Calculator, ShieldCheck } from "lucide-react";
 import { useState } from "react";
+import type { ReactNode } from "react";
 
 import {
   calculateBancorPriceChange,
@@ -88,6 +89,149 @@ export function BancorPriceChangePage({
           )}
         </p>
       </section>
+
+      <BancorPriceChangeFormula t={t} />
+    </div>
+  );
+}
+
+function BancorPriceChangeFormula({ t }: { t: Translate }) {
+  return (
+    <section
+      className="theme-shadow-card p-5 sm:p-6"
+      aria-label={t("价格变化计算公式", "Price-change calculation formulas")}
+      data-bancor-price-change-formula="true"
+    >
+      <div>
+        <p className="text-xs font-medium uppercase tracking-wide text-sky-300/75">BANCOR</p>
+        <h2 className="mt-1 text-lg font-semibold text-white">
+          {t("价格变化计算公式", "Price-change calculation formulas")}
+        </h2>
+        <p className="mt-2 text-xs leading-5 text-white/50">
+          {t(
+            "先扣除手续费，再用当前储备计算到账量；手续费不进入资金池。所有数量都按 4 位小数的最小单位做整数运算。",
+            "The fee is deducted first, then output is calculated from the current reserves; fees do not enter the pool. Every amount uses integer arithmetic at four-decimal smallest-unit precision.",
+          )}
+        </p>
+      </div>
+
+      <div className="mt-5 grid gap-4 lg:grid-cols-2">
+        <FormulaPanel
+          title={t("买入 POINT（支付 USD）", "Buy POINT (pay USD)")}
+          formulas={[
+            <span key="buy-output">
+              <var>y</var><sub>POINT</sub> = ⌊
+              <MathFraction
+                numerator={<><var>x</var><sub>e</sub> × <var>R</var><sub>POINT</sub></>}
+                denominator={<><var>R</var><sub>USD</sub> + <var>x</var><sub>e</sub></>}
+              />⌋
+            </span>,
+            <span key="buy-usd-reserve">
+              <var>R′</var><sub>USD</sub> = <var>R</var><sub>USD</sub> + <var>x</var><sub>e</sub>
+            </span>,
+            <span key="buy-point-reserve">
+              <var>R′</var><sub>POINT</sub> = <var>R</var><sub>POINT</sub> − <var>y</var><sub>POINT</sub>
+            </span>,
+          ]}
+        />
+        <FormulaPanel
+          title={t("卖出 POINT（收到 USD）", "Sell POINT (receive USD)")}
+          formulas={[
+            <span key="sell-output">
+              <var>y</var><sub>USD</sub> = ⌊
+              <MathFraction
+                numerator={<><var>x</var><sub>e</sub> × <var>R</var><sub>USD</sub></>}
+                denominator={<><var>R</var><sub>POINT</sub> + <var>x</var><sub>e</sub></>}
+              />⌋
+            </span>,
+            <span key="sell-point-reserve">
+              <var>R′</var><sub>POINT</sub> = <var>R</var><sub>POINT</sub> + <var>x</var><sub>e</sub>
+            </span>,
+            <span key="sell-usd-reserve">
+              <var>R′</var><sub>USD</sub> = <var>R</var><sub>USD</sub> − <var>y</var><sub>USD</sub>
+            </span>,
+          ]}
+        />
+      </div>
+
+      <div className="mt-4 grid gap-4 rounded-xl border border-sky-300/15 bg-sky-400/[0.045] p-4 lg:grid-cols-3" role="math">
+        <FormulaSummary
+          label={t("扣除手续费", "Deduct fee")}
+          formula={<><var>F</var> = ⌈<var>x</var> × <var>f</var>⌉，<var>x</var><sub>e</sub> = <var>x</var> − <var>F</var></>}
+        />
+        <FormulaSummary
+          label={t("边际价格", "Marginal price")}
+          formula={
+            <>
+              <var>P</var> = <MathFraction numerator={<><var>R</var><sub>USD</sub></>} denominator={<><var>R</var><sub>POINT</sub></>} />，
+              <var>P′</var> = <MathFraction numerator={<><var>R′</var><sub>USD</sub></>} denominator={<><var>R′</var><sub>POINT</sub></>} />
+            </>
+          }
+        />
+        <FormulaSummary
+          label={t("价格变化", "Price change")}
+          formula={
+            <>
+              <var>ΔP</var>% = (
+              <MathFraction numerator={<var>P′</var>} denominator={<var>P</var>} /> − 1) × 100%
+            </>
+          }
+        />
+      </div>
+
+      <dl className="mt-4 grid gap-x-5 gap-y-1.5 border-t border-white/8 pt-3 text-xs leading-5 text-white/45 sm:grid-cols-2 lg:grid-cols-3">
+        <FormulaDefinition symbol="x" text={t("用户填写的支付数量", "payment amount entered by the user")} />
+        <FormulaDefinition symbol="f" text={t("手续费率", "fee rate")} />
+        <FormulaDefinition symbol="F" text={t("向上取整的手续费", "fee rounded up")} />
+        <FormulaDefinition symbol="xₑ" text={t("扣除手续费后的有效投入", "effective input after fees")} />
+        <FormulaDefinition symbol="R" text={t("成交前储备", "reserve before the trade")} />
+        <FormulaDefinition symbol="R′" text={t("成交后储备", "reserve after the trade")} />
+        <FormulaDefinition symbol="y" text={t("向下取整的预计到账", "estimated output rounded down")} />
+        <FormulaDefinition symbol="P / P′" text={t("成交前 / 成交后池内边际价", "pool marginal price before / after")} />
+        <FormulaDefinition symbol="⌈ ⌉ / ⌊ ⌋" text={t("向上取整 / 向下取整到最小单位", "round up / down to the smallest unit")} />
+      </dl>
+    </section>
+  );
+}
+
+function FormulaPanel({ title, formulas }: { title: string; formulas: ReactNode[] }) {
+  return (
+    <article className="min-w-0 rounded-xl border border-white/8 bg-white/[0.025] p-4">
+      <h3 className="text-sm font-semibold text-white/75">{title}</h3>
+      <div className="mt-3 grid gap-3 overflow-x-auto font-serif text-base text-sky-100 sm:text-lg" role="math">
+        {formulas.map((formula, index) => (
+          <div key={index} className="min-w-max whitespace-nowrap py-0.5">{formula}</div>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function FormulaSummary({ label, formula }: { label: string; formula: ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[11px] font-medium text-white/45">{label}</p>
+      <div className="mt-2 overflow-x-auto whitespace-nowrap font-serif text-base text-sky-100">
+        {formula}
+      </div>
+    </div>
+  );
+}
+
+function MathFraction({ numerator, denominator }: { numerator: ReactNode; denominator: ReactNode }) {
+  return (
+    <span className="mx-1 inline-grid text-center align-middle leading-tight">
+      <span className="border-b border-sky-100/55 px-1.5 pb-0.5">{numerator}</span>
+      <span className="px-1.5 pt-0.5">{denominator}</span>
+    </span>
+  );
+}
+
+function FormulaDefinition({ symbol, text }: { symbol: string; text: string }) {
+  return (
+    <div>
+      <dt className="inline font-mono text-white/70">{symbol}</dt>
+      <dd className="inline"> — {text}</dd>
     </div>
   );
 }
