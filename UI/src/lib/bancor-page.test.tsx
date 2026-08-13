@@ -17,10 +17,10 @@ import {
   calculateBancorPriceDomain,
   calculateBancorVisibleWindow,
   calculateBancorZoomViewport,
-  isBancorCandleOpen,
   resolveBancorCandlePalette,
   resolveBancorCandleVisualState,
   scaleBancorPriceDomain,
+  selectClosedBancorCandles,
 } from "../components/BancorPage";
 import type { useBancorRuntime } from "../hooks/useBancorRuntime";
 
@@ -45,10 +45,10 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
         point_fee_amount: "1.2500",
         usd_fee_units: "5000",
         usd_fee_amount: "0.5000",
-        updated_at_unix: 1_800_000_000,
+        updated_at_unix: 1_700_000_000,
       },
       version: 1,
-      updated_at_unix: 1_800_000_000,
+      updated_at_unix: 1_700_000_000,
     },
     candles: {
       schema_version: 1 as const,
@@ -56,12 +56,12 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       market_id: "point-usd-v1",
       interval_seconds: 3_600,
       start_time_unix: 1_799_996_400,
-      end_time_unix: 1_800_000_000,
+      end_time_unix: 1_700_003_600,
       price_scale: 1000000000000 as const,
       price_decimal_places: 12,
       candles: [{
-        bucket_start_unix: 1_799_996_400,
-        bucket_end_unix: 1_800_000_000,
+        bucket_start_unix: 1_699_996_400,
+        bucket_end_unix: 1_700_000_000,
         open: "0.00010000",
         high: "0.00010010",
         low: "0.00009990",
@@ -73,8 +73,8 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
         trade_count: 1,
         has_trades: true,
       }, {
-        bucket_start_unix: 1_800_000_000,
-        bucket_end_unix: 1_800_003_600,
+        bucket_start_unix: 1_700_000_000,
+        bucket_end_unix: 1_700_003_600,
         open: "0.00010005",
         high: "0.00010008",
         low: "0.00009995",
@@ -108,7 +108,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
         output_units: "334",
         output_amount: "0.0334",
         market_version: 228,
-        created_at_unix: 1_800_000_000,
+        created_at_unix: 1_700_000_000,
       }],
     },
     quote: null,
@@ -198,6 +198,8 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /data-bancor-chart-layer="live-price-line"/);
   assert.match(html, /data-bancor-chart-layer="live-price-label"/);
   assert.match(html, /data-bancor-chart-layer="visible-price-extremes"/);
+  assert.doesNotMatch(html, /最后一根未收盘|data-bancor-current-candle/);
+  assert.equal((html.match(/data-bancor-candle-state="closed"/g) ?? []).length, 2);
   assert.match(html, />H 0\.00010010<\/text>/);
   assert.match(html, />L 0\.00009990<\/text>/);
   assert.match(html, /<h2[^>]*>交易<\/h2>/);
@@ -317,7 +319,7 @@ test("BANCOR candle visual state never reports a flat or empty interval as up", 
   assert.equal(resolveBancorCandleVisualState({ ...base, open: "1", close: "1", trade_count: 0, has_trades: false }), "gap");
 });
 
-test("BANCOR current candle marker follows bucket end time", () => {
+test("BANCOR only selects candles whose intervals have closed", () => {
   const candle = {
     bucket_start_unix: 100,
     bucket_end_unix: 160,
@@ -332,42 +334,12 @@ test("BANCOR current candle marker follows bucket end time", () => {
     trade_count: 1,
     has_trades: true,
   };
-  assert.equal(isBancorCandleOpen(candle, 99), false);
-  assert.equal(isBancorCandleOpen(candle, 100), true);
-  assert.equal(isBancorCandleOpen(candle, 159.999), true);
-  assert.equal(isBancorCandleOpen(candle, 160), false);
-});
-
-test("BANCOR renders the current interval as explicitly open", () => {
-  const nowUnix = Math.floor(Date.now() / 1_000);
-  const html = renderToStaticMarkup(
-    <CandleChart
-      candles={[{
-        bucket_start_unix: nowUnix - 10,
-        bucket_end_unix: nowUnix + 50,
-        open: "1.0000",
-        high: "1.0000",
-        low: "1.0000",
-        close: "1.0000",
-        point_volume_units: "10",
-        point_volume: "0.0010",
-        usd_volume_units: "10",
-        usd_volume: "0.0010",
-        trade_count: 1,
-        has_trades: true,
-      }]}
-      intervalSeconds={60}
-      priceDecimalPlaces={4}
-      formatUnixDateTime={(value) => String(value ?? "")}
-      t={(zh) => zh}
-    />,
-  );
-  assert.match(html, /data-bancor-current-candle-state="open"/);
-  assert.match(html, /data-bancor-candle-state="open"/);
-  assert.match(html, /data-bancor-current-candle-marker="true"/);
-  assert.match(html, /data-bancor-candle-direction="flat"/);
-  assert.match(html, /data-bancor-volume-direction="flat"/);
-  assert.doesNotMatch(html, /data-bancor-volume-direction="up"/);
+  const next = { ...candle, bucket_start_unix: 160, bucket_end_unix: 220 };
+  assert.deepEqual(selectClosedBancorCandles([candle, next], 159.999), []);
+  assert.deepEqual(selectClosedBancorCandles([candle, next], 160), [candle]);
+  assert.deepEqual(selectClosedBancorCandles([candle, next], 219.999), [candle]);
+  assert.deepEqual(selectClosedBancorCandles([candle, next], 220), [candle, next]);
+  assert.deepEqual(selectClosedBancorCandles([candle], Number.NaN), []);
 });
 
 test("BANCOR candlesticks distinguish traded flat bars from neutral empty intervals", () => {

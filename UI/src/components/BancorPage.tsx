@@ -92,10 +92,12 @@ export function resolveBancorCandleVisualState(candle: NniBancorCandle): BancorC
   return close > open ? "up" : "down";
 }
 
-export function isBancorCandleOpen(candle: NniBancorCandle, nowUnix = Date.now() / 1_000): boolean {
-  return Number.isFinite(nowUnix)
-    && candle.bucket_start_unix <= nowUnix
-    && nowUnix < candle.bucket_end_unix;
+export function selectClosedBancorCandles(
+  candles: NniBancorCandle[],
+  nowUnix = Date.now() / 1_000,
+): NniBancorCandle[] {
+  if (!Number.isFinite(nowUnix)) return [];
+  return candles.filter((candle) => candle.bucket_end_unix <= nowUnix);
 }
 
 export function calculateBancorPriceDomain(values: Array<{ high: number; low: number }>): {
@@ -316,6 +318,7 @@ export function BancorPage({
   const quotedOutput = quote?.side === side && quote.input_amount === inputAmount
     ? quote.output_amount
     : estimatedSwapOutput;
+  const closedCandles = selectClosedBancorCandles(candles?.candles ?? []);
 
   const changeSide = (next: "buy" | "sell") => {
     setSide(next);
@@ -471,13 +474,13 @@ export function BancorPage({
             <div className="flex min-h-64 items-center justify-center text-sm text-white/40">
               {t("正在读取成交数据...", "Loading trade data...")}
             </div>
-          ) : candles?.candles.length ? (
+          ) : closedCandles.length ? (
             <>
               <CandleChart
                 key={candleIntervalSeconds}
-                candles={candles.candles}
-                intervalSeconds={candles.interval_seconds}
-                priceDecimalPlaces={candles.price_decimal_places}
+                candles={closedCandles}
+                intervalSeconds={candles!.interval_seconds}
+                priceDecimalPlaces={candles!.price_decimal_places}
                 livePrice={market?.marginal_price_usd_per_point}
                 formatUnixDateTime={formatUnixDateTime}
                 onTrade={openTradePanel}
@@ -509,7 +512,11 @@ export function BancorPage({
           ) : (
             <div className="flex min-h-64 flex-col items-center justify-center rounded-xl border border-dashed border-white/10 px-5 text-center">
               <BarChart3 className="h-8 w-8 text-white/35" />
-              <p className="mt-3 text-sm text-white/55">{t("暂无成交，首笔成交后显示 K 线。", "No trades yet. Candlesticks will appear after the first trade.")}</p>
+              <p className="mt-3 text-sm text-white/55">
+                {candles?.candles.length
+                  ? t("当前周期尚未收盘，收盘后显示 K 线。", "The current interval is still open. Its candlestick will appear after close.")
+                  : t("暂无成交，首笔成交后显示 K 线。", "No trades yet. Candlesticks will appear after the first trade.")}
+              </p>
             </div>
           )}
         </div>
@@ -1153,9 +1160,6 @@ export function CandleChart({
   const maxRequestedVisibleCount = Math.min(160, allValues.length);
   const priceClipId = `bancor-price-plot-${chartInstanceId}`;
   const volumeClipId = `bancor-volume-plot-${chartInstanceId}`;
-  const nowUnix = Date.now() / 1_000;
-  const latestCandleOpen = isBancorCandleOpen(last.candle, nowUnix);
-
   const clampOffset = (value: number) => Math.max(0, Math.min(visibleWindow.maxOffset, value));
   const panBy = (candlesToOlder: number) => {
     setOffsetFromLatest((current) => clampOffset(current + candlesToOlder));
@@ -1290,15 +1294,6 @@ export function CandleChart({
           </span>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          {latestCandleOpen ? (
-            <span
-              data-bancor-current-candle-state="open"
-              className="rounded-full border px-2 py-0.5"
-              style={{ borderColor: "var(--theme-chart-open)", color: "var(--theme-chart-label-strong)" }}
-            >
-              {t("最后一根未收盘", "Latest candle is still open")}
-            </span>
-          ) : null}
           <span>
             {visibleWindow.maxOffset > 0
               ? t("左右拖动查看历史；点按查看详情；滚轮缩放", "Drag for history; tap for details; wheel to zoom")
@@ -1385,7 +1380,6 @@ export function CandleChart({
             const visualState = resolveBancorCandleVisualState(value.candle);
             const color = palette[visualState];
             const hasTrades = visualState !== "gap";
-            const candleOpen = isBancorCandleOpen(value.candle, nowUnix);
             const openY = yForPrice(value.open);
             const closeY = yForPrice(value.close);
             const bodyTop = Math.min(openY, closeY);
@@ -1398,7 +1392,7 @@ export function CandleChart({
               <g
                 key={`${value.candle.bucket_start_unix}-${index}`}
                 data-bancor-candle-direction={visualState}
-                data-bancor-candle-state={candleOpen ? "open" : "closed"}
+                data-bancor-candle-state="closed"
               >
                 <title>{`${formatUnixDateTime(value.candle.bucket_start_unix)} · O ${value.candle.open} · H ${value.candle.high} · L ${value.candle.low} · C ${value.candle.close} · ${value.candle.point_volume} POINT · ${value.candle.trade_count} ${t("笔", "trades")}`}</title>
                 <g clipPath={`url(#${priceClipId})`}>
@@ -1427,22 +1421,6 @@ export function CandleChart({
                       strokeWidth="1.4"
                     />
                   )}
-                  {candleOpen ? (
-                    <>
-                      <line
-                        data-bancor-current-candle-marker="true"
-                        x1={x}
-                        y1={priceTop}
-                        x2={x}
-                        y2={priceBottom}
-                        stroke="var(--theme-chart-open)"
-                        strokeWidth="1"
-                        strokeDasharray="2 5"
-                        strokeOpacity="0.72"
-                      />
-                      <circle cx={x} cy={priceTop + 5} r="3" fill="var(--theme-chart-open)" />
-                    </>
-                  ) : null}
                 </g>
                 {hasTrades && volumeHeight > 0 ? (
                   <rect
