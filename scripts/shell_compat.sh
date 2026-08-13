@@ -122,8 +122,33 @@ append_existing_command_path() {
   export PATH
 }
 
+prepend_existing_command_path() {
+  local candidate="$1"
+  [[ -d "$candidate" ]] || return 0
+  case ":${PATH:-}:" in
+    *":${candidate}:"*) ;;
+    *) PATH="${candidate}${PATH:+:${PATH}}" ;;
+  esac
+  export PATH
+}
+
+configure_user_toolchain_command_path() {
+  local cargo_home="${CARGO_HOME:-}"
+  if [[ -z "$cargo_home" && -n "${HOME:-}" ]]; then
+    cargo_home="$HOME/.cargo"
+  fi
+  if [[ -n "$cargo_home" ]]; then
+    # Runtime environment files and service managers commonly provide a
+    # minimal PATH. Restore rustup's user-level proxy directory after those
+    # environments are loaded so Cargo-backed Skill Store installs work from
+    # non-login processes on Linux and macOS.
+    prepend_existing_command_path "$cargo_home/bin"
+  fi
+}
+
 configure_platform_command_path() {
   local candidate
+  configure_user_toolchain_command_path
   if [[ "$(uname -s 2>/dev/null || true)" != "Darwin" ]]; then
     return 0
   fi
