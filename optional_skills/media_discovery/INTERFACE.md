@@ -2,7 +2,11 @@
 
 ## Capability Summary
 
-Run bounded browser collection for Douyin and Xiaohongshu. The default
+Run explicitly requested batch, feed, keyword, scheduled, or continuous
+browser collection for Douyin and Xiaohongshu. A lone copied share payload or
+URL whose content should be downloaded and returned now belongs to
+`media_download.download`, even when it is used as a `seed_urls` input shape;
+this skill does not provide immediate single-post media delivery. The default
 `browser_mode=silent` runs without a browser window; `browser_mode=visible`
 opens one only when the user's request requires visible or non-silent browsing. The skill screenshots media
 elements already rendered in the browser, recognizes visible
@@ -51,6 +55,11 @@ does not enable these periodic notices.
 
 ## Planner Workflow
 
+- Select this skill only when the current request explicitly asks for a
+  collection workflow: batch browsing, home-feed browsing, keyword discovery,
+  scheduling, continuous collection, collection lifecycle control, or CSV
+  export. Do not select `run_once` for one copied share or URL that should be
+  downloaded and returned to the user now; select `media_download.download`.
 - A user request to start continuous collection is a multi-capability workflow:
   1. call `media_discovery.enable` with the requested platform(s), bounded
      settings, and `confirm=true` after policy approval;
