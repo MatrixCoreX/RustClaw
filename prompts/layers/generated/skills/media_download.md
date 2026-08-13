@@ -16,6 +16,11 @@
 - This document teaches usage only. Host admission and policy grants remain authoritative.
 
 ## Planner Selection Notes (from interface)
+- This skill owns immediate delivery of one current share or URL. A copied
+  share payload is not a batch-collection request merely because it names a
+  supported social platform. Use `media_discovery` only for an explicitly
+  requested feed, keyword, batch, scheduled, or continuous collection
+  workflow.
 - “帮我下载这条抖音/快手/小红书/TikTok/YouTube 视频” -> `download`
 - A message consisting only of a supported public URL -> `download`; do not ask whether the user wants resolution or download.
 - A complete copied app-share message for any supported platform containing a supported URL -> pass the complete text as `share` and run `download` immediately.

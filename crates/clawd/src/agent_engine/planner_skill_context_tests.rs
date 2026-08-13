@@ -204,11 +204,14 @@ fn first_round_media_capability_describes_app_and_web_share_default_download() {
         .expect("media download compact-index line");
 
     for expected in [
-        "purpose=Default action for any supported public copied App share text",
+        "purpose=Default action for one current supported public copied App share",
         "website share URL",
         "without asking which operation is wanted",
+        "single-share delivery capability is distinct from media_discovery",
         "Treat UI and every communication channel identically",
         "semantic_tags=default_media_share_action",
+        "single_media_share_delivery",
+        "article_text_delivery",
         "douyin_share",
         "kuaishou_share",
         "xiaohongshu_share",
@@ -220,6 +223,65 @@ fn first_round_media_capability_describes_app_and_web_share_default_download() {
             "missing `{expected}` in media_line={media_line}"
         );
     }
+
+    let registry = state.get_skills_registry().expect("skills registry");
+    let discovery = registry
+        .get("media_discovery")
+        .expect("media discovery registry entry");
+    assert!(
+        !discovery.planner_eager_load,
+        "domain collection must be loaded by semantic selection, not exposed as an eager first-round tool"
+    );
+    let run_once = discovery
+        .planner_capabilities
+        .iter()
+        .find(|capability| capability.name == "media_discovery.run_once")
+        .expect("media discovery run_once capability");
+    for expected in [
+        "batch_collection_run",
+        "collection_report_generation",
+        "without downloading or immediately delivering original media",
+        "lone copied share or URL",
+        "media_download.download",
+    ] {
+        assert!(
+            run_once
+                .description
+                .as_deref()
+                .is_some_and(|description| description.contains(expected))
+                || run_once.semantic_tags.iter().any(|tag| tag == expected),
+            "missing `{expected}` from media discovery boundary: {run_once:?}"
+        );
+    }
+    for forbidden in [
+        "single_media_share_delivery",
+        "immediate_media_delivery",
+        "article_text_delivery",
+    ] {
+        assert!(
+            !run_once.semantic_tags.iter().any(|tag| tag == forbidden),
+            "media discovery must not claim single-share delivery tag `{forbidden}`"
+        );
+    }
+
+    let initial = crate::capability_map::planner_disclosed_native_capability_groups_for_task(
+        &state,
+        &task,
+        &BTreeSet::new(),
+    );
+    assert!(
+        initial
+            .iter()
+            .all(|group| group.skill_name != "media_discovery"),
+        "media discovery must not bypass semantic capability loading"
+    );
+    let loadable = crate::capability_map::planner_loadable_capability_group_names_for_task(
+        &state,
+        &task,
+        &BTreeSet::new(),
+    );
+    assert!(loadable.contains(&"media_discovery".to_string()));
+    assert!(loadable.contains(&"media_download".to_string()));
 }
 
 #[test]

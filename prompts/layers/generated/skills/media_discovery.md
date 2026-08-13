@@ -8,7 +8,11 @@
 - If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
 ## Capability Summary (from interface)
-Run bounded browser collection for Douyin and Xiaohongshu. The default
+Run explicitly requested batch, feed, keyword, scheduled, or continuous
+browser collection for Douyin and Xiaohongshu. A lone copied share payload or
+URL whose content should be downloaded and returned now belongs to
+`media_download.download`, even when it is used as a `seed_urls` input shape;
+this skill does not provide immediate single-post media delivery. The default
 `browser_mode=silent` runs without a browser window; `browser_mode=visible`
 opens one only when the user's request requires visible or non-silent browsing. The skill screenshots media
 elements already rendered in the browser, recognizes visible
