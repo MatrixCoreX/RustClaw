@@ -333,6 +333,8 @@ def run_streaming_command(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         bufsize=1,
         start_new_session=os.name == "posix",
     )
@@ -382,6 +384,8 @@ def run_command(
         stdout=None if verbose else subprocess.PIPE,
         stderr=None if verbose else subprocess.PIPE,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         start_new_session=os.name == "posix",
     )
     try:
@@ -601,7 +605,7 @@ def convert_chinese_to_simplified(text: str) -> str:
             "or pass --no-simplify-chinese."
         ) from exc
     try:
-        return OpenCC("t2s").convert(text)
+        return OpenCC("tw2sp").convert(text)
     except Exception as exc:
         raise VideoTranscribeError(f"OpenCC traditional-to-simplified conversion failed: {exc}") from exc
 

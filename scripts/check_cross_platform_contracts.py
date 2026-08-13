@@ -116,7 +116,8 @@ REQUIRED_FILE_TOKENS = {
         "x86_64-apple-darwin",
     ),
     "build-all.sh": (
-        'for extra_target in "${EXTRA_TARGETS[@]:-}"',
+        'if (( ${#EXTRA_TARGETS[@]} > 0 )); then',
+        'for extra_target in "${EXTRA_TARGETS[@]}"',
         'for existing in "${TARGETS_TO_BUILD[@]:-}"',
     ),
     "install-agent-cmd.sh": (

@@ -1267,15 +1267,16 @@ export interface NniBancorCandle {
   usd_volume_units: string;
   usd_volume: string;
   trade_count: number;
-  has_trades?: boolean;
+  has_trades: boolean;
 }
 
 export interface NniBancorCandlesResponse {
   schema_version: 1;
-  status: string;
+  status: "bancor_candles";
   market_id: string;
-  market_version?: number;
-  market_created_at_unix?: number;
+  market_version: number;
+  market_created_at_unix: number;
+  price_kind: "execution_average_usd_per_point";
   interval_seconds: number;
   start_time_unix: number;
   end_time_unix: number;
@@ -1335,10 +1336,7 @@ export interface NniBancorMarketTradesResponse {
   schema_version: 1;
   status: string;
   market_id: string;
-  page: number;
-  per_page: number;
-  total: number;
-  total_pages: number;
+  limit: 100;
   trades: NniBancorMarketTradeRecord[];
   node_url?: string;
 }

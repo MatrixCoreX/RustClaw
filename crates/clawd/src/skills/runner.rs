@@ -85,6 +85,28 @@ fn runner_pre_dispatch_error(
     )
 }
 
+fn runner_host_pre_dispatch_error(
+    skill_name: &str,
+    error_code: &str,
+    recovery_action: &str,
+    diagnostic_detail: Value,
+) -> String {
+    super::structured_skill_error_from_parts(
+        skill_name,
+        error_code,
+        "skill execution could not start",
+        Some(std::env::consts::OS),
+        Some(json!({
+            "message_key": "clawd.skill.pre_dispatch_failed",
+            "retryable": false,
+            "failure_phase": "pre_dispatch",
+            "side_effect_applied": false,
+            "recovery_action": recovery_action,
+            "diagnostic_detail": diagnostic_detail,
+        })),
+    )
+}
+
 #[derive(Debug, Clone)]
 struct DurableRunnerJobPlan {
     job_id: String,
@@ -812,11 +834,15 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
     std::fs::create_dir_all(&artifact_output_directory).map_err(|error| {
         format!("skill artifact directory unavailable: skill={canonical_skill_name} error={error}")
     })?;
-    if !state.skill_rt.skill_runner_path.exists() {
-        return Err(format!(
-            "skill-runner binary not found: path={} (workspace_root={})",
-            state.skill_rt.skill_runner_path.display(),
-            state.skill_rt.workspace_root.display()
+    if !state.skill_rt.skill_runner_path.is_file() {
+        return Err(runner_host_pre_dispatch_error(
+            canonical_skill_name,
+            "skill_runner_unavailable",
+            "repair_runtime_installation",
+            json!({
+                "runner_path": state.skill_rt.skill_runner_path.display().to_string(),
+                "workspace_root": state.skill_rt.workspace_root.display().to_string(),
+            }),
         ));
     }
 
@@ -1263,6 +1289,7 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
             "APP_SKILL_PACKAGES_ROOT",
             package_root.display().to_string(),
         )
+        .env("APP_SKILL_VERSION_LEASE_MODE", "host_held")
         .env(
             "WORKSPACE_ROOT",
             state.skill_rt.workspace_root.display().to_string(),
@@ -1383,11 +1410,15 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
         return Ok(response);
     }
     let spawn_runner = |command| {
-        WarmRunnerProcess::spawn(command).map_err(|err| {
-            format!(
-                "spawn skill-runner failed: path={} err={}",
-                state.skill_rt.skill_runner_path.display(),
-                err
+        WarmRunnerProcess::spawn(command).map_err(|error| {
+            runner_host_pre_dispatch_error(
+                canonical_skill_name,
+                "skill_runner_spawn_failed",
+                "repair_runtime_installation",
+                json!({
+                    "runner_path": state.skill_rt.skill_runner_path.display().to_string(),
+                    "os_error_code": error.raw_os_error(),
+                }),
             )
         })
     };
@@ -1968,8 +1999,8 @@ pub(crate) fn remap_sandbox_artifact_paths(
     match value {
         Value::String(text) => {
             let sandbox = sandbox_directory.to_string_lossy();
-            if let Some(suffix) = text.strip_prefix(sandbox.as_ref()) {
-                *text = format!("{}{}", host_directory.display(), suffix);
+            if text.contains(sandbox.as_ref()) {
+                *text = text.replace(sandbox.as_ref(), &host_directory.display().to_string());
             }
         }
         Value::Array(items) => {

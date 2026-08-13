@@ -4,17 +4,56 @@ import test from "node:test";
 import {
   BANCOR_DEFAULT_CANDLE_INTERVAL_SECONDS,
   BANCOR_DEFAULT_SLIPPAGE_BPS,
+  BANCOR_MARKET_TRADE_LIMIT,
   BANCOR_MAX_SLIPPAGE_BPS,
   adjustBancorInputAmount,
+  buildBancorCandlesPath,
   calculateBancorEstimatedOutput,
   calculateBancorInputFee,
   formatBancorApiError,
+  hasEarlierBancorCandles,
   parseBancorSlippagePercent,
+  projectBancorCandlesForInterval,
   validateBancorTradeInput,
 } from "./useBancorRuntime";
 
 test("BANCOR opens on the five-minute view by default", () => {
   assert.equal(BANCOR_DEFAULT_CANDLE_INTERVAL_SECONDS, 300);
+  assert.equal(BANCOR_MARKET_TRADE_LIMIT, 100);
+});
+
+test("BANCOR interval projection never labels old-period candles as the new period", () => {
+  const fiveMinutes = { interval_seconds: 300 } as never;
+  const oneHour = { interval_seconds: 3_600 } as never;
+  assert.equal(projectBancorCandlesForInterval(fiveMinutes, 3_600, null), null);
+  assert.equal(projectBancorCandlesForInterval(fiveMinutes, 3_600, oneHour), oneHour);
+  assert.equal(projectBancorCandlesForInterval(fiveMinutes, 300, null), fiveMinutes);
+});
+
+test("BANCOR historical candle requests use an end cursor and never exceed one server page", () => {
+  assert.equal(
+    buildBancorCandlesPath(60, 5_000, 1_800_000_059),
+    "/v1/nni/bancor/candles?interval_seconds=60&limit=300&end_time_unix=1800000059",
+  );
+  assert.equal(
+    buildBancorCandlesPath(300, 2),
+    "/v1/nni/bancor/candles?interval_seconds=300&limit=2",
+  );
+});
+
+test("BANCOR history availability stops once a candle reaches market creation", () => {
+  const base = {
+    interval_seconds: 300,
+    market_created_at_unix: 1_800_000_125,
+  };
+  assert.equal(hasEarlierBancorCandles({
+    ...base,
+    candles: [{ bucket_start_unix: 1_800_000_000 }],
+  } as never), false);
+  assert.equal(hasEarlierBancorCandles({
+    ...base,
+    candles: [{ bucket_start_unix: 1_800_000_300 }],
+  } as never), true);
 });
 
 const zh = (value: string) => value;

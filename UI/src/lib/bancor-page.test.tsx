@@ -13,10 +13,13 @@ import {
   calculateBancorCandleBodyWidth,
   calculateBancorChartGeometry,
   calculateBancorDefaultVisibleCount,
+  calculateBancorPointerCandleIndex,
   calculateBancorPriceDomain,
   calculateBancorVisibleWindow,
   calculateBancorZoomViewport,
+  isBancorCandleOpen,
   resolveBancorCandlePalette,
+  resolveBancorCandleVisualState,
   scaleBancorPriceDomain,
 } from "../components/BancorPage";
 import type { useBancorRuntime } from "../hooks/useBancorRuntime";
@@ -68,6 +71,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
         usd_volume_units: "999",
         usd_volume: "0.0999",
         trade_count: 1,
+        has_trades: true,
       }, {
         bucket_start_unix: 1_800_000_000,
         bucket_end_unix: 1_800_003_600,
@@ -80,6 +84,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
         usd_volume_units: "500",
         usd_volume: "0.0500",
         trade_count: 1,
+        has_trades: true,
       }],
     },
     account: null,
@@ -87,10 +92,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       schema_version: 1 as const,
       status: "bancor_market_trades",
       market_id: "point-usd-v1",
-      page: 1,
-      per_page: 20,
-      total: 1,
-      total_pages: 1,
+      limit: 100 as const,
       trades: [{
         trade_id: "trade-market-1",
         quote_id: "quote-market-1",
@@ -113,6 +115,8 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
     lastTrade: null,
     marketLoading: false,
     candlesLoading: false,
+    candlesOlderLoading: false,
+    candlesHasOlder: true,
     candlesError: null,
     candleIntervalSeconds: 3_600,
     accountLoading: false,
@@ -125,6 +129,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
     fetchMarket: async () => null,
     fetchCandles: async () => null,
     changeCandleInterval: async () => null,
+    loadOlderCandles: async () => null,
     fetchAccount: async () => null,
     fetchMarketTrades: async () => null,
     preview: async () => null,
@@ -179,13 +184,13 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
     );
   }
   assert.match(html, /0\.5000 USD<\/p><p class="mt-0\.5 text-\[11px\][^>]*>按支付资产分别累计/);
-  assert.match(html, /价格 K 线/);
-  assert.match(html, /实时价格/);
+  assert.match(html, /实际成交均价 K 线/);
+  assert.match(html, /池内即时边际价/);
   assert.doesNotMatch(html, /当前 K 线价格摘要/);
-  assert.match(html, /aria-label="实时价格"/);
-  const livePriceIndex = html.indexOf("实时价格");
+  assert.match(html, /aria-label="池内即时边际价"/);
+  const livePriceIndex = html.indexOf("池内即时边际价");
   const headerPriceIndex = html.indexOf("0.00010000 USD", livePriceIndex);
-  assert.ok(livePriceIndex > html.indexOf("价格 K 线"));
+  assert.ok(livePriceIndex > html.indexOf("实际成交均价 K 线"));
   assert.ok(headerPriceIndex > livePriceIndex);
   assert.ok(html.indexOf("每 15 秒自动刷新") > headerPriceIndex);
   assert.doesNotMatch(html, /可见最高价/);
@@ -203,13 +208,13 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /点击填入全部 USD 余额/);
   assert.ok(html.indexOf("我的余额") > html.indexOf("<h2 class=\"text-lg font-semibold text-white\">交易</h2>"));
   assert.doesNotMatch(html, /没有成交的时间窗口沿用上一收盘价/);
-  assert.match(html, /grid gap-5 lg:grid-cols-\[minmax\(0,2fr\)_minmax\(20rem,1fr\)\] lg:items-start/);
+  assert.match(html, /grid gap-5 lg:grid-cols-\[minmax\(0,2fr\)_minmax\(20rem,1fr\)\] lg:items-stretch/);
   assert.match(html, /theme-shadow-card scroll-mt-4 p-4 sm:p-5/);
   assert.ok(
-    html.indexOf("<h2 class=\"text-lg font-semibold text-white\">价格 K 线</h2>")
+    html.indexOf("<h2 class=\"text-lg font-semibold text-white\">实际成交均价 K 线</h2>")
       < html.indexOf("<h2 class=\"text-lg font-semibold text-white\">交易</h2>"),
   );
-  assert.match(html, /价格 K 线.*每 15 秒自动刷新/);
+  assert.match(html, /实际成交均价 K 线.*每 15 秒自动刷新/);
   assert.doesNotMatch(html, /价格来自真实成交/);
   assert.match(html, /立即刷新 K 线/);
   assert.match(html, /aria-label="交易模式"/);
@@ -229,7 +234,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /价格影响超过此值时会标黄警告/);
   assert.match(html, /class="theme-primary-btn mt-3 w-full justify-center"[^>]*>卖出<\/button>/);
   assert.doesNotMatch(html, /红色表示上涨，绿色表示下跌/);
-  assert.match(html, /全部真实 K 线已显示/);
+  assert.match(html, /全部实际成交均价 K 线已显示/);
   assert.match(html, /回到最新/);
   assert.doesNotMatch(html, /MACD|RSI|均线/);
   assert.match(html, /#f87171/);
@@ -237,9 +242,12 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /<rect[^>]+fill="#f87171"/);
   assert.match(html, /<rect[^>]+fill="#34d399"/);
   assert.match(html, /0\.00010005/);
-  assert.match(html, /真实成交 K 线图/);
+  assert.match(html, /实际成交均价 K 线/);
+  assert.match(html, /加载更早 K 线/);
+  assert.match(html, /data-bancor-history-loader="available"/);
+  assert.doesNotMatch(html, /先查看报价|读取私人余额|设备：/);
   assert.match(html, /市场成交记录/);
-  assert.match(html, /设备公钥的紧凑格式/);
+  assert.match(html, /仅展示最近 100 笔全市场成交/);
   assert.match(html, /ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C/);
   assert.doesNotMatch(html, /a2c887498554••••••••331016eb/);
   assert.doesNotMatch(html, /a2c887498554407638cbec1d0ccf11264aa1ab7749bd7913fc6753fac72cfbdb/);
@@ -288,9 +296,81 @@ test("BANCOR candlesticks follow Chinese and English market color conventions", 
   const english = resolveBancorCandlePalette((_zh, en) => en);
   assert.equal(english.up.stroke, "#34d399");
   assert.equal(english.down.stroke, "#f87171");
+  assert.equal(chinese.flat.stroke, "var(--theme-chart-neutral)");
+  assert.equal(chinese.gap.stroke, "var(--theme-chart-gap)");
 });
 
-test("BANCOR one-minute candles connect carried closes and hide empty-minute dots", () => {
+test("BANCOR candle visual state never reports a flat or empty interval as up", () => {
+  const base = {
+    bucket_start_unix: 100,
+    bucket_end_unix: 160,
+    high: "1.0000",
+    low: "1.0000",
+    point_volume_units: "1",
+    point_volume: "0.0001",
+    usd_volume_units: "1",
+    usd_volume: "0.0001",
+  };
+  assert.equal(resolveBancorCandleVisualState({ ...base, open: "1", close: "2", trade_count: 2, has_trades: true }), "up");
+  assert.equal(resolveBancorCandleVisualState({ ...base, open: "2", close: "1", trade_count: 2, has_trades: true }), "down");
+  assert.equal(resolveBancorCandleVisualState({ ...base, open: "1", close: "1", trade_count: 1, has_trades: true }), "flat");
+  assert.equal(resolveBancorCandleVisualState({ ...base, open: "1", close: "1", trade_count: 0, has_trades: false }), "gap");
+});
+
+test("BANCOR current candle marker follows bucket end time", () => {
+  const candle = {
+    bucket_start_unix: 100,
+    bucket_end_unix: 160,
+    open: "1",
+    high: "1",
+    low: "1",
+    close: "1",
+    point_volume_units: "1",
+    point_volume: "0.0001",
+    usd_volume_units: "1",
+    usd_volume: "0.0001",
+    trade_count: 1,
+    has_trades: true,
+  };
+  assert.equal(isBancorCandleOpen(candle, 99), false);
+  assert.equal(isBancorCandleOpen(candle, 100), true);
+  assert.equal(isBancorCandleOpen(candle, 159.999), true);
+  assert.equal(isBancorCandleOpen(candle, 160), false);
+});
+
+test("BANCOR renders the current interval as explicitly open", () => {
+  const nowUnix = Math.floor(Date.now() / 1_000);
+  const html = renderToStaticMarkup(
+    <CandleChart
+      candles={[{
+        bucket_start_unix: nowUnix - 10,
+        bucket_end_unix: nowUnix + 50,
+        open: "1.0000",
+        high: "1.0000",
+        low: "1.0000",
+        close: "1.0000",
+        point_volume_units: "10",
+        point_volume: "0.0010",
+        usd_volume_units: "10",
+        usd_volume: "0.0010",
+        trade_count: 1,
+        has_trades: true,
+      }]}
+      intervalSeconds={60}
+      priceDecimalPlaces={4}
+      formatUnixDateTime={(value) => String(value ?? "")}
+      t={(zh) => zh}
+    />,
+  );
+  assert.match(html, /data-bancor-current-candle-state="open"/);
+  assert.match(html, /data-bancor-candle-state="open"/);
+  assert.match(html, /data-bancor-current-candle-marker="true"/);
+  assert.match(html, /data-bancor-candle-direction="flat"/);
+  assert.match(html, /data-bancor-volume-direction="flat"/);
+  assert.doesNotMatch(html, /data-bancor-volume-direction="up"/);
+});
+
+test("BANCOR candlesticks distinguish traded flat bars from neutral empty intervals", () => {
   const candles = [{
     bucket_start_unix: 1_800_000_000,
     bucket_end_unix: 1_800_000_060,
@@ -338,13 +418,19 @@ test("BANCOR one-minute candles connect carried closes and hide empty-minute dot
   );
 
   assert.match(minuteHtml, /data-bancor-chart-layer="one-minute-close-line"/);
-  assert.match(minuteHtml, /<polyline[^>]+stroke="#7dd3fc"/);
+  assert.match(minuteHtml, /<polyline[^>]+stroke="var\(--theme-chart-close-line\)"/);
   assert.match(minuteHtml, /aria-label="最大化 K 线区域"/);
   assert.match(minuteHtml, /aria-label="打开交易面板"/);
   assert.match(minuteHtml, /aria-controls="bancor-trade-panel"/);
   assert.equal((minuteHtml.match(/data-bancor-candle-body="true"/g) ?? []).length, 1);
+  assert.equal((minuteHtml.match(/data-bancor-candle-gap="true"/g) ?? []).length, 1);
   assert.doesNotMatch(longerHtml, /one-minute-close-line/);
-  assert.equal((longerHtml.match(/data-bancor-candle-body="true"/g) ?? []).length, 2);
+  assert.equal((longerHtml.match(/data-bancor-candle-body="true"/g) ?? []).length, 1);
+  assert.equal((longerHtml.match(/data-bancor-candle-gap="true"/g) ?? []).length, 1);
+  assert.match(longerHtml, /data-bancor-candle-direction="gap"/);
+  assert.match(longerHtml, /data-bancor-tap-details="enabled"/);
+  assert.match(longerHtml, /clip-path="url\(#bancor-price-plot-/);
+  assert.match(longerHtml, /var\(--theme-chart-label\)/);
 });
 
 test("BANCOR quote review and final confirmation use a centered modal", () => {
@@ -475,6 +561,8 @@ test("BANCOR candlestick viewport pans from the latest bars toward history", () 
   assert.equal(calculateBancorDefaultVisibleCount(106), 100);
   assert.equal(calculateBancorDefaultVisibleCount(107), 100);
   assert.equal(calculateBancorDefaultVisibleCount(300), 100);
+  assert.equal(calculateBancorDefaultVisibleCount(300, 320), 29);
+  assert.equal(calculateBancorDefaultVisibleCount(300, 480), 56);
   assert.deepEqual(
     calculateBancorVisibleWindow(27, calculateBancorDefaultVisibleCount(27), 0),
     { start: 6, end: 27, maxOffset: 6, offset: 0 },
@@ -497,6 +585,33 @@ test("BANCOR candlestick viewport pans from the latest bars toward history", () 
     maxOffset: 70,
     offset: 70,
   });
+});
+
+test("BANCOR tap detail index clamps to the drawable plot", () => {
+  assert.equal(calculateBancorPointerCandleIndex({
+    pointerX: 18,
+    plotLeft: 18,
+    plotRight: 196,
+    candleCount: 29,
+  }), 0);
+  assert.equal(calculateBancorPointerCandleIndex({
+    pointerX: 196,
+    plotLeft: 18,
+    plotRight: 196,
+    candleCount: 29,
+  }), 28);
+  assert.equal(calculateBancorPointerCandleIndex({
+    pointerX: 17,
+    plotLeft: 18,
+    plotRight: 196,
+    candleCount: 29,
+  }), null);
+  assert.equal(calculateBancorPointerCandleIndex({
+    pointerX: 80,
+    plotLeft: 18,
+    plotRight: 196,
+    candleCount: 0,
+  }), null);
 });
 
 test("BANCOR wheel zoom keeps the pointed candle anchored when history allows it", () => {

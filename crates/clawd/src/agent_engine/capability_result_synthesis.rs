@@ -127,18 +127,34 @@ pub(super) async fn synthesize_from_capability_results(
         "catalog": results.clone(),
     }));
     if let Some(contract) = transcript_contract {
-        return synthesize_reviewed_transcript(
+        let evidence_count = results["entries"]
+            .as_array()
+            .map_or(0, |entries| entries.len());
+        let request_language_hint =
+            crate::language_policy::task_response_language_hint(state, task, user_text);
+        let target_language =
+            normalized_transcript_language(&contract.response_language, &request_language_hint);
+        let synthesis = synthesize_reviewed_transcript(
             state,
             task,
             user_text,
             loop_state,
-            contract,
-            results["entries"]
-                .as_array()
-                .map_or(0, |entries| entries.len()),
+            contract.clone(),
+            evidence_count,
         )
-        .await
-        .map(Some);
+        .await;
+        return match synthesis {
+            Ok(synthesis) => Ok(Some(synthesis)),
+            Err(error_code) => Ok(Some(synthesize_unreviewed_transcript_fallback(
+                state,
+                task,
+                loop_state,
+                contract,
+                evidence_count,
+                &error_code,
+                &target_language,
+            ))),
+        };
     }
     let result_json = serde_json::to_string(&results)
         .map_err(|_| "capability_result_synthesis_input_serialize_failed".to_string())?;
@@ -312,7 +328,10 @@ async fn synthesize_reviewed_transcript(
         confidence = confidence.min(parsed.confidence.clamp(0.0, 1.0));
         reviewed_chunks.push(reviewed.to_string());
     }
-    let reviewed_text = reviewed_chunks.join("\n\n").trim().to_string();
+    let reviewed_text = normalize_transcript_script_for_language(
+        reviewed_chunks.join("\n\n").trim(),
+        &target_language,
+    );
     if reviewed_text.is_empty() {
         return Err("transcript_revision_empty".to_string());
     }
@@ -437,6 +456,174 @@ fn attach_reviewed_transcript_artifact(
     Ok(format!("{reviewed_text}\nFILE:{path}"))
 }
 
+fn synthesize_unreviewed_transcript_fallback(
+    state: &AppState,
+    task: &ClaimedTask,
+    loop_state: &mut LoopState,
+    contract: TranscriptReviewContract,
+    evidence_count: usize,
+    error_code: &str,
+    target_language: &str,
+) -> CapabilitySynthesis {
+    let normalized_text =
+        normalize_transcript_script_for_language(&contract.raw_text, target_language);
+    let character_count = normalized_text.chars().count();
+    let artifact = crate::skill_output_artifact::publish_task_text_artifact(
+        &state.skill_rt.workspace_root,
+        &task.task_id,
+        "transcript-fallback",
+        &contract.text_filename,
+        &(normalized_text.clone() + "\n"),
+        json!({
+            "artifact_role": "transcript_text",
+            "reviewed_by_model": false,
+            "review_status": "degraded",
+            "review_error_code": error_code,
+            "target_language": target_language,
+            "source": contract.source,
+            "character_count": character_count,
+        }),
+    )
+    .ok()
+    .and_then(|published| serde_json::from_value::<ArtifactRef>(published.artifact_ref).ok());
+    let artifact_included = artifact
+        .as_ref()
+        .and_then(|artifact| artifact.path.as_deref())
+        .is_some_and(|path| !path.trim().is_empty());
+    let answer = loop_state
+        .capability_results
+        .get_mut(contract.result_index)
+        .map(|result| {
+            attach_unreviewed_transcript_fallback(
+                result,
+                artifact,
+                &contract.text_filename,
+                &normalized_text,
+                target_language,
+                &contract.source,
+                error_code,
+            )
+        })
+        .unwrap_or_else(|| normalized_text.clone());
+    loop_state.task_observations.push(json!({
+        "schema_version": 1,
+        "owner_layer": "transcript_revision",
+        "status": "degraded",
+        "error_code": error_code,
+        "source": contract.source,
+        "target_language": target_language,
+        "raw_character_count": character_count,
+        "reviewed_by_model": false,
+        "delivery_mode": if artifact_included {
+            "inline_and_artifact"
+        } else {
+            "inline"
+        },
+    }));
+    CapabilitySynthesis {
+        answer,
+        confidence: 0.0,
+        evidence_count,
+    }
+}
+
+fn attach_unreviewed_transcript_fallback(
+    result: &mut CapabilityResultEnvelope,
+    artifact: Option<ArtifactRef>,
+    filename: &str,
+    raw_text: &str,
+    target_language: &str,
+    source: &str,
+    error_code: &str,
+) -> String {
+    let mut artifact_path = None;
+    if let Some(mut artifact) = artifact {
+        artifact_path = artifact
+            .path
+            .as_deref()
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+            .map(str::to_string);
+        if artifact_path.is_some() {
+            artifact.visibility = Some(ArtifactVisibility::UserDelivery);
+            artifact.artifact_role = Some("transcript_text".to_string());
+            artifact.filename = Some(filename.to_string());
+            if !result
+                .artifacts
+                .iter()
+                .any(|existing| existing == &artifact)
+            {
+                result.artifacts.push(artifact);
+            }
+        }
+    }
+    result.delivery.intent = if artifact_path.is_some() {
+        CapabilityDeliveryIntent::Artifact
+    } else {
+        CapabilityDeliveryIntent::ExactMachine
+    };
+    if let Some(extra) = result.data.get_mut("extra").and_then(Value::as_object_mut) {
+        let delivery = extra.entry("delivery").or_insert_with(|| json!({}));
+        if !delivery.is_object() {
+            *delivery = json!({});
+        }
+        if let Some(delivery) = delivery.as_object_mut() {
+            delivery.insert("deliver_to_user".to_string(), Value::Bool(true));
+            delivery.insert(
+                "intent".to_string(),
+                Value::String(
+                    if artifact_path.is_some() {
+                        "artifact"
+                    } else {
+                        "exact_machine"
+                    }
+                    .to_string(),
+                ),
+            );
+        }
+        extra.insert(
+            "transcription_delivery".to_string(),
+            json!({
+                "mode": if artifact_path.is_some() { "inline_and_artifact" } else { "inline" },
+                "text_included": true,
+                "artifact_included": artifact_path.is_some(),
+                "character_count": raw_text.chars().count(),
+                "reviewed_by_model": false,
+                "review_status": "degraded",
+                "review_error_code": error_code,
+                "target_language": target_language,
+                "source": source,
+            }),
+        );
+        if let Some(transcription) = extra
+            .get_mut("transcription")
+            .and_then(Value::as_object_mut)
+        {
+            transcription.insert("reviewed_by_model".to_string(), Value::Bool(false));
+            transcription.insert("review_required".to_string(), Value::Bool(false));
+            transcription.insert(
+                "character_count".to_string(),
+                json!(raw_text.chars().count()),
+            );
+        }
+        if let Some(review) = extra
+            .get_mut("transcription_review")
+            .and_then(Value::as_object_mut)
+        {
+            review.insert("required".to_string(), Value::Bool(false));
+            review.insert("status".to_string(), Value::String("degraded".to_string()));
+            review.insert(
+                "error_code".to_string(),
+                Value::String(error_code.to_string()),
+            );
+        }
+    }
+    artifact_path.map_or_else(
+        || raw_text.to_string(),
+        |path| format!("{raw_text}\nFILE:{path}"),
+    )
+}
+
 fn normalized_transcript_language(requested: &str, fallback: &str) -> String {
     let requested = requested.trim();
     let selected = if requested.is_empty()
@@ -457,6 +644,19 @@ fn normalized_transcript_language(requested: &str, fallback: &str) -> String {
         "request-language".to_string()
     } else {
         selected
+    }
+}
+
+fn normalize_transcript_script_for_language(text: &str, language: &str) -> String {
+    let language = language.trim().replace('_', "-").to_ascii_lowercase();
+    let simplified_chinese = matches!(language.as_str(), "zh" | "zh-cn" | "zh-sg" | "zh-hans")
+        || language.starts_with("zh-hans-");
+    if simplified_chinese {
+        // The skill has already applied regional phrase conversion before review.
+        // Keep this final guard script-only so already-simplified model text remains stable.
+        zhhz::Converter::new(zhhz::Config::T2s).convert(text)
+    } else {
+        text.to_string()
     }
 }
 

@@ -492,28 +492,8 @@ impl InstallReceiptStore {
         skill_name: &str,
         install_root: &Path,
     ) -> SkillSdkResult<SkillVersionLease> {
-        let versions_root = self.skill_root(skill_name)?.join("versions");
-        let canonical_versions = fs::canonicalize(&versions_root)?;
-        let canonical_install = fs::canonicalize(install_root)?;
-        if !canonical_install.starts_with(&canonical_versions)
-            || canonical_install.parent() != Some(canonical_versions.as_path())
-        {
-            return Err(SkillSdkError::new(
-                "skill_lease_install_root_invalid",
-                canonical_install.display().to_string(),
-            ));
-        }
-        let install_dir = canonical_install
-            .file_name()
-            .and_then(|value| value.to_str())
-            .ok_or_else(|| {
-                SkillSdkError::new(
-                    "skill_lease_install_dir_invalid",
-                    canonical_install.display().to_string(),
-                )
-            })?
-            .to_string();
-        let leases_root = self.skill_root(skill_name)?.join("leases");
+        let (canonical_install, install_dir, leases_root) =
+            self.version_lease_parts(skill_name, install_root)?;
         fs::create_dir_all(&leases_root)?;
         let path = leases_root.join(format!("{install_dir}.lock"));
         let file = OpenOptions::new()
@@ -535,6 +515,39 @@ impl InstallReceiptStore {
             skill_name: skill_name.to_string(),
             install_dir,
         })
+    }
+
+    fn version_lease_parts(
+        &self,
+        skill_name: &str,
+        install_root: &Path,
+    ) -> SkillSdkResult<(PathBuf, String, PathBuf)> {
+        let versions_root = self.skill_root(skill_name)?.join("versions");
+        let canonical_versions = fs::canonicalize(&versions_root)?;
+        let canonical_install = fs::canonicalize(install_root)?;
+        if !canonical_install.starts_with(&canonical_versions)
+            || canonical_install.parent() != Some(canonical_versions.as_path())
+        {
+            return Err(SkillSdkError::new(
+                "skill_lease_install_root_invalid",
+                canonical_install.display().to_string(),
+            ));
+        }
+        let install_dir = canonical_install
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| {
+                SkillSdkError::new(
+                    "skill_lease_install_dir_invalid",
+                    canonical_install.display().to_string(),
+                )
+            })?
+            .to_string();
+        Ok((
+            canonical_install,
+            install_dir,
+            self.skill_root(skill_name)?.join("leases"),
+        ))
     }
 
     pub fn retain_background_version_lease(

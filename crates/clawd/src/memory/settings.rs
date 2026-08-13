@@ -200,14 +200,6 @@ pub(crate) fn resolve_task_memory_settings(
     .map(Some)
 }
 
-pub(crate) fn task_memory_use_enabled(state: &crate::AppState, task: &crate::ClaimedTask) -> bool {
-    match resolve_task_memory_settings(state, task) {
-        Ok(Some(settings)) => settings.use_memory,
-        Ok(None) => state.policy.memory.long_term_enabled,
-        Err(_) => false,
-    }
-}
-
 pub(crate) fn task_memory_generation_enabled(
     state: &crate::AppState,
     task: &crate::ClaimedTask,

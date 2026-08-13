@@ -10,6 +10,43 @@ pub(crate) fn resolve_skill_runner_path(workspace_root: &Path) -> PathBuf {
     )
 }
 
+pub(crate) fn resolve_required_skill_runner_path(workspace_root: &Path) -> Result<PathBuf, String> {
+    let path = resolve_skill_runner_path(workspace_root);
+    validate_skill_runner_path(&path)?;
+    Ok(path)
+}
+
+fn validate_skill_runner_path(path: &Path) -> Result<(), String> {
+    if !path.is_file() {
+        return Err(format!(
+            "required skill-runner binary is missing: path={}",
+            path.display()
+        ));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mode = path
+            .metadata()
+            .map_err(|error| {
+                format!(
+                    "required skill-runner metadata is unavailable: path={} error={error}",
+                    path.display()
+                )
+            })?
+            .permissions()
+            .mode();
+        if mode & 0o111 == 0 {
+            return Err(format!(
+                "required skill-runner binary is not executable: path={}",
+                path.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn resolve_skill_runner_path_from(
     workspace_root: &Path,
     explicit: Option<&str>,

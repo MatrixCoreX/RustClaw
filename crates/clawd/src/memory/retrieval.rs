@@ -81,6 +81,7 @@ struct RetrievalMetadata {
     path: String,
 }
 
+#[cfg(test)]
 pub(crate) fn vector_to_json(vec: &[f32]) -> String {
     serde_json::to_string(vec).unwrap_or_else(|_| "[]".to_string())
 }
@@ -97,6 +98,7 @@ pub(crate) fn build_topic_tags(text: &str) -> String {
         .join(" ")
 }
 
+#[cfg(test)]
 pub(crate) fn retrieve_indexed_memories(
     state: &AppState,
     user_key: Option<&str>,

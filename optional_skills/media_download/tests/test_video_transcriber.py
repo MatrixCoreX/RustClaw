@@ -69,6 +69,45 @@ class ManagedFunAsrModelTest(unittest.TestCase):
         self.assertEqual(payload["detail_key"], "media_download.transcribe.extracting_audio")
         self.assertEqual((payload["current"], payload["total"]), (1, 3))
 
+    def test_command_output_replaces_non_utf8_diagnostics(self) -> None:
+        completed = self.transcriber.run_command(
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.stdout.buffer.write(b'before\\xffafter')",
+            ],
+            verbose=False,
+        )
+
+        self.assertEqual(completed.returncode, 0)
+        self.assertEqual(completed.stdout, "before\ufffdafter")
+
+    def test_chinese_normalization_preserves_other_languages_and_numbers(self) -> None:
+        class FakeOpenCC:
+            def __init__(self, config: str) -> None:
+                self.config = config
+
+            def convert(self, text: str) -> str:
+                self.assert_config()
+                return (
+                    text.replace("繁體", "繁体")
+                    .replace("軟體", "软件")
+                    .replace("資料庫", "数据库")
+                )
+
+            def assert_config(self) -> None:
+                if self.config != "tw2sp":
+                    raise AssertionError(self.config)
+
+        fake_opencc = types.ModuleType("opencc")
+        fake_opencc.OpenCC = FakeOpenCC
+        with mock.patch.dict(sys.modules, {"opencc": fake_opencc}):
+            converted = self.transcriber.convert_chinese_to_simplified(
+                "繁體中文 software v2.7，資料庫 2026-08-12"
+            )
+
+        self.assertEqual(converted, "繁体中文 software v2.7，数据库 2026-08-12")
+
     def test_incomplete_managed_model_fails_without_runtime_download(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             with mock.patch.dict(os.environ, {"MODELSCOPE_CACHE": directory}):

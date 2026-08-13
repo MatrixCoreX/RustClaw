@@ -100,7 +100,7 @@ async fn nni_bancor_routes_require_ui_authentication() {
             "/v1/nni/bancor/candles?interval_seconds=3600&limit=120",
             "",
         ),
-        ("GET", "/v1/nni/bancor/trades?page=1&per_page=20", ""),
+        ("GET", "/v1/nni/bancor/trades", ""),
         ("GET", "/v1/nni/bancor/account?page=1&per_page=20", ""),
         (
             "POST",
@@ -133,7 +133,7 @@ async fn nni_bancor_routes_require_ui_authentication() {
 }
 
 #[test]
-fn nni_bancor_market_trade_pubkeys_use_lossless_compact_display_format() {
+fn nni_bancor_market_trades_are_sanitized_and_limited_to_the_latest_hundred() {
     let pubkey = concat!(
         "2b9c9d84fa15f4e178ce58d0a40a9f5e150e9c502e689a24d0c0f221337870c",
         "726f0e463d730a75401c425bfde0db0c442e314027d83885a84c535eaa35460a0"
@@ -147,16 +147,35 @@ fn nni_bancor_market_trade_pubkeys_use_lossless_compact_display_format() {
         Some("ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C"),
     );
 
+    let mut trades = vec![
+        json!({"trade_id": "raw", "device_pubkey": pubkey}),
+        json!({"trade_id": "mislabelled", "device_pubkey_masked": pubkey}),
+        json!({"trade_id": "masked", "device_pubkey_masked": "a2c887498554••••••••331016eb"}),
+    ];
+    trades.extend((3..105).map(|index| {
+        json!({
+            "trade_id": format!("trade-{index}"),
+            "device_pubkey_compact": "ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C",
+        })
+    }));
     let mut payload = json!({
-        "trades": [
-            {"trade_id": "raw", "device_pubkey": pubkey},
-            {"trade_id": "mislabelled", "device_pubkey_masked": pubkey},
-            {"trade_id": "masked", "device_pubkey_masked": "a2c887498554••••••••331016eb"}
-        ]
+        "page": 1,
+        "per_page": 105,
+        "total": 500,
+        "total_pages": 5,
+        "trades": trades,
     });
-    sanitize_bancor_market_trade_pubkeys(&mut payload);
+    normalize_bancor_market_trades(&mut payload);
     let serialized = payload.to_string();
     assert!(!serialized.contains(pubkey));
+    assert_eq!(payload["limit"], Value::Number(100.into()));
+    assert_eq!(payload["trades"].as_array().map(Vec::len), Some(100));
+    for removed in ["page", "per_page", "total", "total_pages"] {
+        assert!(
+            payload.get(removed).is_none(),
+            "{removed} must not expose pagination"
+        );
+    }
     assert_eq!(
         payload["trades"][0]["device_pubkey_compact"],
         Value::String("ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C".to_string()),

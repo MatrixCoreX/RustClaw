@@ -17,4 +17,4 @@ pub(crate) use prompts::{
     load_required_prompt_template_for_state_with_meta, log_prompt_validation_report,
     reload_runtime_prompts, strict_prompt_validation_error, validate_core_prompts,
 };
-pub(crate) use skill_runner::resolve_skill_runner_path;
+pub(crate) use skill_runner::resolve_required_skill_runner_path;

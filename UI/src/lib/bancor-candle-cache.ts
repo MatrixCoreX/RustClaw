@@ -7,7 +7,7 @@ const CACHE_RECORD_SCHEMA_VERSION = 1;
 const CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1_000;
 const CACHE_FUTURE_TOLERANCE_MS = 5 * 60 * 1_000;
 
-export const BANCOR_CANDLE_CACHE_MAX_CANDLES = 300;
+export const BANCOR_CANDLE_REQUEST_MAX_CANDLES = 300;
 export const BANCOR_CANDLE_INCREMENTAL_MIN_LIMIT = 2;
 
 export interface BancorCandleCacheRecord {
@@ -91,18 +91,26 @@ function isCandle(value: unknown): value is NniBancorCandle {
     && typeof candle.point_volume === "string"
     && typeof candle.usd_volume_units === "string"
     && typeof candle.usd_volume === "string"
-    && Number.isSafeInteger(candle.trade_count);
+    && Number.isSafeInteger(candle.trade_count)
+    && (candle.trade_count ?? -1) >= 0
+    && typeof candle.has_trades === "boolean"
+    && candle.has_trades === ((candle.trade_count ?? 0) > 0);
 }
 
-function isCachedResponse(value: unknown, intervalSeconds: number): value is NniBancorCandlesResponse {
+export function isBancorCandleResponse(value: unknown, intervalSeconds: number): value is NniBancorCandlesResponse {
   if (!value || typeof value !== "object") return false;
   const response = value as Partial<NniBancorCandlesResponse>;
   return response.schema_version === 1
+    && response.status === "bancor_candles"
     && typeof response.market_id === "string"
     && response.market_id.length > 0
+    && Number.isSafeInteger(response.market_version)
+    && (response.market_version ?? -1) >= 0
+    && Number.isSafeInteger(response.market_created_at_unix)
+    && (response.market_created_at_unix ?? -1) >= 0
+    && response.price_kind === "execution_average_usd_per_point"
     && response.interval_seconds === intervalSeconds
     && Array.isArray(response.candles)
-    && response.candles.length <= BANCOR_CANDLE_CACHE_MAX_CANDLES
     && response.candles.every(isCandle);
 }
 
@@ -123,7 +131,7 @@ function validatedRecord(
     || !Number.isFinite(record.cachedAtMs)
     || record.cachedAtMs < nowMs - CACHE_MAX_AGE_MS
     || record.cachedAtMs > nowMs + CACHE_FUTURE_TOLERANCE_MS
-    || !isCachedResponse(record.response, intervalSeconds)
+    || !isBancorCandleResponse(record.response, intervalSeconds)
   ) {
     return null;
   }
@@ -177,7 +185,7 @@ export async function writeBancorCandleCache({
   etagRequestLimit: number | null;
   cachedAtMs?: number;
 }): Promise<void> {
-  if (!isCachedResponse(response, intervalSeconds)) return;
+  if (!isBancorCandleResponse(response, intervalSeconds)) return;
   const database = openCacheDatabase();
   if (!database) return;
   try {
@@ -225,37 +233,35 @@ function responseSeriesChanged(
   if (cached.market_id !== incoming.market_id || cached.interval_seconds !== incoming.interval_seconds) {
     return true;
   }
-  if (
-    cached.market_created_at_unix != null
-    && incoming.market_created_at_unix != null
-    && cached.market_created_at_unix !== incoming.market_created_at_unix
-  ) {
-    return true;
-  }
-  return cached.market_version != null
-    && incoming.market_version != null
-    && incoming.market_version < cached.market_version;
+  return cached.market_created_at_unix !== incoming.market_created_at_unix
+    || cached.price_kind !== incoming.price_kind;
 }
 
 export function mergeBancorCandleResponses(
   cached: NniBancorCandlesResponse | null,
   incoming: NniBancorCandlesResponse,
-  maxCandles = BANCOR_CANDLE_CACHE_MAX_CANDLES,
+  maxCandles?: number,
 ): NniBancorCandlesResponse {
-  const normalizedLimit = Math.max(1, Math.floor(maxCandles));
-  const candidates = !cached || responseSeriesChanged(cached, incoming)
+  const seriesChanged = !cached || responseSeriesChanged(cached, incoming);
+  const incomingIsStale = !seriesChanged && incoming.market_version < cached.market_version;
+  const candidates = seriesChanged
     ? incoming.candles
-    : [...cached.candles, ...incoming.candles];
+    : incomingIsStale
+      ? [...incoming.candles, ...cached.candles]
+      : [...cached.candles, ...incoming.candles];
   const byBucketStart = new Map<number, NniBancorCandle>();
   for (const candle of candidates) {
     if (isCandle(candle)) byBucketStart.set(candle.bucket_start_unix, candle);
   }
   const candles = [...byBucketStart.values()]
     .sort((left, right) => left.bucket_start_unix - right.bucket_start_unix)
-    .slice(-normalizedLimit);
+    .slice(maxCandles === undefined ? 0 : -Math.max(1, Math.floor(maxCandles)));
+  const newestEnvelope = incomingIsStale && cached ? cached : incoming;
   return {
-    ...incoming,
+    ...newestEnvelope,
+    node_url: incoming.node_url ?? newestEnvelope.node_url,
     start_time_unix: candles[0]?.bucket_start_unix ?? incoming.start_time_unix,
+    end_time_unix: candles.at(-1)?.bucket_end_unix ?? incoming.end_time_unix,
     candles,
   };
 }
@@ -264,7 +270,7 @@ export function calculateBancorCandleRefreshLimit(
   cached: NniBancorCandlesResponse | null,
   intervalSeconds: number,
   nowUnix = Math.floor(Date.now() / 1_000),
-  maxLimit = BANCOR_CANDLE_CACHE_MAX_CANDLES,
+  maxLimit = BANCOR_CANDLE_REQUEST_MAX_CANDLES,
 ): number {
   const normalizedMax = Math.max(BANCOR_CANDLE_INCREMENTAL_MIN_LIMIT, Math.floor(maxLimit));
   if (!cached || cached.interval_seconds !== intervalSeconds || cached.candles.length === 0) {

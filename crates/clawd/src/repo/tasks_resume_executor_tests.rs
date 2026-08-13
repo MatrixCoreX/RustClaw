@@ -185,7 +185,8 @@ fn claim_ready_paused_checkpoint_resume_executor_sets_machine_lease() {
             "checkpoint_id": "ckpt-ready",
             "resume_claim": {
                 "schema_version": 1,
-                "owner": "worker_recovery",
+                "owner": state.worker.worker_id,
+                "owner_layer": "worker_recovery",
                 "checkpoint_id": "ckpt-ready",
                 "executor_state": "ready_for_planner_resume"
             },

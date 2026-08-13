@@ -775,6 +775,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "wechat-ilink",
+ "zhhz",
 ]
 
 [[package]]
@@ -2521,9 +2522,9 @@ dependencies = [
 
 [[package]]
 name = "memchr"
-version = "2.8.0"
+version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
+checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "mime"
@@ -6171,6 +6172,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "zhhz"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "792bab37bb3235bec4655690863ca150bca3f65251ed968f11ee700874ce921f"
+dependencies = [
+ "anyhow",
+ "memchr",
+ "serde_json",
 ]
 
 [[package]]

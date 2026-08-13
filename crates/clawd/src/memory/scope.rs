@@ -12,19 +12,10 @@ const MIGRATION_MANIFEST: &str =
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum MemoryScopeKind {
+    #[cfg(test)]
     Conversation,
     Principal,
     Project,
-}
-
-impl MemoryScopeKind {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Conversation => "conversation",
-            Self::Principal => "principal",
-            Self::Project => "project",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -42,17 +33,6 @@ pub(crate) struct ResolvedMemoryAccess {
     pub(crate) project_scope_ref: Option<String>,
 }
 
-impl ResolvedMemoryAccess {
-    pub(crate) fn allows(&self, scope_kind: &str, scope_ref: &str) -> bool {
-        match scope_kind {
-            "principal" => scope_ref == self.principal_scope_ref,
-            "conversation" => self.conversation_scope_ref.as_deref() == Some(scope_ref),
-            "project" => self.project_scope_ref.as_deref() == Some(scope_ref),
-            _ => false,
-        }
-    }
-}
-
 pub(crate) fn resolve_principal_scope(identity: &AuthIdentity) -> ResolvedMemoryScope {
     ResolvedMemoryScope {
         kind: MemoryScopeKind::Principal,
@@ -61,6 +41,7 @@ pub(crate) fn resolve_principal_scope(identity: &AuthIdentity) -> ResolvedMemory
     }
 }
 
+#[cfg(test)]
 pub(crate) fn resolve_conversation_scope(
     identity: &AuthIdentity,
     conversation_id: &str,

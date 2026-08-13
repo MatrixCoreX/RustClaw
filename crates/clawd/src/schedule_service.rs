@@ -33,6 +33,7 @@ fn schedule_skill_catalog_hint(
 
 /// Build a short skill catalog for schedule intent prompt from the loaded registry (same source as runtime).
 /// Injects into `__SKILL_CATALOG__` and `__SKILLS_CATALOG__` (both identical for compatibility).
+#[cfg(test)]
 pub(crate) fn build_schedule_skill_catalog_from_registry(registry: &SkillsRegistry) -> String {
     let enabled = registry.enabled_names().into_iter().collect::<HashSet<_>>();
     build_schedule_skill_catalog_with_allow_set(registry, &enabled)
@@ -213,6 +214,7 @@ pub(crate) fn validate_schedule_run_skill(
 
 /// Core validation/normalization using a registry reference. Used by validate_schedule_run_skill and by tests.
 /// Per-action/schema checks remain in skill runtime (or future registry metadata), not in schedule layer.
+#[cfg(test)]
 pub(crate) fn validate_schedule_run_skill_with_registry(
     registry: &SkillsRegistry,
     payload: &Value,

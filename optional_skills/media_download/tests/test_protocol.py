@@ -131,6 +131,34 @@ class AdapterTest(unittest.TestCase):
             "ja-JP",
         )
 
+    def test_transcribe_command_normalizes_only_simplified_chinese_targets(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            input_path = root / "sample.mp4"
+            input_path.write_bytes(b"video")
+            request = {
+                "context": {
+                    "workspace_root": str(root),
+                    "permissions": {"allow_path_outside_workspace": False},
+                    "locale": "zh-CN",
+                }
+            }
+            simplified = self.skill._build_transcribe_command(
+                request,
+                {"input_path": "sample.mp4"},
+                root / "simplified",
+            )
+            traditional = self.skill._build_transcribe_command(
+                request,
+                {"input_path": "sample.mp4", "response_language": "zh-TW"},
+                root / "traditional",
+            )
+
+        self.assertIn("--simplify-chinese", simplified)
+        self.assertNotIn("--no-simplify-chinese", simplified)
+        self.assertIn("--no-simplify-chinese", traditional)
+        self.assertNotIn("--simplify-chinese", traditional)
+
     def test_intel_macos_capabilities_keep_whisper_and_disable_funasr_package(self) -> None:
         with mock.patch.object(self.skill.platform, "system", return_value="Darwin"), mock.patch.object(
             self.skill.platform, "machine", return_value="x86_64"
@@ -155,6 +183,7 @@ class AdapterTest(unittest.TestCase):
                 "context": {
                     "workspace_root": str(root),
                     "permissions": {"allow_path_outside_workspace": False},
+                    "locale": "zh-CN",
                 }
             }
             with mock.patch.object(self.skill.platform, "system", return_value="Darwin"), mock.patch.object(
@@ -707,6 +736,7 @@ class AdapterTest(unittest.TestCase):
                 "context": {
                     "workspace_root": str(root),
                     "permissions": {"allow_path_outside_workspace": False},
+                    "locale": "zh-CN",
                 }
             }
             command = self.skill._build_transcribe_command(
@@ -717,6 +747,8 @@ class AdapterTest(unittest.TestCase):
 
         self.assertEqual(command[command.index("--engine") + 1], "whisper")
         self.assertNotIn("--extract-only", command)
+        self.assertIn("--simplify-chinese", command)
+        self.assertNotIn("--no-simplify-chinese", command)
         self.assertEqual(command[-1], str(input_path))
 
     def test_download_command_preserves_complete_share_text(self) -> None:

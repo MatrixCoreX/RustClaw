@@ -469,6 +469,13 @@ async fn run() -> anyhow::Result<()> {
         );
         return Ok(());
     }
+    let effective_skill_runner_path =
+        bootstrap::resolve_required_skill_runner_path(&workspace_root)
+            .map_err(anyhow::Error::msg)?;
+    info!(
+        "skill_runner_path validated: {}",
+        effective_skill_runner_path.display()
+    );
     let tools_policy = ToolsPolicy::from_config(&config.tools)
         .map_err(|err| anyhow::anyhow!("invalid tools config: {err}"))?;
     let db_pool = init_db(&config)?;
@@ -666,12 +673,6 @@ async fn run() -> anyhow::Result<()> {
             }
         }
     }
-    let effective_skill_runner_path = bootstrap::resolve_skill_runner_path(&workspace_root);
-    info!(
-        "skill_runner_path resolved: {}",
-        effective_skill_runner_path.display()
-    );
-
     let llm_providers = llm_gateway::build_providers(&config);
     info!(
         "Loaded LLM providers count={} (config selected_vendor={:?}, selected_model={:?})",

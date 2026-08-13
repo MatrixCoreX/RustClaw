@@ -31,6 +31,47 @@ fn package_resolution_failure_is_structured_as_pre_dispatch_no_effect() {
 }
 
 #[test]
+fn missing_host_runner_is_structured_as_pre_dispatch_no_effect() {
+    let encoded = runner_host_pre_dispatch_error(
+        "fixture_skill",
+        "skill_runner_unavailable",
+        "repair_runtime_installation",
+        json!({"runner_path": "/missing/skill-runner"}),
+    );
+    let parsed = crate::skills::parse_structured_skill_error(&encoded)
+        .expect("structured host pre-dispatch error");
+    let extra = parsed.extra.expect("canonical extra");
+
+    assert_eq!(parsed.error_code, "skill_runner_unavailable");
+    assert_eq!(extra["failure_phase"], "pre_dispatch");
+    assert_eq!(extra["side_effect_applied"], false);
+    assert_eq!(extra["recovery_action"], "repair_runtime_installation");
+    assert!(crate::skills::structured_skill_error_proves_not_applied(
+        &encoded
+    ));
+}
+
+#[test]
+fn host_runner_spawn_failure_is_structured_as_pre_dispatch_no_effect() {
+    let encoded = runner_host_pre_dispatch_error(
+        "fixture_skill",
+        "skill_runner_spawn_failed",
+        "repair_runtime_installation",
+        json!({"runner_path": "/not-executable/skill-runner", "os_error_code": 13}),
+    );
+    let parsed =
+        crate::skills::parse_structured_skill_error(&encoded).expect("structured host spawn error");
+    let extra = parsed.extra.expect("canonical extra");
+
+    assert_eq!(parsed.error_code, "skill_runner_spawn_failed");
+    assert_eq!(extra["failure_phase"], "pre_dispatch");
+    assert_eq!(extra["side_effect_applied"], false);
+    assert!(crate::skills::structured_skill_error_proves_not_applied(
+        &encoded
+    ));
+}
+
+#[test]
 fn local_clawd_base_url_accepts_loopback_test_override() {
     assert_eq!(
         local_clawd_base_url_from_internal_listen(Some("127.0.0.1:59871")),
@@ -111,6 +152,7 @@ fn artifact_paths_are_scoped_per_invocation_and_remapped_to_the_host() {
     let sandbox = std::path::Path::new("/run/agent-runtime-writable/2");
     let host = std::path::Path::new("/workspace/.agent-runtime/artifacts/invocation");
     let mut response = json!({
+        "text": "Saved locally at: /run/agent-runtime-writable/2/result.png",
         "extra": {
             "outputs": [{"path": "/run/agent-runtime-writable/2/result.png"}]
         }
@@ -120,6 +162,12 @@ fn artifact_paths_are_scoped_per_invocation_and_remapped_to_the_host() {
         response.pointer("/extra/outputs/0/path"),
         Some(&json!(
             "/workspace/.agent-runtime/artifacts/invocation/result.png"
+        ))
+    );
+    assert_eq!(
+        response.pointer("/text"),
+        Some(&json!(
+            "Saved locally at: /workspace/.agent-runtime/artifacts/invocation/result.png"
         ))
     );
 }

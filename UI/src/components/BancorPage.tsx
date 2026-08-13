@@ -13,7 +13,7 @@ import {
   WalletCards,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 
 import {
@@ -33,6 +33,7 @@ import { NniPublicKeyDisplay } from "./NniPublicKeyDisplay";
 type Translate = (zh: string, en: string) => string;
 type BancorRuntime = ReturnType<typeof useBancorRuntime>;
 type CandleColor = { stroke: string; fill: string; volumeFill: string };
+export type BancorCandleVisualState = "up" | "down" | "flat" | "gap";
 type BancorWheelTarget = {
   addEventListener: (type: "wheel", listener: EventListener, options?: AddEventListenerOptions) => void;
   removeEventListener: (type: "wheel", listener: EventListener) => void;
@@ -52,7 +53,12 @@ export const BANCOR_CANDLE_INTERVALS = [
   { seconds: 31_536_000, zh: "1年", en: "1Y" },
 ] as const;
 
-export function resolveBancorCandlePalette(t: Translate): { up: CandleColor; down: CandleColor } {
+export function resolveBancorCandlePalette(t: Translate): {
+  up: CandleColor;
+  down: CandleColor;
+  flat: CandleColor;
+  gap: CandleColor;
+} {
   const red = {
     stroke: "#f87171",
     fill: "rgba(248,113,113,0.30)",
@@ -63,9 +69,33 @@ export function resolveBancorCandlePalette(t: Translate): { up: CandleColor; dow
     fill: "rgba(52,211,153,0.30)",
     volumeFill: "rgba(52,211,153,0.25)",
   };
+  const flat = {
+    stroke: "var(--theme-chart-neutral)",
+    fill: "var(--theme-chart-neutral-fill)",
+    volumeFill: "var(--theme-chart-neutral-volume)",
+  };
+  const gap = {
+    stroke: "var(--theme-chart-gap)",
+    fill: "var(--theme-chart-surface)",
+    volumeFill: "transparent",
+  };
   return t("zh", "en") === "zh"
-    ? { up: red, down: green }
-    : { up: green, down: red };
+    ? { up: red, down: green, flat, gap }
+    : { up: green, down: red, flat, gap };
+}
+
+export function resolveBancorCandleVisualState(candle: NniBancorCandle): BancorCandleVisualState {
+  if (!candle.has_trades) return "gap";
+  const open = Number(candle.open);
+  const close = Number(candle.close);
+  if (!Number.isFinite(open) || !Number.isFinite(close) || close === open) return "flat";
+  return close > open ? "up" : "down";
+}
+
+export function isBancorCandleOpen(candle: NniBancorCandle, nowUnix = Date.now() / 1_000): boolean {
+  return Number.isFinite(nowUnix)
+    && candle.bucket_start_unix <= nowUnix
+    && nowUnix < candle.bucket_end_unix;
 }
 
 export function calculateBancorPriceDomain(values: Array<{ high: number; low: number }>): {
@@ -150,13 +180,41 @@ export function calculateBancorZoomViewport({
   return { visible: safeNextVisible, offsetFromLatest: nextWindow.offset };
 }
 
-export function calculateBancorDefaultVisibleCount(total: number): number {
+export function calculateBancorDefaultVisibleCount(total: number, viewportWidth = 900): number {
   const safeTotal = Math.max(0, Math.floor(total));
   if (safeTotal <= BANCOR_MIN_VISIBLE_CANDLES) return safeTotal;
+  const geometry = calculateBancorChartGeometry(viewportWidth);
+  const responsiveCapacity = Math.max(
+    BANCOR_MIN_VISIBLE_CANDLES,
+    Math.floor((geometry.plotRight - 18) / 6),
+  );
   if (safeTotal <= BANCOR_DEFAULT_VISIBLE_CANDLES + BANCOR_DRAG_HISTORY_HEADROOM) {
-    return Math.max(BANCOR_MIN_VISIBLE_CANDLES, safeTotal - BANCOR_DRAG_HISTORY_HEADROOM);
+    return Math.min(
+      responsiveCapacity,
+      Math.max(BANCOR_MIN_VISIBLE_CANDLES, safeTotal - BANCOR_DRAG_HISTORY_HEADROOM),
+    );
   }
-  return BANCOR_DEFAULT_VISIBLE_CANDLES;
+  return Math.min(BANCOR_DEFAULT_VISIBLE_CANDLES, responsiveCapacity);
+}
+
+export function calculateBancorPointerCandleIndex({
+  pointerX,
+  plotLeft,
+  plotRight,
+  candleCount,
+}: {
+  pointerX: number;
+  plotLeft: number;
+  plotRight: number;
+  candleCount: number;
+}): number | null {
+  const safeCount = Math.max(0, Math.floor(candleCount));
+  if (safeCount === 0 || !Number.isFinite(pointerX) || pointerX < plotLeft || pointerX > plotRight) {
+    return null;
+  }
+  const step = (plotRight - plotLeft) / safeCount;
+  if (!Number.isFinite(step) || step <= 0) return null;
+  return Math.max(0, Math.min(safeCount - 1, Math.floor((pointerX - plotLeft) / step)));
 }
 
 export function bindBancorWheelZoom(
@@ -213,6 +271,8 @@ export function BancorPage({
     lastTrade,
     marketLoading,
     candlesLoading,
+    candlesOlderLoading,
+    candlesHasOlder,
     candlesError,
     candleIntervalSeconds,
     accountLoading,
@@ -225,6 +285,7 @@ export function BancorPage({
     fetchMarket,
     fetchCandles,
     changeCandleInterval,
+    loadOlderCandles,
     fetchAccount,
     fetchMarketTrades,
     preview,
@@ -350,17 +411,17 @@ export function BancorPage({
         />
       ) : null}
 
-      <section className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(20rem,1fr)] lg:items-start">
+      <section className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(20rem,1fr)] lg:items-stretch">
         <section className="theme-shadow-card min-w-0 p-5 sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
               <BarChart3 className="h-5 w-5 text-sky-300" />
-              <h2 className="text-lg font-semibold text-white">{t("价格 K 线", "Price candlesticks")}</h2>
+              <h2 className="text-lg font-semibold text-white">{t("实际成交均价 K 线", "Average execution-price candlesticks")}</h2>
               <div
                 className="flex min-w-0 items-baseline gap-1.5 rounded-md border border-sky-300/15 bg-sky-400/[0.06] px-2 py-1"
-                aria-label={t("实时价格", "Live price")}
+                aria-label={t("池内即时边际价", "Live pool marginal price")}
               >
-                <span className="shrink-0 text-[11px] text-white/45">{t("实时价格", "Live price")}</span>
+                <span className="shrink-0 text-[11px] text-white/45">{t("池内即时边际价", "Live pool marginal price")}</span>
                 <span className="min-w-0 break-all font-mono text-xs font-semibold leading-4 text-sky-200 sm:text-sm">
                   {market ? `${market.marginal_price_usd_per_point} USD` : "—"}
                 </span>
@@ -411,16 +472,40 @@ export function BancorPage({
               {t("正在读取成交数据...", "Loading trade data...")}
             </div>
           ) : candles?.candles.length ? (
-            <CandleChart
-              key={candleIntervalSeconds}
-              candles={candles.candles}
-              intervalSeconds={candles.interval_seconds}
-              priceDecimalPlaces={candles.price_decimal_places}
-              livePrice={market?.marginal_price_usd_per_point}
-              formatUnixDateTime={formatUnixDateTime}
-              onTrade={openTradePanel}
-              t={t}
-            />
+            <>
+              <CandleChart
+                key={candleIntervalSeconds}
+                candles={candles.candles}
+                intervalSeconds={candles.interval_seconds}
+                priceDecimalPlaces={candles.price_decimal_places}
+                livePrice={market?.marginal_price_usd_per_point}
+                formatUnixDateTime={formatUnixDateTime}
+                onTrade={openTradePanel}
+                t={t}
+              />
+              <div
+                className="mt-3 flex flex-wrap items-center justify-center gap-2 text-xs text-white/45"
+                data-bancor-history-loader={candlesHasOlder ? "available" : "complete"}
+              >
+                {candlesHasOlder ? (
+                  <button
+                    type="button"
+                    className="theme-secondary-btn min-h-9 px-3 py-1.5 text-xs"
+                    disabled={candlesOlderLoading}
+                    onClick={() => void loadOlderCandles()}
+                  >
+                    {candlesOlderLoading
+                      ? t("正在加载更早记录…", "Loading older history…")
+                      : t("加载更早 K 线", "Load older candles")}
+                  </button>
+                ) : (
+                  <span>{t("已加载到市场起点", "Loaded to the start of this market")}</span>
+                )}
+                {candlesHasOlder && !candlesOlderLoading ? (
+                  <span>{t("加载后可用左移按钮查看", "After loading, use the left button to view them")}</span>
+                ) : null}
+              </div>
+            </>
           ) : (
             <div className="flex min-h-64 flex-col items-center justify-center rounded-xl border border-dashed border-white/10 px-5 text-center">
               <BarChart3 className="h-8 w-8 text-white/35" />
@@ -450,10 +535,6 @@ export function BancorPage({
               ))}
             </div>
           </div>
-          <p className="mt-1 text-xs leading-5 text-white/55">
-            {t("先查看报价，确认数量和预计到账后再签名成交。", "Preview the quote first, then review the amounts before signing the trade.")}
-          </p>
-
           <div className="mt-3 rounded-xl border border-white/8 bg-white/[0.025] p-3">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
@@ -480,20 +561,6 @@ export function BancorPage({
                 onClick={() => account && fillBalance("buy", account.usd_balance)}
               />
             </div>
-            <p className="mt-2 text-xs leading-4 text-white/40">
-              {t("读取私人余额需要一次新的设备签名。", "Reading private balances requires a fresh device signature.")}
-            </p>
-            {account?.device_pubkey ? (
-              <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1 text-xs text-white/35">
-                <span>{t("设备：", "Device: ")}</span>
-                <NniPublicKeyDisplay
-                  value={account.device_pubkey}
-                  t={t}
-                  shorten={{ head: 12, tail: 8 }}
-                  valueClassName="text-white/45"
-                />
-              </div>
-            ) : null}
           </div>
 
           {tradeLayout === "standard" ? (
@@ -529,6 +596,14 @@ export function BancorPage({
                   />
                   <span className="text-sm font-semibold text-white/55">{inputAsset}</span>
                 </div>
+                {quotedOutput ? (
+                  <p
+                    className="mt-1.5 break-all text-right text-xs font-medium text-sky-200/80"
+                    aria-label={t("预计兑换数量", "Estimated exchange amount")}
+                  >
+                    ≈ {quotedOutput} {outputAsset}
+                  </p>
+                ) : null}
                 <BancorAmountAdjustmentControls
                   t={t}
                   value={inputAmount}
@@ -678,16 +753,16 @@ export function BancorPage({
           <div className="flex items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold text-white">{t("市场成交记录", "Market trade history")}</h2>
-              <p className="mt-1 text-sm text-white/50">{t("展示全市场成交和设备公钥的紧凑格式。", "Shows market-wide trades with compact device public keys.")}</p>
+              <p className="mt-1 text-sm text-white/50">{t("仅展示最近 100 笔全市场成交，设备公钥使用紧凑格式。", "Shows only the latest 100 market-wide trades with compact device public keys.")}</p>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-xs text-white/40">{marketTrades?.total ?? 0} {t("笔", "trades")}</span>
+              <span className="text-xs text-white/40">{marketTrades?.trades.length ?? 0} {t("笔", "trades")}</span>
               <button
                 type="button"
                 className="theme-icon-btn"
                 aria-label={t("刷新市场成交记录", "Refresh market trades")}
                 disabled={marketTradesLoading}
-                onClick={() => void fetchMarketTrades(marketTrades?.page ?? 1)}
+                onClick={() => void fetchMarketTrades()}
               >
                 <RefreshCw className={`h-4 w-4 ${marketTradesLoading ? "animate-spin" : ""}`} />
               </button>
@@ -718,17 +793,6 @@ export function BancorPage({
               </div>
             )}
           </div>
-          {marketTrades && marketTrades.total_pages > 1 ? (
-            <div className="mt-4 flex items-center justify-between gap-3">
-              <button type="button" className="theme-secondary-btn" disabled={marketTradesLoading || marketTrades.page <= 1} onClick={() => void fetchMarketTrades(marketTrades.page - 1)}>
-                {t("上一页", "Previous")}
-              </button>
-              <span className="text-xs text-white/45">{t("第", "Page")} {marketTrades.page} / {marketTrades.total_pages} {t("页", "")}</span>
-              <button type="button" className="theme-secondary-btn" disabled={marketTradesLoading || marketTrades.page >= marketTrades.total_pages} onClick={() => void fetchMarketTrades(marketTrades.page + 1)}>
-                {t("下一页", "Next")}
-              </button>
-            </div>
-          ) : null}
         </article>
       </section>
 
@@ -961,8 +1025,15 @@ export function CandleChart({
 }) {
   const chartRef = useRef<HTMLDivElement>(null);
   const wheelHandlerRef = useRef<(event: globalThis.WheelEvent) => void>(() => undefined);
-  const dragRef = useRef<{ pointerId: number; startOffset: number; startX: number } | null>(null);
+  const dragRef = useRef<{
+    moved: boolean;
+    pointerId: number;
+    startOffset: number;
+    startX: number;
+    startY: number;
+  } | null>(null);
   const previousCandleCountRef = useRef(candles.length);
+  const chartInstanceId = useId().replace(/:/g, "");
   const [viewportWidth, setViewportWidth] = useState(900);
   const [visibleCountOverride, setVisibleCountOverride] = useState<number | null>(null);
   const [verticalZoom, setVerticalZoom] = useState(1);
@@ -1028,7 +1099,7 @@ export function CandleChart({
     };
   }, [maximized]);
 
-  const defaultVisibleCount = calculateBancorDefaultVisibleCount(allValues.length);
+  const defaultVisibleCount = calculateBancorDefaultVisibleCount(allValues.length, viewportWidth);
   const requestedVisibleCount = visibleCountOverride ?? defaultVisibleCount;
   const visibleCount = Math.max(1, Math.min(allValues.length, requestedVisibleCount));
   const visibleWindow = calculateBancorVisibleWindow(allValues.length, visibleCount, offsetFromLatest);
@@ -1062,7 +1133,8 @@ export function CandleChart({
   const focused = hoveredIndex === null ? last : values[Math.min(hoveredIndex, values.length - 1)] ?? last;
   const tickIndexes = new Set([0, Math.floor((values.length - 1) / 2), values.length - 1]);
   const palette = resolveBancorCandlePalette(t);
-  const latestColor = last.close >= last.open ? palette.up : palette.down;
+  const latestVisualState = resolveBancorCandleVisualState(last.candle);
+  const latestColor = palette[latestVisualState];
   const currentPriceColor = currentPrice > last.close
     ? palette.up
     : currentPrice < last.close
@@ -1079,6 +1151,10 @@ export function CandleChart({
       .join(" ")
     : "";
   const maxRequestedVisibleCount = Math.min(160, allValues.length);
+  const priceClipId = `bancor-price-plot-${chartInstanceId}`;
+  const volumeClipId = `bancor-volume-plot-${chartInstanceId}`;
+  const nowUnix = Date.now() / 1_000;
+  const latestCandleOpen = isBancorCandleOpen(last.candle, nowUnix);
 
   const clampOffset = (value: number) => Math.max(0, Math.min(visibleWindow.maxOffset, value));
   const panBy = (candlesToOlder: number) => {
@@ -1106,18 +1182,25 @@ export function CandleChart({
   const updateHoveredCandle = (event: ReactPointerEvent<HTMLDivElement>) => {
     const bounds = event.currentTarget.getBoundingClientRect();
     const svgX = ((event.clientX - bounds.left) / Math.max(bounds.width, 1)) * width;
-    if (svgX < plotLeft || svgX > plotRight) {
-      setHoveredIndex(null);
-      return;
-    }
-    const index = Math.max(0, Math.min(values.length - 1, Math.floor((svgX - plotLeft) / step)));
+    const index = calculateBancorPointerCandleIndex({
+      pointerX: svgX,
+      plotLeft,
+      plotRight,
+      candleCount: values.length,
+    });
     setHoveredIndex(index);
   };
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
-    event.preventDefault();
+    if (event.pointerType === "mouse") event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
-    dragRef.current = { pointerId: event.pointerId, startOffset: visibleWindow.offset, startX: event.clientX };
+    dragRef.current = {
+      moved: false,
+      pointerId: event.pointerId,
+      startOffset: visibleWindow.offset,
+      startX: event.clientX,
+      startY: event.clientY,
+    };
     setIsDragging(true);
   };
   const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -1126,15 +1209,22 @@ export function CandleChart({
       updateHoveredCandle(event);
       return;
     }
+    const deltaX = event.clientX - drag.startX;
+    const deltaY = event.clientY - drag.startY;
+    if (!drag.moved && Math.hypot(deltaX, deltaY) < 6) return;
+    drag.moved = true;
+    if (Math.abs(deltaY) > Math.abs(deltaX)) return;
     const pixelsPerCandle = Math.max((viewportWidth * 0.6) / Math.max(visibleCount, 1), 10);
-    const candlesToOlder = Math.round((event.clientX - drag.startX) / pixelsPerCandle);
+    const candlesToOlder = Math.round(deltaX / pixelsPerCandle);
     setOffsetFromLatest(clampOffset(drag.startOffset + candlesToOlder));
     setHoveredIndex(null);
   };
   const finishPointerDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (dragRef.current?.pointerId === event.pointerId) {
+    const drag = dragRef.current;
+    if (drag?.pointerId === event.pointerId) {
       dragRef.current = null;
       setIsDragging(false);
+      if (!drag.moved) updateHoveredCandle(event);
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
@@ -1181,6 +1271,7 @@ export function CandleChart({
   };
   const hoveredX = hoveredIndex === null ? null : plotLeft + step * (hoveredIndex + 0.5);
   const hoveredY = hoveredIndex === null ? null : yForPrice(focused.close);
+  const hoveredPriceIsVisible = hoveredY !== null && hoveredY >= priceTop && hoveredY <= priceBottom;
 
   return (
     <div
@@ -1192,53 +1283,79 @@ export function CandleChart({
           <span className="text-white/65">{formatUnixDateTime(focused.candle.bucket_start_unix)}</span>
           <span className="ml-3">O {focused.candle.open} · H {focused.candle.high} · L {focused.candle.low} · C {focused.candle.close}</span>
           <span className="ml-3">VOL {focused.candle.point_volume} POINT</span>
+          <span className="ml-3">
+            {focused.candle.trade_count > 0
+              ? `${focused.candle.trade_count} ${t("笔成交", "trades")}`
+              : t("本周期无成交", "No trades in this interval")}
+          </span>
         </div>
-        <span>
-          {visibleWindow.maxOffset > 0
-            ? t("左右拖动查看历史；滚轮横向缩放，Alt+滚轮纵向缩放", "Drag for history; wheel zooms time, Alt+wheel zooms price")
-            : t("全部真实 K 线已显示，暂无更多历史", "All real-trade candles are visible; no older history is available")}
-        </span>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {latestCandleOpen ? (
+            <span
+              data-bancor-current-candle-state="open"
+              className="rounded-full border px-2 py-0.5"
+              style={{ borderColor: "var(--theme-chart-open)", color: "var(--theme-chart-label-strong)" }}
+            >
+              {t("最后一根未收盘", "Latest candle is still open")}
+            </span>
+          ) : null}
+          <span>
+            {visibleWindow.maxOffset > 0
+              ? t("左右拖动查看历史；点按查看详情；滚轮缩放", "Drag for history; tap for details; wheel to zoom")
+              : t("全部实际成交均价 K 线已显示，暂无更多历史", "All average execution-price candles are visible; no older history is available")}
+          </span>
+        </div>
       </div>
       <div
         ref={chartRef}
-        className={`relative overflow-hidden rounded-xl border border-white/8 bg-black/10 outline-none transition ${isDragging ? "cursor-grabbing ring-1 ring-sky-400/25" : "cursor-grab focus:ring-1 focus:ring-sky-400/35"}`}
+        className={`theme-chart-surface relative overflow-hidden rounded-xl border outline-none transition ${isDragging ? "cursor-grabbing ring-1 ring-sky-400/25" : "cursor-grab focus:ring-1 focus:ring-sky-400/35"}`}
         style={{ touchAction: "pan-y" }}
+        data-bancor-tap-details="enabled"
         role="group"
         tabIndex={0}
-        aria-label={t("可横向与纵向缩放的 POINT 对 USD 真实成交 K 线图", "Horizontally and vertically zoomable real-trade POINT to USD candlestick chart")}
+        aria-label={t("可拖动、缩放并点按查看的 POINT 对 USD 实际成交均价 K 线图", "Draggable, zoomable average execution-price POINT to USD candlestick chart with tap details")}
         onKeyDown={handleKeyDown}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={finishPointerDrag}
         onPointerCancel={finishPointerDrag}
-        onPointerLeave={() => {
-          if (!dragRef.current) setHoveredIndex(null);
+        onPointerLeave={(event) => {
+          if (!dragRef.current && event.pointerType === "mouse") setHoveredIndex(null);
         }}
       >
         <svg
           viewBox={`0 0 ${width} ${height}`}
           className="block h-auto min-h-72 w-full select-none"
           role="img"
-          aria-label={t("POINT 对 USD 的真实成交 K 线图", "Real-trade POINT to USD candlestick chart")}
+          aria-label={t("POINT 对 USD 的实际成交均价 K 线图", "Average execution-price POINT to USD candlestick chart")}
         >
+          <defs>
+            <clipPath id={priceClipId}>
+              <rect x={plotLeft} y={priceTop} width={plotRight - plotLeft} height={priceBottom - priceTop} />
+            </clipPath>
+            <clipPath id={volumeClipId}>
+              <rect x={plotLeft} y={volumeTop} width={plotRight - plotLeft} height={volumeBottom - volumeTop} />
+            </clipPath>
+          </defs>
           {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
             const y = priceTop + ratio * (priceBottom - priceTop);
             const label = (priceHigh - ratio * priceSpan).toFixed(priceDecimalPlaces);
             return (
               <g key={ratio}>
-                <line x1={plotLeft} y1={y} x2={plotRight} y2={y} stroke="rgba(255,255,255,0.075)" strokeDasharray="3 6" />
-                <text x={priceAxisX} y={y + 4} fill="rgba(255,255,255,0.42)" fontSize="11">{label}</text>
+                <line x1={plotLeft} y1={y} x2={plotRight} y2={y} stroke="var(--theme-chart-grid)" strokeDasharray="3 6" />
+                <text x={priceAxisX} y={y + 4} fill="var(--theme-chart-label)" fontSize="11">{label}</text>
               </g>
             );
           })}
           {[0.25, 0.5, 0.75].map((ratio) => {
             const x = plotLeft + ratio * (plotRight - plotLeft);
-            return <line key={ratio} x1={x} y1={priceTop} x2={x} y2={volumeBottom} stroke="rgba(255,255,255,0.05)" strokeDasharray="3 7" />;
+            return <line key={ratio} x1={x} y1={priceTop} x2={x} y2={volumeBottom} stroke="var(--theme-chart-grid-soft)" strokeDasharray="3 7" />;
           })}
-          <line x1={plotLeft} y1={volumeTop - 10} x2={plotRight} y2={volumeTop - 10} stroke="rgba(255,255,255,0.08)" />
+          <line x1={plotLeft} y1={volumeTop - 10} x2={plotRight} y2={volumeTop - 10} stroke="var(--theme-chart-grid)" />
           {currentPriceIsVisible ? (
             <line
               data-bancor-chart-layer="live-price-line"
+              clipPath={`url(#${priceClipId})`}
               x1={plotLeft}
               y1={currentPriceY}
               x2={plotRight}
@@ -1251,9 +1368,10 @@ export function CandleChart({
           {showMinuteCloseLine && values.length > 1 ? (
             <polyline
               data-bancor-chart-layer="one-minute-close-line"
+              clipPath={`url(#${priceClipId})`}
               points={minuteCloseLinePoints}
               fill="none"
-              stroke="#7dd3fc"
+              stroke="var(--theme-chart-close-line)"
               strokeOpacity="0.88"
               strokeWidth="1.75"
               strokeLinecap="round"
@@ -1264,10 +1382,10 @@ export function CandleChart({
           ) : null}
           {values.map((value, index) => {
             const x = plotLeft + step * (index + 0.5);
-            const up = value.close >= value.open;
-            const color = up ? palette.up : palette.down;
-            const hasTrades = value.candle.has_trades ?? (value.candle.trade_count > 0);
-            const showCandleBody = !showMinuteCloseLine || hasTrades;
+            const visualState = resolveBancorCandleVisualState(value.candle);
+            const color = palette[visualState];
+            const hasTrades = visualState !== "gap";
+            const candleOpen = isBancorCandleOpen(value.candle, nowUnix);
             const openY = yForPrice(value.open);
             const closeY = yForPrice(value.close);
             const bodyTop = Math.min(openY, closeY);
@@ -1277,37 +1395,92 @@ export function CandleChart({
             const lowY = yForPrice(value.low);
             const volumeHeight = (value.pointVolume / maxVolume) * (volumeBottom - volumeTop);
             return (
-              <g key={`${value.candle.bucket_start_unix}-${index}`}>
+              <g
+                key={`${value.candle.bucket_start_unix}-${index}`}
+                data-bancor-candle-direction={visualState}
+                data-bancor-candle-state={candleOpen ? "open" : "closed"}
+              >
                 <title>{`${formatUnixDateTime(value.candle.bucket_start_unix)} · O ${value.candle.open} · H ${value.candle.high} · L ${value.candle.low} · C ${value.candle.close} · ${value.candle.point_volume} POINT · ${value.candle.trade_count} ${t("笔", "trades")}`}</title>
-                {showCandleBody && highY < bodyTop ? <line x1={x} y1={highY} x2={x} y2={bodyTop} stroke={color.stroke} strokeWidth="1.5" /> : null}
-                {showCandleBody && bodyBottom < lowY ? <line x1={x} y1={bodyBottom} x2={x} y2={lowY} stroke={color.stroke} strokeWidth="1.5" /> : null}
-                {showCandleBody ? <rect data-bancor-candle-body="true" x={x - bodyWidth / 2} y={bodyTop} width={bodyWidth} height={bodyHeight} rx="1" fill={color.stroke} stroke={color.stroke} strokeWidth="1.2" /> : null}
-                <rect x={x - bodyWidth / 2} y={volumeBottom - volumeHeight} width={bodyWidth} height={volumeHeight} rx="1" fill={color.volumeFill} />
+                <g clipPath={`url(#${priceClipId})`}>
+                  {hasTrades && highY < bodyTop ? <line x1={x} y1={highY} x2={x} y2={bodyTop} stroke={color.stroke} strokeWidth="1.5" /> : null}
+                  {hasTrades && bodyBottom < lowY ? <line x1={x} y1={bodyBottom} x2={x} y2={lowY} stroke={color.stroke} strokeWidth="1.5" /> : null}
+                  {hasTrades ? (
+                    <rect
+                      data-bancor-candle-body="true"
+                      x={x - bodyWidth / 2}
+                      y={bodyTop}
+                      width={bodyWidth}
+                      height={bodyHeight}
+                      rx="1"
+                      fill={color.stroke}
+                      stroke={color.stroke}
+                      strokeWidth="1.2"
+                    />
+                  ) : (
+                    <circle
+                      data-bancor-candle-gap="true"
+                      cx={x}
+                      cy={closeY}
+                      r={Math.max(2.5, Math.min(4, bodyWidth / 2))}
+                      fill={color.fill}
+                      stroke={color.stroke}
+                      strokeWidth="1.4"
+                    />
+                  )}
+                  {candleOpen ? (
+                    <>
+                      <line
+                        data-bancor-current-candle-marker="true"
+                        x1={x}
+                        y1={priceTop}
+                        x2={x}
+                        y2={priceBottom}
+                        stroke="var(--theme-chart-open)"
+                        strokeWidth="1"
+                        strokeDasharray="2 5"
+                        strokeOpacity="0.72"
+                      />
+                      <circle cx={x} cy={priceTop + 5} r="3" fill="var(--theme-chart-open)" />
+                    </>
+                  ) : null}
+                </g>
+                {hasTrades && volumeHeight > 0 ? (
+                  <rect
+                    data-bancor-volume-direction={visualState}
+                    clipPath={`url(#${volumeClipId})`}
+                    x={x - bodyWidth / 2}
+                    y={volumeBottom - volumeHeight}
+                    width={bodyWidth}
+                    height={volumeHeight}
+                    rx="1"
+                    fill={color.volumeFill}
+                  />
+                ) : null}
                 {tickIndexes.has(index) ? (
-                  <text x={x} y={timeAxisY} textAnchor="middle" fill="rgba(255,255,255,0.38)" fontSize="10">
+                  <text x={x} y={timeAxisY} textAnchor="middle" fill="var(--theme-chart-label)" fontSize="10">
                     {formatUnixDateTime(value.candle.bucket_start_unix)}
                   </text>
                 ) : null}
               </g>
             );
           })}
-          <g data-bancor-chart-layer="visible-price-extremes" pointerEvents="none">
-            <line x1={visibleHighX - 5} y1={visibleHighY} x2={visibleHighX + 5} y2={visibleHighY} stroke="rgba(255,255,255,0.65)" />
+          <g data-bancor-chart-layer="visible-price-extremes" clipPath={`url(#${priceClipId})`} pointerEvents="none">
+            <line x1={visibleHighX - 5} y1={visibleHighY} x2={visibleHighX + 5} y2={visibleHighY} stroke="var(--theme-chart-label-strong)" />
             <text
               x={visibleHighX <= (plotLeft + plotRight) / 2 ? visibleHighX + 7 : visibleHighX - 7}
               y={Math.max(priceTop + 11, visibleHighY - 7)}
               textAnchor={visibleHighX <= (plotLeft + plotRight) / 2 ? "start" : "end"}
-              fill="rgba(255,255,255,0.72)"
+              fill="var(--theme-chart-label-strong)"
               fontSize="10"
             >
               H {visibleHigh.candle.high}
             </text>
-            <line x1={visibleLowX - 5} y1={visibleLowY} x2={visibleLowX + 5} y2={visibleLowY} stroke="rgba(255,255,255,0.65)" />
+            <line x1={visibleLowX - 5} y1={visibleLowY} x2={visibleLowX + 5} y2={visibleLowY} stroke="var(--theme-chart-label-strong)" />
             <text
               x={visibleLowX <= (plotLeft + plotRight) / 2 ? visibleLowX + 7 : visibleLowX - 7}
               y={Math.min(priceBottom - 2, visibleLowY + 14)}
               textAnchor={visibleLowX <= (plotLeft + plotRight) / 2 ? "start" : "end"}
-              fill="rgba(255,255,255,0.72)"
+              fill="var(--theme-chart-label-strong)"
               fontSize="10"
             >
               L {visibleLow.candle.low}
@@ -1315,20 +1488,24 @@ export function CandleChart({
           </g>
           {hoveredX !== null && hoveredY !== null ? (
             <g pointerEvents="none">
-              <line x1={hoveredX} y1={priceTop} x2={hoveredX} y2={volumeBottom} stroke="rgba(255,255,255,0.38)" strokeDasharray="4 5" />
-              <line x1={plotLeft} y1={hoveredY} x2={plotRight} y2={hoveredY} stroke="rgba(255,255,255,0.38)" strokeDasharray="4 5" />
-              <rect x={priceAxisX - 4} y={hoveredY - 10} width="96" height="20" rx="3" fill="rgba(15,23,42,0.96)" />
-              <text x={priceAxisX + 3} y={hoveredY + 4} fill="rgba(255,255,255,0.88)" fontSize="11">{focused.candle.close}</text>
+              <line x1={hoveredX} y1={priceTop} x2={hoveredX} y2={volumeBottom} stroke="var(--theme-chart-crosshair)" strokeDasharray="4 5" />
+              {hoveredPriceIsVisible ? (
+                <>
+                  <line x1={plotLeft} y1={hoveredY} x2={plotRight} y2={hoveredY} stroke="var(--theme-chart-crosshair)" strokeDasharray="4 5" />
+                  <rect x={priceAxisX - 4} y={hoveredY - 10} width="96" height="20" rx="3" fill="var(--theme-chart-tooltip-bg)" />
+                  <text x={priceAxisX + 3} y={hoveredY + 4} fill="var(--theme-chart-tooltip-text)" fontSize="11">{focused.candle.close}</text>
+                </>
+              ) : null}
             </g>
           ) : null}
           {currentPriceIsVisible ? (
             <g data-bancor-chart-layer="live-price-label" pointerEvents="none">
-              <title>{t("实时价格", "Live price")}</title>
+              <title>{t("池内即时边际价参考线", "Live pool marginal-price reference")}</title>
               <rect x={priceAxisX - 4} y={currentPriceY - 10} width="96" height="20" rx="3" fill={currentPriceColor.fill} stroke={currentPriceColor.stroke} strokeWidth="1" />
               <text x={priceAxisX + 3} y={currentPriceY + 4} fill={currentPriceColor.stroke} fontSize="11">{currentPriceText}</text>
             </g>
           ) : null}
-          <text x={plotLeft} y={volumeTop + 5} fill="rgba(255,255,255,0.38)" fontSize="10">VOL · POINT</text>
+          <text x={plotLeft} y={volumeTop + 5} fill="var(--theme-chart-label)" fontSize="10">VOL · POINT</text>
         </svg>
       </div>
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-white/45">
