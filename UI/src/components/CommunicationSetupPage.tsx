@@ -123,6 +123,7 @@ export interface CommunicationSetupPageProps {
   wechatLoginStatus: WechatLoginStatus | null;
   wechatQrPreviewRequested: boolean;
   wechatLoginError: string | null;
+  wechatConfigError: string | null;
   wechatConfigEnabled: boolean;
   wechatConfigSaving: boolean;
   wechatServiceHealthy: boolean;
@@ -320,6 +321,7 @@ export function CommunicationSetupPage({
   wechatLoginStatus,
   wechatQrPreviewRequested,
   wechatLoginError,
+  wechatConfigError,
   wechatConfigEnabled,
   wechatConfigSaving,
   wechatServiceHealthy,
@@ -466,6 +468,11 @@ export function CommunicationSetupPage({
                 {wechatLoginError ? (
                   <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
                     {wechatLoginError}
+                  </p>
+                ) : null}
+                {wechatConfigError ? (
+                  <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                    {wechatConfigError}
                   </p>
                 ) : null}
 
