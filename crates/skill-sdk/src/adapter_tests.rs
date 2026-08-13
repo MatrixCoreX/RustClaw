@@ -96,8 +96,12 @@ fn cargo_discovery_falls_back_to_default_home_and_rejects_non_executable_files()
 
     set_executable(&cargo).expect("cargo executable");
     assert_eq!(
-        find_cargo_program_in_environment(None, None, Some(temp.path().as_os_str()))
-            .expect("default cargo home"),
+        find_cargo_program_in_environment(
+            None,
+            Some(temp.path().join("isolated-cache").as_os_str()),
+            Some(temp.path().as_os_str()),
+        )
+        .expect("default cargo home after empty explicit cache"),
         cargo
     );
 }

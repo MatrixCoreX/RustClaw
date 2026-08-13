@@ -77,17 +77,19 @@ export PATH
 rmdir "$PATH_HEAD" "$PATH_TAIL"
 
 USER_CARGO_BIN="$TEST_ROOT/.cargo/bin"
-mkdir -p "$USER_CARGO_BIN"
+EXPLICIT_CARGO_BIN="$TEST_ROOT/cargo-cache/bin"
+mkdir -p "$USER_CARGO_BIN" "$EXPLICIT_CARGO_BIN"
 PATH="/usr/bin:/bin"
-CARGO_HOME="$TEST_ROOT/.cargo"
-export PATH CARGO_HOME
+HOME="$TEST_ROOT"
+CARGO_HOME="$TEST_ROOT/cargo-cache"
+export PATH HOME CARGO_HOME
 configure_platform_command_path
-[[ "$PATH" == "$USER_CARGO_BIN:/usr/bin:/bin" ]]
+[[ "$PATH" == "$EXPLICIT_CARGO_BIN:$USER_CARGO_BIN:/usr/bin:/bin" ]]
 configure_platform_command_path
-[[ "$PATH" == "$USER_CARGO_BIN:/usr/bin:/bin" ]]
+[[ "$PATH" == "$EXPLICIT_CARGO_BIN:$USER_CARGO_BIN:/usr/bin:/bin" ]]
 PATH="$SAVED_PATH"
 export PATH
-rmdir "$USER_CARGO_BIN"
+rmdir "$USER_CARGO_BIN" "$EXPLICIT_CARGO_BIN" "$TEST_ROOT/cargo-cache"
 
 unset RUSTC_WRAPPER CARGO_INCREMENTAL CI
 HOME="$TEST_ROOT"

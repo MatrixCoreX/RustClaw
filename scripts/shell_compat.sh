@@ -133,16 +133,22 @@ prepend_existing_command_path() {
 }
 
 configure_user_toolchain_command_path() {
-  local cargo_home="${CARGO_HOME:-}"
-  if [[ -z "$cargo_home" && -n "${HOME:-}" ]]; then
-    cargo_home="$HOME/.cargo"
+  local default_cargo_home=""
+  if [[ -n "${HOME:-}" ]]; then
+    default_cargo_home="$HOME/.cargo"
   fi
-  if [[ -n "$cargo_home" ]]; then
+  if [[ -n "$default_cargo_home" ]]; then
     # Runtime environment files and service managers commonly provide a
     # minimal PATH. Restore rustup's user-level proxy directory after those
     # environments are loaded so Cargo-backed Skill Store installs work from
     # non-login processes on Linux and macOS.
-    prepend_existing_command_path "$cargo_home/bin"
+    prepend_existing_command_path "$default_cargo_home/bin"
+  fi
+  if [[ -n "${CARGO_HOME:-}" ]]; then
+    # An explicit Cargo home remains authoritative, while the default Rustup
+    # proxy directory above is retained as a fallback when CARGO_HOME is used
+    # only to isolate package caches.
+    prepend_existing_command_path "$CARGO_HOME/bin"
   fi
 }
 
