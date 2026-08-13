@@ -1865,6 +1865,7 @@ export default function App() {
               wechatLoginStatus={wechatLoginStatus}
               wechatQrPreviewRequested={wechatQrPreviewRequested}
               wechatLoginError={wechatLoginError}
+              wechatConfigError={wechatConfigError}
               wechatConfigEnabled={wechatConfigData?.enabled === true}
               wechatConfigSaving={wechatConfigSaving}
               wechatServiceHealthy={health?.wechatd_healthy === true}
