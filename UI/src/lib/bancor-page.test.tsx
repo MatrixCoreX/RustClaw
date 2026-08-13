@@ -17,10 +17,10 @@ import {
   calculateBancorPriceDomain,
   calculateBancorVisibleWindow,
   calculateBancorZoomViewport,
+  isBancorCandleOpen,
   resolveBancorCandlePalette,
   resolveBancorCandleVisualState,
   scaleBancorPriceDomain,
-  selectClosedBancorCandles,
 } from "../components/BancorPage";
 import type { useBancorRuntime } from "../hooks/useBancorRuntime";
 
@@ -319,7 +319,7 @@ test("BANCOR candle visual state never reports a flat or empty interval as up", 
   assert.equal(resolveBancorCandleVisualState({ ...base, open: "1", close: "1", trade_count: 0, has_trades: false }), "gap");
 });
 
-test("BANCOR only selects candles whose intervals have closed", () => {
+test("BANCOR current candle marker follows bucket end time", () => {
   const candle = {
     bucket_start_unix: 100,
     bucket_end_unix: 160,
@@ -334,12 +334,41 @@ test("BANCOR only selects candles whose intervals have closed", () => {
     trade_count: 1,
     has_trades: true,
   };
-  const next = { ...candle, bucket_start_unix: 160, bucket_end_unix: 220 };
-  assert.deepEqual(selectClosedBancorCandles([candle, next], 159.999), []);
-  assert.deepEqual(selectClosedBancorCandles([candle, next], 160), [candle]);
-  assert.deepEqual(selectClosedBancorCandles([candle, next], 219.999), [candle]);
-  assert.deepEqual(selectClosedBancorCandles([candle, next], 220), [candle, next]);
-  assert.deepEqual(selectClosedBancorCandles([candle], Number.NaN), []);
+  assert.equal(isBancorCandleOpen(candle, 99), false);
+  assert.equal(isBancorCandleOpen(candle, 100), true);
+  assert.equal(isBancorCandleOpen(candle, 159.999), true);
+  assert.equal(isBancorCandleOpen(candle, 160), false);
+});
+
+test("BANCOR renders the current interval without an open-candle text badge", () => {
+  const nowUnix = Math.floor(Date.now() / 1_000);
+  const html = renderToStaticMarkup(
+    <CandleChart
+      candles={[{
+        bucket_start_unix: nowUnix - 10,
+        bucket_end_unix: nowUnix + 50,
+        open: "1.0000",
+        high: "1.0000",
+        low: "1.0000",
+        close: "1.0000",
+        point_volume_units: "10",
+        point_volume: "0.0010",
+        usd_volume_units: "10",
+        usd_volume: "0.0010",
+        trade_count: 1,
+        has_trades: true,
+      }]}
+      intervalSeconds={60}
+      priceDecimalPlaces={4}
+      formatUnixDateTime={(value) => String(value ?? "")}
+      t={(zh) => zh}
+    />,
+  );
+  assert.match(html, /data-bancor-candle-state="open"/);
+  assert.match(html, /data-bancor-current-candle-marker="true"/);
+  assert.match(html, /data-bancor-candle-direction="flat"/);
+  assert.match(html, /data-bancor-volume-direction="flat"/);
+  assert.doesNotMatch(html, /最后一根未收盘|Latest candle is still open|data-bancor-current-candle-state/);
 });
 
 test("BANCOR candlesticks distinguish traded flat bars from neutral empty intervals", () => {
