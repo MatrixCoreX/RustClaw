@@ -93,6 +93,11 @@ export function resolveBancorCandleVisualState(candle: NniBancorCandle): BancorC
   return close > open ? "up" : "down";
 }
 
+export function resolveBancorTradeColor(side: "buy" | "sell", t: Translate): string {
+  const palette = resolveBancorCandlePalette(t);
+  return side === "buy" ? palette.up.stroke : palette.down.stroke;
+}
+
 export function isBancorCandleOpen(candle: NniBancorCandle, nowUnix = Date.now() / 1_000): boolean {
   return Number.isFinite(nowUnix)
     && candle.bucket_start_unix <= nowUnix
@@ -711,11 +716,13 @@ export function BancorPage({
             {account?.trades.length ? account.trades.map((record) => (
               <div key={record.trade_id} className="grid gap-2 rounded-xl border border-white/8 bg-white/[0.025] px-4 py-3 text-sm sm:grid-cols-[1fr_auto_auto] sm:items-center">
                 <div>
-                  <span className="font-medium text-white/85">{record.side === "buy" ? t("买入 POINT", "Buy POINT") : t("卖出 POINT", "Sell POINT")}</span>
+                  <span className="font-medium" style={{ color: resolveBancorTradeColor(record.side, t) }}>
+                    {record.side === "buy" ? t("买入 POINT", "Buy POINT") : t("卖出 POINT", "Sell POINT")}
+                  </span>
                   <p className="mt-1 text-xs text-white/40">{formatUnixDateTime(record.created_at_unix)}</p>
                 </div>
                 <span className="text-white/55">{record.input_amount} {record.input_asset}</span>
-                <span className="font-medium text-emerald-200">+ {record.output_amount} {record.output_asset}</span>
+                <span className="font-medium" style={{ color: resolveBancorTradeColor(record.side, t) }}>+ {record.output_amount} {record.output_asset}</span>
               </div>
             )) : (
               <div className="rounded-xl border border-dashed border-white/10 px-4 py-8 text-center text-sm text-white/40">
@@ -772,7 +779,9 @@ export function BancorPage({
               >
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="font-medium text-white/85">{record.side === "buy" ? t("买入 POINT", "Buy POINT") : t("卖出 POINT", "Sell POINT")}</span>
+                    <span className="font-medium" style={{ color: resolveBancorTradeColor(record.side, t) }}>
+                      {record.side === "buy" ? t("买入 POINT", "Buy POINT") : t("卖出 POINT", "Sell POINT")}
+                    </span>
                     <NniPublicKeyDisplay
                       value={record.device_pubkey_compact}
                       t={t}
@@ -783,7 +792,7 @@ export function BancorPage({
                   <p className="mt-1 text-xs text-white/40">{formatUnixDateTime(record.created_at_unix)}</p>
                 </div>
                 <span className="text-white/55">{record.input_amount} {record.input_asset}</span>
-                <span className="font-medium text-emerald-200">+ {record.output_amount} {record.output_asset}</span>
+                <span className="font-medium" style={{ color: resolveBancorTradeColor(record.side, t) }}>+ {record.output_amount} {record.output_asset}</span>
               </div>
             )) : (
               <div className="rounded-xl border border-dashed border-white/10 px-4 py-8 text-center text-sm text-white/40">
@@ -936,12 +945,12 @@ export function BancorAmountAdjustmentControls({
     {
       adjustment: "decrement",
       label: "−",
-      title: t("减少 0.0001", "Decrease by 0.0001"),
+      title: t("减少 1", "Decrease by 1"),
     },
     {
       adjustment: "increment",
       label: "+",
-      title: t("增加 0.0001", "Increase by 0.0001"),
+      title: t("增加 1", "Increase by 1"),
     },
   ];
   return (

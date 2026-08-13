@@ -48,6 +48,13 @@ function response(data: NniBancorCandlesResponse, etag?: string): Response {
   });
 }
 
+function apiResponse(data: unknown): Response {
+  return new Response(JSON.stringify({ ok: true, data, error: null }), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+}
+
 test("BANCOR hook never exposes old-period candles after a failed interval switch", async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   let rejectOneMinute: ((cause: Error) => void) | undefined;
@@ -140,6 +147,98 @@ test("BANCOR hook paginates older candles without reusing the latest-page ETag",
     await runtime!.fetchCandles(300);
   });
   assert.equal(refreshedLatestHeaders?.get("If-None-Match"), '"latest-page"');
+
+  await act(async () => {
+    renderer!.unmount();
+  });
+});
+
+test("BANCOR refreshes the active candlesticks without a stale ETag after a successful trade", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const requestedPaths: string[] = [];
+  const candleHeaders: Headers[] = [];
+  let candleRequestCount = 0;
+  const apiFetch = (path: string, init?: RequestInit): Promise<Response> => {
+    requestedPaths.push(path);
+    if (path.startsWith("/v1/nni/bancor/candles?")) {
+      candleHeaders.push(new Headers(init?.headers));
+      candleRequestCount += 1;
+      const data = candles(300);
+      data.market_version = candleRequestCount;
+      data.candles[0].close = candleRequestCount === 1 ? "0.000100000000" : "0.000110000000";
+      return Promise.resolve(response(data, `"candles-${candleRequestCount}"`));
+    }
+    if (path === "/v1/nni/bancor/quote") {
+      return Promise.resolve(apiResponse({
+        quote_id: "quote-1",
+        side: "sell",
+        input_amount: "100.0000",
+        min_output_amount: "0.0001",
+        slippage_bps: 50,
+      }));
+    }
+    if (path === "/v1/nni/bancor/trade") {
+      return Promise.resolve(apiResponse({ trade: { trade_id: "trade-1" } }));
+    }
+    if (path === "/v1/nni/bancor/market") {
+      return Promise.resolve(apiResponse({
+        status: "open",
+        market_id: "point-usd-v1",
+        fee_bps: 50,
+        point_reserve_units: "1000000000000",
+        usd_reserve_units: "100000000",
+      }));
+    }
+    if (path.startsWith("/v1/nni/bancor/account?")) {
+      return Promise.resolve(apiResponse({
+        point_balance_units: "1000000",
+        usd_balance_units: "100000",
+        page: 1,
+        per_page: 10,
+        total: 1,
+        total_pages: 1,
+        trades: [],
+      }));
+    }
+    if (path === "/v1/nni/bancor/trades") {
+      return Promise.resolve(apiResponse({ limit: 100, trades: [] }));
+    }
+    throw new Error(`unexpected request: ${path}`);
+  };
+  let runtime: ReturnType<typeof useBancorRuntime> | null = null;
+  function Probe() {
+    runtime = useBancorRuntime({ apiFetch, cacheScope: "trade-refresh-test", t: (zh) => zh });
+    return null;
+  }
+
+  let renderer: ReactTestRenderer | null = null;
+  await act(async () => {
+    renderer = create(React.createElement(Probe));
+  });
+  await act(async () => {
+    await Promise.all([
+      runtime!.fetchCandles(),
+      runtime!.fetchMarket(),
+      runtime!.fetchAccount(1),
+    ]);
+  });
+  assert.equal(candleHeaders[0].has("If-None-Match"), false);
+
+  await act(async () => {
+    await runtime!.preview("sell", "100.0000", 50);
+  });
+  await act(async () => {
+    assert.ok(await runtime!.trade());
+  });
+
+  assert.equal(candleRequestCount, 2);
+  assert.equal(candleHeaders[1].has("If-None-Match"), false);
+  assert.ok(requestedPaths.some((path) => path.includes("/v1/nni/bancor/candles?interval_seconds=300")));
+  assert.ok(requestedPaths.includes("/v1/nni/bancor/market"));
+  assert.ok(requestedPaths.includes("/v1/nni/bancor/account?page=1&per_page=10"));
+  assert.ok(requestedPaths.includes("/v1/nni/bancor/trades"));
+  assert.equal(runtime!.candles?.candles[0]?.close, "0.000110000000");
+  assert.equal(runtime!.message, "交易已完成，余额和市场储备已经更新。");
 
   await act(async () => {
     renderer!.unmount();

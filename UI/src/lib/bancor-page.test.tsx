@@ -21,6 +21,7 @@ import {
   paginateBancorTrades,
   resolveBancorCandlePalette,
   resolveBancorCandleVisualState,
+  resolveBancorTradeColor,
   scaleBancorPriceDomain,
 } from "../components/BancorPage";
 import type { useBancorRuntime } from "../hooks/useBancorRuntime";
@@ -219,8 +220,8 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /aria-label="快速调整支付数量"/);
   assert.match(html, /aria-label="将当前数量减少 25%"/);
   assert.match(html, /aria-label="将当前数量减少 50%"/);
-  assert.match(html, /aria-label="减少 0\.0001"/);
-  assert.match(html, /aria-label="增加 0\.0001"/);
+  assert.match(html, /aria-label="减少 1"/);
+  assert.match(html, /aria-label="增加 1"/);
   assert.match(html, /aria-pressed="true"[^>]*>标准<\/button>/);
   assert.match(html, /aria-pressed="false"[^>]*>SWAP<\/button>/);
   assert.match(html, /滑点保护与警戒/);
@@ -314,6 +315,13 @@ test("BANCOR candlesticks follow Chinese and English market color conventions", 
   assert.equal(english.down.stroke, "#f87171");
   assert.equal(chinese.flat.stroke, "var(--theme-chart-neutral)");
   assert.equal(chinese.gap.stroke, "var(--theme-chart-gap)");
+});
+
+test("BANCOR trade records follow localized market color conventions", () => {
+  assert.equal(resolveBancorTradeColor("buy", (zh) => zh), "#f87171");
+  assert.equal(resolveBancorTradeColor("sell", (zh) => zh), "#34d399");
+  assert.equal(resolveBancorTradeColor("buy", (_zh, en) => en), "#34d399");
+  assert.equal(resolveBancorTradeColor("sell", (_zh, en) => en), "#f87171");
 });
 
 test("BANCOR candle visual state never reports a flat or empty interval as up", () => {
