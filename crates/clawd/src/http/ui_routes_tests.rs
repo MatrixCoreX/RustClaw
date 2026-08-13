@@ -86,6 +86,30 @@ fn service_control_error_response_uses_machine_fields() {
 }
 
 #[test]
+fn wechat_service_start_requires_enabled_channel_config() {
+    let root = temp_workspace_root();
+    std::fs::create_dir_all(root.join("configs/channels")).expect("channel config dir");
+    std::fs::write(
+        root.join("configs/channels/wechat.toml"),
+        r#"
+[wechat]
+enabled = false
+listen = "127.0.0.1:8792"
+clawd_base_url = "http://127.0.0.1:8787"
+api_base_url = "https://ilinkai.weixin.qq.com"
+"#,
+    )
+    .expect("write wechat config");
+    let mut state = AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root;
+
+    let failure = validate_service_start_readiness(&state, "wechatd")
+        .expect_err("disabled WeChat must not start");
+
+    assert_eq!(failure.error_code, "service_disabled");
+}
+
+#[test]
 fn workspace_update_api_error_uses_machine_token() {
     let status_snapshot = WorkspaceUpdateStatus {
         status: "running".to_string(),

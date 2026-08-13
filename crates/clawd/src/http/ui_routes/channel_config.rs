@@ -635,13 +635,26 @@ async fn update_wechat_config(
     headers: HeaderMap,
     Json(req): Json<UpdateWechatConfigRequest>,
 ) -> (StatusCode, Json<ApiResponse<WechatConfigResponse>>) {
-    if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err((status, Json(resp))) => {
+            return (
+                status,
+                Json(ApiResponse {
+                    ok: resp.ok,
+                    data: None,
+                    error: resp.error,
+                }),
+            );
+        }
+    };
+    if !identity.role.eq_ignore_ascii_case("admin") {
         return (
-            status,
+            StatusCode::FORBIDDEN,
             Json(ApiResponse {
-                ok: resp.ok,
+                ok: false,
                 data: None,
-                error: resp.error,
+                error: Some("admin_required".to_string()),
             }),
         );
     }

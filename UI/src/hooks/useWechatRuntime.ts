@@ -15,6 +15,8 @@ export interface UseWechatRuntimeParams {
   t: Translate;
   apiBase: string;
   uiAuthReady: boolean;
+  enabled: boolean;
+  serviceHealthy: boolean;
 }
 
 export function useWechatRuntime({
@@ -22,6 +24,8 @@ export function useWechatRuntime({
   t,
   apiBase,
   uiAuthReady,
+  enabled,
+  serviceHealthy,
 }: UseWechatRuntimeParams) {
   const [wechatLoginLoading, setWechatLoginLoading] = useState(false);
   const [wechatLoginError, setWechatLoginError] = useState<string | null>(null);
@@ -141,17 +145,21 @@ export function useWechatRuntime({
   };
 
   useEffect(() => {
-    if (!uiAuthReady) return;
+    if (!uiAuthReady || !enabled || !serviceHealthy) {
+      setWechatLoginStatus(null);
+      setWechatSessionKey(null);
+      return;
+    }
     void fetchWechatLoginStatus(true);
     const timer = window.setInterval(() => {
       void fetchWechatLoginStatus(true);
     }, 5000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiBase, uiAuthReady]);
+  }, [apiBase, uiAuthReady, enabled, serviceHealthy]);
 
   useEffect(() => {
-    if (!uiAuthReady) return;
+    if (!uiAuthReady || !enabled || !serviceHealthy) return;
     if (!wechatSessionKey) return;
     if (wechatLoginStatus?.connected) return;
     const timer = window.setInterval(() => {
@@ -160,7 +168,7 @@ export function useWechatRuntime({
     }, 2000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wechatSessionKey, wechatLoginStatus?.connected, apiBase, uiAuthReady]);
+  }, [wechatSessionKey, wechatLoginStatus?.connected, apiBase, uiAuthReady, enabled, serviceHealthy]);
 
   return {
     wechatLoginLoading,
