@@ -9,6 +9,7 @@ const NNI_BANCOR_DEFAULT_SLIPPAGE_BPS: u16 = 50;
 const NNI_BANCOR_MAX_SLIPPAGE_BPS: u16 = 5_000;
 const NNI_BANCOR_MARKET_TRADE_LIMIT: usize = 100;
 const NNI_BANCOR_CANDLE_PRICE_KIND: &str = "execution_average_usd_per_point";
+const NNI_BANCOR_DAILY_PRICE_KIND: &str = "pool_marginal_usd_per_point";
 
 #[derive(Debug, Deserialize)]
 struct NniBancorCandlesQuery {
@@ -18,6 +19,84 @@ struct NniBancorCandlesQuery {
     limit: Option<usize>,
     #[serde(default)]
     end_time_unix: Option<i64>,
+}
+
+fn validate_bancor_market_response(data: &Value) -> Result<(), &'static str> {
+    let object = data
+        .as_object()
+        .ok_or("nni_bancor_market_contract_invalid")?;
+    let status_is_valid = object
+        .get("status")
+        .and_then(Value::as_str)
+        .is_some_and(|value| matches!(value, "open" | "disabled" | "paused"));
+    if object.get("schema_version").and_then(Value::as_u64) != Some(1)
+        || !status_is_valid
+        || object
+            .get("market_id")
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty)
+        || object.get("point_symbol").and_then(Value::as_str) != Some("POINT")
+        || object.get("usd_symbol").and_then(Value::as_str) != Some("USD")
+        || object.get("point_scale").and_then(Value::as_u64) != Some(10_000)
+        || object.get("usd_scale").and_then(Value::as_u64) != Some(10_000)
+        || object.get("fee_bps").and_then(Value::as_u64).is_none()
+        || object.get("version").and_then(Value::as_u64).is_none()
+        || object.get("updated_at_unix").and_then(Value::as_i64).is_none()
+    {
+        return Err("nni_bancor_market_contract_invalid");
+    }
+    let current = positive_decimal(object, "marginal_price_usd_per_point")?;
+    let daily = object
+        .get("daily_marginal_price")
+        .and_then(Value::as_object)
+        .ok_or("nni_bancor_market_contract_invalid")?;
+    if daily.get("price_kind").and_then(Value::as_str) != Some(NNI_BANCOR_DAILY_PRICE_KIND)
+        || daily.get("timezone").and_then(Value::as_str) != Some("UTC")
+        || daily
+            .get("day_start_unix")
+            .and_then(Value::as_i64)
+            .is_none_or(|value| value < 0 || value % 86_400 != 0)
+        || daily.get("trade_count").and_then(Value::as_u64).is_none()
+    {
+        return Err("nni_bancor_market_contract_invalid");
+    }
+    let open = positive_decimal(daily, "open_usd_per_point")?;
+    let high = positive_decimal(daily, "high_usd_per_point")?;
+    let low = positive_decimal(daily, "low_usd_per_point")?;
+    let change = finite_decimal(daily, "change_percent")?;
+    if high < open.max(current) || low > open.min(current) || low > high {
+        return Err("nni_bancor_market_contract_invalid");
+    }
+    // The server derives change from exact reserve fractions while the public
+    // price fields are intentionally truncated to eight decimals, so the
+    // percentage cannot be reconstructed reliably from display strings here.
+    if change <= -100.0 {
+        return Err("nni_bancor_market_contract_invalid");
+    }
+    Ok(())
+}
+
+fn positive_decimal(
+    object: &serde_json::Map<String, Value>,
+    field: &str,
+) -> Result<f64, &'static str> {
+    finite_decimal(object, field).and_then(|value| {
+        (value > 0.0)
+            .then_some(value)
+            .ok_or("nni_bancor_market_contract_invalid")
+    })
+}
+
+fn finite_decimal(
+    object: &serde_json::Map<String, Value>,
+    field: &str,
+) -> Result<f64, &'static str> {
+    object
+        .get(field)
+        .and_then(Value::as_str)
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite())
+        .ok_or("nni_bancor_market_contract_invalid")
 }
 
 fn validate_bancor_candles_response(
@@ -353,6 +432,14 @@ async fn nni_bancor_market(
                 match response.json::<ApiResponse<Value>>().await {
                     Ok(body) if status.is_success() && body.ok => {
                         if let Some(mut data) = body.data {
+                            if let Err(error_code) = validate_bancor_market_response(&data) {
+                                attempts.push(json!({
+                                    "node_url": node_url,
+                                    "http_status": status.as_u16(),
+                                    "error_code": error_code,
+                                }));
+                                continue;
+                            }
                             if let Some(object) = data.as_object_mut() {
                                 object.insert("node_url".to_string(), Value::String(node_url.clone()));
                             }
@@ -1330,6 +1417,55 @@ mod nni_bancor_unit_tests {
         assert_eq!(
             normalize_bancor_candles_query(&invalid),
             Err("nni_bancor_candle_interval_invalid")
+        );
+    }
+
+    #[test]
+    fn market_response_requires_consistent_utc_daily_marginal_statistics() {
+        let valid = json!({
+            "schema_version": 1,
+            "status": "open",
+            "market_id": "point-usd-v1",
+            "point_symbol": "POINT",
+            "usd_symbol": "USD",
+            "point_scale": 10_000,
+            "usd_scale": 10_000,
+            "point_reserve_units": "999000000000",
+            "point_reserve": "99900000.0000",
+            "usd_reserve_units": "100100000",
+            "usd_reserve": "10010.0000",
+            "marginal_price_usd_per_point": "0.00010020",
+            "daily_marginal_price": {
+                "price_kind": "pool_marginal_usd_per_point",
+                "timezone": "UTC",
+                "day_start_unix": 1_799_971_200,
+                "open_usd_per_point": "0.00010000",
+                "high_usd_per_point": "0.00010100",
+                "low_usd_per_point": "0.00009900",
+                "change_percent": "0.20",
+                "trade_count": 3,
+            },
+            "fee_bps": 50,
+            "version": 3,
+            "updated_at_unix": 1_800_000_000,
+        });
+        assert_eq!(validate_bancor_market_response(&valid), Ok(()));
+
+        for field in ["price_kind", "timezone", "day_start_unix", "high_usd_per_point"] {
+            let mut invalid = valid.clone();
+            invalid["daily_marginal_price"].as_object_mut().unwrap().remove(field);
+            assert_eq!(
+                validate_bancor_market_response(&invalid),
+                Err("nni_bancor_market_contract_invalid"),
+                "{field} must be required",
+            );
+        }
+        let mut inconsistent = valid.clone();
+        inconsistent["daily_marginal_price"]["change_percent"] =
+            Value::String("-100.00".to_string());
+        assert_eq!(
+            validate_bancor_market_response(&inconsistent),
+            Err("nni_bancor_market_contract_invalid"),
         );
     }
 

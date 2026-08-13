@@ -1,6 +1,7 @@
 import {
   ArrowDownUp,
   BarChart3,
+  Calculator,
   ChevronLeft,
   ChevronRight,
   Maximize2,
@@ -14,7 +15,11 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
+import type {
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+} from "react";
 
 import {
   BANCOR_DEFAULT_SLIPPAGE_BPS,
@@ -29,6 +34,8 @@ import {
 } from "../hooks/useBancorRuntime";
 import type { useBancorRuntime } from "../hooks/useBancorRuntime";
 import type { NniBancorCandle, NniBancorQuoteResponse } from "../types/api";
+import { resolveBancorMarketDirectionColors } from "../lib/bancor-market-colors";
+import { BancorPriceChangePage } from "./BancorPriceChangePage";
 import { NniPublicKeyDisplay } from "./NniPublicKeyDisplay";
 
 type Translate = (zh: string, en: string) => string;
@@ -60,16 +67,10 @@ export function resolveBancorCandlePalette(t: Translate): {
   flat: CandleColor;
   gap: CandleColor;
 } {
-  const red = {
-    stroke: "#f87171",
-    fill: "rgba(248,113,113,0.30)",
-    volumeFill: "rgba(248,113,113,0.25)",
-  };
-  const green = {
-    stroke: "#34d399",
-    fill: "rgba(52,211,153,0.30)",
-    volumeFill: "rgba(52,211,153,0.25)",
-  };
+  const marketColors = resolveBancorMarketDirectionColors(t);
+  const byStroke = (stroke: string): CandleColor => stroke === "#f87171"
+    ? { stroke, fill: "rgba(248,113,113,0.30)", volumeFill: "rgba(248,113,113,0.25)" }
+    : { stroke, fill: "rgba(52,211,153,0.30)", volumeFill: "rgba(52,211,153,0.25)" };
   const flat = {
     stroke: "var(--theme-chart-neutral)",
     fill: "var(--theme-chart-neutral-fill)",
@@ -80,9 +81,12 @@ export function resolveBancorCandlePalette(t: Translate): {
     fill: "var(--theme-chart-surface)",
     volumeFill: "transparent",
   };
-  return t("zh", "en") === "zh"
-    ? { up: red, down: green, flat, gap }
-    : { up: green, down: red, flat, gap };
+  return {
+    up: byStroke(marketColors.up),
+    down: byStroke(marketColors.down),
+    flat,
+    gap,
+  };
 }
 
 export function resolveBancorCandleVisualState(candle: NniBancorCandle): BancorCandleVisualState {
@@ -96,6 +100,23 @@ export function resolveBancorCandleVisualState(candle: NniBancorCandle): BancorC
 export function resolveBancorTradeColor(side: "buy" | "sell", t: Translate): string {
   const palette = resolveBancorCandlePalette(t);
   return side === "buy" ? palette.up.stroke : palette.down.stroke;
+}
+
+export function formatBancorDayChangePercent(value: string | undefined): string {
+  if (value === undefined) return "—";
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return "—";
+  if (numericValue === 0) return "0.00%";
+  return `${numericValue > 0 ? "+" : ""}${value}%`;
+}
+
+export function resolveBancorDayChangeColor(value: string | undefined, t: Translate): string {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue) || numericValue === 0) {
+    return "var(--theme-chart-neutral)";
+  }
+  const palette = resolveBancorCandlePalette(t);
+  return numericValue > 0 ? palette.up.stroke : palette.down.stroke;
 }
 
 export function isBancorCandleOpen(candle: NniBancorCandle, nowUnix = Date.now() / 1_000): boolean {
@@ -285,6 +306,7 @@ export function BancorPage({
   const [inputAmount, setInputAmount] = useState("");
   const [slippagePercent, setSlippagePercent] = useState((BANCOR_DEFAULT_SLIPPAGE_BPS / 100).toFixed(2));
   const [marketTradesPage, setMarketTradesPage] = useState(1);
+  const [activeView, setActiveView] = useState<"market" | "price_change">("market");
   const {
     market,
     candles,
@@ -366,6 +388,16 @@ export function BancorPage({
     panel.querySelector<HTMLInputElement>('input[inputmode="decimal"]')?.focus({ preventScroll: true });
   };
 
+  if (activeView === "price_change") {
+    return (
+      <BancorPriceChangePage
+        market={market}
+        onBack={() => setActiveView("market")}
+        t={t}
+      />
+    );
+  }
+
   return (
     <div className="mx-auto grid w-full max-w-7xl gap-5 pb-10">
       <section className="theme-shadow-card p-5 sm:p-6">
@@ -382,15 +414,26 @@ export function BancorPage({
               )}
             </p>
           </div>
-          <button
-            type="button"
-            className="theme-secondary-btn"
-            disabled={marketLoading}
-            onClick={() => void fetchMarket()}
-          >
-            <RefreshCw className={`h-4 w-4 ${marketLoading ? "animate-spin" : ""}`} />
-            {t("刷新市场", "Refresh market")}
-          </button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              className="theme-secondary-btn"
+              data-bancor-open-price-change="true"
+              onClick={() => setActiveView("price_change")}
+            >
+              <Calculator className="h-4 w-4" />
+              {t("价格变化计算", "Price change calculator")}
+            </button>
+            <button
+              type="button"
+              className="theme-secondary-btn"
+              disabled={marketLoading}
+              onClick={() => void fetchMarket()}
+            >
+              <RefreshCw className={`h-4 w-4 ${marketLoading ? "animate-spin" : ""}`} />
+              {t("刷新市场", "Refresh market")}
+            </button>
+          </div>
         </div>
         <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           <MetricCard
@@ -402,8 +445,26 @@ export function BancorPage({
           <MetricCard
             label={t("当前边际价格", "Current marginal price")}
             value={market ? `${market.marginal_price_usd_per_point} USD` : "—"}
-            detail={t("每 1 POINT；实际成交价会随数量变化", "Per POINT; execution price changes with size")}
-          />
+          >
+            <div
+              className="mt-2 grid grid-cols-3 gap-2 border-t border-white/8 pt-2"
+              data-bancor-daily-marginal-price="UTC"
+            >
+              <DailyPriceMetric
+                label={t("今日最高", "Day high")}
+                value={market ? `${market.daily_marginal_price.high_usd_per_point} USD` : "—"}
+              />
+              <DailyPriceMetric
+                label={t("今日最低", "Day low")}
+                value={market ? `${market.daily_marginal_price.low_usd_per_point} USD` : "—"}
+              />
+              <DailyPriceMetric
+                label={t("日涨跌幅", "Day change")}
+                value={formatBancorDayChangePercent(market?.daily_marginal_price.change_percent)}
+                color={resolveBancorDayChangeColor(market?.daily_marginal_price.change_percent, t)}
+              />
+            </div>
+          </MetricCard>
           <MetricCard
             label={t("交易手续费", "Trading fee")}
             value={market ? `${(market.fee_bps / 100).toFixed(2)}%` : "—"}
@@ -1713,11 +1774,13 @@ function MetricCard({
   value,
   secondaryValue,
   detail,
+  children,
 }: {
   label: string;
   value: string;
   secondaryValue?: string;
   detail?: string;
+  children?: ReactNode;
 }) {
   const valueClassName = "mt-1 break-all text-sm font-semibold text-white sm:text-base";
   return (
@@ -1726,6 +1789,22 @@ function MetricCard({
       <p className={valueClassName}>{value}</p>
       {secondaryValue ? <p className={valueClassName}>{secondaryValue}</p> : null}
       {detail ? <p className="mt-0.5 text-[11px] leading-4 text-white/45">{detail}</p> : null}
+      {children}
+    </div>
+  );
+}
+
+function DailyPriceMetric({ label, value, color }: { label: string; value: string; color?: string }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] leading-4 text-white/40">{label}</p>
+      <p
+        className="mt-0.5 break-all font-mono text-[10px] font-semibold leading-4 text-white/75 sm:text-[11px]"
+        style={color ? { color } : undefined}
+        title={value}
+      >
+        {value}
+      </p>
     </div>
   );
 }
