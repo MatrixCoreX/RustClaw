@@ -5,8 +5,10 @@ import {
   BANCOR_DEFAULT_CANDLE_INTERVAL_SECONDS,
   BANCOR_DEFAULT_SLIPPAGE_BPS,
   BANCOR_MARKET_TRADE_LIMIT,
+  BANCOR_TRADE_PAGE_SIZE,
   BANCOR_MAX_SLIPPAGE_BPS,
   adjustBancorInputAmount,
+  buildBancorAccountPath,
   buildBancorCandlesPath,
   calculateBancorEstimatedOutput,
   calculateBancorInputFee,
@@ -20,6 +22,12 @@ import {
 test("BANCOR opens on the five-minute view by default", () => {
   assert.equal(BANCOR_DEFAULT_CANDLE_INTERVAL_SECONDS, 300);
   assert.equal(BANCOR_MARKET_TRADE_LIMIT, 100);
+  assert.equal(BANCOR_TRADE_PAGE_SIZE, 10);
+});
+
+test("BANCOR account history requests ten trades per page", () => {
+  assert.equal(buildBancorAccountPath(3), "/v1/nni/bancor/account?page=3&per_page=10");
+  assert.equal(buildBancorAccountPath(-5), "/v1/nni/bancor/account?page=1&per_page=10");
 });
 
 test("BANCOR interval projection never labels old-period candles as the new period", () => {
