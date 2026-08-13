@@ -26,6 +26,7 @@ export const BANCOR_DEFAULT_CANDLE_INTERVAL_SECONDS = 300;
 export const BANCOR_DEFAULT_SLIPPAGE_BPS = 50;
 export const BANCOR_MAX_SLIPPAGE_BPS = 5_000;
 export const BANCOR_MARKET_TRADE_LIMIT = 100;
+export const BANCOR_TRADE_PAGE_SIZE = 10;
 
 export function projectBancorCandlesForInterval(
   current: NniBancorCandlesResponse | null,
@@ -47,6 +48,14 @@ export function buildBancorCandlesPath(
   });
   if (endTimeUnix !== undefined) params.set("end_time_unix", String(Math.max(0, Math.floor(endTimeUnix))));
   return `/v1/nni/bancor/candles?${params}`;
+}
+
+export function buildBancorAccountPath(page: number): string {
+  const params = new URLSearchParams({
+    page: String(Math.max(1, Math.floor(page))),
+    per_page: String(BANCOR_TRADE_PAGE_SIZE),
+  });
+  return `/v1/nni/bancor/account?${params}`;
 }
 
 export function hasEarlierBancorCandles(response: NniBancorCandlesResponse): boolean {
@@ -296,8 +305,7 @@ export function useBancorRuntime({
   const fetchAccount = async (page = account?.page ?? 1, silent = false) => {
     if (!silent) setAccountLoading(true);
     try {
-      const params = new URLSearchParams({ page: String(Math.max(1, page)), per_page: "20" });
-      const response = await apiFetch(`/v1/nni/bancor/account?${params}`);
+      const response = await apiFetch(buildBancorAccountPath(page));
       const body = (await response.json()) as ApiResponse<NniBancorAccountResponse>;
       if (!response.ok || !body.ok || !body.data) throw new Error(readError(body, `Account load failed (${response.status})`));
       setAccount(body.data);

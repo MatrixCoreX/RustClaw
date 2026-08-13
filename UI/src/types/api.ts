@@ -1242,13 +1242,6 @@ export interface NniBancorMarketResponse {
   usd_reserve: string;
   marginal_price_usd_per_point: string;
   fee_bps: number;
-  fee_totals?: {
-    point_fee_units: string;
-    point_fee_amount: string;
-    usd_fee_units: string;
-    usd_fee_amount: string;
-    updated_at_unix: number;
-  };
   version: number;
   last_trade_id?: string | null;
   updated_at_unix: number;

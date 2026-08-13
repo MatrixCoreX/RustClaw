@@ -18,6 +18,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerE
 
 import {
   BANCOR_DEFAULT_SLIPPAGE_BPS,
+  BANCOR_TRADE_PAGE_SIZE,
   type BancorAmountAdjustment,
   adjustBancorInputAmount,
   calculateBancorEstimatedOutput,
@@ -246,6 +247,22 @@ export function calculateBancorChartGeometry(viewportWidth: number): {
   };
 }
 
+export function paginateBancorTrades<T>(items: readonly T[], requestedPage: number): {
+  items: T[];
+  page: number;
+  totalPages: number;
+} {
+  const totalPages = Math.max(1, Math.ceil(items.length / BANCOR_TRADE_PAGE_SIZE));
+  const normalizedPage = Number.isFinite(requestedPage) ? Math.floor(requestedPage) : 1;
+  const page = Math.max(1, Math.min(totalPages, normalizedPage));
+  const start = (page - 1) * BANCOR_TRADE_PAGE_SIZE;
+  return {
+    items: items.slice(start, start + BANCOR_TRADE_PAGE_SIZE),
+    page,
+    totalPages,
+  };
+}
+
 export function BancorPage({
   t,
   runtime,
@@ -262,6 +279,7 @@ export function BancorPage({
   const [tradeLayout, setTradeLayout] = useState<"standard" | "swap">("standard");
   const [inputAmount, setInputAmount] = useState("");
   const [slippagePercent, setSlippagePercent] = useState((BANCOR_DEFAULT_SLIPPAGE_BPS / 100).toFixed(2));
+  const [marketTradesPage, setMarketTradesPage] = useState(1);
   const {
     market,
     candles,
@@ -271,8 +289,6 @@ export function BancorPage({
     lastTrade,
     marketLoading,
     candlesLoading,
-    candlesOlderLoading,
-    candlesHasOlder,
     candlesError,
     candleIntervalSeconds,
     accountLoading,
@@ -285,7 +301,6 @@ export function BancorPage({
     fetchMarket,
     fetchCandles,
     changeCandleInterval,
-    loadOlderCandles,
     fetchAccount,
     fetchMarketTrades,
     preview,
@@ -316,6 +331,7 @@ export function BancorPage({
   const quotedOutput = quote?.side === side && quote.input_amount === inputAmount
     ? quote.output_amount
     : estimatedSwapOutput;
+  const paginatedMarketTrades = paginateBancorTrades(marketTrades?.trades ?? [], marketTradesPage);
   const changeSide = (next: "buy" | "sell") => {
     setSide(next);
     setInputAmount("");
@@ -371,7 +387,7 @@ export function BancorPage({
             {t("刷新市场", "Refresh market")}
           </button>
         </div>
-        <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           <MetricCard
             label={t("市场储备", "Market reserves")}
             value={market ? `${market.point_reserve} POINT` : "—"}
@@ -382,12 +398,6 @@ export function BancorPage({
             label={t("当前边际价格", "Current marginal price")}
             value={market ? `${market.marginal_price_usd_per_point} USD` : "—"}
             detail={t("每 1 POINT；实际成交价会随数量变化", "Per POINT; execution price changes with size")}
-          />
-          <MetricCard
-            label={t("累计手续费", "Cumulative fees")}
-            value={`${market?.fee_totals?.point_fee_amount ?? "0.0000"} POINT`}
-            secondaryValue={`${market?.fee_totals?.usd_fee_amount ?? "0.0000"} USD`}
-            detail={t("按支付资产分别累计", "Tracked separately by input asset")}
           />
           <MetricCard
             label={t("交易手续费", "Trading fee")}
@@ -482,28 +492,6 @@ export function BancorPage({
                 onTrade={openTradePanel}
                 t={t}
               />
-              <div
-                className="mt-3 flex flex-wrap items-center justify-center gap-2 text-xs text-white/45"
-                data-bancor-history-loader={candlesHasOlder ? "available" : "complete"}
-              >
-                {candlesHasOlder ? (
-                  <button
-                    type="button"
-                    className="theme-secondary-btn min-h-9 px-3 py-1.5 text-xs"
-                    disabled={candlesOlderLoading}
-                    onClick={() => void loadOlderCandles()}
-                  >
-                    {candlesOlderLoading
-                      ? t("正在加载更早记录…", "Loading older history…")
-                      : t("加载更早 K 线", "Load older candles")}
-                  </button>
-                ) : (
-                  <span>{t("已加载到市场起点", "Loaded to the start of this market")}</span>
-                )}
-                {candlesHasOlder && !candlesOlderLoading ? (
-                  <span>{t("加载后可用左移按钮查看", "After loading, use the left button to view them")}</span>
-                ) : null}
-              </div>
             </>
           ) : (
             <div className="flex min-h-64 flex-col items-center justify-center rounded-xl border border-dashed border-white/10 px-5 text-center">
@@ -736,7 +724,11 @@ export function BancorPage({
             )}
           </div>
           {account && account.total_pages > 1 ? (
-            <div className="mt-4 flex items-center justify-between gap-3">
+            <div
+              className="mt-4 flex items-center justify-between gap-3"
+              data-bancor-trade-pagination="account"
+              data-bancor-page-size={BANCOR_TRADE_PAGE_SIZE}
+            >
               <button type="button" className="theme-secondary-btn" disabled={accountLoading || account.page <= 1} onClick={() => void fetchAccount(account.page - 1)}>
                 {t("上一页", "Previous")}
               </button>
@@ -752,7 +744,7 @@ export function BancorPage({
           <div className="flex items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold text-white">{t("市场成交记录", "Market trade history")}</h2>
-              <p className="mt-1 text-sm text-white/50">{t("仅展示最近 100 笔全市场成交，设备公钥使用紧凑格式。", "Shows only the latest 100 market-wide trades with compact device public keys.")}</p>
+              <p className="mt-1 text-sm text-white/50">{t("仅展示最近 100 笔全市场成交。", "Shows only the latest 100 market-wide trades.")}</p>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-xs text-white/40">{marketTrades?.trades.length ?? 0} {t("笔", "trades")}</span>
@@ -761,7 +753,10 @@ export function BancorPage({
                 className="theme-icon-btn"
                 aria-label={t("刷新市场成交记录", "Refresh market trades")}
                 disabled={marketTradesLoading}
-                onClick={() => void fetchMarketTrades()}
+                onClick={() => {
+                  setMarketTradesPage(1);
+                  void fetchMarketTrades();
+                }}
               >
                 <RefreshCw className={`h-4 w-4 ${marketTradesLoading ? "animate-spin" : ""}`} />
               </button>
@@ -769,8 +764,12 @@ export function BancorPage({
           </div>
           {marketTradesError ? <p className="mt-3 text-sm text-red-200" role="alert">{marketTradesError}</p> : null}
           <div className="mt-4 grid gap-2">
-            {marketTrades?.trades.length ? marketTrades.trades.map((record) => (
-              <div key={record.trade_id} className="grid gap-2 rounded-xl border border-white/8 bg-white/[0.025] px-4 py-3 text-sm sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center">
+            {paginatedMarketTrades.items.length ? paginatedMarketTrades.items.map((record) => (
+              <div
+                key={record.trade_id}
+                className="grid gap-2 rounded-xl border border-white/8 bg-white/[0.025] px-4 py-3 text-sm sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center"
+                data-bancor-trade-row="market"
+              >
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span className="font-medium text-white/85">{record.side === "buy" ? t("买入 POINT", "Buy POINT") : t("卖出 POINT", "Sell POINT")}</span>
@@ -792,6 +791,33 @@ export function BancorPage({
               </div>
             )}
           </div>
+          {paginatedMarketTrades.totalPages > 1 ? (
+            <div
+              className="mt-4 flex items-center justify-between gap-3"
+              data-bancor-trade-pagination="market"
+              data-bancor-page-size={BANCOR_TRADE_PAGE_SIZE}
+            >
+              <button
+                type="button"
+                className="theme-secondary-btn"
+                disabled={marketTradesLoading || paginatedMarketTrades.page <= 1}
+                onClick={() => setMarketTradesPage(paginatedMarketTrades.page - 1)}
+              >
+                {t("上一页", "Previous")}
+              </button>
+              <span className="text-xs text-white/45">
+                {t("第", "Page")} {paginatedMarketTrades.page} / {paginatedMarketTrades.totalPages} {t("页", "")}
+              </span>
+              <button
+                type="button"
+                className="theme-secondary-btn"
+                disabled={marketTradesLoading || paginatedMarketTrades.page >= paginatedMarketTrades.totalPages}
+                onClick={() => setMarketTradesPage(paginatedMarketTrades.page + 1)}
+              >
+                {t("下一页", "Next")}
+              </button>
+            </div>
+          ) : null}
         </article>
       </section>
 

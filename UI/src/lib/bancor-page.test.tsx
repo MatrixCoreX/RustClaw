@@ -18,6 +18,7 @@ import {
   calculateBancorVisibleWindow,
   calculateBancorZoomViewport,
   isBancorCandleOpen,
+  paginateBancorTrades,
   resolveBancorCandlePalette,
   resolveBancorCandleVisualState,
   scaleBancorPriceDomain,
@@ -40,13 +41,6 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       usd_reserve: "10000.0000",
       marginal_price_usd_per_point: "0.00010000",
       fee_bps: 50,
-      fee_totals: {
-        point_fee_units: "12500",
-        point_fee_amount: "1.2500",
-        usd_fee_units: "5000",
-        usd_fee_amount: "0.5000",
-        updated_at_unix: 1_700_000_000,
-      },
       version: 1,
       updated_at_unix: 1_700_000_000,
     },
@@ -93,9 +87,9 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       status: "bancor_market_trades",
       market_id: "point-usd-v1",
       limit: 100 as const,
-      trades: [{
-        trade_id: "trade-market-1",
-        quote_id: "quote-market-1",
+      trades: Array.from({ length: 11 }, (_, index) => ({
+        trade_id: `trade-market-${index + 1}`,
+        quote_id: `quote-market-${index + 1}`,
         market_id: "point-usd-v1",
         device_pubkey_compact: "ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C",
         side: "sell" as const,
@@ -107,9 +101,9 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
         output_asset: "USD" as const,
         output_units: "334",
         output_amount: "0.0334",
-        market_version: 228,
-        created_at_unix: 1_700_000_000,
-      }],
+        market_version: 228 + index,
+        created_at_unix: 1_700_000_000 + index,
+      })),
     },
     quote: null,
     lastTrade: null,
@@ -170,20 +164,18 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.doesNotMatch(html, /市场状态/);
   assert.match(html, /交易手续费/);
   assert.match(html, /买入从 USD 扣除，卖出从 POINT 扣除/);
-  assert.match(html, /mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4/);
+  assert.match(html, /mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3/);
   assert.match(html, /rounded-xl border border-white\/8 bg-white\/\[0\.025\] px-3 py-2\.5/);
   assert.doesNotMatch(html, /grid gap-4 sm:grid-cols-2 xl:grid-cols-4/);
   assert.match(html, /当前手续费[：:]0\.50%/);
-  assert.match(html, /累计手续费/);
-  assert.match(html, /1\.2500 POINT/);
-  assert.match(html, /0\.5000 USD/);
-  for (const amount of ["100000000.0000 POINT", "10000.0000 USD", "1.2500 POINT", "0.5000 USD"]) {
+  assert.doesNotMatch(html, /累计手续费|Cumulative fees|按支付资产分别累计/);
+  assert.doesNotMatch(html, /1\.2500 POINT|0\.5000 USD/);
+  for (const amount of ["100000000.0000 POINT", "10000.0000 USD"]) {
     assert.match(
       html,
       new RegExp(`class="mt-1 break-all text-sm font-semibold text-white sm:text-base">${amount.replace(".", "\\.")}</p>`),
     );
   }
-  assert.match(html, /0\.5000 USD<\/p><p class="mt-0\.5 text-\[11px\][^>]*>按支付资产分别累计/);
   assert.match(html, /实际成交均价 K 线/);
   assert.match(html, /池内即时边际价/);
   assert.doesNotMatch(html, /当前 K 线价格摘要/);
@@ -245,16 +237,38 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /<rect[^>]+fill="#34d399"/);
   assert.match(html, /0\.00010005/);
   assert.match(html, /实际成交均价 K 线/);
-  assert.match(html, /加载更早 K 线/);
-  assert.match(html, /data-bancor-history-loader="available"/);
+  assert.doesNotMatch(html, /加载更早 K 线|加载后可用左移按钮查看|data-bancor-history-loader/);
   assert.doesNotMatch(html, /先查看报价|读取私人余额|设备：/);
   assert.match(html, /市场成交记录/);
   assert.match(html, /仅展示最近 100 笔全市场成交/);
+  assert.doesNotMatch(html, /设备公钥使用紧凑格式|compact device public keys/);
+  assert.equal((html.match(/data-bancor-trade-row="market"/g) ?? []).length, 10);
+  assert.match(html, /data-bancor-trade-pagination="market"/);
+  assert.match(html, /data-bancor-page-size="10"/);
   assert.match(html, /ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C/);
   assert.doesNotMatch(html, /a2c887498554••••••••331016eb/);
   assert.doesNotMatch(html, /a2c887498554407638cbec1d0ccf11264aa1ab7749bd7913fc6753fac72cfbdb/);
   assert.match(html, /grid gap-5 lg:grid-cols-2 lg:items-start/);
   assert.ok(html.indexOf("储备曲线交易公式") > html.indexOf("我的成交记录"));
+});
+
+test("BANCOR market history pagination returns ten rows and clamps page bounds", () => {
+  const trades = Array.from({ length: 23 }, (_, index) => index + 1);
+  assert.deepEqual(paginateBancorTrades(trades, 2), {
+    items: [11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+    page: 2,
+    totalPages: 3,
+  });
+  assert.deepEqual(paginateBancorTrades(trades, 99), {
+    items: [21, 22, 23],
+    page: 3,
+    totalPages: 3,
+  });
+  assert.deepEqual(paginateBancorTrades([], Number.NaN), {
+    items: [],
+    page: 1,
+    totalPages: 1,
+  });
 });
 
 test("BANCOR balance values shrink by content length without losing precision", () => {
