@@ -595,6 +595,7 @@ export default function App() {
   } = useSkillsRuntime({ apiFetch, t });
   const {
     wechatConfigLoading,
+    wechatConfigSaving,
     wechatConfigError,
     wechatConfigData,
     feishuConfigLoading,
@@ -612,6 +613,7 @@ export default function App() {
     telegramBotTokenConfigured,
     hasUnsavedTelegramConfigChanges,
     fetchWechatConfig,
+    setWechatEnabled,
     fetchFeishuConfig,
     fetchLarkConfig,
     fetchTelegramConfig,
@@ -1099,7 +1101,19 @@ export default function App() {
     t,
     apiBase,
     uiAuthReady,
+    enabled: wechatConfigData?.enabled === true,
+    serviceHealthy: health?.wechatd_healthy === true,
   });
+
+  const enableAndStartWechat = async () => {
+    const enabled = await setWechatEnabled(true);
+    if (!enabled) return;
+    const started = await controlService("wechatd", "start");
+    await fetchWechatConfig();
+    if (started) {
+      await startWechatQrLogin(true);
+    }
+  };
   const {
     feishuBindLoading,
     feishuBindError,
@@ -1852,6 +1866,7 @@ export default function App() {
               wechatQrPreviewRequested={wechatQrPreviewRequested}
               wechatLoginError={wechatLoginError}
               wechatConfigEnabled={wechatConfigData?.enabled === true}
+              wechatConfigSaving={wechatConfigSaving}
               wechatServiceHealthy={health?.wechatd_healthy === true}
               whatsappWebQrRequested={waLoginDialogOpen}
               whatsappWebLoginLoading={waLoginLoading}
@@ -1909,6 +1924,7 @@ export default function App() {
               }}
               isAdminIdentity={isAdminIdentity}
               onControlService={controlService}
+              onEnableWechat={enableAndStartWechat}
               onStartWechatQrLogin={startWechatQrLogin}
               onShowWhatsappWebQr={() => {
                 setWaLoginDialogOpen(true);

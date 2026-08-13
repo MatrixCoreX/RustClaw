@@ -33,6 +33,7 @@ export interface UseChannelConfigRuntimeParams {
 
 export function useChannelConfigRuntime({ apiFetch, t }: UseChannelConfigRuntimeParams) {
   const [wechatConfigLoading, setWechatConfigLoading] = useState(false);
+  const [wechatConfigSaving, setWechatConfigSaving] = useState(false);
   const [wechatConfigError, setWechatConfigError] = useState<string | null>(null);
   const [wechatConfigData, setWechatConfigData] = useState<WechatConfigResponse | null>(null);
   const [feishuConfigLoading, setFeishuConfigLoading] = useState(false);
@@ -63,6 +64,43 @@ export function useChannelConfigRuntime({ apiFetch, t }: UseChannelConfigRuntime
       setWechatConfigError(message);
     } finally {
       setWechatConfigLoading(false);
+    }
+  };
+
+  const setWechatEnabled = async (enabled: boolean): Promise<boolean> => {
+    if (!wechatConfigData) {
+      setWechatConfigError(t("微信配置尚未载入，请刷新后重试。", "WeChat configuration is not loaded yet. Refresh and try again."));
+      return false;
+    }
+    setWechatConfigSaving(true);
+    setWechatConfigError(null);
+    try {
+      const res = await apiFetch(`/v1/wechat/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enabled,
+          listen: wechatConfigData.listen,
+          clawd_base_url: wechatConfigData.clawd_base_url,
+          api_base_url: wechatConfigData.api_base_url,
+          wechat_uin_base64: wechatConfigData.wechat_uin_base64,
+          request_timeout_seconds: wechatConfigData.request_timeout_seconds,
+          longpoll_timeout_ms: wechatConfigData.longpoll_timeout_ms,
+          text_chunk_chars: wechatConfigData.text_chunk_chars,
+        }),
+      });
+      const body = (await res.json()) as ApiResponse<WechatConfigResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `WeChat config save failed (${res.status})`);
+      }
+      setWechatConfigData(body.data);
+      return true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      setWechatConfigError(message);
+      return false;
+    } finally {
+      setWechatConfigSaving(false);
     }
   };
 
@@ -194,6 +232,7 @@ export function useChannelConfigRuntime({ apiFetch, t }: UseChannelConfigRuntime
 
   return {
     wechatConfigLoading,
+    wechatConfigSaving,
     wechatConfigError,
     wechatConfigData,
     feishuConfigLoading,
@@ -211,6 +250,7 @@ export function useChannelConfigRuntime({ apiFetch, t }: UseChannelConfigRuntime
     telegramBotTokenConfigured,
     hasUnsavedTelegramConfigChanges,
     fetchWechatConfig,
+    setWechatEnabled,
     fetchFeishuConfig,
     fetchLarkConfig,
     fetchTelegramConfig,

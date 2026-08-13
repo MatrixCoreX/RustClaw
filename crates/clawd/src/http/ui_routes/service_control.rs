@@ -207,6 +207,18 @@ fn validate_service_start_readiness(
     service: &str,
 ) -> Result<(), ServiceControlFailure> {
     match service {
+        "wechatd" => {
+            let config = load_wechat_config_response(state).map_err(|err| {
+                ServiceControlFailure::with_data(
+                    "wechat_config_read_failed",
+                    json!({"detail": err.to_string()}),
+                )
+            })?;
+            if !config.enabled {
+                return Err(ServiceControlFailure::new("service_disabled"));
+            }
+            Ok(())
+        }
         "feishud" => {
             let config = load_feishu_config_response(state, None).map_err(|err| {
                 ServiceControlFailure::with_data(

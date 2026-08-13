@@ -27,7 +27,7 @@ export function useServiceActionsRuntime({
   const [serviceActionLoading, setServiceActionLoading] = useState<Record<string, boolean>>({});
   const [serviceActionMessage, setServiceActionMessage] = useState<ServiceActionNotice | null>(null);
 
-  const controlService = async (serviceName: ServiceName, action: ServiceAction) => {
+  const controlService = async (serviceName: ServiceName, action: ServiceAction): Promise<boolean> => {
     setServiceActionMessage(null);
     setServiceActionLoading((prev) => ({ ...prev, [serviceName]: true }));
     try {
@@ -40,7 +40,7 @@ export function useServiceActionsRuntime({
           tone: "error",
           text: formatServiceActionError(serviceName, action, serviceActionErrorCode(body), t),
         });
-        return;
+        return false;
       }
       setServiceActionMessage({
         tone: "success",
@@ -48,11 +48,13 @@ export function useServiceActionsRuntime({
       });
       await sleep(800);
       await onHealthRefresh();
+      return true;
     } catch {
       setServiceActionMessage({
         tone: "error",
         text: formatServiceActionError(serviceName, action, "service_action_request_failed", t),
       });
+      return false;
     } finally {
       setServiceActionLoading((prev) => ({ ...prev, [serviceName]: false }));
     }

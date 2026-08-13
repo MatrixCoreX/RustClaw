@@ -1,4 +1,4 @@
-import { Database, Loader2, LogOut, QrCode, RefreshCw, Server, Square } from "lucide-react";
+import { Database, Loader2, LogOut, Power, QrCode, RefreshCw, Server, Square } from "lucide-react";
 
 import type {
   ServiceActionNotice,
@@ -124,6 +124,7 @@ export interface CommunicationSetupPageProps {
   wechatQrPreviewRequested: boolean;
   wechatLoginError: string | null;
   wechatConfigEnabled: boolean;
+  wechatConfigSaving: boolean;
   wechatServiceHealthy: boolean;
   whatsappWebQrRequested: boolean;
   whatsappWebLoginLoading: boolean;
@@ -147,6 +148,7 @@ export interface CommunicationSetupPageProps {
   larkSetup: AgentAppSetupState;
   isAdminIdentity: boolean;
   onControlService: (serviceName: ServiceName, action: ServiceAction) => unknown | Promise<unknown>;
+  onEnableWechat: () => unknown | Promise<unknown>;
   onStartWechatQrLogin: (force?: boolean) => unknown | Promise<unknown>;
   onShowWhatsappWebQr: () => unknown | Promise<unknown>;
   onRefreshWhatsappWebLogin: () => unknown | Promise<unknown>;
@@ -319,6 +321,7 @@ export function CommunicationSetupPage({
   wechatQrPreviewRequested,
   wechatLoginError,
   wechatConfigEnabled,
+  wechatConfigSaving,
   wechatServiceHealthy,
   whatsappWebQrRequested,
   whatsappWebLoginLoading,
@@ -342,6 +345,7 @@ export function CommunicationSetupPage({
   larkSetup,
   isAdminIdentity,
   onControlService,
+  onEnableWechat,
   onStartWechatQrLogin,
   onShowWhatsappWebQr,
   onRefreshWhatsappWebLogin,
@@ -466,17 +470,31 @@ export function CommunicationSetupPage({
                 ) : null}
 
                 <div className="channel-setup-actions mt-auto flex flex-wrap gap-2">
-                  <ChannelServiceControls
-                    t={t}
-                    serviceName="wechatd"
-                    serviceLabelZh="微信"
-                    serviceLabelEn="WeChat"
-                    healthy={wechatServiceHealthy}
-                    loading={Boolean(serviceActionLoading.wechatd)}
-                    disabled={!wechatConfigEnabled}
-                    className="px-4 py-2.5"
-                    onControlService={onControlService}
-                  />
+                  {wechatConfigEnabled ? (
+                    <ChannelServiceControls
+                      t={t}
+                      serviceName="wechatd"
+                      serviceLabelZh="微信"
+                      serviceLabelEn="WeChat"
+                      healthy={wechatServiceHealthy}
+                      loading={Boolean(serviceActionLoading.wechatd)}
+                      disabled={false}
+                      className="px-4 py-2.5"
+                      onControlService={onControlService}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void onEnableWechat()}
+                      disabled={wechatConfigSaving || Boolean(serviceActionLoading.wechatd) || !isAdminIdentity}
+                      className="theme-accent-btn px-4 py-2.5 text-sm"
+                    >
+                      {wechatConfigSaving || serviceActionLoading.wechatd
+                        ? <Loader2 className="h-4 w-4 animate-spin" />
+                        : <Power className="h-4 w-4" />}
+                      {t("启用微信并开始绑定", "Enable WeChat and start setup")}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => void onStartWechatQrLogin(true)}
