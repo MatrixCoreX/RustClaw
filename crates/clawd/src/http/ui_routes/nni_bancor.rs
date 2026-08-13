@@ -7,6 +7,8 @@ const NNI_BANCOR_CANDLE_INTERVALS: [u64; 8] =
     [60, 300, 900, 3_600, 14_400, 86_400, 604_800, 31_536_000];
 const NNI_BANCOR_DEFAULT_SLIPPAGE_BPS: u16 = 50;
 const NNI_BANCOR_MAX_SLIPPAGE_BPS: u16 = 5_000;
+const NNI_BANCOR_MARKET_TRADE_LIMIT: usize = 100;
+const NNI_BANCOR_CANDLE_PRICE_KIND: &str = "execution_average_usd_per_point";
 
 #[derive(Debug, Deserialize)]
 struct NniBancorCandlesQuery {
@@ -16,6 +18,129 @@ struct NniBancorCandlesQuery {
     limit: Option<usize>,
     #[serde(default)]
     end_time_unix: Option<i64>,
+}
+
+fn validate_bancor_candles_response(
+    data: &Value,
+    expected_interval_seconds: u64,
+    expected_limit: usize,
+) -> Result<(), &'static str> {
+    let object = data
+        .as_object()
+        .ok_or("nni_bancor_candles_contract_invalid")?;
+    if object.get("schema_version").and_then(Value::as_u64) != Some(1)
+        || object.get("status").and_then(Value::as_str) != Some("bancor_candles")
+        || object
+            .get("market_id")
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty)
+        || object
+            .get("market_version")
+            .and_then(Value::as_u64)
+            .is_none()
+        || object
+            .get("market_created_at_unix")
+            .and_then(Value::as_i64)
+            .is_none_or(|value| value < 0)
+        || object.get("price_kind").and_then(Value::as_str) != Some(NNI_BANCOR_CANDLE_PRICE_KIND)
+        || object.get("interval_seconds").and_then(Value::as_u64) != Some(expected_interval_seconds)
+        || object.get("price_scale").and_then(Value::as_u64) != Some(1_000_000_000_000)
+        || object.get("price_decimal_places").and_then(Value::as_u64) != Some(12)
+    {
+        return Err("nni_bancor_candles_contract_invalid");
+    }
+    let range_start = object
+        .get("start_time_unix")
+        .and_then(Value::as_i64)
+        .filter(|value| *value >= 0)
+        .ok_or("nni_bancor_candles_contract_invalid")?;
+    let range_end = object
+        .get("end_time_unix")
+        .and_then(Value::as_i64)
+        .filter(|value| *value >= range_start)
+        .ok_or("nni_bancor_candles_contract_invalid")?;
+    let candles = object
+        .get("candles")
+        .and_then(Value::as_array)
+        .ok_or("nni_bancor_candles_contract_invalid")?;
+    if candles.len() > expected_limit {
+        return Err("nni_bancor_candles_contract_invalid");
+    }
+    let interval_seconds = i64::try_from(expected_interval_seconds)
+        .map_err(|_| "nni_bancor_candles_contract_invalid")?;
+    let mut previous_end = None;
+    for candle in candles {
+        let candle = candle
+            .as_object()
+            .ok_or("nni_bancor_candles_contract_invalid")?;
+        let bucket_start = candle
+            .get("bucket_start_unix")
+            .and_then(Value::as_i64)
+            .filter(|value| *value >= range_start)
+            .ok_or("nni_bancor_candles_contract_invalid")?;
+        let bucket_end = candle
+            .get("bucket_end_unix")
+            .and_then(Value::as_i64)
+            .filter(|value| *value > bucket_start && *value <= range_end)
+            .ok_or("nni_bancor_candles_contract_invalid")?;
+        let bucket_span = bucket_end - bucket_start;
+        let span_is_valid = if expected_interval_seconds == 31_536_000 {
+            (31_536_000..=31_622_400).contains(&bucket_span)
+        } else {
+            bucket_span == interval_seconds
+        };
+        if !span_is_valid || previous_end.is_some_and(|value| bucket_start < value) {
+            return Err("nni_bancor_candles_contract_invalid");
+        }
+        previous_end = Some(bucket_end);
+
+        let mut prices = [0.0_f64; 4];
+        for (index, field) in ["open", "high", "low", "close"].iter().enumerate() {
+            prices[index] = candle
+                .get(*field)
+                .and_then(Value::as_str)
+                .and_then(|value| value.parse::<f64>().ok())
+                .filter(|value| value.is_finite() && *value > 0.0)
+                .ok_or("nni_bancor_candles_contract_invalid")?;
+        }
+        let [open, high, low, close] = prices;
+        if high < open.max(close) || low > open.min(close) || low > high {
+            return Err("nni_bancor_candles_contract_invalid");
+        }
+        for field in ["point_volume_units", "usd_volume_units"] {
+            if candle
+                .get(field)
+                .and_then(Value::as_str)
+                .is_none_or(|value| {
+                    value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit())
+                })
+            {
+                return Err("nni_bancor_candles_contract_invalid");
+            }
+        }
+        for field in ["point_volume", "usd_volume"] {
+            if candle
+                .get(field)
+                .and_then(Value::as_str)
+                .and_then(|value| value.parse::<f64>().ok())
+                .is_none_or(|value| !value.is_finite() || value < 0.0)
+            {
+                return Err("nni_bancor_candles_contract_invalid");
+            }
+        }
+        let trade_count = candle
+            .get("trade_count")
+            .and_then(Value::as_u64)
+            .ok_or("nni_bancor_candles_contract_invalid")?;
+        let has_trades = candle
+            .get("has_trades")
+            .and_then(Value::as_bool)
+            .ok_or("nni_bancor_candles_contract_invalid")?;
+        if has_trades != (trade_count > 0) {
+            return Err("nni_bancor_candles_contract_invalid");
+        }
+    }
+    Ok(())
 }
 
 fn encode_base58(bytes: &[u8]) -> String {
@@ -85,10 +210,22 @@ fn compact_bancor_device_pubkey(value: &str) -> Option<String> {
         .then(|| encode_base58(&compressed))
 }
 
-fn sanitize_bancor_market_trade_pubkeys(data: &mut Value) {
-    let Some(trades) = data.get_mut("trades").and_then(Value::as_array_mut) else {
+fn normalize_bancor_market_trades(data: &mut Value) {
+    let Some(object) = data.as_object_mut() else {
         return;
     };
+    object.remove("page");
+    object.remove("per_page");
+    object.remove("total");
+    object.remove("total_pages");
+    object.insert(
+        "limit".to_string(),
+        Value::Number(NNI_BANCOR_MARKET_TRADE_LIMIT.into()),
+    );
+    let Some(trades) = object.get_mut("trades").and_then(Value::as_array_mut) else {
+        return;
+    };
+    trades.truncate(NNI_BANCOR_MARKET_TRADE_LIMIT);
     for trade in trades {
         let Some(record) = trade.as_object_mut() else {
             continue;
@@ -308,8 +445,7 @@ async fn nni_bancor_candles(
         {
             request = request.header("if-none-match", if_none_match);
         }
-        match request.send().await
-        {
+        match request.send().await {
             Ok(response) => {
                 let status = response.status();
                 let etag = response
@@ -336,6 +472,16 @@ async fn nni_bancor_candles(
                 match response.json::<ApiResponse<Value>>().await {
                     Ok(body) if status.is_success() && body.ok => {
                         if let Some(mut data) = body.data {
+                            if let Err(error_code) =
+                                validate_bancor_candles_response(&data, interval_seconds, limit)
+                            {
+                                attempts.push(json!({
+                                    "node_url": node_url,
+                                    "http_status": status.as_u16(),
+                                    "error_code": error_code,
+                                }));
+                                continue;
+                            }
                             if let Some(object) = data.as_object_mut() {
                                 object.insert(
                                     "node_url".to_string(),
@@ -399,7 +545,6 @@ async fn nni_bancor_candles(
 async fn nni_bancor_market_trades(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Query(query): Query<NniRequestRecordsQuery>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
     if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
         return (
@@ -411,8 +556,6 @@ async fn nni_bancor_market_trades(
             }),
         );
     }
-    let page = query.page.unwrap_or(1).max(1);
-    let per_page = query.per_page.unwrap_or(20).clamp(1, 100);
     let config = match read_nni_config(&state) {
         Ok(config) => config,
         Err(err) => {
@@ -425,8 +568,7 @@ async fn nni_bancor_market_trades(
     };
     let mut attempts = Vec::new();
     for node_url in &config.remote_nodes {
-        let endpoint =
-            format!("{node_url}/v1/nni/server/bancor/trades?page={page}&per_page={per_page}");
+        let endpoint = format!("{node_url}/v1/nni/server/bancor/trades");
         match state
             .core
             .http_client
@@ -440,7 +582,7 @@ async fn nni_bancor_market_trades(
                 match response.json::<ApiResponse<Value>>().await {
                     Ok(body) if status.is_success() && body.ok => {
                         if let Some(mut data) = body.data {
-                            sanitize_bancor_market_trade_pubkeys(&mut data);
+                            normalize_bancor_market_trades(&mut data);
                             if let Some(object) = data.as_object_mut() {
                                 object.insert(
                                     "node_url".to_string(),
@@ -1188,6 +1330,135 @@ mod nni_bancor_unit_tests {
         assert_eq!(
             normalize_bancor_candles_query(&invalid),
             Err("nni_bancor_candle_interval_invalid")
+        );
+    }
+
+    #[test]
+    fn candle_response_requires_price_semantics_and_market_series_identity() {
+        let valid = json!({
+            "schema_version": 1,
+            "status": "bancor_candles",
+            "market_id": "point-usd-v1",
+            "market_version": 7,
+            "market_created_at_unix": 1_800_000_000,
+            "price_kind": "execution_average_usd_per_point",
+            "interval_seconds": 300,
+            "start_time_unix": 1_800_000_000,
+            "end_time_unix": 1_800_000_300,
+            "price_scale": 1_000_000_000_000_u64,
+            "price_decimal_places": 12,
+            "candles": [],
+        });
+        assert_eq!(validate_bancor_candles_response(&valid, 300, 120), Ok(()));
+
+        for field in ["market_version", "market_created_at_unix", "price_kind"] {
+            let mut invalid = valid.clone();
+            invalid.as_object_mut().unwrap().remove(field);
+            assert_eq!(
+                validate_bancor_candles_response(&invalid, 300, 120),
+                Err("nni_bancor_candles_contract_invalid"),
+                "{field} must be required",
+            );
+        }
+        let mut wrong_price_kind = valid.clone();
+        wrong_price_kind["price_kind"] =
+            Value::String("post_trade_marginal_usd_per_point".to_string());
+        assert_eq!(
+            validate_bancor_candles_response(&wrong_price_kind, 300, 120),
+            Err("nni_bancor_candles_contract_invalid"),
+        );
+    }
+
+    #[test]
+    fn candle_response_must_match_the_requested_interval_and_page_limit() {
+        let payload = json!({
+            "schema_version": 1,
+            "status": "bancor_candles",
+            "market_id": "point-usd-v1",
+            "market_version": 7,
+            "market_created_at_unix": 1_800_000_000,
+            "price_kind": "execution_average_usd_per_point",
+            "interval_seconds": 60,
+            "start_time_unix": 1_800_000_000,
+            "end_time_unix": 1_800_000_120,
+            "price_scale": 1_000_000_000_000_u64,
+            "price_decimal_places": 12,
+            "candles": [{}, {}],
+        });
+        assert_eq!(
+            validate_bancor_candles_response(&payload, 300, 2),
+            Err("nni_bancor_candles_contract_invalid"),
+        );
+        assert_eq!(
+            validate_bancor_candles_response(&payload, 60, 1),
+            Err("nni_bancor_candles_contract_invalid"),
+        );
+    }
+
+    #[test]
+    fn candle_response_rejects_malformed_buckets_prices_and_trade_state() {
+        let valid_candle = json!({
+            "bucket_start_unix": 1_800_000_000,
+            "bucket_end_unix": 1_800_000_300,
+            "open": "0.000100000000",
+            "high": "0.000110000000",
+            "low": "0.000090000000",
+            "close": "0.000105000000",
+            "point_volume_units": "10000",
+            "point_volume": "1.0000",
+            "usd_volume_units": "1",
+            "usd_volume": "0.0001",
+            "trade_count": 1,
+            "has_trades": true,
+        });
+        let envelope = |candles: Value| {
+            json!({
+                "schema_version": 1,
+                "status": "bancor_candles",
+                "market_id": "point-usd-v1",
+                "market_version": 7,
+                "market_created_at_unix": 1_800_000_000,
+                "price_kind": "execution_average_usd_per_point",
+                "interval_seconds": 300,
+                "start_time_unix": 1_800_000_000,
+                "end_time_unix": 1_800_000_600,
+                "price_scale": 1_000_000_000_000_u64,
+                "price_decimal_places": 12,
+                "candles": candles,
+            })
+        };
+        assert_eq!(
+            validate_bancor_candles_response(
+                &envelope(Value::Array(vec![valid_candle.clone()])),
+                300,
+                120,
+            ),
+            Ok(()),
+        );
+
+        let mut reversed_range = valid_candle.clone();
+        reversed_range["bucket_end_unix"] = Value::Number(1_799_999_999.into());
+        let mut invalid_high = valid_candle.clone();
+        invalid_high["high"] = Value::String("0.000099000000".to_string());
+        let mut inconsistent_trade_state = valid_candle.clone();
+        inconsistent_trade_state["has_trades"] = Value::Bool(false);
+        for candle in [reversed_range, invalid_high, inconsistent_trade_state] {
+            assert_eq!(
+                validate_bancor_candles_response(&envelope(Value::Array(vec![candle])), 300, 120,),
+                Err("nni_bancor_candles_contract_invalid"),
+            );
+        }
+
+        let mut later = valid_candle.clone();
+        later["bucket_start_unix"] = Value::Number(1_800_000_200.into());
+        later["bucket_end_unix"] = Value::Number(1_800_000_500.into());
+        assert_eq!(
+            validate_bancor_candles_response(
+                &envelope(Value::Array(vec![valid_candle, later])),
+                300,
+                120,
+            ),
+            Err("nni_bancor_candles_contract_invalid"),
         );
     }
 

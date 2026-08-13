@@ -110,6 +110,7 @@ fn planner_capability_hint_includes_structured_contract() {
         idempotent: Some(true),
         execution_mode: Some(CapabilityExecutionMode::AsyncRequired),
         timeout_seconds: None,
+        resource_request: None,
         async_adapter_kind: Some("media_job_poll".to_string()),
         isolation_profile: Some(CapabilityIsolationProfile::ReadOnly),
         network_access: Some(false),

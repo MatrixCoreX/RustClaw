@@ -48,6 +48,20 @@
   --theme-scrollbar-thumb: rgba(255, 150, 96, 0.4);
   --theme-scrollbar-thumb-hover: rgba(255, 161, 114, 0.56);
   --theme-scrollbar-thumb-active: rgba(255, 171, 132, 0.68);
+  --theme-chart-surface: #10151e;
+  --theme-chart-grid: rgba(246, 242, 234, 0.12);
+  --theme-chart-grid-soft: rgba(246, 242, 234, 0.075);
+  --theme-chart-label: rgba(246, 242, 234, 0.58);
+  --theme-chart-label-strong: rgba(246, 242, 234, 0.82);
+  --theme-chart-crosshair: rgba(246, 242, 234, 0.48);
+  --theme-chart-tooltip-bg: rgba(15, 23, 42, 0.96);
+  --theme-chart-tooltip-text: rgba(255, 255, 255, 0.92);
+  --theme-chart-close-line: #7dd3fc;
+  --theme-chart-neutral: #aab5c4;
+  --theme-chart-neutral-fill: #10151e;
+  --theme-chart-neutral-volume: rgba(170, 181, 196, 0.3);
+  --theme-chart-gap: #8793a3;
+  --theme-chart-open: #fbbf24;
 }
 
 :root[data-theme="light"] {
@@ -93,6 +107,20 @@
   --theme-scrollbar-thumb: rgba(73, 91, 125, 0.38);
   --theme-scrollbar-thumb-hover: rgba(65, 82, 116, 0.54);
   --theme-scrollbar-thumb-active: rgba(58, 74, 107, 0.66);
+  --theme-chart-surface: #e3e6e9;
+  --theme-chart-grid: rgba(37, 42, 48, 0.2);
+  --theme-chart-grid-soft: rgba(37, 42, 48, 0.12);
+  --theme-chart-label: rgba(37, 42, 48, 0.72);
+  --theme-chart-label-strong: rgba(37, 42, 48, 0.9);
+  --theme-chart-crosshair: rgba(37, 42, 48, 0.58);
+  --theme-chart-tooltip-bg: rgba(43, 49, 57, 0.94);
+  --theme-chart-tooltip-text: rgba(248, 250, 252, 0.96);
+  --theme-chart-close-line: #0369a1;
+  --theme-chart-neutral: #5f6b7a;
+  --theme-chart-neutral-fill: #e3e6e9;
+  --theme-chart-neutral-volume: rgba(74, 85, 104, 0.32);
+  --theme-chart-gap: #64748b;
+  --theme-chart-open: #a16207;
 }
 
 @layer base {
@@ -175,6 +203,11 @@
     border-color: var(--theme-border);
     background: var(--theme-card-strong);
     box-shadow: none;
+  }
+
+  .theme-chart-surface {
+    border-color: var(--theme-border);
+    background: var(--theme-chart-surface);
   }
 
   .theme-shadow-card {

@@ -111,6 +111,20 @@ fn invalid_runtime_timeout_limit_is_rejected() {
 }
 
 #[test]
+fn version_lease_mode_defaults_to_standalone_runner_ownership() {
+    assert_eq!(
+        parse_version_lease_mode(None).expect("default mode"),
+        VersionLeaseMode::RunnerAcquire
+    );
+    assert_eq!(
+        parse_version_lease_mode(Some("host_held")).expect("host-held mode"),
+        VersionLeaseMode::HostHeld
+    );
+    assert!(parse_version_lease_mode(Some("runner_handoff")).is_err());
+    assert!(parse_version_lease_mode(Some("skip_lease")).is_err());
+}
+
+#[test]
 fn runner_overwrites_child_binding_with_the_verified_actual_binding() {
     let response = SkillResponse {
         request_id: "request-1".to_string(),

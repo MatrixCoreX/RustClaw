@@ -1882,7 +1882,9 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
     );
 
     let dispatch_queue = skill_dispatch_queue_selection(state, task, &skill_name, &args);
-    let resource_request = state.skill_resource_request_for_dispatch(&skill_name);
+    let action = skill_action_token(&args);
+    let resource_request =
+        state.skill_resource_request_for_dispatch(&skill_name, action.as_deref());
     let configured_skill_ceiling = state
         .skill_max_concurrency_for_dispatch(&skill_name)
         .unwrap_or(state.skill_rt.skill_global_max_concurrency);

@@ -504,6 +504,7 @@ def _build_transcribe_command(request: dict[str, Any], args: dict[str, Any], out
     assert raw is not None
     input_path = _input_path(request, raw)
     language = _string(args, "language", default="auto", max_length=32) or "auto"
+    target_language = _target_transcript_language(request, args)
     command = _tool("video_transcriber.py")
     command.extend(
         [
@@ -514,7 +515,11 @@ def _build_transcribe_command(request: dict[str, Any], args: dict[str, Any], out
             "--language",
             language,
             "--no-progress",
-            "--no-simplify-chinese",
+            (
+                "--simplify-chinese"
+                if _transcript_requires_simplified_chinese(target_language)
+                else "--no-simplify-chinese"
+            ),
         ]
     )
     flag_map = {
@@ -1142,6 +1147,13 @@ def _target_transcript_language(
         if isinstance(value, str) and value.strip():
             return value.strip()
     return "preserve-source-language"
+
+
+def _transcript_requires_simplified_chinese(language: str) -> bool:
+    normalized = language.strip().replace("_", "-").lower()
+    return normalized in {"zh", "zh-cn", "zh-sg", "zh-hans"} or normalized.startswith(
+        "zh-hans-"
+    )
 
 
 def _prepare_transcription_review_contract(

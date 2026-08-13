@@ -71,24 +71,6 @@ pub(crate) struct PromptMemoryContext {
     pub(crate) recalled: Vec<(String, String)>,
 }
 
-pub(crate) fn prepare_prompt_with_memory_for_policy(
-    state: &AppState,
-    task: &ClaimedTask,
-    prompt: &str,
-    planner_decision: &MemoryUseDecision,
-    chat_decision: &MemoryUseDecision,
-) -> PromptMemoryContext {
-    let settings = super::settings::revocation_fenced_task_memory_settings(state, task, None);
-    prepare_prompt_with_memory_for_policy_snapshot(
-        state,
-        task,
-        prompt,
-        planner_decision,
-        chat_decision,
-        settings.as_ref(),
-    )
-}
-
 pub(crate) fn prepare_prompt_with_memory_for_policy_snapshot(
     state: &AppState,
     task: &ClaimedTask,
@@ -665,6 +647,7 @@ fn estimate_text_tokens(text: &str) -> usize {
     }
 }
 
+#[cfg(test)]
 pub(crate) async fn maybe_refresh_long_term_summary(
     state: &AppState,
     task: &ClaimedTask,
@@ -1173,6 +1156,7 @@ fn stable_hash64(input: &str) -> u64 {
     hash
 }
 
+#[cfg(test)]
 pub(crate) fn insert_memory(
     state: &AppState,
     user_id: i64,
@@ -1185,31 +1169,6 @@ pub(crate) fn insert_memory(
     max_chars: usize,
 ) -> anyhow::Result<()> {
     crate::memory::insert_memory(
-        state,
-        user_id,
-        chat_id,
-        user_key,
-        channel,
-        external_chat_id,
-        role,
-        content,
-        max_chars,
-        crate::memory::MemoryWriteKind::Default,
-    )
-}
-
-pub(crate) fn insert_memory_with_id(
-    state: &AppState,
-    user_id: i64,
-    chat_id: i64,
-    user_key: Option<&str>,
-    channel: &str,
-    external_chat_id: Option<&str>,
-    role: &str,
-    content: &str,
-    max_chars: usize,
-) -> anyhow::Result<Option<i64>> {
-    crate::memory::insert_memory_with_id(
         state,
         user_id,
         chat_id,
@@ -1236,33 +1195,6 @@ pub(crate) fn insert_memory_with_kind(
     write_kind: crate::memory::MemoryWriteKind,
 ) -> anyhow::Result<()> {
     crate::memory::insert_memory(
-        state,
-        user_id,
-        chat_id,
-        user_key,
-        channel,
-        external_chat_id,
-        role,
-        content,
-        max_chars,
-        write_kind,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn insert_memory_with_kind_and_id(
-    state: &AppState,
-    user_id: i64,
-    chat_id: i64,
-    user_key: Option<&str>,
-    channel: &str,
-    external_chat_id: Option<&str>,
-    role: &str,
-    content: &str,
-    max_chars: usize,
-    write_kind: crate::memory::MemoryWriteKind,
-) -> anyhow::Result<Option<i64>> {
-    crate::memory::insert_memory_with_id(
         state,
         user_id,
         chat_id,

@@ -37,6 +37,7 @@ const DURABLE_GLOBAL_SLOT_ROOT_ENV: &str = "APP_DURABLE_GLOBAL_SLOT_ROOT";
 const DURABLE_GLOBAL_MAX_CONCURRENCY_ENV: &str = "APP_DURABLE_GLOBAL_MAX_CONCURRENCY";
 const DURABLE_SKILL_SLOT_ROOT_ENV: &str = "APP_DURABLE_SKILL_SLOT_ROOT";
 const DURABLE_SKILL_MAX_CONCURRENCY_ENV: &str = "APP_DURABLE_SKILL_MAX_CONCURRENCY";
+const VERSION_LEASE_MODE_ENV: &str = "APP_SKILL_VERSION_LEASE_MODE";
 
 struct DurableJobRuntime {
     directory: PathBuf,
@@ -113,6 +114,14 @@ struct SkillRequest {
     expected_admission_receipt_digest: Option<String>,
     args: Value,
     context: Option<Value>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum VersionLeaseMode {
+    #[default]
+    RunnerAcquire,
+    HostHeld,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -388,17 +397,29 @@ async fn execute_skill(
     binding.policy_digest = req.expected_policy_digest.clone();
     binding.admission_receipt_digest = req.expected_admission_receipt_digest.clone();
 
-    let _version_lease = match acquire_installed_version_lease(&req, &child_launch) {
-        Ok(lease) => lease,
+    let version_lease_mode = match configured_version_lease_mode_from_env() {
+        Ok(mode) => mode,
         Err(detail) => {
             return runner_error_response(
                 req.request_id,
-                "runner_version_lease_failed",
-                "skill_runner.version_lease_failed",
+                "runner_version_lease_mode_invalid",
+                "skill_runner.version_lease_mode_invalid",
                 detail,
             );
         }
     };
+    let _version_lease =
+        match acquire_installed_version_lease(&req, &child_launch, version_lease_mode) {
+            Ok(lease) => lease,
+            Err(detail) => {
+                return runner_error_response(
+                    req.request_id,
+                    "runner_version_lease_failed",
+                    "skill_runner.version_lease_failed",
+                    detail,
+                );
+            }
+        };
     if let Err(detail) = materialize_child_secret_references(&mut child_launch) {
         return runner_error_response(
             req.request_id,
@@ -643,8 +664,9 @@ fn runner_error_response(
 fn acquire_installed_version_lease(
     request: &SkillRequest,
     launch: &ChildLaunch,
+    mode: VersionLeaseMode,
 ) -> Result<Option<skill_sdk::receipt::SkillVersionLease>, String> {
-    if !launch.installed {
+    if !launch.installed || mode == VersionLeaseMode::HostHeld {
         return Ok(None);
     }
     let install_root = launch
@@ -654,15 +676,31 @@ fn acquire_installed_version_lease(
     let package_root = std::env::var_os("APP_SKILL_PACKAGES_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("data/skill-packages"));
-    skill_sdk::InstallReceiptStore::new(package_root)
-        .acquire_version_lease(&request.skill_name, install_root)
-        .map(Some)
-        .map_err(|error| {
-            format!(
-                "runner_version_lease_failed: code={} detail={}",
-                error.code, error.detail
-            )
-        })
+    let store = skill_sdk::InstallReceiptStore::new(package_root);
+    let lease = match mode {
+        VersionLeaseMode::RunnerAcquire => {
+            store.acquire_version_lease(&request.skill_name, install_root)
+        }
+        VersionLeaseMode::HostHeld => unreachable!("host-held lease returned above"),
+    };
+    lease.map(Some).map_err(|error| {
+        format!(
+            "runner_version_lease_failed: code={} detail={}",
+            error.code, error.detail
+        )
+    })
+}
+
+fn configured_version_lease_mode_from_env() -> Result<VersionLeaseMode, String> {
+    parse_version_lease_mode(std::env::var(VERSION_LEASE_MODE_ENV).ok().as_deref())
+}
+
+fn parse_version_lease_mode(value: Option<&str>) -> Result<VersionLeaseMode, String> {
+    match value {
+        None | Some("") | Some("runner_acquire") => Ok(VersionLeaseMode::RunnerAcquire),
+        Some("host_held") => Ok(VersionLeaseMode::HostHeld),
+        Some(value) => Err(format!("invalid {VERSION_LEASE_MODE_ENV}: {value}")),
+    }
 }
 
 fn materialize_child_secret_references(launch: &mut ChildLaunch) -> Result<(), String> {

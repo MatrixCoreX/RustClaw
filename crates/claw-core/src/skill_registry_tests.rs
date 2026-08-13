@@ -205,6 +205,37 @@ resource_request = { class = "memory", memory_mb = 1048577 }
 }
 
 #[test]
+fn action_resource_request_overrides_the_skill_default() {
+    let registry = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "media"
+resource_request = { class = "cpu", memory_mb = 2048 }
+planner_capabilities = [
+  { name = "media.capabilities", action = "capabilities", resource_request = { class = "general", memory_mb = 128 } },
+  { name = "media.transcribe", action = "transcribe" },
+]
+"#,
+    )
+    .expect("action resource request");
+
+    assert_eq!(
+        registry
+            .resolved_resource_request("media", Some("capabilities"))
+            .expect("action request")
+            .memory_mb,
+        128
+    );
+    assert_eq!(
+        registry
+            .resolved_resource_request("media", Some("transcribe"))
+            .expect("skill fallback")
+            .memory_mb,
+        2048
+    );
+}
+
+#[test]
 fn planner_visible_defaults_true_and_can_hide_runtime_backing_tools() {
     let toml = r#"
 [[skills]]

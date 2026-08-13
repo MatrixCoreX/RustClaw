@@ -595,11 +595,31 @@ PY
 
 ensure_deployed_ui_readable() {
   local ui_root="$1"
-  if [[ -w "$ui_root" ]]; then
-    chmod -R a+rX "$ui_root"
-  else
-    sudo chmod -R a+rX "$ui_root"
+  if chmod -R a+rX "$ui_root" 2>/dev/null; then
+    return 0
   fi
+  if command -v sudo >/dev/null 2>&1 && sudo -n chmod -R a+rX "$ui_root" 2>/dev/null; then
+    return 0
+  fi
+  python3 - "$ui_root" <<'PY'
+from pathlib import Path
+import stat
+import sys
+
+root = Path(sys.argv[1])
+blocked = []
+for path in (root, *root.rglob("*")):
+    mode = path.stat().st_mode
+    required = stat.S_IROTH | (stat.S_IXOTH if path.is_dir() else 0)
+    if mode & required != required:
+        blocked.append(str(path))
+if blocked:
+    print(
+        "Deployed UI contains paths that nginx cannot read: " + ", ".join(blocked[:5]),
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+PY
 }
 
 ensure_nginx() {

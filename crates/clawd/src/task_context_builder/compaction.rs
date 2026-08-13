@@ -102,6 +102,7 @@ impl ContextCompactionPlan {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn plan_agent_loop_context_compaction_with_provider_window(
     bundle: &TaskContextBundle,
     provider_context_window_tokens: Option<usize>,
@@ -117,6 +118,7 @@ pub(crate) fn plan_agent_loop_context_compaction_with_policy(
     plan_context_compaction(bundle, Some(policy), false, None)
 }
 
+#[cfg(test)]
 pub(crate) fn force_agent_loop_context_compaction_plan(
     bundle: &TaskContextBundle,
     provider_context_window_tokens: Option<usize>,
@@ -244,6 +246,7 @@ fn plan_context_compaction(
     })
 }
 
+#[cfg(test)]
 fn provider_only_policy(context_window_tokens: usize) -> ContextWindowPolicy {
     ContextWindowPolicy::new(
         "provider-window-only".to_string(),

@@ -772,14 +772,15 @@ fn validate_schedule_run_skill_args_pass_through_for_any_enabled_skill() {
 #[test]
 fn schedule_service_only_uses_adapter_for_schedule_compile_skill() {
     const SRC: &str = include_str!("schedule_service.rs");
-    let prod = SRC.split("#[cfg(test)]").next().unwrap_or(SRC);
-    let n = prod.matches("execution_adapters::run_skill").count();
+    let n = SRC.matches("crate::execution_adapters::run_skill").count();
     assert_eq!(
         n, 1,
         "schedule_service must only call execution_adapters::run_skill for schedule intent compile"
     );
     assert!(
-        prod.contains("run_skill(state, task, \"schedule\", compile_args)"),
+        SRC.contains(
+            "crate::execution_adapters::run_skill(state, task, \"schedule\", compile_args)"
+        ),
         "adapter target must remain the schedule skill only"
     );
 }

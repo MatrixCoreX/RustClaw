@@ -178,6 +178,10 @@ pub struct PlannerCapabilityMapping {
     /// the skill-level timeout.
     #[serde(default)]
     pub timeout_seconds: Option<u64>,
+    /// Optional host scheduling request for this exact action. It may only
+    /// narrow or specialize the skill-level default; it grants no permission.
+    #[serde(default)]
+    pub resource_request: Option<SkillResourceRequest>,
     #[serde(default)]
     pub async_adapter_kind: Option<String>,
     #[serde(default)]
@@ -971,6 +975,7 @@ fn normalize_planner_capabilities(
             idempotent: mapping.idempotent,
             execution_mode: mapping.execution_mode,
             timeout_seconds: mapping.timeout_seconds,
+            resource_request: mapping.resource_request.clone(),
             async_adapter_kind: trim_optional_string(mapping.async_adapter_kind.as_deref())
                 .map(|value| normalize_schema_token(&value)),
             isolation_profile: mapping
@@ -1544,6 +1549,17 @@ impl SkillsRegistry {
                     )
                 })?;
             }
+            for mapping in &entry.planner_capabilities {
+                if let Some(request) = mapping.resource_request.as_ref() {
+                    resource::validate_resource_request(request).map_err(|error| {
+                        format!(
+                            "skill `{canonical}` capability `{}` resource_request {error} in {}",
+                            mapping.name,
+                            path.display()
+                        )
+                    })?;
+                }
+            }
             validate_planner_capability_schemas(&entry, path)?;
             entry.planner_capability_aliases = normalize_planner_capability_aliases(
                 &entry.planner_capability_aliases,
@@ -1729,6 +1745,17 @@ impl SkillsRegistry {
 
     pub fn resource_request(&self, canonical_name: &str) -> Option<&SkillResourceRequest> {
         self.get(canonical_name)?.resource_request.as_ref()
+    }
+
+    pub fn resolved_resource_request(
+        &self,
+        canonical_name: &str,
+        action: Option<&str>,
+    ) -> Option<&SkillResourceRequest> {
+        let entry = self.get(canonical_name)?;
+        matching_planner_capability(entry, action)
+            .and_then(|mapping| mapping.resource_request.as_ref())
+            .or(entry.resource_request.as_ref())
     }
 
     /// 所有已注册的 canonical 名称（含未启用）

@@ -43,6 +43,7 @@ proc-macro2.workspace = true
 portable-pty.workspace = true
 sha2 = "0.10"
 syn.workspace = true
+zhhz = "0.8.2"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

@@ -1074,7 +1074,7 @@ impl AppState {
         self.skill_rt.skill_timeout_seconds = config.skills.skill_timeout_seconds;
         self.skill_rt.skill_global_max_concurrency = config.skills.skill_max_concurrency.max(1);
         self.skill_rt.skill_runner_path =
-            crate::bootstrap::resolve_skill_runner_path(&workspace_root);
+            crate::bootstrap::skill_runner::resolve_skill_runner_path(&workspace_root);
         self.skill_rt.tools_policy = Arc::new(tools_policy);
         self.skill_rt.cmd_timeout_seconds = config.tools.cmd_timeout_seconds.max(1);
         self.skill_rt.cmd_idle_timeout_seconds = config.tools.cmd_idle_timeout_seconds.max(1);
@@ -1793,10 +1793,13 @@ impl AppState {
     pub(crate) fn skill_resource_request_for_dispatch(
         &self,
         canonical_name: &str,
+        action: Option<&str>,
     ) -> Option<claw_core::skill_registry::SkillResourceRequest> {
-        self.get_skills_registry()
-            .as_ref()
-            .and_then(|registry| registry.resource_request(canonical_name).cloned())
+        self.get_skills_registry().as_ref().and_then(|registry| {
+            registry
+                .resolved_resource_request(canonical_name, action)
+                .cloned()
+        })
     }
 
     pub(crate) fn mcp_tool(

@@ -6,7 +6,8 @@ use claw_core::capability_result::{
 use serde_json::json;
 
 use super::{
-    attach_reviewed_transcript_artifact, bounded_result, eligible_for_capability_result_synthesis,
+    attach_reviewed_transcript_artifact, attach_unreviewed_transcript_fallback, bounded_result,
+    eligible_for_capability_result_synthesis, normalize_transcript_script_for_language,
     normalized_transcript_language, pending_transcript_review, safe_transcript_filename,
     split_transcript_chunks, synthesis_evidence_catalog, transcript_review_contract,
     FALLBACK_TRANSCRIPT_REVISION_CHUNK_CHARS, MAX_RESULT_JSON_CHARS,
@@ -166,6 +167,38 @@ fn transcript_language_and_filename_are_safely_normalized() {
 }
 
 #[test]
+fn final_transcript_script_normalization_follows_structured_language_tag() {
+    let source = "繁體中文 software v2.7，資料庫 2026-08-12";
+
+    assert_eq!(
+        normalize_transcript_script_for_language(source, "zh-CN"),
+        "繁体中文 software v2.7，资料库 2026-08-12"
+    );
+    assert_eq!(
+        normalize_transcript_script_for_language(source, "zh-Hans-SG"),
+        "繁体中文 software v2.7，资料库 2026-08-12"
+    );
+    assert_eq!(
+        normalize_transcript_script_for_language(source, "zh-TW"),
+        source
+    );
+    assert_eq!(
+        normalize_transcript_script_for_language(source, "en"),
+        source
+    );
+
+    let already_simplified = "为什么使用软件和数据库？";
+    assert_eq!(
+        normalize_transcript_script_for_language(already_simplified, "zh-CN"),
+        already_simplified
+    );
+    assert_eq!(
+        normalize_transcript_script_for_language("為什麼？", "zh-CN"),
+        "为什么？"
+    );
+}
+
+#[test]
 fn reviewed_transcript_text_and_artifact_override_save_only_for_explicit_delivery() {
     let mut result = CapabilityResultEnvelope::ok(
         "media.transcribe",
@@ -219,6 +252,67 @@ fn reviewed_transcript_text_and_artifact_override_save_only_for_explicit_deliver
     assert_eq!(
         answer,
         "完整校对文本。\nFILE:.agent-runtime/artifacts/transcript-review/task/transcript.txt"
+    );
+}
+
+#[test]
+fn failed_transcript_review_delivers_raw_text_once_and_clears_required_state() {
+    let mut result = CapabilityResultEnvelope::ok(
+        "media.transcribe",
+        Some("transcribe".to_string()),
+        json!({
+            "extra": {
+                "delivery": {
+                    "intent": "model_synthesis",
+                    "deliver_to_user": false
+                },
+                "transcription": {
+                    "review_required": true
+                },
+                "transcription_review": {
+                    "required": true,
+                    "raw_text": "未经审校的原始转写",
+                    "source": "local_asr"
+                }
+            }
+        }),
+    );
+    let artifact = serde_json::from_value::<ArtifactRef>(json!({
+        "id": "transcript-fallback:fixture",
+        "path": ".agent-runtime/artifacts/transcript-fallback/task/transcript.txt",
+        "media_type": "text/plain; charset=utf-8"
+    }))
+    .expect("artifact fixture");
+
+    let answer = attach_unreviewed_transcript_fallback(
+        &mut result,
+        Some(artifact),
+        "transcript.txt",
+        "未经审校的原始转写",
+        "zh-CN",
+        "local_asr",
+        "transcript_revision_provider_unavailable",
+    );
+
+    assert_eq!(result.delivery.intent, CapabilityDeliveryIntent::Artifact);
+    assert_eq!(
+        result.data.pointer("/extra/transcription_review/required"),
+        Some(&json!(false))
+    );
+    assert_eq!(
+        result.data.pointer("/extra/transcription_review/status"),
+        Some(&json!("degraded"))
+    );
+    assert_eq!(
+        result
+            .data
+            .pointer("/extra/transcription_delivery/reviewed_by_model"),
+        Some(&json!(false))
+    );
+    assert!(!pending_transcript_review(&[result]));
+    assert_eq!(
+        answer,
+        "未经审校的原始转写\nFILE:.agent-runtime/artifacts/transcript-fallback/task/transcript.txt"
     );
 }
 

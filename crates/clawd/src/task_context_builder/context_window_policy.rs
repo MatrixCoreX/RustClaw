@@ -13,6 +13,7 @@ const CALIBRATION_SCALE: usize = 1_000;
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ContextTokenScope {
     Total,
+    #[cfg(test)]
     BodyAfterCarriedPrefix,
 }
 
@@ -116,12 +117,14 @@ impl ContextWindowPolicy {
         let input_budget_tokens = self.context_window_tokens.saturating_sub(reserved_tokens);
         let scoped_input_budget_tokens = match self.token_scope {
             ContextTokenScope::Total => input_budget_tokens,
+            #[cfg(test)]
             ContextTokenScope::BodyAfterCarriedPrefix => {
                 input_budget_tokens.saturating_sub(prefix_token_estimate)
             }
         };
         let raw_token_estimate = match self.token_scope {
             ContextTokenScope::Total => total_token_estimate,
+            #[cfg(test)]
             ContextTokenScope::BodyAfterCarriedPrefix => body_token_estimate,
         };
         let adjusted_token_estimate = raw_token_estimate
@@ -132,6 +135,7 @@ impl ContextWindowPolicy {
             trigger: adjusted_token_estimate >= scoped_input_budget_tokens,
             trigger_basis: match self.token_scope {
                 ContextTokenScope::Total => "total_context_after_reserves",
+                #[cfg(test)]
                 ContextTokenScope::BodyAfterCarriedPrefix => {
                     "body_after_carried_prefix_after_reserves"
                 }

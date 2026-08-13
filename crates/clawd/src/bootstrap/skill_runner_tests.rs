@@ -1,6 +1,18 @@
 use super::*;
 use std::fs;
 
+#[cfg(unix)]
+fn make_executable(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut permissions = fs::metadata(path).expect("runner metadata").permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(path, permissions).expect("make runner executable");
+}
+
+#[cfg(not(unix))]
+fn make_executable(_path: &Path) {}
+
 struct TempRoot {
     path: PathBuf,
 }
@@ -74,6 +86,30 @@ fn missing_companion_falls_back_to_workspace_release_runner() {
 
     assert_eq!(
         resolve_skill_runner_path_from(&workspace, None, Some(&clawd)),
+        runner
+    );
+}
+
+#[test]
+fn required_runner_rejects_a_missing_binary() {
+    let root = TempRoot::new("required_missing");
+    let error = resolve_required_skill_runner_path(&root.path)
+        .expect_err("missing runner must fail startup preflight");
+
+    assert!(error.contains("required skill-runner binary is missing"));
+    assert!(error.contains("skill-runner"));
+}
+
+#[test]
+fn required_runner_accepts_an_executable_workspace_binary() {
+    let root = TempRoot::new("required_executable");
+    let runner = root.path.join("target/release/skill-runner");
+    fs::create_dir_all(runner.parent().expect("runner parent")).expect("create runner dir");
+    fs::write(&runner, "runner").expect("write runner");
+    make_executable(&runner);
+
+    assert_eq!(
+        resolve_required_skill_runner_path(&root.path).expect("required runner"),
         runner
     );
 }

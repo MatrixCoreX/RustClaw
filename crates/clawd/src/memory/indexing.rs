@@ -104,6 +104,7 @@ pub(crate) fn retrieval_index_is_empty(db: &Connection) -> anyhow::Result<bool> 
     Ok(count <= 0)
 }
 
+#[cfg(test)]
 pub(crate) fn cleanup_retrieval_index(
     db: &Connection,
     cutoff_ts: i64,
