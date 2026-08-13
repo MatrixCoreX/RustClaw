@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -91,7 +91,7 @@ pub fn copy_source_tree(source: &Path, destination: &Path) -> SkillSdkResult<()>
 }
 
 fn prepare_cargo(context: &AdapterContext<'_>) -> SkillSdkResult<PreparedPackage> {
-    let cargo = find_program("cargo")?;
+    let cargo = find_cargo_program()?;
     let source_root = confined_workspace_path(
         context.workspace_root,
         &context.manifest.build.source_root,
@@ -141,6 +141,7 @@ fn prepare_cargo(context: &AdapterContext<'_>) -> SkillSdkResult<PreparedPackage
         command.arg("--target").arg(target);
     }
     configure_clean_environment(&mut command, &build_home)?;
+    configure_program_command_path(&mut command, &cargo)?;
     command.env("CARGO_HOME", &cargo_home);
     command.env("CARGO_TARGET_DIR", &cache_target);
     if let Some(rustup_home) = std::env::var_os("RUSTUP_HOME").or_else(default_rustup_home) {
@@ -948,20 +949,97 @@ fn bounded_text(value: &str) -> String {
 }
 
 fn find_program(name: &str) -> SkillSdkResult<PathBuf> {
+    find_program_in_environment(name, std::env::var_os("PATH").as_deref())
+}
+
+fn find_cargo_program() -> SkillSdkResult<PathBuf> {
+    find_cargo_program_in_environment(
+        std::env::var_os("PATH").as_deref(),
+        std::env::var_os("CARGO_HOME").as_deref(),
+        std::env::var_os("HOME").as_deref(),
+    )
+}
+
+fn find_cargo_program_in_environment(
+    path: Option<&OsStr>,
+    cargo_home: Option<&OsStr>,
+    home: Option<&OsStr>,
+) -> SkillSdkResult<PathBuf> {
+    let mut directories = path
+        .map(std::env::split_paths)
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    if let Some(cargo_home) = cargo_home.filter(|value| !value.is_empty()) {
+        push_unique_path(&mut directories, PathBuf::from(cargo_home).join("bin"));
+    } else if let Some(home) = home.filter(|value| !value.is_empty()) {
+        push_unique_path(
+            &mut directories,
+            PathBuf::from(home).join(".cargo").join("bin"),
+        );
+    }
+    find_program_in_directories("cargo", directories)
+}
+
+fn find_program_in_environment(name: &str, path: Option<&OsStr>) -> SkillSdkResult<PathBuf> {
+    let directories = path
+        .map(std::env::split_paths)
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    find_program_in_directories(name, directories)
+}
+
+fn find_program_in_directories(
+    name: &str,
+    directories: impl IntoIterator<Item = PathBuf>,
+) -> SkillSdkResult<PathBuf> {
     if name.contains('/') || name.contains('\\') {
         return Err(SkillSdkError::new(
             "toolchain_name_invalid",
             format!("name={name}"),
         ));
     }
-    std::env::var_os("PATH")
+    directories
         .into_iter()
-        .flat_map(|paths| std::env::split_paths(&paths).collect::<Vec<_>>())
         .map(|directory| directory.join(name))
-        .find(|path| path.is_file())
+        .find(|path| path.is_file() && is_executable(path))
         .ok_or_else(|| {
             SkillSdkError::new("toolchain_missing", format!("program={name}")).phase("preflight")
         })
+}
+
+fn push_unique_path(paths: &mut Vec<PathBuf>, candidate: PathBuf) {
+    if !paths.iter().any(|path| path == &candidate) {
+        paths.push(candidate);
+    }
+}
+
+fn command_path_for_program(program: &Path) -> SkillSdkResult<OsString> {
+    let mut directories = Vec::new();
+    if let Some(parent) = program
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        push_unique_path(&mut directories, parent.to_path_buf());
+    }
+    if let Some(path) = std::env::var_os("PATH") {
+        for directory in std::env::split_paths(&path) {
+            push_unique_path(&mut directories, directory);
+        }
+    }
+    std::env::join_paths(directories).map_err(|error| {
+        SkillSdkError::new(
+            "toolchain_path_invalid",
+            format!("program={} error={error}", program.display()),
+        )
+        .phase("preflight")
+    })
+}
+
+fn configure_program_command_path(command: &mut Command, program: &Path) -> SkillSdkResult<()> {
+    command.env("PATH", command_path_for_program(program)?);
+    Ok(())
 }
 
 fn find_program_with_override(name: &str, variable: &str) -> SkillSdkResult<PathBuf> {
@@ -999,9 +1077,7 @@ fn validate_program_override(variable: &str, path: &Path) -> SkillSdkResult<Path
 fn tool_version(program: &Path, args: &[&str]) -> SkillSdkResult<String> {
     let mut command = Command::new(program);
     command.args(args).env_clear();
-    if let Some(path) = std::env::var_os("PATH") {
-        command.env("PATH", path);
-    }
+    configure_program_command_path(&mut command, program)?;
     if let Some(home) = std::env::var_os("RUSTUP_HOME").or_else(default_rustup_home) {
         command.env("RUSTUP_HOME", home);
     }

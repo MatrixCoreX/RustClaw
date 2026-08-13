@@ -60,6 +60,63 @@ fn missing_and_unsafe_toolchain_names_are_structured_preflight_errors() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn cargo_discovery_uses_user_toolchain_when_service_path_is_minimal() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let cargo_home = temp.path().join("cargo-home");
+    let cargo = cargo_home.join("bin/cargo");
+    fs::create_dir_all(cargo.parent().expect("cargo bin")).expect("cargo bin");
+    fs::write(&cargo, b"#!/bin/sh\nexit 0\n").expect("cargo proxy");
+    set_executable(&cargo).expect("cargo executable");
+
+    let resolved = find_cargo_program_in_environment(
+        Some(OsStr::new("/usr/bin:/bin")),
+        Some(cargo_home.as_os_str()),
+        None,
+    )
+    .expect("user cargo fallback");
+
+    assert_eq!(resolved, cargo);
+}
+
+#[cfg(unix)]
+#[test]
+fn cargo_discovery_falls_back_to_default_home_and_rejects_non_executable_files() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let cargo = temp.path().join(".cargo/bin/cargo");
+    fs::create_dir_all(cargo.parent().expect("cargo bin")).expect("cargo bin");
+    fs::write(&cargo, b"not executable\n").expect("cargo fixture");
+    assert_eq!(
+        find_cargo_program_in_environment(None, None, Some(temp.path().as_os_str()))
+            .expect_err("non-executable cargo must not be admitted")
+            .code,
+        "toolchain_missing"
+    );
+
+    set_executable(&cargo).expect("cargo executable");
+    assert_eq!(
+        find_cargo_program_in_environment(None, None, Some(temp.path().as_os_str()))
+            .expect("default cargo home"),
+        cargo
+    );
+}
+
+#[test]
+fn tool_command_path_keeps_program_directory_first_without_duplicates() {
+    let program = Path::new("/tool/bin/cargo");
+    let actual = command_path_for_program(program).expect("command path");
+    let actual_paths = std::env::split_paths(&actual).collect::<Vec<_>>();
+    assert_eq!(actual_paths.first(), Some(&PathBuf::from("/tool/bin")));
+    assert_eq!(
+        actual_paths
+            .iter()
+            .filter(|path| *path == Path::new("/tool/bin"))
+            .count(),
+        1
+    );
+}
+
 #[test]
 fn cargo_jobs_use_explicit_positive_override_or_detected_parallelism() {
     assert_eq!(cargo_jobs_for(Some("4"), 8), "4");
