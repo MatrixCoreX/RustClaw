@@ -61,7 +61,6 @@
   --theme-chart-neutral-fill: #10151e;
   --theme-chart-neutral-volume: rgba(170, 181, 196, 0.3);
   --theme-chart-gap: #8793a3;
-  --theme-chart-open: #fbbf24;
 }
 
 :root[data-theme="light"] {
@@ -120,7 +119,6 @@
   --theme-chart-neutral-fill: #e3e6e9;
   --theme-chart-neutral-volume: rgba(74, 85, 104, 0.32);
   --theme-chart-gap: #64748b;
-  --theme-chart-open: #a16207;
 }
 
 @layer base {
