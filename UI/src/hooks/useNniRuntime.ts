@@ -125,9 +125,6 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       }
       setNniStatus(body.data);
       setNniStatusError(null);
-      if (!body.data.signature_chip_present) {
-        await setNniJoinedPersisted(false);
-      }
       return body.data;
     } catch (err) {
       const message = err instanceof Error ? err.message : "未知错误";
@@ -220,7 +217,6 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     } catch (err) {
       const message = err instanceof Error ? err.message : "未知错误";
       setNniActionError(message);
-      await setNniJoinedPersisted(false);
       return null;
     } finally {
       setNniActionLoading(null);
