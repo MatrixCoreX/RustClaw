@@ -37,10 +37,10 @@ export function NniPublicKeyDisplay({
     ? shortenHex(displayedValue, shorten.head, shorten.tail)
     : displayedValue;
   const targetFormat: PublicKeyFormat = format === "compact" ? "raw" : "compact";
-  const targetLabel = targetFormat === "raw" ? t("原始", "Raw") : t("紧凑", "Compact");
+  const targetLabel = targetFormat === "raw" ? t("原始", "Raw") : "Base58";
   const targetTitle = targetFormat === "raw"
     ? t("切换为原始十六进制公钥", "Show the raw hexadecimal public key")
-    : t("切换为紧凑 Base58 公钥", "Show the compact Base58 public key");
+    : t("切换为 Base58 编码公钥", "Show the Base58-encoded public key");
 
   return (
     <div className={`flex min-w-0 flex-wrap items-center gap-2 ${className}`}>
