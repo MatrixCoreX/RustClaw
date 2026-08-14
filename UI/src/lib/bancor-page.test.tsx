@@ -300,6 +300,8 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.doesNotMatch(html, /a2c887498554••••••••331016eb/);
   assert.doesNotMatch(html, /a2c887498554407638cbec1d0ccf11264aa1ab7749bd7913fc6753fac72cfbdb/);
   assert.match(html, /data-nni-decimal-amount="0\.12340000 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
+  assert.match(html, /data-nni-decimal-amount="\+1200\.00000000 POINT"[^>]*data-nni-decimal-fraction-size="normal"/);
+  assert.match(html, /data-nni-decimal-amount="336\.00000000 POINT"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.match(html, /data-nni-decimal-amount="\+0\.03340000 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.match(html, /grid gap-5 lg:grid-cols-2 lg:items-start/);
   assert.ok(html.indexOf("储备曲线交易公式") > html.indexOf("我的成交记录"));
