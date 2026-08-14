@@ -94,7 +94,36 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
         has_trades: true,
       }],
     },
-    account: null,
+    account: {
+      schema_version: 1 as const,
+      status: "bancor_account",
+      device_pubkey: "ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C",
+      point_balance_units: "10000000000",
+      point_balance: "100.00000000",
+      usd_balance_units: "500000000",
+      usd_balance: "5.00000000",
+      account_version: 1,
+      page: 1,
+      per_page: 10,
+      total: 1,
+      total_pages: 1,
+      trades: [{
+        trade_id: "trade-account-1",
+        quote_id: "quote-account-1",
+        market_id: "point-usd-v1",
+        side: "buy" as const,
+        input_asset: "USD" as const,
+        input_units: "12340000",
+        input_amount: "0.12340000",
+        fee_units: "61700",
+        fee_amount: "0.00061700",
+        output_asset: "POINT" as const,
+        output_units: "120000000000",
+        output_amount: "1200.00000000",
+        market_version: 228,
+        created_at_unix: 1_700_000_000,
+      }],
+    },
     marketTrades: {
       schema_version: 1 as const,
       status: "bancor_market_trades",
@@ -270,6 +299,8 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.doesNotMatch(html, /切换为原始十六进制公钥|切换为紧凑 Base58 公钥/);
   assert.doesNotMatch(html, /a2c887498554••••••••331016eb/);
   assert.doesNotMatch(html, /a2c887498554407638cbec1d0ccf11264aa1ab7749bd7913fc6753fac72cfbdb/);
+  assert.match(html, /data-nni-decimal-amount="0\.12340000 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
+  assert.match(html, /data-nni-decimal-amount="\+0\.03340000 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.match(html, /grid gap-5 lg:grid-cols-2 lg:items-start/);
   assert.ok(html.indexOf("储备曲线交易公式") > html.indexOf("我的成交记录"));
 });

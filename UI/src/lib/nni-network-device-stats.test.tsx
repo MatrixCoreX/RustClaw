@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   NniNetworkDeviceStats,
-  formatNniWindowReward,
+  formatNniRewardMetric,
 } from "../components/NniNetworkDeviceStats";
 import {
   NNI_DEVICE_AUTHORIZATION_DENIED_COPY,
@@ -66,12 +66,12 @@ test("shows registered allowlist devices and active devices from the previous he
   assert.doesNotMatch(markup, /1800000000.*1800000600/);
   assert.match(markup, /累计产出/);
   assert.doesNotMatch(markup, /全网累计产出/);
-  assert.match(markup, /data-nni-decimal-amount="12500\.00000000"/);
-  assert.match(markup, /class="nni-decimal-fraction">\.00000000/);
+  assert.match(markup, />12500<\/span>/);
+  assert.doesNotMatch(markup, /12500\.00000000/);
   assert.match(markup, /窗口奖励/);
   assert.doesNotMatch(markup, /当前每 10 分钟总奖励/);
-  assert.match(markup, /data-nni-decimal-amount="5000\.00000000"/);
-  assert.match(markup, /data-nni-decimal-amount="5000\.00000000"[^>]*data-nni-decimal-fraction-size="normal"/);
+  assert.match(markup, />5000<\/span>/);
+  assert.doesNotMatch(markup, /5000\.00000000/);
   assert.doesNotMatch(markup, /POINT/);
   assert.doesNotMatch(markup, /由本周期有效心跳设备平分/);
   assert.match(markup, /首跳/);
@@ -85,9 +85,10 @@ test("shows registered allowlist devices and active devices from the previous he
   assert.equal((markup.match(/rounded-lg border border-white\/10/g) ?? []).length, 6);
 });
 
-test("window rewards show eight zero decimals when the source value is an integer", () => {
-  assert.equal(formatNniWindowReward("5000"), "5000.00000000");
-  assert.equal(formatNniWindowReward("312.50000000"), "312.50000000");
+test("network reward metrics hide an all-zero fraction and retain real decimals", () => {
+  assert.equal(formatNniRewardMetric("5000.00000000"), "5000");
+  assert.equal(formatNniRewardMetric("5000"), "5000");
+  assert.equal(formatNniRewardMetric("312.50000000"), "312.50000000");
 });
 
 test("explains why network counters are unavailable before joining", () => {

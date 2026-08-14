@@ -9,9 +9,9 @@ import { NniDecimalAmount } from "./NniDecimalAmount";
 
 type Translate = (zh: string, en: string) => string;
 
-export function formatNniWindowReward(value: string | number): string {
+export function formatNniRewardMetric(value: string | number): string {
   const text = String(value).trim();
-  return /^[+-]?\d+$/.test(text) ? `${text}.00000000` : text;
+  return text.replace(/\.0+$/, "");
 }
 
 export interface NniNetworkDeviceStatsProps {
@@ -39,10 +39,10 @@ export function NniNetworkDeviceStats({
   const registeredValue = stats?.registered_device_count ?? unavailableLabel;
   const activeValue = stats?.active_device_count ?? unavailableLabel;
   const networkOutputValue = networkRewards?.total_distributed_reward_points
-    ? networkRewards.total_distributed_reward_points
+    ? formatNniRewardMetric(networkRewards.total_distributed_reward_points)
     : unavailableLabel;
   const rewardPoolValue = rewardPolicy?.current_reward_pool_points
-    ? formatNniWindowReward(rewardPolicy.current_reward_pool_points)
+    ? formatNniRewardMetric(rewardPolicy.current_reward_pool_points)
     : unavailableLabel;
   const firstHeartbeatValue = stats?.first_heartbeat_unix != null
     ? formatUnixDateTime(stats.first_heartbeat_unix)

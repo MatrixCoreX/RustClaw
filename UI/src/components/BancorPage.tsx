@@ -793,9 +793,9 @@ export function BancorPage({
                   </span>
                   <p className="mt-1 text-xs text-white/40">{formatUnixDateTime(record.created_at_unix)}</p>
                 </div>
-                <NniDecimalAmount className="text-white/55" value={`${formatBancorAssetAmountForDisplay(record.input_amount, record.input_asset)} ${record.input_asset}`} />
+                <NniDecimalAmount className="text-white/55" value={`${formatBancorAssetAmountForDisplay(record.input_amount, record.input_asset)} ${record.input_asset}`} shrinkFraction={false} />
                 <span className="font-medium" style={{ color: resolveBancorTradeColor(record.side, t) }}>
-                  <NniDecimalAmount value={`+${formatBancorAssetAmountForDisplay(record.output_amount, record.output_asset)} ${record.output_asset}`} />
+                  <NniDecimalAmount value={`+${formatBancorAssetAmountForDisplay(record.output_amount, record.output_asset)} ${record.output_asset}`} shrinkFraction={false} />
                 </span>
               </div>
             )) : (
@@ -866,9 +866,9 @@ export function BancorPage({
                   </div>
                   <p className="mt-1 text-xs text-white/40">{formatUnixDateTime(record.created_at_unix)}</p>
                 </div>
-                <NniDecimalAmount className="text-white/55" value={`${formatBancorAssetAmountForDisplay(record.input_amount, record.input_asset)} ${record.input_asset}`} />
+                <NniDecimalAmount className="text-white/55" value={`${formatBancorAssetAmountForDisplay(record.input_amount, record.input_asset)} ${record.input_asset}`} shrinkFraction={false} />
                 <span className="font-medium" style={{ color: resolveBancorTradeColor(record.side, t) }}>
-                  <NniDecimalAmount value={`+${formatBancorAssetAmountForDisplay(record.output_amount, record.output_asset)} ${record.output_asset}`} />
+                  <NniDecimalAmount value={`+${formatBancorAssetAmountForDisplay(record.output_amount, record.output_asset)} ${record.output_asset}`} shrinkFraction={false} />
                 </span>
               </div>
             )) : (
