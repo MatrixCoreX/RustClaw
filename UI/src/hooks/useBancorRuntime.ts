@@ -20,7 +20,7 @@ import {
 
 type Translate = (zh: string, en: string) => string;
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
-const BANCOR_ASSET_SCALE = 10_000n;
+const BANCOR_ASSET_SCALE = 100_000_000n;
 const BANCOR_AMOUNT_STEP_UNITS = BANCOR_ASSET_SCALE;
 const BANCOR_MAX_UNITS = 9_223_372_036_854_775_807n;
 export const BANCOR_DEFAULT_CANDLE_INTERVAL_SECONDS = 300;
@@ -67,15 +67,15 @@ export function hasEarlierBancorCandles(response: NniBancorCandlesResponse): boo
 }
 
 function parseBancorInputUnits(value: string): bigint | null {
-  const match = /^(0|[1-9][0-9]*)(?:\.([0-9]{1,4}))?$/.exec(value.trim());
+  const match = /^(0|[1-9][0-9]*)(?:\.([0-9]{1,8}))?$/.exec(value.trim());
   if (!match) return null;
-  const fraction = (match[2] || "").padEnd(4, "0");
+  const fraction = (match[2] || "").padEnd(8, "0");
   const units = BigInt(match[1]) * BANCOR_ASSET_SCALE + BigInt(fraction || "0");
   return units > 0n && units <= BANCOR_MAX_UNITS ? units : null;
 }
 
 function formatBancorUnits(units: bigint): string {
-  return `${units / BANCOR_ASSET_SCALE}.${String(units % BANCOR_ASSET_SCALE).padStart(4, "0")}`;
+  return `${units / BANCOR_ASSET_SCALE}.${String(units % BANCOR_ASSET_SCALE).padStart(8, "0")}`;
 }
 
 export type BancorAmountAdjustment = "decrease_25_percent" | "decrease_50_percent" | "decrement" | "increment";
@@ -86,9 +86,9 @@ export function adjustBancorInputAmount(
 ): string | null {
   const normalized = value.trim();
   if (normalized === "" && adjustment === "increment") return formatBancorUnits(BANCOR_AMOUNT_STEP_UNITS);
-  const match = /^(0|[1-9][0-9]*)(?:\.([0-9]{1,4}))?$/.exec(normalized);
+  const match = /^(0|[1-9][0-9]*)(?:\.([0-9]{1,8}))?$/.exec(normalized);
   if (!match) return null;
-  const fraction = (match[2] || "").padEnd(4, "0");
+  const fraction = (match[2] || "").padEnd(8, "0");
   const units = BigInt(match[1]) * BANCOR_ASSET_SCALE + BigInt(fraction || "0");
   if (units > BANCOR_MAX_UNITS) return null;
 
@@ -193,8 +193,8 @@ export function formatBancorApiError(
 ) {
   if (code === "nni_bancor_amount_invalid" || code === "nni_bancor_input_amount_invalid") {
     return t(
-      "交易金额必须大于 0、最多保留 4 位小数，并且不能超过系统可安全保存的范围。",
-      "The trade amount must be greater than zero, use at most four decimal places, and stay within the safely stored range.",
+      "交易金额必须大于 0、最多保留 8 位小数，并且不能超过系统可安全保存的范围。",
+      "The trade amount must be greater than zero, use at most eight decimal places, and stay within the safely stored range.",
     );
   }
   if (
@@ -203,8 +203,8 @@ export function formatBancorApiError(
     code === "nni_bancor_output_too_small"
   ) {
     return t(
-      "交易金额太小：扣除手续费后或预计到账金额不能为 0.0000，请增加交易金额。",
-      "The trade amount is too small: the amount after fees and the expected output must not be 0.0000. Increase the trade amount.",
+      "交易金额太小：扣除手续费后或预计到账金额不能为 0.00000000，请增加交易金额。",
+      "The trade amount is too small: the amount after fees and the expected output must not be 0.00000000. Increase the trade amount.",
     );
   }
   if (code === "nni_bancor_account_required") {

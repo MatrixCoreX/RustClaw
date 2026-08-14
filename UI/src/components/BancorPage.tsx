@@ -36,6 +36,7 @@ import type { useBancorRuntime } from "../hooks/useBancorRuntime";
 import type { NniBancorCandle, NniBancorQuoteResponse } from "../types/api";
 import { resolveBancorMarketDirectionColors } from "../lib/bancor-market-colors";
 import { BancorPriceChangePage } from "./BancorPriceChangePage";
+import { NniDecimalAmount } from "./NniDecimalAmount";
 import { NniPublicKeyDisplay } from "./NniPublicKeyDisplay";
 
 type Translate = (zh: string, en: string) => string;
@@ -497,9 +498,10 @@ export function BancorPage({
                 aria-label={t("池内即时边际价", "Live pool marginal price")}
               >
                 <span className="shrink-0 text-[11px] text-white/45">{t("池内即时边际价", "Live pool marginal price")}</span>
-                <span className="min-w-0 break-all font-mono text-xs font-semibold leading-4 text-sky-200 sm:text-sm">
-                  {market ? `${market.marginal_price_usd_per_point} USD` : "—"}
-                </span>
+                <NniDecimalAmount
+                  className="min-w-0 break-all font-mono text-xs font-semibold leading-4 text-sky-200 sm:text-sm"
+                  value={market ? `${market.marginal_price_usd_per_point} USD` : "—"}
+                />
               </div>
               <span className="whitespace-nowrap text-xs text-white/40">
                 {t(
@@ -640,7 +642,7 @@ export function BancorPage({
                     id="bancor-standard-input-amount"
                     value={inputAmount}
                     inputMode="decimal"
-                    placeholder="0.0000"
+                    placeholder="0.00000000"
                     className="min-w-0 flex-1 bg-transparent py-2.5 text-base text-white outline-none placeholder:text-white/25"
                     onChange={(event) => {
                       setInputAmount(event.target.value);
@@ -654,7 +656,7 @@ export function BancorPage({
                     className="mt-1.5 break-all text-right text-xs font-medium text-sky-200/80"
                     aria-label={t("预计兑换数量", "Estimated exchange amount")}
                   >
-                    ≈ {quotedOutput} {outputAsset}
+                    ≈ <NniDecimalAmount value={`${quotedOutput} ${outputAsset}`} />
                   </p>
                 ) : null}
                 <BancorAmountAdjustmentControls
@@ -758,7 +760,9 @@ export function BancorPage({
           {lastTrade ? (
             <div className="mt-4 rounded-xl border border-emerald-400/20 bg-emerald-400/5 p-4 text-sm text-emerald-50">
               {t("最近成交：", "Latest trade: ")}
-              {lastTrade.trade.input_amount} {lastTrade.trade.input_asset} → {lastTrade.trade.output_amount} {lastTrade.trade.output_asset}
+              <NniDecimalAmount value={`${lastTrade.trade.input_amount} ${lastTrade.trade.input_asset}`} />
+              {" → "}
+              <NniDecimalAmount value={`${lastTrade.trade.output_amount} ${lastTrade.trade.output_asset}`} />
             </div>
           ) : null}
         </div>
@@ -782,8 +786,10 @@ export function BancorPage({
                   </span>
                   <p className="mt-1 text-xs text-white/40">{formatUnixDateTime(record.created_at_unix)}</p>
                 </div>
-                <span className="text-white/55">{record.input_amount} {record.input_asset}</span>
-                <span className="font-medium" style={{ color: resolveBancorTradeColor(record.side, t) }}>+ {record.output_amount} {record.output_asset}</span>
+                <NniDecimalAmount className="text-white/55" value={`${record.input_amount} ${record.input_asset}`} />
+                <span className="font-medium" style={{ color: resolveBancorTradeColor(record.side, t) }}>
+                  <NniDecimalAmount value={`+${record.output_amount} ${record.output_asset}`} />
+                </span>
               </div>
             )) : (
               <div className="rounded-xl border border-dashed border-white/10 px-4 py-8 text-center text-sm text-white/40">
@@ -847,13 +853,16 @@ export function BancorPage({
                       value={record.device_pubkey_compact}
                       t={t}
                       shorten={{ head: 16, tail: 12 }}
+                      allowFormatSwitch={false}
                       valueClassName="text-[11px] text-white/40"
                     />
                   </div>
                   <p className="mt-1 text-xs text-white/40">{formatUnixDateTime(record.created_at_unix)}</p>
                 </div>
-                <span className="text-white/55">{record.input_amount} {record.input_asset}</span>
-                <span className="font-medium" style={{ color: resolveBancorTradeColor(record.side, t) }}>+ {record.output_amount} {record.output_asset}</span>
+                <NniDecimalAmount className="text-white/55" value={`${record.input_amount} ${record.input_asset}`} />
+                <span className="font-medium" style={{ color: resolveBancorTradeColor(record.side, t) }}>
+                  <NniDecimalAmount value={`+${record.output_amount} ${record.output_asset}`} />
+                </span>
               </div>
             )) : (
               <div className="rounded-xl border border-dashed border-white/10 px-4 py-8 text-center text-sm text-white/40">
@@ -930,7 +939,7 @@ export function BancorSwapTradePanel({
             disabled={!inputBalance}
             onClick={onFillBalance}
           >
-            {t("余额", "Balance")}：{inputBalance ?? "—"}
+            {t("余额", "Balance")}：<NniDecimalAmount value={inputBalance ?? "—"} />
           </button>
         </div>
         <label className="mt-1 flex items-center gap-3">
@@ -939,7 +948,7 @@ export function BancorSwapTradePanel({
             id="bancor-swap-input-amount"
             value={inputAmount}
             inputMode="decimal"
-            placeholder="0.0000"
+            placeholder="0.00000000"
             className="min-w-0 flex-1 bg-transparent py-1.5 text-xl font-medium text-white outline-none placeholder:text-white/20"
             onChange={(event) => onInputChange(event.target.value)}
           />
@@ -967,7 +976,7 @@ export function BancorSwapTradePanel({
         </div>
         <div className="mt-1 flex items-center gap-3">
           <span className={`min-w-0 flex-1 py-1.5 text-xl font-medium ${outputAmount ? "text-white" : "text-white/25"}`}>
-            {outputAmount ?? "—"}
+            <NniDecimalAmount value={outputAmount ?? "—"} />
           </span>
           <span className="rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-sm font-semibold text-white/80">{outputAsset}</span>
         </div>
@@ -1050,7 +1059,8 @@ function BancorFormulaCard({ t, market }: { t: Translate; market: BancorRuntime[
           <h2 className="mt-1 text-lg font-semibold text-white">{t("储备曲线交易公式", "Reserve-curve trading formula")}</h2>
         </div>
         <span className="rounded-md border border-white/8 bg-white/[0.035] px-2 py-1 text-xs text-white/45">
-          {t("当前手续费", "Current fee")}：{market ? `${(market.fee_bps / 100).toFixed(2)}%` : "—"}
+          {t("当前手续费", "Current fee")}：
+          <NniDecimalAmount value={market ? `${(market.fee_bps / 100).toFixed(2)}%` : "—"} />
         </span>
       </div>
       <div className="mt-4 flex flex-col items-center gap-4 overflow-x-auto py-2 font-serif text-xl text-sky-100 sm:text-2xl" role="math">
@@ -1093,8 +1103,8 @@ function BancorFormulaCard({ t, market }: { t: Translate; market: BancorRuntime[
       </div>
       <p className="mt-2 text-xs leading-5 text-white/40">
         {t(
-          "⌊ ⌋ 表示按最小单位向下取整；本市场的 POINT 与 USD 均保留 4 位小数。交易数量越大，对储备比例和成交价格的影响越明显。",
-          "⌊ ⌋ rounds down to the smallest unit. POINT and USD both use four decimal places. Larger trades have a greater effect on the reserve ratio and execution price.",
+          "⌊ ⌋ 表示按最小单位向下取整；本市场的 POINT 与 USD 均保留 8 位小数。交易数量越大，对储备比例和成交价格的影响越明显。",
+          "⌊ ⌋ rounds down to the smallest unit. POINT and USD both use eight decimal places. Larger trades have a greater effect on the reserve ratio and execution price.",
         )}
       </p>
     </section>
@@ -1374,8 +1384,8 @@ export function CandleChart({
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-white/45">
         <div className="min-w-0">
           <span className="text-white/65">{formatUnixDateTime(focused.candle.bucket_start_unix)}</span>
-          <span className="ml-3">O {focused.candle.open} · H {focused.candle.high} · L {focused.candle.low} · C {focused.candle.close}</span>
-          <span className="ml-3">VOL {focused.candle.point_volume} POINT</span>
+          <span className="ml-3">O <NniDecimalAmount value={focused.candle.open} /> · H <NniDecimalAmount value={focused.candle.high} /> · L <NniDecimalAmount value={focused.candle.low} /> · C <NniDecimalAmount value={focused.candle.close} /></span>
+          <span className="ml-3">VOL <NniDecimalAmount value={`${focused.candle.point_volume} POINT`} /></span>
           <span className="ml-3">
             {focused.candle.trade_count > 0
               ? `${focused.candle.trade_count} ${t("笔成交", "trades")}`
@@ -1786,8 +1796,8 @@ function MetricCard({
   return (
     <div className="rounded-xl border border-white/8 bg-white/[0.025] px-3 py-2.5">
       <p className="text-[11px] uppercase tracking-wide text-white/40">{label}</p>
-      <p className={valueClassName}>{value}</p>
-      {secondaryValue ? <p className={valueClassName}>{secondaryValue}</p> : null}
+      <NniDecimalAmount className={`block ${valueClassName}`} value={value} />
+      {secondaryValue ? <NniDecimalAmount className={`block ${valueClassName}`} value={secondaryValue} /> : null}
       {detail ? <p className="mt-0.5 text-[11px] leading-4 text-white/45">{detail}</p> : null}
       {children}
     </div>
@@ -1803,7 +1813,7 @@ function DailyPriceMetric({ label, value, color }: { label: string; value: strin
         style={color ? { color } : undefined}
         title={value}
       >
-        {value}
+        <NniDecimalAmount value={value} />
       </p>
     </div>
   );
@@ -1813,7 +1823,7 @@ function QuoteLine({ label, value, strong = false }: { label: string; value: str
   return (
     <div>
       <p className="text-xs text-white/45">{label}</p>
-      <p className={`mt-1 ${strong ? "font-semibold text-emerald-200" : "text-white/80"}`}>{value}</p>
+      <NniDecimalAmount className={`mt-1 block ${strong ? "font-semibold text-emerald-200" : "text-white/80"}`} value={value} />
     </div>
   );
 }
@@ -1846,7 +1856,7 @@ function BalanceLine({
         className={`mt-1 block max-w-full break-all font-mono font-semibold leading-5 text-white ${valueSizeClass}`}
         title={value}
       >
-        {value}
+        <NniDecimalAmount value={value} />
       </span>
       {!disabled ? <span className="mt-1 block text-[11px] leading-4 text-sky-200/55 transition group-hover:text-sky-100/80">{actionLabel}</span> : null}
     </button>

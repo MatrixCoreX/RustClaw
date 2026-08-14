@@ -6,7 +6,6 @@ export interface NniHistoryTabsProps {
   activeView: NniHistoryView;
   recordsTotal: number;
   errorsTotal: number;
-  rewardsTotal: number;
   t: Translate;
   onChange: (view: NniHistoryView) => void;
 }
@@ -15,7 +14,6 @@ export function NniHistoryTabs({
   activeView,
   recordsTotal,
   errorsTotal,
-  rewardsTotal,
   t,
   onChange,
 }: NniHistoryTabsProps) {
@@ -47,7 +45,7 @@ export function NniHistoryTabs({
       >
         <span>{t("原生智能奖励", "Native intelligence rewards")}</span>
         <span className="rounded-full border border-current/20 bg-black/15 px-2 py-0.5 text-[11px] font-semibold">
-          {rewardsTotal}
+          {t("最近 100 条", "Latest 100")}
         </span>
       </button>
       <button

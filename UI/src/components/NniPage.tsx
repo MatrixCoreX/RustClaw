@@ -419,7 +419,6 @@ export function NniPage({
         activeView={nniHistoryView}
         recordsTotal={nniHeartbeatRecordsTotal}
         errorsTotal={nniHeartbeatErrorsTotal}
-        rewardsTotal={nniRewards?.reward_grant_count ?? 0}
         t={t}
         onChange={setNniHistoryView}
       />

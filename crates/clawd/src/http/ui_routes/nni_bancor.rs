@@ -37,8 +37,8 @@ fn validate_bancor_market_response(data: &Value) -> Result<(), &'static str> {
             .is_none_or(str::is_empty)
         || object.get("point_symbol").and_then(Value::as_str) != Some("POINT")
         || object.get("usd_symbol").and_then(Value::as_str) != Some("USD")
-        || object.get("point_scale").and_then(Value::as_u64) != Some(10_000)
-        || object.get("usd_scale").and_then(Value::as_u64) != Some(10_000)
+        || object.get("point_scale").and_then(Value::as_u64) != Some(100_000_000)
+        || object.get("usd_scale").and_then(Value::as_u64) != Some(100_000_000)
         || object.get("fee_bps").and_then(Value::as_u64).is_none()
         || object.get("version").and_then(Value::as_u64).is_none()
         || object.get("updated_at_unix").and_then(Value::as_i64).is_none()
@@ -1313,7 +1313,7 @@ fn normalize_bancor_amount(value: &str) -> Result<(String, String), &'static str
         || whole.len() > 18
         || !whole.bytes().all(|byte| byte.is_ascii_digit())
         || (whole.len() > 1 && whole.starts_with('0'))
-        || fraction.len() > 4
+        || fraction.len() > 8
         || !fraction.bytes().all(|byte| byte.is_ascii_digit())
     {
         return Err("nni_bancor_amount_invalid");
@@ -1321,7 +1321,7 @@ fn normalize_bancor_amount(value: &str) -> Result<(String, String), &'static str
     let whole_value = whole
         .parse::<u128>()
         .map_err(|_| "nni_bancor_amount_invalid")?;
-    let fraction_padded = format!("{fraction:0<4}");
+    let fraction_padded = format!("{fraction:0<8}");
     let fraction_value = if fraction_padded.is_empty() {
         0
     } else {
@@ -1330,14 +1330,14 @@ fn normalize_bancor_amount(value: &str) -> Result<(String, String), &'static str
             .map_err(|_| "nni_bancor_amount_invalid")?
     };
     let units = whole_value
-        .checked_mul(10_000)
+        .checked_mul(100_000_000)
         .and_then(|value| value.checked_add(fraction_value))
         .ok_or("nni_bancor_amount_invalid")?;
     if units == 0 || units > i64::MAX as u128 {
         return Err("nni_bancor_amount_invalid");
     }
     Ok((
-        format!("{whole_value}.{:04}", fraction_value),
+        format!("{whole_value}.{:08}", fraction_value),
         units.to_string(),
     ))
 }
@@ -1362,21 +1362,21 @@ mod nni_bancor_unit_tests {
     use super::*;
 
     #[test]
-    fn amount_normalization_is_four_decimal_and_rejects_float_syntax() {
+    fn amount_normalization_is_eight_decimal_and_rejects_float_syntax() {
         assert_eq!(
             normalize_bancor_amount("100").unwrap(),
-            ("100.0000".to_string(), "1000000".to_string())
+            ("100.00000000".to_string(), "10000000000".to_string())
         );
-        assert_eq!(normalize_bancor_amount("0.0001").unwrap().1, "1");
+        assert_eq!(normalize_bancor_amount("0.00000001").unwrap().1, "1");
         assert_eq!(
-            normalize_bancor_amount("922337203685477.5807").unwrap().1,
+            normalize_bancor_amount("92233720368.54775807").unwrap().1,
             i64::MAX.to_string()
         );
         assert!(normalize_bancor_amount("0").is_err());
-        assert!(normalize_bancor_amount("0.0000").is_err());
-        assert!(normalize_bancor_amount("922337203685477.5808").is_err());
+        assert!(normalize_bancor_amount("0.00000000").is_err());
+        assert!(normalize_bancor_amount("92233720368.54775808").is_err());
         assert!(normalize_bancor_amount("1e2").is_err());
-        assert!(normalize_bancor_amount("1.00001").is_err());
+        assert!(normalize_bancor_amount("1.000000001").is_err());
     }
 
     #[test]
@@ -1428,12 +1428,12 @@ mod nni_bancor_unit_tests {
             "market_id": "point-usd-v1",
             "point_symbol": "POINT",
             "usd_symbol": "USD",
-            "point_scale": 10_000,
-            "usd_scale": 10_000,
-            "point_reserve_units": "999000000000",
-            "point_reserve": "99900000.0000",
-            "usd_reserve_units": "100100000",
-            "usd_reserve": "10010.0000",
+            "point_scale": 100_000_000,
+            "usd_scale": 100_000_000,
+            "point_reserve_units": "9990000000000000",
+            "point_reserve": "99900000.00000000",
+            "usd_reserve_units": "1001000000000",
+            "usd_reserve": "10010.00000000",
             "marginal_price_usd_per_point": "0.00010020",
             "daily_marginal_price": {
                 "price_kind": "pool_marginal_usd_per_point",
@@ -1540,10 +1540,10 @@ mod nni_bancor_unit_tests {
             "high": "0.000110000000",
             "low": "0.000090000000",
             "close": "0.000105000000",
-            "point_volume_units": "10000",
-            "point_volume": "1.0000",
-            "usd_volume_units": "1",
-            "usd_volume": "0.0001",
+            "point_volume_units": "100000000",
+            "point_volume": "1.00000000",
+            "usd_volume_units": "10000",
+            "usd_volume": "0.00010000",
             "trade_count": 1,
             "has_trades": true,
         });

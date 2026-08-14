@@ -5,17 +5,9 @@ import type {
   NniNetworkRewards,
   NniRewardPolicy,
 } from "../types/api";
+import { NniDecimalAmount } from "./NniDecimalAmount";
 
 type Translate = (zh: string, en: string) => string;
-
-function formatWholePoints(value: string): string {
-  const match = /^(\d+)(?:\.(\d+))?$/.exec(value.trim());
-  if (!match) return value;
-
-  let whole = BigInt(match[1]);
-  if ((match[2]?.[0] ?? "0") >= "5") whole += 1n;
-  return whole.toString();
-}
 
 export interface NniNetworkDeviceStatsProps {
   stats: NniNetworkDeviceStatsValue | null;
@@ -42,10 +34,10 @@ export function NniNetworkDeviceStats({
   const registeredValue = stats?.registered_device_count ?? unavailableLabel;
   const activeValue = stats?.active_device_count ?? unavailableLabel;
   const networkOutputValue = networkRewards?.total_distributed_reward_points
-    ? formatWholePoints(networkRewards.total_distributed_reward_points)
+    ? networkRewards.total_distributed_reward_points
     : unavailableLabel;
   const rewardPoolValue = rewardPolicy?.current_reward_pool_points
-    ? formatWholePoints(rewardPolicy.current_reward_pool_points)
+    ? rewardPolicy.current_reward_pool_points
     : unavailableLabel;
   const firstHeartbeatValue = stats?.first_heartbeat_unix != null
     ? formatUnixDateTime(stats.first_heartbeat_unix)
@@ -89,7 +81,7 @@ export function NniNetworkDeviceStats({
             <span className="text-xs font-semibold">{t("累计产出", "Total output")}</span>
           </div>
           <p className={networkRewards ? "min-w-0 break-all text-right font-mono text-base font-semibold text-white/90" : "text-sm font-semibold text-white/75"}>
-            {loading && !networkRewards ? <Loader2 className="h-5 w-5 animate-spin" /> : networkOutputValue}
+            {loading && !networkRewards ? <Loader2 className="h-5 w-5 animate-spin" /> : <NniDecimalAmount value={String(networkOutputValue)} />}
           </p>
         </div>
       </div>
@@ -101,7 +93,7 @@ export function NniNetworkDeviceStats({
             <span className="text-xs font-semibold">{t("窗口奖励", "Window reward")}</span>
           </div>
           <p className={rewardPolicy ? "min-w-0 break-words text-right font-mono text-base font-semibold text-white/90" : "text-sm font-semibold text-white/75"}>
-            {loading && !rewardPolicy ? <Loader2 className="h-5 w-5 animate-spin" /> : rewardPoolValue}
+            {loading && !rewardPolicy ? <Loader2 className="h-5 w-5 animate-spin" /> : <NniDecimalAmount value={String(rewardPoolValue)} />}
           </p>
         </div>
       </div>

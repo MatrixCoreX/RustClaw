@@ -1562,6 +1562,14 @@
   animation: chat-activity-sweep 2.1s ease-in-out infinite;
 }
 
+.nni-decimal-fraction {
+  display: inline-block;
+  font-size: 0.42em;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.015em;
+  vertical-align: 0.08em;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .chat-activity-sweep::after {
     animation: none;

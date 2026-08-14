@@ -36,12 +36,12 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       market_id: "point-usd-v1",
       point_symbol: "POINT" as const,
       usd_symbol: "USD" as const,
-      point_scale: 10000 as const,
-      usd_scale: 10000 as const,
-      point_reserve_units: "1000000000000",
-      point_reserve: "100000000.0000",
-      usd_reserve_units: "100000000",
-      usd_reserve: "10000.0000",
+      point_scale: 100000000 as const,
+      usd_scale: 100000000 as const,
+      point_reserve_units: "10000000000000000",
+      point_reserve: "100000000.00000000",
+      usd_reserve_units: "1000000000000",
+      usd_reserve: "10000.00000000",
       marginal_price_usd_per_point: "0.00010000",
       daily_marginal_price: {
         price_kind: "pool_marginal_usd_per_point" as const,
@@ -73,10 +73,10 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
         high: "0.00010010",
         low: "0.00009990",
         close: "0.00010005",
-        point_volume_units: "10000000",
-        point_volume: "1000.0000",
-        usd_volume_units: "999",
-        usd_volume: "0.0999",
+        point_volume_units: "100000000000",
+        point_volume: "1000.00000000",
+        usd_volume_units: "9990000",
+        usd_volume: "0.09990000",
         trade_count: 1,
         has_trades: true,
       }, {
@@ -86,10 +86,10 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
         high: "0.00010008",
         low: "0.00009995",
         close: "0.00010000",
-        point_volume_units: "5000000",
-        point_volume: "500.0000",
-        usd_volume_units: "500",
-        usd_volume: "0.0500",
+        point_volume_units: "50000000000",
+        point_volume: "500.00000000",
+        usd_volume_units: "5000000",
+        usd_volume: "0.05000000",
         trade_count: 1,
         has_trades: true,
       }],
@@ -107,13 +107,13 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
         device_pubkey_compact: "ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C",
         side: "sell" as const,
         input_asset: "POINT" as const,
-        input_units: "3360000",
-        input_amount: "336.0000",
-        fee_units: "16800",
-        fee_amount: "1.6800",
+        input_units: "33600000000",
+        input_amount: "336.00000000",
+        fee_units: "168000000",
+        fee_amount: "1.68000000",
         output_asset: "USD" as const,
-        output_units: "334",
-        output_amount: "0.0334",
+        output_units: "3340000",
+        output_amount: "0.03340000",
         market_version: 228 + index,
         created_at_unix: 1_700_000_000 + index,
       })),
@@ -151,8 +151,8 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       nniReady
     />,
   );
-  assert.match(html, /100000000\.0000 POINT/);
-  assert.match(html, /10000\.0000 USD/);
+  assert.match(html, /data-nni-decimal-amount="100000000\.00000000 POINT"/);
+  assert.match(html, /data-nni-decimal-amount="10000\.00000000 USD"/);
   assert.match(html, /BANCOR储备曲线市场/);
   assert.match(html, /data-bancor-open-price-change="true"/);
   assert.match(html, /价格变化计算/);
@@ -163,7 +163,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.doesNotMatch(html, /内部 USD/);
   assert.match(html, /浏览器不会接触私钥/);
   assert.match(html, /ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C/);
-  assert.match(html, /切换为原始十六进制公钥/);
+  assert.doesNotMatch(html, /切换为原始十六进制公钥/);
   assert.match(html, /BANCOR 储备曲线公式/);
   assert.match(html, /role="math"/);
   assert.match(html, /有效支付量等于支付量减去手续费/);
@@ -175,28 +175,28 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /⌊/);
   assert.match(html, /买入 POINT：输入储备是 USD，输出储备是 POINT/);
   assert.match(html, /卖出 POINT：输入储备是 POINT，输出储备是 USD/);
-  assert.match(html, /均保留 4 位小数/);
+  assert.match(html, /均保留 8 位小数/);
   assert.doesNotMatch(html, /市场状态/);
   assert.match(html, /交易手续费/);
   assert.doesNotMatch(html, /每 1 POINT|Per POINT/);
   assert.match(html, /data-bancor-daily-marginal-price="UTC"/);
   assert.match(html, /今日最高/);
-  assert.match(html, /0\.00010100 USD/);
+  assert.match(html, /data-nni-decimal-amount="0\.00010100 USD"/);
   assert.match(html, /今日最低/);
-  assert.match(html, /0\.00009900 USD/);
+  assert.match(html, /data-nni-decimal-amount="0\.00009900 USD"/);
   assert.match(html, /日涨跌幅/);
-  assert.match(html, /\+0\.50%/);
+  assert.match(html, /data-nni-decimal-amount="\+0\.50%"/);
   assert.match(html, /买入从 USD 扣除，卖出从 POINT 扣除/);
   assert.match(html, /mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3/);
   assert.match(html, /rounded-xl border border-white\/8 bg-white\/\[0\.025\] px-3 py-2\.5/);
   assert.doesNotMatch(html, /grid gap-4 sm:grid-cols-2 xl:grid-cols-4/);
-  assert.match(html, /当前手续费[：:]0\.50%/);
+  assert.match(html, /当前手续费[：:].*data-nni-decimal-amount="0\.50%"/);
   assert.doesNotMatch(html, /累计手续费|Cumulative fees|按支付资产分别累计/);
   assert.doesNotMatch(html, /1\.2500 POINT|0\.5000 USD/);
-  for (const amount of ["100000000.0000 POINT", "10000.0000 USD"]) {
+  for (const amount of ["100000000.00000000 POINT", "10000.00000000 USD"]) {
     assert.match(
       html,
-      new RegExp(`class="mt-1 break-all text-sm font-semibold text-white sm:text-base">${amount.replace(".", "\\.")}</p>`),
+      new RegExp(`data-nni-decimal-amount="${amount.replace(".", "\\.")}"`),
     );
   }
   assert.match(html, /实际成交均价 K 线/);
@@ -269,6 +269,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /data-bancor-trade-pagination="market"/);
   assert.match(html, /data-bancor-page-size="10"/);
   assert.match(html, /ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C/);
+  assert.doesNotMatch(html, /切换为原始十六进制公钥|切换为紧凑 Base58 公钥/);
   assert.doesNotMatch(html, /a2c887498554••••••••331016eb/);
   assert.doesNotMatch(html, /a2c887498554407638cbec1d0ccf11264aa1ab7749bd7913fc6753fac72cfbdb/);
   assert.match(html, /grid gap-5 lg:grid-cols-2 lg:items-start/);
@@ -295,9 +296,9 @@ test("BANCOR market history pagination returns ten rows and clamps page bounds",
 });
 
 test("BANCOR balance values shrink by content length without losing precision", () => {
-  assert.equal(balanceValueSizeClass("12.3400"), "text-base sm:text-lg");
-  assert.equal(balanceValueSizeClass("1234567890123.3400"), "text-sm sm:text-base");
-  assert.equal(balanceValueSizeClass("12345678901234567890123.3400"), "text-xs sm:text-sm");
+  assert.equal(balanceValueSizeClass("12.34000000"), "text-base sm:text-lg");
+  assert.equal(balanceValueSizeClass("1234567890123.34000000"), "text-sm sm:text-base");
+  assert.equal(balanceValueSizeClass("12345678901234567890123.34000000"), "text-xs sm:text-sm");
 });
 
 test("BANCOR swap mode uses stacked pay and estimated-output windows", () => {
@@ -305,11 +306,11 @@ test("BANCOR swap mode uses stacked pay and estimated-output windows", () => {
     <BancorSwapTradePanel
       t={(zh) => zh}
       side="sell"
-      inputAmount="100.0000"
+      inputAmount="100.00000000"
       inputAsset="POINT"
-      inputBalance="125.0000"
+      inputBalance="125.00000000"
       outputAsset="USD"
-      outputAmount="0.0099"
+      outputAmount="0.00990000"
       onInputChange={() => undefined}
       onFillBalance={() => undefined}
       onFlip={() => undefined}
@@ -361,12 +362,12 @@ test("BANCOR candle visual state never reports a flat or empty interval as up", 
   const base = {
     bucket_start_unix: 100,
     bucket_end_unix: 160,
-    high: "1.0000",
-    low: "1.0000",
-    point_volume_units: "1",
-    point_volume: "0.0001",
-    usd_volume_units: "1",
-    usd_volume: "0.0001",
+    high: "1.00000000",
+    low: "1.00000000",
+    point_volume_units: "10000",
+    point_volume: "0.00010000",
+    usd_volume_units: "10000",
+    usd_volume: "0.00010000",
   };
   assert.equal(resolveBancorCandleVisualState({ ...base, open: "1", close: "2", trade_count: 2, has_trades: true }), "up");
   assert.equal(resolveBancorCandleVisualState({ ...base, open: "2", close: "1", trade_count: 2, has_trades: true }), "down");
@@ -382,10 +383,10 @@ test("BANCOR current candle marker follows bucket end time", () => {
     high: "1",
     low: "1",
     close: "1",
-    point_volume_units: "1",
-    point_volume: "0.0001",
-    usd_volume_units: "1",
-    usd_volume: "0.0001",
+    point_volume_units: "10000",
+    point_volume: "0.00010000",
+    usd_volume_units: "10000",
+    usd_volume: "0.00010000",
     trade_count: 1,
     has_trades: true,
   };
@@ -402,14 +403,14 @@ test("BANCOR renders the current interval without an open-candle text badge", ()
       candles={[{
         bucket_start_unix: nowUnix - 10,
         bucket_end_unix: nowUnix + 50,
-        open: "1.0000",
-        high: "1.0000",
-        low: "1.0000",
-        close: "1.0000",
-        point_volume_units: "10",
-        point_volume: "0.0010",
-        usd_volume_units: "10",
-        usd_volume: "0.0010",
+        open: "1.00000000",
+        high: "1.00000000",
+        low: "1.00000000",
+        close: "1.00000000",
+        point_volume_units: "100000",
+        point_volume: "0.00100000",
+        usd_volume_units: "100000",
+        usd_volume: "0.00100000",
         trade_count: 1,
         has_trades: true,
       }]}
@@ -434,10 +435,10 @@ test("BANCOR candlesticks distinguish traded flat bars from neutral empty interv
     high: "0.00010010",
     low: "0.00009990",
     close: "0.00010005",
-    point_volume_units: "10000000",
-    point_volume: "1000.0000",
-    usd_volume_units: "999",
-    usd_volume: "0.0999",
+    point_volume_units: "100000000000",
+    point_volume: "1000.00000000",
+    usd_volume_units: "9990000",
+    usd_volume: "0.09990000",
     trade_count: 1,
     has_trades: true,
   }, {
@@ -448,9 +449,9 @@ test("BANCOR candlesticks distinguish traded flat bars from neutral empty interv
     low: "0.00010005",
     close: "0.00010005",
     point_volume_units: "0",
-    point_volume: "0.0000",
+    point_volume: "0.00000000",
     usd_volume_units: "0",
-    usd_volume: "0.0000",
+    usd_volume: "0.00000000",
     trade_count: 0,
     has_trades: false,
   }];
@@ -498,23 +499,23 @@ test("BANCOR quote review and final confirmation use a centered modal", () => {
         status: "quoted",
         side: "sell",
         input_asset: "POINT",
-        input_units: "100000",
-        input_amount: "10.0000",
+        input_units: "1000000000",
+        input_amount: "10.00000000",
         fee_asset: "POINT",
-        fee_units: "500",
-        fee_amount: "0.0500",
-        curve_input_units: "99500",
-        curve_input_amount: "9.9500",
+        fee_units: "5000000",
+        fee_amount: "0.05000000",
+        curve_input_units: "995000000",
+        curve_input_amount: "9.95000000",
         output_asset: "USD",
-        output_units: "10",
-        output_amount: "0.0010",
+        output_units: "100000",
+        output_amount: "0.00100000",
         price_impact_bps: 12,
         fee_bps: 50,
         market_id: "point-usd-v1",
         market_version: 3,
         slippage_bps: 50,
-        min_output_units: "9",
-        min_output_amount: "0.0009",
+        min_output_units: "90000",
+        min_output_amount: "0.00090000",
       }}
       tradeLoading={false}
       tradeError={null}
@@ -527,9 +528,9 @@ test("BANCOR quote review and final confirmation use a centered modal", () => {
   assert.match(html, /role="dialog"/);
   assert.match(html, /aria-modal="true"/);
   assert.match(html, /查看报价并确认交易/);
-  assert.match(html, /10\.0000 POINT/);
-  assert.match(html, /0\.0010 USD/);
-  assert.match(html, /0\.0500 POINT/);
+  assert.match(html, /data-nni-decimal-amount="10\.00000000 POINT"/);
+  assert.match(html, /data-nni-decimal-amount="0\.00100000 USD"/);
+  assert.match(html, /data-nni-decimal-amount="0\.05000000 POINT"/);
   assert.match(html, /bancor-sign-trade-btn/);
   assert.match(html, /确认签名交易/);
   assert.match(html, /返回修改/);
@@ -545,23 +546,23 @@ test("BANCOR quote modal warns but still permits confirmation when price impact 
         status: "quoted",
         side: "buy",
         input_asset: "USD",
-        input_units: "50000000",
-        input_amount: "5000.0000",
+        input_units: "500000000000",
+        input_amount: "5000.00000000",
         fee_asset: "USD",
-        fee_units: "250000",
-        fee_amount: "25.0000",
-        curve_input_units: "49750000",
-        curve_input_amount: "4975.0000",
+        fee_units: "2500000000",
+        fee_amount: "25.00000000",
+        curve_input_units: "497500000000",
+        curve_input_amount: "4975.00000000",
         output_asset: "POINT",
-        output_units: "332220367278",
-        output_amount: "33222036.7278",
+        output_units: "3322203672780000",
+        output_amount: "33222036.72780000",
         price_impact_bps: 3353,
         fee_bps: 50,
         market_id: "point-usd-v1",
         market_version: 3,
         slippage_bps: 50,
-        min_output_units: "330559265441",
-        min_output_amount: "33055926.5441",
+        min_output_units: "3305592654410000",
+        min_output_amount: "33055926.54410000",
       }}
       tradeLoading={false}
       tradeError={null}
@@ -595,7 +596,7 @@ test("BANCOR candlestick price domain follows the visible range instead of flatt
   assert.ok(domain.low < 0.0000999);
   assert.ok(domain.high - domain.low < 0.000001);
 
-  const flat = calculateBancorPriceDomain([{ high: 0.0001, low: 0.0001 }]);
+  const flat = calculateBancorPriceDomain([{ high: 0.00010000, low: 0.00010000 }]);
   assert.ok(flat.high > flat.low);
   assert.ok(flat.low >= 0);
 
