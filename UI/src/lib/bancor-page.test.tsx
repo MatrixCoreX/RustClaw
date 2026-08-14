@@ -296,7 +296,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /data-bancor-trade-pagination="market"/);
   assert.match(html, /data-bancor-page-size="10"/);
   assert.match(html, /ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C/);
-  assert.doesNotMatch(html, /切换为原始十六进制公钥|切换为紧凑 Base58 公钥/);
+  assert.doesNotMatch(html, /切换为原始十六进制公钥|切换为 Base58 编码公钥/);
   assert.doesNotMatch(html, /a2c887498554••••••••331016eb/);
   assert.doesNotMatch(html, /a2c887498554407638cbec1d0ccf11264aa1ab7749bd7913fc6753fac72cfbdb/);
   assert.match(html, /data-nni-decimal-amount="0\.12340000 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
