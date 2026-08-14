@@ -318,6 +318,7 @@ export function NniPage({
             <NniNetworkDeviceStats
               stats={nniRewards?.network_devices ?? null}
               loading={nniRewardsLoading}
+              joined={nniJoined}
               t={t}
               formatUnixDateTime={formatUnixDateTime}
             />

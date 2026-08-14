@@ -15,6 +15,7 @@ test("shows registered allowlist devices and active devices from the previous he
         window_seconds: 600,
       }}
       loading={false}
+      joined
       t={(zh) => zh}
       formatUnixDateTime={(value) => String(value ?? "--")}
     />,
@@ -31,11 +32,12 @@ test("shows registered allowlist devices and active devices from the previous he
   assert.equal((markup.match(/flex items-center justify-between gap-3/g) ?? []).length, 2);
 });
 
-test("keeps the network counters understandable before the first settlement", () => {
+test("explains why network counters are unavailable before joining", () => {
   const markup = renderToStaticMarkup(
     <NniNetworkDeviceStats
       stats={null}
       loading={false}
+      joined={false}
       t={(zh) => zh}
       formatUnixDateTime={() => "--"}
     />,
@@ -43,5 +45,23 @@ test("keeps the network counters understandable before the first settlement", ()
 
   assert.match(markup, /注册设备/);
   assert.match(markup, /活跃设备/);
-  assert.match(markup, /等待首个窗口结算/);
+  assert.equal((markup.match(/未加入/g) ?? []).length, 2);
+  assert.match(markup, /加入网络后可查看/);
+  assert.doesNotMatch(markup, />--</);
+});
+
+test("distinguishes a joined network whose counters are temporarily unavailable", () => {
+  const markup = renderToStaticMarkup(
+    <NniNetworkDeviceStats
+      stats={null}
+      loading={false}
+      joined
+      t={(zh) => zh}
+      formatUnixDateTime={() => "--"}
+    />,
+  );
+
+  assert.equal((markup.match(/暂不可用/g) ?? []).length, 2);
+  assert.match(markup, /刷新状态后重试/);
+  assert.doesNotMatch(markup, /未加入/);
 });
