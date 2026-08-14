@@ -1205,7 +1205,29 @@ export interface NniNetworkDeviceStats {
   active_device_count: number;
   active_period_start_unix: number | null;
   active_period_end_unix: number | null;
+  first_heartbeat_unix: number | null;
   window_seconds: number;
+}
+
+export interface NniRewardPolicy {
+  interval_seconds: number;
+  initial_reward_pool_points: number;
+  current_reward_pool_units: string | null;
+  current_reward_pool_points: string | null;
+  distribution: "equal_per_eligible_device";
+  halving_epoch_unix: number | null;
+  halving_interval_seconds: number;
+  halving_era: number | null;
+  rewards_ended: boolean;
+  next_halving_at_unix: number | null;
+}
+
+export interface NniNetworkRewards {
+  total_distributed_reward_units: string;
+  total_distributed_reward_points: string;
+  settled_period_count: number;
+  first_period_start_unix: number | null;
+  latest_period_end_unix: number | null;
 }
 
 export interface NniRewardsResponse {
@@ -1221,6 +1243,8 @@ export interface NniRewardsResponse {
   first_period_start_unix?: number | null;
   latest_period_end_unix?: number | null;
   network_devices?: NniNetworkDeviceStats;
+  reward_policy?: NniRewardPolicy;
+  network_rewards?: NniNetworkRewards;
   page: number;
   per_page: number;
   total: number;

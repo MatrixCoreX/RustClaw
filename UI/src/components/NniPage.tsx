@@ -341,6 +341,8 @@ export function NniPage({
           <div className="grid gap-3">
             <NniNetworkDeviceStats
               stats={nniRewards?.network_devices ?? null}
+              networkRewards={nniRewards?.network_rewards ?? null}
+              rewardPolicy={nniRewards?.reward_policy ?? null}
               loading={nniRewardsLoading}
               joined={nniJoined}
               t={t}
