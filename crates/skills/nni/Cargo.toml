@@ -1,0 +1,16 @@
+[package]
+name = "nni-skill"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "nni-skill"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+claw-core = { path = "../../claw-core" }
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true

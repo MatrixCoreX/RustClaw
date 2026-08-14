@@ -22,6 +22,65 @@ fn nni_agent_sends_heartbeats_every_eight_minutes() {
 }
 
 #[test]
+fn nni_next_heartbeat_due_time_is_stable_for_success_and_retry_states() {
+    let active = NniHeartbeatRuntimeState {
+        last_heartbeat_at_ts: Some(1_000),
+        last_heartbeat_attempt_at_ts: Some(1_000),
+        ..NniHeartbeatRuntimeState::default()
+    };
+    assert_eq!(
+        nni_next_heartbeat_due_at_ts(true, "active", &active, 1_200),
+        Some(1_000 + NNI_HEARTBEAT_INTERVAL_SECONDS)
+    );
+
+    let waiting = NniHeartbeatRuntimeState {
+        last_heartbeat_attempt_at_ts: Some(2_000),
+        ..NniHeartbeatRuntimeState::default()
+    };
+    assert_eq!(
+        nni_next_heartbeat_due_at_ts(true, "waiting_network", &waiting, 9_999),
+        Some(2_000 + NNI_HEARTBEAT_POLL_SECONDS)
+    );
+    assert_eq!(
+        nni_next_heartbeat_due_at_ts(false, "disabled", &waiting, 9_999),
+        None
+    );
+}
+
+#[test]
+fn nni_remote_error_compatibility_never_treats_prose_as_a_machine_token() {
+    let prose = ApiResponse::<Value> {
+        ok: false,
+        data: None,
+        error: Some("localized provider detail".to_string()),
+    };
+    assert_eq!(
+        nni_remote_api_error_code(&prose, "nni_remote_request_failed"),
+        "nni_remote_request_failed"
+    );
+
+    let legacy_machine_token = ApiResponse::<Value> {
+        ok: false,
+        data: None,
+        error: Some("nni_pubkey_not_allowlisted".to_string()),
+    };
+    assert_eq!(
+        nni_remote_api_error_code(&legacy_machine_token, "nni_remote_request_failed"),
+        "nni_pubkey_not_allowlisted"
+    );
+
+    let canonical = ApiResponse::<Value> {
+        ok: false,
+        data: Some(json!({"error_code": "nni_structured_rejection"})),
+        error: Some("ignored detail".to_string()),
+    };
+    assert_eq!(
+        nni_remote_api_error_code(&canonical, "nni_remote_request_failed"),
+        "nni_structured_rejection"
+    );
+}
+
+#[test]
 fn nni_simulation_controls_are_accepted_but_not_advertised_as_chip_operations() {
     assert!(nni_accepted_actions().contains(&NNI_SIMULATION_ENABLE_ACTION));
     assert!(nni_accepted_actions().contains(&NNI_SIMULATION_DISABLE_ACTION));
@@ -265,9 +324,22 @@ fn nni_heartbeat_status_uses_data_root_without_mutating_config() {
     assert_eq!(initial.heartbeat_request_count, 0);
     assert_eq!(initial.last_heartbeat_error, None);
 
-    let response =
-        write_nni_heartbeat_status(&state, Some(222), None, None, None, Some(10), Some(0))
-            .expect("persist NNI heartbeat runtime state");
+    let response = write_nni_heartbeat_status(
+        &state,
+        NniHeartbeatStatusUpdate {
+            heartbeat_at_ts: Some(222),
+            attempt_at_ts: Some(222),
+            error: None,
+            error_code: None,
+            error_at_ts: None,
+            error_network: false,
+            request_count: Some(10),
+            network_failures: Some(0),
+            success_node_url: Some("https://nni.example.test"),
+            network_authorization: Some("authorized"),
+        },
+    )
+    .expect("persist NNI heartbeat runtime state");
 
     assert_eq!(workspace.read_config(), config);
     assert_eq!(response.last_heartbeat_at_ts, Some(222));
@@ -282,7 +354,7 @@ fn nni_heartbeat_status_uses_data_root_without_mutating_config() {
         &std::fs::read_to_string(runtime_state_path).expect("read NNI heartbeat state"),
     )
     .expect("parse NNI heartbeat state");
-    assert_eq!(persisted.schema_version, 1);
+    assert_eq!(persisted.schema_version, 2);
     assert_eq!(persisted.last_heartbeat_at_ts, Some(222));
     assert_eq!(persisted.heartbeat_request_count, 10);
     let migrated: NniRuntimeConfig = serde_json::from_str(
@@ -347,12 +419,18 @@ fn nni_history_clear_operations_do_not_mutate_config() {
 
     write_nni_heartbeat_status(
         &state,
-        Some(444),
-        Some("network unavailable"),
-        Some(444),
-        Some(true),
-        Some(11),
-        Some(3),
+        NniHeartbeatStatusUpdate {
+            heartbeat_at_ts: Some(444),
+            attempt_at_ts: Some(444),
+            error: Some("network unavailable"),
+            error_code: Some("heartbeat_request_network_failed"),
+            error_at_ts: Some(444),
+            error_network: true,
+            request_count: Some(11),
+            network_failures: Some(3),
+            success_node_url: None,
+            network_authorization: None,
+        },
     )
     .expect("write NNI heartbeat error state");
     assert_eq!(
@@ -371,6 +449,7 @@ fn nni_history_clear_operations_do_not_mutate_config() {
     assert_eq!(runtime_state.heartbeat_request_count, 11);
     assert_eq!(runtime_state.last_heartbeat_at_ts, Some(444));
     assert_eq!(runtime_state.last_heartbeat_error, None);
+    assert_eq!(runtime_state.last_heartbeat_error_code, None);
     assert_eq!(runtime_state.last_heartbeat_error_at_ts, None);
     assert_eq!(runtime_state.last_heartbeat_network_failures, 0);
 }

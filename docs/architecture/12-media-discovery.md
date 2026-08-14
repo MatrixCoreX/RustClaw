@@ -5,7 +5,8 @@
 
 <!-- ai-learning-navigation:start -->
 Previous: [Task artifact delivery](11-task-artifact-delivery.md) |
-[Architecture index](README.md)
+[Architecture index](README.md) |
+Next: [NNI capability and heartbeat control](13-nni-capability.md)
 <!-- ai-learning-navigation:end -->
 
 `media_discovery` is an optional Skill Store capability for bounded discovery on

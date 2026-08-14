@@ -60,6 +60,66 @@ fn state_with_registry_toml(toml: &str) -> crate::AppState {
 }
 
 #[test]
+fn nni_capabilities_resolve_through_one_read_only_registry_surface() {
+    let state = state_with_workspace_registry();
+    let cases = [
+        ("nni.status", "status", json!({})),
+        ("nni.device_status", "device_status", json!({})),
+        ("nni.heartbeat_status", "heartbeat_status", json!({})),
+        ("nni.heartbeat_enable", "heartbeat_enable", json!({})),
+        ("nni.heartbeat_disable", "heartbeat_disable", json!({})),
+        ("nni.heartbeat_now", "heartbeat_now", json!({})),
+        ("nni.network_stats", "network_stats", json!({"limit": 5})),
+        ("nni.my_rewards", "my_rewards", json!({"limit": 5})),
+        ("nni.bancor_market", "bancor_market", json!({})),
+        ("nni.bancor_account", "bancor_account", json!({"limit": 5})),
+        (
+            "nni.bancor_market_trades",
+            "bancor_market_trades",
+            json!({"limit": 10}),
+        ),
+        (
+            "nni.bancor_candles",
+            "bancor_candles",
+            json!({"interval": "15m", "limit": 12}),
+        ),
+        (
+            "nni.bancor_quote",
+            "bancor_quote",
+            json!({"side": "buy", "pay_amount": "25"}),
+        ),
+    ];
+
+    for (capability, expected_action, args) in cases {
+        let (action, record) =
+            resolve_capability_action_with_record_for_state(&state, capability, args);
+        let Some(AgentAction::CallSkill { skill, args }) = action else {
+            panic!("expected NNI skill action for {capability}");
+        };
+        assert_eq!(skill, "nni");
+        assert_eq!(args["action"], expected_action);
+        assert_eq!(
+            record.reason_code,
+            "capability_resolver_registry_mapping_resolved"
+        );
+    }
+
+    let registry = state.get_skills_registry().expect("skills registry");
+    let capabilities = registry.planner_capabilities("nni");
+    assert_eq!(capabilities.len(), 13);
+    assert!(capabilities.iter().all(|mapping| !matches!(
+        mapping.name.as_str(),
+        "nni.buy" | "nni.sell" | "nni.trade" | "nni.bancor_trade"
+    )));
+    assert!(!crate::schema_contract::executable_enum_violations(
+        &state,
+        "nni",
+        &json!({"action": "trade", "pay_amount": "25"}),
+    )
+    .is_empty());
+}
+
+#[test]
 fn media_download_routes_raw_share_text_to_autonomous_download() {
     let state = state_with_workspace_registry();
     assert_eq!(

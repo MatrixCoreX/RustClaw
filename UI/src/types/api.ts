@@ -1061,6 +1061,11 @@ export interface NniDeviceStatusResponse {
   nni_available: boolean;
   helper_available: boolean;
   signature_chip_present: boolean;
+  hardware_chip_present?: boolean;
+  signer_available?: boolean;
+  local_participation_eligible?: boolean;
+  signer_kind?: "hardware" | "simulated" | "unavailable" | string;
+  network_authorization?: "unknown" | "authorized" | "rejected" | string;
   simulated?: boolean;
   device_kind?: "hardware" | "simulated" | "unavailable" | string | null;
   simulation_available?: boolean;
@@ -1142,8 +1147,16 @@ export interface NniConfigResponse {
   heartbeat_request_count: number;
   last_heartbeat_at_ts?: number | null;
   last_heartbeat_error?: string | null;
+  last_heartbeat_error_code?: string | null;
   last_heartbeat_error_at_ts?: number | null;
   last_heartbeat_network_failures: number;
+  last_heartbeat_attempt_at_ts?: number | null;
+  consecutive_heartbeat_failures?: number;
+  last_success_node_host?: string | null;
+  network_authorization?: "unknown" | "authorized" | "rejected" | string;
+  heartbeat_state?: "disabled" | "enabling" | "active" | "waiting_network" | "rejected" | "degraded" | string;
+  next_heartbeat_due_at_ts?: number | null;
+  worker_running?: boolean;
   config_path: string;
 }
 

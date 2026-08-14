@@ -1,6 +1,29 @@
 use super::*;
 
 #[test]
+fn internal_nni_access_is_capability_driven() {
+    let nni_mapping: PlannerCapabilityMapping = toml::from_str(
+        r#"
+name = "nni.status"
+action = "status"
+effect = "observe"
+"#,
+    )
+    .expect("NNI capability mapping");
+    let unrelated_mapping: PlannerCapabilityMapping = toml::from_str(
+        r#"
+name = "network.status"
+action = "status"
+effect = "observe"
+"#,
+    )
+    .expect("unrelated capability mapping");
+
+    assert!(has_planner_capability_prefix(&[nni_mapping], "nni."));
+    assert!(!has_planner_capability_prefix(&[unrelated_mapping], "nni."));
+}
+
+#[test]
 fn package_resolution_failure_is_structured_as_pre_dispatch_no_effect() {
     let error = skill_sdk::SkillSdkError::new(
         "launch_pinned_version_missing",

@@ -35,8 +35,16 @@ SURFACE_EXCLUSIONS = {
     "receipt_resolution_or_pin": {
         "crates/clawd/src/repo/channel_delivery_receipt.rs",
     },
+    # The NNI internal gateway authenticates a scoped core-domain token. This
+    # is an authorization boundary, not planner-side skill selection.
+    "semantic_special_case": {
+        "crates/clawd/src/http/ui_routes/nni_skill_gateway.rs",
+    },
 }
 DOMAIN_ADAPTER_PATHS = {
+    "crates/clawd/src/http/ui_routes/nni_internal_llm.rs",
+    "crates/clawd/src/http/ui_routes/nni_remote_join.rs",
+    "crates/clawd/src/http/ui_routes/nni_skill_gateway.rs",
     "crates/clawd/src/repo/crypto_storage.rs",
     "crates/clawd/src/skill_storage/data_owners.rs",
     "crates/clawd/src/skill_storage/migration.rs",

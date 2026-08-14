@@ -432,6 +432,13 @@ fn installed_child_inherits_secret_token_store_without_manifest_declaration() {
 }
 
 #[test]
+fn internal_gateway_tokens_are_redeemed_only_by_their_server_endpoints() {
+    assert!(ENDPOINT_REDEEMED_TOKENS.contains(&"AGENT_INTERNAL_LLM_TOKEN"));
+    assert!(ENDPOINT_REDEEMED_TOKENS.contains(&"AGENT_INTERNAL_ADMISSION_TOKEN"));
+    assert!(ENDPOINT_REDEEMED_TOKENS.contains(&"AGENT_INTERNAL_NNI_TOKEN"));
+}
+
+#[test]
 fn declared_private_storage_is_writable_for_a_read_only_installed_skill() {
     let storage = tempfile::tempdir().expect("storage tempdir");
     let mut launch = ChildLaunch::legacy("/bin/true");

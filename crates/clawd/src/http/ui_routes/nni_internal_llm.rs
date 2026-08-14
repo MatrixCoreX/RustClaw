@@ -272,6 +272,163 @@ fn nni_helper_payload_meta(payload: &Value) -> Value {
     })
 }
 
+async fn nni_device_snapshot(state: &AppState) -> Value {
+    let script_path = nni_signature_helper_path(state);
+    let supported_actions = nni_supported_actions();
+    if !script_path.is_file() {
+        append_nni_log_event_best_effort(
+            state,
+            "device_status",
+            json!({
+                "status": "helper_missing",
+                "helper_available": false,
+                "hardware_chip_present": false,
+                "signer_available": false,
+            }),
+        );
+        return json!({
+            "nni_available": true,
+            "helper_available": false,
+            "signature_chip_present": false,
+            "hardware_chip_present": false,
+            "signer_available": false,
+            "local_participation_eligible": false,
+            "signer_kind": "unavailable",
+            "network_authorization": "unknown",
+            "status": "helper_missing",
+            "simulated": false,
+            "device_kind": "unavailable",
+            "simulation_available": false,
+            "message_key": "nni.device_status.helper_missing",
+            "next_step_key": "nni.device_status.helper_missing.next_step",
+            "helper_path": script_path.to_string_lossy(),
+            "supported_actions": supported_actions,
+        });
+    }
+
+    match detect_nni_signature_chip(state).await {
+        Ok(output) if output.ok => {
+            let simulated = nni_helper_payload_simulated(&output.payload);
+            let hardware_chip_present = !simulated;
+            let signer_kind = if simulated { "simulated" } else { "hardware" };
+            let pubkey = output
+                .payload
+                .get("pubkey")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            append_nni_log_event_best_effort(
+                state,
+                "device_status",
+                json!({
+                    "status": if simulated { "simulated" } else { "ready" },
+                    "helper_available": true,
+                    "hardware_chip_present": hardware_chip_present,
+                    "signer_available": true,
+                    "signer_kind": signer_kind,
+                    "exit_code": output.exit_code,
+                }),
+            );
+            json!({
+                "nni_available": true,
+                "helper_available": true,
+                // Compatibility projection for the existing UI. New runtime
+                // contracts use hardware_chip_present and signer_available.
+                "signature_chip_present": true,
+                "hardware_chip_present": hardware_chip_present,
+                "signer_available": true,
+                "local_participation_eligible": true,
+                "signer_kind": signer_kind,
+                "network_authorization": "unknown",
+                "status": if simulated { "simulated" } else { "ready" },
+                "message_key": if simulated { "nni.device_status.simulated" } else { "nni.device_status.ready" },
+                "next_step_key": if simulated { Some("nni.device_status.simulated.next_step") } else { None },
+                "simulated": simulated,
+                "device_kind": signer_kind,
+                "simulation_available": false,
+                "helper_path": script_path.to_string_lossy(),
+                "supported_actions": supported_actions,
+                "pubkey": pubkey,
+                "pubkey_preview": nni_short_hex(pubkey),
+                "pubkey_fingerprint": nni_hex_fingerprint(pubkey),
+                "meta": nni_helper_payload_meta(&output.payload),
+                "exit_code": output.exit_code,
+            })
+        }
+        Ok(output) => {
+            let reason = output
+                .error
+                .clone()
+                .filter(|value| !value.trim().is_empty())
+                .or_else(|| {
+                    (!output.stderr_tail.trim().is_empty()).then(|| output.stderr_tail.clone())
+                })
+                .unwrap_or_else(|| "signature device unavailable".to_string());
+            append_nni_log_event_best_effort(
+                state,
+                "device_status",
+                json!({
+                    "status": "signature_chip_missing",
+                    "helper_available": true,
+                    "hardware_chip_present": false,
+                    "signer_available": false,
+                    "exit_code": output.exit_code,
+                    "diagnostic": reason,
+                }),
+            );
+            json!({
+                "nni_available": true,
+                "helper_available": true,
+                "signature_chip_present": false,
+                "hardware_chip_present": false,
+                "signer_available": false,
+                "local_participation_eligible": false,
+                "signer_kind": "unavailable",
+                "network_authorization": "unknown",
+                "status": "signature_chip_missing",
+                "simulated": false,
+                "device_kind": "unavailable",
+                "simulation_available": true,
+                "message_key": "nni.device_status.signature_chip_missing",
+                "next_step_key": "nni.device_status.signature_chip_missing.next_step",
+                "helper_path": script_path.to_string_lossy(),
+                "supported_actions": supported_actions,
+                "exit_code": output.exit_code,
+            })
+        }
+        Err(err) => {
+            append_nni_log_event_best_effort(
+                state,
+                "device_status",
+                json!({
+                    "status": "signature_chip_missing",
+                    "helper_available": true,
+                    "hardware_chip_present": false,
+                    "signer_available": false,
+                    "diagnostic": err,
+                }),
+            );
+            json!({
+                "nni_available": true,
+                "helper_available": true,
+                "signature_chip_present": false,
+                "hardware_chip_present": false,
+                "signer_available": false,
+                "local_participation_eligible": false,
+                "signer_kind": "unavailable",
+                "network_authorization": "unknown",
+                "status": "signature_chip_missing",
+                "simulated": false,
+                "device_kind": "unavailable",
+                "simulation_available": true,
+                "message_key": "nni.device_status.signature_chip_missing",
+                "next_step_key": "nni.device_status.signature_chip_missing.next_step",
+                "helper_path": script_path.to_string_lossy(),
+                "supported_actions": supported_actions,
+            })
+        }
+    }
+}
+
 async fn nni_device_status(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -287,161 +444,14 @@ async fn nni_device_status(
         );
     }
 
-    let script_path = nni_signature_helper_path(&state);
-    let supported_actions = nni_supported_actions();
-    if !script_path.is_file() {
-        append_nni_log_event_best_effort(
-            &state,
-            "device_status",
-            json!({
-                "status": "helper_missing",
-                "helper_available": false,
-                "signature_chip_present": false,
-                "helper_path": script_path.to_string_lossy(),
-            }),
-        );
-        return (
-            StatusCode::OK,
-            Json(ApiResponse {
-                ok: true,
-                data: Some(json!({
-                    "nni_available": true,
-                    "helper_available": false,
-                    "signature_chip_present": false,
-                    "status": "helper_missing",
-                    "simulated": false,
-                    "device_kind": "unavailable",
-                    "simulation_available": false,
-                    "message_key": "nni.device_status.helper_missing",
-                    "next_step_key": "nni.device_status.helper_missing.next_step",
-                    "helper_path": script_path.to_string_lossy(),
-                    "supported_actions": supported_actions,
-                })),
-                error: None,
-            }),
-        );
-    }
-
-    match detect_nni_signature_chip(&state).await {
-        Ok(output) if output.ok => {
-            let simulated = nni_helper_payload_simulated(&output.payload);
-            let pubkey = output
-                .payload
-                .get("pubkey")
-                .and_then(|value| value.as_str())
-                .unwrap_or_default();
-            append_nni_log_event_best_effort(
-                &state,
-                "device_status",
-                json!({
-                    "status": if simulated { "simulated" } else { "ready" },
-                    "helper_available": true,
-                    "signature_chip_present": true,
-                    "simulated": simulated,
-                    "exit_code": output.exit_code,
-                }),
-            );
-            (
-                StatusCode::OK,
-                Json(ApiResponse {
-                    ok: true,
-                    data: Some(json!({
-                        "nni_available": true,
-                        "helper_available": true,
-                        "signature_chip_present": true,
-                        "status": if simulated { "simulated" } else { "ready" },
-                        "message_key": if simulated { "nni.device_status.simulated" } else { "nni.device_status.ready" },
-                        "next_step_key": if simulated { Some("nni.device_status.simulated.next_step") } else { None },
-                        "simulated": simulated,
-                        "device_kind": if simulated { "simulated" } else { "hardware" },
-                        "simulation_available": false,
-                        "helper_path": script_path.to_string_lossy(),
-                        "supported_actions": supported_actions,
-                        "pubkey": pubkey,
-                        "pubkey_preview": nni_short_hex(pubkey),
-                        "pubkey_fingerprint": nni_hex_fingerprint(pubkey),
-                        "meta": nni_helper_payload_meta(&output.payload),
-                        "exit_code": output.exit_code,
-                    })),
-                    error: None,
-                }),
-            )
-        }
-        Ok(output) => {
-            let reason = output
-                .error
-                .clone()
-                .filter(|value| !value.trim().is_empty())
-                .or_else(|| {
-                    (!output.stderr_tail.trim().is_empty()).then(|| output.stderr_tail.clone())
-                })
-                .unwrap_or_else(|| "signature chip unavailable".to_string());
-            append_nni_log_event_best_effort(
-                &state,
-                "device_status",
-                json!({
-                    "status": "signature_chip_missing",
-                    "helper_available": true,
-                    "signature_chip_present": false,
-                    "exit_code": output.exit_code,
-                    "diagnostic": reason,
-                }),
-            );
-            (
-                StatusCode::OK,
-                Json(ApiResponse {
-                    ok: true,
-                    data: Some(json!({
-                        "nni_available": true,
-                        "helper_available": true,
-                        "signature_chip_present": false,
-                        "status": "signature_chip_missing",
-                        "simulated": false,
-                        "device_kind": "unavailable",
-                        "simulation_available": true,
-                        "message_key": "nni.device_status.signature_chip_missing",
-                        "next_step_key": "nni.device_status.signature_chip_missing.next_step",
-                        "helper_path": script_path.to_string_lossy(),
-                        "supported_actions": supported_actions,
-                        "exit_code": output.exit_code,
-                    })),
-                    error: None,
-                }),
-            )
-        }
-        Err(err) => {
-            append_nni_log_event_best_effort(
-                &state,
-                "device_status",
-                json!({
-                    "status": "signature_chip_missing",
-                    "helper_available": true,
-                    "signature_chip_present": false,
-                    "diagnostic": err,
-                }),
-            );
-            (
-                StatusCode::OK,
-                Json(ApiResponse {
-                    ok: true,
-                    data: Some(json!({
-                        "nni_available": true,
-                        "helper_available": true,
-                        "signature_chip_present": false,
-                        "status": "signature_chip_missing",
-                        "simulated": false,
-                        "device_kind": "unavailable",
-                        "simulation_available": true,
-                        "message_key": "nni.device_status.signature_chip_missing",
-                        "next_step_key": "nni.device_status.signature_chip_missing.next_step",
-                        "helper_path": script_path.to_string_lossy(),
-                        "supported_actions": supported_actions,
-                    })),
-                    error: None,
-                }),
-            )
-        }
-    }
+    (
+        StatusCode::OK,
+        Json(ApiResponse {
+            ok: true,
+            data: Some(nni_device_snapshot(&state).await),
+            error: None,
+        }),
+    )
 }
 
 async fn nni_device_action(

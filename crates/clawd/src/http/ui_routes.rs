@@ -380,6 +380,7 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             post(webd_internal_verify_login),
         )
         .route("/internal/llm/text", post(internal_llm_text))
+        .route("/internal/nni/action", post(internal_nni_action))
         .route("/internal/skills/admit", post(internal_skill_admit))
         .route("/admin/webd-accounts", post(admin_upsert_webd_account))
 }
@@ -461,6 +462,7 @@ include!("ui_routes/nni_request_records.rs");
 include!("ui_routes/nni_remote_join.rs");
 include!("ui_routes/nni_rewards.rs");
 include!("ui_routes/nni_bancor.rs");
+include!("ui_routes/nni_skill_gateway.rs");
 include!("ui_routes/auth_feishu_bind.rs");
 include!("ui_routes/factory_reset.rs");
 include!("ui_routes/channel_config.rs");
@@ -513,6 +515,10 @@ mod host_dependencies_tests;
 #[cfg(test)]
 #[path = "ui_routes/nni_device_tests.rs"]
 mod nni_device_tests;
+
+#[cfg(test)]
+#[path = "ui_routes/nni_skill_gateway_tests.rs"]
+mod nni_skill_gateway_tests;
 
 #[cfg(test)]
 #[path = "ui_routes/logs_runtime_tests.rs"]
