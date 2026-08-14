@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   formatBancorAssetAmountForDisplay,
   formatBancorIntegerAmount,
+  formatBancorTradeHistoryAmount,
 } from "./bancor-amount-display";
 
 test("BANCOR reserve display rounds decimal amounts to an integer without floating point", () => {
@@ -15,4 +16,11 @@ test("BANCOR reserve display rounds decimal amounts to an integer without floati
 test("BANCOR trade display uses integers for POINT while preserving USD precision", () => {
   assert.equal(formatBancorAssetAmountForDisplay("33222036.72780000", "POINT"), "33222037");
   assert.equal(formatBancorAssetAmountForDisplay("0.29888786", "USD"), "0.29888786");
+});
+
+test("BANCOR trade history keeps meaningful precision without trailing zeros", () => {
+  assert.equal(formatBancorTradeHistoryAmount("900191.74840000"), "900191.7484");
+  assert.equal(formatBancorTradeHistoryAmount("1200.00000000"), "1200");
+  assert.equal(formatBancorTradeHistoryAmount("0.03340000"), "0.0334");
+  assert.equal(formatBancorTradeHistoryAmount("invalid"), "invalid");
 });

@@ -36,7 +36,7 @@ import type { useBancorRuntime } from "../hooks/useBancorRuntime";
 import type { NniBancorCandle, NniBancorQuoteResponse } from "../types/api";
 import {
   formatBancorAssetAmountForDisplay,
-  formatBancorIntegerAmount,
+  formatBancorTradeHistoryAmount,
 } from "../lib/bancor-amount-display";
 import { resolveBancorMarketDirectionColors } from "../lib/bancor-market-colors";
 import { BancorPriceChangePage } from "./BancorPriceChangePage";
@@ -443,8 +443,9 @@ export function BancorPage({
         <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           <MetricCard
             label={t("市场储备", "Market reserves")}
-            value={market ? `${formatBancorIntegerAmount(market.point_reserve)} POINT` : "—"}
-            secondaryValue={market ? `${formatBancorIntegerAmount(market.usd_reserve)} USD` : undefined}
+            value={market ? `${market.point_reserve} POINT` : "—"}
+            secondaryValue={market ? `${market.usd_reserve} USD` : undefined}
+            shrinkFraction={false}
             detail={market ? undefined : t("等待读取", "Waiting to load")}
           />
           <MetricCard
@@ -793,9 +794,9 @@ export function BancorPage({
                   </span>
                   <p className="mt-1 text-xs text-white/40">{formatUnixDateTime(record.created_at_unix)}</p>
                 </div>
-                <NniDecimalAmount className="text-white/55" value={`${record.input_amount} ${record.input_asset}`} shrinkFraction={false} />
+                <NniDecimalAmount className="text-white/55" value={`${formatBancorTradeHistoryAmount(record.input_amount)} ${record.input_asset}`} shrinkFraction={false} />
                 <span className="font-medium" style={{ color: resolveBancorTradeColor(record.side, t) }}>
-                  <NniDecimalAmount value={`+${record.output_amount} ${record.output_asset}`} shrinkFraction={false} />
+                  <NniDecimalAmount value={`+${formatBancorTradeHistoryAmount(record.output_amount)} ${record.output_asset}`} shrinkFraction={false} />
                 </span>
               </div>
             )) : (
@@ -866,9 +867,9 @@ export function BancorPage({
                   </div>
                   <p className="mt-1 text-xs text-white/40">{formatUnixDateTime(record.created_at_unix)}</p>
                 </div>
-                <NniDecimalAmount className="text-white/55" value={`${record.input_amount} ${record.input_asset}`} shrinkFraction={false} />
+                <NniDecimalAmount className="text-white/55" value={`${formatBancorTradeHistoryAmount(record.input_amount)} ${record.input_asset}`} shrinkFraction={false} />
                 <span className="font-medium" style={{ color: resolveBancorTradeColor(record.side, t) }}>
-                  <NniDecimalAmount value={`+${record.output_amount} ${record.output_asset}`} shrinkFraction={false} />
+                  <NniDecimalAmount value={`+${formatBancorTradeHistoryAmount(record.output_amount)} ${record.output_asset}`} shrinkFraction={false} />
                 </span>
               </div>
             )) : (

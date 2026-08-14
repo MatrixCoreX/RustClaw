@@ -180,8 +180,8 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       nniReady
     />,
   );
-  assert.match(html, />100000000 POINT<\/span>/);
-  assert.match(html, />10000 USD<\/span>/);
+  assert.match(html, /data-nni-decimal-amount="100000000\.00000000 POINT"[^>]*data-nni-decimal-fraction-size="normal"/);
+  assert.match(html, /data-nni-decimal-amount="10000\.00000000 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.match(html, /BANCOR储备曲线市场/);
   assert.match(html, /data-bancor-open-price-change="true"/);
   assert.match(html, /价格变化计算/);
@@ -224,8 +224,6 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /data-nni-decimal-amount="0\.50%"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.doesNotMatch(html, /累计手续费|Cumulative fees|按支付资产分别累计/);
   assert.doesNotMatch(html, /1\.2500 POINT|0\.5000 USD/);
-  assert.doesNotMatch(html, /data-nni-decimal-amount="100000000\.00000000 POINT"/);
-  assert.doesNotMatch(html, /data-nni-decimal-amount="10000\.00000000 USD"/);
   assert.match(html, /实际成交均价 K 线/);
   assert.match(html, /池内即时边际价/);
   assert.doesNotMatch(html, /当前 K 线价格摘要/);
@@ -299,10 +297,11 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.doesNotMatch(html, /切换为原始十六进制公钥|切换为 Base58 编码公钥/);
   assert.doesNotMatch(html, /a2c887498554••••••••331016eb/);
   assert.doesNotMatch(html, /a2c887498554407638cbec1d0ccf11264aa1ab7749bd7913fc6753fac72cfbdb/);
-  assert.match(html, /data-nni-decimal-amount="0\.12340000 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
-  assert.match(html, /data-nni-decimal-amount="\+1200\.00000000 POINT"[^>]*data-nni-decimal-fraction-size="normal"/);
-  assert.match(html, /data-nni-decimal-amount="336\.00000000 POINT"[^>]*data-nni-decimal-fraction-size="normal"/);
-  assert.match(html, /data-nni-decimal-amount="\+0\.03340000 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
+  assert.match(html, /data-nni-decimal-amount="0\.1234 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
+  assert.match(html, />\+1200 POINT<\/span>/);
+  assert.match(html, />336 POINT<\/span>/);
+  assert.match(html, /data-nni-decimal-amount="\+0\.0334 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
+  assert.doesNotMatch(html, /1200\.00000000 POINT|336\.00000000 POINT|0\.03340000 USD/);
   assert.match(html, /grid gap-5 lg:grid-cols-2 lg:items-start/);
   assert.ok(html.indexOf("储备曲线交易公式") > html.indexOf("我的成交记录"));
 });
