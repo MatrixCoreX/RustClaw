@@ -40,6 +40,7 @@ fn parse_sina_hq_returns_structured_quote_extra() {
         input: "茅台".to_string(),
         matched_name: "贵州茅台".to_string(),
         used_llm: false,
+        reason_code: "configured_alias",
     };
 
     let (text, extra) = parse_sina_hq(body, "sh600519", Some(&correction)).unwrap();
@@ -88,7 +89,7 @@ fn parse_sina_hq_returns_structured_quote_extra() {
             .get("correction")
             .and_then(|correction| correction.get("reason_code"))
             .and_then(Value::as_str),
-        Some("alias_match")
+        Some("configured_alias")
     );
     assert!(extra
         .get("change_pct")
@@ -115,8 +116,58 @@ fn preview_quote_keeps_name_resolution_deferred() {
     let (_, extra) = execute(args, &RuntimeConfig::default()).unwrap();
 
     assert!(extra["normalized_code"].is_null());
-    assert_eq!(extra["resolution_mode"], "configured_alias_or_model");
+    assert_eq!(
+        extra["resolution_mode"],
+        "provider_search_or_configured_alias"
+    );
     assert_eq!(extra["external_call_count"], 0);
+}
+
+#[test]
+fn preview_quote_normalizes_us_ticker_without_external_calls() {
+    let args = json!({"action": "preview_quote", "symbol": "TSLA"});
+    let (_, extra) = execute(args, &RuntimeConfig::default()).unwrap();
+
+    assert_eq!(extra["normalized_code"], "US:TSLA");
+    assert_eq!(extra["market"], "us");
+    assert_eq!(extra["resolution_mode"], "direct_code");
+    assert_eq!(extra["external_call_count"], 0);
+}
+
+#[test]
+fn sina_symbol_search_resolves_unconfigured_a_share_and_us_names() {
+    let body = r#"var suggestdata="园林股份,11,605303,sh605303,园林股份,,园林股份,99,1,,,;特斯拉,41,tsla,tsla,特斯拉,,特斯拉,99,1,ESG,,;";"#;
+    let candidates = parse_sina_suggestions(body, &[]);
+
+    let garden = choose_search_candidate("园林股份", "园林股份", &candidates).unwrap();
+    assert_eq!(garden.market, StockMarket::China);
+    assert_eq!(garden.code, "sh605303");
+
+    let tesla = choose_search_candidate("特斯拉", "特斯拉", &candidates).unwrap();
+    assert_eq!(tesla.market, StockMarket::UnitedStates);
+    assert_eq!(tesla.code, "TSLA");
+}
+
+#[test]
+fn parse_sina_us_quote_returns_normalized_market_fields() {
+    let body = r#"var hq_str_gb_tsla="特斯拉,349.9528,2.94,2026-08-14 22:00:53,9.9928,342.3300,350.3500,342.0100,498.8300,297.3800,10009980,31333314,1382155169263,1.20,291.490000,0.00,0.00,0.00,0.00,3949547394,61,0.0000,0.00,0.00,,Aug 14 10:00AM EDT,339.9600";"#;
+    let (_, extra) = parse_sina_us_hq(body, "TSLA", None).unwrap();
+
+    assert_eq!(extra["normalized_code"], "US:TSLA");
+    assert_eq!(extra["market"], "us");
+    assert_eq!(extra["currency"], "USD");
+    assert_eq!(extra["price"], "349.9528");
+    assert_eq!(extra["prev_close"], "339.9600");
+}
+
+#[test]
+fn parse_tencent_quote_supports_a_share_fallback() {
+    let body = r#"v_sh605303="1~园林股份~605303~21.42~21.75~22.00~30682~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~20260814161456~-0.33~-1.52~22.07~21.00~CNY";"#;
+    let (_, extra) = parse_tencent_hq(body, StockMarket::China, "sh605303", None).unwrap();
+
+    assert_eq!(extra["normalized_code"], "SH605303");
+    assert_eq!(extra["provider"], "tencent_finance");
+    assert_eq!(extra["observed_at"], "2026-08-14T16:14:56+08:00");
 }
 
 #[test]
@@ -124,6 +175,20 @@ fn protocol_errors_always_expose_stable_machine_fields() {
     let extra = stock_error_extra("unsupported_action");
     assert_eq!(extra["error_code"], "unsupported_action");
     assert_eq!(extra["message_key"], "skill.stock.unsupported_action");
+}
+
+#[test]
+fn machine_error_code_preserves_specific_failure_ownership() {
+    assert_eq!(
+        machine_error_code("code=symbol_not_found input=unknown"),
+        "symbol_not_found"
+    );
+    assert_eq!(
+        machine_error_code("provider returned arbitrary prose"),
+        "stock_execution_failed"
+    );
+    assert!(error_is_retryable("quote_provider_chain_failed"));
+    assert!(!error_is_retryable("symbol_not_found"));
 }
 
 #[test]

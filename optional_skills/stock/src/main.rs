@@ -1,5 +1,6 @@
-//! 股票技能：查询 A 股实时行情（单行 JSON stdin -> 单行 JSON stdout）
-//! 数据来源：新浪财经 hq.sinajs.cn，需 Referer
+//! 股票技能：查询 A 股和美股实时行情（单行 JSON stdin -> 单行 JSON stdout）
+
+#![recursion_limit = "256"]
 
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
@@ -128,6 +129,7 @@ struct InternalLlmTextData {
 #[derive(Debug, Clone)]
 struct ResolvedSymbol {
     code: String,
+    market: StockMarket,
     correction: Option<SymbolCorrection>,
 }
 
@@ -136,6 +138,49 @@ struct SymbolCorrection {
     input: String,
     matched_name: String,
     used_llm: bool,
+    reason_code: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StockMarket {
+    China,
+    UnitedStates,
+}
+
+impl StockMarket {
+    fn token(self) -> &'static str {
+        match self {
+            Self::China => "cn",
+            Self::UnitedStates => "us",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MarketHint {
+    Auto,
+    China,
+    UnitedStates,
+}
+
+impl MarketHint {
+    fn accepts(self, market: StockMarket) -> bool {
+        matches!(self, Self::Auto)
+            || matches!((self, market), (Self::China, StockMarket::China))
+            || matches!(
+                (self, market),
+                (Self::UnitedStates, StockMarket::UnitedStates)
+            )
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SymbolSearchCandidate {
+    code: String,
+    market: StockMarket,
+    name: String,
+    normalized_name: String,
+    query_alias: String,
 }
 
 #[derive(Debug, Clone)]
@@ -156,8 +201,10 @@ enum VendorKind {
     Custom,
 }
 
-/// 新浪 A 股行情：上海 sh + 代码，深圳 sz + 代码
-const SINA_HQ_URL: &str = "http://hq.sinajs.cn/list=";
+/// Provider endpoints are protocol configuration, not natural-language routing rules.
+const SINA_HQ_URL: &str = "https://hq.sinajs.cn/list=";
+const SINA_SUGGEST_URL: &str = "https://suggest3.sinajs.cn/suggest/";
+const TENCENT_HQ_URL: &str = "https://qt.gtimg.cn/q=";
 const SINA_REFERER: &str = "https://finance.sina.com.cn";
 
 fn main() -> anyhow::Result<()> {
@@ -180,7 +227,8 @@ fn main() -> anyhow::Result<()> {
                         error_text: None,
                     },
                     Err(err) => {
-                        let mut extra = stock_error_extra("stock_quote_failed");
+                        let error_code = machine_error_code(&err);
+                        let mut extra = stock_error_extra(error_code);
                         if let (Some(extra), Some(requested_symbol)) =
                             (extra.as_object_mut(), requested_symbol)
                         {
@@ -204,7 +252,7 @@ fn main() -> anyhow::Result<()> {
                 status: "error".to_string(),
                 text: String::new(),
                 extra: Some(stock_error_extra("invalid_input")),
-                error_text: Some(format!("invalid input: {err}")),
+                error_text: Some(format!("code=invalid_input detail={err}")),
             },
         };
         writeln!(stdout, "{}", serde_json::to_string(&resp)?)?;
@@ -233,6 +281,7 @@ fn execute(args: Value, runtime: &RuntimeConfig) -> Result<(String, Value), Stri
         .unwrap_or("quote")
         .trim()
         .to_ascii_lowercase();
+    let market_hint = market_hint_from_args(obj)?;
 
     match action.as_str() {
         "preview_quote" => preview_quote_request(obj),
@@ -247,8 +296,8 @@ fn execute(args: Value, runtime: &RuntimeConfig) -> Result<(String, Value), Stri
                 .ok_or_else(|| {
                     "code=missing_symbol required_any=symbol|code|name example=600519".to_string()
                 })?;
-            let resolved = resolve_symbol(symbol, runtime)?;
-            quote_a_share(&resolved)
+            let resolved = resolve_symbol(symbol, market_hint, runtime)?;
+            quote_stock(&resolved)
         }
         _ => Err(format!(
             "code=unsupported_action action={} allowed=preview_quote|quote|query",
@@ -268,13 +317,16 @@ fn preview_quote_request(obj: &serde_json::Map<String, Value>) -> Result<(String
         .ok_or_else(|| {
             "code=missing_symbol required_any=symbol|code|name example=600519".to_string()
         })?;
-    let direct_code = looks_like_stock_code(requested_symbol);
-    let normalized_code =
-        direct_code.then(|| normalize_code(requested_symbol).to_ascii_uppercase());
-    let resolution_mode = if direct_code {
+    let market_hint = market_hint_from_args(obj)?;
+    let direct = normalize_direct_symbol(requested_symbol, market_hint);
+    let normalized_code = direct
+        .as_ref()
+        .map(|(market, code)| display_code(*market, code));
+    let market = direct.as_ref().map(|(market, _)| market.token());
+    let resolution_mode = if direct.is_some() {
         "direct_code"
     } else {
-        "configured_alias_or_model"
+        "provider_search_or_configured_alias"
     };
     let text =
         format!("message_key=skill.stock.quote_preview_ready resolution_mode={resolution_mode}");
@@ -288,8 +340,9 @@ fn preview_quote_request(obj: &serde_json::Map<String, Value>) -> Result<(String
             "action": "preview_quote",
             "requested_symbol": requested_symbol,
             "normalized_code": normalized_code,
+            "market": market,
             "resolution_mode": resolution_mode,
-            "provider": "sina_finance",
+            "provider_candidates": ["sina_finance", "tencent_finance"],
             "would_execute": false,
             "external_call_count": 0,
         }),
@@ -303,8 +356,36 @@ fn stock_error_extra(error_kind: &str) -> Value {
         "error_code": error_kind,
         "message_key": format!("skill.stock.{error_kind}"),
         "source_skill": "stock",
-        "retryable": false,
+        "retryable": error_is_retryable(error_kind),
     })
+}
+
+fn machine_error_code(error: &str) -> &str {
+    error
+        .split_ascii_whitespace()
+        .find_map(|part| part.strip_prefix("code="))
+        .filter(|code| {
+            !code.is_empty()
+                && code
+                    .chars()
+                    .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_')
+        })
+        .unwrap_or("stock_execution_failed")
+}
+
+fn error_is_retryable(error_code: &str) -> bool {
+    matches!(
+        error_code,
+        "http_client_build_failed"
+            | "quote_request_failed"
+            | "quote_response_read_failed"
+            | "quote_http_status"
+            | "quote_provider_chain_failed"
+            | "symbol_search_request_failed"
+            | "symbol_search_http_status"
+            | "symbol_search_response_read_failed"
+            | "symbol_search_unavailable"
+    )
 }
 
 fn default_true() -> bool {
@@ -345,7 +426,25 @@ fn workspace_root() -> PathBuf {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
-/// 将用户输入的代码规范为新浪格式：shXXXXXX 或 szXXXXXX
+fn market_hint_from_args(obj: &serde_json::Map<String, Value>) -> Result<MarketHint, String> {
+    match obj
+        .get("market")
+        .and_then(Value::as_str)
+        .unwrap_or("auto")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "auto" => Ok(MarketHint::Auto),
+        "cn" => Ok(MarketHint::China),
+        "us" => Ok(MarketHint::UnitedStates),
+        value => Err(format!(
+            "code=invalid_market value={value} allowed=auto|cn|us"
+        )),
+    }
+}
+
+/// 将 A 股代码规范为新浪格式：上海 sh + 代码，深圳 sz + 代码。
 fn normalize_code(input: &str) -> String {
     let s = input.trim();
     if s.to_ascii_lowercase().starts_with("sh") || s.to_ascii_lowercase().starts_with("sz") {
@@ -362,10 +461,50 @@ fn normalize_code(input: &str) -> String {
     }
 }
 
-fn resolve_symbol(input: &str, runtime: &RuntimeConfig) -> Result<ResolvedSymbol, String> {
-    if looks_like_stock_code(input) {
+fn display_code(market: StockMarket, provider_code: &str) -> String {
+    match market {
+        StockMarket::China => provider_code.to_ascii_uppercase(),
+        StockMarket::UnitedStates => format!("US:{}", provider_code.to_ascii_uppercase()),
+    }
+}
+
+fn normalize_direct_symbol(input: &str, market_hint: MarketHint) -> Option<(StockMarket, String)> {
+    let raw = input.trim();
+    let lower = raw.to_ascii_lowercase();
+    if looks_like_stock_code(raw) && market_hint.accepts(StockMarket::China) {
+        return Some((StockMarket::China, normalize_code(raw)));
+    }
+
+    let explicit_us = ["us:", "nasdaq:", "nyse:"]
+        .iter()
+        .find_map(|prefix| lower.strip_prefix(prefix))
+        .or_else(|| lower.strip_suffix(".us"));
+    let ticker = explicit_us.unwrap_or(raw).trim();
+    let ticker_valid = !ticker.is_empty()
+        && ticker.len() <= 12
+        && ticker.chars().any(|ch| ch.is_ascii_alphabetic())
+        && ticker
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '.' || ch == '-');
+    let auto_ticker = raw == raw.to_ascii_uppercase();
+    if ticker_valid
+        && market_hint.accepts(StockMarket::UnitedStates)
+        && (explicit_us.is_some() || matches!(market_hint, MarketHint::UnitedStates) || auto_ticker)
+    {
+        return Some((StockMarket::UnitedStates, ticker.to_ascii_uppercase()));
+    }
+    None
+}
+
+fn resolve_symbol(
+    input: &str,
+    market_hint: MarketHint,
+    runtime: &RuntimeConfig,
+) -> Result<ResolvedSymbol, String> {
+    if let Some((market, code)) = normalize_direct_symbol(input, market_hint) {
         return Ok(ResolvedSymbol {
-            code: normalize_code(input),
+            code,
+            market,
             correction: None,
         });
     }
@@ -380,18 +519,34 @@ fn resolve_symbol(input: &str, runtime: &RuntimeConfig) -> Result<ResolvedSymbol
         return Err("code=symbol_unrecognized reason=empty_normalized_name".to_string());
     }
 
-    if let Some((alias, code)) = alias_map.get(&normalized_input) {
+    if market_hint.accepts(StockMarket::China) {
+        if let Some((alias, code)) = alias_map.get(&normalized_input) {
+            return Ok(ResolvedSymbol {
+                code: normalize_code(code),
+                market: StockMarket::China,
+                correction: symbol_correction(input, alias, false, "configured_alias"),
+            });
+        }
+    }
+
+    let search_result = search_symbol_via_sina(input, &normalized_input, market_hint, runtime);
+    if let Ok(Some(candidate)) = &search_result {
         return Ok(ResolvedSymbol {
-            code: code.clone(),
-            correction: symbol_correction(input, alias, false),
+            code: candidate.code.clone(),
+            market: candidate.market,
+            correction: symbol_correction(input, &candidate.name, false, "provider_symbol_search"),
         });
     }
 
-    let candidates = best_alias_candidates(
-        &normalized_input,
-        &alias_map,
-        runtime.stock.max_llm_candidates,
-    );
+    let candidates = if market_hint.accepts(StockMarket::China) {
+        best_alias_candidates(
+            &normalized_input,
+            &alias_map,
+            runtime.stock.max_llm_candidates,
+        )
+    } else {
+        Vec::new()
+    };
     if let Some(best) = choose_direct_candidate(
         input,
         &normalized_input,
@@ -399,18 +554,27 @@ fn resolve_symbol(input: &str, runtime: &RuntimeConfig) -> Result<ResolvedSymbol
         &runtime.stock.cleanup_tokens,
     ) {
         return Ok(ResolvedSymbol {
-            code: best.code.clone(),
-            correction: symbol_correction(input, &best.alias, false),
+            code: normalize_code(&best.code),
+            market: StockMarket::China,
+            correction: symbol_correction(input, &best.alias, false, "configured_alias_fuzzy"),
         });
     }
 
     if runtime.stock.enable_llm_name_correction {
-        if let Some(best) = choose_candidate_via_llm(input, &candidates, runtime)? {
+        if let Ok(Some(best)) = choose_candidate_via_llm(input, &candidates, runtime) {
             return Ok(ResolvedSymbol {
-                code: best.code.clone(),
-                correction: symbol_correction(input, &best.alias, true),
+                code: normalize_code(&best.code),
+                market: StockMarket::China,
+                correction: symbol_correction(input, &best.alias, true, "llm_alias_correction"),
             });
         }
+    }
+
+    if let Err(error) = search_result {
+        return Err(format!(
+            "code=symbol_search_unavailable cause={}",
+            machine_error_code(&error)
+        ));
     }
 
     let suggestions = candidates
@@ -420,44 +584,203 @@ fn resolve_symbol(input: &str, runtime: &RuntimeConfig) -> Result<ResolvedSymbol
         .collect::<Vec<_>>();
     if suggestions.is_empty() {
         Err(format!(
-            "code=symbol_alias_not_found input={} config=configs/stock.toml",
+            "code=symbol_not_found input={} markets=cn|us",
             input.trim()
         ))
     } else {
         Err(format!(
-            "code=symbol_alias_not_found input={} suggestions={} config=configs/stock.toml",
+            "code=symbol_not_found input={} suggestions={} markets=cn|us",
             input.trim(),
             suggestions.join("|")
         ))
     }
 }
 
-fn quote_a_share(resolved: &ResolvedSymbol) -> Result<(String, Value), String> {
-    let code = normalize_code(&resolved.code);
-    let url = format!("{SINA_HQ_URL}{code}");
+fn search_symbol_via_sina(
+    input: &str,
+    normalized_input: &str,
+    market_hint: MarketHint,
+    runtime: &RuntimeConfig,
+) -> Result<Option<SymbolSearchCandidate>, String> {
     let client = Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
         .map_err(|e| format!("code=http_client_build_failed detail={e}"))?;
-
     let resp = client
-        .get(&url)
+        .get(SINA_SUGGEST_URL)
         .header("Referer", SINA_REFERER)
         .header("User-Agent", "agent-stock-skill/1.0")
+        .query(&[("type", ""), ("key", input.trim()), ("name", "suggestdata")])
         .send()
-        .map_err(|e| format!("code=quote_request_failed detail={e}"))?;
-
+        .map_err(|e| format!("code=symbol_search_request_failed detail={e}"))?;
     if !resp.status().is_success() {
-        return Err(format!("code=quote_http_status status={}", resp.status()));
+        return Err(format!(
+            "code=symbol_search_http_status status={}",
+            resp.status()
+        ));
     }
-
     let body = decode_sina_body(
         &resp
             .bytes()
-            .map_err(|e| format!("code=quote_response_read_failed detail={e}"))?,
+            .map_err(|e| format!("code=symbol_search_response_read_failed detail={e}"))?,
     );
+    let candidates = parse_sina_suggestions(&body, &runtime.stock.cleanup_tokens)
+        .into_iter()
+        .filter(|candidate| market_hint.accepts(candidate.market))
+        .collect::<Vec<_>>();
+    Ok(choose_search_candidate(normalized_input, input, &candidates).cloned())
+}
 
-    parse_sina_hq(&body, &code, resolved.correction.as_ref())
+fn parse_sina_suggestions(body: &str, cleanup_tokens: &[String]) -> Vec<SymbolSearchCandidate> {
+    let Some(content_start) = body.find('"').map(|index| index + 1) else {
+        return Vec::new();
+    };
+    let Some(relative_end) = body[content_start..].rfind('"') else {
+        return Vec::new();
+    };
+    body[content_start..content_start + relative_end]
+        .split(';')
+        .filter_map(|row| {
+            let fields = row.split(',').map(str::trim).collect::<Vec<_>>();
+            let market = match fields.get(1).copied() {
+                Some("11") => StockMarket::China,
+                Some("41") => StockMarket::UnitedStates,
+                _ => return None,
+            };
+            let raw_code = fields.get(3).or_else(|| fields.get(2))?.trim();
+            let code = match market {
+                StockMarket::China => normalize_code(raw_code),
+                StockMarket::UnitedStates => fields.get(2)?.trim().to_ascii_uppercase(),
+            };
+            let name = fields.get(4).or_else(|| fields.first())?.trim().to_string();
+            let query_alias = fields.first()?.trim().to_string();
+            if code.is_empty() || name.is_empty() {
+                return None;
+            }
+            Some(SymbolSearchCandidate {
+                code,
+                market,
+                normalized_name: normalize_stock_name(&name, cleanup_tokens),
+                name,
+                query_alias,
+            })
+        })
+        .collect()
+}
+
+fn choose_search_candidate<'a>(
+    normalized_input: &str,
+    raw_input: &str,
+    candidates: &'a [SymbolSearchCandidate],
+) -> Option<&'a SymbolSearchCandidate> {
+    let normalized_ascii = raw_input
+        .trim()
+        .trim_start_matches("US:")
+        .trim_start_matches("us:")
+        .to_ascii_uppercase();
+    candidates
+        .iter()
+        .find(|candidate| {
+            candidate.normalized_name == normalized_input
+                || normalize_stock_name(&candidate.query_alias, &[]) == normalized_input
+                || (candidate.market == StockMarket::UnitedStates
+                    && candidate.code == normalized_ascii)
+        })
+        .or_else(|| candidates.first())
+}
+
+fn quote_stock(resolved: &ResolvedSymbol) -> Result<(String, Value), String> {
+    match quote_via_sina(resolved) {
+        Ok(result) => Ok(result),
+        Err(primary) => match quote_via_tencent(resolved) {
+            Ok(result) => Ok(result),
+            Err(fallback) => Err(format!(
+                "code=quote_provider_chain_failed primary={} fallback={}",
+                machine_error_code(&primary),
+                machine_error_code(&fallback)
+            )),
+        },
+    }
+}
+
+fn quote_via_sina(resolved: &ResolvedSymbol) -> Result<(String, Value), String> {
+    let provider_code = match resolved.market {
+        StockMarket::China => normalize_code(&resolved.code),
+        StockMarket::UnitedStates => format!("gb_{}", resolved.code.to_ascii_lowercase()),
+    };
+    let body = fetch_quote_body(&format!("{SINA_HQ_URL}{provider_code}"), "sina_finance")?;
+    match resolved.market {
+        StockMarket::China => parse_sina_hq(&body, &provider_code, resolved.correction.as_ref())
+            .map(|result| add_market_metadata(result, resolved.market)),
+        StockMarket::UnitedStates => {
+            parse_sina_us_hq(&body, &resolved.code, resolved.correction.as_ref())
+        }
+    }
+}
+
+fn quote_via_tencent(resolved: &ResolvedSymbol) -> Result<(String, Value), String> {
+    let provider_code = match resolved.market {
+        StockMarket::China => normalize_code(&resolved.code),
+        StockMarket::UnitedStates => format!("us{}", resolved.code.to_ascii_uppercase()),
+    };
+    let body = fetch_quote_body(
+        &format!("{TENCENT_HQ_URL}{provider_code}"),
+        "tencent_finance",
+    )?;
+    parse_tencent_hq(
+        &body,
+        resolved.market,
+        &resolved.code,
+        resolved.correction.as_ref(),
+    )
+}
+
+fn fetch_quote_body(url: &str, provider: &str) -> Result<String, String> {
+    let client = Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("code=http_client_build_failed provider={provider} detail={e}"))?;
+    let resp = client
+        .get(url)
+        .header("Referer", SINA_REFERER)
+        .header("User-Agent", "agent-stock-skill/1.0")
+        .send()
+        .map_err(|e| format!("code=quote_request_failed provider={provider} detail={e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!(
+            "code=quote_http_status provider={provider} status={}",
+            resp.status()
+        ));
+    }
+    Ok(decode_quote_body(&resp.bytes().map_err(|e| {
+        format!("code=quote_response_read_failed provider={provider} detail={e}")
+    })?))
+}
+
+fn add_market_metadata(mut result: (String, Value), market: StockMarket) -> (String, Value) {
+    if let Some(extra) = result.1.as_object_mut() {
+        extra.insert(
+            "market".to_string(),
+            Value::String(market.token().to_string()),
+        );
+        if let Some(quote) = extra.get_mut("quote").and_then(Value::as_object_mut) {
+            quote.insert(
+                "market".to_string(),
+                Value::String(market.token().to_string()),
+            );
+        }
+    }
+    result.0.push_str(&format!("\nmarket={}", market.token()));
+    result
+}
+
+fn decode_quote_body(bytes: &[u8]) -> String {
+    let utf8 = String::from_utf8_lossy(bytes);
+    if !utf8.contains('\u{fffd}') {
+        return utf8.into_owned();
+    }
+    let (decoded, _, _) = GBK.decode(bytes);
+    decoded.into_owned()
 }
 
 fn decode_sina_body(bytes: &[u8]) -> String {
@@ -557,11 +880,7 @@ fn parse_sina_hq(
             "input": correction.input.clone(),
             "matched_name": correction.matched_name.clone(),
             "used_llm": correction.used_llm,
-            "reason_code": if correction.used_llm {
-                "llm_alias_correction"
-            } else {
-                "alias_match"
-            }
+            "reason_code": correction.reason_code,
         })
     });
     let extra = json!({
@@ -578,6 +897,7 @@ fn parse_sina_hq(
         "price": current,
         "provider": "sina_finance",
         "provider_id": "sina_finance",
+        "currency": "CNY",
         "observed_at": observed_at,
         "open": open,
         "prev_close": prev_close,
@@ -596,6 +916,7 @@ fn parse_sina_hq(
             "name": name,
             "price": current,
             "provider": "sina_finance",
+            "currency": "CNY",
             "observed_at": observed_at,
             "open": open,
             "prev_close": prev_close,
@@ -609,6 +930,225 @@ fn parse_sina_hq(
         }
     });
     Ok((lines.join("\n"), extra))
+}
+
+fn parse_sina_us_hq(
+    body: &str,
+    ticker: &str,
+    correction: Option<&SymbolCorrection>,
+) -> Result<(String, Value), String> {
+    let content = extract_quoted_payload(body, "var hq_str_gb_")?;
+    let parts = content.split(',').map(str::trim).collect::<Vec<_>>();
+    if parts.len() < 27 {
+        return Err(format!(
+            "code=quote_fields_insufficient provider=sina_finance market=us count={}",
+            parts.len()
+        ));
+    }
+    let observed = parts.get(3).copied().unwrap_or_default();
+    let (date, time) = observed.split_once(' ').unwrap_or((observed, ""));
+    let observed_at =
+        (!date.is_empty() && !time.is_empty()).then(|| format!("{date}T{time}+08:00"));
+    let change_pct = parts.get(2).and_then(|value| value.parse::<f64>().ok());
+    Ok(build_quote_result(
+        StockMarket::UnitedStates,
+        "sina_finance",
+        ticker,
+        parts.first().copied().unwrap_or_default(),
+        parts.get(1).copied().unwrap_or_default(),
+        parts.get(5).copied().unwrap_or_default(),
+        parts.get(26).copied().unwrap_or_default(),
+        parts.get(6).copied().unwrap_or_default(),
+        parts.get(7).copied().unwrap_or_default(),
+        parts.get(10).copied().unwrap_or_default(),
+        date,
+        time,
+        observed_at,
+        change_pct,
+        "USD",
+        correction,
+    ))
+}
+
+fn parse_tencent_hq(
+    body: &str,
+    market: StockMarket,
+    canonical_code: &str,
+    correction: Option<&SymbolCorrection>,
+) -> Result<(String, Value), String> {
+    let content = extract_quoted_payload(body, "v_")?;
+    let parts = content.split('~').map(str::trim).collect::<Vec<_>>();
+    if parts.len() < 35 {
+        return Err(format!(
+            "code=quote_fields_insufficient provider=tencent_finance market={} count={}",
+            market.token(),
+            parts.len()
+        ));
+    }
+    let timestamp = parts.get(30).copied().unwrap_or_default();
+    let (date, time) = parse_compact_timestamp(timestamp);
+    let observed_at =
+        (!date.is_empty() && !time.is_empty()).then(|| format!("{date}T{time}+08:00"));
+    let change_pct = parts.get(32).and_then(|value| value.parse::<f64>().ok());
+    let currency = parts
+        .get(35)
+        .copied()
+        .filter(|value| !value.is_empty())
+        .unwrap_or(match market {
+            StockMarket::China => "CNY",
+            StockMarket::UnitedStates => "USD",
+        });
+    Ok(build_quote_result(
+        market,
+        "tencent_finance",
+        canonical_code,
+        parts.get(1).copied().unwrap_or_default(),
+        parts.get(3).copied().unwrap_or_default(),
+        parts.get(5).copied().unwrap_or_default(),
+        parts.get(4).copied().unwrap_or_default(),
+        parts.get(33).copied().unwrap_or_default(),
+        parts.get(34).copied().unwrap_or_default(),
+        parts.get(6).copied().unwrap_or_default(),
+        &date,
+        &time,
+        observed_at,
+        change_pct,
+        currency,
+        correction,
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_quote_result(
+    market: StockMarket,
+    provider: &str,
+    canonical_code: &str,
+    name: &str,
+    current: &str,
+    open: &str,
+    prev_close: &str,
+    high: &str,
+    low: &str,
+    volume: &str,
+    date: &str,
+    time: &str,
+    observed_at: Option<String>,
+    change_pct: Option<f64>,
+    currency: &str,
+    correction: Option<&SymbolCorrection>,
+) -> (String, Value) {
+    let normalized_code = display_code(market, canonical_code);
+    let correction_value = correction.map(|correction| {
+        json!({
+            "input": correction.input,
+            "matched_name": correction.matched_name,
+            "used_llm": correction.used_llm,
+            "reason_code": correction.reason_code,
+        })
+    });
+    let mut lines = vec![
+        "message_key=stock.msg.quote".to_string(),
+        "reason_code=stock_quote_observed".to_string(),
+        format!("normalized_code={normalized_code}"),
+        format!("market={}", market.token()),
+        format!("name={name}"),
+        format!("price={current}"),
+        format!("provider={provider}"),
+        format!("currency={currency}"),
+        format!("open={open}"),
+        format!("prev_close={prev_close}"),
+        format!("high={high}"),
+        format!("low={low}"),
+        format!("volume={volume}"),
+    ];
+    if let Some(observed_at) = observed_at.as_deref() {
+        lines.push(format!("observed_at={observed_at}"));
+    }
+    if let Some(change_pct) = change_pct {
+        lines.push(format!("change_pct={change_pct:.4}"));
+    }
+    let quote = json!({
+        "code": normalized_code,
+        "normalized_code": normalized_code,
+        "symbol": canonical_code,
+        "market": market.token(),
+        "name": name,
+        "price": current,
+        "current": current,
+        "open": open,
+        "prev_close": prev_close,
+        "high": high,
+        "low": low,
+        "volume": volume,
+        "currency": currency,
+        "provider": provider,
+        "observed_at": observed_at,
+        "date": date,
+        "time": time,
+        "change_pct": change_pct,
+    });
+    let extra = json!({
+        "schema_version": 1,
+        "source_skill": "stock",
+        "status": "ok",
+        "message_key": "stock.msg.quote",
+        "reason_code": "stock_quote_observed",
+        "action": "quote",
+        "code": normalized_code,
+        "normalized_code": normalized_code,
+        "symbol": canonical_code,
+        "market": market.token(),
+        "name": name,
+        "price": current,
+        "current": current,
+        "open": open,
+        "prev_close": prev_close,
+        "high": high,
+        "low": low,
+        "volume": volume,
+        "currency": currency,
+        "provider": provider,
+        "provider_id": provider,
+        "observed_at": observed_at,
+        "date": date,
+        "time": time,
+        "change_pct": change_pct,
+        "correction": correction_value,
+        "quote": quote,
+    });
+    (lines.join("\n"), extra)
+}
+
+fn extract_quoted_payload<'a>(body: &'a str, expected_prefix: &str) -> Result<&'a str, String> {
+    if !body.contains(expected_prefix) {
+        return Err(format!(
+            "code=quote_response_contract_invalid expected_prefix={expected_prefix}"
+        ));
+    }
+    let start = body
+        .find('"')
+        .map(|index| index + 1)
+        .ok_or_else(|| "code=quote_response_contract_invalid missing=opening_quote".to_string())?;
+    let end = start
+        + body[start..].rfind('"').ok_or_else(|| {
+            "code=quote_response_contract_invalid missing=closing_quote".to_string()
+        })?;
+    let content = body[start..end].trim();
+    if content.is_empty() {
+        return Err("code=quote_empty".to_string());
+    }
+    Ok(content)
+}
+
+fn parse_compact_timestamp(raw: &str) -> (String, String) {
+    let digits = raw.chars().filter(char::is_ascii_digit).collect::<String>();
+    if digits.len() < 14 {
+        return (String::new(), String::new());
+    }
+    (
+        format!("{}-{}-{}", &digits[0..4], &digits[4..6], &digits[6..8]),
+        format!("{}:{}:{}", &digits[8..10], &digits[10..12], &digits[12..14]),
+    )
 }
 
 fn looks_like_stock_code(input: &str) -> bool {
@@ -1037,7 +1577,12 @@ fn parse_alias_from_json_value(value: &Value) -> Option<String> {
     Some(alias.to_string())
 }
 
-fn symbol_correction(input: &str, matched_name: &str, used_llm: bool) -> Option<SymbolCorrection> {
+fn symbol_correction(
+    input: &str,
+    matched_name: &str,
+    used_llm: bool,
+    reason_code: &'static str,
+) -> Option<SymbolCorrection> {
     let raw = input.trim();
     if raw.is_empty() {
         return None;
@@ -1046,6 +1591,7 @@ fn symbol_correction(input: &str, matched_name: &str, used_llm: bool) -> Option<
         input: raw.to_string(),
         matched_name: matched_name.trim().to_string(),
         used_llm,
+        reason_code,
     })
 }
 

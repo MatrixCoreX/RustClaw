@@ -284,7 +284,7 @@ PY
 init_llm_trace_offset() {
   local offset_file="$1"
   python3 "${SCRIPT_DIR}/print_llm_raw_trace.py" \
-    --log "$ROOT_DIR/logs/model_io.log" \
+    --log "${NL_MODEL_IO_LOG:-$ROOT_DIR/logs/model_io.log}" \
     --state-file "$offset_file" \
     --init-state
 }
@@ -294,7 +294,7 @@ print_new_llm_trace() {
   local offset_file="$2"
   [[ "${PRINT_LLM_TRACE:-1}" == "1" ]] || return 0
   python3 "${SCRIPT_DIR}/print_llm_raw_trace.py" \
-    --log "$ROOT_DIR/logs/model_io.log" \
+    --log "${NL_MODEL_IO_LOG:-$ROOT_DIR/logs/model_io.log}" \
     --task-id "$task_id" \
     --state-file "$offset_file"
 }

@@ -4,7 +4,7 @@ schema_version = 2
 [package]
 name = "stock"
 version = "0.1.8"
-description = "Query A-share stock quotes by code or configured company name/alias and return current market data."
+description = "Query China A-share and US stock quotes by ticker, code, or company name with provider fallback."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
 supported_arch = ["x86_64", "aarch64"]
@@ -50,10 +50,10 @@ update_strategy = "atomic_replace"
 
 [capability_request]
 schema_version = 1
-input_schema = { "type" = "object", "properties" = { "action" = { "type" = "string", "enum" = ["preview_quote", "quote", "query"] }, "symbol" = { "type" = "string" }, "code" = { "type" = "string" }, "name" = { "type" = "string" } } }
+input_schema = { "type" = "object", "additionalProperties" = false, "anyOf" = [{ "required" = ["symbol"] }, { "required" = ["code"] }, { "required" = ["name"] }], "properties" = { "action" = { "type" = "string", "enum" = ["preview_quote", "quote", "query"] }, "symbol" = { "type" = "string", "minLength" = 1, "maxLength" = 128 }, "code" = { "type" = "string", "minLength" = 1, "maxLength" = 128 }, "name" = { "type" = "string", "minLength" = 1, "maxLength" = 128 }, "market" = { "type" = "string", "enum" = ["auto", "cn", "us"] } } }
 output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
 config_entry_points = [{ "kind" = "file", "reference" = "configs/stock.toml", "required" = false }]
-capabilities = [{ "name" = "stock.preview_quote", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["symbol|code|name"], "optional" = [], "timeout_seconds" = 15, "action" = "preview_quote" }, { "name" = "stock.quote", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["symbol|code|name"], "optional" = [], "timeout_seconds" = 15, "action" = "quote" }]
+capabilities = [{ "name" = "stock.preview_quote", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["symbol|code|name"], "optional" = ["market"], "timeout_seconds" = 15, "action" = "preview_quote" }, { "name" = "stock.quote", "effect" = "observe", "execution_mode" = "sync_short", "required" = ["symbol|code|name"], "optional" = ["market"], "timeout_seconds" = 15, "action" = "quote" }]
 
 [capability_request.permissions]
 llm_gateway = true
