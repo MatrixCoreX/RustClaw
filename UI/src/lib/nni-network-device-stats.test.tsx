@@ -62,9 +62,11 @@ test("shows registered allowlist devices and active devices from the previous he
   assert.doesNotMatch(markup, /上个 10 分钟窗口内提交过心跳/);
   assert.doesNotMatch(markup, /1800000000.*1800000600/);
   assert.match(markup, /全网累计产出/);
-  assert.match(markup, /12500\.0000/);
+  assert.match(markup, />12500</);
+  assert.doesNotMatch(markup, /12500\.0000/);
   assert.match(markup, /当前每 10 分钟总奖励/);
-  assert.match(markup, /5000\.0000/);
+  assert.match(markup, />5000</);
+  assert.doesNotMatch(markup, /5000\.0000/);
   assert.doesNotMatch(markup, /POINT/);
   assert.doesNotMatch(markup, /由本周期有效心跳设备平分/);
   assert.match(markup, /全网首次心跳时间/);
