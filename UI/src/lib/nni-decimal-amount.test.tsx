@@ -15,3 +15,12 @@ test("NNI decimal amounts keep all digits while shrinking only the fraction", ()
 test("NNI decimal amounts leave non-decimal labels unchanged", () => {
   assert.equal(renderToStaticMarkup(<NniDecimalAmount value="—" />), "<span>—</span>");
 });
+
+test("NNI price and fee values can retain a normal-size fraction", () => {
+  const html = renderToStaticMarkup(
+    <NniDecimalAmount value="0.00010000 USD" shrinkFraction={false} />,
+  );
+  assert.match(html, /data-nni-decimal-fraction-size="normal"/);
+  assert.match(html, />0\.00010000 USD<\/span>/);
+  assert.doesNotMatch(html, /class="nni-decimal-fraction"/);
+});

@@ -34,6 +34,10 @@ import {
 } from "../hooks/useBancorRuntime";
 import type { useBancorRuntime } from "../hooks/useBancorRuntime";
 import type { NniBancorCandle, NniBancorQuoteResponse } from "../types/api";
+import {
+  formatBancorAssetAmountForDisplay,
+  formatBancorIntegerAmount,
+} from "../lib/bancor-amount-display";
 import { resolveBancorMarketDirectionColors } from "../lib/bancor-market-colors";
 import { BancorPriceChangePage } from "./BancorPriceChangePage";
 import { NniDecimalAmount } from "./NniDecimalAmount";
@@ -439,13 +443,14 @@ export function BancorPage({
         <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           <MetricCard
             label={t("市场储备", "Market reserves")}
-            value={market ? `${market.point_reserve} POINT` : "—"}
-            secondaryValue={market ? `${market.usd_reserve} USD` : undefined}
+            value={market ? `${formatBancorIntegerAmount(market.point_reserve)} POINT` : "—"}
+            secondaryValue={market ? `${formatBancorIntegerAmount(market.usd_reserve)} USD` : undefined}
             detail={market ? undefined : t("等待读取", "Waiting to load")}
           />
           <MetricCard
             label={t("当前边际价格", "Current marginal price")}
             value={market ? `${market.marginal_price_usd_per_point} USD` : "—"}
+            shrinkFraction={false}
           >
             <div
               className="mt-2 grid grid-cols-3 gap-2 border-t border-white/8 pt-2"
@@ -469,6 +474,7 @@ export function BancorPage({
           <MetricCard
             label={t("交易手续费", "Trading fee")}
             value={market ? `${(market.fee_bps / 100).toFixed(2)}%` : "—"}
+            shrinkFraction={false}
             detail={t("买入从 USD 扣除，卖出从 POINT 扣除", "Charged in USD when buying and POINT when selling")}
           />
         </div>
@@ -501,6 +507,7 @@ export function BancorPage({
                 <NniDecimalAmount
                   className="min-w-0 break-all font-mono text-xs font-semibold leading-4 text-sky-200 sm:text-sm"
                   value={market ? `${market.marginal_price_usd_per_point} USD` : "—"}
+                  shrinkFraction={false}
                 />
               </div>
               <span className="whitespace-nowrap text-xs text-white/40">
@@ -656,7 +663,7 @@ export function BancorPage({
                     className="mt-1.5 break-all text-right text-xs font-medium text-sky-200/80"
                     aria-label={t("预计兑换数量", "Estimated exchange amount")}
                   >
-                    ≈ <NniDecimalAmount value={`${quotedOutput} ${outputAsset}`} />
+                    ≈ <NniDecimalAmount value={`${formatBancorAssetAmountForDisplay(quotedOutput, outputAsset)} ${outputAsset}`} />
                   </p>
                 ) : null}
                 <BancorAmountAdjustmentControls
@@ -760,9 +767,9 @@ export function BancorPage({
           {lastTrade ? (
             <div className="mt-4 rounded-xl border border-emerald-400/20 bg-emerald-400/5 p-4 text-sm text-emerald-50">
               {t("最近成交：", "Latest trade: ")}
-              <NniDecimalAmount value={`${lastTrade.trade.input_amount} ${lastTrade.trade.input_asset}`} />
+              <NniDecimalAmount value={`${formatBancorAssetAmountForDisplay(lastTrade.trade.input_amount, lastTrade.trade.input_asset)} ${lastTrade.trade.input_asset}`} />
               {" → "}
-              <NniDecimalAmount value={`${lastTrade.trade.output_amount} ${lastTrade.trade.output_asset}`} />
+              <NniDecimalAmount value={`${formatBancorAssetAmountForDisplay(lastTrade.trade.output_amount, lastTrade.trade.output_asset)} ${lastTrade.trade.output_asset}`} />
             </div>
           ) : null}
         </div>
@@ -786,9 +793,9 @@ export function BancorPage({
                   </span>
                   <p className="mt-1 text-xs text-white/40">{formatUnixDateTime(record.created_at_unix)}</p>
                 </div>
-                <NniDecimalAmount className="text-white/55" value={`${record.input_amount} ${record.input_asset}`} />
+                <NniDecimalAmount className="text-white/55" value={`${formatBancorAssetAmountForDisplay(record.input_amount, record.input_asset)} ${record.input_asset}`} />
                 <span className="font-medium" style={{ color: resolveBancorTradeColor(record.side, t) }}>
-                  <NniDecimalAmount value={`+${record.output_amount} ${record.output_asset}`} />
+                  <NniDecimalAmount value={`+${formatBancorAssetAmountForDisplay(record.output_amount, record.output_asset)} ${record.output_asset}`} />
                 </span>
               </div>
             )) : (
@@ -859,9 +866,9 @@ export function BancorPage({
                   </div>
                   <p className="mt-1 text-xs text-white/40">{formatUnixDateTime(record.created_at_unix)}</p>
                 </div>
-                <NniDecimalAmount className="text-white/55" value={`${record.input_amount} ${record.input_asset}`} />
+                <NniDecimalAmount className="text-white/55" value={`${formatBancorAssetAmountForDisplay(record.input_amount, record.input_asset)} ${record.input_asset}`} />
                 <span className="font-medium" style={{ color: resolveBancorTradeColor(record.side, t) }}>
-                  <NniDecimalAmount value={`+${record.output_amount} ${record.output_asset}`} />
+                  <NniDecimalAmount value={`+${formatBancorAssetAmountForDisplay(record.output_amount, record.output_asset)} ${record.output_asset}`} />
                 </span>
               </div>
             )) : (
@@ -976,7 +983,7 @@ export function BancorSwapTradePanel({
         </div>
         <div className="mt-1 flex items-center gap-3">
           <span className={`min-w-0 flex-1 py-1.5 text-xl font-medium ${outputAmount ? "text-white" : "text-white/25"}`}>
-            <NniDecimalAmount value={outputAmount ?? "—"} />
+            <NniDecimalAmount value={outputAmount ? formatBancorAssetAmountForDisplay(outputAmount, outputAsset) : "—"} />
           </span>
           <span className="rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-sm font-semibold text-white/80">{outputAsset}</span>
         </div>
@@ -1060,7 +1067,7 @@ function BancorFormulaCard({ t, market }: { t: Translate; market: BancorRuntime[
         </div>
         <span className="rounded-md border border-white/8 bg-white/[0.035] px-2 py-1 text-xs text-white/45">
           {t("当前手续费", "Current fee")}：
-          <NniDecimalAmount value={market ? `${(market.fee_bps / 100).toFixed(2)}%` : "—"} />
+          <NniDecimalAmount value={market ? `${(market.fee_bps / 100).toFixed(2)}%` : "—"} shrinkFraction={false} />
         </span>
       </div>
       <div className="mt-4 flex flex-col items-center gap-4 overflow-x-auto py-2 font-serif text-xl text-sky-100 sm:text-2xl" role="math">
@@ -1384,7 +1391,7 @@ export function CandleChart({
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-white/45">
         <div className="min-w-0">
           <span className="text-white/65">{formatUnixDateTime(focused.candle.bucket_start_unix)}</span>
-          <span className="ml-3">O <NniDecimalAmount value={focused.candle.open} /> · H <NniDecimalAmount value={focused.candle.high} /> · L <NniDecimalAmount value={focused.candle.low} /> · C <NniDecimalAmount value={focused.candle.close} /></span>
+          <span className="ml-3">O <NniDecimalAmount value={focused.candle.open} shrinkFraction={false} /> · H <NniDecimalAmount value={focused.candle.high} shrinkFraction={false} /> · L <NniDecimalAmount value={focused.candle.low} shrinkFraction={false} /> · C <NniDecimalAmount value={focused.candle.close} shrinkFraction={false} /></span>
           <span className="ml-3">VOL <NniDecimalAmount value={`${focused.candle.point_volume} POINT`} /></span>
           <span className="ml-3">
             {focused.candle.trade_count > 0
@@ -1732,12 +1739,12 @@ export function BancorQuoteDialog({
         </header>
 
         <div className="grid gap-4 px-5 py-5 text-sm sm:grid-cols-2">
-          <QuoteLine label={t("支付", "Pay")} value={`${quote.input_amount} ${quote.input_asset}`} />
-          <QuoteLine label={t("预计收到", "Expected output")} value={`${quote.output_amount} ${quote.output_asset}`} strong />
-          <QuoteLine label={t("最低收到", "Minimum output")} value={`${quote.min_output_amount} ${quote.output_asset}`} />
-          <QuoteLine label={t("手续费", "Fee")} value={`${quote.fee_amount} ${quote.fee_asset}`} />
-          <QuoteLine label={t("价格影响", "Price impact")} value={`${(quote.price_impact_bps / 100).toFixed(2)}%`} />
-          <QuoteLine label={t("滑点保护", "Slippage protection")} value={`${(quote.slippage_bps / 100).toFixed(2)}%`} />
+          <QuoteLine label={t("支付", "Pay")} value={`${formatBancorAssetAmountForDisplay(quote.input_amount, quote.input_asset)} ${quote.input_asset}`} />
+          <QuoteLine label={t("预计收到", "Expected output")} value={`${formatBancorAssetAmountForDisplay(quote.output_amount, quote.output_asset)} ${quote.output_asset}`} strong />
+          <QuoteLine label={t("最低收到", "Minimum output")} value={`${formatBancorAssetAmountForDisplay(quote.min_output_amount, quote.output_asset)} ${quote.output_asset}`} />
+          <QuoteLine label={t("手续费", "Fee")} value={`${quote.fee_amount} ${quote.fee_asset}`} shrinkFraction={false} />
+          <QuoteLine label={t("价格影响", "Price impact")} value={`${(quote.price_impact_bps / 100).toFixed(2)}%`} shrinkFraction={false} />
+          <QuoteLine label={t("滑点保护", "Slippage protection")} value={`${(quote.slippage_bps / 100).toFixed(2)}%`} shrinkFraction={false} />
         </div>
 
         {priceImpactWarning ? (
@@ -1785,19 +1792,21 @@ function MetricCard({
   secondaryValue,
   detail,
   children,
+  shrinkFraction = true,
 }: {
   label: string;
   value: string;
   secondaryValue?: string;
   detail?: string;
   children?: ReactNode;
+  shrinkFraction?: boolean;
 }) {
   const valueClassName = "mt-1 break-all text-sm font-semibold text-white sm:text-base";
   return (
     <div className="rounded-xl border border-white/8 bg-white/[0.025] px-3 py-2.5">
       <p className="text-[11px] uppercase tracking-wide text-white/40">{label}</p>
-      <NniDecimalAmount className={`block ${valueClassName}`} value={value} />
-      {secondaryValue ? <NniDecimalAmount className={`block ${valueClassName}`} value={secondaryValue} /> : null}
+      <NniDecimalAmount className={`block ${valueClassName}`} value={value} shrinkFraction={shrinkFraction} />
+      {secondaryValue ? <NniDecimalAmount className={`block ${valueClassName}`} value={secondaryValue} shrinkFraction={shrinkFraction} /> : null}
       {detail ? <p className="mt-0.5 text-[11px] leading-4 text-white/45">{detail}</p> : null}
       {children}
     </div>
@@ -1813,17 +1822,17 @@ function DailyPriceMetric({ label, value, color }: { label: string; value: strin
         style={color ? { color } : undefined}
         title={value}
       >
-        <NniDecimalAmount value={value} />
+        <NniDecimalAmount value={value} shrinkFraction={false} />
       </p>
     </div>
   );
 }
 
-function QuoteLine({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
+function QuoteLine({ label, value, strong = false, shrinkFraction = false }: { label: string; value: string; strong?: boolean; shrinkFraction?: boolean }) {
   return (
     <div>
       <p className="text-xs text-white/45">{label}</p>
-      <NniDecimalAmount className={`mt-1 block ${strong ? "font-semibold text-emerald-200" : "text-white/80"}`} value={value} />
+      <NniDecimalAmount className={`mt-1 block ${strong ? "font-semibold text-emerald-200" : "text-white/80"}`} value={value} shrinkFraction={shrinkFraction} />
     </div>
   );
 }

@@ -138,7 +138,7 @@ export function NniRewardsPanel({
           records.map((record) => (
             <div key={record.id} className="border-t border-white/10 px-4 py-3 first:border-t-0">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <NniDecimalAmount className="setup-status setup-status-done font-mono" value={`+${record.reward_points}`} />
+                <NniDecimalAmount className="setup-status setup-status-done font-mono" value={`+${record.reward_points}`} shrinkFraction={false} />
                 <span className="text-xs text-white/50">{formatUnixDateTime(record.awarded_at_unix)}</span>
               </div>
               <div className="mt-3 grid gap-3 text-xs sm:grid-cols-2">
