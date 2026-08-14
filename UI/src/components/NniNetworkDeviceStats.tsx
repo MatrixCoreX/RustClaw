@@ -86,7 +86,7 @@ export function NniNetworkDeviceStats({
         <div className="flex items-start justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2 text-white/55">
             <Globe2 className="h-4 w-4" />
-            <span className="text-xs font-semibold">{t("全网累计产出", "Network-wide output")}</span>
+            <span className="text-xs font-semibold">{t("累计产出", "Total output")}</span>
           </div>
           <p className={networkRewards ? "min-w-0 break-all text-right font-mono text-base font-semibold text-white/90" : "text-sm font-semibold text-white/75"}>
             {loading && !networkRewards ? <Loader2 className="h-5 w-5 animate-spin" /> : networkOutputValue}
@@ -98,7 +98,7 @@ export function NniNetworkDeviceStats({
         <div className="flex items-start justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2 text-white/55">
             <Coins className="h-4 w-4" />
-            <span className="text-xs font-semibold">{t("当前每 10 分钟总奖励", "Current total reward per 10 minutes")}</span>
+            <span className="text-xs font-semibold">{t("窗口奖励", "Window reward")}</span>
           </div>
           <p className={rewardPolicy ? "min-w-0 break-words text-right font-mono text-base font-semibold text-white/90" : "text-sm font-semibold text-white/75"}>
             {loading && !rewardPolicy ? <Loader2 className="h-5 w-5 animate-spin" /> : rewardPoolValue}
