@@ -64,6 +64,12 @@ pub(super) fn extract_skill_provider_model(value: &Value) -> Option<(String, Str
     ))
 }
 
+fn has_planner_capability_prefix(capabilities: &[PlannerCapabilityMapping], prefix: &str) -> bool {
+    capabilities
+        .iter()
+        .any(|capability| capability.name.starts_with(prefix))
+}
+
 fn runner_pre_dispatch_error(
     skill_name: &str,
     error: &skill_sdk::SkillSdkError,
@@ -1011,6 +1017,24 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
     } else {
         None
     };
+    let internal_nni_capable = state.get_skills_registry().is_some_and(|registry| {
+        has_planner_capability_prefix(registry.planner_capabilities(canonical_skill_name), "nni.")
+    });
+    let internal_nni_token = if internal_nni_capable {
+        Some(
+            claw_core::secrets::issue_secret_token_value(
+                &claw_core::secrets::SecretValue::new(internal_skill_context.to_string()),
+                secret_token_ttl,
+            )
+            .map_err(|error| {
+                format!(
+                    "internal_nni_token_issue_failed;skill={canonical_skill_name};detail={error}"
+                )
+            })?,
+        )
+    } else {
+        None
+    };
     let selected_provider_api_key = selected_llm_connection
         .as_ref()
         .map(|connection| connection.api_key.trim())
@@ -1325,6 +1349,13 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
             format!("{}/v1/internal/skills/admit", local_clawd_base_url),
         )
         .env("AGENT_INTERNAL_ADMISSION_TOKEN", token);
+    }
+    if let Some(token) = &internal_nni_token {
+        cmd.env(
+            "AGENT_INTERNAL_NNI_URL",
+            format!("{}/v1/internal/nni/action", local_clawd_base_url),
+        )
+        .env("AGENT_INTERNAL_NNI_TOKEN", token);
     }
     if let Some(connection) = &selected_llm_connection {
         cmd.env("OPENAI_BASE_URL", &connection.base_url)

@@ -131,10 +131,12 @@ async fn query_nni_rewards_for_node(
             })
         })?;
     if !request_status.is_success() || !request_body.ok {
+        let error_code =
+            nni_remote_api_error_code(&request_body, "nni_reward_request_failed");
         return Err(json!({
             "node_url": node_url,
             "http_status": request_status.as_u16(),
-            "error_code": request_body.error.unwrap_or_else(|| "nni_reward_request_failed".to_string()),
+            "error_code": error_code,
         }));
     }
     let request_data = request_body.data.ok_or_else(
@@ -207,10 +209,12 @@ async fn query_nni_rewards_for_node(
             })
         })?;
     if !verify_status.is_success() || !verify_body.ok {
+        let error_code =
+            nni_remote_api_error_code(&verify_body, "nni_reward_verify_failed");
         return Err(json!({
             "node_url": node_url,
             "http_status": verify_status.as_u16(),
-            "error_code": verify_body.error.unwrap_or_else(|| "nni_reward_verify_failed".to_string()),
+            "error_code": error_code,
         }));
     }
     verify_body.data.ok_or_else(

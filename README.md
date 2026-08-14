@@ -14,7 +14,7 @@ Current repository highlights:
 - multi-channel entry points: Telegram, WeChat, Feishu, Lark, WhatsApp Cloud, WhatsApp Web, and the browser UI through `webd`, with optional nginx/TLS
 - task runtime and HTTP API in `clawd`
 - shared skill dispatch with in-process builtins, external adapters, and runner subprocesses through `skill-runner`
-- built-in, external, and runner-based skills for system, files, web, image, audio, video, music, crypto, KB, and automation tasks
+- built-in, external, and runner-based skills for system, files, web, image, audio, video, music, NNI, crypto, KB, and automation tasks
 - local browser UI in `UI/`, including Dashboard, Agent, Models, Tasks,
   Communication Setup, Account Binding, Tools/Skills, Skill Store, Memory,
   Logs, and Learning / Maintenance pages
@@ -489,6 +489,7 @@ UI renders these same Markdown sources instead of maintaining a second copy:
 10. [Web entry and core isolation](docs/architecture/10-web-entry-security.md)
 11. [Task artifact delivery](docs/architecture/11-task-artifact-delivery.md)
 12. [Browser media discovery](docs/architecture/12-media-discovery.md)
+13. [NNI capability and heartbeat control](docs/architecture/13-nni-capability.md)
 
 Use the [architecture index](docs/architecture/README.md) for language selection and previous/next navigation.
 The [full documentation index](docs/README.md) links every engineering document in English and Simplified Chinese.

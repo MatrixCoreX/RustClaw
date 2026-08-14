@@ -341,7 +341,12 @@ if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost"} 
 print(f"127.0.0.1:{parsed.port}")
 PY
 )"
-  ISOLATION_ROOT="$(mktemp -d "${LOG_DIR%/}/agent-runtime-nl-isolated-XXXXXX")"
+  # Admission overlays are intentionally restricted to the workspace. Keep
+  # the complete isolated runtime under the ignored workspace tmp directory
+  # so the harness cannot accidentally share production skill state or ask
+  # clawd to weaken its path boundary.
+  mkdir -p "${ROOT_DIR}/tmp"
+  ISOLATION_ROOT="$(mktemp -d "${ROOT_DIR}/tmp/agent-runtime-nl-isolated-XXXXXX")"
   ISOLATED_CONFIG="${ISOLATION_ROOT}/config.toml"
   ISOLATED_DB="${ISOLATION_ROOT}/tasks.sqlite"
   ISOLATED_AUDIT_DB="${ISOLATION_ROOT}/audit.sqlite"

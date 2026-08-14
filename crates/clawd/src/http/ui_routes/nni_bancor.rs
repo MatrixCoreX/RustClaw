@@ -446,11 +446,15 @@ async fn nni_bancor_market(
                             return (StatusCode::OK, Json(ApiResponse { ok: true, data: Some(data), error: None }));
                         }
                     }
-                    Ok(body) => attempts.push(json!({
-                        "node_url": node_url,
-                        "http_status": status.as_u16(),
-                        "error_code": body.error.unwrap_or_else(|| "nni_bancor_market_failed".to_string()),
-                    })),
+                    Ok(body) => {
+                        let error_code =
+                            nni_remote_api_error_code(&body, "nni_bancor_market_failed");
+                        attempts.push(json!({
+                            "node_url": node_url,
+                            "http_status": status.as_u16(),
+                            "error_code": error_code,
+                        }));
+                    }
                     Err(err) => attempts.push(json!({
                         "node_url": node_url,
                         "http_status": status.as_u16(),
@@ -601,11 +605,15 @@ async fn nni_bancor_candles(
                             return downstream;
                         }
                     }
-                    Ok(body) => attempts.push(json!({
-                        "node_url": node_url,
-                        "http_status": status.as_u16(),
-                        "error_code": body.error.unwrap_or_else(|| "nni_bancor_candles_failed".to_string()),
-                    })),
+                    Ok(body) => {
+                        let error_code =
+                            nni_remote_api_error_code(&body, "nni_bancor_candles_failed");
+                        attempts.push(json!({
+                            "node_url": node_url,
+                            "http_status": status.as_u16(),
+                            "error_code": error_code,
+                        }));
+                    }
                     Err(err) => attempts.push(json!({
                         "node_url": node_url,
                         "http_status": status.as_u16(),
@@ -686,11 +694,17 @@ async fn nni_bancor_market_trades(
                             );
                         }
                     }
-                    Ok(body) => attempts.push(json!({
-                        "node_url": node_url,
-                        "http_status": status.as_u16(),
-                        "error_code": body.error.unwrap_or_else(|| "nni_bancor_market_trades_failed".to_string()),
-                    })),
+                    Ok(body) => {
+                        let error_code = nni_remote_api_error_code(
+                            &body,
+                            "nni_bancor_market_trades_failed",
+                        );
+                        attempts.push(json!({
+                            "node_url": node_url,
+                            "http_status": status.as_u16(),
+                            "error_code": error_code,
+                        }));
+                    }
                     Err(err) => attempts.push(json!({
                         "node_url": node_url,
                         "http_status": status.as_u16(),
@@ -787,7 +801,15 @@ async fn nni_bancor_quote(
                             return (StatusCode::OK, Json(ApiResponse { ok: true, data: Some(data), error: None }));
                         }
                     }
-                    Ok(body) => attempts.push(json!({"node_url": node_url, "http_status": status.as_u16(), "error_code": body.error})),
+                    Ok(body) => {
+                        let error_code =
+                            nni_remote_api_error_code(&body, "nni_bancor_quote_failed");
+                        attempts.push(json!({
+                            "node_url": node_url,
+                            "http_status": status.as_u16(),
+                            "error_code": error_code,
+                        }));
+                    }
                     Err(err) => attempts.push(json!({"node_url": node_url, "error_code": "nni_bancor_quote_body_invalid", "detail": err.to_string()})),
                 }
             }
@@ -890,8 +912,10 @@ async fn query_nni_bancor_account_for_node(
     let body = request_response.json::<ApiResponse<Value>>().await
         .map_err(|err| json!({"node_url": node_url, "error_code": "nni_bancor_account_request_body_invalid", "detail": err.to_string()}))?;
     if !status.is_success() || !body.ok {
+        let error_code =
+            nni_remote_api_error_code(&body, "nni_bancor_account_request_failed");
         return Err(
-            json!({"node_url": node_url, "http_status": status.as_u16(), "error_code": body.error}),
+            json!({"node_url": node_url, "http_status": status.as_u16(), "error_code": error_code}),
         );
     }
     let data = body.data.ok_or_else(
@@ -921,8 +945,10 @@ async fn query_nni_bancor_account_for_node(
     let body = response.json::<ApiResponse<Value>>().await
         .map_err(|err| json!({"node_url": node_url, "error_code": "nni_bancor_account_verify_body_invalid", "detail": err.to_string()}))?;
     if !status.is_success() || !body.ok {
+        let error_code =
+            nni_remote_api_error_code(&body, "nni_bancor_account_verify_failed");
         return Err(
-            json!({"node_url": node_url, "http_status": status.as_u16(), "error_code": body.error}),
+            json!({"node_url": node_url, "http_status": status.as_u16(), "error_code": error_code}),
         );
     }
     body.data.ok_or_else(
@@ -1074,8 +1100,10 @@ async fn execute_nni_bancor_trade_for_node(
     let body = response.json::<ApiResponse<Value>>().await
         .map_err(|err| json!({"node_url": node_url, "error_code": "nni_bancor_trade_request_body_invalid", "detail": err.to_string()}))?;
     if !status.is_success() || !body.ok {
+        let error_code =
+            nni_remote_api_error_code(&body, "nni_bancor_trade_request_failed");
         return Err(
-            json!({"node_url": node_url, "http_status": status.as_u16(), "error_code": body.error}),
+            json!({"node_url": node_url, "http_status": status.as_u16(), "error_code": error_code}),
         );
     }
     let data = body.data.ok_or_else(
@@ -1140,10 +1168,12 @@ async fn execute_nni_bancor_trade_for_node(
         })
     })?;
     if !status.is_success() || !body.ok {
+        let error_code =
+            nni_remote_api_error_code(&body, "nni_bancor_trade_outcome_unknown");
         return Err(json!({
             "node_url": node_url,
             "http_status": status.as_u16(),
-            "error_code": body.error,
+            "error_code": error_code,
             "terminal": true,
         }));
     }

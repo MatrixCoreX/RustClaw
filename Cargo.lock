@@ -2663,6 +2663,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nni-skill"
+version = "0.1.8"
+dependencies = [
+ "anyhow",
+ "claw-core",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "nom"
 version = "7.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

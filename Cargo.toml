@@ -36,6 +36,7 @@ members = [
     "crates/skills/install_module",
     "crates/skills/log_analyze",
     "crates/skills/music_generate",
+    "crates/skills/nni",
     "crates/skills/package_manager",
     "crates/skills/process_basic",
     "crates/skills/rss_fetch",

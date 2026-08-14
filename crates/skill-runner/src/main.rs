@@ -703,9 +703,13 @@ fn parse_version_lease_mode(value: Option<&str>) -> Result<VersionLeaseMode, Str
     }
 }
 
+const ENDPOINT_REDEEMED_TOKENS: [&str; 3] = [
+    "AGENT_INTERNAL_LLM_TOKEN",
+    "AGENT_INTERNAL_ADMISSION_TOKEN",
+    "AGENT_INTERNAL_NNI_TOKEN",
+];
+
 fn materialize_child_secret_references(launch: &mut ChildLaunch) -> Result<(), String> {
-    const ENDPOINT_REDEEMED_TOKENS: [&str; 2] =
-        ["AGENT_INTERNAL_LLM_TOKEN", "AGENT_INTERNAL_ADMISSION_TOKEN"];
     let keys = launch.environment_allowlist.clone();
     for key in keys {
         if ENDPOINT_REDEEMED_TOKENS.contains(&key.as_str()) {

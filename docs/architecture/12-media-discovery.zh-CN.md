@@ -5,7 +5,8 @@
 
 <!-- ai-learning-navigation:start -->
 上一页：[任务产物交付](11-task-artifact-delivery.zh-CN.md) |
-[架构索引](README.md)
+[架构索引](README.md) |
+下一页：[NNI 能力与心跳控制](13-nni-capability.zh-CN.md)
 <!-- ai-learning-navigation:end -->
 
 `media_discovery` 是通过 Skill Store 按需安装的抖音与小红书有界素材发现能力。默认以

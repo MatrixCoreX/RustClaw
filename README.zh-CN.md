@@ -14,7 +14,7 @@ Agent Runtime 面向在消息应用或浏览器中完成日常使用和管理的
 - 多通道接入：Telegram、微信、飞书、Lark、WhatsApp Cloud、WhatsApp Web，以及统一通过 `webd` 进入的浏览器 UI；nginx/TLS 可选
 - 由 `clawd` 提供任务运行时、HTTP API、路由、记忆和调度
 - 共享技能调度层，支持进程内 builtin、external adapter，以及通过 `skill-runner` 拉起的 runner 子进程
-- 覆盖系统、文件、网络、图片、语音、视频、音乐、加密货币、知识库、自动化等场景的 builtin、external 与 runner 技能
+- 覆盖系统、文件、网络、图片、语音、视频、音乐、NNI、加密货币、知识库、自动化等场景的 builtin、external 与 runner 技能
 - 本地浏览器控制台位于 `UI/`，包含首页、Agent、模型、任务、通信设置、账号绑定、
   工具/技能、Skill Store、记忆、日志和 AI 学习等页面
 - 树莓派/小屏桌面程序位于 `pi_app/`
@@ -456,6 +456,7 @@ GitHub README 不支持真正的页内分页。详细流程图按顺序维护为
 10. [Web 入口与核心隔离](docs/architecture/10-web-entry-security.zh-CN.md)
 11. [任务产物交付](docs/architecture/11-task-artifact-delivery.zh-CN.md)
 12. [浏览器媒体发现](docs/architecture/12-media-discovery.zh-CN.md)
+13. [NNI 能力与心跳控制](docs/architecture/13-nni-capability.zh-CN.md)
 
 可从[架构索引](docs/architecture/README.md)选择语言并使用上一页/下一页导航。
 完整的[文档索引](docs/README.md)提供全部工程文档的英文与简体中文入口。

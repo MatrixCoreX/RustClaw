@@ -368,7 +368,16 @@ def message_texts():
     return texts
 
 if field == "status":
-    print(str(data.get("status") or ""))
+    status = str(data.get("status") or "").strip()
+    execution_state = str(data.get("execution_state") or "").strip()
+    lifecycle = data.get("lifecycle") or result.get("task_lifecycle") or {}
+    lifecycle_state = str(lifecycle.get("state") or "").strip()
+    if status not in {"succeeded", "failed", "canceled", "timeout"} and (
+        execution_state in {"needs_confirmation", "blocked"}
+        or lifecycle_state == "needs_user"
+    ):
+        status = "needs_user"
+    print(status)
 elif field == "text":
     text = str(result.get("text") or "").strip()
     if not text:
@@ -1430,7 +1439,7 @@ PY
   unset CURRENT_LLM_TRACE_RESULT_FILE
 
   local case_tags_l
-  case_tags_l=",$(printf '%s' "$case_tags" | tr '[:upper:]' '[:lower:]'),"
+  case_tags_l=",$(printf '%s' "$case_tags" | tr '[:upper:]' '[:lower:]' | sed -E 's/[;[:space:]]+/,/g'),"
   local expected_terminal_failure=0
   if [[ "$case_tags_l" == *",expect_terminal_failure,"* ]]; then
     expected_terminal_failure=1
@@ -1440,7 +1449,7 @@ PY
     allow_terminal_failure=1
   fi
   if [[ "$status" != "succeeded" \
-    && ! ( "$status" == "failed" \
+    && ! ( ( "$status" == "failed" || "$status" == "needs_user" ) \
       && ( "$expected_terminal_failure" -eq 1 || "$allow_terminal_failure" -eq 1 ) ) ]]; then
     echo "Turn ${turn} did not succeed: status=${status} error=${error}" >&2
     print_log_hints "$task_id" >&2
