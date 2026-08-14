@@ -282,6 +282,8 @@ export function findNniJoinErrorCode(data?: unknown): string | null {
   if (directError) return directError;
   const status = typeof record.status === "string" ? record.status : null;
   if (status === "public_key_not_allowlisted" || status === "public_key_whitelist_empty") return status;
+  const nestedDataCode = findNniJoinErrorCode(record.data);
+  if (nestedDataCode) return nestedDataCode;
   if (Array.isArray(record.attempts)) {
     for (const attempt of record.attempts) {
       const attemptCode = findNniJoinErrorCode(attempt);
@@ -289,6 +291,22 @@ export function findNniJoinErrorCode(data?: unknown): string | null {
     }
   }
   return null;
+}
+
+function isNniPublicKeyNotAllowlistedCode(code: string | null | undefined): boolean {
+  return (
+    code === "nni_pubkey_not_allowlisted" ||
+    code === "nni_public_key_not_allowlisted" ||
+    code === "public_key_not_allowlisted"
+  );
+}
+
+function isNniPublicKeyWhitelistEmptyCode(code: string | null | undefined): boolean {
+  return code === "nni_public_key_whitelist_empty" || code === "public_key_whitelist_empty";
+}
+
+export function nniJoinRejectsDevicePublicKey(error: string | undefined, data: unknown): boolean {
+  return isNniPublicKeyNotAllowlistedCode(error) || isNniPublicKeyNotAllowlistedCode(findNniJoinErrorCode(data));
 }
 
 export function parseNniRemoteNodeUrls(value: string): string[] {
@@ -304,15 +322,20 @@ export function nniJoinErrorMessage(
   fallback: string,
   lang: UiLanguage,
 ): string {
-  const code = error || findNniJoinErrorCode(data);
-  if (code === "nni_pubkey_not_allowlisted" || code === "nni_public_key_not_allowlisted" || code === "public_key_not_allowlisted") {
+  const detailCode = findNniJoinErrorCode(data);
+  const code =
+    [error, detailCode].find(isNniPublicKeyNotAllowlistedCode) ??
+    [error, detailCode].find(isNniPublicKeyWhitelistEmptyCode) ??
+    error ??
+    detailCode;
+  if (isNniPublicKeyNotAllowlistedCode(code)) {
     return copy(
       lang,
       "这台设备尚未获远程 NNI 服务端允许。请联系管理员添加设备后再重试。",
       "This device is not allowed by the remote NNI server yet. Ask an administrator to add it, then retry.",
     );
   }
-  if (code === "nni_public_key_whitelist_empty" || code === "public_key_whitelist_empty") {
+  if (isNniPublicKeyWhitelistEmptyCode(code)) {
     return copy(
       lang,
       "远程 NNI 服务端尚未允许任何设备。请联系管理员完成设备授权后再重试。",

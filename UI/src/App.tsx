@@ -289,6 +289,7 @@ export default function App() {
     nniActionResult,
     nniActionError,
     nniActionMessage,
+    nniDeviceAuthorizationDenied,
     nniJoined,
     nniRemoteNodes,
     nniRemoteNodeCount,
@@ -1786,6 +1787,7 @@ export default function App() {
               nniActionResult={nniActionResult}
               nniActionError={nniActionError}
               nniActionMessage={nniActionMessage}
+              nniDeviceAuthorizationDenied={nniDeviceAuthorizationDenied}
               nniJoined={nniJoined}
               nniRemoteNodes={nniRemoteNodes}
               nniRemoteNodeCount={nniRemoteNodeCount}
