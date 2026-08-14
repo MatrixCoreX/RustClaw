@@ -62,6 +62,7 @@ test("renders the signed device reward total and period record", () => {
   assert.match(markup, /当前持有/);
   assert.match(markup, /data-nni-decimal-amount="6250\.12500000"/);
   assert.match(markup, /data-nni-decimal-amount="\+5000\.00000000"/);
+  assert.match(markup, /data-nni-decimal-amount="\+5000\.00000000"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.match(markup, /3 次，按 1 台设备计奖/);
   assert.match(markup, /每次刷新都会由本机设备签署一次临时挑战/);
   assert.match(markup, /切换为原始十六进制公钥/);

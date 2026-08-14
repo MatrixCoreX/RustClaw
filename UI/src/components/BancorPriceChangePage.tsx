@@ -7,6 +7,10 @@ import {
   type BancorPriceChangeProjection,
   type BancorPriceChangeSide,
 } from "../lib/bancor-price-change";
+import {
+  formatBancorAssetAmountForDisplay,
+  formatBancorIntegerAmount,
+} from "../lib/bancor-amount-display";
 import { resolveBancorMarketDirectionColor } from "../lib/bancor-market-colors";
 import type { NniBancorMarketResponse } from "../types/api";
 import { NniDecimalAmount } from "./NniDecimalAmount";
@@ -325,6 +329,7 @@ function ProjectionDetails({ projection, t }: { projection: BancorPriceChangePro
       <ResultRow
         label={t("手续费", "Fee")}
         value={`${projection.feeAmount} ${projection.inputAsset}`}
+        shrinkFraction={false}
       />
       <ResultRow
         label={t("有效投入", "Effective input")}
@@ -333,21 +338,21 @@ function ProjectionDetails({ projection, t }: { projection: BancorPriceChangePro
       <ResultRow
         emphasized
         label={t("预计到账", "Estimated output")}
-        value={`${projection.outputAmount} ${projection.outputAsset}`}
+        value={`${formatBancorAssetAmountForDisplay(projection.outputAmount, projection.outputAsset)} ${projection.outputAsset}`}
       />
       <div className="grid gap-2 rounded-xl border border-white/8 bg-white/[0.025] p-3 sm:grid-cols-2">
-        <ResultCell label={t("成交后 POINT 储备", "POINT reserve after")} value={`${projection.pointReserveAfter} POINT`} />
-        <ResultCell label={t("成交后 USD 储备", "USD reserve after")} value={`${projection.usdReserveAfter} USD`} />
+        <ResultCell label={t("成交后 POINT 储备", "POINT reserve after")} value={`${formatBancorIntegerAmount(projection.pointReserveAfter)} POINT`} />
+        <ResultCell label={t("成交后 USD 储备", "USD reserve after")} value={`${formatBancorIntegerAmount(projection.usdReserveAfter)} USD`} />
       </div>
       <div className="rounded-xl border border-sky-300/15 bg-sky-400/[0.05] p-3">
         <p className="text-xs text-white/45">{t("池内边际价变化", "Pool marginal-price change")}</p>
         <div className="mt-2 flex flex-wrap items-baseline gap-2 font-mono text-sm">
-          <NniDecimalAmount className="break-all text-white/65" value={projection.currentMarginalPrice} />
+          <NniDecimalAmount className="break-all text-white/65" value={projection.currentMarginalPrice} shrinkFraction={false} />
           <span className="text-white/35">→</span>
-          <NniDecimalAmount className="break-all font-semibold text-white" value={`${projection.marginalPriceAfter} USD / POINT`} />
+          <NniDecimalAmount className="break-all font-semibold text-white" value={`${projection.marginalPriceAfter} USD / POINT`} shrinkFraction={false} />
         </div>
         <p className="mt-2 text-lg font-semibold" style={{ color: changeColor }}>
-          <NniDecimalAmount value={projection.marginalPriceChangePercent} />
+          <NniDecimalAmount value={projection.marginalPriceChangePercent} shrinkFraction={false} />
         </p>
       </div>
     </div>
@@ -358,15 +363,17 @@ function ResultRow({
   label,
   value,
   emphasized = false,
+  shrinkFraction = true,
 }: {
   label: string;
   value: string;
   emphasized?: boolean;
+  shrinkFraction?: boolean;
 }) {
   return (
     <div className="flex min-w-0 items-start justify-between gap-4 border-b border-white/8 pb-3 text-sm">
       <span className="shrink-0 text-white/45">{label}</span>
-      <NniDecimalAmount className={`min-w-0 break-all text-right font-mono ${emphasized ? "font-semibold text-sky-200" : "text-white/75"}`} value={value} />
+      <NniDecimalAmount className={`min-w-0 break-all text-right font-mono ${emphasized ? "font-semibold text-sky-200" : "text-white/75"}`} value={value} shrinkFraction={shrinkFraction} />
     </div>
   );
 }

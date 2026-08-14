@@ -151,8 +151,8 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       nniReady
     />,
   );
-  assert.match(html, /data-nni-decimal-amount="100000000\.00000000 POINT"/);
-  assert.match(html, /data-nni-decimal-amount="10000\.00000000 USD"/);
+  assert.match(html, />100000000 POINT<\/span>/);
+  assert.match(html, />10000 USD<\/span>/);
   assert.match(html, /BANCOR储备曲线市场/);
   assert.match(html, /data-bancor-open-price-change="true"/);
   assert.match(html, /价格变化计算/);
@@ -182,6 +182,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /data-bancor-daily-marginal-price="UTC"/);
   assert.match(html, /今日最高/);
   assert.match(html, /data-nni-decimal-amount="0\.00010100 USD"/);
+  assert.match(html, /data-nni-decimal-amount="0\.00010100 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.match(html, /今日最低/);
   assert.match(html, /data-nni-decimal-amount="0\.00009900 USD"/);
   assert.match(html, /日涨跌幅/);
@@ -191,14 +192,11 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /rounded-xl border border-white\/8 bg-white\/\[0\.025\] px-3 py-2\.5/);
   assert.doesNotMatch(html, /grid gap-4 sm:grid-cols-2 xl:grid-cols-4/);
   assert.match(html, /当前手续费[：:].*data-nni-decimal-amount="0\.50%"/);
+  assert.match(html, /data-nni-decimal-amount="0\.50%"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.doesNotMatch(html, /累计手续费|Cumulative fees|按支付资产分别累计/);
   assert.doesNotMatch(html, /1\.2500 POINT|0\.5000 USD/);
-  for (const amount of ["100000000.00000000 POINT", "10000.00000000 USD"]) {
-    assert.match(
-      html,
-      new RegExp(`data-nni-decimal-amount="${amount.replace(".", "\\.")}"`),
-    );
-  }
+  assert.doesNotMatch(html, /data-nni-decimal-amount="100000000\.00000000 POINT"/);
+  assert.doesNotMatch(html, /data-nni-decimal-amount="10000\.00000000 USD"/);
   assert.match(html, /实际成交均价 K 线/);
   assert.match(html, /池内即时边际价/);
   assert.doesNotMatch(html, /当前 K 线价格摘要/);
@@ -528,9 +526,11 @@ test("BANCOR quote review and final confirmation use a centered modal", () => {
   assert.match(html, /role="dialog"/);
   assert.match(html, /aria-modal="true"/);
   assert.match(html, /查看报价并确认交易/);
-  assert.match(html, /data-nni-decimal-amount="10\.00000000 POINT"/);
+  assert.match(html, />10 POINT<\/span>/);
   assert.match(html, /data-nni-decimal-amount="0\.00100000 USD"/);
+  assert.match(html, /data-nni-decimal-amount="0\.00100000 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.match(html, /data-nni-decimal-amount="0\.05000000 POINT"/);
+  assert.match(html, /data-nni-decimal-amount="0\.05000000 POINT"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.match(html, /bancor-sign-trade-btn/);
   assert.match(html, /确认签名交易/);
   assert.match(html, /返回修改/);

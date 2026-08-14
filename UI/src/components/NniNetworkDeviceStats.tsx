@@ -9,6 +9,11 @@ import { NniDecimalAmount } from "./NniDecimalAmount";
 
 type Translate = (zh: string, en: string) => string;
 
+export function formatNniWindowReward(value: string | number): string {
+  const text = String(value).trim();
+  return /^[+-]?\d+$/.test(text) ? `${text}.00000000` : text;
+}
+
 export interface NniNetworkDeviceStatsProps {
   stats: NniNetworkDeviceStatsValue | null;
   networkRewards?: NniNetworkRewards | null;
@@ -37,7 +42,7 @@ export function NniNetworkDeviceStats({
     ? networkRewards.total_distributed_reward_points
     : unavailableLabel;
   const rewardPoolValue = rewardPolicy?.current_reward_pool_points
-    ? rewardPolicy.current_reward_pool_points
+    ? formatNniWindowReward(rewardPolicy.current_reward_pool_points)
     : unavailableLabel;
   const firstHeartbeatValue = stats?.first_heartbeat_unix != null
     ? formatUnixDateTime(stats.first_heartbeat_unix)
@@ -93,7 +98,7 @@ export function NniNetworkDeviceStats({
             <span className="text-xs font-semibold">{t("窗口奖励", "Window reward")}</span>
           </div>
           <p className={rewardPolicy ? "min-w-0 break-words text-right font-mono text-base font-semibold text-white/90" : "text-sm font-semibold text-white/75"}>
-            {loading && !rewardPolicy ? <Loader2 className="h-5 w-5 animate-spin" /> : <NniDecimalAmount value={String(rewardPoolValue)} />}
+            {loading && !rewardPolicy ? <Loader2 className="h-5 w-5 animate-spin" /> : <NniDecimalAmount value={String(rewardPoolValue)} shrinkFraction={false} />}
           </p>
         </div>
       </div>
