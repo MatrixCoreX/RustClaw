@@ -192,6 +192,55 @@ curl_health() {
 started_pid=""
 suite_pid=""
 ISOLATION_ROOT=""
+ISOLATED_WORKSPACE=""
+
+prepare_isolated_workspace() {
+  local source_path name skill_name
+  ISOLATED_WORKSPACE="${ISOLATION_ROOT}/workspace"
+  mkdir -p \
+    "${ISOLATED_WORKSPACE}/data/skill-packages" \
+    "${ISOLATED_WORKSPACE}/data/skills" \
+    "${ISOLATED_WORKSPACE}/logs" \
+    "${ISOLATED_WORKSPACE}/optional_skills" \
+    "${ISOLATED_WORKSPACE}/tmp" \
+    "${ISOLATED_WORKSPACE}/.pids"
+
+  # clawd owns package receipts relative to its workspace. Give the isolated
+  # server a private workspace while reusing immutable source/build inputs.
+  # Mutable runtime directories stay local to ISOLATION_ROOT.
+  shopt -s dotglob nullglob
+  for source_path in "${ROOT_DIR}"/*; do
+    name="$(basename "${source_path}")"
+    case "${name}" in
+      Cargo.lock|Cargo.toml|data|logs|optional_skills|tmp|.pids)
+        continue
+        ;;
+    esac
+    ln -s "${source_path}" "${ISOLATED_WORKSPACE}/${name}"
+  done
+  shopt -u dotglob nullglob
+  cp -p \
+    "${ROOT_DIR}/Cargo.lock" \
+    "${ROOT_DIR}/Cargo.toml" \
+    "${ISOLATED_WORKSPACE}/"
+
+  # Admission canonicalizes package manifests and rejects symlink escapes.
+  # Cargo also validates every workspace member before a one-package build,
+  # so copy the small optional source tree when an on-demand test is requested.
+  # Build output still reuses the shared target directory.
+  for skill_name in "${INSTALL_ON_DEMAND_SKILLS[@]}"; do
+    if [[ ! "${skill_name}" =~ ^[a-z0-9_]+$ ]] \
+      || [[ ! -d "${ROOT_DIR}/optional_skills/${skill_name}" ]]; then
+      echo "Invalid or missing on-demand skill source: ${skill_name}" >&2
+      return 2
+    fi
+  done
+  if [[ "${#INSTALL_ON_DEMAND_SKILLS[@]}" -gt 0 ]]; then
+    cp -R \
+      "${ROOT_DIR}/optional_skills/." \
+      "${ISOLATED_WORKSPACE}/optional_skills/"
+  fi
+}
 
 skill_store_response_ok() {
   local skill_name="$1"
@@ -251,9 +300,10 @@ project_proactive_skill_receipts() {
   fi
   python3 "${ROOT_DIR}/scripts/project_skill_receipts.py" \
     --target host \
+    --scope proactive \
     --binary-dir "${ROOT_DIR}/target/release" \
     --sdk-cli "$sdk_cli" \
-    --package-root "${ROOT_DIR}/data/skill-packages"
+    --package-root "${ISOLATED_WORKSPACE}/data/skill-packages"
 }
 
 install_on_demand_skill() {
@@ -350,17 +400,19 @@ PY
   ISOLATED_CONFIG="${ISOLATION_ROOT}/config.toml"
   ISOLATED_DB="${ISOLATION_ROOT}/tasks.sqlite"
   ISOLATED_AUDIT_DB="${ISOLATION_ROOT}/audit.sqlite"
+  prepare_isolated_workspace
   python3 "${SCRIPT_DIR}/create_isolated_config.py" \
     --source "${SOURCE_CONFIG}" \
     --output "${ISOLATED_CONFIG}" \
     --sqlite-path "${ISOLATED_DB}" \
     --audit-sqlite-path "${ISOLATED_AUDIT_DB}" \
-    --skill-data-root "${ISOLATION_ROOT}/skills"
+    --skill-data-root "${ISOLATED_WORKSPACE}/data/skills"
   echo "server_mode=isolated"
   echo "base_url=${BASE_URL}"
   echo "config_identity=isolated/config.toml"
   echo "task_db_identity=isolated/tasks.sqlite"
   echo "audit_db_identity=isolated/audit.sqlite"
+  echo "skill_package_identity=isolated/data/skill-packages"
 else
   if [[ "${#INSTALL_ON_DEMAND_SKILLS[@]}" -gt 0 ]]; then
     echo "--install-on-demand-skill requires the default isolated server mode" >&2
@@ -385,6 +437,7 @@ if [[ "${REUSE_SERVER}" -eq 0 ]]; then
   export APP_DB_PATH="${ISOLATED_DB}"
   export APP_INTERNAL_LISTEN="${isolated_listen}"
   export CLIENT_LIKE_CHANNEL="ui"
+  export NL_MODEL_IO_LOG="${ISOLATED_WORKSPACE}/logs/model_io.log"
   # An isolated database gets its own generated admin key. Never reuse a key
   # inherited from the developer's normal runtime against that database.
   USER_KEY_VALUE=""
@@ -409,7 +462,7 @@ fi
 # Direct NL-suite startup bypasses start-all.sh, so project the same verified
 # proactive receipts before exercising on-demand packages. This performs no
 # compilation and never projects an on-demand Skill Store entry.
-if [[ "${REUSE_SERVER}" -eq 0 && "${#INSTALL_ON_DEMAND_SKILLS[@]}" -gt 0 ]]; then
+if [[ "${REUSE_SERVER}" -eq 0 ]]; then
   project_proactive_skill_receipts
 fi
 
@@ -431,7 +484,10 @@ else
   fi
   stamp="$(date +%Y%m%d_%H%M%S)"
   SERVER_LOG="${LOG_DIR%/}/clawd_full_nl_${stamp}.log"
-  "${CLAWD_BIN}" --config "${ISOLATED_CONFIG}" >"${SERVER_LOG}" 2>&1 &
+  (
+    cd "${ISOLATED_WORKSPACE}"
+    exec "${CLAWD_BIN}" --config "${ISOLATED_CONFIG}"
+  ) >"${SERVER_LOG}" 2>&1 &
   started_pid=$!
   echo "server_log=${SERVER_LOG}"
   echo "server_pid=${started_pid}"

@@ -1237,7 +1237,7 @@ PY
 init_llm_trace_offset() {
   local offset_file="$1"
   python3 "${NL_TEST_SCRIPT_DIR}/print_llm_raw_trace.py" \
-    --log "${ROOT_DIR}/logs/model_io.log" \
+    --log "${NL_MODEL_IO_LOG:-${ROOT_DIR}/logs/model_io.log}" \
     --state-file "$offset_file" \
     --init-state
 }
@@ -1249,7 +1249,7 @@ print_new_llm_trace() {
   [[ -n "${LLM_TRACE_STATE_FILE:-}" ]] || return 0
   echo "[TURN ${turn_number}] llm_trace task_id=${task_id}"
   local trace_args=(
-    --log "${ROOT_DIR}/logs/model_io.log"
+    --log "${NL_MODEL_IO_LOG:-${ROOT_DIR}/logs/model_io.log}"
     --task-id "$task_id"
     --state-file "$LLM_TRACE_STATE_FILE"
     --max-field-chars "${PRINT_LLM_TRACE_MAX_CHARS:-1200}"

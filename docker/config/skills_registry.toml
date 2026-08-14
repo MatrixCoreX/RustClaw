@@ -1542,7 +1542,7 @@ output_schema = { type = "object", required = ["text"], properties = { text = { 
 name = "nni"
 enabled = true
 fixed_on = true
-planner_eager_load = true
+planner_eager_load = false
 kind = "runner"
 planner_kind = "skill"
 group = "market/data"
@@ -1643,22 +1643,22 @@ supported_os = ["linux", "macos"]
 install_mode = "on_demand"
 package_manifest = "optional_skills/stock/skill.toml"
 config_files = ["configs/stock.toml"]
-aliases = ["a_stock", "stock_quote", "a_share_quote", "cn_stock_quote"]
+aliases = ["a_stock", "us_stock", "stock_quote", "a_share_quote", "global_stock_quote"]
 timeout_seconds = 15
-prompt_file = "prompts/skills/stock.md"
+prompt_file = "prompts/layers/generated/skills/stock.md"
 output_kind = "text"
-description = "Query A-share stock quotes by code or configured company name/alias and return current market data."
-description_zh = "按股票代码、公司名称或别名查询 A 股实时行情。"
-semantic_tags = ["stock.quote", "a_share.quote", "asset.quote"]
+description = "Query China A-share and US stock quotes by ticker, code, or company name with provider fallback."
+description_zh = "按代码、Ticker 或公司名称查询 A 股和美股实时行情，并支持行情源回退。"
+semantic_tags = ["stock.quote", "a_share.quote", "us_stock.quote", "asset.quote"]
 capabilities = ["net", "llm"]
 risk_level = "low"
 auto_invocable = true
 side_effect = false
 planner_capabilities = [
-  { name = "stock.preview_quote", action = "preview_quote", effect = "observe", required = ["symbol|code|name"], risk_level = "low", preferred = false, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false },
-  { name = "stock.quote", action = "quote", effect = "observe", required = ["symbol|code|name"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = false, external_publish = false, credential_access = true },
+  { name = "stock.preview_quote", action = "preview_quote", effect = "observe", required = ["symbol|code|name"], optional = ["market"], risk_level = "low", preferred = false, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false },
+  { name = "stock.quote", action = "quote", effect = "observe", required = ["symbol|code|name"], optional = ["market"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = false, external_publish = false, credential_access = true },
 ]
-input_schema = { type = "object", properties = { action = { type = "string", enum = ["preview_quote", "quote", "query"] }, symbol = { type = "string" }, code = { type = "string" }, name = { type = "string" } } }
+input_schema = { type = "object", additionalProperties = false, anyOf = [{ required = ["symbol"] }, { required = ["code"] }, { required = ["name"] }], properties = { action = { type = "string", enum = ["preview_quote", "quote", "query"] }, symbol = { type = "string", minLength = 1, maxLength = 128 }, code = { type = "string", minLength = 1, maxLength = 128 }, name = { type = "string", minLength = 1, maxLength = 128 }, market = { type = "string", enum = ["auto", "cn", "us"] } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]

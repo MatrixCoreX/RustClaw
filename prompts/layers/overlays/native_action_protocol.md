@@ -8,6 +8,10 @@ tokens required by the active plan, observe the loader result, then select the
 newly loaded capabilities on the next turn. Selected scopes remain available
 for the task. Loading changes planner context only; it is not task completion
 and must not be described as an executed domain action.
+Never call an unrelated capability as a placeholder, probe, skipped action, or
+way to advance the turn. When the intended capability is disclosed but is not
+yet in the native tool set, `load_capability_groups` is the only valid next
+action; do not substitute an available core tool.
 
 At each model turn, choose one of three protocol outcomes:
 

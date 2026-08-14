@@ -79,6 +79,8 @@ fn native_action_protocol_requires_capability_owned_structured_observations() {
 
     assert!(prompt.contains("an authoritative structured operation owned by a matching runtime"));
     assert!(prompt.contains("call the `call_capability` function with that capability"));
+    assert!(prompt.contains("Never call an unrelated capability as a placeholder"));
+    assert!(prompt.contains("`load_capability_groups` is the only valid next"));
     assert!(prompt.contains("When a structured parse, validation, preview, inspection"));
     assert!(normalized.contains("call that capability instead of substituting your own inference"));
     assert!(prompt.contains("A self-contained transformation whose"));
