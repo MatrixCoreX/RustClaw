@@ -4,6 +4,7 @@ import { useUiDialog } from "../components/UiDialogProvider";
 import {
   nniDeviceMessage,
   nniJoinErrorMessage,
+  nniJoinRejectsDevicePublicKey,
   parseNniRemoteNodeUrls,
   shortenHex,
   nniTimestampSignatureReady,
@@ -45,6 +46,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
   const [nniActionResult, setNniActionResult] = useState<NniDeviceActionResponse | null>(null);
   const [nniActionError, setNniActionError] = useState<string | null>(null);
   const [nniActionMessage, setNniActionMessage] = useState<string | null>(null);
+  const [nniDeviceAuthorizationDenied, setNniDeviceAuthorizationDenied] = useState(false);
   const [nniJoined, setNniJoined] = useState(false);
   const [nniRemoteNodes, setNniRemoteNodes] = useState("");
   const [nniHeartbeatIntervalSeconds, setNniHeartbeatIntervalSeconds] = useState<number | null>(null);
@@ -241,6 +243,9 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     });
     const body = (await res.json()) as ApiResponse<NniJoinTaskResponse>;
     if (!res.ok || !body.ok || !body.data) {
+      if (nniJoinRejectsDevicePublicKey(body.error, body.data)) {
+        setNniDeviceAuthorizationDenied(true);
+      }
       throw new Error(nniJoinErrorMessage(body.error, body.data, `NNI join request failed (${res.status})`, lang));
     }
     return body.data;
@@ -254,6 +259,9 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     });
     const body = (await res.json()) as ApiResponse<NniJoinVerifyResponse>;
     if (!res.ok || !body.ok || !body.data) {
+      if (nniJoinRejectsDevicePublicKey(body.error, body.data)) {
+        setNniDeviceAuthorizationDenied(true);
+      }
       throw new Error(nniJoinErrorMessage(body.error, body.data, `NNI join verify failed (${res.status})`, lang));
     }
     return body.data;
@@ -524,6 +532,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     setNniActionLoading("join_nni");
     setNniActionError(null);
     setNniActionMessage(null);
+    setNniDeviceAuthorizationDenied(false);
     const status = nniStatus ?? (await fetchNniDeviceStatus(false));
     if (!status?.signature_chip_present) {
       setNniActionError(
@@ -553,6 +562,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         throw new Error("nni_join_verify_rejected");
       }
       await setNniJoinedPersisted(true, { persistRemoteNodes: true });
+      setNniDeviceAuthorizationDenied(false);
       setNniActionMessage(
         t(
           "设备签名已通过服务端验证，NNI 已开始运行。",
@@ -572,6 +582,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
 
   const updateNniRemoteNodes = (value: string) => {
     setNniRemoteNodes(value);
+    setNniDeviceAuthorizationDenied(false);
     setNniConfigMessage(null);
     setNniConfigError(null);
   };
@@ -584,6 +595,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     nniActionResult,
     nniActionError,
     nniActionMessage,
+    nniDeviceAuthorizationDenied,
     nniJoined,
     nniRemoteNodes,
     nniRemoteNodeCount: nniRemoteNodeUrls().length,

@@ -9,6 +9,7 @@ import {
   nniDeviceMessage,
   nniDeviceNextStep,
   nniJoinErrorMessage,
+  nniJoinRejectsDevicePublicKey,
   nniPayloadHexField,
   nniSimulationControlMode,
   nniTimestampSignatureReady,
@@ -118,6 +119,30 @@ test("formats NNI join errors from structured codes", () => {
     /尚未允许任何设备/,
   );
   assert.equal(nniJoinErrorMessage(undefined, null, "fallback", "en"), "fallback");
+  assert.match(
+    nniJoinErrorMessage(
+      "nni_remote_nodes_unavailable",
+      { attempts: [{ error: "nni_pubkey_not_allowlisted" }] },
+      "fallback",
+      "zh",
+    ),
+    /尚未获远程 NNI 服务端允许/,
+  );
+});
+
+test("detects only structured public-key authorization rejection codes", () => {
+  assert.equal(
+    nniJoinRejectsDevicePublicKey(
+      "nni_remote_nodes_unavailable",
+      { attempts: [{ data: { status: "public_key_not_allowlisted" } }] },
+    ),
+    true,
+  );
+  assert.equal(
+    nniJoinRejectsDevicePublicKey("nni_remote_nodes_unavailable", { attempts: [{ status: "connection_failed" }] }),
+    false,
+  );
+  assert.equal(nniJoinRejectsDevicePublicKey("public key is not allowed", null), false);
 });
 
 test("parses remote NNI node urls", () => {

@@ -51,6 +51,7 @@ export interface NniPageProps {
   nniActionResult: NniDeviceActionResponse | null;
   nniActionError: string | null;
   nniActionMessage: string | null;
+  nniDeviceAuthorizationDenied: boolean;
   nniJoined: boolean;
   nniRemoteNodes: string;
   nniRemoteNodeCount: number;
@@ -122,6 +123,10 @@ export const NNI_DEVICE_MANAGEMENT_COPY = {
   zh: "这里管理硬件设备的 NNI 入口和设备签名能力。",
   en: "This page manages the hardware device's NNI entry and device-signing capability.",
 } as const;
+export const NNI_DEVICE_AUTHORIZATION_DENIED_COPY = {
+  zh: "你不是合法设备，不能参与 NNI 网络。",
+  en: "This is not an authorized device and cannot participate in the NNI network.",
+} as const;
 
 export function NniPage({
   lang,
@@ -133,6 +138,7 @@ export function NniPage({
   nniActionResult,
   nniActionError,
   nniActionMessage,
+  nniDeviceAuthorizationDenied,
   nniJoined,
   nniRemoteNodes,
   nniRemoteNodeCount,
@@ -316,6 +322,20 @@ export function NniPage({
                 NNI_DEVICE_MANAGEMENT_COPY.en,
               )}
             </p>
+            {nniDeviceAuthorizationDenied ? (
+              <div
+                role="alert"
+                className="mt-3 flex items-start gap-2 rounded-md border border-rose-400/35 bg-rose-500/10 px-3 py-2.5 text-sm leading-6 text-rose-100"
+              >
+                <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>
+                  {t(
+                    NNI_DEVICE_AUTHORIZATION_DENIED_COPY.zh,
+                    NNI_DEVICE_AUTHORIZATION_DENIED_COPY.en,
+                  )}
+                </span>
+              </div>
+            ) : null}
           </div>
 
           <div className="grid gap-3">
