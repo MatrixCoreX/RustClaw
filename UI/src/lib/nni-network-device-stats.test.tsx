@@ -60,17 +60,19 @@ test("shows registered allowlist devices and active devices from the previous he
   assert.match(markup, /活跃设备/);
   assert.match(markup, />8</);
   assert.doesNotMatch(markup, /上个 10 分钟窗口内提交过心跳/);
-  assert.match(markup, /1800000000.*1800000600/);
+  assert.doesNotMatch(markup, /1800000000.*1800000600/);
   assert.match(markup, /全网累计产出/);
   assert.match(markup, /12500\.0000/);
   assert.match(markup, /当前每 10 分钟总奖励/);
-  assert.match(markup, /5000\.0000 POINT/);
-  assert.match(markup, /由本周期有效心跳设备平分/);
+  assert.match(markup, /5000\.0000/);
+  assert.doesNotMatch(markup, /POINT/);
+  assert.doesNotMatch(markup, /由本周期有效心跳设备平分/);
   assert.match(markup, /全网首次心跳时间/);
   assert.match(markup, /1799000000/);
   assert.match(markup, /下次减半时间/);
   assert.match(markup, /1925144000/);
-  assert.equal((markup.match(/rounded-2xl border border-white\/10/g) ?? []).length, 6);
+  assert.match(markup, /sm:grid-cols-2 md:grid-cols-3/);
+  assert.equal((markup.match(/rounded-lg border border-white\/10/g) ?? []).length, 6);
 });
 
 test("explains why network counters are unavailable before joining", () => {
@@ -87,7 +89,6 @@ test("explains why network counters are unavailable before joining", () => {
   assert.match(markup, /注册设备/);
   assert.match(markup, /活跃设备/);
   assert.equal((markup.match(/未加入/g) ?? []).length, 6);
-  assert.match(markup, /加入网络后可查看/);
   assert.doesNotMatch(markup, />--</);
 });
 
@@ -103,6 +104,5 @@ test("distinguishes a joined network whose counters are temporarily unavailable"
   );
 
   assert.equal((markup.match(/暂不可用/g) ?? []).length, 6);
-  assert.match(markup, /刷新状态后重试/);
   assert.doesNotMatch(markup, /未加入/);
 });
