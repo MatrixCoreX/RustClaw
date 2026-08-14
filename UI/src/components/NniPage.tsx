@@ -309,7 +309,7 @@ export function NniPage({
   return (
     <div className="flex flex-col gap-4">
       <section className="theme-panel p-5 sm:p-6">
-        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(32rem,40rem)] xl:items-start">
+        <div className="grid gap-5">
           <div className="max-w-3xl">
             <p className="theme-kicker text-[10px] uppercase tracking-[0.35em]">Network Native Intelligence</p>
             <h3 className="mt-2 flex items-center gap-2 text-xl font-semibold tracking-tight sm:text-2xl">
@@ -338,7 +338,7 @@ export function NniPage({
             ) : null}
           </div>
 
-          <div className="grid gap-3">
+          <div className="grid w-full gap-3">
             <NniNetworkDeviceStats
               stats={nniRewards?.network_devices ?? null}
               networkRewards={nniRewards?.network_rewards ?? null}
