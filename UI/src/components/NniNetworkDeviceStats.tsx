@@ -8,6 +8,15 @@ import type {
 
 type Translate = (zh: string, en: string) => string;
 
+function formatWholePoints(value: string): string {
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(value.trim());
+  if (!match) return value;
+
+  let whole = BigInt(match[1]);
+  if ((match[2]?.[0] ?? "0") >= "5") whole += 1n;
+  return whole.toString();
+}
+
 export interface NniNetworkDeviceStatsProps {
   stats: NniNetworkDeviceStatsValue | null;
   networkRewards?: NniNetworkRewards | null;
@@ -32,9 +41,11 @@ export function NniNetworkDeviceStats({
     : t("未加入", "Not joined");
   const registeredValue = stats?.registered_device_count ?? unavailableLabel;
   const activeValue = stats?.active_device_count ?? unavailableLabel;
-  const networkOutputValue = networkRewards?.total_distributed_reward_points ?? unavailableLabel;
+  const networkOutputValue = networkRewards?.total_distributed_reward_points
+    ? formatWholePoints(networkRewards.total_distributed_reward_points)
+    : unavailableLabel;
   const rewardPoolValue = rewardPolicy?.current_reward_pool_points
-    ? rewardPolicy.current_reward_pool_points
+    ? formatWholePoints(rewardPolicy.current_reward_pool_points)
     : unavailableLabel;
   const firstHeartbeatValue = stats?.first_heartbeat_unix != null
     ? formatUnixDateTime(stats.first_heartbeat_unix)
