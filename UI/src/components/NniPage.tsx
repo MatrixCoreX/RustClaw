@@ -118,6 +118,10 @@ const NNI_DEVICE_ACTIONS = [
 
 const NNI_TEST_JOIN_ACTIVITY_MS = 2200;
 const NNI_SIGNATURE_DETECTION_SECONDS = 12;
+export const NNI_DEVICE_MANAGEMENT_COPY = {
+  zh: "这里管理硬件设备的 NNI 入口和设备签名能力。",
+  en: "This page manages the hardware device's NNI entry and device-signing capability.",
+} as const;
 
 export function NniPage({
   lang,
@@ -308,8 +312,8 @@ export function NniPage({
             </h3>
             <p className="mt-3 text-sm leading-7 text-white/70">
               {t(
-                "这里管理 Pi App 里的 NNI 入口和设备签名能力。",
-                "This page manages the NNI entry from the Pi App and device signing.",
+                NNI_DEVICE_MANAGEMENT_COPY.zh,
+                NNI_DEVICE_MANAGEMENT_COPY.en,
               )}
             </p>
           </div>

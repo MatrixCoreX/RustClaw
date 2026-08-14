@@ -3,6 +3,13 @@ import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { NniNetworkDeviceStats } from "../components/NniNetworkDeviceStats";
+import { NNI_DEVICE_MANAGEMENT_COPY } from "../components/NniPage";
+
+test("describes NNI as a hardware-device capability instead of a Pi App feature", () => {
+  assert.equal(NNI_DEVICE_MANAGEMENT_COPY.zh, "这里管理硬件设备的 NNI 入口和设备签名能力。");
+  assert.match(NNI_DEVICE_MANAGEMENT_COPY.en, /hardware device/);
+  assert.doesNotMatch(Object.values(NNI_DEVICE_MANAGEMENT_COPY).join(" "), /Pi App/);
+});
 
 test("shows registered allowlist devices and active devices from the previous heartbeat window", () => {
   const markup = renderToStaticMarkup(
