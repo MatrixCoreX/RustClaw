@@ -71,11 +71,14 @@ test("shows registered allowlist devices and active devices from the previous he
   assert.doesNotMatch(markup, /5000\.0000/);
   assert.doesNotMatch(markup, /POINT/);
   assert.doesNotMatch(markup, /由本周期有效心跳设备平分/);
-  assert.match(markup, /全网首次心跳时间/);
+  assert.match(markup, /首跳/);
+  assert.doesNotMatch(markup, /全网首次心跳时间/);
   assert.match(markup, /1799000000/);
-  assert.match(markup, /下次减半时间/);
+  assert.match(markup, /减半/);
+  assert.doesNotMatch(markup, /下次减半时间/);
   assert.match(markup, /1925144000/);
-  assert.match(markup, /sm:grid-cols-2 md:grid-cols-3/);
+  assert.match(markup, /sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6/);
+  assert.equal((markup.match(/whitespace-nowrap text-xs font-medium/g) ?? []).length, 2);
   assert.equal((markup.match(/rounded-lg border border-white\/10/g) ?? []).length, 6);
 });
 

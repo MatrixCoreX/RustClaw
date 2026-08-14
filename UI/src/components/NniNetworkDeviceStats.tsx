@@ -57,7 +57,7 @@ export function NniNetworkDeviceStats({
       : unavailableLabel;
 
   return (
-    <div className="grid w-full gap-2.5 sm:grid-cols-2 md:grid-cols-3" aria-label={t("网络概览", "Network overview")}>
+    <div className="grid w-full gap-2.5 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6" aria-label={t("网络概览", "Network overview")}>
       <div className="min-w-0 rounded-lg border border-white/10 bg-black/15 px-3 py-2.5">
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2 text-white/55">
@@ -109,9 +109,9 @@ export function NniNetworkDeviceStats({
       <div className="min-w-0 rounded-lg border border-white/10 bg-black/15 px-3 py-2.5">
         <div className="flex items-center gap-2 text-white/55">
           <CalendarClock className="h-4 w-4" />
-          <span className="text-xs font-semibold">{t("全网首次心跳时间", "First network heartbeat")}</span>
+          <span className="text-xs font-semibold">{t("首跳", "First heartbeat")}</span>
         </div>
-        <p className={stats?.first_heartbeat_unix != null ? "mt-1.5 text-sm font-semibold text-white/90" : "mt-1.5 text-sm font-semibold text-white/75"}>
+        <p className={stats?.first_heartbeat_unix != null ? "mt-1.5 whitespace-nowrap text-xs font-medium text-white/90" : "mt-1.5 text-xs font-medium text-white/75"}>
           {loading && !stats ? <Loader2 className="h-5 w-5 animate-spin" /> : firstHeartbeatValue}
         </p>
       </div>
@@ -119,9 +119,9 @@ export function NniNetworkDeviceStats({
       <div className="min-w-0 rounded-lg border border-white/10 bg-black/15 px-3 py-2.5">
         <div className="flex items-center gap-2 text-white/55">
           <TimerReset className="h-4 w-4" />
-          <span className="text-xs font-semibold">{t("下次减半时间", "Next halving")}</span>
+          <span className="text-xs font-semibold">{t("减半", "Halving")}</span>
         </div>
-        <p className={rewardPolicy?.next_halving_at_unix != null ? "mt-1.5 text-sm font-semibold text-white/90" : "mt-1.5 text-sm font-semibold text-white/75"}>
+        <p className={rewardPolicy?.next_halving_at_unix != null ? "mt-1.5 whitespace-nowrap text-xs font-medium text-white/90" : "mt-1.5 text-xs font-medium text-white/75"}>
           {loading && !rewardPolicy ? <Loader2 className="h-5 w-5 animate-spin" /> : nextHalvingValue}
         </p>
       </div>
