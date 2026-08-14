@@ -23,6 +23,8 @@ const rewards: NniRewardsResponse = {
   per_page: 10,
   total: 2,
   total_pages: 1,
+  history_limit: 100,
+  history_truncated: false,
   records: [
     {
       id: 2,
@@ -47,10 +49,9 @@ test("renders the signed device reward total and period record", () => {
       currentPointBalanceLoading={false}
       loading={false}
       error={null}
-      pageSize={10}
+      pageSize={100}
       t={(zh) => zh}
       formatUnixDateTime={(value) => (value ? String(value) : "--")}
-      onFetch={() => undefined}
       onRefresh={() => undefined}
     />,
   );
@@ -64,4 +65,7 @@ test("renders the signed device reward total and period record", () => {
   assert.match(markup, /3 次，按 1 台设备计奖/);
   assert.match(markup, /每次刷新都会由本机设备签署一次临时挑战/);
   assert.match(markup, /切换为原始十六进制公钥/);
+  assert.match(markup, /（最近 100 条）/);
+  assert.doesNotMatch(markup, /共 2 条/);
+  assert.doesNotMatch(markup, /上一页|下一页/);
 });

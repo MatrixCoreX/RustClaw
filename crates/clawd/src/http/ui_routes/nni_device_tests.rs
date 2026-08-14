@@ -82,7 +82,7 @@ async fn nni_reward_ledger_requires_ui_authentication() {
         .with_state(state)
         .oneshot(
             Request::builder()
-                .uri("/v1/nni/rewards?page=1&per_page=10")
+                .uri("/v1/nni/rewards?page=1&per_page=100")
                 .body(Body::empty())
                 .expect("reward ledger request"),
         )

@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Coins, Loader2, RefreshCw, WalletCards } from "lucide-react";
+import { Coins, Loader2, RefreshCw, WalletCards } from "lucide-react";
 
 import { shortNniValue } from "../lib/nni-display";
 import type { NniRewardsResponse } from "../types/api";
@@ -15,8 +15,7 @@ export interface NniRewardsPanelProps {
   pageSize: number;
   t: Translate;
   formatUnixDateTime: (ts: number | null | undefined) => string;
-  onFetch: (page: number) => unknown | Promise<unknown>;
-  onRefresh: (page: number) => unknown | Promise<unknown>;
+  onRefresh: () => unknown | Promise<unknown>;
 }
 
 export function NniRewardsPanel({
@@ -28,14 +27,9 @@ export function NniRewardsPanel({
   pageSize,
   t,
   formatUnixDateTime,
-  onFetch,
   onRefresh,
 }: NniRewardsPanelProps) {
-  const page = rewards?.page ?? 1;
-  const totalPages = Math.max(1, rewards?.total_pages ?? 1);
   const records = rewards?.records ?? [];
-  const canPrev = page > 1;
-  const canNext = page < totalPages;
 
   return (
     <div
@@ -59,7 +53,7 @@ export function NniRewardsPanel({
         </div>
         <button
           type="button"
-          onClick={() => void onRefresh(page)}
+          onClick={() => void onRefresh()}
           disabled={loading || currentPointBalanceLoading}
           className="theme-secondary-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -122,10 +116,7 @@ export function NniRewardsPanel({
         <div>
           <h5 className="text-sm font-semibold text-white/85">{t("奖励明细", "Reward records")}</h5>
           <p className="mt-1 text-xs text-white/45">
-            {t(
-              `共 ${rewards?.total ?? 0} 条，每页 ${pageSize} 条。`,
-              `${rewards?.total ?? 0} records total, ${pageSize} per page.`,
-            )}
+            {t(`（最近 ${pageSize} 条）`, `(Latest ${pageSize} records)`)}
           </p>
         </div>
         {rewards?.node_url ? (
@@ -171,31 +162,6 @@ export function NniRewardsPanel({
         )}
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs text-white/50">
-          {t(`第 ${page} / ${totalPages} 页`, `Page ${page} of ${totalPages}`)}
-        </p>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void onFetch(page - 1)}
-            disabled={!canPrev || loading}
-            className="theme-secondary-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <ChevronLeft className="h-3.5 w-3.5" />
-            {t("上一页", "Previous")}
-          </button>
-          <button
-            type="button"
-            onClick={() => void onFetch(page + 1)}
-            disabled={!canNext || loading}
-            className="theme-secondary-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {t("下一页", "Next")}
-            <ChevronRight className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      </div>
     </div>
   );
 }

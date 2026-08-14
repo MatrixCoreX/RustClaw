@@ -26,7 +26,7 @@ import type {
 
 export const NNI_HEARTBEAT_RECORDS_PAGE_SIZE = 10;
 export const NNI_HEARTBEAT_ERRORS_PAGE_SIZE = 10;
-export const NNI_REWARDS_PAGE_SIZE = 10;
+export const NNI_REWARDS_PAGE_SIZE = 100;
 
 type Translate = (zh: string, en: string) => string;
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;

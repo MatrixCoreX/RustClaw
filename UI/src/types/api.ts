@@ -1249,6 +1249,8 @@ export interface NniRewardsResponse {
   per_page: number;
   total: number;
   total_pages: number;
+  history_limit: number;
+  history_truncated: boolean;
   records: NniRewardRecord[];
 }
 

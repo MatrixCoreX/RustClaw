@@ -301,8 +301,8 @@ export function NniPage({
     }
   };
 
-  const refreshNniRewards = async (page: number) => {
-    await Promise.resolve(onFetchRewards(page));
+  const refreshNniRewards = async () => {
+    await Promise.resolve(onFetchRewards(1));
     await Promise.resolve(onFetchCurrentPointBalance());
   };
 
@@ -719,7 +719,6 @@ export function NniPage({
             pageSize={nniRewardsPageSize}
             t={t}
             formatUnixDateTime={formatUnixDateTime}
-            onFetch={onFetchRewards}
             onRefresh={refreshNniRewards}
           />
         ) : null}
