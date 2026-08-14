@@ -2,6 +2,7 @@ import { Coins, Loader2, RefreshCw, WalletCards } from "lucide-react";
 
 import { shortNniValue } from "../lib/nni-display";
 import type { NniRewardsResponse } from "../types/api";
+import { NniDecimalAmount } from "./NniDecimalAmount";
 import { NniPublicKeyDisplay } from "./NniPublicKeyDisplay";
 
 type Translate = (zh: string, en: string) => string;
@@ -76,7 +77,7 @@ export function NniRewardsPanel({
             <span className="text-xs font-semibold">{t("累计奖励", "Total rewards")}</span>
           </div>
           <p className="mt-3 font-mono text-2xl font-semibold text-emerald-50">
-            {rewards?.total_reward_points ?? "0.0000"}
+            <NniDecimalAmount value={rewards?.total_reward_points ?? "0.00000000"} />
           </p>
           <p className="mt-1 text-xs text-white/45">{t("点", "points")}</p>
         </div>
@@ -86,7 +87,7 @@ export function NniRewardsPanel({
             <span className="text-xs font-semibold">{t("当前持有", "Current holdings")}</span>
           </div>
           <p className="mt-3 font-mono text-2xl font-semibold text-sky-50">
-            {currentPointBalanceLoading ? "…" : currentPointBalance ?? "—"}
+            {currentPointBalanceLoading ? "…" : <NniDecimalAmount value={currentPointBalance ?? "—"} />}
           </p>
           <p className="mt-1 text-xs text-white/45">POINT</p>
         </div>
@@ -137,7 +138,7 @@ export function NniRewardsPanel({
           records.map((record) => (
             <div key={record.id} className="border-t border-white/10 px-4 py-3 first:border-t-0">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="setup-status setup-status-done font-mono">+{record.reward_points}</span>
+                <NniDecimalAmount className="setup-status setup-status-done font-mono" value={`+${record.reward_points}`} />
                 <span className="text-xs text-white/50">{formatUnixDateTime(record.awarded_at_unix)}</span>
               </div>
               <div className="mt-3 grid gap-3 text-xs sm:grid-cols-2">

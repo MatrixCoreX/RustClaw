@@ -9,6 +9,7 @@ import {
 } from "../lib/bancor-price-change";
 import { resolveBancorMarketDirectionColor } from "../lib/bancor-market-colors";
 import type { NniBancorMarketResponse } from "../types/api";
+import { NniDecimalAmount } from "./NniDecimalAmount";
 
 type Translate = (zh: string, en: string) => string;
 
@@ -22,8 +23,8 @@ export function BancorPriceChangePage({
   t: Translate;
 }) {
   const [amounts, setAmounts] = useState<Record<BancorPriceChangeSide, string>>({
-    buy: "1.0000",
-    sell: "100.0000",
+    buy: "1.00000000",
+    sell: "100.00000000",
   });
 
   return (
@@ -109,8 +110,8 @@ function BancorPriceChangeFormula({ t }: { t: Translate }) {
         </h2>
         <p className="mt-2 text-xs leading-5 text-white/50">
           {t(
-            "先扣除手续费，再用当前储备计算到账量；手续费不进入资金池。所有数量都按 4 位小数的最小单位做整数运算。",
-            "The fee is deducted first, then output is calculated from the current reserves; fees do not enter the pool. Every amount uses integer arithmetic at four-decimal smallest-unit precision.",
+            "先扣除手续费，再用当前储备计算到账量；手续费不进入资金池。所有数量都按 8 位小数的最小单位做整数运算。",
+            "The fee is deducted first, then output is calculated from the current reserves; fees do not enter the pool. Every amount uses integer arithmetic at eight-decimal smallest-unit precision.",
           )}
         </p>
       </div>
@@ -282,7 +283,7 @@ function PriceChangeCalculatorCard({
             aria-label={t(`计划支付 ${inputAsset}`, `Planned ${inputAsset} payment`)}
             value={amount}
             onChange={(event) => onAmountChange(event.target.value)}
-            placeholder="0.0000"
+            placeholder="0.00000000"
           />
           <span className="ml-2 shrink-0 text-sm font-semibold text-white/55">{inputAsset}</span>
         </div>
@@ -341,12 +342,12 @@ function ProjectionDetails({ projection, t }: { projection: BancorPriceChangePro
       <div className="rounded-xl border border-sky-300/15 bg-sky-400/[0.05] p-3">
         <p className="text-xs text-white/45">{t("池内边际价变化", "Pool marginal-price change")}</p>
         <div className="mt-2 flex flex-wrap items-baseline gap-2 font-mono text-sm">
-          <span className="break-all text-white/65">{projection.currentMarginalPrice}</span>
+          <NniDecimalAmount className="break-all text-white/65" value={projection.currentMarginalPrice} />
           <span className="text-white/35">→</span>
-          <span className="break-all font-semibold text-white">{projection.marginalPriceAfter} USD / POINT</span>
+          <NniDecimalAmount className="break-all font-semibold text-white" value={`${projection.marginalPriceAfter} USD / POINT`} />
         </div>
         <p className="mt-2 text-lg font-semibold" style={{ color: changeColor }}>
-          {projection.marginalPriceChangePercent}
+          <NniDecimalAmount value={projection.marginalPriceChangePercent} />
         </p>
       </div>
     </div>
@@ -365,7 +366,7 @@ function ResultRow({
   return (
     <div className="flex min-w-0 items-start justify-between gap-4 border-b border-white/8 pb-3 text-sm">
       <span className="shrink-0 text-white/45">{label}</span>
-      <span className={`min-w-0 break-all text-right font-mono ${emphasized ? "font-semibold text-sky-200" : "text-white/75"}`}>{value}</span>
+      <NniDecimalAmount className={`min-w-0 break-all text-right font-mono ${emphasized ? "font-semibold text-sky-200" : "text-white/75"}`} value={value} />
     </div>
   );
 }
@@ -374,7 +375,7 @@ function ResultCell({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
       <p className="text-[11px] text-white/40">{label}</p>
-      <p className="mt-1 break-all font-mono text-xs font-semibold text-white/70">{value}</p>
+      <NniDecimalAmount className="mt-1 block break-all font-mono text-xs font-semibold text-white/70" value={value} />
     </div>
   );
 }
@@ -392,5 +393,5 @@ function formatCalculatorError(
   if (error === "market_capacity_exceeded") {
     return t("计算后的储备超出市场可保存范围，请减少数量。", "The resulting reserve exceeds the market storage limit. Reduce the amount.");
   }
-  return t("请输入大于 0、最多 4 位小数的数量。", "Enter an amount above 0 with no more than 4 decimal places.");
+  return t("请输入大于 0、最多 8 位小数的数量。", "Enter an amount above 0 with no more than 8 decimal places.");
 }

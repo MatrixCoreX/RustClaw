@@ -13,6 +13,7 @@ export interface NniPublicKeyDisplayProps {
   valueClassName?: string;
   shorten?: { head: number; tail: number };
   showByteSize?: boolean;
+  allowFormatSwitch?: boolean;
   onCopy?: (value: string) => void;
 }
 
@@ -23,6 +24,7 @@ export function NniPublicKeyDisplay({
   valueClassName = "",
   shorten,
   showByteSize = false,
+  allowFormatSwitch = true,
   onCopy,
 }: NniPublicKeyDisplayProps) {
   const formats = useMemo(() => nniPublicKeyFormats(value), [value]);
@@ -52,16 +54,18 @@ export function NniPublicKeyDisplay({
               {format === "compact" ? 33 : 64} bytes
             </span>
           ) : null}
-          <button
-            type="button"
-            onClick={() => setFormat(targetFormat)}
-            title={targetTitle}
-            aria-label={targetTitle}
-            className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-medium text-white/60 transition hover:border-white/20 hover:bg-white/10 hover:text-white"
-          >
-            <ArrowLeftRight className="h-3 w-3" />
-            {targetLabel}
-          </button>
+          {allowFormatSwitch ? (
+            <button
+              type="button"
+              onClick={() => setFormat(targetFormat)}
+              title={targetTitle}
+              aria-label={targetTitle}
+              className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-medium text-white/60 transition hover:border-white/20 hover:bg-white/10 hover:text-white"
+            >
+              <ArrowLeftRight className="h-3 w-3" />
+              {targetLabel}
+            </button>
+          ) : null}
         </>
       ) : null}
       {onCopy ? (

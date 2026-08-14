@@ -1194,9 +1194,9 @@ export interface NniRewardRecord {
   heartbeat_count_in_period: number;
   eligibility_units: 1;
   reward_points_units: string;
-  reward_point_scale: 10000;
+  reward_point_scale: 100000000;
   reward_points: string;
-  rounding_adjustment_units: 0 | 1;
+  rounding_adjustment_units: number;
   awarded_at_unix: number;
 }
 
@@ -1235,8 +1235,8 @@ export interface NniRewardsResponse {
   status: string;
   device_pubkey: string;
   node_url?: string;
-  reward_point_scale: 10000;
-  reward_decimal_places: 4;
+  reward_point_scale: 100000000;
+  reward_decimal_places: 8;
   total_reward_units: string;
   total_reward_points: string;
   reward_grant_count: number;
@@ -1260,8 +1260,8 @@ export interface NniBancorMarketResponse {
   market_id: string;
   point_symbol: "POINT";
   usd_symbol: "USD";
-  point_scale: 10000;
-  usd_scale: 10000;
+  point_scale: 100000000;
+  usd_scale: 100000000;
   point_reserve_units: string;
   point_reserve: string;
   usd_reserve_units: string;

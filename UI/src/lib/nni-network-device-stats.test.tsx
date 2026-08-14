@@ -28,8 +28,8 @@ test("shows registered allowlist devices and active devices from the previous he
         window_seconds: 600,
       }}
       networkRewards={{
-        total_distributed_reward_units: "125000000",
-        total_distributed_reward_points: "12500.0000",
+        total_distributed_reward_units: "1250000000000",
+        total_distributed_reward_points: "12500.00000000",
         settled_period_count: 3,
         first_period_start_unix: 1_800_000_000,
         latest_period_end_unix: 1_800_001_800,
@@ -37,8 +37,8 @@ test("shows registered allowlist devices and active devices from the previous he
       rewardPolicy={{
         interval_seconds: 600,
         initial_reward_pool_points: 5000,
-        current_reward_pool_units: "50000000",
-        current_reward_pool_points: "5000.0000",
+        current_reward_pool_units: "500000000000",
+        current_reward_pool_points: "5000.00000000",
         distribution: "equal_per_eligible_device",
         halving_epoch_unix: 1_799_000_000,
         halving_interval_seconds: 126_144_000,
@@ -63,12 +63,11 @@ test("shows registered allowlist devices and active devices from the previous he
   assert.doesNotMatch(markup, /1800000000.*1800000600/);
   assert.match(markup, /累计产出/);
   assert.doesNotMatch(markup, /全网累计产出/);
-  assert.match(markup, />12500</);
-  assert.doesNotMatch(markup, /12500\.0000/);
+  assert.match(markup, /data-nni-decimal-amount="12500\.00000000"/);
+  assert.match(markup, /class="nni-decimal-fraction">\.00000000/);
   assert.match(markup, /窗口奖励/);
   assert.doesNotMatch(markup, /当前每 10 分钟总奖励/);
-  assert.match(markup, />5000</);
-  assert.doesNotMatch(markup, /5000\.0000/);
+  assert.match(markup, /data-nni-decimal-amount="5000\.00000000"/);
   assert.doesNotMatch(markup, /POINT/);
   assert.doesNotMatch(markup, /由本周期有效心跳设备平分/);
   assert.match(markup, /首跳/);

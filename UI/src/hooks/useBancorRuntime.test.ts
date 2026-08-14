@@ -104,65 +104,65 @@ test("BANCOR accepts configurable slippage up to fifty percent", () => {
 
 const market = {
   fee_bps: 50,
-  point_reserve_units: "1000000000000",
-  usd_reserve_units: "100000000",
+  point_reserve_units: "10000000000000000",
+  usd_reserve_units: "1000000000000",
 } as never;
 
 const account = {
-  point_balance_units: "100000",
-  usd_balance_units: "50000",
+  point_balance_units: "1000000000",
+  usd_balance_units: "500000000",
 } as never;
 
 test("BANCOR frontend preflight checks the input asset balance", () => {
   assert.equal(
-    validateBancorTradeInput({ side: "sell", inputAmount: "10.0001", market, account }),
+    validateBancorTradeInput({ side: "sell", inputAmount: "10.00010000", market, account }),
     "nni_bancor_insufficient_point_balance",
   );
   assert.equal(
-    validateBancorTradeInput({ side: "buy", inputAmount: "5.0001", market, account }),
+    validateBancorTradeInput({ side: "buy", inputAmount: "5.00010000", market, account }),
     "nni_bancor_insufficient_usd_balance",
   );
-  assert.equal(validateBancorTradeInput({ side: "sell", inputAmount: "10.0000", market, account }), null);
-  assert.equal(validateBancorTradeInput({ side: "buy", inputAmount: "5.0000", market, account }), null);
+  assert.equal(validateBancorTradeInput({ side: "sell", inputAmount: "10.00000000", market, account }), null);
+  assert.equal(validateBancorTradeInput({ side: "buy", inputAmount: "5.00000000", market, account }), null);
 });
 
 test("BANCOR frontend preflight rejects zero-settlement amounts", () => {
   assert.equal(
-    validateBancorTradeInput({ side: "buy", inputAmount: "0.0001", market, account }),
+    validateBancorTradeInput({ side: "buy", inputAmount: "0.00000001", market, account }),
     "nni_bancor_input_after_fee_too_small",
   );
   assert.equal(
-    validateBancorTradeInput({ side: "sell", inputAmount: "0.0002", market, account }),
+    validateBancorTradeInput({ side: "sell", inputAmount: "0.00000002", market, account }),
     "nni_bancor_output_too_small",
   );
   assert.equal(
-    validateBancorTradeInput({ side: "buy", inputAmount: "1.0000", market, account: null }),
+    validateBancorTradeInput({ side: "buy", inputAmount: "1.00000000", market, account: null }),
     "nni_bancor_account_required",
   );
 });
 
 test("BANCOR frontend fee preview uses the backend integer rounding rule", () => {
-  assert.equal(calculateBancorInputFee("100.0000", 50), "0.5000");
-  assert.equal(calculateBancorInputFee("0.0001", 50), "0.0001");
-  assert.equal(calculateBancorInputFee("1.0000", 0), "0.0000");
+  assert.equal(calculateBancorInputFee("100.00000000", 50), "0.50000000");
+  assert.equal(calculateBancorInputFee("0.00010000", 50), "0.00000050");
+  assert.equal(calculateBancorInputFee("1.00000000", 0), "0.00000000");
   assert.equal(calculateBancorInputFee("0", 50), null);
 });
 
 test("BANCOR swap preview follows the same integer reserve formula as the backend", () => {
-  assert.equal(calculateBancorEstimatedOutput({ side: "buy", inputAmount: "1.0000", market }), "9949.0100");
-  assert.equal(calculateBancorEstimatedOutput({ side: "sell", inputAmount: "100.0000", market }), "0.0099");
-  assert.equal(calculateBancorEstimatedOutput({ side: "buy", inputAmount: "0.0001", market }), null);
+  assert.equal(calculateBancorEstimatedOutput({ side: "buy", inputAmount: "1.00000000", market }), "9949.01007349");
+  assert.equal(calculateBancorEstimatedOutput({ side: "sell", inputAmount: "100.00000000", market }), "0.00994999");
+  assert.equal(calculateBancorEstimatedOutput({ side: "buy", inputAmount: "0.00000001", market }), null);
 });
 
 test("BANCOR amount shortcuts reduce precisely and step by one whole unit", () => {
-  assert.equal(adjustBancorInputAmount("100.0000", "decrease_25_percent"), "75.0000");
-  assert.equal(adjustBancorInputAmount("100.0000", "decrease_50_percent"), "50.0000");
-  assert.equal(adjustBancorInputAmount("2.0000", "decrement"), "1.0000");
-  assert.equal(adjustBancorInputAmount("1.0000", "decrement"), "1.0000");
-  assert.equal(adjustBancorInputAmount("1.0000", "increment"), "2.0000");
-  assert.equal(adjustBancorInputAmount("", "increment"), "1.0000");
-  assert.equal(adjustBancorInputAmount("0.0001", "decrement"), "0.0001");
-  assert.equal(adjustBancorInputAmount("0.0001", "decrease_50_percent"), "0.0001");
+  assert.equal(adjustBancorInputAmount("100.00000000", "decrease_25_percent"), "75.00000000");
+  assert.equal(adjustBancorInputAmount("100.00000000", "decrease_50_percent"), "50.00000000");
+  assert.equal(adjustBancorInputAmount("2.00000000", "decrement"), "1.00000000");
+  assert.equal(adjustBancorInputAmount("1.00000000", "decrement"), "1.00000000");
+  assert.equal(adjustBancorInputAmount("1.00000000", "increment"), "2.00000000");
+  assert.equal(adjustBancorInputAmount("", "increment"), "1.00000000");
+  assert.equal(adjustBancorInputAmount("0.00010000", "decrement"), "0.00010000");
+  assert.equal(adjustBancorInputAmount("0.00010000", "decrease_50_percent"), "0.00005000");
   assert.equal(adjustBancorInputAmount("invalid", "increment"), null);
-  assert.equal(adjustBancorInputAmount("922337203685477.0000", "increment"), null);
+  assert.equal(adjustBancorInputAmount("92233720368.00000000", "increment"), null);
 });

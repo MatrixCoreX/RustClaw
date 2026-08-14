@@ -28,9 +28,9 @@ function candles(intervalSeconds: number, bucketStartUnix = 1_800_000_000): NniB
       low: "0.000100000000",
       close: "0.000100000000",
       point_volume_units: "10000",
-      point_volume: "1.0000",
+      point_volume: "1.00000000",
       usd_volume_units: "1",
-      usd_volume: "0.0001",
+      usd_volume: "0.00010000",
       trade_count: 1,
       has_trades: true,
     }],
@@ -172,8 +172,8 @@ test("BANCOR refreshes the active candlesticks without a stale ETag after a succ
       return Promise.resolve(apiResponse({
         quote_id: "quote-1",
         side: "sell",
-        input_amount: "100.0000",
-        min_output_amount: "0.0001",
+        input_amount: "100.00000000",
+        min_output_amount: "0.00010000",
         slippage_bps: 50,
       }));
     }
@@ -185,14 +185,14 @@ test("BANCOR refreshes the active candlesticks without a stale ETag after a succ
         status: "open",
         market_id: "point-usd-v1",
         fee_bps: 50,
-        point_reserve_units: "1000000000000",
-        usd_reserve_units: "100000000",
+        point_reserve_units: "10000000000000000",
+        usd_reserve_units: "1000000000000",
       }));
     }
     if (path.startsWith("/v1/nni/bancor/account?")) {
       return Promise.resolve(apiResponse({
-        point_balance_units: "1000000",
-        usd_balance_units: "100000",
+        point_balance_units: "10000000000",
+        usd_balance_units: "1000000000",
         page: 1,
         per_page: 10,
         total: 1,
@@ -225,7 +225,7 @@ test("BANCOR refreshes the active candlesticks without a stale ETag after a succ
   assert.equal(candleHeaders[0].has("If-None-Match"), false);
 
   await act(async () => {
-    await runtime!.preview("sell", "100.0000", 50);
+    await runtime!.preview("sell", "100.00000000", 50);
   });
   await act(async () => {
     assert.ok(await runtime!.trade());

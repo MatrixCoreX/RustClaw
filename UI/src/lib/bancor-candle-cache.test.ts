@@ -18,9 +18,9 @@ function candle(bucketStart: number, close: string): NniBancorCandle {
     low: close,
     close,
     point_volume_units: "0",
-    point_volume: "0.0000",
+    point_volume: "0.00000000",
     usd_volume_units: "0",
-    usd_volume: "0.0000",
+    usd_volume: "0.00000000",
     trade_count: 0,
     has_trades: false,
   };

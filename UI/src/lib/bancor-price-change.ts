@@ -21,7 +21,7 @@ export type BancorPriceChangeResult =
   | { ok: true; projection: BancorPriceChangeProjection }
   | { ok: false; error: "amount_invalid" | "amount_too_small" | "market_capacity_exceeded" | "market_invalid" };
 
-const ASSET_SCALE = 10_000n;
+const ASSET_SCALE = 100_000_000n;
 const BPS_SCALE = 10_000n;
 const MAX_UNITS = 9_223_372_036_854_775_807n;
 
@@ -101,9 +101,9 @@ export function calculateBancorPriceChange({
 }
 
 function parseAssetUnits(value: string): bigint | null {
-  const match = /^(0|[1-9][0-9]*)(?:\.([0-9]{1,4}))?$/.exec(value.trim());
+  const match = /^(0|[1-9][0-9]*)(?:\.([0-9]{1,8}))?$/.exec(value.trim());
   if (!match) return null;
-  const fraction = (match[2] || "").padEnd(4, "0");
+  const fraction = (match[2] || "").padEnd(8, "0");
   const units = BigInt(match[1]) * ASSET_SCALE + BigInt(fraction || "0");
   return units > 0n && units <= MAX_UNITS ? units : null;
 }
@@ -117,7 +117,7 @@ function parseReserveUnits(value: string): bigint {
 
 function formatAssetUnits(units: bigint): string {
   const whole = units / ASSET_SCALE;
-  const fraction = String(units % ASSET_SCALE).padStart(4, "0");
+  const fraction = String(units % ASSET_SCALE).padStart(8, "0");
   return `${whole}.${fraction}`;
 }
 
