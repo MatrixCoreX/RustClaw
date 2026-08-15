@@ -250,6 +250,8 @@ token = os.environ.get("GITHUB_TOKEN", "").strip()
 if token and url.startswith("https://api.github.com/"):
     headers["Authorization"] = f"Bearer {token}"
 request = urllib.request.Request(url, headers=headers)
+if url.startswith("https://api.github.com/") and "/releases/assets/" in url:
+    request.add_header("Accept", "application/octet-stream")
 with urllib.request.urlopen(request, timeout=300) as response, open(output, "wb") as stream:
     while True:
         chunk = response.read(1024 * 1024)
@@ -460,9 +462,13 @@ for release in releases:
     result = {
         "tag": tag,
         "archive_name": archive_name,
-        "archive_url": str(archive.get("browser_download_url") or ""),
+        "archive_url": str(
+            archive.get("url") or archive.get("browser_download_url") or ""
+        ),
         "checksum_name": checksum_name,
-        "checksum_url": str(checksum.get("browser_download_url") or ""),
+        "checksum_url": str(
+            checksum.get("url") or checksum.get("browser_download_url") or ""
+        ),
     }
     if not result["archive_url"] or not result["checksum_url"]:
         continue
