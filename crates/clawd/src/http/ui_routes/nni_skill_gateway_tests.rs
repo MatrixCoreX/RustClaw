@@ -235,6 +235,7 @@ fn nni_gateway_sanitizes_sensitive_fields_recursively() {
 fn nni_gateway_uses_persisted_error_code_without_parsing_error_text() {
     let projection = nni_skill_heartbeat_projection(&NniConfigResponse {
         remote_nodes: vec!["https://nni.example.test".to_string()],
+        selected_node_url: Some("https://nni.example.test".to_string()),
         joined: true,
         heartbeat_interval_seconds: 480,
         heartbeat_network_retry_limit: 3,

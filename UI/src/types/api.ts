@@ -1141,6 +1141,7 @@ export interface NniJoinVerifyResponse {
 
 export interface NniConfigResponse {
   remote_nodes: string[];
+  selected_node_url?: string | null;
   joined: boolean;
   heartbeat_interval_seconds: number;
   heartbeat_network_retry_limit: number;

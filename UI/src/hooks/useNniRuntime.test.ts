@@ -128,9 +128,11 @@ test("NNI device action failure does not persist an implicit leave", async () =>
 
 test("NNI join exposes a structured public-key authorization rejection", async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  let joinRequest: unknown = null;
   const apiFetch = async (path: string, init?: RequestInit) => {
     if (path === "/v1/nni/device/status") return apiResponse(readyChipStatus());
     if (path === "/v1/nni/join/request") {
+      joinRequest = JSON.parse(String(init?.body));
       return new Response(
         JSON.stringify({
           ok: false,
@@ -151,13 +153,17 @@ test("NNI join exposes a structured public-key authorization rejection", async (
   const mounted = await mountRuntime(apiFetch);
 
   await act(async () => {
-    mounted.runtime().updateNniRemoteNodes("https://nni.example.test");
+    mounted.runtime().updateNniRemoteNodes("https://node-a.example.test\nhttps://nni.example.test");
+  });
+  await act(async () => {
+    mounted.runtime().updateNniSelectedNodeUrl("https://nni.example.test");
   });
   await act(async () => {
     await mounted.runtime().joinNni();
   });
 
   assert.equal(mounted.runtime().nniDeviceAuthorizationDenied, true);
+  assert.deepEqual(joinRequest, { node_url: "https://nni.example.test" });
   assert.match(mounted.runtime().nniActionError ?? "", /尚未获远程 NNI 服务端允许/);
 
   await act(async () => {

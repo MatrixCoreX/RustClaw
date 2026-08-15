@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { useUiDialog } from "../components/UiDialogProvider";
 import {
@@ -10,6 +10,7 @@ import {
   nniTimestampSignatureReady,
   type UiLanguage,
 } from "../lib/nni-display";
+import { fetchResilientRead, runCoalescedRead } from "../lib/resilient-read";
 import type {
   ApiResponse,
   NniConfigResponse,
@@ -39,6 +40,7 @@ export interface UseNniRuntimeParams {
 
 export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
   const { confirm: showConfirm } = useUiDialog();
+  const readRequestsRef = useRef(new Map<string, Promise<unknown>>());
   const [nniStatus, setNniStatus] = useState<NniDeviceStatusResponse | null>(null);
   const [nniStatusLoading, setNniStatusLoading] = useState(false);
   const [nniStatusError, setNniStatusError] = useState<string | null>(null);
@@ -49,6 +51,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
   const [nniDeviceAuthorizationDenied, setNniDeviceAuthorizationDenied] = useState(false);
   const [nniJoined, setNniJoined] = useState(false);
   const [nniRemoteNodes, setNniRemoteNodes] = useState("");
+  const [nniSelectedNodeUrl, setNniSelectedNodeUrl] = useState("");
   const [nniHeartbeatIntervalSeconds, setNniHeartbeatIntervalSeconds] = useState<number | null>(null);
   const [nniHeartbeatRequestCount, setNniHeartbeatRequestCount] = useState(0);
   const [nniHeartbeatRetryLimit, setNniHeartbeatRetryLimit] = useState(3);
@@ -79,10 +82,15 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
   const [nniConfigMessage, setNniConfigMessage] = useState<string | null>(null);
 
   const nniRemoteNodeUrls = () => parseNniRemoteNodeUrls(nniRemoteNodes);
+  const selectedNniNodeUrl = () => {
+    const nodeUrls = nniRemoteNodeUrls();
+    return nodeUrls.includes(nniSelectedNodeUrl) ? nniSelectedNodeUrl : nodeUrls[0] ?? "";
+  };
 
   const applyNniConfigResponse = (config: NniConfigResponse) => {
     setNniJoined(config.joined);
     setNniRemoteNodes(config.remote_nodes.join("\n"));
+    setNniSelectedNodeUrl(config.selected_node_url ?? config.remote_nodes[0] ?? "");
     setNniHeartbeatIntervalSeconds(config.heartbeat_interval_seconds ?? null);
     setNniHeartbeatRequestCount(config.heartbeat_request_count ?? 0);
     setNniHeartbeatRetryLimit(config.heartbeat_network_retry_limit ?? 3);
@@ -93,9 +101,10 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
   const setNniJoinedPersisted = async (joined: boolean, options?: { persistRemoteNodes?: boolean }) => {
     setNniJoined(joined);
     try {
-      const payload: { joined: boolean; remote_nodes?: string[] } = { joined };
+      const payload: { joined: boolean; remote_nodes?: string[]; selected_node_url?: string } = { joined };
       if (options?.persistRemoteNodes) {
         payload.remote_nodes = nniRemoteNodeUrls();
+        payload.selected_node_url = selectedNniNodeUrl();
       }
       const res = await apiFetch(`/v1/nni/config`, {
         method: "POST",
@@ -114,13 +123,16 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     }
   };
 
-  const fetchNniDeviceStatus = async (silent = false) => {
+  const fetchNniDeviceStatus = (silent = false) => runCoalescedRead(
+    readRequestsRef.current,
+    "device-status",
+    async () => {
     if (!silent) {
       setNniStatusLoading(true);
       setNniStatusError(null);
     }
     try {
-      const res = await apiFetch(`/v1/nni/device/status`);
+      const res = await fetchResilientRead(apiFetch, `/v1/nni/device/status`);
       const body = (await res.json()) as ApiResponse<NniDeviceStatusResponse>;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `NNI 状态获取失败 (${res.status})`);
@@ -130,14 +142,15 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       return body.data;
     } catch (err) {
       const message = err instanceof Error ? err.message : "未知错误";
-      setNniStatusError(message);
+      if (!silent) setNniStatusError(message);
       return null;
     } finally {
       if (!silent) {
         setNniStatusLoading(false);
       }
     }
-  };
+    },
+  );
 
   const runNniDeviceAction = async (action: string, options?: { challenge?: string }) => {
     setNniActionLoading(action);
@@ -232,14 +245,14 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
   };
 
   const requestNniJoinTask = async (): Promise<NniJoinTaskResponse | null> => {
-    const nodeUrls = nniRemoteNodeUrls();
-    if (nodeUrls.length === 0) {
+    const nodeUrl = selectedNniNodeUrl();
+    if (!nodeUrl) {
       throw new Error(t("请先填写至少一个远程 NNI 节点地址。", "Enter at least one remote NNI node URL first."));
     }
     const res = await apiFetch(`/v1/nni/join/request`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ node_urls: nodeUrls }),
+      body: JSON.stringify({ node_url: nodeUrl }),
     });
     const body = (await res.json()) as ApiResponse<NniJoinTaskResponse>;
     if (!res.ok || !body.ok || !body.data) {
@@ -267,11 +280,14 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     return body.data;
   };
 
-  const fetchNniConfig = async (silent = false) => {
+  const fetchNniConfig = (silent = false) => runCoalescedRead(
+    readRequestsRef.current,
+    "config",
+    async () => {
     if (!silent) setNniConfigLoading(true);
-    setNniConfigError(null);
+    if (!silent) setNniConfigError(null);
     try {
-      const res = await apiFetch(`/v1/nni/config`);
+      const res = await fetchResilientRead(apiFetch, `/v1/nni/config`);
       const body = (await res.json()) as ApiResponse<NniConfigResponse>;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `NNI config load failed (${res.status})`);
@@ -280,14 +296,16 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       if (!silent) setNniConfigMessage(null);
     } catch (err) {
       const message = err instanceof Error ? err.message : "未知错误";
-      setNniConfigError(message);
+      if (!silent) setNniConfigError(message);
     } finally {
       if (!silent) setNniConfigLoading(false);
     }
-  };
+    },
+  );
 
-  const fetchNniHeartbeatRecords = async (page = nniHeartbeatRecordsPage, silent = false) => {
+  const fetchNniHeartbeatRecords = (page = nniHeartbeatRecordsPage, silent = false) => {
     const safePage = Math.max(1, page);
+    return runCoalescedRead(readRequestsRef.current, `heartbeat-records:${safePage}`, async () => {
     if (!silent) {
       setNniHeartbeatRecordsLoading(true);
       setNniHeartbeatRecordsError(null);
@@ -298,7 +316,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         page: String(safePage),
         per_page: String(NNI_HEARTBEAT_RECORDS_PAGE_SIZE),
       });
-      const res = await apiFetch(`/v1/nni/records?${params.toString()}`);
+      const res = await fetchResilientRead(apiFetch, `/v1/nni/records?${params.toString()}`);
       const body = (await res.json()) as ApiResponse<NniHeartbeatRecordsResponse>;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `NNI request records load failed (${res.status})`);
@@ -314,6 +332,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     } finally {
       if (!silent) setNniHeartbeatRecordsLoading(false);
     }
+    });
   };
 
   const clearNniHeartbeatRecords = async () => {
@@ -365,8 +384,9 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     }
   };
 
-  const fetchNniHeartbeatErrors = async (page = nniHeartbeatErrorsPage, silent = false) => {
+  const fetchNniHeartbeatErrors = (page = nniHeartbeatErrorsPage, silent = false) => {
     const safePage = Math.max(1, page);
+    return runCoalescedRead(readRequestsRef.current, `heartbeat-errors:${safePage}`, async () => {
     if (!silent) {
       setNniHeartbeatErrorsLoading(true);
       setNniHeartbeatErrorsError(null);
@@ -377,7 +397,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         page: String(safePage),
         per_page: String(NNI_HEARTBEAT_ERRORS_PAGE_SIZE),
       });
-      const res = await apiFetch(`/v1/nni/heartbeat/errors?${params.toString()}`);
+      const res = await fetchResilientRead(apiFetch, `/v1/nni/heartbeat/errors?${params.toString()}`);
       const rawText = await res.text();
       let body: ApiResponse<NniHeartbeatErrorsResponse>;
       try {
@@ -408,6 +428,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     } finally {
       if (!silent) setNniHeartbeatErrorsLoading(false);
     }
+    });
   };
 
   const clearNniHeartbeatErrors = async () => {
@@ -460,8 +481,9 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     }
   };
 
-  const fetchNniRewards = async (page = nniRewards?.page ?? 1, silent = false) => {
+  const fetchNniRewards = (page = nniRewards?.page ?? 1, silent = false) => {
     const safePage = Math.max(1, page);
+    return runCoalescedRead(readRequestsRef.current, `rewards:${safePage}`, async () => {
     if (!silent) {
       setNniRewardsLoading(true);
       setNniRewardsError(null);
@@ -471,7 +493,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         page: String(safePage),
         per_page: String(NNI_REWARDS_PAGE_SIZE),
       });
-      const res = await apiFetch(`/v1/nni/rewards?${params.toString()}`);
+      const res = await fetchResilientRead(apiFetch, `/v1/nni/rewards?${params.toString()}`);
       const body = (await res.json()) as ApiResponse<NniRewardsResponse>;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `NNI reward records load failed (${res.status})`);
@@ -484,6 +506,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     } finally {
       if (!silent) setNniRewardsLoading(false);
     }
+    });
   };
 
   const saveNniConfig = async () => {
@@ -494,7 +517,10 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       const res = await apiFetch(`/v1/nni/config`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ remote_nodes: nniRemoteNodeUrls() }),
+        body: JSON.stringify({
+          remote_nodes: nniRemoteNodeUrls(),
+          selected_node_url: selectedNniNodeUrl(),
+        }),
       });
       const body = (await res.json()) as ApiResponse<NniConfigResponse>;
       if (!res.ok || !body.ok || !body.data) {
@@ -582,6 +608,18 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
 
   const updateNniRemoteNodes = (value: string) => {
     setNniRemoteNodes(value);
+    const nodeUrls = parseNniRemoteNodeUrls(value);
+    if (!nodeUrls.includes(nniSelectedNodeUrl)) {
+      setNniSelectedNodeUrl(nodeUrls[0] ?? "");
+    }
+    setNniDeviceAuthorizationDenied(false);
+    setNniConfigMessage(null);
+    setNniConfigError(null);
+  };
+
+  const updateNniSelectedNodeUrl = (value: string) => {
+    if (!nniRemoteNodeUrls().includes(value)) return;
+    setNniSelectedNodeUrl(value);
     setNniDeviceAuthorizationDenied(false);
     setNniConfigMessage(null);
     setNniConfigError(null);
@@ -598,6 +636,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     nniDeviceAuthorizationDenied,
     nniJoined,
     nniRemoteNodes,
+    nniSelectedNodeUrl: selectedNniNodeUrl(),
     nniRemoteNodeCount: nniRemoteNodeUrls().length,
     nniHeartbeatIntervalSeconds,
     nniHeartbeatRequestCount,
@@ -636,6 +675,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     fetchNniConfig,
     saveNniConfig,
     updateNniRemoteNodes,
+    updateNniSelectedNodeUrl,
     fetchNniHeartbeatRecords,
     clearNniHeartbeatRecords,
     fetchNniHeartbeatErrors,

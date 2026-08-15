@@ -311,6 +311,10 @@ fn nni_heartbeat_status_uses_data_root_without_mutating_config() {
 
     let initial = read_nni_config(&state).expect("read initial NNI config");
     assert_eq!(initial.remote_nodes, vec!["https://nni.example.test"]);
+    assert_eq!(
+        initial.selected_node_url.as_deref(),
+        Some("https://nni.example.test")
+    );
     assert!(initial.joined);
     assert_eq!(
         initial.config_path,
@@ -380,6 +384,10 @@ fn nni_settings_use_data_root_without_mutating_main_config() {
 
     assert_eq!(workspace.read_config(), main_config);
     assert_eq!(response.remote_nodes, vec!["https://nni.example.test"]);
+    assert_eq!(
+        response.selected_node_url.as_deref(),
+        Some("https://nni.example.test")
+    );
     assert!(response.joined);
     assert_eq!(
         response.config_path,
@@ -394,7 +402,59 @@ fn nni_settings_use_data_root_without_mutating_main_config() {
     )
     .expect("parse NNI runtime config");
     assert_eq!(persisted.remote_nodes, vec!["https://nni.example.test"]);
+    assert_eq!(
+        persisted.selected_node_url.as_deref(),
+        Some("https://nni.example.test")
+    );
     assert!(persisted.joined);
+}
+
+#[test]
+fn nni_settings_keep_one_explicit_active_node() {
+    let workspace = NniRuntimeStateTestWorkspace::new("selected-node");
+    workspace.write_config("[llm]\nselected_vendor = \"minimax\"\n");
+    let state = workspace.state();
+    let nodes = vec![
+        "https://node-a.example.test".to_string(),
+        "https://node-b.example.test/v1".to_string(),
+    ];
+
+    let response = write_nni_config_with_selected_node(
+        &state,
+        Some(&nodes),
+        Some("https://node-b.example.test"),
+        Some(true),
+    )
+    .expect("persist selected NNI node");
+
+    assert_eq!(response.remote_nodes.len(), 2);
+    assert_eq!(
+        response.selected_node_url.as_deref(),
+        Some("https://node-b.example.test")
+    );
+    assert_eq!(
+        nni_selected_remote_node(&response).map(String::as_str),
+        Some("https://node-b.example.test")
+    );
+
+    let switch_error = write_nni_config_with_selected_node(
+        &state,
+        None,
+        Some("https://node-a.example.test"),
+        None,
+    )
+    .expect_err("active NNI must stop before switching nodes");
+    assert_eq!(switch_error.to_string(), "nni_selected_node_change_requires_stop");
+
+    let stopped = write_nni_config_with_selected_node(
+        &state,
+        None,
+        Some("https://node-a.example.test"),
+        Some(false),
+    )
+    .expect("stop NNI and select another bound node");
+    assert!(!stopped.joined);
+    assert_eq!(stopped.selected_node_url.as_deref(), Some("https://node-a.example.test"));
 }
 
 #[test]

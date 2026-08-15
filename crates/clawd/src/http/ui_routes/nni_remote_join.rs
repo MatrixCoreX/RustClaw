@@ -1,4 +1,3 @@
-const NNI_REMOTE_JOIN_TIMEOUT_SECONDS: u64 = 20;
 const NNI_HEARTBEAT_INTERVAL_SECONDS: u64 = 8 * 60;
 const NNI_HEARTBEAT_POLL_SECONDS: u64 = 60;
 const NNI_HEARTBEAT_NETWORK_RETRY_LIMIT: usize = 3;
@@ -11,6 +10,7 @@ const NNI_HEARTBEAT_RUNTIME_STATE_SCHEMA_VERSION: u32 = 2;
 #[derive(Debug, Serialize)]
 struct NniConfigResponse {
     remote_nodes: Vec<String>,
+    selected_node_url: Option<String>,
     joined: bool,
     heartbeat_interval_seconds: u64,
     heartbeat_network_retry_limit: usize,
@@ -35,6 +35,8 @@ struct NniConfigUpdateRequest {
     #[serde(default)]
     remote_nodes: Option<Vec<String>>,
     #[serde(default)]
+    selected_node_url: Option<String>,
+    #[serde(default)]
     joined: Option<bool>,
 }
 
@@ -45,6 +47,8 @@ struct NniRuntimeConfig {
     #[serde(default)]
     remote_nodes: Vec<String>,
     #[serde(default)]
+    selected_node_url: Option<String>,
+    #[serde(default)]
     joined: bool,
 }
 
@@ -53,6 +57,7 @@ impl Default for NniRuntimeConfig {
         Self {
             schema_version: NNI_RUNTIME_CONFIG_SCHEMA_VERSION,
             remote_nodes: Vec::new(),
+            selected_node_url: None,
             joined: false,
         }
     }
@@ -116,8 +121,7 @@ fn nni_heartbeat_runtime_state_schema_version() -> u32 {
 
 #[derive(Debug, Deserialize)]
 struct NniLocalJoinRequest {
-    #[serde(default)]
-    node_urls: Vec<String>,
+    node_url: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -266,7 +270,12 @@ async fn update_nni_config(
         None => None,
     };
 
-    match write_nni_config(&state, remote_nodes.as_deref(), req.joined) {
+    match write_nni_config_with_selected_node(
+        &state,
+        remote_nodes.as_deref(),
+        req.selected_node_url.as_deref(),
+        req.joined,
+    ) {
         Ok(config) => (
             StatusCode::OK,
             Json(ApiResponse {
@@ -305,31 +314,33 @@ async fn nni_join_request(
         }
     };
 
-    let node_urls = match normalize_nni_node_urls(&req.node_urls) {
-        Ok(urls) if !urls.is_empty() => urls,
-        Ok(_) => {
-            let mut record = nni_request_record("nni_join", "failed");
-            record.user_key = Some(identity.user_key.clone());
-            record.error_code = Some("nni_remote_node_required".to_string());
-            record.created_at_ts = Some(u64::try_from(current_unix_ts()).unwrap_or_default());
-            record_nni_request_event(&state, record);
-            return nni_join_error(
-                StatusCode::BAD_REQUEST,
-                "nni_remote_node_required",
-                json!({"status": "remote_node_required"}),
-            );
-        }
-        Err(err) => {
-            let mut record = nni_request_record("nni_join", "failed");
-            record.user_key = Some(identity.user_key.clone());
-            record.error_code = Some(err.to_string());
-            record.created_at_ts = Some(u64::try_from(current_unix_ts()).unwrap_or_default());
-            record_nni_request_event(&state, record);
-            return nni_join_error(
-                StatusCode::BAD_REQUEST,
-                err,
-                json!({"status": "remote_node_invalid"}),
-            );
+    let node_url = if req.node_url.trim().is_empty() {
+        let mut record = nni_request_record("nni_join", "failed");
+        record.user_key = Some(identity.user_key.clone());
+        record.error_code = Some("nni_remote_node_required".to_string());
+        record.created_at_ts = Some(u64::try_from(current_unix_ts()).unwrap_or_default());
+        record_nni_request_event(&state, record);
+        return nni_join_error(
+            StatusCode::BAD_REQUEST,
+            "nni_remote_node_required",
+            json!({"status": "remote_node_required"}),
+        );
+    } else {
+        match normalize_nni_node_url(&req.node_url) {
+            Ok(url) => url,
+            Err(err) => {
+                let mut record = nni_request_record("nni_join", "failed");
+                record.user_key = Some(identity.user_key.clone());
+                record.error_code = Some(err.to_string());
+                record.created_at_ts =
+                    Some(u64::try_from(current_unix_ts()).unwrap_or_default());
+                record_nni_request_event(&state, record);
+                return nni_join_error(
+                    StatusCode::BAD_REQUEST,
+                    err,
+                    json!({"status": "remote_node_invalid"}),
+                );
+            }
         }
     };
 
@@ -347,13 +358,13 @@ async fn nni_join_request(
     };
 
     let mut attempts = Vec::new();
-    for node_url in node_urls {
-        let endpoint = format!("{}/v1/nni/server/join/request", node_url);
+    for node_url in std::iter::once(node_url) {
+        let endpoint = nni_remote_api_endpoint(&node_url, "join/request");
         let response = state
             .core
             .http_client
             .post(&endpoint)
-            .timeout(Duration::from_secs(NNI_REMOTE_JOIN_TIMEOUT_SECONDS))
+            .timeout(nni_remote_api_timeout())
             .json(&NniRemoteJoinRequest {
                 device_pubkey: device_pubkey.clone(),
                 client_user_key: identity.user_key.clone(),
@@ -507,12 +518,12 @@ async fn nni_join_verify(
             );
         }
     };
-    let endpoint = format!("{}/v1/nni/server/join/verify", node_url);
+    let endpoint = nni_remote_api_endpoint(&node_url, "join/verify");
     let response = state
         .core
         .http_client
         .post(&endpoint)
-        .timeout(Duration::from_secs(NNI_REMOTE_JOIN_TIMEOUT_SECONDS))
+        .timeout(nni_remote_api_timeout())
         .json(&NniRemoteJoinVerifyRequest {
             task_id: req.task_id.trim().to_string(),
             signature: req.signature.trim().to_string(),
@@ -882,6 +893,7 @@ fn read_nni_config(state: &AppState) -> anyhow::Result<NniConfigResponse> {
         now,
     );
     Ok(NniConfigResponse {
+        selected_node_url: config.selected_node_url,
         remote_nodes: config.remote_nodes,
         joined: config.joined,
         heartbeat_interval_seconds: NNI_HEARTBEAT_INTERVAL_SECONDS,
@@ -960,6 +972,10 @@ fn read_nni_runtime_config(state: &AppState) -> anyhow::Result<NniRuntimeConfig>
     }
     config.remote_nodes = normalize_nni_node_urls(&config.remote_nodes)
         .map_err(|error| anyhow::anyhow!(error))?;
+    config.selected_node_url = normalize_selected_nni_node(
+        config.selected_node_url.as_deref(),
+        &config.remote_nodes,
+    )?;
     Ok(config)
 }
 
@@ -987,6 +1003,7 @@ fn read_legacy_nni_config(state: &AppState) -> anyhow::Result<Option<NniRuntimeC
         .unwrap_or(false);
     Ok(Some(NniRuntimeConfig {
         schema_version: NNI_RUNTIME_CONFIG_SCHEMA_VERSION,
+        selected_node_url: remote_nodes.first().cloned(),
         remote_nodes,
         joined,
     }))
@@ -1186,16 +1203,55 @@ fn write_nni_config(
     remote_nodes: Option<&[String]>,
     joined: Option<bool>,
 ) -> anyhow::Result<NniConfigResponse> {
+    write_nni_config_with_selected_node(state, remote_nodes, None, joined)
+}
+
+fn write_nni_config_with_selected_node(
+    state: &AppState,
+    remote_nodes: Option<&[String]>,
+    selected_node_url: Option<&str>,
+    joined: Option<bool>,
+) -> anyhow::Result<NniConfigResponse> {
     let mut config = read_nni_runtime_config(state)?;
+    let previous_selected_node_url = config.selected_node_url.clone();
     if let Some(remote_nodes) = remote_nodes {
         config.remote_nodes = normalize_nni_node_urls(remote_nodes)
             .map_err(|error| anyhow::anyhow!(error))?;
     }
+    let next_selected_node_url = normalize_selected_nni_node(
+        selected_node_url.or(config.selected_node_url.as_deref()),
+        &config.remote_nodes,
+    )?;
+    if config.joined
+        && joined != Some(false)
+        && previous_selected_node_url != next_selected_node_url
+    {
+        anyhow::bail!("nni_selected_node_change_requires_stop");
+    }
+    config.selected_node_url = next_selected_node_url;
     if let Some(joined) = joined {
         config.joined = joined;
     }
     write_nni_runtime_config(state, &config)?;
     read_nni_config(state)
+}
+
+fn normalize_selected_nni_node(
+    selected_node_url: Option<&str>,
+    remote_nodes: &[String],
+) -> anyhow::Result<Option<String>> {
+    if remote_nodes.is_empty() {
+        return Ok(None);
+    }
+    let selected = selected_node_url
+        .map(normalize_nni_node_url)
+        .transpose()
+        .map_err(|error| anyhow::anyhow!(error))?;
+    match selected {
+        Some(selected) if remote_nodes.contains(&selected) => Ok(Some(selected)),
+        Some(_) => anyhow::bail!("nni_selected_node_not_bound"),
+        None => Ok(remote_nodes.first().cloned()),
+    }
 }
 
 struct NniHeartbeatStatusUpdate<'a> {
@@ -1295,7 +1351,7 @@ pub(crate) fn spawn_nni_heartbeat_worker(state: AppState) {
 async fn nni_heartbeat_tick(state: &AppState) -> anyhow::Result<()> {
     let _guard = nni_heartbeat_operation_lock().lock().await;
     let config = read_nni_config(state)?;
-    if !config.joined || config.remote_nodes.is_empty() {
+    if !config.joined || nni_selected_remote_node(&config).is_none() {
         return Ok(());
     }
     let now = u64::try_from(current_unix_ts()).unwrap_or_default();
@@ -1306,7 +1362,8 @@ async fn nni_heartbeat_tick(state: &AppState) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    match nni_recorded_heartbeat(state, &config.remote_nodes).await {
+    let selected_nodes = config.selected_node_url.iter().cloned().collect::<Vec<_>>();
+    match nni_recorded_heartbeat(state, &selected_nodes).await {
         Ok(_) => Ok(()),
         Err(error) => {
             if nni_heartbeat_error_is_authorization_rejection(&error.code) {
@@ -1581,12 +1638,12 @@ async fn run_nni_heartbeat_once_for_node(
     node_url: &str,
     device_pubkey: &str,
 ) -> Result<Value, NniHeartbeatError> {
-    let request_endpoint = format!("{}/v1/nni/server/heartbeat/request", node_url);
+    let request_endpoint = nni_remote_api_endpoint(node_url, "heartbeat/request");
     let request_resp = state
         .core
         .http_client
         .post(&request_endpoint)
-        .timeout(Duration::from_secs(NNI_REMOTE_JOIN_TIMEOUT_SECONDS))
+        .timeout(nni_remote_api_timeout())
         .json(&NniRemoteHeartbeatRequest {
             device_pubkey: device_pubkey.to_string(),
             client_user_key: NNI_HEARTBEAT_USER_KEY.to_string(),
@@ -1668,12 +1725,12 @@ async fn run_nni_heartbeat_once_for_node(
             )
         })?;
 
-    let verify_endpoint = format!("{}/v1/nni/server/heartbeat/verify", node_url);
+    let verify_endpoint = nni_remote_api_endpoint(node_url, "heartbeat/verify");
     let verify_resp = state
         .core
         .http_client
         .post(&verify_endpoint)
-        .timeout(Duration::from_secs(NNI_REMOTE_JOIN_TIMEOUT_SECONDS))
+        .timeout(nni_remote_api_timeout())
         .json(&NniRemoteHeartbeatVerifyRequest { task_id, signature })
         .send()
         .await

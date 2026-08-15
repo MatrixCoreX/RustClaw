@@ -40,7 +40,7 @@ async fn nni_rewards(
             );
         }
     };
-    if config.remote_nodes.is_empty() {
+    if nni_selected_remote_node(&config).is_none() {
         return nni_join_error(
             StatusCode::BAD_REQUEST,
             "nni_remote_node_required",
@@ -54,7 +54,7 @@ async fn nni_rewards(
     let page = query.page.unwrap_or(1).clamp(1, 1_000_000);
     let per_page = query.per_page.unwrap_or(10).clamp(1, 100);
     let mut attempts = Vec::new();
-    for node_url in &config.remote_nodes {
+    for node_url in nni_selected_remote_nodes(&config) {
         match query_nni_rewards_for_node(
             &state,
             node_url,
@@ -99,12 +99,12 @@ async fn query_nni_rewards_for_node(
     page: usize,
     per_page: usize,
 ) -> Result<Value, Value> {
-    let request_endpoint = format!("{node_url}/v1/nni/server/rewards/request");
+    let request_endpoint = nni_remote_api_endpoint(node_url, "rewards/request");
     let request_response = state
         .core
         .http_client
         .post(&request_endpoint)
-        .timeout(Duration::from_secs(NNI_REMOTE_JOIN_TIMEOUT_SECONDS))
+        .timeout(nni_remote_api_timeout())
         .json(&NniRemoteRewardQueryRequest {
             device_pubkey: device_pubkey.to_string(),
             client_user_key: user_key.to_string(),
@@ -175,12 +175,12 @@ async fn query_nni_rewards_for_node(
             || json!({"node_url": node_url, "error_code": "nni_reward_signature_missing"}),
         )?;
 
-    let verify_endpoint = format!("{node_url}/v1/nni/server/rewards/verify");
+    let verify_endpoint = nni_remote_api_endpoint(node_url, "rewards/verify");
     let verify_response = state
         .core
         .http_client
         .post(&verify_endpoint)
-        .timeout(Duration::from_secs(NNI_REMOTE_JOIN_TIMEOUT_SECONDS))
+        .timeout(nni_remote_api_timeout())
         .json(&NniRemoteRewardQueryVerifyRequest {
             task_id: task_id.to_string(),
             signature: signature.to_string(),
