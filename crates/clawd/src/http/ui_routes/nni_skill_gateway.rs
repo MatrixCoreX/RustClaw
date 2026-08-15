@@ -291,7 +291,8 @@ fn nni_skill_heartbeat_projection(config: &NniConfigResponse) -> Value {
         "network_failure_count": config.last_heartbeat_network_failures,
         "last_error_code": config.last_heartbeat_error_code,
         "last_error_at_ts": config.last_heartbeat_error_at_ts,
-        "selected_node_count": config.remote_nodes.len(),
+        "selected_node_count": usize::from(config.selected_node_url.is_some()),
+        "selected_node_url": config.selected_node_url,
         "last_success_node_host": config.last_success_node_host,
         "network_authorization": config.network_authorization,
     })
@@ -394,7 +395,7 @@ async fn nni_skill_rewards_data(
             json!({"detail": error.to_string()}),
         )
     })?;
-    if config.remote_nodes.is_empty() {
+    if nni_selected_remote_node(&config).is_none() {
         return Err(NniSkillDomainError::new(
             StatusCode::PRECONDITION_FAILED,
             "nni_remote_node_unconfigured",
@@ -406,7 +407,7 @@ async fn nni_skill_rewards_data(
         .await
         .map_err(|(status, error, data)| NniSkillDomainError::new(status, error, false, data))?;
     let mut attempts = Vec::new();
-    for node_url in &config.remote_nodes {
+    for node_url in nni_selected_remote_nodes(&config) {
         match query_nni_rewards_for_node(state, node_url, &device_pubkey, user_key, 1, limit).await {
             Ok(mut data) => {
                 if let Some(object) = data.as_object_mut() {
@@ -440,7 +441,7 @@ async fn nni_skill_bancor_account_data(
             json!({"detail": error.to_string()}),
         )
     })?;
-    if config.remote_nodes.is_empty() {
+    if nni_selected_remote_node(&config).is_none() {
         return Err(NniSkillDomainError::new(
             StatusCode::PRECONDITION_FAILED,
             "nni_remote_node_unconfigured",
@@ -452,7 +453,7 @@ async fn nni_skill_bancor_account_data(
         .await
         .map_err(|(status, error, data)| NniSkillDomainError::new(status, error, false, data))?;
     let mut attempts = Vec::new();
-    for node_url in &config.remote_nodes {
+    for node_url in nni_selected_remote_nodes(&config) {
         match query_nni_bancor_account_for_node(
             state,
             node_url,
@@ -495,7 +496,7 @@ async fn nni_skill_public_node_data(
             json!({"detail": error.to_string()}),
         )
     })?;
-    if config.remote_nodes.is_empty() {
+    if nni_selected_remote_node(&config).is_none() {
         return Err(NniSkillDomainError::new(
             StatusCode::PRECONDITION_FAILED,
             "nni_remote_node_unconfigured",
@@ -504,14 +505,14 @@ async fn nni_skill_public_node_data(
         ));
     }
     let mut attempts = Vec::new();
-    for node_url in &config.remote_nodes {
-        let endpoint = format!("{node_url}{path}");
+    for node_url in nni_selected_remote_nodes(&config) {
+        let endpoint = nni_remote_api_endpoint(node_url, path);
         let request = if let Some(body) = body {
             state.core.http_client.post(&endpoint).json(body)
         } else {
             state.core.http_client.get(&endpoint)
         }
-        .timeout(Duration::from_secs(NNI_REMOTE_JOIN_TIMEOUT_SECONDS));
+        .timeout(nni_remote_api_timeout());
         match request.send().await {
             Ok(response) => {
                 let status = response.status();
@@ -727,7 +728,7 @@ async fn nni_skill_heartbeat_enable(state: &AppState) -> Result<Value, NniSkillD
             json!({"detail": error.to_string()}),
         )
     })?;
-    if existing.remote_nodes.is_empty() {
+    if nni_selected_remote_node(&existing).is_none() {
         return Err(NniSkillDomainError::new(
             StatusCode::PRECONDITION_FAILED,
             "nni_remote_node_unconfigured",
@@ -750,7 +751,8 @@ async fn nni_skill_heartbeat_enable(state: &AppState) -> Result<Value, NniSkillD
             json!({"detail": error.to_string()}),
         )
     })?;
-    match nni_recorded_heartbeat(state, &enabled.remote_nodes).await {
+    let selected_nodes = enabled.selected_node_url.iter().cloned().collect::<Vec<_>>();
+    match nni_recorded_heartbeat(state, &selected_nodes).await {
         Ok(_) => {
             let current = read_nni_config(state).map_err(|error| {
                 NniSkillDomainError::new(
@@ -848,7 +850,7 @@ async fn nni_skill_heartbeat_now(state: &AppState) -> Result<Value, NniSkillDoma
             json!({"detail": error.to_string()}),
         )
     })?;
-    if config.remote_nodes.is_empty() {
+    if nni_selected_remote_node(&config).is_none() {
         return Err(NniSkillDomainError::new(
             StatusCode::PRECONDITION_FAILED,
             "nni_remote_node_unconfigured",
@@ -869,7 +871,8 @@ async fn nni_skill_heartbeat_now(state: &AppState) -> Result<Value, NniSkillDoma
             json!({"retry_after_seconds": 30}),
         ));
     }
-    nni_recorded_heartbeat(state, &config.remote_nodes)
+    let selected_nodes = config.selected_node_url.iter().cloned().collect::<Vec<_>>();
+    nni_recorded_heartbeat(state, &selected_nodes)
         .await
         .map_err(|error| {
             let effect_is_uncertain = matches!(
@@ -985,7 +988,7 @@ async fn execute_internal_nni_action(
         InternalNniAction::BancorMarket => {
             let data = nni_skill_public_node_data(
                 state,
-                "/v1/nni/server/bancor/market",
+                "bancor/market",
                 None,
             )
             .await?;
@@ -1013,7 +1016,7 @@ async fn execute_internal_nni_action(
             let limit = nni_skill_limit(request.limit, 100, 100)?;
             let mut data = nni_skill_public_node_data(
                 state,
-                "/v1/nni/server/bancor/trades",
+                "bancor/trades",
                 None,
             )
             .await?;
@@ -1046,7 +1049,7 @@ async fn execute_internal_nni_action(
                 ));
             }
             let mut path = format!(
-                "/v1/nni/server/bancor/candles?interval_seconds={interval_seconds}&limit={limit}"
+                "bancor/candles?interval_seconds={interval_seconds}&limit={limit}"
             );
             if let Some(end_time_ts) = request.end_time_ts {
                 path.push_str(&format!("&end_time_unix={end_time_ts}"));
@@ -1126,7 +1129,7 @@ async fn execute_internal_nni_action(
             })?;
             nni_skill_public_node_data(
                 state,
-                "/v1/nni/server/bancor/quote",
+                "bancor/quote",
                 Some(&body),
             )
             .await

@@ -25,6 +25,7 @@ import {
   nniDeviceMessage,
   nniDeviceNextStep,
   nniPayloadHexField,
+  parseNniRemoteNodeUrls,
   nniSimulationControlMode,
   nniTimestampSignatureReady,
   shortenHex,
@@ -54,6 +55,7 @@ export interface NniPageProps {
   nniDeviceAuthorizationDenied: boolean;
   nniJoined: boolean;
   nniRemoteNodes: string;
+  nniSelectedNodeUrl: string;
   nniRemoteNodeCount: number;
   nniHeartbeatIntervalSeconds: number | null;
   nniHeartbeatRequestCount: number;
@@ -96,6 +98,7 @@ export interface NniPageProps {
   onFetchConfig: () => unknown | Promise<unknown>;
   onSaveConfig: () => unknown | Promise<unknown>;
   onRemoteNodesChange: (value: string) => void;
+  onSelectedNodeChange: (value: string) => void;
   onFetchHeartbeatRecords: (page: number) => unknown | Promise<unknown>;
   onClearHeartbeatRecords: () => unknown | Promise<unknown>;
   onFetchHeartbeatErrors: (page: number) => unknown | Promise<unknown>;
@@ -141,6 +144,7 @@ export function NniPage({
   nniDeviceAuthorizationDenied,
   nniJoined,
   nniRemoteNodes,
+  nniSelectedNodeUrl,
   nniRemoteNodeCount,
   nniHeartbeatIntervalSeconds,
   nniHeartbeatRequestCount,
@@ -183,6 +187,7 @@ export function NniPage({
   onFetchConfig,
   onSaveConfig,
   onRemoteNodesChange,
+  onSelectedNodeChange,
   onFetchHeartbeatRecords,
   onClearHeartbeatRecords,
   onFetchHeartbeatErrors,
@@ -623,16 +628,32 @@ export function NniPage({
             <textarea
               className="theme-input mt-2 min-h-20 resize-y font-mono text-xs"
               placeholder={t(
-                "例如：https://nni-node.example.com\n多个节点可以一行一个，系统会按顺序尝试。",
-                "Example: https://nni-node.example.com\nUse one node per line. The system will try them in order.",
+                "例如：https://nni-node.example.com\n多个节点可以一行一个，再从下方选择当前节点。",
+                "Example: https://nni-node.example.com\nUse one node per line, then select the active node below.",
               )}
               value={nniRemoteNodes}
+              disabled={nniJoined}
               onChange={(event) => onRemoteNodesChange(event.target.value)}
             />
+            {parseNniRemoteNodeUrls(nniRemoteNodes).length > 0 ? (
+              <label className="mt-3 block text-xs text-white/65">
+                <span className="mb-1.5 block font-semibold">{t("当前节点", "Active node")}</span>
+                <select
+                  className="theme-input w-full font-mono text-xs"
+                  value={nniSelectedNodeUrl}
+                  disabled={nniJoined}
+                  onChange={(event) => onSelectedNodeChange(event.target.value)}
+                >
+                  {parseNniRemoteNodeUrls(nniRemoteNodes).map((nodeUrl) => (
+                    <option key={nodeUrl} value={nodeUrl}>{nodeUrl}</option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <p className="mt-2 text-xs leading-5 text-white/50">
               {t(
-                "远程节点和加入状态会自动保存，Agent 重启或页面重开后会自动载入。",
-                "Remote nodes and Join status are saved automatically and restored after the Agent restarts or the page reopens.",
+                "节点列表、当前节点和加入状态会保存。NNI 心跳、奖励与 Bancor 始终使用当前节点；需要切换时请先停止 NNI。",
+                "The node list, active node, and Join state are saved. NNI heartbeat, rewards, and Bancor always use the active node; stop NNI before switching nodes.",
               )}
             </p>
             {nniConfigMessage ? <p className="mt-2 text-xs text-emerald-200">{nniConfigMessage}</p> : null}

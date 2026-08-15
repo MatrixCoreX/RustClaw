@@ -417,13 +417,13 @@ async fn nni_bancor_market(
         }
     };
     let mut attempts = Vec::new();
-    for node_url in &config.remote_nodes {
-        let endpoint = format!("{node_url}/v1/nni/server/bancor/market");
+    for node_url in nni_selected_remote_nodes(&config) {
+        let endpoint = nni_remote_api_endpoint(node_url, "bancor/market");
         match state
             .core
             .http_client
             .get(&endpoint)
-            .timeout(Duration::from_secs(NNI_REMOTE_JOIN_TIMEOUT_SECONDS))
+            .timeout(nni_remote_api_timeout())
             .send()
             .await
         {
@@ -518,9 +518,10 @@ async fn nni_bancor_candles(
         }
     };
     let mut attempts = Vec::new();
-    for node_url in &config.remote_nodes {
-        let mut endpoint = format!(
-            "{node_url}/v1/nni/server/bancor/candles?interval_seconds={interval_seconds}&limit={limit}"
+    for node_url in nni_selected_remote_nodes(&config) {
+        let mut endpoint = nni_remote_api_endpoint(
+            node_url,
+            &format!("bancor/candles?interval_seconds={interval_seconds}&limit={limit}"),
         );
         if let Some(end_time_unix) = end_time_unix {
             endpoint.push_str(&format!("&end_time_unix={end_time_unix}"));
@@ -529,7 +530,7 @@ async fn nni_bancor_candles(
             .core
             .http_client
             .get(&endpoint)
-            .timeout(Duration::from_secs(NNI_REMOTE_JOIN_TIMEOUT_SECONDS));
+            .timeout(nni_remote_api_timeout());
         if let Some(if_none_match) = headers
             .get(axum::http::header::IF_NONE_MATCH)
             .and_then(|value| value.to_str().ok())
@@ -662,13 +663,13 @@ async fn nni_bancor_market_trades(
         }
     };
     let mut attempts = Vec::new();
-    for node_url in &config.remote_nodes {
-        let endpoint = format!("{node_url}/v1/nni/server/bancor/trades");
+    for node_url in nni_selected_remote_nodes(&config) {
+        let endpoint = nni_remote_api_endpoint(node_url, "bancor/trades");
         match state
             .core
             .http_client
             .get(&endpoint)
-            .timeout(Duration::from_secs(NNI_REMOTE_JOIN_TIMEOUT_SECONDS))
+            .timeout(nni_remote_api_timeout())
             .send()
             .await
         {
@@ -784,10 +785,10 @@ async fn nni_bancor_quote(
         }
     };
     let mut attempts = Vec::new();
-    for node_url in &config.remote_nodes {
-        let endpoint = format!("{node_url}/v1/nni/server/bancor/quote");
+    for node_url in nni_selected_remote_nodes(&config) {
+        let endpoint = nni_remote_api_endpoint(node_url, "bancor/quote");
         match state.core.http_client.post(&endpoint)
-            .timeout(Duration::from_secs(NNI_REMOTE_JOIN_TIMEOUT_SECONDS))
+            .timeout(nni_remote_api_timeout())
             .json(&request).send().await
         {
             Ok(response) => {
@@ -858,7 +859,7 @@ async fn nni_bancor_account(
     let page = query.page.unwrap_or(1).clamp(1, 1_000_000);
     let per_page = query.per_page.unwrap_or(20).clamp(1, 100);
     let mut attempts = Vec::new();
-    for node_url in &config.remote_nodes {
+    for node_url in nni_selected_remote_nodes(&config) {
         match query_nni_bancor_account_for_node(
             &state,
             node_url,
@@ -901,8 +902,8 @@ async fn query_nni_bancor_account_for_node(
     per_page: usize,
 ) -> Result<Value, Value> {
     let request_response = state.core.http_client
-        .post(format!("{node_url}/v1/nni/server/bancor/account/request"))
-        .timeout(Duration::from_secs(NNI_REMOTE_JOIN_TIMEOUT_SECONDS))
+        .post(nni_remote_api_endpoint(node_url, "bancor/account/request"))
+        .timeout(nni_remote_api_timeout())
         .json(&NniBancorAuthenticatedRequest {
             device_pubkey: device_pubkey.to_string(),
             client_user_key: user_key.to_string(),
@@ -936,8 +937,8 @@ async fn query_nni_bancor_account_for_node(
         "nni_bancor_account_signature_missing",
     )?;
     let response = state.core.http_client
-        .post(format!("{node_url}/v1/nni/server/bancor/account/verify"))
-        .timeout(Duration::from_secs(NNI_REMOTE_JOIN_TIMEOUT_SECONDS))
+        .post(nni_remote_api_endpoint(node_url, "bancor/account/verify"))
+        .timeout(nni_remote_api_timeout())
         .json(&NniBancorAccountVerifyRequest { task_id, signature, page, per_page })
         .send().await
         .map_err(|err| json!({"node_url": node_url, "error_code": "nni_bancor_account_verify_network_failed", "detail": err.to_string()}))?;
@@ -1033,7 +1034,7 @@ async fn nni_bancor_trade(
         Err((status, error, data)) => return nni_join_error(status, error, data),
     };
     let mut attempts = Vec::new();
-    for node_url in &config.remote_nodes {
+    for node_url in nni_selected_remote_nodes(&config) {
         let remote_request = NniBancorTradeRemoteRequest {
             device_pubkey: device_pubkey.clone(),
             client_user_key: identity.user_key.clone(),
@@ -1092,8 +1093,8 @@ async fn execute_nni_bancor_trade_for_node(
     request: &NniBancorTradeRemoteRequest,
 ) -> Result<Value, Value> {
     let response = state.core.http_client
-        .post(format!("{node_url}/v1/nni/server/bancor/trade/request"))
-        .timeout(Duration::from_secs(NNI_REMOTE_JOIN_TIMEOUT_SECONDS))
+        .post(nni_remote_api_endpoint(node_url, "bancor/trade/request"))
+        .timeout(nni_remote_api_timeout())
         .json(request).send().await
         .map_err(|err| json!({"node_url": node_url, "error_code": "nni_bancor_trade_request_network_failed", "detail": err.to_string()}))?;
     let status = response.status();
@@ -1141,8 +1142,8 @@ async fn execute_nni_bancor_trade_for_node(
     let response = state
         .core
         .http_client
-        .post(format!("{node_url}/v1/nni/server/bancor/trade/verify"))
-        .timeout(Duration::from_secs(NNI_REMOTE_JOIN_TIMEOUT_SECONDS))
+        .post(nni_remote_api_endpoint(node_url, "bancor/trade/verify"))
+        .timeout(nni_remote_api_timeout())
         .json(&NniBancorTradeVerifyRequest {
             task_id: validated.task_id,
             quote_id: validated.quote_id,

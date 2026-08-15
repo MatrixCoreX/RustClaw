@@ -292,6 +292,7 @@ export default function App() {
     nniDeviceAuthorizationDenied,
     nniJoined,
     nniRemoteNodes,
+    nniSelectedNodeUrl,
     nniRemoteNodeCount,
     nniHeartbeatIntervalSeconds,
     nniHeartbeatRequestCount,
@@ -330,6 +331,7 @@ export default function App() {
     fetchNniConfig,
     saveNniConfig,
     updateNniRemoteNodes,
+    updateNniSelectedNodeUrl,
     fetchNniHeartbeatRecords,
     clearNniHeartbeatRecords,
     fetchNniHeartbeatErrors,
@@ -1492,32 +1494,31 @@ export default function App() {
     void bancorRuntime.fetchMarketTrades();
     void fetchNniDeviceStatus(true);
     void fetchNniConfig(true);
-    const refreshCandlesWhileVisible = () => {
+    let cancelled = false;
+    let refreshTimer: number | null = null;
+    const refreshWhileVisible = async () => {
       if (document.visibilityState !== "visible") return;
-      void bancorRuntime.fetchCandles(bancorRuntime.candleIntervalSeconds, true);
-      void bancorRuntime.fetchMarketTrades(true);
+      await Promise.allSettled([
+        bancorRuntime.fetchCandles(bancorRuntime.candleIntervalSeconds, true),
+        bancorRuntime.fetchMarketTrades(true),
+        bancorRuntime.fetchMarket(true),
+      ]);
     };
-    const refreshMarketWhileVisible = () => {
-      if (document.visibilityState !== "visible") return;
-      void bancorRuntime.fetchMarket(true);
+    const scheduleNextRefresh = () => {
+      refreshTimer = window.setTimeout(async () => {
+        await refreshWhileVisible();
+        if (!cancelled) scheduleNextRefresh();
+      }, BANCOR_CANDLE_AUTO_REFRESH_SECONDS * 1_000);
     };
-    const candleTimer = window.setInterval(
-      refreshCandlesWhileVisible,
-      BANCOR_CANDLE_AUTO_REFRESH_SECONDS * 1_000,
-    );
-    const marketTimer = window.setInterval(
-      refreshMarketWhileVisible,
-      BANCOR_CANDLE_AUTO_REFRESH_SECONDS * 1_000,
-    );
+    scheduleNextRefresh();
     const handleVisibilityChange = () => {
       if (document.visibilityState !== "visible") return;
-      refreshMarketWhileVisible();
-      refreshCandlesWhileVisible();
+      void refreshWhileVisible();
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
-      window.clearInterval(candleTimer);
-      window.clearInterval(marketTimer);
+      cancelled = true;
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1790,6 +1791,7 @@ export default function App() {
               nniDeviceAuthorizationDenied={nniDeviceAuthorizationDenied}
               nniJoined={nniJoined}
               nniRemoteNodes={nniRemoteNodes}
+              nniSelectedNodeUrl={nniSelectedNodeUrl}
               nniRemoteNodeCount={nniRemoteNodeCount}
               nniHeartbeatIntervalSeconds={nniHeartbeatIntervalSeconds}
               nniHeartbeatRequestCount={nniHeartbeatRequestCount}
@@ -1832,6 +1834,7 @@ export default function App() {
               onFetchConfig={fetchNniConfig}
               onSaveConfig={saveNniConfig}
               onRemoteNodesChange={updateNniRemoteNodes}
+              onSelectedNodeChange={updateNniSelectedNodeUrl}
               onFetchHeartbeatRecords={fetchNniHeartbeatRecords}
               onClearHeartbeatRecords={clearNniHeartbeatRecords}
               onFetchHeartbeatErrors={fetchNniHeartbeatErrors}

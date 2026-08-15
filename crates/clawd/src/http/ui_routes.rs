@@ -459,6 +459,7 @@ mod agent_config_unit_tests;
 #[path = "ui_routes/git_remote_config_tests.rs"]
 mod git_remote_config_tests;
 include!("ui_routes/nni_request_records.rs");
+include!("ui_routes/nni_remote_api.rs");
 include!("ui_routes/nni_remote_join.rs");
 include!("ui_routes/nni_rewards.rs");
 include!("ui_routes/nni_bancor.rs");

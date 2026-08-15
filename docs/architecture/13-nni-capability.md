@@ -44,6 +44,22 @@ The skill process does not read NNI state files, run the hardware signing helper
 or administrator credentials, or call remote nodes directly. `clawd` owns those operations and
 returns only bounded structured observations.
 
+## Node Selection and Remote API
+
+The UI stores a directory of bound node endpoints plus one explicit active node. Heartbeat,
+rewards, Bancor UI routes, and agent-invoked `nni.*` capabilities all use that same active node for
+the complete request. They do not silently fail over to another bound node because account,
+market, authorization, and signature context must not be mixed across nodes.
+
+Browsers and skills never call a node directly. They use the local versioned API, while one
+central remote-API boundary in `clawd` constructs `/v1/nni/server/*` endpoints and owns the bounded
+network timeout. This leaves the node directory independent from business routes: future signed
+directories, peer discovery, or decentralized node registries may populate bound-node candidates
+without changing NNI/Bancor contracts. Changing the active node remains an explicit user or policy
+decision.
+An active runtime must be stopped before its selected node can change, keeping heartbeat and
+authorization state tied to one node for the entire participation session.
+
 ## Available Actions
 
 | Area | Actions | Behavior |
@@ -83,7 +99,7 @@ paths, node URLs, and internal tokens are removed or reduced to safe previews be
 
 ## Heartbeat State
 
-`heartbeat_enable` first verifies a signer and configured nodes, records the desired state, and
+`heartbeat_enable` first verifies a signer and the active node, records the desired state, and
 immediately attempts one heartbeat. A success becomes `active`. A temporary network failure keeps
 the desired state and becomes `waiting_network`, allowing the existing worker to retry. An explicit
 authorization rejection rolls the desired state back and becomes `rejected`.

@@ -17,6 +17,7 @@ import {
   readBancorCandleCache,
   writeBancorCandleCache,
 } from "../lib/bancor-candle-cache";
+import { fetchResilientRead, runCoalescedRead } from "../lib/resilient-read";
 
 type Translate = (zh: string, en: string) => string;
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
@@ -284,6 +285,7 @@ export function useBancorRuntime({
     etagRequestLimit: number | null;
   }>());
   const candleRequestsRef = useRef(new Map<string, Promise<NniBancorCandlesResponse | null>>());
+  const readRequestsRef = useRef(new Map<string, Promise<unknown>>());
   const candleCacheScopeRef = useRef(cacheScope);
   candleCacheScopeRef.current = cacheScope;
 
@@ -299,10 +301,13 @@ export function useBancorRuntime({
     return formatBancorApiError(code, t, fallback);
   };
 
-  const fetchMarket = async (silent = false) => {
+  const fetchMarket = (silent = false) => runCoalescedRead(
+    readRequestsRef.current,
+    "market",
+    async () => {
     if (!silent) setMarketLoading(true);
     try {
-      const response = await apiFetch("/v1/nni/bancor/market");
+      const response = await fetchResilientRead(apiFetch, "/v1/nni/bancor/market");
       const body = (await response.json()) as ApiResponse<NniBancorMarketResponse>;
       if (!response.ok || !body.ok || !body.data) throw new Error(readError(body, `Market load failed (${response.status})`));
       setMarket(body.data);
@@ -314,12 +319,16 @@ export function useBancorRuntime({
     } finally {
       if (!silent) setMarketLoading(false);
     }
-  };
+    },
+  );
 
-  const fetchAccount = async (page = account?.page ?? 1, silent = false) => {
+  const fetchAccount = (page = account?.page ?? 1, silent = false) => runCoalescedRead(
+    readRequestsRef.current,
+    `account:${Math.max(1, Math.floor(page))}`,
+    async () => {
     if (!silent) setAccountLoading(true);
     try {
-      const response = await apiFetch(buildBancorAccountPath(page));
+      const response = await fetchResilientRead(apiFetch, buildBancorAccountPath(page));
       const body = (await response.json()) as ApiResponse<NniBancorAccountResponse>;
       if (!response.ok || !body.ok || !body.data) throw new Error(readError(body, `Account load failed (${response.status})`));
       setAccount(body.data);
@@ -331,12 +340,16 @@ export function useBancorRuntime({
     } finally {
       if (!silent) setAccountLoading(false);
     }
-  };
+    },
+  );
 
-  const fetchMarketTrades = async (silent = false) => {
+  const fetchMarketTrades = (silent = false) => runCoalescedRead(
+    readRequestsRef.current,
+    "market-trades",
+    async () => {
     if (!silent) setMarketTradesLoading(true);
     try {
-      const response = await apiFetch("/v1/nni/bancor/trades");
+      const response = await fetchResilientRead(apiFetch, "/v1/nni/bancor/trades");
       const body = (await response.json()) as ApiResponse<NniBancorMarketTradesResponse>;
       if (!response.ok || !body.ok || !body.data) {
         throw new Error(readError(body, `Market trades load failed (${response.status})`));
@@ -354,7 +367,8 @@ export function useBancorRuntime({
     } finally {
       if (!silent) setMarketTradesLoading(false);
     }
-  };
+    },
+  );
 
   const fetchCandles = (
     intervalSeconds = candleIntervalRef.current,
@@ -416,7 +430,7 @@ export function useBancorRuntime({
       }
 
       try {
-        const response = await apiFetch(buildBancorCandlesPath(intervalSeconds, refreshLimit, endTimeUnix), {
+        const response = await fetchResilientRead(apiFetch, buildBancorCandlesPath(intervalSeconds, refreshLimit, endTimeUnix), {
           cache: "no-store",
           headers: requestHeaders,
         });
