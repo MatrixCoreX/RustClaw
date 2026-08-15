@@ -1389,25 +1389,6 @@ export function CandleChart({
       id="bancor-candle-chart"
       className={maximized ? "bancor-chart-maximized" : undefined}
     >
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-white/45">
-        <div className="min-w-0">
-          <span className="text-white/65">{formatUnixDateTime(focused.candle.bucket_start_unix)}</span>
-          <span className="ml-3">O <NniDecimalAmount value={focused.candle.open} shrinkFraction={false} /> · H <NniDecimalAmount value={focused.candle.high} shrinkFraction={false} /> · L <NniDecimalAmount value={focused.candle.low} shrinkFraction={false} /> · C <NniDecimalAmount value={focused.candle.close} shrinkFraction={false} /></span>
-          <span className="ml-3">VOL <NniDecimalAmount value={`${focused.candle.point_volume} POINT`} /></span>
-          <span className="ml-3">
-            {focused.candle.trade_count > 0
-              ? `${focused.candle.trade_count} ${t("笔成交", "trades")}`
-              : t("本周期无成交", "No trades in this interval")}
-          </span>
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <span>
-            {visibleWindow.maxOffset > 0
-              ? t("左右拖动查看历史；点按查看详情；滚轮缩放", "Drag for history; tap for details; wheel to zoom")
-              : t("全部实际成交均价 K 线已显示，暂无更多历史", "All average execution-price candles are visible; no older history is available")}
-          </span>
-        </div>
-      </div>
       <div
         ref={chartRef}
         className={`theme-chart-surface relative overflow-hidden rounded-xl border outline-none transition ${isDragging ? "cursor-grabbing ring-1 ring-sky-400/25" : "cursor-grab focus:ring-1 focus:ring-sky-400/35"}`}
