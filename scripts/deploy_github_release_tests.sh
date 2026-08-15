@@ -49,11 +49,13 @@ releases = [
         "assets": [
             {
                 "name": archive.name,
-                "browser_download_url": archive.as_uri(),
+                "url": archive.as_uri(),
+                "browser_download_url": "file:///api-asset-preference-must-win/archive",
             },
             {
                 "name": checksum.name,
-                "browser_download_url": checksum.as_uri(),
+                "url": checksum.as_uri(),
+                "browser_download_url": "file:///api-asset-preference-must-win/checksum",
             },
         ],
     },
