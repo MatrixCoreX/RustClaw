@@ -17,6 +17,8 @@ KEEP_BACKUPS=2
 SYSTEMD_UNIT="${APP_SERVICE_NAME}.service"
 
 WORK_DIR=""
+WORK_PARENT=""
+WORK_PARENT_OWNED=0
 LOCK_DIR=""
 BACKUP_DIR=""
 PACKAGE_STAGE_DIR=""
@@ -284,7 +286,15 @@ elif runtime_pid_is_active; then
   RUNTIME_WAS_ACTIVE=1
 fi
 
-WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/agent-release-deploy.XXXXXX")"
+if [[ -n "${TMPDIR:-}" ]]; then
+  WORK_PARENT="$TMPDIR"
+else
+  WORK_PARENT="$ROOT_PARENT/.${ROOT_NAME}-release-work"
+  mkdir -p "$WORK_PARENT"
+  chmod 700 "$WORK_PARENT"
+  WORK_PARENT_OWNED=1
+fi
+WORK_DIR="$(mktemp -d "$WORK_PARENT/agent-release-deploy.XXXXXX")"
 if [[ "$PACKAGE_MODE" -eq 1 ]]; then
   LOCK_DIR="$ROOT_PARENT/.${ROOT_NAME}-release-mode.lock"
 else
@@ -381,6 +391,9 @@ cleanup() {
   fi
   [[ -z "$WORK_DIR" ]] || rm -rf "$WORK_DIR"
   [[ -z "$PACKAGE_STAGE_DIR" ]] || rm -rf "$PACKAGE_STAGE_DIR"
+  if [[ "$WORK_PARENT_OWNED" -eq 1 && -n "$WORK_PARENT" ]]; then
+    rmdir "$WORK_PARENT" >/dev/null 2>&1 || true
+  fi
   if [[ -n "$LOCK_DIR" && -d "$LOCK_DIR" ]]; then
     lock_pid="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
     if [[ "$lock_pid" == "$$" ]]; then
@@ -730,6 +743,33 @@ while IFS= read -r binary; do
   [[ -f "$binary" ]] || continue
   printf 'target/release/%s\n' "$(basename "$binary")" >> "$MANAGED_PATHS_FILE"
 done < <(find "$PACKAGE_DIR/target/release" -mindepth 1 -maxdepth 1 -type f | LC_ALL=C sort)
+
+for manifest_root in crates/skills optional_skills external_skills; do
+  [[ -d "$PACKAGE_DIR/$manifest_root" ]] || continue
+  while IFS= read -r manifest; do
+    [[ -f "$manifest" ]] || continue
+    printf '%s\n' "${manifest#"$PACKAGE_DIR/"}" >> "$MANAGED_PATHS_FILE"
+  done < <(
+    find "$PACKAGE_DIR/$manifest_root" \
+      -mindepth 2 -maxdepth 2 -type f -name skill.toml | LC_ALL=C sort
+  )
+done
+
+# The packaged data tree contains repository-maintained proactive receipts only.
+# Install those directories individually so optional/external runtime receipts
+# that exist only on this host remain untouched.
+if [[ -d "$PACKAGE_DIR/data/skill-packages" ]]; then
+  while IFS= read -r receipt_dir; do
+    [[ -d "$receipt_dir" ]] || continue
+    printf 'data/skill-packages/%s\n' "$(basename "$receipt_dir")" >> "$MANAGED_PATHS_FILE"
+  done < <(
+    find "$PACKAGE_DIR/data/skill-packages" \
+      -mindepth 1 -maxdepth 1 -type d | LC_ALL=C sort
+  )
+fi
+if [[ -d "$PACKAGE_DIR/prebuilt/skill-packages" ]]; then
+  printf '%s\n' "prebuilt/skill-packages" >> "$MANAGED_PATHS_FILE"
+fi
 printf '%s\n' ".release-tag" >> "$MANAGED_PATHS_FILE"
 printf '%s\n' ".release-rollback" >> "$MANAGED_PATHS_FILE"
 
