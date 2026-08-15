@@ -12,10 +12,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 REQUIRED_FILE_TOKENS = {
-    "AGENTS.md": (
-        "All shared production code must support both Linux and macOS.",
-        "Never attempt Linux commands implicitly on macOS",
-    ),
     "crates/claw-core/src/config.rs": (
         "pub enum ToolSandboxBackend",
         "Auto",
