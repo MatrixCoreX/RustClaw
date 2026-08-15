@@ -717,11 +717,20 @@ for relative in \
   scripts \
   component_start \
   pi_app \
-  services/wa-web-bridge \
   UI/dist; do
   [[ -e "$PACKAGE_DIR/$relative" ]] || continue
   printf '%s\n' "$relative" >> "$MANAGED_PATHS_FILE"
 done
+
+if [[ -d "$PACKAGE_DIR/services/wa-web-bridge" ]]; then
+  while IFS= read -r bridge_file; do
+    [[ -f "$bridge_file" ]] || continue
+    printf '%s\n' "${bridge_file#"$PACKAGE_DIR/"}" >> "$MANAGED_PATHS_FILE"
+  done < <(
+    find "$PACKAGE_DIR/services/wa-web-bridge" \
+      -mindepth 1 -maxdepth 1 -type f | LC_ALL=C sort
+  )
+fi
 
 for relative in \
   README.md \

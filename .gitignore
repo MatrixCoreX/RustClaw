@@ -12,6 +12,7 @@
 /run/
 /data/
 /release-bin/
+/prebuilt/
 /skills_output/
 /.agent-runtime/
 /plan/
