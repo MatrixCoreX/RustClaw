@@ -229,7 +229,22 @@ impl SkillAdmissionService {
         &self,
         mutations: Vec<AdmissionMutation>,
     ) -> Result<OverlaySnapshot> {
-        self.commit_mutations(mutations, true)
+        self.commit_mutations(mutations, true, &BTreeSet::new())
+    }
+
+    pub(crate) fn retire_release_owned_bundled(
+        &self,
+        skill_names: &BTreeSet<String>,
+    ) -> Result<OverlaySnapshot> {
+        if skill_names.is_empty() {
+            return Err(error(
+                "skill_admission_retirement_empty",
+                "skill_admission_retirement_empty",
+            ));
+        }
+        let mut mutations = self.current_repair_inputs()?;
+        mutations.retain(|mutation| !skill_names.contains(&mutation.metadata.name));
+        self.commit_mutations(mutations, true, skill_names)
     }
 
     pub(crate) fn rollback_generation(&self, expected_generation: u64) -> Result<OverlaySnapshot> {
@@ -299,13 +314,14 @@ impl SkillAdmissionService {
     }
 
     fn commit_mutation(&self, mutation: AdmissionMutation) -> Result<OverlaySnapshot> {
-        self.commit_mutations(vec![mutation], false)
+        self.commit_mutations(vec![mutation], false, &BTreeSet::new())
     }
 
     fn commit_mutations(
         &self,
         mutations: Vec<AdmissionMutation>,
         require_complete_current_generation: bool,
+        retired_release_owned_bundled: &BTreeSet<String>,
     ) -> Result<OverlaySnapshot> {
         fs::create_dir_all(&self.root).map_err(io_error("skill_admission_root_create_failed"))?;
         secure_directory(&self.root)?;
@@ -317,7 +333,11 @@ impl SkillAdmissionService {
             .open(&lock_path)
             .map_err(io_error("skill_admission_lock_open_failed"))?;
         FileExt::lock_exclusive(&lock).map_err(io_error("skill_admission_lock_failed"))?;
-        let result = self.commit_mutations_locked(mutations, require_complete_current_generation);
+        let result = self.commit_mutations_locked(
+            mutations,
+            require_complete_current_generation,
+            retired_release_owned_bundled,
+        );
         let _ = FileExt::unlock(&lock);
         result
     }
@@ -326,14 +346,17 @@ impl SkillAdmissionService {
         &self,
         mutations: Vec<AdmissionMutation>,
         require_complete_current_generation: bool,
+        retired_release_owned_bundled: &BTreeSet<String>,
     ) -> Result<OverlaySnapshot> {
-        if mutations.is_empty() {
+        if mutations.is_empty() && retired_release_owned_bundled.is_empty() {
             return Err(error(
                 "skill_admission_repair_empty",
                 "skill_admission_repair_empty",
             ));
         }
         let current = self.read_current_generation()?;
+        let base = SkillsRegistry::load_from_path(&self.base_registry_path)
+            .map_err(|detail| error("skill_registry_invalid", detail))?;
         if require_complete_current_generation {
             let (_, current_record, _) = current.as_ref().ok_or_else(|| {
                 error(
@@ -350,15 +373,39 @@ impl SkillAdmissionService {
                 .iter()
                 .map(|(name, skill)| (name.clone(), skill.source))
                 .collect::<BTreeMap<_, _>>();
-            if requested != expected || requested.len() != mutations.len() {
+            let requested_scope_is_valid = requested.len() == mutations.len()
+                && requested
+                    .iter()
+                    .all(|(name, source)| expected.get(name) == Some(source));
+            let retired_scope_is_valid = retired_release_owned_bundled.iter().all(|name| {
+                expected.get(name) == Some(&SkillAdmissionSource::BundledBase)
+                    && base
+                        .get(name)
+                        .is_some_and(|entry| entry.install_mode.as_deref() != Some("on_demand"))
+            });
+            let scopes_are_disjoint = requested
+                .keys()
+                .all(|name| !retired_release_owned_bundled.contains(name));
+            let complete_scope = expected.keys().all(|name| {
+                requested.contains_key(name) || retired_release_owned_bundled.contains(name)
+            }) && expected.len()
+                == requested.len() + retired_release_owned_bundled.len();
+            if !requested_scope_is_valid
+                || !retired_scope_is_valid
+                || !scopes_are_disjoint
+                || !complete_scope
+            {
                 return Err(error(
                     "skill_admission_repair_scope_mismatch",
-                    format!("expected={} requested={}", expected.len(), mutations.len()),
+                    format!(
+                        "expected={} requested={} retired={}",
+                        expected.len(),
+                        mutations.len(),
+                        retired_release_owned_bundled.len()
+                    ),
                 ));
             }
         }
-        let base = SkillsRegistry::load_from_path(&self.base_registry_path)
-            .map_err(|detail| error("skill_registry_invalid", detail))?;
         let mut names = BTreeSet::new();
         let mut verified_mutations = Vec::with_capacity(mutations.len());
         for mutation in mutations {
@@ -436,6 +483,10 @@ impl SkillAdmissionService {
                 skills: BTreeMap::new(),
             }
         };
+        for name in retired_release_owned_bundled {
+            remove_retired_skill_files(staging.path(), name)?;
+            record.skills.remove(name);
+        }
         for (mutation, verified) in &verified_mutations {
             self.write_mutated_skill(
                 staging.path(),
@@ -998,6 +1049,37 @@ fn remove_optional_file(path: &Path) -> Result<()> {
         Err(source) => Err(error(
             "skill_admission_file_remove_failed",
             format!("path={} error={source}", path.display()),
+        )),
+    }
+}
+
+fn remove_retired_skill_files(generation_root: &Path, skill_name: &str) -> Result<()> {
+    for path in [
+        generation_root
+            .join("admissions")
+            .join(format!("{skill_name}.json")),
+        generation_root
+            .join("metadata")
+            .join(format!("{skill_name}.json")),
+        generation_root
+            .join("policy.d")
+            .join(format!("{skill_name}.json")),
+        generation_root
+            .join("prompts")
+            .join(format!("{skill_name}.md")),
+        generation_root
+            .join("registry.d")
+            .join(format!("{skill_name}.toml")),
+    ] {
+        remove_optional_file(&path)?;
+    }
+    let manifest_root = generation_root.join("manifests").join(skill_name);
+    match fs::remove_dir_all(&manifest_root) {
+        Ok(()) => Ok(()),
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(error(
+            "skill_admission_directory_remove_failed",
+            format!("path={} error={source}", manifest_root.display()),
         )),
     }
 }

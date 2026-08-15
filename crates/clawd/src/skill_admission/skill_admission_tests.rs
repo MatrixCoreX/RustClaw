@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 
@@ -174,6 +174,110 @@ fn generation_activation_is_atomic_restartable_and_tombstone_preserves_shared_to
         Some(AdmissionState::Tombstoned)
     );
     assert!(shared_toolchain.join("sentinel").is_file());
+    fs::remove_dir_all(root).expect("remove fixture");
+}
+
+#[test]
+fn promoted_bundled_skill_is_retired_without_losing_external_overlay_state() {
+    let root = std::env::temp_dir().join(format!(
+        "skillctl-admission-promoted-bundled-{}",
+        uuid::Uuid::new_v4()
+    ));
+    let bundled_name = format!("bundled_{}", uuid::Uuid::new_v4().simple());
+    let external_name = format!("external_{}", uuid::Uuid::new_v4().simple());
+    fs::create_dir_all(root.join("configs")).expect("create configs");
+    let base_registry = root.join("configs/skills_registry.toml");
+    fs::write(
+        &base_registry,
+        format!(
+            r#"[[skills]]
+name = "{bundled_name}"
+enabled = true
+kind = "runner"
+planner_kind = "skill"
+package_manifest = "sources/{bundled_name}/skill.toml"
+install_mode = "on_demand"
+"#,
+        ),
+    )
+    .expect("write on-demand registry");
+    let bundled_manifest = install_fixture(&root, &bundled_name);
+    let external_manifest = install_fixture(&root, &external_name);
+    let service = SkillAdmissionService::for_test(&root, &base_registry);
+    service
+        .admit_bundled(AdmissionMutation {
+            metadata: ExternalSkillMetadata {
+                name: bundled_name.clone(),
+                source: SkillAdmissionSource::BundledBase,
+                package_manifest_path: format!("sources/{bundled_name}/skill.toml"),
+                description: "Bundled fixture".to_string(),
+                aliases: Vec::new(),
+                group: "extensions".to_string(),
+            },
+            prompt: "# Bundled fixture\n".to_string(),
+            state: AdmissionState::Enabled,
+            grant: Some(fixture_grant(
+                &bundled_manifest,
+                ApprovalSource::ReleaseBaseline,
+            )),
+        })
+        .expect("admit bundled fixture");
+    let before = service
+        .admit_external(AdmissionMutation {
+            metadata: ExternalSkillMetadata {
+                name: external_name.clone(),
+                source: SkillAdmissionSource::ExternalOverlay,
+                package_manifest_path: format!("sources/{external_name}/skill.toml"),
+                description: "External fixture".to_string(),
+                aliases: Vec::new(),
+                group: "extensions".to_string(),
+            },
+            prompt: "# External fixture\n".to_string(),
+            state: AdmissionState::Enabled,
+            grant: Some(fixture_grant(&external_manifest, ApprovalSource::AdminApi)),
+        })
+        .expect("admit external fixture");
+
+    let retirement_scope = BTreeSet::from([bundled_name.clone()]);
+    let rejected = service
+        .retire_release_owned_bundled(&retirement_scope)
+        .expect_err("on-demand bundled skill must remain overlay-owned");
+    assert_eq!(rejected.code, "skill_admission_repair_scope_mismatch");
+
+    fs::write(
+        &base_registry,
+        format!(
+            r#"[[skills]]
+name = "{bundled_name}"
+enabled = true
+fixed_on = true
+kind = "runner"
+planner_kind = "skill"
+package_manifest = "sources/{bundled_name}/skill.toml"
+"#,
+        ),
+    )
+    .expect("promote bundled fixture to release-owned");
+    let retired = service
+        .retire_release_owned_bundled(&retirement_scope)
+        .expect("retire historical bundled overlay binding");
+    assert_eq!(retired.generation, before.generation + 1);
+    assert_eq!(retired.state(&bundled_name), None);
+    assert!(!retired.execution_bindings.contains_key(&bundled_name));
+    assert_eq!(retired.state(&external_name), Some(AdmissionState::Enabled));
+    assert!(retired.execution_bindings.contains_key(&external_name));
+    let current_root = service
+        .root()
+        .join("generations")
+        .join(format!("{:020}", retired.generation));
+    assert!(!current_root
+        .join("admissions")
+        .join(format!("{bundled_name}.json"))
+        .exists());
+    assert!(current_root
+        .join("admissions")
+        .join(format!("{external_name}.json"))
+        .is_file());
     fs::remove_dir_all(root).expect("remove fixture");
 }
 
@@ -355,6 +459,35 @@ fn install_fixture(root: &Path, skill_name: &str) -> skill_sdk::PackageManifest 
         .expect("write receipt");
     store.activate(&install_dir, &receipt).expect("activate");
     manifest
+}
+
+fn fixture_grant(
+    manifest: &skill_sdk::PackageManifest,
+    approval_source: ApprovalSource,
+) -> HostPolicyGrant {
+    let capability = manifest
+        .effective_capability_request()
+        .expect("capability request")
+        .capabilities[0]
+        .clone();
+    HostPolicyGrant {
+        schema_version: HOST_POLICY_GRANT_SCHEMA_VERSION,
+        skill_name: manifest.package.name.clone(),
+        version: manifest.package.version.clone(),
+        semantic_contract_digest: manifest
+            .capability_request_digest()
+            .expect("semantic digest"),
+        capabilities: vec![GrantedCapability {
+            name: capability.name,
+            action: capability.action,
+        }],
+        permissions: RuntimePermissionRequest::default(),
+        risk_level: HostRiskLevel::Low,
+        auto_invocable: true,
+        requires_confirmation: false,
+        approval_source,
+        approved_at_unix: 1,
+    }
 }
 
 fn activate_updated_fixture(

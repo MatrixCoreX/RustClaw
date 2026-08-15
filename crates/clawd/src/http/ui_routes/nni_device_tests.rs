@@ -444,7 +444,10 @@ fn nni_settings_keep_one_explicit_active_node() {
         None,
     )
     .expect_err("active NNI must stop before switching nodes");
-    assert_eq!(switch_error.to_string(), "nni_selected_node_change_requires_stop");
+    assert_eq!(
+        switch_error.to_string(),
+        "nni_selected_node_change_requires_stop"
+    );
 
     let stopped = write_nni_config_with_selected_node(
         &state,
@@ -454,7 +457,10 @@ fn nni_settings_keep_one_explicit_active_node() {
     )
     .expect("stop NNI and select another bound node");
     assert!(!stopped.joined);
-    assert_eq!(stopped.selected_node_url.as_deref(), Some("https://node-a.example.test"));
+    assert_eq!(
+        stopped.selected_node_url.as_deref(),
+        Some("https://node-a.example.test")
+    );
 }
 
 #[test]
