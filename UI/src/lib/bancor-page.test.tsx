@@ -276,7 +276,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /价格影响超过此值时会标黄警告/);
   assert.match(html, /class="theme-primary-btn mt-3 w-full justify-center"[^>]*>卖出<\/button>/);
   assert.doesNotMatch(html, /红色表示上涨，绿色表示下跌/);
-  assert.match(html, /全部实际成交均价 K 线已显示/);
+  assert.doesNotMatch(html, /左右拖动查看历史|点按查看详情|滚轮缩放|全部实际成交均价 K 线已显示/);
   assert.match(html, /回到最新/);
   assert.doesNotMatch(html, /MACD|RSI|均线/);
   assert.match(html, /#f87171/);
@@ -455,6 +455,36 @@ test("BANCOR renders the current interval without an open-candle text badge", ()
   assert.match(html, /data-bancor-candle-direction="flat"/);
   assert.match(html, /data-bancor-volume-direction="flat"/);
   assert.doesNotMatch(html, /最后一根未收盘|Latest candle is still open|data-bancor-current-candle-state/);
+});
+
+test("BANCOR keeps focused candle details out of the chart layout", () => {
+  const html = renderToStaticMarkup(
+    <CandleChart
+      candles={[{
+        bucket_start_unix: 1_800_000_000,
+        bucket_end_unix: 1_800_000_060,
+        open: "0.00010000",
+        high: "0.00010010",
+        low: "0.00009990",
+        close: "0.00010005",
+        point_volume_units: "100000000000",
+        point_volume: "1000.00000000",
+        usd_volume_units: "9990000",
+        usd_volume: "0.09990000",
+        trade_count: 1,
+        has_trades: true,
+      }]}
+      intervalSeconds={60}
+      priceDecimalPlaces={12}
+      formatUnixDateTime={() => "UNIQUE_CANDLE_TIMESTAMP"}
+      t={(zh) => zh}
+    />,
+  );
+
+  const svgStart = html.indexOf("<svg");
+  assert.ok(svgStart > 0);
+  assert.doesNotMatch(html.slice(0, svgStart), /UNIQUE_CANDLE_TIMESTAMP|O 0\.00010000|VOL 1000\.00000000/);
+  assert.match(html.slice(svgStart), /<title>UNIQUE_CANDLE_TIMESTAMP · O /);
 });
 
 test("BANCOR candlesticks distinguish traded flat bars from neutral empty intervals", () => {
