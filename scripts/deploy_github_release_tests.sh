@@ -16,6 +16,7 @@ mkdir -p \
   "$PACKAGE_DIR/optional_skills/store_fixture" \
   "$PACKAGE_DIR/data/skill-packages/core_fixture" \
   "$PACKAGE_DIR/prebuilt/skill-packages/store_fixture" \
+  "$PACKAGE_DIR/services/wa-web-bridge" \
   "$PACKAGE_DIR/UI/dist"
 cp /bin/true "$PACKAGE_DIR/target/release/clawd"
 printf 'new release readme\n' > "$PACKAGE_DIR/README.md"
@@ -26,6 +27,7 @@ printf 'name = "core_fixture"\n' > "$PACKAGE_DIR/crates/skills/core_fixture/skil
 printf 'name = "store_fixture"\n' > "$PACKAGE_DIR/optional_skills/store_fixture/skill.toml"
 printf 'release receipt\n' > "$PACKAGE_DIR/data/skill-packages/core_fixture/current.json"
 printf 'release prebuilt\n' > "$PACKAGE_DIR/prebuilt/skill-packages/store_fixture/current.json"
+printf 'release bridge\n' > "$PACKAGE_DIR/services/wa-web-bridge/index.js"
 printf '<!doctype html><title>release ui</title>\n' > "$PACKAGE_DIR/UI/dist/index.html"
 
 ARCHIVE="$TMP_ROOT/$APP_RELEASE_ARTIFACT_ID-ubuntu-x86_64-test.tar.gz"
@@ -75,11 +77,14 @@ RUNTIME="$TMP_ROOT/runtime"
 mkdir -p \
   "$RUNTIME/configs" \
   "$RUNTIME/data/skill-packages/local_optional" \
+  "$RUNTIME/services/wa-web-bridge" \
   "$RUNTIME/target/release"
 cp /bin/false "$RUNTIME/target/release/clawd"
 printf 'local-secret = "preserve"\n' > "$RUNTIME/configs/config.toml"
 printf 'old readme\n' > "$RUNTIME/README.md"
 printf 'keep local optional\n' > "$RUNTIME/data/skill-packages/local_optional/current.json"
+printf 'old bridge\n' > "$RUNTIME/services/wa-web-bridge/index.js"
+printf 'keep source test\n' > "$RUNTIME/services/wa-web-bridge/test.js"
 printf 'ubuntu-x86_64-old\n' > "$RUNTIME/.release-tag"
 
 mkdir "$RUNTIME/.release-deploy.lock"
@@ -127,6 +132,8 @@ grep -Fxq 'name = "store_fixture"' "$RUNTIME/optional_skills/store_fixture/skill
 grep -Fxq 'release receipt' "$RUNTIME/data/skill-packages/core_fixture/current.json"
 grep -Fxq 'keep local optional' "$RUNTIME/data/skill-packages/local_optional/current.json"
 grep -Fxq 'release prebuilt' "$RUNTIME/prebuilt/skill-packages/store_fixture/current.json"
+grep -Fxq 'release bridge' "$RUNTIME/services/wa-web-bridge/index.js"
+grep -Fxq 'keep source test' "$RUNTIME/services/wa-web-bridge/test.js"
 cmp /bin/true "$RUNTIME/target/release/clawd"
 find "$RUNTIME/.release-backups" -name files.tar.gz -type f | grep -q .
 ROLLBACK_MARKER_BEFORE="$(cat "$RUNTIME/.release-rollback")"
