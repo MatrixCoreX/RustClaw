@@ -508,10 +508,9 @@ pub(crate) fn repair_bundled_skill_admission_offline(
             .get(name)
             .ok_or_else(|| format!("skill_admission_base_entry_missing: skill={name}"))?;
         if !refresh_bundled_install_in_offline_repair(entry.install_mode.as_deref()) {
-            // Historical generations may still contain a pin for a bundled
-            // skill that has since become part of the fixed release set. Its
-            // existing verified admission remains unchanged while on-demand
-            // packages are refreshed to their current immutable receipts.
+            // Release-owned skills are retired from the overlay by the startup
+            // reconciliation pass. Keep this repair scoped to on-demand
+            // packages if a concurrent release transition is still settling.
             continue;
         }
         let verified = package_store
@@ -559,6 +558,30 @@ pub(crate) fn refresh_stale_bundled_skill_admissions_offline(
     let snapshot = service
         .catalog_snapshot()
         .map_err(|error| error.to_string())?;
+    let release_owned_bundled = snapshot
+        .sources
+        .iter()
+        .filter_map(|(skill_name, source)| {
+            if *source != crate::skill_admission::SkillAdmissionSource::BundledBase {
+                return None;
+            }
+            registry
+                .get(skill_name)
+                .is_some_and(|entry| {
+                    entry.install_mode.as_deref() != Some("on_demand")
+                })
+                .then(|| skill_name.clone())
+        })
+        .collect::<BTreeSet<_>>();
+    if !release_owned_bundled.is_empty() {
+        let retired = service
+            .retire_release_owned_bundled(&release_owned_bundled)
+            .map_err(|error| error.to_string())?;
+        return match refresh_stale_bundled_skill_admissions_offline(workspace_root, config)? {
+            Some(refreshed) => Ok(Some(refreshed)),
+            None => Ok(Some(retired)),
+        };
+    }
     let package_root = workspace_root.join("data/skill-packages");
     let package_store = skill_sdk::InstallReceiptStore::new(&package_root);
     let resolver = skill_sdk::SkillRuntimeResolver::new(&package_root);
