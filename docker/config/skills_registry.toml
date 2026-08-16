@@ -12,7 +12,7 @@ planner_kind = "tool"
 group = "system"
 aliases = ["shell", "exec"]
 argument_aliases = { command = ["cmd", "shell_command"] }
-timeout_seconds = 60
+timeout_seconds = 180
 prompt_file = "prompts/skills/run_cmd.md"
 output_kind = "text"
 risk_level = "high"
@@ -2170,7 +2170,7 @@ side_effect = false
 supported_os = ["linux", "macos"]
 platform_notes = ["Search backend requires network and backend/API configuration."]
 planner_capabilities = [
-  { name = "web.search_results", required_companions = ["rss.list_categories", "rss.latest_news"], action = "search_extract", description = "Search all available web backends and merge results for source-unspecified current-information research. This general research capability requires configured RSS catalog and matching latest-news observations before final synthesis.", effect = "observe", required = ["query"], optional = ["cursor", "continuation", "top_k", "lang", "time_range", "include_snippet"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "async_preferred", async_adapter_kind = "http_job_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = false, external_publish = false, credential_access = true },
+  { name = "web.search_results", action = "search_extract", description = "Search all available web backends and merge results. The agent loop may add RSS evidence for source-unspecified current-information research, but explicit web-only requests remain within this capability.", effect = "observe", required = ["query"], optional = ["cursor", "continuation", "top_k", "lang", "time_range", "include_snippet"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "async_preferred", async_adapter_kind = "http_job_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = false, external_publish = false, credential_access = true },
   { name = "web.search", action = "search", description = "Search within an explicit user-selected web source boundary. Use backend_policy=strict for a named search engine or domains_allow for a named website; do not use this scoped capability for ordinary source-unspecified research.", effect = "observe", required = ["query"], optional = ["cursor", "continuation", "top_k", "lang", "time_range", "domains_allow", "domains_deny", "backend", "backend_policy", "include_snippet"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "async_preferred", async_adapter_kind = "http_job_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = false, external_publish = false, credential_access = true },
 ]
 input_schema = { type = "object", required = ["action", "query"], properties = { action = { type = "string", enum = ["search", "search_extract"] }, query = { type = "string" }, cursor = { type = "integer", minimum = 0 }, continuation = { type = "string" }, top_k = { type = "integer", minimum = 1, maximum = 20 }, lang = { type = "string" }, time_range = { type = "string" }, domains_allow = { type = "array", items = { type = "string" } }, domains_deny = { type = "array", items = { type = "string" } }, backend = { type = "string", enum = ["serpapi", "baidu_ai", "brave", "searxng", "tavily", "perplexity", "exa", "you", "mojeek", "kagi", "duckduckgo_html", "bing_html"] }, backend_policy = { type = "string", enum = ["auto", "strict"] }, include_snippet = { type = "boolean" } } }
