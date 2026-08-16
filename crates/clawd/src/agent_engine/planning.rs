@@ -1535,15 +1535,19 @@ fn action_from_native_tool_call_with_schemas(
             if !call.arguments.is_object() {
                 return Err("native_plan_args_not_object".to_string());
             }
+            let arguments = capability_argument_schemas
+                .get(capability)
+                .map(|schema| normalize_native_argument_to_schema(schema, &call.arguments))
+                .unwrap_or_else(|| call.arguments.clone());
             if capability_argument_schemas
                 .get(capability)
-                .is_some_and(|schema| schema_has_missing_required_fields(schema, &call.arguments))
+                .is_some_and(|schema| schema_has_missing_required_fields(schema, &arguments))
             {
                 return Err("native_plan_required_args_missing".to_string());
             }
             Ok(AgentAction::CallCapability {
                 capability: capability.clone(),
-                args: call.arguments.clone(),
+                args: arguments,
             })
         }
         _ => Err("native_plan_unknown_tool".to_string()),
@@ -1569,9 +1573,7 @@ fn action_from_native_capability_group_load(call: &ModelToolCall) -> Result<Agen
         });
     }
     if operation == Some("expand") {
-        let references = arguments
-            .get("capability_refs")
-            .and_then(Value::as_array)
+        let references = normalized_native_array_argument(arguments.get("capability_refs"))
             .filter(|references| !references.is_empty())
             .ok_or_else(|| "native_capability_catalog_expand_refs_invalid".to_string())?;
         if references.iter().any(|reference| {
@@ -1586,9 +1588,7 @@ fn action_from_native_capability_group_load(call: &ModelToolCall) -> Result<Agen
             args: json!({"op": "expand", "capability_refs": references}),
         });
     }
-    let groups = arguments
-        .get("groups")
-        .and_then(Value::as_array)
+    let groups = normalized_native_array_argument(arguments.get("groups"))
         .filter(|groups| !groups.is_empty())
         .ok_or_else(|| "native_capability_group_load_groups_invalid".to_string())?;
     if groups.iter().any(|group| {
@@ -1630,10 +1630,86 @@ fn action_from_native_capability_call(
         }
         _ => return Err("native_plan_args_not_object".to_string()),
     };
+    let args = capability_argument_schemas
+        .get(capability)
+        .map(|schema| normalize_native_argument_to_schema(schema, &args))
+        .unwrap_or(args);
     Ok(AgentAction::CallCapability {
         capability: capability.to_string(),
         args,
     })
+}
+
+fn normalized_native_array_argument(value: Option<&Value>) -> Option<Vec<Value>> {
+    match value? {
+        Value::Array(items) => Some(items.clone()),
+        Value::Object(wrapper) if wrapper.len() == 1 => {
+            let item = wrapper.get("item")?;
+            Some(match item {
+                Value::Array(items) => items.clone(),
+                item => vec![item.clone()],
+            })
+        }
+        _ => None,
+    }
+}
+
+fn normalize_native_argument_to_schema(schema: &Value, value: &Value) -> Value {
+    let schema_type = schema.get("type").and_then(Value::as_str);
+    match schema_type {
+        Some("object") => {
+            let Some(input) = value.as_object() else {
+                return value.clone();
+            };
+            let properties = schema.get("properties").and_then(Value::as_object);
+            let mut normalized = input.clone();
+            if let Some(properties) = properties {
+                for (name, property_schema) in properties {
+                    if let Some(field) = input.get(name) {
+                        normalized.insert(
+                            name.clone(),
+                            normalize_native_argument_to_schema(property_schema, field),
+                        );
+                    }
+                }
+            }
+            Value::Object(normalized)
+        }
+        Some("array") => {
+            let Some(items) = normalized_native_array_argument(Some(value)) else {
+                return value.clone();
+            };
+            let item_schema = schema.get("items");
+            Value::Array(
+                items
+                    .iter()
+                    .map(|item| {
+                        item_schema
+                            .map(|schema| normalize_native_argument_to_schema(schema, item))
+                            .unwrap_or_else(|| item.clone())
+                    })
+                    .collect(),
+            )
+        }
+        Some("integer") => value
+            .as_str()
+            .and_then(|raw| raw.trim().parse::<i64>().ok())
+            .map(serde_json::Number::from)
+            .map(Value::Number)
+            .unwrap_or_else(|| value.clone()),
+        Some("number") => value
+            .as_str()
+            .and_then(|raw| raw.trim().parse::<f64>().ok())
+            .and_then(serde_json::Number::from_f64)
+            .map(Value::Number)
+            .unwrap_or_else(|| value.clone()),
+        Some("boolean") => match value.as_str().map(str::trim) {
+            Some("true") => Value::Bool(true),
+            Some("false") => Value::Bool(false),
+            _ => value.clone(),
+        },
+        _ => value.clone(),
+    }
 }
 
 fn schema_accepts_empty_object(schema: &Value) -> bool {

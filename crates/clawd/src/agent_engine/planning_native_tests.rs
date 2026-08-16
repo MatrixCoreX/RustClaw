@@ -903,6 +903,84 @@ fn native_tool_normalizes_only_schema_proven_empty_argument_objects() {
 }
 
 #[test]
+fn native_tool_normalizes_unambiguous_schema_transport_wrappers() {
+    let capability = "web.search_results";
+    let callable = vec![capability.to_string()];
+    let tool_name = native_capability_leaf_tool_name(capability);
+    let group_map = BTreeMap::from([(tool_name.clone(), BTreeSet::from([capability.to_string()]))]);
+    let schemas = BTreeMap::from([(
+        capability.to_string(),
+        json!({
+            "type": "object",
+            "required": ["query"],
+            "properties": {
+                "query": {"type": "string"},
+                "top_k": {"type": "integer"},
+                "domains_allow": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                }
+            },
+            "additionalProperties": false
+        }),
+    )]);
+    let actions = actions_from_native_turn_with_schemas(
+        &turn(
+            vec![ModelToolCall {
+                id: "provider-wrapper".to_string(),
+                name: tool_name,
+                arguments: json!({
+                    "query": "runtime",
+                    "top_k": "3",
+                    "domains_allow": {"item": "example.com"}
+                }),
+            }],
+            "",
+        ),
+        &callable,
+        &group_map,
+        &schemas,
+        None,
+    )
+    .expect("schema-proven transport wrappers normalize");
+
+    assert!(matches!(
+        actions.as_slice(),
+        [AgentAction::CallCapability { capability, args }]
+            if capability == "web.search_results"
+                && args["top_k"] == json!(3)
+                && args["domains_allow"] == json!(["example.com"])
+    ));
+    assert_eq!(
+        normalize_native_argument_to_schema(
+            &json!({"type": "array", "items": {"type": "string"}}),
+            &json!({"item": "example.com", "extra": "ambiguous"}),
+        ),
+        json!({"item": "example.com", "extra": "ambiguous"})
+    );
+}
+
+#[test]
+fn native_capability_loader_normalizes_single_item_transport_wrapper() {
+    let action = action_from_native_capability_group_load(&ModelToolCall {
+        id: "loader-wrapper".to_string(),
+        name: "load_capability_groups".to_string(),
+        arguments: json!({
+            "op": "load_groups",
+            "groups": {"item": "web_search_extract"}
+        }),
+    })
+    .expect("single item wrapper normalizes");
+
+    assert!(matches!(
+        action,
+        AgentAction::CallTool { tool, args }
+            if tool == "load_capability_groups"
+                && args["groups"] == json!(["web_search_extract"])
+    ));
+}
+
+#[test]
 fn native_tool_rejects_capability_outside_runtime_catalog() {
     let unknown_capability = turn(
         vec![ModelToolCall {
