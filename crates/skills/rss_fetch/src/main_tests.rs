@@ -1,6 +1,38 @@
 use super::*;
 
 #[test]
+fn bounded_parallel_map_preserves_input_order_and_runs_concurrently() {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    let active = Arc::new(AtomicUsize::new(0));
+    let peak = Arc::new(AtomicUsize::new(0));
+    let values = vec![3_u64, 1, 4, 2];
+    let output = bounded_parallel_map(&values, 4, {
+        let active = Arc::clone(&active);
+        let peak = Arc::clone(&peak);
+        move |value| {
+            let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+            peak.fetch_max(current, Ordering::SeqCst);
+            std::thread::sleep(Duration::from_millis(30));
+            active.fetch_sub(1, Ordering::SeqCst);
+            value * 10
+        }
+    });
+
+    assert_eq!(output, vec![30, 10, 40, 20]);
+    assert!(peak.load(Ordering::SeqCst) >= 2);
+}
+
+#[test]
+fn source_timeout_reserves_runner_margin_across_worker_batches() {
+    assert_eq!(effective_source_timeout_with_budget(20, 6, Some(30)), 20);
+    assert_eq!(effective_source_timeout_with_budget(60, 1, Some(30)), 27);
+    assert_eq!(effective_source_timeout_with_budget(20, 17, Some(30)), 13);
+    assert_eq!(effective_source_timeout_with_budget(20, 6, None), 20);
+}
+
+#[test]
 fn error_extra_exposes_machine_contract() {
     let extra = error_extra("execution_failed");
 

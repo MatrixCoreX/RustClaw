@@ -144,7 +144,7 @@ export interface DashboardPageProps {
   onRestartPiApp: () => unknown | Promise<unknown>;
   onControlService: (
     serviceName: DashboardCommunicationRow["serviceName"],
-    action: "stop",
+    action: "restart" | "stop",
   ) => unknown | Promise<unknown>;
   onFetchHostSystemSummary: () => unknown | Promise<unknown>;
   onFetchHostDependencies: () => unknown | Promise<unknown>;
@@ -1176,7 +1176,21 @@ export function DashboardPage({
                   </div>
                 </div>
 
-                <div className="mt-4 flex justify-end border-t border-white/8 pt-3">
+                <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-white/8 pt-3">
+                  <button
+                    type="button"
+                    onClick={() => void onControlService(row.serviceName, "restart")}
+                    disabled={Boolean(serviceActionLoading[row.serviceName])}
+                    className="theme-secondary-btn px-3 py-2 text-sm"
+                    aria-label={t(`重启${row.label}`, `Restart ${row.label}`)}
+                  >
+                    {serviceActionLoading[row.serviceName] ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4" />
+                    )}
+                    {serviceActionLoading[row.serviceName] ? t("处理中", "Working") : t("重启", "Restart")}
+                  </button>
                   <button
                     type="button"
                     onClick={async () => {

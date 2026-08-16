@@ -39,3 +39,38 @@ fn impossible_memory_request_is_not_started() {
     assert!(!grant.admitted);
     assert_eq!(grant.wait_reason, Some("memory_unavailable"));
 }
+
+#[test]
+fn low_memory_host_serializes_runtime_work_and_disables_warm_pool() {
+    let plan = runtime_concurrency_plan_for_host(4, 3, 2, true, 4, Some(1024));
+    assert_eq!(plan.worker_concurrency, 1);
+    assert_eq!(plan.skill_concurrency, 1);
+    assert_eq!(plan.memory_background_concurrency, 1);
+    assert!(!plan.runner_warm_pool_enabled);
+}
+
+#[test]
+fn constrained_host_keeps_two_foreground_slots_but_one_background_slot() {
+    let plan = runtime_concurrency_plan_for_host(4, 4, 4, true, 4, Some(4096));
+    assert_eq!(plan.worker_concurrency, 2);
+    assert_eq!(plan.skill_concurrency, 2);
+    assert_eq!(plan.memory_background_concurrency, 1);
+    assert!(!plan.runner_warm_pool_enabled);
+}
+
+#[test]
+fn capable_host_preserves_configured_limits() {
+    let plan = runtime_concurrency_plan_for_host(3, 2, 2, true, 8, Some(16 * 1024));
+    assert_eq!(plan.worker_concurrency, 3);
+    assert_eq!(plan.skill_concurrency, 2);
+    assert_eq!(plan.memory_background_concurrency, 2);
+    assert!(plan.runner_warm_pool_enabled);
+}
+
+#[test]
+fn cpu_count_remains_a_hard_concurrency_ceiling() {
+    let plan = runtime_concurrency_plan_for_host(8, 8, 8, true, 2, None);
+    assert_eq!(plan.worker_concurrency, 2);
+    assert_eq!(plan.skill_concurrency, 2);
+    assert_eq!(plan.memory_background_concurrency, 2);
+}

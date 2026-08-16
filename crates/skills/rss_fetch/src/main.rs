@@ -2,6 +2,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::OpenOptions;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use fs2::FileExt;
@@ -21,6 +23,8 @@ use source_discovery::{
 };
 
 const SKILL_NAME: &str = "rss_fetch";
+const MAX_CONCURRENT_FEED_FETCHES: usize = 16;
+const RUNNER_TIMEOUT_MARGIN_SECONDS: u64 = 3;
 
 /// 单个 active source 的失败状态（持久化在 config 的 source_entries 中）。
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -740,15 +744,98 @@ fn resolve_direct_feed_urls(obj: &serde_json::Map<String, Value>) -> Result<Vec<
     Err("fetch requires url, feed_url, or feed_urls".to_string())
 }
 
+fn bounded_parallel_map<T, R, F>(items: &[T], max_workers: usize, operation: F) -> Vec<R>
+where
+    T: Sync,
+    R: Send,
+    F: Fn(&T) -> R + Sync,
+{
+    if items.is_empty() {
+        return Vec::new();
+    }
+
+    let worker_count = items.len().min(max_workers.max(1));
+    let next_index = AtomicUsize::new(0);
+    let (sender, receiver) = mpsc::channel();
+    let mut ordered = std::iter::repeat_with(|| None)
+        .take(items.len())
+        .collect::<Vec<Option<R>>>();
+
+    std::thread::scope(|scope| {
+        for _ in 0..worker_count {
+            let sender = sender.clone();
+            let next_index = &next_index;
+            let operation = &operation;
+            scope.spawn(move || loop {
+                let index = next_index.fetch_add(1, Ordering::Relaxed);
+                let Some(item) = items.get(index) else {
+                    break;
+                };
+                if sender.send((index, operation(item))).is_err() {
+                    break;
+                }
+            });
+        }
+        drop(sender);
+        for (index, result) in receiver {
+            ordered[index] = Some(result);
+        }
+    });
+
+    ordered
+        .into_iter()
+        .map(|result| result.expect("rss parallel worker must return one result per input"))
+        .collect()
+}
+
+fn effective_source_timeout_with_budget(
+    requested_seconds: u64,
+    source_count: usize,
+    runner_budget_seconds: Option<u64>,
+) -> u64 {
+    let requested_seconds = requested_seconds.clamp(3, 60);
+    let Some(runner_budget_seconds) = runner_budget_seconds.filter(|value| *value > 0) else {
+        return requested_seconds;
+    };
+    let batches = source_count
+        .max(1)
+        .saturating_add(MAX_CONCURRENT_FEED_FETCHES - 1)
+        / MAX_CONCURRENT_FEED_FETCHES;
+    let available_seconds = runner_budget_seconds.saturating_sub(RUNNER_TIMEOUT_MARGIN_SECONDS);
+    let per_batch_seconds = available_seconds
+        .checked_div(batches as u64)
+        .unwrap_or(0)
+        .max(3);
+    requested_seconds.min(per_batch_seconds)
+}
+
+fn effective_source_timeout(requested_seconds: u64, source_count: usize) -> u64 {
+    let runner_budget_seconds = std::env::var("SKILL_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok());
+    effective_source_timeout_with_budget(requested_seconds, source_count, runner_budget_seconds)
+}
+
+fn direct_source_timeout(obj: &serde_json::Map<String, Value>) -> u64 {
+    obj.get("timeout_seconds")
+        .and_then(Value::as_u64)
+        .unwrap_or(15)
+        .clamp(3, 60)
+}
+
 fn fetch_direct_feeds(obj: &serde_json::Map<String, Value>) -> Result<SkillOutput, String> {
     let urls = resolve_direct_feed_urls(obj)?;
+    let source_timeout_seconds = effective_source_timeout(direct_source_timeout(obj), urls.len());
     if urls.len() == 1 {
-        return fetch_single_feed(obj, &urls[0]);
+        return fetch_single_feed(obj, &urls[0], source_timeout_seconds);
     }
     let mut text_parts = Vec::new();
     let mut item_parts = Vec::new();
-    for url in &urls {
-        let output = fetch_single_feed(obj, url)?;
+    let fetched = bounded_parallel_map(&urls, MAX_CONCURRENT_FEED_FETCHES, |url| {
+        fetch_single_feed(obj, url, source_timeout_seconds)
+    });
+    for output in fetched {
+        let output = output?;
         text_parts.push(output.text);
         if let Some(items) = output
             .extra
@@ -767,6 +854,8 @@ fn fetch_direct_feeds(obj: &serde_json::Map<String, Value>) -> Result<SkillOutpu
         "mode": "direct",
         "source_urls": urls,
         "source_count": text_parts.len(),
+        "source_timeout_seconds": source_timeout_seconds,
+        "fetch_concurrency": text_parts.len().min(MAX_CONCURRENT_FEED_FETCHES),
         "item_count": item_parts.len(),
         "field_value": {
             "source_count": text_parts.len(),
@@ -784,6 +873,7 @@ fn fetch_direct_feeds(obj: &serde_json::Map<String, Value>) -> Result<SkillOutpu
 fn fetch_single_feed(
     obj: &serde_json::Map<String, Value>,
     url: &str,
+    source_timeout_seconds: u64,
 ) -> Result<SkillOutput, String> {
     if !is_safe_feed_url(url) {
         return Err("url must start with http:// or https://".to_string());
@@ -793,13 +883,8 @@ fn fetch_single_feed(
         .and_then(|v| v.as_u64())
         .unwrap_or(10)
         .clamp(1, 50) as usize;
-    let timeout_seconds = obj
-        .get("timeout_seconds")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(15)
-        .clamp(3, 60);
     let topic = news_topic_token(None, obj, None);
-    let xml = fetch_public_feed_xml(url, timeout_seconds)?;
+    let xml = fetch_public_feed_xml(url, source_timeout_seconds)?;
     let parsed_items = parse_feed_items(&xml, limit);
     if parsed_items.is_empty() {
         return Err("no_parseable_feed_items".to_string());
@@ -820,6 +905,8 @@ fn fetch_single_feed(
         "mode": "direct",
         "source_url": url,
         "source_count": 1,
+        "source_timeout_seconds": source_timeout_seconds,
+        "fetch_concurrency": 1,
         "item_count": items.len(),
         "field_value": {
             "source_count": 1,
@@ -944,9 +1031,15 @@ fn fetch_layered_news(
     let mut state_updates: HashMap<String, SourceStateEntry> = HashMap::new();
     let mut to_deprecate: Vec<DeprecatedEntry> = Vec::new();
 
-    for (url, state) in &urls_with_state {
+    let source_timeout_seconds = effective_source_timeout(timeout_seconds, urls_with_state.len());
+    let fetched =
+        bounded_parallel_map(&urls_with_state, MAX_CONCURRENT_FEED_FETCHES, |(url, _)| {
+            fetch_public_feed_xml(url, source_timeout_seconds)
+        });
+
+    for ((url, state), fetched_feed) in urls_with_state.iter().zip(fetched) {
         let mut state = state.clone();
-        match fetch_public_feed_xml(url, timeout_seconds) {
+        match fetched_feed {
             Ok(xml) => {
                 let parsed = parse_feed_items(&xml, per_feed_limit);
                 if parsed.is_empty() {
@@ -1058,6 +1151,8 @@ fn fetch_layered_news(
         "category": category,
         "mode": if is_explicit { "explicit_urls" } else { "category" },
         "source_count": urls_with_state.len(),
+        "source_timeout_seconds": source_timeout_seconds,
+        "fetch_concurrency": urls_with_state.len().min(MAX_CONCURRENT_FEED_FETCHES),
         "sources_ok": success_count,
         "sources_failed": failed_count,
         "item_count": extra_items.len(),

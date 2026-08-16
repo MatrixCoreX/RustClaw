@@ -566,4 +566,5 @@ enum ServiceAction {
     Start,
     Stop,
     Restart,
+    Reset,
 }

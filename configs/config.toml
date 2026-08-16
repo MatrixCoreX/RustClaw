@@ -9,7 +9,7 @@
 #   - ToolsConfig::default()               => allow=[], allow_sudo=false,
 #                                              allow_path_outside_workspace=false
 #   - default_skill_timeout_seconds()      => 30s
-#   - default_tool_cmd_timeout_seconds()   => 60s
+#   - default_tool_cmd_timeout_seconds()   => 180s
 #
 # 部署生产环境的推荐做法：
 #   1. 复制本文件，删除 [tools] 整节让它走代码安全默认，或显式只保留需要的字段。
@@ -31,7 +31,7 @@ default_locale = "zh-CN"
 # 风险/Risk: 超时太短会频繁 busy；路径错误会导致服务无法启动/读写.
 [database]
 # SQLite busy 超时（毫秒） / SQLite busy timeout in milliseconds.
-busy_timeout_ms = 2000
+busy_timeout_ms = 5000
 # SQLite 文件路径 / SQLite file path.
 sqlite_path = "data/agent-runtime.db"
 # 技能私有数据库根目录；每个持久化技能只访问自己的 `<skill>/state.db`。
@@ -509,8 +509,8 @@ note = "placeholder"
 # 已收敛项：
 # - `allow_sudo`               true → false  （需要 sudo 的场景请按渠道/任务显式打开）
 # - `allow_path_outside_workspace` true → false  （只读写当前 workspace 内路径）
-# - `cmd_timeout_seconds`      30 → 60        （单次 shell 命令墙钟上限）
-# - `cmd_idle_timeout_seconds` 新增 60        （stdout/stderr 无输出卡住上限）
+# - `cmd_timeout_seconds`      30 → 180       （慢设备普通 shell 命令墙钟上限）
+# - `cmd_idle_timeout_seconds` 新增 120       （stdout/stderr 无输出卡住上限）
 # - `cmd_max_output_bytes`     新增 8000      （持续输出截断上限）
 # `coding` profile 仅允许本地编码、检查、任务控制和知识读取能力；网络发布、媒体生成、
 # 账户访问、安装和服务变更操作需要管理员在部署配置中按 skill/capability 显式放行；
@@ -525,8 +525,8 @@ allow_path_outside_workspace = false
 # Global baseline switch. Runtime only honors this for admin-authenticated tasks;
 # ordinary users are always treated as false even when this is true.
 allow_sudo = false
-cmd_timeout_seconds = 60
-cmd_idle_timeout_seconds = 60
+cmd_timeout_seconds = 180
+cmd_idle_timeout_seconds = 120
 # Durable background jobs have no default runtime deadline. Use the explicit
 # deadline-bearing capability when a user or host policy requires one.
 cmd_async_retention_seconds = 86400

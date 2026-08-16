@@ -12,7 +12,7 @@ planner_kind = "tool"
 group = "system"
 aliases = ["shell", "exec"]
 argument_aliases = { command = ["cmd", "shell_command"] }
-timeout_seconds = 60
+timeout_seconds = 180
 prompt_file = "prompts/skills/run_cmd.md"
 output_kind = "text"
 risk_level = "high"

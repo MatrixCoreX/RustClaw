@@ -1,6 +1,64 @@
 use claw_core::skill_registry::{SkillResourceClass, SkillResourceRequest};
 use serde_json::{json, Value};
 
+const LOW_MEMORY_HOST_MAX_MIB: u64 = 2 * 1024;
+const CONSTRAINED_MEMORY_HOST_MAX_MIB: u64 = 4 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RuntimeConcurrencyPlan {
+    pub(crate) worker_concurrency: usize,
+    pub(crate) skill_concurrency: usize,
+    pub(crate) memory_background_concurrency: usize,
+    pub(crate) runner_warm_pool_enabled: bool,
+    pub(crate) cpu_total: usize,
+    pub(crate) memory_total_mib: Option<u64>,
+}
+
+pub(crate) fn runtime_concurrency_plan(
+    configured_workers: usize,
+    configured_skills: usize,
+    configured_memory_background: usize,
+    configured_runner_warm_pool: bool,
+) -> RuntimeConcurrencyPlan {
+    runtime_concurrency_plan_for_host(
+        configured_workers,
+        configured_skills,
+        configured_memory_background,
+        configured_runner_warm_pool,
+        std::thread::available_parallelism().map_or(1, usize::from),
+        total_memory_mib(),
+    )
+}
+
+fn runtime_concurrency_plan_for_host(
+    configured_workers: usize,
+    configured_skills: usize,
+    configured_memory_background: usize,
+    configured_runner_warm_pool: bool,
+    cpu_total: usize,
+    memory_total_mib: Option<u64>,
+) -> RuntimeConcurrencyPlan {
+    let cpu_total = cpu_total.max(1);
+    let configured_workers = configured_workers.max(1);
+    let configured_skills = configured_skills.max(1);
+    let configured_memory_background = configured_memory_background.max(1);
+    let (foreground_ceiling, background_ceiling, warm_pool_allowed) = match memory_total_mib {
+        Some(total) if total <= LOW_MEMORY_HOST_MAX_MIB => (1, 1, false),
+        Some(total) if total <= CONSTRAINED_MEMORY_HOST_MAX_MIB => (2, 1, false),
+        _ => (cpu_total, cpu_total, true),
+    };
+    RuntimeConcurrencyPlan {
+        worker_concurrency: configured_workers.min(cpu_total).min(foreground_ceiling),
+        skill_concurrency: configured_skills.min(cpu_total).min(foreground_ceiling),
+        memory_background_concurrency: configured_memory_background
+            .min(cpu_total)
+            .min(background_ceiling),
+        runner_warm_pool_enabled: configured_runner_warm_pool && warm_pool_allowed,
+        cpu_total,
+        memory_total_mib,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ResourceGrant {
     pub(crate) admitted: bool,
@@ -86,6 +144,40 @@ fn available_memory_mb() -> Option<u64> {
         });
     }
     #[cfg(not(target_os = "linux"))]
+    None
+}
+
+fn total_memory_mib() -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    {
+        let raw = std::fs::read_to_string("/proc/meminfo").ok()?;
+        return raw.lines().find_map(|line| {
+            let value = line.strip_prefix("MemTotal:")?;
+            value
+                .split_whitespace()
+                .next()?
+                .parse::<u64>()
+                .ok()
+                .map(|kb| kb / 1024)
+        });
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let output = std::process::Command::new("sysctl")
+            .args(["-n", "hw.memsize"])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        return std::str::from_utf8(&output.stdout)
+            .ok()?
+            .trim()
+            .parse::<u64>()
+            .ok()
+            .map(|bytes| bytes / 1024 / 1024);
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     None
 }
 

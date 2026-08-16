@@ -1072,6 +1072,14 @@ export default function App() {
     onHealthRefresh: async () => {
       await fetchHealth();
     },
+    onConfigRefresh: async () => {
+      await Promise.all([
+        fetchWechatConfig(),
+        fetchFeishuConfig(),
+        fetchLarkConfig(),
+        fetchTelegramConfig(),
+      ]);
+    },
   });
   const {
     waLoginDialogOpen,
@@ -1872,6 +1880,11 @@ export default function App() {
               wechatLoginError={wechatLoginError}
               wechatConfigError={wechatConfigError}
               wechatConfigEnabled={wechatConfigData?.enabled === true}
+              wechatConfigured={
+                wechatConfigData?.enabled === true
+                || wechatConfigData?.bot_token_configured === true
+                || wechatConfigData?.saved_session_present === true
+              }
               wechatConfigSaving={wechatConfigSaving}
               wechatServiceHealthy={health?.wechatd_healthy === true}
               whatsappWebQrRequested={waLoginDialogOpen}

@@ -7,6 +7,7 @@ fn parse_service_action(raw: &str) -> Option<ServiceAction> {
         "start" => Some(ServiceAction::Start),
         "stop" => Some(ServiceAction::Stop),
         "restart" => Some(ServiceAction::Restart),
+        "reset" => Some(ServiceAction::Reset),
         _ => None,
     }
 }
@@ -16,9 +17,11 @@ fn service_action_token(action: ServiceAction) -> &'static str {
         ServiceAction::Start => "start",
         ServiceAction::Stop => "stop",
         ServiceAction::Restart => "restart",
+        ServiceAction::Reset => "reset",
     }
 }
 
+#[derive(Debug)]
 struct ServiceControlFailure {
     error_code: &'static str,
     data: Value,
@@ -76,6 +79,199 @@ fn service_start_script(service: &str) -> Option<&'static str> {
         "feishud" => Some("component_start/start-feishud.sh"),
         "larkd" => Some("component_start/start-larkd.sh"),
         _ => None,
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ChannelServiceConfigBinding {
+    relative_path: &'static str,
+    enabled_section: &'static str,
+}
+
+fn channel_service_config_binding(service: &str) -> Option<ChannelServiceConfigBinding> {
+    match service {
+        "telegramd" => Some(ChannelServiceConfigBinding {
+            relative_path: "configs/channels/telegram.toml",
+            enabled_section: "telegram_bot",
+        }),
+        "whatsappd" => Some(ChannelServiceConfigBinding {
+            relative_path: "configs/channels/whatsapp-cloud.toml",
+            enabled_section: "whatsapp",
+        }),
+        "whatsapp_webd" => Some(ChannelServiceConfigBinding {
+            relative_path: "configs/channels/whatsapp-web.toml",
+            enabled_section: "whatsapp_web",
+        }),
+        "wechatd" => Some(ChannelServiceConfigBinding {
+            relative_path: "configs/channels/wechat.toml",
+            enabled_section: "wechat",
+        }),
+        "feishud" => Some(ChannelServiceConfigBinding {
+            relative_path: "configs/channels/feishu.toml",
+            enabled_section: "feishu",
+        }),
+        "larkd" => Some(ChannelServiceConfigBinding {
+            relative_path: "configs/channels/lark.toml",
+            enabled_section: "lark",
+        }),
+        _ => None,
+    }
+}
+
+fn read_channel_service_config(
+    state: &AppState,
+    service: &str,
+) -> Result<(ChannelServiceConfigBinding, String), ServiceControlFailure> {
+    let binding = channel_service_config_binding(service)
+        .ok_or_else(|| ServiceControlFailure::new("unsupported_service"))?;
+    let raw = fs::read_to_string(state.skill_rt.workspace_root.join(binding.relative_path))
+        .map_err(|error| {
+            ServiceControlFailure::with_data(
+                "service_config_read_failed",
+                json!({"detail": error.to_string(), "config_path": binding.relative_path}),
+            )
+        })?;
+    Ok((binding, raw))
+}
+
+fn persist_channel_service_enabled(
+    state: &AppState,
+    service: &str,
+    enabled: bool,
+) -> Result<(), ServiceControlFailure> {
+    let Some(binding) = channel_service_config_binding(service) else {
+        return Ok(());
+    };
+    let (_, raw) = read_channel_service_config(state, service)?;
+    let token = if enabled { "true" } else { "false" };
+    let mut output =
+        upsert_section_key_line(&raw, binding.enabled_section, "enabled", token);
+    if service == "whatsappd" {
+        output = upsert_section_key_line(&output, "whatsapp_cloud", "enabled", token);
+    }
+    write_workspace_and_mounted_file(
+        &state.skill_rt.workspace_root,
+        binding.relative_path,
+        &output,
+    )
+    .map_err(|error| {
+        ServiceControlFailure::with_data(
+            "service_config_write_failed",
+            json!({"detail": error.to_string(), "config_path": binding.relative_path}),
+        )
+    })
+}
+
+fn reset_channel_service_config(
+    state: &AppState,
+    service: &str,
+) -> Result<(), ServiceControlFailure> {
+    let (binding, raw) = read_channel_service_config(state, service)?;
+    let mut output = upsert_section_key_line(&raw, binding.enabled_section, "enabled", "false");
+    let reset_fields: &[(&str, &str, &str)] = match service {
+        "telegramd" => &[
+            ("telegram", "bot_token", "\"\""),
+            ("telegram", "bots", "[]"),
+            ("telegram", "bindings", "[]"),
+        ],
+        "whatsappd" => &[
+            ("whatsapp", "access_token", "\"\""),
+            ("whatsapp", "app_secret", "\"\""),
+            ("whatsapp", "verify_token", "\"\""),
+            ("whatsapp", "phone_number_id", "\"\""),
+            ("whatsapp", "bindings", "[]"),
+            ("whatsapp_cloud", "enabled", "false"),
+        ],
+        "whatsapp_webd" => &[("whatsapp_web", "bindings", "[]")],
+        "wechatd" => &[
+            ("wechat", "bot_token", "\"\""),
+            ("wechat", "wechat_uin_base64", "\"\""),
+        ],
+        "feishud" => &[
+            ("feishu", "app_id", "\"\""),
+            ("feishu", "app_secret", "\"\""),
+            ("feishu", "verification_token", "\"\""),
+            ("feishu", "encrypt_key", "\"\""),
+        ],
+        "larkd" => &[
+            ("lark", "app_id", "\"\""),
+            ("lark", "app_secret", "\"\""),
+            ("lark", "verification_token", "\"\""),
+            ("lark", "encrypt_key", "\"\""),
+        ],
+        _ => return Err(ServiceControlFailure::new("unsupported_service")),
+    };
+    for (section, key, value) in reset_fields {
+        output = upsert_section_key_line(&output, section, key, value);
+    }
+    write_workspace_and_mounted_file(
+        &state.skill_rt.workspace_root,
+        binding.relative_path,
+        &output,
+    )
+    .map_err(|error| {
+        ServiceControlFailure::with_data(
+            "service_config_write_failed",
+            json!({"detail": error.to_string(), "config_path": binding.relative_path}),
+        )
+    })?;
+
+    let local_state = match service {
+        "whatsapp_webd" => Some(state.skill_rt.workspace_root.join("data/wa-web-auth")),
+        "wechatd" => Some(
+            state
+                .skill_rt
+                .workspace_root
+                .join("data/wechatd/session.json"),
+        ),
+        _ => None,
+    };
+    if let Some(path) = local_state {
+        let result = if path.is_dir() {
+            fs::remove_dir_all(path)
+        } else {
+            fs::remove_file(path)
+        };
+        if let Err(error) = result {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                return Err(ServiceControlFailure::with_data(
+                    "service_local_state_reset_failed",
+                    json!({"detail": error.to_string()}),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn channel_binding_adapter(service: &str) -> Option<&'static str> {
+    match service {
+        "telegramd" => Some("telegram_bot"),
+        "whatsappd" => Some("whatsapp_cloud"),
+        "whatsapp_webd" => Some("whatsapp_web"),
+        "wechatd" => Some("wechat"),
+        "feishud" => Some("feishu"),
+        "larkd" => Some("lark"),
+        _ => None,
+    }
+}
+
+async fn terminate_channel_service_processes(service: &str) {
+    if let Some(process_name) = service_process_name(service) {
+        if let Some(pids) = daemon_process_pids_by_name(process_name) {
+            for pid in pids {
+                let cmd = format!("kill -TERM {} >/dev/null 2>&1 || true", pid);
+                let _ = Command::new("bash").arg("-lc").arg(cmd).output().await;
+            }
+        }
+    }
+    for extra_name in service_extra_process_names_on_stop(service) {
+        if let Some(pids) = daemon_process_pids_by_name(extra_name) {
+            for pid in pids {
+                let cmd = format!("kill -TERM {} >/dev/null 2>&1 || true", pid);
+                let _ = Command::new("bash").arg("-lc").arg(cmd).output().await;
+            }
+        }
     }
 }
 
@@ -208,15 +404,12 @@ fn validate_service_start_readiness(
 ) -> Result<(), ServiceControlFailure> {
     match service {
         "wechatd" => {
-            let config = load_wechat_config_response(state).map_err(|err| {
+            load_wechat_config_response(state).map_err(|err| {
                 ServiceControlFailure::with_data(
                     "wechat_config_read_failed",
                     json!({"detail": err.to_string()}),
                 )
             })?;
-            if !config.enabled {
-                return Err(ServiceControlFailure::new("service_disabled"));
-            }
             Ok(())
         }
         "feishud" => {
@@ -226,9 +419,6 @@ fn validate_service_start_readiness(
                     json!({"detail": err.to_string()}),
                 )
             })?;
-            if !config.enabled {
-                return Err(ServiceControlFailure::new("service_disabled"));
-            }
             if config.app_id.trim().is_empty() || config.app_secret.trim().is_empty() {
                 return Err(ServiceControlFailure::new("feishu_credentials_missing"));
             }
@@ -249,9 +439,6 @@ fn validate_service_start_readiness(
                     json!({"detail": err.to_string()}),
                 )
             })?;
-            if !config.enabled {
-                return Err(ServiceControlFailure::new("service_disabled"));
-            }
             if config.app_id.trim().is_empty() || config.app_secret.trim().is_empty() {
                 return Err(ServiceControlFailure::new("lark_credentials_missing"));
             }
@@ -265,6 +452,60 @@ fn validate_service_start_readiness(
             }
             Ok(())
         }
+        "telegramd" => {
+            let (_, raw) = read_channel_service_config(state, service)?;
+            let value = toml::from_str::<toml::Value>(&raw).map_err(|error| {
+                ServiceControlFailure::with_data(
+                    "telegram_config_read_failed",
+                    json!({"detail": error.to_string()}),
+                )
+            })?;
+            let telegram = value.get("telegram").and_then(toml::Value::as_table);
+            let primary_configured = telegram
+                .and_then(|table| table.get("bot_token"))
+                .and_then(toml::Value::as_str)
+                .is_some_and(|token| !token.trim().is_empty());
+            let extra_configured = telegram
+                .and_then(|table| table.get("bots"))
+                .and_then(toml::Value::as_array)
+                .is_some_and(|bots| {
+                    bots.iter().any(|bot| {
+                        bot.get("bot_token")
+                            .and_then(toml::Value::as_str)
+                            .is_some_and(|token| !token.trim().is_empty())
+                    })
+                });
+            if !primary_configured && !extra_configured {
+                return Err(ServiceControlFailure::new("telegram_credentials_missing"));
+            }
+            Ok(())
+        }
+        "whatsappd" => {
+            let (_, raw) = read_channel_service_config(state, service)?;
+            let value = toml::from_str::<toml::Value>(&raw).map_err(|error| {
+                ServiceControlFailure::with_data(
+                    "whatsapp_config_read_failed",
+                    json!({"detail": error.to_string()}),
+                )
+            })?;
+            let section = value.get("whatsapp").and_then(toml::Value::as_table);
+            let has_value = |key: &str| {
+                section
+                    .and_then(|table| table.get(key))
+                    .and_then(toml::Value::as_str)
+                    .is_some_and(|value| {
+                        let value = value.trim();
+                        !value.is_empty() && !value.starts_with("REPLACE_ME")
+                    })
+            };
+            if !has_value("access_token")
+                || !has_value("app_secret")
+                || !has_value("phone_number_id")
+            {
+                return Err(ServiceControlFailure::new("whatsapp_credentials_missing"));
+            }
+            Ok(())
+        }
         _ => Ok(()),
     }
 }
@@ -274,8 +515,17 @@ async fn control_service(
     headers: HeaderMap,
     AxumPath((service, action)): AxumPath<(String, String)>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    if let Err(resp) = require_ui_identity(&state, &headers) {
-        return resp;
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err(resp) => return resp,
+    };
+    if !identity.role.eq_ignore_ascii_case("admin") {
+        return service_control_error_response(
+            StatusCode::FORBIDDEN,
+            service.as_str(),
+            action.trim(),
+            ServiceControlFailure::new("admin_role_required"),
+        );
     }
     let action = match parse_service_action(action.trim()) {
         Some(v) => v,
@@ -304,6 +554,14 @@ async fn control_service(
             if let Err(err) = validate_service_start_readiness(&state, service.as_str()) {
                 return service_control_error_response(
                     StatusCode::BAD_REQUEST,
+                    service.as_str(),
+                    action_token,
+                    err,
+                );
+            }
+            if let Err(err) = persist_channel_service_enabled(&state, service.as_str(), true) {
+                return service_control_error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
                     service.as_str(),
                     action_token,
                     err,
@@ -345,6 +603,7 @@ async fn control_service(
                 shell_escape_arg(log_file.as_str())
             );
             if let Err(err) = spawn_background_shell(&cmd) {
+                let _ = persist_channel_service_enabled(&state, service.as_str(), false);
                 return service_control_error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     service.as_str(),
@@ -356,6 +615,7 @@ async fn control_service(
                 );
             }
             if !wait_for_service_running(service.as_str()).await {
+                let _ = persist_channel_service_enabled(&state, service.as_str(), false);
                 return service_control_error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     service.as_str(),
@@ -390,6 +650,14 @@ async fn control_service(
                         "service_gateway_managed",
                         json!({"managed_by": "channel-gateway"}),
                     ),
+                );
+            }
+            if let Err(err) = persist_channel_service_enabled(&state, service.as_str(), false) {
+                return service_control_error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    service.as_str(),
+                    action_token,
+                    err,
                 );
             }
             let Some(process_name) = service_process_name(service.as_str()) else {
@@ -506,28 +774,23 @@ async fn control_service(
                     err,
                 );
             }
-            let Some(process_name) = service_process_name(service.as_str()) else {
+            if let Err(err) = persist_channel_service_enabled(&state, service.as_str(), true) {
+                return service_control_error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    service.as_str(),
+                    action_token,
+                    err,
+                );
+            }
+            if service_process_name(service.as_str()).is_none() {
                 return service_control_error_response(
                     StatusCode::BAD_REQUEST,
                     service.as_str(),
                     action_token,
                     ServiceControlFailure::new("unsupported_service"),
                 );
-            };
-            if let Some(pids) = daemon_process_pids_by_name(process_name) {
-                for pid in pids {
-                    let cmd = format!("kill -TERM {} >/dev/null 2>&1 || true", pid);
-                    let _ = Command::new("bash").arg("-lc").arg(cmd).output().await;
-                }
             }
-            for extra_name in service_extra_process_names_on_stop(service.as_str()) {
-                if let Some(pids) = daemon_process_pids_by_name(extra_name) {
-                    for pid in pids {
-                        let cmd = format!("kill -TERM {} >/dev/null 2>&1 || true", pid);
-                        let _ = Command::new("bash").arg("-lc").arg(cmd).output().await;
-                    }
-                }
-            }
+            terminate_channel_service_processes(service.as_str()).await;
             if let Some(pid_file) = service_pid_file(service.as_str()) {
                 let workspace = state.skill_rt.workspace_root.to_string_lossy();
                 let cmd = format!(
@@ -590,6 +853,66 @@ async fn control_service(
                         "action": "restart",
                         "status": "restarted",
                         "profile": profile
+                    })),
+                    error: None,
+                }),
+            )
+        }
+        ServiceAction::Reset => {
+            if service_is_gateway_managed(service.as_str()) {
+                return service_control_error_response(
+                    StatusCode::BAD_REQUEST,
+                    service.as_str(),
+                    action_token,
+                    ServiceControlFailure::with_data(
+                        "service_gateway_managed",
+                        json!({"managed_by": "channel-gateway"}),
+                    ),
+                );
+            }
+            if let Err(err) = reset_channel_service_config(&state, service.as_str()) {
+                return service_control_error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    service.as_str(),
+                    action_token,
+                    err,
+                );
+            }
+            if service_process_name(service.as_str()).is_none() {
+                return service_control_error_response(
+                    StatusCode::BAD_REQUEST,
+                    service.as_str(),
+                    action_token,
+                    ServiceControlFailure::new("unsupported_service"),
+                );
+            }
+            terminate_channel_service_processes(service.as_str()).await;
+            if let Some(pid_file) = service_pid_file(service.as_str()) {
+                let _ = fs::remove_file(state.skill_rt.workspace_root.join(".pids").join(pid_file));
+            }
+            if let Some(adapter) = channel_binding_adapter(service.as_str()) {
+                if let Err(error) =
+                    reset_channel_binding_state_for_user_key(&state, adapter, &identity.user_key)
+                {
+                    return service_control_error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        service.as_str(),
+                        action_token,
+                        ServiceControlFailure::with_data(
+                            "service_binding_reset_failed",
+                            json!({"detail": error.to_string()}),
+                        ),
+                    );
+                }
+            }
+            (
+                StatusCode::OK,
+                Json(ApiResponse {
+                    ok: true,
+                    data: Some(json!({
+                        "service": service,
+                        "action": "reset",
+                        "status": "reset"
                     })),
                     error: None,
                 }),
