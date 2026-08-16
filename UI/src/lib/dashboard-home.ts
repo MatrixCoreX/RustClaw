@@ -6,7 +6,8 @@ export type DashboardSection =
   | "persona"
   | "dependencies"
   | "updates"
-  | "communications";
+  | "communications"
+  | "git";
 
 export const DASHBOARD_CATEGORY_PAGES = ["models", "services", "skills"] as const;
 

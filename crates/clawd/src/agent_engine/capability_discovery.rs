@@ -98,9 +98,15 @@ pub(super) fn handle_capability_group_load(
         task,
         &loop_state.loaded_capability_skills,
     );
+    let authorized =
+        crate::capability_map::planner_loadable_capability_group_members_for_task(
+            state,
+            task,
+            &BTreeSet::new(),
+        );
     let invalid = groups
         .iter()
-        .filter(|group| !loadable.contains_key(*group))
+        .filter(|group| !loadable.contains_key(*group) && !authorized.contains_key(*group))
         .cloned()
         .collect::<Vec<_>>();
     if !invalid.is_empty() {
@@ -113,7 +119,7 @@ pub(super) fn handle_capability_group_load(
 
     let resolved_skills = groups
         .iter()
-        .flat_map(|group| loadable.get(group).into_iter().flatten().cloned())
+        .flat_map(|group| authorized.get(group).into_iter().flatten().cloned())
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();

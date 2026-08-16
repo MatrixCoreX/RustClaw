@@ -76,14 +76,28 @@ fn group_loader_expands_only_exact_registry_groups() {
         .as_deref()
         .is_some_and(|output| output.contains(&format!("\"loaded_groups\":[\"{group}\"]"))));
 
+    let repeated = handle_capability_group_load(
+        &state,
+        &task,
+        &mut loop_state,
+        &json!({"groups": [&group]}),
+        &format!("load:{group}:again"),
+        2,
+        2,
+        &mut executed,
+    )
+    .expect("reloading an authorized group must be idempotent");
+    assert!(matches!(repeated, ActionLoopDecision::StopRound(_)));
+    assert_eq!(executed, 2);
+
     let error = match handle_capability_group_load(
         &state,
         &task,
         &mut loop_state,
         &json!({"groups": ["not_registered"]}),
         "load:invalid",
-        2,
-        2,
+        3,
+        3,
         &mut executed,
     ) {
         Ok(_) => panic!("unknown registry group must be rejected"),
