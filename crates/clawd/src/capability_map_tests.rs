@@ -199,6 +199,26 @@ fn real_registry_keeps_document_content_and_office_structure_semantics_distinct(
 }
 
 #[test]
+fn real_registry_leaves_semantic_source_selection_to_the_agent_loop() {
+    let registry_toml = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml"),
+    )
+    .expect("read registry");
+    let web_search = registry_entry_from(&registry_toml, "web_search_extract");
+    let search_results = web_search
+        .planner_capabilities
+        .iter()
+        .find(|mapping| mapping.name == "web.search_results")
+        .expect("web.search_results mapping");
+
+    assert!(search_results.required_companions.is_empty());
+    assert!(search_results
+        .description
+        .as_deref()
+        .is_some_and(|description| description.contains("explicit web-only requests remain")));
+}
+
+#[test]
 fn real_config_native_schemas_preserve_nonempty_and_nested_read_contracts() {
     let state = crate::AppState::test_default_with_fixture_provider()
         .with_prompt_layers_installed()
