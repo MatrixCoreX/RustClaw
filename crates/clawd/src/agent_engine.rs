@@ -915,7 +915,7 @@ async fn build_resume_context_error(
     ];
     if structured_error.is_some() {
         policy_boundary.push(
-            "preserve_observed_failure_fields=status,error_code,failure_phase,retryable"
+            "preserve_observed_failure_fields=status,error_code,failure_phase,retryable,side_effect_applied"
                 .to_string(),
         );
     }
@@ -1118,7 +1118,7 @@ pub(crate) async fn run_agent_with_tools(
     if user_text.is_empty() {
         return Ok(AskReply::non_llm(String::new()));
     }
-    run_agent_with_loop_with_initial_observations(
+    let result = run_agent_with_loop_with_initial_observations(
         state,
         task,
         goal,
@@ -1126,7 +1126,9 @@ pub(crate) async fn run_agent_with_tools(
         agent_run_context.as_ref(),
         initial_task_observations,
     )
-    .await
+    .await;
+    settle_browser_session_leases(state, task, &result).await;
+    result
 }
 
 pub(crate) async fn run_agent_with_tools_seeded(
@@ -1148,7 +1150,7 @@ pub(crate) async fn run_agent_with_tools_seeded(
     );
     let user_text = user_request.trim();
     if !user_text.is_empty() {
-        return run_agent_with_loop_seeded(
+        let result = run_agent_with_loop_seeded(
             state,
             task,
             goal,
@@ -1158,6 +1160,8 @@ pub(crate) async fn run_agent_with_tools_seeded(
             initial_task_observations,
         )
         .await;
+        settle_browser_session_leases(state, task, &result).await;
+        return result;
     }
     Ok(AskReply::non_llm(String::new()))
 }
@@ -1257,7 +1261,7 @@ pub(crate) async fn run_agent_with_tools_direct_plan(
     agent_run_context: Option<AgentRunContext>,
     initial_plan: &PlanResult,
 ) -> Result<AskReply, String> {
-    run_agent_with_loop_direct_plan(
+    let result = run_agent_with_loop_direct_plan(
         state,
         task,
         &initial_plan.goal,
@@ -1265,7 +1269,9 @@ pub(crate) async fn run_agent_with_tools_direct_plan(
         agent_run_context.as_ref(),
         initial_plan,
     )
-    .await
+    .await;
+    settle_browser_session_leases(state, task, &result).await;
+    result
 }
 
 pub(crate) async fn run_agent_with_tools_seeded_direct_plan(
@@ -1277,7 +1283,7 @@ pub(crate) async fn run_agent_with_tools_seeded_direct_plan(
     initial_task_observations: &[Value],
     initial_plan: &PlanResult,
 ) -> Result<AskReply, String> {
-    run_agent_with_loop_seeded_direct_plan(
+    let result = run_agent_with_loop_seeded_direct_plan(
         state,
         task,
         &initial_plan.goal,
@@ -1287,7 +1293,56 @@ pub(crate) async fn run_agent_with_tools_seeded_direct_plan(
         initial_plan,
         initial_task_observations,
     )
-    .await
+    .await;
+    settle_browser_session_leases(state, task, &result).await;
+    result
+}
+
+fn reply_preserves_browser_session_leases(reply: &AskReply) -> bool {
+    let Some(lifecycle) = reply
+        .task_journal
+        .as_ref()
+        .and_then(|journal| journal.task_lifecycle.as_ref())
+    else {
+        return false;
+    };
+    let state = lifecycle
+        .get("state")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    let checkpoint_id = lifecycle
+        .get("checkpoint_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    matches!(state, "waiting" | "background" | "needs_user") && !checkpoint_id.is_empty()
+}
+
+async fn settle_browser_session_leases(
+    state: &AppState,
+    task: &ClaimedTask,
+    result: &Result<AskReply, String>,
+) {
+    if result
+        .as_ref()
+        .ok()
+        .is_some_and(reply_preserves_browser_session_leases)
+    {
+        return;
+    }
+    let closed = state
+        .core
+        .browser_sessions
+        .close_task_sessions(&task.task_id)
+        .await;
+    if closed > 0 {
+        info!(
+            task_id = %task.task_id,
+            closed,
+            "browser_task_sessions_released"
+        );
+    }
 }
 
 #[cfg(test)]

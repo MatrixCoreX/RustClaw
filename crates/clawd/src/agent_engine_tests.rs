@@ -1231,6 +1231,30 @@ fn resume_failure_machine_facts_preserve_proven_not_created_fields() {
 }
 
 #[test]
+fn browser_session_leases_are_preserved_only_for_checkpoint_handoffs() {
+    let terminal = crate::AskReply::non_llm(String::new());
+    assert!(!reply_preserves_browser_session_leases(&terminal));
+
+    let mut waiting_without_checkpoint = crate::task_journal::TaskJournal::new("continue");
+    waiting_without_checkpoint.task_lifecycle = Some(serde_json::json!({
+        "state": "waiting"
+    }));
+    let waiting_without_checkpoint =
+        crate::AskReply::non_llm(String::new()).with_task_journal(waiting_without_checkpoint);
+    assert!(!reply_preserves_browser_session_leases(
+        &waiting_without_checkpoint
+    ));
+
+    let mut waiting = crate::task_journal::TaskJournal::new("continue");
+    waiting.task_lifecycle = Some(serde_json::json!({
+        "state": "waiting",
+        "checkpoint_id": "checkpoint-browser"
+    }));
+    let waiting = crate::AskReply::non_llm(String::new()).with_task_journal(waiting);
+    assert!(reply_preserves_browser_session_leases(&waiting));
+}
+
+#[test]
 fn test_extract_single_explicit_path_from_request_ok() {
     let text = "先读 /home/guagua/test/README.md 开头，再用一句话总结";
     assert_eq!(
