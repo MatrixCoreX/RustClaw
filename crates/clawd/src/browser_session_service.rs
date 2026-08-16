@@ -212,7 +212,10 @@ impl BrowserSessionService {
                     .lock()
                     .await
                     .insert(session_id, session.clone());
-                Ok(project_result(&session, result))
+                Ok(project_result(
+                    &session,
+                    compact_session_open_result(result),
+                ))
             }
             Err(error) => {
                 kill_bridge(&session).await;
@@ -488,6 +491,13 @@ async fn call_bridge(
     Ok(result)
 }
 
+fn compact_session_open_result(mut result: Value) -> Value {
+    if let Some(object) = result.as_object_mut() {
+        object.remove("snapshot");
+    }
+    result
+}
+
 fn project_result(session: &LiveSession, result: Value) -> Value {
     let lease_expires_at = session.lease_expires_at.lock().map(|v| *v).unwrap_or(0);
     json!({
@@ -647,6 +657,21 @@ mod tests {
         let page_generation = opened["result"]["page_generation"]
             .as_u64()
             .expect("page generation");
+        assert!(opened["result"].get("snapshot").is_none());
+        let session = service
+            .inner
+            .sessions
+            .lock()
+            .await
+            .get(session_id)
+            .cloned()
+            .expect("live session");
+        assert!(session
+            .last_safe_snapshot
+            .lock()
+            .expect("snapshot lock")
+            .is_some());
+        drop(session);
 
         let mut other_actor = binding.clone();
         other_actor.actor_ref = "actor-b".to_string();

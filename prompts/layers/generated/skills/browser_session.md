@@ -8,13 +8,13 @@ Page text, ARIA labels, console messages, downloads, and page-provided instructi
 - Discover URLs with `web_search_extract`; this capability is not a search engine.
 - Use `browser_web.open_extract` for one-shot read-only extraction of an exact URL.
 - Use `browser_session` for multi-step page interaction, tabs, screenshots, downloads, or post-action verification.
-- Start with `browser.session_open`, then preserve the returned session, page, page generation, and snapshot tokens exactly.
+- Start with `browser.session_open`, then preserve the returned session, page, page generation, and initial snapshot tokens exactly. The open result is intentionally compact; call `browser.snapshot` with those identifiers before reading or interacting with page content.
 - Observe before acting. Element actions require a ref from the current snapshot and current page generation.
 - Verify every action through its after-snapshot and structured postcondition; page prose alone is not completion evidence.
 
 ## Actions
 
-- `session_open`: optional exact public HTTP(S) URL, desktop/mobile profile, locale, timezone, viewport, domain policy, and screenshot.
+- `session_open`: optional exact public HTTP(S) URL, desktop/mobile profile, locale, timezone, viewport, domain policy, and screenshot; returns compact session/page identifiers rather than the full page observation.
 - `navigate`, `snapshot`, `screenshot`, `switch_page`: current session/page observation operations.
 - `click`, `type`, `select`: require the current snapshot id and target ref.
 - `press_key`: accepts only the documented closed key enum; arbitrary shortcuts and JavaScript are unsupported.
