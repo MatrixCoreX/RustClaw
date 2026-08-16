@@ -21,6 +21,7 @@ input_schema = { type = "object", properties = { path = { type = "string" }, con
 planner_capabilities = [
   { name = "batch.read", action = "read", effect = "observe", required = ["path"], idempotent = true },
   { name = "batch.dotted_read", action = "batch.dotted_read", effect = "observe", required = ["path"], idempotent = true },
+  { name = "batch.subprocess_read", action = "subprocess_read", effect = "observe", required = ["path"], idempotent = true, subprocess = true },
   { name = "batch.write", action = "write", effect = "mutate", required = ["path", "content"], idempotent = false, once_per_task = true },
   { name = "batch.validate", action = "validate", effect = "validate", required = ["path"], idempotent = true },
 ]
@@ -66,6 +67,13 @@ fn update_plan() -> AgentAction {
 fn dotted_read(path: &str) -> AgentAction {
     AgentAction::CallCapability {
         capability: "batch.dotted_read".to_string(),
+        args: serde_json::json!({"path": path}),
+    }
+}
+
+fn subprocess_read(path: &str) -> AgentAction {
+    AgentAction::CallCapability {
+        capability: "batch.subprocess_read".to_string(),
         args: serde_json::json!({"path": path}),
     }
 }
@@ -116,6 +124,21 @@ fn dotted_registry_actions_remain_parallel_read_candidates() {
     assert_eq!(
         independent_read_batch_prefix_len(&state, &actions, actions.len()),
         2
+    );
+}
+
+#[test]
+fn subprocess_backed_reads_form_material_boundaries() {
+    let state = state_with_batch_registry();
+    let actions = vec![subprocess_read("a.txt"), subprocess_read("b.txt")];
+
+    assert_eq!(
+        independent_read_batch_prefix_len(&state, &actions, actions.len()),
+        0
+    );
+    assert_eq!(
+        planner_action_dependencies(Some(&state), &actions),
+        vec![vec![], vec!["step_1".to_string()]],
     );
 }
 
