@@ -1643,6 +1643,7 @@ export default function App() {
           {currentPage === "dashboard" ? (
             <DashboardPage
               t={t}
+              apiFetch={safeFetch}
               onboardingSteps={onboardingSteps}
               dashboardOverviewItems={dashboardOverviewItems}
               hostSystemSummary={hostSystemSummary}
@@ -2122,8 +2123,6 @@ export default function App() {
             <SkillStorePage
               lang={lang}
               t={t}
-              apiFetch={safeFetch}
-              canManage={isAdminIdentity}
               data={skillStoreData}
               loading={skillStoreLoading}
               error={skillStoreError}

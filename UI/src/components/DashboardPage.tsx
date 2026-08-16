@@ -36,6 +36,7 @@ import { useUiDialog } from "./UiDialogProvider";
 import { HostSystemSummaryPanel } from "./HostSystemSummaryPanel";
 import { SystemDependenciesPanel } from "./SystemDependenciesPanel";
 import { AgentPersonaCard } from "./AgentPersonaCard";
+import { GitRemoteSetupPanel, type GitRemoteSetupPanelProps } from "./GitRemoteSetupPanel";
 import type {
   AgentConfigResponse,
   ConsolePage,
@@ -69,6 +70,7 @@ const DASHBOARD_SECTION_IDS = new Set<DashboardSection>([
   "dependencies",
   "updates",
   "communications",
+  "git",
 ]);
 
 export interface DashboardOnboardingStep {
@@ -83,6 +85,7 @@ export interface DashboardOnboardingStep {
 
 export interface DashboardPageProps {
   t: Translate;
+  apiFetch: GitRemoteSetupPanelProps["apiFetch"];
   onboardingSteps: DashboardOnboardingStep[];
   dashboardOverviewItems: DashboardOverviewItem[];
   hostSystemSummary: HostSystemSummary | null;
@@ -158,6 +161,7 @@ export interface DashboardPageProps {
 
 export function DashboardPage({
   t,
+  apiFetch,
   onboardingSteps,
   dashboardOverviewItems,
   hostSystemSummary,
@@ -302,6 +306,13 @@ export function DashboardPage({
       label: t("通信端", "Channels"),
       description: t("配置通信接入，并查看或关闭已启动的通信端。", "Configure communication access, then review or stop running services."),
       icon: <BellRing className="h-4 w-4" />,
+    },
+    {
+      key: "git",
+      section: "git",
+      label: t("Git 设置", "Git Settings"),
+      description: t("管理 GitHub 仓库范围，以及读取、推送和 Pull Request 凭据。", "Manage allowed GitHub repositories and credentials for reads, pushes, and pull requests."),
+      icon: <GitBranch className="h-4 w-4" />,
     },
   ];
   const selectedDashboardSection =
@@ -1233,6 +1244,10 @@ export function DashboardPage({
           )}
           </section>
         </div>
+      ) : null}
+
+      {activeDashboardSection === "git" ? (
+        <GitRemoteSetupPanel apiFetch={apiFetch} t={t} canManage={isAdminIdentity} />
       ) : null}
 
       {activeDashboardSection === "overview" && (queuePressureHigh || runningTooOld || !isOnline) && (
