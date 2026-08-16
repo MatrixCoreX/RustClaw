@@ -25,6 +25,15 @@ auto_invocable = true
 input_schema = { type = "object", required = ["path"], properties = { path = { type = "string" } } }
 
 [[skills]]
+name = "nullable_skill"
+enabled = true
+kind = "runner"
+output_kind = "text"
+side_effect = false
+auto_invocable = true
+input_schema = { type = "object", required = ["expected_sha"], properties = { expected_sha = { anyOf = [ { type = "string", pattern = "^[0-9a-f]{40}$" }, { type = "null" } ] } } }
+
+[[skills]]
 name = "run_cmd"
 enabled = true
 kind = "builtin"
@@ -288,6 +297,7 @@ pub(super) fn test_state() -> AppState {
     let skills_list = Arc::new(
         [
             "read_file",
+            "nullable_skill",
             "run_cmd",
             "list_dir",
             "write_file",
@@ -897,6 +907,37 @@ fn enforce_mode_blocks_missing_required_arg() {
         .as_deref()
         .unwrap_or_default()
         .contains("missing required arg"));
+}
+
+#[test]
+fn enforce_mode_accepts_required_null_when_the_schema_allows_null() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            output_contract: None,
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "nullable_skill".to_string(),
+                args: json!({"expected_sha": null}),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(!result
+        .issues
+        .iter()
+        .any(|issue| issue.kind == VerifyIssueKind::MissingRequiredArg));
 }
 
 #[test]

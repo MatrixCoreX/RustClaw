@@ -453,6 +453,8 @@ fn arg_value_is_present(value: &serde_json::Value) -> bool {
 }
 
 fn required_arg_satisfied(
+    state: &AppState,
+    normalized_skill: &str,
     obj: &serde_json::Map<String, serde_json::Value>,
     required: &str,
 ) -> bool {
@@ -461,7 +463,17 @@ fn required_arg_satisfied(
         .any(|alternative| {
             alternative
                 .iter()
-                .all(|key| obj.get(key).is_some_and(arg_value_is_present))
+                .all(|key| {
+                    obj.get(key).is_some_and(|value| {
+                        arg_value_is_present(value)
+                            || (value.is_null()
+                                && crate::schema_contract::executable_top_level_arg_accepts_null(
+                                    state,
+                                    normalized_skill,
+                                    key,
+                                ))
+                    })
+                })
         })
 }
 
@@ -584,7 +596,7 @@ fn verify_step_args(
         return;
     };
     for key in &required {
-        if !required_arg_satisfied(obj, key) {
+        if !required_arg_satisfied(state, normalized_skill, obj, key) {
             issues.push(VerifyIssue {
                 step_id: step.step_id.clone(),
                 kind: VerifyIssueKind::MissingRequiredArg,

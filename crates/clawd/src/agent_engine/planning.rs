@@ -1667,7 +1667,7 @@ fn schema_has_missing_required_fields(schema: &Value, arguments: &Value) -> bool
 
 fn native_required_value_is_present(schema: Option<&Value>, value: &Value) -> bool {
     match value {
-        Value::Null => schema.is_some_and(schema_accepts_null),
+        Value::Null => schema.is_some_and(crate::schema_contract::schema_accepts_null),
         Value::String(value) => !value.trim().is_empty(),
         Value::Array(values) => values
             .iter()
@@ -1675,24 +1675,6 @@ fn native_required_value_is_present(schema: Option<&Value>, value: &Value) -> bo
         Value::Object(values) => !values.is_empty(),
         Value::Bool(_) | Value::Number(_) => true,
     }
-}
-
-fn schema_accepts_null(schema: &Value) -> bool {
-    schema.get("type").is_some_and(|schema_type| {
-        schema_type.as_str() == Some("null")
-            || schema_type
-                .as_array()
-                .is_some_and(|types| types.iter().any(|value| value.as_str() == Some("null")))
-    }) || schema
-        .get("enum")
-        .and_then(Value::as_array)
-        .is_some_and(|values| values.iter().any(Value::is_null))
-        || schema.get("const").is_some_and(Value::is_null)
-        || ["anyOf", "oneOf"]
-            .iter()
-            .filter_map(|key| schema.get(*key).and_then(Value::as_array))
-            .flatten()
-            .any(schema_accepts_null)
 }
 
 fn action_from_native_respond_call(
