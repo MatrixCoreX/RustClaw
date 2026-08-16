@@ -461,19 +461,17 @@ fn required_arg_satisfied(
     claw_core::skill_registry::planner_requirement_alternatives(required)
         .into_iter()
         .any(|alternative| {
-            alternative
-                .iter()
-                .all(|key| {
-                    obj.get(key).is_some_and(|value| {
-                        arg_value_is_present(value)
-                            || (value.is_null()
-                                && crate::schema_contract::executable_top_level_arg_accepts_null(
-                                    state,
-                                    normalized_skill,
-                                    key,
-                                ))
-                    })
+            alternative.iter().all(|key| {
+                obj.get(key).is_some_and(|value| {
+                    arg_value_is_present(value)
+                        || (value.is_null()
+                            && crate::schema_contract::executable_top_level_arg_accepts_null(
+                                state,
+                                normalized_skill,
+                                key,
+                            ))
                 })
+            })
         })
 }
 

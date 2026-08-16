@@ -264,6 +264,27 @@ impl BrowserSessionService {
         response
     }
 
+    pub(crate) async fn close_task_sessions(&self, task_id: &str) -> usize {
+        let sessions = {
+            let mut live = self.inner.sessions.lock().await;
+            let session_ids = live
+                .iter()
+                .filter_map(|(session_id, session)| {
+                    (session.binding.task_id == task_id).then(|| session_id.clone())
+                })
+                .collect::<Vec<_>>();
+            session_ids
+                .into_iter()
+                .filter_map(|session_id| live.remove(&session_id))
+                .collect::<Vec<_>>()
+        };
+        let count = sessions.len();
+        for session in sessions {
+            kill_bridge(&session).await;
+        }
+        count
+    }
+
     async fn lookup_bound(
         &self,
         session_id: &str,
@@ -731,6 +752,39 @@ mod tests {
             .await
             .expect_err("browser_restart_lost");
         assert_eq!(lost.code, "BROWSER_SESSION_LOST");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn task_cleanup_releases_only_the_matching_session_lease() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("workspace");
+        let service = BrowserSessionService::new(&workspace);
+        let first_binding = fixture_binding("actor-cleanup", "task-cleanup-first");
+        let second_binding = fixture_binding("actor-cleanup", "task-cleanup-second");
+        let first = service
+            .open(first_binding.clone(), json!({}), None)
+            .await
+            .expect("first browser session");
+        let second = service
+            .open(second_binding.clone(), json!({}), None)
+            .await
+            .expect("second browser session");
+        let first_id = first["session_id"].as_str().expect("first id");
+        let second_id = second["session_id"].as_str().expect("second id");
+
+        assert_eq!(service.close_task_sessions("task-cleanup-first").await, 1);
+        let first_lost = service
+            .request(first_id, &first_binding, "observe_debug", json!({}), None)
+            .await
+            .expect_err("cleaned session must be gone");
+        assert_eq!(first_lost.code, "BROWSER_SESSION_LOST");
+        service
+            .request(second_id, &second_binding, "observe_debug", json!({}), None)
+            .await
+            .expect("unrelated session remains available");
+        assert_eq!(service.close_task_sessions("task-cleanup-second").await, 1);
     }
 
     #[cfg(target_os = "linux")]

@@ -98,12 +98,11 @@ pub(super) fn handle_capability_group_load(
         task,
         &loop_state.loaded_capability_skills,
     );
-    let authorized =
-        crate::capability_map::planner_loadable_capability_group_members_for_task(
-            state,
-            task,
-            &BTreeSet::new(),
-        );
+    let authorized = crate::capability_map::planner_loadable_capability_group_members_for_task(
+        state,
+        task,
+        &BTreeSet::new(),
+    );
     let invalid = groups
         .iter()
         .filter(|group| !loadable.contains_key(*group) && !authorized.contains_key(*group))
