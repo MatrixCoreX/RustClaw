@@ -1418,6 +1418,67 @@ fn native_leaf_rejects_empty_direct_required_arguments() {
 }
 
 #[test]
+fn native_leaf_accepts_required_argument_when_its_schema_allows_null() {
+    let capability = "git.push";
+    let callable = vec![capability.to_string()];
+    let tool_name = native_capability_leaf_tool_name(capability);
+    let group_map = BTreeMap::from([(tool_name.clone(), BTreeSet::from([capability.to_string()]))]);
+    let schema = json!({
+        "type": "object",
+        "required": ["expected_remote_sha"],
+        "properties": {
+            "expected_remote_sha": {
+                "anyOf": [
+                    {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                    {"type": "null"}
+                ]
+            }
+        },
+        "additionalProperties": false
+    });
+    let schemas = BTreeMap::from([(capability.to_string(), schema)]);
+
+    let actions = actions_from_native_turn_with_schemas(
+        &turn(
+            vec![ModelToolCall {
+                id: "nullable-required".to_string(),
+                name: tool_name.clone(),
+                arguments: json!({"expected_remote_sha": null}),
+            }],
+            "",
+        ),
+        &callable,
+        &group_map,
+        &schemas,
+        None,
+    )
+    .expect("required nullable argument is present");
+
+    assert!(matches!(
+        actions.as_slice(),
+        [AgentAction::CallCapability { capability, args }]
+            if capability == "git.push" && args["expected_remote_sha"].is_null()
+    ));
+
+    let error = actions_from_native_turn_with_schemas(
+        &turn(
+            vec![ModelToolCall {
+                id: "missing-nullable-required".to_string(),
+                name: tool_name,
+                arguments: json!({}),
+            }],
+            "",
+        ),
+        &callable,
+        &group_map,
+        &schemas,
+        None,
+    )
+    .expect_err("missing nullable required argument remains invalid");
+    assert_eq!(error, "native_plan_required_args_missing");
+}
+
+#[test]
 fn native_contract_retry_scopes_required_tool_and_adds_machine_observation() {
     let request = native_planner_request(
         "protocol",
