@@ -154,6 +154,44 @@ pub(crate) fn executable_type_constraint_violations(
         .unwrap_or_default()
 }
 
+pub(crate) fn executable_top_level_arg_accepts_null(
+    state: &AppState,
+    executable: &str,
+    arg: &str,
+) -> bool {
+    let input_schema = state
+        .mcp_tool(executable)
+        .map(|tool| tool.input_schema)
+        .or_else(|| {
+            state
+                .skill_manifest(executable)
+                .and_then(|manifest| manifest.input_schema)
+        });
+    input_schema
+        .as_ref()
+        .and_then(|schema| schema.get("properties"))
+        .and_then(Value::as_object)
+        .and_then(|properties| properties.get(arg))
+        .is_some_and(schema_accepts_null)
+}
+
+pub(crate) fn schema_accepts_null(schema: &Value) -> bool {
+    schema.get("type").is_some_and(|value| match value {
+        Value::String(kind) => kind == "null",
+        Value::Array(kinds) => kinds.iter().any(|kind| kind.as_str() == Some("null")),
+        _ => false,
+    }) || schema
+        .get("enum")
+        .and_then(Value::as_array)
+        .is_some_and(|values| values.iter().any(Value::is_null))
+        || schema.get("const").is_some_and(Value::is_null)
+        || ["anyOf", "oneOf"]
+            .into_iter()
+            .filter_map(|key| schema.get(key).and_then(Value::as_array))
+            .flatten()
+            .any(schema_accepts_null)
+}
+
 pub(crate) fn type_constraint_violations(
     input_schema: &Value,
     args: &Value,
