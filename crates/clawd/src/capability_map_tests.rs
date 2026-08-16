@@ -219,6 +219,33 @@ fn real_registry_leaves_semantic_source_selection_to_the_agent_loop() {
 }
 
 #[test]
+fn real_registry_does_not_charge_remote_audio_actions_for_local_model_memory() {
+    let registry_toml = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml"),
+    )
+    .expect("read registry");
+    let audio = registry_entry_from(&registry_toml, "audio_transcribe");
+    let preview = audio
+        .planner_capabilities
+        .iter()
+        .find(|mapping| mapping.name == "audio.preview_transcribe")
+        .and_then(|mapping| mapping.resource_request.as_ref())
+        .expect("preview resource request");
+    let transcribe = audio
+        .planner_capabilities
+        .iter()
+        .find(|mapping| mapping.name == "audio.transcribe")
+        .and_then(|mapping| mapping.resource_request.as_ref())
+        .expect("remote transcription resource request");
+
+    assert_eq!(preview.class.as_token(), "general");
+    assert_eq!(preview.memory_mb, 128);
+    assert_eq!(transcribe.class.as_token(), "network");
+    assert_eq!(transcribe.memory_mb, 256);
+    assert_eq!(transcribe.network_slots, 1);
+}
+
+#[test]
 fn real_config_native_schemas_preserve_nonempty_and_nested_read_contracts() {
     let state = crate::AppState::test_default_with_fixture_provider()
         .with_prompt_layers_installed()
