@@ -544,11 +544,11 @@ pub(super) fn default_telegram_ephemeral_image_saved_seconds() -> u64 {
 }
 
 pub(super) fn default_tool_cmd_timeout_seconds() -> u64 {
-    60
+    180
 }
 
 pub(super) fn default_tool_cmd_idle_timeout_seconds() -> u64 {
-    60
+    120
 }
 
 pub(super) fn default_tool_cmd_async_retention_seconds() -> u64 {

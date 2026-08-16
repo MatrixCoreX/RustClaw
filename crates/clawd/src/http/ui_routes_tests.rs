@@ -86,7 +86,7 @@ fn service_control_error_response_uses_machine_fields() {
 }
 
 #[test]
-fn wechat_service_start_requires_enabled_channel_config() {
+fn wechat_service_start_can_enable_a_saved_channel_config() {
     let root = temp_workspace_root();
     std::fs::create_dir_all(root.join("configs/channels")).expect("channel config dir");
     std::fs::write(
@@ -103,10 +103,106 @@ api_base_url = "https://ilinkai.weixin.qq.com"
     let mut state = AppState::test_default_with_fixture_provider();
     state.skill_rt.workspace_root = root;
 
-    let failure = validate_service_start_readiness(&state, "wechatd")
-        .expect_err("disabled WeChat must not start");
+    validate_service_start_readiness(&state, "wechatd")
+        .expect("start action persists enabled=true before spawning WeChat");
+}
 
-    assert_eq!(failure.error_code, "service_disabled");
+#[test]
+fn communication_service_stop_persists_disabled_state_to_both_config_copies() {
+    let root = temp_workspace_root();
+    std::fs::create_dir_all(root.join("configs/channels")).expect("channel config dir");
+    std::fs::write(
+        root.join("configs/channels/wechat.toml"),
+        "[wechat]\nenabled = true\nbot_token = \"saved\"\n",
+    )
+    .expect("write config");
+    let mut state = AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.clone();
+
+    persist_channel_service_enabled(&state, "wechatd", false).expect("disable service");
+
+    for path in [
+        root.join("configs/channels/wechat.toml"),
+        root.join("docker/config/channels/wechat.toml"),
+    ] {
+        let raw = std::fs::read_to_string(path).expect("read persisted config");
+        let value = toml::from_str::<toml::Value>(&raw).expect("parse config");
+        assert_eq!(
+            value
+                .get("wechat")
+                .and_then(|section| section.get("enabled"))
+                .and_then(toml::Value::as_bool),
+            Some(false)
+        );
+        assert_eq!(
+            value
+                .get("wechat")
+                .and_then(|section| section.get("bot_token"))
+                .and_then(toml::Value::as_str),
+            Some("saved")
+        );
+    }
+
+    persist_channel_service_enabled(&state, "wechatd", true).expect("enable service");
+    for path in [
+        root.join("configs/channels/wechat.toml"),
+        root.join("docker/config/channels/wechat.toml"),
+    ] {
+        let raw = std::fs::read_to_string(path).expect("read re-enabled config");
+        let value = toml::from_str::<toml::Value>(&raw).expect("parse config");
+        assert_eq!(
+            value
+                .get("wechat")
+                .and_then(|section| section.get("enabled"))
+                .and_then(toml::Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            value
+                .get("wechat")
+                .and_then(|section| section.get("bot_token"))
+                .and_then(toml::Value::as_str),
+            Some("saved")
+        );
+    }
+}
+
+#[test]
+fn communication_service_reset_clears_only_the_selected_channel_credentials() {
+    let root = temp_workspace_root();
+    std::fs::create_dir_all(root.join("configs/channels")).expect("channel config dir");
+    std::fs::write(
+        root.join("configs/channels/telegram.toml"),
+        "[telegram]\nbot_token = \"secret\"\nbots = [{ name = \"extra\", bot_token = \"other\" }]\nbindings = [{ external_user_id = \"u\" }]\n\n[telegram_bot]\nenabled = true\n",
+    )
+    .expect("write config");
+    let mut state = AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.clone();
+
+    reset_channel_service_config(&state, "telegramd").expect("reset telegram");
+
+    let raw = std::fs::read_to_string(root.join("configs/channels/telegram.toml"))
+        .expect("read reset config");
+    let value = toml::from_str::<toml::Value>(&raw).expect("parse reset config");
+    assert_eq!(
+        value
+            .get("telegram_bot")
+            .and_then(|section| section.get("enabled"))
+            .and_then(toml::Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        value
+            .get("telegram")
+            .and_then(|section| section.get("bot_token"))
+            .and_then(toml::Value::as_str),
+        Some("")
+    );
+    assert!(value
+        .get("telegram")
+        .and_then(|section| section.get("bots"))
+        .and_then(toml::Value::as_array)
+        .is_some_and(Vec::is_empty));
 }
 
 #[test]

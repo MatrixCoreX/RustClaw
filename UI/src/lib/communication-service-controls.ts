@@ -1,7 +1,12 @@
-export type CommunicationServiceAction = "start" | "stop" | "restart";
+export type CommunicationServiceAction = "start" | "stop" | "restart" | "reset";
 
 export function serviceControlActions(
   serviceHealthy: boolean,
+  allowReset = true,
 ): CommunicationServiceAction[] {
-  return serviceHealthy ? ["restart", "stop"] : ["start"];
+  const actions: CommunicationServiceAction[] = serviceHealthy
+    ? ["restart", "stop"]
+    : ["start"];
+  if (allowReset) actions.push("reset");
+  return actions;
 }

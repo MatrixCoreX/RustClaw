@@ -107,6 +107,7 @@
 - `extra.schema_version`: number, currently `1`.
 - `extra.action`: canonical action (`fetch`, `latest`, or `news` alias normalized to `latest` internally).
 - `extra.mode`: `direct`, `category`, or `explicit_urls`.
+- `extra.source_timeout_seconds` / `extra.fetch_concurrency`: effective per-source network timeout and bounded worker count used for the invocation. These are execution evidence only and do not change routing or success semantics.
 - `extra.field_value`: object containing stable execution counters such as `sources_ok`, `sources_failed`, and `items` / `item_count`, plus a compact `titles` array for grounding brief headline answers before evidence truncation.
 - `extra.items`: array of normalized feed item objects with `title`, `link`, `date`, `source`, `source_host`, `layer`, and `topic`.
 - Discovery responses expose `results[]` with URL, lifecycle status, validation counters, sample titles, and machine error code. `source_health` exposes per-category `active_count`, `candidate_count`, `eligible_count`, `quarantined_count`, and `recommended_action`.
@@ -121,7 +122,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"sources_ok=3 sources_failed=0 items=5\n1) ...\n2) ...","extra":{"schema_version":1,"action":"latest","category":"crypto","mode":"category","sources_ok":3,"sources_failed":0,"item_count":5,"field_value":{"sources_ok":3,"sources_failed":0,"items":5,"titles":["..."]},"items":[{"title":"...","link":"https://example.com/news","source_host":"example.com","layer":"feed","topic":"macro_market"}]},"error_text":null}
+{"request_id":"demo-1","status":"ok","text":"sources_ok=3 sources_failed=0 items=5\n1) ...\n2) ...","extra":{"schema_version":1,"action":"latest","category":"crypto","mode":"category","source_timeout_seconds":20,"fetch_concurrency":3,"sources_ok":3,"sources_failed":0,"item_count":5,"field_value":{"sources_ok":3,"sources_failed":0,"items":5,"titles":["..."]},"items":[{"title":"...","link":"https://example.com/news","source_host":"example.com","layer":"feed","topic":"macro_market"}]},"error_text":null}
 ```
 
 ### Example 2 (direct fetch)
@@ -131,7 +132,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-2","status":"ok","text":"...","extra":{"schema_version":1,"action":"fetch","mode":"direct","source_count":1,"item_count":10,"field_value":{"source_count":1,"item_count":10,"titles":["..."]},"items":[{"title":"...","link":"https://example.com/item","source_host":"example.com","layer":"feed","topic":"other"}]},"error_text":null}
+{"request_id":"demo-2","status":"ok","text":"...","extra":{"schema_version":1,"action":"fetch","mode":"direct","source_count":1,"source_timeout_seconds":15,"fetch_concurrency":1,"item_count":10,"field_value":{"source_count":1,"item_count":10,"titles":["..."]},"items":[{"title":"...","link":"https://example.com/item","source_host":"example.com","layer":"feed","topic":"other"}]},"error_text":null}
 ```
 
 ### Example 3 (evidence-backed discovery)

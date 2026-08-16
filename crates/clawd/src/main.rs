@@ -442,6 +442,25 @@ async fn run() -> anyhow::Result<()> {
 
     let config_path = resolve_startup_config_path()?;
     let config = AppConfig::load(&config_path)?;
+    let runtime_concurrency = resource_scheduler::runtime_concurrency_plan(
+        config.worker.concurrency,
+        config.skills.skill_max_concurrency,
+        config.memory.background_job_concurrency,
+        config.skills.runner_warm_pool_enabled,
+    );
+    info!(
+        configured_workers = config.worker.concurrency,
+        effective_workers = runtime_concurrency.worker_concurrency,
+        configured_skill_concurrency = config.skills.skill_max_concurrency,
+        effective_skill_concurrency = runtime_concurrency.skill_concurrency,
+        configured_memory_background = config.memory.background_job_concurrency,
+        effective_memory_background = runtime_concurrency.memory_background_concurrency,
+        configured_runner_warm_pool = config.skills.runner_warm_pool_enabled,
+        effective_runner_warm_pool = runtime_concurrency.runner_warm_pool_enabled,
+        host_cpu_cores = runtime_concurrency.cpu_total,
+        host_memory_total_mib = runtime_concurrency.memory_total_mib.unwrap_or_default(),
+        "runtime_concurrency_plan"
+    );
     let workspace_root = std::env::current_dir()?;
     let credential_store_path =
         claw_core::git_remote_config::git_credential_store_path(&workspace_root);
@@ -915,13 +934,13 @@ async fn run() -> anyhow::Result<()> {
         skill_rt: crate::SkillRuntime {
             skill_timeout_seconds: config.skills.skill_timeout_seconds,
             skill_runner_path: effective_skill_runner_path,
-            skill_global_max_concurrency: config.skills.skill_max_concurrency.max(1),
-            skill_semaphore: Arc::new(Semaphore::new(config.skills.skill_max_concurrency.max(1))),
+            skill_global_max_concurrency: runtime_concurrency.skill_concurrency,
+            skill_semaphore: Arc::new(Semaphore::new(runtime_concurrency.skill_concurrency)),
             skill_concurrency_gates: Arc::new(
                 crate::runtime::state::SkillConcurrencyGates::default(),
             ),
             runner_pool: Arc::new(crate::skills::runner_pool::WarmRunnerPool::new(
-                config.skills.runner_warm_pool_enabled,
+                runtime_concurrency.runner_warm_pool_enabled,
                 config.skills.runner_warm_pool_max_idle_per_skill,
                 config.skills.runner_warm_pool_min_available_memory_mib,
                 config.skills.runner_warm_pool_idle_timeout_seconds,
@@ -1042,7 +1061,7 @@ async fn run() -> anyhow::Result<()> {
     spawn_worker(
         state.clone(),
         config.worker.poll_interval_ms,
-        config.worker.concurrency.max(1),
+        runtime_concurrency.worker_concurrency,
     );
     match memory::jobs::reconcile_missing_turn_jobs(&state) {
         Ok(repaired) if repaired > 0 => {
@@ -1054,10 +1073,13 @@ async fn run() -> anyhow::Result<()> {
         Ok(_) => {}
         Err(error) => warn!(error = %error, "memory_durable_job_outbox_reconciliation_failed"),
     }
-    memory::jobs::spawn_memory_job_workers(state.clone(), config.memory.background_job_concurrency);
+    memory::jobs::spawn_memory_job_workers(
+        state.clone(),
+        runtime_concurrency.memory_background_concurrency,
+    );
     memory::embedding_jobs::spawn_embedding_workers(
         state.clone(),
-        config.memory.background_job_concurrency,
+        runtime_concurrency.memory_background_concurrency,
     );
     spawn_cleanup_worker(state.clone());
     spawn_schedule_worker(state.clone());

@@ -3,7 +3,7 @@ import type { AdapterHealthRow, ApiResponse } from "../types/api";
 type Translate = (zh: string, en: string) => string;
 
 export type ServiceRuntimeName = AdapterHealthRow["serviceName"];
-export type ServiceActionName = "start" | "stop" | "restart";
+export type ServiceActionName = "start" | "stop" | "restart" | "reset";
 
 function recordAt(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -56,8 +56,13 @@ export function formatServiceActionError(
   t: Translate,
 ): string {
   const serviceLabel = serviceActionLabel(serviceName, t);
-  const actionLabel =
-    action === "start" ? t("启动", "start") : action === "restart" ? t("重启", "restart") : t("停止", "stop");
+  const actionLabel = action === "start"
+    ? t("启动", "start")
+    : action === "restart"
+      ? t("重启", "restart")
+      : action === "reset"
+        ? t("重置", "reset")
+        : t("停止", "stop");
 
   if (errorCode === "service_start_not_running" || errorCode === "service_restart_not_running") {
     return t(
@@ -108,5 +113,6 @@ export function serviceActionSuccessMessage(
   const label = serviceActionLabel(serviceName, t);
   if (action === "restart") return t(`${label}服务已重启。`, `${label} was restarted.`);
   if (action === "start") return t(`${label}服务已启动。`, `${label} started.`);
+  if (action === "reset") return t(`${label}配置和连接状态已重置。`, `${label} configuration and connection state were reset.`);
   return t(`${label}服务已停止。`, `${label} stopped.`);
 }

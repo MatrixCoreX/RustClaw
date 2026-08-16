@@ -1,4 +1,4 @@
-import { Database, Loader2, LogOut, Power, QrCode, RefreshCw, Server, Square } from "lucide-react";
+import { Database, Loader2, LogOut, Power, QrCode, RefreshCw, RotateCcw, Server, Square } from "lucide-react";
 
 import type {
   ServiceActionNotice,
@@ -48,6 +48,7 @@ interface ChannelServiceControlsProps {
   healthy: boolean;
   loading: boolean;
   disabled: boolean;
+  allowReset?: boolean;
   className?: string;
   onControlService: CommunicationSetupPageProps["onControlService"];
 }
@@ -79,6 +80,7 @@ function ChannelServiceControls({
   healthy,
   loading,
   disabled,
+  allowReset = true,
   className = "",
   onControlService,
 }: ChannelServiceControlsProps) {
@@ -89,18 +91,27 @@ function ChannelServiceControls({
     if (action === "restart") {
       return t(`重启${serviceLabelZh}服务`, `Restart ${serviceLabelEn} service`);
     }
+    if (action === "reset") {
+      return t(`重置${serviceLabelZh}`, `Reset ${serviceLabelEn}`);
+    }
     return t(`关闭${serviceLabelZh}服务`, `Stop ${serviceLabelEn} service`);
   };
 
-  return serviceControlActions(healthy).map((action) => {
-    const ActionIcon = action === "stop" ? Square : action === "restart" ? RefreshCw : Server;
+  return serviceControlActions(healthy, allowReset).map((action) => {
+    const ActionIcon = action === "stop"
+      ? Square
+      : action === "restart"
+        ? RefreshCw
+        : action === "reset"
+          ? RotateCcw
+          : Server;
     return (
       <button
         key={action}
         type="button"
         onClick={() => void onControlService(serviceName, action)}
         disabled={loading || disabled}
-        className={`theme-secondary-btn px-3 py-2 text-sm ${action === "stop" ? "channel-service-stop-button" : ""} ${className}`}
+        className={`theme-secondary-btn px-3 py-2 text-sm ${action === "stop" || action === "reset" ? "channel-service-stop-button" : ""} ${className}`}
       >
         {loading
           ? <Loader2 className="h-4 w-4 animate-spin" />
@@ -125,6 +136,7 @@ export interface CommunicationSetupPageProps {
   wechatLoginError: string | null;
   wechatConfigError: string | null;
   wechatConfigEnabled: boolean;
+  wechatConfigured: boolean;
   wechatConfigSaving: boolean;
   wechatServiceHealthy: boolean;
   whatsappWebQrRequested: boolean;
@@ -292,6 +304,7 @@ function AgentAppSetupCard({
             healthy={setup.serviceHealthy}
             loading={Boolean(serviceActionLoading[serviceName])}
             disabled={!setup.canControlService}
+            allowReset={false}
             onControlService={onControlService}
           />
         ) : null}
@@ -323,6 +336,7 @@ export function CommunicationSetupPage({
   wechatLoginError,
   wechatConfigError,
   wechatConfigEnabled,
+  wechatConfigured,
   wechatConfigSaving,
   wechatServiceHealthy,
   whatsappWebQrRequested,
@@ -477,7 +491,7 @@ export function CommunicationSetupPage({
                 ) : null}
 
                 <div className="channel-setup-actions mt-auto flex flex-wrap gap-2">
-                  {wechatConfigEnabled ? (
+                  {wechatConfigEnabled || wechatConfigured ? (
                     <ChannelServiceControls
                       t={t}
                       serviceName="wechatd"
@@ -485,7 +499,7 @@ export function CommunicationSetupPage({
                       serviceLabelEn="WeChat"
                       healthy={wechatServiceHealthy}
                       loading={Boolean(serviceActionLoading.wechatd)}
-                      disabled={false}
+                      disabled={!isAdminIdentity}
                       className="px-4 py-2.5"
                       onControlService={onControlService}
                     />
@@ -642,7 +656,7 @@ export function CommunicationSetupPage({
                   serviceLabelEn="WhatsApp Web"
                   healthy={whatsappWebServiceHealthy}
                   loading={Boolean(serviceActionLoading.whatsapp_webd)}
-                  disabled={false}
+                  disabled={!isAdminIdentity}
                   className="px-4 py-2.5"
                   onControlService={onControlService}
                 />
@@ -742,7 +756,7 @@ export function CommunicationSetupPage({
                 serviceLabelEn="Telegram"
                 healthy={telegramServiceHealthy}
                 loading={Boolean(serviceActionLoading.telegramd)}
-                disabled={!telegramBotTokenConfigured}
+                disabled={!telegramBotTokenConfigured || !isAdminIdentity}
                 className="theme-key-create-btn"
                 onControlService={onControlService}
               />

@@ -907,6 +907,13 @@ async fn reset_feishu_config_handler(
             }),
         );
     }
+    terminate_channel_service_processes("feishud").await;
+    let _ = fs::remove_file(
+        state
+            .skill_rt
+            .workspace_root
+            .join(".pids/feishud.pid"),
+    );
     if let Err(err) = reset_channel_binding_state_for_user_key(&state, "feishu", &identity.user_key)
     {
         return (
@@ -1064,6 +1071,13 @@ async fn reset_lark_config_handler(
             }),
         );
     }
+    terminate_channel_service_processes("larkd").await;
+    let _ = fs::remove_file(
+        state
+            .skill_rt
+            .workspace_root
+            .join(".pids/larkd.pid"),
+    );
     if let Err(err) = reset_channel_binding_state_for_user_key(&state, "lark", &identity.user_key)
     {
         return (
