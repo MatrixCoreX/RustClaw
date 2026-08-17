@@ -860,14 +860,16 @@ async fn nni_bancor_account(
     let per_page = query.per_page.unwrap_or(20).clamp(1, 100);
     let mut attempts = Vec::new();
     for node_url in nni_selected_remote_nodes(&config) {
-        match query_nni_bancor_account_for_node(
-            &state,
-            node_url,
-            &device_pubkey,
-            &identity.user_key,
-            page,
-            per_page,
-        )
+        match nni_remote_read_with_retry(|| {
+            query_nni_bancor_account_for_node(
+                &state,
+                node_url,
+                &device_pubkey,
+                &identity.user_key,
+                page,
+                per_page,
+            )
+        })
         .await
         {
             Ok(mut data) => {
@@ -908,15 +910,15 @@ async fn query_nni_bancor_account_for_node(
             device_pubkey: device_pubkey.to_string(),
             client_user_key: user_key.to_string(),
         }).send().await
-        .map_err(|err| json!({"node_url": node_url, "error_code": "nni_bancor_account_request_network_failed", "detail": err.to_string()}))?;
+        .map_err(|err| json!({"node_url": node_url, "error_code": "nni_bancor_account_request_network_failed", "detail": err.to_string(), "retryable": true}))?;
     let status = request_response.status();
     let body = request_response.json::<ApiResponse<Value>>().await
-        .map_err(|err| json!({"node_url": node_url, "error_code": "nni_bancor_account_request_body_invalid", "detail": err.to_string()}))?;
+        .map_err(|err| json!({"node_url": node_url, "error_code": "nni_bancor_account_request_body_invalid", "detail": err.to_string(), "retryable": true}))?;
     if !status.is_success() || !body.ok {
         let error_code =
             nni_remote_api_error_code(&body, "nni_bancor_account_request_failed");
         return Err(
-            json!({"node_url": node_url, "http_status": status.as_u16(), "error_code": error_code}),
+            json!({"node_url": node_url, "http_status": status.as_u16(), "error_code": error_code, "retryable": nni_remote_http_status_retryable(status.as_u16())}),
         );
     }
     let data = body.data.ok_or_else(
@@ -925,10 +927,10 @@ async fn query_nni_bancor_account_for_node(
     let task_id = value_string(&data, "task_id", "nni_bancor_account_task_id_missing")?;
     let challenge = value_string(&data, "challenge", "nni_bancor_account_challenge_missing")?;
     let sign_output = run_nni_signature_helper(state, &["sign_challenge".to_string(), challenge]).await
-        .map_err(|_| json!({"node_url": node_url, "error_code": "nni_bancor_account_signature_helper_failed"}))?;
+        .map_err(|_| json!({"node_url": node_url, "error_code": "nni_bancor_account_signature_helper_failed", "retryable": true}))?;
     if !sign_output.ok {
         return Err(
-            json!({"node_url": node_url, "error_code": "nni_bancor_account_signature_failed"}),
+            json!({"node_url": node_url, "error_code": "nni_bancor_account_signature_failed", "retryable": true}),
         );
     }
     let signature = value_string(
@@ -941,15 +943,15 @@ async fn query_nni_bancor_account_for_node(
         .timeout(nni_remote_api_timeout())
         .json(&NniBancorAccountVerifyRequest { task_id, signature, page, per_page })
         .send().await
-        .map_err(|err| json!({"node_url": node_url, "error_code": "nni_bancor_account_verify_network_failed", "detail": err.to_string()}))?;
+        .map_err(|err| json!({"node_url": node_url, "error_code": "nni_bancor_account_verify_network_failed", "detail": err.to_string(), "retryable": true}))?;
     let status = response.status();
     let body = response.json::<ApiResponse<Value>>().await
-        .map_err(|err| json!({"node_url": node_url, "error_code": "nni_bancor_account_verify_body_invalid", "detail": err.to_string()}))?;
+        .map_err(|err| json!({"node_url": node_url, "error_code": "nni_bancor_account_verify_body_invalid", "detail": err.to_string(), "retryable": true}))?;
     if !status.is_success() || !body.ok {
         let error_code =
             nni_remote_api_error_code(&body, "nni_bancor_account_verify_failed");
         return Err(
-            json!({"node_url": node_url, "http_status": status.as_u16(), "error_code": error_code}),
+            json!({"node_url": node_url, "http_status": status.as_u16(), "error_code": error_code, "retryable": nni_remote_http_status_retryable(status.as_u16())}),
         );
     }
     body.data.ok_or_else(

@@ -123,16 +123,17 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     }
   };
 
-  const fetchNniDeviceStatus = (silent = false) => runCoalescedRead(
+  const readNniDeviceStatus = (silent: boolean, forceRefresh: boolean) => runCoalescedRead(
     readRequestsRef.current,
-    "device-status",
+    forceRefresh ? "device-status-refresh" : "device-status",
     async () => {
     if (!silent) {
       setNniStatusLoading(true);
       setNniStatusError(null);
     }
     try {
-      const res = await fetchResilientRead(apiFetch, `/v1/nni/device/status`);
+      const path = forceRefresh ? `/v1/nni/device/status?refresh=true` : `/v1/nni/device/status`;
+      const res = await fetchResilientRead(apiFetch, path);
       const body = (await res.json()) as ApiResponse<NniDeviceStatusResponse>;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `NNI 状态获取失败 (${res.status})`);
@@ -150,6 +151,12 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       }
     }
     },
+  );
+
+  const fetchNniDeviceStatus = (silent = false) => readNniDeviceStatus(silent, true);
+
+  const ensureNniDeviceStatus = (silent = false) => (
+    nniStatus ? Promise.resolve(nniStatus) : readNniDeviceStatus(silent, false)
   );
 
   const runNniDeviceAction = async (action: string, options?: { challenge?: string }) => {
@@ -669,6 +676,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     setNniActionMessage,
     setNniActionError,
     fetchNniDeviceStatus,
+    ensureNniDeviceStatus,
     setNniJoinedPersisted,
     joinNni,
     testJoinNni,

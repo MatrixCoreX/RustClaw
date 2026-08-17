@@ -66,7 +66,6 @@ const WORKSPACE_UPDATE_LOG_MAX_CHARS: usize = 12000;
 const WORKSPACE_UPDATE_PATH_BATCH_SIZE: usize = 128;
 const WORKSPACE_UPDATE_PATH_LIST_MAX_BYTES: usize = 32 * 1024 * 1024;
 const WORKSPACE_UPDATE_PATH_LIST_MAX_ITEMS: usize = 250_000;
-const NNI_SIGNATURE_HELPER_TIMEOUT_SECONDS: u64 = 12;
 const FEISHU_CONFIG_TEMPLATE: &str = include_str!("../../templates/feishu_china_config.toml");
 const LARK_CONFIG_TEMPLATE: &str = include_str!("../../templates/lark_international_config.toml");
 const LLM_CONNECTIVITY_TEST_PROMPT: &str = "Reply with OK only.";
@@ -426,7 +425,7 @@ fn default_true_bool() -> bool {
     true
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct NniSignatureHelperOutput {
     ok: bool,
     payload: Value,

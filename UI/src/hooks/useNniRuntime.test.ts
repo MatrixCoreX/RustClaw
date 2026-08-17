@@ -88,7 +88,7 @@ test("NNI device detection failure does not clear a previously joined runtime", 
   const apiFetch = async (path: string, init?: RequestInit) => {
     requests.push({ path, method: init?.method ?? "GET" });
     if (path === "/v1/nni/config") return apiResponse(joinedConfig());
-    if (path === "/v1/nni/device/status") return apiResponse(missingChipStatus());
+    if (path === "/v1/nni/device/status?refresh=true") return apiResponse(missingChipStatus());
     throw new Error(`unexpected request: ${path}`);
   };
   const mounted = await mountRuntime(apiFetch);
@@ -101,6 +101,33 @@ test("NNI device detection failure does not clear a previously joined runtime", 
   assert.equal(mounted.runtime().nniJoined, true);
   assert.equal(mounted.runtime().nniStatus?.signature_chip_present, false);
   assert.equal(requests.filter((request) => request.method === "POST").length, 0);
+  await mounted.unmount();
+});
+
+test("NNI page entry reuses the device status until an explicit refresh", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  let statusReads = 0;
+  const apiFetch = async (path: string) => {
+    if (path === "/v1/nni/device/status" || path === "/v1/nni/device/status?refresh=true") {
+      statusReads += 1;
+      return apiResponse(readyChipStatus());
+    }
+    throw new Error(`unexpected request: ${path}`);
+  };
+  const mounted = await mountRuntime(apiFetch);
+
+  await act(async () => {
+    await mounted.runtime().ensureNniDeviceStatus();
+  });
+  await act(async () => {
+    await mounted.runtime().ensureNniDeviceStatus(true);
+  });
+  assert.equal(statusReads, 1);
+
+  await act(async () => {
+    await mounted.runtime().fetchNniDeviceStatus();
+  });
+  assert.equal(statusReads, 2);
   await mounted.unmount();
 });
 
@@ -130,7 +157,7 @@ test("NNI join exposes a structured public-key authorization rejection", async (
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   let joinRequest: unknown = null;
   const apiFetch = async (path: string, init?: RequestInit) => {
-    if (path === "/v1/nni/device/status") return apiResponse(readyChipStatus());
+    if (path === "/v1/nni/device/status?refresh=true") return apiResponse(readyChipStatus());
     if (path === "/v1/nni/join/request") {
       joinRequest = JSON.parse(String(init?.body));
       return new Response(

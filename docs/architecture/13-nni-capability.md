@@ -97,6 +97,14 @@ Simulation is never enabled automatically. A simulated signer can be locally eli
 not bypass server-side public-key authorization. Full public keys, signatures, challenges, helper
 paths, node URLs, and internal tokens are removed or reduced to safe previews before model access.
 
+All physical-chip operations pass through one asynchronous serial gate, and queue time is not
+charged against the helper execution timeout. `APP_NNI_SIGNATURE_HELPER_TIMEOUT_SECONDS` controls
+that timeout; it defaults to 25 seconds and is bounded to 5-120 seconds. The UI does not promise a
+fixed detection duration. A verified immutable hardware public key may be cached for one heartbeat
+window, and page reads plus NNI capabilities reuse that evidence first. A helper timeout or an
+overloaded device yields `detection_unavailable`, never `signature_chip_missing`; the UI reports a
+missing chip only after a completed helper check explicitly reports that result.
+
 ## Heartbeat State
 
 `heartbeat_enable` first verifies a signer and the active node, records the desired state, and

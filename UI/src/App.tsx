@@ -11,6 +11,7 @@ import { LogsPage } from "./components/LogsPage";
 import { MemoryPage } from "./components/MemoryPage";
 import { McpConfigSection } from "./components/McpConfigSection";
 import { ModelConfigPage } from "./components/ModelConfigPage";
+import { NniAprPage } from "./components/NniAprPage";
 import { NniPage } from "./components/NniPage";
 import { SignInPage } from "./components/SignInPage";
 import { SkillsPage } from "./components/SkillsPage";
@@ -38,6 +39,7 @@ import {
   buildModelCatalogEntryViews,
   type MultimodalKey,
 } from "./lib/model-config";
+import { NNI_APR_AUTO_REFRESH_SECONDS } from "./lib/nni-apr";
 import {
   buildWorkspaceUpdateView,
   formatWorkspaceUpdateStatus,
@@ -89,7 +91,7 @@ const AiLearningPage = lazy(() =>
   })),
 );
 
-const CONSOLE_PAGES: ConsolePage[] = ["dashboard", "chat", "ai_learning", "nni", "bancor", "services", "channels", "models", "skills", "skill_store", "memory", "logs", "tasks"];
+const CONSOLE_PAGES: ConsolePage[] = ["dashboard", "chat", "ai_learning", "nni", "nni_apr", "bancor", "services", "channels", "models", "skills", "skill_store", "memory", "logs", "tasks"];
 
 const STORAGE_KEYS = {
   baseUrl: appStorageKey("monitor.baseUrl"),
@@ -325,6 +327,7 @@ export default function App() {
     setNniActionMessage,
     setNniActionError,
     fetchNniDeviceStatus,
+    ensureNniDeviceStatus,
     setNniJoinedPersisted,
     joinNni,
     testJoinNni,
@@ -1466,7 +1469,7 @@ export default function App() {
   useEffect(() => {
     if (!uiAuthReady) return;
     if (currentPage !== "nni") return;
-    void fetchNniDeviceStatus();
+    void ensureNniDeviceStatus();
     void fetchNniConfig(true);
     void fetchNniHeartbeatErrors(nniHeartbeatErrorsPage);
     void fetchNniHeartbeatRecords(nniHeartbeatRecordsPage);
@@ -1496,11 +1499,28 @@ export default function App() {
   }, [currentPage, apiBase, uiAuthReady, nniJoined, nniStatus?.signature_chip_present]);
 
   useEffect(() => {
+    if (!uiAuthReady || currentPage !== "nni_apr") return;
+    void ensureNniDeviceStatus(true);
+    void fetchNniConfig(true);
+
+    const refreshAprInputs = (silent: boolean) => Promise.allSettled([
+      bancorRuntime.fetchMarket(silent),
+      ...(nniJoined ? [fetchNniRewards(1, silent)] : []),
+    ]);
+    void refreshAprInputs(false);
+    const timer = window.setInterval(() => {
+      void refreshAprInputs(true);
+    }, NNI_APR_AUTO_REFRESH_SECONDS * 1_000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, apiBase, uiAuthReady, nniJoined]);
+
+  useEffect(() => {
     if (!uiAuthReady || currentPage !== "bancor") return;
     void bancorRuntime.fetchMarket();
     void bancorRuntime.fetchCandles(bancorRuntime.candleIntervalSeconds);
     void bancorRuntime.fetchMarketTrades();
-    void fetchNniDeviceStatus(true);
+    void ensureNniDeviceStatus(true);
     void fetchNniConfig(true);
     let cancelled = false;
     let refreshTimer: number | null = null;
@@ -1852,8 +1872,31 @@ export default function App() {
               onFetchCurrentPointBalance={() => bancorRuntime.fetchAccount(1)}
               onRunDeviceAction={runNniDeviceAction}
               onSetDeviceSimulation={setNniDeviceSimulation}
+              onOpenApr={() => setCurrentPage("nni_apr")}
+              onOpenBancor={() => setCurrentPage("bancor")}
               onActionMessageChange={setNniActionMessage}
               onActionErrorChange={setNniActionError}
+            />
+          ) : null}
+
+          {currentPage === "nni_apr" ? (
+            <NniAprPage
+              lang={lang}
+              t={t}
+              joined={nniJoined}
+              rewards={nniRewards}
+              market={bancorRuntime.market}
+              rewardsLoading={nniRewardsLoading}
+              marketLoading={bancorRuntime.marketLoading}
+              rewardsError={nniRewardsError}
+              marketError={bancorRuntime.error}
+              formatUnixDateTime={formatUnixDateTime}
+              onBack={() => setCurrentPage("nni")}
+              onOpenBancor={() => setCurrentPage("bancor")}
+              onRefresh={() => Promise.allSettled([
+                bancorRuntime.fetchMarket(),
+                ...(nniJoined ? [fetchNniRewards(1)] : []),
+              ])}
             />
           ) : null}
 
@@ -1863,6 +1906,7 @@ export default function App() {
               runtime={bancorRuntime}
               formatUnixDateTime={formatUnixDateTime}
               nniReady={nniJoined && nniStatus?.signature_chip_present === true}
+              onOpenNni={() => setCurrentPage("nni")}
             />
           ) : null}
 

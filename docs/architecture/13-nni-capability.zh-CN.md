@@ -77,6 +77,12 @@ flowchart TD
 完整公钥、签名、challenge、helper 路径、节点 URL 和内部 token 在进入模型前会被删除或缩减为
 安全预览。
 
+所有真实芯片操作经过同一个异步串行门禁，排队时间不计入 helper 自身的执行超时。helper 超时
+由 `APP_NNI_SIGNATURE_HELPER_TIMEOUT_SECONDS` 配置，默认 25 秒，并限制在 5 至 120 秒；UI
+不承诺固定检测时长。已验证的不可变硬件公钥可缓存一个心跳周期，页面读取和 NNI capability
+优先复用该证据。检测进程超时或设备负载过高只会产生 `detection_unavailable`，不得推导成
+`signature_chip_missing`；只有 helper 完成检测并明确报告不可用时，才显示缺少芯片。
+
 ## 心跳状态
 
 `heartbeat_enable` 先验证 signer 和节点配置，再保存期望状态并立即尝试一次心跳。成功进入
