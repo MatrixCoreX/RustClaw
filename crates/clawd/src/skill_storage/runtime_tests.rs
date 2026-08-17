@@ -1,6 +1,90 @@
 use super::*;
 
 #[test]
+fn kb_runtime_schema_matches_the_normalized_skill_contract() {
+    let runtime = SkillStorageRuntime::test_default();
+    let db = runtime
+        .pool_for("kb")
+        .expect("KB owner")
+        .get()
+        .expect("KB db");
+    let columns = {
+        let mut stmt = db
+            .prepare("PRAGMA table_info(kb_namespaces)")
+            .expect("namespace columns");
+        stmt.query_map([], |row| row.get::<_, String>(1))
+            .expect("query columns")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("collect columns")
+    };
+    assert!(!columns.iter().any(|column| column == "payload_json"));
+    assert!(columns.iter().any(|column| column == "next_chunk_seq"));
+    assert!(columns.iter().any(|column| column == "embedding_version"));
+    for table in ["kb_documents", "kb_chunks", "kb_ingest_jobs"] {
+        let exists: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                [table],
+                |row| row.get(0),
+            )
+            .expect("normalized table");
+        assert_eq!(exists, 1, "table={table}");
+    }
+    let version: i64 = db
+        .query_row(
+            "SELECT schema_version FROM skill_storage_metadata WHERE skill_name='kb'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("KB schema version");
+    assert_eq!(version, schema::KB_SCHEMA_VERSION);
+}
+
+#[test]
+fn kb_runtime_does_not_overwrite_a_legacy_payload_before_skill_migration() {
+    let db = Connection::open_in_memory().expect("legacy KB db");
+    db.execute_batch(
+        "CREATE TABLE kb_namespaces (
+            owner_user_key TEXT NOT NULL,
+            namespace TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            updated_at_epoch INTEGER NOT NULL,
+            PRIMARY KEY(owner_user_key, namespace)
+         );",
+    )
+    .expect("legacy namespace schema");
+
+    schema::ensure_kb_schema(&db).expect("legacy-compatible schema");
+
+    let has_payload: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('kb_namespaces') WHERE name='payload_json'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("legacy payload column");
+    let version: i64 = db
+        .query_row(
+            "SELECT schema_version FROM skill_storage_metadata WHERE skill_name='kb'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("legacy schema version");
+    assert_eq!(has_payload, 1);
+    assert_eq!(version, 1);
+    for table in ["kb_documents", "kb_chunks", "kb_ingest_jobs"] {
+        let exists: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                [table],
+                |row| row.get(0),
+            )
+            .expect("legacy table check");
+        assert_eq!(exists, 0, "table={table}");
+    }
+}
+
+#[test]
 fn runtime_keeps_crypto_and_kb_in_separate_pools() {
     let runtime = SkillStorageRuntime::test_default();
     let crypto = runtime
@@ -53,8 +137,9 @@ fn clearing_one_skill_never_removes_another_skills_rows() {
         .expect("KB db")
         .execute(
             "INSERT INTO kb_namespaces
-                (owner_user_key, namespace, payload_json, updated_at_epoch)
-             VALUES ('rk-user', 'docs', '{}', 1)",
+                (owner_user_key, namespace, updated_at_epoch, next_chunk_seq,
+                 revision, parser_version, chunker_version, embedding_version)
+             VALUES ('rk-user', 'docs', 1, 1, 1, 'plain-v1', 'chars-v1', 'none')",
             [],
         )
         .expect("seed KB");

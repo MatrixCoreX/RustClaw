@@ -721,6 +721,35 @@ async fn imported_external_skill_can_be_disabled_removed_and_reinstalled() {
 }
 
 #[tokio::test]
+async fn skills_config_uses_catalog_snapshot_without_revalidating_installed_artifacts() {
+    let (state, workspace) = isolated_skill_store_state();
+    let skill_name = "catalog_only_fixture";
+    register_external_skill_fixture(&state, &workspace, skill_name).await;
+
+    std::fs::remove_dir_all(workspace.join("data/skill-packages").join(skill_name))
+        .expect("remove installed artifact fixture");
+    assert!(
+        admission_service(&state)
+            .and_then(|service| service.snapshot().map_err(|error| error.to_string()))
+            .is_err(),
+        "the execution snapshot must still reject a missing installed artifact"
+    );
+
+    let router = axum::Router::new()
+        .nest("/v1", build_ui_router())
+        .with_state(state);
+    let (status, config) =
+        call_skill_store_api(router, Method::GET, "/v1/skills/config", None).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(value_array_contains(
+        &config["data"]["managed_skills"],
+        skill_name
+    ));
+    let _ = std::fs::remove_dir_all(workspace);
+}
+
+#[tokio::test]
 async fn internal_extension_admission_uses_the_same_overlay_without_source_writes() {
     let (state, workspace) = isolated_skill_store_state();
     let skill_name = "runtime_probe";

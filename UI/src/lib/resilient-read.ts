@@ -94,3 +94,20 @@ export function runCoalescedRead<T>(
   void request.then(cleanUp, cleanUp);
   return request;
 }
+
+export function runCoalescedResponseRead(
+  inFlight: Map<string, Promise<Response>>,
+  key: string,
+  start: () => Promise<Response>,
+): Promise<Response> {
+  let request = inFlight.get(key);
+  if (!request) {
+    request = start();
+    inFlight.set(key, request);
+    const cleanUp = () => {
+      if (inFlight.get(key) === request) inFlight.delete(key);
+    };
+    void request.then(cleanUp, cleanUp);
+  }
+  return request.then((response) => response.clone());
+}

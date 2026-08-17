@@ -33,20 +33,12 @@ fn seed_kb_user_data(state: &AppState, user_key: &str) {
         .expect("KB owner")
         .get()
         .expect("KB db");
-    let payload = serde_json::json!({
-        "namespace": "docs",
-        "owner_user_key": user_key,
-        "updated_at_epoch": 1,
-        "next_chunk_seq": 1,
-        "docs": {},
-        "chunks": []
-    })
-    .to_string();
     db.execute(
         "INSERT INTO kb_namespaces
-            (owner_user_key, namespace, payload_json, updated_at_epoch)
-         VALUES (?1, 'docs', ?2, 1)",
-        params![user_key, payload],
+            (owner_user_key, namespace, updated_at_epoch, next_chunk_seq,
+             revision, parser_version, chunker_version, embedding_version)
+         VALUES (?1, 'docs', 1, 1, 1, 'plain-v1', 'chars-v1', 'none')",
+        params![user_key],
     )
     .expect("seed KB namespace");
     db.execute(
@@ -519,9 +511,9 @@ fn admin_rotation_rebinds_crypto_and_kb_storage() {
         .expect("KB owner")
         .get()
         .expect("KB db");
-    let (payload, source_ref, metadata): (String, String, String) = kb
+    let (owner_user_key, source_ref, metadata): (String, String, String) = kb
         .query_row(
-            "SELECT n.payload_json, r.source_ref, r.metadata_json
+            "SELECT n.owner_user_key, r.source_ref, r.metadata_json
              FROM kb_namespaces n
              JOIN memory_retrieval_index r ON r.user_key = n.owner_user_key
              WHERE n.owner_user_key = ?1",
@@ -529,7 +521,7 @@ fn admin_rotation_rebinds_crypto_and_kb_storage() {
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .expect("read rebound KB identities");
-    assert!(payload.contains(&new_user_key));
+    assert_eq!(owner_user_key, new_user_key);
     assert!(source_ref.contains(&new_user_key));
     assert!(metadata.contains(&new_user_key));
 }

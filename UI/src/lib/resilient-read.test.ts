@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { fetchResilientRead, runCoalescedRead } from "./resilient-read";
+import {
+  fetchResilientRead,
+  runCoalescedRead,
+  runCoalescedResponseRead,
+} from "./resilient-read";
 
 test("resilient read retries transient network failures", async () => {
   let attempts = 0;
@@ -75,5 +79,27 @@ test("coalesced reads share one in-flight request", async () => {
   resolveRequest?.(7);
   assert.equal(await second, 7);
   await Promise.resolve();
+  assert.equal(inFlight.size, 0);
+});
+
+test("coalesced response reads clone the shared response for every consumer", async () => {
+  const inFlight = new Map<string, Promise<Response>>();
+  let starts = 0;
+  let resolveRequest: ((response: Response) => void) | undefined;
+  const start = () => {
+    starts += 1;
+    return new Promise<Response>((resolve) => {
+      resolveRequest = resolve;
+    });
+  };
+
+  const first = runCoalescedResponseRead(inFlight, "skills-config", start);
+  const second = runCoalescedResponseRead(inFlight, "skills-config", start);
+  resolveRequest?.(Response.json({ enabled: true }));
+  const [firstResponse, secondResponse] = await Promise.all([first, second]);
+
+  assert.equal(starts, 1);
+  assert.deepEqual(await firstResponse.json(), { enabled: true });
+  assert.deepEqual(await secondResponse.json(), { enabled: true });
   assert.equal(inFlight.size, 0);
 });
