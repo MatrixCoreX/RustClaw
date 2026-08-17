@@ -4,21 +4,71 @@ use axum::http::Request;
 use tower::ServiceExt;
 
 #[test]
-fn nni_hardware_detection_uses_a_twelve_second_retry_window() {
-    assert_eq!(NNI_SIGNATURE_HELPER_TIMEOUT_SECONDS, 12);
+fn nni_hardware_detection_timeout_is_configurable_and_bounded() {
     assert_eq!(
-        nni_detection_retry_delay(Duration::from_secs(5)),
-        Duration::from_secs(1)
+        normalize_nni_signature_helper_timeout_seconds(None),
+        NNI_SIGNATURE_HELPER_TIMEOUT_DEFAULT_SECONDS
     );
     assert_eq!(
-        nni_detection_retry_delay(Duration::from_millis(250)),
-        Duration::from_millis(250)
+        normalize_nni_signature_helper_timeout_seconds(Some("45")),
+        45
+    );
+    assert_eq!(normalize_nni_signature_helper_timeout_seconds(Some("1")), 5);
+    assert_eq!(
+        normalize_nni_signature_helper_timeout_seconds(Some("999")),
+        120
+    );
+    assert_eq!(
+        normalize_nni_signature_helper_timeout_seconds(Some("invalid")),
+        NNI_SIGNATURE_HELPER_TIMEOUT_DEFAULT_SECONDS
     );
 }
 
+#[tokio::test]
+async fn nni_signature_helper_operations_share_one_serial_gate() {
+    let first = nni_signature_helper_operation_lock().lock().await;
+    assert!(nni_signature_helper_operation_lock().try_lock().is_err());
+    drop(first);
+    let second = nni_signature_helper_operation_lock()
+        .try_lock()
+        .expect("signature helper gate should be released");
+    drop(second);
+}
+
 #[test]
-fn nni_agent_sends_heartbeats_every_eight_minutes() {
-    assert_eq!(NNI_HEARTBEAT_INTERVAL_SECONDS, 8 * 60);
+fn nni_hardware_pubkey_cache_only_reuses_valid_real_chip_results() {
+    assert_eq!(NNI_HARDWARE_PUBKEY_CACHE_SECONDS, 10 * 60);
+    let script_path = PathBuf::from("/tmp/nni-hardware-pubkey-cache-test/signature.py");
+    invalidate_nni_hardware_pubkey(&script_path);
+
+    let hardware_output = NniSignatureHelperOutput {
+        ok: true,
+        payload: json!({
+            "ok": true,
+            "pubkey": "a".repeat(128),
+            "simulated": false,
+        }),
+        error: None,
+        stderr_tail: String::new(),
+        exit_code: Some(0),
+    };
+    cache_nni_hardware_pubkey(script_path.clone(), &hardware_output);
+    assert_eq!(
+        cached_nni_hardware_pubkey(&script_path)
+            .and_then(|output| output.payload.get("pubkey").cloned()),
+        hardware_output.payload.get("pubkey").cloned()
+    );
+
+    invalidate_nni_hardware_pubkey(&script_path);
+    let mut simulated_output = hardware_output;
+    simulated_output.payload["simulated"] = json!(true);
+    cache_nni_hardware_pubkey(script_path.clone(), &simulated_output);
+    assert!(cached_nni_hardware_pubkey(&script_path).is_none());
+}
+
+#[test]
+fn nni_agent_sends_heartbeats_ten_seconds_before_each_ten_minute_window() {
+    assert_eq!(NNI_HEARTBEAT_INTERVAL_SECONDS, 9 * 60 + 50);
 }
 
 #[test]
@@ -45,6 +95,14 @@ fn nni_next_heartbeat_due_time_is_stable_for_success_and_retry_states() {
         nni_next_heartbeat_due_at_ts(false, "disabled", &waiting, 9_999),
         None
     );
+}
+
+#[test]
+fn nni_heartbeat_worker_sleeps_to_the_exact_due_time_without_busy_polling() {
+    assert_eq!(nni_heartbeat_worker_sleep_seconds(Some(1_590), 1_000), 60);
+    assert_eq!(nni_heartbeat_worker_sleep_seconds(Some(1_590), 1_550), 40);
+    assert_eq!(nni_heartbeat_worker_sleep_seconds(Some(1_590), 1_590), 1);
+    assert_eq!(nni_heartbeat_worker_sleep_seconds(None, 1_000), 60);
 }
 
 #[test]

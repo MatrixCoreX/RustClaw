@@ -1,4 +1,5 @@
 import {
+  ArrowLeftRight,
   ChevronLeft,
   ChevronRight,
   Copy,
@@ -7,6 +8,7 @@ import {
   KeyRound,
   Loader2,
   Network,
+  Percent,
   RefreshCw,
   ShieldAlert,
   ShieldCheck,
@@ -107,6 +109,8 @@ export interface NniPageProps {
   onFetchCurrentPointBalance: () => unknown | Promise<unknown>;
   onRunDeviceAction: (action: string) => unknown | Promise<unknown>;
   onSetDeviceSimulation: (enabled: boolean) => unknown | Promise<unknown>;
+  onOpenApr: () => void;
+  onOpenBancor: () => void;
   onActionMessageChange: (message: string | null) => void;
   onActionErrorChange: (message: string | null) => void;
 }
@@ -121,7 +125,6 @@ const NNI_DEVICE_ACTIONS = [
 ];
 
 const NNI_TEST_JOIN_ACTIVITY_MS = 2200;
-const NNI_SIGNATURE_DETECTION_SECONDS = 12;
 export const NNI_DEVICE_MANAGEMENT_COPY = {
   zh: "这里管理硬件设备的 NNI 入口和设备签名能力。",
   en: "This page manages the hardware device's NNI entry and device-signing capability.",
@@ -196,15 +199,17 @@ export function NniPage({
   onFetchCurrentPointBalance,
   onRunDeviceAction,
   onSetDeviceSimulation,
+  onOpenApr,
+  onOpenBancor,
   onActionMessageChange,
   onActionErrorChange,
 }: NniPageProps) {
   const [nniTestJoinPulse, setNniTestJoinPulse] = useState(false);
   const [nniHistoryView, setNniHistoryView] = useState<NniHistoryView>("overview");
-  const [nniDetectionSecondsLeft, setNniDetectionSecondsLeft] = useState(NNI_SIGNATURE_DETECTION_SECONDS);
   const nniTestJoinPulseTimer = useRef<number | null>(null);
   const nniChipPresent = nniStatus?.signature_chip_present === true;
-  const nniChipMissing = nniStatus?.signature_chip_present === false;
+  const nniChipMissing = nniStatus?.status === "signature_chip_missing";
+  const nniDetectionUnavailable = nniStatus?.status === "detection_unavailable";
   const nniSimulated = nniStatus?.simulated === true;
   const nniSimulationControl = nniSimulationControlMode(nniStatus, nniStatusLoading);
   const nniPrimaryHex = nniPayloadHexField(nniActionResult?.payload);
@@ -231,8 +236,8 @@ export function NniPage({
     nniJoined || nniTestJoinPulse || ["join_nni", "sign_challenge", "sign_timestamp"].includes(nniActionLoading || "");
   const nniStatusMessage = nniStatusLoading
     ? t(
-        `正在检测真实芯片，请等待约 ${nniDetectionSecondsLeft} 秒。`,
-        `Checking for a real chip. Please wait about ${nniDetectionSecondsLeft} seconds.`,
+        "正在检测真实芯片，请稍候。",
+        "Checking for a real chip. Please wait.",
       )
     : nniDeviceMessage(
         nniStatus,
@@ -248,23 +253,6 @@ export function NniPage({
       }
     };
   }, []);
-
-  useEffect(() => {
-    if (!nniStatusLoading) {
-      setNniDetectionSecondsLeft(NNI_SIGNATURE_DETECTION_SECONDS);
-      return;
-    }
-    const startedAt = Date.now();
-    const updateCountdown = () => {
-      const elapsedSeconds = (Date.now() - startedAt) / 1000;
-      setNniDetectionSecondsLeft(
-        Math.max(1, Math.ceil(NNI_SIGNATURE_DETECTION_SECONDS - elapsedSeconds)),
-      );
-    };
-    updateCountdown();
-    const timer = window.setInterval(updateCountdown, 250);
-    return () => window.clearInterval(timer);
-  }, [nniStatusLoading]);
 
   const runTestJoinWithRuntimePulse = async () => {
     if (nniTestJoinPulseTimer.current !== null) {
@@ -354,61 +342,79 @@ export function NniPage({
               formatUnixDateTime={formatUnixDateTime}
             />
             <div className="flex flex-wrap justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => void refreshNniPageStatus()}
-              disabled={nniStatusLoading || nniRewardsLoading}
-              className="theme-secondary-btn px-3 py-2 text-sm"
-            >
-              {nniStatusLoading || nniRewardsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              {t("刷新状态", "Refresh status")}
-            </button>
-            <button
-              type="button"
-              onClick={() => (nniJoined ? void onSetJoinedPersisted(false) : void onJoin())}
-              disabled={Boolean(nniActionLoading) || nniStatusLoading || nniChipMissing || (!nniJoined && nniRemoteNodeCount === 0)}
-              className={nniJoined ? "theme-secondary-btn px-3 py-2 text-sm" : "theme-accent-btn px-3 py-2 text-sm"}
-              title={
-                nniChipMissing
-                  ? t("当前设备缺少芯片，不能加入需要设备签名的 NNI。", "This device has no chip, so it cannot join signed NNI.")
-                  : nniRemoteNodeCount === 0
-                    ? t("请先填写远程 NNI 节点地址。", "Enter a remote NNI node URL first.")
-                    : undefined
-              }
-            >
-              {["join_nni", "sign_challenge"].includes(nniActionLoading || "") ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <KeyRound className="h-4 w-4" />
-              )}
-              {nniJoined ? t("停止", "Stop") : t("加入", "Join")}
-            </button>
-            {!nniJoined ? (
               <button
                 type="button"
-                onClick={() => void runTestJoinWithRuntimePulse()}
-                disabled={Boolean(nniActionLoading) || nniStatusLoading}
+                onClick={onOpenApr}
                 className="theme-secondary-btn px-3 py-2 text-sm"
+              >
+                <Percent className="h-4 w-4" />
+                APR
+              </button>
+              <button
+                type="button"
+                onClick={onOpenBancor}
+                className="theme-secondary-btn px-3 py-2 text-sm"
+              >
+                <ArrowLeftRight className="h-4 w-4" />
+                {t("交易", "Trade")}
+              </button>
+              <button
+                type="button"
+                onClick={() => void refreshNniPageStatus()}
+                disabled={nniStatusLoading || nniRewardsLoading}
+                className="theme-secondary-btn px-3 py-2 text-sm"
+              >
+                {nniStatusLoading || nniRewardsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                {t("刷新状态", "Refresh status")}
+              </button>
+              <button
+                type="button"
+                onClick={() => (nniJoined ? void onSetJoinedPersisted(false) : void onJoin())}
+                disabled={Boolean(nniActionLoading) || nniStatusLoading || (!nniJoined && (!nniChipPresent || nniRemoteNodeCount === 0))}
+                className={nniJoined ? "theme-secondary-btn px-3 py-2 text-sm" : "theme-accent-btn px-3 py-2 text-sm"}
                 title={
-                  nniChipMissing
-                    ? t(
-                        "上次检测未找到芯片；测试加入会重新尝试本机时间戳签名，不请求远程 NNI 服务端。",
-                        "The last check did not find a chip. Test Join retries a local timestamp signature and does not contact the remote NNI server.",
-                      )
-                    : t(
-                        "测试加入只做本机时间戳签名，不请求远程 NNI 服务端。",
-                        "Test join only signs a local timestamp and does not contact the remote NNI server.",
-                      )
+                  !nniJoined && !nniChipPresent
+                    ? nniDetectionUnavailable
+                      ? t("芯片检测暂时未完成，请稍后刷新状态。", "Chip detection is temporarily unavailable. Refresh the status later.")
+                      : t("当前设备缺少芯片，不能加入需要设备签名的 NNI。", "This device has no chip, so it cannot join signed NNI.")
+                    : nniRemoteNodeCount === 0
+                      ? t("请先填写远程 NNI 节点地址。", "Enter a remote NNI node URL first.")
+                      : undefined
                 }
               >
-                {nniActionLoading === "sign_timestamp" ? (
+                {["join_nni", "sign_challenge"].includes(nniActionLoading || "") ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <KeyRound className="h-4 w-4" />
                 )}
-                {t("测试加入", "Test Join")}
+                {nniJoined ? t("停止", "Stop") : t("加入", "Join")}
               </button>
-            ) : null}
+              {!nniJoined ? (
+                <button
+                  type="button"
+                  onClick={() => void runTestJoinWithRuntimePulse()}
+                  disabled={Boolean(nniActionLoading) || nniStatusLoading}
+                  className="theme-secondary-btn px-3 py-2 text-sm"
+                  title={
+                    nniChipMissing
+                      ? t(
+                          "上次检测未找到芯片；测试加入会重新尝试本机时间戳签名，不请求远程 NNI 服务端。",
+                          "The last check did not find a chip. Test Join retries a local timestamp signature and does not contact the remote NNI server.",
+                        )
+                      : t(
+                          "测试加入只做本机时间戳签名，不请求远程 NNI 服务端。",
+                          "Test join only signs a local timestamp and does not contact the remote NNI server.",
+                        )
+                  }
+                >
+                  {nniActionLoading === "sign_timestamp" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <KeyRound className="h-4 w-4" />
+                  )}
+                  {t("测试加入", "Test Join")}
+                </button>
+              ) : null}
             </div>
           </div>
         </div>
@@ -491,6 +497,11 @@ export function NniPage({
                     <ShieldCheck className="h-3.5 w-3.5" />
                     {t("可用", "Ready")}
                   </>
+                ) : nniDetectionUnavailable ? (
+                  <>
+                    <ShieldAlert className="h-3.5 w-3.5" />
+                    {t("暂不可用", "Unavailable")}
+                  </>
                 ) : nniStatus == null ? (
                   t("未检测", "Not checked")
                 ) : (
@@ -529,17 +540,7 @@ export function NniPage({
                   </div>
                 </div>
                 <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-black/20">
-                  <div
-                    className="h-full rounded-full bg-sky-300 transition-[width] duration-300 ease-linear"
-                    style={{
-                      width: `${Math.max(
-                        8,
-                        ((NNI_SIGNATURE_DETECTION_SECONDS - nniDetectionSecondsLeft) /
-                          NNI_SIGNATURE_DETECTION_SECONDS) *
-                          100,
-                      )}%`,
-                    }}
-                  />
+                  <div className="h-full w-2/3 animate-pulse rounded-full bg-sky-300" />
                 </div>
               </>
             ) : (
@@ -708,7 +709,12 @@ export function NniPage({
           </div>
 
           <p className="mt-4 text-sm leading-7 text-white/65">
-            {nniChipMissing
+            {nniDetectionUnavailable
+              ? t(
+                  "本次芯片检测暂时未完成，不代表设备缺少芯片。请等待设备负载降低后刷新状态。",
+                  "This chip check did not finish. It does not mean the chip is missing. Refresh after the device load decreases.",
+                )
+              : nniChipMissing
               ? t(
                   "当前设备缺少芯片，因此不会显示为已加入。你仍可以继续使用 {product_name} 的其它功能。",
                   "This device has no chip, so it will not be marked as joined. Other {product_name} features remain available.",
@@ -1090,11 +1096,13 @@ export function NniPage({
                 key={action}
                 type="button"
                 onClick={() => void onRunDeviceAction(action)}
-                disabled={Boolean(nniActionLoading) || nniStatusLoading || nniChipMissing}
+                disabled={Boolean(nniActionLoading) || nniStatusLoading || !nniChipPresent}
                 className="theme-topbar-btn justify-between px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
                 title={
-                  nniChipMissing
-                    ? t("当前设备缺少芯片，不能执行该操作。", "This device has no chip, so this action cannot run.")
+                  !nniChipPresent
+                    ? nniDetectionUnavailable
+                      ? t("芯片检测暂时未完成，请刷新状态后重试。", "Chip detection is temporarily unavailable. Refresh the status and retry.")
+                      : t("当前设备缺少芯片，不能执行该操作。", "This device has no chip, so this action cannot run.")
                     : undefined
                 }
               >

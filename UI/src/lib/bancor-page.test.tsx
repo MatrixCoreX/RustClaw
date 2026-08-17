@@ -178,11 +178,13 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       runtime={runtime}
       formatUnixDateTime={(value) => String(value ?? "")}
       nniReady
+      onOpenNni={() => undefined}
     />,
   );
   assert.match(html, /data-nni-decimal-amount="100000000\.00000000 POINT"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.match(html, /data-nni-decimal-amount="10000\.00000000 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.match(html, /BANCOR储备曲线市场/);
+  assert.match(html, /获得奖励/);
   assert.match(html, /data-bancor-open-price-change="true"/);
   assert.match(html, /价格变化计算/);
   assert.equal((html.match(/theme-shadow-card/g) ?? []).length, 6);

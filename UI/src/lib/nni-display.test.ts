@@ -213,6 +213,19 @@ test("renders NNI device messages from machine keys", () => {
   assert.equal(
     nniDeviceMessage(
       {
+        nni_available: true,
+        helper_available: true,
+        signature_chip_present: false,
+        status: "detection_unavailable",
+        message_key: "nni.device_status.detection_unavailable",
+      },
+      "zh",
+    ),
+    "芯片检测暂时未完成，不代表设备缺少芯片。",
+  );
+  assert.equal(
+    nniDeviceMessage(
+      {
         action: "sign_timestamp",
         signature_chip_present: true,
         message_key: "nni.device_action.completed",

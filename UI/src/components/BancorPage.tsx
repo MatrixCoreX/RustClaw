@@ -4,6 +4,7 @@ import {
   Calculator,
   ChevronLeft,
   ChevronRight,
+  Gift,
   Maximize2,
   Minimize2,
   Minus,
@@ -299,11 +300,13 @@ export function BancorPage({
   runtime,
   formatUnixDateTime,
   nniReady,
+  onOpenNni,
 }: {
   t: Translate;
   runtime: BancorRuntime;
   formatUnixDateTime: (value?: number | null) => string;
   nniReady: boolean;
+  onOpenNni: () => void;
 }) {
   const tradePanelRef = useRef<HTMLDivElement>(null);
   const [side, setSide] = useState<"buy" | "sell">("sell");
@@ -420,6 +423,14 @@ export function BancorPage({
             </p>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              className="theme-secondary-btn"
+              onClick={onOpenNni}
+            >
+              <Gift className="h-4 w-4" />
+              {t("获得奖励", "Earn rewards")}
+            </button>
             <button
               type="button"
               className="theme-secondary-btn"

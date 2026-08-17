@@ -717,7 +717,7 @@ fn nni_skill_enrich_utc_timestamps(value: &mut Value) {
 }
 
 async fn nni_skill_heartbeat_enable(state: &AppState) -> Result<Value, NniSkillDomainError> {
-    let device = nni_device_snapshot(state).await;
+    let device = nni_device_snapshot(state, false).await;
     nni_skill_require_signer(&device)?;
     let _guard = nni_heartbeat_operation_lock().lock().await;
     let existing = read_nni_config(state).map_err(|error| {
@@ -839,7 +839,7 @@ async fn nni_skill_heartbeat_disable(state: &AppState) -> Result<Value, NniSkill
 }
 
 async fn nni_skill_heartbeat_now(state: &AppState) -> Result<Value, NniSkillDomainError> {
-    let device = nni_device_snapshot(state).await;
+    let device = nni_device_snapshot(state, false).await;
     nni_skill_require_signer(&device)?;
     let _guard = nni_heartbeat_operation_lock().lock().await;
     let config = read_nni_config(state).map_err(|error| {
@@ -933,7 +933,7 @@ async fn execute_internal_nni_action(
         .unwrap_or_else(|| format!("nni-task:{}", token_ctx.task_id));
     match request.action {
         InternalNniAction::Status => {
-            let device = nni_device_snapshot(state).await;
+            let device = nni_device_snapshot(state, false).await;
             let config = read_nni_config(state).map_err(|error| {
                 NniSkillDomainError::new(
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -948,7 +948,7 @@ async fn execute_internal_nni_action(
             }))
         }
         InternalNniAction::DeviceStatus => {
-            Ok(nni_skill_device_projection(&nni_device_snapshot(state).await))
+            Ok(nni_skill_device_projection(&nni_device_snapshot(state, false).await))
         }
         InternalNniAction::HeartbeatStatus => {
             let config = read_nni_config(state).map_err(|error| {
@@ -965,7 +965,7 @@ async fn execute_internal_nni_action(
         InternalNniAction::HeartbeatDisable => nni_skill_heartbeat_disable(state).await,
         InternalNniAction::HeartbeatNow => nni_skill_heartbeat_now(state).await,
         InternalNniAction::NetworkStats => {
-            let device = nni_device_snapshot(state).await;
+            let device = nni_device_snapshot(state, false).await;
             nni_skill_require_signer(&device)?;
             let rewards = nni_skill_rewards_data(
                 state,
@@ -976,7 +976,7 @@ async fn execute_internal_nni_action(
             nni_skill_network_stats(&rewards)
         }
         InternalNniAction::MyRewards => {
-            let device = nni_device_snapshot(state).await;
+            let device = nni_device_snapshot(state, false).await;
             nni_skill_require_signer(&device)?;
             nni_skill_rewards_data(
                 state,
@@ -1003,7 +1003,7 @@ async fn execute_internal_nni_action(
             Ok(data)
         }
         InternalNniAction::BancorAccount => {
-            let device = nni_device_snapshot(state).await;
+            let device = nni_device_snapshot(state, false).await;
             nni_skill_require_signer(&device)?;
             nni_skill_bancor_account_data(
                 state,

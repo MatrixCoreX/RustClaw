@@ -254,6 +254,18 @@ function messageForNniKey(key: string | null | undefined, lang: UiLanguage): str
         "正式参与网络原生智能需要带芯片的 MatrixAI 硬件；若只做本机协议测试，检测确认后可使用模拟芯片。",
         "Production participation in Network Native Intelligence requires MatrixAI hardware with a chip. For local protocol testing only, simulation becomes available after detection is confirmed.",
       );
+    case "nni.device_status.detection_unavailable":
+      return copy(
+        lang,
+        "芯片检测暂时未完成，不代表设备缺少芯片。",
+        "Chip detection is temporarily unavailable. This does not mean the chip is missing.",
+      );
+    case "nni.device_status.detection_unavailable.next_step":
+      return copy(
+        lang,
+        "请等待设备负载降低后刷新状态；后台心跳会继续使用已验证的设备身份。",
+        "Refresh after the device load decreases. Background heartbeats continue using the verified device identity.",
+      );
     case "nni.device_action.completed":
       return copy(lang, "NNI 设备签名操作完成。", "NNI device signing action completed.");
     case "nni.device_action.simulation_enabled":

@@ -237,7 +237,7 @@ fn nni_gateway_uses_persisted_error_code_without_parsing_error_text() {
         remote_nodes: vec!["https://nni.example.test".to_string()],
         selected_node_url: Some("https://nni.example.test".to_string()),
         joined: true,
-        heartbeat_interval_seconds: 480,
+        heartbeat_interval_seconds: 590,
         heartbeat_network_retry_limit: 3,
         heartbeat_request_count: 4,
         last_heartbeat_at_ts: Some(100),
@@ -250,7 +250,7 @@ fn nni_gateway_uses_persisted_error_code_without_parsing_error_text() {
         last_success_node_host: Some("nni.example.test".to_string()),
         network_authorization: "authorized".to_string(),
         heartbeat_state: "waiting_network".to_string(),
-        next_heartbeat_due_at_ts: Some(680),
+        next_heartbeat_due_at_ts: Some(690),
         worker_running: true,
         config_path: "ignored".to_string(),
     });

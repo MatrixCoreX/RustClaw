@@ -1,4 +1,4 @@
-const NNI_HEARTBEAT_INTERVAL_SECONDS: u64 = 8 * 60;
+const NNI_HEARTBEAT_INTERVAL_SECONDS: u64 = 9 * 60 + 50;
 const NNI_HEARTBEAT_POLL_SECONDS: u64 = 60;
 const NNI_HEARTBEAT_NETWORK_RETRY_LIMIT: usize = 3;
 const NNI_HEARTBEAT_NETWORK_RETRY_DELAY_SECONDS: u64 = 2;
@@ -1333,6 +1333,16 @@ fn nni_heartbeat_operation_lock() -> &'static tokio::sync::Mutex<()> {
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
+fn nni_heartbeat_worker_sleep_seconds(next_due_at_ts: Option<u64>, now: u64) -> u64 {
+    next_due_at_ts
+        .map(|next_due| {
+            next_due
+                .saturating_sub(now)
+                .clamp(1, NNI_HEARTBEAT_POLL_SECONDS)
+        })
+        .unwrap_or(NNI_HEARTBEAT_POLL_SECONDS)
+}
+
 pub(crate) fn spawn_nni_heartbeat_worker(state: AppState) {
     tokio::spawn(async move {
         loop {
@@ -1343,7 +1353,15 @@ pub(crate) fn spawn_nni_heartbeat_worker(state: AppState) {
                     json!({"error": err.to_string()}),
                 );
             }
-            tokio::time::sleep(Duration::from_secs(NNI_HEARTBEAT_POLL_SECONDS)).await;
+            let now = u64::try_from(current_unix_ts()).unwrap_or_default();
+            let next_due_at_ts = read_nni_config(&state)
+                .ok()
+                .and_then(|config| config.next_heartbeat_due_at_ts);
+            tokio::time::sleep(Duration::from_secs(nni_heartbeat_worker_sleep_seconds(
+                next_due_at_ts,
+                now,
+            )))
+            .await;
         }
     });
 }

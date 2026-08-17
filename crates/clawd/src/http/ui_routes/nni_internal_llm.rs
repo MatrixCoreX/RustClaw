@@ -12,6 +12,10 @@ fn nni_supported_actions() -> Vec<&'static str> {
 
 const NNI_SIMULATION_ENABLE_ACTION: &str = "simulation_enable";
 const NNI_SIMULATION_DISABLE_ACTION: &str = "simulation_disable";
+const NNI_SIGNATURE_HELPER_TIMEOUT_ENV: &str = "APP_NNI_SIGNATURE_HELPER_TIMEOUT_SECONDS";
+const NNI_SIGNATURE_HELPER_TIMEOUT_DEFAULT_SECONDS: u64 = 25;
+const NNI_SIGNATURE_HELPER_TIMEOUT_MIN_SECONDS: u64 = 5;
+const NNI_SIGNATURE_HELPER_TIMEOUT_MAX_SECONDS: u64 = 120;
 
 fn nni_accepted_actions() -> Vec<&'static str> {
     let mut actions = nni_supported_actions();
@@ -90,12 +94,89 @@ fn nni_signature_helper_log_context(args: &[String]) -> Value {
     })
 }
 
+fn nni_signature_helper_operation_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+const NNI_HARDWARE_PUBKEY_CACHE_SECONDS: u64 = 10 * 60;
+
+#[derive(Clone)]
+struct NniHardwarePubkeyCacheEntry {
+    output: NniSignatureHelperOutput,
+    expires_at: tokio::time::Instant,
+}
+
+fn nni_hardware_pubkey_cache(
+) -> &'static Mutex<HashMap<PathBuf, NniHardwarePubkeyCacheEntry>> {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, NniHardwarePubkeyCacheEntry>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn cached_nni_hardware_pubkey(script_path: &Path) -> Option<NniSignatureHelperOutput> {
+    let now = tokio::time::Instant::now();
+    let mut cache = nni_hardware_pubkey_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    cache.retain(|_, entry| entry.expires_at > now);
+    cache.get(script_path).map(|entry| entry.output.clone())
+}
+
+fn cache_nni_hardware_pubkey(script_path: PathBuf, output: &NniSignatureHelperOutput) {
+    let pubkey_is_valid = output
+        .payload
+        .get("pubkey")
+        .and_then(Value::as_str)
+        .is_some_and(is_nni_pubkey_hex);
+    if !output.ok || nni_helper_payload_simulated(&output.payload) || !pubkey_is_valid {
+        return;
+    }
+    nni_hardware_pubkey_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(
+            script_path,
+            NniHardwarePubkeyCacheEntry {
+                output: output.clone(),
+                expires_at: tokio::time::Instant::now()
+                    + Duration::from_secs(NNI_HARDWARE_PUBKEY_CACHE_SECONDS),
+            },
+        );
+}
+
+fn invalidate_nni_hardware_pubkey(script_path: &Path) {
+    nni_hardware_pubkey_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(script_path);
+}
+
 async fn run_nni_signature_helper(
     state: &AppState,
     args: &[String],
 ) -> Result<NniSignatureHelperOutput, String> {
+    run_nni_signature_helper_with_cache(state, args, true).await
+}
+
+async fn run_nni_signature_helper_uncached(
+    state: &AppState,
+    args: &[String],
+) -> Result<NniSignatureHelperOutput, String> {
+    run_nni_signature_helper_with_cache(state, args, false).await
+}
+
+async fn run_nni_signature_helper_with_cache(
+    state: &AppState,
+    args: &[String],
+    allow_pubkey_cache: bool,
+) -> Result<NniSignatureHelperOutput, String> {
     let script_path = nni_signature_helper_path(state);
     let log_context = nni_signature_helper_log_context(args);
+    let action = args.first().map(String::as_str).unwrap_or_default();
+    let changes_signer = matches!(
+        action,
+        NNI_SIMULATION_ENABLE_ACTION | NNI_SIMULATION_DISABLE_ACTION
+    );
     if !script_path.is_file() {
         append_nni_log_event_best_effort(
             state,
@@ -109,6 +190,30 @@ async fn run_nni_signature_helper(
             "signature helper not found: {}",
             script_path.display()
         ));
+    }
+    if allow_pubkey_cache && action == "pubkey" {
+        if let Some(output) = logged_cached_nni_hardware_pubkey(
+            state,
+            &script_path,
+            &log_context,
+        ) {
+            return Ok(output);
+        }
+    }
+
+    // The secure element and simulator state are single-writer resources. UI,
+    // trading, reward, and heartbeat calls may arrive concurrently.
+    let _operation_guard = nni_signature_helper_operation_lock().lock().await;
+    if changes_signer {
+        invalidate_nni_hardware_pubkey(&script_path);
+    } else if allow_pubkey_cache && action == "pubkey" {
+        if let Some(output) = logged_cached_nni_hardware_pubkey(
+            state,
+            &script_path,
+            &log_context,
+        ) {
+            return Ok(output);
+        }
     }
 
     let mut cmd = Command::new(nni_signature_helper_python());
@@ -125,12 +230,8 @@ async fn run_nni_signature_helper(
         .stderr(StdProcessStdio::piped())
         .kill_on_drop(true);
 
-    let output = match tokio::time::timeout(
-        Duration::from_secs(NNI_SIGNATURE_HELPER_TIMEOUT_SECONDS),
-        cmd.output(),
-    )
-    .await
-    {
+    let timeout_seconds = nni_signature_helper_timeout_seconds();
+    let output = match tokio::time::timeout(Duration::from_secs(timeout_seconds), cmd.output()).await {
         Ok(Ok(output)) => output,
         Ok(Err(err)) => {
             append_nni_log_event_best_effort(
@@ -148,13 +249,11 @@ async fn run_nni_signature_helper(
                 state,
                 "signature_helper_timeout",
                 json!({
-                    "timeout_seconds": NNI_SIGNATURE_HELPER_TIMEOUT_SECONDS,
+                    "timeout_seconds": timeout_seconds,
                     "context": log_context.clone(),
                 }),
             );
-            return Err(format!(
-                "signature helper timed out after {NNI_SIGNATURE_HELPER_TIMEOUT_SECONDS}s"
-            ));
+            return Err(format!("signature helper timed out after {timeout_seconds}s"));
         }
     };
 
@@ -210,54 +309,80 @@ async fn run_nni_signature_helper(
         }),
     );
 
-    Ok(NniSignatureHelperOutput {
+    let result = NniSignatureHelperOutput {
         ok,
         payload,
         error,
         stderr_tail: stderr,
         exit_code: output.status.code(),
-    })
-}
-
-fn nni_detection_retry_delay(remaining: Duration) -> Duration {
-    remaining.min(Duration::from_secs(1))
-}
-
-fn nni_detection_timeout_error() -> String {
-    format!("nni_signature_detection_timeout:{NNI_SIGNATURE_HELPER_TIMEOUT_SECONDS}")
-}
-
-async fn detect_nni_signature_chip(state: &AppState) -> Result<NniSignatureHelperOutput, String> {
-    let args = [String::from("pubkey")];
-    let deadline =
-        tokio::time::Instant::now() + Duration::from_secs(NNI_SIGNATURE_HELPER_TIMEOUT_SECONDS);
-    let mut last_result = None;
-
-    loop {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        if remaining.is_zero() {
-            return last_result.unwrap_or_else(|| Err(nni_detection_timeout_error()));
-        }
-
-        let result = match tokio::time::timeout(remaining, run_nni_signature_helper(state, &args))
-            .await
-        {
-            Ok(result) => result,
-            Err(_) => {
-                return last_result.unwrap_or_else(|| Err(nni_detection_timeout_error()));
-            }
-        };
-        if matches!(&result, Ok(output) if output.ok) {
-            return result;
-        }
-        last_result = Some(result);
-
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        if remaining.is_zero() {
-            continue;
-        }
-        tokio::time::sleep(nni_detection_retry_delay(remaining)).await;
+    };
+    if action == "pubkey" {
+        cache_nni_hardware_pubkey(script_path.clone(), &result);
+    } else if changes_signer {
+        invalidate_nni_hardware_pubkey(&script_path);
     }
+    Ok(result)
+}
+
+fn logged_cached_nni_hardware_pubkey(
+    state: &AppState,
+    script_path: &Path,
+    log_context: &Value,
+) -> Option<NniSignatureHelperOutput> {
+    let output = cached_nni_hardware_pubkey(script_path)?;
+    append_nni_log_event_best_effort(
+        state,
+        "signature_helper_cache_hit",
+        json!({
+            "context": log_context,
+            "cache_seconds": NNI_HARDWARE_PUBKEY_CACHE_SECONDS,
+            "meta": nni_helper_payload_meta(&output.payload),
+        }),
+    );
+    Some(output)
+}
+
+fn normalize_nni_signature_helper_timeout_seconds(raw: Option<&str>) -> u64 {
+    raw.and_then(|value| value.trim().parse::<u64>().ok())
+        .unwrap_or(NNI_SIGNATURE_HELPER_TIMEOUT_DEFAULT_SECONDS)
+        .clamp(
+            NNI_SIGNATURE_HELPER_TIMEOUT_MIN_SECONDS,
+            NNI_SIGNATURE_HELPER_TIMEOUT_MAX_SECONDS,
+        )
+}
+
+fn nni_signature_helper_timeout_seconds() -> u64 {
+    let configured = std::env::var(NNI_SIGNATURE_HELPER_TIMEOUT_ENV).ok();
+    normalize_nni_signature_helper_timeout_seconds(configured.as_deref())
+}
+
+async fn detect_nni_signature_chip(
+    state: &AppState,
+    force_refresh: bool,
+) -> Result<NniSignatureHelperOutput, String> {
+    let args = [String::from("pubkey")];
+    let result = if force_refresh {
+        run_nni_signature_helper_uncached(state, &args).await
+    } else {
+        run_nni_signature_helper(state, &args).await
+    };
+    if matches!(&result, Ok(output) if output.ok) {
+        return result;
+    }
+
+    let script_path = nni_signature_helper_path(state);
+    if let Some(output) = cached_nni_hardware_pubkey(&script_path) {
+        append_nni_log_event_best_effort(
+            state,
+            "signature_detection_cache_fallback",
+            json!({
+                "force_refresh": force_refresh,
+                "meta": nni_helper_payload_meta(&output.payload),
+            }),
+        );
+        return Ok(output);
+    }
+    result
 }
 
 fn nni_helper_payload_meta(payload: &Value) -> Value {
@@ -272,7 +397,7 @@ fn nni_helper_payload_meta(payload: &Value) -> Value {
     })
 }
 
-async fn nni_device_snapshot(state: &AppState) -> Value {
+async fn nni_device_snapshot(state: &AppState, force_refresh: bool) -> Value {
     let script_path = nni_signature_helper_path(state);
     let supported_actions = nni_supported_actions();
     if !script_path.is_file() {
@@ -306,7 +431,7 @@ async fn nni_device_snapshot(state: &AppState) -> Value {
         });
     }
 
-    match detect_nni_signature_chip(state).await {
+    match detect_nni_signature_chip(state, force_refresh).await {
         Ok(output) if output.ok => {
             let simulated = nni_helper_payload_simulated(&output.payload);
             let hardware_chip_present = !simulated;
@@ -400,7 +525,7 @@ async fn nni_device_snapshot(state: &AppState) -> Value {
                 state,
                 "device_status",
                 json!({
-                    "status": "signature_chip_missing",
+                    "status": "detection_unavailable",
                     "helper_available": true,
                     "hardware_chip_present": false,
                     "signer_available": false,
@@ -416,12 +541,12 @@ async fn nni_device_snapshot(state: &AppState) -> Value {
                 "local_participation_eligible": false,
                 "signer_kind": "unavailable",
                 "network_authorization": "unknown",
-                "status": "signature_chip_missing",
+                "status": "detection_unavailable",
                 "simulated": false,
                 "device_kind": "unavailable",
-                "simulation_available": true,
-                "message_key": "nni.device_status.signature_chip_missing",
-                "next_step_key": "nni.device_status.signature_chip_missing.next_step",
+                "simulation_available": false,
+                "message_key": "nni.device_status.detection_unavailable",
+                "next_step_key": "nni.device_status.detection_unavailable.next_step",
                 "helper_path": script_path.to_string_lossy(),
                 "supported_actions": supported_actions,
             })
@@ -429,9 +554,16 @@ async fn nni_device_snapshot(state: &AppState) -> Value {
     }
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct NniDeviceStatusQuery {
+    #[serde(default)]
+    refresh: bool,
+}
+
 async fn nni_device_status(
     State(state): State<AppState>,
     headers: HeaderMap,
+    Query(query): Query<NniDeviceStatusQuery>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
     if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
         return (
@@ -448,7 +580,7 @@ async fn nni_device_status(
         StatusCode::OK,
         Json(ApiResponse {
             ok: true,
-            data: Some(nni_device_snapshot(&state).await),
+            data: Some(nni_device_snapshot(&state, query.refresh).await),
             error: None,
         }),
     )

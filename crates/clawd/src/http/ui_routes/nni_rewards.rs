@@ -55,14 +55,16 @@ async fn nni_rewards(
     let per_page = query.per_page.unwrap_or(10).clamp(1, 100);
     let mut attempts = Vec::new();
     for node_url in nni_selected_remote_nodes(&config) {
-        match query_nni_rewards_for_node(
-            &state,
-            node_url,
-            &device_pubkey,
-            &identity.user_key,
-            page,
-            per_page,
-        )
+        match nni_remote_read_with_retry(|| {
+            query_nni_rewards_for_node(
+                &state,
+                node_url,
+                &device_pubkey,
+                &identity.user_key,
+                page,
+                per_page,
+            )
+        })
         .await
         {
             Ok(mut data) => {
@@ -116,6 +118,7 @@ async fn query_nni_rewards_for_node(
                 "node_url": node_url,
                 "error_code": "nni_reward_request_network_failed",
                 "detail": err.to_string(),
+                "retryable": true,
             })
         })?;
     let request_status = request_response.status();
@@ -128,6 +131,7 @@ async fn query_nni_rewards_for_node(
                 "http_status": request_status.as_u16(),
                 "error_code": "nni_reward_request_body_invalid",
                 "detail": err.to_string(),
+                "retryable": true,
             })
         })?;
     if !request_status.is_success() || !request_body.ok {
@@ -137,6 +141,7 @@ async fn query_nni_rewards_for_node(
             "node_url": node_url,
             "http_status": request_status.as_u16(),
             "error_code": error_code,
+            "retryable": nni_remote_http_status_retryable(request_status.as_u16()),
         }));
     }
     let request_data = request_body.data.ok_or_else(
@@ -159,12 +164,13 @@ async fn query_nni_rewards_for_node(
     )
     .await
     .map_err(
-        |_| json!({"node_url": node_url, "error_code": "nni_reward_signature_helper_failed"}),
+        |_| json!({"node_url": node_url, "error_code": "nni_reward_signature_helper_failed", "retryable": true}),
     )?;
     if !sign_output.ok {
         return Err(json!({
             "node_url": node_url,
             "error_code": "nni_reward_signature_failed",
+            "retryable": true,
         }));
     }
     let signature = sign_output
@@ -194,6 +200,7 @@ async fn query_nni_rewards_for_node(
                 "node_url": node_url,
                 "error_code": "nni_reward_verify_network_failed",
                 "detail": err.to_string(),
+                "retryable": true,
             })
         })?;
     let verify_status = verify_response.status();
@@ -206,6 +213,7 @@ async fn query_nni_rewards_for_node(
                 "http_status": verify_status.as_u16(),
                 "error_code": "nni_reward_verify_body_invalid",
                 "detail": err.to_string(),
+                "retryable": true,
             })
         })?;
     if !verify_status.is_success() || !verify_body.ok {
@@ -215,6 +223,7 @@ async fn query_nni_rewards_for_node(
             "node_url": node_url,
             "http_status": verify_status.as_u16(),
             "error_code": error_code,
+            "retryable": nni_remote_http_status_retryable(verify_status.as_u16()),
         }));
     }
     verify_body.data.ok_or_else(
