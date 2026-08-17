@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 
 pub(super) const CRYPTO_SCHEMA_VERSION: i64 = 1;
-pub(super) const KB_SCHEMA_VERSION: i64 = 1;
+pub(super) const KB_SCHEMA_VERSION: i64 = 3;
 
 pub(super) fn ensure_crypto_schema(db: &Connection) -> anyhow::Result<()> {
     ensure_common_schema(db, "crypto", CRYPTO_SCHEMA_VERSION)?;
@@ -24,18 +24,92 @@ pub(super) fn ensure_crypto_schema(db: &Connection) -> anyhow::Result<()> {
 }
 
 pub(super) fn ensure_kb_schema(db: &Connection) -> anyhow::Result<()> {
-    ensure_common_schema(db, "kb", KB_SCHEMA_VERSION)?;
+    let legacy_payload_schema = table_has_column(db, "kb_namespaces", "payload_json")?;
+    ensure_common_schema(
+        db,
+        "kb",
+        if legacy_payload_schema {
+            1
+        } else {
+            KB_SCHEMA_VERSION
+        },
+    )?;
+    ensure_kb_retrieval_schema(db)?;
+    if legacy_payload_schema {
+        return integrity_check(db, "kb");
+    }
     db.execute_batch(
         "CREATE TABLE IF NOT EXISTS kb_namespaces (
             owner_user_key  TEXT NOT NULL,
             namespace       TEXT NOT NULL,
-            payload_json    TEXT NOT NULL,
             updated_at_epoch INTEGER NOT NULL,
+            next_chunk_seq  INTEGER NOT NULL,
+            revision        INTEGER NOT NULL,
+            parser_version  TEXT NOT NULL,
+            chunker_version TEXT NOT NULL,
+            embedding_version TEXT NOT NULL,
             PRIMARY KEY(owner_user_key, namespace)
         );
         CREATE INDEX IF NOT EXISTS idx_kb_namespaces_owner_updated
         ON kb_namespaces(owner_user_key, updated_at_epoch DESC);
-        CREATE TABLE IF NOT EXISTS memory_retrieval_index (
+        CREATE TABLE IF NOT EXISTS kb_documents (
+            owner_user_key TEXT NOT NULL,
+            namespace TEXT NOT NULL,
+            path TEXT NOT NULL,
+            file_type TEXT NOT NULL,
+            mtime_epoch INTEGER NOT NULL,
+            size_bytes INTEGER NOT NULL,
+            chunk_count INTEGER NOT NULL,
+            content_sha256 TEXT NOT NULL,
+            parser_version TEXT NOT NULL,
+            chunker_version TEXT NOT NULL,
+            PRIMARY KEY(owner_user_key, namespace, path),
+            FOREIGN KEY(owner_user_key, namespace)
+                REFERENCES kb_namespaces(owner_user_key, namespace)
+                ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_kb_documents_owner_namespace_type
+        ON kb_documents(owner_user_key, namespace, file_type, path);
+        CREATE TABLE IF NOT EXISTS kb_chunks (
+            owner_user_key TEXT NOT NULL,
+            namespace TEXT NOT NULL,
+            chunk_id TEXT NOT NULL,
+            document_path TEXT NOT NULL,
+            file_type TEXT NOT NULL,
+            ordinal INTEGER NOT NULL,
+            text TEXT NOT NULL,
+            text_sha256 TEXT NOT NULL,
+            len_tokens INTEGER NOT NULL,
+            mtime_epoch INTEGER NOT NULL,
+            PRIMARY KEY(owner_user_key, namespace, chunk_id),
+            FOREIGN KEY(owner_user_key, namespace, document_path)
+                REFERENCES kb_documents(owner_user_key, namespace, path)
+                ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_kb_chunks_owner_namespace_document
+        ON kb_chunks(owner_user_key, namespace, document_path, ordinal);
+        CREATE TABLE IF NOT EXISTS kb_ingest_jobs (
+            owner_user_key TEXT NOT NULL,
+            job_id TEXT NOT NULL,
+            namespace TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            status TEXT NOT NULL,
+            next_file_index INTEGER NOT NULL,
+            total_files INTEGER NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at_epoch INTEGER NOT NULL,
+            updated_at_epoch INTEGER NOT NULL,
+            PRIMARY KEY(owner_user_key, job_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_kb_ingest_jobs_owner_status_updated
+        ON kb_ingest_jobs(owner_user_key, status, updated_at_epoch DESC);",
+    )?;
+    integrity_check(db, "kb")
+}
+
+fn ensure_kb_retrieval_schema(db: &Connection) -> anyhow::Result<()> {
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS memory_retrieval_index (
             id                INTEGER PRIMARY KEY AUTOINCREMENT,
             source_kind       TEXT NOT NULL,
             source_memory_id  INTEGER,
@@ -69,7 +143,18 @@ pub(super) fn ensure_kb_schema(db: &Connection) -> anyhow::Result<()> {
         "CREATE VIRTUAL TABLE IF NOT EXISTS memory_retrieval_index_fts
          USING fts5(search_text, topic_tags);",
     );
-    integrity_check(db, "kb")
+    Ok(())
+}
+
+fn table_has_column(db: &Connection, table: &str, column: &str) -> anyhow::Result<bool> {
+    let mut stmt = db.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    for current in columns {
+        if current? == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn ensure_common_schema(

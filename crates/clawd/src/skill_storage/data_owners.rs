@@ -52,6 +52,9 @@ fn crypto_data_state(pool: &DbPool) -> anyhow::Result<&'static str> {
 fn kb_data_state(pool: &DbPool) -> anyhow::Result<&'static str> {
     state_from_count(
         count(pool, "SELECT COUNT(*) FROM kb_namespaces")?
+            + count(pool, "SELECT COUNT(*) FROM kb_documents")?
+            + count(pool, "SELECT COUNT(*) FROM kb_chunks")?
+            + count(pool, "SELECT COUNT(*) FROM kb_ingest_jobs")?
             + count(pool, "SELECT COUNT(*) FROM memory_retrieval_index")?,
     )
 }

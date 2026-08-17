@@ -24,6 +24,7 @@ import {
 } from "./lib/auth-keys";
 import { conversationHistoryScope } from "./lib/chat-history";
 import { formatDuration, toLocalTime } from "./lib/display-format";
+import { runCoalescedResponseRead } from "./lib/resilient-read";
 import {
   appStorageKey,
   AUTH_KEY_HEADER,
@@ -154,6 +155,7 @@ export default function App() {
   const [authMeLoading, setAuthMeLoading] = useState(false);
   const [authMeError, setAuthMeError] = useState<string | null>(null);
   const authFlowEpochRef = useRef(0);
+  const sharedApiReadsRef = useRef(new Map<string, Promise<Response>>());
   const [pollingSeconds, setPollingSeconds] = useState(() => {
     return readNumber(STORAGE_KEYS.polling, 5);
   });
@@ -264,7 +266,17 @@ export default function App() {
     }
   };
 
-  const apiFetch = (path: string, init?: RequestInit) => safeFetch(path, init, true);
+  const apiFetch = (path: string, init?: RequestInit) => {
+    const method = (init?.method || "GET").toUpperCase();
+    if (path !== "/v1/skills/config" || method !== "GET") {
+      return safeFetch(path, init, true);
+    }
+
+    const key = `${authFlowEpochRef.current}:${authMode || "none"}:${apiBase}:${path}`;
+    return runCoalescedResponseRead(sharedApiReadsRef.current, key, () =>
+      safeFetch(path, init, true),
+    );
+  };
   const publicApiFetch = (path: string, init?: RequestInit) => safeFetch(path, init, false);
   const bancorRuntime = useBancorRuntime({ apiFetch, cacheScope: apiBase, t });
   const {
@@ -1349,16 +1361,9 @@ export default function App() {
   }, [apiBase, authMode, uiKey, uiAuthLoading, uiAuthReady, authIdentity]);
 
   useEffect(() => {
-    if (!uiAuthReady || pollingSeconds <= 0) return;
+    if (!uiAuthReady) return;
     void fetchHealth();
-    void fetchAuthMe();
-    void fetchSkills();
-    void fetchSkillsConfig();
-    void fetchLlmConfig();
     void fetchMultimodalConfig();
-    void fetchModelCatalog();
-    void fetchNniConfig();
-    void fetchLocalInteractionContext();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uiAuthReady]);
 

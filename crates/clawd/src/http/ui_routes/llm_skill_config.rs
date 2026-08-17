@@ -527,8 +527,11 @@ async fn get_skills_config(
     let baseline = collect_skills_baseline(&parsed, &state);
     let mut switches = collect_skill_switches(&parsed, &state);
     let mut uninstalled = collect_uninstalled_skills(&parsed, &state);
-    let admission_snapshot = match admission_service(&state)
-        .and_then(|service| service.snapshot().map_err(|error| error.to_string()))
+    let admission_snapshot = match admission_service(&state).and_then(|service| {
+        service
+            .catalog_snapshot()
+            .map_err(|error| error.to_string())
+    })
     {
         Ok(snapshot) => snapshot,
         Err(error) => {
