@@ -1501,6 +1501,7 @@ export interface ModelConfigItem {
   external_provider?: boolean | null;
   provider_supported?: boolean | null;
   unsupported_reason?: string | null;
+  runtime_enabled?: boolean | null;
 }
 
 export interface ModelConfigResponse {
