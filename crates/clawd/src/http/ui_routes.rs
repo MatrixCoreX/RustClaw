@@ -489,6 +489,10 @@ include!("ui_routes/messaging_login.rs");
 mod tests;
 
 #[cfg(test)]
+#[path = "ui_routes/model_provider_config_tests.rs"]
+mod model_provider_config_tests;
+
+#[cfg(test)]
 #[path = "ui_routes/slo_metrics_tests.rs"]
 mod slo_metrics_tests;
 

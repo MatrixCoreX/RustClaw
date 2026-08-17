@@ -115,6 +115,7 @@ export interface ChatPageProps {
   chatWorking: boolean;
   chatActivity: ChatActivitySummary;
   chatRecording: boolean;
+  chatVoiceInputEnabled: boolean;
   chatVoiceRecordingSupported: boolean;
   chatVoiceRecordingAvailability: VoiceRecordingAvailability;
   chatAudioInputDevices: VoiceInputDeviceOption[];
@@ -172,6 +173,7 @@ export function ChatPage({
   chatWorking,
   chatActivity,
   chatRecording,
+  chatVoiceInputEnabled,
   chatVoiceRecordingSupported,
   chatVoiceRecordingAvailability,
   chatAudioInputDevices,
@@ -901,8 +903,9 @@ export function ChatPage({
               <Paperclip className="h-3.5 w-3.5" />
               {t("上传图片/文件", "Upload image/file")}
             </button>
-            {chatVoiceRecordingSupported ? (
-              <>
+            {chatVoiceInputEnabled ? (
+              chatVoiceRecordingSupported ? (
+                <>
                 <label className="inline-flex items-center gap-1.5 text-xs text-white/70">
                   <span>{t("麦克风", "Microphone")}</span>
                   <select
@@ -961,40 +964,43 @@ export function ChatPage({
                     ? t("松开发送", "Release to send")
                     : t("按住发言", "Hold to talk")}
                 </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                onClick={() => void onStartVoiceRecording()}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300/25 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-100 hover:bg-amber-500/15"
-                title={
-                  chatVoiceRecordingAvailability === "insecure_context"
-                    ? t("HTTP IP 地址无法获得浏览器麦克风权限", "HTTP IP addresses cannot receive browser microphone permission")
-                    : t("当前浏览器不支持直接录音", "This browser does not support direct recording")
-                }
-              >
-                <Mic className="h-3.5 w-3.5" />
-                {chatVoiceRecordingAvailability === "insecure_context"
-                  ? t("语音需要 HTTPS", "Voice needs HTTPS")
-                  : t("语音不可用", "Voice unavailable")}
-              </button>
-            )}
-            <span className="text-xs text-white/45">
-              {chatVoiceRecordingSupported
-                ? t(
-                    "按住发言，松开后自动发送；也可以发送图片或文件。",
-                    "Hold to talk and release to send automatically; images and files are also supported.",
-                  )
-                : chatVoiceRecordingAvailability === "insecure_context"
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void onStartVoiceRecording()}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300/25 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-100 hover:bg-amber-500/15"
+                  title={
+                    chatVoiceRecordingAvailability === "insecure_context"
+                      ? t("HTTP IP 地址无法获得浏览器麦克风权限", "HTTP IP addresses cannot receive browser microphone permission")
+                      : t("当前浏览器不支持直接录音", "This browser does not support direct recording")
+                  }
+                >
+                  <Mic className="h-3.5 w-3.5" />
+                  {chatVoiceRecordingAvailability === "insecure_context"
+                    ? t("语音需要 HTTPS", "Voice needs HTTPS")
+                    : t("语音不可用", "Voice unavailable")}
+                </button>
+              )
+            ) : null}
+            {chatVoiceInputEnabled ? (
+              <span className="text-xs text-white/45">
+                {chatVoiceRecordingSupported
                   ? t(
-                      "浏览器不允许 HTTP IP 页面使用麦克风，请改用受信任的 HTTPS 地址。",
-                      "Browsers do not allow microphone access on HTTP IP pages. Use a trusted HTTPS address.",
+                      "按住发言，松开后自动发送；也可以发送图片或文件。",
+                      "Hold to talk and release to send automatically; images and files are also supported.",
                     )
-                : t(
-                    "可直接发送图片或文件，也可以带一句说明。",
-                    "Send images or files directly, with an optional note.",
-                  )}
-            </span>
+                  : chatVoiceRecordingAvailability === "insecure_context"
+                    ? t(
+                        "浏览器不允许 HTTP IP 页面使用麦克风，请改用受信任的 HTTPS 地址。",
+                        "Browsers do not allow microphone access on HTTP IP pages. Use a trusted HTTPS address.",
+                      )
+                  : t(
+                      "可直接发送图片或文件，也可以带一句说明。",
+                      "Send images or files directly, with an optional note.",
+                    )}
+              </span>
+            ) : null}
           </div>
           <div className="grid grid-cols-[minmax(0,1fr)_auto] items-stretch gap-2 sm:gap-3">
             <textarea

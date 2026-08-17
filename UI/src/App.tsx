@@ -1760,6 +1760,10 @@ export default function App() {
               chatWorking={chatWorking}
               chatActivity={chatActivity}
               chatRecording={chatRecording}
+              chatVoiceInputEnabled={
+                multimodalSkillEnabled.audio_transcribe === true
+                && multimodalConfigData?.audio_transcribe.runtime_enabled === true
+              }
               chatVoiceRecordingSupported={chatVoiceRecordingSupported}
               chatVoiceRecordingAvailability={chatVoiceRecordingAvailability}
               chatAudioInputDevices={chatAudioInputDevices}

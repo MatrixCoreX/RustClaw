@@ -46,6 +46,7 @@ function props(): ComponentProps<typeof ChatPage> {
     chatWorking: false,
     chatActivity: emptyChatActivity(),
     chatRecording: false,
+    chatVoiceInputEnabled: true,
     chatVoiceRecordingSupported: false,
     chatVoiceRecordingAvailability: "media_devices_unavailable",
     chatAudioInputDevices: [],
@@ -228,6 +229,22 @@ test("keeps an actionable HTTPS explanation when HTTP IP recording is blocked", 
 
   assert.match(markup, /语音需要 HTTPS/);
   assert.match(markup, /HTTP IP 页面使用麦克风/);
+});
+
+test("hides all voice controls when transcription is disabled by the runtime", () => {
+  const markup = renderToStaticMarkup(
+    <ChatPage
+      {...props()}
+      chatVoiceInputEnabled={false}
+      chatVoiceRecordingSupported
+      chatVoiceRecordingAvailability="available"
+    />,
+  );
+
+  assert.doesNotMatch(markup, /按住发言/);
+  assert.doesNotMatch(markup, /麦克风/);
+  assert.doesNotMatch(markup, /语音不可用/);
+  assert.doesNotMatch(markup, /语音需要 HTTPS/);
 });
 
 test("renders compact structured activity instead of a generic working label", () => {

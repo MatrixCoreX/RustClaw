@@ -50,6 +50,8 @@ struct ModelConfigItem {
     provider_supported: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     unsupported_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    runtime_enabled: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -115,6 +117,7 @@ fn default_model_item() -> ModelConfigItem {
         external_provider: None,
         provider_supported: None,
         unsupported_reason: None,
+        runtime_enabled: None,
     }
 }
 
@@ -180,8 +183,40 @@ fn read_model_section(value: &toml::Value, section: &str) -> ModelConfigItem {
         external_provider: None,
         provider_supported: None,
         unsupported_reason: None,
+        runtime_enabled: None,
     };
-    model_item_with_capability_metadata(item, section)
+    let mut item = model_item_with_capability_metadata(item, section);
+    if section == "audio_transcribe" {
+        item.runtime_enabled = Some(audio_transcription_runtime_enabled(table, &item));
+    }
+    item
+}
+
+fn audio_transcription_runtime_enabled(
+    table: &toml::map::Map<String, toml::Value>,
+    item: &ModelConfigItem,
+) -> bool {
+    if item.vendor == "custom" && item.model == "local-whisper" {
+        let configured = table
+            .get("local_server_enabled")
+            .and_then(toml::Value::as_bool)
+            .unwrap_or(false);
+        return local_whisper_effectively_enabled(
+            configured,
+            std::env::var("APP_LOCAL_WHISPER_ENABLED").ok().as_deref(),
+        );
+    }
+
+    item.provider_supported == Some(true)
+}
+
+fn local_whisper_effectively_enabled(configured: bool, runtime_override: Option<&str>) -> bool {
+    match runtime_override.map(str::trim).filter(|value| !value.is_empty()) {
+        None | Some("auto") => configured,
+        Some("1" | "true" | "yes") => true,
+        Some("0" | "false" | "no") => false,
+        Some(_) => false,
+    }
 }
 
 fn read_section_model_cache(
@@ -566,6 +601,7 @@ fn read_model_config(state: &AppState) -> anyhow::Result<ModelConfigResponse> {
                     external_provider: None,
                     provider_supported: None,
                     unsupported_reason: None,
+                    runtime_enabled: None,
                 },
                 "llm",
             )
