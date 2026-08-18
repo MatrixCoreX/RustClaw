@@ -1,6 +1,6 @@
 use super::{
     bounded_content_excerpt, handle_parse_doc, normalize_action, parse_doc_extra, parse_docx,
-    Metadata, ParsePayload, TableMode, EXTRA_CONTENT_EXCERPT_CHARS,
+    resolve_input_path_against, Metadata, ParsePayload, TableMode, EXTRA_CONTENT_EXCERPT_CHARS,
 };
 use serde_json::json;
 use std::fs::File;
@@ -63,6 +63,25 @@ fn normalize_action_accepts_parse_alias() {
     assert_eq!(normalize_action("parse_doc"), Some("parse_doc"));
     assert_eq!(normalize_action("parse"), Some("parse_doc"));
     assert_eq!(normalize_action("unknown"), None);
+}
+
+#[test]
+fn relative_input_path_resolves_against_workspace_root() {
+    let root = PathBuf::from("/workspace");
+
+    let resolved = resolve_input_path_against(PathBuf::from("docs/report.md"), Some(&root));
+
+    assert_eq!(resolved, root.join("docs/report.md"));
+}
+
+#[test]
+fn absolute_input_path_is_not_rebased() {
+    let absolute = std::env::temp_dir().join("report.md");
+
+    let resolved =
+        resolve_input_path_against(absolute.clone(), Some(std::path::Path::new("/workspace")));
+
+    assert_eq!(resolved, absolute);
 }
 
 #[test]

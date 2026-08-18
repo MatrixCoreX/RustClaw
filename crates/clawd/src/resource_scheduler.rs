@@ -3,6 +3,7 @@ use serde_json::{json, Value};
 
 const LOW_MEMORY_HOST_MAX_MIB: u64 = 2 * 1024;
 const CONSTRAINED_MEMORY_HOST_MAX_MIB: u64 = 4 * 1024;
+const DEFAULT_SKILL_MEMORY_MIB: u64 = 128;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RuntimeConcurrencyPlan {
@@ -76,7 +77,7 @@ pub(crate) fn host_grant(
     let gpu_available = gpu_device_available();
     let request = request.cloned().unwrap_or_default();
     let cpu_cores = request.cpu_cores.max(1);
-    let memory_mb = request.memory_mb.max(128);
+    let memory_mb = requested_memory_mb(request.memory_mb, total_memory_mib());
     let gpu_required = request.gpu_slots > 0 || request.class == SkillResourceClass::Gpu;
     let fallback = gpu_required && !gpu_available && request.allow_cpu_fallback;
     let memory_sufficient = memory_available_mb >= memory_mb;
@@ -126,6 +127,19 @@ pub(crate) fn host_grant(
             "max_concurrency": max_concurrency,
             "wait_reason": wait_reason,
         }),
+    }
+}
+
+fn requested_memory_mb(explicit_memory_mb: u64, total_memory_mib: Option<u64>) -> u64 {
+    let requested = if explicit_memory_mb == 0 {
+        DEFAULT_SKILL_MEMORY_MIB
+    } else {
+        explicit_memory_mb
+    };
+    if total_memory_mib.is_some_and(|total| total <= LOW_MEMORY_HOST_MAX_MIB) {
+        requested
+    } else {
+        requested.max(DEFAULT_SKILL_MEMORY_MIB)
     }
 }
 

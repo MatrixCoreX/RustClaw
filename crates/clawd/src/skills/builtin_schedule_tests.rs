@@ -1,6 +1,6 @@
 use super::builtin_schedule::{
     explicit_schedule_intent_from_args, schedule_args_contain_structured_intent,
-    schedule_replan_error, schedule_workflow_prompt,
+    schedule_kind_for_action, schedule_replan_error, schedule_workflow_prompt,
 };
 use serde_json::json;
 
@@ -79,6 +79,11 @@ fn schedule_intent_json_preserves_nested_machine_types() {
     assert_eq!(intent.schedule.every_minutes, 60);
     assert_eq!(intent.task.payload["args"]["platforms"], json!(["example"]));
     assert_eq!(intent.task.payload["args"]["scheduled_run"], true);
+}
+
+#[test]
+fn structured_create_action_normalizes_to_create_intent() {
+    assert_eq!(schedule_kind_for_action("create_structured"), "create");
 }
 
 #[test]

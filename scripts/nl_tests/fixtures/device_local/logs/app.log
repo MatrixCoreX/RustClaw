@@ -1,0 +1,8 @@
+2026-06-29T08:00:00Z INFO service starting
+2026-06-29T08:00:01Z INFO configuration loaded
+2026-06-29T08:00:02Z INFO listener ready
+2026-06-29T08:01:00Z WARN upstream response was slow
+2026-06-29T08:01:03Z ERROR upstream request failed
+2026-06-29T08:01:05Z INFO retry scheduled
+2026-06-29T08:01:08Z INFO upstream request recovered
+2026-06-29T08:01:09Z INFO service healthy

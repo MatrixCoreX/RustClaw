@@ -176,13 +176,13 @@ pub(super) fn schedule_args_contain_structured_intent(args: &Value) -> bool {
         .any(|key| args.get(*key).is_some())
 }
 
-fn schedule_kind_for_action(action: &str) -> &'static str {
+pub(super) fn schedule_kind_for_action(action: &str) -> &'static str {
     match action {
         "list" | "query" => "list",
         "delete" => "delete",
         "pause" => "pause",
         "resume" => "resume",
-        "preview" | "dry_run" | "create" => "create",
+        "preview" | "dry_run" | "create" | "create_structured" => "create",
         _ => "",
     }
 }

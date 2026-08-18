@@ -10,7 +10,7 @@ Compile natural-language scheduling requests into structured schedule plans.
 ## Parameter contract
 | Param | Required | Type | Default | Description |
 |-------|----------|------|---------|-------------|
-| `action` | yes | string | - | One of `compile`, `create`, `preview`, `list`, `delete`, `delete_matching`, `pause`, `resume`. |
+| `action` | yes | string | - | One of `compile`, `create`, `create_structured`, `preview`, `list`, `delete`, `delete_matching`, `pause`, `resume`. |
 | `text` | for natural-language compile/create/preview unless `intent` is complete | string | - | Original user schedule request. |
 | `intent` | no | object | - | Complete `ScheduleIntentOutput` when already available. |
 | `intent_json` | for create_structured | string | - | Exact serialized machine intent copied from a current capability observation. |

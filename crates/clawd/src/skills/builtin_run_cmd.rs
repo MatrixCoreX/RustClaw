@@ -525,7 +525,7 @@ pub(super) async fn run_safe_command_detailed(
 
     let mut cmd = prepare_run_cmd_process(cwd, sandbox_mode, sandbox_backend, workspace_root)?;
     crate::skills::apply_skill_runner_env_isolation(&mut cmd);
-    cmd.args(["-o", "pipefail", "-lc"]).arg(command);
+    configure_bash_command(&mut cmd, command);
     cmd.current_dir(cwd)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
@@ -854,7 +854,7 @@ grace = int(sys.argv[2])
 command = sys.argv[3]
 with open(sys.argv[4], "wb") as stdout, open(sys.argv[5], "wb") as stderr:
     process = subprocess.Popen(
-        ["bash", "-o", "pipefail", "-lc", command],
+        ["bash", "-o", "pipefail", "-c", command],
         stdout=stdout,
         stderr=stderr,
         start_new_session=True,
@@ -878,9 +878,9 @@ with open(sys.argv[4], "wb") as stdout, open(sys.argv[5], "wb") as stderr:
 sys.exit(code if code >= 0 else 128 - code)
 PY
 elif command -v timeout >/dev/null 2>&1; then
-  timeout --foreground -k {} {} bash -o pipefail -lc {} > {} 2> {}
+  timeout --foreground -k {} {} bash -o pipefail -c {} > {} 2> {}
 elif command -v gtimeout >/dev/null 2>&1; then
-  gtimeout --foreground -k {} {} bash -o pipefail -lc {} > {} 2> {}
+  gtimeout --foreground -k {} {} bash -o pipefail -c {} > {} 2> {}
 else
   printf '%s\n' 'portable_timeout_backend_unavailable' > {}
   exit 125
@@ -904,7 +904,7 @@ fi"#,
         )
     } else {
         format!(
-            "bash -o pipefail -lc {} > {} 2> {}",
+            "bash -o pipefail -c {} > {} 2> {}",
             shell_single_quote(command),
             shell_single_quote(&stdout_path.display().to_string()),
             shell_single_quote(&stderr_path.display().to_string()),
@@ -1049,12 +1049,16 @@ pub(super) fn prepare_durable_pty_command(
     let mut cmd =
         prepare_durable_run_cmd_process(cwd, sandbox_mode, sandbox_backend, workspace_root)?;
     crate::skills::apply_skill_runner_env_isolation(&mut cmd);
-    cmd.arg("-o")
-        .arg("pipefail")
-        .arg("-lc")
-        .arg(command)
-        .current_dir(cwd);
+    configure_bash_command(&mut cmd, command);
+    cmd.current_dir(cwd);
     Ok(cmd)
+}
+
+fn configure_bash_command(cmd: &mut Command, command: &str) {
+    // Runtime commands must not source user login profiles. Besides making
+    // execution host-dependent, profiles may launch interactive programs and
+    // prevent a short tool call from ever reaching the requested command.
+    cmd.args(["-o", "pipefail", "-c"]).arg(command);
 }
 
 fn prepare_run_cmd_process_for_lifetime(

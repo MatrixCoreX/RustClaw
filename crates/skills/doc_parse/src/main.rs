@@ -389,6 +389,10 @@ fn parse_options(req: &Value) -> Result<ParseOptions> {
         .and_then(Value::as_str)
         .map(PathBuf::from)
         .ok_or_else(|| anyhow!("missing required args.path"))?;
+    let path = resolve_input_path_against(
+        path,
+        std::env::var_os("WORKSPACE_ROOT").as_deref().map(Path::new),
+    );
     let mode = args
         .get("mode")
         .and_then(Value::as_str)
@@ -427,6 +431,14 @@ fn parse_options(req: &Value) -> Result<ParseOptions> {
         start_char,
         continuation,
     })
+}
+
+fn resolve_input_path_against(path: PathBuf, workspace_root: Option<&Path>) -> PathBuf {
+    if path.is_absolute() {
+        return path;
+    }
+
+    workspace_root.map(|root| root.join(&path)).unwrap_or(path)
 }
 
 fn encode_doc_continuation(start_char: usize, snapshot_sha256: &str) -> String {
