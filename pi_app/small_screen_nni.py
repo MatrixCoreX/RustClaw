@@ -168,7 +168,7 @@ def format_nni_runtime_summary(config, device, lang="CN", error="", rewards=None
     active_count, previous_reward = nni_previous_window_metrics(rewards)
     lines.append(
         f"{copy['network_active']}: {active_count if active_count is not None else '--'}  ·  "
-        f"{copy['previous_reward']}: {previous_reward} POINT"
+        f"{copy['previous_reward']}: {previous_reward}"
     )
     if error:
         lines.append(copy["sync_error"])

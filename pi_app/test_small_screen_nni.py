@@ -53,7 +53,8 @@ class SmallScreenNniSummaryTests(unittest.TestCase):
         self.assertIn("授权: 已授权", summary)
         self.assertIn("请求: 42", summary)
         self.assertIn("全网活跃设备: 8", summary)
-        self.assertIn("上一窗口奖励: 625 POINT", summary)
+        self.assertIn("上一窗口奖励: 625", summary)
+        self.assertNotIn("上一窗口奖励: 625 POINT", summary)
 
     def test_stopped_runtime_and_missing_device_are_explicit(self):
         summary = format_nni_runtime_summary(
