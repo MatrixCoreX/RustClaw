@@ -69,7 +69,7 @@ pub fn merge_task_artifact_delivery_messages(
 
     let manifests = task_artifact_manifests(task_id, result_json);
     if manifests.is_empty() {
-        return messages;
+        return messages_without_unresolved_task_artifact_lines(messages);
     }
     let messages = messages_without_internal_manifest_delivery_lines(messages, &manifests);
     let explicit_references = messages
@@ -84,18 +84,28 @@ pub fn merge_task_artifact_delivery_messages(
                 && (explicit_references.is_empty()
                     || explicit_references
                         .iter()
-                        .any(|reference| manifest_matches_reference(manifest, reference)))
+                        .any(|reference| manifest_matches_reference(task_id, manifest, reference)))
         })
         .collect::<Vec<_>>();
     if selected_manifests.is_empty() {
-        return messages;
+        return if explicit_references
+            .iter()
+            .any(|reference| task_artifact_reference(reference))
+        {
+            messages_without_unresolved_task_artifact_lines(messages)
+        } else {
+            messages
+        };
     }
     if !explicit_references.is_empty()
         && !explicit_references.iter().all(|reference| {
             selected_manifests
                 .iter()
-                .any(|manifest| manifest_matches_reference(manifest, reference))
+                .any(|manifest| manifest_matches_reference(task_id, manifest, reference))
         })
+        && explicit_references
+            .iter()
+            .any(|reference| !task_artifact_reference(reference))
     {
         return messages;
     }
@@ -169,7 +179,7 @@ fn messages_without_internal_manifest_delivery_lines(
                     token.location != LegacyDeliveryLocation::LocalFile
                         || !manifests.iter().any(|manifest| {
                             internal_runtime_artifact(manifest)
-                                && manifest_matches_reference(manifest, token.reference)
+                                && manifest_matches_reference("", manifest, token.reference)
                         })
                 })
                 .collect::<Vec<_>>()
@@ -200,10 +210,16 @@ fn internal_runtime_delivery_reference(workspace_root: &Path, reference: &str) -
         })
 }
 
-fn manifest_matches_reference(manifest: &TaskDeliveryArtifactManifest, reference: &str) -> bool {
+fn manifest_matches_reference(
+    task_id: &str,
+    manifest: &TaskDeliveryArtifactManifest,
+    reference: &str,
+) -> bool {
     let reference = reference.trim();
     reference == manifest.artifact_ref
         || reference == manifest.id
+        || (!task_id.is_empty()
+            && canonical_task_artifact_ref(task_id, &manifest.id).as_deref() == Some(reference))
         || Path::new(reference)
             .file_name()
             .and_then(|name| name.to_str())
@@ -215,6 +231,31 @@ fn messages_without_delivery_lines(messages: Vec<String>) -> Vec<String> {
         .into_iter()
         .map(|message| strip_wechat_delivery_lines(&message).trim().to_string())
         .filter(|message| !message.is_empty())
+        .collect()
+}
+
+fn task_artifact_reference(reference: &str) -> bool {
+    reference.trim().starts_with("artifact:task/")
+}
+
+/// Canonical task-artifact references are runtime handles, not filesystem
+/// paths. An unresolved handle must never reach a channel adapter, where it
+/// would otherwise be interpreted as a relative local path and fail after the
+/// preceding text part had already been accepted by the provider.
+fn messages_without_unresolved_task_artifact_lines(messages: Vec<String>) -> Vec<String> {
+    messages
+        .into_iter()
+        .map(|message| {
+            message
+                .lines()
+                .filter(|line| {
+                    parse_legacy_delivery_line_ref(line.trim())
+                        .is_none_or(|token| !task_artifact_reference(token.reference))
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .filter(|message| !message.trim().is_empty())
         .collect()
 }
 

@@ -362,6 +362,7 @@ async fn synthesize_reviewed_transcript(
         artifact,
         &contract.text_filename,
         &reviewed_text,
+        &target_language,
     )?;
     if let Some(extra) = loop_state
         .capability_results
@@ -379,6 +380,7 @@ async fn synthesize_reviewed_transcript(
                 "reviewed_by_model": true,
                 "target_language": target_language,
                 "source": contract.source,
+                "result_label_kind": "audio_transcript",
             }),
         );
         if let Some(transcription) = extra
@@ -394,6 +396,10 @@ async fn synthesize_reviewed_transcript(
             .and_then(Value::as_object_mut)
         {
             review.insert("required".to_string(), Value::Bool(false));
+            review.insert(
+                "result_label_kind".to_string(),
+                Value::String("audio_transcript".to_string()),
+            );
             review.insert(
                 "reviewed_character_count".to_string(),
                 json!(character_count),
@@ -422,6 +428,7 @@ fn attach_reviewed_transcript_artifact(
     mut artifact: ArtifactRef,
     filename: &str,
     reviewed_text: &str,
+    target_language: &str,
 ) -> Result<String, String> {
     let path = artifact
         .path
@@ -453,7 +460,42 @@ fn attach_reviewed_transcript_artifact(
         .ok_or_else(|| "transcript_revision_delivery_contract_invalid".to_string())?;
     delivery.insert("deliver_to_user".to_string(), Value::Bool(true));
     delivery.insert("intent".to_string(), Value::String("artifact".to_string()));
-    Ok(format!("{reviewed_text}\nFILE:{path}"))
+    Ok(format_labeled_audio_transcript(
+        reviewed_text,
+        target_language,
+        Some(&path),
+    ))
+}
+
+fn audio_transcript_label(language: &str) -> &'static str {
+    let language = language.trim().replace('_', "-").to_ascii_lowercase();
+    if matches!(language.as_str(), "zh" | "zh-cn" | "zh-sg" | "zh-hans")
+        || language.starts_with("zh-hans-")
+    {
+        "音频转写"
+    } else if matches!(language.as_str(), "zh-tw" | "zh-hk" | "zh-mo" | "zh-hant")
+        || language.starts_with("zh-hant-")
+    {
+        "音訊轉寫"
+    } else if language == "ja" || language.starts_with("ja-") {
+        "音声文字起こし"
+    } else if language == "ko" || language.starts_with("ko-") {
+        "오디오 전사"
+    } else {
+        "Audio transcript"
+    }
+}
+
+fn format_labeled_audio_transcript(
+    text: &str,
+    target_language: &str,
+    artifact_path: Option<&str>,
+) -> String {
+    let label = audio_transcript_label(target_language);
+    artifact_path.map_or_else(
+        || format!("{label}:\n{text}"),
+        |path| format!("{label}:\n{text}\nFILE:{path}"),
+    )
 }
 
 fn synthesize_unreviewed_transcript_fallback(
@@ -593,6 +635,7 @@ fn attach_unreviewed_transcript_fallback(
                 "review_error_code": error_code,
                 "target_language": target_language,
                 "source": source,
+                "result_label_kind": "audio_transcript",
             }),
         );
         if let Some(transcription) = extra
@@ -611,6 +654,10 @@ fn attach_unreviewed_transcript_fallback(
             .and_then(Value::as_object_mut)
         {
             review.insert("required".to_string(), Value::Bool(false));
+            review.insert(
+                "result_label_kind".to_string(),
+                Value::String("audio_transcript".to_string()),
+            );
             review.insert("status".to_string(), Value::String("degraded".to_string()));
             review.insert(
                 "error_code".to_string(),
@@ -618,10 +665,7 @@ fn attach_unreviewed_transcript_fallback(
             );
         }
     }
-    artifact_path.map_or_else(
-        || raw_text.to_string(),
-        |path| format!("{raw_text}\nFILE:{path}"),
-    )
+    format_labeled_audio_transcript(raw_text, target_language, artifact_path.as_deref())
 }
 
 fn normalized_transcript_language(requested: &str, fallback: &str) -> String {

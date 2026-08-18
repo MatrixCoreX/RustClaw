@@ -899,6 +899,25 @@ pub(super) async fn execute_actions_once(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Result<RoundOutcome, String> {
     ensure_task_running(state, task)?;
+    let enforced_actions = super::required_followups::enforce_required_followup(
+        actions,
+        &loop_state.capability_results,
+    );
+    let owned_actions;
+    let actions = if let Some((actions, observation)) = enforced_actions {
+        info!(
+            "required_followup_enforced task_id={} round={} component_kind={} required_capability={}",
+            task.task_id,
+            loop_state.round_no,
+            observation["component_kind"].as_str().unwrap_or("unknown"),
+            observation["required_capability"].as_str().unwrap_or("unknown")
+        );
+        loop_state.task_observations.push(observation);
+        owned_actions = actions;
+        owned_actions.as_slice()
+    } else {
+        actions
+    };
     let mut executed_actions = 0usize;
     let mut stop_signal: Option<String> = None;
     let actionable_count = actions

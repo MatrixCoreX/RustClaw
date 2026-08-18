@@ -794,11 +794,64 @@ def _profile_collection_summary(
     }
 
 
+def _video_first_frame_processing_input(
+    artifacts: list[dict[str, Any]],
+    existing: dict[str, Any] | None,
+    output_dir: Path,
+    text_conversion_scope: str,
+) -> dict[str, Any] | None:
+    if text_conversion_scope not in {"all", "images_only"}:
+        return existing
+    video = next(
+        (item for item in artifacts if item.get("artifact_role") == "original_video"),
+        None,
+    )
+    if video is None or not video.get("path"):
+        return existing
+    frame_path = output_dir / f"{Path(str(video['path'])).stem}_first_frame.png"
+    completed = subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-i",
+            str(video["path"]),
+            "-frames:v",
+            "1",
+            "-y",
+            str(frame_path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    inputs = dict(existing or {})
+    if completed.returncode != 0 or not frame_path.is_file():
+        inputs["video_first_frame"] = {
+            "status": "unavailable",
+            "error_code": "video_first_frame_extraction_failed",
+        }
+        return inputs
+    descriptor = _artifact(frame_path)
+    descriptor.update(
+        {
+            "status": "available",
+            "source": "video_first_frame",
+            "deliver_to_user": False,
+        }
+    )
+    inputs["video_first_frame"] = descriptor
+    return inputs
+
+
 def _content_bundle(
     artifacts: list[dict[str, Any]],
     inline_article: dict[str, Any] | None = None,
     image_delivery: dict[str, Any] | None = None,
     processing_inputs: dict[str, Any] | None = None,
+    text_conversion_scope: str | None = None,
 ) -> dict[str, Any]:
     counts = {
         "image_count": 0,
@@ -857,51 +910,149 @@ def _content_bundle(
             ),
             None,
         )
-        bundle["followup_policy"] = {
-            "text_conversion_action": "transcribe_audio",
-            "capability": "media_download.transcribe",
-            "input_field": "input_path",
-            **(
-                {"input_value": original_video["path"]}
-                if original_video is not None and original_video.get("path")
-                else {}
-            ),
-            "never_use_image_ocr": True,
-        }
+        scope = text_conversion_scope or "auto"
+        first_frame = (processing_inputs or {}).get("video_first_frame")
+        video_path = (
+            original_video.get("path")
+            if isinstance(original_video, dict) and original_video.get("path")
+            else None
+        )
+        image_step = None
+        if isinstance(first_frame, dict) and first_frame.get("status") == "available":
+            image_step = {
+                "component_kind": "video_first_frame",
+                "capability": "image_vision.extract_text",
+                "input_field": "images",
+                "input_value": [{"path": first_frame["path"]}],
+                "result_label_kind": "video_first_frame_text",
+            }
+        audio_step = None
+        if video_path:
+            audio_step = {
+                "component_kind": "video_audio",
+                "capability": "audio.preview_transcribe",
+                "input_field": "audio_path",
+                "input_value": video_path,
+                "fallback_capability": "media_download.transcribe",
+                "fallback_input_field": "input_path",
+                "fallback_input_value": video_path,
+                "completion_capabilities": [
+                    "audio.transcribe",
+                    "media_download.transcribe",
+                ],
+                "recommended_capability_pointer": "/extra/recommended_capability",
+                "result_label_kind": "audio_transcript",
+            }
+        if scope in {"all", "images_only", "audio_only"}:
+            if scope == "images_only":
+                steps = [image_step] if image_step is not None else []
+            elif scope == "audio_only":
+                steps = [audio_step] if audio_step is not None else []
+            else:
+                steps = [step for step in (image_step, audio_step) if step is not None]
+            if not steps:
+                return bundle
+            bundle["followup_policy"] = {
+                "text_conversion_action": "extract_first_frame_and_transcribe_audio",
+                "requested_scope": scope,
+                "activation_requirement": "required",
+                "completion_requirement": (
+                    "all_components" if len(steps) > 1 else "selected_components"
+                ),
+                "steps": steps,
+                "synthesis_sources": [step["result_label_kind"] for step in steps],
+                "result_label_kinds": {
+                    "video_first_frame_text": "video_first_frame_text",
+                    "audio_transcript": "audio_transcript",
+                },
+                "source_label_requirement": "label_each_result_in_request_language",
+            }
+        elif scope == "none":
+            pass
+        else:
+            bundle["followup_policy"] = {
+                "text_conversion_action": "transcribe_audio",
+                "capability": "media_download.transcribe",
+                "input_field": "input_path",
+                **(
+                    {"input_value": original_video["path"]}
+                    if original_video is not None and original_video.get("path")
+                    else {}
+                ),
+                "never_use_image_ocr": True,
+                "result_label_kind": "audio_transcript",
+            }
     elif kind in {"image_audio", "image_audio_article"}:
         images = (processing_inputs or {}).get("images")
         background_audio = (processing_inputs or {}).get("background_audio")
         if isinstance(images, list) and isinstance(background_audio, dict):
-            bundle["followup_policy"] = {
-                "text_conversion_action": "extract_image_and_audio_text",
-                "completion_requirement": "all_components",
-                "steps": [
-                    {
-                        "component_kind": "images",
-                        "capability": "image_vision.extract_text",
-                        "input_field": "images",
-                        "input_value": [
-                            {"path": item["path"]}
-                            for item in images
-                            if isinstance(item, dict) and item.get("path")
-                        ],
-                    },
-                    {
-                        "component_kind": "background_audio",
-                        "capability": "audio.preview_transcribe",
-                        "input_field": "audio_path",
-                        "input_value": background_audio.get("path"),
-                        "fallback_capability": "media_download.transcribe",
-                        "fallback_input_field": "input_path",
-                        "fallback_input_value": background_audio.get("path"),
-                    },
+            image_step = {
+                "component_kind": "images",
+                "capability": "image_vision.extract_text",
+                "input_field": "images",
+                "input_value": [
+                    {"path": item["path"]}
+                    for item in images
+                    if isinstance(item, dict) and item.get("path")
                 ],
-                "synthesis_sources": [
+                "result_label_kind": "image_text",
+            }
+            audio_step = {
+                "component_kind": "background_audio",
+                "capability": "audio.preview_transcribe",
+                "input_field": "audio_path",
+                "input_value": background_audio.get("path"),
+                "fallback_capability": "media_download.transcribe",
+                "fallback_input_field": "input_path",
+                "fallback_input_value": background_audio.get("path"),
+                "completion_capabilities": [
+                    "audio.transcribe",
+                    "media_download.transcribe",
+                ],
+                "recommended_capability_pointer": "/extra/recommended_capability",
+                "result_label_kind": "audio_transcript",
+            }
+            scope = text_conversion_scope or "auto"
+            if scope == "none":
+                return bundle
+            if scope == "images_only":
+                steps = [image_step]
+                synthesis_sources = [
+                    *(["platform_article"] if kind == "image_audio_article" else []),
+                    "image_text",
+                ]
+                completion_requirement = "selected_components"
+            elif scope == "audio_only":
+                steps = [audio_step]
+                synthesis_sources = [
+                    *(["platform_article"] if kind == "image_audio_article" else []),
+                    "audio_transcript",
+                ]
+                completion_requirement = "selected_components"
+            else:
+                steps = [image_step, audio_step]
+                synthesis_sources = [
                     *(["platform_article"] if kind == "image_audio_article" else []),
                     "image_text",
                     "audio_transcript",
-                ],
+                ]
+                completion_requirement = "all_components"
+            policy = {
+                "text_conversion_action": "extract_image_and_audio_text",
+                "requested_scope": scope,
+                "completion_requirement": completion_requirement,
+                "steps": steps,
+                "synthesis_sources": synthesis_sources,
+                "result_label_kinds": {
+                    "image_text": "image_text",
+                    "audio_transcript": "audio_transcript",
+                    "platform_article": "platform_article",
+                },
+                "source_label_requirement": "label_each_result_in_request_language",
             }
+            if scope in {"all", "images_only", "audio_only"}:
+                policy["activation_requirement"] = "required"
+            bundle["followup_policy"] = policy
     return bundle
 
 
@@ -1948,6 +2099,12 @@ def respond(
         inline_recognition = _ocr_text_delivery(artifacts)
     if action == "download":
         processing_inputs = _composite_processing_inputs(artifacts, processing_inputs)
+        processing_inputs = _video_first_frame_processing_input(
+            artifacts,
+            processing_inputs,
+            output_dir,
+            str(args.get("text_conversion_scope") or "auto"),
+        )
     count = len(urls) if action == "resolve" else len(artifacts)
     noun = "URL" if action == "resolve" else "file"
     text = f"{action} completed with {count} {noun}{'' if count == 1 else 's'}."
@@ -2001,6 +2158,7 @@ def respond(
             inline_article,
             image_delivery,
             processing_inputs,
+            str(args.get("text_conversion_scope") or "auto"),
         )
         if processing_inputs is not None:
             extra["processing_inputs"] = processing_inputs

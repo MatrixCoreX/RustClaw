@@ -485,6 +485,88 @@ fn unavailable_structured_artifact_keeps_legacy_delivery_message() {
 }
 
 #[test]
+fn unresolved_task_artifact_handle_is_removed_before_channel_delivery() {
+    let workspace = temp_workspace("task_delivery_unresolved_handle");
+    let task_id = "task-current";
+    let result = result_with_artifact(
+        task_id,
+        "downloaded-image",
+        "photo.webp",
+        "image",
+        "image/webp",
+        4,
+        None,
+    );
+
+    let messages = merge_task_artifact_delivery_messages(
+        task_id,
+        Some(&result),
+        &workspace,
+        vec![format!(
+            "识别完成\nFILE:artifact:task/{task_id}/artifact-from-another-result"
+        )],
+    );
+
+    assert_eq!(messages, vec!["识别完成"]);
+    fs::remove_dir_all(workspace).ok();
+}
+
+#[test]
+fn unresolved_task_artifact_handle_is_removed_without_any_manifest() {
+    let workspace = temp_workspace("task_delivery_unresolved_without_manifest");
+    let messages = merge_task_artifact_delivery_messages(
+        "task-current",
+        None,
+        &workspace,
+        vec!["处理完成\nFILE:artifact:task/task-current/missing-artifact".to_string()],
+    );
+
+    assert_eq!(messages, vec!["处理完成"]);
+    fs::remove_dir_all(workspace).ok();
+}
+
+#[test]
+fn valid_task_artifact_is_delivered_when_another_handle_is_stale() {
+    let workspace = temp_workspace("task_delivery_mixed_handles");
+    let task_id = "task-mixed";
+    let artifact_id = "transcript-current";
+    let path = write_delivery_artifact(
+        &workspace,
+        task_id,
+        artifact_id,
+        "transcript.txt",
+        b"transcript",
+    );
+    let result = result_with_artifact(
+        task_id,
+        artifact_id,
+        "transcript.txt",
+        "file",
+        "text/plain",
+        10,
+        None,
+    );
+
+    let messages = merge_task_artifact_delivery_messages(
+        task_id,
+        Some(&result),
+        &workspace,
+        vec![format!(
+            "转写完成\nFILE:artifact:task/{task_id}/{artifact_id}\nFILE:artifact:task/{task_id}/stale"
+        )],
+    );
+
+    assert_eq!(
+        messages,
+        vec![format!(
+            "转写完成\nFILE:{}",
+            path.canonicalize().expect("canonical transcript").display()
+        )]
+    );
+    fs::remove_dir_all(workspace).ok();
+}
+
+#[test]
 fn ui_fallback_only_accepts_files_in_managed_delivery_tree() {
     let workspace = temp_workspace("task_delivery_fallback");
     let managed =

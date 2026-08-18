@@ -34,6 +34,7 @@ mod plan_verifier_observation;
 mod planner_skill_context;
 mod planning;
 mod progress_contract;
+mod required_followups;
 mod scratch_cleanup_args;
 pub(crate) use explicit_machine_command::explicit_machine_syntax_command_segment;
 mod planning_action_normalization;

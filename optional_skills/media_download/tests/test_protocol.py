@@ -1213,11 +1213,101 @@ class AdapterTest(unittest.TestCase):
                 "input_field": "input_path",
                 "input_value": str(artifacts / "public-video.mp4"),
                 "never_use_image_ocr": True,
+                "result_label_kind": "audio_transcript",
             },
         )
         command = runner.call_args.args[0]
         self.assertIn("--no-system-browser-cookies", command)
         self.assertNotIn("shell", runner.call_args.kwargs)
+
+    def test_video_text_conversion_exposes_first_frame_and_audio_steps(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            artifacts = workspace / "artifacts"
+            workspace.mkdir()
+
+            def fake_run(command, **kwargs):
+                if command[0] == "ffmpeg":
+                    Path(command[-1]).write_bytes(b"frame")
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                output_dir = Path(command[command.index("--output-dir") + 1])
+                output_dir.mkdir(parents=True, exist_ok=True)
+                (output_dir / "public-video.mp4").write_bytes(b"video")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            request = {
+                "request_id": "download-video-text-1",
+                "args": {
+                    "action": "download",
+                    "share": "https://example.test/public-video",
+                    "text_conversion_scope": "all",
+                },
+                "context": {
+                    "artifact_output_directory": str(artifacts),
+                    "workspace_root": str(workspace),
+                    "permissions": {"allow_path_outside_workspace": False},
+                },
+                "user_id": 1,
+                "chat_id": 1,
+            }
+            with mock.patch.object(self.skill.subprocess, "run", side_effect=fake_run):
+                response = self.skill.respond(request)
+
+        self.assertEqual(
+            [artifact["filename"] for artifact in response["extra"]["artifacts"]],
+            ["public-video.mp4"],
+        )
+        first_frame = response["extra"]["processing_inputs"]["video_first_frame"]
+        self.assertEqual(first_frame["status"], "available")
+        self.assertEqual(first_frame["source"], "video_first_frame")
+        self.assertFalse(first_frame["deliver_to_user"])
+        policy = response["extra"]["content_bundle"]["followup_policy"]
+        self.assertEqual(policy["activation_requirement"], "required")
+        self.assertEqual(policy["completion_requirement"], "all_components")
+        self.assertEqual(
+            [step["component_kind"] for step in policy["steps"]],
+            ["video_first_frame", "video_audio"],
+        )
+        self.assertEqual(
+            policy["result_label_kinds"],
+            {
+                "video_first_frame_text": "video_first_frame_text",
+                "audio_transcript": "audio_transcript",
+            },
+        )
+        self.assertEqual(
+            policy["source_label_requirement"],
+            "label_each_result_in_request_language",
+        )
+        self.assertEqual(policy["steps"][1]["result_label_kind"], "audio_transcript")
+
+    def test_video_audio_only_scope_enforces_only_audio_transcription(self) -> None:
+        artifacts = [
+            {
+                "artifact_role": "original_video",
+                "path": "/workspace/video.mp4",
+                "filename": "video.mp4",
+                "mime_type": "video/mp4",
+                "size_bytes": 5,
+            }
+        ]
+
+        bundle = self.skill._content_bundle(
+            artifacts,
+            processing_inputs=None,
+            text_conversion_scope="audio_only",
+        )
+
+        policy = bundle["followup_policy"]
+        self.assertEqual(policy["requested_scope"], "audio_only")
+        self.assertEqual(policy["completion_requirement"], "selected_components")
+        self.assertEqual(policy["activation_requirement"], "required")
+        self.assertEqual(
+            [step["component_kind"] for step in policy["steps"]],
+            ["video_audio"],
+        )
+        self.assertEqual(policy["steps"][0]["result_label_kind"], "audio_transcript")
 
     def test_download_classifies_image_article_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1307,6 +1397,7 @@ class AdapterTest(unittest.TestCase):
                 "args": {
                     "action": "download",
                     "share": "https://www.douyin.com/note/example",
+                    "text_conversion_scope": "all",
                 },
                 "context": {
                     "artifact_output_directory": str(artifacts),
@@ -1346,6 +1437,19 @@ class AdapterTest(unittest.TestCase):
             "all_components",
         )
         self.assertEqual(
+            bundle["followup_policy"]["activation_requirement"],
+            "required",
+        )
+        self.assertEqual(bundle["followup_policy"]["requested_scope"], "all")
+        self.assertEqual(
+            bundle["followup_policy"]["source_label_requirement"],
+            "label_each_result_in_request_language",
+        )
+        self.assertEqual(
+            [step["result_label_kind"] for step in bundle["followup_policy"]["steps"]],
+            ["image_text", "audio_transcript"],
+        )
+        self.assertEqual(
             response["extra"]["processing_inputs"]["background_audio"]["path"],
             str(artifacts / "note_background_audio.mp3"),
         )
@@ -1354,6 +1458,14 @@ class AdapterTest(unittest.TestCase):
         self.assertEqual(
             audio_step["fallback_input_value"],
             str(artifacts / "note_background_audio.mp3"),
+        )
+        self.assertEqual(
+            audio_step["completion_capabilities"],
+            ["audio.transcribe", "media_download.transcribe"],
+        )
+        self.assertEqual(
+            audio_step["recommended_capability_pointer"],
+            "/extra/recommended_capability",
         )
         self.assertEqual(
             response["extra"]["processing_inputs"]["images"],
@@ -1365,6 +1477,40 @@ class AdapterTest(unittest.TestCase):
                     "size_bytes": 5,
                 }
             ],
+        )
+
+    def test_explicit_audio_only_scope_does_not_require_image_text(self) -> None:
+        artifacts = [
+            {
+                "artifact_role": "original_image",
+                "path": "/workspace/note.webp",
+                "filename": "note.webp",
+                "mime_type": "image/webp",
+                "size_bytes": 5,
+            },
+            {
+                "artifact_role": "background_audio",
+                "path": "/workspace/note.mp3",
+                "filename": "note.mp3",
+                "mime_type": "audio/mpeg",
+                "size_bytes": 5,
+            },
+        ]
+        processing_inputs = self.skill._composite_processing_inputs(artifacts, None)
+
+        bundle = self.skill._content_bundle(
+            artifacts,
+            processing_inputs=processing_inputs,
+            text_conversion_scope="audio_only",
+        )
+
+        policy = bundle["followup_policy"]
+        self.assertEqual(policy["requested_scope"], "audio_only")
+        self.assertEqual(policy["completion_requirement"], "selected_components")
+        self.assertEqual(policy["activation_requirement"], "required")
+        self.assertEqual(
+            [step["component_kind"] for step in policy["steps"]],
+            ["background_audio"],
         )
 
     def test_numbered_background_audio_remains_a_composite_component(self) -> None:
