@@ -56,6 +56,10 @@ class AdapterTest(unittest.TestCase):
             response["extra"]["image_article_posts"]["text_delivery"],
             "inline_and_artifact",
         )
+        self.assertEqual(
+            response["extra"]["image_article_posts"]["delivery_policy"],
+            "best_effort_components",
+        )
         self.assertTrue(response["extra"]["transcription_engines"]["whisper"]["default"])
 
     def test_progress_reporter_emits_ordered_machine_frames(self) -> None:
@@ -1350,6 +1354,8 @@ class AdapterTest(unittest.TestCase):
             {
                 "schema_version": 1,
                 "kind": "image_article",
+                "delivery_policy": "best_effort_components",
+                "available_components": ["images", "platform_article"],
                 "image_count": 2,
                 "video_count": 0,
                 "article_count": 1,
@@ -1563,6 +1569,14 @@ class AdapterTest(unittest.TestCase):
         )
         self.assertNotIn("image_delivery", response["extra"]["content_bundle"])
         self.assertNotIn("processing_inputs", response["extra"])
+        self.assertEqual(
+            response["extra"]["content_bundle"]["delivery_policy"],
+            "best_effort_components",
+        )
+        self.assertEqual(
+            response["extra"]["content_bundle"]["available_components"],
+            ["images"],
+        )
 
     def test_sixty_five_images_and_long_article_are_preserved_in_archive(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1618,6 +1632,8 @@ class AdapterTest(unittest.TestCase):
             {
                 "schema_version": 1,
                 "kind": "image_article",
+                "delivery_policy": "best_effort_components",
+                "available_components": ["images", "platform_article"],
                 "image_count": 65,
                 "video_count": 0,
                 "article_count": 1,
