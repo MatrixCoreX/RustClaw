@@ -133,7 +133,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
         trade_id: `trade-market-${index + 1}`,
         quote_id: `quote-market-${index + 1}`,
         market_id: "point-usd-v1",
-        device_pubkey_compact: "ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C",
+        asset_owner_pubkey: "5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M",
         side: "sell" as const,
         input_asset: "POINT" as const,
         input_units: "33600000000",
@@ -178,6 +178,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       runtime={runtime}
       formatUnixDateTime={(value) => String(value ?? "")}
       signingDeviceReady
+      assetOwnerReady
       onOpenNni={() => undefined}
     />,
   );
@@ -187,6 +188,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       runtime={runtime}
       formatUnixDateTime={(value) => String(value ?? "")}
       signingDeviceReady={false}
+      assetOwnerReady={false}
       onOpenNni={() => undefined}
     />,
   );
@@ -203,8 +205,9 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /强制流动性算法/);
   assert.doesNotMatch(html, /<h1[^>]*>BANCOR<\/h1>/);
   assert.doesNotMatch(html, /内部 USD/);
-  assert.match(html, /浏览器不会接触私钥/);
-  assert.match(html, /ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C/);
+  assert.match(html, /临时输入 A 资产私钥自行签名/);
+  assert.doesNotMatch(html, /ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C/);
+  assert.match(html, /5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M/);
   assert.doesNotMatch(html, /切换为原始十六进制公钥/);
   assert.match(html, /BANCOR 储备曲线公式/);
   assert.match(html, /role="math"/);
@@ -306,7 +309,8 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.equal((html.match(/data-bancor-trade-row="market"/g) ?? []).length, 10);
   assert.match(html, /data-bancor-trade-pagination="market"/);
   assert.match(html, /data-bancor-page-size="10"/);
-  assert.match(html, /ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C/);
+  assert.doesNotMatch(html, /ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C/);
+  assert.match(html, /5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M/);
   assert.doesNotMatch(html, /切换为原始十六进制公钥|切换为 Base58 编码公钥/);
   assert.doesNotMatch(html, /a2c887498554••••••••331016eb/);
   assert.doesNotMatch(html, /a2c887498554407638cbec1d0ccf11264aa1ab7749bd7913fc6753fac72cfbdb/);
@@ -592,6 +596,8 @@ test("BANCOR quote review and final confirmation use a centered modal", () => {
       }}
       tradeLoading={false}
       tradeError={null}
+      signingDeviceReady
+      assetOwnerReady
       onClose={() => undefined}
       onConfirm={() => undefined}
     />,
@@ -608,6 +614,8 @@ test("BANCOR quote review and final confirmation use a centered modal", () => {
   assert.match(html, /data-nni-decimal-amount="0\.05000000 POINT"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.match(html, /bancor-sign-trade-btn/);
   assert.match(html, /确认签名交易/);
+  assert.match(html, /当前硬件代理签名/);
+  assert.match(html, /A 资产密钥自行签名/);
   assert.match(html, /返回修改/);
   assert.doesNotMatch(html, /已超过你设置的/);
 });
@@ -641,6 +649,8 @@ test("BANCOR quote modal warns but still permits confirmation when price impact 
       }}
       tradeLoading={false}
       tradeError={null}
+      signingDeviceReady
+      assetOwnerReady
       onClose={() => undefined}
       onConfirm={() => undefined}
     />,

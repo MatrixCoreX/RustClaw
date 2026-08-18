@@ -79,6 +79,7 @@ base64 = "0.22"
 config = "0.15"
 hmac = "0.12"
 hex = "0.4"
+bs58 = "0.5"
 ignore = "0.4.31"
 globset = "0.4.19"
 libc = "0.2"
@@ -96,6 +97,9 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+ripemd = "0.1"
+k256 = { version = "0.13", features = ["ecdsa"] }
+zeroize = "1"
 syn = { version = "2", features = ["full", "visit"] }
 # default-features = false + rustls 便于交叉编译 aarch64（无需 OpenSSL）
 teloxide = { version = "0.12", default-features = false, features = ["rustls", "ctrlc_handler", "webhooks-axum"] }

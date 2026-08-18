@@ -23,6 +23,8 @@ import type {
   NniJoinTaskResponse,
   NniJoinVerifyResponse,
   NniNetworkStatsResponse,
+  NniOwnerKeyPairResponse,
+  NniOwnerRecoveryResponse,
   NniRewardsResponse,
 } from "../types/api";
 
@@ -51,6 +53,9 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
   const [nniActionMessage, setNniActionMessage] = useState<string | null>(null);
   const [nniDeviceAuthorizationDenied, setNniDeviceAuthorizationDenied] = useState(false);
   const [nniJoined, setNniJoined] = useState(false);
+  const [nniAssetOwnerPubkey, setNniAssetOwnerPubkey] = useState<string | null>(null);
+  const [nniOwnerKeyPair, setNniOwnerKeyPair] = useState<NniOwnerKeyPairResponse | null>(null);
+  const [nniOwnerActionLoading, setNniOwnerActionLoading] = useState<"generate" | "recover" | null>(null);
   const [nniRemoteNodes, setNniRemoteNodes] = useState("");
   const [nniSelectedNodeUrl, setNniSelectedNodeUrl] = useState("");
   const [nniHeartbeatIntervalSeconds, setNniHeartbeatIntervalSeconds] = useState<number | null>(null);
@@ -93,6 +98,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
 
   const applyNniConfigResponse = (config: NniConfigResponse) => {
     setNniJoined(config.joined);
+    setNniAssetOwnerPubkey(config.asset_owner_pubkey ?? null);
     setNniRemoteNodes(config.remote_nodes.join("\n"));
     setNniSelectedNodeUrl(config.selected_node_url ?? config.remote_nodes[0] ?? "");
     setNniHeartbeatIntervalSeconds(config.heartbeat_interval_seconds ?? null);
@@ -255,7 +261,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     return fetchNniDeviceStatus(false);
   };
 
-  const requestNniJoinTask = async (): Promise<NniJoinTaskResponse | null> => {
+  const requestNniJoinTask = async (assetOwnerPubkey?: string | null): Promise<NniJoinTaskResponse | null> => {
     const nodeUrl = selectedNniNodeUrl();
     if (!nodeUrl) {
       throw new Error(t("请先填写至少一个远程 NNI 节点地址。", "Enter at least one remote NNI node URL first."));
@@ -263,7 +269,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     const res = await apiFetch(`/v1/nni/join/request`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ node_url: nodeUrl }),
+      body: JSON.stringify({ node_url: nodeUrl, asset_owner_pubkey: assetOwnerPubkey || undefined }),
     });
     const body = (await res.json()) as ApiResponse<NniJoinTaskResponse>;
     if (!res.ok || !body.ok || !body.data) {
@@ -275,11 +281,23 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     return body.data;
   };
 
-  const verifyNniJoinTask = async (taskId: string, nodeUrl: string, signature: string): Promise<NniJoinVerifyResponse | null> => {
+  const verifyNniJoinTask = async (
+    taskId: string,
+    nodeUrl: string,
+    signature: string,
+    signingPayload: string,
+    ownerPrivateKey?: string,
+  ): Promise<NniJoinVerifyResponse | null> => {
     const res = await apiFetch(`/v1/nni/join/verify`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ task_id: taskId, node_url: nodeUrl, signature }),
+      body: JSON.stringify({
+        task_id: taskId,
+        node_url: nodeUrl,
+        signature,
+        signing_payload: ownerPrivateKey ? signingPayload : undefined,
+        owner_private_key: ownerPrivateKey,
+      }),
     });
     const body = (await res.json()) as ApiResponse<NniJoinVerifyResponse>;
     if (!res.ok || !body.ok || !body.data) {
@@ -289,6 +307,67 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       throw new Error(nniJoinErrorMessage(body.error, body.data, `NNI join verify failed (${res.status})`, lang));
     }
     return body.data;
+  };
+
+  const generateNniOwnerKeyPair = async () => {
+    setNniOwnerActionLoading("generate");
+    setNniActionError(null);
+    setNniActionMessage(null);
+    try {
+      const res = await apiFetch(`/v1/nni/owner/generate`, { method: "POST" });
+      const body = (await res.json()) as ApiResponse<NniOwnerKeyPairResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `NNI owner generation failed (${res.status})`);
+      }
+      setNniOwnerKeyPair(body.data);
+      setNniActionMessage(t(
+        "资产密钥已生成。请立即抄写私钥；页面刷新后无法找回。",
+        "The asset key was generated. Copy the private key now; it cannot be recovered after refresh.",
+      ));
+      return body.data;
+    } catch (err) {
+      setNniActionError(err instanceof Error ? err.message : t("生成资产密钥失败。", "Failed to generate the asset key."));
+      return null;
+    } finally {
+      setNniOwnerActionLoading(null);
+    }
+  };
+
+  const clearNniOwnerKeyPair = () => setNniOwnerKeyPair(null);
+
+  const recoverNniOwner = async (ownerPrivateKey: string) => {
+    const nodeUrl = selectedNniNodeUrl();
+    if (!nodeUrl) {
+      setNniActionError(t("请先填写至少一个远程 NNI 节点地址。", "Enter at least one remote NNI node URL first."));
+      return null;
+    }
+    setNniOwnerActionLoading("recover");
+    setNniActionError(null);
+    setNniActionMessage(null);
+    try {
+      const res = await apiFetch(`/v1/nni/owner/recover`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ node_url: nodeUrl, owner_private_key: ownerPrivateKey }),
+      });
+      const body = (await res.json()) as ApiResponse<NniOwnerRecoveryResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(nniJoinErrorMessage(body.error, body.data, `NNI recovery failed (${res.status})`, lang));
+      }
+      setNniAssetOwnerPubkey(body.data.asset_owner_pubkey);
+      setNniOwnerKeyPair(null);
+      await setNniJoinedPersisted(true, { persistRemoteNodes: true });
+      setNniActionMessage(t(
+        "资产账户已恢复到当前设备，旧设备授权已撤销。",
+        "The asset account was recovered to this device and the old device authorization was revoked.",
+      ));
+      return body.data;
+    } catch (err) {
+      setNniActionError(err instanceof Error ? err.message : t("恢复资产账户失败。", "Failed to recover the asset account."));
+      return null;
+    } finally {
+      setNniOwnerActionLoading(null);
+    }
   };
 
   const fetchNniConfig = (silent = false) => runCoalescedRead(
@@ -609,9 +688,20 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       return;
     }
     try {
-      const task = await requestNniJoinTask();
+      const ownerKeyPair = nniOwnerKeyPair;
+      if (!nniAssetOwnerPubkey && !ownerKeyPair) {
+        await generateNniOwnerKeyPair();
+        return;
+      }
+      const task = await requestNniJoinTask(ownerKeyPair?.public_key ?? nniAssetOwnerPubkey);
       if (!task?.challenge) {
         throw new Error("nni_join_challenge_missing");
+      }
+      if (task.owner_signature_required && !ownerKeyPair?.private_key) {
+        throw new Error(t(
+          "首次绑定需要刚生成的私钥；请重新生成并抄写后再加入。",
+          "First-time binding needs the newly generated private key. Generate and copy it again before joining.",
+        ));
       }
       const signatureResult = await runNniDeviceAction("sign_challenge", { challenge: task.challenge });
       const signature = signatureResult?.payload?.signature;
@@ -619,11 +709,19 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         throw new Error("nni_join_signature_missing");
       }
       setNniActionLoading("join_nni");
-      const verified = await verifyNniJoinTask(task.task_id, task.node_url, signature);
+      const verified = await verifyNniJoinTask(
+        task.task_id,
+        task.node_url,
+        signature,
+        task.challenge,
+        task.owner_signature_required ? ownerKeyPair?.private_key : undefined,
+      );
       if (!verified?.joined || !verified.compliant) {
         throw new Error("nni_join_verify_rejected");
       }
       await setNniJoinedPersisted(true, { persistRemoteNodes: true });
+      setNniAssetOwnerPubkey(verified.asset_owner_pubkey ?? task.asset_owner_pubkey ?? null);
+      setNniOwnerKeyPair(null);
       setNniDeviceAuthorizationDenied(false);
       setNniActionMessage(
         t(
@@ -671,6 +769,9 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     nniActionMessage,
     nniDeviceAuthorizationDenied,
     nniJoined,
+    nniAssetOwnerPubkey,
+    nniOwnerKeyPair,
+    nniOwnerActionLoading,
     nniRemoteNodes,
     nniSelectedNodeUrl: selectedNniNodeUrl(),
     nniRemoteNodeCount: nniRemoteNodeUrls().length,
@@ -711,6 +812,9 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     ensureNniDeviceStatus,
     setNniJoinedPersisted,
     joinNni,
+    generateNniOwnerKeyPair,
+    clearNniOwnerKeyPair,
+    recoverNniOwner,
     testJoinNni,
     fetchNniConfig,
     saveNniConfig,

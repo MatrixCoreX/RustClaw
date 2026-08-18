@@ -4,7 +4,7 @@ const NNI_HEARTBEAT_NETWORK_RETRY_LIMIT: usize = 3;
 const NNI_HEARTBEAT_NETWORK_RETRY_DELAY_SECONDS: u64 = 2;
 const NNI_HEARTBEAT_USER_KEY: &str = "clawd-nni-heartbeat";
 const NNI_HEARTBEAT_ERROR_HISTORY_LIMIT: usize = 200;
-const NNI_RUNTIME_CONFIG_SCHEMA_VERSION: u32 = 1;
+const NNI_RUNTIME_CONFIG_SCHEMA_VERSION: u32 = 2;
 const NNI_HEARTBEAT_RUNTIME_STATE_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Serialize)]
@@ -12,6 +12,7 @@ struct NniConfigResponse {
     remote_nodes: Vec<String>,
     selected_node_url: Option<String>,
     joined: bool,
+    asset_owner_pubkey: Option<String>,
     heartbeat_interval_seconds: u64,
     heartbeat_network_retry_limit: usize,
     heartbeat_request_count: u64,
@@ -50,6 +51,8 @@ struct NniRuntimeConfig {
     selected_node_url: Option<String>,
     #[serde(default)]
     joined: bool,
+    #[serde(default)]
+    asset_owner_pubkey: Option<String>,
 }
 
 impl Default for NniRuntimeConfig {
@@ -59,6 +62,7 @@ impl Default for NniRuntimeConfig {
             remote_nodes: Vec::new(),
             selected_node_url: None,
             joined: false,
+            asset_owner_pubkey: None,
         }
     }
 }
@@ -122,13 +126,25 @@ fn nni_heartbeat_runtime_state_schema_version() -> u32 {
 #[derive(Debug, Deserialize)]
 struct NniLocalJoinRequest {
     node_url: String,
+    #[serde(default)]
+    asset_owner_pubkey: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct NniLocalJoinVerifyRequest {
     task_id: String,
     node_url: String,
     signature: String,
+    #[serde(default)]
+    signing_payload: Option<String>,
+    #[serde(default)]
+    owner_private_key: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct NniOwnerRecoveryRequest {
+    node_url: String,
+    owner_private_key: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -149,12 +165,30 @@ struct NniHeartbeatErrorRecord {
 struct NniRemoteJoinRequest {
     device_pubkey: String,
     client_user_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    asset_owner_pubkey: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct NniRemoteJoinVerifyRequest {
     task_id: String,
     signature: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    owner_signature: Option<String>,
+}
+
+#[derive(Serialize)]
+struct NniRemoteOwnerRecoveryRequest {
+    asset_owner_pubkey: String,
+    new_device_pubkey: String,
+    client_user_key: String,
+}
+
+#[derive(Serialize)]
+struct NniRemoteOwnerRecoveryVerifyRequest {
+    task_id: String,
+    device_signature: String,
+    owner_signature: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -344,6 +378,34 @@ async fn nni_join_request(
         }
     };
 
+    let configured_owner = read_nni_runtime_config(&state)
+        .ok()
+        .and_then(|config| config.asset_owner_pubkey);
+    let requested_owner = match req.asset_owner_pubkey.as_deref() {
+        Some(value) if !value.trim().is_empty() => match normalize_nni_owner_public_key(value) {
+            Ok(value) => Some(value),
+            Err(error) => {
+                return nni_join_error(
+                    StatusCode::BAD_REQUEST,
+                    error,
+                    json!({"status": "asset_owner_invalid"}),
+                );
+            }
+        },
+        _ => None,
+    };
+    if configured_owner.is_some()
+        && requested_owner.is_some()
+        && configured_owner != requested_owner
+    {
+        return nni_join_error(
+            StatusCode::CONFLICT,
+            "nni_asset_owner_conflict",
+            json!({"status": "asset_owner_conflict"}),
+        );
+    }
+    let asset_owner_pubkey = configured_owner.or(requested_owner);
+
     let device_pubkey = match nni_device_pubkey(&state).await {
         Ok(pubkey) => pubkey,
         Err((status, error, data)) => {
@@ -368,6 +430,7 @@ async fn nni_join_request(
             .json(&NniRemoteJoinRequest {
                 device_pubkey: device_pubkey.clone(),
                 client_user_key: identity.user_key.clone(),
+                asset_owner_pubkey: asset_owner_pubkey.clone(),
             })
             .send()
             .await;
@@ -485,8 +548,9 @@ async fn nni_join_request(
 async fn nni_join_verify(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(req): Json<NniLocalJoinVerifyRequest>,
+    Json(mut req): Json<NniLocalJoinVerifyRequest>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
+    let mut owner_private_key = req.owner_private_key.take().map(Zeroizing::new);
     let identity = match require_ui_identity(&state, &headers) {
         Ok(identity) => identity,
         Err((status, Json(resp))) => {
@@ -518,6 +582,33 @@ async fn nni_join_verify(
             );
         }
     };
+    let (derived_owner_pubkey, owner_signature) = match owner_private_key.as_mut() {
+        Some(private_key) => {
+            let Some(signing_payload) = req
+                .signing_payload
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty() && value.len() <= 4096)
+            else {
+                return nni_join_error(
+                    StatusCode::BAD_REQUEST,
+                    "nni_owner_signing_payload_required",
+                    json!({"status": "owner_signing_payload_required"}),
+                );
+            };
+            match sign_nni_owner_payload(&mut **private_key, signing_payload) {
+                Ok((public_key, signature)) => (Some(public_key), Some(signature)),
+                Err(error) => {
+                    return nni_join_error(
+                        StatusCode::BAD_REQUEST,
+                        error,
+                        json!({"status": "owner_private_key_invalid"}),
+                    );
+                }
+            }
+        }
+        None => (None, None),
+    };
     let endpoint = nni_remote_api_endpoint(&node_url, "join/verify");
     let response = state
         .core
@@ -527,6 +618,7 @@ async fn nni_join_verify(
         .json(&NniRemoteJoinVerifyRequest {
             task_id: req.task_id.trim().to_string(),
             signature: req.signature.trim().to_string(),
+            owner_signature,
         })
         .send()
         .await;
@@ -536,6 +628,42 @@ async fn nni_join_verify(
             let status = resp.status();
             match resp.json::<ApiResponse<Value>>().await {
                 Ok(mut body) => {
+                    if status.is_success() && body.ok {
+                        if let Some(owner_pubkey) = body
+                            .data
+                            .as_ref()
+                            .and_then(|data| data.get("asset_owner_pubkey"))
+                            .and_then(Value::as_str)
+                        {
+                            let normalized_owner = match normalize_nni_owner_public_key(owner_pubkey) {
+                                Ok(value) => value,
+                                Err(error) => {
+                                    return nni_join_error(
+                                        StatusCode::BAD_GATEWAY,
+                                        error,
+                                        json!({"status": "remote_asset_owner_invalid"}),
+                                    );
+                                }
+                            };
+                            if derived_owner_pubkey
+                                .as_ref()
+                                .is_some_and(|derived| derived != &normalized_owner)
+                            {
+                                return nni_join_error(
+                                    StatusCode::CONFLICT,
+                                    "nni_asset_owner_signature_mismatch",
+                                    json!({"status": "asset_owner_signature_mismatch"}),
+                                );
+                            }
+                            if let Err(error) = persist_nni_asset_owner_pubkey(&state, &normalized_owner) {
+                                return nni_join_error(
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    "nni_asset_owner_persist_failed",
+                                    json!({"status": "asset_owner_persist_failed", "detail": error.to_string()}),
+                                );
+                            }
+                        }
+                    }
                     let data_ref = body.data.as_ref();
                     let remote_status = data_ref
                         .and_then(|data| data.get("status"))
@@ -627,6 +755,216 @@ async fn nni_join_verify(
             )
         }
     }
+}
+
+async fn nni_owner_recover(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<NniOwnerRecoveryRequest>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    let mut owner_private_key = Zeroizing::new(req.owner_private_key);
+    let requested_node_url = req.node_url;
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err((status, Json(resp))) => {
+            return (
+                status,
+                Json(ApiResponse {
+                    ok: resp.ok,
+                    data: None,
+                    error: resp.error,
+                }),
+            );
+        }
+    };
+    let node_url = match normalize_nni_node_url(&requested_node_url) {
+        Ok(value) => value,
+        Err(error) => {
+            return nni_join_error(
+                StatusCode::BAD_REQUEST,
+                error,
+                json!({"status": "remote_node_invalid"}),
+            );
+        }
+    };
+    let owner_pubkey = match nni_owner_public_key_from_private(&owner_private_key) {
+        Ok(value) => value,
+        Err(error) => {
+            return nni_join_error(
+                StatusCode::BAD_REQUEST,
+                error,
+                json!({"status": "owner_private_key_invalid"}),
+            );
+        }
+    };
+    let device_pubkey = match nni_device_pubkey(&state).await {
+        Ok(value) => value,
+        Err((status, error, data)) => return nni_join_error(status, error, data),
+    };
+
+    let challenge_response = match state
+        .core
+        .http_client
+        .post(nni_remote_api_endpoint(&node_url, "asset-owner/recovery/request"))
+        .timeout(nni_remote_api_timeout())
+        .json(&NniRemoteOwnerRecoveryRequest {
+            asset_owner_pubkey: owner_pubkey.clone(),
+            new_device_pubkey: device_pubkey,
+            client_user_key: identity.user_key,
+        })
+        .send()
+        .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            return nni_join_error(
+                StatusCode::BAD_GATEWAY,
+                "nni_owner_recovery_request_failed",
+                json!({"status": "remote_request_failed", "detail": error.to_string()}),
+            );
+        }
+    };
+    let challenge_status = challenge_response.status();
+    let challenge_body = match challenge_response.json::<ApiResponse<Value>>().await {
+        Ok(value) => value,
+        Err(error) => {
+            return nni_join_error(
+                StatusCode::BAD_GATEWAY,
+                "nni_owner_recovery_response_invalid",
+                json!({"status": "remote_bad_response", "detail": error.to_string()}),
+            );
+        }
+    };
+    if !challenge_status.is_success() || !challenge_body.ok {
+        let error = nni_remote_api_error_code(
+            &challenge_body,
+            "nni_owner_recovery_request_rejected",
+        );
+        return nni_join_error(
+            StatusCode::from_u16(challenge_status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY),
+            error,
+            challenge_body.data.unwrap_or_else(|| json!({"status": "recovery_rejected"})),
+        );
+    }
+    let Some(challenge_data) = challenge_body.data else {
+        return nni_join_error(
+            StatusCode::BAD_GATEWAY,
+            "nni_owner_recovery_challenge_missing",
+            json!({"status": "remote_bad_response"}),
+        );
+    };
+    let Some(task_id) = challenge_data
+        .get("task_id")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    else {
+        return nni_join_error(
+            StatusCode::BAD_GATEWAY,
+            "nni_owner_recovery_task_id_missing",
+            json!({"status": "remote_bad_response"}),
+        );
+    };
+    let Some(signing_payload) = challenge_data
+        .get("signing_payload")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty() && value.len() <= 4096)
+        .map(str::to_string)
+    else {
+        return nni_join_error(
+            StatusCode::BAD_GATEWAY,
+            "nni_owner_recovery_payload_missing",
+            json!({"status": "remote_bad_response"}),
+        );
+    };
+
+    let (derived_owner_pubkey, owner_signature) =
+        match sign_nni_owner_payload(&mut owner_private_key, &signing_payload) {
+            Ok(value) => value,
+            Err(error) => {
+                return nni_join_error(
+                    StatusCode::BAD_REQUEST,
+                    error,
+                    json!({"status": "owner_private_key_invalid"}),
+                );
+            }
+        };
+    if derived_owner_pubkey != owner_pubkey {
+        return nni_join_error(
+            StatusCode::CONFLICT,
+            "nni_owner_recovery_identity_changed",
+            json!({"status": "owner_identity_changed"}),
+        );
+    }
+    let hardware_signature = match run_nni_signature_helper(
+        &state,
+        &["sign_challenge".to_string(), signing_payload],
+    )
+    .await
+    {
+        Ok(output) if output.ok => output
+            .payload
+            .get("signature")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        _ => None,
+    };
+    let Some(device_signature) = hardware_signature else {
+        return nni_join_error(
+            StatusCode::BAD_GATEWAY,
+            "nni_owner_recovery_device_signature_failed",
+            json!({"status": "device_signature_failed"}),
+        );
+    };
+
+    let verify_response = match state
+        .core
+        .http_client
+        .post(nni_remote_api_endpoint(&node_url, "asset-owner/recovery/verify"))
+        .timeout(nni_remote_api_timeout())
+        .json(&NniRemoteOwnerRecoveryVerifyRequest {
+            task_id,
+            device_signature,
+            owner_signature,
+        })
+        .send()
+        .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            return nni_join_error(
+                StatusCode::BAD_GATEWAY,
+                "nni_owner_recovery_verify_failed",
+                json!({"status": "remote_request_failed", "detail": error.to_string()}),
+            );
+        }
+    };
+    let verify_status = verify_response.status();
+    let mut verify_body = match verify_response.json::<ApiResponse<Value>>().await {
+        Ok(value) => value,
+        Err(error) => {
+            return nni_join_error(
+                StatusCode::BAD_GATEWAY,
+                "nni_owner_recovery_verify_response_invalid",
+                json!({"status": "remote_bad_response", "detail": error.to_string()}),
+            );
+        }
+    };
+    if verify_status.is_success() && verify_body.ok {
+        if let Err(error) = persist_nni_asset_owner_pubkey(&state, &owner_pubkey) {
+            return nni_join_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "nni_asset_owner_persist_failed",
+                json!({"status": "asset_owner_persist_failed", "detail": error.to_string()}),
+            );
+        }
+        if let Some(data) = verify_body.data.as_mut().and_then(Value::as_object_mut) {
+            data.insert("node_url".to_string(), Value::String(node_url));
+        }
+    }
+    (
+        StatusCode::from_u16(verify_status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY),
+        Json(verify_body),
+    )
 }
 
 async fn nni_request_records(
@@ -896,6 +1234,7 @@ fn read_nni_config(state: &AppState) -> anyhow::Result<NniConfigResponse> {
         selected_node_url: config.selected_node_url,
         remote_nodes: config.remote_nodes,
         joined: config.joined,
+        asset_owner_pubkey: config.asset_owner_pubkey,
         heartbeat_interval_seconds: NNI_HEARTBEAT_INTERVAL_SECONDS,
         heartbeat_network_retry_limit: NNI_HEARTBEAT_NETWORK_RETRY_LIMIT,
         heartbeat_request_count: heartbeat_state.heartbeat_request_count,
@@ -964,7 +1303,10 @@ fn read_nni_runtime_config(state: &AppState) -> anyhow::Result<NniRuntimeConfig>
         return Ok(NniRuntimeConfig::default());
     }
     let mut config: NniRuntimeConfig = serde_json::from_str(&raw)?;
-    if config.schema_version != NNI_RUNTIME_CONFIG_SCHEMA_VERSION {
+    let migrated = config.schema_version == 1;
+    if migrated {
+        config.schema_version = NNI_RUNTIME_CONFIG_SCHEMA_VERSION;
+    } else if config.schema_version != NNI_RUNTIME_CONFIG_SCHEMA_VERSION {
         anyhow::bail!(
             "nni_runtime_config_schema_unsupported:{}",
             config.schema_version
@@ -976,6 +1318,15 @@ fn read_nni_runtime_config(state: &AppState) -> anyhow::Result<NniRuntimeConfig>
         config.selected_node_url.as_deref(),
         &config.remote_nodes,
     )?;
+    config.asset_owner_pubkey = config
+        .asset_owner_pubkey
+        .as_deref()
+        .map(normalize_nni_owner_public_key)
+        .transpose()
+        .map_err(anyhow::Error::msg)?;
+    if migrated {
+        write_nni_runtime_config(state, &config)?;
+    }
     Ok(config)
 }
 
@@ -1006,7 +1357,22 @@ fn read_legacy_nni_config(state: &AppState) -> anyhow::Result<Option<NniRuntimeC
         selected_node_url: remote_nodes.first().cloned(),
         remote_nodes,
         joined,
+        asset_owner_pubkey: None,
     }))
+}
+
+fn persist_nni_asset_owner_pubkey(state: &AppState, owner_pubkey: &str) -> anyhow::Result<()> {
+    let normalized = normalize_nni_owner_public_key(owner_pubkey).map_err(anyhow::Error::msg)?;
+    let mut config = read_nni_runtime_config(state)?;
+    if config
+        .asset_owner_pubkey
+        .as_ref()
+        .is_some_and(|current| current != &normalized)
+    {
+        anyhow::bail!("nni_asset_owner_conflict");
+    }
+    config.asset_owner_pubkey = Some(normalized);
+    write_nni_runtime_config(state, &config)
 }
 
 fn write_nni_runtime_config(

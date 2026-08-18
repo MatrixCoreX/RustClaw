@@ -237,6 +237,7 @@ fn nni_gateway_uses_persisted_error_code_without_parsing_error_text() {
         remote_nodes: vec!["https://nni.example.test".to_string()],
         selected_node_url: Some("https://nni.example.test".to_string()),
         joined: true,
+        asset_owner_pubkey: None,
         heartbeat_interval_seconds: 590,
         heartbeat_network_retry_limit: 3,
         heartbeat_request_count: 4,

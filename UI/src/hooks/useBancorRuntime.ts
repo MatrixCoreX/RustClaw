@@ -31,6 +31,11 @@ export const BANCOR_MARKET_TRADE_LIMIT = 100;
 export const BANCOR_TRADE_PAGE_SIZE = 10;
 export const BANCOR_SUCCESS_MESSAGE_DURATION_MS = 5_000;
 
+export type BancorTradeAuthorization = {
+  authorizationMode?: "delegated_hardware" | "asset_owner";
+  ownerPrivateKey?: string;
+};
+
 export function projectBancorCandlesForInterval(
   current: NniBancorCandlesResponse | null,
   intervalSeconds: number,
@@ -158,11 +163,13 @@ export function validateBancorTradeInput({
   inputAmount,
   market,
   account,
+  requireAccount = true,
 }: {
   side: "buy" | "sell";
   inputAmount: string;
   market: NniBancorMarketResponse | null;
   account: NniBancorAccountResponse | null;
+  requireAccount?: boolean;
 }): string | null {
   const inputUnits = parseBancorInputUnits(inputAmount);
   if (inputUnits === null) return "nni_bancor_amount_invalid";
@@ -177,7 +184,7 @@ export function validateBancorTradeInput({
     const outputUnits = (curveInputUnits * outputReserveUnits) / (inputReserveUnits + curveInputUnits);
     if (outputUnits <= 0n) return "nni_bancor_output_too_small";
   }
-  if (!account) return "nni_bancor_account_required";
+  if (!account) return requireAccount ? "nni_bancor_account_required" : null;
   const availableUnits = BigInt(side === "buy" ? account.usd_balance_units : account.point_balance_units);
   if (inputUnits > availableUnits) {
     return side === "buy"
@@ -574,11 +581,18 @@ export function useBancorRuntime({
     side: "buy" | "sell",
     inputAmount: string,
     slippageBps = BANCOR_DEFAULT_SLIPPAGE_BPS,
+    allowWithoutAccount = false,
   ) => {
     setError(null);
     setMessage(null);
     setLastTrade(null);
-    const validationError = validateBancorTradeInput({ side, inputAmount, market, account });
+    const validationError = validateBancorTradeInput({
+      side,
+      inputAmount,
+      market,
+      account,
+      requireAccount: !allowWithoutAccount,
+    });
     if (validationError) {
       setQuote(null);
       setError(formatBancorApiError(validationError, t, t("金额无法交易。", "This amount cannot be traded.")));
@@ -609,7 +623,10 @@ export function useBancorRuntime({
     }
   };
 
-  const trade = async () => {
+  const trade = async ({
+    authorizationMode = "delegated_hardware",
+    ownerPrivateKey,
+  }: BancorTradeAuthorization = {}) => {
     if (!quote) return null;
     setTradeLoading(true);
     setError(null);
@@ -623,13 +640,17 @@ export function useBancorRuntime({
           input_amount: quote.input_amount,
           min_output: quote.min_output_amount,
           slippage_bps: quote.slippage_bps,
+          authorization_mode: authorizationMode,
+          ...(authorizationMode === "asset_owner"
+            ? { owner_private_key: ownerPrivateKey ?? "" }
+            : {}),
         }),
       });
       const body = (await response.json()) as ApiResponse<NniBancorTradeResponse>;
       if (!response.ok || !body.ok || !body.data) throw new Error(readError(body, `Trade failed (${response.status})`));
       setLastTrade(body.data);
       setQuote(null);
-      await Promise.all([
+      await Promise.allSettled([
         fetchMarket(true),
         fetchAccount(1, true),
         fetchMarketTrades(true),

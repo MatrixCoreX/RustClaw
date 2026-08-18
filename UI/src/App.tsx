@@ -305,6 +305,9 @@ export default function App() {
     nniActionMessage,
     nniDeviceAuthorizationDenied,
     nniJoined,
+    nniAssetOwnerPubkey,
+    nniOwnerKeyPair,
+    nniOwnerActionLoading,
     nniRemoteNodes,
     nniSelectedNodeUrl,
     nniRemoteNodeCount,
@@ -345,6 +348,9 @@ export default function App() {
     ensureNniDeviceStatus,
     setNniJoinedPersisted,
     joinNni,
+    generateNniOwnerKeyPair,
+    clearNniOwnerKeyPair,
+    recoverNniOwner,
     testJoinNni,
     fetchNniConfig,
     saveNniConfig,
@@ -1834,6 +1840,9 @@ export default function App() {
               nniActionMessage={nniActionMessage}
               nniDeviceAuthorizationDenied={nniDeviceAuthorizationDenied}
               nniJoined={nniJoined}
+              nniAssetOwnerPubkey={nniAssetOwnerPubkey}
+              nniOwnerKeyPair={nniOwnerKeyPair}
+              nniOwnerActionLoading={nniOwnerActionLoading}
               nniRemoteNodes={nniRemoteNodes}
               nniSelectedNodeUrl={nniSelectedNodeUrl}
               nniRemoteNodeCount={nniRemoteNodeCount}
@@ -1877,6 +1886,9 @@ export default function App() {
               onFetchDeviceStatus={fetchNniDeviceStatus}
               onSetJoinedPersisted={setNniJoinedPersisted}
               onJoin={joinNni}
+              onGenerateOwner={generateNniOwnerKeyPair}
+              onClearGeneratedOwner={clearNniOwnerKeyPair}
+              onRecoverOwner={recoverNniOwner}
               onTestJoin={testJoinNni}
               onFetchConfig={fetchNniConfig}
               onSaveConfig={saveNniConfig}
@@ -1925,6 +1937,7 @@ export default function App() {
               runtime={bancorRuntime}
               formatUnixDateTime={formatUnixDateTime}
               signingDeviceReady={nniStatus?.signature_chip_present === true}
+              assetOwnerReady={Boolean(nniAssetOwnerPubkey)}
               onOpenNni={() => setCurrentPage("nni")}
             />
           ) : null}
