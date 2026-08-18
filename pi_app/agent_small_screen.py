@@ -33,9 +33,8 @@ from small_screen_config import (
     _pi_app_dir,
     _root_dir,
     _writable_pi_app_dir,
-    ensure_small_screen_auth_key,
-    load_auth_key,
     load_crypto_page_visible,
+    load_preferred_runtime_auth_key,
     load_gallery_page_visible,
     load_lang,
     load_logs_page_visible,
@@ -46,7 +45,6 @@ from small_screen_config import (
     load_theme,
     load_us_stock_page_visible,
     load_weather_page_visible,
-    save_auth_key,
     save_crypto_page_visible,
     save_gallery_page_visible,
     save_lang,
@@ -1345,7 +1343,7 @@ class SmallScreenApp:
         self._show_stock_page = load_stock_page_visible()
         self._show_us_stock_page = load_us_stock_page_visible()
         self._show_crypto_page = load_crypto_page_visible()
-        self._auth_key = ensure_small_screen_auth_key()
+        self._auth_key = load_preferred_runtime_auth_key()
         self._ui_queue = queue.SimpleQueue()
         self._ui_pump_job = None
         self._refresh_thread = None

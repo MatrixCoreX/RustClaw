@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import secrets
 import sqlite3
@@ -8,6 +9,9 @@ try:
     import tomllib
 except ModuleNotFoundError:
     tomllib = None
+
+
+logger = logging.getLogger(__name__)
 
 
 def _pi_app_dir():
@@ -102,19 +106,30 @@ def load_product_splash_image():
 
 def _load_settings_dict():
     try:
-        with open(_settings_file(), "r", encoding="utf-8") as f:
+        path = _settings_file()
+        os.chmod(path, 0o600)
+        with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         return data if isinstance(data, dict) else {}
-    except Exception:
+    except FileNotFoundError:
+        return {}
+    except Exception as exc:
+        logger.warning("Unable to load small-screen settings: %s", exc)
         return {}
 
 
 def _save_settings_dict(settings):
     try:
-        with open(_settings_file(), "w", encoding="utf-8") as f:
+        path = _settings_file()
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        fd = os.open(path, flags, 0o600)
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(settings, f, ensure_ascii=True, indent=2, sort_keys=True)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Unable to save small-screen settings: %s", exc)
 
 
 def _save_setting_value(name, value):
@@ -306,29 +321,37 @@ def ensure_small_screen_auth_key():
                 (user_key,),
             )
         return user_key
-    except Exception:
+    except Exception as exc:
+        logger.warning("Unable to register the small-screen fallback auth key: %s", exc)
         return user_key
 
 
 def load_enabled_admin_user_key():
     db_path = _load_sqlite_path_from_config()
     try:
-        conn = sqlite3.connect(db_path)
-        row = conn.execute(
-            """
-            SELECT user_key
-            FROM auth_keys
-            WHERE role = 'admin' AND enabled = 1
-            ORDER BY rowid ASC
-            LIMIT 1
-            """
-        ).fetchone()
-        conn.close()
+        with sqlite3.connect(db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT user_key
+                FROM auth_keys
+                WHERE role = 'admin' AND enabled = 1
+                ORDER BY rowid ASC
+                LIMIT 1
+                """
+            ).fetchone()
         if row and row[0]:
             return str(row[0]).strip()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Unable to load the enabled admin key for the small-screen app: %s", exc)
     return ""
+
+
+def load_preferred_runtime_auth_key():
+    """Use the runtime's enabled admin identity without persisting it in app settings."""
+    admin_key = load_enabled_admin_user_key()
+    if admin_key:
+        return admin_key
+    return ensure_small_screen_auth_key()
 
 
 def _default_lang_from_system():
