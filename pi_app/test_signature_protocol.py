@@ -104,8 +104,15 @@ class SignatureProtocolTests(unittest.TestCase):
             saved_private_keys = tuple(disabled_state[field] for field in private_key_fields)
 
             result, unavailable = self.run_helper(state_path, "pubkey")
-            self.assertNotEqual(result.returncode, 0)
-            self.assertFalse(unavailable["ok"])
+            if result.returncode == 0:
+                # A physical chip may still be available after the simulator is
+                # disabled.  In that case the helper must use the real I2C
+                # device instead of silently continuing with the simulator.
+                self.assertTrue(unavailable["ok"])
+                self.assertNotEqual(unavailable.get("i2c_address"), "virtual")
+                self.assertNotEqual(unavailable.get("pubkey"), enabled["pubkey"])
+            else:
+                self.assertFalse(unavailable["ok"])
 
             result, reenabled = self.run_helper(state_path, "simulation_enable")
             self.assertEqual(result.returncode, 0)
