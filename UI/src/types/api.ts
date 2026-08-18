@@ -1224,6 +1224,11 @@ export interface NniNetworkDeviceStats {
 }
 
 export interface NniRewardPolicy {
+  phase?: "disabled" | "scheduled" | "active" | string;
+  accepting_reward_heartbeats?: boolean;
+  reward_start_time_unix?: number;
+  starts_in_seconds?: number | null;
+  first_settlement_at_unix?: number | null;
   interval_seconds: number;
   initial_reward_pool_points: number;
   current_reward_pool_units: string | null;

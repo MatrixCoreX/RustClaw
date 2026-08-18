@@ -1,4 +1,5 @@
-import { Coins, Loader2, RefreshCw, WalletCards } from "lucide-react";
+import { Clock3, Coins, Loader2, RefreshCw, WalletCards } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { shortNniValue } from "../lib/nni-display";
 import type { NniRewardsResponse } from "../types/api";
@@ -6,6 +7,21 @@ import { NniDecimalAmount } from "./NniDecimalAmount";
 import { NniPublicKeyDisplay } from "./NniPublicKeyDisplay";
 
 type Translate = (zh: string, en: string) => string;
+
+export function formatNniRewardCountdown(seconds: number, t: Translate): string {
+  const safeSeconds = Math.max(0, Math.floor(seconds));
+  const days = Math.floor(safeSeconds / 86_400);
+  const hours = Math.floor((safeSeconds % 86_400) / 3_600);
+  const minutes = Math.floor((safeSeconds % 3_600) / 60);
+  const remainder = safeSeconds % 60;
+  const zh = [days ? `${days} 天` : "", hours ? `${hours} 小时` : "", minutes ? `${minutes} 分` : "", `${remainder} 秒`]
+    .filter(Boolean)
+    .join(" ");
+  const en = [days ? `${days}d` : "", hours ? `${hours}h` : "", minutes ? `${minutes}m` : "", `${remainder}s`]
+    .filter(Boolean)
+    .join(" ");
+  return t(zh, en);
+}
 
 export interface NniRewardsPanelProps {
   rewards: NniRewardsResponse | null;
@@ -31,6 +47,23 @@ export function NniRewardsPanel({
   onRefresh,
 }: NniRewardsPanelProps) {
   const records = rewards?.records ?? [];
+  const rewardPolicy = rewards?.reward_policy;
+  const [countdownSeconds, setCountdownSeconds] = useState(
+    rewardPolicy?.phase === "scheduled" ? Math.max(0, rewardPolicy.starts_in_seconds ?? 0) : 0,
+  );
+
+  useEffect(() => {
+    if (rewardPolicy?.phase !== "scheduled") {
+      setCountdownSeconds(0);
+      return undefined;
+    }
+    const initialSeconds = Math.max(0, rewardPolicy.starts_in_seconds ?? 0);
+    const deadline = Date.now() + initialSeconds * 1_000;
+    const update = () => setCountdownSeconds(Math.max(0, Math.ceil((deadline - Date.now()) / 1_000)));
+    update();
+    const timer = window.setInterval(update, 1_000);
+    return () => window.clearInterval(timer);
+  }, [rewardPolicy?.phase, rewardPolicy?.reward_start_time_unix, rewardPolicy?.starts_in_seconds]);
 
   return (
     <div
@@ -68,6 +101,34 @@ export function NniRewardsPanel({
           {t("奖励暂时无法读取：", "Rewards could not be loaded: ")}
           {error}
         </p>
+      ) : null}
+
+      {rewardPolicy?.phase === "scheduled" ? (
+        <div
+          data-nni-reward-countdown={countdownSeconds}
+          className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-300/[0.08] p-4"
+        >
+          <div className="flex items-center gap-2 text-amber-100">
+            <Clock3 className="h-4 w-4" />
+            <p className="text-sm font-semibold">
+              {countdownSeconds > 0
+                ? t("奖励开始倒计时", "Reward start countdown")
+                : t("奖励开始时间已到", "Reward start time reached")}
+            </p>
+          </div>
+          <p className="mt-2 font-mono text-xl font-semibold text-amber-50">
+            {formatNniRewardCountdown(countdownSeconds, t)}
+          </p>
+          <p className="mt-2 text-xs leading-5 text-white/60">
+            {t(
+              "开始时间前的心跳只用于确认设备在线，不参与奖励；开始后第一个完整窗口结束时才会首次结算。",
+              "Heartbeats before the start only confirm that the device is online and do not earn rewards. The first settlement occurs after the first complete window closes.",
+            )}
+          </p>
+          <p className="mt-2 text-xs text-white/45">
+            {t("开始", "Starts")}: {formatUnixDateTime(rewardPolicy.reward_start_time_unix)} · {t("首次结算", "First settlement")}: {formatUnixDateTime(rewardPolicy.first_settlement_at_unix)}
+          </p>
+        </div>
       ) : null}
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
