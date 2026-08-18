@@ -4934,13 +4934,14 @@ class SmallScreenApp:
         try:
             self._bancor_price_var.set(view["price"])
             self._bancor_daily_var.set(view["daily"])
-            self._bancor_reserves_var.set(view["reserves"])
-            self._bancor_meta_var.set(view["meta"])
-            self._bancor_daily_label.config(fg=change_color)
-            self._bancor_refresh_btn.config(
-                state=tk.DISABLED if self._bancor_loading else tk.NORMAL,
-                text=self._t("bancor_loading") if self._bancor_loading else self._t("refresh"),
+            self._bancor_point_reserve_var.set(view["point_reserve"])
+            self._bancor_usd_reserve_var.set(view["usd_reserve"])
+            self._bancor_meta_var.set(
+                self._t("bancor_loading")
+                if self._bancor_loading and not self._bancor_market
+                else view["meta"]
             )
+            self._bancor_daily_label.config(fg=change_color)
         except tk.TclError:
             pass
 
@@ -4993,20 +4994,6 @@ class SmallScreenApp:
             bg=self._c("bg"),
             fg=self._c("fg"),
         ).pack(side=tk.LEFT)
-        self._bancor_refresh_btn = tk.Button(
-            header,
-            text=self._t("refresh"),
-            font=("", 10),
-            relief=tk.FLAT,
-            bg=self._c("button_bg"),
-            fg=self._c("button_fg"),
-            activebackground=self._c("button_active_bg"),
-            activeforeground=self._c("fg"),
-            command=lambda: self._load_bancor_market_for_page(silent=False),
-            padx=10,
-            pady=3,
-        )
-        self._bancor_refresh_btn.pack(side=tk.RIGHT)
 
         price_box = tk.Frame(
             self.bancor_frame,
@@ -5014,7 +5001,7 @@ class SmallScreenApp:
             highlightbackground=self._c("box_border"),
             highlightthickness=1,
             padx=10,
-            pady=7,
+            pady=5,
         )
         price_box.pack(fill=tk.X, pady=(0, 6))
         tk.Label(
@@ -5028,13 +5015,14 @@ class SmallScreenApp:
         tk.Label(
             price_box,
             textvariable=self._bancor_price_var,
-            font=("DejaVu Sans Mono", 22, "bold"),
+            font=("DejaVu Sans Mono", 14, "bold"),
             bg=self._c("box_bg"),
             fg=self._c("accent"),
         ).pack(anchor=tk.W)
 
         self._bancor_daily_var = tk.StringVar(value="--")
-        self._bancor_reserves_var = tk.StringVar(value="--")
+        self._bancor_point_reserve_var = tk.StringVar(value="--")
+        self._bancor_usd_reserve_var = tk.StringVar(value="--")
         self._bancor_meta_var = tk.StringVar(value=self._t("bancor_loading"))
         self._bancor_daily_label = tk.Label(
             self.bancor_frame,
@@ -5047,16 +5035,47 @@ class SmallScreenApp:
             wraplength=W - 28,
         )
         self._bancor_daily_label.pack(fill=tk.X, pady=(2, 5))
-        tk.Label(
-            self.bancor_frame,
-            textvariable=self._bancor_reserves_var,
-            font=("DejaVu Sans Mono", 9),
-            bg=self._c("bg"),
-            fg=self._c("fg"),
-            anchor="w",
-            justify=tk.LEFT,
-            wraplength=W - 28,
-        ).pack(fill=tk.X, pady=(0, 5))
+        reserves_row = tk.Frame(self.bancor_frame, bg=self._c("bg"))
+        reserves_row.pack(fill=tk.X, pady=(0, 6))
+        for label_key, value_var, unit, right_gap in (
+            ("bancor_point_reserve", self._bancor_point_reserve_var, "POINT", True),
+            ("bancor_usd_reserve", self._bancor_usd_reserve_var, "USD", False),
+        ):
+            reserve_box = tk.Frame(
+                reserves_row,
+                bg=self._c("box_bg"),
+                highlightbackground=self._c("box_border"),
+                highlightthickness=1,
+                padx=7,
+                pady=5,
+            )
+            reserve_box.pack(
+                side=tk.LEFT,
+                fill=tk.BOTH,
+                expand=True,
+                padx=(0, 6) if right_gap else 0,
+            )
+            tk.Label(
+                reserve_box,
+                text=self._t(label_key),
+                font=("", 9),
+                bg=self._c("box_bg"),
+                fg=self._c("fg_dim"),
+            ).pack(anchor=tk.W)
+            tk.Label(
+                reserve_box,
+                textvariable=value_var,
+                font=("DejaVu Sans Mono", 17, "bold"),
+                bg=self._c("box_bg"),
+                fg=self._c("fg"),
+            ).pack(anchor=tk.W)
+            tk.Label(
+                reserve_box,
+                text=unit,
+                font=("", 8),
+                bg=self._c("box_bg"),
+                fg=self._c("fg_dim"),
+            ).pack(anchor=tk.W)
         tk.Label(
             self.bancor_frame,
             textvariable=self._bancor_meta_var,

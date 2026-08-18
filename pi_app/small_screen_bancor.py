@@ -55,7 +55,6 @@ def build_bancor_market_view(market, lang="CN", error=""):
             "high": "当日最高",
             "low": "当日最低",
             "change": "日涨跌",
-            "reserves": "池子储备",
         },
         "EN": {
             "unavailable": "Market information is temporarily unavailable",
@@ -68,14 +67,14 @@ def build_bancor_market_view(market, lang="CN", error=""):
             "high": "Daily high",
             "low": "Daily low",
             "change": "Daily change",
-            "reserves": "Pool reserves",
         },
     }[selected_lang]
     if not isinstance(market, dict) or not market:
         return {
             "price": "--",
             "daily": copy["unavailable"],
-            "reserves": "POINT --  ·  USD --",
+            "point_reserve": "--",
+            "usd_reserve": "--",
             "meta": str(error or copy["unavailable"]),
             "change_direction": "flat",
         }
@@ -98,10 +97,8 @@ def build_bancor_market_view(market, lang="CN", error=""):
             f"{copy['low']} {_compact_decimal(daily.get('low_usd_per_point'))}  ·  "
             f"{copy['change']} {change}"
         ),
-        "reserves": (
-            f"{copy['reserves']}: {_reserve_amount(market.get('point_reserve'))} POINT  ·  "
-            f"{_reserve_amount(market.get('usd_reserve'))} USD"
-        ),
+        "point_reserve": _reserve_amount(market.get("point_reserve")),
+        "usd_reserve": _reserve_amount(market.get("usd_reserve")),
         "meta": (
             f"{copy['status']}: {status_label}  ·  {copy['fee']}: {fee_text}  ·  "
             f"{copy['trades']}: {trade_count}"
