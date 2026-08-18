@@ -229,8 +229,8 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.doesNotMatch(html, /内部 USD/);
   assert.match(html, /临时输入资产私钥自行签名/);
   assert.doesNotMatch(html, /ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C/);
-  assert.match(html, /data-bancor-asset-owner-pubkey="true"/);
-  assert.match(html, /资产账号公钥/);
+  assert.doesNotMatch(html, /资产账号公钥/);
+  assert.doesNotMatch(html, /Asset account public key/);
   assert.match(html, /5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M/);
   assert.doesNotMatch(html, /切换为原始十六进制公钥/);
   assert.match(html, /BANCOR 储备曲线公式/);
