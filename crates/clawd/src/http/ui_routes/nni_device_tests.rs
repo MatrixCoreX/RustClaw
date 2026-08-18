@@ -73,6 +73,13 @@ fn nni_agent_sends_heartbeats_ten_seconds_before_each_ten_minute_window() {
 
 #[test]
 fn nni_next_heartbeat_due_time_is_stable_for_success_and_retry_states() {
+    let fresh = NniHeartbeatRuntimeState::default();
+    assert_eq!(
+        nni_next_heartbeat_due_at_ts(true, "enabling", &fresh, 900),
+        Some(900),
+        "a newly joined device must be immediately due instead of moving the deadline forward forever"
+    );
+
     let active = NniHeartbeatRuntimeState {
         last_heartbeat_at_ts: Some(1_000),
         last_heartbeat_attempt_at_ts: Some(1_000),
@@ -90,6 +97,11 @@ fn nni_next_heartbeat_due_time_is_stable_for_success_and_retry_states() {
     assert_eq!(
         nni_next_heartbeat_due_at_ts(true, "waiting_network", &waiting, 9_999),
         Some(2_000 + NNI_HEARTBEAT_POLL_SECONDS)
+    );
+    assert_eq!(
+        nni_next_heartbeat_due_at_ts(true, "degraded", &fresh, 9_999),
+        Some(9_999),
+        "a recovered state without a persisted attempt must retry immediately"
     );
     assert_eq!(
         nni_next_heartbeat_due_at_ts(false, "disabled", &waiting, 9_999),

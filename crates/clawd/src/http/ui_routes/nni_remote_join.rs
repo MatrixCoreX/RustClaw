@@ -1263,18 +1263,16 @@ fn nni_next_heartbeat_due_at_ts(
     if !joined {
         return None;
     }
-    let (base, delay) = match heartbeat_state {
-        "active" => (
-            runtime_state.last_heartbeat_at_ts.unwrap_or(now),
-            NNI_HEARTBEAT_INTERVAL_SECONDS,
-        ),
-        "enabling" | "waiting_network" | "degraded" => (
-            runtime_state.last_heartbeat_attempt_at_ts.unwrap_or(now),
-            NNI_HEARTBEAT_POLL_SECONDS,
-        ),
+    let due = match heartbeat_state {
+        "active" => runtime_state
+            .last_heartbeat_at_ts
+            .map(|base| base.saturating_add(NNI_HEARTBEAT_INTERVAL_SECONDS)),
+        "enabling" | "waiting_network" | "degraded" => runtime_state
+            .last_heartbeat_attempt_at_ts
+            .map(|base| base.saturating_add(NNI_HEARTBEAT_POLL_SECONDS)),
         _ => return None,
     };
-    Some(base.saturating_add(delay))
+    Some(due.unwrap_or(now))
 }
 
 fn nni_runtime_config_path(state: &AppState) -> PathBuf {
