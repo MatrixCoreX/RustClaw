@@ -131,6 +131,63 @@ test("NNI page entry reuses the device status until an explicit refresh", async 
   await mounted.unmount();
 });
 
+test("public NNI network stats load without joining or invoking the device signer", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const requests: string[] = [];
+  const apiFetch = async (path: string) => {
+    requests.push(path);
+    if (path === "/v1/nni/network-stats") {
+      return apiResponse({
+        schema_version: 1,
+        status: "heartbeat_network_stats",
+        network_devices: {
+          registered_device_count: 153,
+          active_device_count: 0,
+          active_period_start_unix: null,
+          active_period_end_unix: null,
+          first_heartbeat_unix: null,
+          window_seconds: 600,
+        },
+        reward_policy: {
+          phase: "active",
+          accepting_reward_heartbeats: true,
+          reward_start_time_unix: 1_800_000_000,
+          starts_in_seconds: 0,
+          first_settlement_at_unix: 1_800_000_600,
+          interval_seconds: 600,
+          initial_reward_pool_points: 5000,
+          current_reward_pool_units: "500000000000",
+          current_reward_pool_points: "5000.00000000",
+          distribution: "equal_per_eligible_device",
+          halving_epoch_unix: null,
+          halving_interval_seconds: 126_144_000,
+          halving_era: null,
+          rewards_ended: false,
+          next_halving_at_unix: null,
+        },
+        network_rewards: {
+          total_distributed_reward_units: "0",
+          total_distributed_reward_points: "0.00000000",
+          settled_period_count: 0,
+          first_period_start_unix: null,
+          latest_period_end_unix: null,
+        },
+      });
+    }
+    throw new Error(`unexpected request: ${path}`);
+  };
+  const mounted = await mountRuntime(apiFetch);
+
+  await act(async () => {
+    await mounted.runtime().fetchNniNetworkStats();
+  });
+
+  assert.equal(mounted.runtime().nniJoined, false);
+  assert.equal(mounted.runtime().nniNetworkStats?.network_devices.registered_device_count, 153);
+  assert.deepEqual(requests, ["/v1/nni/network-stats"]);
+  await mounted.unmount();
+});
+
 test("NNI device action failure does not persist an implicit leave", async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const requests: Array<{ path: string; method: string }> = [];

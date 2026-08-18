@@ -263,6 +263,7 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         .route("/nni/records/clear", post(nni_clear_request_records))
         .route("/nni/heartbeat/records", get(nni_request_records))
         .route("/nni/heartbeat/errors", get(nni_heartbeat_errors))
+        .route("/nni/network-stats", get(nni_network_stats))
         .route("/nni/rewards", get(nni_rewards))
         .route("/nni/bancor/market", get(nni_bancor_market))
         .route("/nni/bancor/candles", get(nni_bancor_candles))

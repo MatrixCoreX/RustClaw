@@ -299,13 +299,13 @@ export function BancorPage({
   t,
   runtime,
   formatUnixDateTime,
-  nniReady,
+  signingDeviceReady,
   onOpenNni,
 }: {
   t: Translate;
   runtime: BancorRuntime;
   formatUnixDateTime: (value?: number | null) => string;
-  nniReady: boolean;
+  signingDeviceReady: boolean;
   onOpenNni: () => void;
 }) {
   const tradePanelRef = useRef<HTMLDivElement>(null);
@@ -345,7 +345,7 @@ export function BancorPage({
   const inputAsset = side === "buy" ? "USD" : "POINT";
   const outputAsset = side === "buy" ? "POINT" : "USD";
   const marketOpen = market?.status === "open";
-  const tradingReady = marketOpen && nniReady;
+  const tradingReady = marketOpen && signingDeviceReady;
   const inputErrorCode = inputAmount.trim()
     ? validateBancorTradeInput({ side, inputAmount, market, account })
     : null;
@@ -615,7 +615,7 @@ export function BancorPage({
                 <WalletCards className="h-4 w-4 text-sky-300" />
                 <h3 className="text-sm font-medium text-white/80">{t("我的余额", "My balances")}</h3>
               </div>
-              <button type="button" className="theme-icon-btn" disabled={accountLoading || !nniReady} onClick={() => void fetchAccount()} title={t("签名刷新余额", "Sign to refresh balances")}>
+              <button type="button" className="theme-icon-btn" disabled={accountLoading || !signingDeviceReady} onClick={() => void fetchAccount()} title={t("签名刷新余额", "Sign to refresh balances")}>
                 <RefreshCw className={`h-4 w-4 ${accountLoading ? "animate-spin" : ""}`} />
               </button>
             </div>
@@ -767,11 +767,11 @@ export function BancorPage({
               {t("管理员尚未开启市场，因此现在只能查看储备和账户。", "The market is not enabled by the administrator, so only reserves and account data are available.")}
             </p>
           ) : null}
-          {marketOpen && !nniReady ? (
+          {marketOpen && !signingDeviceReady ? (
             <p className="mt-3 text-xs leading-5 text-amber-200/80">
               {t(
-                "请先在 NNI 页面加入网络，并确认本机签名设备可用；完成后才能获取报价和提交交易。",
-                "Join the network on the NNI page and confirm that this device can sign before requesting quotes or trading.",
+                "请确认本机签名设备可用；加入 NNI 网络不是交易的前置条件。",
+                "Confirm that this device can sign. Joining the NNI network is not required for trading.",
               )}
             </p>
           ) : null}

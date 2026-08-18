@@ -19,7 +19,6 @@ export interface NniNetworkDeviceStatsProps {
   networkRewards?: NniNetworkRewards | null;
   rewardPolicy?: NniRewardPolicy | null;
   loading: boolean;
-  joined: boolean;
   t: Translate;
   formatUnixDateTime: (ts: number | null | undefined) => string;
 }
@@ -29,13 +28,10 @@ export function NniNetworkDeviceStats({
   networkRewards = null,
   rewardPolicy = null,
   loading,
-  joined,
   t,
   formatUnixDateTime,
 }: NniNetworkDeviceStatsProps) {
-  const unavailableLabel = joined
-    ? t("暂不可用", "Unavailable")
-    : t("未加入", "Not joined");
+  const unavailableLabel = t("暂不可用", "Unavailable");
   const registeredValue = stats?.registered_device_count ?? unavailableLabel;
   const activeValue = stats?.active_device_count ?? unavailableLabel;
   const networkOutputValue = networkRewards?.total_distributed_reward_points
@@ -46,12 +42,16 @@ export function NniNetworkDeviceStats({
     : unavailableLabel;
   const firstHeartbeatValue = stats?.first_heartbeat_unix != null
     ? formatUnixDateTime(stats.first_heartbeat_unix)
-    : unavailableLabel;
+    : stats
+      ? t("等待首跳", "Waiting for first heartbeat")
+      : unavailableLabel;
   const nextHalvingValue = rewardPolicy?.rewards_ended
     ? t("奖励已结束", "Rewards ended")
     : rewardPolicy?.next_halving_at_unix != null
       ? formatUnixDateTime(rewardPolicy.next_halving_at_unix)
-      : unavailableLabel;
+      : rewardPolicy && rewardPolicy.halving_epoch_unix == null
+        ? t("首跳后计算", "Calculated after first heartbeat")
+        : unavailableLabel;
 
   return (
     <div className="grid w-full gap-2.5 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6" aria-label={t("网络概览", "Network overview")}>

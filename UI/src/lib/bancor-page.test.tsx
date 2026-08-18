@@ -177,10 +177,21 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       t={(zh) => zh}
       runtime={runtime}
       formatUnixDateTime={(value) => String(value ?? "")}
-      nniReady
+      signingDeviceReady
       onOpenNni={() => undefined}
     />,
   );
+  const signingUnavailableHtml = renderToStaticMarkup(
+    <BancorPage
+      t={(zh) => zh}
+      runtime={runtime}
+      formatUnixDateTime={(value) => String(value ?? "")}
+      signingDeviceReady={false}
+      onOpenNni={() => undefined}
+    />,
+  );
+  assert.match(signingUnavailableHtml, /加入 NNI 网络不是交易的前置条件/);
+  assert.doesNotMatch(signingUnavailableHtml, /请先在 NNI 页面加入网络/);
   assert.match(html, /data-nni-decimal-amount="100000000\.00000000 POINT"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.match(html, /data-nni-decimal-amount="10000\.00000000 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.match(html, /BANCOR储备曲线市场/);
