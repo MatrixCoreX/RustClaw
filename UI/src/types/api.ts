@@ -1126,6 +1126,9 @@ export interface NniJoinTaskResponse {
   node_url: string;
   expires_at_ts: number;
   request_interval_seconds: number;
+  asset_owner_pubkey?: string | null;
+  authorization_epoch?: number | null;
+  owner_signature_required?: boolean;
 }
 
 export interface NniJoinVerifyResponse {
@@ -1137,12 +1140,34 @@ export interface NniJoinVerifyResponse {
   joined: boolean;
   verified_at_ts: number;
   next_allowed_ts: number;
+  asset_owner_pubkey?: string | null;
+  authorization_epoch?: number | null;
+  authorization_status?: string;
+}
+
+export interface NniOwnerKeyPairResponse {
+  key_type: "K1";
+  encoding: "eos_base58_v1";
+  public_key: string;
+  private_key: string;
+  private_key_persisted: false;
+}
+
+export interface NniOwnerRecoveryResponse {
+  status: string;
+  asset_owner_pubkey: string;
+  device_pubkey: string;
+  authorization_epoch: number;
+  authorization_status: string;
+  authorized_at_unix: number;
+  node_url: string;
 }
 
 export interface NniConfigResponse {
   remote_nodes: string[];
   selected_node_url?: string | null;
   joined: boolean;
+  asset_owner_pubkey?: string | null;
   heartbeat_interval_seconds: number;
   heartbeat_network_retry_limit: number;
   heartbeat_request_count: number;
@@ -1386,7 +1411,7 @@ export interface NniBancorTradeRecord {
 }
 
 export interface NniBancorMarketTradeRecord extends NniBancorTradeRecord {
-  device_pubkey_compact: string;
+  asset_owner_pubkey: string;
 }
 
 export interface NniBancorMarketTradesResponse {
@@ -1418,6 +1443,10 @@ export interface NniBancorAccountResponse {
 export interface NniBancorTradeResponse {
   schema_version: 1;
   status: string;
+  device_pubkey: string;
+  asset_owner_pubkey: string;
+  authorization_epoch: number;
+  authorization_mode: "delegated_hardware" | "asset_owner";
   trade: NniBancorTradeRecord;
   account: {
     point_balance_units: string;

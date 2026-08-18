@@ -251,28 +251,24 @@ async fn nni_bancor_routes_require_ui_authentication() {
 
 #[test]
 fn nni_bancor_market_trades_are_sanitized_and_limited_to_the_latest_hundred() {
-    let pubkey = concat!(
+    let hardware_pubkey = concat!(
         "2b9c9d84fa15f4e178ce58d0a40a9f5e150e9c502e689a24d0c0f221337870c",
         "726f0e463d730a75401c425bfde0db0c442e314027d83885a84c535eaa35460a0"
     );
-    assert_eq!(
-        compact_bancor_device_pubkey(pubkey).as_deref(),
-        Some("ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C"),
-    );
-    assert_eq!(
-        compact_bancor_device_pubkey("AiucnYT6FfTheM5Y0KQKn14VDpxQLmiaJNDA8iEzeHDH").as_deref(),
-        Some("ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C"),
-    );
+    let owner_pubkey = "5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M";
 
     let mut trades = vec![
-        json!({"trade_id": "raw", "device_pubkey": pubkey}),
-        json!({"trade_id": "mislabelled", "device_pubkey_masked": pubkey}),
-        json!({"trade_id": "masked", "device_pubkey_masked": "a2c887498554••••••••331016eb"}),
+        json!({
+            "trade_id": "asset-owner",
+            "asset_owner_pubkey": owner_pubkey,
+            "device_pubkey": hardware_pubkey,
+        }),
+        json!({"trade_id": "hardware-only", "device_pubkey": hardware_pubkey}),
     ];
-    trades.extend((3..105).map(|index| {
+    trades.extend((2..105).map(|index| {
         json!({
             "trade_id": format!("trade-{index}"),
-            "device_pubkey_compact": "ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C",
+            "asset_owner_pubkey": owner_pubkey,
         })
     }));
     let mut payload = json!({
@@ -284,7 +280,7 @@ fn nni_bancor_market_trades_are_sanitized_and_limited_to_the_latest_hundred() {
     });
     normalize_bancor_market_trades(&mut payload);
     let serialized = payload.to_string();
-    assert!(!serialized.contains(pubkey));
+    assert!(!serialized.contains(hardware_pubkey));
     assert_eq!(payload["limit"], Value::Number(100.into()));
     assert_eq!(payload["trades"].as_array().map(Vec::len), Some(100));
     for removed in ["page", "per_page", "total", "total_pages"] {
@@ -294,23 +290,17 @@ fn nni_bancor_market_trades_are_sanitized_and_limited_to_the_latest_hundred() {
         );
     }
     assert_eq!(
-        payload["trades"][0]["device_pubkey_compact"],
-        Value::String("ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C".to_string()),
-    );
-    assert_eq!(
-        payload["trades"][1]["device_pubkey_compact"],
-        Value::String("ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C".to_string()),
-    );
-    assert_eq!(
-        payload["trades"][2]["device_pubkey_compact"],
-        Value::String("a2c887498554••••••••331016eb".to_string()),
+        payload["trades"][0]["asset_owner_pubkey"],
+        Value::String(owner_pubkey.to_string()),
     );
     assert!(payload["trades"]
         .as_array()
         .expect("market trades")
         .iter()
         .all(|trade| trade.get("device_pubkey").is_none()
-            && trade.get("device_pubkey_masked").is_none()));
+            && trade.get("device_pubkey_masked").is_none()
+            && trade.get("device_pubkey_compact").is_none()
+            && trade.get("asset_owner_pubkey").is_some()));
 }
 
 struct NniRuntimeStateTestWorkspace {
@@ -424,7 +414,7 @@ fn nni_heartbeat_status_uses_data_root_without_mutating_config() {
             .expect("read migrated NNI runtime config"),
     )
     .expect("parse migrated NNI runtime config");
-    assert_eq!(migrated.schema_version, 1);
+    assert_eq!(migrated.schema_version, 2);
     assert_eq!(migrated.remote_nodes, vec!["https://nni.example.test"]);
     assert!(migrated.joined);
 }

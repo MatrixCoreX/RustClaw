@@ -256,6 +256,8 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         .route("/models/catalog", get(get_model_catalog))
         .route("/nni/device/status", get(nni_device_status))
         .route("/nni/device/action", post(nni_device_action))
+        .route("/nni/owner/generate", post(nni_owner_generate))
+        .route("/nni/owner/recover", post(nni_owner_recover))
         .route("/nni/config", get(get_nni_config).post(update_nni_config))
         .route("/nni/join/request", post(nni_join_request))
         .route("/nni/join/verify", post(nni_join_verify))
@@ -460,6 +462,7 @@ mod agent_config_unit_tests;
 mod git_remote_config_tests;
 include!("ui_routes/nni_request_records.rs");
 include!("ui_routes/nni_remote_api.rs");
+include!("ui_routes/nni_owner_identity.rs");
 include!("ui_routes/nni_remote_join.rs");
 include!("ui_routes/nni_rewards.rs");
 include!("ui_routes/nni_bancor.rs");

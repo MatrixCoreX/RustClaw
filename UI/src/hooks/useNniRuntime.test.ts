@@ -212,9 +212,13 @@ test("NNI device action failure does not persist an implicit leave", async () =>
 
 test("NNI join exposes a structured public-key authorization rejection", async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const assetOwnerPubkey = "5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M";
   let joinRequest: unknown = null;
   const apiFetch = async (path: string, init?: RequestInit) => {
     if (path === "/v1/nni/device/status?refresh=true") return apiResponse(readyChipStatus());
+    if (path === "/v1/nni/config" && !init?.method) {
+      return apiResponse({ ...joinedConfig(), joined: false, asset_owner_pubkey: assetOwnerPubkey });
+    }
     if (path === "/v1/nni/join/request") {
       joinRequest = JSON.parse(String(init?.body));
       return new Response(
@@ -237,6 +241,9 @@ test("NNI join exposes a structured public-key authorization rejection", async (
   const mounted = await mountRuntime(apiFetch);
 
   await act(async () => {
+    await mounted.runtime().fetchNniConfig();
+  });
+  await act(async () => {
     mounted.runtime().updateNniRemoteNodes("https://node-a.example.test\nhttps://nni.example.test");
   });
   await act(async () => {
@@ -247,12 +254,94 @@ test("NNI join exposes a structured public-key authorization rejection", async (
   });
 
   assert.equal(mounted.runtime().nniDeviceAuthorizationDenied, true);
-  assert.deepEqual(joinRequest, { node_url: "https://nni.example.test" });
+  assert.deepEqual(joinRequest, {
+    node_url: "https://nni.example.test",
+    asset_owner_pubkey: assetOwnerPubkey,
+  });
   assert.match(mounted.runtime().nniActionError ?? "", /尚未获远程 NNI 服务端允许/);
 
   await act(async () => {
     mounted.runtime().updateNniRemoteNodes("https://other-nni.example.test");
   });
   assert.equal(mounted.runtime().nniDeviceAuthorizationDenied, false);
+  await mounted.unmount();
+});
+
+test("NNI asset owner generation keeps the private key in transient UI state only", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const assetOwnerPubkey = "5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M";
+  const ownerPrivateKey = "5K3exampleTransientOwnerPrivateKey";
+  const requests: Array<{ path: string; body: unknown }> = [];
+  const apiFetch = async (path: string, init?: RequestInit) => {
+    requests.push({
+      path,
+      body: init?.body ? JSON.parse(String(init.body)) : null,
+    });
+    if (path === "/v1/nni/owner/generate") {
+      return apiResponse({
+        key_type: "K1",
+        encoding: "eos_base58_v1",
+        public_key: assetOwnerPubkey,
+        private_key: ownerPrivateKey,
+        private_key_persisted: false,
+      });
+    }
+    throw new Error(`unexpected request: ${path}`);
+  };
+  const mounted = await mountRuntime(apiFetch);
+
+  await act(async () => {
+    await mounted.runtime().generateNniOwnerKeyPair();
+  });
+
+  assert.equal(mounted.runtime().nniOwnerKeyPair?.private_key, ownerPrivateKey);
+  assert.deepEqual(requests, [{ path: "/v1/nni/owner/generate", body: null }]);
+  await act(async () => mounted.runtime().clearNniOwnerKeyPair());
+  assert.equal(mounted.runtime().nniOwnerKeyPair, null);
+  await mounted.unmount();
+});
+
+test("NNI recovery sends the owner private key once and persists only the public identity", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const assetOwnerPubkey = "5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M";
+  const ownerPrivateKey = "5K3exampleTransientRecoveryPrivateKey";
+  const requests: Array<{ path: string; body: Record<string, unknown> | null }> = [];
+  const apiFetch = async (path: string, init?: RequestInit) => {
+    const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : null;
+    requests.push({ path, body });
+    if (path === "/v1/nni/owner/recover") {
+      return apiResponse({
+        schema_version: 1,
+        status: "asset_device_rotated",
+        asset_owner_pubkey: assetOwnerPubkey,
+        device_pubkey: "ab".repeat(64),
+        authorization_epoch: 2,
+        authorization_status: "active",
+      });
+    }
+    if (path === "/v1/nni/config" && init?.method === "POST") {
+      return apiResponse({
+        ...joinedConfig(),
+        asset_owner_pubkey: assetOwnerPubkey,
+      });
+    }
+    throw new Error(`unexpected request: ${path}`);
+  };
+  const mounted = await mountRuntime(apiFetch);
+
+  await act(async () => {
+    mounted.runtime().updateNniRemoteNodes("https://nni.example.test");
+  });
+  await act(async () => {
+    await mounted.runtime().recoverNniOwner(ownerPrivateKey);
+  });
+
+  assert.equal(mounted.runtime().nniAssetOwnerPubkey, assetOwnerPubkey);
+  assert.equal(mounted.runtime().nniOwnerKeyPair, null);
+  assert.equal(requests[0].path, "/v1/nni/owner/recover");
+  assert.equal(requests[0].body?.owner_private_key, ownerPrivateKey);
+  assert.equal(requests[1].path, "/v1/nni/config");
+  assert.equal(Object.hasOwn(requests[1].body ?? {}, "owner_private_key"), false);
+  assert.equal(Object.hasOwn(requests[1].body ?? {}, "private_key"), false);
   await mounted.unmount();
 });

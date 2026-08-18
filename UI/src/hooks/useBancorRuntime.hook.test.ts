@@ -156,6 +156,7 @@ test("BANCOR hook paginates older candles without reusing the latest-page ETag",
 test("BANCOR refreshes the active candlesticks without a stale ETag after a successful trade", async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const requestedPaths: string[] = [];
+  const tradeBodies: Array<Record<string, unknown>> = [];
   const candleHeaders: Headers[] = [];
   let candleRequestCount = 0;
   const apiFetch = (path: string, init?: RequestInit): Promise<Response> => {
@@ -178,6 +179,7 @@ test("BANCOR refreshes the active candlesticks without a stale ETag after a succ
       }));
     }
     if (path === "/v1/nni/bancor/trade") {
+      tradeBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
       return Promise.resolve(apiResponse({ trade: { trade_id: "trade-1" } }));
     }
     if (path === "/v1/nni/bancor/market") {
@@ -228,7 +230,10 @@ test("BANCOR refreshes the active candlesticks without a stale ETag after a succ
     await runtime!.preview("sell", "100.00000000", 50);
   });
   await act(async () => {
-    assert.ok(await runtime!.trade());
+    assert.ok(await runtime!.trade({
+      authorizationMode: "asset_owner",
+      ownerPrivateKey: "transient-owner-private-key",
+    }));
   });
 
   assert.equal(candleRequestCount, 2);
@@ -237,6 +242,14 @@ test("BANCOR refreshes the active candlesticks without a stale ETag after a succ
   assert.ok(requestedPaths.includes("/v1/nni/bancor/market"));
   assert.ok(requestedPaths.includes("/v1/nni/bancor/account?page=1&per_page=10"));
   assert.ok(requestedPaths.includes("/v1/nni/bancor/trades"));
+  assert.deepEqual(tradeBodies, [{
+    side: "sell",
+    input_amount: "100.00000000",
+    min_output: "0.00010000",
+    slippage_bps: 50,
+    authorization_mode: "asset_owner",
+    owner_private_key: "transient-owner-private-key",
+  }]);
   assert.equal(runtime!.candles?.candles[0]?.close, "0.000110000000");
   assert.equal(runtime!.message, "交易已完成，余额和市场储备已经更新。");
 

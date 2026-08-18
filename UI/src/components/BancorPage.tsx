@@ -25,6 +25,7 @@ import type {
 import {
   BANCOR_DEFAULT_SLIPPAGE_BPS,
   BANCOR_TRADE_PAGE_SIZE,
+  type BancorTradeAuthorization,
   type BancorAmountAdjustment,
   adjustBancorInputAmount,
   calculateBancorEstimatedOutput,
@@ -300,12 +301,14 @@ export function BancorPage({
   runtime,
   formatUnixDateTime,
   signingDeviceReady,
+  assetOwnerReady,
   onOpenNni,
 }: {
   t: Translate;
   runtime: BancorRuntime;
   formatUnixDateTime: (value?: number | null) => string;
   signingDeviceReady: boolean;
+  assetOwnerReady: boolean;
   onOpenNni: () => void;
 }) {
   const tradePanelRef = useRef<HTMLDivElement>(null);
@@ -345,9 +348,16 @@ export function BancorPage({
   const inputAsset = side === "buy" ? "USD" : "POINT";
   const outputAsset = side === "buy" ? "POINT" : "USD";
   const marketOpen = market?.status === "open";
-  const tradingReady = marketOpen && signingDeviceReady;
+  const tradingReady = marketOpen && (signingDeviceReady || assetOwnerReady);
+  const allowTradeWithoutLoadedAccount = !signingDeviceReady && assetOwnerReady;
   const inputErrorCode = inputAmount.trim()
-    ? validateBancorTradeInput({ side, inputAmount, market, account })
+    ? validateBancorTradeInput({
+      side,
+      inputAmount,
+      market,
+      account,
+      requireAccount: !allowTradeWithoutLoadedAccount,
+    })
     : null;
   const inputError = inputErrorCode
     ? formatBancorApiError(inputErrorCode, t, t("金额无法交易。", "This amount cannot be traded."))
@@ -385,8 +395,8 @@ export function BancorPage({
     setSlippagePercent(value);
     clearQuote();
   };
-  const confirmTrade = async () => {
-    const result = await trade();
+  const confirmTrade = async (authorization: BancorTradeAuthorization) => {
+    const result = await trade(authorization);
     if (result) setInputAmount("");
   };
   const openTradePanel = () => {
@@ -417,8 +427,8 @@ export function BancorPage({
             </div>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-white/60">
               {t(
-                "强制流动性算法，每笔成交都会由本机设备单独签名，浏览器不会接触私钥。",
-                "A forced-liquidity algorithm. Every trade is signed separately by this device; the browser never handles the private key.",
+                "强制流动性算法。每笔成交可由当前硬件代理签名，也可临时输入 A 资产私钥自行签名。",
+                "A forced-liquidity algorithm. Each trade can use the current hardware delegate or a one-time A asset-key signature.",
               )}
             </p>
           </div>
@@ -500,8 +510,10 @@ export function BancorPage({
           quote={quote}
           tradeLoading={tradeLoading}
           tradeError={error}
+          signingDeviceReady={signingDeviceReady}
+          assetOwnerReady={assetOwnerReady}
           onClose={clearQuote}
-          onConfirm={() => void confirmTrade()}
+          onConfirm={(authorization) => void confirmTrade(authorization)}
         />
       ) : null}
 
@@ -754,7 +766,12 @@ export function BancorPage({
             type="button"
             className="theme-primary-btn mt-3 w-full justify-center"
             disabled={!tradingReady || !inputAmount.trim() || Boolean(inputErrorCode) || slippageBps === null || quoteLoading || tradeLoading}
-            onClick={() => slippageBps !== null && void preview(side, inputAmount, slippageBps)}
+            onClick={() => slippageBps !== null && void preview(
+              side,
+              inputAmount,
+              slippageBps,
+              allowTradeWithoutLoadedAccount,
+            )}
           >
             {quoteLoading
               ? t("正在计算...", "Calculating...")
@@ -869,7 +886,7 @@ export function BancorPage({
                       {record.side === "buy" ? t("买入 POINT", "Buy POINT") : t("卖出 POINT", "Sell POINT")}
                     </span>
                     <NniPublicKeyDisplay
-                      value={record.device_pubkey_compact}
+                      value={record.asset_owner_pubkey}
                       t={t}
                       shorten={{ head: 16, tail: 12 }}
                       allowFormatSwitch={false}
@@ -1668,6 +1685,8 @@ export function BancorQuoteDialog({
   quote,
   tradeLoading,
   tradeError,
+  signingDeviceReady,
+  assetOwnerReady,
   onClose,
   onConfirm,
 }: {
@@ -1675,18 +1694,42 @@ export function BancorQuoteDialog({
   quote: NniBancorQuoteResponse;
   tradeLoading: boolean;
   tradeError: string | null;
+  signingDeviceReady: boolean;
+  assetOwnerReady: boolean;
   onClose: () => void;
-  onConfirm: () => void;
+  onConfirm: (authorization: BancorTradeAuthorization) => void;
 }) {
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
   const priceImpactWarning = quote.price_impact_bps > quote.slippage_bps;
+  const [authorizationMode, setAuthorizationMode] = useState<"delegated_hardware" | "asset_owner">(
+    signingDeviceReady ? "delegated_hardware" : "asset_owner",
+  );
+  const [ownerPrivateKey, setOwnerPrivateKey] = useState("");
+  const canConfirm = authorizationMode === "delegated_hardware"
+    ? signingDeviceReady
+    : assetOwnerReady && ownerPrivateKey.trim().length > 0;
+  const close = () => {
+    setOwnerPrivateKey("");
+    onClose();
+  };
+  const confirm = () => {
+    if (!canConfirm) return;
+    const authorization: BancorTradeAuthorization = authorizationMode === "asset_owner"
+      ? { authorizationMode, ownerPrivateKey }
+      : { authorizationMode };
+    setOwnerPrivateKey("");
+    onConfirm(authorization);
+  };
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => confirmButtonRef.current?.focus());
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape" && !tradeLoading) onClose();
+      if (event.key === "Escape" && !tradeLoading) {
+        setOwnerPrivateKey("");
+        onClose();
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => {
@@ -1700,7 +1743,7 @@ export function BancorQuoteDialog({
     <div
       className="fixed inset-0 z-[120] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm"
       onMouseDown={(event) => {
-        if (!tradeLoading && event.target === event.currentTarget) onClose();
+        if (!tradeLoading && event.target === event.currentTarget) close();
       }}
     >
       <section
@@ -1717,14 +1760,14 @@ export function BancorQuoteDialog({
               {t("查看报价并确认交易", "Review quote and confirm trade")}
             </h2>
             <p id="bancor-quote-dialog-description" className="mt-1 text-sm leading-6 text-white/55">
-              {t("请核对支付、到账和手续费，再使用本机设备签名。", "Check the payment, output, and fee before signing with this device.")}
+              {t("请核对支付、到账和手续费，再选择本机硬件或 A 资产密钥签名。", "Check payment, output, and fees, then choose the hardware delegate or A asset key.")}
             </p>
           </div>
           <button
             type="button"
             className="theme-icon-btn h-8 w-8 shrink-0"
             disabled={tradeLoading}
-            onClick={onClose}
+            onClick={close}
             title={t("关闭报价", "Close quote")}
           >
             <X className="h-4 w-4" />
@@ -1738,6 +1781,61 @@ export function BancorQuoteDialog({
           <QuoteLine label={t("手续费", "Fee")} value={`${quote.fee_amount} ${quote.fee_asset}`} shrinkFraction={false} />
           <QuoteLine label={t("价格影响", "Price impact")} value={`${(quote.price_impact_bps / 100).toFixed(2)}%`} shrinkFraction={false} />
           <QuoteLine label={t("滑点保护", "Slippage protection")} value={`${(quote.slippage_bps / 100).toFixed(2)}%`} shrinkFraction={false} />
+        </div>
+
+        <div className="mx-5 mb-4 grid gap-3 rounded-xl border border-white/10 bg-black/10 p-4 text-sm">
+          <p className="font-medium text-white/85">{t("选择签名方式", "Choose signing method")}</p>
+          <label className={`flex items-start gap-3 rounded-lg border p-3 ${signingDeviceReady ? "cursor-pointer border-white/10" : "border-white/5 opacity-50"}`}>
+            <input
+              type="radio"
+              name="bancor-authorization-mode"
+              value="delegated_hardware"
+              checked={authorizationMode === "delegated_hardware"}
+              disabled={!signingDeviceReady || tradeLoading}
+              onChange={() => setAuthorizationMode("delegated_hardware")}
+            />
+            <span>
+              <span className="block font-medium text-white">{t("当前硬件代理签名", "Current hardware delegate")}</span>
+              <span className="mt-1 block text-xs leading-5 text-white/50">
+                {signingDeviceReady
+                  ? t("使用当前绑定的 H 芯片，不需要输入 A 私钥。", "Uses the currently authorized H chip; the A private key is not needed.")
+                  : t("当前未检测到可用签名芯片。", "No available signing chip is currently detected.")}
+              </span>
+            </span>
+          </label>
+          <label className={`flex items-start gap-3 rounded-lg border p-3 ${assetOwnerReady ? "cursor-pointer border-white/10" : "border-white/5 opacity-50"}`}>
+            <input
+              type="radio"
+              name="bancor-authorization-mode"
+              value="asset_owner"
+              checked={authorizationMode === "asset_owner"}
+              disabled={!assetOwnerReady || tradeLoading}
+              onChange={() => setAuthorizationMode("asset_owner")}
+            />
+            <span className="min-w-0 flex-1">
+              <span className="block font-medium text-white">{t("A 资产密钥自行签名", "Sign with the A asset key")}</span>
+              <span className="mt-1 block text-xs leading-5 text-white/50">
+                {assetOwnerReady
+                  ? t("私钥只用于这一次签名，提交后立即从本机请求内存中清除。", "The private key is used for this signature only and cleared from local request memory immediately afterward.")
+                  : t("请先在 NNI 页面完成 A 与 H 的绑定。", "Bind A to H on the NNI page first.")}
+              </span>
+            </span>
+          </label>
+          {authorizationMode === "asset_owner" ? (
+            <label className="grid gap-1.5">
+              <span className="text-xs text-white/60">{t("A 私钥（仅本次）", "A private key (this time only)")}</span>
+              <input
+                type="password"
+                value={ownerPrivateKey}
+                disabled={tradeLoading}
+                autoComplete="off"
+                spellCheck={false}
+                className="theme-input w-full font-mono"
+                placeholder={t("粘贴手抄保存的 A 私钥", "Paste the saved A private key")}
+                onChange={(event) => setOwnerPrivateKey(event.target.value)}
+              />
+            </label>
+          ) : null}
         </div>
 
         {priceImpactWarning ? (
@@ -1756,15 +1854,15 @@ export function BancorQuoteDialog({
         ) : null}
 
         <footer className="flex flex-wrap justify-end gap-2 px-5 py-4">
-          <button type="button" className="theme-secondary-btn px-4 py-2 text-sm" disabled={tradeLoading} onClick={onClose}>
+          <button type="button" className="theme-secondary-btn px-4 py-2 text-sm" disabled={tradeLoading} onClick={close}>
             {t("返回修改", "Back to edit")}
           </button>
           <button
             ref={confirmButtonRef}
             type="button"
             className="bancor-sign-trade-btn"
-            disabled={tradeLoading}
-            onClick={onConfirm}
+            disabled={tradeLoading || !canConfirm}
+            onClick={confirm}
           >
             <ShieldCheck className="h-4 w-4" />
             {tradeLoading

@@ -1,7 +1,4 @@
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use sha2::{Digest, Sha256};
-
-const BASE58_ALPHABET: &[u8; 58] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
 const NNI_BANCOR_CANDLE_INTERVALS: [u64; 8] =
     [60, 300, 900, 3_600, 14_400, 86_400, 604_800, 31_536_000];
@@ -222,73 +219,6 @@ fn validate_bancor_candles_response(
     Ok(())
 }
 
-fn encode_base58(bytes: &[u8]) -> String {
-    let mut digits = Vec::<u8>::new();
-    for &byte in bytes {
-        let mut carry = u32::from(byte);
-        for digit in &mut digits {
-            let value = u32::from(*digit) * 256 + carry;
-            *digit = (value % 58) as u8;
-            carry = value / 58;
-        }
-        while carry > 0 {
-            digits.push((carry % 58) as u8);
-            carry /= 58;
-        }
-    }
-
-    let leading_zeroes = bytes.iter().take_while(|&&byte| byte == 0).count();
-    let mut encoded = String::with_capacity(leading_zeroes + digits.len());
-    encoded.extend(std::iter::repeat('1').take(leading_zeroes));
-    encoded.extend(
-        digits
-            .iter()
-            .rev()
-            .map(|&digit| BASE58_ALPHABET[digit as usize] as char),
-    );
-    encoded
-}
-
-fn decode_base58(value: &str) -> Option<Vec<u8>> {
-    let mut bytes = Vec::<u8>::new();
-    for character in value.bytes() {
-        let digit = BASE58_ALPHABET
-            .iter()
-            .position(|&candidate| candidate == character)? as u32;
-        let mut carry = digit;
-        for byte in &mut bytes {
-            let decoded = u32::from(*byte) * 58 + carry;
-            *byte = (decoded & 0xff) as u8;
-            carry = decoded >> 8;
-        }
-        while carry > 0 {
-            bytes.push((carry & 0xff) as u8);
-            carry >>= 8;
-        }
-    }
-
-    let leading_zeroes = value.bytes().take_while(|&byte| byte == b'1').count();
-    let mut decoded = vec![0; leading_zeroes];
-    decoded.extend(bytes.into_iter().rev());
-    Some(decoded)
-}
-
-fn compact_bancor_device_pubkey(value: &str) -> Option<String> {
-    let normalized = value.trim();
-    if normalized.len() == 128 && normalized.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        let raw = hex::decode(normalized).ok()?;
-        let mut compressed = Vec::with_capacity(33);
-        compressed.push(if raw[63] & 1 == 0 { 0x02 } else { 0x03 });
-        compressed.extend_from_slice(&raw[..32]);
-        return Some(encode_base58(&compressed));
-    }
-
-    let compressed =
-        decode_base58(normalized).or_else(|| URL_SAFE_NO_PAD.decode(normalized).ok())?;
-    (compressed.len() == 33 && matches!(compressed[0], 0x02 | 0x03))
-        .then(|| encode_base58(&compressed))
-}
-
 fn normalize_bancor_market_trades(data: &mut Value) {
     let Some(object) = data.as_object_mut() else {
         return;
@@ -304,44 +234,28 @@ fn normalize_bancor_market_trades(data: &mut Value) {
     let Some(trades) = object.get_mut("trades").and_then(Value::as_array_mut) else {
         return;
     };
-    trades.truncate(NNI_BANCOR_MARKET_TRADE_LIMIT);
-    for trade in trades {
+    trades.retain_mut(|trade| {
         let Some(record) = trade.as_object_mut() else {
-            continue;
+            return false;
         };
-        let public_key = record
-            .remove("device_pubkey")
-            .or_else(|| record.remove("device_public_key"))
-            .or_else(|| record.remove("public_key"))
-            .and_then(|value| value.as_str().map(str::to_string));
-        let provided_compact = record.remove("device_pubkey_compact");
-        let provided_masked = record.remove("device_pubkey_masked");
-        let compact = public_key
-            .as_deref()
-            .and_then(compact_bancor_device_pubkey)
-            .or_else(|| {
-                provided_compact
-                    .as_ref()
-                    .and_then(Value::as_str)
-                    .and_then(compact_bancor_device_pubkey)
-            })
-            .or_else(|| {
-                provided_masked
-                    .as_ref()
-                    .and_then(Value::as_str)
-                    .and_then(compact_bancor_device_pubkey)
-            })
-            .or_else(|| {
-                provided_masked
-                    .as_ref()
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(str::to_string)
-            })
-            .unwrap_or_else(|| "••••••••".to_string());
-        record.insert("device_pubkey_compact".to_string(), Value::String(compact));
-    }
+        record.remove("device_pubkey");
+        record.remove("device_public_key");
+        record.remove("public_key");
+        record.remove("device_pubkey_compact");
+        record.remove("device_pubkey_masked");
+        record.remove("asset_owner_pubkey_masked");
+        let owner = record
+            .remove("asset_owner_pubkey")
+            .and_then(|value| value.as_str().map(str::to_string))
+            .and_then(|value| normalize_nni_owner_public_key(&value).ok());
+        if let Some(owner) = owner {
+            record.insert("asset_owner_pubkey".to_string(), Value::String(owner));
+            true
+        } else {
+            false
+        }
+    });
+    trades.truncate(NNI_BANCOR_MARKET_TRADE_LIMIT);
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -352,13 +266,17 @@ struct NniBancorQuoteRequest {
     slippage_bps: Option<u16>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Deserialize)]
 struct NniBancorTradeRequest {
     side: String,
     input_amount: String,
     #[serde(default)]
     slippage_bps: Option<u16>,
     min_output: String,
+    #[serde(default)]
+    authorization_mode: Option<String>,
+    #[serde(default)]
+    owner_private_key: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -377,7 +295,10 @@ struct NniBancorAccountVerifyRequest {
 
 #[derive(Debug, Serialize)]
 struct NniBancorTradeRemoteRequest {
-    device_pubkey: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    device_pubkey: Option<String>,
+    asset_owner_pubkey: String,
+    authorization_mode: String,
     client_user_key: String,
     side: String,
     input_amount: String,
@@ -964,6 +885,7 @@ async fn nni_bancor_trade(
     headers: HeaderMap,
     Json(mut request): Json<NniBancorTradeRequest>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
+    let mut owner_private_key = request.owner_private_key.take().map(Zeroizing::new);
     let identity = match require_ui_identity(&state, &headers) {
         Ok(identity) => identity,
         Err((status, Json(resp))) => {
@@ -1021,6 +943,18 @@ async fn nni_bancor_trade(
             )
         }
     };
+    let authorization_mode = match normalize_bancor_authorization_mode(
+        request.authorization_mode.as_deref(),
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            return nni_join_error(
+                StatusCode::BAD_REQUEST,
+                error,
+                json!({"status": "trade_invalid"}),
+            )
+        }
+    };
     let config = match read_nni_config(&state) {
         Ok(config) => config,
         Err(err) => {
@@ -1031,14 +965,78 @@ async fn nni_bancor_trade(
             )
         }
     };
-    let device_pubkey = match nni_device_pubkey(&state).await {
-        Ok(pubkey) => pubkey,
-        Err((status, error, data)) => return nni_join_error(status, error, data),
+    let configured_owner = match config.asset_owner_pubkey.as_deref() {
+        Some(value) => match normalize_nni_owner_public_key(value) {
+            Ok(value) => Some(value),
+            Err(error) => {
+                return nni_join_error(
+                    StatusCode::CONFLICT,
+                    error,
+                    json!({"status": "asset_owner_invalid"}),
+                )
+            }
+        },
+        None => None,
+    };
+    let (device_pubkey, asset_owner_pubkey) = if authorization_mode == "asset_owner" {
+        let Some(private_key) = owner_private_key.as_deref() else {
+            return nni_join_error(
+                StatusCode::BAD_REQUEST,
+                "nni_owner_private_key_required",
+                json!({"status": "trade_invalid"}),
+            );
+        };
+        let owner_pubkey = match nni_owner_public_key_from_private(private_key) {
+            Ok(value) => value,
+            Err(error) => {
+                return nni_join_error(
+                    StatusCode::BAD_REQUEST,
+                    error,
+                    json!({"status": "trade_invalid"}),
+                )
+            }
+        };
+        if configured_owner
+            .as_ref()
+            .is_some_and(|configured| configured != &owner_pubkey)
+        {
+            return nni_join_error(
+                StatusCode::CONFLICT,
+                "nni_owner_private_key_mismatch",
+                json!({"status": "trade_invalid"}),
+            );
+        }
+        (None, owner_pubkey)
+    } else {
+        if owner_private_key.is_some() {
+            return nni_join_error(
+                StatusCode::BAD_REQUEST,
+                "nni_owner_private_key_unexpected",
+                json!({"status": "trade_invalid"}),
+            );
+        }
+        let owner_pubkey = match configured_owner {
+            Some(value) => value,
+            None => {
+                return nni_join_error(
+                    StatusCode::CONFLICT,
+                    "nni_asset_owner_required",
+                    json!({"status": "asset_owner_required"}),
+                )
+            }
+        };
+        let device_pubkey = match nni_device_pubkey(&state).await {
+            Ok(pubkey) => pubkey,
+            Err((status, error, data)) => return nni_join_error(status, error, data),
+        };
+        (Some(device_pubkey), owner_pubkey)
     };
     let mut attempts = Vec::new();
     for node_url in nni_selected_remote_nodes(&config) {
         let remote_request = NniBancorTradeRemoteRequest {
             device_pubkey: device_pubkey.clone(),
+            asset_owner_pubkey: asset_owner_pubkey.clone(),
+            authorization_mode: authorization_mode.to_string(),
             client_user_key: identity.user_key.clone(),
             side: request.side.clone(),
             input_amount: request.input_amount.clone(),
@@ -1048,11 +1046,14 @@ async fn nni_bancor_trade(
         match execute_nni_bancor_trade_for_node(
             &state,
             node_url,
-            &device_pubkey,
+            device_pubkey.as_deref(),
+            &asset_owner_pubkey,
+            authorization_mode,
             &request.side,
             &expected_input_units,
             &expected_min_output_units,
             &remote_request,
+            owner_private_key.as_deref_mut(),
         )
         .await
         {
@@ -1088,11 +1089,14 @@ async fn nni_bancor_trade(
 async fn execute_nni_bancor_trade_for_node(
     state: &AppState,
     node_url: &str,
-    device_pubkey: &str,
+    device_pubkey: Option<&str>,
+    asset_owner_pubkey: &str,
+    authorization_mode: &str,
     side: &str,
     expected_input_units: &str,
     expected_min_output_units: &str,
     request: &NniBancorTradeRemoteRequest,
+    owner_private_key: Option<&mut String>,
 ) -> Result<Value, Value> {
     let response = state.core.http_client
         .post(nni_remote_api_endpoint(node_url, "bancor/trade/request"))
@@ -1115,32 +1119,59 @@ async fn execute_nni_bancor_trade_for_node(
     let validated = validate_bancor_signing_payload(
         &data,
         device_pubkey,
+        asset_owner_pubkey,
+        authorization_mode,
         side,
         expected_input_units,
         expected_min_output_units,
     )
     .map_err(|error| json!({"node_url": node_url, "error_code": error}))?;
-    let sign_output = run_nni_signature_helper(
-        state,
-        &[
-            "sign_challenge".to_string(),
-            validated.signing_payload.clone(),
-        ],
-    )
-    .await
-    .map_err(
-        |_| json!({"node_url": node_url, "error_code": "nni_bancor_trade_signature_helper_failed"}),
-    )?;
-    if !sign_output.ok {
-        return Err(
-            json!({"node_url": node_url, "error_code": "nni_bancor_trade_signature_failed"}),
-        );
-    }
-    let signature = value_string(
-        &sign_output.payload,
-        "signature",
-        "nni_bancor_trade_signature_missing",
-    )?;
+    let signature = if authorization_mode == "asset_owner" {
+        let private_key = owner_private_key.ok_or_else(|| {
+            json!({
+                "node_url": node_url,
+                "error_code": "nni_owner_private_key_required",
+                "terminal": true,
+            })
+        })?;
+        let (signing_pubkey, signature) = sign_nni_owner_payload(
+            private_key,
+            &validated.signing_payload,
+        )
+        .map_err(|error| {
+            json!({"node_url": node_url, "error_code": error, "terminal": true})
+        })?;
+        if signing_pubkey != asset_owner_pubkey {
+            return Err(json!({
+                "node_url": node_url,
+                "error_code": "nni_owner_private_key_mismatch",
+                "terminal": true,
+            }));
+        }
+        signature
+    } else {
+        let sign_output = run_nni_signature_helper(
+            state,
+            &[
+                "sign_challenge".to_string(),
+                validated.signing_payload.clone(),
+            ],
+        )
+        .await
+        .map_err(
+            |_| json!({"node_url": node_url, "error_code": "nni_bancor_trade_signature_helper_failed"}),
+        )?;
+        if !sign_output.ok {
+            return Err(
+                json!({"node_url": node_url, "error_code": "nni_bancor_trade_signature_failed"}),
+            );
+        }
+        value_string(
+            &sign_output.payload,
+            "signature",
+            "nni_bancor_trade_signature_missing",
+        )?
+    };
     let response = state
         .core
         .http_client
@@ -1205,7 +1236,9 @@ struct ValidatedBancorSigningPayload {
 
 fn validate_bancor_signing_payload(
     response: &Value,
-    expected_pubkey: &str,
+    expected_device_pubkey: Option<&str>,
+    expected_asset_owner_pubkey: &str,
+    expected_authorization_mode: &str,
     expected_side: &str,
     expected_input_units: &str,
     expected_min_output_units: &str,
@@ -1231,6 +1264,9 @@ fn validate_bancor_signing_payload(
         "quote_id",
         "task_id",
         "device_pubkey",
+        "asset_owner_pubkey",
+        "authorization_epoch",
+        "authorization_mode",
         "side",
         "input_units",
         "fee_units",
@@ -1244,10 +1280,27 @@ fn validate_bancor_signing_payload(
     if actual_keys != expected_keys {
         return Err("nni_bancor_signing_payload_fields_invalid");
     }
+    let payload_device_pubkey = payload
+        .get("device_pubkey")
+        .and_then(Value::as_str)
+        .ok_or("nni_bancor_signing_payload_binding_invalid")?;
+    if payload_device_pubkey.len() != 128
+        || !payload_device_pubkey
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
+        || expected_device_pubkey
+            .is_some_and(|expected| payload_device_pubkey != expected)
+    {
+        return Err("nni_bancor_signing_payload_binding_invalid");
+    }
     if payload.get("schema_version").and_then(Value::as_u64) != Some(1)
         || payload.get("action").and_then(Value::as_str) != Some("nni_bancor_trade")
         || payload.get("server_identity").and_then(Value::as_str) != Some("nni-server-v1")
-        || payload.get("device_pubkey").and_then(Value::as_str) != Some(expected_pubkey)
+        || payload.get("asset_owner_pubkey").and_then(Value::as_str)
+            != Some(expected_asset_owner_pubkey)
+        || payload.get("authorization_epoch").and_then(Value::as_u64).is_none_or(|value| value == 0)
+        || payload.get("authorization_mode").and_then(Value::as_str)
+            != Some(expected_authorization_mode)
         || payload.get("side").and_then(Value::as_str) != Some(expected_side)
         || payload.get("input_units").and_then(Value::as_str) != Some(expected_input_units)
         || payload.get("min_output_units").and_then(Value::as_str)
@@ -1260,6 +1313,10 @@ fn validate_bancor_signing_payload(
         "market_version",
         "quote_id",
         "task_id",
+        "device_pubkey",
+        "asset_owner_pubkey",
+        "authorization_epoch",
+        "authorization_mode",
         "input_units",
         "fee_bps",
         "fee_units",
@@ -1316,6 +1373,19 @@ fn normalize_bancor_side(value: &str) -> Result<&'static str, &'static str> {
         "buy" => Ok("buy"),
         "sell" => Ok("sell"),
         _ => Err("nni_bancor_side_invalid"),
+    }
+}
+
+fn normalize_bancor_authorization_mode(value: Option<&str>) -> Result<&'static str, &'static str> {
+    match value
+        .unwrap_or("delegated_hardware")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "delegated_hardware" => Ok("delegated_hardware"),
+        "asset_owner" => Ok("asset_owner"),
+        _ => Err("nni_bancor_authorization_mode_invalid"),
     }
 }
 
@@ -1634,6 +1704,7 @@ mod nni_bancor_unit_tests {
     #[test]
     fn device_signing_is_restricted_to_the_bound_bancor_contract() {
         let expires_at = current_unix_ts() + 120;
+        let asset_owner_pubkey = "5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M";
         let payload = json!({
             "schema_version": 1,
             "action": "nni_bancor_trade",
@@ -1643,6 +1714,9 @@ mod nni_bancor_unit_tests {
             "quote_id": "quote-1",
             "task_id": "task-1",
             "device_pubkey": "aa".repeat(64),
+            "asset_owner_pubkey": asset_owner_pubkey,
+            "authorization_epoch": 1,
+            "authorization_mode": "delegated_hardware",
             "side": "sell",
             "input_units": "10000",
             "fee_bps": 0,
@@ -1661,6 +1735,10 @@ mod nni_bancor_unit_tests {
             "market_version": 7,
             "quote_id": "quote-1",
             "task_id": "task-1",
+            "device_pubkey": "aa".repeat(64),
+            "asset_owner_pubkey": asset_owner_pubkey,
+            "authorization_epoch": 1,
+            "authorization_mode": "delegated_hardware",
             "input_units": "10000",
             "fee_bps": 0,
             "fee_units": "0",
@@ -1669,11 +1747,27 @@ mod nni_bancor_unit_tests {
             "expires_at_unix": expires_at,
         });
         assert!(
-            validate_bancor_signing_payload(&response, &"aa".repeat(64), "sell", "10000", "1",)
+            validate_bancor_signing_payload(
+                &response,
+                Some(&"aa".repeat(64)),
+                asset_owner_pubkey,
+                "delegated_hardware",
+                "sell",
+                "10000",
+                "1",
+            )
                 .is_ok()
         );
         assert_eq!(
-            validate_bancor_signing_payload(&response, &"aa".repeat(64), "sell", "20000", "1",)
+            validate_bancor_signing_payload(
+                &response,
+                Some(&"aa".repeat(64)),
+                asset_owner_pubkey,
+                "delegated_hardware",
+                "sell",
+                "20000",
+                "1",
+            )
                 .unwrap_err(),
             "nni_bancor_signing_payload_binding_invalid",
         );
@@ -1693,7 +1787,9 @@ mod nni_bancor_unit_tests {
         assert_eq!(
             validate_bancor_signing_payload(
                 &arbitrary_response,
-                &"aa".repeat(64),
+                Some(&"aa".repeat(64)),
+                asset_owner_pubkey,
+                "delegated_hardware",
                 "sell",
                 "10000",
                 "1",
