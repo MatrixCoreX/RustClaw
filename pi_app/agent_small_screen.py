@@ -608,8 +608,8 @@ def update_nni_joined_state(user_key, joined):
         return {}, str(exc)
 
 
-def request_nni_join_task(user_key="", node_urls=None):
-    payload = {"node_urls": list(node_urls or [])}
+def request_nni_join_task(user_key="", node_url=""):
+    payload = {"node_url": str(node_url or "").strip()}
     try:
         raw = localhost_api_request(
             "POST",
@@ -4176,7 +4176,11 @@ class SmallScreenApp:
 
             self._post_ui(switch_to_requesting)
 
-            task, task_error = request_nni_join_task(self._auth_key, nodes)
+            preferred_node = str(
+                (self._nni_runtime_config or {}).get("selected_node_url") or ""
+            ).strip()
+            node_url = preferred_node or str(nodes[0] or "").strip()
+            task, task_error = request_nni_join_task(self._auth_key, node_url)
             if join_epoch != self._llm_join_epoch:
                 return
             if not task or not task.get("challenge"):
@@ -4211,7 +4215,10 @@ class SmallScreenApp:
                 def finish_sign_failed():
                     if join_epoch != self._llm_join_epoch:
                         return
-                    self._finish_llm_remote_join_failed(sign_error or "nni_join_signature_missing")
+                    self._finish_llm_remote_join_failed(
+                        sign_error or "nni_join_signature_missing",
+                        signature_failed=True,
+                    )
 
                 self._post_ui(finish_sign_failed)
                 return
@@ -4274,14 +4281,19 @@ class SmallScreenApp:
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _finish_llm_remote_join_failed(self, error):
+    def _finish_llm_remote_join_failed(self, error, signature_failed=False):
         self._stop_llm_animation()
         self._llm_join_in_progress = False
         self._llm_pubkey_loading = False
         self._llm_signing = False
         self._llm_signature_hex = ""
-        self._llm_signature_error = str(error or "request failed").strip()
-        self._llm_join_status = self._t("llm_remote_join_failed")
+        error_text = str(error or "request failed").strip()[:200]
+        self._llm_signature_error = error_text if signature_failed else ""
+        self._llm_join_status = (
+            self._t("llm_remote_join_failed")
+            if signature_failed
+            else self._t("llm_remote_join_failed_detail").format(error=error_text)
+        )
         try:
             self._llm_join_btn.config(text=self._t("llm_join"))
         except tk.TclError:

@@ -199,6 +199,30 @@ class SmallScreenNniSummaryTests(unittest.TestCase):
         body = json.loads(request.call_args.kwargs["body"].decode("utf-8"))
         self.assertEqual(body, {"joined": False})
 
+    def test_join_request_sends_the_single_node_url_runtime_contract(self):
+        response = {
+            "ok": True,
+            "data": {
+                "task_id": "nni-join-test",
+                "challenge": "ab" * 32,
+                "node_url": "https://api.example.test",
+            },
+        }
+        with mock.patch.object(
+            screen,
+            "localhost_api_request",
+            return_value=json.dumps(response).encode("utf-8"),
+        ) as request:
+            task, error = screen.request_nni_join_task(
+                "key",
+                "https://api.example.test",
+            )
+
+        self.assertIsNone(error)
+        self.assertEqual(task["task_id"], "nni-join-test")
+        body = json.loads(request.call_args.kwargs["body"].decode("utf-8"))
+        self.assertEqual(body, {"node_url": "https://api.example.test"})
+
 
 if __name__ == "__main__":
     unittest.main()
