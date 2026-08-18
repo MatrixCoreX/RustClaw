@@ -4,6 +4,7 @@ import os
 import secrets
 import sqlite3
 import sys
+from contextlib import closing
 
 try:
     import tomllib
@@ -297,29 +298,30 @@ def ensure_small_screen_auth_key():
     db_path = _load_sqlite_path_from_config()
     try:
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
-        with sqlite3.connect(db_path) as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS auth_keys (
-                    user_key     TEXT PRIMARY KEY,
-                    role         TEXT NOT NULL CHECK (role IN ('admin', 'user')),
-                    enabled      INTEGER NOT NULL DEFAULT 1,
-                    created_at   TEXT NOT NULL,
-                    last_used_at TEXT
+        with closing(sqlite3.connect(db_path)) as conn:
+            with conn:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS auth_keys (
+                        user_key     TEXT PRIMARY KEY,
+                        role         TEXT NOT NULL CHECK (role IN ('admin', 'user')),
+                        enabled      INTEGER NOT NULL DEFAULT 1,
+                        created_at   TEXT NOT NULL,
+                        last_used_at TEXT
+                    )
+                    """
                 )
-                """
-            )
-            if not user_key:
-                user_key = _generate_user_key()
-                save_auth_key(user_key)
-            conn.execute(
-                """
-                INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
-                VALUES (?, 'user', 1, strftime('%s','now'), NULL)
-                ON CONFLICT(user_key) DO UPDATE SET enabled=1
-                """,
-                (user_key,),
-            )
+                if not user_key:
+                    user_key = _generate_user_key()
+                    save_auth_key(user_key)
+                conn.execute(
+                    """
+                    INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
+                    VALUES (?, 'user', 1, strftime('%s','now'), NULL)
+                    ON CONFLICT(user_key) DO UPDATE SET enabled=1
+                    """,
+                    (user_key,),
+                )
         return user_key
     except Exception as exc:
         logger.warning("Unable to register the small-screen fallback auth key: %s", exc)
@@ -329,7 +331,7 @@ def ensure_small_screen_auth_key():
 def load_enabled_admin_user_key():
     db_path = _load_sqlite_path_from_config()
     try:
-        with sqlite3.connect(db_path) as conn:
+        with closing(sqlite3.connect(db_path)) as conn:
             row = conn.execute(
                 """
                 SELECT user_key
