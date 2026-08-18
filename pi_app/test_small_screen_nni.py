@@ -112,7 +112,7 @@ class SmallScreenNniSummaryTests(unittest.TestCase):
         app = SimpleNamespace(
             _nni_runtime_config={"joined": True, "worker_running": True},
             _llm_join_btn=join_button,
-            _llm_test_btn=test_button,
+            _llm_chip_test_btn=test_button,
             _llm_join_in_progress=False,
             _llm_lobster_job=None,
             _t=lambda key: {"llm_join": "加入", "llm_stop": "停止"}[key],
