@@ -90,6 +90,13 @@ test("BANCOR zero-output errors explain how to recover", () => {
   }
 });
 
+test("BANCOR missing asset owner error directs beginners to the NNI page", () => {
+  const message = formatBancorApiError("nni_asset_owner_required", zh, "fallback");
+  assert.match(message, /NNI 页面/);
+  assert.match(message, /生成并绑定资产账号/);
+  assert.doesNotMatch(message, /nni_asset_owner_required/);
+});
+
 test("BANCOR accepts configurable slippage up to fifty percent", () => {
   assert.equal(BANCOR_DEFAULT_SLIPPAGE_BPS, 50);
   assert.equal(BANCOR_MAX_SLIPPAGE_BPS, 5_000);

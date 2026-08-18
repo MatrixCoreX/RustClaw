@@ -267,6 +267,8 @@ class ArticleContent:
     body: str
     author: str
     source: str
+    background_audio_url: str | None = None
+    background_audio_duration: float | None = None
 
 
 @dataclass(frozen=True)
@@ -1255,11 +1257,19 @@ def article_from_douyin_payload(
     *,
     source: str,
 ) -> ArticleContent | None:
-    return article_content(
+    article = article_content(
         payload,
         source=source,
         title_keys=("title",),
         body_keys=("desc", "description", "content", "caption"),
+    )
+    if article is None or not isinstance(payload.get("images"), list):
+        return article
+    audio_url, audio_duration = douyin_background_audio(payload)
+    return replace(
+        article,
+        background_audio_url=audio_url,
+        background_audio_duration=audio_duration,
     )
 
 
@@ -1436,7 +1446,15 @@ def richer_article(
         return candidate
     current_score = len(current.title) + len(current.body) + len(current.author)
     candidate_score = len(candidate.title) + len(candidate.body) + len(candidate.author)
-    return candidate if candidate_score > current_score else current
+    selected = candidate if candidate_score > current_score else current
+    audio_source = candidate if candidate.background_audio_url else current
+    if not audio_source.background_audio_url:
+        return selected
+    return replace(
+        selected,
+        background_audio_url=audio_source.background_audio_url,
+        background_audio_duration=audio_source.background_audio_duration,
+    )
 
 
 def douyin_flag_enabled(value: Any) -> bool:
@@ -1471,6 +1489,18 @@ def first_http_url_from_address(value: Any) -> str | None:
     return None
 
 
+def douyin_background_audio(payload: dict[str, Any]) -> tuple[str | None, float | None]:
+    music = payload.get("music")
+    if not isinstance(music, dict):
+        return None, None
+    audio_url = first_http_url_from_address(music.get("play_url") or music.get("playUrl"))
+    try:
+        duration = float(music.get("duration") or 0)
+    except (TypeError, ValueError):
+        duration = 0
+    return audio_url, duration if duration > 0 else None
+
+
 def douyin_live_photo_composition(payload: dict[str, Any]) -> tuple[str | None, float | None]:
     album_music = payload.get("image_album_music_info")
     duration: float | None = None
@@ -1484,18 +1514,9 @@ def douyin_live_photo_composition(payload: dict[str, Any]) -> tuple[str | None, 
         if end_time > begin_time:
             duration = (end_time - begin_time) / 1000.0
 
-    music = payload.get("music")
-    if duration is None and isinstance(music, dict):
-        try:
-            music_duration = float(music.get("duration") or 0)
-        except (TypeError, ValueError):
-            music_duration = 0
-        if music_duration > 0:
-            duration = music_duration
-
-    audio_url: str | None = None
-    if isinstance(music, dict):
-        audio_url = first_http_url_from_address(music.get("play_url"))
+    audio_url, music_duration = douyin_background_audio(payload)
+    if duration is None:
+        duration = music_duration
     top_video = payload.get("video")
     if audio_url is None and isinstance(top_video, dict):
         audio_url = first_http_url_from_address(top_video.get("play_addr"))
@@ -4321,13 +4342,15 @@ def download_candidate(
         raise DouyinDownloadError(f"Network error while downloading {candidate.url}: {exc.reason}") from exc
 
 
-def download_live_photo_audio(
+def download_audio_stream(
     url: str,
     output_path: Path,
     *,
     cookie: str | None,
     timeout: float,
     referer: str,
+    progress_key: str,
+    media_label: str,
 ) -> Path:
     headers = build_headers(
         cookie,
@@ -4337,7 +4360,7 @@ def download_live_photo_audio(
         },
     )
     request = urllib.request.Request(url, headers=headers)
-    print("live_photo_audio: downloading complete soundtrack", file=sys.stderr, flush=True)
+    print(f"{progress_key}: downloading {media_label}", file=sys.stderr, flush=True)
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             try:
@@ -4361,7 +4384,7 @@ def download_live_photo_audio(
                             if percent >= last_reported_percent + 10 or percent == 100:
                                 last_reported_percent = percent
                                 print(
-                                    f"live_photo_audio_progress: {percent}% "
+                                    f"{progress_key}_progress: {percent}% "
                                     f"({downloaded_bytes}/{total_bytes} bytes)",
                                     file=sys.stderr,
                                     flush=True,
@@ -4371,12 +4394,66 @@ def download_live_photo_audio(
                 temporary_path.unlink(missing_ok=True)
                 raise
     except urllib.error.HTTPError as exc:
-        raise DouyinDownloadError(f"HTTP {exc.code} while downloading live-photo audio") from exc
+        raise DouyinDownloadError(
+            f"HTTP {exc.code} while downloading {media_label}"
+        ) from exc
     except urllib.error.URLError as exc:
         raise DouyinDownloadError(
-            f"Network error while downloading live-photo audio: {exc.reason}"
+            f"Network error while downloading {media_label}: {exc.reason}"
         ) from exc
     return output_path
+
+
+def download_live_photo_audio(
+    url: str,
+    output_path: Path,
+    *,
+    cookie: str | None,
+    timeout: float,
+    referer: str,
+) -> Path:
+    return download_audio_stream(
+        url,
+        output_path,
+        cookie=cookie,
+        timeout=timeout,
+        referer=referer,
+        progress_key="live_photo_audio",
+        media_label="live-photo audio",
+    )
+
+
+def background_audio_suffix(url: str) -> str:
+    suffix = Path(urllib.parse.urlsplit(url).path).suffix.lower()
+    supported = {".aac", ".flac", ".m4a", ".mp3", ".ogg", ".opus", ".wav", ".webm"}
+    return suffix if suffix in supported else ".mp3"
+
+
+def download_image_post_audio(
+    url: str,
+    output_dir: Path,
+    *,
+    output_name: str,
+    overwrite: bool,
+    cookie: str | None,
+    timeout: float,
+    referer: str,
+) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / (
+        f"{Path(output_name).stem}_background_audio{background_audio_suffix(url)}"
+    )
+    if output_path.exists() and not overwrite:
+        output_path = unique_output_path(output_path)
+    return download_audio_stream(
+        url,
+        output_path,
+        cookie=cookie,
+        timeout=timeout,
+        referer=referer,
+        progress_key="image_post_audio",
+        media_label="image-post background audio",
+    )
 
 
 def download_separate_audio_stream(
@@ -7912,6 +7989,18 @@ def handle_resolved_media(
                     item_id=item_id,
                     share_text=share_text,
                     overwrite=args.overwrite,
+                )
+            )
+        if article is not None and article.background_audio_url:
+            saved_paths.append(
+                download_image_post_audio(
+                    article.background_audio_url,
+                    output_dir,
+                    output_name=image_output_name,
+                    overwrite=args.overwrite,
+                    cookie=cookie,
+                    timeout=args.timeout,
+                    referer=platform_referer(platform),
                 )
             )
         if args.save_meta:

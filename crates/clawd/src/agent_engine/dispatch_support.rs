@@ -103,6 +103,21 @@ fn transcript_review_overridden_action_kind(action: &AgentAction) -> &'static st
     }
 }
 
+fn preserve_transcript_review_as_intermediate_evidence(
+    loop_state: &mut LoopState,
+    ended_with_user_visible_output: &mut bool,
+    previous_ended_with_user_visible_output: bool,
+    previous_publishable_synthesis_output: Option<String>,
+) {
+    *ended_with_user_visible_output = previous_ended_with_user_visible_output;
+    loop_state.last_publishable_synthesis_output = previous_publishable_synthesis_output;
+    loop_state.task_observations.push(json!({
+        "schema_version": 1,
+        "owner_layer": "transcript_revision",
+        "status_code": "review_completed_continue_planning",
+    }));
+}
+
 fn unresolved_capability_error(state: &AppState, capability: &str, args: &Value) -> String {
     let (_resolved, record) =
         crate::capability_resolver::resolve_capability_action_with_record_for_state(
@@ -1165,7 +1180,10 @@ pub(super) async fn dispatch_round_action(
                 task.task_id, loop_state.round_no, step_in_round
             );
         }
-        return handle_synthesize_answer_action(
+        let previous_ended_with_user_visible_output = *ended_with_user_visible_output;
+        let previous_publishable_synthesis_output =
+            loop_state.last_publishable_synthesis_output.clone();
+        let decision = handle_synthesize_answer_action(
             state,
             task,
             user_text,
@@ -1178,7 +1196,25 @@ pub(super) async fn dispatch_round_action(
             agent_run_context,
             &evidence_refs,
         )
-        .await;
+        .await?;
+        if !super::capability_result_synthesis::pending_transcript_review(
+            &loop_state.capability_results,
+        ) {
+            preserve_transcript_review_as_intermediate_evidence(
+                loop_state,
+                ended_with_user_visible_output,
+                previous_ended_with_user_visible_output,
+                previous_publishable_synthesis_output,
+            );
+            info!(
+                "transcript_review_completed_continue_planning task_id={} round={} step={}",
+                task.task_id, loop_state.round_no, step_in_round
+            );
+            return Ok(ActionLoopDecision::StopRound(
+                "recoverable_failure_continue_round".to_string(),
+            ));
+        }
+        return Ok(decision);
     }
     let requested_capability = match action {
         AgentAction::CallCapability { capability, .. } => Some(capability.as_str()),

@@ -650,7 +650,11 @@ def _artifact(path: Path) -> dict[str, Any]:
     elif path.suffix.lower() == ".txt" and path.stem.endswith("_transcript"):
         artifact["artifact_role"] = "transcript_text"
     elif artifact["mime_type"].startswith("audio/"):
-        artifact["artifact_role"] = "extracted_audio"
+        artifact["artifact_role"] = (
+            "background_audio"
+            if re.search(r"_background_audio(?:\.\d+)?$", path.stem)
+            else "extracted_audio"
+        )
     elif path.suffix.lower() == ".zip":
         artifact["artifact_role"] = "archive"
     elif path.suffix.lower() == ".json":
@@ -794,16 +798,19 @@ def _content_bundle(
     artifacts: list[dict[str, Any]],
     inline_article: dict[str, Any] | None = None,
     image_delivery: dict[str, Any] | None = None,
+    processing_inputs: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     counts = {
         "image_count": 0,
         "video_count": 0,
+        "audio_count": 0,
         "article_count": 0,
         "other_file_count": 0,
     }
     roles = {
         "original_image": "image_count",
         "original_video": "video_count",
+        "background_audio": "audio_count",
         "article_text": "article_count",
     }
     for artifact in artifacts:
@@ -818,7 +825,11 @@ def _content_bundle(
     inline_article_count = 1 if inline_article is not None else 0
     if counts["article_count"] == 0:
         counts["article_count"] += inline_article_count
-    if counts["image_count"] and counts["article_count"]:
+    if counts["image_count"] and counts["audio_count"] and counts["article_count"]:
+        kind = "image_audio_article"
+    elif counts["image_count"] and counts["audio_count"]:
+        kind = "image_audio"
+    elif counts["image_count"] and counts["article_count"]:
         kind = "image_article"
     elif counts["image_count"]:
         kind = "images"
@@ -826,12 +837,15 @@ def _content_bundle(
         kind = "video"
     else:
         kind = "files"
+    audio_count = counts.pop("audio_count")
     bundle = {
         "schema_version": 1,
         "kind": kind,
         **counts,
         "inline_article_count": inline_article_count,
     }
+    if audio_count:
+        bundle["audio_count"] = audio_count
     if image_delivery is not None:
         bundle["image_delivery"] = image_delivery
     if kind == "video":
@@ -854,7 +868,79 @@ def _content_bundle(
             ),
             "never_use_image_ocr": True,
         }
+    elif kind in {"image_audio", "image_audio_article"}:
+        images = (processing_inputs or {}).get("images")
+        background_audio = (processing_inputs or {}).get("background_audio")
+        if isinstance(images, list) and isinstance(background_audio, dict):
+            bundle["followup_policy"] = {
+                "text_conversion_action": "extract_image_and_audio_text",
+                "completion_requirement": "all_components",
+                "steps": [
+                    {
+                        "component_kind": "images",
+                        "capability": "image_vision.extract_text",
+                        "input_field": "images",
+                        "input_value": [
+                            {"path": item["path"]}
+                            for item in images
+                            if isinstance(item, dict) and item.get("path")
+                        ],
+                    },
+                    {
+                        "component_kind": "background_audio",
+                        "capability": "audio.preview_transcribe",
+                        "input_field": "audio_path",
+                        "input_value": background_audio.get("path"),
+                        "fallback_capability": "media_download.transcribe",
+                        "fallback_input_field": "input_path",
+                        "fallback_input_value": background_audio.get("path"),
+                    },
+                ],
+                "synthesis_sources": [
+                    *(["platform_article"] if kind == "image_audio_article" else []),
+                    "image_text",
+                    "audio_transcript",
+                ],
+            }
     return bundle
+
+
+def _composite_processing_inputs(
+    artifacts: list[dict[str, Any]],
+    existing: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    background_audio = next(
+        (item for item in artifacts if item.get("artifact_role") == "background_audio"),
+        None,
+    )
+    if background_audio is None:
+        return existing
+    inputs = dict(existing or {})
+    if "images" not in inputs:
+        images = [item for item in artifacts if item.get("artifact_role") == "original_image"]
+        inputs.update(
+            {
+                "images": [
+                    {
+                        "path": item["path"],
+                        "filename": item["filename"],
+                        "mime_type": item["mime_type"],
+                        "size_bytes": item["size_bytes"],
+                    }
+                    for item in images
+                ],
+                "image_count": len(images),
+                "ordered": True,
+            }
+        )
+    inputs["background_audio"] = {
+        "path": background_audio["path"],
+        "filename": background_audio["filename"],
+        "mime_type": background_audio["mime_type"],
+        "size_bytes": background_audio["size_bytes"],
+    }
+    inputs["audio_count"] = 1
+    return inputs
 
 
 def _read_text_artifact(
@@ -1860,6 +1946,8 @@ def respond(
         inline_article = _article_text_delivery(artifacts)
     elif action == "ocr" and deliver_to_user:
         inline_recognition = _ocr_text_delivery(artifacts)
+    if action == "download":
+        processing_inputs = _composite_processing_inputs(artifacts, processing_inputs)
     count = len(urls) if action == "resolve" else len(artifacts)
     noun = "URL" if action == "resolve" else "file"
     text = f"{action} completed with {count} {noun}{'' if count == 1 else 's'}."
@@ -1912,6 +2000,7 @@ def respond(
             artifacts,
             inline_article,
             image_delivery,
+            processing_inputs,
         )
         if processing_inputs is not None:
             extra["processing_inputs"] = processing_inputs

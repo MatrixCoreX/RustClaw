@@ -1938,6 +1938,7 @@ export default function App() {
               formatUnixDateTime={formatUnixDateTime}
               signingDeviceReady={nniStatus?.signature_chip_present === true}
               assetOwnerReady={Boolean(nniAssetOwnerPubkey)}
+              assetOwnerPubkey={nniAssetOwnerPubkey}
               onOpenNni={() => setCurrentPage("nni")}
             />
           ) : null}
