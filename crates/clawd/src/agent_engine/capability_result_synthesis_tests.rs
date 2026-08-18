@@ -6,10 +6,11 @@ use claw_core::capability_result::{
 use serde_json::json;
 
 use super::{
-    attach_reviewed_transcript_artifact, attach_unreviewed_transcript_fallback, bounded_result,
-    eligible_for_capability_result_synthesis, normalize_transcript_script_for_language,
-    normalized_transcript_language, pending_transcript_review, safe_transcript_filename,
-    split_transcript_chunks, synthesis_evidence_catalog, transcript_review_contract,
+    attach_reviewed_transcript_artifact, attach_unreviewed_transcript_fallback,
+    audio_transcript_label, bounded_result, eligible_for_capability_result_synthesis,
+    normalize_transcript_script_for_language, normalized_transcript_language,
+    pending_transcript_review, safe_transcript_filename, split_transcript_chunks,
+    synthesis_evidence_catalog, transcript_review_contract,
     FALLBACK_TRANSCRIPT_REVISION_CHUNK_CHARS, MAX_RESULT_JSON_CHARS,
 };
 use crate::agent_engine::{AgentRunContext, LoopState};
@@ -224,6 +225,7 @@ fn reviewed_transcript_text_and_artifact_override_save_only_for_explicit_deliver
         artifact,
         "transcript.txt",
         "完整校对文本。",
+        "zh-CN",
     )
     .expect("attach reviewed transcript");
 
@@ -251,7 +253,7 @@ fn reviewed_transcript_text_and_artifact_override_save_only_for_explicit_deliver
     );
     assert_eq!(
         answer,
-        "完整校对文本。\nFILE:.agent-runtime/artifacts/transcript-review/task/transcript.txt"
+        "音频转写:\n完整校对文本。\nFILE:.agent-runtime/artifacts/transcript-review/task/transcript.txt"
     );
 }
 
@@ -312,8 +314,16 @@ fn failed_transcript_review_delivers_raw_text_once_and_clears_required_state() {
     assert!(!pending_transcript_review(&[result]));
     assert_eq!(
         answer,
-        "未经审校的原始转写\nFILE:.agent-runtime/artifacts/transcript-fallback/task/transcript.txt"
+        "音频转写:\n未经审校的原始转写\nFILE:.agent-runtime/artifacts/transcript-fallback/task/transcript.txt"
     );
+}
+
+#[test]
+fn audio_transcript_source_label_follows_response_language() {
+    assert_eq!(audio_transcript_label("zh-CN"), "音频转写");
+    assert_eq!(audio_transcript_label("zh-Hant"), "音訊轉寫");
+    assert_eq!(audio_transcript_label("ja-JP"), "音声文字起こし");
+    assert_eq!(audio_transcript_label("en-US"), "Audio transcript");
 }
 
 #[test]
