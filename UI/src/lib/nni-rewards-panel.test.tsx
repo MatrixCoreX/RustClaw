@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { NniRewardsPanel } from "../components/NniRewardsPanel";
+import { formatNniRewardCountdown, NniRewardsPanel } from "../components/NniRewardsPanel";
 import type { NniRewardsResponse } from "../types/api";
 
 const rewards: NniRewardsResponse = {
@@ -19,6 +19,23 @@ const rewards: NniRewardsResponse = {
   reward_grant_count: 2,
   first_period_start_unix: 1_800_000_000,
   latest_period_end_unix: 1_800_001_200,
+  reward_policy: {
+    phase: "scheduled",
+    accepting_reward_heartbeats: false,
+    reward_start_time_unix: 1_800_010_000,
+    starts_in_seconds: 3_661,
+    first_settlement_at_unix: 1_800_010_600,
+    interval_seconds: 600,
+    initial_reward_pool_points: 5000,
+    current_reward_pool_units: null,
+    current_reward_pool_points: null,
+    distribution: "equal_per_eligible_device",
+    halving_epoch_unix: null,
+    halving_interval_seconds: 126_144_000,
+    halving_era: null,
+    rewards_ended: false,
+    next_halving_at_unix: null,
+  },
   page: 1,
   per_page: 10,
   total: 2,
@@ -67,6 +84,15 @@ test("renders the signed device reward total and period record", () => {
   assert.match(markup, /每次刷新都会由本机设备签署一次临时挑战/);
   assert.match(markup, /切换为原始十六进制公钥/);
   assert.match(markup, /（最近 100 条）/);
+  assert.match(markup, /奖励开始倒计时/);
+  assert.match(markup, /1 小时 1 分 1 秒/);
+  assert.match(markup, /开始时间前的心跳只用于确认设备在线，不参与奖励/);
+  assert.match(markup, /data-nni-reward-countdown="3661"/);
   assert.doesNotMatch(markup, /共 2 条/);
   assert.doesNotMatch(markup, /上一页|下一页/);
+});
+
+test("formats reward countdowns without hiding long durations", () => {
+  assert.equal(formatNniRewardCountdown(90_061, (zh) => zh), "1 天 1 小时 1 分 1 秒");
+  assert.equal(formatNniRewardCountdown(0, (_zh, en) => en), "0s");
 });
