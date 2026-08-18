@@ -1,0 +1,135 @@
+import json
+import tkinter as tk
+import unittest
+from types import SimpleNamespace
+from unittest import mock
+
+import agent_small_screen as screen
+from small_screen_nni import format_nni_runtime_summary, nni_runtime_is_active
+
+
+class SmallScreenNniSummaryTests(unittest.TestCase):
+    def test_active_hardware_runtime_matches_web_ui_state(self):
+        config = {
+            "joined": True,
+            "worker_running": True,
+            "heartbeat_state": "active",
+            "network_authorization": "authorized",
+            "last_success_node_host": "api.example.test",
+            "heartbeat_request_count": 42,
+            "last_heartbeat_at_ts": 1_787_000_000,
+        }
+        device = {
+            "signature_chip_present": True,
+            "hardware_chip_present": True,
+            "simulated": False,
+        }
+
+        summary = format_nni_runtime_summary(config, device, "CN")
+
+        self.assertTrue(nni_runtime_is_active(config))
+        self.assertIn("状态: 运行中", summary)
+        self.assertIn("心跳: 正常", summary)
+        self.assertIn("芯片: 硬件", summary)
+        self.assertIn("节点: api.example.test", summary)
+        self.assertIn("授权: 已授权", summary)
+        self.assertIn("请求: 42", summary)
+
+    def test_stopped_runtime_and_missing_device_are_explicit(self):
+        summary = format_nni_runtime_summary(
+            {
+                "joined": False,
+                "worker_running": True,
+                "heartbeat_state": "disabled",
+                "selected_node_url": "https://node.example.test/v1",
+                "heartbeat_request_count": 0,
+            },
+            {},
+            "EN",
+        )
+        self.assertIn("Status: Stopped", summary)
+        self.assertIn("Chip: Unavailable", summary)
+        self.assertIn("Node: node.example.test", summary)
+
+    def test_refresh_error_keeps_last_good_runtime_visible(self):
+        summary = format_nni_runtime_summary(
+            {"joined": True, "worker_running": True, "heartbeat_state": "active"},
+            {"hardware_chip_present": True},
+            "CN",
+            "temporary read failure",
+        )
+        self.assertIn("状态: 运行中", summary)
+        self.assertIn("状态同步失败，保留上次结果", summary)
+
+    def test_runtime_sync_auto_starts_and_stops_the_page_visual(self):
+        class FakeButton:
+            def __init__(self):
+                self.values = {}
+
+            def config(self, **values):
+                self.values.update(values)
+
+        join_button = FakeButton()
+        test_button = FakeButton()
+        app = SimpleNamespace(
+            _nni_runtime_config={"joined": True, "worker_running": True},
+            _llm_join_btn=join_button,
+            _llm_test_btn=test_button,
+            _llm_join_in_progress=False,
+            _llm_lobster_job=None,
+            _t=lambda key: {"llm_join": "加入", "llm_stop": "停止"}[key],
+            _start_nni_runtime_visual=mock.Mock(),
+            _stop_llm_animation=mock.Mock(),
+            _refresh_llm_join_button_state=mock.Mock(),
+        )
+
+        screen.SmallScreenApp._sync_nni_runtime_view(app)
+
+        self.assertEqual(join_button.values["text"], "停止")
+        self.assertEqual(test_button.values["state"], tk.DISABLED)
+        app._start_nni_runtime_visual.assert_called_once_with()
+
+        app._nni_runtime_config = {"joined": False, "worker_running": True}
+        app._llm_lobster_job = object()
+        screen.SmallScreenApp._sync_nni_runtime_view(app)
+        self.assertEqual(join_button.values["text"], "加入")
+        self.assertEqual(test_button.values["state"], tk.NORMAL)
+        app._stop_llm_animation.assert_called_once_with()
+
+    def test_fetch_overview_uses_the_same_two_endpoints_as_web_ui(self):
+        responses = [
+            {"ok": True, "data": {"joined": True, "remote_nodes": ["https://node.test"]}},
+            {"ok": True, "data": {"signature_chip_present": True}},
+        ]
+        with mock.patch.object(
+            screen,
+            "localhost_api_request",
+            side_effect=[json.dumps(item).encode("utf-8") for item in responses],
+        ) as request:
+            config, device, error = screen.fetch_nni_runtime_overview("key")
+
+        self.assertEqual(error, "")
+        self.assertTrue(config["joined"])
+        self.assertTrue(device["signature_chip_present"])
+        self.assertEqual(
+            [call.args[1] for call in request.call_args_list],
+            ["/v1/nni/config", "/v1/nni/device/status"],
+        )
+
+    def test_stop_updates_persisted_join_state(self):
+        response = {"ok": True, "data": {"joined": False, "remote_nodes": []}}
+        with mock.patch.object(
+            screen,
+            "localhost_api_request",
+            return_value=json.dumps(response).encode("utf-8"),
+        ) as request:
+            config, error = screen.update_nni_joined_state("key", False)
+
+        self.assertEqual(error, "")
+        self.assertFalse(config["joined"])
+        body = json.loads(request.call_args.kwargs["body"].decode("utf-8"))
+        self.assertEqual(body, {"joined": False})
+
+
+if __name__ == "__main__":
+    unittest.main()

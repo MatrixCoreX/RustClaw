@@ -82,6 +82,8 @@ from small_screen_market_service import (
     fetch_crypto_prices,
     fetch_us_stock_quotes,
 )
+from small_screen_messages import extract_message_channel, message_channel_display_name
+from small_screen_nni import format_nni_runtime_summary, nni_runtime_is_active
 from small_screen_overview_ui import (
     build_overview_layout as overview_build_layout,
     render_dashboard_overview as overview_render_dashboard,
@@ -381,9 +383,18 @@ def _single_line_message_preview(text, lang="CN"):
 
 
 def _collect_recent_user_messages(raw_text, limit=5, lang="CN"):
+    raw_lines = (raw_text or "").splitlines()
+    channels_by_task = {}
+    for raw in raw_lines:
+        line = _strip_ansi(raw).strip()
+        metadata_task_id = _extract_task_id(line)
+        metadata_channel = extract_message_channel(line)
+        if metadata_task_id and metadata_channel:
+            channels_by_task[metadata_task_id] = metadata_channel
+
     items_by_key = {}
     ordered_keys = []
-    for raw in reversed((raw_text or "").splitlines()):
+    for raw in reversed(raw_lines):
         line = _strip_ansi(raw).strip()
         if not line:
             continue
@@ -402,6 +413,8 @@ def _collect_recent_user_messages(raw_text, limit=5, lang="CN"):
         task_id = task_id or _extract_task_id(line)
         if task_id:
             task_id = task_id.strip().strip('",;]}')
+
+        channel = extract_message_channel(line) or channels_by_task.get(task_id, "")
 
         text = ""
         field = None
@@ -443,6 +456,7 @@ def _collect_recent_user_messages(raw_text, limit=5, lang="CN"):
                 "user_id": user_id,
                 "chat_id": chat_id,
                 "task_id": task_id,
+                "channel": channel,
                 "_question_priority": -1,
                 "_reply_priority": -1,
             }
@@ -455,6 +469,8 @@ def _collect_recent_user_messages(raw_text, limit=5, lang="CN"):
             item["chat_id"] = chat_id
         if task_id and not item.get("task_id"):
             item["task_id"] = task_id
+        if channel and not item.get("channel"):
+            item["channel"] = channel
         if not item.get("time"):
             item["time"] = _extract_log_time_label(line)
 
@@ -537,6 +553,28 @@ def fetch_nni_remote_nodes(user_key=""):
         return [str(node).strip() for node in nodes if str(node or "").strip()], None
     except Exception as exc:
         return [], str(exc)
+
+
+def fetch_nni_runtime_overview(user_key=""):
+    try:
+        config = _api_response_data(localhost_api_request("GET", "/v1/nni/config", user_key))
+    except Exception as exc:
+        return {}, {}, str(exc)
+    try:
+        device = _api_response_data(localhost_api_request("GET", "/v1/nni/device/status", user_key))
+        return config if isinstance(config, dict) else {}, device if isinstance(device, dict) else {}, ""
+    except Exception as exc:
+        return config if isinstance(config, dict) else {}, {}, str(exc)
+
+
+def update_nni_joined_state(user_key, joined):
+    body = json.dumps({"joined": bool(joined)}).encode("utf-8")
+    try:
+        raw = localhost_api_request("POST", "/v1/nni/config", user_key, body=body)
+        data = _api_response_data(raw)
+        return data if isinstance(data, dict) else {}, ""
+    except Exception as exc:
+        return {}, str(exc)
 
 
 def request_nni_join_task(user_key="", node_urls=None):
@@ -1400,6 +1438,11 @@ class SmallScreenApp:
         self._llm_join_status = ""
         self._llm_remote_nodes = []
         self._llm_remote_nodes_loading = False
+        self._nni_runtime_config = {}
+        self._nni_device_status = {}
+        self._nni_runtime_error = ""
+        self._nni_refresh_job = None
+        self._nni_state_change_in_progress = False
         self._llm_info_hidden = True
         self._llm_clear_job = None
         self._llm_info_frame = None
@@ -1518,6 +1561,7 @@ class SmallScreenApp:
 
     def _teardown_gallery_view(self):
         self._cancel_job("_gallery_job")
+        self._cancel_job("_nni_refresh_job")
         self._cancel_llm_clear_job()
         self._stop_llm_animation()
 
@@ -3661,8 +3705,10 @@ class SmallScreenApp:
             self._render_user_messages()
 
     def _format_llm_pubkey_text(self):
+        has_runtime_summary = bool(self._nni_runtime_config or self._nni_runtime_error)
         if (
             self._llm_info_hidden
+            and not has_runtime_summary
             and not self._llm_pubkey_loading
             and not self._llm_signing
             and not self._llm_pubkey_hex
@@ -3673,6 +3719,15 @@ class SmallScreenApp:
         ):
             return ""
         parts = []
+        if has_runtime_summary:
+            parts.append(
+                format_nni_runtime_summary(
+                    self._nni_runtime_config,
+                    self._nni_device_status,
+                    self._lang,
+                    self._nni_runtime_error,
+                )
+            )
         if self._llm_join_status:
             parts.append(str(self._llm_join_status).strip())
         if self._llm_pubkey_loading:
@@ -3685,7 +3740,7 @@ class SmallScreenApp:
             parts.append(self._t("llm_pubkey_slot0") + ":\n" + "\n".join(chunks))
         elif self._llm_pubkey_error:
             parts.append(self._t("llm_pubkey_error"))
-        else:
+        elif not self._llm_info_hidden:
             parts.append(self._t("llm_pubkey_empty"))
 
         if self._llm_signing:
@@ -3761,7 +3816,11 @@ class SmallScreenApp:
         btn = getattr(self, "_llm_join_btn", None)
         if not btn or not btn.winfo_exists():
             return
-        if self._llm_join_in_progress or self._llm_lobster_job:
+        if self._nni_state_change_in_progress:
+            state = tk.DISABLED
+        elif nni_runtime_is_active(self._nni_runtime_config):
+            state = tk.NORMAL
+        elif self._llm_join_in_progress or self._llm_lobster_job:
             state = tk.NORMAL
         elif self._llm_remote_nodes_loading or not self._llm_remote_nodes:
             state = tk.DISABLED
@@ -3772,30 +3831,110 @@ class SmallScreenApp:
         except tk.TclError:
             pass
 
-    def _load_llm_remote_nodes_for_page(self):
-        if getattr(self, "_closing", False):
+    def _start_nni_runtime_visual(self):
+        if (
+            getattr(self, "_closing", False)
+            or self._view_mode != "gallery"
+            or self._llm_join_in_progress
+            or self._llm_lobster_job
+        ):
             return
-        self._llm_remote_nodes = []
+        self._stop_llm_animation()
+        if self._theme == "matrix":
+            self._llm_start_matrix_rain()
+            return
+        if self._llm_lobster_photo is None:
+            self._llm_lobster_photo = self._llm_load_lobster_icon()
+        if self._llm_lobster_photo:
+            self._llm_lobster_tick()
+
+    def _sync_nni_runtime_view(self):
+        active = nni_runtime_is_active(self._nni_runtime_config)
+        try:
+            self._llm_join_btn.config(text=self._t("llm_stop") if active else self._t("llm_join"))
+        except tk.TclError:
+            pass
+        try:
+            self._llm_test_btn.config(state=tk.DISABLED if active else tk.NORMAL)
+        except tk.TclError:
+            pass
+        if active:
+            self._start_nni_runtime_visual()
+        elif not self._llm_join_in_progress and self._llm_lobster_job:
+            self._stop_llm_animation()
+        self._refresh_llm_join_button_state()
+
+    def _schedule_nni_page_refresh(self):
+        self._cancel_job("_nni_refresh_job")
+        if getattr(self, "_closing", False) or self._view_mode != "gallery":
+            return
+        self._nni_refresh_job = self.root.after(
+            10000,
+            lambda: self._load_llm_remote_nodes_for_page(silent=True),
+        )
+
+    def _load_llm_remote_nodes_for_page(self, silent=False):
+        if getattr(self, "_closing", False) or self._llm_remote_nodes_loading:
+            return
         self._llm_remote_nodes_loading = True
-        self._llm_info_hidden = False
-        self._llm_join_status = self._t("llm_remote_nodes_loading")
+        if not silent:
+            self._llm_info_hidden = False
+            self._llm_join_status = self._t("llm_remote_nodes_loading")
         self._refresh_llm_join_button_state()
         self._refresh_llm_pubkey_label()
 
         def worker():
-            nodes, error = fetch_nni_remote_nodes(self._auth_key)
+            config, device, error = fetch_nni_runtime_overview(self._auth_key)
 
             def finish():
                 self._llm_remote_nodes_loading = False
-                self._llm_remote_nodes = list(nodes or [])
-                if self._llm_remote_nodes:
+                if config:
+                    self._nni_runtime_config = dict(config)
+                if device:
+                    self._nni_device_status = dict(device)
+                self._nni_runtime_error = str(error or "").strip()
+                self._llm_remote_nodes = list(self._nni_runtime_config.get("remote_nodes") or [])
+                if self._nni_runtime_config:
                     self._llm_join_status = ""
                     self._llm_info_hidden = True
                 else:
                     self._llm_join_status = error or self._t("llm_remote_nodes_empty")
                     self._llm_info_hidden = False
-                self._refresh_llm_join_button_state()
+                self._sync_nni_runtime_view()
                 self._refresh_llm_pubkey_label()
+                self._schedule_nni_page_refresh()
+
+            self._post_ui(finish)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _stop_nni_runtime_from_page(self):
+        if self._nni_state_change_in_progress:
+            return
+        self._cancel_job("_nni_refresh_job")
+        self._nni_state_change_in_progress = True
+        self._llm_info_hidden = False
+        self._llm_join_status = self._t("llm_remote_stopping")
+        self._refresh_llm_join_button_state()
+        self._refresh_llm_pubkey_label()
+
+        def worker():
+            config, error = update_nni_joined_state(self._auth_key, False)
+
+            def finish():
+                self._nni_state_change_in_progress = False
+                if config:
+                    self._nni_runtime_config = dict(config)
+                    self._nni_runtime_error = ""
+                    self._llm_join_status = self._t("llm_remote_stopped")
+                    self._stop_llm_animation()
+                    self._schedule_llm_info_clear()
+                else:
+                    self._nni_runtime_error = str(error or "").strip()
+                    self._llm_join_status = self._nni_runtime_error
+                self._sync_nni_runtime_view()
+                self._refresh_llm_pubkey_label()
+                self._schedule_nni_page_refresh()
 
             self._post_ui(finish)
 
@@ -4107,7 +4246,15 @@ class SmallScreenApp:
                             self._llm_lobster_photo = self._llm_load_lobster_icon()
                         if self._llm_lobster_photo:
                             self._llm_lobster_tick()
+                    self._nni_runtime_config = {
+                        **self._nni_runtime_config,
+                        "joined": True,
+                        "worker_running": True,
+                        "heartbeat_state": "enabling",
+                    }
+                    self._sync_nni_runtime_view()
                     self._schedule_llm_info_clear()
+                    self._load_llm_remote_nodes_for_page(silent=True)
                 else:
                     self._llm_signature_error = (verify_error or "nni_join_verify_rejected").strip()
                     self._llm_join_status = self._t("llm_remote_join_failed")
@@ -4207,6 +4354,7 @@ class SmallScreenApp:
                 str(item.get("time") or "--:--:--"),
                 str(item.get("question") or item.get("text") or ""),
                 str(item.get("reply") or ""),
+                str(item.get("channel") or ""),
             )
             for item in (items if isinstance(items, list) else [])
         )
@@ -4237,7 +4385,11 @@ class SmallScreenApp:
                 card_bg = self._tk_color("bg")
             card = tk.Frame(self._users_messages_body, bg=card_bg, bd=0, highlightthickness=0)
             card.pack(fill=tk.X, pady=(0, 6))
-            meta_parts = [item.get("time") or "--:--:--"]
+            meta_parts = [
+                f"{self._t('message_channel_label')}: "
+                f"{message_channel_display_name(item.get('channel'), self._lang)}",
+                item.get("time") or "--:--:--",
+            ]
             tk.Label(
                 card,
                 text="  ".join(meta_parts),
@@ -4831,8 +4983,13 @@ class SmallScreenApp:
         self._llm_matrix_tick()
 
     def _on_llm_join_click(self):
-        """加入/停止：未运行时开始远端加入，运行中点击停止会结束签名或动画。"""
+        """加入/停止：未运行时加入 NNI，运行中持久化停止 NNI。"""
         if getattr(self, "_closing", False) or self._view_mode != "gallery":
+            return
+        if nni_runtime_is_active(self._nni_runtime_config):
+            self._stop_nni_runtime_from_page()
+            return
+        if self._nni_state_change_in_progress:
             return
         if self._llm_join_is_active():
             self._stop_llm_join_activity(clear_info=True)
