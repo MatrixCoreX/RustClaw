@@ -33,16 +33,17 @@ def localhost_api_request(method, path, user_key="", body=None):
     global _api_http_conn
     if not path.startswith("/"):
         path = "/" + path
-    headers = {}
     stripped_key = (user_key or "").strip()
-    if stripped_key:
-        headers["X-Agent-Key"] = stripped_key
-    if body is not None:
-        headers["Content-Type"] = "application/json"
+    effective_key = load_enabled_admin_user_key() or stripped_key
     host, port = _api_host_port()
     last_err = None
     with _api_http_lock:
         for attempt in range(2):
+            headers = {}
+            if effective_key:
+                headers["X-Agent-Key"] = effective_key
+            if body is not None:
+                headers["Content-Type"] = "application/json"
             try:
                 if _api_http_conn is None:
                     _api_http_conn = http.client.HTTPConnection(host, port, timeout=8)
@@ -52,6 +53,10 @@ def localhost_api_request(method, path, user_key="", body=None):
                 if 200 <= resp.status < 300:
                     return data
                 last_err = RuntimeError(f"HTTP {resp.status}: {data[:200]!r}")
+                if resp.status == 401 and attempt == 0:
+                    # The admin credential can be rotated while the display is running.
+                    # Reload it from the runtime database and retry once; never persist it.
+                    effective_key = load_enabled_admin_user_key() or stripped_key
             except Exception as exc:
                 last_err = exc
             _api_drop_connection_unlocked()

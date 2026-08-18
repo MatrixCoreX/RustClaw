@@ -28,7 +28,7 @@ pi_app/
 | **开机自启动** | 运行 `./enable-autostart.sh` 后写入 XDG `~/.config/autostart/` 与树莓派 LXDE `~/.config/lxsession/LXDE-pi/autostart`，登录后自动启动 |
 | **自启动取消** | 运行 `./disable-autostart.sh` 会同时移除上述两处 |
 | **启动日志** | 启动失败时错误信息写入 `~/.agent-runtime-small-screen.log` |
-| **用户配置** | 语言、主题、页面显示开关和小程序专用 key 统一保存在 pi_app 目录下 `.agent_small_screen_config.json` |
+| **用户配置** | 语言、主题、页面显示开关和备用的小程序专用 key 保存在 pi_app 目录下 `.agent_small_screen_config.json`；运行库中的 admin key 不写入该文件 |
 
 ## 使用方式
 
@@ -52,7 +52,9 @@ pi_app/
 - Python 3 + tkinter
 - 图形环境（DISPLAY，桌面或 `export DISPLAY=:0`）
 - 小屏程序请求 `http://127.0.0.1:8787/v1/health`，需先启动 clawd
-- 首次启动时，Python 小程序会自动生成并写入一把本机专用 `user` key 到数据库，同时保存到 `pi_app/.agent_small_screen_config.json`
+- Python 小程序优先直接读取运行库中已启用的 `admin` key，以本机管理界面的完整权限读取状态；不会把 admin key 复制到设置文件
+- 运行库中没有可用 admin key 时，才会生成并注册一把本机专用 `user` key，保存到权限为 `0600` 的 `pi_app/.agent_small_screen_config.json`
+- 请求返回 401 时会重新读取当前 admin key 并重试一次，以适配运行期间的密钥轮换
 
 ## 自启动后进程在但窗口不出现
 
