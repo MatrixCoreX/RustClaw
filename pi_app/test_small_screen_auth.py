@@ -4,6 +4,7 @@ import sqlite3
 import stat
 import tempfile
 import unittest
+from contextlib import closing
 from unittest import mock
 
 import small_screen_clawd_client as client
@@ -11,22 +12,23 @@ import small_screen_config as config
 
 
 def _create_auth_db(path, rows=()):
-    with sqlite3.connect(path) as conn:
-        conn.execute(
-            """
-            CREATE TABLE auth_keys (
-                user_key TEXT PRIMARY KEY,
-                role TEXT NOT NULL,
-                enabled INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT NOT NULL,
-                last_used_at TEXT
+    with closing(sqlite3.connect(path)) as conn:
+        with conn:
+            conn.execute(
+                """
+                CREATE TABLE auth_keys (
+                    user_key TEXT PRIMARY KEY,
+                    role TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    last_used_at TEXT
+                )
+                """
             )
-            """
-        )
-        conn.executemany(
-            "INSERT INTO auth_keys(user_key, role, enabled, created_at) VALUES (?, ?, ?, ?)",
-            rows,
-        )
+            conn.executemany(
+                "INSERT INTO auth_keys(user_key, role, enabled, created_at) VALUES (?, ?, ?, ?)",
+                rows,
+            )
 
 
 class SmallScreenAuthConfigTests(unittest.TestCase):
@@ -52,7 +54,7 @@ class SmallScreenAuthConfigTests(unittest.TestCase):
                 fallback_key = config.load_preferred_runtime_auth_key()
 
             self.assertTrue(fallback_key.startswith("rk-"))
-            with sqlite3.connect(db_path) as conn:
+            with closing(sqlite3.connect(db_path)) as conn:
                 self.assertEqual(
                     conn.execute(
                         "SELECT role, enabled FROM auth_keys WHERE user_key = ?", (fallback_key,)
