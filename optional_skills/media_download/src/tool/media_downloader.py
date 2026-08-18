@@ -4987,15 +4987,23 @@ def download_image_candidates(
         output_path = output_dir / filename
         if output_path.exists() and not overwrite:
             output_path = unique_output_path(output_path)
-        saved_paths.append(
-            download_image_candidate(
-                candidate,
-                output_path,
-                cookie=cookie,
-                timeout=timeout,
-                referer=referer,
+        try:
+            saved_paths.append(
+                download_image_candidate(
+                    candidate,
+                    output_path,
+                    cookie=cookie,
+                    timeout=timeout,
+                    referer=referer,
+                )
             )
-        )
+        except OperationCancelled:
+            raise
+        except (DouyinDownloadError, OSError) as exc:
+            print(
+                f"component_unavailable: component=image index={index} error={exc}",
+                file=sys.stderr,
+            )
     return saved_paths
 
 
@@ -7961,9 +7969,10 @@ def handle_resolved_media(
         return 0
 
     if image_post_article_is_missing(args, platform, image_candidates, article):
-        raise DouyinDownloadError(
-            "Image post media was found, but the complete platform article text could not be "
-            "verified; refusing partial delivery."
+        print(
+            "component_unavailable: component=platform_article "
+            "error=complete platform article text could not be verified",
+            file=sys.stderr,
         )
 
     if image_candidates and not candidates:
@@ -7980,32 +7989,58 @@ def handle_resolved_media(
         )
         saved_paths = list(image_paths)
         if article is not None and normalize_platform(platform) in {"douyin", "xiaohongshu"}:
-            saved_paths.append(
-                save_article_content(
-                    article,
-                    output_dir,
-                    output_name=image_output_name,
-                    platform=platform,
-                    item_id=item_id,
-                    share_text=share_text,
-                    overwrite=args.overwrite,
+            try:
+                saved_paths.append(
+                    save_article_content(
+                        article,
+                        output_dir,
+                        output_name=image_output_name,
+                        platform=platform,
+                        item_id=item_id,
+                        share_text=share_text,
+                        overwrite=args.overwrite,
+                    )
                 )
-            )
+            except OperationCancelled:
+                raise
+            except (DouyinDownloadError, OSError) as exc:
+                print(
+                    f"component_unavailable: component=platform_article error={exc}",
+                    file=sys.stderr,
+                )
         if article is not None and article.background_audio_url:
-            saved_paths.append(
-                download_image_post_audio(
-                    article.background_audio_url,
-                    output_dir,
-                    output_name=image_output_name,
-                    overwrite=args.overwrite,
-                    cookie=cookie,
-                    timeout=args.timeout,
-                    referer=platform_referer(platform),
+            try:
+                saved_paths.append(
+                    download_image_post_audio(
+                        article.background_audio_url,
+                        output_dir,
+                        output_name=image_output_name,
+                        overwrite=args.overwrite,
+                        cookie=cookie,
+                        timeout=args.timeout,
+                        referer=platform_referer(platform),
+                    )
                 )
-            )
+            except OperationCancelled:
+                raise
+            except (DouyinDownloadError, OSError) as exc:
+                print(
+                    f"component_unavailable: component=background_audio error={exc}",
+                    file=sys.stderr,
+                )
         if args.save_meta:
-            meta_name = f"{Path(image_output_name).stem}.json"
-            save_metadata(output_dir / meta_name, platform, item_id, [], image_candidates, logs)
+            try:
+                meta_name = f"{Path(image_output_name).stem}.json"
+                save_metadata(output_dir / meta_name, platform, item_id, [], image_candidates, logs)
+            except OSError as exc:
+                print(
+                    f"component_unavailable: component=metadata error={exc}",
+                    file=sys.stderr,
+                )
+        if not saved_paths:
+            raise DouyinDownloadError(
+                "No image-post media, article, or audio component could be saved."
+            )
         for path in saved_paths:
             if args.show_info:
                 print(f"file: {path}")

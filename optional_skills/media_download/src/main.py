@@ -891,9 +891,22 @@ def _content_bundle(
     else:
         kind = "files"
     audio_count = counts.pop("audio_count")
+    available_components = []
+    if counts["image_count"]:
+        available_components.append("images")
+    if counts["video_count"]:
+        available_components.append("video")
+    if audio_count:
+        available_components.append("background_audio")
+    if counts["article_count"]:
+        available_components.append("platform_article")
+    if counts["other_file_count"]:
+        available_components.append("files")
     bundle = {
         "schema_version": 1,
         "kind": kind,
+        "delivery_policy": "best_effort_components",
+        "available_components": available_components,
         **counts,
         "inline_article_count": inline_article_count,
     }
@@ -1882,6 +1895,7 @@ def _capabilities_extra() -> dict[str, Any]:
         "image_article_posts": {
             "platforms": ["douyin", "xiaohongshu"],
             "default_outputs": ["original_images", "article_text"],
+            "delivery_policy": "best_effort_components",
             "text_delivery": "inline_and_artifact",
             "individual_delivery_max_images": IMAGE_ARCHIVE_THRESHOLD,
             "large_set_delivery": "ordered_zip",

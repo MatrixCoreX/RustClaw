@@ -1,4 +1,6 @@
 import importlib.util
+import io
+from contextlib import redirect_stderr
 from pathlib import Path
 import sys
 import tempfile
@@ -329,22 +331,32 @@ class ShareTextTest(unittest.TestCase):
         self.assertEqual(result, complete)
         self.assertEqual(gather.call_count, 2)
 
-    def test_image_post_download_refuses_silent_article_omission(self) -> None:
+    def test_image_post_download_delivers_images_when_article_is_missing(self) -> None:
         image = self.downloader.ImageCandidate("https://p.test/1.webp", "test", 1)
-        args = SimpleNamespace(
-            verbose=False,
-            browser_fallback=True,
-            print_url=False,
-            extract_audio=False,
-            transcribe=False,
-        )
-
-        with mock.patch.object(self.downloader, "download_image_candidates") as download:
-            with self.assertRaisesRegex(
-                self.downloader.DouyinDownloadError,
-                "complete platform article text",
-            ):
-                self.downloader.handle_resolved_media(
+        with tempfile.TemporaryDirectory() as directory:
+            image_path = Path(directory) / "note.webp"
+            image_path.write_bytes(b"image")
+            args = SimpleNamespace(
+                verbose=False,
+                browser_fallback=True,
+                print_url=False,
+                extract_audio=False,
+                transcribe=False,
+                output_dir=directory,
+                output_name="note",
+                overwrite=False,
+                timeout=1.0,
+                save_meta=False,
+                show_info=False,
+                ocr_images=False,
+            )
+            diagnostics = io.StringIO()
+            with mock.patch.object(
+                self.downloader,
+                "download_image_candidates",
+                return_value=[image_path],
+            ) as download, redirect_stderr(diagnostics):
+                result = self.downloader.handle_resolved_media(
                     args,
                     "https://www.douyin.com/note/7658893225607908651",
                     None,
@@ -356,7 +368,81 @@ class ShareTextTest(unittest.TestCase):
                     article=None,
                 )
 
-        download.assert_not_called()
+        self.assertEqual(result, 0)
+        download.assert_called_once()
+        self.assertIn("component=platform_article", diagnostics.getvalue())
+
+    def test_image_candidate_failure_does_not_hide_successful_images(self) -> None:
+        candidates = [
+            self.downloader.ImageCandidate("https://p.test/1.webp", "test", 1),
+            self.downloader.ImageCandidate("https://p.test/2.webp", "test", 1),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+
+            def download(candidate, output_path, **_kwargs):
+                if candidate.url.endswith("1.webp"):
+                    raise self.downloader.DouyinDownloadError("first image unavailable")
+                output_path.write_bytes(b"image")
+                return output_path
+
+            diagnostics = io.StringIO()
+            with mock.patch.object(
+                self.downloader,
+                "download_image_candidate",
+                side_effect=download,
+            ), redirect_stderr(diagnostics):
+                saved = self.downloader.download_image_candidates(
+                    candidates,
+                    output_dir,
+                    output_name="note",
+                )
+
+        self.assertEqual([path.name for path in saved], ["note_02.webp"])
+        self.assertIn("component=image index=1", diagnostics.getvalue())
+
+    def test_image_post_delivers_article_when_images_are_unavailable(self) -> None:
+        image = self.downloader.ImageCandidate("https://p.test/1.webp", "test", 1)
+        article = self.downloader.ArticleContent("", "平台正文", "", "test")
+        with tempfile.TemporaryDirectory() as directory:
+            article_path = Path(directory) / "note_article.txt"
+            article_path.write_text("平台正文", encoding="utf-8")
+            args = SimpleNamespace(
+                verbose=False,
+                browser_fallback=True,
+                print_url=False,
+                extract_audio=False,
+                transcribe=False,
+                output_dir=directory,
+                output_name="note",
+                overwrite=False,
+                timeout=1.0,
+                save_meta=False,
+                show_info=False,
+                ocr_images=False,
+            )
+            with mock.patch.object(
+                self.downloader,
+                "download_image_candidates",
+                return_value=[],
+            ), mock.patch.object(
+                self.downloader,
+                "save_article_content",
+                return_value=article_path,
+            ):
+                result = self.downloader.handle_resolved_media(
+                    args,
+                    "https://www.douyin.com/note/7658893225607908651",
+                    None,
+                    "douyin",
+                    "7658893225607908651",
+                    [],
+                    [image],
+                    [],
+                    article=article,
+                )
+
+        self.assertEqual(result, 0)
 
     def test_xiaohongshu_article_matches_requested_note_only(self) -> None:
         requested_id = "66a1b2c3d4e5f60718293abc"
