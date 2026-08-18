@@ -185,3 +185,24 @@ def sign_challenge_via_helper(challenge):
     if payload and payload.get("signature"):
         return payload, ""
     return None, error or "sign failed"
+
+
+def test_signature_chip_via_helper():
+    """Run a local-only slot 0 read/sign self-test.
+
+    This helper intentionally has no NNI client dependency: it neither requests a
+    remote challenge nor submits a signature.  The random challenge exists only
+    for the lifetime of the local helper calls.
+    """
+    pubkey, error = read_slot0_pubkey_via_helper()
+    if not pubkey:
+        return None, error or "public key unavailable"
+    challenge = os.urandom(32).hex()
+    signed, error = sign_challenge_via_helper(challenge)
+    signature = str((signed or {}).get("signature") or "").strip()
+    if not signature:
+        return None, error or "sign failed"
+    return {
+        "pubkey": pubkey,
+        "signature": signature,
+    }, ""

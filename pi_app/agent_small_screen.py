@@ -57,7 +57,12 @@ from small_screen_config import (
     save_weather_page_visible,
 )
 from small_screen_bancor import build_bancor_market_view
-from small_screen_cryptoauth_service import read_slot0_pubkey_via_helper, sign_challenge_via_helper, sign_unix_time_via_helper
+from small_screen_cryptoauth_service import (
+    read_slot0_pubkey_via_helper,
+    sign_challenge_via_helper,
+    sign_unix_time_via_helper,
+    test_signature_chip_via_helper,
+)
 from small_screen_formatters import (
     _fmt_signed_pct,
     _line_clamp_text,
@@ -3885,7 +3890,7 @@ class SmallScreenApp:
         except tk.TclError:
             pass
         try:
-            self._llm_test_btn.config(state=tk.DISABLED if active else tk.NORMAL)
+            self._llm_chip_test_btn.config(state=tk.DISABLED if active else tk.NORMAL)
         except tk.TclError:
             pass
         if active:
@@ -4008,7 +4013,7 @@ class SmallScreenApp:
         except tk.TclError:
             pass
         try:
-            self._llm_test_btn.config(state=tk.NORMAL)
+            self._llm_chip_test_btn.config(state=tk.NORMAL)
         except tk.TclError:
             pass
         self._refresh_llm_join_button_state()
@@ -4037,7 +4042,7 @@ class SmallScreenApp:
         self._llm_matrix_cols = []
         self._llm_matrix_max_rows = 0
 
-    def _start_llm_test_join_flow(self):
+    def _start_llm_chip_test_flow(self):
         if self._llm_join_is_active():
             return
         join_epoch = self._bump_llm_join_epoch()
@@ -4050,61 +4055,42 @@ class SmallScreenApp:
         self._llm_signature_hex = ""
         self._llm_signature_error = ""
         self._llm_signature_timestamp = ""
-        self._llm_signature_context = "timestamp"
-        self._llm_join_status = self._t("llm_test_join_status")
+        self._llm_signature_context = ""
+        self._llm_join_status = self._t("llm_chip_test_status")
         self._llm_pubkey_loading = True
         self._llm_signing = False
         self._refresh_llm_pubkey_label()
 
         def worker():
-            pubkey_hex, pubkey_error = read_slot0_pubkey_via_helper()
+            payload, test_error = test_signature_chip_via_helper()
             if join_epoch != self._llm_join_epoch:
                 return
-            if not pubkey_hex:
-                def finish_pubkey_failed():
+            pubkey_hex = str((payload or {}).get("pubkey") or "").strip()
+            if not payload or not pubkey_hex:
+                def finish_test_failed():
                     if join_epoch != self._llm_join_epoch:
                         return
                     self._stop_llm_animation()
                     self._llm_join_in_progress = False
                     self._llm_pubkey_loading = False
                     self._llm_pubkey_hex = ""
-                    self._llm_pubkey_error = (pubkey_error or "").strip()
+                    self._llm_pubkey_error = (test_error or "").strip()
                     self._llm_signing = False
                     self._llm_signature_hex = ""
                     self._llm_signature_error = ""
                     self._llm_signature_timestamp = ""
                     self._llm_signature_context = ""
                     try:
-                        self._llm_join_btn.config(text=self._t("llm_join"))
+                        self._llm_join_btn.config(text=self._t("llm_join"), state=tk.NORMAL)
                     except tk.TclError:
                         pass
                     try:
-                        self._llm_test_btn.config(state=tk.NORMAL)
+                        self._llm_chip_test_btn.config(state=tk.NORMAL)
                     except tk.TclError:
                         pass
                     self._refresh_llm_pubkey_label()
 
-                self._post_ui(finish_pubkey_failed)
-                return
-
-            now_ts = int(time.time())
-
-            def switch_to_signing():
-                if join_epoch != self._llm_join_epoch:
-                    return
-                self._llm_pubkey_loading = False
-                self._llm_pubkey_hex = pubkey_hex or ""
-                self._llm_pubkey_error = ""
-                self._llm_signing = True
-                self._llm_signature_hex = ""
-                self._llm_signature_error = ""
-                self._llm_signature_timestamp = str(now_ts)
-                self._llm_signature_context = "timestamp"
-                self._refresh_llm_pubkey_label()
-
-            self._post_ui(switch_to_signing)
-            payload, sign_error = sign_unix_time_via_helper(now_ts)
-            if join_epoch != self._llm_join_epoch:
+                self._post_ui(finish_test_failed)
                 return
 
             def finish():
@@ -4115,47 +4101,20 @@ class SmallScreenApp:
                 self._llm_pubkey_hex = pubkey_hex or ""
                 self._llm_pubkey_error = ""
                 self._llm_signing = False
-                if payload:
-                    self._llm_signature_timestamp = str(payload.get("timestamp") or now_ts)
-                    self._llm_signature_context = "timestamp"
-                    self._llm_signature_hex = str(payload.get("signature") or "").strip()
-                    self._llm_signature_error = ""
-                    self._llm_join_status = self._t("llm_test_join_done")
-                    self._schedule_llm_info_clear()
-                    if self._theme == "matrix":
-                        self._llm_start_matrix_rain()
-                    else:
-                        if self._llm_lobster_photo is None:
-                            self._llm_lobster_photo = self._llm_load_lobster_icon()
-                        if self._llm_lobster_photo:
-                            self._llm_lobster_tick()
-                        else:
-                            tk.Label(
-                                self._llm_content, text="(无 lobster.gif)", font=("", 12),
-                                bg=self._c("bg"), fg=self._c("status_off")
-                            ).pack(pady=20)
-                            try:
-                                self._llm_join_btn.config(text=self._t("llm_join"))
-                            except tk.TclError:
-                                pass
-                            try:
-                                self._llm_test_btn.config(state=tk.NORMAL)
-                            except tk.TclError:
-                                pass
-                else:
-                    self._stop_llm_animation()
-                    self._llm_signature_timestamp = str(now_ts)
-                    self._llm_signature_context = "timestamp"
-                    self._llm_signature_hex = ""
-                    self._llm_signature_error = (sign_error or "").strip()
-                    try:
-                        self._llm_join_btn.config(text=self._t("llm_join"))
-                    except tk.TclError:
-                        pass
-                    try:
-                        self._llm_test_btn.config(state=tk.NORMAL)
-                    except tk.TclError:
-                        pass
+                self._llm_signature_timestamp = ""
+                self._llm_signature_context = ""
+                self._llm_signature_hex = ""
+                self._llm_signature_error = ""
+                self._llm_join_status = self._t("llm_chip_test_done")
+                self._schedule_llm_info_clear()
+                try:
+                    self._llm_join_btn.config(text=self._t("llm_join"), state=tk.NORMAL)
+                except tk.TclError:
+                    pass
+                try:
+                    self._llm_chip_test_btn.config(state=tk.NORMAL)
+                except tk.TclError:
+                    pass
                 self._refresh_llm_pubkey_label()
 
             self._post_ui(finish)
@@ -4306,7 +4265,7 @@ class SmallScreenApp:
                     except tk.TclError:
                         pass
                     try:
-                        self._llm_test_btn.config(state=tk.NORMAL)
+                        self._llm_chip_test_btn.config(state=tk.NORMAL)
                     except tk.TclError:
                         pass
                 self._refresh_llm_pubkey_label()
@@ -4328,7 +4287,7 @@ class SmallScreenApp:
         except tk.TclError:
             pass
         try:
-            self._llm_test_btn.config(state=tk.NORMAL)
+            self._llm_chip_test_btn.config(state=tk.NORMAL)
         except tk.TclError:
             pass
         self._refresh_llm_pubkey_label()
@@ -5119,12 +5078,12 @@ class SmallScreenApp:
                 command=self._on_llm_join_click, padx=12, pady=4
             )
             self._llm_join_btn.pack(side=tk.RIGHT)
-            self._llm_test_btn = tk.Button(
-                title_row, text=self._t("llm_test_join"), font=("", 10), relief=tk.FLAT, bg=self._c("button_bg"), fg=self._c("button_fg"),
+            self._llm_chip_test_btn = tk.Button(
+                title_row, text=self._t("llm_chip_test"), font=("", 10), relief=tk.FLAT, bg=self._c("button_bg"), fg=self._c("button_fg"),
                 activebackground=self._c("button_active_bg"), activeforeground=self._c("fg"), cursor="hand2",
-                command=self._on_llm_test_join_click, padx=10, pady=4
+                command=self._on_llm_chip_test_click, padx=10, pady=4
             )
-            self._llm_test_btn.pack(side=tk.RIGHT, padx=(0, 6))
+            self._llm_chip_test_btn.pack(side=tk.RIGHT, padx=(0, 6))
             llm_info = tk.Frame(self.gallery_frame, bg=self._c("box_bg"), padx=6, pady=4)
             self._llm_info_frame = llm_info
             self._llm_info_pady = (0, 6)
@@ -5157,12 +5116,12 @@ class SmallScreenApp:
             command=self._on_llm_join_click, padx=12, pady=4
         )
         self._llm_join_btn.pack(side=tk.RIGHT)
-        self._llm_test_btn = tk.Button(
-            title_row, text=self._t("llm_test_join"), font=("", 10), relief=tk.FLAT, bg=self._c("button_bg"), fg=self._c("button_fg"),
+        self._llm_chip_test_btn = tk.Button(
+            title_row, text=self._t("llm_chip_test"), font=("", 10), relief=tk.FLAT, bg=self._c("button_bg"), fg=self._c("button_fg"),
             activebackground=self._c("button_active_bg"), activeforeground=self._c("fg"), cursor="hand2",
-            command=self._on_llm_test_join_click, padx=10, pady=4
+            command=self._on_llm_chip_test_click, padx=10, pady=4
         )
-        self._llm_test_btn.pack(side=tk.RIGHT, padx=(0, 6))
+        self._llm_chip_test_btn.pack(side=tk.RIGHT, padx=(0, 6))
         llm_info = tk.Frame(self.gallery_frame, bg=self._c("box_bg"), padx=6, pady=4)
         self._llm_info_frame = llm_info
         self._llm_info_pady = (0, 8)
@@ -5233,12 +5192,12 @@ class SmallScreenApp:
         self._llm_lobster_count = 0
         self._llm_join_btn.config(text=self._t("llm_stop"))
         try:
-            self._llm_test_btn.config(state=tk.DISABLED)
+            self._llm_chip_test_btn.config(state=tk.DISABLED)
         except tk.TclError:
             pass
         self._start_llm_remote_join_flow()
 
-    def _on_llm_test_join_click(self):
+    def _on_llm_chip_test_click(self):
         if getattr(self, "_closing", False) or self._view_mode != "gallery":
             return
         if self._llm_join_is_active():
@@ -5248,12 +5207,12 @@ class SmallScreenApp:
             w.destroy()
         self._llm_dot_labels.clear()
         self._llm_lobster_count = 0
-        self._llm_join_btn.config(text=self._t("llm_stop"))
+        self._llm_join_btn.config(text=self._t("llm_join"), state=tk.DISABLED)
         try:
-            self._llm_test_btn.config(state=tk.DISABLED)
+            self._llm_chip_test_btn.config(state=tk.DISABLED)
         except tk.TclError:
             pass
-        self._start_llm_test_join_flow()
+        self._start_llm_chip_test_flow()
 
     def _llm_load_lobster_icon(self):
         """从 scripts/assets 加载 lobster.png 或 lobster.gif，缩成小图标，透明处叠到深色底（无白底）。"""
