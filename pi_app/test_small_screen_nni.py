@@ -5,7 +5,11 @@ from types import SimpleNamespace
 from unittest import mock
 
 import agent_small_screen as screen
-from small_screen_nni import format_nni_runtime_summary, nni_runtime_is_active
+from small_screen_nni import (
+    format_nni_runtime_summary,
+    nni_previous_window_metrics,
+    nni_runtime_is_active,
+)
 
 
 class SmallScreenNniSummaryTests(unittest.TestCase):
@@ -25,7 +29,21 @@ class SmallScreenNniSummaryTests(unittest.TestCase):
             "simulated": False,
         }
 
-        summary = format_nni_runtime_summary(config, device, "CN")
+        summary = format_nni_runtime_summary(
+            config,
+            device,
+            "CN",
+            rewards={
+                "network_devices": {"active_device_count": 8},
+                "network_rewards": {"latest_period_end_unix": 1_800_000_600},
+                "records": [
+                    {
+                        "period_end_unix": 1_800_000_600,
+                        "reward_points": "625.00000000",
+                    }
+                ],
+            },
+        )
 
         self.assertTrue(nni_runtime_is_active(config))
         self.assertIn("状态: 运行中", summary)
@@ -34,6 +52,8 @@ class SmallScreenNniSummaryTests(unittest.TestCase):
         self.assertIn("节点: api.example.test", summary)
         self.assertIn("授权: 已授权", summary)
         self.assertIn("请求: 42", summary)
+        self.assertIn("全网活跃设备: 8", summary)
+        self.assertIn("上一窗口奖励: 625 POINT", summary)
 
     def test_stopped_runtime_and_missing_device_are_explicit(self):
         summary = format_nni_runtime_summary(
@@ -60,6 +80,23 @@ class SmallScreenNniSummaryTests(unittest.TestCase):
         )
         self.assertIn("状态: 运行中", summary)
         self.assertIn("状态同步失败，保留上次结果", summary)
+
+    def test_missing_grant_in_latest_network_window_reports_zero_reward(self):
+        active, reward = nni_previous_window_metrics(
+            {
+                "network_devices": {"active_device_count": 3},
+                "network_rewards": {"latest_period_end_unix": 1_800_001_200},
+                "records": [
+                    {
+                        "period_end_unix": 1_800_000_600,
+                        "reward_points": "10.50000000",
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(active, 3)
+        self.assertEqual(reward, "0")
 
     def test_runtime_sync_auto_starts_and_stops_the_page_visual(self):
         class FakeButton:
@@ -100,21 +137,52 @@ class SmallScreenNniSummaryTests(unittest.TestCase):
         responses = [
             {"ok": True, "data": {"joined": True, "remote_nodes": ["https://node.test"]}},
             {"ok": True, "data": {"signature_chip_present": True}},
+            {
+                "ok": True,
+                "data": {
+                    "network_devices": {"active_device_count": 8},
+                    "records": [{"reward_points": "625.00000000"}],
+                },
+            },
         ]
         with mock.patch.object(
             screen,
             "localhost_api_request",
             side_effect=[json.dumps(item).encode("utf-8") for item in responses],
         ) as request:
-            config, device, error = screen.fetch_nni_runtime_overview("key")
+            config, device, rewards, error = screen.fetch_nni_runtime_overview("key")
 
         self.assertEqual(error, "")
         self.assertTrue(config["joined"])
         self.assertTrue(device["signature_chip_present"])
+        self.assertEqual(rewards["network_devices"]["active_device_count"], 8)
         self.assertEqual(
             [call.args[1] for call in request.call_args_list],
-            ["/v1/nni/config", "/v1/nni/device/status"],
+            [
+                "/v1/nni/config",
+                "/v1/nni/device/status",
+                "/v1/nni/rewards?page=1&per_page=1",
+            ],
         )
+
+    def test_silent_status_refresh_can_skip_the_reward_signature(self):
+        responses = [
+            {"ok": True, "data": {"joined": True}},
+            {"ok": True, "data": {"signature_chip_present": True}},
+        ]
+        with mock.patch.object(
+            screen,
+            "localhost_api_request",
+            side_effect=[json.dumps(item).encode("utf-8") for item in responses],
+        ) as request:
+            config, device, rewards, error = screen.fetch_nni_runtime_overview(
+                "key",
+                include_rewards=False,
+            )
+
+        self.assertEqual(error, "")
+        self.assertIsNone(rewards)
+        self.assertEqual(len(request.call_args_list), 2)
 
     def test_stop_updates_persisted_join_state(self):
         response = {"ok": True, "data": {"joined": False, "remote_nodes": []}}

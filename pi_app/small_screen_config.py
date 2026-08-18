@@ -43,6 +43,7 @@ def _default_settings():
         "show_gallery": True,
         "show_weather": True,
         "show_crypto": True,
+        "show_bancor": True,
         "user_key": "",
     }
 
@@ -152,6 +153,7 @@ def migrate_small_screen_settings(remove_legacy=False):
         "show_gallery": bool(settings.get("show_gallery", defaults["show_gallery"])),
         "show_weather": bool(settings.get("show_weather", defaults["show_weather"])),
         "show_crypto": bool(settings.get("show_crypto", defaults["show_crypto"])),
+        "show_bancor": bool(settings.get("show_bancor", defaults["show_bancor"])),
         "user_key": str(settings.get("user_key") or defaults["user_key"]).strip(),
     }
     if merged["lang"] not in ("EN", "CN"):
@@ -227,6 +229,17 @@ def load_gallery_page_visible():
 
 def save_gallery_page_visible(visible):
     _save_setting_value("show_gallery", bool(visible))
+
+
+def load_bancor_page_visible():
+    settings = _load_settings_dict()
+    if "show_bancor" in settings:
+        return bool(settings.get("show_bancor"))
+    return True
+
+
+def save_bancor_page_visible(visible):
+    _save_setting_value("show_bancor", bool(visible))
 
 
 def load_weather_page_visible():

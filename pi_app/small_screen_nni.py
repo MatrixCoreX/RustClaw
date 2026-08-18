@@ -1,5 +1,6 @@
 import urllib.parse
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 
 
 def nni_runtime_is_active(config):
@@ -32,7 +33,54 @@ def _clock_label(timestamp):
         return "--"
 
 
-def format_nni_runtime_summary(config, device, lang="CN", error=""):
+def _reward_amount(value):
+    try:
+        parsed = Decimal(str(value).strip())
+    except (InvalidOperation, TypeError, ValueError):
+        return "--"
+    if not parsed.is_finite() or parsed < 0:
+        return "--"
+    text = format(parsed, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def nni_previous_window_metrics(rewards):
+    if not isinstance(rewards, dict):
+        return None, "--"
+    network_devices = rewards.get("network_devices")
+    network_devices = network_devices if isinstance(network_devices, dict) else {}
+    active_count = network_devices.get("active_device_count")
+    if not isinstance(active_count, int) or isinstance(active_count, bool) or active_count < 0:
+        active_count = None
+
+    network_rewards = rewards.get("network_rewards")
+    network_rewards = network_rewards if isinstance(network_rewards, dict) else {}
+    latest_period_end = network_rewards.get("latest_period_end_unix")
+    if not isinstance(latest_period_end, int) or isinstance(latest_period_end, bool):
+        latest_period_end = None
+    records = rewards.get("records")
+    records = records if isinstance(records, list) else []
+    latest_record = max(
+        (record for record in records if isinstance(record, dict)),
+        key=lambda record: record.get("period_end_unix")
+        if isinstance(record.get("period_end_unix"), int)
+        else -1,
+        default=None,
+    )
+    if latest_record is None:
+        reward = "0" if latest_period_end is not None else "--"
+    else:
+        record_period_end = latest_record.get("period_end_unix")
+        if latest_period_end is not None and record_period_end != latest_period_end:
+            reward = "0"
+        else:
+            reward = _reward_amount(latest_record.get("reward_points"))
+    return active_count, reward
+
+
+def format_nni_runtime_summary(config, device, lang="CN", error="", rewards=None):
     selected_lang = "EN" if lang == "EN" else "CN"
     if not isinstance(config, dict) or not config:
         if error:
@@ -61,6 +109,8 @@ def format_nni_runtime_summary(config, device, lang="CN", error=""):
             "unknown": "待确认",
             "requests": "请求",
             "latest": "最近",
+            "network_active": "全网活跃设备",
+            "previous_reward": "上一窗口奖励",
             "sync_error": "状态同步失败，保留上次结果",
         },
         "EN": {
@@ -84,6 +134,8 @@ def format_nni_runtime_summary(config, device, lang="CN", error=""):
             "unknown": "Pending",
             "requests": "Requests",
             "latest": "Latest",
+            "network_active": "Network active devices",
+            "previous_reward": "Previous-window reward",
             "sync_error": "Status refresh failed; showing the last result",
         },
     }[selected_lang]
@@ -113,6 +165,11 @@ def format_nni_runtime_summary(config, device, lang="CN", error=""):
         f"{copy['requests']}: {request_count}  ·  "
         f"{copy['latest']}: {_clock_label(config.get('last_heartbeat_at_ts'))}",
     ]
+    active_count, previous_reward = nni_previous_window_metrics(rewards)
+    lines.append(
+        f"{copy['network_active']}: {active_count if active_count is not None else '--'}  ·  "
+        f"{copy['previous_reward']}: {previous_reward} POINT"
+    )
     if error:
         lines.append(copy["sync_error"])
     return "\n".join(lines)
