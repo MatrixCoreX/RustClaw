@@ -1,5 +1,5 @@
 {
-  "core_skill_count": 48,
+  "core_skill_count": 49,
   "covered_categories": [
     "behavior:archive_roundtrip",
     "behavior:async_cancel",
@@ -45,6 +45,7 @@
     "skill:make_dir",
     "skill:memory_store",
     "skill:music_generate",
+    "skill:nni",
     "skill:office_workspace",
     "skill:package_manager",
     "skill:process_basic",
@@ -68,7 +69,7 @@
   "minimum_proven": true,
   "missing_categories": [],
   "registry": "configs/skills_registry.toml",
-  "required_category_count": 62,
+  "required_category_count": 63,
   "schema_version": 1,
   "selected_cases": [
     "b100_002_fs_list_docs_en",
@@ -109,11 +110,12 @@
     "b100_104_subagent_readonly_review_en",
     "b100_105_workspace_patch_live_zh",
     "b100_106_kb_cancel_cleanup_en",
-    "b100_107_archive_safe_roundtrip_zh"
+    "b100_107_archive_safe_roundtrip_zh",
+    "b100_108_nni_status_zh"
   ],
   "selected_non_x_dry_run_count": 0,
-  "selected_row_count": 39,
+  "selected_row_count": 40,
   "selection_algorithm": "exact_minimum_cardinality_set_cover",
   "source": "scripts/nl_tests/cases/nl_cases_basic_skill_100_coverage_20260629.txt",
-  "source_sha256": "e5c1786b68963634d07eb8494d00066ef1828904cf681589b4fb5f19a86d8b3d"
+  "source_sha256": "b2316b6ba85f08f5bc1f1739aeaf3a4701b18a977926fa828def323640a04cc5"
 }

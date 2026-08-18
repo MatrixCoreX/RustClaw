@@ -42,7 +42,7 @@ Parse one local file and return:
 
 ## Parameter Contract (from interface)
 - `action` (required, string): `parse_doc`
-- `path` (required, string): local file path
+- `path` (required, string): local file path; relative paths are resolved against the runtime-provided workspace root
 - `mode` (optional, string, default `auto`): `auto|text_only`
 - `max_chars` (optional, integer, default `12000`): size of one text page
 - `start_char` (optional, integer, default `0`): explicit Unicode-character page start

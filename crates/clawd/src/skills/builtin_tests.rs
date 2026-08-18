@@ -1143,6 +1143,13 @@ async fn run_safe_command_allows_successful_pipeline() {
     assert_eq!(output.trim_end(), "ok");
 }
 
+#[test]
+fn run_cmd_does_not_start_login_shells() {
+    let source = include_str!("builtin_run_cmd.rs");
+    assert!(!source.contains("pipefail\", \"-lc"));
+    assert!(!source.contains("pipefail -lc"));
+}
+
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn run_safe_command_idle_timeout_leaves_no_live_child_process() {

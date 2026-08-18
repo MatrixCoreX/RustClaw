@@ -41,6 +41,17 @@ fn impossible_memory_request_is_not_started() {
 }
 
 #[test]
+fn explicit_small_memory_request_is_only_honored_on_low_memory_hosts() {
+    assert_eq!(requested_memory_mb(64, Some(1024)), 64);
+    assert_eq!(
+        requested_memory_mb(64, Some(4096)),
+        DEFAULT_SKILL_MEMORY_MIB
+    );
+    assert_eq!(requested_memory_mb(64, None), DEFAULT_SKILL_MEMORY_MIB);
+    assert_eq!(requested_memory_mb(0, Some(1024)), DEFAULT_SKILL_MEMORY_MIB);
+}
+
+#[test]
 fn low_memory_host_serializes_runtime_work_and_disables_warm_pool() {
     let plan = runtime_concurrency_plan_for_host(4, 3, 2, true, 4, Some(1024));
     assert_eq!(plan.worker_concurrency, 1);
