@@ -40,7 +40,6 @@ from small_screen_config import (
     load_logs_page_visible,
     load_messages_page_visible,
     load_product_display_name,
-    load_skills_page_visible,
     load_stock_page_visible,
     load_theme,
     load_us_stock_page_visible,
@@ -50,7 +49,6 @@ from small_screen_config import (
     save_lang,
     save_logs_page_visible,
     save_messages_page_visible,
-    save_skills_page_visible,
     save_stock_page_visible,
     save_theme,
     save_us_stock_page_visible,
@@ -1376,7 +1374,6 @@ class SmallScreenApp:
         self._show_messages_page = load_messages_page_visible()
         self._show_logs_page = load_logs_page_visible()
         self._show_gallery_page = load_gallery_page_visible()
-        self._show_skills_page = load_skills_page_visible()
         self._show_weather_page = load_weather_page_visible()
         self._show_stock_page = load_stock_page_visible()
         self._show_us_stock_page = load_us_stock_page_visible()
@@ -1714,13 +1711,12 @@ class SmallScreenApp:
         self.status_canvas = tk.Canvas(right_frame, width=16, height=16, bg=self._c("bg"), highlightthickness=0)
         self.status_canvas.pack(side=tk.LEFT)
         self.status_oval = self.status_canvas.create_oval(2, 2, 14, 14, outline=self._c("status_outline"), fill=self._c("status_off"))
-        # 可切换内容区：仪表盘 | 技能列表
+        # 可切换内容区
         self.switch_container = tk.Frame(self.root, bg=self._c("bg"))
         self.switch_container.pack(fill=tk.BOTH, expand=True)
         self.dashboard_frame = tk.Frame(self.switch_container, bg=self._c("bg"), padx=8, pady=4)
         self.dashboard_frame.pack(fill=tk.BOTH, expand=True)
         self.overview_frame = tk.Frame(self.switch_container, bg=self._c("bg"), padx=8, pady=4)
-        self.skills_frame = tk.Frame(self.switch_container, bg=self._c("bg"))
         self.gallery_frame = tk.Frame(self.switch_container, bg=self._c("bg"))
         self.weather_frame = tk.Frame(self.switch_container, bg=self._c("bg"))
         self.crypto_frame = tk.Frame(self.switch_container, bg=self._c("bg"))
@@ -1730,8 +1726,8 @@ class SmallScreenApp:
         self.users_frame = tk.Frame(self.switch_container, bg=self._c("bg"), padx=20, pady=18)
         self.logs_frame = tk.Frame(self.switch_container, bg=self._c("bg"), padx=10, pady=8)
         self.settings_frame = tk.Frame(self.switch_container, bg=self._c("bg"), padx=24, pady=20)
-        # 顺序（左滑下一页）：首页 → 总览 → 用户 → 日志 → 技能 → 天气 → A股 → 加密货币 → 挖矿 → 设置；右滑=上一页
-        self._view_mode = "dashboard"  # dashboard | overview | users | logs | skills | weather | stock | crypto | gallery | wifi | settings
+        # 顺序（左滑下一页）：首页 → 总览 → 用户 → 日志 → 天气 → A股 → 美股 → 加密货币 → NNI → 设置；右滑=上一页
+        self._view_mode = "dashboard"
         self._crypto_job = None
         self._stock_job = None
         self._us_stock_job = None
@@ -1836,14 +1832,13 @@ class SmallScreenApp:
         self._users_messages_body.pack(fill=tk.BOTH, expand=True)
         self._logs_body = tk.Frame(self.logs_frame, bg=self._c("bg"))
         self._logs_body.pack(fill=tk.BOTH, expand=True)
-        # 翻页：左右滑屏可到仪表盘 / 技能 / 加密货币 / 图库 / 用户 / 设置
+        # 翻页：左右滑屏可到仪表盘、消息、日志、天气、行情、NNI 和设置
         # 设置页（内嵌在主窗口，左滑可进入）
         self._settings_lang_var = tk.StringVar(value=self._lang)
         self._settings_theme_var = tk.StringVar(value=self._theme)
         self._settings_show_messages_var = tk.BooleanVar(value=self._show_messages_page)
         self._settings_show_logs_var = tk.BooleanVar(value=self._show_logs_page)
         self._settings_show_gallery_var = tk.BooleanVar(value=self._show_gallery_page)
-        self._settings_show_skills_var = tk.BooleanVar(value=self._show_skills_page)
         self._settings_show_weather_var = tk.BooleanVar(value=self._show_weather_page)
         self._settings_show_stock_var = tk.BooleanVar(value=self._show_stock_page)
         self._settings_show_us_stock_var = tk.BooleanVar(value=self._show_us_stock_page)
@@ -2028,15 +2023,12 @@ class SmallScreenApp:
         self._settings_pages_row3 = tk.Frame(self._settings_pages_frame, bg=self._c("bg"))
         self._settings_pages_row3.pack(fill=tk.X, pady=(0, 10))
         self._settings_pages_row4 = tk.Frame(self._settings_pages_frame, bg=self._c("bg"))
-        self._settings_pages_row4.pack(fill=tk.X, pady=(0, 10))
-        self._settings_pages_row5 = tk.Frame(self._settings_pages_frame, bg=self._c("bg"))
-        self._settings_pages_row5.pack(fill=tk.X)
+        self._settings_pages_row4.pack(fill=tk.X)
         for row in (
             self._settings_pages_row1,
             self._settings_pages_row2,
             self._settings_pages_row3,
             self._settings_pages_row4,
-            self._settings_pages_row5,
         ):
             row.grid_columnconfigure(0, weight=1, uniform="settings-pages")
             row.grid_columnconfigure(1, weight=1, uniform="settings-pages")
@@ -2084,28 +2076,6 @@ class SmallScreenApp:
             pady=6,
         )
         self._settings_show_logs_btn.grid(row=0, column=1, sticky="ew", padx=(6, 0))
-        self._settings_show_skills_btn = tk.Checkbutton(
-            self._settings_pages_row2,
-            text=_t("show_skills_page"),
-            variable=self._settings_show_skills_var,
-            onvalue=True,
-            offvalue=False,
-            command=lambda: self._apply_settings_changes("pages"),
-            font=("", 12),
-            indicatoron=False,
-            relief=tk.FLAT,
-            borderwidth=0,
-            highlightthickness=0,
-            bg=self._c("button_bg"),
-            fg=self._c("button_fg"),
-            selectcolor=self._c("button_bg"),
-            activebackground=self._c("button_active_bg"),
-            activeforeground=self._c("button_fg"),
-            anchor="w",
-            padx=10,
-            pady=6,
-        )
-        self._settings_show_skills_btn.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         self._settings_show_gallery_btn = tk.Checkbutton(
             self._settings_pages_row2,
             text=_t("show_nni_page"),
@@ -2127,9 +2097,9 @@ class SmallScreenApp:
             padx=10,
             pady=6,
         )
-        self._settings_show_gallery_btn.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        self._settings_show_gallery_btn.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         self._settings_show_weather_btn = tk.Checkbutton(
-            self._settings_pages_row3,
+            self._settings_pages_row2,
             text=_t("show_weather_page"),
             variable=self._settings_show_weather_var,
             onvalue=True,
@@ -2149,7 +2119,7 @@ class SmallScreenApp:
             padx=10,
             pady=6,
         )
-        self._settings_show_weather_btn.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self._settings_show_weather_btn.grid(row=0, column=1, sticky="ew", padx=(6, 0))
         self._settings_show_stock_btn = tk.Checkbutton(
             self._settings_pages_row3,
             text=_t("show_stock_page"),
@@ -2171,7 +2141,7 @@ class SmallScreenApp:
             padx=10,
             pady=6,
         )
-        self._settings_show_stock_btn.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        self._settings_show_stock_btn.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         self._settings_show_crypto_btn = tk.Checkbutton(
             self._settings_pages_row4,
             text=_t("show_crypto_page"),
@@ -2195,7 +2165,7 @@ class SmallScreenApp:
         )
         self._settings_show_crypto_btn.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         self._settings_show_us_stock_btn = tk.Checkbutton(
-            self._settings_pages_row4,
+            self._settings_pages_row3,
             text=_t("show_us_stock_page"),
             variable=self._settings_show_us_stock_var,
             onvalue=True,
@@ -2216,8 +2186,8 @@ class SmallScreenApp:
             pady=6,
         )
         self._settings_show_us_stock_btn.grid(row=0, column=1, sticky="ew", padx=(6, 0))
-        self._settings_pages_row5_spacer = tk.Frame(self._settings_pages_row5, bg=self._c("bg"))
-        self._settings_pages_row5_spacer.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        self._settings_pages_row4_spacer = tk.Frame(self._settings_pages_row4, bg=self._c("bg"))
+        self._settings_pages_row4_spacer.grid(row=0, column=1, sticky="ew", padx=(6, 0))
         self._settings_system_frame = tk.Frame(self._settings_content_frame, bg=self._c("bg"))
         self._settings_wifi_btn = tk.Button(
             self._settings_system_frame,
@@ -2559,8 +2529,6 @@ class SmallScreenApp:
             self._top_recent_message_var.set(self._t("recent_messages_title"))
         elif self._view_mode == "logs":
             self._top_recent_message_var.set("logs")
-        elif self._view_mode == "skills":
-            self._top_recent_message_var.set("skills")
         elif self._view_mode == "weather":
             self._top_recent_message_var.set(self._t("weather_title"))
         elif self._view_mode == "us_stock":
@@ -2886,7 +2854,7 @@ class SmallScreenApp:
         if self._overview_skills_loading and not summary:
             return self._t("overview_loading")
         if summary.get("error"):
-            return self._t("skills_load_fail")
+            return self._t("overview_skills_load_fail")
         total = summary.get("total")
         enabled = summary.get("enabled")
         if total is None:
@@ -3110,8 +3078,6 @@ class SmallScreenApp:
             modes.append("users")
         if self._show_logs_page:
             modes.append("logs")
-        if self._show_skills_page:
-            modes.append("skills")
         if self._show_weather_page:
             modes.append("weather")
         if self._show_stock_page:
@@ -3126,7 +3092,7 @@ class SmallScreenApp:
         return modes
 
     def _switch_view(self, mode):
-        if mode not in {"dashboard", "overview", "users", "logs", "skills", "weather", "stock", "us_stock", "crypto", "gallery", "settings", "wifi"}:
+        if mode not in {"dashboard", "overview", "users", "logs", "weather", "stock", "us_stock", "crypto", "gallery", "settings", "wifi"}:
             mode = "dashboard"
         self._reset_overview_double_tap()
         self._teardown_current_view()
@@ -3135,7 +3101,6 @@ class SmallScreenApp:
             self.overview_frame,
             self.users_frame,
             self.logs_frame,
-            self.skills_frame,
             self.weather_frame,
             self.stock_frame,
             self.us_stock_frame,
@@ -3162,9 +3127,6 @@ class SmallScreenApp:
         elif mode == "logs":
             self._prepare_logs_view()
             self.logs_frame.pack(fill=tk.BOTH, expand=True)
-        elif mode == "skills":
-            self.skills_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
-            self._refresh_skills_view()
         elif mode == "weather":
             self.weather_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
             self._show_weather()
@@ -4696,7 +4658,6 @@ class SmallScreenApp:
         old_show_messages = self._show_messages_page
         old_show_logs = self._show_logs_page
         old_show_gallery = self._show_gallery_page
-        old_show_skills = self._show_skills_page
         old_show_weather = self._show_weather_page
         old_show_stock = self._show_stock_page
         old_show_us_stock = self._show_us_stock_page
@@ -4706,7 +4667,6 @@ class SmallScreenApp:
         self._show_messages_page = bool(self._settings_show_messages_var.get())
         self._show_logs_page = bool(self._settings_show_logs_var.get())
         self._show_gallery_page = bool(self._settings_show_gallery_var.get())
-        self._show_skills_page = bool(self._settings_show_skills_var.get())
         self._show_weather_page = bool(self._settings_show_weather_var.get())
         self._show_stock_page = bool(self._settings_show_stock_var.get())
         self._show_us_stock_page = bool(self._settings_show_us_stock_var.get())
@@ -4715,7 +4675,6 @@ class SmallScreenApp:
         save_messages_page_visible(self._show_messages_page)
         save_logs_page_visible(self._show_logs_page)
         save_gallery_page_visible(self._show_gallery_page)
-        save_skills_page_visible(self._show_skills_page)
         save_weather_page_visible(self._show_weather_page)
         save_stock_page_visible(self._show_stock_page)
         save_us_stock_page_visible(self._show_us_stock_page)
@@ -4740,7 +4699,6 @@ class SmallScreenApp:
             self._show_messages_page != old_show_messages
             or self._show_logs_page != old_show_logs
             or self._show_gallery_page != old_show_gallery
-            or self._show_skills_page != old_show_skills
             or self._show_weather_page != old_show_weather
             or self._show_stock_page != old_show_stock
             or self._show_us_stock_page != old_show_us_stock
@@ -5969,20 +5927,6 @@ class SmallScreenApp:
         threading.Thread(target=_fetch, daemon=True).start()
         self._us_stock_job = self.root.after(self._us_stock_refresh_sec * 1000, self._us_stock_refresh_loop)
 
-    def _refresh_skills_view(self):
-        for w in self.skills_frame.winfo_children():
-            w.destroy()
-        self._skills_loading_label = tk.Label(
-            self.skills_frame, text="Loading...", font=("", 12), bg=self._c("bg"), fg=self._c("status_off")
-        )
-        self._skills_loading_label.pack(pady=12)
-        def _fetch():
-            result = fetch_skills_config(self._auth_key)
-            if getattr(self, "_closing", False):
-                return
-            self._post_ui(lambda: self._fill_skills_view(result))
-        threading.Thread(target=_fetch, daemon=True).start()
-
     def _refresh_health_once(self):
         def _fetch():
             data, err = fetch_health(self._auth_key)
@@ -5991,103 +5935,6 @@ class SmallScreenApp:
                 return
             self._post_ui(lambda d=data, e=err, logs=logs, user_messages=user_messages: self._update(d, e, logs=logs, user_messages=user_messages))
         threading.Thread(target=_fetch, daemon=True).start()
-
-    def _fill_skills_view(self, result):
-        if getattr(self, "_closing", False) or self._view_mode != "skills":
-            return
-        all_skills, enabled_set = result if result else (None, None)
-        for w in self.skills_frame.winfo_children():
-            w.destroy()
-        if all_skills is None:
-            tk.Label(self.skills_frame, text=self._t("skills_load_fail"), font=("", 12), bg=self._c("bg"), fg=self._c("status_off")).pack(anchor=tk.W)
-            return
-        # 技能列表全屏上下滑动，保留右侧滚动条；拖拽/滚轮/滚动条均可
-        list_wrapper = tk.Frame(self.skills_frame, bg=self._c("bg"))
-        list_wrapper.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
-        canvas = tk.Canvas(list_wrapper, bg=self._c("bg"), highlightthickness=0)
-        scrollbar = tk.Scrollbar(list_wrapper)
-        inner = tk.Frame(canvas, bg=self._c("bg"))
-        win_id = canvas.create_window((0, 0), window=inner, anchor=tk.NW)
-
-        def _on_inner_configure(_):
-            canvas.configure(scrollregion=canvas.bbox("all"))
-
-        def _on_canvas_configure(evt):
-            canvas.itemconfig(win_id, width=evt.width)
-
-        inner.bind("<Configure>", _on_inner_configure)
-        canvas.bind("<Configure>", _on_canvas_configure)
-        row_h = 22
-        canvas.configure(yscrollcommand=scrollbar.set, yscrollincrement=row_h)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self._style_scrollbar(scrollbar)
-
-        def _after_scroll():
-            canvas.update_idletasks()
-
-        def _scrollbar_cmd(*args):
-            canvas.yview(*args)
-            _after_scroll()
-
-        scrollbar.configure(command=_scrollbar_cmd)
-
-        for name in all_skills:
-            row = tk.Frame(inner, bg=self._c("bg"), height=row_h)
-            row.pack(fill=tk.X, pady=0)
-            row.pack_propagate(False)
-            dot_canvas = tk.Canvas(row, width=14, height=14, bg=self._c("bg"), highlightthickness=0)
-            dot_canvas.pack(side=tk.LEFT, padx=(0, 8), pady=3)
-            fill = self._c("status_ok") if name in enabled_set else self._c("status_err")
-            dot_canvas.create_oval(2, 2, 12, 12, outline=self._c("status_outline"), fill=fill)
-            tk.Label(row, text=name[:36], font=("", 12), bg=self._c("bg"), fg=self._c("fg")).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        inner.update_idletasks()
-        canvas.configure(scrollregion=canvas.bbox("all"))
-
-        # 滚轮：每次翻一点（约 3 单位）；拖拽：手指方向即列表移动方向，按像素比例滚动
-        _scroll_units = 3
-
-        def _scroll(evt):
-            # 滚轮向下(delta<0/num=5) -> 视图向下 -> 看下面内容
-            if getattr(evt, "num", None) == 5 or getattr(evt, "delta", 0) == -120:
-                canvas.yview_scroll(_scroll_units, "units")
-            else:
-                canvas.yview_scroll(-_scroll_units, "units")
-            _after_scroll()
-        _drag_y_root = [None]
-
-        def _on_drag_start(evt):
-            _drag_y_root[0] = evt.y_root
-
-        def _on_drag_motion(evt):
-            if _drag_y_root[0] is not None:
-                dy = evt.y_root - _drag_y_root[0]
-                # 手指向下(dy>0) -> 视图向下(yview 正) -> 内容上移、看到下面；每次按位移滚动一点
-                step = max(-15, min(15, int(dy)))
-                if step != 0:
-                    canvas.yview_scroll(step, "units")
-                    _after_scroll()
-                _drag_y_root[0] = evt.y_root
-
-        def _on_drag_end(_evt):
-            _drag_y_root[0] = None
-
-        def _bind_scroll(widget):
-            widget.bind("<MouseWheel>", _scroll)
-            widget.bind("<Button-4>", lambda e: (canvas.yview_scroll(-_scroll_units, "units"), _after_scroll()))
-            widget.bind("<Button-5>", lambda e: (canvas.yview_scroll(_scroll_units, "units"), _after_scroll()))
-            widget.bind("<Button-1>", _on_drag_start)
-            widget.bind("<B1-Motion>", _on_drag_motion)
-            widget.bind("<ButtonRelease-1>", _on_drag_end)
-
-        _bind_scroll(list_wrapper)
-        _bind_scroll(canvas)
-        _bind_scroll(inner)
-        _bind_scroll(scrollbar)
-        for row in inner.winfo_children():
-            _bind_scroll(row)
-            for child in row.winfo_children():
-                _bind_scroll(child)
 
     def _schedule_refresh(self):
         existing = getattr(self, "_refresh_thread", None)

@@ -41,7 +41,6 @@ def _default_settings():
         "show_messages": True,
         "show_logs": True,
         "show_gallery": True,
-        "show_skills": True,
         "show_weather": True,
         "show_crypto": True,
         "user_key": "",
@@ -151,7 +150,6 @@ def migrate_small_screen_settings(remove_legacy=False):
         "show_messages": bool(settings.get("show_messages", defaults["show_messages"])),
         "show_logs": bool(settings.get("show_logs", defaults["show_logs"])),
         "show_gallery": bool(settings.get("show_gallery", defaults["show_gallery"])),
-        "show_skills": bool(settings.get("show_skills", defaults["show_skills"])),
         "show_weather": bool(settings.get("show_weather", defaults["show_weather"])),
         "show_crypto": bool(settings.get("show_crypto", defaults["show_crypto"])),
         "user_key": str(settings.get("user_key") or defaults["user_key"]).strip(),
@@ -229,17 +227,6 @@ def load_gallery_page_visible():
 
 def save_gallery_page_visible(visible):
     _save_setting_value("show_gallery", bool(visible))
-
-
-def load_skills_page_visible():
-    settings = _load_settings_dict()
-    if "show_skills" in settings:
-        return bool(settings.get("show_skills"))
-    return True
-
-
-def save_skills_page_visible(visible):
-    _save_setting_value("show_skills", bool(visible))
 
 
 def load_weather_page_visible():
