@@ -199,6 +199,27 @@ class SmallScreenNniSummaryTests(unittest.TestCase):
         body = json.loads(request.call_args.kwargs["body"].decode("utf-8"))
         self.assertEqual(body, {"joined": False})
 
+    def test_successful_join_can_persist_the_running_state(self):
+        response = {
+            "ok": True,
+            "data": {
+                "joined": True,
+                "worker_running": True,
+                "heartbeat_state": "enabling",
+            },
+        }
+        with mock.patch.object(
+            screen,
+            "localhost_api_request",
+            return_value=json.dumps(response).encode("utf-8"),
+        ) as request:
+            config, error = screen.update_nni_joined_state("key", True)
+
+        self.assertEqual(error, "")
+        self.assertTrue(config["joined"])
+        body = json.loads(request.call_args.kwargs["body"].decode("utf-8"))
+        self.assertEqual(body, {"joined": True})
+
     def test_join_request_sends_the_single_node_url_runtime_contract(self):
         response = {
             "ok": True,

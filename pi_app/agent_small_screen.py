@@ -4231,6 +4231,15 @@ class SmallScreenApp:
             )
             if join_epoch != self._llm_join_epoch:
                 return
+            persisted_config = {}
+            if verified and verified.get("joined") and verified.get("compliant"):
+                persisted_config, persist_error = update_nni_joined_state(
+                    self._auth_key,
+                    True,
+                )
+                if not persisted_config or not persisted_config.get("joined"):
+                    verified = None
+                    verify_error = persist_error or "nni_join_state_persist_failed"
 
             def finish():
                 if join_epoch != self._llm_join_epoch:
@@ -4255,17 +4264,20 @@ class SmallScreenApp:
                             self._llm_lobster_tick()
                     self._nni_runtime_config = {
                         **self._nni_runtime_config,
-                        "joined": True,
-                        "worker_running": True,
-                        "heartbeat_state": "enabling",
+                        **persisted_config,
                     }
                     self._nni_rewards_updated_at = 0.0
                     self._sync_nni_runtime_view()
                     self._schedule_llm_info_clear()
                     self._load_llm_remote_nodes_for_page(silent=True)
                 else:
-                    self._llm_signature_error = (verify_error or "nni_join_verify_rejected").strip()
-                    self._llm_join_status = self._t("llm_remote_join_failed")
+                    error_text = str(
+                        verify_error or "nni_join_verify_rejected"
+                    ).strip()[:200]
+                    self._llm_signature_error = ""
+                    self._llm_join_status = self._t(
+                        "llm_remote_join_failed_detail"
+                    ).format(error=error_text)
                     self._stop_llm_animation()
                     try:
                         self._llm_join_btn.config(text=self._t("llm_join"))
