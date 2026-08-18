@@ -6,7 +6,7 @@
 
 ```
 pi_app/
-├── agent_small_screen.py          # 主程序（480×320 全屏，/v1/health + 技能/加密货币/NNI 等）
+├── agent_small_screen.py          # 主程序（480×320 全屏，运行状态、消息、行情、Bancor、NNI 等）
 ├── run-small-screen-launcher.sh   # 桌面/自启动用启动脚本（补全 DISPLAY/PATH）
 ├── run-small-screen.sh            # 终端前台启动（调试用）
 ├── open-small-screen.sh           # 用浏览器打开网页版小屏页（small-screen.html）
