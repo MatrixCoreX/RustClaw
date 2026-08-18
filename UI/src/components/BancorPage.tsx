@@ -643,9 +643,20 @@ export function BancorPage({
           </div>
           <div className="mt-3 rounded-xl border border-white/8 bg-white/[0.025] p-3">
             <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <WalletCards className="h-4 w-4 text-sky-300" />
-                <h3 className="text-sm font-medium text-white/80">{t("我的余额", "My balances")}</h3>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <WalletCards className="h-4 w-4 text-sky-300" />
+                  <h3 className="text-sm font-medium text-white/80">{t("我的余额", "My balances")}</h3>
+                </div>
+                {assetOwnerPubkey ? (
+                  <NniPublicKeyDisplay
+                    value={assetOwnerPubkey}
+                    t={t}
+                    className="mt-1 pl-6"
+                    valueClassName="text-[10px] leading-4 text-white/40"
+                    allowFormatSwitch={false}
+                  />
+                ) : null}
               </div>
               <button type="button" className="theme-icon-btn" disabled={accountLoading || !signingDeviceReady} onClick={() => void fetchAccount()} title={t("签名刷新余额", "Sign to refresh balances")}>
                 <RefreshCw className={`h-4 w-4 ${accountLoading ? "animate-spin" : ""}`} />
@@ -667,22 +678,6 @@ export function BancorPage({
                 onClick={() => account && fillBalance("buy", account.usd_balance)}
               />
             </div>
-            {assetOwnerPubkey ? (
-              <div
-                className="mt-3 min-w-0 border-t border-white/8 pt-3"
-                data-bancor-asset-owner-pubkey="true"
-              >
-                <p className="mb-1.5 text-xs text-white/45">
-                  {t("资产账号公钥", "Asset account public key")}
-                </p>
-                <NniPublicKeyDisplay
-                  value={assetOwnerPubkey}
-                  t={t}
-                  allowFormatSwitch={false}
-                  valueClassName="text-xs leading-5 text-white/70"
-                />
-              </div>
-            ) : null}
           </div>
 
           {tradeLayout === "standard" ? (
