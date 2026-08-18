@@ -22,6 +22,7 @@ import type {
   NniHeartbeatRecordsResponse,
   NniJoinTaskResponse,
   NniJoinVerifyResponse,
+  NniNetworkStatsResponse,
   NniRewardsResponse,
 } from "../types/api";
 
@@ -76,6 +77,9 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
   const [nniRewards, setNniRewards] = useState<NniRewardsResponse | null>(null);
   const [nniRewardsLoading, setNniRewardsLoading] = useState(false);
   const [nniRewardsError, setNniRewardsError] = useState<string | null>(null);
+  const [nniNetworkStats, setNniNetworkStats] = useState<NniNetworkStatsResponse | null>(null);
+  const [nniNetworkStatsLoading, setNniNetworkStatsLoading] = useState(false);
+  const [nniNetworkStatsError, setNniNetworkStatsError] = useState<string | null>(null);
   const [nniConfigLoading, setNniConfigLoading] = useState(false);
   const [nniConfigSaving, setNniConfigSaving] = useState(false);
   const [nniConfigError, setNniConfigError] = useState<string | null>(null);
@@ -516,6 +520,31 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     });
   };
 
+  const fetchNniNetworkStats = (silent = false) => runCoalescedRead(
+    readRequestsRef.current,
+    "network-stats",
+    async () => {
+      if (!silent) {
+        setNniNetworkStatsLoading(true);
+        setNniNetworkStatsError(null);
+      }
+      try {
+        const res = await fetchResilientRead(apiFetch, "/v1/nni/network-stats");
+        const body = (await res.json()) as ApiResponse<NniNetworkStatsResponse>;
+        if (!res.ok || !body.ok || !body.data) {
+          throw new Error(body.error || `NNI network stats load failed (${res.status})`);
+        }
+        setNniNetworkStats(body.data);
+        setNniNetworkStatsError(null);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "未知错误";
+        if (!silent) setNniNetworkStatsError(message);
+      } finally {
+        if (!silent) setNniNetworkStatsLoading(false);
+      }
+    },
+  );
+
   const saveNniConfig = async () => {
     setNniConfigSaving(true);
     setNniConfigError(null);
@@ -669,6 +698,9 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     nniRewards,
     nniRewardsLoading,
     nniRewardsError,
+    nniNetworkStats,
+    nniNetworkStatsLoading,
+    nniNetworkStatsError,
     nniConfigLoading,
     nniConfigSaving,
     nniConfigError,
@@ -689,6 +721,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     fetchNniHeartbeatErrors,
     clearNniHeartbeatErrors,
     fetchNniRewards,
+    fetchNniNetworkStats,
     runNniDeviceAction,
     setNniDeviceSimulation,
   };

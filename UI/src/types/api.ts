@@ -1249,6 +1249,15 @@ export interface NniNetworkRewards {
   latest_period_end_unix: number | null;
 }
 
+export interface NniNetworkStatsResponse {
+  schema_version: 1;
+  status: "heartbeat_network_stats";
+  node_url?: string;
+  network_devices: NniNetworkDeviceStats;
+  reward_policy: NniRewardPolicy;
+  network_rewards: NniNetworkRewards;
+}
+
 export interface NniRewardsResponse {
   schema_version: 1;
   status: string;

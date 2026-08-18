@@ -38,6 +38,7 @@ import type {
   NniDeviceStatusResponse,
   NniHeartbeatErrorRecord,
   NniHeartbeatRecord,
+  NniNetworkStatsResponse,
   NniRewardsResponse,
 } from "../types/api";
 
@@ -86,6 +87,9 @@ export interface NniPageProps {
   nniRewardsLoading: boolean;
   nniRewardsError: string | null;
   nniRewardsPageSize: number;
+  nniNetworkStats: NniNetworkStatsResponse | null;
+  nniNetworkStatsLoading: boolean;
+  nniNetworkStatsError: string | null;
   nniCurrentPointBalance: string | null;
   nniCurrentPointBalanceLoading: boolean;
   nniConfigLoading: boolean;
@@ -106,6 +110,7 @@ export interface NniPageProps {
   onFetchHeartbeatErrors: (page: number) => unknown | Promise<unknown>;
   onClearHeartbeatErrors: () => unknown | Promise<unknown>;
   onFetchRewards: (page: number) => unknown | Promise<unknown>;
+  onFetchNetworkStats: () => unknown | Promise<unknown>;
   onFetchCurrentPointBalance: () => unknown | Promise<unknown>;
   onRunDeviceAction: (action: string) => unknown | Promise<unknown>;
   onSetDeviceSimulation: (enabled: boolean) => unknown | Promise<unknown>;
@@ -176,6 +181,9 @@ export function NniPage({
   nniRewardsLoading,
   nniRewardsError,
   nniRewardsPageSize,
+  nniNetworkStats,
+  nniNetworkStatsLoading,
+  nniNetworkStatsError,
   nniCurrentPointBalance,
   nniCurrentPointBalanceLoading,
   nniConfigLoading,
@@ -196,6 +204,7 @@ export function NniPage({
   onFetchHeartbeatErrors,
   onClearHeartbeatErrors,
   onFetchRewards,
+  onFetchNetworkStats,
   onFetchCurrentPointBalance,
   onRunDeviceAction,
   onSetDeviceSimulation,
@@ -285,7 +294,10 @@ export function NniPage({
   };
 
   const refreshNniPageStatus = async () => {
-    await Promise.resolve(onFetchDeviceStatus());
+    await Promise.allSettled([
+      Promise.resolve(onFetchDeviceStatus()),
+      Promise.resolve(onFetchNetworkStats()),
+    ]);
     if (nniJoined) {
       // Both private reads use the device signer. Keep them sequential so a
       // hardware-backed signer never receives overlapping challenges.
@@ -333,14 +345,18 @@ export function NniPage({
 
           <div className="grid w-full gap-3">
             <NniNetworkDeviceStats
-              stats={nniRewards?.network_devices ?? null}
-              networkRewards={nniRewards?.network_rewards ?? null}
-              rewardPolicy={nniRewards?.reward_policy ?? null}
-              loading={nniRewardsLoading}
-              joined={nniJoined}
+              stats={nniNetworkStats?.network_devices ?? null}
+              networkRewards={nniNetworkStats?.network_rewards ?? null}
+              rewardPolicy={nniNetworkStats?.reward_policy ?? null}
+              loading={nniNetworkStatsLoading}
               t={t}
               formatUnixDateTime={formatUnixDateTime}
             />
+            {nniNetworkStatsError ? (
+              <p className="text-xs text-amber-200/85">
+                {t("网络概览暂时无法读取，请稍后刷新。", "Network overview is temporarily unavailable. Refresh later.")}
+              </p>
+            ) : null}
             <div className="flex flex-wrap justify-end gap-2">
               <button
                 type="button"
@@ -600,67 +616,6 @@ export function NniPage({
             </span>
           </div>
 
-          <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <label className="text-[11px] font-semibold tracking-[0.16em] text-white/55">
-                {t("远程 NNI 节点", "Remote NNI nodes")}
-              </label>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => void onFetchConfig()}
-                  disabled={nniConfigLoading || nniConfigSaving}
-                  className="theme-secondary-btn px-3 py-1.5 text-xs"
-                >
-                  {nniConfigLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                  {t("重新载入", "Reload")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void onSaveConfig()}
-                  disabled={nniConfigLoading || nniConfigSaving}
-                  className="theme-accent-btn px-3 py-1.5 text-xs"
-                >
-                  {nniConfigSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                  {t("保存节点", "Save nodes")}
-                </button>
-              </div>
-            </div>
-            <textarea
-              className="theme-input mt-2 min-h-20 resize-y font-mono text-xs"
-              placeholder={t(
-                "例如：https://nni-node.example.com\n多个节点可以一行一个，再从下方选择当前节点。",
-                "Example: https://nni-node.example.com\nUse one node per line, then select the active node below.",
-              )}
-              value={nniRemoteNodes}
-              disabled={nniJoined}
-              onChange={(event) => onRemoteNodesChange(event.target.value)}
-            />
-            {parseNniRemoteNodeUrls(nniRemoteNodes).length > 0 ? (
-              <label className="mt-3 block text-xs text-white/65">
-                <span className="mb-1.5 block font-semibold">{t("当前节点", "Active node")}</span>
-                <select
-                  className="theme-input w-full font-mono text-xs"
-                  value={nniSelectedNodeUrl}
-                  disabled={nniJoined}
-                  onChange={(event) => onSelectedNodeChange(event.target.value)}
-                >
-                  {parseNniRemoteNodeUrls(nniRemoteNodes).map((nodeUrl) => (
-                    <option key={nodeUrl} value={nodeUrl}>{nodeUrl}</option>
-                  ))}
-                </select>
-              </label>
-            ) : null}
-            <p className="mt-2 text-xs leading-5 text-white/50">
-              {t(
-                "节点列表、当前节点和加入状态会保存。NNI 心跳、奖励与 Bancor 始终使用当前节点；需要切换时请先停止 NNI。",
-                "The node list, active node, and Join state are saved. NNI heartbeat, rewards, and Bancor always use the active node; stop NNI before switching nodes.",
-              )}
-            </p>
-            {nniConfigMessage ? <p className="mt-2 text-xs text-emerald-200">{nniConfigMessage}</p> : null}
-            {nniConfigError ? <p className="mt-2 break-words text-xs text-red-200">{nniConfigError}</p> : null}
-          </div>
-
           <div
             className={`nni-runtime-board mt-4 min-h-[180px] rounded-2xl border p-4 ${
               nniRuntimeActivity ? "nni-runtime-board-active" : "nni-runtime-board-idle"
@@ -729,6 +684,67 @@ export function NniPage({
                     "Click Join to request a random challenge from the remote server. The runtime is enabled after verification. Test Join only signs a local timestamp and does not contact the remote server.",
                   )}
           </p>
+
+          <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label className="text-[11px] font-semibold tracking-[0.16em] text-white/55">
+                {t("远程 NNI 节点", "Remote NNI nodes")}
+              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void onFetchConfig()}
+                  disabled={nniConfigLoading || nniConfigSaving}
+                  className="theme-secondary-btn px-3 py-1.5 text-xs"
+                >
+                  {nniConfigLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                  {t("重新载入", "Reload")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void onSaveConfig()}
+                  disabled={nniConfigLoading || nniConfigSaving}
+                  className="theme-accent-btn px-3 py-1.5 text-xs"
+                >
+                  {nniConfigSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                  {t("保存节点", "Save nodes")}
+                </button>
+              </div>
+            </div>
+            <textarea
+              className="theme-input mt-2 min-h-20 resize-y font-mono text-xs"
+              placeholder={t(
+                "例如：https://nni-node.example.com\n多个节点可以一行一个，再从下方选择当前节点。",
+                "Example: https://nni-node.example.com\nUse one node per line, then select the active node below.",
+              )}
+              value={nniRemoteNodes}
+              disabled={nniJoined}
+              onChange={(event) => onRemoteNodesChange(event.target.value)}
+            />
+            {parseNniRemoteNodeUrls(nniRemoteNodes).length > 0 ? (
+              <label className="mt-3 block text-xs text-white/65">
+                <span className="mb-1.5 block font-semibold">{t("当前节点", "Active node")}</span>
+                <select
+                  className="theme-input w-full font-mono text-xs"
+                  value={nniSelectedNodeUrl}
+                  disabled={nniJoined}
+                  onChange={(event) => onSelectedNodeChange(event.target.value)}
+                >
+                  {parseNniRemoteNodeUrls(nniRemoteNodes).map((nodeUrl) => (
+                    <option key={nodeUrl} value={nodeUrl}>{nodeUrl}</option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            <p className="mt-2 text-xs leading-5 text-white/50">
+              {t(
+                "节点列表、当前节点和加入状态会保存。NNI 心跳、奖励与 Bancor 始终使用当前节点；需要切换时请先停止 NNI。",
+                "The node list, active node, and Join state are saved. NNI heartbeat, rewards, and Bancor always use the active node; stop NNI before switching nodes.",
+              )}
+            </p>
+            {nniConfigMessage ? <p className="mt-2 text-xs text-emerald-200">{nniConfigMessage}</p> : null}
+            {nniConfigError ? <p className="mt-2 break-words text-xs text-red-200">{nniConfigError}</p> : null}
+          </div>
         </div>
         </section>
       ) : null}

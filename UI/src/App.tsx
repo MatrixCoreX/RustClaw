@@ -332,6 +332,9 @@ export default function App() {
     nniRewards,
     nniRewardsLoading,
     nniRewardsError,
+    nniNetworkStats,
+    nniNetworkStatsLoading,
+    nniNetworkStatsError,
     nniConfigLoading,
     nniConfigSaving,
     nniConfigError,
@@ -352,6 +355,7 @@ export default function App() {
     fetchNniHeartbeatErrors,
     clearNniHeartbeatErrors,
     fetchNniRewards,
+    fetchNniNetworkStats,
     runNniDeviceAction,
     setNniDeviceSimulation,
   } = useNniRuntime({ apiFetch, t, lang });
@@ -1476,10 +1480,12 @@ export default function App() {
     if (currentPage !== "nni") return;
     void ensureNniDeviceStatus();
     void fetchNniConfig(true);
+    void fetchNniNetworkStats();
     void fetchNniHeartbeatErrors(nniHeartbeatErrorsPage);
     void fetchNniHeartbeatRecords(nniHeartbeatRecordsPage);
     const timer = window.setInterval(() => {
       void fetchNniConfig(true);
+      void fetchNniNetworkStats(true);
       void fetchNniHeartbeatErrors(nniHeartbeatErrorsPage, true);
       void fetchNniHeartbeatRecords(nniHeartbeatRecordsPage, true);
     }, 60_000);
@@ -1558,12 +1564,12 @@ export default function App() {
   }, [currentPage, apiBase, uiAuthReady, bancorRuntime.candleIntervalSeconds]);
 
   useEffect(() => {
-    if (!uiAuthReady || currentPage !== "bancor" || !nniJoined || !nniStatus?.signature_chip_present) return;
+    if (!uiAuthReady || currentPage !== "bancor" || !nniStatus?.signature_chip_present) return;
     void bancorRuntime.fetchAccount(1);
-    // Private account reads require a fresh device signature. Load only after
-    // the NNI join state and signing device have both been confirmed.
+    // Private account reads require a fresh device signature, but Bancor
+    // access is independent from participation in NNI heartbeat rewards.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, apiBase, uiAuthReady, nniJoined, nniStatus?.signature_chip_present]);
+  }, [currentPage, apiBase, uiAuthReady, nniStatus?.signature_chip_present]);
 
   useEffect(() => {
     if (!uiAuthReady) return;
@@ -1858,6 +1864,9 @@ export default function App() {
               nniRewardsLoading={nniRewardsLoading}
               nniRewardsError={nniRewardsError}
               nniRewardsPageSize={NNI_REWARDS_PAGE_SIZE}
+              nniNetworkStats={nniNetworkStats}
+              nniNetworkStatsLoading={nniNetworkStatsLoading}
+              nniNetworkStatsError={nniNetworkStatsError}
               nniCurrentPointBalance={bancorRuntime.account?.point_balance ?? null}
               nniCurrentPointBalanceLoading={bancorRuntime.accountLoading}
               nniConfigLoading={nniConfigLoading}
@@ -1878,6 +1887,7 @@ export default function App() {
               onFetchHeartbeatErrors={fetchNniHeartbeatErrors}
               onClearHeartbeatErrors={clearNniHeartbeatErrors}
               onFetchRewards={fetchNniRewards}
+              onFetchNetworkStats={fetchNniNetworkStats}
               onFetchCurrentPointBalance={() => bancorRuntime.fetchAccount(1)}
               onRunDeviceAction={runNniDeviceAction}
               onSetDeviceSimulation={setNniDeviceSimulation}
@@ -1914,7 +1924,7 @@ export default function App() {
               t={t}
               runtime={bancorRuntime}
               formatUnixDateTime={formatUnixDateTime}
-              nniReady={nniJoined && nniStatus?.signature_chip_present === true}
+              signingDeviceReady={nniStatus?.signature_chip_present === true}
               onOpenNni={() => setCurrentPage("nni")}
             />
           ) : null}

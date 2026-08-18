@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -50,7 +51,6 @@ test("shows registered allowlist devices and active devices from the previous he
         next_halving_at_unix: 1_925_144_000,
       }}
       loading={false}
-      joined
       t={(zh) => zh}
       formatUnixDateTime={(value) => String(value ?? "--")}
     />,
@@ -91,12 +91,19 @@ test("network reward metrics hide an all-zero fraction and retain real decimals"
   assert.equal(formatNniRewardMetric("312.50000000"), "312.50000000");
 });
 
-test("explains why network counters are unavailable before joining", () => {
+test("places remote node configuration at the bottom of the runtime entry card", () => {
+  const source = readFileSync(new URL("../components/NniPage.tsx", import.meta.url), "utf8");
+  const nodeSettings = source.indexOf('t("远程 NNI 节点", "Remote NNI nodes")');
+  assert.ok(nodeSettings > source.indexOf("nni-runtime-board"));
+  assert.ok(nodeSettings > source.indexOf('t("心跳请求次数", "Heartbeat requests")'));
+  assert.ok(nodeSettings > source.indexOf('"点击加入会向远程服务端请求一次随机挑战'));
+});
+
+test("network counters never imply that public aggregate data requires joining", () => {
   const markup = renderToStaticMarkup(
     <NniNetworkDeviceStats
       stats={null}
       loading={false}
-      joined={false}
       t={(zh) => zh}
       formatUnixDateTime={() => "--"}
     />,
@@ -104,21 +111,50 @@ test("explains why network counters are unavailable before joining", () => {
 
   assert.match(markup, /注册设备/);
   assert.match(markup, /活跃设备/);
-  assert.equal((markup.match(/未加入/g) ?? []).length, 6);
+  assert.equal((markup.match(/暂不可用/g) ?? []).length, 6);
+  assert.doesNotMatch(markup, /未加入/);
   assert.doesNotMatch(markup, />--</);
 });
 
-test("distinguishes a joined network whose counters are temporarily unavailable", () => {
+test("shows explicit first-heartbeat placeholders for a fresh public network", () => {
   const markup = renderToStaticMarkup(
     <NniNetworkDeviceStats
-      stats={null}
+      stats={{
+        registered_device_count: 153,
+        active_device_count: 0,
+        active_period_start_unix: null,
+        active_period_end_unix: null,
+        first_heartbeat_unix: null,
+        window_seconds: 600,
+      }}
+      networkRewards={{
+        total_distributed_reward_units: "0",
+        total_distributed_reward_points: "0.00000000",
+        settled_period_count: 0,
+        first_period_start_unix: null,
+        latest_period_end_unix: null,
+      }}
+      rewardPolicy={{
+        interval_seconds: 600,
+        initial_reward_pool_points: 5000,
+        current_reward_pool_units: "500000000000",
+        current_reward_pool_points: "5000.00000000",
+        distribution: "equal_per_eligible_device",
+        halving_epoch_unix: null,
+        halving_interval_seconds: 126_144_000,
+        halving_era: null,
+        rewards_ended: false,
+        next_halving_at_unix: null,
+      }}
       loading={false}
-      joined
       t={(zh) => zh}
       formatUnixDateTime={() => "--"}
     />,
   );
 
-  assert.equal((markup.match(/暂不可用/g) ?? []).length, 6);
+  assert.match(markup, />153</);
+  assert.match(markup, />0</);
+  assert.match(markup, /等待首跳/);
+  assert.match(markup, /首跳后计算/);
   assert.doesNotMatch(markup, /未加入/);
 });

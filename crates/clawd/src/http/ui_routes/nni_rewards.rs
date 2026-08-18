@@ -12,6 +12,219 @@ struct NniRemoteRewardQueryVerifyRequest {
     per_page: usize,
 }
 
+fn nni_network_stats_decimal(value: &Value) -> bool {
+    let Some(value) = value.as_str() else {
+        return false;
+    };
+    let Some((whole, fraction)) = value.split_once('.') else {
+        return false;
+    };
+    !whole.is_empty()
+        && whole.bytes().all(|byte| byte.is_ascii_digit())
+        && fraction.len() == 8
+        && fraction.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+fn nni_network_stats_optional_unix(value: Option<&Value>) -> bool {
+    value.is_some_and(|value| value.is_null() || value.as_i64().is_some_and(|unix| unix >= 0))
+}
+
+fn validate_nni_network_stats_response(data: &Value) -> Result<(), &'static str> {
+    let root = data
+        .as_object()
+        .ok_or("nni_network_stats_contract_invalid")?;
+    let devices = root
+        .get("network_devices")
+        .and_then(Value::as_object)
+        .ok_or("nni_network_stats_contract_invalid")?;
+    let policy = root
+        .get("reward_policy")
+        .and_then(Value::as_object)
+        .ok_or("nni_network_stats_contract_invalid")?;
+    let rewards = root
+        .get("network_rewards")
+        .and_then(Value::as_object)
+        .ok_or("nni_network_stats_contract_invalid")?;
+    let phase_is_valid = policy
+        .get("phase")
+        .and_then(Value::as_str)
+        .is_some_and(|phase| matches!(phase, "disabled" | "scheduled" | "active"));
+
+    if root.get("schema_version").and_then(Value::as_u64) != Some(1)
+        || root.get("status").and_then(Value::as_str) != Some("heartbeat_network_stats")
+        || root.contains_key("device_pubkey")
+        || root.contains_key("records")
+        || devices
+            .get("registered_device_count")
+            .and_then(Value::as_u64)
+            .is_none()
+        || devices
+            .get("active_device_count")
+            .and_then(Value::as_u64)
+            .is_none()
+        || devices.get("window_seconds").and_then(Value::as_u64) == Some(0)
+        || devices
+            .get("window_seconds")
+            .and_then(Value::as_u64)
+            .is_none()
+        || !nni_network_stats_optional_unix(devices.get("active_period_start_unix"))
+        || !nni_network_stats_optional_unix(devices.get("active_period_end_unix"))
+        || !nni_network_stats_optional_unix(devices.get("first_heartbeat_unix"))
+        || !phase_is_valid
+        || policy
+            .get("accepting_reward_heartbeats")
+            .and_then(Value::as_bool)
+            .is_none()
+        || policy
+            .get("reward_start_time_unix")
+            .and_then(Value::as_i64)
+            .is_none_or(|unix| unix < 0)
+        || !nni_network_stats_optional_unix(policy.get("first_settlement_at_unix"))
+        || policy.get("interval_seconds").and_then(Value::as_u64) == Some(0)
+        || policy
+            .get("interval_seconds")
+            .and_then(Value::as_u64)
+            .is_none()
+        || policy.get("distribution").and_then(Value::as_str) != Some("equal_per_eligible_device")
+        || !policy
+            .get("current_reward_pool_points")
+            .is_some_and(|value| value.is_null() || nni_network_stats_decimal(value))
+        || !nni_network_stats_optional_unix(policy.get("halving_epoch_unix"))
+        || policy
+            .get("halving_interval_seconds")
+            .and_then(Value::as_u64)
+            == Some(0)
+        || policy
+            .get("halving_interval_seconds")
+            .and_then(Value::as_u64)
+            .is_none()
+        || policy
+            .get("rewards_ended")
+            .and_then(Value::as_bool)
+            .is_none()
+        || !nni_network_stats_optional_unix(policy.get("next_halving_at_unix"))
+        || !rewards
+            .get("total_distributed_reward_points")
+            .is_some_and(nni_network_stats_decimal)
+        || rewards
+            .get("settled_period_count")
+            .and_then(Value::as_u64)
+            .is_none()
+        || !nni_network_stats_optional_unix(rewards.get("first_period_start_unix"))
+        || !nni_network_stats_optional_unix(rewards.get("latest_period_end_unix"))
+    {
+        return Err("nni_network_stats_contract_invalid");
+    }
+    Ok(())
+}
+
+async fn nni_network_stats(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
+        return (
+            status,
+            Json(ApiResponse {
+                ok: resp.ok,
+                data: None,
+                error: resp.error,
+            }),
+        );
+    }
+    let config = match read_nni_config(&state) {
+        Ok(config) => config,
+        Err(err) => {
+            return nni_join_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "nni_config_read_failed",
+                json!({"status": "config_read_failed", "error": err.to_string()}),
+            );
+        }
+    };
+    if nni_selected_remote_node(&config).is_none() {
+        return nni_join_error(
+            StatusCode::BAD_REQUEST,
+            "nni_remote_node_required",
+            json!({"status": "remote_node_required"}),
+        );
+    }
+
+    let mut attempts = Vec::new();
+    for node_url in nni_selected_remote_nodes(&config) {
+        match nni_remote_read_with_retry(|| query_nni_network_stats_for_node(&state, node_url))
+            .await
+        {
+            Ok(mut data) => {
+                if let Some(object) = data.as_object_mut() {
+                    object.insert("node_url".to_string(), Value::String(node_url.clone()));
+                }
+                return (
+                    StatusCode::OK,
+                    Json(ApiResponse {
+                        ok: true,
+                        data: Some(data),
+                        error: None,
+                    }),
+                );
+            }
+            Err(attempt) => attempts.push(attempt),
+        }
+    }
+    nni_join_error(
+        StatusCode::BAD_GATEWAY,
+        "nni_network_stats_nodes_unavailable",
+        json!({"status": "network_stats_nodes_unavailable", "attempts": attempts}),
+    )
+}
+
+async fn query_nni_network_stats_for_node(
+    state: &AppState,
+    node_url: &str,
+) -> Result<Value, Value> {
+    let endpoint = nni_remote_api_endpoint(node_url, "network-stats");
+    let response = state
+        .core
+        .http_client
+        .get(&endpoint)
+        .timeout(nni_remote_api_timeout())
+        .send()
+        .await
+        .map_err(|err| {
+            json!({
+                "node_url": node_url,
+                "error_code": "nni_network_stats_network_failed",
+                "detail": err.to_string(),
+                "retryable": true,
+            })
+        })?;
+    let status = response.status();
+    let body = response.json::<ApiResponse<Value>>().await.map_err(|err| {
+        json!({
+            "node_url": node_url,
+            "http_status": status.as_u16(),
+            "error_code": "nni_network_stats_body_invalid",
+            "detail": err.to_string(),
+            "retryable": nni_remote_http_status_retryable(status.as_u16()),
+        })
+    })?;
+    if !status.is_success() || !body.ok {
+        let error_code = nni_remote_api_error_code(&body, "nni_network_stats_failed");
+        return Err(json!({
+            "node_url": node_url,
+            "http_status": status.as_u16(),
+            "error_code": error_code,
+            "retryable": nni_remote_http_status_retryable(status.as_u16()),
+        }));
+    }
+    let data = body.data.ok_or_else(
+        || json!({"node_url": node_url, "error_code": "nni_network_stats_data_missing"}),
+    )?;
+    validate_nni_network_stats_response(&data)
+        .map_err(|error_code| json!({"node_url": node_url, "error_code": error_code}))?;
+    Ok(data)
+}
+
 async fn nni_rewards(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -135,8 +348,7 @@ async fn query_nni_rewards_for_node(
             })
         })?;
     if !request_status.is_success() || !request_body.ok {
-        let error_code =
-            nni_remote_api_error_code(&request_body, "nni_reward_request_failed");
+        let error_code = nni_remote_api_error_code(&request_body, "nni_reward_request_failed");
         return Err(json!({
             "node_url": node_url,
             "http_status": request_status.as_u16(),
@@ -217,8 +429,7 @@ async fn query_nni_rewards_for_node(
             })
         })?;
     if !verify_status.is_success() || !verify_body.ok {
-        let error_code =
-            nni_remote_api_error_code(&verify_body, "nni_reward_verify_failed");
+        let error_code = nni_remote_api_error_code(&verify_body, "nni_reward_verify_failed");
         return Err(json!({
             "node_url": node_url,
             "http_status": verify_status.as_u16(),
@@ -229,4 +440,73 @@ async fn query_nni_rewards_for_node(
     verify_body.data.ok_or_else(
         || json!({"node_url": node_url, "error_code": "nni_reward_verify_data_missing"}),
     )
+}
+
+#[cfg(test)]
+mod nni_network_stats_unit_tests {
+    use super::*;
+
+    fn valid_network_stats() -> Value {
+        json!({
+            "schema_version": 1,
+            "status": "heartbeat_network_stats",
+            "network_devices": {
+                "registered_device_count": 12,
+                "active_device_count": 8,
+                "active_period_start_unix": null,
+                "active_period_end_unix": null,
+                "first_heartbeat_unix": null,
+                "window_seconds": 600
+            },
+            "reward_policy": {
+                "phase": "scheduled",
+                "accepting_reward_heartbeats": false,
+                "reward_start_time_unix": 1_800_000_000,
+                "starts_in_seconds": 300,
+                "first_settlement_at_unix": 1_800_000_600,
+                "interval_seconds": 600,
+                "initial_reward_pool_points": 5000,
+                "current_reward_pool_units": "500000000000",
+                "current_reward_pool_points": "5000.00000000",
+                "distribution": "equal_per_eligible_device",
+                "halving_epoch_unix": null,
+                "halving_interval_seconds": 126_144_000,
+                "halving_era": null,
+                "rewards_ended": false,
+                "next_halving_at_unix": null
+            },
+            "network_rewards": {
+                "total_distributed_reward_units": "0",
+                "total_distributed_reward_points": "0.00000000",
+                "settled_period_count": 0,
+                "first_period_start_unix": null,
+                "latest_period_end_unix": null
+            }
+        })
+    }
+
+    #[test]
+    fn accepts_aggregate_only_network_stats_before_first_heartbeat() {
+        assert_eq!(
+            validate_nni_network_stats_response(&valid_network_stats()),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn rejects_private_device_data_and_malformed_aggregate_values() {
+        let mut private = valid_network_stats();
+        private["device_pubkey"] = json!("private-key");
+        assert_eq!(
+            validate_nni_network_stats_response(&private),
+            Err("nni_network_stats_contract_invalid")
+        );
+
+        let mut malformed = valid_network_stats();
+        malformed["network_rewards"]["total_distributed_reward_points"] = json!("0");
+        assert_eq!(
+            validate_nni_network_stats_response(&malformed),
+            Err("nni_network_stats_contract_invalid")
+        );
+    }
 }
