@@ -99,6 +99,17 @@ test("places remote node configuration at the bottom of the runtime entry card",
   assert.ok(nodeSettings > source.indexOf('"点击加入会向远程服务端请求一次随机挑战'));
 });
 
+test("asset account setup avoids key-letter jargon and protects key actions", () => {
+  const source = readFileSync(new URL("../components/NniPage.tsx", import.meta.url), "utf8");
+  assert.match(source, /t\("资产账户", "Asset account"\)/);
+  assert.match(source, /硬件芯片只识别设备并证明当前授权/);
+  assert.doesNotMatch(source, /资产账户 A|芯片公钥 H|资产公钥 A/);
+  assert.match(source, /data-nni-copy-owner-private-key="true"/);
+  assert.match(source, /ownerPrivateKeyCopied \? t\("已复制", "Copied"\)/);
+  assert.match(source, /className="flex justify-end pt-1"/);
+  assert.match(source, /data-nni-discard-owner-key-pair="true"/);
+});
+
 test("network counters never imply that public aggregate data requires joining", () => {
   const markup = renderToStaticMarkup(
     <NniNetworkDeviceStats

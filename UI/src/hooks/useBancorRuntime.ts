@@ -221,6 +221,12 @@ export function formatBancorApiError(
       "Refresh My balances first so the available POINT and USD balances can be checked before trading.",
     );
   }
+  if (code === "nni_asset_owner_required") {
+    return t(
+      "请先到 NNI 页面生成并绑定资产账号，然后再进行交易。",
+      "Go to the NNI page to generate and bind an asset account before trading.",
+    );
+  }
   if (code === "nni_bancor_market_not_open") {
     return t("交易市场尚未开启。现在可以查看储备，但不能报价或成交。", "The market is not open yet. Reserves remain visible, but quotes and trades are unavailable.");
   }
@@ -284,6 +290,7 @@ export function useBancorRuntime({
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [tradeLoading, setTradeLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [assetOwnerRequired, setAssetOwnerRequired] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const candleIntervalRef = useRef(BANCOR_DEFAULT_CANDLE_INTERVAL_SECONDS);
   const candleCacheRef = useRef(new Map<string, {
@@ -305,6 +312,7 @@ export function useBancorRuntime({
   const readError = (body: ApiResponse<unknown>, fallback: string) => {
     const data = body.data as { attempts?: Array<{ error_code?: string | null }> } | undefined;
     const code = data?.attempts?.find((attempt) => attempt.error_code)?.error_code || body.error;
+    if (code === "nni_asset_owner_required") setAssetOwnerRequired(true);
     return formatBancorApiError(code, t, fallback);
   };
 
@@ -339,6 +347,7 @@ export function useBancorRuntime({
       const body = (await response.json()) as ApiResponse<NniBancorAccountResponse>;
       if (!response.ok || !body.ok || !body.data) throw new Error(readError(body, `Account load failed (${response.status})`));
       setAccount(body.data);
+      setAssetOwnerRequired(false);
       setError(null);
       return body.data;
     } catch (cause) {
@@ -693,6 +702,7 @@ export function useBancorRuntime({
     quoteLoading,
     tradeLoading,
     error,
+    assetOwnerRequired,
     message,
     fetchMarket,
     fetchCandles,

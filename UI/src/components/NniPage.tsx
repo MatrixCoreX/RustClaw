@@ -1,5 +1,6 @@
 import {
   ArrowLeftRight,
+  Check,
   ChevronLeft,
   ChevronRight,
   Copy,
@@ -137,6 +138,7 @@ const NNI_DEVICE_ACTIONS = [
 ];
 
 const NNI_TEST_JOIN_ACTIVITY_MS = 2200;
+const NNI_COPY_FEEDBACK_MS = 2200;
 export const NNI_DEVICE_MANAGEMENT_COPY = {
   zh: "这里管理硬件设备的 NNI 入口和设备签名能力。",
   en: "This page manages the hardware device's NNI entry and device-signing capability.",
@@ -229,9 +231,11 @@ export function NniPage({
   const [nniTestJoinPulse, setNniTestJoinPulse] = useState(false);
   const [nniHistoryView, setNniHistoryView] = useState<NniHistoryView>("overview");
   const [ownerBackupConfirmed, setOwnerBackupConfirmed] = useState(false);
+  const [ownerPrivateKeyCopied, setOwnerPrivateKeyCopied] = useState(false);
   const [ownerRecoveryOpen, setOwnerRecoveryOpen] = useState(false);
   const [ownerRecoveryPrivateKey, setOwnerRecoveryPrivateKey] = useState("");
   const nniTestJoinPulseTimer = useRef<number | null>(null);
+  const ownerPrivateKeyCopyTimer = useRef<number | null>(null);
   const nniChipPresent = nniStatus?.signature_chip_present === true;
   const nniChipMissing = nniStatus?.status === "signature_chip_missing";
   const nniDetectionUnavailable = nniStatus?.status === "detection_unavailable";
@@ -276,11 +280,17 @@ export function NniPage({
       if (nniTestJoinPulseTimer.current !== null) {
         window.clearTimeout(nniTestJoinPulseTimer.current);
       }
+      if (ownerPrivateKeyCopyTimer.current !== null) {
+        window.clearTimeout(ownerPrivateKeyCopyTimer.current);
+      }
     };
   }, []);
 
   useEffect(() => {
-    if (!nniOwnerKeyPair) setOwnerBackupConfirmed(false);
+    if (!nniOwnerKeyPair) {
+      setOwnerBackupConfirmed(false);
+      setOwnerPrivateKeyCopied(false);
+    }
   }, [nniOwnerKeyPair]);
 
   const recoverOwner = async () => {
@@ -321,6 +331,25 @@ export function NniPage({
     void writeTextToClipboard(copyValue)
       .then(() => onActionMessageChange(t("已复制结果。", "Result copied.")))
       .catch((err) => onActionErrorChange(err instanceof Error ? err.message : t("复制失败", "Copy failed")));
+  };
+
+  const copyOwnerPrivateKey = async () => {
+    if (!nniOwnerKeyPair?.private_key) return;
+    try {
+      await writeTextToClipboard(nniOwnerKeyPair.private_key);
+      if (ownerPrivateKeyCopyTimer.current !== null) {
+        window.clearTimeout(ownerPrivateKeyCopyTimer.current);
+      }
+      setOwnerPrivateKeyCopied(true);
+      onActionMessageChange(t("私钥已复制。", "Private key copied."));
+      ownerPrivateKeyCopyTimer.current = window.setTimeout(() => {
+        setOwnerPrivateKeyCopied(false);
+        ownerPrivateKeyCopyTimer.current = null;
+      }, NNI_COPY_FEEDBACK_MS);
+    } catch (err) {
+      setOwnerPrivateKeyCopied(false);
+      onActionErrorChange(err instanceof Error ? err.message : t("复制失败", "Copy failed"));
+    }
   };
 
   const refreshNniPageStatus = async () => {
@@ -479,11 +508,11 @@ export function NniPage({
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="theme-kicker text-[10px] uppercase tracking-[0.28em]">Asset owner</p>
-              <h4 className="mt-2 text-lg font-semibold">{t("资产账户 A", "Asset account A")}</h4>
+              <h4 className="mt-2 text-lg font-semibold">{t("资产账户", "Asset account")}</h4>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-white/65">
                 {t(
-                  "资产、奖励和交易都归这个固定账户；芯片公钥 H 只识别设备并证明当前授权。",
-                  "Assets, rewards, and trades belong to this stable account. Hardware key H only identifies and proves the currently authorized device.",
+                  "资产、奖励和交易都归这个固定账户；硬件芯片只识别设备并证明当前授权。",
+                  "Assets, rewards, and trades belong to this stable account. The hardware chip only identifies the device and proves its current authorization.",
                 )}
               </p>
             </div>
@@ -524,14 +553,20 @@ export function NniPage({
               </div>
               <div className="mt-3 grid gap-3">
                 <div>
-                  <p className="text-xs text-white/55">{t("资产公钥 A", "Asset public key A")}</p>
+                  <p className="text-xs text-white/55">{t("资产公钥", "Asset public key")}</p>
                   <code className="mt-1 block break-all rounded-lg bg-black/20 p-3 text-sm text-white/85">{nniOwnerKeyPair.public_key}</code>
                 </div>
                 <div>
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-xs text-white/55">{t("一次性显示的私钥", "One-time private key")}</p>
-                    <button type="button" className="theme-secondary-btn px-2 py-1.5 text-xs" onClick={() => copyPrimaryHex(nniOwnerKeyPair.private_key)}>
-                      <Copy className="h-3.5 w-3.5" /> {t("复制私钥", "Copy private key")}
+                    <button
+                      type="button"
+                      className="theme-secondary-btn px-2 py-1.5 text-xs"
+                      data-nni-copy-owner-private-key="true"
+                      onClick={() => void copyOwnerPrivateKey()}
+                    >
+                      {ownerPrivateKeyCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                      {ownerPrivateKeyCopied ? t("已复制", "Copied") : t("复制私钥", "Copy private key")}
                     </button>
                   </div>
                   <code className="mt-1 block break-all rounded-lg bg-black/25 p-3 text-sm text-amber-100">{nniOwnerKeyPair.private_key}</code>
@@ -540,9 +575,16 @@ export function NniPage({
                   <input type="checkbox" checked={ownerBackupConfirmed} onChange={(event) => setOwnerBackupConfirmed(event.target.checked)} className="mt-1" />
                   {t("我已经离线保存私钥，理解丢失后只能靠这把私钥换机恢复。", "I saved the private key offline and understand that it is required for device recovery.")}
                 </label>
-                <button type="button" className="theme-secondary-btn w-fit px-3 py-2 text-sm" onClick={onClearGeneratedOwner}>
-                  {t("放弃这组密钥", "Discard this key pair")}
-                </button>
+                <div className="flex justify-end pt-1">
+                  <button
+                    type="button"
+                    className="theme-secondary-btn px-3 py-2 text-sm text-red-100 hover:border-red-400/35 hover:bg-red-500/10"
+                    data-nni-discard-owner-key-pair="true"
+                    onClick={onClearGeneratedOwner}
+                  >
+                    {t("放弃这组密钥", "Discard this key pair")}
+                  </button>
+                </div>
               </div>
             </div>
           ) : null}
@@ -550,7 +592,7 @@ export function NniPage({
           {ownerRecoveryOpen && !nniJoined ? (
             <div className="mt-4 rounded-xl border border-white/12 p-4">
               <p className="text-sm leading-6 text-white/70">
-                {t("新设备的芯片公钥 H 必须先进入服务端白名单。私钥只用于这次换机签名，不会保存。", "The new hardware key H must be allowlisted first. The private key is used only for this recovery signature and is not saved.")}
+                {t("新设备的硬件芯片必须先进入服务端白名单。私钥只用于这次换机签名，不会保存。", "The new device's hardware chip must be allowlisted first. The private key is used only for this recovery signature and is not saved.")}
               </p>
               <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                 <input

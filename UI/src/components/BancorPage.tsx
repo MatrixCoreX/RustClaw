@@ -302,6 +302,7 @@ export function BancorPage({
   formatUnixDateTime,
   signingDeviceReady,
   assetOwnerReady,
+  assetOwnerPubkey,
   onOpenNni,
 }: {
   t: Translate;
@@ -309,6 +310,7 @@ export function BancorPage({
   formatUnixDateTime: (value?: number | null) => string;
   signingDeviceReady: boolean;
   assetOwnerReady: boolean;
+  assetOwnerPubkey: string | null;
   onOpenNni: () => void;
 }) {
   const tradePanelRef = useRef<HTMLDivElement>(null);
@@ -335,6 +337,7 @@ export function BancorPage({
     quoteLoading,
     tradeLoading,
     error,
+    assetOwnerRequired,
     message,
     fetchMarket,
     fetchCandles,
@@ -427,8 +430,8 @@ export function BancorPage({
             </div>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-white/60">
               {t(
-                "强制流动性算法。每笔成交可由当前硬件代理签名，也可临时输入 A 资产私钥自行签名。",
-                "A forced-liquidity algorithm. Each trade can use the current hardware delegate or a one-time A asset-key signature.",
+                "强制流动性算法。每笔成交可由当前硬件代理签名，也可临时输入资产私钥自行签名。",
+                "A forced-liquidity algorithm. Each trade can use the current hardware delegate or a one-time asset-key signature.",
               )}
             </p>
           </div>
@@ -502,7 +505,24 @@ export function BancorPage({
         </div>
       </section>
 
-      {error ? <div className="rounded-xl border border-red-400/25 bg-red-500/10 px-4 py-3 text-sm text-red-100">{error}</div> : null}
+      {assetOwnerRequired ? (
+        <div
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-400/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-50"
+          data-bancor-asset-owner-required="true"
+        >
+          <span>{formatBancorApiError("nni_asset_owner_required", t, "")}</span>
+          <button
+            type="button"
+            className="theme-secondary-btn shrink-0 px-3 py-2 text-xs"
+            data-bancor-open-nni="asset-owner"
+            onClick={onOpenNni}
+          >
+            {t("前往 NNI 页面", "Go to NNI")}
+          </button>
+        </div>
+      ) : error ? (
+        <div className="rounded-xl border border-red-400/25 bg-red-500/10 px-4 py-3 text-sm text-red-100">{error}</div>
+      ) : null}
       {message ? <div className="rounded-xl border border-emerald-400/25 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">{message}</div> : null}
       {quote ? (
         <BancorQuoteDialog
@@ -647,6 +667,22 @@ export function BancorPage({
                 onClick={() => account && fillBalance("buy", account.usd_balance)}
               />
             </div>
+            {assetOwnerPubkey ? (
+              <div
+                className="mt-3 min-w-0 border-t border-white/8 pt-3"
+                data-bancor-asset-owner-pubkey="true"
+              >
+                <p className="mb-1.5 text-xs text-white/45">
+                  {t("资产账号公钥", "Asset account public key")}
+                </p>
+                <NniPublicKeyDisplay
+                  value={assetOwnerPubkey}
+                  t={t}
+                  allowFormatSwitch={false}
+                  valueClassName="text-xs leading-5 text-white/70"
+                />
+              </div>
+            ) : null}
           </div>
 
           {tradeLayout === "standard" ? (
@@ -1760,7 +1796,7 @@ export function BancorQuoteDialog({
               {t("查看报价并确认交易", "Review quote and confirm trade")}
             </h2>
             <p id="bancor-quote-dialog-description" className="mt-1 text-sm leading-6 text-white/55">
-              {t("请核对支付、到账和手续费，再选择本机硬件或 A 资产密钥签名。", "Check payment, output, and fees, then choose the hardware delegate or A asset key.")}
+              {t("请核对支付、到账和手续费，再选择本机硬件或资产密钥签名。", "Check payment, output, and fees, then choose the hardware delegate or asset key.")}
             </p>
           </div>
           <button
@@ -1798,7 +1834,7 @@ export function BancorQuoteDialog({
               <span className="block font-medium text-white">{t("当前硬件代理签名", "Current hardware delegate")}</span>
               <span className="mt-1 block text-xs leading-5 text-white/50">
                 {signingDeviceReady
-                  ? t("使用当前绑定的 H 芯片，不需要输入 A 私钥。", "Uses the currently authorized H chip; the A private key is not needed.")
+                  ? t("使用当前绑定的硬件芯片，不需要输入资产私钥。", "Uses the currently authorized hardware chip; the asset private key is not needed.")
                   : t("当前未检测到可用签名芯片。", "No available signing chip is currently detected.")}
               </span>
             </span>
@@ -1813,11 +1849,11 @@ export function BancorQuoteDialog({
               onChange={() => setAuthorizationMode("asset_owner")}
             />
             <span className="min-w-0 flex-1">
-              <span className="block font-medium text-white">{t("A 资产密钥自行签名", "Sign with the A asset key")}</span>
+              <span className="block font-medium text-white">{t("使用资产密钥自行签名", "Sign with the asset key")}</span>
               <span className="mt-1 block text-xs leading-5 text-white/50">
                 {assetOwnerReady
                   ? t("私钥只用于这一次签名，提交后立即从本机请求内存中清除。", "The private key is used for this signature only and cleared from local request memory immediately afterward.")
-                  : t("请先在 NNI 页面完成 A 与 H 的绑定。", "Bind A to H on the NNI page first.")}
+                  : t("请先在 NNI 页面完成资产账户与硬件芯片的绑定。", "Bind the asset account to the hardware chip on the NNI page first.")}
               </span>
             </span>
           </label>
@@ -1831,7 +1867,7 @@ export function BancorQuoteDialog({
                 autoComplete="off"
                 spellCheck={false}
                 className="theme-input w-full font-mono"
-                placeholder={t("粘贴手抄保存的 A 私钥", "Paste the saved A private key")}
+                placeholder={t("粘贴手抄保存的资产私钥", "Paste the saved asset private key")}
                 onChange={(event) => setOwnerPrivateKey(event.target.value)}
               />
             </label>

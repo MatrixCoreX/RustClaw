@@ -187,6 +187,12 @@ class ShareTextTest(unittest.TestCase):
             "desc": "第一段\r\n第二段\u200b",
             "author": {"nickname": "图文作者"},
             "images": [{"url_list": ["https://p.test/1.jpg"]}],
+            "music": {
+                "duration": 397,
+                "playUrl": {
+                    "urlList": ["https://audio.test/image-post.mp3"],
+                },
+            },
         }
 
         article = self.downloader.article_from_douyin_payload(
@@ -198,6 +204,11 @@ class ShareTextTest(unittest.TestCase):
         assert article is not None
         self.assertEqual(article.body, "第一段\n第二段")
         self.assertEqual(article.author, "图文作者")
+        self.assertEqual(
+            article.background_audio_url,
+            "https://audio.test/image-post.mp3",
+        )
+        self.assertEqual(article.background_audio_duration, 397.0)
 
     def test_douyin_rendered_dom_extracts_complete_exact_post_article(self) -> None:
         item_id = "7658893225607908651"
@@ -465,6 +476,78 @@ class ShareTextTest(unittest.TestCase):
             self.assertIn("作者：目标作者", article_text)
             self.assertIn("目标正文第一段\n目标正文第二段", article_text)
             self.assertEqual(len(list(output_dir.glob("note_*.jpg"))), 2)
+
+    def test_douyin_image_article_download_keeps_background_audio(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            image_path = output_dir / "note.webp"
+
+            def fake_download_images(*_args, **_kwargs):
+                image_path.write_bytes(b"image")
+                return [image_path]
+
+            def fake_download_audio(_url, _output_dir, **kwargs):
+                audio_path = output_dir / f"{kwargs['output_name']}_background_audio.mp3"
+                audio_path.write_bytes(b"audio")
+                return audio_path
+
+            args = SimpleNamespace(
+                verbose=False,
+                print_url=False,
+                extract_audio=False,
+                transcribe=False,
+                browser_fallback=False,
+                output_dir=str(output_dir),
+                output_name="note",
+                overwrite=True,
+                timeout=1.0,
+                save_meta=False,
+                show_info=False,
+                ocr_images=False,
+            )
+            article = self.downloader.ArticleContent(
+                "",
+                "平台正文",
+                "",
+                "test",
+                "https://audio.test/image-post.mp3",
+                397.0,
+            )
+            with (
+                mock.patch.object(
+                    self.downloader,
+                    "download_image_candidates",
+                    side_effect=fake_download_images,
+                ),
+                mock.patch.object(
+                    self.downloader,
+                    "download_image_post_audio",
+                    side_effect=fake_download_audio,
+                ) as download_audio,
+            ):
+                result = self.downloader.handle_resolved_media(
+                    args,
+                    "https://www.douyin.com/note/7658893225607908651",
+                    None,
+                    "douyin",
+                    "7658893225607908651",
+                    [],
+                    [self.downloader.ImageCandidate("https://p.test/1.webp", "test", 1)],
+                    [],
+                    article=article,
+                )
+
+            self.assertEqual(result, 0)
+            self.assertTrue((output_dir / "note_background_audio.mp3").is_file())
+            download_audio.assert_called_once_with(
+                "https://audio.test/image-post.mp3",
+                output_dir,
+                output_name="note",
+                overwrite=True,
+                cookie=None,
+                timeout=1.0,
+                referer="https://www.douyin.com/",
+            )
 
     def test_video_download_prefers_candidate_with_audio(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

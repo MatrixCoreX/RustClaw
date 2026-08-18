@@ -4,7 +4,8 @@ use std::sync::{Arc, RwLock};
 
 use super::{
     action_requires_transcript_review_synthesis, classify_skill_failure_recovery,
-    preserve_requested_capability_result_identity, strip_internal_execution_args,
+    preserve_requested_capability_result_identity,
+    preserve_transcript_review_as_intermediate_evidence, strip_internal_execution_args,
     strip_unsupported_planner_metadata_args, synthesize_answer_allows_direct_fallback,
     synthesize_bounded_read_range_direct_answer,
     synthesize_direct_fallback_would_passthrough_multiline_read_range,
@@ -82,6 +83,39 @@ fn required_transcript_review_overrides_direct_respond() {
         },
         &loop_state,
     ));
+}
+
+#[test]
+fn completed_transcript_review_remains_intermediate_evidence_for_followup_planning() {
+    let mut loop_state = LoopState::default();
+    loop_state.last_publishable_synthesis_output = Some("reviewed transcript".to_string());
+    loop_state.last_capability_synthesis_output = Some("reviewed transcript".to_string());
+    let mut ended_with_user_visible_output = true;
+
+    preserve_transcript_review_as_intermediate_evidence(
+        &mut loop_state,
+        &mut ended_with_user_visible_output,
+        false,
+        Some("earlier publishable answer".to_string()),
+    );
+
+    assert!(!ended_with_user_visible_output);
+    assert_eq!(
+        loop_state.last_publishable_synthesis_output.as_deref(),
+        Some("earlier publishable answer")
+    );
+    assert_eq!(
+        loop_state.last_capability_synthesis_output.as_deref(),
+        Some("reviewed transcript")
+    );
+    assert_eq!(
+        loop_state.task_observations.last().and_then(|observation| {
+            observation
+                .get("status_code")
+                .and_then(serde_json::Value::as_str)
+        }),
+        Some("review_completed_continue_planning")
+    );
 }
 
 #[path = "dispatch_support_tests/active_recipe_terminal_discussion.rs"]

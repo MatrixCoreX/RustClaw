@@ -55,6 +55,61 @@ function apiResponse(data: unknown): Response {
   });
 }
 
+test("BANCOR keeps the asset-account setup guide until account access succeeds", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  let ownerMissing = true;
+  const apiFetch = (path: string): Promise<Response> => {
+    if (path.startsWith("/v1/nni/bancor/account?")) {
+      if (ownerMissing) {
+        return Promise.resolve(new Response(JSON.stringify({
+          ok: false,
+          data: null,
+          error: "nni_asset_owner_required",
+        }), {
+          status: 409,
+          headers: { "content-type": "application/json" },
+        }));
+      }
+      return Promise.resolve(apiResponse({ trades: [] }));
+    }
+    if (path === "/v1/nni/bancor/market") {
+      return Promise.resolve(apiResponse({ status: "open" }));
+    }
+    throw new Error(`unexpected request: ${path}`);
+  };
+  let runtime: ReturnType<typeof useBancorRuntime> | null = null;
+  function Probe() {
+    runtime = useBancorRuntime({ apiFetch, cacheScope: "asset-owner-guide-test", t: (zh) => zh });
+    return null;
+  }
+
+  let renderer: ReactTestRenderer | null = null;
+  await act(async () => {
+    renderer = create(React.createElement(Probe));
+  });
+  await act(async () => {
+    await runtime!.fetchAccount(1);
+  });
+  assert.equal(runtime!.assetOwnerRequired, true);
+  assert.match(runtime!.error ?? "", /生成并绑定资产账号/);
+  assert.doesNotMatch(runtime!.error ?? "", /nni_asset_owner_required/);
+
+  await act(async () => {
+    await runtime!.fetchMarket();
+  });
+  assert.equal(runtime!.assetOwnerRequired, true);
+
+  ownerMissing = false;
+  await act(async () => {
+    await runtime!.fetchAccount(1);
+  });
+  assert.equal(runtime!.assetOwnerRequired, false);
+
+  await act(async () => {
+    renderer!.unmount();
+  });
+});
+
 test("BANCOR hook never exposes old-period candles after a failed interval switch", async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   let rejectOneMinute: ((cause: Error) => void) | undefined;

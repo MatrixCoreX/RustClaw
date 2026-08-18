@@ -1284,6 +1284,98 @@ class AdapterTest(unittest.TestCase):
             "inline_and_artifact",
         )
 
+    def test_download_exposes_both_image_and_background_audio_text_followups(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            artifacts = workspace / "artifacts"
+            workspace.mkdir()
+
+            def fake_run(command, **kwargs):
+                output_dir = Path(command[command.index("--output-dir") + 1])
+                output_dir.mkdir(parents=True, exist_ok=True)
+                (output_dir / "note.webp").write_bytes(b"image")
+                (output_dir / "note_background_audio.mp3").write_bytes(b"audio")
+                (output_dir / "note_article.txt").write_text(
+                    "平台：抖音\n\n正文：\n平台正文",
+                    encoding="utf-8",
+                )
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            request = {
+                "request_id": "download-image-audio-article-1",
+                "args": {
+                    "action": "download",
+                    "share": "https://www.douyin.com/note/example",
+                },
+                "context": {
+                    "artifact_output_directory": str(artifacts),
+                    "workspace_root": str(workspace),
+                    "permissions": {"allow_path_outside_workspace": False},
+                },
+                "user_id": 1,
+                "chat_id": 1,
+            }
+            with mock.patch.object(
+                self.skill.subprocess,
+                "run",
+                side_effect=fake_run,
+            ) as run_tool:
+                response = self.skill.respond(request)
+
+        self.assertEqual(run_tool.call_count, 1)
+        self.assertNotIn("processing_outputs", response["extra"])
+        self.assertFalse(
+            any(
+                artifact.get("artifact_role") in {"recognized_text", "transcript_text"}
+                for artifact in response["extra"]["artifacts"]
+            )
+        )
+
+        bundle = response["extra"]["content_bundle"]
+        self.assertEqual(bundle["kind"], "image_audio_article")
+        self.assertEqual(bundle["image_count"], 1)
+        self.assertEqual(bundle["audio_count"], 1)
+        self.assertEqual(bundle["article_count"], 1)
+        self.assertEqual(
+            [step["component_kind"] for step in bundle["followup_policy"]["steps"]],
+            ["images", "background_audio"],
+        )
+        self.assertEqual(
+            bundle["followup_policy"]["completion_requirement"],
+            "all_components",
+        )
+        self.assertEqual(
+            response["extra"]["processing_inputs"]["background_audio"]["path"],
+            str(artifacts / "note_background_audio.mp3"),
+        )
+        audio_step = bundle["followup_policy"]["steps"][1]
+        self.assertEqual(audio_step["fallback_input_field"], "input_path")
+        self.assertEqual(
+            audio_step["fallback_input_value"],
+            str(artifacts / "note_background_audio.mp3"),
+        )
+        self.assertEqual(
+            response["extra"]["processing_inputs"]["images"],
+            [
+                {
+                    "path": str(artifacts / "note.webp"),
+                    "filename": "note.webp",
+                    "mime_type": "image/webp",
+                    "size_bytes": 5,
+                }
+            ],
+        )
+
+    def test_numbered_background_audio_remains_a_composite_component(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "note_background_audio.1.mp3"
+            path.write_bytes(b"audio")
+
+            artifact = self.skill._artifact(path)
+
+        self.assertEqual(artifact["artifact_role"], "background_audio")
+
     def test_nine_downloaded_images_remain_individual_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

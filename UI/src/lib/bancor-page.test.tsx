@@ -179,6 +179,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       formatUnixDateTime={(value) => String(value ?? "")}
       signingDeviceReady
       assetOwnerReady
+      assetOwnerPubkey="5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M"
       onOpenNni={() => undefined}
     />,
   );
@@ -189,11 +190,32 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       formatUnixDateTime={(value) => String(value ?? "")}
       signingDeviceReady={false}
       assetOwnerReady={false}
+      assetOwnerPubkey={null}
+      onOpenNni={() => undefined}
+    />,
+  );
+  const assetOwnerRequiredHtml = renderToStaticMarkup(
+    <BancorPage
+      t={(zh) => zh}
+      runtime={{
+        ...runtime,
+        assetOwnerRequired: true,
+        error: "请先到 NNI 页面生成并绑定资产账号，然后再进行交易。",
+      }}
+      formatUnixDateTime={(value) => String(value ?? "")}
+      signingDeviceReady
+      assetOwnerReady={false}
+      assetOwnerPubkey={null}
       onOpenNni={() => undefined}
     />,
   );
   assert.match(signingUnavailableHtml, /加入 NNI 网络不是交易的前置条件/);
   assert.doesNotMatch(signingUnavailableHtml, /请先在 NNI 页面加入网络/);
+  assert.match(assetOwnerRequiredHtml, /data-bancor-asset-owner-required="true"/);
+  assert.match(assetOwnerRequiredHtml, /请先到 NNI 页面生成并绑定资产账号/);
+  assert.match(assetOwnerRequiredHtml, /data-bancor-open-nni="asset-owner"/);
+  assert.match(assetOwnerRequiredHtml, /前往 NNI 页面/);
+  assert.doesNotMatch(assetOwnerRequiredHtml, /nni_asset_owner_required/);
   assert.match(html, /data-nni-decimal-amount="100000000\.00000000 POINT"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.match(html, /data-nni-decimal-amount="10000\.00000000 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.match(html, /BANCOR储备曲线市场/);
@@ -205,8 +227,10 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /强制流动性算法/);
   assert.doesNotMatch(html, /<h1[^>]*>BANCOR<\/h1>/);
   assert.doesNotMatch(html, /内部 USD/);
-  assert.match(html, /临时输入 A 资产私钥自行签名/);
+  assert.match(html, /临时输入资产私钥自行签名/);
   assert.doesNotMatch(html, /ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C/);
+  assert.match(html, /data-bancor-asset-owner-pubkey="true"/);
+  assert.match(html, /资产账号公钥/);
   assert.match(html, /5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M/);
   assert.doesNotMatch(html, /切换为原始十六进制公钥/);
   assert.match(html, /BANCOR 储备曲线公式/);
@@ -615,7 +639,7 @@ test("BANCOR quote review and final confirmation use a centered modal", () => {
   assert.match(html, /bancor-sign-trade-btn/);
   assert.match(html, /确认签名交易/);
   assert.match(html, /当前硬件代理签名/);
-  assert.match(html, /A 资产密钥自行签名/);
+  assert.match(html, /使用资产密钥自行签名/);
   assert.match(html, /返回修改/);
   assert.doesNotMatch(html, /已超过你设置的/);
 });
