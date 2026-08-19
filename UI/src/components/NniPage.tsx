@@ -148,6 +148,14 @@ export const NNI_DEVICE_AUTHORIZATION_DENIED_COPY = {
   en: "This is not an authorized device and cannot participate in the NNI network.",
 } as const;
 
+export function shouldOfferNniOwnerRecovery(
+  joined: boolean,
+  assetOwnerPubkey: string | null,
+  hasPendingOwnerKeyPair: boolean,
+): boolean {
+  return !joined && !assetOwnerPubkey && !hasPendingOwnerKeyPair;
+}
+
 export function NniPage({
   lang,
   t,
@@ -241,6 +249,11 @@ export function NniPage({
   const nniDetectionUnavailable = nniStatus?.status === "detection_unavailable";
   const nniSimulated = nniStatus?.simulated === true;
   const nniSimulationControl = nniSimulationControlMode(nniStatus, nniStatusLoading);
+  const ownerRecoveryAvailable = shouldOfferNniOwnerRecovery(
+    nniJoined,
+    nniAssetOwnerPubkey,
+    Boolean(nniOwnerKeyPair),
+  );
   const nniPrimaryHex = nniPayloadHexField(nniActionResult?.payload);
   const nniHeartbeatRecordsCanPrev = nniHeartbeatRecordsPage > 1;
   const nniHeartbeatRecordsCanNext = nniHeartbeatRecordsPage < nniHeartbeatRecordsTotalPages;
@@ -516,7 +529,7 @@ export function NniPage({
                 )}
               </p>
             </div>
-            {!nniJoined ? (
+            {ownerRecoveryAvailable ? (
               <button
                 type="button"
                 className="theme-secondary-btn px-3 py-2 text-sm"
@@ -589,7 +602,7 @@ export function NniPage({
             </div>
           ) : null}
 
-          {ownerRecoveryOpen && !nniJoined ? (
+          {ownerRecoveryOpen && ownerRecoveryAvailable ? (
             <div className="mt-4 rounded-xl border border-white/12 p-4">
               <p className="text-sm leading-6 text-white/70">
                 {t("新设备的硬件芯片必须先进入服务端白名单。私钥只用于这次换机签名，不会保存。", "The new device's hardware chip must be allowlisted first. The private key is used only for this recovery signature and is not saved.")}

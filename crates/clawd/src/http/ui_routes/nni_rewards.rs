@@ -25,14 +25,19 @@ fn nni_network_stats_decimal(value: &Value) -> bool {
         && fraction.bytes().all(|byte| byte.is_ascii_digit())
 }
 
+fn nni_network_stats_integer_string(value: &Value) -> bool {
+    value
+        .as_str()
+        .is_some_and(|value| !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
 fn nni_network_stats_optional_unix(value: Option<&Value>) -> bool {
     value.is_some_and(|value| value.is_null() || value.as_i64().is_some_and(|unix| unix >= 0))
 }
 
-fn validate_nni_network_stats_response(data: &Value) -> Result<(), &'static str> {
-    let root = data
-        .as_object()
-        .ok_or("nni_network_stats_contract_invalid")?;
+fn validate_nni_network_stats_sections(
+    root: &serde_json::Map<String, Value>,
+) -> Result<(), &'static str> {
     let devices = root
         .get("network_devices")
         .and_then(Value::as_object)
@@ -49,24 +54,25 @@ fn validate_nni_network_stats_response(data: &Value) -> Result<(), &'static str>
         .get("phase")
         .and_then(Value::as_str)
         .is_some_and(|phase| matches!(phase, "disabled" | "scheduled" | "active"));
+    let current_reward_units_are_valid = policy
+        .get("current_reward_pool_units")
+        .is_some_and(|value| value.is_null() || nni_network_stats_integer_string(value));
+    let halving_era_is_valid = policy
+        .get("halving_era")
+        .is_some_and(|value| value.is_null() || value.as_u64().is_some());
 
-    if root.get("schema_version").and_then(Value::as_u64) != Some(1)
-        || root.get("status").and_then(Value::as_str) != Some("heartbeat_network_stats")
-        || root.contains_key("device_pubkey")
-        || root.contains_key("records")
-        || devices
-            .get("registered_device_count")
-            .and_then(Value::as_u64)
-            .is_none()
+    if devices
+        .get("registered_device_count")
+        .and_then(Value::as_u64)
+        .is_none()
         || devices
             .get("active_device_count")
             .and_then(Value::as_u64)
             .is_none()
-        || devices.get("window_seconds").and_then(Value::as_u64) == Some(0)
         || devices
             .get("window_seconds")
             .and_then(Value::as_u64)
-            .is_none()
+            .is_none_or(|seconds| seconds == 0)
         || !nni_network_stats_optional_unix(devices.get("active_period_start_unix"))
         || !nni_network_stats_optional_unix(devices.get("active_period_end_unix"))
         || !nni_network_stats_optional_unix(devices.get("first_heartbeat_unix"))
@@ -79,13 +85,22 @@ fn validate_nni_network_stats_response(data: &Value) -> Result<(), &'static str>
             .get("reward_start_time_unix")
             .and_then(Value::as_i64)
             .is_none_or(|unix| unix < 0)
+        || policy
+            .get("starts_in_seconds")
+            .and_then(Value::as_u64)
+            .is_none()
         || !nni_network_stats_optional_unix(policy.get("first_settlement_at_unix"))
-        || policy.get("interval_seconds").and_then(Value::as_u64) == Some(0)
         || policy
             .get("interval_seconds")
             .and_then(Value::as_u64)
-            .is_none()
-        || policy.get("distribution").and_then(Value::as_str) != Some("equal_per_eligible_device")
+            .is_none_or(|seconds| seconds == 0)
+        || policy
+            .get("initial_reward_pool_points")
+            .and_then(Value::as_u64)
+            .is_none_or(|points| points == 0)
+        || !current_reward_units_are_valid
+        || policy.get("distribution").and_then(Value::as_str)
+            != Some("equal_per_eligible_device")
         || !policy
             .get("current_reward_pool_points")
             .is_some_and(|value| value.is_null() || nni_network_stats_decimal(value))
@@ -93,16 +108,13 @@ fn validate_nni_network_stats_response(data: &Value) -> Result<(), &'static str>
         || policy
             .get("halving_interval_seconds")
             .and_then(Value::as_u64)
-            == Some(0)
-        || policy
-            .get("halving_interval_seconds")
-            .and_then(Value::as_u64)
-            .is_none()
-        || policy
-            .get("rewards_ended")
-            .and_then(Value::as_bool)
-            .is_none()
+            .is_none_or(|seconds| seconds == 0)
+        || !halving_era_is_valid
+        || policy.get("rewards_ended").and_then(Value::as_bool).is_none()
         || !nni_network_stats_optional_unix(policy.get("next_halving_at_unix"))
+        || !rewards
+            .get("total_distributed_reward_units")
+            .is_some_and(nni_network_stats_integer_string)
         || !rewards
             .get("total_distributed_reward_points")
             .is_some_and(nni_network_stats_decimal)
@@ -114,6 +126,77 @@ fn validate_nni_network_stats_response(data: &Value) -> Result<(), &'static str>
         || !nni_network_stats_optional_unix(rewards.get("latest_period_end_unix"))
     {
         return Err("nni_network_stats_contract_invalid");
+    }
+    Ok(())
+}
+
+fn validate_nni_network_stats_response(data: &Value) -> Result<(), &'static str> {
+    let root = data
+        .as_object()
+        .ok_or("nni_network_stats_contract_invalid")?;
+    if root.get("schema_version").and_then(Value::as_u64) != Some(1)
+        || root.get("status").and_then(Value::as_str) != Some("heartbeat_network_stats")
+        || root.contains_key("device_pubkey")
+        || root.contains_key("records")
+    {
+        return Err("nni_network_stats_contract_invalid");
+    }
+    validate_nni_network_stats_sections(root)
+}
+
+fn validate_nni_rewards_response(data: &Value) -> Result<(), &'static str> {
+    let root = data
+        .as_object()
+        .ok_or("nni_rewards_contract_invalid")?;
+    validate_nni_network_stats_sections(root).map_err(|_| "nni_rewards_contract_invalid")?;
+    let per_page = root
+        .get("per_page")
+        .and_then(Value::as_u64)
+        .filter(|value| (1..=100).contains(value))
+        .ok_or("nni_rewards_contract_invalid")?;
+    let records = root
+        .get("records")
+        .and_then(Value::as_array)
+        .ok_or("nni_rewards_contract_invalid")?;
+
+    if root.get("schema_version").and_then(Value::as_u64) != Some(1)
+        || root.get("status").and_then(Value::as_str) != Some("heartbeat_rewards")
+        || root
+            .get("device_pubkey")
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty)
+        || root
+            .get("reward_point_scale")
+            .and_then(Value::as_u64)
+            .is_none_or(|scale| scale == 0)
+        || root.get("reward_decimal_places").and_then(Value::as_u64) != Some(8)
+        || !root
+            .get("total_reward_units")
+            .is_some_and(nni_network_stats_integer_string)
+        || !root
+            .get("total_reward_points")
+            .is_some_and(nni_network_stats_decimal)
+        || root
+            .get("reward_grant_count")
+            .and_then(Value::as_u64)
+            .is_none()
+        || !nni_network_stats_optional_unix(root.get("first_period_start_unix"))
+        || !nni_network_stats_optional_unix(root.get("latest_period_end_unix"))
+        || root.get("page").and_then(Value::as_u64).is_none_or(|page| page == 0)
+        || root.get("total").and_then(Value::as_u64).is_none()
+        || root
+            .get("total_pages")
+            .and_then(Value::as_u64)
+            .is_none_or(|pages| pages == 0)
+        || root
+            .get("history_limit")
+            .and_then(Value::as_u64)
+            .is_none_or(|limit| !(1..=100).contains(&limit))
+        || root.get("history_truncated").and_then(Value::as_bool).is_none()
+        || records.len() as u64 > per_page
+        || records.iter().any(|record| !record.is_object())
+    {
+        return Err("nni_rewards_contract_invalid");
     }
     Ok(())
 }
@@ -437,9 +520,13 @@ async fn query_nni_rewards_for_node(
             "retryable": nni_remote_http_status_retryable(verify_status.as_u16()),
         }));
     }
-    verify_body.data.ok_or_else(
+    let data = verify_body.data.ok_or_else(
         || json!({"node_url": node_url, "error_code": "nni_reward_verify_data_missing"}),
-    )
+    )?;
+    validate_nni_rewards_response(&data).map_err(
+        |error_code| json!({"node_url": node_url, "error_code": error_code}),
+    )?;
+    Ok(data)
 }
 
 #[cfg(test)]
@@ -485,6 +572,34 @@ mod nni_network_stats_unit_tests {
         })
     }
 
+    fn valid_rewards() -> Value {
+        let network_stats = valid_network_stats();
+        json!({
+            "schema_version": 1,
+            "status": "heartbeat_rewards",
+            "device_pubkey": "test-device-public-key",
+            "asset_owner_pubkey": null,
+            "authorization_epoch": null,
+            "reward_point_scale": 100_000_000,
+            "reward_decimal_places": 8,
+            "total_reward_units": "500000000000",
+            "total_reward_points": "5000.00000000",
+            "reward_grant_count": 1,
+            "first_period_start_unix": null,
+            "latest_period_end_unix": null,
+            "network_devices": network_stats["network_devices"].clone(),
+            "reward_policy": network_stats["reward_policy"].clone(),
+            "network_rewards": network_stats["network_rewards"].clone(),
+            "page": 1,
+            "per_page": 20,
+            "total": 1,
+            "total_pages": 1,
+            "history_limit": 100,
+            "history_truncated": false,
+            "records": [{}]
+        })
+    }
+
     #[test]
     fn accepts_aggregate_only_network_stats_before_first_heartbeat() {
         assert_eq!(
@@ -507,6 +622,33 @@ mod nni_network_stats_unit_tests {
         assert_eq!(
             validate_nni_network_stats_response(&malformed),
             Err("nni_network_stats_contract_invalid")
+        );
+
+        let mut malformed_pool = valid_network_stats();
+        malformed_pool["reward_policy"]["current_reward_pool_units"] = json!(5000);
+        assert_eq!(
+            validate_nni_network_stats_response(&malformed_pool),
+            Err("nni_network_stats_contract_invalid")
+        );
+    }
+
+    #[test]
+    fn validates_private_reward_envelope_and_history_metadata() {
+        assert_eq!(validate_nni_rewards_response(&valid_rewards()), Ok(()));
+
+        let mut malformed = valid_rewards();
+        malformed["history_truncated"] = json!("false");
+        assert_eq!(
+            validate_nni_rewards_response(&malformed),
+            Err("nni_rewards_contract_invalid")
+        );
+
+        let mut oversized = valid_rewards();
+        oversized["per_page"] = json!(1);
+        oversized["records"] = json!([{}, {}]);
+        assert_eq!(
+            validate_nni_rewards_response(&oversized),
+            Err("nni_rewards_contract_invalid")
         );
     }
 }

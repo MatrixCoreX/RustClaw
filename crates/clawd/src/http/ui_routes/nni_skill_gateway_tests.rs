@@ -192,7 +192,7 @@ async fn public_market_query_is_not_blocked_by_missing_local_signer() {
 }
 
 #[tokio::test]
-async fn network_stats_requires_the_signed_rewards_contract() {
+async fn public_network_stats_is_not_blocked_by_missing_local_signer() {
     let root = NniTempDir::new();
     let state = isolated_nni_state(root.path());
 
@@ -202,9 +202,9 @@ async fn network_stats_requires_the_signed_rewards_contract() {
         &internal_nni_request(InternalNniAction::NetworkStats),
     )
     .await
-    .expect_err("network statistics are returned by the signed rewards endpoint");
+    .expect_err("fixture has no configured remote node");
 
-    assert_eq!(error.error_code, "nni_signature_helper_unavailable");
+    assert_eq!(error.error_code, "nni_remote_node_unconfigured");
 }
 
 #[test]
@@ -212,6 +212,7 @@ fn nni_gateway_sanitizes_sensitive_fields_recursively() {
     let sanitized = sanitize_nni_skill_data(json!({
         "node_url": "https://secret.example.test/private/path",
         "device_pubkey": "abcdef0123456789abcdef0123456789",
+        "asset_owner_pubkey": "0123456789abcdef0123456789abcdef",
         "nested": {
             "signature": "private-signature",
             "challenge": "private-challenge",
@@ -221,6 +222,9 @@ fn nni_gateway_sanitizes_sensitive_fields_recursively() {
     }));
     assert!(sanitized.get("node_url").is_none());
     assert!(sanitized.get("device_pubkey").is_none());
+    assert!(sanitized.get("asset_owner_pubkey").is_none());
+    assert!(sanitized.get("device_pubkey_fingerprint").is_some());
+    assert!(sanitized.get("asset_owner_pubkey_fingerprint").is_some());
     assert!(sanitized["nested"].get("signature").is_none());
     assert!(sanitized["nested"].get("challenge").is_none());
     assert!(sanitized["nested"].get("token").is_none());
@@ -331,6 +335,16 @@ fn nni_gateway_rejects_fields_owned_by_another_action() {
         .expect_err("status must reject quote fields");
     assert_eq!(error.error_code, "nni_argument_invalid");
     assert_eq!(error.details["invalid_fields"], json!(["pay_amount"]));
+
+    let request: InternalNniActionRequest = serde_json::from_value(json!({
+        "action": "network_stats",
+        "limit": 10
+    }))
+    .expect("decode known request fields");
+    let error = validate_internal_nni_action_request(&request)
+        .expect_err("public aggregate statistics must reject pagination fields");
+    assert_eq!(error.error_code, "nni_argument_invalid");
+    assert_eq!(error.details["invalid_fields"], json!(["limit"]));
 }
 
 #[test]
@@ -510,20 +524,24 @@ fn nni_gateway_enforces_query_bounds_and_supported_candle_periods() {
 }
 
 #[test]
-fn nni_network_stats_requires_structured_network_sections() {
-    let data = nni_skill_network_stats(&json!({
-        "network_devices": {"registered": 10, "active": 8},
-        "reward_policy": {"window_reward": "5000"},
-        "network_rewards": {"cumulative_output": "10000"},
-    }))
-    .expect("network statistics");
-    assert_eq!(data["network_devices"]["active"], 8);
-    assert_eq!(data["reward_policy"]["window_reward"], "5000");
+fn nni_reward_truncation_uses_server_pagination_metadata() {
+    let complete = json!({
+        "page": 1,
+        "total_pages": 1,
+        "history_truncated": false,
+        "records": [{}, {}],
+    });
+    assert!(!nni_skill_reward_result_truncated(
+        complete.as_object().expect("object")
+    ));
 
-    assert_eq!(
-        nni_skill_network_stats(&json!({}))
-            .expect_err("missing network statistics")
-            .error_code,
-        "nni_response_contract_invalid"
-    );
+    let more_pages = json!({"page": 1, "total_pages": 2, "history_truncated": false});
+    assert!(nni_skill_reward_result_truncated(
+        more_pages.as_object().expect("object")
+    ));
+
+    let historical_rows_removed = json!({"page": 1, "total_pages": 1, "history_truncated": true});
+    assert!(nni_skill_reward_result_truncated(
+        historical_rows_removed.as_object().expect("object")
+    ));
 }

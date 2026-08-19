@@ -82,8 +82,7 @@ fn validate_internal_nni_action_request(
         supplied.push("slippage_bps");
     }
     let allowed: &[&str] = match request.action {
-        InternalNniAction::NetworkStats
-        | InternalNniAction::MyRewards
+        InternalNniAction::MyRewards
         | InternalNniAction::BancorAccount
         | InternalNniAction::BancorMarketTrades => &["limit"],
         InternalNniAction::BancorCandles => &["limit", "interval", "end_time_ts"],
@@ -359,6 +358,9 @@ fn nni_skill_attempts_error(
 }
 
 fn nni_skill_attempt_is_retryable(attempt: &Value) -> bool {
+    if attempt.get("retryable").and_then(Value::as_bool) == Some(true) {
+        return true;
+    }
     if attempt
         .get("http_status")
         .and_then(Value::as_u64)
@@ -418,7 +420,10 @@ async fn nni_skill_rewards_data(
                         .map(Vec::len)
                         .unwrap_or_default();
                     object.insert("returned_count".to_string(), json!(returned_count));
-                    object.insert("truncated".to_string(), json!(returned_count >= limit));
+                    object.insert(
+                        "truncated".to_string(),
+                        json!(nni_skill_reward_result_truncated(object)),
+                    );
                 }
                 return Ok(data);
             }
@@ -426,6 +431,19 @@ async fn nni_skill_rewards_data(
         }
     }
     Err(nni_skill_attempts_error("nni_rewards_query_failed", attempts))
+}
+
+fn nni_skill_reward_result_truncated(object: &serde_json::Map<String, Value>) -> bool {
+    let page = object.get("page").and_then(Value::as_u64).unwrap_or(1);
+    let total_pages = object
+        .get("total_pages")
+        .and_then(Value::as_u64)
+        .unwrap_or(page);
+    let history_truncated = object
+        .get("history_truncated")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    page < total_pages || history_truncated
 }
 
 async fn nni_skill_bancor_account_data(
@@ -586,23 +604,40 @@ async fn nni_skill_public_node_data(
     Err(nni_skill_attempts_error("nni_bancor_query_failed", attempts))
 }
 
-fn nni_skill_network_stats(rewards: &Value) -> Result<Value, NniSkillDomainError> {
-    let network_devices = rewards.get("network_devices").cloned().unwrap_or(Value::Null);
-    let reward_policy = rewards.get("reward_policy").cloned().unwrap_or(Value::Null);
-    let network_rewards = rewards.get("network_rewards").cloned().unwrap_or(Value::Null);
-    if network_devices.is_null() && reward_policy.is_null() && network_rewards.is_null() {
-        return Err(NniSkillDomainError::new(
-            StatusCode::BAD_GATEWAY,
-            "nni_response_contract_invalid",
+async fn nni_skill_network_stats_data(state: &AppState) -> Result<Value, NniSkillDomainError> {
+    let config = read_nni_config(state).map_err(|error| {
+        NniSkillDomainError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "nni_config_read_failed",
             false,
-            json!({"missing_fields": ["network_devices", "reward_policy", "network_rewards"]}),
+            json!({"detail": error.to_string()}),
+        )
+    })?;
+    if nni_selected_remote_node(&config).is_none() {
+        return Err(NniSkillDomainError::new(
+            StatusCode::PRECONDITION_FAILED,
+            "nni_remote_node_unconfigured",
+            false,
+            json!({"selected_node_count": 0}),
         ));
     }
-    Ok(json!({
-        "network_devices": network_devices,
-        "reward_policy": reward_policy,
-        "network_rewards": network_rewards,
-    }))
+
+    let mut attempts = Vec::new();
+    for node_url in nni_selected_remote_nodes(&config) {
+        match nni_remote_read_with_retry(|| query_nni_network_stats_for_node(state, node_url)).await {
+            Ok(mut data) => {
+                if let Some(object) = data.as_object_mut() {
+                    object.insert("node_url".to_string(), Value::String(node_url.clone()));
+                }
+                return Ok(data);
+            }
+            Err(error) => attempts.push(error),
+        }
+    }
+    Err(nni_skill_attempts_error(
+        "nni_network_stats_query_failed",
+        attempts,
+    ))
 }
 
 fn sanitize_nni_skill_data(value: Value) -> Value {
@@ -620,13 +655,26 @@ fn sanitize_nni_skill_data(value: Value) -> Value {
                     nni_node_host(&node_url).map(Value::String).unwrap_or(Value::Null),
                 );
             }
-            if let Some(pubkey) = object
+            let device_pubkey = object
                 .remove("device_pubkey")
-                .or_else(|| object.remove("local_device_pubkey"))
+                .or_else(|| object.remove("local_device_pubkey"));
+            object.remove("local_device_pubkey");
+            if let Some(pubkey) = device_pubkey
                 .and_then(|value| value.as_str().map(str::to_string))
             {
                 object.insert(
                     "device_pubkey_fingerprint".to_string(),
+                    nni_hex_fingerprint(&pubkey)
+                        .map(Value::String)
+                        .unwrap_or(Value::Null),
+                );
+            }
+            if let Some(pubkey) = object
+                .remove("asset_owner_pubkey")
+                .and_then(|value| value.as_str().map(str::to_string))
+            {
+                object.insert(
+                    "asset_owner_pubkey_fingerprint".to_string(),
                     nni_hex_fingerprint(&pubkey)
                         .map(Value::String)
                         .unwrap_or(Value::Null),
@@ -964,17 +1012,7 @@ async fn execute_internal_nni_action(
         InternalNniAction::HeartbeatEnable => nni_skill_heartbeat_enable(state).await,
         InternalNniAction::HeartbeatDisable => nni_skill_heartbeat_disable(state).await,
         InternalNniAction::HeartbeatNow => nni_skill_heartbeat_now(state).await,
-        InternalNniAction::NetworkStats => {
-            let device = nni_device_snapshot(state, false).await;
-            nni_skill_require_signer(&device)?;
-            let rewards = nni_skill_rewards_data(
-                state,
-                &user_key,
-                nni_skill_limit(request.limit, 1, 100)?,
-            )
-            .await?;
-            nni_skill_network_stats(&rewards)
-        }
+        InternalNniAction::NetworkStats => nni_skill_network_stats_data(state).await,
         InternalNniAction::MyRewards => {
             let device = nni_device_snapshot(state, false).await;
             nni_skill_require_signer(&device)?;
