@@ -72,6 +72,15 @@ fn action_specific_fields_are_enforced() {
         .expect_err("status must reject limit");
     assert_eq!(error.code, "nni_argument_invalid");
 
+    let network_stats: Request =
+        serde_json::from_str(&request_for("network_stats", r#", "limit":1"#))
+            .expect("decode known but irrelevant field");
+    let error = network_stats
+        .args
+        .validate()
+        .expect_err("public network statistics must reject pagination fields");
+    assert_eq!(error.code, "nni_argument_invalid");
+
     let quote: Request =
         serde_json::from_str(&request_for("bancor_quote", "")).expect("decode incomplete quote");
     let error = quote

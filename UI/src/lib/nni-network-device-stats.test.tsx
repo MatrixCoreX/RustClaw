@@ -10,6 +10,7 @@ import {
 import {
   NNI_DEVICE_AUTHORIZATION_DENIED_COPY,
   NNI_DEVICE_MANAGEMENT_COPY,
+  shouldOfferNniOwnerRecovery,
 } from "../components/NniPage";
 
 test("describes NNI as a hardware-device capability instead of a Pi App feature", () => {
@@ -108,6 +109,13 @@ test("asset account setup avoids key-letter jargon and protects key actions", ()
   assert.match(source, /ownerPrivateKeyCopied \? t\("已复制", "Copied"\)/);
   assert.match(source, /className="flex justify-end pt-1"/);
   assert.match(source, /data-nni-discard-owner-key-pair="true"/);
+});
+
+test("offers device recovery only before an asset account is bound or generated", () => {
+  assert.equal(shouldOfferNniOwnerRecovery(false, null, false), true);
+  assert.equal(shouldOfferNniOwnerRecovery(true, null, false), false);
+  assert.equal(shouldOfferNniOwnerRecovery(false, "bound-asset-public-key", false), false);
+  assert.equal(shouldOfferNniOwnerRecovery(false, null, true), false);
 });
 
 test("network counters never imply that public aggregate data requires joining", () => {

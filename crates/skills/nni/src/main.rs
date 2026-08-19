@@ -102,10 +102,7 @@ impl Args {
             supplied.push("slippage_bps");
         }
         let allowed: &[&str] = match self.action {
-            Action::NetworkStats
-            | Action::MyRewards
-            | Action::BancorAccount
-            | Action::BancorMarketTrades => &["limit"],
+            Action::MyRewards | Action::BancorAccount | Action::BancorMarketTrades => &["limit"],
             Action::BancorCandles => &["limit", "interval", "end_time_ts"],
             Action::BancorQuote => &["side", "pay_asset", "pay_amount", "slippage_bps"],
             _ => &[],

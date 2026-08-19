@@ -3,9 +3,10 @@
 ## Capability Summary
 
 `nni` exposes structured, policy-gated access to the local NNI runtime. It reports device signer
-status, controls the heartbeat intent, reads rewards and public Bancor data, and previews Bancor
-quotes. It never enables simulated signing, changes remote nodes, returns full keys/signatures, or
-executes a Bancor trade. Final user-facing prose is synthesized by the agent in the user's language.
+status, controls the heartbeat intent, reads public network statistics, reads private rewards and
+public Bancor data, and previews Bancor quotes. It never enables simulated signing, changes remote
+nodes, returns full keys/signatures, or executes a Bancor trade. Final user-facing prose is
+synthesized by the agent in the user's language.
 
 The process is a thin adapter over the authenticated local NNI gateway. It must not read NNI state
 files, invoke hardware helpers, or call a remote NNI node directly.
@@ -24,8 +25,9 @@ Action selection semantics:
   `device_status` or combine it with `bancor_market_trades` for an account or "my trades" request.
 - `bancor_market_trades` returns public market-wide trades and must not be presented as the current
   device's own trades.
-- `network_stats` is backed by the signed rewards contract and therefore requires an authorized
-  signer even though the returned values describe the network.
+- `network_stats` reads the selected node's public aggregate contract. It does not require a local
+  signer and does not expose device-level reward history. Use `my_rewards` for the current signer's
+  private reward totals and records.
 - Machine timestamps ending in `_ts` or `_unix` have a deterministic companion `_utc` field. Use
   the supplied `_utc` value when presenting a date; do not independently calculate a calendar date
   from the numeric timestamp. If no companion exists, preserve the numeric timestamp.
@@ -43,7 +45,7 @@ Action selection semantics:
 | `heartbeat_enable` | mutate | - | - | yes |
 | `heartbeat_disable` | mutate | - | - | no |
 | `heartbeat_now` | mutate | - | - | yes |
-| `network_stats` | observe | - | `limit` | yes |
+| `network_stats` | observe | - | - | no |
 | `my_rewards` | observe | - | `limit` | yes |
 | `bancor_market` | observe | - | - | no |
 | `bancor_account` | observe | - | `limit` | yes |
@@ -61,7 +63,7 @@ candles at most 300 rows.
 | Action | Param | Required | Type | Default | Description |
 | --- | --- | --- | --- | --- | --- |
 | all | `action` | yes | enum | - | One of the actions listed above; free-text intent is rejected. |
-| `network_stats`, `my_rewards`, `bancor_account`, `bancor_market_trades` | `limit` | no | integer | action-specific | Between 1 and 100. |
+| `my_rewards`, `bancor_account`, `bancor_market_trades` | `limit` | no | integer | action-specific | Between 1 and 100. |
 | `bancor_candles` | `interval` | no | enum | `5m` | One of `1m`, `5m`, `15m`, `1h`, `4h`, `1d`, `1w`, `1y`. |
 | `bancor_candles` | `limit` | no | integer | `120` | Between 1 and 300. |
 | `bancor_candles` | `end_time_ts` | no | integer | current | Non-negative Unix timestamp. |
@@ -80,6 +82,23 @@ candles at most 300 rows.
   explicit UI control; it does not mean simulation is currently active.
 - `local_participation_eligible` describes local signing eligibility. It does not imply remote
   authorization; interpret `network_authorization` independently.
+
+## Reward Semantics
+
+- Reward values are observations returned by the selected NNI node. The skill does not calculate,
+  override, or cache the economic schedule.
+- `active_device_count` is the number of distinct eligible devices in the latest settled reward
+  window. It is not a live process count.
+- `current_reward_pool_points` is the total reward pool for one window before distribution, not a
+  per-device reward. `distribution=equal_per_eligible_device` states how that window is divided.
+  Use actual reward records for a device's credited amount; do not estimate when window evidence is
+  absent.
+- `first_heartbeat_unix` and `halving_epoch_unix` identify the observed schedule origin.
+  `halving_era`, `next_halving_at_unix`, and `rewards_ended` are authoritative node fields. Do not
+  hardcode interval, initial pool, halving period, or end thresholds in an answer.
+- `phase=scheduled` means rewards have not started, `phase=active` means the configured schedule is
+  active, and `phase=disabled` means reward heartbeats are not accepted. Treat null schedule fields
+  as unavailable rather than deriving replacements.
 
 ## Result Contract
 
@@ -103,7 +122,8 @@ must not parse `text` or `error_text` as natural language.
 Important error codes include `nni_signature_device_unavailable`,
 `nni_signature_helper_unavailable`, `nni_remote_node_unconfigured`,
 `nni_device_not_authorized`, `nni_heartbeat_network_unavailable`,
-`nni_operation_in_progress`, `nni_argument_invalid`, and `nni_response_contract_invalid`.
+`nni_network_stats_query_failed`, `nni_operation_in_progress`, `nni_argument_invalid`, and
+`nni_response_contract_invalid`.
 
 ## Request/Response Examples
 
