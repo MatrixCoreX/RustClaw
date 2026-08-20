@@ -41,6 +41,7 @@ import {
   formatBancorTradeHistoryAmount,
 } from "../lib/bancor-amount-display";
 import { resolveBancorMarketDirectionColors } from "../lib/bancor-market-colors";
+import { nniPublicKeyFormats, shortenHex } from "../lib/nni-display";
 import { BancorPriceChangePage } from "./BancorPriceChangePage";
 import { NniDecimalAmount } from "./NniDecimalAmount";
 import { NniPublicKeyDisplay } from "./NniPublicKeyDisplay";
@@ -57,6 +58,54 @@ export const BANCOR_CANDLE_AUTO_REFRESH_SECONDS = 15;
 export const BANCOR_DEFAULT_VISIBLE_CANDLES = 100;
 const BANCOR_MIN_VISIBLE_CANDLES = 6;
 const BANCOR_DRAG_HISTORY_HEADROOM = 6;
+
+export interface BancorAssetAccountOption {
+  id: string;
+  publicKey: string;
+  source: "local_binding" | "external";
+  label?: string;
+}
+
+export function buildBancorAssetAccountOptions(
+  localBindingPublicKey: string | null | undefined,
+  additionalAccounts: readonly BancorAssetAccountOption[] = [],
+): BancorAssetAccountOption[] {
+  const options: BancorAssetAccountOption[] = [];
+  const seenPublicKeys = new Set<string>();
+  const seenIds = new Set<string>();
+  const localPublicKey = localBindingPublicKey?.trim();
+  if (localPublicKey) {
+    const id = `local-binding:${localPublicKey}`;
+    options.push({
+      id,
+      publicKey: localPublicKey,
+      source: "local_binding",
+    });
+    seenIds.add(id);
+    seenPublicKeys.add(localPublicKey);
+  }
+  for (const account of additionalAccounts) {
+    const id = account.id.trim();
+    const publicKey = account.publicKey.trim();
+    if (!id || !publicKey || seenIds.has(id) || seenPublicKeys.has(publicKey)) continue;
+    options.push({ ...account, id, publicKey });
+    seenIds.add(id);
+    seenPublicKeys.add(publicKey);
+  }
+  return options;
+}
+
+export function formatBancorAssetAccountOption(
+  account: BancorAssetAccountOption,
+  t: Translate,
+): string {
+  const defaultLabel = account.source === "local_binding"
+    ? t("本机绑定账户", "Local bound account")
+    : t("其他资产账户", "Other asset account");
+  const compactPublicKey = nniPublicKeyFormats(account.publicKey)?.compact ?? account.publicKey;
+  return `${account.label?.trim() || defaultLabel} · ${shortenHex(compactPublicKey, 8, 8)}`;
+}
+
 export const BANCOR_CANDLE_INTERVALS = [
   { seconds: 60, zh: "1分", en: "1m" },
   { seconds: 300, zh: "5分", en: "5m" },
@@ -320,6 +369,13 @@ export function BancorPage({
   const [slippagePercent, setSlippagePercent] = useState((BANCOR_DEFAULT_SLIPPAGE_BPS / 100).toFixed(2));
   const [marketTradesPage, setMarketTradesPage] = useState(1);
   const [activeView, setActiveView] = useState<"market" | "price_change">("market");
+  const assetAccountOptions = buildBancorAssetAccountOptions(assetOwnerPubkey);
+  const [preferredAssetAccountId, setPreferredAssetAccountId] = useState(
+    assetAccountOptions[0]?.id ?? "",
+  );
+  const selectedAssetAccount = assetAccountOptions.find(
+    (accountOption) => accountOption.id === preferredAssetAccountId,
+  ) ?? assetAccountOptions[0] ?? null;
   const {
     market,
     candles,
@@ -339,6 +395,7 @@ export function BancorPage({
     error,
     assetOwnerRequired,
     assetOwnerAccessErrorCode,
+    hardwareAccountAccessUnavailable,
     message,
     fetchMarket,
     fetchCandles,
@@ -352,8 +409,10 @@ export function BancorPage({
   const inputAsset = side === "buy" ? "USD" : "POINT";
   const outputAsset = side === "buy" ? "POINT" : "USD";
   const marketOpen = market?.status === "open";
-  const tradingReady = marketOpen && (signingDeviceReady || assetOwnerReady);
-  const allowTradeWithoutLoadedAccount = !signingDeviceReady && assetOwnerReady;
+  const hardwareSigningReady = signingDeviceReady && !hardwareAccountAccessUnavailable;
+  const assetSigningReady = assetOwnerReady && selectedAssetAccount !== null;
+  const tradingReady = marketOpen && (hardwareSigningReady || assetSigningReady);
+  const allowTradeWithoutLoadedAccount = !hardwareSigningReady && assetSigningReady;
   const inputErrorCode = inputAmount.trim()
     ? validateBancorTradeInput({
       side,
@@ -531,8 +590,8 @@ export function BancorPage({
           quote={quote}
           tradeLoading={tradeLoading}
           tradeError={error}
-          signingDeviceReady={signingDeviceReady}
-          assetOwnerReady={assetOwnerReady}
+          signingDeviceReady={hardwareSigningReady}
+          assetOwnerReady={assetSigningReady}
           onClose={clearQuote}
           onConfirm={(authorization) => void confirmTrade(authorization)}
         />
@@ -643,15 +702,32 @@ export function BancorPage({
             </div>
           </div>
           <div className="mt-3 rounded-xl border border-white/8 bg-white/[0.025] p-3">
+            {selectedAssetAccount ? (
+              <label className="mb-3 grid gap-1.5" data-bancor-account-selector="true">
+                <span className="text-xs font-medium text-white/55">{t("交易账户", "Trading account")}</span>
+                <select
+                  className="theme-input w-full font-mono text-xs"
+                  value={selectedAssetAccount.id}
+                  aria-label={t("选择交易账户", "Select trading account")}
+                  onChange={(event) => setPreferredAssetAccountId(event.target.value)}
+                >
+                  {assetAccountOptions.map((accountOption) => (
+                    <option key={accountOption.id} value={accountOption.id}>
+                      {formatBancorAssetAccountOption(accountOption, t)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <WalletCards className="h-4 w-4 text-sky-300" />
                   <h3 className="text-sm font-medium text-white/80">{t("我的余额", "My balances")}</h3>
                 </div>
-                {assetOwnerPubkey ? (
+                {selectedAssetAccount ? (
                   <NniPublicKeyDisplay
-                    value={assetOwnerPubkey}
+                    value={selectedAssetAccount.publicKey}
                     t={t}
                     className="mt-1 pl-6"
                     valueClassName="text-[10px] leading-4 text-white/40"
@@ -663,6 +739,14 @@ export function BancorPage({
                 <RefreshCw className={`h-4 w-4 ${accountLoading ? "animate-spin" : ""}`} />
               </button>
             </div>
+            {hardwareAccountAccessUnavailable && selectedAssetAccount ? (
+              <p className="mt-2 text-xs leading-5 text-amber-200/80" data-bancor-hardware-account-unavailable="true">
+                {t(
+                  "当前硬件签名方式暂时无法读取余额；仍可选择资产密钥签名完成交易。",
+                  "The current hardware signing method cannot read balances right now; you can still complete a trade with an asset-key signature.",
+                )}
+              </p>
+            ) : null}
             <div className="mt-2 grid min-w-0 gap-2 sm:grid-cols-2">
               <BalanceLine
                 label="POINT"
@@ -816,12 +900,17 @@ export function BancorPage({
               {t("管理员尚未开启市场，因此现在只能查看储备和账户。", "The market is not enabled by the administrator, so only reserves and account data are available.")}
             </p>
           ) : null}
-          {marketOpen && !signingDeviceReady ? (
+          {marketOpen && !hardwareSigningReady ? (
             <p className="mt-3 text-xs leading-5 text-amber-200/80">
-              {t(
-                "请确认本机签名设备可用；加入 NNI 网络不是交易的前置条件。",
-                "Confirm that this device can sign. Joining the NNI network is not required for trading.",
-              )}
+              {assetSigningReady
+                ? t(
+                  "当前可使用所选账户的资产密钥签名交易。",
+                  "You can currently trade by signing with the asset key for the selected account.",
+                )
+                : t(
+                  "请选择并准备一种可用的账户签名方式后再交易。",
+                  "Select and prepare an available account signing method before trading.",
+                )}
             </p>
           ) : null}
 

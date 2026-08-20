@@ -36,6 +36,26 @@ export type BancorTradeAuthorization = {
   ownerPrivateKey?: string;
 };
 
+class BancorApiError extends Error {
+  readonly code: string | null | undefined;
+
+  constructor(code: string | null | undefined, message: string) {
+    super(message);
+    this.name = "BancorApiError";
+    this.code = code;
+  }
+}
+
+export function isBancorNniDeviceAdmissionCode(code: string | null | undefined): boolean {
+  return (
+    code === "nni_public_key_whitelist_empty"
+    || code === "public_key_whitelist_empty"
+    || code === "nni_pubkey_not_allowlisted"
+    || code === "nni_public_key_not_allowlisted"
+    || code === "public_key_not_allowlisted"
+  );
+}
+
 export function projectBancorCandlesForInterval(
   current: NniBancorCandlesResponse | null,
   intervalSeconds: number,
@@ -233,16 +253,10 @@ export function formatBancorApiError(
       "This device is no longer bound to an asset account, so balances and trading are unavailable. Go to the NNI page to bind the asset account again.",
     );
   }
-  if (
-    code === "nni_public_key_whitelist_empty"
-    || code === "public_key_whitelist_empty"
-    || code === "nni_pubkey_not_allowlisted"
-    || code === "nni_public_key_not_allowlisted"
-    || code === "public_key_not_allowlisted"
-  ) {
+  if (isBancorNniDeviceAdmissionCode(code)) {
     return t(
-      "当前设备尚未获得 NNI 网络准入。请使用合法设备。",
-      "This device has not been admitted to the NNI network. Use an authorized device.",
+      "当前硬件签名方式暂时无法读取账户。可以改用资产密钥签名交易。",
+      "The current hardware signing method cannot read the account right now. You can trade by signing with the asset key instead.",
     );
   }
   if (code === "nni_bancor_market_not_open") {
@@ -310,6 +324,7 @@ export function useBancorRuntime({
   const [error, setError] = useState<string | null>(null);
   const [assetOwnerRequired, setAssetOwnerRequired] = useState(false);
   const [assetOwnerAccessErrorCode, setAssetOwnerAccessErrorCode] = useState<string | null>(null);
+  const [hardwareAccountAccessUnavailable, setHardwareAccountAccessUnavailable] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const candleIntervalRef = useRef(BANCOR_DEFAULT_CANDLE_INTERVAL_SECONDS);
   const candleCacheRef = useRef(new Map<string, {
@@ -328,14 +343,14 @@ export function useBancorRuntime({
     return () => globalThis.clearTimeout(timeout);
   }, [message]);
 
-  const readError = (body: ApiResponse<unknown>, fallback: string) => {
+  const readError = (body: ApiResponse<unknown>, fallback: string): BancorApiError => {
     const data = body.data as { attempts?: Array<{ error_code?: string | null }> } | undefined;
     const code = data?.attempts?.find((attempt) => attempt.error_code)?.error_code || body.error;
     if (code === "nni_asset_owner_required" || code === "nni_asset_device_not_authorized") {
       setAssetOwnerRequired(true);
       setAssetOwnerAccessErrorCode(code);
     }
-    return formatBancorApiError(code, t, fallback);
+    return new BancorApiError(code, formatBancorApiError(code, t, fallback));
   };
 
   const fetchMarket = (silent = false) => runCoalescedRead(
@@ -346,7 +361,7 @@ export function useBancorRuntime({
     try {
       const response = await fetchResilientRead(apiFetch, "/v1/nni/bancor/market");
       const body = (await response.json()) as ApiResponse<NniBancorMarketResponse>;
-      if (!response.ok || !body.ok || !body.data) throw new Error(readError(body, `Market load failed (${response.status})`));
+      if (!response.ok || !body.ok || !body.data) throw readError(body, `Market load failed (${response.status})`);
       setMarket(body.data);
       setError(null);
       return body.data;
@@ -367,14 +382,21 @@ export function useBancorRuntime({
     try {
       const response = await fetchResilientRead(apiFetch, buildBancorAccountPath(page));
       const body = (await response.json()) as ApiResponse<NniBancorAccountResponse>;
-      if (!response.ok || !body.ok || !body.data) throw new Error(readError(body, `Account load failed (${response.status})`));
+      if (!response.ok || !body.ok || !body.data) throw readError(body, `Account load failed (${response.status})`);
       setAccount(body.data);
       setAssetOwnerRequired(false);
       setAssetOwnerAccessErrorCode(null);
+      setHardwareAccountAccessUnavailable(false);
       setError(null);
       return body.data;
     } catch (cause) {
-      if (!silent) setError(cause instanceof Error ? cause.message : t("余额读取失败。", "Balance load failed."));
+      if (cause instanceof BancorApiError && isBancorNniDeviceAdmissionCode(cause.code)) {
+        setAccount(null);
+        setHardwareAccountAccessUnavailable(true);
+        if (!silent) setError(null);
+      } else if (!silent) {
+        setError(cause instanceof Error ? cause.message : t("余额读取失败。", "Balance load failed."));
+      }
       return null;
     } finally {
       if (!silent) setAccountLoading(false);
@@ -391,7 +413,7 @@ export function useBancorRuntime({
       const response = await fetchResilientRead(apiFetch, "/v1/nni/bancor/trades");
       const body = (await response.json()) as ApiResponse<NniBancorMarketTradesResponse>;
       if (!response.ok || !body.ok || !body.data) {
-        throw new Error(readError(body, `Market trades load failed (${response.status})`));
+        throw readError(body, `Market trades load failed (${response.status})`);
       }
       setMarketTrades(body.data);
       setMarketTradesError(null);
@@ -500,7 +522,7 @@ export function useBancorRuntime({
 
         const body = (await response.json()) as ApiResponse<NniBancorCandlesResponse>;
         if (!response.ok || !body.ok || !body.data) {
-          throw new Error(readError(body, `Candle load failed (${response.status})`));
+          throw readError(body, `Candle load failed (${response.status})`);
         }
         if (!isBancorCandleResponse(body.data, intervalSeconds)) {
           throw new Error(formatBancorApiError("nni_bancor_candles_contract_invalid", t, ""));
@@ -643,7 +665,7 @@ export function useBancorRuntime({
         body: JSON.stringify({ side, input_amount: inputAmount, slippage_bps: slippageBps }),
       });
       const body = (await response.json()) as ApiResponse<NniBancorQuoteResponse>;
-      if (!response.ok || !body.ok || !body.data) throw new Error(readError(body, `Quote failed (${response.status})`));
+      if (!response.ok || !body.ok || !body.data) throw readError(body, `Quote failed (${response.status})`);
       setQuote(body.data);
       return body.data;
     } catch (cause) {
@@ -679,7 +701,7 @@ export function useBancorRuntime({
         }),
       });
       const body = (await response.json()) as ApiResponse<NniBancorTradeResponse>;
-      if (!response.ok || !body.ok || !body.data) throw new Error(readError(body, `Trade failed (${response.status})`));
+      if (!response.ok || !body.ok || !body.data) throw readError(body, `Trade failed (${response.status})`);
       setLastTrade(body.data);
       setQuote(null);
       await Promise.allSettled([
@@ -727,6 +749,7 @@ export function useBancorRuntime({
     error,
     assetOwnerRequired,
     assetOwnerAccessErrorCode,
+    hardwareAccountAccessUnavailable,
     message,
     fetchMarket,
     fetchCandles,

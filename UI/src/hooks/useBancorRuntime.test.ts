@@ -114,7 +114,7 @@ test("BANCOR formats NNI device admission errors for users", () => {
   ]) {
     assert.equal(
       formatBancorApiError(code, zh, "fallback"),
-      "当前设备尚未获得 NNI 网络准入。请使用合法设备。",
+      "当前硬件签名方式暂时无法读取账户。可以改用资产密钥签名交易。",
     );
   }
 });
