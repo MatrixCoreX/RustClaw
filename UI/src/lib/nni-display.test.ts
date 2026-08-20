@@ -114,9 +114,9 @@ test("formats NNI join errors from structured codes", () => {
     nniJoinErrorMessage(undefined, { status: "public_key_not_allowlisted" }, "fallback", "en"),
     /not allowed/,
   );
-  assert.match(
+  assert.equal(
     nniJoinErrorMessage("nni_public_key_whitelist_empty", null, "fallback", "zh"),
-    /当前设备尚未获得 NNI 网络准入/,
+    "当前设备尚未获得 NNI 网络准入。请使用合法设备。",
   );
   assert.equal(nniJoinErrorMessage(undefined, null, "fallback", "en"), "fallback");
   assert.equal(
