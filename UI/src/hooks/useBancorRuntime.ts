@@ -233,6 +233,18 @@ export function formatBancorApiError(
       "This device is no longer bound to an asset account, so balances and trading are unavailable. Go to the NNI page to bind the asset account again.",
     );
   }
+  if (
+    code === "nni_public_key_whitelist_empty"
+    || code === "public_key_whitelist_empty"
+    || code === "nni_pubkey_not_allowlisted"
+    || code === "nni_public_key_not_allowlisted"
+    || code === "public_key_not_allowlisted"
+  ) {
+    return t(
+      "当前设备尚未获得 NNI 网络准入。请使用合法设备。",
+      "This device has not been admitted to the NNI network. Use an authorized device.",
+    );
+  }
   if (code === "nni_bancor_market_not_open") {
     return t("交易市场尚未开启。现在可以查看储备，但不能报价或成交。", "The market is not open yet. Reserves remain visible, but quotes and trades are unavailable.");
   }
