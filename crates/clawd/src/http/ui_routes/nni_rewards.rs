@@ -195,10 +195,60 @@ fn validate_nni_rewards_response(data: &Value) -> Result<(), &'static str> {
         || root.get("history_truncated").and_then(Value::as_bool).is_none()
         || records.len() as u64 > per_page
         || records.iter().any(|record| !record.is_object())
+        || !validate_nni_reward_windows(root.get("reward_windows"))
     {
         return Err("nni_rewards_contract_invalid");
     }
     Ok(())
+}
+
+fn validate_nni_reward_windows(value: Option<&Value>) -> bool {
+    let Some(value) = value else {
+        // The aggregate is an additive contract so rolling node upgrades do
+        // not break signed reward history reads from an older selected node.
+        return true;
+    };
+    let Some(windows) = value.as_array() else {
+        return false;
+    };
+    let expected = [
+        ("week", 7 * 24 * 60 * 60),
+        ("month", 30 * 24 * 60 * 60),
+        ("year", 365 * 24 * 60 * 60),
+    ];
+    if windows.len() != expected.len() {
+        return false;
+    }
+
+    expected.iter().all(|(expected_key, expected_seconds)| {
+        let mut matches = windows.iter().filter(|window| {
+            window.get("key").and_then(Value::as_str) == Some(*expected_key)
+        });
+        let Some(window) = matches.next().and_then(Value::as_object) else {
+            return false;
+        };
+        if matches.next().is_some() {
+            return false;
+        }
+        let Some(window_start) = window.get("window_start_unix").and_then(Value::as_u64) else {
+            return false;
+        };
+        let Some(window_end) = window.get("window_end_unix").and_then(Value::as_u64) else {
+            return false;
+        };
+        window.get("window_seconds").and_then(Value::as_u64) == Some(*expected_seconds)
+            && window_end.checked_sub(window_start) == Some(*expected_seconds)
+            && window
+                .get("total_reward_units")
+                .is_some_and(nni_network_stats_integer_string)
+            && window
+                .get("total_reward_aic")
+                .is_some_and(nni_network_stats_decimal)
+            && window
+                .get("reward_grant_count")
+                .and_then(Value::as_u64)
+                .is_some()
+    })
 }
 
 async fn nni_network_stats(
@@ -587,6 +637,35 @@ mod nni_network_stats_unit_tests {
             "reward_grant_count": 1,
             "first_period_start_unix": null,
             "latest_period_end_unix": null,
+            "reward_windows": [
+                {
+                    "key": "week",
+                    "window_seconds": 604_800,
+                    "window_start_unix": 1_799_395_200,
+                    "window_end_unix": 1_800_000_000,
+                    "total_reward_units": "500000000000",
+                    "total_reward_aic": "5000.00000000",
+                    "reward_grant_count": 1
+                },
+                {
+                    "key": "month",
+                    "window_seconds": 2_592_000,
+                    "window_start_unix": 1_797_408_000,
+                    "window_end_unix": 1_800_000_000,
+                    "total_reward_units": "500000000000",
+                    "total_reward_aic": "5000.00000000",
+                    "reward_grant_count": 1
+                },
+                {
+                    "key": "year",
+                    "window_seconds": 31_536_000,
+                    "window_start_unix": 1_768_464_000,
+                    "window_end_unix": 1_800_000_000,
+                    "total_reward_units": "500000000000",
+                    "total_reward_aic": "5000.00000000",
+                    "reward_grant_count": 1
+                }
+            ],
             "network_devices": network_stats["network_devices"].clone(),
             "reward_policy": network_stats["reward_policy"].clone(),
             "network_rewards": network_stats["network_rewards"].clone(),
@@ -650,5 +729,16 @@ mod nni_network_stats_unit_tests {
             validate_nni_rewards_response(&oversized),
             Err("nni_rewards_contract_invalid")
         );
+
+        let mut malformed_window = valid_rewards();
+        malformed_window["reward_windows"][0]["window_seconds"] = json!(600);
+        assert_eq!(
+            validate_nni_rewards_response(&malformed_window),
+            Err("nni_rewards_contract_invalid")
+        );
+
+        let mut older_node = valid_rewards();
+        older_node.as_object_mut().unwrap().remove("reward_windows");
+        assert_eq!(validate_nni_rewards_response(&older_node), Ok(()));
     }
 }

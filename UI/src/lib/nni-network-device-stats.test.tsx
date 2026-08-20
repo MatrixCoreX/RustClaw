@@ -51,6 +51,7 @@ test("shows registered allowlist devices and active devices from the previous he
         rewards_ended: false,
         next_halving_at_unix: 1_925_144_000,
       }}
+      localPreviousRewardAic="62.50000000"
       loading={false}
       t={(zh) => zh}
       formatUnixDateTime={(value) => String(value ?? "--")}
@@ -70,8 +71,11 @@ test("shows registered allowlist devices and active devices from the previous he
   assert.match(markup, />12500<\/span>/);
   assert.doesNotMatch(markup, /12500\.00000000/);
   assert.match(markup, /窗口奖励/);
+  assert.match(markup, /总奖励/);
+  assert.match(markup, /本机上个窗口/);
   assert.doesNotMatch(markup, /当前每 10 分钟总奖励/);
   assert.match(markup, />5000<\/span>/);
+  assert.match(markup, />62\.50000000<\/span>/);
   assert.doesNotMatch(markup, /5000\.00000000/);
   assert.doesNotMatch(markup, /AIC/);
   assert.doesNotMatch(markup, /由本周期有效心跳设备平分/);
@@ -159,7 +163,7 @@ test("network counters never imply that public aggregate data requires joining",
 
   assert.match(markup, /注册设备/);
   assert.match(markup, /活跃设备/);
-  assert.equal((markup.match(/暂不可用/g) ?? []).length, 6);
+  assert.equal((markup.match(/暂不可用/g) ?? []).length, 7);
   assert.doesNotMatch(markup, /未加入/);
   assert.doesNotMatch(markup, />--</);
 });

@@ -9,6 +9,7 @@ import {
 } from "../components/NniAprPage";
 import {
   calculateNniAprEstimate,
+  calculateNniPeriodAprEstimate,
   latestNniRewardRecord,
   NNI_APR_AUTO_REFRESH_SECONDS,
   parsePositiveNniDevicePrice,
@@ -25,6 +26,35 @@ const rewards: NniRewardsResponse = {
   total_reward_aic: "15.00000000",
   reward_grant_count: 2,
   latest_period_end_unix: 1_800_001_200,
+  reward_windows: [
+    {
+      key: "week",
+      window_seconds: 604_800,
+      window_start_unix: 1_799_396_410,
+      window_end_unix: 1_800_001_210,
+      total_reward_units: "7000000000",
+      total_reward_aic: "70.00000000",
+      reward_grant_count: 7,
+    },
+    {
+      key: "month",
+      window_seconds: 2_592_000,
+      window_start_unix: 1_797_409_210,
+      window_end_unix: 1_800_001_210,
+      total_reward_units: "30000000000",
+      total_reward_aic: "300.00000000",
+      reward_grant_count: 30,
+    },
+    {
+      key: "year",
+      window_seconds: 31_536_000,
+      window_start_unix: 1_768_465_210,
+      window_end_unix: 1_800_001_210,
+      total_reward_units: "365000000000",
+      total_reward_aic: "3650.00000000",
+      reward_grant_count: 365,
+    },
+  ],
   reward_policy: {
     interval_seconds: 600,
     initial_reward_pool_aic: 5000,
@@ -111,8 +141,34 @@ test("NNI APR uses the latest settled device reward and the Bancor marginal pric
   assert.equal(estimate.record.id, 2);
   assert.equal(estimate.periodSeconds, 600);
   assert.equal(estimate.periodValueUsd, 5);
-  assert.equal(estimate.annualRewardUsd, 262800);
+  assert.equal(estimate.aprBasisRewardUsd, 262800);
   assert.equal(estimate.aprPercent, 26280);
+});
+
+test("NNI period APR uses the complete selected reward window", () => {
+  const weekly = calculateNniPeriodAprEstimate({
+    devicePriceUsd: "1000",
+    rewards,
+    market,
+    windowKey: "week",
+  });
+  assert.ok(weekly);
+  assert.equal(weekly.window.key, "week");
+  assert.equal(weekly.rewardAic, 70);
+  assert.equal(weekly.windowValueUsd, 35);
+  assert.equal(weekly.aprBasisRewardUsd, 1825);
+  assert.equal(weekly.aprPercent, 182.5);
+
+  const monthly = calculateNniPeriodAprEstimate({
+    devicePriceUsd: "1000",
+    rewards,
+    market,
+    windowKey: "month",
+  });
+  assert.ok(monthly);
+  assert.equal(monthly.rewardAic, 300);
+  assert.equal(monthly.windowValueUsd, 150);
+  assert.equal(monthly.aprPercent, 182.5);
 });
 
 test("NNI APR rejects empty, zero, negative, and malformed device prices", () => {
@@ -153,10 +209,18 @@ test("NNI APR page explains its inputs, refresh cadence, and estimate boundary",
       onRefresh={() => undefined}
     />,
   );
-  assert.match(markup, /NNI 奖励年化/);
+  assert.match(markup, /NNI 奖励 APR/);
   assert.match(markup, /设备价格（USD）/);
+  assert.match(markup, /实时 APR/);
+  assert.match(markup, /周期 APR/);
+  assert.match(markup, /周（最近 7 天）/);
+  assert.match(markup, /月（最近 30 天）/);
+  assert.match(markup, /年（最近 365 天）/);
+  assert.match(markup, /假定这些奖励 AIC 没有卖出/);
   assert.match(markup, /每 10 分钟自动刷新/);
   assert.match(markup, /不含复利、交易手续费和价格影响/);
+  const prohibitedRiskTerm = String.fromCodePoint(0x5e74, 0x5316);
+  assert.doesNotMatch(markup, new RegExp(prohibitedRiskTerm));
   assert.match(markup, /返回 NNI/);
   assert.match(markup, /查看市场/);
 });

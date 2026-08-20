@@ -42,6 +42,7 @@ import {
 } from "../lib/bancor-amount-display";
 import { resolveBancorMarketDirectionColors } from "../lib/bancor-market-colors";
 import { nniPublicKeyFormats, shortenHex } from "../lib/nni-display";
+import { appStorageKey } from "../lib/product-identity";
 import { BancorPriceChangePage } from "./BancorPriceChangePage";
 import { NniDecimalAmount } from "./NniDecimalAmount";
 import { NniPublicKeyDisplay } from "./NniPublicKeyDisplay";
@@ -58,6 +59,35 @@ export const BANCOR_CANDLE_AUTO_REFRESH_SECONDS = 15;
 export const BANCOR_DEFAULT_VISIBLE_CANDLES = 100;
 const BANCOR_MIN_VISIBLE_CANDLES = 6;
 const BANCOR_DRAG_HISTORY_HEADROOM = 6;
+const BANCOR_TRADE_LAYOUT_STORAGE_KEY = appStorageKey("nni.bancor.tradeLayout");
+
+export type BancorTradeLayout = "standard" | "swap";
+
+interface BancorTradeLayoutStorage {
+  getItem: (key: string) => string | null;
+  setItem: (key: string, value: string) => void;
+}
+
+export function readBancorTradeLayout(storage?: BancorTradeLayoutStorage): BancorTradeLayout {
+  if (!storage) return "standard";
+  try {
+    return storage.getItem(BANCOR_TRADE_LAYOUT_STORAGE_KEY) === "swap" ? "swap" : "standard";
+  } catch {
+    return "standard";
+  }
+}
+
+export function persistBancorTradeLayout(
+  storage: BancorTradeLayoutStorage | undefined,
+  layout: BancorTradeLayout,
+): void {
+  if (!storage) return;
+  try {
+    storage.setItem(BANCOR_TRADE_LAYOUT_STORAGE_KEY, layout);
+  } catch {
+    // Private browsing or a storage policy may make persistence unavailable.
+  }
+}
 
 export interface BancorAssetAccountOption {
   id: string;
@@ -364,7 +394,9 @@ export function BancorPage({
 }) {
   const tradePanelRef = useRef<HTMLDivElement>(null);
   const [side, setSide] = useState<"buy" | "sell">("sell");
-  const [tradeLayout, setTradeLayout] = useState<"standard" | "swap">("standard");
+  const [tradeLayout, setTradeLayout] = useState<BancorTradeLayout>(() =>
+    readBancorTradeLayout(typeof window === "undefined" ? undefined : window.localStorage),
+  );
   const [inputAmount, setInputAmount] = useState("");
   const [slippagePercent, setSlippagePercent] = useState((BANCOR_DEFAULT_SLIPPAGE_BPS / 100).toFixed(2));
   const [marketTradesPage, setMarketTradesPage] = useState(1);
@@ -450,8 +482,12 @@ export function BancorPage({
     setInputAmount(amount);
     clearQuote();
   };
-  const changeTradeLayout = (next: "standard" | "swap") => {
+  const changeTradeLayout = (next: BancorTradeLayout) => {
     setTradeLayout(next);
+    persistBancorTradeLayout(
+      typeof window === "undefined" ? undefined : window.localStorage,
+      next,
+    );
     clearQuote();
   };
   const changeSlippage = (value: string) => {
@@ -2077,7 +2113,6 @@ function BalanceLine({
       >
         <NniDecimalAmount value={value} />
       </span>
-      {!disabled ? <span className="mt-1 block text-[11px] leading-4 text-sky-200/55 transition group-hover:text-sky-100/80">{actionLabel}</span> : null}
     </button>
   );
 }

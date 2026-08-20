@@ -1265,6 +1265,18 @@ export interface NniRewardRecord {
   awarded_at_unix: number;
 }
 
+export type NniRewardWindowKey = "week" | "month" | "year";
+
+export interface NniRewardWindowSummary {
+  key: NniRewardWindowKey;
+  window_seconds: number;
+  window_start_unix: number;
+  window_end_unix: number;
+  total_reward_units: string;
+  total_reward_aic: string;
+  reward_grant_count: number;
+}
+
 export interface NniNetworkDeviceStats {
   registered_device_count: number;
   active_device_count: number;
@@ -1321,6 +1333,7 @@ export interface NniRewardsResponse {
   reward_grant_count: number;
   first_period_start_unix?: number | null;
   latest_period_end_unix?: number | null;
+  reward_windows?: NniRewardWindowSummary[];
   network_devices?: NniNetworkDeviceStats;
   reward_policy?: NniRewardPolicy;
   network_rewards?: NniNetworkRewards;

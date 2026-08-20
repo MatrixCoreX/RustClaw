@@ -20,6 +20,8 @@ import {
   calculateBancorZoomViewport,
   isBancorCandleOpen,
   paginateBancorTrades,
+  persistBancorTradeLayout,
+  readBancorTradeLayout,
   formatBancorDayChangePercent,
   formatBancorAssetAccountOption,
   resolveBancorCandlePalette,
@@ -336,8 +338,9 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /我的余额/);
   assert.match(html, /mt-2 grid min-w-0 gap-2 sm:grid-cols-2/);
   assert.match(html, /group min-w-0 max-w-full overflow-hidden/);
-  assert.match(html, /点击填入全部 AIC 余额/);
-  assert.match(html, /点击填入全部 USD 余额/);
+  assert.match(html, /title="点击填入全部 AIC 余额"/);
+  assert.match(html, /title="点击填入全部 USD 余额"/);
+  assert.doesNotMatch(html, />点击填入全部 (?:AIC|USD) 余额<\/span>/);
   assert.ok(html.indexOf("我的余额") > html.indexOf("<h2 class=\"text-lg font-semibold text-white\">交易</h2>"));
   assert.doesNotMatch(html, /没有成交的时间窗口沿用上一收盘价/);
   assert.match(html, /grid gap-5 lg:grid-cols-\[minmax\(0,2fr\)_minmax\(20rem,1fr\)\] lg:items-stretch/);
@@ -395,6 +398,21 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.doesNotMatch(html, /1200\.00000000 AIC|336\.00000000 AIC|0\.03340000 USD/);
   assert.match(html, /grid gap-5 lg:grid-cols-2 lg:items-start/);
   assert.ok(html.indexOf("储备曲线交易公式") > html.indexOf("我的成交记录"));
+});
+
+test("BANCOR trade layout persists through the product-neutral storage key", () => {
+  const values = new Map<string, string>();
+  const storage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+  };
+
+  assert.equal(readBancorTradeLayout(storage), "standard");
+  persistBancorTradeLayout(storage, "swap");
+  assert.equal(readBancorTradeLayout(storage), "swap");
+  persistBancorTradeLayout(storage, "standard");
+  assert.equal(readBancorTradeLayout(storage), "standard");
+  assert.match([...values.keys()][0] ?? "", /^agent-runtime\./);
 });
 
 test("BANCOR account options keep the local binding first and leave room for external accounts", () => {

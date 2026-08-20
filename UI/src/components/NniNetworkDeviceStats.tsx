@@ -18,6 +18,8 @@ export interface NniNetworkDeviceStatsProps {
   stats: NniNetworkDeviceStatsValue | null;
   networkRewards?: NniNetworkRewards | null;
   rewardPolicy?: NniRewardPolicy | null;
+  localPreviousRewardAic?: string | null;
+  localRewardLoading?: boolean;
   loading: boolean;
   t: Translate;
   formatUnixDateTime: (ts: number | null | undefined) => string;
@@ -27,6 +29,8 @@ export function NniNetworkDeviceStats({
   stats,
   networkRewards = null,
   rewardPolicy = null,
+  localPreviousRewardAic = null,
+  localRewardLoading = false,
   loading,
   t,
   formatUnixDateTime,
@@ -39,6 +43,9 @@ export function NniNetworkDeviceStats({
     : unavailableLabel;
   const rewardPoolValue = rewardPolicy?.current_reward_pool_aic
     ? formatNniRewardMetric(rewardPolicy.current_reward_pool_aic)
+    : unavailableLabel;
+  const localPreviousRewardValue = localPreviousRewardAic
+    ? formatNniRewardMetric(localPreviousRewardAic)
     : unavailableLabel;
   const firstHeartbeatValue = stats?.first_heartbeat_unix != null
     ? formatUnixDateTime(stats.first_heartbeat_unix)
@@ -92,14 +99,24 @@ export function NniNetworkDeviceStats({
       </div>
 
       <div className="min-w-0 rounded-lg border border-white/10 bg-black/15 px-3 py-2.5">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-2 text-white/55">
-            <Coins className="h-4 w-4" />
-            <span className="text-xs font-semibold">{t("窗口奖励", "Window reward")}</span>
+        <div className="flex items-center gap-2 text-white/55">
+          <Coins className="h-4 w-4" />
+          <span className="text-xs font-semibold">{t("窗口奖励", "Window reward")}</span>
+        </div>
+        <div className="mt-1.5 grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-end gap-1">
+          <div className="min-w-0">
+            <p className="text-[9px] leading-3 text-white/40">{t("总奖励", "Total")}</p>
+            <p className={rewardPolicy ? "min-w-0 break-all font-mono text-sm font-semibold text-white/90" : "text-xs font-semibold text-white/75"}>
+              {loading && !rewardPolicy ? <Loader2 className="h-4 w-4 animate-spin" /> : <NniDecimalAmount value={String(rewardPoolValue)} shrinkFraction={false} />}
+            </p>
           </div>
-          <p className={rewardPolicy ? "min-w-0 break-words text-right font-mono text-base font-semibold text-white/90" : "text-sm font-semibold text-white/75"}>
-            {loading && !rewardPolicy ? <Loader2 className="h-5 w-5 animate-spin" /> : <NniDecimalAmount value={String(rewardPoolValue)} shrinkFraction={false} />}
-          </p>
+          <span className="pb-0.5 text-xs text-white/25">/</span>
+          <div className="min-w-0 text-right">
+            <p className="text-[9px] leading-3 text-white/40">{t("本机上个窗口", "Local previous")}</p>
+            <p className={localPreviousRewardAic ? "min-w-0 break-all font-mono text-sm font-semibold text-white/90" : "text-xs font-semibold text-white/75"}>
+              {localRewardLoading && !localPreviousRewardAic ? <Loader2 className="ml-auto h-4 w-4 animate-spin" /> : <NniDecimalAmount value={String(localPreviousRewardValue)} shrinkFraction={false} />}
+            </p>
+          </div>
         </div>
       </div>
 
