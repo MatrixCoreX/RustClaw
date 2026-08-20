@@ -18,6 +18,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 
 import { writeTextToClipboard } from "../lib/auth-keys";
+import { latestNniRewardRecord } from "../lib/nni-apr";
 import type { NniOwnerAuthorizationChallenge } from "../hooks/useNniRuntime";
 import {
   NniAssetAccountDialog,
@@ -253,6 +254,10 @@ export function NniPage({
   onActionMessageChange,
   onActionErrorChange,
 }: NniPageProps) {
+  const [latestRewardCache, setLatestRewardCache] = useState<{
+    devicePubkey: string;
+    rewardAic: string | null;
+  } | null>(null);
   const [nniTestJoinPulse, setNniTestJoinPulse] = useState(false);
   const [nniHistoryView, setNniHistoryView] = useState<NniHistoryView>("overview");
   const [ownerPrivateKeyCopied, setOwnerPrivateKeyCopied] = useState(false);
@@ -302,6 +307,22 @@ export function NniPage({
         t("还没有读取状态。点击刷新状态开始检测。", "Status has not been loaded yet. Click Refresh status to check."),
       ) ?? "";
   const nniStatusNextStep = nniDeviceNextStep(nniStatus, lang);
+  const nniLatestSettledReward = nniRewards?.page === 1
+    ? latestNniRewardRecord(nniRewards.records)
+    : null;
+  const nniPreviousWindowRewardAic = nniRewards?.page === 1
+    ? nniLatestSettledReward?.reward_aic ?? null
+    : latestRewardCache?.devicePubkey === nniRewards?.device_pubkey
+      ? latestRewardCache.rewardAic
+      : null;
+
+  useEffect(() => {
+    if (nniRewards?.page !== 1) return;
+    setLatestRewardCache({
+      devicePubkey: nniRewards.device_pubkey,
+      rewardAic: latestNniRewardRecord(nniRewards.records)?.reward_aic ?? null,
+    });
+  }, [nniRewards]);
 
   useEffect(() => {
     return () => {
@@ -430,6 +451,8 @@ export function NniPage({
               stats={nniNetworkStats?.network_devices ?? null}
               networkRewards={nniNetworkStats?.network_rewards ?? null}
               rewardPolicy={nniNetworkStats?.reward_policy ?? null}
+              localPreviousRewardAic={nniPreviousWindowRewardAic}
+              localRewardLoading={nniRewardsLoading}
               loading={nniNetworkStatsLoading}
               t={t}
               formatUnixDateTime={formatUnixDateTime}

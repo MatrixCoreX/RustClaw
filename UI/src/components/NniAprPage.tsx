@@ -1,9 +1,17 @@
 import { ArrowLeft, ArrowLeftRight, Calculator, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { calculateNniAprEstimate, parsePositiveNniDevicePrice } from "../lib/nni-apr";
+import {
+  calculateNniAprEstimate,
+  calculateNniPeriodAprEstimate,
+  parsePositiveNniDevicePrice,
+} from "../lib/nni-apr";
 import { appStorageKey } from "../lib/product-identity";
-import type { NniBancorMarketResponse, NniRewardsResponse } from "../types/api";
+import type {
+  NniBancorMarketResponse,
+  NniRewardsResponse,
+  NniRewardWindowKey,
+} from "../types/api";
 
 type UiLanguage = "zh" | "en";
 type Translate = (zh: string, en: string) => string;
@@ -73,9 +81,19 @@ export function NniAprPage({
   const [devicePriceUsd, setDevicePriceUsd] = useState(() =>
     readNniAprDevicePrice(typeof window === "undefined" ? undefined : window.localStorage),
   );
+  const [periodWindow, setPeriodWindow] = useState<NniRewardWindowKey>("week");
   const estimate = useMemo(
     () => calculateNniAprEstimate({ devicePriceUsd, rewards, market }),
     [devicePriceUsd, market, rewards],
+  );
+  const periodEstimate = useMemo(
+    () => calculateNniPeriodAprEstimate({
+      devicePriceUsd,
+      rewards,
+      market,
+      windowKey: periodWindow,
+    }),
+    [devicePriceUsd, market, periodWindow, rewards],
   );
   const priceInvalid = devicePriceUsd.trim() !== "" && parsePositiveNniDevicePrice(devicePriceUsd) === null;
   const loading = rewardsLoading || marketLoading;
@@ -94,12 +112,12 @@ export function NniAprPage({
           <div>
             <div className="flex items-center gap-2 text-xl font-semibold text-emerald-100 sm:text-2xl">
               <Calculator className="h-5 w-5" />
-              <span>{t("NNI 奖励年化", "NNI reward APR")}</span>
+              <span>{t("NNI 奖励 APR", "NNI reward APR")}</span>
             </div>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-white/60">
               {t(
-                "用本设备最近一个已结算奖励周期和 Bancor 池当前边际价格，估算设备价格对应的简单年化收益率。",
-                "Estimate simple annualized return from this device's latest settled reward period and the Bancor pool's current marginal price.",
+                "根据本设备奖励、设备价格和 Bancor 池当前边际价格计算 APR；可查看最近结算窗口或选定历史周期。",
+                "Calculate APR from this device's rewards, device price, and the Bancor pool's current marginal price, using either the latest settlement or a selected history window.",
               )}
             </p>
           </div>
@@ -160,19 +178,26 @@ export function NniAprPage({
           </p>
         ) : null}
 
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="mt-6">
+          <h2 className="text-base font-semibold text-white/90">{t("实时 APR", "Live APR")}</h2>
+          <p className="mt-1 text-xs leading-5 text-white/45">
+            {t("使用本设备最近一个已结算奖励窗口。", "Uses this device's latest settled reward window.")}
+          </p>
+        </div>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <AprMetric
-            label="APR"
+            label={t("实时 APR", "Live APR")}
             value={estimate ? `${formatDecimal(estimate.aprPercent, lang)}%` : "—"}
             emphasized
           />
           <AprMetric
-            label={t("年化奖励估值", "Annual reward value")}
-            value={estimate ? `${formatDecimal(estimate.annualRewardUsd, lang)} USD` : "—"}
-          />
-          <AprMetric
             label={t("最近周期奖励", "Latest period reward")}
             value={estimate ? `${formatDecimal(estimate.rewardAic, lang, 8)} AIC` : "—"}
+          />
+          <AprMetric
+            label={t("最近奖励估值", "Latest reward value")}
+            value={estimate ? `${formatDecimal(estimate.periodValueUsd, lang, 8)} USD` : "—"}
           />
           <AprMetric
             label={t("AIC 当前价格", "Current AIC price")}
@@ -205,10 +230,68 @@ export function NniAprPage({
           </div>
         </div>
 
+        <div className="mt-7 border-t border-white/10 pt-6">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-white/90">{t("周期 APR", "Period APR")}</h2>
+              <p className="mt-1 text-xs leading-5 text-white/45">
+                {t(
+                  "按所选窗口的累计奖励计算，并假定这些奖励 AIC 没有卖出。",
+                  "Uses total rewards in the selected window and assumes the rewarded AIC was not sold.",
+                )}
+              </p>
+            </div>
+            <label className="min-w-40">
+              <span className="sr-only">{t("选择计算周期", "Select calculation period")}</span>
+              <select
+                className="theme-input w-full"
+                value={periodWindow}
+                onChange={(event) => setPeriodWindow(event.target.value as NniRewardWindowKey)}
+                aria-label={t("周期 APR 窗口", "Period APR window")}
+              >
+                <option value="week">{t("周（最近 7 天）", "Week (last 7 days)")}</option>
+                <option value="month">{t("月（最近 30 天）", "Month (last 30 days)")}</option>
+                <option value="year">{t("年（最近 365 天）", "Year (last 365 days)")}</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <AprMetric
+              label={t("周期 APR", "Period APR")}
+              value={periodEstimate ? `${formatDecimal(periodEstimate.aprPercent, lang)}%` : "—"}
+              emphasized
+            />
+            <AprMetric
+              label={t("窗口累计奖励", "Window rewards")}
+              value={periodEstimate ? `${formatDecimal(periodEstimate.rewardAic, lang, 8)} AIC` : "—"}
+            />
+            <AprMetric
+              label={t("窗口奖励估值", "Window reward value")}
+              value={periodEstimate ? `${formatDecimal(periodEstimate.windowValueUsd, lang, 8)} USD` : "—"}
+            />
+            <AprMetric
+              label={t("结算记录", "Settlements")}
+              value={periodEstimate ? formatDecimal(periodEstimate.window.reward_grant_count, lang, 0) : "—"}
+            />
+          </div>
+
+          <div className="mt-3 rounded-lg border border-white/10 bg-black/15 p-4 text-sm">
+            <p className="text-xs font-semibold text-white/45">{t("计算窗口", "Calculation window")}</p>
+            <p className="mt-2 text-white/80">
+              {periodEstimate
+                ? `${formatUnixDateTime(periodEstimate.window.window_start_unix)} – ${formatUnixDateTime(periodEstimate.window.window_end_unix)}`
+                : rewards?.reward_windows
+                  ? t("当前窗口暂无可用数据", "No data is available for this window")
+                  : t("所选 NNI 节点暂未提供周期奖励汇总", "The selected NNI node does not provide period reward summaries yet")}
+            </p>
+          </div>
+        </div>
+
         <p className="mt-5 text-xs leading-5 text-white/45">
           {t(
-            "APR 是按最近周期静态外推的简单年化估算，不含复利、交易手续费和价格影响。设备数、奖励规则与 AIC 价格变化都会改变结果。",
-            "APR is a simple annualized estimate extrapolated from the latest period. It excludes compounding, trading fees, and price impact. Device count, reward policy, and AIC price changes will alter the result.",
+            "APR 为估算值，不含复利、交易手续费和价格影响。设备数、奖励规则与 AIC 价格变化都会改变结果。",
+            "APR is an estimate and excludes compounding, trading fees, and price impact. Device count, reward policy, and AIC price changes will alter the result.",
           )}
         </p>
       </section>

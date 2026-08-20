@@ -1,10 +1,12 @@
 import type {
   NniBancorMarketResponse,
   NniRewardRecord,
+  NniRewardWindowKey,
+  NniRewardWindowSummary,
   NniRewardsResponse,
 } from "../types/api";
 
-const SECONDS_PER_YEAR = 365 * 24 * 60 * 60;
+const APR_REFERENCE_SECONDS = 365 * 24 * 60 * 60;
 export const NNI_APR_AUTO_REFRESH_SECONDS = 10 * 60;
 
 export interface NniAprEstimate {
@@ -13,7 +15,16 @@ export interface NniAprEstimate {
   rewardAic: number;
   aicPriceUsd: number;
   periodValueUsd: number;
-  annualRewardUsd: number;
+  aprBasisRewardUsd: number;
+  aprPercent: number;
+}
+
+export interface NniPeriodAprEstimate {
+  window: NniRewardWindowSummary;
+  rewardAic: number;
+  aicPriceUsd: number;
+  windowValueUsd: number;
+  aprBasisRewardUsd: number;
   aprPercent: number;
 }
 
@@ -67,9 +78,9 @@ export function calculateNniAprEstimate({
   }
 
   const periodValueUsd = rewardAic * aicPriceUsd;
-  const annualRewardUsd = periodValueUsd * (SECONDS_PER_YEAR / periodSeconds);
-  const aprPercent = (annualRewardUsd / devicePrice) * 100;
-  if (![periodValueUsd, annualRewardUsd, aprPercent].every(Number.isFinite)) return null;
+  const aprBasisRewardUsd = periodValueUsd * (APR_REFERENCE_SECONDS / periodSeconds);
+  const aprPercent = (aprBasisRewardUsd / devicePrice) * 100;
+  if (![periodValueUsd, aprBasisRewardUsd, aprPercent].every(Number.isFinite)) return null;
 
   return {
     record,
@@ -77,7 +88,52 @@ export function calculateNniAprEstimate({
     rewardAic,
     aicPriceUsd,
     periodValueUsd,
-    annualRewardUsd,
+    aprBasisRewardUsd,
+    aprPercent,
+  };
+}
+
+export function calculateNniPeriodAprEstimate({
+  devicePriceUsd,
+  rewards,
+  market,
+  windowKey,
+}: {
+  devicePriceUsd: string;
+  rewards: NniRewardsResponse | null;
+  market: NniBancorMarketResponse | null;
+  windowKey: NniRewardWindowKey;
+}): NniPeriodAprEstimate | null {
+  const devicePrice = parsePositiveNniDevicePrice(devicePriceUsd);
+  const window = rewards?.reward_windows?.find((candidate) => candidate.key === windowKey);
+  if (devicePrice === null || !window || !market) return null;
+
+  const rewardAic = Number(window.total_reward_aic);
+  const aicPriceUsd = Number(market.marginal_price_usd_per_aic);
+  const { window_seconds: windowSeconds } = window;
+  if (
+    !Number.isFinite(rewardAic)
+    || rewardAic < 0
+    || !Number.isFinite(aicPriceUsd)
+    || aicPriceUsd < 0
+    || !Number.isSafeInteger(windowSeconds)
+    || windowSeconds <= 0
+    || window.window_end_unix - window.window_start_unix !== windowSeconds
+  ) {
+    return null;
+  }
+
+  const windowValueUsd = rewardAic * aicPriceUsd;
+  const aprBasisRewardUsd = windowValueUsd * (APR_REFERENCE_SECONDS / windowSeconds);
+  const aprPercent = (aprBasisRewardUsd / devicePrice) * 100;
+  if (![windowValueUsd, aprBasisRewardUsd, aprPercent].every(Number.isFinite)) return null;
+
+  return {
+    window,
+    rewardAic,
+    aicPriceUsd,
+    windowValueUsd,
+    aprBasisRewardUsd,
     aprPercent,
   };
 }
