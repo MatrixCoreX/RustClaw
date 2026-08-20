@@ -192,8 +192,8 @@ test("BANCOR account reads never expose a nested NNI admission code", async () =
   await act(async () => {
     await runtime!.fetchAccount(1);
   });
-  assert.equal(runtime!.error, "当前设备尚未获得 NNI 网络准入。请使用合法设备。");
-  assert.doesNotMatch(runtime!.error ?? "", /nni_public_key_whitelist_empty/);
+  assert.equal(runtime!.error, null);
+  assert.equal(runtime!.hardwareAccountAccessUnavailable, true);
 
   await act(async () => {
     renderer!.unmount();

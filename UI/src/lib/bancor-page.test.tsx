@@ -10,6 +10,7 @@ import {
   CandleChart,
   bindBancorWheelZoom,
   balanceValueSizeClass,
+  buildBancorAssetAccountOptions,
   calculateBancorCandleBodyWidth,
   calculateBancorChartGeometry,
   calculateBancorDefaultVisibleCount,
@@ -20,6 +21,7 @@ import {
   isBancorCandleOpen,
   paginateBancorTrades,
   formatBancorDayChangePercent,
+  formatBancorAssetAccountOption,
   resolveBancorCandlePalette,
   resolveBancorDayChangeColor,
   resolveBancorCandleVisualState,
@@ -225,8 +227,31 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       onOpenNni={() => undefined}
     />,
   );
-  assert.match(signingUnavailableHtml, /加入 NNI 网络不是交易的前置条件/);
+  const hardwareAccountUnavailableHtml = renderToStaticMarkup(
+    <BancorPage
+      t={(zh) => zh}
+      runtime={{
+        ...runtime,
+        account: null,
+        hardwareAccountAccessUnavailable: true,
+      }}
+      formatUnixDateTime={(value) => String(value ?? "")}
+      signingDeviceReady
+      assetOwnerReady
+      assetOwnerPubkey="5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M"
+      onOpenNni={() => undefined}
+    />,
+  );
+  assert.match(signingUnavailableHtml, /请选择并准备一种可用的账户签名方式/);
   assert.doesNotMatch(signingUnavailableHtml, /请先在 NNI 页面加入网络/);
+  assert.doesNotMatch(signingUnavailableHtml, /合法设备|NNI 网络准入/);
+  assert.doesNotMatch(signingUnavailableHtml, /data-bancor-account-selector="true"/);
+  assert.match(html, /data-bancor-account-selector="true"/);
+  assert.match(html, /交易账户/);
+  assert.match(html, /本机绑定账户/);
+  assert.match(hardwareAccountUnavailableHtml, /data-bancor-hardware-account-unavailable="true"/);
+  assert.match(hardwareAccountUnavailableHtml, /仍可选择资产密钥签名完成交易/);
+  assert.doesNotMatch(hardwareAccountUnavailableHtml, /合法设备|NNI 网络准入/);
   assert.match(assetOwnerRequiredHtml, /data-bancor-asset-owner-required="true"/);
   assert.match(assetOwnerRequiredHtml, /请先到 NNI 页面生成并绑定资产账号/);
   assert.match(assetOwnerRequiredHtml, /data-bancor-open-nni="asset-owner"/);
@@ -365,6 +390,22 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.doesNotMatch(html, /1200\.00000000 POINT|336\.00000000 POINT|0\.03340000 USD/);
   assert.match(html, /grid gap-5 lg:grid-cols-2 lg:items-start/);
   assert.ok(html.indexOf("储备曲线交易公式") > html.indexOf("我的成交记录"));
+});
+
+test("BANCOR account options keep the local binding first and leave room for external accounts", () => {
+  const localPublicKey = "5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M";
+  const externalPublicKey = "7gY3W3iKnU7Nd4MCY7N9FY4U5ABQG1nB7eVwjvp23uLnzUE5nL";
+  const options = buildBancorAssetAccountOptions(localPublicKey, [
+    { id: "external:primary", publicKey: externalPublicKey, source: "external", label: "冷钱包" },
+    { id: "external:duplicate", publicKey: localPublicKey, source: "external" },
+    { id: "external:primary", publicKey: "8x1gP42dC6eABn91QkKTuWJ4AVREkLX2cw7NLo9pRC7Y", source: "external" },
+  ]);
+
+  assert.deepEqual(options.map((option) => option.source), ["local_binding", "external"]);
+  assert.equal(options[0]?.publicKey, localPublicKey);
+  assert.match(formatBancorAssetAccountOption(options[0]!, (zh) => zh), /^本机绑定账户/);
+  assert.match(formatBancorAssetAccountOption(options[1]!, (zh) => zh), /^冷钱包/);
+  assert.deepEqual(buildBancorAssetAccountOptions(null), []);
 });
 
 test("BANCOR market history pagination returns ten rows and clamps page bounds", () => {
