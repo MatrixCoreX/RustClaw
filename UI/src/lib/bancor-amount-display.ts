@@ -1,4 +1,4 @@
-export type BancorAssetSymbol = "POINT" | "USD";
+export type BancorAssetSymbol = "AIC" | "USD";
 
 export function formatBancorIntegerAmount(value: string): string {
   const match = /^([+-]?)(\d+)(?:\.(\d+))?$/.exec(value.trim());
@@ -12,7 +12,7 @@ export function formatBancorAssetAmountForDisplay(
   value: string,
   asset: BancorAssetSymbol,
 ): string {
-  return asset === "POINT" ? formatBancorIntegerAmount(value) : value;
+  return asset === "AIC" ? formatBancorIntegerAmount(value) : value;
 }
 
 export function formatBancorTradeHistoryAmount(value: string): string {

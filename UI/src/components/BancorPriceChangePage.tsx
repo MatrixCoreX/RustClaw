@@ -122,35 +122,35 @@ function BancorPriceChangeFormula({ t }: { t: Translate }) {
 
       <div className="mt-5 grid gap-4 lg:grid-cols-2">
         <FormulaPanel
-          title={t("买入 POINT（支付 USD）", "Buy POINT (pay USD)")}
+          title={t("买入 AIC（支付 USD）", "Buy AIC (pay USD)")}
           formulas={[
             <span key="buy-output">
-              <var>y</var><sub>POINT</sub> = ⌊
+              <var>y</var><sub>AIC</sub> = ⌊
               <MathFraction
-                numerator={<><var>x</var><sub>e</sub> × <var>R</var><sub>POINT</sub></>}
+                numerator={<><var>x</var><sub>e</sub> × <var>R</var><sub>AIC</sub></>}
                 denominator={<><var>R</var><sub>USD</sub> + <var>x</var><sub>e</sub></>}
               />⌋
             </span>,
             <span key="buy-usd-reserve">
               <var>R′</var><sub>USD</sub> = <var>R</var><sub>USD</sub> + <var>x</var><sub>e</sub>
             </span>,
-            <span key="buy-point-reserve">
-              <var>R′</var><sub>POINT</sub> = <var>R</var><sub>POINT</sub> − <var>y</var><sub>POINT</sub>
+            <span key="buy-aic-reserve">
+              <var>R′</var><sub>AIC</sub> = <var>R</var><sub>AIC</sub> − <var>y</var><sub>AIC</sub>
             </span>,
           ]}
         />
         <FormulaPanel
-          title={t("卖出 POINT（收到 USD）", "Sell POINT (receive USD)")}
+          title={t("卖出 AIC（收到 USD）", "Sell AIC (receive USD)")}
           formulas={[
             <span key="sell-output">
               <var>y</var><sub>USD</sub> = ⌊
               <MathFraction
                 numerator={<><var>x</var><sub>e</sub> × <var>R</var><sub>USD</sub></>}
-                denominator={<><var>R</var><sub>POINT</sub> + <var>x</var><sub>e</sub></>}
+                denominator={<><var>R</var><sub>AIC</sub> + <var>x</var><sub>e</sub></>}
               />⌋
             </span>,
-            <span key="sell-point-reserve">
-              <var>R′</var><sub>POINT</sub> = <var>R</var><sub>POINT</sub> + <var>x</var><sub>e</sub>
+            <span key="sell-aic-reserve">
+              <var>R′</var><sub>AIC</sub> = <var>R</var><sub>AIC</sub> + <var>x</var><sub>e</sub>
             </span>,
             <span key="sell-usd-reserve">
               <var>R′</var><sub>USD</sub> = <var>R</var><sub>USD</sub> − <var>y</var><sub>USD</sub>
@@ -168,8 +168,8 @@ function BancorPriceChangeFormula({ t }: { t: Translate }) {
           label={t("边际价格", "Marginal price")}
           formula={
             <>
-              <var>P</var> = <MathFraction numerator={<><var>R</var><sub>USD</sub></>} denominator={<><var>R</var><sub>POINT</sub></>} />，
-              <var>P′</var> = <MathFraction numerator={<><var>R′</var><sub>USD</sub></>} denominator={<><var>R′</var><sub>POINT</sub></>} />
+              <var>P</var> = <MathFraction numerator={<><var>R</var><sub>USD</sub></>} denominator={<><var>R</var><sub>AIC</sub></>} />，
+              <var>P′</var> = <MathFraction numerator={<><var>R′</var><sub>USD</sub></>} denominator={<><var>R′</var><sub>AIC</sub></>} />
             </>
           }
         />
@@ -254,8 +254,8 @@ function PriceChangeCalculatorCard({
   onAmountChange: (amount: string) => void;
   t: Translate;
 }) {
-  const inputAsset = side === "buy" ? "USD" : "POINT";
-  const outputAsset = side === "buy" ? "POINT" : "USD";
+  const inputAsset = side === "buy" ? "USD" : "AIC";
+  const outputAsset = side === "buy" ? "AIC" : "USD";
   const result = amount.trim()
     ? calculateBancorPriceChange({ side, inputAmount: amount, market })
     : null;
@@ -268,12 +268,12 @@ function PriceChangeCalculatorCard({
     <article className="theme-shadow-card min-w-0 p-5 sm:p-6" data-bancor-calculator-side={side}>
       <div>
         <p className="text-xs font-medium uppercase tracking-wide text-sky-300/75">
-          {side === "buy" ? t("买入 POINT", "Buy POINT") : t("卖出 POINT", "Sell POINT")}
+          {side === "buy" ? t("买入 AIC", "Buy AIC") : t("卖出 AIC", "Sell AIC")}
         </p>
         <h2 className="mt-1 text-lg font-semibold text-white">
           {side === "buy"
             ? t("使用 USD 计算", "Calculate with USD")
-            : t("使用 POINT 计算", "Calculate with POINT")}
+            : t("使用 AIC 计算", "Calculate with AIC")}
         </h2>
       </div>
 
@@ -341,7 +341,7 @@ function ProjectionDetails({ projection, t }: { projection: BancorPriceChangePro
         value={`${formatBancorAssetAmountForDisplay(projection.outputAmount, projection.outputAsset)} ${projection.outputAsset}`}
       />
       <div className="grid gap-2 rounded-xl border border-white/8 bg-white/[0.025] p-3 sm:grid-cols-2">
-        <ResultCell label={t("成交后 POINT 储备", "POINT reserve after")} value={`${formatBancorIntegerAmount(projection.pointReserveAfter)} POINT`} />
+        <ResultCell label={t("成交后 AIC 储备", "AIC reserve after")} value={`${formatBancorIntegerAmount(projection.aicReserveAfter)} AIC`} />
         <ResultCell label={t("成交后 USD 储备", "USD reserve after")} value={`${formatBancorIntegerAmount(projection.usdReserveAfter)} USD`} />
       </div>
       <div className="rounded-xl border border-sky-300/15 bg-sky-400/[0.05] p-3">
@@ -349,7 +349,7 @@ function ProjectionDetails({ projection, t }: { projection: BancorPriceChangePro
         <div className="mt-2 flex flex-wrap items-baseline gap-2 font-mono text-sm">
           <NniDecimalAmount className="break-all text-white/65" value={projection.currentMarginalPrice} shrinkFraction={false} />
           <span className="text-white/35">→</span>
-          <NniDecimalAmount className="break-all font-semibold text-white" value={`${projection.marginalPriceAfter} USD / POINT`} shrinkFraction={false} />
+          <NniDecimalAmount className="break-all font-semibold text-white" value={`${projection.marginalPriceAfter} USD / AIC`} shrinkFraction={false} />
         </div>
         <p className="mt-2 text-lg font-semibold" style={{ color: changeColor }}>
           <NniDecimalAmount value={projection.marginalPriceChangePercent} shrinkFraction={false} />

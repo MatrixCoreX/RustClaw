@@ -172,11 +172,11 @@ export function NniAprPage({
           />
           <AprMetric
             label={t("最近周期奖励", "Latest period reward")}
-            value={estimate ? `${formatDecimal(estimate.rewardPoints, lang, 8)} POINT` : "—"}
+            value={estimate ? `${formatDecimal(estimate.rewardAic, lang, 8)} AIC` : "—"}
           />
           <AprMetric
-            label={t("POINT 当前价格", "Current POINT price")}
-            value={estimate ? `${formatDecimal(estimate.pointPriceUsd, lang, 12)} USD` : "—"}
+            label={t("AIC 当前价格", "Current AIC price")}
+            value={estimate ? `${formatDecimal(estimate.aicPriceUsd, lang, 12)} USD` : "—"}
           />
         </div>
 
@@ -207,8 +207,8 @@ export function NniAprPage({
 
         <p className="mt-5 text-xs leading-5 text-white/45">
           {t(
-            "APR 是按最近周期静态外推的简单年化估算，不含复利、交易手续费和价格影响。设备数、奖励规则与 POINT 价格变化都会改变结果。",
-            "APR is a simple annualized estimate extrapolated from the latest period. It excludes compounding, trading fees, and price impact. Device count, reward policy, and POINT price changes will alter the result.",
+            "APR 是按最近周期静态外推的简单年化估算，不含复利、交易手续费和价格影响。设备数、奖励规则与 AIC 价格变化都会改变结果。",
+            "APR is a simple annualized estimate extrapolated from the latest period. It excludes compounding, trading fees, and price impact. Device count, reward policy, and AIC price changes will alter the result.",
           )}
         </p>
       </section>

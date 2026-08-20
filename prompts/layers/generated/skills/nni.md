@@ -25,7 +25,7 @@ not imply remote network authorization.
 Action selection semantics:
 
 - `status` is a local device-and-heartbeat summary. It does not query remote network statistics.
-- `bancor_account` is the only action for the current signer's POINT/USD balances and that
+- `bancor_account` is the only action for the current signer's AIC/USD balances and that
   signer's own recent trades. Its `limit` bounds the account-owned trade rows. It performs its own
   signer and remote-authorization checks, so call it alone and do not preflight with
   `device_status` or combine it with `bancor_market_trades` for an account or "my trades" request.
@@ -76,7 +76,7 @@ candles at most 300 rows.
 | `bancor_candles` | `end_time_ts` | no | integer | current | Non-negative Unix timestamp. |
 | `bancor_quote` | `side` | yes | enum | - | `buy` or `sell`. |
 | `bancor_quote` | `pay_amount` | yes | decimal string | - | Positive amount; never pass a JSON float. |
-| `bancor_quote` | `pay_asset` | no | enum | derived | `USD` for buy and `POINT` for sell. |
+| `bancor_quote` | `pay_asset` | no | enum | derived | `USD` for buy and `AIC` for sell. |
 | `bancor_quote` | `slippage_bps` | no | integer | domain default | Between 0 and 10000 basis points. |
 
 ## Error Contract (from interface)

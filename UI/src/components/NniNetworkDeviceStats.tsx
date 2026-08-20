@@ -34,11 +34,11 @@ export function NniNetworkDeviceStats({
   const unavailableLabel = t("暂不可用", "Unavailable");
   const registeredValue = stats?.registered_device_count ?? unavailableLabel;
   const activeValue = stats?.active_device_count ?? unavailableLabel;
-  const networkOutputValue = networkRewards?.total_distributed_reward_points
-    ? formatNniRewardMetric(networkRewards.total_distributed_reward_points)
+  const networkOutputValue = networkRewards?.total_distributed_reward_aic
+    ? formatNniRewardMetric(networkRewards.total_distributed_reward_aic)
     : unavailableLabel;
-  const rewardPoolValue = rewardPolicy?.current_reward_pool_points
-    ? formatNniRewardMetric(rewardPolicy.current_reward_pool_points)
+  const rewardPoolValue = rewardPolicy?.current_reward_pool_aic
+    ? formatNniRewardMetric(rewardPolicy.current_reward_pool_aic)
     : unavailableLabel;
   const firstHeartbeatValue = stats?.first_heartbeat_unix != null
     ? formatUnixDateTime(stats.first_heartbeat_unix)

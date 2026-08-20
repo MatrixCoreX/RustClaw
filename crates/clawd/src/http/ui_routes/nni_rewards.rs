@@ -95,14 +95,14 @@ fn validate_nni_network_stats_sections(
             .and_then(Value::as_u64)
             .is_none_or(|seconds| seconds == 0)
         || policy
-            .get("initial_reward_pool_points")
+            .get("initial_reward_pool_aic")
             .and_then(Value::as_u64)
-            .is_none_or(|points| points == 0)
+            .is_none_or(|aic| aic == 0)
         || !current_reward_units_are_valid
         || policy.get("distribution").and_then(Value::as_str)
             != Some("equal_per_eligible_device")
         || !policy
-            .get("current_reward_pool_points")
+            .get("current_reward_pool_aic")
             .is_some_and(|value| value.is_null() || nni_network_stats_decimal(value))
         || !nni_network_stats_optional_unix(policy.get("halving_epoch_unix"))
         || policy
@@ -116,7 +116,7 @@ fn validate_nni_network_stats_sections(
             .get("total_distributed_reward_units")
             .is_some_and(nni_network_stats_integer_string)
         || !rewards
-            .get("total_distributed_reward_points")
+            .get("total_distributed_reward_aic")
             .is_some_and(nni_network_stats_decimal)
         || rewards
             .get("settled_period_count")
@@ -166,7 +166,7 @@ fn validate_nni_rewards_response(data: &Value) -> Result<(), &'static str> {
             .and_then(Value::as_str)
             .is_none_or(str::is_empty)
         || root
-            .get("reward_point_scale")
+            .get("reward_aic_scale")
             .and_then(Value::as_u64)
             .is_none_or(|scale| scale == 0)
         || root.get("reward_decimal_places").and_then(Value::as_u64) != Some(8)
@@ -174,7 +174,7 @@ fn validate_nni_rewards_response(data: &Value) -> Result<(), &'static str> {
             .get("total_reward_units")
             .is_some_and(nni_network_stats_integer_string)
         || !root
-            .get("total_reward_points")
+            .get("total_reward_aic")
             .is_some_and(nni_network_stats_decimal)
         || root
             .get("reward_grant_count")
@@ -552,9 +552,9 @@ mod nni_network_stats_unit_tests {
                 "starts_in_seconds": 300,
                 "first_settlement_at_unix": 1_800_000_600,
                 "interval_seconds": 600,
-                "initial_reward_pool_points": 5000,
+                "initial_reward_pool_aic": 5000,
                 "current_reward_pool_units": "500000000000",
-                "current_reward_pool_points": "5000.00000000",
+                "current_reward_pool_aic": "5000.00000000",
                 "distribution": "equal_per_eligible_device",
                 "halving_epoch_unix": null,
                 "halving_interval_seconds": 126_144_000,
@@ -564,7 +564,7 @@ mod nni_network_stats_unit_tests {
             },
             "network_rewards": {
                 "total_distributed_reward_units": "0",
-                "total_distributed_reward_points": "0.00000000",
+                "total_distributed_reward_aic": "0.00000000",
                 "settled_period_count": 0,
                 "first_period_start_unix": null,
                 "latest_period_end_unix": null
@@ -580,10 +580,10 @@ mod nni_network_stats_unit_tests {
             "device_pubkey": "test-device-public-key",
             "asset_owner_pubkey": null,
             "authorization_epoch": null,
-            "reward_point_scale": 100_000_000,
+            "reward_aic_scale": 100_000_000,
             "reward_decimal_places": 8,
             "total_reward_units": "500000000000",
-            "total_reward_points": "5000.00000000",
+            "total_reward_aic": "5000.00000000",
             "reward_grant_count": 1,
             "first_period_start_unix": null,
             "latest_period_end_unix": null,
@@ -618,7 +618,7 @@ mod nni_network_stats_unit_tests {
         );
 
         let mut malformed = valid_network_stats();
-        malformed["network_rewards"]["total_distributed_reward_points"] = json!("0");
+        malformed["network_rewards"]["total_distributed_reward_aic"] = json!("0");
         assert_eq!(
             validate_nni_network_stats_response(&malformed),
             Err("nni_network_stats_contract_invalid")

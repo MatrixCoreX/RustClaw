@@ -406,8 +406,8 @@ export function BancorPage({
     trade,
     clearQuote,
   } = runtime;
-  const inputAsset = side === "buy" ? "USD" : "POINT";
-  const outputAsset = side === "buy" ? "POINT" : "USD";
+  const inputAsset = side === "buy" ? "USD" : "AIC";
+  const outputAsset = side === "buy" ? "AIC" : "USD";
   const marketOpen = market?.status === "open";
   const hardwareSigningReady = signingDeviceReady && !hardwareAccountAccessUnavailable;
   const assetSigningReady = assetOwnerReady && selectedAssetAccount !== null;
@@ -432,7 +432,7 @@ export function BancorPage({
   const estimatedInputFee = market && inputAmount.trim()
     ? calculateBancorInputFee(inputAmount, market.fee_bps)
     : null;
-  const inputBalance = side === "buy" ? account?.usd_balance : account?.point_balance;
+  const inputBalance = side === "buy" ? account?.usd_balance : account?.aic_balance;
   const estimatedSwapOutput = market && inputAmount.trim()
     ? calculateBancorEstimatedOutput({ side, inputAmount, market })
     : null;
@@ -527,14 +527,14 @@ export function BancorPage({
         <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           <MetricCard
             label={t("市场储备", "Market reserves")}
-            value={market ? `${market.point_reserve} POINT` : "—"}
+            value={market ? `${market.aic_reserve} AIC` : "—"}
             secondaryValue={market ? `${market.usd_reserve} USD` : undefined}
             shrinkFraction={false}
             detail={market ? undefined : t("等待读取", "Waiting to load")}
           />
           <MetricCard
             label={t("当前边际价格", "Current marginal price")}
-            value={market ? `${market.marginal_price_usd_per_point} USD` : "—"}
+            value={market ? `${market.marginal_price_usd_per_aic} USD` : "—"}
             shrinkFraction={false}
           >
             <div
@@ -543,11 +543,11 @@ export function BancorPage({
             >
               <DailyPriceMetric
                 label={t("今日最高", "Day high")}
-                value={market ? `${market.daily_marginal_price.high_usd_per_point} USD` : "—"}
+                value={market ? `${market.daily_marginal_price.high_usd_per_aic} USD` : "—"}
               />
               <DailyPriceMetric
                 label={t("今日最低", "Day low")}
-                value={market ? `${market.daily_marginal_price.low_usd_per_point} USD` : "—"}
+                value={market ? `${market.daily_marginal_price.low_usd_per_aic} USD` : "—"}
               />
               <DailyPriceMetric
                 label={t("日涨跌幅", "Day change")}
@@ -560,7 +560,7 @@ export function BancorPage({
             label={t("交易手续费", "Trading fee")}
             value={market ? `${(market.fee_bps / 100).toFixed(2)}%` : "—"}
             shrinkFraction={false}
-            detail={t("买入从 USD 扣除，卖出从 POINT 扣除", "Charged in USD when buying and POINT when selling")}
+            detail={t("买入从 USD 扣除，卖出从 AIC 扣除", "Charged in USD when buying and AIC when selling")}
           />
         </div>
       </section>
@@ -610,7 +610,7 @@ export function BancorPage({
                 <span className="shrink-0 text-[11px] text-white/45">{t("池内即时边际价", "Live pool marginal price")}</span>
                 <NniDecimalAmount
                   className="min-w-0 break-all font-mono text-xs font-semibold leading-4 text-sky-200 sm:text-sm"
-                  value={market ? `${market.marginal_price_usd_per_point} USD` : "—"}
+                  value={market ? `${market.marginal_price_usd_per_aic} USD` : "—"}
                   shrinkFraction={false}
                 />
               </div>
@@ -666,7 +666,7 @@ export function BancorPage({
                 candles={candles.candles}
                 intervalSeconds={candles.interval_seconds}
                 priceDecimalPlaces={candles.price_decimal_places}
-                livePrice={market?.marginal_price_usd_per_point}
+                livePrice={market?.marginal_price_usd_per_aic}
                 formatUnixDateTime={formatUnixDateTime}
                 onTrade={openTradePanel}
                 t={t}
@@ -717,6 +717,13 @@ export function BancorPage({
                     </option>
                   ))}
                 </select>
+                <NniPublicKeyDisplay
+                  value={selectedAssetAccount.publicKey}
+                  t={t}
+                  className="mt-1"
+                  valueClassName="text-[10px] leading-4 text-white/45"
+                  allowFormatSwitch={false}
+                />
               </label>
             ) : null}
             <div className="flex items-center justify-between gap-3">
@@ -725,15 +732,6 @@ export function BancorPage({
                   <WalletCards className="h-4 w-4 text-sky-300" />
                   <h3 className="text-sm font-medium text-white/80">{t("我的余额", "My balances")}</h3>
                 </div>
-                {selectedAssetAccount ? (
-                  <NniPublicKeyDisplay
-                    value={selectedAssetAccount.publicKey}
-                    t={t}
-                    className="mt-1 pl-6"
-                    valueClassName="text-[10px] leading-4 text-white/40"
-                    allowFormatSwitch={false}
-                  />
-                ) : null}
               </div>
               <button type="button" className="theme-icon-btn" disabled={accountLoading || !signingDeviceReady} onClick={() => void fetchAccount()} title={t("签名刷新余额", "Sign to refresh balances")}>
                 <RefreshCw className={`h-4 w-4 ${accountLoading ? "animate-spin" : ""}`} />
@@ -749,11 +747,11 @@ export function BancorPage({
             ) : null}
             <div className="mt-2 grid min-w-0 gap-2 sm:grid-cols-2">
               <BalanceLine
-                label="POINT"
-                value={account?.point_balance ?? "—"}
+                label="AIC"
+                value={account?.aic_balance ?? "—"}
                 disabled={!account}
-                actionLabel={t("点击填入全部 POINT 余额", "Use the full POINT balance")}
-                onClick={() => account && fillBalance("sell", account.point_balance)}
+                actionLabel={t("点击填入全部 AIC 余额", "Use the full AIC balance")}
+                onClick={() => account && fillBalance("sell", account.aic_balance)}
               />
               <BalanceLine
                 label="USD"
@@ -775,7 +773,7 @@ export function BancorPage({
                     className={`rounded-lg px-4 py-2 text-sm font-medium transition ${side === value ? "bg-sky-400/20 text-sky-100" : "text-white/55 hover:text-white/80"}`}
                     onClick={() => changeSide(value)}
                   >
-                    {value === "sell" ? t("卖出 POINT", "Sell POINT") : t("买入 POINT", "Buy POINT")}
+                    {value === "sell" ? t("卖出 AIC", "Sell AIC") : t("买入 AIC", "Buy AIC")}
                   </button>
                 ))}
               </div>
@@ -939,7 +937,7 @@ export function BancorPage({
               <div key={record.trade_id} className="grid gap-2 rounded-xl border border-white/8 bg-white/[0.025] px-4 py-3 text-sm sm:grid-cols-[1fr_auto_auto] sm:items-center">
                 <div>
                   <span className="font-medium" style={{ color: resolveBancorTradeColor(record.side, t) }}>
-                    {record.side === "buy" ? t("买入 POINT", "Buy POINT") : t("卖出 POINT", "Sell POINT")}
+                    {record.side === "buy" ? t("买入 AIC", "Buy AIC") : t("卖出 AIC", "Sell AIC")}
                   </span>
                   <p className="mt-1 text-xs text-white/40">{formatUnixDateTime(record.created_at_unix)}</p>
                 </div>
@@ -1004,7 +1002,7 @@ export function BancorPage({
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span className="font-medium" style={{ color: resolveBancorTradeColor(record.side, t) }}>
-                      {record.side === "buy" ? t("买入 POINT", "Buy POINT") : t("卖出 POINT", "Sell POINT")}
+                      {record.side === "buy" ? t("买入 AIC", "Buy AIC") : t("卖出 AIC", "Sell AIC")}
                     </span>
                     <NniPublicKeyDisplay
                       value={record.asset_owner_pubkey}
@@ -1077,9 +1075,9 @@ export function BancorSwapTradePanel({
   t: Translate;
   side: "buy" | "sell";
   inputAmount: string;
-  inputAsset: "POINT" | "USD";
+  inputAsset: "AIC" | "USD";
   inputBalance: string | null;
-  outputAsset: "POINT" | "USD";
+  outputAsset: "AIC" | "USD";
   outputAmount: string | null;
   onInputChange: (value: string) => void;
   onFillBalance: () => void;
@@ -1129,7 +1127,7 @@ export function BancorSwapTradePanel({
       <div className="rounded-xl border border-white/8 bg-white/[0.025] p-3 pt-4">
         <div className="flex items-center justify-between gap-3 text-xs text-white/45">
           <span>{t("预计收到", "Estimated output")}</span>
-          <span>{side === "sell" ? t("卖出 POINT", "Sell POINT") : t("买入 POINT", "Buy POINT")}</span>
+          <span>{side === "sell" ? t("卖出 AIC", "Sell AIC") : t("买入 AIC", "Buy AIC")}</span>
         </div>
         <div className="mt-1 flex items-center gap-3">
           <span className={`min-w-0 flex-1 py-1.5 text-xl font-medium ${outputAmount ? "text-white" : "text-white/25"}`}>
@@ -1255,13 +1253,13 @@ function BancorFormulaCard({ t, market }: { t: Translate; market: BancorRuntime[
         <div><dt className="inline font-mono text-white/65">y</dt><dd className="inline"> — {t("向下取整后的实际到账量", "actual output after rounding down")}</dd></div>
       </dl>
       <div className="mt-3 grid gap-2 text-xs leading-5 text-white/45 sm:grid-cols-2">
-        <p>{t("买入 POINT：输入储备是 USD，输出储备是 POINT。", "Buy POINT: the input reserve is USD and the output reserve is POINT.")}</p>
-        <p>{t("卖出 POINT：输入储备是 POINT，输出储备是 USD。", "Sell POINT: the input reserve is POINT and the output reserve is USD.")}</p>
+        <p>{t("买入 AIC：输入储备是 USD，输出储备是 AIC。", "Buy AIC: the input reserve is USD and the output reserve is AIC.")}</p>
+        <p>{t("卖出 AIC：输入储备是 AIC，输出储备是 USD。", "Sell AIC: the input reserve is AIC and the output reserve is USD.")}</p>
       </div>
       <p className="mt-2 text-xs leading-5 text-white/40">
         {t(
-          "⌊ ⌋ 表示按最小单位向下取整；本市场的 POINT 与 USD 均保留 8 位小数。交易数量越大，对储备比例和成交价格的影响越明显。",
-          "⌊ ⌋ rounds down to the smallest unit. POINT and USD both use eight decimal places. Larger trades have a greater effect on the reserve ratio and execution price.",
+          "⌊ ⌋ 表示按最小单位向下取整；本市场的 AIC 与 USD 均保留 8 位小数。交易数量越大，对储备比例和成交价格的影响越明显。",
+          "⌊ ⌋ rounds down to the smallest unit. AIC and USD both use eight decimal places. Larger trades have a greater effect on the reserve ratio and execution price.",
         )}
       </p>
     </section>
@@ -1320,7 +1318,7 @@ export function CandleChart({
     high: Number(candle.high),
     low: Number(candle.low),
     close: Number(candle.close),
-    pointVolume: Number(candle.point_volume),
+    aicVolume: Number(candle.aic_volume),
   }));
 
   useEffect(() => {
@@ -1381,7 +1379,7 @@ export function CandleChart({
   const priceHigh = priceDomain.high;
   const priceLow = priceDomain.low;
   const priceSpan = Math.max(priceHigh - priceLow, Number.EPSILON);
-  const maxVolume = Math.max(...values.map((value) => value.pointVolume), 1);
+  const maxVolume = Math.max(...values.map((value) => value.aicVolume), 1);
   const step = (plotRight - plotLeft) / Math.max(values.length, 1);
   const bodyWidth = calculateBancorCandleBodyWidth(step);
   const yForPrice = (price: number) => priceTop + ((priceHigh - price) / priceSpan) * (priceBottom - priceTop);
@@ -1545,7 +1543,7 @@ export function CandleChart({
         data-bancor-tap-details="enabled"
         role="group"
         tabIndex={0}
-        aria-label={t("可拖动、缩放并点按查看的 POINT 对 USD 实际成交均价 K 线图", "Draggable, zoomable average execution-price POINT to USD candlestick chart with tap details")}
+        aria-label={t("可拖动、缩放并点按查看的 AIC 对 USD 实际成交均价 K 线图", "Draggable, zoomable average execution-price AIC to USD candlestick chart with tap details")}
         onKeyDown={handleKeyDown}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -1559,7 +1557,7 @@ export function CandleChart({
           viewBox={`0 0 ${width} ${height}`}
           className="block h-auto min-h-72 w-full select-none"
           role="img"
-          aria-label={t("POINT 对 USD 的实际成交均价 K 线图", "Average execution-price POINT to USD candlestick chart")}
+          aria-label={t("AIC 对 USD 的实际成交均价 K 线图", "Average execution-price AIC to USD candlestick chart")}
         >
           <defs>
             <clipPath id={priceClipId}>
@@ -1625,14 +1623,14 @@ export function CandleChart({
             const bodyBottom = bodyTop + bodyHeight;
             const highY = yForPrice(value.high);
             const lowY = yForPrice(value.low);
-            const volumeHeight = (value.pointVolume / maxVolume) * (volumeBottom - volumeTop);
+            const volumeHeight = (value.aicVolume / maxVolume) * (volumeBottom - volumeTop);
             return (
               <g
                 key={`${value.candle.bucket_start_unix}-${index}`}
                 data-bancor-candle-direction={visualState}
                 data-bancor-candle-state={candleOpen ? "open" : "closed"}
               >
-                <title>{`${formatUnixDateTime(value.candle.bucket_start_unix)} · O ${value.candle.open} · H ${value.candle.high} · L ${value.candle.low} · C ${value.candle.close} · ${value.candle.point_volume} POINT · ${value.candle.trade_count} ${t("笔", "trades")}`}</title>
+                <title>{`${formatUnixDateTime(value.candle.bucket_start_unix)} · O ${value.candle.open} · H ${value.candle.high} · L ${value.candle.low} · C ${value.candle.close} · ${value.candle.aic_volume} AIC · ${value.candle.trade_count} ${t("笔", "trades")}`}</title>
                 <g clipPath={`url(#${priceClipId})`}>
                   {hasTrades && highY < bodyTop ? <line x1={x} y1={highY} x2={x} y2={bodyTop} stroke={color.stroke} strokeWidth="1.5" /> : null}
                   {hasTrades && bodyBottom < lowY ? <line x1={x} y1={bodyBottom} x2={x} y2={lowY} stroke={color.stroke} strokeWidth="1.5" /> : null}
@@ -1737,7 +1735,7 @@ export function CandleChart({
               <text x={priceAxisX + 3} y={currentPriceY + 4} fill={currentPriceColor.stroke} fontSize="11">{currentPriceText}</text>
             </g>
           ) : null}
-          <text x={plotLeft} y={volumeTop + 5} fill="var(--theme-chart-label)" fontSize="10">VOL · POINT</text>
+          <text x={plotLeft} y={volumeTop + 5} fill="var(--theme-chart-label)" fontSize="10">VOL · AIC</text>
         </svg>
       </div>
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-white/45">

@@ -17,8 +17,8 @@ function candle(bucketStart: number, close: string): NniBancorCandle {
     high: close,
     low: close,
     close,
-    point_volume_units: "0",
-    point_volume: "0.00000000",
+    aic_volume_units: "0",
+    aic_volume: "0.00000000",
     usd_volume_units: "0",
     usd_volume: "0.00000000",
     trade_count: 0,
@@ -30,7 +30,7 @@ function response(candles: NniBancorCandle[], overrides: Partial<NniBancorCandle
   return {
     schema_version: 1,
     status: "bancor_candles",
-    market_id: "point-usd-v1",
+    market_id: "aic-usd-v1",
     interval_seconds: 300,
     start_time_unix: candles[0]?.bucket_start_unix ?? 0,
     end_time_unix: candles.at(-1)?.bucket_end_unix ?? 0,
@@ -38,7 +38,7 @@ function response(candles: NniBancorCandle[], overrides: Partial<NniBancorCandle
     price_decimal_places: 12,
     market_version: 10,
     market_created_at_unix: 1_800_000_000,
-    price_kind: "execution_average_usd_per_point",
+    price_kind: "execution_average_usd_per_aic",
     candles,
     ...overrides,
   };
@@ -72,7 +72,7 @@ test("BANCOR candle responses require a stable price kind and market series iden
     assert.equal(isBancorCandleResponse(invalid, 300), false, `${field} must be required`);
   }
   assert.equal(isBancorCandleResponse({ ...valid, status: "ok" }, 300), false);
-  assert.equal(isBancorCandleResponse({ ...valid, price_kind: "post_trade_marginal_usd_per_point" }, 300), false);
+  assert.equal(isBancorCandleResponse({ ...valid, price_kind: "post_trade_marginal_usd_per_aic" }, 300), false);
   const missingTradeState = { ...valid, candles: [{ ...valid.candles[0] }] } as Record<string, unknown>;
   delete (missingTradeState.candles as Array<Record<string, unknown>>)[0].has_trades;
   assert.equal(isBancorCandleResponse(missingTradeState, 300), false);

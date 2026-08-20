@@ -172,8 +172,8 @@ export function calculateBancorEstimatedOutput({
     : (inputUnits * BigInt(market.fee_bps) + 9_999n) / 10_000n;
   const curveInputUnits = inputUnits - feeUnits;
   if (curveInputUnits <= 0n) return null;
-  const inputReserveUnits = BigInt(side === "buy" ? market.usd_reserve_units : market.point_reserve_units);
-  const outputReserveUnits = BigInt(side === "buy" ? market.point_reserve_units : market.usd_reserve_units);
+  const inputReserveUnits = BigInt(side === "buy" ? market.usd_reserve_units : market.aic_reserve_units);
+  const outputReserveUnits = BigInt(side === "buy" ? market.aic_reserve_units : market.usd_reserve_units);
   const outputUnits = (curveInputUnits * outputReserveUnits) / (inputReserveUnits + curveInputUnits);
   return outputUnits > 0n ? formatBancorUnits(outputUnits) : null;
 }
@@ -199,17 +199,17 @@ export function validateBancorTradeInput({
       : (inputUnits * BigInt(market.fee_bps) + 9_999n) / 10_000n;
     const curveInputUnits = inputUnits - feeUnits;
     if (curveInputUnits <= 0n) return "nni_bancor_input_after_fee_too_small";
-    const inputReserveUnits = BigInt(side === "buy" ? market.usd_reserve_units : market.point_reserve_units);
-    const outputReserveUnits = BigInt(side === "buy" ? market.point_reserve_units : market.usd_reserve_units);
+    const inputReserveUnits = BigInt(side === "buy" ? market.usd_reserve_units : market.aic_reserve_units);
+    const outputReserveUnits = BigInt(side === "buy" ? market.aic_reserve_units : market.usd_reserve_units);
     const outputUnits = (curveInputUnits * outputReserveUnits) / (inputReserveUnits + curveInputUnits);
     if (outputUnits <= 0n) return "nni_bancor_output_too_small";
   }
   if (!account) return requireAccount ? "nni_bancor_account_required" : null;
-  const availableUnits = BigInt(side === "buy" ? account.usd_balance_units : account.point_balance_units);
+  const availableUnits = BigInt(side === "buy" ? account.usd_balance_units : account.aic_balance_units);
   if (inputUnits > availableUnits) {
     return side === "buy"
       ? "nni_bancor_insufficient_usd_balance"
-      : "nni_bancor_insufficient_point_balance";
+      : "nni_bancor_insufficient_aic_balance";
   }
   return null;
 }
@@ -237,8 +237,8 @@ export function formatBancorApiError(
   }
   if (code === "nni_bancor_account_required") {
     return t(
-      "请先刷新“我的余额”，读取 POINT 和 USD 可用余额后再交易。",
-      "Refresh My balances first so the available POINT and USD balances can be checked before trading.",
+      "请先刷新“我的余额”，读取 AIC 和 USD 可用余额后再交易。",
+      "Refresh My balances first so the available AIC and USD balances can be checked before trading.",
     );
   }
   if (code === "nni_asset_owner_required") {
@@ -262,8 +262,8 @@ export function formatBancorApiError(
   if (code === "nni_bancor_market_not_open") {
     return t("交易市场尚未开启。现在可以查看储备，但不能报价或成交。", "The market is not open yet. Reserves remain visible, but quotes and trades are unavailable.");
   }
-  if (code === "nni_bancor_insufficient_point_balance") {
-    return t("POINT 余额不足，请减少卖出数量。", "Your POINT balance is too low. Reduce the sell amount.");
+  if (code === "nni_bancor_insufficient_aic_balance") {
+    return t("AIC 余额不足，请减少卖出数量。", "Your AIC balance is too low. Reduce the sell amount.");
   }
   if (code === "nni_bancor_insufficient_usd_balance") {
     return t("USD 记账余额不足，请减少买入金额。", "Your USD account balance is too low. Reduce the buy amount.");

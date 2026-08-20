@@ -13,8 +13,8 @@ test("BANCOR reserve display rounds decimal amounts to an integer without floati
   assert.equal(formatBancorIntegerAmount("invalid"), "invalid");
 });
 
-test("BANCOR trade display uses integers for POINT while preserving USD precision", () => {
-  assert.equal(formatBancorAssetAmountForDisplay("33222036.72780000", "POINT"), "33222037");
+test("BANCOR trade display uses integers for AIC while preserving USD precision", () => {
+  assert.equal(formatBancorAssetAmountForDisplay("33222036.72780000", "AIC"), "33222037");
   assert.equal(formatBancorAssetAmountForDisplay("0.29888786", "USD"), "0.29888786");
 });
 

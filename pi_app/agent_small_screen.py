@@ -4917,7 +4917,7 @@ class SmallScreenApp:
         try:
             self._bancor_price_var.set(view["price"])
             self._bancor_daily_var.set(view["daily"])
-            self._bancor_point_reserve_var.set(view["point_reserve"])
+            self._bancor_aic_reserve_var.set(view["aic_reserve"])
             self._bancor_usd_reserve_var.set(view["usd_reserve"])
             self._bancor_meta_var.set(
                 self._t("bancor_loading")
@@ -5004,7 +5004,7 @@ class SmallScreenApp:
         ).pack(anchor=tk.W)
 
         self._bancor_daily_var = tk.StringVar(value="--")
-        self._bancor_point_reserve_var = tk.StringVar(value="--")
+        self._bancor_aic_reserve_var = tk.StringVar(value="--")
         self._bancor_usd_reserve_var = tk.StringVar(value="--")
         self._bancor_meta_var = tk.StringVar(value=self._t("bancor_loading"))
         self._bancor_daily_label = tk.Label(
@@ -5021,7 +5021,7 @@ class SmallScreenApp:
         reserves_row = tk.Frame(self.bancor_frame, bg=self._c("bg"))
         reserves_row.pack(fill=tk.X, pady=(0, 6))
         for label_key, value_var, unit, right_gap in (
-            ("bancor_point_reserve", self._bancor_point_reserve_var, "POINT", True),
+            ("bancor_aic_reserve", self._bancor_aic_reserve_var, "AIC", True),
             ("bancor_usd_reserve", self._bancor_usd_reserve_var, "USD", False),
         ):
             reserve_box = tk.Frame(

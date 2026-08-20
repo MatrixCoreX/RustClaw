@@ -11,10 +11,10 @@ function candles(intervalSeconds: number, bucketStartUnix = 1_800_000_000): NniB
   return {
     schema_version: 1,
     status: "bancor_candles",
-    market_id: "point-usd-v1",
+    market_id: "aic-usd-v1",
     market_version: 7,
     market_created_at_unix: 1_800_000_000,
-    price_kind: "execution_average_usd_per_point",
+    price_kind: "execution_average_usd_per_aic",
     interval_seconds: intervalSeconds,
     start_time_unix: bucketStartUnix,
     end_time_unix: bucketStartUnix + intervalSeconds,
@@ -27,8 +27,8 @@ function candles(intervalSeconds: number, bucketStartUnix = 1_800_000_000): NniB
       high: "0.000100000000",
       low: "0.000100000000",
       close: "0.000100000000",
-      point_volume_units: "10000",
-      point_volume: "1.00000000",
+      aic_volume_units: "10000",
+      aic_volume: "1.00000000",
       usd_volume_units: "1",
       usd_volume: "0.00010000",
       trade_count: 1,
@@ -330,15 +330,15 @@ test("BANCOR refreshes the active candlesticks without a stale ETag after a succ
     if (path === "/v1/nni/bancor/market") {
       return Promise.resolve(apiResponse({
         status: "open",
-        market_id: "point-usd-v1",
+        market_id: "aic-usd-v1",
         fee_bps: 50,
-        point_reserve_units: "10000000000000000",
+        aic_reserve_units: "10000000000000000",
         usd_reserve_units: "1000000000000",
       }));
     }
     if (path.startsWith("/v1/nni/bancor/account?")) {
       return Promise.resolve(apiResponse({
-        point_balance_units: "10000000000",
+        aic_balance_units: "10000000000",
         usd_balance_units: "1000000000",
         page: 1,
         per_page: 10,
