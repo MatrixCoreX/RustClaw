@@ -356,8 +356,8 @@ export function nniJoinErrorMessage(
   if (isNniPublicKeyWhitelistEmptyCode(code)) {
     return copy(
       lang,
-      "当前设备尚未获得 NNI 网络准入。请联系管理员登记设备后再重试。",
-      "This device has not been admitted to the NNI network yet. Ask an administrator to register it, then retry.",
+      "当前设备尚未获得 NNI 网络准入。请使用合法设备。",
+      "This device has not been admitted to the NNI network. Use an authorized device.",
     );
   }
   if (code) {
