@@ -132,6 +132,9 @@ test("asset account UI keeps recovery while adding custom bind, replacement, and
   assert.match(dialogSource, /data-nni-created-owner-join/);
   assert.match(dialogSource, /t\("确认已保存私钥", "Confirm private-key backup"\)/);
   assert.match(dialogSource, /不会发送给本机服务、远程节点或写入存储/);
+  assert.match(dialogSource, /data-nni-recovery-warning="true"/);
+  assert.match(dialogSource, /仅当原设备已损坏或无法再使用时/);
+  assert.match(dialogSource, /撤销该资产账户当前关联的其他设备授权/);
   assert.doesNotMatch(source, /previousOwnerAuthorizationSignature/);
 });
 
