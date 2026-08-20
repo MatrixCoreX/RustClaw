@@ -159,6 +159,47 @@ test("BANCOR keeps a revoked-device recovery guide until account access succeeds
   });
 });
 
+test("BANCOR account reads never expose a nested NNI admission code", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const apiFetch = (path: string): Promise<Response> => {
+    if (!path.startsWith("/v1/nni/bancor/account?")) {
+      throw new Error(`unexpected request: ${path}`);
+    }
+    return Promise.resolve(new Response(JSON.stringify({
+      ok: false,
+      data: {
+        attempts: [{
+          node_url: "https://nni.example.invalid",
+          error_code: "nni_public_key_whitelist_empty",
+        }],
+      },
+      error: "nni_bancor_account_nodes_unavailable",
+    }), {
+      status: 502,
+      headers: { "content-type": "application/json" },
+    }));
+  };
+  let runtime: ReturnType<typeof useBancorRuntime> | null = null;
+  function Probe() {
+    runtime = useBancorRuntime({ apiFetch, cacheScope: "device-admission-error-test", t: (zh) => zh });
+    return null;
+  }
+
+  let renderer: ReactTestRenderer | null = null;
+  await act(async () => {
+    renderer = create(React.createElement(Probe));
+  });
+  await act(async () => {
+    await runtime!.fetchAccount(1);
+  });
+  assert.equal(runtime!.error, "当前设备尚未获得 NNI 网络准入。请使用合法设备。");
+  assert.doesNotMatch(runtime!.error ?? "", /nni_public_key_whitelist_empty/);
+
+  await act(async () => {
+    renderer!.unmount();
+  });
+});
+
 test("BANCOR hook never exposes old-period candles after a failed interval switch", async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   let rejectOneMinute: ((cause: Error) => void) | undefined;

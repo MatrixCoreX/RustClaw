@@ -104,6 +104,21 @@ test("BANCOR revoked device authorization explains how to bind the device again"
   assert.doesNotMatch(message, /nni_asset_device_not_authorized/);
 });
 
+test("BANCOR formats NNI device admission errors for users", () => {
+  for (const code of [
+    "nni_public_key_whitelist_empty",
+    "public_key_whitelist_empty",
+    "nni_pubkey_not_allowlisted",
+    "nni_public_key_not_allowlisted",
+    "public_key_not_allowlisted",
+  ]) {
+    assert.equal(
+      formatBancorApiError(code, zh, "fallback"),
+      "当前设备尚未获得 NNI 网络准入。请使用合法设备。",
+    );
+  }
+});
+
 test("BANCOR accepts configurable slippage up to fifty percent", () => {
   assert.equal(BANCOR_DEFAULT_SLIPPAGE_BPS, 50);
   assert.equal(BANCOR_MAX_SLIPPAGE_BPS, 5_000);
