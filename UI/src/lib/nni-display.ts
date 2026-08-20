@@ -318,7 +318,13 @@ function isNniPublicKeyWhitelistEmptyCode(code: string | null | undefined): bool
 }
 
 export function nniJoinRejectsDevicePublicKey(error: string | undefined, data: unknown): boolean {
-  return isNniPublicKeyNotAllowlistedCode(error) || isNniPublicKeyNotAllowlistedCode(findNniJoinErrorCode(data));
+  const detailCode = findNniJoinErrorCode(data);
+  return (
+    isNniPublicKeyNotAllowlistedCode(error) ||
+    isNniPublicKeyWhitelistEmptyCode(error) ||
+    isNniPublicKeyNotAllowlistedCode(detailCode) ||
+    isNniPublicKeyWhitelistEmptyCode(detailCode)
+  );
 }
 
 export function parseNniRemoteNodeUrls(value: string): string[] {
@@ -350,11 +356,18 @@ export function nniJoinErrorMessage(
   if (isNniPublicKeyWhitelistEmptyCode(code)) {
     return copy(
       lang,
-      "远程 NNI 服务端尚未允许任何设备。请联系管理员完成设备授权后再重试。",
-      "The remote NNI server does not allow any devices yet. Ask an administrator to authorize this device, then retry.",
+      "当前设备尚未获得 NNI 网络准入。请联系管理员登记设备后再重试。",
+      "This device has not been admitted to the NNI network yet. Ask an administrator to register it, then retry.",
     );
   }
-  return error || fallback;
+  if (code) {
+    return copy(
+      lang,
+      "NNI 操作未完成。请检查设备状态和网络连接后重试；如果仍然失败，请联系管理员查看任务日志。",
+      "The NNI operation did not complete. Check the device status and network connection, then retry. If it still fails, ask an administrator to review the task logs.",
+    );
+  }
+  return fallback;
 }
 
 export function nniActionLabel(action: string, lang: UiLanguage): string {

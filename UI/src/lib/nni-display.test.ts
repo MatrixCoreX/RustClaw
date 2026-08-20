@@ -116,9 +116,13 @@ test("formats NNI join errors from structured codes", () => {
   );
   assert.match(
     nniJoinErrorMessage("nni_public_key_whitelist_empty", null, "fallback", "zh"),
-    /尚未允许任何设备/,
+    /当前设备尚未获得 NNI 网络准入/,
   );
   assert.equal(nniJoinErrorMessage(undefined, null, "fallback", "en"), "fallback");
+  assert.equal(
+    nniJoinErrorMessage("nni_unmapped_machine_code", null, "fallback", "zh"),
+    "NNI 操作未完成。请检查设备状态和网络连接后重试；如果仍然失败，请联系管理员查看任务日志。",
+  );
   assert.match(
     nniJoinErrorMessage(
       "nni_remote_nodes_unavailable",
@@ -131,6 +135,10 @@ test("formats NNI join errors from structured codes", () => {
 });
 
 test("detects only structured public-key authorization rejection codes", () => {
+  assert.equal(
+    nniJoinRejectsDevicePublicKey("nni_public_key_whitelist_empty", null),
+    true,
+  );
   assert.equal(
     nniJoinRejectsDevicePublicKey(
       "nni_remote_nodes_unavailable",
