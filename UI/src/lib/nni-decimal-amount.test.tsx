@@ -6,10 +6,10 @@ import { NniDecimalAmount } from "../components/NniDecimalAmount";
 
 test("NNI decimal amounts keep all digits while shrinking only the fraction", () => {
   const html = renderToStaticMarkup(
-    <NniDecimalAmount value="+12345.67890123 POINT" />,
+    <NniDecimalAmount value="+12345.67890123 AIC" />,
   );
-  assert.match(html, /data-nni-decimal-amount="\+12345\.67890123 POINT"/);
-  assert.match(html, />\+12345<\/span><span class="nni-decimal-fraction">\.67890123<\/span> POINT/);
+  assert.match(html, /data-nni-decimal-amount="\+12345\.67890123 AIC"/);
+  assert.match(html, />\+12345<\/span><span class="nni-decimal-fraction">\.67890123<\/span> AIC/);
 });
 
 test("NNI decimal amounts leave non-decimal labels unchanged", () => {

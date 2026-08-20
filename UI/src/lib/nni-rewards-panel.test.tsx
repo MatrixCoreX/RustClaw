@@ -12,10 +12,10 @@ const rewards: NniRewardsResponse = {
     "2b9c9d84fa15f4e178ce58d0a40a9f5e150e9c502e689a24d0c0f221337870c" +
     "726f0e463d730a75401c425bfde0db0c442e314027d83885a84c535eaa35460a0",
   node_url: "https://nni.example.test",
-  reward_point_scale: 100000000,
+  reward_aic_scale: 100000000,
   reward_decimal_places: 8,
   total_reward_units: "750000000000",
-  total_reward_points: "7500.00000000",
+  total_reward_aic: "7500.00000000",
   reward_grant_count: 2,
   first_period_start_unix: 1_800_000_000,
   latest_period_end_unix: 1_800_001_200,
@@ -26,9 +26,9 @@ const rewards: NniRewardsResponse = {
     starts_in_seconds: 3_661,
     first_settlement_at_unix: 1_800_010_600,
     interval_seconds: 600,
-    initial_reward_pool_points: 5000,
+    initial_reward_pool_aic: 5000,
     current_reward_pool_units: null,
-    current_reward_pool_points: null,
+    current_reward_pool_aic: null,
     distribution: "equal_per_eligible_device",
     halving_epoch_unix: null,
     halving_interval_seconds: 126_144_000,
@@ -49,9 +49,9 @@ const rewards: NniRewardsResponse = {
       period_end_unix: 1_800_001_200,
       heartbeat_count_in_period: 3,
       eligibility_units: 1,
-      reward_points_units: "500000000000",
-      reward_point_scale: 100000000,
-      reward_points: "5000.00000000",
+      reward_aic_units: "500000000000",
+      reward_aic_scale: 100000000,
+      reward_aic: "5000.00000000",
       rounding_adjustment_units: 0,
       awarded_at_unix: 1_800_001_201,
     },
@@ -62,8 +62,8 @@ test("renders the signed device reward total and period record", () => {
   const markup = renderToStaticMarkup(
     <NniRewardsPanel
       rewards={rewards}
-      currentPointBalance="6250.12500000"
-      currentPointBalanceLoading={false}
+      currentAicBalance="6250.12500000"
+      currentAicBalanceLoading={false}
       loading={false}
       error={null}
       pageSize={100}

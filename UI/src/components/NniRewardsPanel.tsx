@@ -25,8 +25,8 @@ export function formatNniRewardCountdown(seconds: number, t: Translate): string 
 
 export interface NniRewardsPanelProps {
   rewards: NniRewardsResponse | null;
-  currentPointBalance: string | null;
-  currentPointBalanceLoading: boolean;
+  currentAicBalance: string | null;
+  currentAicBalanceLoading: boolean;
   loading: boolean;
   error: string | null;
   pageSize: number;
@@ -37,8 +37,8 @@ export interface NniRewardsPanelProps {
 
 export function NniRewardsPanel({
   rewards,
-  currentPointBalance,
-  currentPointBalanceLoading,
+  currentAicBalance,
+  currentAicBalanceLoading,
   loading,
   error,
   pageSize,
@@ -88,10 +88,10 @@ export function NniRewardsPanel({
         <button
           type="button"
           onClick={() => void onRefresh()}
-          disabled={loading || currentPointBalanceLoading}
+          disabled={loading || currentAicBalanceLoading}
           className="theme-secondary-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {loading || currentPointBalanceLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+          {loading || currentAicBalanceLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
           {t("刷新奖励", "Refresh rewards")}
         </button>
       </div>
@@ -138,9 +138,9 @@ export function NniRewardsPanel({
             <span className="text-xs font-semibold">{t("累计奖励", "Total rewards")}</span>
           </div>
           <p className="mt-3 font-mono text-2xl font-semibold text-emerald-50">
-            <NniDecimalAmount value={rewards?.total_reward_points ?? "0.00000000"} />
+            <NniDecimalAmount value={rewards?.total_reward_aic ?? "0.00000000"} />
           </p>
-          <p className="mt-1 text-xs text-white/45">{t("点", "points")}</p>
+          <p className="mt-1 text-xs text-white/45">AIC</p>
         </div>
         <div className="rounded-2xl border border-sky-300/15 bg-sky-300/[0.06] p-4">
           <div className="flex items-center gap-2 text-sky-100/75">
@@ -148,9 +148,9 @@ export function NniRewardsPanel({
             <span className="text-xs font-semibold">{t("当前持有", "Current holdings")}</span>
           </div>
           <p className="mt-3 font-mono text-2xl font-semibold text-sky-50">
-            {currentPointBalanceLoading ? "…" : <NniDecimalAmount value={currentPointBalance ?? "—"} />}
+            {currentAicBalanceLoading ? "…" : <NniDecimalAmount value={currentAicBalance ?? "—"} />}
           </p>
-          <p className="mt-1 text-xs text-white/45">POINT</p>
+          <p className="mt-1 text-xs text-white/45">AIC</p>
         </div>
         <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
           <p className="text-xs font-semibold text-white/50">{t("获得奖励的时段", "Rewarded periods")}</p>
@@ -199,7 +199,7 @@ export function NniRewardsPanel({
           records.map((record) => (
             <div key={record.id} className="border-t border-white/10 px-4 py-3 first:border-t-0">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <NniDecimalAmount className="setup-status setup-status-done font-mono" value={`+${record.reward_points}`} shrinkFraction={false} />
+                <NniDecimalAmount className="setup-status setup-status-done font-mono" value={`+${record.reward_aic}`} shrinkFraction={false} />
                 <span className="text-xs text-white/50">{formatUnixDateTime(record.awarded_at_unix)}</span>
               </div>
               <div className="mt-3 grid gap-3 text-xs sm:grid-cols-2">

@@ -76,7 +76,7 @@ def nni_previous_window_metrics(rewards):
         if latest_period_end is not None and record_period_end != latest_period_end:
             reward = "0"
         else:
-            reward = _reward_amount(latest_record.get("reward_points"))
+            reward = _reward_amount(latest_record.get("reward_aic"))
     return active_count, reward
 
 

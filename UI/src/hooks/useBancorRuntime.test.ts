@@ -133,19 +133,19 @@ test("BANCOR accepts configurable slippage up to fifty percent", () => {
 
 const market = {
   fee_bps: 50,
-  point_reserve_units: "10000000000000000",
+  aic_reserve_units: "10000000000000000",
   usd_reserve_units: "1000000000000",
 } as never;
 
 const account = {
-  point_balance_units: "1000000000",
+  aic_balance_units: "1000000000",
   usd_balance_units: "500000000",
 } as never;
 
 test("BANCOR frontend preflight checks the input asset balance", () => {
   assert.equal(
     validateBancorTradeInput({ side: "sell", inputAmount: "10.00010000", market, account }),
-    "nni_bancor_insufficient_point_balance",
+    "nni_bancor_insufficient_aic_balance",
   );
   assert.equal(
     validateBancorTradeInput({ side: "buy", inputAmount: "5.00010000", market, account }),

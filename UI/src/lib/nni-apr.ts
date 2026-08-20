@@ -10,8 +10,8 @@ export const NNI_APR_AUTO_REFRESH_SECONDS = 10 * 60;
 export interface NniAprEstimate {
   record: NniRewardRecord;
   periodSeconds: number;
-  rewardPoints: number;
-  pointPriceUsd: number;
+  rewardAic: number;
+  aicPriceUsd: number;
   periodValueUsd: number;
   annualRewardUsd: number;
   aprPercent: number;
@@ -49,24 +49,24 @@ export function calculateNniAprEstimate({
   const record = latestNniRewardRecord(rewards?.records ?? []);
   if (devicePrice === null || !record || !market) return null;
 
-  const rewardPoints = Number(record.reward_points);
-  const pointPriceUsd = Number(market.marginal_price_usd_per_point);
+  const rewardAic = Number(record.reward_aic);
+  const aicPriceUsd = Number(market.marginal_price_usd_per_aic);
   const recordPeriodSeconds = record.period_end_unix - record.period_start_unix;
   const periodSeconds = recordPeriodSeconds > 0
     ? recordPeriodSeconds
     : rewards?.reward_policy?.interval_seconds ?? 0;
   if (
-    !Number.isFinite(rewardPoints)
-    || rewardPoints < 0
-    || !Number.isFinite(pointPriceUsd)
-    || pointPriceUsd < 0
+    !Number.isFinite(rewardAic)
+    || rewardAic < 0
+    || !Number.isFinite(aicPriceUsd)
+    || aicPriceUsd < 0
     || !Number.isFinite(periodSeconds)
     || periodSeconds <= 0
   ) {
     return null;
   }
 
-  const periodValueUsd = rewardPoints * pointPriceUsd;
+  const periodValueUsd = rewardAic * aicPriceUsd;
   const annualRewardUsd = periodValueUsd * (SECONDS_PER_YEAR / periodSeconds);
   const aprPercent = (annualRewardUsd / devicePrice) * 100;
   if (![periodValueUsd, annualRewardUsd, aprPercent].every(Number.isFinite)) return null;
@@ -74,8 +74,8 @@ export function calculateNniAprEstimate({
   return {
     record,
     periodSeconds,
-    rewardPoints,
-    pointPriceUsd,
+    rewardAic,
+    aicPriceUsd,
     periodValueUsd,
     annualRewardUsd,
     aprPercent,

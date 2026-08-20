@@ -39,7 +39,7 @@ class SmallScreenNniSummaryTests(unittest.TestCase):
                 "records": [
                     {
                         "period_end_unix": 1_800_000_600,
-                        "reward_points": "625.00000000",
+                        "reward_aic": "625.00000000",
                     }
                 ],
             },
@@ -54,7 +54,7 @@ class SmallScreenNniSummaryTests(unittest.TestCase):
         self.assertIn("请求: 42", summary)
         self.assertIn("全网活跃设备: 8", summary)
         self.assertIn("上一窗口奖励: 625", summary)
-        self.assertNotIn("上一窗口奖励: 625 POINT", summary)
+        self.assertNotIn("上一窗口奖励: 625 AIC", summary)
 
     def test_stopped_runtime_and_missing_device_are_explicit(self):
         summary = format_nni_runtime_summary(
@@ -90,7 +90,7 @@ class SmallScreenNniSummaryTests(unittest.TestCase):
                 "records": [
                     {
                         "period_end_unix": 1_800_000_600,
-                        "reward_points": "10.50000000",
+                        "reward_aic": "10.50000000",
                     }
                 ],
             }
@@ -142,7 +142,7 @@ class SmallScreenNniSummaryTests(unittest.TestCase):
                 "ok": True,
                 "data": {
                     "network_devices": {"active_device_count": 8},
-                    "records": [{"reward_points": "625.00000000"}],
+                    "records": [{"reward_aic": "625.00000000"}],
                 },
             },
         ]

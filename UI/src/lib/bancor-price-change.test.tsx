@@ -10,23 +10,23 @@ import type { NniBancorMarketResponse } from "../types/api";
 const market: NniBancorMarketResponse = {
   schema_version: 1,
   status: "open",
-  market_id: "point-usd-v1",
-  point_symbol: "POINT",
+  market_id: "aic-usd-v1",
+  aic_symbol: "AIC",
   usd_symbol: "USD",
-  point_scale: 100000000,
+  aic_scale: 100000000,
   usd_scale: 100000000,
-  point_reserve_units: "10000000000000000",
-  point_reserve: "100000000.00000000",
+  aic_reserve_units: "10000000000000000",
+  aic_reserve: "100000000.00000000",
   usd_reserve_units: "1000000000000",
   usd_reserve: "10000.00000000",
-  marginal_price_usd_per_point: "0.00010000",
+  marginal_price_usd_per_aic: "0.00010000",
   daily_marginal_price: {
-    price_kind: "pool_marginal_usd_per_point",
+    price_kind: "pool_marginal_usd_per_aic",
     timezone: "UTC",
     day_start_unix: 1_800_000_000,
-    open_usd_per_point: "0.00010000",
-    high_usd_per_point: "0.00010000",
-    low_usd_per_point: "0.00010000",
+    open_usd_per_aic: "0.00010000",
+    high_usd_per_aic: "0.00010000",
+    low_usd_per_aic: "0.00010000",
     change_percent: "0.00",
     trade_count: 0,
   },
@@ -42,12 +42,12 @@ test("BANCOR buy price-change projection matches the server integer quote and re
   assert.deepEqual(result.projection, {
     side: "buy",
     inputAsset: "USD",
-    outputAsset: "POINT",
+    outputAsset: "AIC",
     inputAmount: "1.00000000",
     feeAmount: "0.00500000",
     effectiveInputAmount: "0.99500000",
     outputAmount: "9949.01007349",
-    pointReserveAfter: "99990050.98992651",
+    aicReserveAfter: "99990050.98992651",
     usdReserveAfter: "10000.99500000",
     currentMarginalPrice: "0.00010000",
     marginalPriceAfter: "0.00010001",
@@ -62,7 +62,7 @@ test("BANCOR sell price-change projection keeps fees outside the pool", () => {
   assert.equal(result.projection.feeAmount, "0.50000000");
   assert.equal(result.projection.effectiveInputAmount, "99.50000000");
   assert.equal(result.projection.outputAmount, "0.00994999");
-  assert.equal(result.projection.pointReserveAfter, "100000099.50000000");
+  assert.equal(result.projection.aicReserveAfter, "100000099.50000000");
   assert.equal(result.projection.usdReserveAfter, "9999.99005001");
   assert.equal(result.projection.marginalPriceAfter, "0.00009999");
   assert.equal(result.projection.marginalPriceChangePercent, "-0.0002%");
@@ -85,7 +85,7 @@ test("BANCOR price-change calculator rejects malformed, zero-output, and missing
     calculateBancorPriceChange({
       side: "sell",
       inputAmount: "10000000.00000000",
-      market: { ...market, fee_bps: 0, point_reserve_units: "9223372036854775807" },
+      market: { ...market, fee_bps: 0, aic_reserve_units: "9223372036854775807" },
     }),
     { ok: false, error: "market_capacity_exceeded" },
   );
@@ -108,15 +108,15 @@ test("BANCOR price-change page exposes two local-only beginner calculators", () 
   assert.match(html, /data-bancor-calculator-side="buy"/);
   assert.match(html, /data-bancor-calculator-side="sell"/);
   assert.match(html, /aria-label="计划支付 USD"/);
-  assert.match(html, /aria-label="计划支付 POINT"/);
+  assert.match(html, /aria-label="计划支付 AIC"/);
   assert.equal((html.match(/data-bancor-price-change-result="ready"/g) ?? []).length, 2);
-  assert.match(html, /成交后 POINT 储备/);
+  assert.match(html, /成交后 AIC 储备/);
   assert.match(html, /成交后 USD 储备/);
   assert.match(html, /池内边际价变化/);
   assert.match(html, /data-bancor-price-change-formula="true"/);
   assert.match(html, /价格变化计算公式/);
-  assert.match(html, /买入 POINT（支付 USD）/);
-  assert.match(html, /卖出 POINT（收到 USD）/);
+  assert.match(html, /买入 AIC（支付 USD）/);
+  assert.match(html, /卖出 AIC（收到 USD）/);
   assert.match(html, /向上取整的手续费/);
   assert.match(html, /向下取整的预计到账/);
   assert.match(html, /ΔP/);

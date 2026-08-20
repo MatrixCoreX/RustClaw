@@ -30,28 +30,28 @@ import {
 } from "../components/BancorPage";
 import type { useBancorRuntime } from "../hooks/useBancorRuntime";
 
-test("BANCOR page presents the forced-liquidity market and shows the 100 million POINT pool", () => {
+test("BANCOR page presents the forced-liquidity market and shows the 100 million AIC pool", () => {
   const runtime = {
     market: {
       schema_version: 1 as const,
       status: "open" as const,
-      market_id: "point-usd-v1",
-      point_symbol: "POINT" as const,
+      market_id: "aic-usd-v1",
+      aic_symbol: "AIC" as const,
       usd_symbol: "USD" as const,
-      point_scale: 100000000 as const,
+      aic_scale: 100000000 as const,
       usd_scale: 100000000 as const,
-      point_reserve_units: "10000000000000000",
-      point_reserve: "100000000.00000000",
+      aic_reserve_units: "10000000000000000",
+      aic_reserve: "100000000.00000000",
       usd_reserve_units: "1000000000000",
       usd_reserve: "10000.00000000",
-      marginal_price_usd_per_point: "0.00010000",
+      marginal_price_usd_per_aic: "0.00010000",
       daily_marginal_price: {
-        price_kind: "pool_marginal_usd_per_point" as const,
+        price_kind: "pool_marginal_usd_per_aic" as const,
         timezone: "UTC" as const,
         day_start_unix: 1_699_920_000,
-        open_usd_per_point: "0.00009950",
-        high_usd_per_point: "0.00010100",
-        low_usd_per_point: "0.00009900",
+        open_usd_per_aic: "0.00009950",
+        high_usd_per_aic: "0.00010100",
+        low_usd_per_aic: "0.00009900",
         change_percent: "0.50",
         trade_count: 17,
       },
@@ -62,7 +62,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
     candles: {
       schema_version: 1 as const,
       status: "bancor_candles",
-      market_id: "point-usd-v1",
+      market_id: "aic-usd-v1",
       interval_seconds: 3_600,
       start_time_unix: 1_799_996_400,
       end_time_unix: 1_700_003_600,
@@ -75,8 +75,8 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
         high: "0.00010010",
         low: "0.00009990",
         close: "0.00010005",
-        point_volume_units: "100000000000",
-        point_volume: "1000.00000000",
+        aic_volume_units: "100000000000",
+        aic_volume: "1000.00000000",
         usd_volume_units: "9990000",
         usd_volume: "0.09990000",
         trade_count: 1,
@@ -88,8 +88,8 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
         high: "0.00010008",
         low: "0.00009995",
         close: "0.00010000",
-        point_volume_units: "50000000000",
-        point_volume: "500.00000000",
+        aic_volume_units: "50000000000",
+        aic_volume: "500.00000000",
         usd_volume_units: "5000000",
         usd_volume: "0.05000000",
         trade_count: 1,
@@ -100,8 +100,8 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       schema_version: 1 as const,
       status: "bancor_account",
       device_pubkey: "ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C",
-      point_balance_units: "10000000000",
-      point_balance: "100.00000000",
+      aic_balance_units: "10000000000",
+      aic_balance: "100.00000000",
       usd_balance_units: "500000000",
       usd_balance: "5.00000000",
       account_version: 1,
@@ -112,14 +112,14 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       trades: [{
         trade_id: "trade-account-1",
         quote_id: "quote-account-1",
-        market_id: "point-usd-v1",
+        market_id: "aic-usd-v1",
         side: "buy" as const,
         input_asset: "USD" as const,
         input_units: "12340000",
         input_amount: "0.12340000",
         fee_units: "61700",
         fee_amount: "0.00061700",
-        output_asset: "POINT" as const,
+        output_asset: "AIC" as const,
         output_units: "120000000000",
         output_amount: "1200.00000000",
         market_version: 228,
@@ -129,15 +129,15 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
     marketTrades: {
       schema_version: 1 as const,
       status: "bancor_market_trades",
-      market_id: "point-usd-v1",
+      market_id: "aic-usd-v1",
       limit: 100 as const,
       trades: Array.from({ length: 11 }, (_, index) => ({
         trade_id: `trade-market-${index + 1}`,
         quote_id: `quote-market-${index + 1}`,
-        market_id: "point-usd-v1",
+        market_id: "aic-usd-v1",
         asset_owner_pubkey: "5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M",
         side: "sell" as const,
-        input_asset: "POINT" as const,
+        input_asset: "AIC" as const,
         input_units: "33600000000",
         input_amount: "336.00000000",
         fee_units: "168000000",
@@ -249,6 +249,11 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /data-bancor-account-selector="true"/);
   assert.match(html, /交易账户/);
   assert.match(html, /本机绑定账户/);
+  const tradingAccountIndex = html.indexOf("交易账户");
+  const assetPublicKeyIndex = html.indexOf("5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M");
+  const balancesIndex = html.indexOf("我的余额");
+  assert.ok(assetPublicKeyIndex > tradingAccountIndex);
+  assert.ok(assetPublicKeyIndex < balancesIndex);
   assert.match(hardwareAccountUnavailableHtml, /data-bancor-hardware-account-unavailable="true"/);
   assert.match(hardwareAccountUnavailableHtml, /仍可选择资产密钥签名完成交易/);
   assert.doesNotMatch(hardwareAccountUnavailableHtml, /合法设备|NNI 网络准入/);
@@ -261,7 +266,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(revokedDeviceHtml, /重新绑定资产账号/);
   assert.match(revokedDeviceHtml, /data-bancor-open-nni="asset-owner"/);
   assert.doesNotMatch(revokedDeviceHtml, /nni_asset_device_not_authorized/);
-  assert.match(html, /data-nni-decimal-amount="100000000\.00000000 POINT"[^>]*data-nni-decimal-fraction-size="normal"/);
+  assert.match(html, /data-nni-decimal-amount="100000000\.00000000 AIC"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.match(html, /data-nni-decimal-amount="10000\.00000000 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.match(html, /BANCOR储备曲线市场/);
   assert.match(html, /获得奖励/);
@@ -287,12 +292,12 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /输出资产的市场储备/);
   assert.match(html, /向下取整后的实际到账量/);
   assert.match(html, /⌊/);
-  assert.match(html, /买入 POINT：输入储备是 USD，输出储备是 POINT/);
-  assert.match(html, /卖出 POINT：输入储备是 POINT，输出储备是 USD/);
+  assert.match(html, /买入 AIC：输入储备是 USD，输出储备是 AIC/);
+  assert.match(html, /卖出 AIC：输入储备是 AIC，输出储备是 USD/);
   assert.match(html, /均保留 8 位小数/);
   assert.doesNotMatch(html, /市场状态/);
   assert.match(html, /交易手续费/);
-  assert.doesNotMatch(html, /每 1 POINT|Per POINT/);
+  assert.doesNotMatch(html, /每 1 AIC|Per AIC/);
   assert.match(html, /data-bancor-daily-marginal-price="UTC"/);
   assert.match(html, /今日最高/);
   assert.match(html, /data-nni-decimal-amount="0\.00010100 USD"/);
@@ -301,14 +306,14 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /data-nni-decimal-amount="0\.00009900 USD"/);
   assert.match(html, /日涨跌幅/);
   assert.match(html, /data-nni-decimal-amount="\+0\.50%"/);
-  assert.match(html, /买入从 USD 扣除，卖出从 POINT 扣除/);
+  assert.match(html, /买入从 USD 扣除，卖出从 AIC 扣除/);
   assert.match(html, /mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3/);
   assert.match(html, /rounded-xl border border-white\/8 bg-white\/\[0\.025\] px-3 py-2\.5/);
   assert.doesNotMatch(html, /grid gap-4 sm:grid-cols-2 xl:grid-cols-4/);
   assert.match(html, /当前手续费[：:].*data-nni-decimal-amount="0\.50%"/);
   assert.match(html, /data-nni-decimal-amount="0\.50%"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.doesNotMatch(html, /累计手续费|Cumulative fees|按支付资产分别累计/);
-  assert.doesNotMatch(html, /1\.2500 POINT|0\.5000 USD/);
+  assert.doesNotMatch(html, /1\.2500 AIC|0\.5000 USD/);
   assert.match(html, /实际成交均价 K 线/);
   assert.match(html, /池内即时边际价/);
   assert.doesNotMatch(html, /当前 K 线价格摘要/);
@@ -331,7 +336,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /我的余额/);
   assert.match(html, /mt-2 grid min-w-0 gap-2 sm:grid-cols-2/);
   assert.match(html, /group min-w-0 max-w-full overflow-hidden/);
-  assert.match(html, /点击填入全部 POINT 余额/);
+  assert.match(html, /点击填入全部 AIC 余额/);
   assert.match(html, /点击填入全部 USD 余额/);
   assert.ok(html.indexOf("我的余额") > html.indexOf("<h2 class=\"text-lg font-semibold text-white\">交易</h2>"));
   assert.doesNotMatch(html, /没有成交的时间窗口沿用上一收盘价/);
@@ -384,10 +389,10 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.doesNotMatch(html, /a2c887498554••••••••331016eb/);
   assert.doesNotMatch(html, /a2c887498554407638cbec1d0ccf11264aa1ab7749bd7913fc6753fac72cfbdb/);
   assert.match(html, /data-nni-decimal-amount="0\.1234 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
-  assert.match(html, />\+1200 POINT<\/span>/);
-  assert.match(html, />336 POINT<\/span>/);
+  assert.match(html, />\+1200 AIC<\/span>/);
+  assert.match(html, />336 AIC<\/span>/);
   assert.match(html, /data-nni-decimal-amount="\+0\.0334 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
-  assert.doesNotMatch(html, /1200\.00000000 POINT|336\.00000000 POINT|0\.03340000 USD/);
+  assert.doesNotMatch(html, /1200\.00000000 AIC|336\.00000000 AIC|0\.03340000 USD/);
   assert.match(html, /grid gap-5 lg:grid-cols-2 lg:items-start/);
   assert.ok(html.indexOf("储备曲线交易公式") > html.indexOf("我的成交记录"));
 });
@@ -439,7 +444,7 @@ test("BANCOR swap mode uses stacked pay and estimated-output windows", () => {
       t={(zh) => zh}
       side="sell"
       inputAmount="100.00000000"
-      inputAsset="POINT"
+      inputAsset="AIC"
       inputBalance="125.00000000"
       outputAsset="USD"
       outputAmount="0.00990000"
@@ -496,8 +501,8 @@ test("BANCOR candle visual state never reports a flat or empty interval as up", 
     bucket_end_unix: 160,
     high: "1.00000000",
     low: "1.00000000",
-    point_volume_units: "10000",
-    point_volume: "0.00010000",
+    aic_volume_units: "10000",
+    aic_volume: "0.00010000",
     usd_volume_units: "10000",
     usd_volume: "0.00010000",
   };
@@ -515,8 +520,8 @@ test("BANCOR current candle marker follows bucket end time", () => {
     high: "1",
     low: "1",
     close: "1",
-    point_volume_units: "10000",
-    point_volume: "0.00010000",
+    aic_volume_units: "10000",
+    aic_volume: "0.00010000",
     usd_volume_units: "10000",
     usd_volume: "0.00010000",
     trade_count: 1,
@@ -539,8 +544,8 @@ test("BANCOR renders the current interval without an open-candle text badge", ()
         high: "1.00000000",
         low: "1.00000000",
         close: "1.00000000",
-        point_volume_units: "100000",
-        point_volume: "0.00100000",
+        aic_volume_units: "100000",
+        aic_volume: "0.00100000",
         usd_volume_units: "100000",
         usd_volume: "0.00100000",
         trade_count: 1,
@@ -569,8 +574,8 @@ test("BANCOR keeps focused candle details out of the chart layout", () => {
         high: "0.00010010",
         low: "0.00009990",
         close: "0.00010005",
-        point_volume_units: "100000000000",
-        point_volume: "1000.00000000",
+        aic_volume_units: "100000000000",
+        aic_volume: "1000.00000000",
         usd_volume_units: "9990000",
         usd_volume: "0.09990000",
         trade_count: 1,
@@ -597,8 +602,8 @@ test("BANCOR candlesticks distinguish traded flat bars from neutral empty interv
     high: "0.00010010",
     low: "0.00009990",
     close: "0.00010005",
-    point_volume_units: "100000000000",
-    point_volume: "1000.00000000",
+    aic_volume_units: "100000000000",
+    aic_volume: "1000.00000000",
     usd_volume_units: "9990000",
     usd_volume: "0.09990000",
     trade_count: 1,
@@ -610,8 +615,8 @@ test("BANCOR candlesticks distinguish traded flat bars from neutral empty interv
     high: "0.00010005",
     low: "0.00010005",
     close: "0.00010005",
-    point_volume_units: "0",
-    point_volume: "0.00000000",
+    aic_volume_units: "0",
+    aic_volume: "0.00000000",
     usd_volume_units: "0",
     usd_volume: "0.00000000",
     trade_count: 0,
@@ -660,10 +665,10 @@ test("BANCOR quote review and final confirmation use a centered modal", () => {
         schema_version: 1,
         status: "quoted",
         side: "sell",
-        input_asset: "POINT",
+        input_asset: "AIC",
         input_units: "1000000000",
         input_amount: "10.00000000",
-        fee_asset: "POINT",
+        fee_asset: "AIC",
         fee_units: "5000000",
         fee_amount: "0.05000000",
         curve_input_units: "995000000",
@@ -673,7 +678,7 @@ test("BANCOR quote review and final confirmation use a centered modal", () => {
         output_amount: "0.00100000",
         price_impact_bps: 12,
         fee_bps: 50,
-        market_id: "point-usd-v1",
+        market_id: "aic-usd-v1",
         market_version: 3,
         slippage_bps: 50,
         min_output_units: "90000",
@@ -692,11 +697,11 @@ test("BANCOR quote review and final confirmation use a centered modal", () => {
   assert.match(html, /role="dialog"/);
   assert.match(html, /aria-modal="true"/);
   assert.match(html, /查看报价并确认交易/);
-  assert.match(html, />10 POINT<\/span>/);
+  assert.match(html, />10 AIC<\/span>/);
   assert.match(html, /data-nni-decimal-amount="0\.00100000 USD"/);
   assert.match(html, /data-nni-decimal-amount="0\.00100000 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
-  assert.match(html, /data-nni-decimal-amount="0\.05000000 POINT"/);
-  assert.match(html, /data-nni-decimal-amount="0\.05000000 POINT"[^>]*data-nni-decimal-fraction-size="normal"/);
+  assert.match(html, /data-nni-decimal-amount="0\.05000000 AIC"/);
+  assert.match(html, /data-nni-decimal-amount="0\.05000000 AIC"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.match(html, /bancor-sign-trade-btn/);
   assert.match(html, /确认签名交易/);
   assert.match(html, /当前硬件代理签名/);
@@ -721,12 +726,12 @@ test("BANCOR quote modal warns but still permits confirmation when price impact 
         fee_amount: "25.00000000",
         curve_input_units: "497500000000",
         curve_input_amount: "4975.00000000",
-        output_asset: "POINT",
+        output_asset: "AIC",
         output_units: "3322203672780000",
         output_amount: "33222036.72780000",
         price_impact_bps: 3353,
         fee_bps: 50,
-        market_id: "point-usd-v1",
+        market_id: "aic-usd-v1",
         market_version: 3,
         slippage_bps: 50,
         min_output_units: "3305592654410000",

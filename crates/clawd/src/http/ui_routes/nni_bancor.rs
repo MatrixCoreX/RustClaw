@@ -5,8 +5,8 @@ const NNI_BANCOR_CANDLE_INTERVALS: [u64; 8] =
 const NNI_BANCOR_DEFAULT_SLIPPAGE_BPS: u16 = 50;
 const NNI_BANCOR_MAX_SLIPPAGE_BPS: u16 = 5_000;
 const NNI_BANCOR_MARKET_TRADE_LIMIT: usize = 100;
-const NNI_BANCOR_CANDLE_PRICE_KIND: &str = "execution_average_usd_per_point";
-const NNI_BANCOR_DAILY_PRICE_KIND: &str = "pool_marginal_usd_per_point";
+const NNI_BANCOR_CANDLE_PRICE_KIND: &str = "execution_average_usd_per_aic";
+const NNI_BANCOR_DAILY_PRICE_KIND: &str = "pool_marginal_usd_per_aic";
 
 #[derive(Debug, Deserialize)]
 struct NniBancorCandlesQuery {
@@ -32,9 +32,9 @@ fn validate_bancor_market_response(data: &Value) -> Result<(), &'static str> {
             .get("market_id")
             .and_then(Value::as_str)
             .is_none_or(str::is_empty)
-        || object.get("point_symbol").and_then(Value::as_str) != Some("POINT")
+        || object.get("aic_symbol").and_then(Value::as_str) != Some("AIC")
         || object.get("usd_symbol").and_then(Value::as_str) != Some("USD")
-        || object.get("point_scale").and_then(Value::as_u64) != Some(100_000_000)
+        || object.get("aic_scale").and_then(Value::as_u64) != Some(100_000_000)
         || object.get("usd_scale").and_then(Value::as_u64) != Some(100_000_000)
         || object.get("fee_bps").and_then(Value::as_u64).is_none()
         || object.get("version").and_then(Value::as_u64).is_none()
@@ -42,7 +42,7 @@ fn validate_bancor_market_response(data: &Value) -> Result<(), &'static str> {
     {
         return Err("nni_bancor_market_contract_invalid");
     }
-    let current = positive_decimal(object, "marginal_price_usd_per_point")?;
+    let current = positive_decimal(object, "marginal_price_usd_per_aic")?;
     let daily = object
         .get("daily_marginal_price")
         .and_then(Value::as_object)
@@ -57,9 +57,9 @@ fn validate_bancor_market_response(data: &Value) -> Result<(), &'static str> {
     {
         return Err("nni_bancor_market_contract_invalid");
     }
-    let open = positive_decimal(daily, "open_usd_per_point")?;
-    let high = positive_decimal(daily, "high_usd_per_point")?;
-    let low = positive_decimal(daily, "low_usd_per_point")?;
+    let open = positive_decimal(daily, "open_usd_per_aic")?;
+    let high = positive_decimal(daily, "high_usd_per_aic")?;
+    let low = positive_decimal(daily, "low_usd_per_aic")?;
     let change = finite_decimal(daily, "change_percent")?;
     if high < open.max(current) || low > open.min(current) || low > high {
         return Err("nni_bancor_market_contract_invalid");
@@ -183,7 +183,7 @@ fn validate_bancor_candles_response(
         if high < open.max(close) || low > open.min(close) || low > high {
             return Err("nni_bancor_candles_contract_invalid");
         }
-        for field in ["point_volume_units", "usd_volume_units"] {
+        for field in ["aic_volume_units", "usd_volume_units"] {
             if candle
                 .get(field)
                 .and_then(Value::as_str)
@@ -194,7 +194,7 @@ fn validate_bancor_candles_response(
                 return Err("nni_bancor_candles_contract_invalid");
             }
         }
-        for field in ["point_volume", "usd_volume"] {
+        for field in ["aic_volume", "usd_volume"] {
             if candle
                 .get(field)
                 .and_then(Value::as_str)
@@ -1528,23 +1528,23 @@ mod nni_bancor_unit_tests {
         let valid = json!({
             "schema_version": 1,
             "status": "open",
-            "market_id": "point-usd-v1",
-            "point_symbol": "POINT",
+            "market_id": "aic-usd-v1",
+            "aic_symbol": "AIC",
             "usd_symbol": "USD",
-            "point_scale": 100_000_000,
+            "aic_scale": 100_000_000,
             "usd_scale": 100_000_000,
-            "point_reserve_units": "9990000000000000",
-            "point_reserve": "99900000.00000000",
+            "aic_reserve_units": "9990000000000000",
+            "aic_reserve": "99900000.00000000",
             "usd_reserve_units": "1001000000000",
             "usd_reserve": "10010.00000000",
-            "marginal_price_usd_per_point": "0.00010020",
+            "marginal_price_usd_per_aic": "0.00010020",
             "daily_marginal_price": {
-                "price_kind": "pool_marginal_usd_per_point",
+                "price_kind": "pool_marginal_usd_per_aic",
                 "timezone": "UTC",
                 "day_start_unix": 1_799_971_200,
-                "open_usd_per_point": "0.00010000",
-                "high_usd_per_point": "0.00010100",
-                "low_usd_per_point": "0.00009900",
+                "open_usd_per_aic": "0.00010000",
+                "high_usd_per_aic": "0.00010100",
+                "low_usd_per_aic": "0.00009900",
                 "change_percent": "0.20",
                 "trade_count": 3,
             },
@@ -1554,7 +1554,7 @@ mod nni_bancor_unit_tests {
         });
         assert_eq!(validate_bancor_market_response(&valid), Ok(()));
 
-        for field in ["price_kind", "timezone", "day_start_unix", "high_usd_per_point"] {
+        for field in ["price_kind", "timezone", "day_start_unix", "high_usd_per_aic"] {
             let mut invalid = valid.clone();
             invalid["daily_marginal_price"].as_object_mut().unwrap().remove(field);
             assert_eq!(
@@ -1577,10 +1577,10 @@ mod nni_bancor_unit_tests {
         let valid = json!({
             "schema_version": 1,
             "status": "bancor_candles",
-            "market_id": "point-usd-v1",
+            "market_id": "aic-usd-v1",
             "market_version": 7,
             "market_created_at_unix": 1_800_000_000,
-            "price_kind": "execution_average_usd_per_point",
+            "price_kind": "execution_average_usd_per_aic",
             "interval_seconds": 300,
             "start_time_unix": 1_800_000_000,
             "end_time_unix": 1_800_000_300,
@@ -1601,7 +1601,7 @@ mod nni_bancor_unit_tests {
         }
         let mut wrong_price_kind = valid.clone();
         wrong_price_kind["price_kind"] =
-            Value::String("post_trade_marginal_usd_per_point".to_string());
+            Value::String("post_trade_marginal_usd_per_aic".to_string());
         assert_eq!(
             validate_bancor_candles_response(&wrong_price_kind, 300, 120),
             Err("nni_bancor_candles_contract_invalid"),
@@ -1613,10 +1613,10 @@ mod nni_bancor_unit_tests {
         let payload = json!({
             "schema_version": 1,
             "status": "bancor_candles",
-            "market_id": "point-usd-v1",
+            "market_id": "aic-usd-v1",
             "market_version": 7,
             "market_created_at_unix": 1_800_000_000,
-            "price_kind": "execution_average_usd_per_point",
+            "price_kind": "execution_average_usd_per_aic",
             "interval_seconds": 60,
             "start_time_unix": 1_800_000_000,
             "end_time_unix": 1_800_000_120,
@@ -1643,8 +1643,8 @@ mod nni_bancor_unit_tests {
             "high": "0.000110000000",
             "low": "0.000090000000",
             "close": "0.000105000000",
-            "point_volume_units": "100000000",
-            "point_volume": "1.00000000",
+            "aic_volume_units": "100000000",
+            "aic_volume": "1.00000000",
             "usd_volume_units": "10000",
             "usd_volume": "0.00010000",
             "trade_count": 1,
@@ -1654,10 +1654,10 @@ mod nni_bancor_unit_tests {
             json!({
                 "schema_version": 1,
                 "status": "bancor_candles",
-                "market_id": "point-usd-v1",
+                "market_id": "aic-usd-v1",
                 "market_version": 7,
                 "market_created_at_unix": 1_800_000_000,
-                "price_kind": "execution_average_usd_per_point",
+                "price_kind": "execution_average_usd_per_aic",
                 "interval_seconds": 300,
                 "start_time_unix": 1_800_000_000,
                 "end_time_unix": 1_800_000_600,
@@ -1709,7 +1709,7 @@ mod nni_bancor_unit_tests {
             "schema_version": 1,
             "action": "nni_bancor_trade",
             "server_identity": "nni-server-v1",
-            "market_id": "point-usd-v1",
+            "market_id": "aic-usd-v1",
             "market_version": 7,
             "quote_id": "quote-1",
             "task_id": "task-1",
@@ -1731,7 +1731,7 @@ mod nni_bancor_unit_tests {
         let response = json!({
             "signing_payload": signing_payload,
             "signing_payload_digest": digest,
-            "market_id": "point-usd-v1",
+            "market_id": "aic-usd-v1",
             "market_version": 7,
             "quote_id": "quote-1",
             "task_id": "task-1",

@@ -4,13 +4,13 @@ export type BancorPriceChangeSide = "buy" | "sell";
 
 export interface BancorPriceChangeProjection {
   side: BancorPriceChangeSide;
-  inputAsset: "USD" | "POINT";
-  outputAsset: "POINT" | "USD";
+  inputAsset: "USD" | "AIC";
+  outputAsset: "AIC" | "USD";
   inputAmount: string;
   feeAmount: string;
   effectiveInputAmount: string;
   outputAmount: string;
-  pointReserveAfter: string;
+  aicReserveAfter: string;
   usdReserveAfter: string;
   currentMarginalPrice: string;
   marginalPriceAfter: string;
@@ -40,10 +40,10 @@ export function calculateBancorPriceChange({
     return { ok: false, error: "market_invalid" };
   }
 
-  let pointReserve: bigint;
+  let aicReserve: bigint;
   let usdReserve: bigint;
   try {
-    pointReserve = parseReserveUnits(market.point_reserve_units);
+    aicReserve = parseReserveUnits(market.aic_reserve_units);
     usdReserve = parseReserveUnits(market.usd_reserve_units);
   } catch {
     return { ok: false, error: "market_invalid" };
@@ -55,23 +55,23 @@ export function calculateBancorPriceChange({
   const curveInputUnits = inputUnits - feeUnits;
   if (curveInputUnits <= 0n) return { ok: false, error: "amount_too_small" };
 
-  const inputReserveUnits = side === "buy" ? usdReserve : pointReserve;
-  const outputReserveUnits = side === "buy" ? pointReserve : usdReserve;
+  const inputReserveUnits = side === "buy" ? usdReserve : aicReserve;
+  const outputReserveUnits = side === "buy" ? aicReserve : usdReserve;
   const outputUnits = (curveInputUnits * outputReserveUnits) / (inputReserveUnits + curveInputUnits);
   if (outputUnits <= 0n || outputUnits >= outputReserveUnits) {
     return { ok: false, error: "amount_too_small" };
   }
 
-  const pointReserveAfter = side === "buy"
-    ? pointReserve - outputUnits
-    : pointReserve + curveInputUnits;
+  const aicReserveAfter = side === "buy"
+    ? aicReserve - outputUnits
+    : aicReserve + curveInputUnits;
   const usdReserveAfter = side === "buy"
     ? usdReserve + curveInputUnits
     : usdReserve - outputUnits;
-  if (pointReserveAfter <= 0n || usdReserveAfter <= 0n) {
+  if (aicReserveAfter <= 0n || usdReserveAfter <= 0n) {
     return { ok: false, error: "amount_too_small" };
   }
-  if (pointReserveAfter > MAX_UNITS || usdReserveAfter > MAX_UNITS) {
+  if (aicReserveAfter > MAX_UNITS || usdReserveAfter > MAX_UNITS) {
     return { ok: false, error: "market_capacity_exceeded" };
   }
 
@@ -79,21 +79,21 @@ export function calculateBancorPriceChange({
     ok: true,
     projection: {
       side,
-      inputAsset: side === "buy" ? "USD" : "POINT",
-      outputAsset: side === "buy" ? "POINT" : "USD",
+      inputAsset: side === "buy" ? "USD" : "AIC",
+      outputAsset: side === "buy" ? "AIC" : "USD",
       inputAmount: formatAssetUnits(inputUnits),
       feeAmount: formatAssetUnits(feeUnits),
       effectiveInputAmount: formatAssetUnits(curveInputUnits),
       outputAmount: formatAssetUnits(outputUnits),
-      pointReserveAfter: formatAssetUnits(pointReserveAfter),
+      aicReserveAfter: formatAssetUnits(aicReserveAfter),
       usdReserveAfter: formatAssetUnits(usdReserveAfter),
-      currentMarginalPrice: formatUnsignedRatio(usdReserve, pointReserve, 8),
-      marginalPriceAfter: formatUnsignedRatio(usdReserveAfter, pointReserveAfter, 8),
+      currentMarginalPrice: formatUnsignedRatio(usdReserve, aicReserve, 8),
+      marginalPriceAfter: formatUnsignedRatio(usdReserveAfter, aicReserveAfter, 8),
       marginalPriceChangePercent: formatSignedPercentChange({
         beforeNumerator: usdReserve,
-        beforeDenominator: pointReserve,
+        beforeDenominator: aicReserve,
         afterNumerator: usdReserveAfter,
-        afterDenominator: pointReserveAfter,
+        afterDenominator: aicReserveAfter,
         decimalPlaces: 4,
       }),
     },

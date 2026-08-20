@@ -73,7 +73,7 @@ def build_bancor_market_view(market, lang="CN", error=""):
         return {
             "price": "--",
             "daily": copy["unavailable"],
-            "point_reserve": "--",
+            "aic_reserve": "--",
             "usd_reserve": "--",
             "meta": str(error or copy["unavailable"]),
             "change_direction": "flat",
@@ -91,13 +91,13 @@ def build_bancor_market_view(market, lang="CN", error=""):
         trade_count = "--"
 
     return {
-        "price": f"{_compact_decimal(market.get('marginal_price_usd_per_point'))} USD",
+        "price": f"{_compact_decimal(market.get('marginal_price_usd_per_aic'))} USD",
         "daily": (
-            f"{copy['high']} {_compact_decimal(daily.get('high_usd_per_point'))}  ·  "
-            f"{copy['low']} {_compact_decimal(daily.get('low_usd_per_point'))}  ·  "
+            f"{copy['high']} {_compact_decimal(daily.get('high_usd_per_aic'))}  ·  "
+            f"{copy['low']} {_compact_decimal(daily.get('low_usd_per_aic'))}  ·  "
             f"{copy['change']} {change}"
         ),
-        "point_reserve": _reserve_amount(market.get("point_reserve")),
+        "aic_reserve": _reserve_amount(market.get("aic_reserve")),
         "usd_reserve": _reserve_amount(market.get("usd_reserve")),
         "meta": (
             f"{copy['status']}: {status_label}  ·  {copy['fee']}: {fee_text}  ·  "

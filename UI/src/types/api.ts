@@ -1258,9 +1258,9 @@ export interface NniRewardRecord {
   period_end_unix: number;
   heartbeat_count_in_period: number;
   eligibility_units: 1;
-  reward_points_units: string;
-  reward_point_scale: 100000000;
-  reward_points: string;
+  reward_aic_units: string;
+  reward_aic_scale: 100000000;
+  reward_aic: string;
   rounding_adjustment_units: number;
   awarded_at_unix: number;
 }
@@ -1281,9 +1281,9 @@ export interface NniRewardPolicy {
   starts_in_seconds?: number | null;
   first_settlement_at_unix?: number | null;
   interval_seconds: number;
-  initial_reward_pool_points: number;
+  initial_reward_pool_aic: number;
   current_reward_pool_units: string | null;
-  current_reward_pool_points: string | null;
+  current_reward_pool_aic: string | null;
   distribution: "equal_per_eligible_device";
   halving_epoch_unix: number | null;
   halving_interval_seconds: number;
@@ -1294,7 +1294,7 @@ export interface NniRewardPolicy {
 
 export interface NniNetworkRewards {
   total_distributed_reward_units: string;
-  total_distributed_reward_points: string;
+  total_distributed_reward_aic: string;
   settled_period_count: number;
   first_period_start_unix: number | null;
   latest_period_end_unix: number | null;
@@ -1314,10 +1314,10 @@ export interface NniRewardsResponse {
   status: string;
   device_pubkey: string;
   node_url?: string;
-  reward_point_scale: 100000000;
+  reward_aic_scale: 100000000;
   reward_decimal_places: 8;
   total_reward_units: string;
-  total_reward_points: string;
+  total_reward_aic: string;
   reward_grant_count: number;
   first_period_start_unix?: number | null;
   latest_period_end_unix?: number | null;
@@ -1337,22 +1337,22 @@ export interface NniBancorMarketResponse {
   schema_version: 1;
   status: "open" | "disabled" | "paused";
   market_id: string;
-  point_symbol: "POINT";
+  aic_symbol: "AIC";
   usd_symbol: "USD";
-  point_scale: 100000000;
+  aic_scale: 100000000;
   usd_scale: 100000000;
-  point_reserve_units: string;
-  point_reserve: string;
+  aic_reserve_units: string;
+  aic_reserve: string;
   usd_reserve_units: string;
   usd_reserve: string;
-  marginal_price_usd_per_point: string;
+  marginal_price_usd_per_aic: string;
   daily_marginal_price: {
-    price_kind: "pool_marginal_usd_per_point";
+    price_kind: "pool_marginal_usd_per_aic";
     timezone: "UTC";
     day_start_unix: number;
-    open_usd_per_point: string;
-    high_usd_per_point: string;
-    low_usd_per_point: string;
+    open_usd_per_aic: string;
+    high_usd_per_aic: string;
+    low_usd_per_aic: string;
     change_percent: string;
     trade_count: number;
   };
@@ -1370,8 +1370,8 @@ export interface NniBancorCandle {
   high: string;
   low: string;
   close: string;
-  point_volume_units: string;
-  point_volume: string;
+  aic_volume_units: string;
+  aic_volume: string;
   usd_volume_units: string;
   usd_volume: string;
   trade_count: number;
@@ -1384,7 +1384,7 @@ export interface NniBancorCandlesResponse {
   market_id: string;
   market_version: number;
   market_created_at_unix: number;
-  price_kind: "execution_average_usd_per_point";
+  price_kind: "execution_average_usd_per_aic";
   interval_seconds: number;
   start_time_unix: number;
   end_time_unix: number;
@@ -1398,15 +1398,15 @@ export interface NniBancorQuoteResponse {
   schema_version: 1;
   status: string;
   side: "buy" | "sell";
-  input_asset: "POINT" | "USD";
+  input_asset: "AIC" | "USD";
   input_units: string;
   input_amount: string;
-  fee_asset: "POINT" | "USD";
+  fee_asset: "AIC" | "USD";
   fee_units: string;
   fee_amount: string;
   curve_input_units: string;
   curve_input_amount: string;
-  output_asset: "POINT" | "USD";
+  output_asset: "AIC" | "USD";
   output_units: string;
   output_amount: string;
   price_impact_bps: number;
@@ -1424,12 +1424,12 @@ export interface NniBancorTradeRecord {
   quote_id: string;
   market_id: string;
   side: "buy" | "sell";
-  input_asset: "POINT" | "USD";
+  input_asset: "AIC" | "USD";
   input_units: string;
   input_amount: string;
   fee_units: string;
   fee_amount: string;
-  output_asset: "POINT" | "USD";
+  output_asset: "AIC" | "USD";
   output_units: string;
   output_amount: string;
   market_version: number;
@@ -1453,8 +1453,8 @@ export interface NniBancorAccountResponse {
   schema_version: 1;
   status: string;
   device_pubkey: string;
-  point_balance_units: string;
-  point_balance: string;
+  aic_balance_units: string;
+  aic_balance: string;
   usd_balance_units: string;
   usd_balance: string;
   account_version: number;
@@ -1475,8 +1475,8 @@ export interface NniBancorTradeResponse {
   authorization_mode: "delegated_hardware" | "asset_owner";
   trade: NniBancorTradeRecord;
   account: {
-    point_balance_units: string;
-    point_balance: string;
+    aic_balance_units: string;
+    aic_balance: string;
     usd_balance_units: string;
     usd_balance: string;
     version: number;

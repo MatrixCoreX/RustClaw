@@ -1896,8 +1896,8 @@ export default function App() {
               nniNetworkStats={nniNetworkStats}
               nniNetworkStatsLoading={nniNetworkStatsLoading}
               nniNetworkStatsError={nniNetworkStatsError}
-              nniCurrentPointBalance={bancorRuntime.account?.point_balance ?? null}
-              nniCurrentPointBalanceLoading={bancorRuntime.accountLoading}
+              nniCurrentAicBalance={bancorRuntime.account?.aic_balance ?? null}
+              nniCurrentAicBalanceLoading={bancorRuntime.accountLoading}
               nniConfigLoading={nniConfigLoading}
               nniConfigSaving={nniConfigSaving}
               nniConfigError={nniConfigError}
@@ -1925,7 +1925,7 @@ export default function App() {
               onClearHeartbeatErrors={clearNniHeartbeatErrors}
               onFetchRewards={fetchNniRewards}
               onFetchNetworkStats={fetchNniNetworkStats}
-              onFetchCurrentPointBalance={() => bancorRuntime.fetchAccount(1)}
+              onFetchCurrentAicBalance={() => bancorRuntime.fetchAccount(1)}
               onRunDeviceAction={runNniDeviceAction}
               onSetDeviceSimulation={setNniDeviceSimulation}
               onOpenApr={() => setCurrentPage("nni_apr")}

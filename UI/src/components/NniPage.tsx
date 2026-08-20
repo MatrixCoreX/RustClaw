@@ -101,8 +101,8 @@ export interface NniPageProps {
   nniNetworkStats: NniNetworkStatsResponse | null;
   nniNetworkStatsLoading: boolean;
   nniNetworkStatsError: string | null;
-  nniCurrentPointBalance: string | null;
-  nniCurrentPointBalanceLoading: boolean;
+  nniCurrentAicBalance: string | null;
+  nniCurrentAicBalanceLoading: boolean;
   nniConfigLoading: boolean;
   nniConfigSaving: boolean;
   nniConfigError: string | null;
@@ -130,7 +130,7 @@ export interface NniPageProps {
   onClearHeartbeatErrors: () => unknown | Promise<unknown>;
   onFetchRewards: (page: number) => unknown | Promise<unknown>;
   onFetchNetworkStats: () => unknown | Promise<unknown>;
-  onFetchCurrentPointBalance: () => unknown | Promise<unknown>;
+  onFetchCurrentAicBalance: () => unknown | Promise<unknown>;
   onRunDeviceAction: (action: string) => unknown | Promise<unknown>;
   onSetDeviceSimulation: (enabled: boolean) => unknown | Promise<unknown>;
   onOpenApr: () => void;
@@ -216,8 +216,8 @@ export function NniPage({
   nniNetworkStats,
   nniNetworkStatsLoading,
   nniNetworkStatsError,
-  nniCurrentPointBalance,
-  nniCurrentPointBalanceLoading,
+  nniCurrentAicBalance,
+  nniCurrentAicBalanceLoading,
   nniConfigLoading,
   nniConfigSaving,
   nniConfigError,
@@ -245,7 +245,7 @@ export function NniPage({
   onClearHeartbeatErrors,
   onFetchRewards,
   onFetchNetworkStats,
-  onFetchCurrentPointBalance,
+  onFetchCurrentAicBalance,
   onRunDeviceAction,
   onSetDeviceSimulation,
   onOpenApr,
@@ -384,13 +384,13 @@ export function NniPage({
       // Both private reads use the device signer. Keep them sequential so a
       // hardware-backed signer never receives overlapping challenges.
       await Promise.resolve(onFetchRewards(1));
-      await Promise.resolve(onFetchCurrentPointBalance());
+      await Promise.resolve(onFetchCurrentAicBalance());
     }
   };
 
   const refreshNniRewards = async () => {
     await Promise.resolve(onFetchRewards(1));
-    await Promise.resolve(onFetchCurrentPointBalance());
+    await Promise.resolve(onFetchCurrentAicBalance());
   };
 
   return (
@@ -936,8 +936,8 @@ export function NniPage({
         {nniHistoryView === "rewards" ? (
           <NniRewardsPanel
             rewards={nniRewards}
-            currentPointBalance={nniCurrentPointBalance}
-            currentPointBalanceLoading={nniCurrentPointBalanceLoading}
+            currentAicBalance={nniCurrentAicBalance}
+            currentAicBalanceLoading={nniCurrentAicBalanceLoading}
             loading={nniRewardsLoading}
             error={nniRewardsError}
             pageSize={nniRewardsPageSize}

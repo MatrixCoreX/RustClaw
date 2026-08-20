@@ -1115,7 +1115,7 @@ async fn execute_internal_nni_action(
             let side = normalize_bancor_side(side).map_err(|error| {
                 NniSkillDomainError::new(StatusCode::BAD_REQUEST, error, false, json!({"field": "side"}))
             })?;
-            let expected_asset = if side == "buy" { "USD" } else { "POINT" };
+            let expected_asset = if side == "buy" { "USD" } else { "AIC" };
             if request
                 .pay_asset
                 .as_deref()

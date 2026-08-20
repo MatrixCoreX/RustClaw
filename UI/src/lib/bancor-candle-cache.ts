@@ -87,8 +87,8 @@ function isCandle(value: unknown): value is NniBancorCandle {
     && typeof candle.high === "string"
     && typeof candle.low === "string"
     && typeof candle.close === "string"
-    && typeof candle.point_volume_units === "string"
-    && typeof candle.point_volume === "string"
+    && typeof candle.aic_volume_units === "string"
+    && typeof candle.aic_volume === "string"
     && typeof candle.usd_volume_units === "string"
     && typeof candle.usd_volume === "string"
     && Number.isSafeInteger(candle.trade_count)
@@ -108,7 +108,7 @@ export function isBancorCandleResponse(value: unknown, intervalSeconds: number):
     && (response.market_version ?? -1) >= 0
     && Number.isSafeInteger(response.market_created_at_unix)
     && (response.market_created_at_unix ?? -1) >= 0
-    && response.price_kind === "execution_average_usd_per_point"
+    && response.price_kind === "execution_average_usd_per_aic"
     && response.interval_seconds === intervalSeconds
     && Array.isArray(response.candles)
     && response.candles.every(isCandle);
