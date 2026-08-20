@@ -209,6 +209,22 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       onOpenNni={() => undefined}
     />,
   );
+  const revokedDeviceHtml = renderToStaticMarkup(
+    <BancorPage
+      t={(zh) => zh}
+      runtime={{
+        ...runtime,
+        assetOwnerRequired: true,
+        assetOwnerAccessErrorCode: "nni_asset_device_not_authorized",
+        error: "当前设备的资产绑定已经解除，无法读取余额或进行交易。请前往 NNI 页面重新绑定资产账号。",
+      }}
+      formatUnixDateTime={(value) => String(value ?? "")}
+      signingDeviceReady
+      assetOwnerReady={false}
+      assetOwnerPubkey={null}
+      onOpenNni={() => undefined}
+    />,
+  );
   assert.match(signingUnavailableHtml, /加入 NNI 网络不是交易的前置条件/);
   assert.doesNotMatch(signingUnavailableHtml, /请先在 NNI 页面加入网络/);
   assert.match(assetOwnerRequiredHtml, /data-bancor-asset-owner-required="true"/);
@@ -216,6 +232,10 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(assetOwnerRequiredHtml, /data-bancor-open-nni="asset-owner"/);
   assert.match(assetOwnerRequiredHtml, /前往 NNI 页面/);
   assert.doesNotMatch(assetOwnerRequiredHtml, /nni_asset_owner_required/);
+  assert.match(revokedDeviceHtml, /data-bancor-asset-owner-required="true"/);
+  assert.match(revokedDeviceHtml, /重新绑定资产账号/);
+  assert.match(revokedDeviceHtml, /data-bancor-open-nni="asset-owner"/);
+  assert.doesNotMatch(revokedDeviceHtml, /nni_asset_device_not_authorized/);
   assert.match(html, /data-nni-decimal-amount="100000000\.00000000 POINT"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.match(html, /data-nni-decimal-amount="10000\.00000000 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.match(html, /BANCOR储备曲线市场/);

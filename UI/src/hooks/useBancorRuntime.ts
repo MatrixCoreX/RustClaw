@@ -227,6 +227,12 @@ export function formatBancorApiError(
       "Go to the NNI page to generate and bind an asset account before trading.",
     );
   }
+  if (code === "nni_asset_device_not_authorized") {
+    return t(
+      "当前设备的资产绑定已经解除，无法读取余额或进行交易。请前往 NNI 页面重新绑定资产账号。",
+      "This device is no longer bound to an asset account, so balances and trading are unavailable. Go to the NNI page to bind the asset account again.",
+    );
+  }
   if (code === "nni_bancor_market_not_open") {
     return t("交易市场尚未开启。现在可以查看储备，但不能报价或成交。", "The market is not open yet. Reserves remain visible, but quotes and trades are unavailable.");
   }
@@ -291,6 +297,7 @@ export function useBancorRuntime({
   const [tradeLoading, setTradeLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [assetOwnerRequired, setAssetOwnerRequired] = useState(false);
+  const [assetOwnerAccessErrorCode, setAssetOwnerAccessErrorCode] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const candleIntervalRef = useRef(BANCOR_DEFAULT_CANDLE_INTERVAL_SECONDS);
   const candleCacheRef = useRef(new Map<string, {
@@ -312,7 +319,10 @@ export function useBancorRuntime({
   const readError = (body: ApiResponse<unknown>, fallback: string) => {
     const data = body.data as { attempts?: Array<{ error_code?: string | null }> } | undefined;
     const code = data?.attempts?.find((attempt) => attempt.error_code)?.error_code || body.error;
-    if (code === "nni_asset_owner_required") setAssetOwnerRequired(true);
+    if (code === "nni_asset_owner_required" || code === "nni_asset_device_not_authorized") {
+      setAssetOwnerRequired(true);
+      setAssetOwnerAccessErrorCode(code);
+    }
     return formatBancorApiError(code, t, fallback);
   };
 
@@ -348,6 +358,7 @@ export function useBancorRuntime({
       if (!response.ok || !body.ok || !body.data) throw new Error(readError(body, `Account load failed (${response.status})`));
       setAccount(body.data);
       setAssetOwnerRequired(false);
+      setAssetOwnerAccessErrorCode(null);
       setError(null);
       return body.data;
     } catch (cause) {
@@ -703,6 +714,7 @@ export function useBancorRuntime({
     tradeLoading,
     error,
     assetOwnerRequired,
+    assetOwnerAccessErrorCode,
     message,
     fetchMarket,
     fetchCandles,

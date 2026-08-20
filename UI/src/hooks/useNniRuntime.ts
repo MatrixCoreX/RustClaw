@@ -11,6 +11,12 @@ import {
   type UiLanguage,
 } from "../lib/nni-display";
 import { fetchResilientRead, runCoalescedRead } from "../lib/resilient-read";
+import {
+  normalizeNniOwnerSignature,
+  signNniOwnerChallenge,
+  validateNniOwnerPrivateKey,
+  validateNniOwnerPublicKey,
+} from "../lib/nni-owner-public-key";
 import type {
   ApiResponse,
   NniConfigResponse,
@@ -25,6 +31,8 @@ import type {
   NniNetworkStatsResponse,
   NniOwnerKeyPairResponse,
   NniOwnerRecoveryResponse,
+  NniOwnerUnbindTaskResponse,
+  NniOwnerUnbindVerifyResponse,
   NniRewardsResponse,
 } from "../types/api";
 
@@ -34,6 +42,16 @@ export const NNI_REWARDS_PAGE_SIZE = 100;
 
 type Translate = (zh: string, en: string) => string;
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
+
+export interface NniOwnerAuthorizationChallenge {
+  mode: "bind";
+  taskId: string;
+  nodeUrl: string;
+  signingPayload: string;
+  deviceSignature: string;
+  targetOwnerPublicKey: string | null;
+  replaceExistingOwner: boolean;
+}
 
 export interface UseNniRuntimeParams {
   apiFetch: ApiFetch;
@@ -55,7 +73,9 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
   const [nniJoined, setNniJoined] = useState(false);
   const [nniAssetOwnerPubkey, setNniAssetOwnerPubkey] = useState<string | null>(null);
   const [nniOwnerKeyPair, setNniOwnerKeyPair] = useState<NniOwnerKeyPairResponse | null>(null);
-  const [nniOwnerActionLoading, setNniOwnerActionLoading] = useState<"generate" | "recover" | null>(null);
+  const [nniOwnerActionLoading, setNniOwnerActionLoading] = useState<"generate" | "recover" | "custom" | "unbind" | null>(null);
+  const [nniOwnerAuthorizationChallenge, setNniOwnerAuthorizationChallenge] =
+    useState<NniOwnerAuthorizationChallenge | null>(null);
   const [nniRemoteNodes, setNniRemoteNodes] = useState("");
   const [nniSelectedNodeUrl, setNniSelectedNodeUrl] = useState("");
   const [nniHeartbeatIntervalSeconds, setNniHeartbeatIntervalSeconds] = useState<number | null>(null);
@@ -261,7 +281,10 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     return fetchNniDeviceStatus(false);
   };
 
-  const requestNniJoinTask = async (assetOwnerPubkey?: string | null): Promise<NniJoinTaskResponse | null> => {
+  const requestNniJoinTask = async (
+    assetOwnerPubkey?: string | null,
+    replaceExistingOwner = false,
+  ): Promise<NniJoinTaskResponse | null> => {
     const nodeUrl = selectedNniNodeUrl();
     if (!nodeUrl) {
       throw new Error(t("请先填写至少一个远程 NNI 节点地址。", "Enter at least one remote NNI node URL first."));
@@ -269,7 +292,11 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     const res = await apiFetch(`/v1/nni/join/request`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ node_url: nodeUrl, asset_owner_pubkey: assetOwnerPubkey || undefined }),
+      body: JSON.stringify({
+        node_url: nodeUrl,
+        asset_owner_pubkey: assetOwnerPubkey || undefined,
+        replace_existing_owner: replaceExistingOwner,
+      }),
     });
     const body = (await res.json()) as ApiResponse<NniJoinTaskResponse>;
     if (!res.ok || !body.ok || !body.data) {
@@ -285,8 +312,10 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     taskId: string,
     nodeUrl: string,
     signature: string,
-    signingPayload: string,
-    ownerPrivateKey?: string,
+    options?: {
+      ownerSignature?: string;
+      replaceExistingOwner?: boolean;
+    },
   ): Promise<NniJoinVerifyResponse | null> => {
     const res = await apiFetch(`/v1/nni/join/verify`, {
       method: "POST",
@@ -295,8 +324,8 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         task_id: taskId,
         node_url: nodeUrl,
         signature,
-        signing_payload: ownerPrivateKey ? signingPayload : undefined,
-        owner_private_key: ownerPrivateKey,
+        owner_signature: options?.ownerSignature,
+        replace_existing_owner: options?.replaceExistingOwner === true,
       }),
     });
     const body = (await res.json()) as ApiResponse<NniJoinVerifyResponse>;
@@ -368,6 +397,224 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     } finally {
       setNniOwnerActionLoading(null);
     }
+  };
+
+  const startNniCustomOwnerAuthorization = async (ownerPublicKey: string) => {
+    const validation = validateNniOwnerPublicKey(ownerPublicKey);
+    if (!validation.ok) {
+      setNniActionError(t("资产公钥格式无效。", "The asset public key format is invalid."));
+      return null;
+    }
+    const replaceExistingOwner = Boolean(
+      nniAssetOwnerPubkey && nniAssetOwnerPubkey !== validation.normalized,
+    );
+    if (nniAssetOwnerPubkey === validation.normalized) {
+      setNniActionError(t("当前设备已经绑定这个资产公钥。", "This device already uses this asset public key."));
+      return null;
+    }
+    const status = nniStatus ?? (await fetchNniDeviceStatus(false));
+    if (!status?.signature_chip_present) {
+      setNniActionError(t(
+        "当前设备没有可用的签名芯片，不能修改资产授权。",
+        "This device has no available signing chip, so asset authorization cannot be changed.",
+      ));
+      return null;
+    }
+    setNniOwnerActionLoading("custom");
+    setNniActionError(null);
+    setNniActionMessage(null);
+    try {
+      const task = await requestNniJoinTask(validation.normalized, replaceExistingOwner);
+      if (!task?.challenge) throw new Error("nni_join_challenge_missing");
+      const signatureResult = await runNniDeviceAction("sign_challenge", {
+        challenge: task.challenge,
+      });
+      const deviceSignature = signatureResult?.payload?.signature;
+      if (!deviceSignature) throw new Error("nni_join_signature_missing");
+      if (task.owner_signature_required !== true) {
+        throw new Error("nni_target_owner_signature_requirement_missing");
+      }
+      const challenge: NniOwnerAuthorizationChallenge = {
+        mode: "bind",
+        taskId: task.task_id,
+        nodeUrl: task.node_url,
+        signingPayload: task.challenge,
+        deviceSignature,
+        targetOwnerPublicKey: validation.normalized,
+        replaceExistingOwner,
+      };
+      setNniOwnerAuthorizationChallenge(challenge);
+      setNniActionMessage(t(
+        "设备签名已完成。请使用目标资产密钥签名下方数据。",
+        "The device signature is ready. Sign the payload with the target asset key.",
+      ));
+      return challenge;
+    } catch (err) {
+      setNniActionError(err instanceof Error ? err.message : t("资产绑定请求失败。", "Asset binding request failed."));
+      return null;
+    } finally {
+      setNniOwnerActionLoading(null);
+    }
+  };
+
+  const startNniOwnerUnbind = async () => {
+    if (!nniAssetOwnerPubkey) {
+      setNniActionError(t("当前设备没有已绑定的资产公钥。", "This device has no bound asset public key."));
+      return null;
+    }
+    const status = nniStatus ?? (await fetchNniDeviceStatus(false));
+    if (!status?.signature_chip_present) {
+      setNniActionError(t(
+        "当前设备没有可用的签名芯片，不能解绑资产密钥。",
+        "This device has no available signing chip, so the asset key cannot be unbound.",
+      ));
+      return null;
+    }
+    const confirmed = await showConfirm({
+      title: t("解绑资产密钥", "Unbind asset key"),
+      message: t(
+        "解绑只使用当前硬件设备签名，不需要资产私钥；它只撤销当前设备，不影响同一资产账户下的其他设备。能控制设备签名的人可以执行解绑，并把当前设备未来的奖励改绑到其能签名的新账户。完成后当前设备会停止 NNI 心跳，重新绑定后才能继续获得奖励。",
+        "Unbinding uses only this hardware device signature and does not require the asset private key. It revokes only this device and leaves other devices on the same asset account unchanged. Anyone controlling the device signer can unbind it and redirect this device's future rewards to a new asset account they can sign for. NNI heartbeats stop until this device is bound again.",
+      ),
+      confirmLabel: t("继续解绑", "Continue"),
+      tone: "danger",
+    });
+    if (!confirmed) return null;
+    const nodeUrl = selectedNniNodeUrl();
+    if (!nodeUrl) {
+      setNniActionError(t("请先选择 NNI 节点。", "Select an NNI node first."));
+      return null;
+    }
+    setNniOwnerActionLoading("unbind");
+    setNniActionError(null);
+    setNniActionMessage(null);
+    try {
+      const res = await apiFetch(`/v1/nni/owner/unbind/request`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ node_url: nodeUrl }),
+      });
+      const body = (await res.json()) as ApiResponse<NniOwnerUnbindTaskResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(nniJoinErrorMessage(body.error, body.data, `NNI unbind request failed (${res.status})`, lang));
+      }
+      const signatureResult = await runNniDeviceAction("sign_challenge", {
+        challenge: body.data.signing_payload,
+      });
+      const deviceSignature = signatureResult?.payload?.signature;
+      if (!deviceSignature) throw new Error("nni_asset_unbind_device_signature_missing");
+      const verifyRes = await apiFetch(`/v1/nni/owner/unbind/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          task_id: body.data.task_id,
+          node_url: body.data.node_url,
+          device_signature: deviceSignature,
+        }),
+      });
+      const verifyBody = (await verifyRes.json()) as ApiResponse<NniOwnerUnbindVerifyResponse>;
+      if (!verifyRes.ok || !verifyBody.ok || !verifyBody.data) {
+        throw new Error(nniJoinErrorMessage(
+          verifyBody.error,
+          verifyBody.data,
+          `NNI unbind verify failed (${verifyRes.status})`,
+          lang,
+        ));
+      }
+      setNniAssetOwnerPubkey(null);
+      setNniJoined(false);
+      setNniActionMessage(t(
+        "设备签名已验证，当前设备已经解绑资产密钥。",
+        "The device signature was verified and the asset key was unbound from this device.",
+      ));
+      return verifyBody.data;
+    } catch (err) {
+      setNniActionError(err instanceof Error ? err.message : t("资产解绑请求失败。", "Asset unbind request failed."));
+      return null;
+    } finally {
+      setNniOwnerActionLoading(null);
+    }
+  };
+
+  const verifyNniOwnerAuthorization = async (
+    challenge: NniOwnerAuthorizationChallenge,
+    ownerSignatureInput: string,
+  ) => {
+    const ownerSignature = normalizeNniOwnerSignature(ownerSignatureInput);
+    if (!ownerSignature) {
+      setNniActionError(t("资产签名必须是 128 位十六进制。", "The asset signature must be 128 hexadecimal characters."));
+      return null;
+    }
+    setNniOwnerActionLoading("custom");
+    setNniActionError(null);
+    try {
+      const verified = await verifyNniJoinTask(
+        challenge.taskId,
+        challenge.nodeUrl,
+        challenge.deviceSignature,
+        {
+          ownerSignature,
+          replaceExistingOwner: challenge.replaceExistingOwner,
+        },
+      );
+      if (!verified?.joined || !verified.compliant) throw new Error("nni_join_verify_rejected");
+      await setNniJoinedPersisted(true, { persistRemoteNodes: true });
+      setNniAssetOwnerPubkey(verified.asset_owner_pubkey ?? challenge.targetOwnerPublicKey);
+      setNniOwnerKeyPair(null);
+      setNniOwnerAuthorizationChallenge(null);
+      setNniActionMessage(t(
+        challenge.replaceExistingOwner
+          ? "目标资产签名已验证，资产公钥已更换。"
+          : "目标资产签名已验证，资产账户已绑定。",
+        challenge.replaceExistingOwner
+          ? "The target asset signature was verified and the asset public key was replaced."
+          : "The target asset signature was verified and the asset account was bound.",
+      ));
+      return verified;
+    } catch (err) {
+      setNniActionError(err instanceof Error ? err.message : t("资产授权失败。", "Asset authorization failed."));
+      return null;
+    } finally {
+      setNniOwnerActionLoading(null);
+    }
+  };
+
+  const completeNniOwnerAuthorization = async (ownerSignatureInput: string) => {
+    const challenge = nniOwnerAuthorizationChallenge;
+    if (!challenge) {
+      setNniActionError(t("当前没有待签名的资产操作。", "There is no pending asset authorization."));
+      return null;
+    }
+    return verifyNniOwnerAuthorization(challenge, ownerSignatureInput);
+  };
+
+  const authorizeNniOwnerWithPrivateKey = async (ownerPrivateKeyInput: string) => {
+    const validation = validateNniOwnerPrivateKey(ownerPrivateKeyInput);
+    if (!validation.ok) {
+      setNniActionError(t(
+        "资产私钥无效。请检查 Base58 编码、K1 校验和及密钥内容。",
+        "The asset private key is invalid. Check its Base58 encoding, K1 checksum, and key data.",
+      ));
+      return null;
+    }
+
+    const challenge = await startNniCustomOwnerAuthorization(validation.publicKey);
+    if (!challenge) return null;
+    try {
+      const signed = signNniOwnerChallenge(validation.normalized, challenge.signingPayload);
+      if (signed.publicKey !== challenge.targetOwnerPublicKey) {
+        throw new Error("nni_owner_private_key_target_mismatch");
+      }
+      return await verifyNniOwnerAuthorization(challenge, signed.signature);
+    } catch (err) {
+      setNniActionError(err instanceof Error ? err.message : t("本地资产签名失败。", "Local asset signing failed."));
+      return null;
+    }
+  };
+
+  const cancelNniOwnerAuthorization = () => {
+    setNniOwnerAuthorizationChallenge(null);
+    setNniActionError(null);
   };
 
   const fetchNniConfig = (silent = false) => runCoalescedRead(
@@ -693,14 +940,18 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         await generateNniOwnerKeyPair();
         return;
       }
-      const task = await requestNniJoinTask(ownerKeyPair?.public_key ?? nniAssetOwnerPubkey);
+      if (!nniAssetOwnerPubkey && ownerKeyPair) {
+        await authorizeNniOwnerWithPrivateKey(ownerKeyPair.private_key);
+        return;
+      }
+      const task = await requestNniJoinTask(nniAssetOwnerPubkey);
       if (!task?.challenge) {
         throw new Error("nni_join_challenge_missing");
       }
-      if (task.owner_signature_required && !ownerKeyPair?.private_key) {
+      if (task.owner_signature_required) {
         throw new Error(t(
-          "首次绑定需要刚生成的私钥；请重新生成并抄写后再加入。",
-          "First-time binding needs the newly generated private key. Generate and copy it again before joining.",
+          "远程节点要求资产密钥签名，请通过资产账户的重新绑定流程完成授权。",
+          "The remote node requires an asset-key signature. Complete authorization through the asset-account rebind flow.",
         ));
       }
       const signatureResult = await runNniDeviceAction("sign_challenge", { challenge: task.challenge });
@@ -713,8 +964,6 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         task.task_id,
         task.node_url,
         signature,
-        task.challenge,
-        task.owner_signature_required ? ownerKeyPair?.private_key : undefined,
       );
       if (!verified?.joined || !verified.compliant) {
         throw new Error("nni_join_verify_rejected");
@@ -772,6 +1021,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     nniAssetOwnerPubkey,
     nniOwnerKeyPair,
     nniOwnerActionLoading,
+    nniOwnerAuthorizationChallenge,
     nniRemoteNodes,
     nniSelectedNodeUrl: selectedNniNodeUrl(),
     nniRemoteNodeCount: nniRemoteNodeUrls().length,
@@ -815,6 +1065,11 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     generateNniOwnerKeyPair,
     clearNniOwnerKeyPair,
     recoverNniOwner,
+    startNniCustomOwnerAuthorization,
+    authorizeNniOwnerWithPrivateKey,
+    startNniOwnerUnbind,
+    completeNniOwnerAuthorization,
+    cancelNniOwnerAuthorization,
     testJoinNni,
     fetchNniConfig,
     saveNniConfig,

@@ -102,13 +102,13 @@ test("places remote node configuration at the bottom of the runtime entry card",
 
 test("asset account setup avoids key-letter jargon and protects key actions", () => {
   const source = readFileSync(new URL("../components/NniPage.tsx", import.meta.url), "utf8");
+  const dialogSource = readFileSync(new URL("../components/NniAssetAccountDialog.tsx", import.meta.url), "utf8");
   assert.match(source, /t\("资产账户", "Asset account"\)/);
   assert.match(source, /硬件芯片只识别设备并证明当前授权/);
   assert.doesNotMatch(source, /资产账户 A|芯片公钥 H|资产公钥 A/);
-  assert.match(source, /data-nni-copy-owner-private-key="true"/);
-  assert.match(source, /ownerPrivateKeyCopied \? t\("已复制", "Copied"\)/);
-  assert.match(source, /className="flex justify-end pt-1"/);
-  assert.match(source, /data-nni-discard-owner-key-pair="true"/);
+  assert.match(dialogSource, /data-nni-copy-owner-private-key="true"/);
+  assert.match(dialogSource, /privateKeyCopied \? t\("已复制", "Copied"\)/);
+  assert.match(dialogSource, /data-nni-discard-owner-key-pair="true"/);
 });
 
 test("offers device recovery only before an asset account is bound or generated", () => {
@@ -116,6 +116,32 @@ test("offers device recovery only before an asset account is bound or generated"
   assert.equal(shouldOfferNniOwnerRecovery(true, null, false), false);
   assert.equal(shouldOfferNniOwnerRecovery(false, "bound-asset-public-key", false), false);
   assert.equal(shouldOfferNniOwnerRecovery(false, null, true), false);
+});
+
+test("asset account UI keeps recovery while adding custom bind, replacement, and unbind controls", () => {
+  const source = readFileSync(new URL("../components/NniPage.tsx", import.meta.url), "utf8");
+  const dialogSource = readFileSync(new URL("../components/NniAssetAccountDialog.tsx", import.meta.url), "utf8");
+  assert.match(source, /t\("换机恢复", "Recover on this device"\)/);
+  assert.match(source, /t\("重新绑定资产账户", "Rebind asset account"\)/);
+  assert.match(source, /t\("更换资产账户", "Replace asset account"\)/);
+  assert.match(source, /t\("解绑资产密钥", "Unbind asset key"\)/);
+  assert.match(source, /onStartOwnerUnbind/);
+  assert.match(dialogSource, /data-nni-asset-account-dialog/);
+  assert.match(dialogSource, /t\("输入私钥", "Use private key"\)/);
+  assert.match(dialogSource, /t\("外部签名", "External signature"\)/);
+  assert.match(dialogSource, /data-nni-created-owner-join/);
+  assert.match(dialogSource, /t\("确认已保存私钥", "Confirm private-key backup"\)/);
+  assert.match(dialogSource, /不会发送给本机服务、远程节点或写入存储/);
+  assert.doesNotMatch(source, /previousOwnerAuthorizationSignature/);
+});
+
+test("non-admin console sessions cannot display NNI or Bancor pages", () => {
+  const source = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
+  assert.match(source, /ADMIN_ONLY_UI_PAGES = new Set<ConsolePage>\(\["nni", "nni_apr", "bancor"\]\)/);
+  assert.match(source, /navItems\.filter\(\(item\) => !ADMIN_ONLY_UI_PAGES\.has\(item\.id\)\)/);
+  assert.match(source, /!isAdminIdentity && ADMIN_ONLY_UI_PAGES\.has\(currentPage\)/);
+  assert.match(source, /isAdminIdentity && currentPage === "nni"/);
+  assert.match(source, /isAdminIdentity && currentPage === "bancor"/);
 });
 
 test("network counters never imply that public aggregate data requires joining", () => {

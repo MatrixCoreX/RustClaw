@@ -258,6 +258,8 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         .route("/nni/device/action", post(nni_device_action))
         .route("/nni/owner/generate", post(nni_owner_generate))
         .route("/nni/owner/recover", post(nni_owner_recover))
+        .route("/nni/owner/unbind/request", post(nni_owner_unbind_request))
+        .route("/nni/owner/unbind/verify", post(nni_owner_unbind_verify))
         .route("/nni/config", get(get_nni_config).post(update_nni_config))
         .route("/nni/join/request", post(nni_join_request))
         .route("/nni/join/verify", post(nni_join_verify))
