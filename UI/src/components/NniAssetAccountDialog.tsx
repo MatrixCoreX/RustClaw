@@ -253,6 +253,19 @@ export function NniAssetAccountDialog({
             )
           ) : mode === "recover" ? (
             <>
+              <div
+                role="note"
+                data-nni-recovery-warning="true"
+                className="flex items-start gap-2 rounded-md border border-amber-400/30 bg-amber-500/10 px-3 py-2.5 text-sm leading-6 text-amber-100"
+              >
+                <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>
+                  {t(
+                    "仅当原设备已损坏或无法再使用时，才使用换机恢复。此操作会把资产账户迁移到新设备，并撤销该资产账户当前关联的其他设备授权；如果原设备仍可正常使用，执行后它将无法继续参与 NNI。请确认原设备确实不可恢复后再继续。",
+                    "Use device recovery only when the original device is damaged or no longer usable. This moves the asset account to the new device and revokes every other device currently authorized for that account. If the original device still works, it will no longer be able to participate in NNI after recovery. Continue only after confirming that the original device cannot be recovered.",
+                  )}
+                </span>
+              </div>
               <p className="text-sm leading-6 text-white/65">
                 {t("新设备必须已经获准加入网络。私钥只用于这次恢复签名，不会保存在浏览器中。", "The new device must already be admitted to the network. The private key is used only for this recovery signature and is not stored in the browser.")}
               </p>
