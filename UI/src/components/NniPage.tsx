@@ -18,7 +18,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 
 import { writeTextToClipboard } from "../lib/auth-keys";
-import { latestNniRewardRecord } from "../lib/nni-apr";
+import { latestNniRewardRecord, latestVisibleNniRewardAic } from "../lib/nni-apr";
 import type { NniOwnerAuthorizationChallenge } from "../hooks/useNniRuntime";
 import {
   NniAssetAccountDialog,
@@ -307,14 +307,7 @@ export function NniPage({
         t("还没有读取状态。点击刷新状态开始检测。", "Status has not been loaded yet. Click Refresh status to check."),
       ) ?? "";
   const nniStatusNextStep = nniDeviceNextStep(nniStatus, lang);
-  const nniLatestSettledReward = nniRewards?.page === 1
-    ? latestNniRewardRecord(nniRewards.records)
-    : null;
-  const nniPreviousWindowRewardAic = nniRewards?.page === 1
-    ? nniLatestSettledReward?.reward_aic ?? null
-    : latestRewardCache?.devicePubkey === nniRewards?.device_pubkey
-      ? latestRewardCache.rewardAic
-      : null;
+  const nniPreviousWindowRewardAic = latestVisibleNniRewardAic(nniRewards, latestRewardCache);
 
   useEffect(() => {
     if (nniRewards?.page !== 1) return;

@@ -11,6 +11,7 @@ import {
   calculateNniAprEstimate,
   calculateNniPeriodAprEstimate,
   latestNniRewardRecord,
+  latestVisibleNniRewardAic,
   NNI_APR_AUTO_REFRESH_SECONDS,
   parsePositiveNniDevicePrice,
 } from "./nni-apr";
@@ -143,6 +144,27 @@ test("NNI APR uses the latest settled device reward and the Bancor marginal pric
   assert.equal(estimate.periodValueUsd, 5);
   assert.equal(estimate.aprBasisRewardUsd, 262800);
   assert.equal(estimate.aprPercent, 26280);
+});
+
+test("NNI page reward summary tolerates the initial empty response and uses only matching cache", () => {
+  assert.equal(latestVisibleNniRewardAic(null, null), null);
+  assert.equal(latestVisibleNniRewardAic(rewards, null), "10.00000000");
+
+  const secondPage = { ...rewards, page: 2 };
+  assert.equal(
+    latestVisibleNniRewardAic(secondPage, {
+      devicePubkey: rewards.device_pubkey,
+      rewardAic: "9.00000000",
+    }),
+    "9.00000000",
+  );
+  assert.equal(
+    latestVisibleNniRewardAic(secondPage, {
+      devicePubkey: "another-device",
+      rewardAic: "9.00000000",
+    }),
+    null,
+  );
 });
 
 test("NNI period APR uses the complete selected reward window", () => {

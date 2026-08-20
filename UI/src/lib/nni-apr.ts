@@ -28,6 +28,11 @@ export interface NniPeriodAprEstimate {
   aprPercent: number;
 }
 
+export interface NniLatestRewardCache {
+  devicePubkey: string;
+  rewardAic: string | null;
+}
+
 export function parsePositiveNniDevicePrice(value: string): number | null {
   const normalized = value.trim();
   if (!/^(?:\d+\.?\d*|\.\d+)$/.test(normalized)) return null;
@@ -45,6 +50,17 @@ export function latestNniRewardRecord(
     }
     return record.awarded_at_unix > latest.awarded_at_unix ? record : latest;
   }, null);
+}
+
+export function latestVisibleNniRewardAic(
+  rewards: NniRewardsResponse | null,
+  cache: NniLatestRewardCache | null,
+): string | null {
+  if (rewards?.page === 1) {
+    return latestNniRewardRecord(rewards.records)?.reward_aic ?? null;
+  }
+  if (!rewards || !cache || cache.devicePubkey !== rewards.device_pubkey) return null;
+  return cache.rewardAic;
 }
 
 export function calculateNniAprEstimate({
