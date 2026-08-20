@@ -97,6 +97,13 @@ test("BANCOR missing asset owner error directs beginners to the NNI page", () =>
   assert.doesNotMatch(message, /nni_asset_owner_required/);
 });
 
+test("BANCOR revoked device authorization explains how to bind the device again", () => {
+  const message = formatBancorApiError("nni_asset_device_not_authorized", zh, "fallback");
+  assert.match(message, /当前设备/);
+  assert.match(message, /重新绑定资产账号/);
+  assert.doesNotMatch(message, /nni_asset_device_not_authorized/);
+});
+
 test("BANCOR accepts configurable slippage up to fifty percent", () => {
   assert.equal(BANCOR_DEFAULT_SLIPPAGE_BPS, 50);
   assert.equal(BANCOR_MAX_SLIPPAGE_BPS, 5_000);

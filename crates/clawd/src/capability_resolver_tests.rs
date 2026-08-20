@@ -187,16 +187,22 @@ fn registry_resolution_observes_required_companion_capabilities() {
     let state = state_with_workspace_registry();
     let (_, record) = resolve_capability_action_with_record_for_state(
         &state,
-        "web.search_results",
-        json!({"query": "current finance news"}),
+        "media_discovery.enable",
+        json!({"platform": "douyin", "confirm": true}),
     );
     assert_eq!(
         record.required_companions,
-        vec!["rss.list_categories", "rss.latest_news"]
+        vec![
+            "schedule.create_structured",
+            "media_discovery.run_enabled_once"
+        ]
     );
     assert_eq!(
         record.dispatch_observation(1, 1, 1)["required_companions"],
-        json!(["rss.list_categories", "rss.latest_news"])
+        json!([
+            "schedule.create_structured",
+            "media_discovery.run_enabled_once"
+        ])
     );
 }
 

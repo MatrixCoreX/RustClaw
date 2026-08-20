@@ -66,7 +66,7 @@ authorization state tied to one node for the entire participation session.
 | --- | --- | --- |
 | State | `status`, `device_status`, `heartbeat_status` | Read local signer and heartbeat machine fields. |
 | Heartbeat | `heartbeat_enable`, `heartbeat_disable`, `heartbeat_now` | Change or diagnose heartbeat participation under the shared operation lock. |
-| Rewards | `network_stats`, `my_rewards` | Use the device-signed reward query. Current server statistics are delivered with this signed response, so a signer is required. |
+| Rewards | `network_stats`, `my_rewards` | Read public aggregate network statistics without a signer, or use a device signature for private per-device reward history. |
 | Bancor | `bancor_market`, `bancor_market_trades`, `bancor_candles` | Read bounded public market data. |
 | Private Bancor | `bancor_account` | Read the signed device account and recent device trades. |
 | Quote | `bancor_quote` | Preview expected output and protection fields without signing or executing a trade. |
@@ -80,6 +80,33 @@ local or public observation.
 No `buy`, `sell`, or `trade` capability exists in the skill registry. Remote-node configuration,
 simulated signer enablement, administrator policy, and economic-model changes also remain outside
 the natural-language NNI capability surface.
+
+## Asset Authorization
+
+The UI keeps asset ownership separate from hardware identity. One K1 asset public key may authorize
+multiple hardware devices, while each hardware device has at most one active asset owner. Reward
+eligibility, reward grants, and ledger source records remain per hardware device. When multiple
+devices credit the same asset account, the server writes one grant and one immutable ledger entry
+for each device instead of merging them; only the account balance is an aggregate projection.
+
+Initial custom binding and rebinding require the current hardware signature plus a signature from
+the target asset key. Rebinding does not require the previous asset private key, so a lost old key
+does not permanently lock the device to an obsolete account. Unbinding requires only the current
+hardware signature. Rebinding changes only that device's future reward destination; unbinding
+revokes only that device and stops local heartbeat intent until it is bound again. Lost-device
+recovery remains a separate flow: it authorizes a newly allowlisted device and intentionally
+revokes the owner's old device
+authorizations. The custom-public-key UI validates the full Base58 K1 envelope before submission
+and never receives or stores the corresponding private key.
+
+Hardware-only unbinding intentionally makes physical signer control a recovery boundary. A party
+that controls the signer can unbind that device and redirect its future rewards to a new asset key
+that party can prove, but cannot bind an unrelated third-party public key without that target key's
+signature. Existing balances and other devices remain under their current asset authorization.
+
+The visual console exposes NNI, APR, and Bancor pages only to an authenticated administrator. This
+is a UI access boundary only; public NNI node APIs and their cryptographic contracts remain
+independent of console roles.
 
 ## Device Contract
 

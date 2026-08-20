@@ -338,6 +338,7 @@ export function BancorPage({
     tradeLoading,
     error,
     assetOwnerRequired,
+    assetOwnerAccessErrorCode,
     message,
     fetchMarket,
     fetchCandles,
@@ -510,7 +511,7 @@ export function BancorPage({
           className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-400/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-50"
           data-bancor-asset-owner-required="true"
         >
-          <span>{formatBancorApiError("nni_asset_owner_required", t, "")}</span>
+          <span>{formatBancorApiError(assetOwnerAccessErrorCode ?? "nni_asset_owner_required", t, "")}</span>
           <button
             type="button"
             className="theme-secondary-btn shrink-0 px-3 py-2 text-xs"

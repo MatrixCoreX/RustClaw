@@ -110,6 +110,55 @@ test("BANCOR keeps the asset-account setup guide until account access succeeds",
   });
 });
 
+test("BANCOR keeps a revoked-device recovery guide until account access succeeds", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  let deviceAuthorized = false;
+  const apiFetch = (path: string): Promise<Response> => {
+    if (!path.startsWith("/v1/nni/bancor/account?")) {
+      throw new Error(`unexpected request: ${path}`);
+    }
+    if (!deviceAuthorized) {
+      return Promise.resolve(new Response(JSON.stringify({
+        ok: false,
+        data: null,
+        error: "nni_asset_device_not_authorized",
+      }), {
+        status: 403,
+        headers: { "content-type": "application/json" },
+      }));
+    }
+    return Promise.resolve(apiResponse({ trades: [] }));
+  };
+  let runtime: ReturnType<typeof useBancorRuntime> | null = null;
+  function Probe() {
+    runtime = useBancorRuntime({ apiFetch, cacheScope: "revoked-device-guide-test", t: (zh) => zh });
+    return null;
+  }
+
+  let renderer: ReactTestRenderer | null = null;
+  await act(async () => {
+    renderer = create(React.createElement(Probe));
+  });
+  await act(async () => {
+    await runtime!.fetchAccount(1);
+  });
+  assert.equal(runtime!.assetOwnerRequired, true);
+  assert.equal(runtime!.assetOwnerAccessErrorCode, "nni_asset_device_not_authorized");
+  assert.match(runtime!.error ?? "", /重新绑定资产账号/);
+  assert.doesNotMatch(runtime!.error ?? "", /nni_asset_device_not_authorized/);
+
+  deviceAuthorized = true;
+  await act(async () => {
+    await runtime!.fetchAccount(1);
+  });
+  assert.equal(runtime!.assetOwnerRequired, false);
+  assert.equal(runtime!.assetOwnerAccessErrorCode, null);
+
+  await act(async () => {
+    renderer!.unmount();
+  });
+});
+
 test("BANCOR hook never exposes old-period candles after a failed interval switch", async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   let rejectOneMinute: ((cause: Error) => void) | undefined;

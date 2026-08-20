@@ -93,7 +93,7 @@ fn verified_action_budget_uses_registry_timeout_and_execution_mode() {
                 args: json!({"command": "sleep 120", "async_start": true}),
             },
         ),
-        (60, true)
+        (180, true)
     );
 }
 

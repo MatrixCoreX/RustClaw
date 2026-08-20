@@ -84,6 +84,14 @@ fn normalize_nni_owner_public_key(value: &str) -> Result<String, &'static str> {
     Ok(encode_nni_owner_payload(&payload))
 }
 
+fn normalize_nni_owner_signature(value: &str) -> Result<String, &'static str> {
+    let normalized = value.trim();
+    if normalized.len() != 128 || !normalized.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("nni_owner_signature_invalid");
+    }
+    Ok(normalized.to_ascii_lowercase())
+}
+
 fn nni_owner_public_key_from_private(value: &str) -> Result<String, &'static str> {
     let private_bytes = Zeroizing::new(decode_nni_owner_payload(
         value,
@@ -176,6 +184,18 @@ mod nni_owner_identity_tests {
         assert_eq!(
             normalize_nni_owner_public_key(&format!("PUB_K1_{}", generated.public_key)),
             Err("nni_owner_pubkey_invalid")
+        );
+    }
+
+    #[test]
+    fn owner_signatures_are_canonical_lowercase_hex() {
+        assert_eq!(
+            normalize_nni_owner_signature(&"AB".repeat(64)),
+            Ok("ab".repeat(64))
+        );
+        assert_eq!(
+            normalize_nni_owner_signature(&"ab".repeat(63)),
+            Err("nni_owner_signature_invalid")
         );
     }
 }

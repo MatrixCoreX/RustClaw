@@ -1,6 +1,5 @@
 import {
   ArrowLeftRight,
-  Check,
   ChevronLeft,
   ChevronRight,
   Copy,
@@ -14,10 +13,16 @@ import {
   ShieldAlert,
   ShieldCheck,
   Trash2,
+  Unlink,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { writeTextToClipboard } from "../lib/auth-keys";
+import type { NniOwnerAuthorizationChallenge } from "../hooks/useNniRuntime";
+import {
+  NniAssetAccountDialog,
+  type NniAssetAccountDialogMode,
+} from "./NniAssetAccountDialog";
 import { NniHistoryTabs, type NniHistoryView } from "./NniHistoryTabs";
 import { NniNetworkDeviceStats } from "./NniNetworkDeviceStats";
 import { NniPublicKeyDisplay } from "./NniPublicKeyDisplay";
@@ -61,7 +66,8 @@ export interface NniPageProps {
   nniJoined: boolean;
   nniAssetOwnerPubkey: string | null;
   nniOwnerKeyPair: NniOwnerKeyPairResponse | null;
-  nniOwnerActionLoading: "generate" | "recover" | null;
+  nniOwnerActionLoading: "generate" | "recover" | "custom" | "unbind" | null;
+  nniOwnerAuthorizationChallenge: NniOwnerAuthorizationChallenge | null;
   nniRemoteNodes: string;
   nniSelectedNodeUrl: string;
   nniRemoteNodeCount: number;
@@ -108,6 +114,11 @@ export interface NniPageProps {
   onGenerateOwner: () => unknown | Promise<unknown>;
   onClearGeneratedOwner: () => void;
   onRecoverOwner: (privateKey: string) => unknown | Promise<unknown>;
+  onStartCustomOwnerAuthorization: (publicKey: string) => unknown | Promise<unknown>;
+  onAuthorizeOwnerWithPrivateKey: (privateKey: string) => unknown | Promise<unknown>;
+  onStartOwnerUnbind: () => unknown | Promise<unknown>;
+  onCompleteOwnerAuthorization: (ownerSignature: string) => unknown | Promise<unknown>;
+  onCancelOwnerAuthorization: () => void;
   onTestJoin: () => unknown | Promise<unknown>;
   onFetchConfig: () => unknown | Promise<unknown>;
   onSaveConfig: () => unknown | Promise<unknown>;
@@ -171,6 +182,7 @@ export function NniPage({
   nniAssetOwnerPubkey,
   nniOwnerKeyPair,
   nniOwnerActionLoading,
+  nniOwnerAuthorizationChallenge,
   nniRemoteNodes,
   nniSelectedNodeUrl,
   nniRemoteNodeCount,
@@ -217,6 +229,11 @@ export function NniPage({
   onGenerateOwner,
   onClearGeneratedOwner,
   onRecoverOwner,
+  onStartCustomOwnerAuthorization,
+  onAuthorizeOwnerWithPrivateKey,
+  onStartOwnerUnbind,
+  onCompleteOwnerAuthorization,
+  onCancelOwnerAuthorization,
   onTestJoin,
   onFetchConfig,
   onSaveConfig,
@@ -238,10 +255,8 @@ export function NniPage({
 }: NniPageProps) {
   const [nniTestJoinPulse, setNniTestJoinPulse] = useState(false);
   const [nniHistoryView, setNniHistoryView] = useState<NniHistoryView>("overview");
-  const [ownerBackupConfirmed, setOwnerBackupConfirmed] = useState(false);
   const [ownerPrivateKeyCopied, setOwnerPrivateKeyCopied] = useState(false);
-  const [ownerRecoveryOpen, setOwnerRecoveryOpen] = useState(false);
-  const [ownerRecoveryPrivateKey, setOwnerRecoveryPrivateKey] = useState("");
+  const [ownerDialogMode, setOwnerDialogMode] = useState<NniAssetAccountDialogMode | null>(null);
   const nniTestJoinPulseTimer = useRef<number | null>(null);
   const ownerPrivateKeyCopyTimer = useRef<number | null>(null);
   const nniChipPresent = nniStatus?.signature_chip_present === true;
@@ -301,19 +316,14 @@ export function NniPage({
 
   useEffect(() => {
     if (!nniOwnerKeyPair) {
-      setOwnerBackupConfirmed(false);
       setOwnerPrivateKeyCopied(false);
     }
   }, [nniOwnerKeyPair]);
 
-  const recoverOwner = async () => {
-    const privateKey = ownerRecoveryPrivateKey.trim();
-    if (!privateKey) return;
-    try {
-      await Promise.resolve(onRecoverOwner(privateKey));
-    } finally {
-      setOwnerRecoveryPrivateKey("");
-    }
+  const openOwnerDialog = (mode: NniAssetAccountDialogMode) => {
+    onActionErrorChange(null);
+    setOwnerDialogMode(mode);
+    if (mode === "create" && !nniOwnerKeyPair) void onGenerateOwner();
   };
 
   const runTestJoinWithRuntimePulse = async () => {
@@ -459,10 +469,10 @@ export function NniPage({
                 type="button"
                 onClick={() => {
                   if (nniJoined) void onSetJoinedPersisted(false);
-                  else if (!nniAssetOwnerPubkey && !nniOwnerKeyPair) void onGenerateOwner();
+                  else if (!nniAssetOwnerPubkey) openOwnerDialog("create");
                   else void onJoin();
                 }}
-                disabled={Boolean(nniActionLoading) || Boolean(nniOwnerActionLoading) || nniStatusLoading || (!nniJoined && (!nniChipPresent || nniRemoteNodeCount === 0 || Boolean(nniOwnerKeyPair && !ownerBackupConfirmed)))}
+                disabled={Boolean(nniActionLoading) || Boolean(nniOwnerActionLoading) || nniStatusLoading || (!nniJoined && (!nniChipPresent || nniRemoteNodeCount === 0))}
                 className={nniJoined ? "theme-secondary-btn px-3 py-2 text-sm" : "theme-accent-btn px-3 py-2 text-sm"}
                 title={
                   !nniJoined && !nniChipPresent
@@ -483,7 +493,9 @@ export function NniPage({
                   ? t("停止", "Stop")
                   : !nniAssetOwnerPubkey && !nniOwnerKeyPair
                     ? t("创建资产账户", "Create asset account")
-                    : t("加入", "Join")}
+                    : !nniAssetOwnerPubkey
+                      ? t("继续创建", "Continue setup")
+                      : t("加入", "Join")}
               </button>
               {!nniJoined ? (
                 <button
@@ -529,16 +541,42 @@ export function NniPage({
                 )}
               </p>
             </div>
-            {ownerRecoveryAvailable ? (
-              <button
-                type="button"
-                className="theme-secondary-btn px-3 py-2 text-sm"
-                onClick={() => setOwnerRecoveryOpen((value) => !value)}
-              >
-                <KeyRound className="h-4 w-4" />
-                {t("换机恢复", "Recover on this device")}
-              </button>
-            ) : null}
+            <div className="flex flex-wrap justify-end gap-2">
+              {ownerRecoveryAvailable ? (
+                <button
+                  type="button"
+                  className="theme-secondary-btn px-3 py-2 text-sm"
+                  onClick={() => openOwnerDialog("recover")}
+                >
+                  <KeyRound className="h-4 w-4" />
+                  {t("换机恢复", "Recover on this device")}
+                </button>
+              ) : null}
+              {!nniOwnerKeyPair ? (
+                <button
+                  type="button"
+                  className="theme-secondary-btn px-3 py-2 text-sm"
+                  disabled={Boolean(nniOwnerActionLoading) || Boolean(nniOwnerAuthorizationChallenge)}
+                  onClick={() => openOwnerDialog(nniAssetOwnerPubkey ? "replace" : "bind")}
+                >
+                  <KeyRound className="h-4 w-4" />
+                  {nniAssetOwnerPubkey
+                    ? t("更换资产账户", "Replace asset account")
+                    : t("重新绑定资产账户", "Rebind asset account")}
+                </button>
+              ) : null}
+              {nniAssetOwnerPubkey ? (
+                <button
+                  type="button"
+                  className="theme-secondary-btn px-3 py-2 text-sm text-red-100 hover:border-red-400/35 hover:bg-red-500/10"
+                  disabled={Boolean(nniOwnerActionLoading) || Boolean(nniOwnerAuthorizationChallenge)}
+                  onClick={() => void onStartOwnerUnbind()}
+                >
+                  {nniOwnerActionLoading === "unbind" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Unlink className="h-4 w-4" />}
+                  {t("解绑资产密钥", "Unbind asset key")}
+                </button>
+              ) : null}
+            </div>
           </div>
 
           {nniAssetOwnerPubkey ? (
@@ -553,78 +591,31 @@ export function NniPage({
             </div>
           ) : null}
 
-          {nniOwnerKeyPair ? (
-            <div className="mt-4 rounded-xl border border-amber-400/35 bg-amber-500/10 p-4">
-              <div className="flex items-start gap-2 text-amber-100">
-                <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
-                <p className="text-sm leading-6">
-                  {t(
-                    "私钥只显示这一次，系统不会保存。请手抄或离线保存；刷新页面后无法找回。",
-                    "The private key is shown once and is not saved. Copy it by hand or store it offline; it cannot be recovered after refresh.",
-                  )}
-                </p>
-              </div>
-              <div className="mt-3 grid gap-3">
-                <div>
-                  <p className="text-xs text-white/55">{t("资产公钥", "Asset public key")}</p>
-                  <code className="mt-1 block break-all rounded-lg bg-black/20 p-3 text-sm text-white/85">{nniOwnerKeyPair.public_key}</code>
-                </div>
-                <div>
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs text-white/55">{t("一次性显示的私钥", "One-time private key")}</p>
-                    <button
-                      type="button"
-                      className="theme-secondary-btn px-2 py-1.5 text-xs"
-                      data-nni-copy-owner-private-key="true"
-                      onClick={() => void copyOwnerPrivateKey()}
-                    >
-                      {ownerPrivateKeyCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                      {ownerPrivateKeyCopied ? t("已复制", "Copied") : t("复制私钥", "Copy private key")}
-                    </button>
-                  </div>
-                  <code className="mt-1 block break-all rounded-lg bg-black/25 p-3 text-sm text-amber-100">{nniOwnerKeyPair.private_key}</code>
-                </div>
-                <label className="flex cursor-pointer items-start gap-2 text-sm leading-6 text-white/75">
-                  <input type="checkbox" checked={ownerBackupConfirmed} onChange={(event) => setOwnerBackupConfirmed(event.target.checked)} className="mt-1" />
-                  {t("我已经离线保存私钥，理解丢失后只能靠这把私钥换机恢复。", "I saved the private key offline and understand that it is required for device recovery.")}
-                </label>
-                <div className="flex justify-end pt-1">
-                  <button
-                    type="button"
-                    className="theme-secondary-btn px-3 py-2 text-sm text-red-100 hover:border-red-400/35 hover:bg-red-500/10"
-                    data-nni-discard-owner-key-pair="true"
-                    onClick={onClearGeneratedOwner}
-                  >
-                    {t("放弃这组密钥", "Discard this key pair")}
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : null}
-
-          {ownerRecoveryOpen && ownerRecoveryAvailable ? (
-            <div className="mt-4 rounded-xl border border-white/12 p-4">
-              <p className="text-sm leading-6 text-white/70">
-                {t("新设备的硬件芯片必须先进入服务端白名单。私钥只用于这次换机签名，不会保存。", "The new device's hardware chip must be allowlisted first. The private key is used only for this recovery signature and is not saved.")}
-              </p>
-              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                <input
-                  type="password"
-                  autoComplete="new-password"
-                  spellCheck={false}
-                  value={ownerRecoveryPrivateKey}
-                  onChange={(event) => setOwnerRecoveryPrivateKey(event.target.value)}
-                  placeholder={t("粘贴资产私钥", "Paste the asset private key")}
-                  className="theme-input min-w-0 flex-1"
-                />
-                <button type="button" className="theme-accent-btn px-3 py-2 text-sm" disabled={!ownerRecoveryPrivateKey.trim() || nniOwnerActionLoading === "recover"} onClick={() => void recoverOwner()}>
-                  {nniOwnerActionLoading === "recover" ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
-                  {t("签名并恢复", "Sign and recover")}
-                </button>
-              </div>
-            </div>
-          ) : null}
         </section>
+      ) : null}
+
+      {ownerDialogMode ? (
+        <NniAssetAccountDialog
+          mode={ownerDialogMode}
+          t={t}
+          chipReady={nniChipPresent}
+          remoteNodeReady={nniRemoteNodeCount > 0}
+          loading={Boolean(nniOwnerActionLoading) || ["join_nni", "sign_challenge"].includes(nniActionLoading || "")}
+          actionError={nniActionError}
+          generatedKeyPair={nniOwnerKeyPair}
+          authorizationChallenge={nniOwnerAuthorizationChallenge}
+          privateKeyCopied={ownerPrivateKeyCopied}
+          onClose={() => setOwnerDialogMode(null)}
+          onGenerate={onGenerateOwner}
+          onDiscardGenerated={onClearGeneratedOwner}
+          onCopyGeneratedPrivateKey={copyOwnerPrivateKey}
+          onAuthorizeWithPrivateKey={onAuthorizeOwnerWithPrivateKey}
+          onRecover={onRecoverOwner}
+          onStartExternalAuthorization={onStartCustomOwnerAuthorization}
+          onCompleteExternalAuthorization={onCompleteOwnerAuthorization}
+          onCancelExternalAuthorization={onCancelOwnerAuthorization}
+          onCopyText={copyPrimaryHex}
+        />
       ) : null}
 
       {nniStatusError ? (

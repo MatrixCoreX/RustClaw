@@ -87,6 +87,10 @@ candles at most 300 rows.
 
 - Reward values are observations returned by the selected NNI node. The skill does not calculate,
   override, or cache the economic schedule.
+- Eligibility and reward history are keyed by hardware device. One asset owner may authorize
+  multiple devices; each eligible device receives its own reward grant and immutable ledger source
+  entry even when all grants credit the same asset account. Do not describe those grants as one
+  merged payment. The account balance is their aggregate projection.
 - `active_device_count` is the number of distinct eligible devices in the latest settled reward
   window. It is not a live process count.
 - `current_reward_pool_points` is the total reward pool for one window before distribution, not a

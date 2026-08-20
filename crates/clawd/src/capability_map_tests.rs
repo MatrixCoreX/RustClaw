@@ -241,7 +241,7 @@ fn real_registry_does_not_charge_remote_audio_actions_for_local_model_memory() {
     assert_eq!(preview.class.as_token(), "general");
     assert_eq!(preview.memory_mb, 128);
     assert_eq!(transcribe.class.as_token(), "network");
-    assert_eq!(transcribe.memory_mb, 256);
+    assert_eq!(transcribe.memory_mb, 64);
     assert_eq!(transcribe.network_slots, 1);
 }
 

@@ -93,6 +93,7 @@ const AiLearningPage = lazy(() =>
 );
 
 const CONSOLE_PAGES: ConsolePage[] = ["dashboard", "chat", "ai_learning", "nni", "nni_apr", "bancor", "services", "channels", "models", "skills", "skill_store", "memory", "logs", "tasks"];
+const ADMIN_ONLY_UI_PAGES = new Set<ConsolePage>(["nni", "nni_apr", "bancor"]);
 
 const STORAGE_KEYS = {
   baseUrl: appStorageKey("monitor.baseUrl"),
@@ -308,6 +309,7 @@ export default function App() {
     nniAssetOwnerPubkey,
     nniOwnerKeyPair,
     nniOwnerActionLoading,
+    nniOwnerAuthorizationChallenge,
     nniRemoteNodes,
     nniSelectedNodeUrl,
     nniRemoteNodeCount,
@@ -351,6 +353,11 @@ export default function App() {
     generateNniOwnerKeyPair,
     clearNniOwnerKeyPair,
     recoverNniOwner,
+    startNniCustomOwnerAuthorization,
+    authorizeNniOwnerWithPrivateKey,
+    startNniOwnerUnbind,
+    completeNniOwnerAuthorization,
+    cancelNniOwnerAuthorization,
     testJoinNni,
     fetchNniConfig,
     saveNniConfig,
@@ -1244,6 +1251,18 @@ export default function App() {
     larkConfigError,
     larkBindSession,
   });
+  const visibleNavItems = useMemo(
+    () => isAdminIdentity
+      ? navItems
+      : navItems.filter((item) => !ADMIN_ONLY_UI_PAGES.has(item.id)),
+    [isAdminIdentity, navItems],
+  );
+
+  useEffect(() => {
+    if (uiAuthReady && !isAdminIdentity && ADMIN_ONLY_UI_PAGES.has(currentPage)) {
+      setCurrentPage("dashboard");
+    }
+  }, [currentPage, isAdminIdentity, uiAuthReady]);
 
   const fetchLocalInteractionContext = async () => {
     setLocalContextLoading(true);
@@ -1452,10 +1471,10 @@ export default function App() {
     void fetchTelegramConfig();
     void fetchLlmConfig();
     void fetchModelCatalog();
-    void fetchNniConfig();
+    if (isAdminIdentity) void fetchNniConfig();
     void fetchLocalInteractionContext();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiBase, uiAuthReady]);
+  }, [apiBase, uiAuthReady, isAdminIdentity]);
 
   useEffect(() => {
     if (!uiAuthReady) return;
@@ -1482,7 +1501,7 @@ export default function App() {
   }, [currentPage, apiBase, uiAuthReady, isAdminIdentity]);
 
   useEffect(() => {
-    if (!uiAuthReady) return;
+    if (!uiAuthReady || !isAdminIdentity) return;
     if (currentPage !== "nni") return;
     void ensureNniDeviceStatus();
     void fetchNniConfig(true);
@@ -1497,26 +1516,26 @@ export default function App() {
     }, 60_000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, apiBase, uiAuthReady, nniHeartbeatErrorsPage, nniHeartbeatRecordsPage]);
+  }, [currentPage, apiBase, uiAuthReady, isAdminIdentity, nniHeartbeatErrorsPage, nniHeartbeatRecordsPage]);
 
   useEffect(() => {
-    if (!uiAuthReady || currentPage !== "nni" || !nniJoined) return;
+    if (!uiAuthReady || !isAdminIdentity || currentPage !== "nni" || !nniJoined) return;
     void fetchNniRewards(1);
     // Reward reads require a fresh device signature, so load on page entry/join
     // and leave subsequent refreshes or pagination to an explicit user action.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, apiBase, uiAuthReady, nniJoined]);
+  }, [currentPage, apiBase, uiAuthReady, isAdminIdentity, nniJoined]);
 
   useEffect(() => {
-    if (!uiAuthReady || currentPage !== "nni" || !nniJoined || !nniStatus?.signature_chip_present) return;
+    if (!uiAuthReady || !isAdminIdentity || currentPage !== "nni" || !nniJoined || !nniStatus?.signature_chip_present) return;
     void bancorRuntime.fetchAccount(1);
     // Current holdings are private account data and require a fresh device
     // signature. Load them independently from the public reward ledger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, apiBase, uiAuthReady, nniJoined, nniStatus?.signature_chip_present]);
+  }, [currentPage, apiBase, uiAuthReady, isAdminIdentity, nniJoined, nniStatus?.signature_chip_present]);
 
   useEffect(() => {
-    if (!uiAuthReady || currentPage !== "nni_apr") return;
+    if (!uiAuthReady || !isAdminIdentity || currentPage !== "nni_apr") return;
     void ensureNniDeviceStatus(true);
     void fetchNniConfig(true);
 
@@ -1530,10 +1549,10 @@ export default function App() {
     }, NNI_APR_AUTO_REFRESH_SECONDS * 1_000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, apiBase, uiAuthReady, nniJoined]);
+  }, [currentPage, apiBase, uiAuthReady, isAdminIdentity, nniJoined]);
 
   useEffect(() => {
-    if (!uiAuthReady || currentPage !== "bancor") return;
+    if (!uiAuthReady || !isAdminIdentity || currentPage !== "bancor") return;
     void bancorRuntime.fetchMarket();
     void bancorRuntime.fetchCandles(bancorRuntime.candleIntervalSeconds);
     void bancorRuntime.fetchMarketTrades();
@@ -1567,15 +1586,15 @@ export default function App() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, apiBase, uiAuthReady, bancorRuntime.candleIntervalSeconds]);
+  }, [currentPage, apiBase, uiAuthReady, isAdminIdentity, bancorRuntime.candleIntervalSeconds]);
 
   useEffect(() => {
-    if (!uiAuthReady || currentPage !== "bancor" || !nniStatus?.signature_chip_present) return;
+    if (!uiAuthReady || !isAdminIdentity || currentPage !== "bancor" || !nniStatus?.signature_chip_present) return;
     void bancorRuntime.fetchAccount(1);
     // Private account reads require a fresh device signature, but Bancor
     // access is independent from participation in NNI heartbeat rewards.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, apiBase, uiAuthReady, nniStatus?.signature_chip_present]);
+  }, [currentPage, apiBase, uiAuthReady, isAdminIdentity, nniStatus?.signature_chip_present]);
 
   useEffect(() => {
     if (!uiAuthReady) return;
@@ -1667,7 +1686,7 @@ export default function App() {
       authIdentity={authIdentity}
       isAdminIdentity={isAdminIdentity}
       currentPage={currentPage}
-      navItems={navItems}
+      navItems={visibleNavItems}
       maskedIdentityKey={maskedIdentityKey}
       maskedSavedUiKey={maskedSavedUiKey}
       factoryResetModal={factoryResetModal}
@@ -1827,7 +1846,7 @@ export default function App() {
             </Suspense>
           ) : null}
 
-          {currentPage === "nni" ? (
+          {isAdminIdentity && currentPage === "nni" ? (
             <NniPage
               lang={lang}
               t={t}
@@ -1843,6 +1862,7 @@ export default function App() {
               nniAssetOwnerPubkey={nniAssetOwnerPubkey}
               nniOwnerKeyPair={nniOwnerKeyPair}
               nniOwnerActionLoading={nniOwnerActionLoading}
+              nniOwnerAuthorizationChallenge={nniOwnerAuthorizationChallenge}
               nniRemoteNodes={nniRemoteNodes}
               nniSelectedNodeUrl={nniSelectedNodeUrl}
               nniRemoteNodeCount={nniRemoteNodeCount}
@@ -1889,6 +1909,11 @@ export default function App() {
               onGenerateOwner={generateNniOwnerKeyPair}
               onClearGeneratedOwner={clearNniOwnerKeyPair}
               onRecoverOwner={recoverNniOwner}
+              onStartCustomOwnerAuthorization={startNniCustomOwnerAuthorization}
+              onAuthorizeOwnerWithPrivateKey={authorizeNniOwnerWithPrivateKey}
+              onStartOwnerUnbind={startNniOwnerUnbind}
+              onCompleteOwnerAuthorization={completeNniOwnerAuthorization}
+              onCancelOwnerAuthorization={cancelNniOwnerAuthorization}
               onTestJoin={testJoinNni}
               onFetchConfig={fetchNniConfig}
               onSaveConfig={saveNniConfig}
@@ -1910,7 +1935,7 @@ export default function App() {
             />
           ) : null}
 
-          {currentPage === "nni_apr" ? (
+          {isAdminIdentity && currentPage === "nni_apr" ? (
             <NniAprPage
               lang={lang}
               t={t}
@@ -1931,7 +1956,7 @@ export default function App() {
             />
           ) : null}
 
-          {currentPage === "bancor" ? (
+          {isAdminIdentity && currentPage === "bancor" ? (
             <BancorPage
               t={t}
               runtime={bancorRuntime}

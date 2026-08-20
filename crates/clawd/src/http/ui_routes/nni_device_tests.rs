@@ -524,6 +524,85 @@ fn nni_settings_keep_one_explicit_active_node() {
 }
 
 #[test]
+fn nni_asset_owner_binding_can_replace_and_clear_only_when_explicit() {
+    let workspace = NniRuntimeStateTestWorkspace::new("asset-owner-binding");
+    workspace.write_config("[llm]\nselected_vendor = \"minimax\"\n");
+    let state = workspace.state();
+    let first = generate_nni_owner_key_pair().public_key;
+    let second = generate_nni_owner_key_pair().public_key;
+
+    persist_nni_asset_owner_pubkey(&state, &first, false).expect("bind first owner");
+    assert_eq!(
+        read_nni_runtime_config(&state)
+            .expect("read first owner")
+            .asset_owner_pubkey
+            .as_deref(),
+        Some(first.as_str())
+    );
+    assert_eq!(
+        persist_nni_asset_owner_pubkey(&state, &second, false)
+            .expect_err("implicit owner replacement must fail")
+            .to_string(),
+        "nni_asset_owner_conflict"
+    );
+
+    persist_nni_asset_owner_pubkey(&state, &second, true).expect("replace owner explicitly");
+    let mut config = read_nni_runtime_config(&state).expect("read replacement");
+    config.joined = true;
+    write_nni_runtime_config(&state, &config).expect("enable NNI for clear test");
+    clear_nni_asset_owner_binding(&state).expect("clear current device binding");
+    let cleared = read_nni_runtime_config(&state).expect("read cleared binding");
+    assert_eq!(cleared.asset_owner_pubkey, None);
+    assert!(!cleared.joined);
+}
+
+#[test]
+fn nni_device_signatures_are_normalized_without_accepting_partial_values() {
+    assert_eq!(
+        normalize_nni_device_signature(&"AB".repeat(64)),
+        Ok("ab".repeat(64))
+    );
+    assert_eq!(
+        normalize_nni_device_signature(&"ab".repeat(63)),
+        Err("nni_signature_invalid")
+    );
+}
+
+#[test]
+fn nni_rebind_wire_contract_uses_device_and_target_owner_signatures() {
+    let request = serde_json::to_value(NniRemoteJoinRequest {
+        device_pubkey: "ab".repeat(64),
+        client_user_key: "ui-user".to_string(),
+        asset_owner_pubkey: Some("target-owner".to_string()),
+        replace_existing_owner: true,
+    })
+    .expect("serialize rebind request");
+    assert_eq!(request["replace_existing_owner"], Value::Bool(true));
+
+    let verify = serde_json::to_value(NniRemoteJoinVerifyRequest {
+        task_id: "rebind-task".to_string(),
+        signature: "12".repeat(64),
+        owner_signature: Some("34".repeat(64)),
+        previous_owner_signature: None,
+    })
+    .expect("serialize rebind verify");
+    assert_eq!(verify["owner_signature"], Value::String("34".repeat(64)));
+    assert!(verify.get("previous_owner_signature").is_none());
+    assert!(verify.get("owner_private_key").is_none());
+}
+
+#[test]
+fn nni_unbind_wire_contract_uses_only_the_device_signature() {
+    let verify = serde_json::to_value(NniRemoteOwnerUnbindVerifyRequest {
+        task_id: "unbind-task".to_string(),
+        device_signature: "12".repeat(64),
+    })
+    .expect("serialize unbind verify");
+    assert_eq!(verify["device_signature"], Value::String("12".repeat(64)));
+    assert!(verify.get("owner_signature").is_none());
+}
+
+#[test]
 fn nni_history_clear_operations_do_not_mutate_config() {
     let workspace = NniRuntimeStateTestWorkspace::new("history-clear");
     let config = concat!(

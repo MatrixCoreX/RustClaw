@@ -1129,6 +1129,8 @@ export interface NniJoinTaskResponse {
   asset_owner_pubkey?: string | null;
   authorization_epoch?: number | null;
   owner_signature_required?: boolean;
+  previous_owner_signature_required?: boolean;
+  previous_asset_owner_pubkey?: string | null;
 }
 
 export interface NniJoinVerifyResponse {
@@ -1161,6 +1163,30 @@ export interface NniOwnerRecoveryResponse {
   authorization_status: string;
   authorized_at_unix: number;
   node_url: string;
+}
+
+export interface NniOwnerUnbindTaskResponse {
+  status: string;
+  task_id: string;
+  signing_payload: string;
+  device_pubkey: string;
+  asset_owner_pubkey: string;
+  authorization_epoch: number;
+  device_signature_required: true;
+  owner_signature_required: false;
+  expires_at_unix: number;
+  node_url: string;
+}
+
+export interface NniOwnerUnbindVerifyResponse {
+  status: string;
+  device_pubkey: string;
+  asset_owner_pubkey: string;
+  authorization_epoch: number;
+  authorization_status: "revoked" | string;
+  revoked_at_unix: number;
+  node_url: string;
+  joined: false;
 }
 
 export interface NniConfigResponse {
