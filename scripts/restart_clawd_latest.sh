@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 RUNTIME_ENV_FILE="${RUNTIME_ENV_FILE:-${APP_RUNTIME_ENV_SCRIPT:-$HOME/runtime_env_filled.sh}}"
 CONFIG_PATH="${APP_CONFIG_PATH:-${ROOT_DIR}/configs/config.toml}"
 PID_FILE="${ROOT_DIR}/.pids/clawd.pid"
