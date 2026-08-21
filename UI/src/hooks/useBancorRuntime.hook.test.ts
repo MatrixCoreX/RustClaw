@@ -5,7 +5,7 @@ import React from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 
 import type { ApiResponse, NniBancorCandlesResponse } from "../types/api";
-import { useBancorRuntime } from "./useBancorRuntime";
+import { formatBancorApiError, useBancorRuntime } from "./useBancorRuntime";
 
 function candles(intervalSeconds: number, bucketStartUnix = 1_800_000_000): NniBancorCandlesResponse {
   return {
@@ -54,6 +54,18 @@ function apiResponse(data: unknown): Response {
     headers: { "content-type": "application/json" },
   });
 }
+
+test("BANCOR explains protected repricing failures without exposing machine error codes", () => {
+  const t = (zh: string) => zh;
+  assert.equal(
+    formatBancorApiError("nni_bancor_slippage_exceeded", t, "fallback"),
+    "价格变化已超出你设置的最低到账保护，本次交易未成交。请重新获取报价。",
+  );
+  assert.equal(
+    formatBancorApiError("nni_bancor_fee_limit_exceeded", t, "fallback"),
+    "当前手续费已超过签名时允许的上限，本次交易未成交。请重新获取报价。",
+  );
+});
 
 test("BANCOR keeps the asset-account setup guide until account access succeeds", async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;

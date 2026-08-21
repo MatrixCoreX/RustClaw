@@ -1911,7 +1911,10 @@ export function BancorQuoteDialog({
               {t("查看报价并确认交易", "Review quote and confirm trade")}
             </h2>
             <p id="bancor-quote-dialog-description" className="mt-1 text-sm leading-6 text-white/55">
-              {t("请核对支付、到账和手续费，再选择本机硬件或资产密钥签名。", "Check payment, output, and fees, then choose the hardware delegate or asset key.")}
+              {t(
+                "请核对支付、最低到账和手续费。签名后若市场变化仍在保护范围内，将按最新储备成交；超出范围则不会成交。",
+                "Check the payment, minimum output, and fee. After signing, a market move within your protection executes against the latest reserves; otherwise no trade occurs.",
+              )}
             </p>
           </div>
           <button

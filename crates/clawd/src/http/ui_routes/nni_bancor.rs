@@ -1260,7 +1260,8 @@ fn validate_bancor_signing_payload(
         "action",
         "server_identity",
         "market_id",
-        "market_version",
+        "execution_policy",
+        "quoted_market_version",
         "quote_id",
         "task_id",
         "device_pubkey",
@@ -1269,9 +1270,9 @@ fn validate_bancor_signing_payload(
         "authorization_mode",
         "side",
         "input_units",
-        "fee_units",
-        "fee_bps",
-        "output_units",
+        "max_fee_bps",
+        "quoted_fee_units",
+        "quoted_output_units",
         "min_output_units",
         "nonce",
         "expires_at_unix",
@@ -1293,9 +1294,11 @@ fn validate_bancor_signing_payload(
     {
         return Err("nni_bancor_signing_payload_binding_invalid");
     }
-    if payload.get("schema_version").and_then(Value::as_u64) != Some(1)
+    if payload.get("schema_version").and_then(Value::as_u64) != Some(2)
         || payload.get("action").and_then(Value::as_str) != Some("nni_bancor_trade")
         || payload.get("server_identity").and_then(Value::as_str) != Some("nni-server-v1")
+        || payload.get("execution_policy").and_then(Value::as_str)
+            != Some("current_reserves_with_min_output")
         || payload.get("asset_owner_pubkey").and_then(Value::as_str)
             != Some(expected_asset_owner_pubkey)
         || payload.get("authorization_epoch").and_then(Value::as_u64).is_none_or(|value| value == 0)
@@ -1310,7 +1313,6 @@ fn validate_bancor_signing_payload(
     }
     for field in [
         "market_id",
-        "market_version",
         "quote_id",
         "task_id",
         "device_pubkey",
@@ -1318,13 +1320,20 @@ fn validate_bancor_signing_payload(
         "authorization_epoch",
         "authorization_mode",
         "input_units",
-        "fee_bps",
-        "fee_units",
-        "output_units",
         "min_output_units",
         "expires_at_unix",
     ] {
         if payload.get(field) != response.get(field) {
+            return Err("nni_bancor_signing_payload_response_mismatch");
+        }
+    }
+    for (payload_field, response_field) in [
+        ("quoted_market_version", "market_version"),
+        ("max_fee_bps", "fee_bps"),
+        ("quoted_fee_units", "fee_units"),
+        ("quoted_output_units", "output_units"),
+    ] {
+        if payload.get(payload_field) != response.get(response_field) {
             return Err("nni_bancor_signing_payload_response_mismatch");
         }
     }
@@ -1706,11 +1715,12 @@ mod nni_bancor_unit_tests {
         let expires_at = current_unix_ts() + 120;
         let asset_owner_pubkey = "5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M";
         let payload = json!({
-            "schema_version": 1,
+            "schema_version": 2,
             "action": "nni_bancor_trade",
             "server_identity": "nni-server-v1",
             "market_id": "aic-usd-v1",
-            "market_version": 7,
+            "execution_policy": "current_reserves_with_min_output",
+            "quoted_market_version": 7,
             "quote_id": "quote-1",
             "task_id": "task-1",
             "device_pubkey": "aa".repeat(64),
@@ -1719,9 +1729,9 @@ mod nni_bancor_unit_tests {
             "authorization_mode": "delegated_hardware",
             "side": "sell",
             "input_units": "10000",
-            "fee_bps": 0,
-            "fee_units": "0",
-            "output_units": "1",
+            "max_fee_bps": 0,
+            "quoted_fee_units": "0",
+            "quoted_output_units": "1",
             "min_output_units": "1",
             "nonce": "11".repeat(16),
             "expires_at_unix": expires_at,
