@@ -375,6 +375,13 @@ export function paginateBancorTrades<T>(items: readonly T[], requestedPage: numb
   };
 }
 
+const BANCOR_MARKET_WORKSPACE_DEFAULT_CLASS =
+  "grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(20rem,1fr)] lg:items-stretch";
+
+export function bancorMarketWorkspaceClass(maximized: boolean): string {
+  return maximized ? "bancor-market-workspace-maximized" : BANCOR_MARKET_WORKSPACE_DEFAULT_CLASS;
+}
+
 export function BancorPage({
   t,
   runtime,
@@ -392,7 +399,6 @@ export function BancorPage({
   assetOwnerPubkey: string | null;
   onOpenNni: () => void;
 }) {
-  const tradePanelRef = useRef<HTMLDivElement>(null);
   const [side, setSide] = useState<"buy" | "sell">("sell");
   const [tradeLayout, setTradeLayout] = useState<BancorTradeLayout>(() =>
     readBancorTradeLayout(typeof window === "undefined" ? undefined : window.localStorage),
@@ -401,6 +407,7 @@ export function BancorPage({
   const [slippagePercent, setSlippagePercent] = useState((BANCOR_DEFAULT_SLIPPAGE_BPS / 100).toFixed(2));
   const [marketTradesPage, setMarketTradesPage] = useState(1);
   const [activeView, setActiveView] = useState<"market" | "price_change">("market");
+  const [chartMaximized, setChartMaximized] = useState(false);
   const assetAccountOptions = buildBancorAssetAccountOptions(assetOwnerPubkey);
   const [preferredAssetAccountId, setPreferredAssetAccountId] = useState(
     assetAccountOptions[0]?.id ?? "",
@@ -498,13 +505,6 @@ export function BancorPage({
     const result = await trade(authorization);
     if (result) setInputAmount("");
   };
-  const openTradePanel = () => {
-    const panel = tradePanelRef.current;
-    if (!panel) return;
-    panel.scrollIntoView({ behavior: "smooth", block: "start" });
-    panel.querySelector<HTMLInputElement>('input[inputmode="decimal"]')?.focus({ preventScroll: true });
-  };
-
   if (activeView === "price_change") {
     return (
       <BancorPriceChangePage
@@ -633,8 +633,13 @@ export function BancorPage({
         />
       ) : null}
 
-      <section className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(20rem,1fr)] lg:items-stretch">
-        <section className="theme-shadow-card min-w-0 p-5 sm:p-6">
+      <section
+        id="bancor-market-workspace"
+        className={bancorMarketWorkspaceClass(chartMaximized)}
+        data-bancor-market-workspace="true"
+        data-chart-maximized={chartMaximized ? "true" : "false"}
+      >
+        <section className="bancor-market-chart-panel theme-shadow-card min-w-0 p-5 sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
               <BarChart3 className="h-5 w-5 text-sky-300" />
@@ -667,7 +672,7 @@ export function BancorPage({
               <RefreshCw className={`h-4 w-4 ${candlesLoading ? "animate-spin" : ""}`} />
             </button>
           </div>
-        <div className="mt-4 flex flex-wrap gap-2" aria-label={t("K 线周期", "Candlestick interval")}>
+        <div className="bancor-market-chart-intervals mt-4 flex flex-wrap gap-2" aria-label={t("K 线周期", "Candlestick interval")}>
           {BANCOR_CANDLE_INTERVALS.map((interval) => (
             <button
               key={interval.seconds}
@@ -690,7 +695,7 @@ export function BancorPage({
             {candlesError}
           </div>
         ) : null}
-        <div className="mt-4">
+        <div className="bancor-market-chart-body mt-4">
           {candlesLoading && !candles ? (
             <div className="flex min-h-64 items-center justify-center text-sm text-white/40">
               {t("正在读取成交数据...", "Loading trade data...")}
@@ -704,7 +709,8 @@ export function BancorPage({
                 priceDecimalPlaces={candles.price_decimal_places}
                 livePrice={market?.marginal_price_usd_per_aic}
                 formatUnixDateTime={formatUnixDateTime}
-                onTrade={openTradePanel}
+                maximized={chartMaximized}
+                onMaximizedChange={setChartMaximized}
                 t={t}
               />
             </>
@@ -717,7 +723,7 @@ export function BancorPage({
         </div>
         </section>
 
-        <div id="bancor-trade-panel" ref={tradePanelRef} className="theme-shadow-card scroll-mt-4 p-4 sm:p-5">
+        <div id="bancor-trade-panel" className="bancor-market-trade-panel theme-shadow-card scroll-mt-4 p-4 sm:p-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <ArrowDownUp className="h-5 w-5 text-sky-300" />
@@ -1308,7 +1314,8 @@ export function CandleChart({
   priceDecimalPlaces,
   livePrice,
   formatUnixDateTime,
-  onTrade,
+  maximized,
+  onMaximizedChange,
   t,
 }: {
   candles: NniBancorCandle[];
@@ -1316,7 +1323,8 @@ export function CandleChart({
   priceDecimalPlaces: number;
   livePrice?: string | null;
   formatUnixDateTime: (value?: number | null) => string;
-  onTrade?: () => void;
+  maximized: boolean;
+  onMaximizedChange: (maximized: boolean) => void;
   t: Translate;
 }) {
   const chartRef = useRef<HTMLDivElement>(null);
@@ -1336,7 +1344,6 @@ export function CandleChart({
   const [offsetFromLatest, setOffsetFromLatest] = useState(0);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [maximized, setMaximized] = useState(false);
   const geometry = calculateBancorChartGeometry(viewportWidth);
   const width = geometry.width;
   const height = 396;
@@ -1385,7 +1392,7 @@ export function CandleChart({
     if (!maximized) return;
     const previousBodyOverflow = document.body.style.overflow;
     const restoreFromEscape = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") setMaximized(false);
+      if (event.key === "Escape") onMaximizedChange(false);
     };
     document.body.style.overflow = "hidden";
     window.addEventListener("keydown", restoreFromEscape);
@@ -1393,7 +1400,7 @@ export function CandleChart({
       document.body.style.overflow = previousBodyOverflow;
       window.removeEventListener("keydown", restoreFromEscape);
     };
-  }, [maximized]);
+  }, [maximized, onMaximizedChange]);
 
   const defaultVisibleCount = calculateBancorDefaultVisibleCount(allValues.length, viewportWidth);
   const requestedVisibleCount = visibleCountOverride ?? defaultVisibleCount;
@@ -1559,10 +1566,6 @@ export function CandleChart({
       setOffsetFromLatest(0);
     }
   };
-  const openTradePanel = () => {
-    setMaximized(false);
-    if (onTrade) window.requestAnimationFrame(onTrade);
-  };
   const hoveredX = hoveredIndex === null ? null : plotLeft + step * (hoveredIndex + 0.5);
   const hoveredY = hoveredIndex === null ? null : yForPrice(focused.close);
   const hoveredPriceIsVisible = hoveredY !== null && hoveredY >= priceTop && hoveredY <= priceBottom;
@@ -1570,7 +1573,7 @@ export function CandleChart({
   return (
     <div
       id="bancor-candle-chart"
-      className={maximized ? "bancor-chart-maximized" : undefined}
+      data-bancor-chart-maximized={maximized ? "true" : "false"}
     >
       <div
         ref={chartRef}
@@ -1808,28 +1811,15 @@ export function CandleChart({
           <button
             type="button"
             className="theme-icon-btn h-8 w-8"
-            onClick={() => setMaximized((current) => !current)}
-            title={maximized ? t("恢复 K 线区域", "Restore candlestick chart") : t("最大化 K 线区域", "Maximize candlestick chart")}
-            aria-label={maximized ? t("恢复 K 线区域", "Restore candlestick chart") : t("最大化 K 线区域", "Maximize candlestick chart")}
+            onClick={() => onMaximizedChange(!maximized)}
+            title={maximized ? t("恢复市场布局", "Restore market layout") : t("最大化 K 线与交易区域", "Maximize chart and trade area")}
+            aria-label={maximized ? t("恢复市场布局", "Restore market layout") : t("最大化 K 线与交易区域", "Maximize chart and trade area")}
             aria-pressed={maximized}
-            aria-controls="bancor-candle-chart"
+            aria-controls="bancor-market-workspace"
           >
             {maximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
           </button>
         </div>
-      </div>
-      <div className="bancor-maximized-trade-action">
-        <button
-          type="button"
-          className="theme-primary-btn min-h-11 min-w-40 justify-center px-6"
-          disabled={!onTrade}
-          onClick={openTradePanel}
-          aria-controls="bancor-trade-panel"
-          aria-label={t("打开交易面板", "Open trade panel")}
-        >
-          <ArrowDownUp className="h-4 w-4" />
-          {t("交易", "Trade")}
-        </button>
       </div>
     </div>
   );

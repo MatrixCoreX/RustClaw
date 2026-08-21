@@ -1518,38 +1518,98 @@
   min-height: 0;
 }
 
-.bancor-chart-maximized {
+.bancor-market-workspace-maximized {
   position: fixed;
   inset: 0;
   z-index: 70;
+  display: grid;
+  grid-template-rows: minmax(19rem, 1fr) minmax(11rem, 30dvh);
+  gap: clamp(0.5rem, 1.2vw, 0.875rem);
   width: 100vw;
   height: 100vh;
   height: 100dvh;
   max-width: none;
-  overflow: auto;
+  overflow: hidden;
   padding: clamp(0.75rem, 2vw, 1.5rem);
-  padding-bottom: calc(5.75rem + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(clamp(0.75rem, 2vw, 1.5rem) + env(safe-area-inset-bottom, 0px));
   background:
     radial-gradient(circle at top, var(--theme-shell-radial), transparent 32%),
     linear-gradient(180deg, var(--theme-shell-start) 0%, var(--theme-shell-end) 100%);
 }
 
-.bancor-maximized-trade-action {
-  display: none;
+.bancor-market-workspace-maximized .bancor-market-chart-panel {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  padding: clamp(0.75rem, 1.5vw, 1.25rem);
 }
 
-.bancor-chart-maximized .bancor-maximized-trade-action {
-  position: fixed;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  z-index: 72;
+.bancor-market-workspace-maximized .bancor-market-chart-intervals {
+  margin-top: 0.625rem;
+}
+
+.bancor-market-workspace-maximized .bancor-market-chart-body {
   display: flex;
-  justify-content: center;
-  padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom, 0px));
-  border-top: 1px solid rgb(255 255 255 / 0.1);
-  background: rgb(8 15 28 / 0.92);
-  backdrop-filter: blur(14px);
+  min-height: 0;
+  flex: 1;
+  margin-top: 0.625rem;
+}
+
+.bancor-market-workspace-maximized #bancor-candle-chart {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.bancor-market-workspace-maximized #bancor-candle-chart .theme-chart-surface {
+  min-height: 12rem;
+  flex: 1;
+}
+
+.bancor-market-workspace-maximized #bancor-candle-chart svg {
+  width: 100%;
+  height: 100%;
+  min-height: 12rem;
+}
+
+.bancor-market-workspace-maximized .bancor-market-trade-panel {
+  min-height: 0;
+  overflow: auto;
+  padding: clamp(0.75rem, 1.4vw, 1rem);
+  scrollbar-gutter: stable;
+}
+
+@media (max-width: 640px) {
+  .bancor-market-workspace-maximized {
+    grid-template-rows: minmax(14rem, 1fr) minmax(10rem, 36dvh);
+    gap: 0.5rem;
+    padding: 0.5rem;
+    padding-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .bancor-market-workspace-maximized .bancor-market-chart-panel,
+  .bancor-market-workspace-maximized .bancor-market-trade-panel {
+    padding: 0.75rem;
+  }
+
+  .bancor-market-workspace-maximized .bancor-market-chart-intervals {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 0.25rem;
+  }
+}
+
+@media (max-height: 560px) {
+  .bancor-market-workspace-maximized {
+    grid-template-rows: minmax(10rem, 1fr) minmax(8rem, 40dvh);
+  }
+
+  .bancor-market-workspace-maximized #bancor-candle-chart .theme-chart-surface,
+  .bancor-market-workspace-maximized #bancor-candle-chart svg {
+    min-height: 8rem;
+  }
 }
 
 .chat-activity-sweep::after {
