@@ -640,7 +640,7 @@ export function BancorPage({
         data-chart-maximized={chartMaximized ? "true" : "false"}
       >
         <section className="bancor-market-chart-panel theme-shadow-card min-w-0 p-5 sm:p-6">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="bancor-market-chart-header flex flex-wrap items-center justify-between gap-3">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
               <BarChart3 className="h-5 w-5 text-sky-300" />
               <h2 className="text-lg font-semibold text-white">{t("实际成交均价 K 线", "Average execution-price candlesticks")}</h2>
@@ -745,7 +745,7 @@ export function BancorPage({
           </div>
           <div className="bancor-trade-account mt-3 rounded-xl border border-white/8 bg-white/[0.025] p-3">
             {selectedAssetAccount ? (
-              <label className="mb-3 grid gap-1.5" data-bancor-account-selector="true">
+              <label className="bancor-trade-account-selector mb-3 grid gap-1.5" data-bancor-account-selector="true">
                 <span className="text-xs font-medium text-white/55">{t("交易账户", "Trading account")}</span>
                 <select
                   className="theme-input w-full font-mono text-xs"
@@ -768,7 +768,7 @@ export function BancorPage({
                 />
               </label>
             ) : null}
-            <div className="flex items-center justify-between gap-3">
+            <div className="bancor-trade-balance-header flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <WalletCards className="h-4 w-4 text-sky-300" />
@@ -787,7 +787,7 @@ export function BancorPage({
                 )}
               </p>
             ) : null}
-            <div className="mt-2 grid min-w-0 gap-2 sm:grid-cols-2">
+            <div className="bancor-trade-balances mt-2 grid min-w-0 gap-2 sm:grid-cols-2">
               <BalanceLine
                 label="AIC"
                 value={account?.aic_balance ?? "—"}
@@ -808,7 +808,7 @@ export function BancorPage({
           <div className="bancor-trade-order-panel">
             {tradeLayout === "standard" ? (
               <>
-              <div className="mt-3 grid grid-cols-2 rounded-xl bg-white/5 p-1">
+              <div className="bancor-trade-side-tabs mt-3 grid grid-cols-2 rounded-xl bg-white/5 p-1">
                 {(["sell", "buy"] as const).map((value) => (
                   <button
                     key={value}
@@ -821,7 +821,7 @@ export function BancorPage({
                 ))}
               </div>
 
-              <div className="mt-3">
+              <div className="bancor-trade-amount mt-3">
                 <label htmlFor="bancor-standard-input-amount" className="block text-xs text-white/70">
                   {t("支付数量", "Amount to pay")} ({inputAsset})
                 </label>
@@ -876,7 +876,7 @@ export function BancorPage({
             )}
           </div>
           <div className="bancor-trade-risk-panel">
-            <div className="mt-3 rounded-xl border border-white/8 bg-white/[0.025] p-3">
+            <div className="bancor-trade-slippage mt-3 rounded-xl border border-white/8 bg-white/[0.025] p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <label htmlFor="bancor-slippage-percent" className="text-sm font-medium text-white/70">
                   {t("滑点保护与警戒", "Slippage protection and warning")}
@@ -906,7 +906,7 @@ export function BancorPage({
                 />
                 <span className="text-sm text-white/55">%</span>
               </div>
-              <p className="mt-1.5 text-xs leading-4 text-white/45">
+              <p className="bancor-trade-slippage-help mt-1.5 text-xs leading-4 text-white/45">
                 {t("用于最低到账保护；报价的价格影响超过此值时会标黄警告，但你仍可确认继续。", "Protects the minimum output. A quote whose price impact exceeds this value is highlighted as a warning, but you may still confirm it.")}
               </p>
               {slippageError ? <p className="mt-1 text-xs text-red-200" role="alert">{slippageError}</p> : null}
@@ -1228,7 +1228,7 @@ export function BancorAmountAdjustmentControls({
   ];
   return (
     <div
-      className="mt-1.5 flex flex-wrap justify-end gap-1.5"
+      className="bancor-amount-adjustments mt-1.5 flex flex-wrap justify-end gap-1.5"
       role="group"
       aria-label={t("快速调整支付数量", "Quick amount adjustments")}
     >
@@ -1783,11 +1783,11 @@ export function CandleChart({
           <text x={plotLeft} y={volumeTop + 5} fill="var(--theme-chart-label)" fontSize="10">VOL · AIC</text>
         </svg>
       </div>
-      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-white/45">
+      <div className="bancor-chart-controls mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-white/45">
         <span>
           {t("当前显示", "Showing")} {visibleWindow.start + 1}–{visibleWindow.end} / {allValues.length}
         </span>
-        <div className="flex flex-wrap items-center justify-end gap-1">
+        <div className="bancor-chart-controls-actions flex flex-wrap items-center justify-end gap-1">
           <button type="button" className="theme-icon-btn h-8 w-8" disabled={visibleWindow.offset >= visibleWindow.maxOffset} onClick={() => panBy(Math.max(1, Math.floor(visibleCount / 2)))} title={t("查看更早 K 线", "View older candles")}>
             <ChevronLeft className="h-4 w-4" />
           </button>
