@@ -22,6 +22,9 @@ fn turn(tool_calls: Vec<ModelToolCall>, text: &str) -> ModelTurnResponse {
 
 fn respond_call(mut arguments: Value) -> ModelToolCall {
     if let Some(arguments) = arguments.as_object_mut() {
+        arguments
+            .entry("terminal_intent")
+            .or_insert_with(|| json!("answer"));
         arguments.entry("fields").or_insert_with(|| json!([]));
         arguments
             .entry("observed_fields")
@@ -178,6 +181,63 @@ fn native_respond_maps_free_text_contract_to_terminal_action() {
         &actions[0],
         AgentAction::Respond { content } if content == "Done."
     ));
+}
+
+#[test]
+fn native_respond_preserves_structured_clarification_control_fields() {
+    let native_turn = turn(
+        vec![respond_call(json!({
+            "terminal_intent": "clarify",
+            "clarify_reason_code": "missing_required_input",
+            "missing_slot": "device_price_usd",
+            "field_path": "nni.reward_apr.device_price_usd",
+            "message_key": "agent.clarify.missing_required_input",
+            "shape": "free_text",
+            "content": "What is the device price in USD?",
+            "items": [],
+            "exact_item_count": 0
+        }))],
+        "",
+    );
+    let actions = actions_from_native_turn(&native_turn, &callable_capabilities())
+        .expect("clarification action");
+    let mut plan = build_plan_result_with_notes(
+        None,
+        "calculate annualized return",
+        "{}",
+        PlanKind::Native,
+        &actions,
+        "",
+    );
+
+    preserve_native_respond_control_fields(&native_turn, &mut plan);
+
+    assert_eq!(plan.steps[0].args["terminal_intent"], "clarify");
+    assert_eq!(plan.steps[0].args["missing_slot"], "device_price_usd");
+    assert_eq!(
+        plan.steps[0].args["field_path"],
+        "nni.reward_apr.device_price_usd"
+    );
+}
+
+#[test]
+fn native_respond_rejects_clarification_without_missing_slot() {
+    let error = actions_from_native_turn(
+        &turn(
+            vec![respond_call(json!({
+                "terminal_intent": "clarify",
+                "shape": "free_text",
+                "content": "What value should I use?",
+                "items": [],
+                "exact_item_count": 0
+            }))],
+            "",
+        ),
+        &callable_capabilities(),
+    )
+    .expect_err("clarification without a machine slot must be rejected");
+
+    assert_eq!(error, "native_respond_clarify_missing_slot_required");
 }
 
 #[test]

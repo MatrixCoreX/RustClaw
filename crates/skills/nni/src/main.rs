@@ -21,6 +21,7 @@ enum Action {
     HeartbeatNow,
     NetworkStats,
     MyRewards,
+    RewardApr,
     BancorMarket,
     BancorAccount,
     BancorMarketTrades,
@@ -39,6 +40,7 @@ impl Action {
             Self::HeartbeatNow => "heartbeat_now",
             Self::NetworkStats => "network_stats",
             Self::MyRewards => "my_rewards",
+            Self::RewardApr => "reward_apr",
             Self::BancorMarket => "bancor_market",
             Self::BancorAccount => "bancor_account",
             Self::BancorMarketTrades => "bancor_market_trades",
@@ -64,6 +66,8 @@ struct Args {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     limit: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    device_price_usd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     interval: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     end_time_ts: Option<i64>,
@@ -82,6 +86,9 @@ impl Args {
         let mut supplied = Vec::new();
         if self.limit.is_some() {
             supplied.push("limit");
+        }
+        if self.device_price_usd.is_some() {
+            supplied.push("device_price_usd");
         }
         if self.interval.is_some() {
             supplied.push("interval");
@@ -103,6 +110,7 @@ impl Args {
         }
         let allowed: &[&str] = match self.action {
             Action::MyRewards | Action::BancorAccount | Action::BancorMarketTrades => &["limit"],
+            Action::RewardApr => &["device_price_usd"],
             Action::BancorCandles => &["limit", "interval", "end_time_ts"],
             Action::BancorQuote => &["side", "pay_asset", "pay_amount", "slippage_bps"],
             _ => &[],
@@ -116,6 +124,16 @@ impl Args {
                 "nni_argument_invalid",
                 false,
                 json!({"action": self.action.as_str(), "invalid_fields": invalid}),
+            ));
+        }
+        if self.action == Action::RewardApr && self.device_price_usd.is_none() {
+            return Err(SkillError::new(
+                "nni_argument_invalid",
+                false,
+                json!({
+                    "action": self.action.as_str(),
+                    "missing_fields": ["device_price_usd"],
+                }),
             ));
         }
         if self.action == Action::BancorQuote {

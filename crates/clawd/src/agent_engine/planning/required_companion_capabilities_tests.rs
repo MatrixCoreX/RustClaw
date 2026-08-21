@@ -25,6 +25,7 @@ fn respond_call(content: &str) -> ModelToolCall {
         id: "companion-respond".to_string(),
         name: "respond".to_string(),
         arguments: json!({
+            "terminal_intent": "answer",
             "shape": "free_text",
             "content": content,
             "items": [],

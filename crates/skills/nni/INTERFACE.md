@@ -4,9 +4,9 @@
 
 `nni` exposes structured, policy-gated access to the local NNI runtime. It reports device signer
 status, controls the heartbeat intent, reads public network statistics, reads private rewards and
-public Bancor data, and previews Bancor quotes. It never enables simulated signing, changes remote
-nodes, returns full keys/signatures, or executes a Bancor trade. Final user-facing prose is
-synthesized by the agent in the user's language.
+public Bancor data, estimates reward APR from settled evidence, and previews Bancor quotes. It
+never enables simulated signing, changes remote nodes, returns full keys/signatures, or executes a
+Bancor trade. Final user-facing prose is synthesized by the agent in the user's language.
 
 The process is a thin adapter over the authenticated local NNI gateway. It must not read NNI state
 files, invoke hardware helpers, or call a remote NNI node directly.
@@ -18,7 +18,9 @@ not imply remote network authorization.
 
 Action selection semantics:
 
-- `status` is a local device-and-heartbeat summary. It does not query remote network statistics.
+- `status` is the self-contained local device-and-heartbeat summary. Use it alone when a request
+  asks for signer source, local participation eligibility, network authorization, and heartbeat
+  enablement together. It does not query remote network statistics.
 - `bancor_account` is the only action for the current signer's AIC/USD balances and that
   signer's own recent trades. Its `limit` bounds the account-owned trade rows. It performs its own
   signer and remote-authorization checks, so call it alone and do not preflight with
@@ -28,6 +30,17 @@ Action selection semantics:
 - `network_stats` reads the selected node's public aggregate contract. It does not require a local
   signer and does not expose device-level reward history. Use `my_rewards` for the current signer's
   private reward totals and records.
+- `reward_apr` is the self-contained action for APR or annualized reward questions. It requires the
+  device's USD price, reads signed reward history and current Bancor market data concurrently from
+  the selected node, and returns live plus week/month/year estimates. Do not call `my_rewards` and
+  `bancor_market` separately for the same APR request.
+- Signatures used by `my_rewards`, `reward_apr`, and `bancor_account` authenticate private reads
+  only. These observe actions do not claim rewards, submit a trade, transfer assets, or mutate the
+  remote account. If signing is unavailable, describe the private-read authentication blocker and
+  do not imply that a reward claim or transaction was attempted.
+- `bancor_market` answers public pool status, reserve, current marginal-price, fee-rate, and current
+  UTC-day price questions. `bancor_candles` answers historical OHLCV questions, while
+  `bancor_market_trades` answers recent public market-trade questions.
 - Machine timestamps ending in `_ts` or `_unix` have a deterministic companion `_utc` field. Use
   the supplied `_utc` value when presenting a date; do not independently calculate a calendar date
   from the numeric timestamp. If no companion exists, preserve the numeric timestamp.
@@ -47,6 +60,7 @@ Action selection semantics:
 | `heartbeat_now` | mutate | - | - | yes |
 | `network_stats` | observe | - | - | no |
 | `my_rewards` | observe | - | `limit` | yes |
+| `reward_apr` | observe | `device_price_usd` | - | yes |
 | `bancor_market` | observe | - | - | no |
 | `bancor_account` | observe | - | `limit` | yes |
 | `bancor_market_trades` | observe | - | `limit` | no |
@@ -64,6 +78,7 @@ candles at most 300 rows.
 | --- | --- | --- | --- | --- | --- |
 | all | `action` | yes | enum | - | One of the actions listed above; free-text intent is rejected. |
 | `my_rewards`, `bancor_account`, `bancor_market_trades` | `limit` | no | integer | action-specific | Between 1 and 100. |
+| `reward_apr` | `device_price_usd` | yes | decimal string | - | Positive device cost in USD, with at most 8 decimal places. |
 | `bancor_candles` | `interval` | no | enum | `5m` | One of `1m`, `5m`, `15m`, `1h`, `4h`, `1d`, `1w`, `1y`. |
 | `bancor_candles` | `limit` | no | integer | `120` | Between 1 and 300. |
 | `bancor_candles` | `end_time_ts` | no | integer | current | Non-negative Unix timestamp. |
@@ -85,6 +100,9 @@ candles at most 300 rows.
 
 ## Reward Semantics
 
+- NNI participation in this contract means authenticated periodic heartbeat participation and the
+  associated reward accounting. It is not proof-of-work mining, block production, or a consensus
+  role. Do not infer any of those concepts from signer or heartbeat fields.
 - Reward values are observations returned by the selected NNI node. The skill does not calculate,
   override, or cache the economic schedule.
 - Eligibility and reward history are keyed by hardware device. One asset owner may authorize
@@ -103,6 +121,21 @@ candles at most 300 rows.
 - `phase=scheduled` means rewards have not started, `phase=active` means the configured schedule is
   active, and `phase=disabled` means reward heartbeats are not accepted. Treat null schedule fields
   as unavailable rather than deriving replacements.
+
+## APR Estimate Semantics
+
+- `reward_apr` is an estimate, not a guaranteed return, market quote, or trading recommendation.
+- `live` annualizes the latest settled device reward period. Each entry in `periods` annualizes the
+  observed reward total over its actual available coverage, not an assumed full week, month, or
+  year. `partial_coverage=true` identifies an incomplete named window.
+- All calculations value AIC at the observed current pool marginal price. They exclude compounding,
+  Bancor fees, and sell slippage. The response exposes these assumptions as machine fields.
+- `calculation_status=insufficient_reward_history` means the node returned too little settled
+  reward evidence for an estimate. Do not replace missing observations with configured reward-pool
+  values or active-device-count projections.
+- The skill requires one selected node and refuses to combine reward and market observations from
+  different nodes. Decimal outputs remain strings; do not convert them to binary floats and then
+  claim greater precision.
 
 ## Result Contract
 
@@ -127,7 +160,8 @@ Important error codes include `nni_signature_device_unavailable`,
 `nni_signature_helper_unavailable`, `nni_remote_node_unconfigured`,
 `nni_device_not_authorized`, `nni_heartbeat_network_unavailable`,
 `nni_network_stats_query_failed`, `nni_operation_in_progress`, `nni_argument_invalid`, and
-`nni_response_contract_invalid`.
+`nni_response_contract_invalid`. APR-specific failures include `nni_apr_inputs_invalid` and
+`nni_apr_snapshot_inconsistent`.
 
 ## Request/Response Examples
 
@@ -151,4 +185,10 @@ Important error codes include `nni_signature_device_unavailable`,
 
 ```json
 {"request_id":"nni-3","args":{"action":"bancor_quote","side":"buy","pay_asset":"USD","pay_amount":"25","slippage_bps":50},"user_id":1,"chat_id":2,"context":null}
+```
+
+### Example 4: reward APR estimate
+
+```json
+{"request_id":"nni-4","args":{"action":"reward_apr","device_price_usd":"499.00"},"user_id":1,"chat_id":2,"context":null}
 ```
