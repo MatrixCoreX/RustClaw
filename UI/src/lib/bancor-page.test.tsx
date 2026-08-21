@@ -8,6 +8,7 @@ import {
   BancorQuoteDialog,
   BancorSwapTradePanel,
   CandleChart,
+  bancorMarketWorkspaceClass,
   bindBancorWheelZoom,
   balanceValueSizeClass,
   buildBancorAssetAccountOptions,
@@ -343,8 +344,10 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.doesNotMatch(html, />点击填入全部 (?:AIC|USD) 余额<\/span>/);
   assert.ok(html.indexOf("我的余额") > html.indexOf("<h2 class=\"text-lg font-semibold text-white\">交易</h2>"));
   assert.doesNotMatch(html, /没有成交的时间窗口沿用上一收盘价/);
+  assert.match(html, /data-bancor-market-workspace="true"/);
+  assert.match(html, /data-chart-maximized="false"/);
   assert.match(html, /grid gap-5 lg:grid-cols-\[minmax\(0,2fr\)_minmax\(20rem,1fr\)\] lg:items-stretch/);
-  assert.match(html, /theme-shadow-card scroll-mt-4 p-4 sm:p-5/);
+  assert.match(html, /bancor-market-trade-panel theme-shadow-card scroll-mt-4 p-4 sm:p-5/);
   assert.ok(
     html.indexOf("<h2 class=\"text-lg font-semibold text-white\">实际成交均价 K 线</h2>")
       < html.indexOf("<h2 class=\"text-lg font-semibold text-white\">交易</h2>"),
@@ -355,8 +358,8 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /aria-label="交易模式"/);
   assert.match(html, /id="bancor-trade-panel"/);
   assert.match(html, /id="bancor-standard-input-amount"/);
-  assert.match(html, /aria-label="打开交易面板"/);
-  assert.match(html, /aria-controls="bancor-trade-panel"/);
+  assert.match(html, /aria-label="最大化 K 线与交易区域"/);
+  assert.match(html, /aria-controls="bancor-market-workspace"/);
   assert.match(html, /aria-label="快速调整支付数量"/);
   assert.match(html, /aria-label="将当前数量减少 25%"/);
   assert.match(html, /aria-label="将当前数量减少 50%"/);
@@ -572,6 +575,8 @@ test("BANCOR renders the current interval without an open-candle text badge", ()
       intervalSeconds={60}
       priceDecimalPlaces={4}
       formatUnixDateTime={(value) => String(value ?? "")}
+      maximized={false}
+      onMaximizedChange={() => undefined}
       t={(zh) => zh}
     />,
   );
@@ -602,6 +607,8 @@ test("BANCOR keeps focused candle details out of the chart layout", () => {
       intervalSeconds={60}
       priceDecimalPlaces={12}
       formatUnixDateTime={() => "UNIQUE_CANDLE_TIMESTAMP"}
+      maximized={false}
+      onMaximizedChange={() => undefined}
       t={(zh) => zh}
     />,
   );
@@ -646,6 +653,8 @@ test("BANCOR candlesticks distinguish traded flat bars from neutral empty interv
       intervalSeconds={60}
       priceDecimalPlaces={12}
       formatUnixDateTime={(value) => String(value ?? "")}
+      maximized={false}
+      onMaximizedChange={() => undefined}
       t={(zh) => zh}
     />,
   );
@@ -655,15 +664,21 @@ test("BANCOR candlesticks distinguish traded flat bars from neutral empty interv
       intervalSeconds={300}
       priceDecimalPlaces={12}
       formatUnixDateTime={(value) => String(value ?? "")}
+      maximized
+      onMaximizedChange={() => undefined}
       t={(zh) => zh}
     />,
   );
 
   assert.match(minuteHtml, /data-bancor-chart-layer="one-minute-close-line"/);
   assert.match(minuteHtml, /<polyline[^>]+stroke="var\(--theme-chart-close-line\)"/);
-  assert.match(minuteHtml, /aria-label="最大化 K 线区域"/);
-  assert.match(minuteHtml, /aria-label="打开交易面板"/);
-  assert.match(minuteHtml, /aria-controls="bancor-trade-panel"/);
+  assert.match(minuteHtml, /data-bancor-chart-maximized="false"/);
+  assert.match(minuteHtml, /aria-label="最大化 K 线与交易区域"/);
+  assert.match(minuteHtml, /aria-controls="bancor-market-workspace"/);
+  assert.match(longerHtml, /data-bancor-chart-maximized="true"/);
+  assert.match(longerHtml, /aria-label="恢复市场布局"/);
+  assert.equal(bancorMarketWorkspaceClass(true), "bancor-market-workspace-maximized");
+  assert.match(bancorMarketWorkspaceClass(false), /lg:grid-cols-/);
   assert.equal((minuteHtml.match(/data-bancor-candle-body="true"/g) ?? []).length, 1);
   assert.equal((minuteHtml.match(/data-bancor-candle-gap="true"/g) ?? []).length, 1);
   assert.doesNotMatch(longerHtml, /one-minute-close-line/);
