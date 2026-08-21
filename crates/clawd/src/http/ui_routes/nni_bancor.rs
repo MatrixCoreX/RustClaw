@@ -2,7 +2,7 @@ use sha2::{Digest, Sha256};
 
 const NNI_BANCOR_CANDLE_INTERVALS: [u64; 8] =
     [60, 300, 900, 3_600, 14_400, 86_400, 604_800, 31_536_000];
-const NNI_BANCOR_DEFAULT_SLIPPAGE_BPS: u16 = 50;
+const NNI_BANCOR_DEFAULT_SLIPPAGE_BPS: u16 = 300;
 const NNI_BANCOR_MAX_SLIPPAGE_BPS: u16 = 5_000;
 const NNI_BANCOR_MARKET_TRADE_LIMIT: usize = 100;
 const NNI_BANCOR_CANDLE_PRICE_KIND: &str = "execution_average_usd_per_aic";
@@ -1493,7 +1493,7 @@ mod nni_bancor_unit_tests {
 
     #[test]
     fn slippage_allows_explicit_large_trade_protection_up_to_fifty_percent() {
-        assert_eq!(normalize_bancor_slippage_bps(None), Ok(50));
+        assert_eq!(normalize_bancor_slippage_bps(None), Ok(300));
         assert_eq!(normalize_bancor_slippage_bps(Some(0)), Ok(0));
         assert_eq!(normalize_bancor_slippage_bps(Some(5_000)), Ok(5_000));
         assert_eq!(

@@ -120,7 +120,7 @@ test("BANCOR formats NNI device admission errors for users", () => {
 });
 
 test("BANCOR accepts configurable slippage up to fifty percent", () => {
-  assert.equal(BANCOR_DEFAULT_SLIPPAGE_BPS, 50);
+  assert.equal(BANCOR_DEFAULT_SLIPPAGE_BPS, 300);
   assert.equal(BANCOR_MAX_SLIPPAGE_BPS, 5_000);
   assert.equal(parseBancorSlippagePercent("0"), 0);
   assert.equal(parseBancorSlippagePercent("0.50"), 50);
