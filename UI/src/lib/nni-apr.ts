@@ -21,6 +21,9 @@ export interface NniAprEstimate {
 
 export interface NniPeriodAprEstimate {
   window: NniRewardWindowSummary;
+  coverageStartUnix: number;
+  coverageEndUnix: number;
+  coverageSeconds: number;
   rewardAic: number;
   aicPriceUsd: number;
   windowValueUsd: number;
@@ -127,6 +130,19 @@ export function calculateNniPeriodAprEstimate({
   const rewardAic = Number(window.total_reward_aic);
   const aicPriceUsd = Number(market.marginal_price_usd_per_aic);
   const { window_seconds: windowSeconds } = window;
+  const firstRewardStart = rewards?.first_period_start_unix;
+  const latestRewardEnd = rewards?.latest_period_end_unix;
+  const hasRewardCoverageBounds = Number.isSafeInteger(firstRewardStart)
+    && Number(firstRewardStart) >= 0
+    && Number.isSafeInteger(latestRewardEnd)
+    && Number(latestRewardEnd) >= 0;
+  const coverageStartUnix = hasRewardCoverageBounds
+    ? Math.max(window.window_start_unix, Number(firstRewardStart))
+    : window.window_start_unix;
+  const coverageEndUnix = hasRewardCoverageBounds
+    ? Math.min(window.window_end_unix, Number(latestRewardEnd))
+    : window.window_end_unix;
+  const coverageSeconds = coverageEndUnix - coverageStartUnix;
   if (
     !Number.isFinite(rewardAic)
     || rewardAic < 0
@@ -135,17 +151,24 @@ export function calculateNniPeriodAprEstimate({
     || !Number.isSafeInteger(windowSeconds)
     || windowSeconds <= 0
     || window.window_end_unix - window.window_start_unix !== windowSeconds
+    || !Number.isSafeInteger(coverageStartUnix)
+    || !Number.isSafeInteger(coverageEndUnix)
+    || !Number.isSafeInteger(coverageSeconds)
+    || coverageSeconds <= 0
   ) {
     return null;
   }
 
   const windowValueUsd = rewardAic * aicPriceUsd;
-  const aprBasisRewardUsd = windowValueUsd * (APR_REFERENCE_SECONDS / windowSeconds);
+  const aprBasisRewardUsd = windowValueUsd * (APR_REFERENCE_SECONDS / coverageSeconds);
   const aprPercent = (aprBasisRewardUsd / devicePrice) * 100;
   if (![windowValueUsd, aprBasisRewardUsd, aprPercent].every(Number.isFinite)) return null;
 
   return {
     window,
+    coverageStartUnix,
+    coverageEndUnix,
+    coverageSeconds,
     rewardAic,
     aicPriceUsd,
     windowValueUsd,

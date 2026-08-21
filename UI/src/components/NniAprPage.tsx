@@ -236,8 +236,8 @@ export function NniAprPage({
               <h2 className="text-base font-semibold text-white/90">{t("周期 APR", "Period APR")}</h2>
               <p className="mt-1 text-xs leading-5 text-white/45">
                 {t(
-                  "按所选窗口的累计奖励计算，并假定这些奖励 AIC 没有卖出。",
-                  "Uses total rewards in the selected window and assumes the rewarded AIC was not sold.",
+                  "按所选窗口的累计奖励计算，假定这些 AIC 没有卖出，并统一按当前池价格估值。",
+                  "Uses total rewards in the selected window, assumes the rewarded AIC was not sold, and values all of it at the current pool price.",
                 )}
               </p>
             </div>
@@ -277,14 +277,27 @@ export function NniAprPage({
           </div>
 
           <div className="mt-3 rounded-lg border border-white/10 bg-black/15 p-4 text-sm">
-            <p className="text-xs font-semibold text-white/45">{t("计算窗口", "Calculation window")}</p>
+            <p className="text-xs font-semibold text-white/45">{t("实际奖励覆盖", "Actual reward coverage")}</p>
             <p className="mt-2 text-white/80">
               {periodEstimate
-                ? `${formatUnixDateTime(periodEstimate.window.window_start_unix)} – ${formatUnixDateTime(periodEstimate.window.window_end_unix)}`
+                ? `${formatUnixDateTime(periodEstimate.coverageStartUnix)} – ${formatUnixDateTime(periodEstimate.coverageEndUnix)}`
                 : rewards?.reward_windows
                   ? t("当前窗口暂无可用数据", "No data is available for this window")
                   : t("所选 NNI 节点暂未提供周期奖励汇总", "The selected NNI node does not provide period reward summaries yet")}
             </p>
+            {periodEstimate ? (
+              <p className="mt-1 text-xs leading-5 text-white/45">
+                {periodEstimate.coverageSeconds < periodEstimate.window.window_seconds
+                  ? t(
+                    "设备奖励记录尚未覆盖完整所选窗口，APR 按已有记录的实际时长换算。",
+                    "The device does not yet have a complete selected window, so APR uses the actual duration covered by its reward records.",
+                  )
+                  : t(
+                    "设备奖励记录已覆盖完整所选窗口。",
+                    "The device reward records cover the complete selected window.",
+                  )}
+              </p>
+            ) : null}
           </div>
         </div>
 
