@@ -1587,16 +1587,17 @@
 
 .bancor-market-workspace-maximized .bancor-market-trade-panel {
   display: grid;
-  grid-template-columns: 7rem minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1fr) minmax(8rem, 0.72fr);
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: 7rem minmax(0, 1fr) minmax(0, 1.2fr) minmax(18rem, 1.7fr);
+  grid-template-rows: minmax(0, 1fr) auto;
   align-items: start;
-  gap: 0.5rem;
+  gap: 0.25rem 0.5rem;
   min-height: 0;
   overflow: hidden;
   padding: 0.625rem;
 }
 
 .bancor-market-workspace-maximized .bancor-trade-header {
+  grid-row: 1 / -1;
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
@@ -1623,6 +1624,21 @@
 .bancor-market-workspace-maximized .bancor-trade-action-panel {
   min-width: 0;
   min-height: 0;
+}
+
+.bancor-market-workspace-maximized .bancor-trade-account,
+.bancor-market-workspace-maximized .bancor-trade-order-panel {
+  grid-row: 1 / -1;
+}
+
+.bancor-market-workspace-maximized .bancor-trade-risk-panel {
+  grid-column: 4;
+  grid-row: 1;
+}
+
+.bancor-market-workspace-maximized .bancor-trade-action-panel {
+  grid-column: 4;
+  grid-row: 2;
 }
 
 .bancor-market-workspace-maximized .bancor-trade-account,
@@ -1808,7 +1824,7 @@
   min-height: 2.5rem;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 900px) {
   .bancor-market-workspace-maximized {
     grid-template-rows: minmax(17rem, 1fr) minmax(18rem, 42dvh);
   }
