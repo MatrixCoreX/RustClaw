@@ -372,7 +372,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /aria-pressed="true"[^>]*>标准<\/button>/);
   assert.match(html, /aria-pressed="false"[^>]*>SWAP<\/button>/);
   assert.match(html, /滑点保护与警戒/);
-  assert.match(html, /value="0\.50"/);
+  assert.match(html, /value="3\.00"/);
   assert.match(html, /价格影响超过此值时会标黄警告/);
   assert.match(html, /class="theme-primary-btn mt-3 w-full justify-center"[^>]*>卖出<\/button>/);
   assert.doesNotMatch(html, /红色表示上涨，绿色表示下跌/);
