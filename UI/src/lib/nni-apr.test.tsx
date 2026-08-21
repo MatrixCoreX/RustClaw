@@ -193,6 +193,34 @@ test("NNI period APR uses the complete selected reward window", () => {
   assert.equal(monthly.aprPercent, 182.5);
 });
 
+test("NNI period APR uses actual reward coverage before a selected window is complete", () => {
+  const partialRewards: NniRewardsResponse = {
+    ...rewards,
+    first_period_start_unix: 1_800_000_000,
+    latest_period_end_unix: 1_800_001_200,
+  };
+  const weekly = calculateNniPeriodAprEstimate({
+    devicePriceUsd: "1000",
+    rewards: partialRewards,
+    market,
+    windowKey: "week",
+  });
+  assert.ok(weekly);
+  assert.equal(weekly.coverageStartUnix, 1_800_000_000);
+  assert.equal(weekly.coverageEndUnix, 1_800_001_200);
+  assert.equal(weekly.coverageSeconds, 1_200);
+  assert.equal(weekly.windowValueUsd, 35);
+  assert.equal(weekly.aprBasisRewardUsd, 919_800);
+  assert.equal(weekly.aprPercent, 91_980);
+  const live = calculateNniAprEstimate({
+    devicePriceUsd: "1000",
+    rewards: partialRewards,
+    market,
+  });
+  assert.ok(live);
+  assert(weekly.aprPercent > live.aprPercent);
+});
+
 test("NNI APR rejects empty, zero, negative, and malformed device prices", () => {
   assert.equal(parsePositiveNniDevicePrice(""), null);
   assert.equal(parsePositiveNniDevicePrice("0"), null);
@@ -238,7 +266,8 @@ test("NNI APR page explains its inputs, refresh cadence, and estimate boundary",
   assert.match(markup, /周（最近 7 天）/);
   assert.match(markup, /月（最近 30 天）/);
   assert.match(markup, /年（最近 365 天）/);
-  assert.match(markup, /假定这些奖励 AIC 没有卖出/);
+  assert.match(markup, /假定这些 AIC 没有卖出/);
+  assert.match(markup, /统一按当前池价格估值/);
   assert.match(markup, /每 10 分钟自动刷新/);
   assert.match(markup, /不含复利、交易手续费和价格影响/);
   const prohibitedRiskTerm = String.fromCodePoint(0x5e74, 0x5316);
