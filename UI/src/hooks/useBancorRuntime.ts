@@ -268,8 +268,17 @@ export function formatBancorApiError(
   if (code === "nni_bancor_insufficient_usd_balance") {
     return t("USD 记账余额不足，请减少买入金额。", "Your USD account balance is too low. Reduce the buy amount.");
   }
-  if (code === "nni_bancor_quote_stale") {
-    return t("市场储备已经变化，请重新获取报价。", "Market reserves changed. Please request a new quote.");
+  if (code === "nni_bancor_slippage_exceeded") {
+    return t(
+      "价格变化已超出你设置的最低到账保护，本次交易未成交。请重新获取报价。",
+      "The price moved beyond your minimum-output protection, so the trade was not executed. Request a new quote.",
+    );
+  }
+  if (code === "nni_bancor_fee_limit_exceeded") {
+    return t(
+      "当前手续费已超过签名时允许的上限，本次交易未成交。请重新获取报价。",
+      "The current fee exceeds the signed maximum, so the trade was not executed. Request a new quote.",
+    );
   }
   if (code === "nni_bancor_auto_pause_threshold_reached" || code === "nni_bancor_usd_reserve_floor_reached") {
     return t("USD 储备接近安全下限，市场已自动暂停。请等待管理员检查储备。", "The USD reserve is near its safety limit, so the market paused automatically. Wait for an administrator to review the reserves.");
