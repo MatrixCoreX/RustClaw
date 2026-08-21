@@ -71,6 +71,11 @@ fn nni_capabilities_resolve_through_one_read_only_registry_surface() {
         ("nni.heartbeat_now", "heartbeat_now", json!({})),
         ("nni.network_stats", "network_stats", json!({"limit": 5})),
         ("nni.my_rewards", "my_rewards", json!({"limit": 5})),
+        (
+            "nni.reward_apr",
+            "reward_apr",
+            json!({"device_price_usd": "499"}),
+        ),
         ("nni.bancor_market", "bancor_market", json!({})),
         ("nni.bancor_account", "bancor_account", json!({"limit": 5})),
         (
@@ -106,7 +111,7 @@ fn nni_capabilities_resolve_through_one_read_only_registry_surface() {
 
     let registry = state.get_skills_registry().expect("skills registry");
     let capabilities = registry.planner_capabilities("nni");
-    assert_eq!(capabilities.len(), 13);
+    assert_eq!(capabilities.len(), 14);
     assert!(capabilities.iter().all(|mapping| !matches!(
         mapping.name.as_str(),
         "nni.buy" | "nni.sell" | "nni.trade" | "nni.bancor_trade"

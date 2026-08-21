@@ -9,6 +9,7 @@ enum InternalNniAction {
     HeartbeatNow,
     NetworkStats,
     MyRewards,
+    RewardApr,
     BancorMarket,
     BancorAccount,
     BancorMarketTrades,
@@ -27,6 +28,7 @@ impl InternalNniAction {
             Self::HeartbeatNow => "heartbeat_now",
             Self::NetworkStats => "network_stats",
             Self::MyRewards => "my_rewards",
+            Self::RewardApr => "reward_apr",
             Self::BancorMarket => "bancor_market",
             Self::BancorAccount => "bancor_account",
             Self::BancorMarketTrades => "bancor_market_trades",
@@ -42,6 +44,8 @@ struct InternalNniActionRequest {
     action: InternalNniAction,
     #[serde(default)]
     limit: Option<usize>,
+    #[serde(default)]
+    device_price_usd: Option<String>,
     #[serde(default)]
     interval: Option<String>,
     #[serde(default)]
@@ -62,6 +66,9 @@ fn validate_internal_nni_action_request(
     let mut supplied = Vec::new();
     if request.limit.is_some() {
         supplied.push("limit");
+    }
+    if request.device_price_usd.is_some() {
+        supplied.push("device_price_usd");
     }
     if request.interval.is_some() {
         supplied.push("interval");
@@ -85,6 +92,7 @@ fn validate_internal_nni_action_request(
         InternalNniAction::MyRewards
         | InternalNniAction::BancorAccount
         | InternalNniAction::BancorMarketTrades => &["limit"],
+        InternalNniAction::RewardApr => &["device_price_usd"],
         InternalNniAction::BancorCandles => &["limit", "interval", "end_time_ts"],
         InternalNniAction::BancorQuote => {
             &["side", "pay_asset", "pay_amount", "slippage_bps"]
@@ -95,10 +103,8 @@ fn validate_internal_nni_action_request(
         .into_iter()
         .filter(|field| !allowed.contains(field))
         .collect();
-    if invalid.is_empty() {
-        Ok(())
-    } else {
-        Err(
+    if !invalid.is_empty() {
+        return Err(
             NniSkillDomainError::new(
                 StatusCode::BAD_REQUEST,
                 "nni_argument_invalid",
@@ -106,8 +112,25 @@ fn validate_internal_nni_action_request(
                 json!({"action": request.action.as_str(), "invalid_fields": invalid}),
             )
             .pre_dispatch(Some("replan_arguments")),
-        )
+        );
     }
+    if matches!(request.action, InternalNniAction::RewardApr)
+        && request.device_price_usd.is_none()
+    {
+        return Err(
+            NniSkillDomainError::new(
+                StatusCode::BAD_REQUEST,
+                "nni_argument_invalid",
+                false,
+                json!({
+                    "action": request.action.as_str(),
+                    "missing_fields": ["device_price_usd"],
+                }),
+            )
+            .pre_dispatch(Some("replan_arguments")),
+        );
+    }
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -444,6 +467,253 @@ fn nni_skill_reward_result_truncated(object: &serde_json::Map<String, Value>) ->
         .and_then(Value::as_bool)
         .unwrap_or(false);
     page < total_pages || history_truncated
+}
+
+const NNI_APR_REFERENCE_SECONDS: u64 = 365 * 24 * 60 * 60;
+
+fn nni_skill_apr_input_error(field: &'static str) -> NniSkillDomainError {
+    NniSkillDomainError::new(
+        StatusCode::BAD_GATEWAY,
+        "nni_apr_inputs_invalid",
+        false,
+        json!({"field": field}),
+    )
+}
+
+fn nni_skill_apr_decimal(value: f64) -> Result<String, NniSkillDomainError> {
+    if !value.is_finite() || value < 0.0 {
+        return Err(nni_skill_apr_input_error("calculated_value"));
+    }
+    Ok(format!("{value:.8}"))
+}
+
+fn nni_skill_apr_metric(
+    reward_aic: f64,
+    aic_price_usd: f64,
+    coverage_seconds: u64,
+    device_price_usd: f64,
+) -> Result<Value, NniSkillDomainError> {
+    if !reward_aic.is_finite()
+        || reward_aic < 0.0
+        || !aic_price_usd.is_finite()
+        || aic_price_usd <= 0.0
+        || coverage_seconds == 0
+        || !device_price_usd.is_finite()
+        || device_price_usd <= 0.0
+    {
+        return Err(nni_skill_apr_input_error("calculation_basis"));
+    }
+    let reward_value_usd = reward_aic * aic_price_usd;
+    let annualized_reward_usd =
+        reward_value_usd * (NNI_APR_REFERENCE_SECONDS as f64 / coverage_seconds as f64);
+    let apr_percent = annualized_reward_usd / device_price_usd * 100.0;
+    Ok(json!({
+        "coverage_seconds": coverage_seconds,
+        "reward_aic": nni_skill_apr_decimal(reward_aic)?,
+        "reward_value_usd": nni_skill_apr_decimal(reward_value_usd)?,
+        "annualized_reward_usd": nni_skill_apr_decimal(annualized_reward_usd)?,
+        "apr_percent": nni_skill_apr_decimal(apr_percent)?,
+    }))
+}
+
+fn nni_skill_reward_apr_projection(
+    device_price_usd: &str,
+    rewards: &Value,
+    market: &Value,
+) -> Result<Value, NniSkillDomainError> {
+    let (device_price_usd, _) = normalize_bancor_amount(device_price_usd).map_err(|_| {
+        NniSkillDomainError::new(
+            StatusCode::BAD_REQUEST,
+            "nni_argument_invalid",
+            false,
+            json!({"field": "device_price_usd"}),
+        )
+        .pre_dispatch(Some("replan_arguments"))
+    })?;
+    let device_price_value = device_price_usd
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .ok_or_else(|| nni_skill_apr_input_error("device_price_usd"))?;
+    let price_text = market
+        .get("marginal_price_usd_per_aic")
+        .and_then(Value::as_str)
+        .ok_or_else(|| nni_skill_apr_input_error("marginal_price_usd_per_aic"))?;
+    let price_value = price_text
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .ok_or_else(|| nni_skill_apr_input_error("marginal_price_usd_per_aic"))?;
+
+    let reward_node = rewards.get("node_url").and_then(Value::as_str);
+    let market_node = market.get("node_url").and_then(Value::as_str);
+    if reward_node.is_some() && market_node.is_some() && reward_node != market_node {
+        return Err(NniSkillDomainError::new(
+            StatusCode::BAD_GATEWAY,
+            "nni_apr_snapshot_inconsistent",
+            true,
+            json!({}),
+        ));
+    }
+
+    let records = rewards
+        .get("records")
+        .and_then(Value::as_array)
+        .ok_or_else(|| nni_skill_apr_input_error("records"))?;
+    let latest_record = records
+        .iter()
+        .filter_map(|record| {
+            Some((
+                record.get("period_end_unix")?.as_u64()?,
+                record.get("awarded_at_unix")?.as_u64()?,
+                record,
+            ))
+        })
+        .max_by_key(|(period_end, awarded_at, _)| (*period_end, *awarded_at))
+        .map(|(_, _, record)| record);
+    if !records.is_empty() && latest_record.is_none() {
+        return Err(nni_skill_apr_input_error("records"));
+    }
+
+    let live = latest_record
+        .map(|record| {
+            let period_start = record
+                .get("period_start_unix")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| nni_skill_apr_input_error("records.period_start_unix"))?;
+            let period_end = record
+                .get("period_end_unix")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| nni_skill_apr_input_error("records.period_end_unix"))?;
+            let coverage_seconds = period_end
+                .checked_sub(period_start)
+                .filter(|seconds| *seconds > 0)
+                .ok_or_else(|| nni_skill_apr_input_error("records.period_range"))?;
+            let reward_aic = record
+                .get("reward_aic")
+                .and_then(Value::as_str)
+                .and_then(|value| value.parse::<f64>().ok())
+                .ok_or_else(|| nni_skill_apr_input_error("records.reward_aic"))?;
+            let mut metric = nni_skill_apr_metric(
+                reward_aic,
+                price_value,
+                coverage_seconds,
+                device_price_value,
+            )?;
+            if let Some(object) = metric.as_object_mut() {
+                object.insert("basis".to_string(), json!("latest_reward_period"));
+                object.insert("period_start_unix".to_string(), json!(period_start));
+                object.insert("period_end_unix".to_string(), json!(period_end));
+                object.insert(
+                    "awarded_at_unix".to_string(),
+                    record.get("awarded_at_unix").cloned().unwrap_or(Value::Null),
+                );
+            }
+            Ok(metric)
+        })
+        .transpose()?;
+
+    let first_period_start = rewards
+        .get("first_period_start_unix")
+        .and_then(Value::as_u64);
+    let latest_period_end = rewards
+        .get("latest_period_end_unix")
+        .and_then(Value::as_u64);
+    let mut periods = Vec::new();
+    if let (Some(first_period_start), Some(latest_period_end), Some(windows)) = (
+        first_period_start,
+        latest_period_end,
+        rewards.get("reward_windows").and_then(Value::as_array),
+    ) {
+        for key in ["week", "month", "year"] {
+            let Some(window) = windows
+                .iter()
+                .find(|window| window.get("key").and_then(Value::as_str) == Some(key))
+            else {
+                continue;
+            };
+            let window_start = window
+                .get("window_start_unix")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| nni_skill_apr_input_error("reward_windows.window_start_unix"))?;
+            let window_end = window
+                .get("window_end_unix")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| nni_skill_apr_input_error("reward_windows.window_end_unix"))?;
+            let window_seconds = window
+                .get("window_seconds")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| nni_skill_apr_input_error("reward_windows.window_seconds"))?;
+            let coverage_start = window_start.max(first_period_start);
+            let coverage_end = window_end.min(latest_period_end);
+            let Some(coverage_seconds) = coverage_end
+                .checked_sub(coverage_start)
+                .filter(|seconds| *seconds > 0)
+            else {
+                continue;
+            };
+            let reward_aic = window
+                .get("total_reward_aic")
+                .and_then(Value::as_str)
+                .and_then(|value| value.parse::<f64>().ok())
+                .ok_or_else(|| nni_skill_apr_input_error("reward_windows.total_reward_aic"))?;
+            let mut metric = nni_skill_apr_metric(
+                reward_aic,
+                price_value,
+                coverage_seconds,
+                device_price_value,
+            )?;
+            if let Some(object) = metric.as_object_mut() {
+                object.insert("basis".to_string(), json!("settled_reward_window"));
+                object.insert("key".to_string(), json!(key));
+                object.insert("window_seconds".to_string(), json!(window_seconds));
+                object.insert("coverage_start_unix".to_string(), json!(coverage_start));
+                object.insert("coverage_end_unix".to_string(), json!(coverage_end));
+                object.insert(
+                    "partial_coverage".to_string(),
+                    json!(coverage_seconds < window_seconds),
+                );
+                object.insert(
+                    "reward_grant_count".to_string(),
+                    window
+                        .get("reward_grant_count")
+                        .cloned()
+                        .unwrap_or(Value::Null),
+                );
+            }
+            periods.push(metric);
+        }
+    }
+
+    let calculation_status = match (live.is_some(), periods.is_empty()) {
+        (true, false) => "available",
+        (true, true) | (false, false) => "partial",
+        (false, true) => "insufficient_reward_history",
+    };
+    Ok(json!({
+        "schema_version": 1,
+        "status": "reward_apr_estimate",
+        "calculation_status": calculation_status,
+        "device_price_usd": device_price_usd,
+        "market": {
+            "marginal_price_usd_per_aic": price_text,
+            "updated_at_unix": market.get("updated_at_unix").cloned().unwrap_or(Value::Null),
+        },
+        "calculation_basis": {
+            "annual_reference_seconds": NNI_APR_REFERENCE_SECONDS,
+            "valuation": "current_pool_marginal_price",
+            "compounding_included": false,
+            "fees_included": false,
+            "slippage_included": false,
+        },
+        "reward_coverage": {
+            "first_period_start_unix": first_period_start,
+            "latest_period_end_unix": latest_period_end,
+        },
+        "live": live,
+        "periods": periods,
+        "node_url": reward_node.or(market_node),
+    }))
 }
 
 async fn nni_skill_bancor_account_data(
@@ -1022,6 +1292,32 @@ async fn execute_internal_nni_action(
                 nni_skill_limit(request.limit, 20, 100)?,
             )
             .await
+        }
+        InternalNniAction::RewardApr => {
+            let device = nni_device_snapshot(state, false).await;
+            nni_skill_require_signer(&device)?;
+            let device_price_usd = request.device_price_usd.as_deref().ok_or_else(|| {
+                NniSkillDomainError::new(
+                    StatusCode::BAD_REQUEST,
+                    "nni_argument_invalid",
+                    false,
+                    json!({"missing_fields": ["device_price_usd"]}),
+                )
+                .pre_dispatch(Some("replan_arguments"))
+            })?;
+            let (rewards, market) = tokio::try_join!(
+                nni_skill_rewards_data(state, &user_key, 1),
+                nni_skill_public_node_data(state, "bancor/market", None),
+            )?;
+            validate_bancor_market_response(&market).map_err(|error| {
+                NniSkillDomainError::new(
+                    StatusCode::BAD_GATEWAY,
+                    error,
+                    false,
+                    json!({"response_status": market.get("status")}),
+                )
+            })?;
+            nni_skill_reward_apr_projection(device_price_usd, &rewards, &market)
         }
         InternalNniAction::BancorMarket => {
             let data = nni_skill_public_node_data(

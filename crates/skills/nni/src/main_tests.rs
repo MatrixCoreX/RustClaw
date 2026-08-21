@@ -17,6 +17,7 @@ fn all_supported_actions_have_stable_tokens() {
         "heartbeat_now",
         "network_stats",
         "my_rewards",
+        "reward_apr",
         "bancor_market",
         "bancor_account",
         "bancor_market_trades",
@@ -60,6 +61,29 @@ fn quote_arguments_preserve_decimal_strings() {
     assert_eq!(request.args.pay_amount.as_deref(), Some("12.3400"));
     assert_eq!(request.args.slippage_bps, Some(50));
     assert!(request.args.validate().is_ok());
+}
+
+#[test]
+fn reward_apr_requires_and_forwards_device_price() {
+    let request: Request = serde_json::from_str(&request_for(
+        "reward_apr",
+        r#", "device_price_usd":"499.99000000""#,
+    ))
+    .expect("decode APR request");
+    assert_eq!(
+        request.args.device_price_usd.as_deref(),
+        Some("499.99000000")
+    );
+    assert!(request.args.validate().is_ok());
+
+    let missing: Request =
+        serde_json::from_str(&request_for("reward_apr", "")).expect("decode incomplete APR");
+    let error = missing
+        .args
+        .validate()
+        .expect_err("APR requires a device price");
+    assert_eq!(error.code, "nni_argument_invalid");
+    assert_eq!(error.details["missing_fields"], json!(["device_price_usd"]));
 }
 
 #[test]

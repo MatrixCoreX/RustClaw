@@ -64,6 +64,7 @@ fn internal_nni_request(action: InternalNniAction) -> InternalNniActionRequest {
     InternalNniActionRequest {
         action,
         limit: None,
+        device_price_usd: None,
         interval: None,
         end_time_ts: None,
         side: None,
@@ -71,6 +72,84 @@ fn internal_nni_request(action: InternalNniAction) -> InternalNniActionRequest {
         pay_amount: None,
         slippage_bps: None,
     }
+}
+
+fn reward_apr_fixture() -> (Value, Value) {
+    let rewards = json!({
+        "node_url": "https://nni.example.test",
+        "first_period_start_unix": 1_000,
+        "latest_period_end_unix": 87_400,
+        "records": [{
+            "period_start_unix": 86_800,
+            "period_end_unix": 87_400,
+            "reward_aic": "10.00000000",
+            "awarded_at_unix": 87_401,
+        }],
+        "reward_windows": [
+            {
+                "key": "week",
+                "window_seconds": 604_800,
+                "window_start_unix": 0,
+                "window_end_unix": 604_800,
+                "total_reward_aic": "100.00000000",
+                "reward_grant_count": 144,
+            },
+            {
+                "key": "month",
+                "window_seconds": 2_592_000,
+                "window_start_unix": 0,
+                "window_end_unix": 2_592_000,
+                "total_reward_aic": "100.00000000",
+                "reward_grant_count": 144,
+            },
+            {
+                "key": "year",
+                "window_seconds": 31_536_000,
+                "window_start_unix": 0,
+                "window_end_unix": 31_536_000,
+                "total_reward_aic": "100.00000000",
+                "reward_grant_count": 144,
+            }
+        ]
+    });
+    let market = json!({
+        "node_url": "https://nni.example.test",
+        "marginal_price_usd_per_aic": "2.00000000",
+        "updated_at_unix": 87_450,
+    });
+    (rewards, market)
+}
+
+#[test]
+fn reward_apr_uses_latest_period_and_actual_window_coverage() {
+    let (rewards, market) = reward_apr_fixture();
+    let projection = nni_skill_reward_apr_projection("1000", &rewards, &market)
+        .expect("calculate APR projection");
+
+    assert_eq!(projection["calculation_status"], "available");
+    assert_eq!(projection["device_price_usd"], "1000.00000000");
+    assert_eq!(projection["live"]["coverage_seconds"], 600);
+    assert_eq!(projection["live"]["apr_percent"], "105120.00000000");
+    assert_eq!(projection["periods"][0]["key"], "week");
+    assert_eq!(projection["periods"][0]["coverage_seconds"], 86_400);
+    assert_eq!(projection["periods"][0]["partial_coverage"], true);
+    assert_eq!(projection["periods"][0]["apr_percent"], "7300.00000000");
+    assert_eq!(projection["calculation_basis"]["fees_included"], false);
+    assert_eq!(projection["calculation_basis"]["slippage_included"], false);
+}
+
+#[test]
+fn reward_apr_rejects_invalid_price_and_cross_node_snapshots() {
+    let (rewards, mut market) = reward_apr_fixture();
+    let invalid_price = nni_skill_reward_apr_projection("0", &rewards, &market)
+        .expect_err("zero device price must be rejected");
+    assert_eq!(invalid_price.error_code, "nni_argument_invalid");
+
+    market["node_url"] = json!("https://other.example.test");
+    let inconsistent = nni_skill_reward_apr_projection("1000", &rewards, &market)
+        .expect_err("cross-node observations must not be combined");
+    assert_eq!(inconsistent.error_code, "nni_apr_snapshot_inconsistent");
+    assert!(inconsistent.retryable);
 }
 
 fn isolated_nni_state(root: &std::path::Path) -> AppState {

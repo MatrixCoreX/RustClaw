@@ -255,6 +255,18 @@ fn answer_verifier_does_not_invent_configurable_token_mappings() {
 }
 
 #[test]
+fn answer_verifier_accepts_grounded_required_input_clarification() {
+    let overlay = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../prompts/layers/overlays/answer_verifier_prompt.md");
+    let prompt = std::fs::read_to_string(overlay).expect("read answer verifier prompt");
+
+    assert!(prompt.contains("completed clarification"));
+    assert!(prompt.contains("schema declaration is sufficient machine-contract evidence"));
+    assert!(prompt.contains("never require an intentionally invalid capability call"));
+    assert!(prompt.contains("set `pass=true`"));
+}
+
+#[test]
 fn planner_and_verifier_reject_truncated_search_as_exhaustive_inventory() {
     let overlays = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts/layers/overlays");
     let single = std::fs::read_to_string(overlays.join("single_plan_execution_prompt.md"))
