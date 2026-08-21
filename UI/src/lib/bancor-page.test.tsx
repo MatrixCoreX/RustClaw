@@ -357,6 +357,10 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /立即刷新 K 线/);
   assert.match(html, /aria-label="交易模式"/);
   assert.match(html, /id="bancor-trade-panel"/);
+  assert.match(html, /bancor-trade-account/);
+  assert.match(html, /bancor-trade-order-panel/);
+  assert.match(html, /bancor-trade-risk-panel/);
+  assert.match(html, /bancor-trade-action-panel/);
   assert.match(html, /id="bancor-standard-input-amount"/);
   assert.match(html, /aria-label="最大化 K 线与交易区域"/);
   assert.match(html, /aria-controls="bancor-market-workspace"/);
