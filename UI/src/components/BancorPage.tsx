@@ -724,7 +724,7 @@ export function BancorPage({
         </section>
 
         <div id="bancor-trade-panel" className="bancor-market-trade-panel theme-shadow-card scroll-mt-4 p-4 sm:p-5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="bancor-trade-header flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <ArrowDownUp className="h-5 w-5 text-sky-300" />
               <h2 className="text-lg font-semibold text-white">{t("交易", "Trade")}</h2>
@@ -743,7 +743,7 @@ export function BancorPage({
               ))}
             </div>
           </div>
-          <div className="mt-3 rounded-xl border border-white/8 bg-white/[0.025] p-3">
+          <div className="bancor-trade-account mt-3 rounded-xl border border-white/8 bg-white/[0.025] p-3">
             {selectedAssetAccount ? (
               <label className="mb-3 grid gap-1.5" data-bancor-account-selector="true">
                 <span className="text-xs font-medium text-white/55">{t("交易账户", "Trading account")}</span>
@@ -805,8 +805,9 @@ export function BancorPage({
             </div>
           </div>
 
-          {tradeLayout === "standard" ? (
-            <>
+          <div className="bancor-trade-order-panel">
+            {tradeLayout === "standard" ? (
+              <>
               <div className="mt-3 grid grid-cols-2 rounded-xl bg-white/5 p-1">
                 {(["sell", "buy"] as const).map((value) => (
                   <button
@@ -855,113 +856,118 @@ export function BancorPage({
                   }}
                 />
               </div>
-            </>
-          ) : (
-            <BancorSwapTradePanel
-              t={t}
-              side={side}
-              inputAmount={inputAmount}
-              inputAsset={inputAsset}
-              inputBalance={inputBalance ?? null}
-              outputAsset={outputAsset}
-              outputAmount={quotedOutput}
-              onInputChange={(value) => {
-                setInputAmount(value);
-                clearQuote();
-              }}
-              onFillBalance={() => inputBalance && fillBalance(side, inputBalance)}
-              onFlip={() => changeSide(side === "sell" ? "buy" : "sell")}
-            />
-          )}
-          <div className="mt-3 rounded-xl border border-white/8 bg-white/[0.025] p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <label htmlFor="bancor-slippage-percent" className="text-sm font-medium text-white/70">
-                {t("滑点保护与警戒", "Slippage protection and warning")}
-              </label>
-              <div className="flex flex-wrap gap-1.5" role="group" aria-label={t("常用滑点", "Common slippage settings")}>
-                {["0.50", "1.00", "3.00", "5.00"].map((value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    aria-pressed={slippagePercent === value}
-                    className={`rounded-lg border px-2 py-1 text-xs transition ${slippagePercent === value ? "border-sky-300/35 bg-sky-400/15 text-sky-100" : "border-white/8 text-white/50 hover:text-white/75"}`}
-                    onClick={() => changeSlippage(value)}
-                  >
-                    {Number(value).toFixed(2)}%
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="mt-2 flex items-center rounded-lg border border-white/10 bg-black/10 px-3 focus-within:border-sky-400/50">
-              <input
-                id="bancor-slippage-percent"
-                value={slippagePercent}
-                inputMode="decimal"
-                aria-invalid={Boolean(slippageError)}
-                className="min-w-0 flex-1 bg-transparent py-2 text-sm text-white outline-none"
-                onChange={(event) => changeSlippage(event.target.value)}
+              </>
+            ) : (
+              <BancorSwapTradePanel
+                t={t}
+                side={side}
+                inputAmount={inputAmount}
+                inputAsset={inputAsset}
+                inputBalance={inputBalance ?? null}
+                outputAsset={outputAsset}
+                outputAmount={quotedOutput}
+                onInputChange={(value) => {
+                  setInputAmount(value);
+                  clearQuote();
+                }}
+                onFillBalance={() => inputBalance && fillBalance(side, inputBalance)}
+                onFlip={() => changeSide(side === "sell" ? "buy" : "sell")}
               />
-              <span className="text-sm text-white/55">%</span>
-            </div>
-            <p className="mt-1.5 text-xs leading-4 text-white/45">
-              {t("用于最低到账保护；报价的价格影响超过此值时会标黄警告，但你仍可确认继续。", "Protects the minimum output. A quote whose price impact exceeds this value is highlighted as a warning, but you may still confirm it.")}
-            </p>
-            {slippageError ? <p className="mt-1 text-xs text-red-200" role="alert">{slippageError}</p> : null}
-          </div>
-          {inputError ? (
-            <p className="mt-2 text-xs leading-5 text-red-200" role="alert">{inputError}</p>
-          ) : null}
-          {estimatedInputFee ? (
-            <p className="mt-2 text-xs leading-5 text-white/50">
-              {t("预计手续费", "Estimated fee")}：{estimatedInputFee} {inputAsset}
-              {market ? ` · ${(market.fee_bps / 100).toFixed(2)}%` : ""}
-            </p>
-          ) : null}
-
-          <button
-            type="button"
-            className="theme-primary-btn mt-3 w-full justify-center"
-            disabled={!tradingReady || !inputAmount.trim() || Boolean(inputErrorCode) || slippageBps === null || quoteLoading || tradeLoading}
-            onClick={() => slippageBps !== null && void preview(
-              side,
-              inputAmount,
-              slippageBps,
-              allowTradeWithoutLoadedAccount,
             )}
-          >
-            {quoteLoading
-              ? t("正在计算...", "Calculating...")
-              : side === "sell"
-                ? t("卖出", "Sell")
-                : t("买入", "Buy")}
-          </button>
-          {!marketOpen ? (
-            <p className="mt-3 text-xs leading-5 text-amber-200/80">
-              {t("管理员尚未开启市场，因此现在只能查看储备和账户。", "The market is not enabled by the administrator, so only reserves and account data are available.")}
-            </p>
-          ) : null}
-          {marketOpen && !hardwareSigningReady ? (
-            <p className="mt-3 text-xs leading-5 text-amber-200/80">
-              {assetSigningReady
-                ? t(
-                  "当前可使用所选账户的资产密钥签名交易。",
-                  "You can currently trade by signing with the asset key for the selected account.",
-                )
-                : t(
-                  "请选择并准备一种可用的账户签名方式后再交易。",
-                  "Select and prepare an available account signing method before trading.",
-                )}
-            </p>
-          ) : null}
-
-          {lastTrade ? (
-            <div className="mt-4 rounded-xl border border-emerald-400/20 bg-emerald-400/5 p-4 text-sm text-emerald-50">
-              {t("最近成交：", "Latest trade: ")}
-              <NniDecimalAmount value={`${formatBancorAssetAmountForDisplay(lastTrade.trade.input_amount, lastTrade.trade.input_asset)} ${lastTrade.trade.input_asset}`} />
-              {" → "}
-              <NniDecimalAmount value={`${formatBancorAssetAmountForDisplay(lastTrade.trade.output_amount, lastTrade.trade.output_asset)} ${lastTrade.trade.output_asset}`} />
+          </div>
+          <div className="bancor-trade-risk-panel">
+            <div className="mt-3 rounded-xl border border-white/8 bg-white/[0.025] p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label htmlFor="bancor-slippage-percent" className="text-sm font-medium text-white/70">
+                  {t("滑点保护与警戒", "Slippage protection and warning")}
+                </label>
+                <div className="flex flex-wrap gap-1.5" role="group" aria-label={t("常用滑点", "Common slippage settings")}>
+                  {["0.50", "1.00", "3.00", "5.00"].map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      aria-pressed={slippagePercent === value}
+                      className={`rounded-lg border px-2 py-1 text-xs transition ${slippagePercent === value ? "border-sky-300/35 bg-sky-400/15 text-sky-100" : "border-white/8 text-white/50 hover:text-white/75"}`}
+                      onClick={() => changeSlippage(value)}
+                    >
+                      {Number(value).toFixed(2)}%
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="mt-2 flex items-center rounded-lg border border-white/10 bg-black/10 px-3 focus-within:border-sky-400/50">
+                <input
+                  id="bancor-slippage-percent"
+                  value={slippagePercent}
+                  inputMode="decimal"
+                  aria-invalid={Boolean(slippageError)}
+                  className="min-w-0 flex-1 bg-transparent py-2 text-sm text-white outline-none"
+                  onChange={(event) => changeSlippage(event.target.value)}
+                />
+                <span className="text-sm text-white/55">%</span>
+              </div>
+              <p className="mt-1.5 text-xs leading-4 text-white/45">
+                {t("用于最低到账保护；报价的价格影响超过此值时会标黄警告，但你仍可确认继续。", "Protects the minimum output. A quote whose price impact exceeds this value is highlighted as a warning, but you may still confirm it.")}
+              </p>
+              {slippageError ? <p className="mt-1 text-xs text-red-200" role="alert">{slippageError}</p> : null}
             </div>
-          ) : null}
+            {inputError ? (
+              <p className="mt-2 text-xs leading-5 text-red-200" role="alert">{inputError}</p>
+            ) : null}
+            {estimatedInputFee ? (
+              <p className="mt-2 text-xs leading-5 text-white/50">
+                {t("预计手续费", "Estimated fee")}：{estimatedInputFee} {inputAsset}
+                {market ? ` · ${(market.fee_bps / 100).toFixed(2)}%` : ""}
+              </p>
+            ) : null}
+          </div>
+
+          <div className="bancor-trade-action-panel">
+            <button
+              type="button"
+              className="theme-primary-btn mt-3 w-full justify-center"
+              disabled={!tradingReady || !inputAmount.trim() || Boolean(inputErrorCode) || slippageBps === null || quoteLoading || tradeLoading}
+              onClick={() => slippageBps !== null && void preview(
+                side,
+                inputAmount,
+                slippageBps,
+                allowTradeWithoutLoadedAccount,
+              )}
+            >
+              {quoteLoading
+                ? t("正在计算...", "Calculating...")
+                : side === "sell"
+                  ? t("卖出", "Sell")
+                  : t("买入", "Buy")}
+            </button>
+            {!marketOpen ? (
+              <p className="mt-3 text-xs leading-5 text-amber-200/80">
+                {t("管理员尚未开启市场，因此现在只能查看储备和账户。", "The market is not enabled by the administrator, so only reserves and account data are available.")}
+              </p>
+            ) : null}
+            {marketOpen && !hardwareSigningReady ? (
+              <p className="mt-3 text-xs leading-5 text-amber-200/80">
+                {assetSigningReady
+                  ? t(
+                    "当前可使用所选账户的资产密钥签名交易。",
+                    "You can currently trade by signing with the asset key for the selected account.",
+                  )
+                  : t(
+                    "请选择并准备一种可用的账户签名方式后再交易。",
+                    "Select and prepare an available account signing method before trading.",
+                  )}
+              </p>
+            ) : null}
+
+            {lastTrade ? (
+              <div className="mt-4 rounded-xl border border-emerald-400/20 bg-emerald-400/5 p-4 text-sm text-emerald-50">
+                {t("最近成交：", "Latest trade: ")}
+                <NniDecimalAmount value={`${formatBancorAssetAmountForDisplay(lastTrade.trade.input_amount, lastTrade.trade.input_asset)} ${lastTrade.trade.input_asset}`} />
+                {" → "}
+                <NniDecimalAmount value={`${formatBancorAssetAmountForDisplay(lastTrade.trade.output_amount, lastTrade.trade.output_asset)} ${lastTrade.trade.output_asset}`} />
+              </div>
+            ) : null}
+          </div>
         </div>
       </section>
 
