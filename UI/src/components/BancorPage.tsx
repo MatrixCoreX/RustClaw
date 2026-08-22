@@ -2200,6 +2200,7 @@ function BalanceLine({
 }) {
   const displayValue = formatBancorBalanceAmount(value);
   const fullValue = formatBancorBalanceHoverAmount(value);
+  const hoverText = `${label}: ${fullValue}\n${actionLabel}`;
   const valueSizeClass = balanceValueSizeClass(displayValue);
   return (
     <button
@@ -2207,13 +2208,13 @@ function BalanceLine({
       className="group min-w-0 max-w-full overflow-hidden rounded-lg border border-white/8 bg-white/[0.025] px-3 py-2 text-left transition enabled:hover:border-sky-300/30 enabled:hover:bg-sky-400/[0.07] disabled:cursor-default"
       disabled={disabled}
       onClick={onClick}
-      title={actionLabel}
+      title={hoverText}
       aria-label={`${actionLabel}: ${fullValue}`}
     >
       <span className="text-xs text-white/45">{label}</span>
       <span
         className={`mt-1 block max-w-full break-all font-mono font-semibold leading-5 text-white ${valueSizeClass}`}
-        title={fullValue}
+        title={hoverText}
         data-bancor-balance-full-value={fullValue}
       >
         <NniDecimalAmount value={displayValue} shrinkFraction={false} />
