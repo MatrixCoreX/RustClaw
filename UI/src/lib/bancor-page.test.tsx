@@ -351,6 +351,8 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /group min-w-0 max-w-full overflow-hidden/);
   assert.match(html, /title="AIC: 100\n点击填入全部 AIC 余额"/);
   assert.match(html, /title="USD: 5\n点击填入全部 USD 余额"/);
+  assert.equal((html.match(/title="AIC: 100\n点击填入全部 AIC 余额"/g) ?? []).length, 3);
+  assert.equal((html.match(/title="USD: 5\n点击填入全部 USD 余额"/g) ?? []).length, 3);
   assert.match(html, /data-bancor-balance-full-value="100"/);
   assert.match(html, /data-bancor-balance-full-value="5"/);
   assert.match(html, /data-nni-decimal-amount="100\.00"[^>]*data-nni-decimal-fraction-size="normal"/);

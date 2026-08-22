@@ -2217,7 +2217,7 @@ function BalanceLine({
         title={hoverText}
         data-bancor-balance-full-value={fullValue}
       >
-        <NniDecimalAmount value={displayValue} shrinkFraction={false} />
+        <NniDecimalAmount value={displayValue} shrinkFraction={false} title={hoverText} />
       </span>
     </button>
   );

@@ -24,3 +24,12 @@ test("NNI price and fee values can retain a normal-size fraction", () => {
   assert.match(html, />0\.00010000 USD<\/span>/);
   assert.doesNotMatch(html, /class="nni-decimal-fraction"/);
 });
+
+test("NNI decimal amounts can expose a more precise hover value", () => {
+  const html = renderToStaticMarkup(
+    <NniDecimalAmount value="9.99" shrinkFraction={false} title="9.999" />,
+  );
+  assert.match(html, /data-nni-decimal-amount="9\.99"/);
+  assert.match(html, /title="9\.999"/);
+  assert.doesNotMatch(html, /title="9\.99"/);
+});
