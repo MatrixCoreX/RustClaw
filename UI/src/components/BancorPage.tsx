@@ -887,7 +887,7 @@ export function BancorPage({
           <div className="bancor-trade-order-panel">
             {tradeLayout === "standard" ? (
               <>
-              <div className="bancor-trade-side-tabs mt-3 grid grid-cols-2 rounded-xl border border-white/10 bg-white/5 p-1 shadow-inner">
+              <div className="bancor-trade-side-tabs mt-3 grid grid-cols-2 rounded-xl border border-white/10 bg-white/5 p-1">
                 {(["sell", "buy"] as const).map((value) => (
                   <button
                     key={value}

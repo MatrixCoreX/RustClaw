@@ -1520,8 +1520,7 @@
 
 .bancor-trade-side-button {
   border: 1px solid transparent;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease, color 150ms ease, transform 150ms ease;
+  transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease, transform 150ms ease;
 }
 
 .bancor-trade-side-button:hover:not(:disabled) {
@@ -1532,15 +1531,10 @@
 .bancor-trade-side-button[data-selected="true"] {
   border-color: color-mix(in srgb, var(--theme-focus-ring) 56%, var(--theme-border));
   background: color-mix(in srgb, var(--theme-focus-ring) 18%, var(--theme-card));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.16),
-    0 3px 0 color-mix(in srgb, var(--theme-focus-ring) 28%, rgba(0, 0, 0, 0.48)),
-    0 8px 16px color-mix(in srgb, var(--theme-focus-ring) 18%, transparent);
   transform: translateY(-1px);
 }
 
 .bancor-trade-side-button:active:not(:disabled) {
-  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.2);
   transform: translateY(1px);
 }
 
@@ -1558,37 +1552,24 @@
   border-radius: 0.5rem;
   padding: 0.7rem 1rem;
   background: linear-gradient(180deg, var(--theme-primary-btn-start-hover) 0%, var(--theme-primary-btn-end) 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.28),
-    0 4px 0 color-mix(in srgb, var(--theme-primary-btn-end) 68%, black 32%),
-    0 11px 22px color-mix(in srgb, var(--theme-primary-btn-end) 28%, transparent);
   color: white;
   font-size: 0.9375rem;
   font-weight: 700;
-  transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease, filter 150ms ease, transform 150ms ease;
+  transition: border-color 150ms ease, background 150ms ease, filter 150ms ease, transform 150ms ease;
 }
 
 .bancor-trade-submit-button:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--theme-primary-btn-start-hover) 82%, white 18%);
   background: linear-gradient(180deg, var(--theme-primary-btn-start-hover) 0%, var(--theme-primary-btn-end-hover) 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.32),
-    0 5px 0 color-mix(in srgb, var(--theme-primary-btn-end) 66%, black 34%),
-    0 14px 26px color-mix(in srgb, var(--theme-primary-btn-end) 34%, transparent);
   transform: translateY(-1px);
 }
 
 .bancor-trade-submit-button:active:not(:disabled) {
-  box-shadow:
-    inset 0 2px 6px rgba(0, 0, 0, 0.22),
-    0 1px 0 color-mix(in srgb, var(--theme-primary-btn-end) 68%, black 32%),
-    0 5px 10px color-mix(in srgb, var(--theme-primary-btn-end) 20%, transparent);
-  transform: translateY(3px);
+  transform: translateY(1px);
 }
 
 .bancor-trade-submit-button:disabled {
   cursor: not-allowed;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 2px 0 rgba(0, 0, 0, 0.22);
   filter: grayscale(0.35) saturate(0.55);
   opacity: 0.48;
 }
