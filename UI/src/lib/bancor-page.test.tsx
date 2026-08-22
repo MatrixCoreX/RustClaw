@@ -543,6 +543,7 @@ test("BANCOR swap mode uses stacked pay and estimated-output windows", () => {
   assert.match(html, /data-bancor-trade-layout="swap"/);
   assert.ok(html.indexOf("支付") < html.indexOf("预计收到"));
   assert.match(html, /data-nni-decimal-amount="125\.00000000"[^>]*data-nni-decimal-fraction-size="normal"/);
+  assert.match(html, /data-nni-decimal-amount="0\.00990000"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.match(html, /100\.0000/);
   assert.match(html, /0\.0099/);
   assert.match(html, /切换为 USD 支付/);

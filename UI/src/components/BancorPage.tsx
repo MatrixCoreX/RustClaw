@@ -1264,7 +1264,10 @@ export function BancorSwapTradePanel({
         </div>
         <div className="mt-1 flex items-center gap-3">
           <span className={`min-w-0 flex-1 py-1.5 text-xl font-medium ${outputAmount ? "text-white" : "text-white/25"}`}>
-            <NniDecimalAmount value={outputAmount ? formatBancorAssetAmountForDisplay(outputAmount, outputAsset) : "—"} />
+            <NniDecimalAmount
+              value={outputAmount ? formatBancorAssetAmountForDisplay(outputAmount, outputAsset) : "—"}
+              shrinkFraction={false}
+            />
           </span>
           <span className="rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-sm font-semibold text-white/80">{outputAsset}</span>
         </div>
