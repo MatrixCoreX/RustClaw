@@ -368,7 +368,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, />L 0\.00009990<\/text>/);
   assert.match(html, /<h2[^>]*>交易<\/h2>/);
   assert.match(html, /我的余额/);
-  assert.match(html, /mt-2 grid min-w-0 gap-2 sm:grid-cols-2/);
+  assert.match(html, /mt-1\.5 grid min-w-0 gap-1\.5 sm:grid-cols-2/);
   assert.match(html, /group min-w-0 max-w-full overflow-hidden/);
   assert.match(html, /title="AIC: 100\n点击填入全部 AIC 余额"/);
   assert.match(html, /title="USD: 5\n点击填入全部 USD 余额"/);
@@ -384,7 +384,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /data-bancor-market-workspace="true"/);
   assert.match(html, /data-chart-maximized="false"/);
   assert.match(html, /grid gap-5 lg:grid-cols-\[minmax\(0,2fr\)_minmax\(20rem,1fr\)\] lg:items-stretch/);
-  assert.match(html, /bancor-market-trade-panel theme-shadow-card scroll-mt-4 p-4 sm:p-5/);
+  assert.match(html, /bancor-market-trade-panel theme-shadow-card scroll-mt-4 p-3 sm:p-4/);
   assert.ok(
     html.indexOf("<h2 class=\"text-lg font-semibold text-white\">实际成交均价 K 线</h2>")
       < html.indexOf("<h2 class=\"text-lg font-semibold text-white\">交易</h2>"),
@@ -412,7 +412,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /value="3\.00"/);
   assert.match(html, /价格影响超过此值时会标黄警告/);
   assert.match(html, /data-bancor-trade-side="sell"[^>]*data-selected="true"/);
-  assert.match(html, /class="bancor-trade-submit-button mt-3 w-full justify-center"[^>]*data-bancor-trade-submit="sell"/);
+  assert.match(html, /class="bancor-trade-submit-button mt-2 w-full justify-center"[^>]*data-bancor-trade-submit="sell"/);
   assert.doesNotMatch(html, /最低 0\.000002 USD|最低 0\.00010052 AIC/);
   assert.match(latestTradeHtml, /data-nni-decimal-amount="99\.99999800 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.match(latestTradeHtml, /data-nni-decimal-amount="149930\.26917640 AIC"[^>]*data-nni-decimal-fraction-size="normal"/);

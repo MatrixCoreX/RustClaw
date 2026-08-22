@@ -802,7 +802,7 @@ export function BancorPage({
         </div>
         </section>
 
-        <div id="bancor-trade-panel" className="bancor-market-trade-panel theme-shadow-card scroll-mt-4 p-4 sm:p-5">
+        <div id="bancor-trade-panel" className="bancor-market-trade-panel theme-shadow-card scroll-mt-4 p-3 sm:p-4">
           <div className="bancor-trade-header flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <ArrowDownUp className="h-5 w-5 text-sky-300" />
@@ -822,9 +822,9 @@ export function BancorPage({
               ))}
             </div>
           </div>
-          <div className="bancor-trade-account mt-3 rounded-xl border border-white/8 bg-white/[0.025] p-3">
+          <div className="bancor-trade-account mt-2 rounded-lg border border-white/8 bg-white/[0.025] p-2.5">
             {selectedAssetAccount ? (
-              <label className="bancor-trade-account-selector mb-3 grid gap-1.5" data-bancor-account-selector="true">
+              <label className="bancor-trade-account-selector mb-2 grid gap-1" data-bancor-account-selector="true">
                 <span className="text-xs font-medium text-white/55">{t("交易账户", "Trading account")}</span>
                 <select
                   className="theme-input w-full font-mono text-xs"
@@ -841,7 +841,7 @@ export function BancorPage({
                 <NniPublicKeyDisplay
                   value={selectedAssetAccount.publicKey}
                   t={t}
-                  className="mt-1"
+                  className="mt-0.5"
                   valueClassName="text-[10px] leading-4 text-white/45"
                   allowFormatSwitch={false}
                 />
@@ -859,14 +859,14 @@ export function BancorPage({
               </button>
             </div>
             {hardwareAccountAccessUnavailable && selectedAssetAccount ? (
-              <p className="mt-2 text-xs leading-5 text-amber-200/80" data-bancor-hardware-account-unavailable="true">
+              <p className="mt-1.5 text-xs leading-4 text-amber-200/80" data-bancor-hardware-account-unavailable="true">
                 {t(
                   "当前硬件签名方式暂时无法读取余额；仍可选择资产密钥签名完成交易。",
                   "The current hardware signing method cannot read balances right now; you can still complete a trade with an asset-key signature.",
                 )}
               </p>
             ) : null}
-            <div className="bancor-trade-balances mt-2 grid min-w-0 gap-2 sm:grid-cols-2">
+            <div className="bancor-trade-balances mt-1.5 grid min-w-0 gap-1.5 sm:grid-cols-2">
               <BalanceLine
                 label="AIC"
                 value={account?.aic_balance ?? "—"}
@@ -887,14 +887,14 @@ export function BancorPage({
           <div className="bancor-trade-order-panel">
             {tradeLayout === "standard" ? (
               <>
-              <div className="bancor-trade-side-tabs mt-3 grid grid-cols-2 rounded-xl border border-white/10 bg-white/5 p-1">
+              <div className="bancor-trade-side-tabs mt-2 grid grid-cols-2 rounded-lg border border-white/10 bg-white/5 p-0.5">
                 {(["sell", "buy"] as const).map((value) => (
                   <button
                     key={value}
                     type="button"
                     data-bancor-trade-side={value}
                     data-selected={side === value}
-                    className={`bancor-trade-side-button rounded-lg px-4 py-2 text-sm font-medium ${side === value ? "bg-sky-400/20 text-sky-100" : "text-white/55 hover:text-white/80"}`}
+                    className={`bancor-trade-side-button rounded-md px-3 py-1.5 text-sm font-medium ${side === value ? "bg-sky-400/20 text-sky-100" : "text-white/55 hover:text-white/80"}`}
                     onClick={() => changeSide(value)}
                   >
                     {value === "sell" ? t("卖出 AIC", "Sell AIC") : t("买入 AIC", "Buy AIC")}
@@ -902,17 +902,17 @@ export function BancorPage({
                 ))}
               </div>
 
-              <div className="bancor-trade-amount mt-3">
+              <div className="bancor-trade-amount mt-2">
                 <label htmlFor="bancor-standard-input-amount" className="block text-xs text-white/70">
                   {t("支付数量", "Amount to pay")} ({inputAsset})
                 </label>
-                <div className="mt-1.5 flex items-center rounded-xl border border-white/10 bg-black/10 px-3 focus-within:border-sky-400/50">
+                <div className="mt-1 flex items-center rounded-lg border border-white/10 bg-black/10 px-2.5 focus-within:border-sky-400/50">
                   <input
                     id="bancor-standard-input-amount"
                     value={inputAmount}
                     inputMode="decimal"
                     placeholder="0.00000000"
-                    className="min-w-0 flex-1 bg-transparent py-2.5 text-base text-white outline-none placeholder:text-white/25"
+                    className="min-w-0 flex-1 bg-transparent py-2 text-base text-white outline-none placeholder:text-white/25"
                     onChange={(event) => {
                       setInputAmount(event.target.value);
                       clearQuote();
@@ -922,7 +922,7 @@ export function BancorPage({
                 </div>
                 {quotedOutput ? (
                   <p
-                    className="mt-1.5 break-all text-right text-xs font-medium text-sky-200/80"
+                    className="mt-1 break-all text-right text-xs font-medium text-sky-200/80"
                     aria-label={t("预计兑换数量", "Estimated exchange amount")}
                   >
                     ≈ <NniDecimalAmount
@@ -960,9 +960,9 @@ export function BancorPage({
             )}
           </div>
           <div className="bancor-trade-risk-panel">
-            <div className="bancor-trade-slippage mt-3 rounded-xl border border-white/8 bg-white/[0.025] p-3">
+            <div className="bancor-trade-slippage mt-2 rounded-lg border border-white/8 bg-white/[0.025] p-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <label htmlFor="bancor-slippage-percent" className="text-sm font-medium text-white/70">
+                <label htmlFor="bancor-slippage-percent" className="text-xs font-medium text-white/70">
                   {t("滑点保护与警戒", "Slippage protection and warning")}
                 </label>
                 <div className="flex flex-wrap gap-1.5" role="group" aria-label={t("常用滑点", "Common slippage settings")}>
@@ -971,7 +971,7 @@ export function BancorPage({
                       key={value}
                       type="button"
                       aria-pressed={slippagePercent === value}
-                      className={`rounded-lg border px-2 py-1 text-xs transition ${slippagePercent === value ? "border-sky-300/35 bg-sky-400/15 text-sky-100" : "border-white/8 text-white/50 hover:text-white/75"}`}
+                      className={`rounded-md border px-2 py-0.5 text-xs transition ${slippagePercent === value ? "border-sky-300/35 bg-sky-400/15 text-sky-100" : "border-white/8 text-white/50 hover:text-white/75"}`}
                       onClick={() => changeSlippage(value)}
                     >
                       {Number(value).toFixed(2)}%
@@ -979,27 +979,27 @@ export function BancorPage({
                   ))}
                 </div>
               </div>
-              <div className="mt-2 flex items-center rounded-lg border border-white/10 bg-black/10 px-3 focus-within:border-sky-400/50">
+              <div className="mt-1.5 flex items-center rounded-md border border-white/10 bg-black/10 px-2.5 focus-within:border-sky-400/50">
                 <input
                   id="bancor-slippage-percent"
                   value={slippagePercent}
                   inputMode="decimal"
                   aria-invalid={Boolean(slippageError)}
-                  className="min-w-0 flex-1 bg-transparent py-2 text-sm text-white outline-none"
+                  className="min-w-0 flex-1 bg-transparent py-1.5 text-sm text-white outline-none"
                   onChange={(event) => changeSlippage(event.target.value)}
                 />
                 <span className="text-sm text-white/55">%</span>
               </div>
-              <p className="bancor-trade-slippage-help mt-1.5 text-xs leading-4 text-white/45">
+              <p className="bancor-trade-slippage-help mt-1 text-[11px] leading-4 text-white/45">
                 {t("用于最低到账保护；报价的价格影响超过此值时会标黄警告，但你仍可确认继续。", "Protects the minimum output. A quote whose price impact exceeds this value is highlighted as a warning, but you may still confirm it.")}
               </p>
               {slippageError ? <p className="mt-1 text-xs text-red-200" role="alert">{slippageError}</p> : null}
             </div>
             {inputError ? (
-              <p className="mt-2 text-xs leading-5 text-red-200" role="alert">{inputError}</p>
+              <p className="mt-1.5 text-xs leading-4 text-red-200" role="alert">{inputError}</p>
             ) : null}
             {estimatedInputFee ? (
-              <p className="mt-2 text-xs leading-5 text-white/50">
+              <p className="mt-1.5 text-xs leading-4 text-white/50">
                 {t("预计手续费", "Estimated fee")}：{estimatedInputFee} {inputAsset}
                 {market ? ` · ${(market.fee_bps / 100).toFixed(2)}%` : ""}
               </p>
@@ -1009,7 +1009,7 @@ export function BancorPage({
           <div className="bancor-trade-action-panel">
             <button
               type="button"
-              className="bancor-trade-submit-button mt-3 w-full justify-center"
+              className="bancor-trade-submit-button mt-2 w-full justify-center"
               data-bancor-trade-submit={side}
               disabled={!tradingReady || !inputAmount.trim() || Boolean(inputErrorCode) || slippageBps === null || quoteLoading || tradeLoading}
               onClick={() => slippageBps !== null && void preview(
@@ -1026,12 +1026,12 @@ export function BancorPage({
                   : t("买入", "Buy")}
             </button>
             {!marketOpen ? (
-              <p className="mt-3 text-xs leading-5 text-amber-200/80">
+              <p className="mt-2 text-xs leading-4 text-amber-200/80">
                 {t("管理员尚未开启市场，因此现在只能查看储备和账户。", "The market is not enabled by the administrator, so only reserves and account data are available.")}
               </p>
             ) : null}
             {marketOpen && !hardwareSigningReady ? (
-              <p className="mt-3 text-xs leading-5 text-amber-200/80">
+              <p className="mt-2 text-xs leading-4 text-amber-200/80">
                 {assetSigningReady
                   ? t(
                     "当前可使用所选账户的资产密钥签名交易。",
@@ -1045,7 +1045,7 @@ export function BancorPage({
             ) : null}
 
             {lastTrade ? (
-              <div className="mt-4 rounded-xl border border-emerald-400/20 bg-emerald-400/5 p-4 text-sm text-emerald-50">
+              <div className="mt-2 rounded-lg border border-emerald-400/20 bg-emerald-400/5 p-2.5 text-sm text-emerald-50">
                 {t("最近成交：", "Latest trade: ")}
                 <NniDecimalAmount value={`${formatBancorAssetAmountForDisplay(lastTrade.trade.input_amount, lastTrade.trade.input_asset)} ${lastTrade.trade.input_asset}`} shrinkFraction={false} />
                 {" → "}
@@ -1217,13 +1217,13 @@ export function BancorSwapTradePanel({
   onFlip: () => void;
 }) {
   return (
-    <div className="mt-3" data-bancor-trade-layout="swap">
-      <div className="rounded-xl border border-white/10 bg-black/10 p-3 focus-within:border-sky-400/45">
+    <div className="mt-2" data-bancor-trade-layout="swap">
+      <div className="rounded-lg border border-white/10 bg-black/10 p-2.5 focus-within:border-sky-400/45">
         <div className="flex items-center justify-between gap-3 text-xs text-white/45">
           <span>{t("支付", "Pay")}</span>
           <button
             type="button"
-            className="min-w-0 max-w-[78%] break-all rounded-md px-2 py-1 text-right text-[11px] leading-4 text-white/50 transition hover:bg-white/5 hover:text-sky-100 disabled:cursor-not-allowed disabled:opacity-45"
+            className="min-w-0 max-w-[78%] break-all rounded-md px-2 py-0.5 text-right text-[11px] leading-4 text-white/50 transition hover:bg-white/5 hover:text-sky-100 disabled:cursor-not-allowed disabled:opacity-45"
             disabled={!inputBalance}
             onClick={onFillBalance}
           >
@@ -1237,18 +1237,18 @@ export function BancorSwapTradePanel({
             value={inputAmount}
             inputMode="decimal"
             placeholder="0.00000000"
-            className="min-w-0 flex-1 bg-transparent py-1.5 text-xl font-medium text-white outline-none placeholder:text-white/20"
+            className="min-w-0 flex-1 bg-transparent py-1 text-lg font-medium text-white outline-none placeholder:text-white/20"
             onChange={(event) => onInputChange(event.target.value)}
           />
-          <span className="rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-sm font-semibold text-white/80">{inputAsset}</span>
+          <span className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-sm font-semibold text-white/80">{inputAsset}</span>
         </label>
         <BancorAmountAdjustmentControls t={t} value={inputAmount} onChange={onInputChange} />
       </div>
 
-      <div className="relative z-10 -my-3 flex justify-center">
+      <div className="relative z-10 -my-2.5 flex justify-center">
         <button
           type="button"
-          className="theme-icon-btn h-9 w-9 border border-sky-300/25 bg-slate-900 text-sky-200 shadow-lg"
+          className="theme-icon-btn h-8 w-8 border border-sky-300/25 bg-slate-900 text-sky-200"
           onClick={onFlip}
           aria-label={t(`切换为 ${outputAsset} 支付`, `Pay with ${outputAsset}`)}
           title={t("切换兑换方向", "Reverse swap direction")}
@@ -1257,19 +1257,19 @@ export function BancorSwapTradePanel({
         </button>
       </div>
 
-      <div className="rounded-xl border border-white/8 bg-white/[0.025] p-3 pt-4">
+      <div className="rounded-lg border border-white/8 bg-white/[0.025] p-2.5 pt-3.5">
         <div className="flex items-center justify-between gap-3 text-xs text-white/45">
           <span>{t("预计收到", "Estimated output")}</span>
           <span>{side === "sell" ? t("卖出 AIC", "Sell AIC") : t("买入 AIC", "Buy AIC")}</span>
         </div>
         <div className="mt-1 flex items-center gap-3">
-          <span className={`min-w-0 flex-1 py-1.5 text-xl font-medium ${outputAmount ? "text-white" : "text-white/25"}`}>
+          <span className={`min-w-0 flex-1 py-1 text-lg font-medium ${outputAmount ? "text-white" : "text-white/25"}`}>
             <NniDecimalAmount
               value={outputAmount ? formatBancorAssetAmountForDisplay(outputAmount, outputAsset) : "—"}
               shrinkFraction={false}
             />
           </span>
-          <span className="rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-sm font-semibold text-white/80">{outputAsset}</span>
+          <span className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-sm font-semibold text-white/80">{outputAsset}</span>
         </div>
         <p className="mt-1 text-[11px] leading-4 text-white/35">
           {t("按当前储备预估，最终到账以服务端签名报价为准。", "Estimated from current reserves; the signed server quote is final.")}
@@ -1316,7 +1316,7 @@ export function BancorAmountAdjustmentControls({
   ];
   return (
     <div
-      className="bancor-amount-adjustments mt-1.5 flex flex-wrap justify-end gap-1.5"
+      className="bancor-amount-adjustments mt-1 flex flex-wrap justify-end gap-1"
       role="group"
       aria-label={t("快速调整支付数量", "Quick amount adjustments")}
     >
@@ -1327,7 +1327,7 @@ export function BancorAmountAdjustmentControls({
           <button
             key={control.adjustment}
             type="button"
-            className="min-w-10 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1 text-xs font-medium text-white/60 transition hover:border-sky-300/25 hover:bg-sky-400/10 hover:text-sky-100 disabled:cursor-not-allowed disabled:opacity-35"
+            className="min-w-9 rounded-md border border-white/10 bg-white/[0.03] px-2 py-0.5 text-xs font-medium text-white/60 transition hover:border-sky-300/25 hover:bg-sky-400/10 hover:text-sky-100 disabled:cursor-not-allowed disabled:opacity-35"
             disabled={disabled}
             aria-label={control.title}
             title={control.title}
@@ -2196,7 +2196,7 @@ function BalanceLine({
   return (
     <button
       type="button"
-      className="group min-w-0 max-w-full overflow-hidden rounded-lg border border-white/8 bg-white/[0.025] px-3 py-2 text-left transition enabled:hover:border-sky-300/30 enabled:hover:bg-sky-400/[0.07] disabled:cursor-default"
+      className="group min-w-0 max-w-full overflow-hidden rounded-md border border-white/8 bg-white/[0.025] px-2.5 py-1.5 text-left transition enabled:hover:border-sky-300/30 enabled:hover:bg-sky-400/[0.07] disabled:cursor-default"
       disabled={disabled}
       onClick={onClick}
       title={hoverText}
@@ -2204,7 +2204,7 @@ function BalanceLine({
     >
       <span className="text-xs text-white/45">{label}</span>
       <span
-        className={`mt-1 block max-w-full break-all font-mono font-semibold leading-5 text-white ${valueSizeClass}`}
+        className={`mt-0.5 block max-w-full break-all font-mono font-semibold leading-4 text-white ${valueSizeClass}`}
         title={hoverText}
         data-bancor-balance-full-value={fullValue}
       >
