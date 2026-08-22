@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   calculateNniAprEstimate,
   calculateNniPeriodAprEstimate,
+  calculateNniSimplePaybackDays,
   parsePositiveNniDevicePrice,
 } from "../lib/nni-apr";
 import { appStorageKey } from "../lib/product-identity";
@@ -45,6 +46,21 @@ function formatDecimal(value: number, lang: UiLanguage, maximumFractionDigits = 
   return new Intl.NumberFormat(lang === "zh" ? "zh-CN" : "en-US", {
     maximumFractionDigits,
   }).format(value);
+}
+
+function formatPaybackTime(days: number | null, lang: UiLanguage, t: Translate): string {
+  if (days === null) return "—";
+  if (days >= 365) {
+    return `${formatDecimal(days / 365, lang)} ${t("年", "years")}`;
+  }
+  if (days >= 1) {
+    return `${formatDecimal(days, lang)} ${t("天", "days")}`;
+  }
+  const hours = days * 24;
+  if (hours >= 1) {
+    return `${formatDecimal(hours, lang)} ${t("小时", "hours")}`;
+  }
+  return `${formatDecimal(hours * 60, lang)} ${t("分钟", "minutes")}`;
 }
 
 export interface NniAprPageProps {
@@ -95,6 +111,7 @@ export function NniAprPage({
     }),
     [devicePriceUsd, market, periodWindow, rewards],
   );
+  const periodPaybackDays = calculateNniSimplePaybackDays(periodEstimate?.aprPercent ?? 0);
   const priceInvalid = devicePriceUsd.trim() !== "" && parsePositiveNniDevicePrice(devicePriceUsd) === null;
   const loading = rewardsLoading || marketLoading;
 
@@ -256,14 +273,19 @@ export function NniAprPage({
             </label>
           </div>
 
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
             <AprMetric
               label={t("周期 APR", "Period APR")}
               value={periodEstimate ? `${formatDecimal(periodEstimate.aprPercent, lang)}%` : "—"}
               emphasized
             />
             <AprMetric
-              label={t("窗口累计奖励", "Window rewards")}
+              label={t("预计回本时间", "Estimated payback time")}
+              value={formatPaybackTime(periodPaybackDays, lang, t)}
+              emphasized
+            />
+            <AprMetric
+              label={t("本设备窗口累计奖励", "This device's window rewards")}
               value={periodEstimate ? `${formatDecimal(periodEstimate.rewardAic, lang, 8)} AIC` : "—"}
             />
             <AprMetric
@@ -303,8 +325,8 @@ export function NniAprPage({
 
         <p className="mt-5 text-xs leading-5 text-white/45">
           {t(
-            "APR 为估算值，不含复利、交易手续费和价格影响。设备数、奖励规则与 AIC 价格变化都会改变结果。",
-            "APR is an estimate and excludes compounding, trading fees, and price impact. Device count, reward policy, and AIC price changes will alter the result.",
+            "APR 和回本时间均为估算值；回本时间按所选周期 APR 保持不变并采用单利外推，不含复利、交易手续费和价格影响。设备数、奖励规则与 AIC 价格变化都会改变结果。",
+            "APR and payback time are estimates. Payback assumes the selected period APR remains constant and uses a simple-return projection, excluding compounding, trading fees, and price impact. Device count, reward policy, and AIC price changes will alter the result.",
           )}
         </p>
       </section>

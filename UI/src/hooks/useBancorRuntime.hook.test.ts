@@ -67,6 +67,66 @@ test("BANCOR explains protected repricing failures without exposing machine erro
   );
 });
 
+test("BANCOR refreshes a changed dynamic minimum after the backend rejects a stale preview", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  let marketRequestCount = 0;
+  const apiFetch = (path: string): Promise<Response> => {
+    if (path === "/v1/nni/bancor/market") {
+      marketRequestCount += 1;
+      const minimumUnits = marketRequestCount === 1 ? "200" : "400";
+      const minimumAmount = marketRequestCount === 1 ? "0.00000200" : "0.00000400";
+      return Promise.resolve(apiResponse({
+        status: "open",
+        market_id: "aic-usd-v1",
+        fee_bps: 50,
+        min_trade_usd: minimumAmount,
+        min_trade_usd_units: minimumUnits,
+        min_trade_aic: "0.00010052",
+        min_trade_aic_units: "10052",
+        minimum_fee_units: "1",
+        minimum_output_units: "1",
+        aic_reserve_units: "10000000000000000",
+        usd_reserve_units: "1000000000000",
+      }));
+    }
+    if (path === "/v1/nni/bancor/quote") {
+      return Promise.resolve(new Response(JSON.stringify({
+        ok: false,
+        data: null,
+        error: "nni_bancor_trade_below_minimum",
+      }), {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      }));
+    }
+    throw new Error(`unexpected request: ${path}`);
+  };
+  let runtime: ReturnType<typeof useBancorRuntime> | null = null;
+  function Probe() {
+    runtime = useBancorRuntime({ apiFetch, cacheScope: "dynamic-minimum-refresh-test", t: (zh) => zh });
+    return null;
+  }
+
+  let renderer: ReactTestRenderer | null = null;
+  await act(async () => {
+    renderer = create(React.createElement(Probe));
+  });
+  await act(async () => {
+    await runtime!.fetchMarket();
+  });
+  await act(async () => {
+    await runtime!.preview("buy", "0.00000200", 300, true);
+  });
+
+  assert.equal(marketRequestCount, 2);
+  assert.equal(runtime!.market?.min_trade_usd_units, "400");
+  assert.equal(runtime!.error, "金额不能小于 0.000004 USD。");
+
+  await act(async () => {
+    renderer!.unmount();
+  });
+});
+
 test("BANCOR keeps the asset-account setup guide until account access succeeds", async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   let ownerMissing = true;
@@ -344,6 +404,12 @@ test("BANCOR refreshes the active candlesticks without a stale ETag after a succ
         status: "open",
         market_id: "aic-usd-v1",
         fee_bps: 50,
+        min_trade_usd: "0.00000200",
+        min_trade_usd_units: "200",
+        min_trade_aic: "0.00010052",
+        min_trade_aic_units: "10052",
+        minimum_fee_units: "1",
+        minimum_output_units: "1",
         aic_reserve_units: "10000000000000000",
         usd_reserve_units: "1000000000000",
       }));

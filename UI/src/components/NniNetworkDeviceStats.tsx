@@ -103,17 +103,16 @@ export function NniNetworkDeviceStats({
           <Coins className="h-4 w-4" />
           <span className="text-xs font-semibold">{t("窗口奖励", "Window reward")}</span>
         </div>
-        <div className="mt-1.5 grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-end gap-1">
-          <div className="min-w-0">
-            <p className="text-[9px] leading-3 text-white/40">{t("总奖励", "Total")}</p>
-            <p className={rewardPolicy ? "min-w-0 break-all font-mono text-sm font-semibold text-white/90" : "text-xs font-semibold text-white/75"}>
+        <div className="mt-1.5 grid min-w-0 gap-1" data-nni-window-reward-layout="stacked">
+          <div className="flex min-w-0 items-baseline justify-between gap-2">
+            <p className="shrink-0 text-[9px] leading-3 text-white/40">{t("总奖励", "Total")}</p>
+            <p className={rewardPolicy ? "min-w-0 break-all text-right font-mono text-xs font-semibold text-white/90" : "text-xs font-semibold text-white/75"}>
               {loading && !rewardPolicy ? <Loader2 className="h-4 w-4 animate-spin" /> : <NniDecimalAmount value={String(rewardPoolValue)} shrinkFraction={false} />}
             </p>
           </div>
-          <span className="pb-0.5 text-xs text-white/25">/</span>
-          <div className="min-w-0 text-right">
-            <p className="text-[9px] leading-3 text-white/40">{t("本机上个窗口", "Local previous")}</p>
-            <p className={localPreviousRewardAic ? "min-w-0 break-all font-mono text-sm font-semibold text-white/90" : "text-xs font-semibold text-white/75"}>
+          <div className="flex min-w-0 items-baseline justify-between gap-2 border-t border-white/5 pt-1">
+            <p className="shrink-0 text-[9px] leading-3 text-white/40">{t("本机上个窗口", "Local previous")}</p>
+            <p className={localPreviousRewardAic ? "min-w-0 break-all text-right font-mono text-xs font-semibold text-white/90" : "text-xs font-semibold text-white/75"}>
               {localRewardLoading && !localPreviousRewardAic ? <Loader2 className="ml-auto h-4 w-4 animate-spin" /> : <NniDecimalAmount value={String(localPreviousRewardValue)} shrinkFraction={false} />}
             </p>
           </div>

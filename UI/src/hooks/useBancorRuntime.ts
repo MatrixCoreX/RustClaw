@@ -17,6 +17,7 @@ import {
   readBancorCandleCache,
   writeBancorCandleCache,
 } from "../lib/bancor-candle-cache";
+import { formatBancorTradeHistoryAmount } from "../lib/bancor-amount-display";
 import { fetchResilientRead, runCoalescedRead } from "../lib/resilient-read";
 
 type Translate = (zh: string, en: string) => string;
@@ -92,12 +93,19 @@ export function hasEarlierBancorCandles(response: NniBancorCandlesResponse): boo
   return oldestBucketStart > response.market_created_at_unix;
 }
 
-function parseBancorInputUnits(value: string): bigint | null {
+function parseBancorInputUnits(value: unknown): bigint | null {
+  if (typeof value !== "string") return null;
   const match = /^(0|[1-9][0-9]*)(?:\.([0-9]{1,8}))?$/.exec(value.trim());
   if (!match) return null;
   const fraction = (match[2] || "").padEnd(8, "0");
   const units = BigInt(match[1]) * BANCOR_ASSET_SCALE + BigInt(fraction || "0");
   return units > 0n && units <= BANCOR_MAX_UNITS ? units : null;
+}
+
+function parseBancorStoredUnits(value: unknown): bigint | null {
+  if (typeof value !== "string" || !/^[1-9][0-9]*$/.test(value)) return null;
+  const units = BigInt(value);
+  return units <= BANCOR_MAX_UNITS ? units : null;
 }
 
 function formatBancorUnits(units: bigint): string {
@@ -194,15 +202,12 @@ export function validateBancorTradeInput({
   const inputUnits = parseBancorInputUnits(inputAmount);
   if (inputUnits === null) return "nni_bancor_amount_invalid";
   if (market) {
-    const feeUnits = market.fee_bps === 0
-      ? 0n
-      : (inputUnits * BigInt(market.fee_bps) + 9_999n) / 10_000n;
-    const curveInputUnits = inputUnits - feeUnits;
-    if (curveInputUnits <= 0n) return "nni_bancor_input_after_fee_too_small";
-    const inputReserveUnits = BigInt(side === "buy" ? market.usd_reserve_units : market.aic_reserve_units);
-    const outputReserveUnits = BigInt(side === "buy" ? market.aic_reserve_units : market.usd_reserve_units);
-    const outputUnits = (curveInputUnits * outputReserveUnits) / (inputReserveUnits + curveInputUnits);
-    if (outputUnits <= 0n) return "nni_bancor_output_too_small";
+    const minimumUnits = parseBancorStoredUnits(
+      side === "buy" ? market.min_trade_usd_units : market.min_trade_aic_units,
+    );
+    if (minimumUnits === null || inputUnits < minimumUnits) {
+      return "nni_bancor_trade_below_minimum";
+    }
   }
   if (!account) return requireAccount ? "nni_bancor_account_required" : null;
   const availableUnits = BigInt(side === "buy" ? account.usd_balance_units : account.aic_balance_units);
@@ -218,6 +223,7 @@ export function formatBancorApiError(
   code: string | null | undefined,
   t: Translate,
   fallback: string,
+  minimum?: { amount: string; asset: "AIC" | "USD" },
 ) {
   if (code === "nni_bancor_amount_invalid" || code === "nni_bancor_input_amount_invalid") {
     return t(
@@ -225,14 +231,18 @@ export function formatBancorApiError(
       "The trade amount must be greater than zero, use at most eight decimal places, and stay within the safely stored range.",
     );
   }
-  if (
-    code === "nni_bancor_trade_below_minimum" ||
-    code === "nni_bancor_input_after_fee_too_small" ||
-    code === "nni_bancor_output_too_small"
-  ) {
+  if (code === "nni_bancor_trade_below_minimum") {
+    return minimum
+      ? t(
+        `金额不能小于 ${minimum.amount} ${minimum.asset}。`,
+        `Amount cannot be less than ${minimum.amount} ${minimum.asset}.`,
+      )
+      : t("金额不能小于市场最小额度。", "Amount cannot be less than the market minimum.");
+  }
+  if (code === "nni_bancor_input_after_fee_too_small" || code === "nni_bancor_output_too_small") {
     return t(
-      "交易金额太小：扣除手续费后或预计到账金额不能为 0.00000000，请增加交易金额。",
-      "The trade amount is too small: the amount after fees and the expected output must not be 0.00000000. Increase the trade amount.",
+      "金额过小，请增加交易金额。",
+      "The amount is too small. Increase the trade amount.",
     );
   }
   if (code === "nni_bancor_account_required") {
@@ -382,6 +392,31 @@ export function useBancorRuntime({
     }
     },
   );
+
+  const refreshDynamicMinimumError = async (
+    cause: unknown,
+    side: "buy" | "sell",
+  ): Promise<boolean> => {
+    if (!(cause instanceof BancorApiError) || cause.code !== "nni_bancor_trade_below_minimum") {
+      return false;
+    }
+    const refreshedMarket = await fetchMarket(true);
+    const minimumAmount = refreshedMarket
+      ? side === "buy" ? refreshedMarket.min_trade_usd : refreshedMarket.min_trade_aic
+      : null;
+    setError(formatBancorApiError(
+      cause.code,
+      t,
+      cause.message,
+      typeof minimumAmount === "string"
+        ? {
+          amount: formatBancorTradeHistoryAmount(minimumAmount),
+          asset: side === "buy" ? "USD" : "AIC",
+        }
+        : undefined,
+    ));
+    return true;
+  };
 
   const fetchAccount = (page = account?.page ?? 1, silent = false) => runCoalescedRead(
     readRequestsRef.current,
@@ -658,7 +693,20 @@ export function useBancorRuntime({
     });
     if (validationError) {
       setQuote(null);
-      setError(formatBancorApiError(validationError, t, t("金额无法交易。", "This amount cannot be traded.")));
+      const minimumAmount = market
+        ? side === "buy" ? market.min_trade_usd : market.min_trade_aic
+        : null;
+      setError(formatBancorApiError(
+        validationError,
+        t,
+        t("金额无法交易。", "This amount cannot be traded."),
+        typeof minimumAmount === "string"
+          ? {
+            amount: formatBancorTradeHistoryAmount(minimumAmount),
+            asset: side === "buy" ? "USD" : "AIC",
+          }
+          : undefined,
+      ));
       return null;
     }
     if (!Number.isSafeInteger(slippageBps) || slippageBps < 0 || slippageBps > BANCOR_MAX_SLIPPAGE_BPS) {
@@ -679,7 +727,9 @@ export function useBancorRuntime({
       return body.data;
     } catch (cause) {
       setQuote(null);
-      setError(cause instanceof Error ? cause.message : t("报价失败。", "Quote failed."));
+      if (!(await refreshDynamicMinimumError(cause, side))) {
+        setError(cause instanceof Error ? cause.message : t("报价失败。", "Quote failed."));
+      }
       return null;
     } finally {
       setQuoteLoading(false);
@@ -725,7 +775,9 @@ export function useBancorRuntime({
       ));
       return body.data;
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("交易没有完成。", "The trade was not completed."));
+      if (!(await refreshDynamicMinimumError(cause, quote.side))) {
+        setError(cause instanceof Error ? cause.message : t("交易没有完成。", "The trade was not completed."));
+      }
       return null;
     } finally {
       setTradeLoading(false);

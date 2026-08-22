@@ -77,14 +77,21 @@ test("BANCOR amount boundary errors are beginner-readable", () => {
   }
 });
 
+test("BANCOR minimum errors state only the concrete lower bound", () => {
+  assert.equal(
+    formatBancorApiError(
+      "nni_bancor_trade_below_minimum",
+      zh,
+      "fallback",
+      { amount: "0.0001", asset: "USD" },
+    ),
+    "金额不能小于 0.0001 USD。",
+  );
+});
+
 test("BANCOR zero-output errors explain how to recover", () => {
-  for (const code of [
-    "nni_bancor_trade_below_minimum",
-    "nni_bancor_input_after_fee_too_small",
-    "nni_bancor_output_too_small",
-  ]) {
+  for (const code of ["nni_bancor_input_after_fee_too_small", "nni_bancor_output_too_small"]) {
     const message = formatBancorApiError(code, zh, "fallback");
-    assert.match(message, /不能为 0\.0000/);
     assert.match(message, /增加交易金额/);
     assert.doesNotMatch(message, /nni_bancor/);
   }
@@ -133,6 +140,12 @@ test("BANCOR accepts configurable slippage up to fifty percent", () => {
 
 const market = {
   fee_bps: 50,
+  min_trade_usd: "0.00000200",
+  min_trade_usd_units: "200",
+  min_trade_aic: "0.00010052",
+  min_trade_aic_units: "10052",
+  minimum_fee_units: "1",
+  minimum_output_units: "1",
   aic_reserve_units: "10000000000000000",
   usd_reserve_units: "1000000000000",
 } as never;
@@ -155,15 +168,21 @@ test("BANCOR frontend preflight checks the input asset balance", () => {
   assert.equal(validateBancorTradeInput({ side: "buy", inputAmount: "5.00000000", market, account }), null);
 });
 
-test("BANCOR frontend preflight rejects zero-settlement amounts", () => {
+test("BANCOR frontend preflight enforces the market minimum before settlement math", () => {
   assert.equal(
     validateBancorTradeInput({ side: "buy", inputAmount: "0.00000001", market, account }),
-    "nni_bancor_input_after_fee_too_small",
+    "nni_bancor_trade_below_minimum",
   );
   assert.equal(
-    validateBancorTradeInput({ side: "sell", inputAmount: "0.00000002", market, account }),
-    "nni_bancor_output_too_small",
+    validateBancorTradeInput({ side: "buy", inputAmount: "0.00000199", market, account }),
+    "nni_bancor_trade_below_minimum",
   );
+  assert.equal(
+    validateBancorTradeInput({ side: "sell", inputAmount: "0.00010051", market, account }),
+    "nni_bancor_trade_below_minimum",
+  );
+  assert.equal(validateBancorTradeInput({ side: "buy", inputAmount: "0.00000200", market, account }), null);
+  assert.equal(validateBancorTradeInput({ side: "sell", inputAmount: "0.00010052", market, account }), null);
   assert.equal(
     validateBancorTradeInput({ side: "buy", inputAmount: "1.00000000", market, account: null }),
     "nni_bancor_account_required",

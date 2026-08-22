@@ -635,10 +635,15 @@ fn build_capability_map_for_task_with_scope(
     loaded_mcp_capabilities: &BTreeSet<String>,
 ) -> String {
     let execution_policy = crate::task_execution_policy::effective_policy_for_task(state, task);
+    let planner_network_policy = if execution_policy.has_unrestricted_admin_authority() {
+        crate::process_sandbox::ProcessNetworkPolicy::Inherit
+    } else {
+        crate::process_sandbox::ProcessNetworkPolicy::Deny
+    };
     let sandbox_diagnostics = crate::process_sandbox::sandbox_backend_diagnostics(
         state.skill_rt.tools_policy.sandbox_backend,
         execution_policy.sandbox_mode,
-        crate::process_sandbox::ProcessNetworkPolicy::Deny,
+        planner_network_policy,
     );
     let sandbox_hint = format!(
         "sandbox_runtime_v1={}",
