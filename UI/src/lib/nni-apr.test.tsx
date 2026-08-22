@@ -10,6 +10,7 @@ import {
 import {
   calculateNniAprEstimate,
   calculateNniPeriodAprEstimate,
+  calculateNniSimplePaybackDays,
   latestNniRewardRecord,
   latestVisibleNniRewardAic,
   NNI_APR_AUTO_REFRESH_SECONDS,
@@ -125,6 +126,12 @@ const market: NniBancorMarketResponse = {
     change_percent: "0.00",
     trade_count: 0,
   },
+  min_trade_usd: "0.00000200",
+  min_trade_usd_units: "200",
+  min_trade_aic: "0.00000200",
+  min_trade_aic_units: "200",
+  minimum_fee_units: "1",
+  minimum_output_units: "1",
   fee_bps: 50,
   version: 1,
   updated_at_unix: 1_800_001_210,
@@ -180,6 +187,7 @@ test("NNI period APR uses the complete selected reward window", () => {
   assert.equal(weekly.windowValueUsd, 35);
   assert.equal(weekly.aprBasisRewardUsd, 1825);
   assert.equal(weekly.aprPercent, 182.5);
+  assert.equal(calculateNniSimplePaybackDays(weekly.aprPercent), 200);
 
   const monthly = calculateNniPeriodAprEstimate({
     devicePriceUsd: "1000",
@@ -228,6 +236,8 @@ test("NNI APR rejects empty, zero, negative, and malformed device prices", () =>
   assert.equal(parsePositiveNniDevicePrice("10 USD"), null);
   assert.equal(parsePositiveNniDevicePrice(".5"), 0.5);
   assert.equal(calculateNniAprEstimate({ devicePriceUsd: "0", rewards, market }), null);
+  assert.equal(calculateNniSimplePaybackDays(0), null);
+  assert.equal(calculateNniSimplePaybackDays(Number.NaN), null);
 });
 
 test("NNI APR device price persists through the product-neutral storage key", () => {
@@ -263,12 +273,15 @@ test("NNI APR page explains its inputs, refresh cadence, and estimate boundary",
   assert.match(markup, /设备价格（USD）/);
   assert.match(markup, /实时 APR/);
   assert.match(markup, /周期 APR/);
+  assert.match(markup, /预计回本时间/);
+  assert.match(markup, /本设备窗口累计奖励/);
   assert.match(markup, /周（最近 7 天）/);
   assert.match(markup, /月（最近 30 天）/);
   assert.match(markup, /年（最近 365 天）/);
   assert.match(markup, /假定这些 AIC 没有卖出/);
   assert.match(markup, /统一按当前池价格估值/);
   assert.match(markup, /每 10 分钟自动刷新/);
+  assert.match(markup, /回本时间按所选周期 APR 保持不变并采用单利外推/);
   assert.match(markup, /不含复利、交易手续费和价格影响/);
   const prohibitedRiskTerm = String.fromCodePoint(0x5e74, 0x5316);
   assert.doesNotMatch(markup, new RegExp(prohibitedRiskTerm));

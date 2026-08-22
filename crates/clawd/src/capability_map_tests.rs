@@ -5,6 +5,21 @@ use claw_core::skill_registry::{
 };
 use std::path::Path;
 
+fn task_with_payload(user_key: Option<&str>, payload: serde_json::Value) -> crate::ClaimedTask {
+    crate::ClaimedTask {
+        claim_attempt: 0,
+        task_id: "capability-map-policy".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: user_key.map(str::to_string),
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: payload.to_string(),
+    }
+}
+
 fn registry_entry_from(toml: &str, name: &str) -> SkillRegistryEntry {
     let path = std::env::temp_dir().join(format!("capability_map_{name}.toml"));
     std::fs::write(&path, toml).unwrap();
@@ -600,6 +615,35 @@ fn compact_capability_map_omits_registry_skill_detail_duplication() {
     assert!(!compact.contains("visible_skills="));
     assert!(!compact.contains("Registry skill hints:"));
     assert!(compact.len() < full.len());
+}
+
+#[test]
+fn authenticated_admin_capability_map_does_not_claim_network_is_denied() {
+    let user_key = "rk-capability-map-admin";
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+    state.seed_test_auth_identity(user_key, "admin");
+    let task = task_with_payload(
+        Some(user_key),
+        serde_json::json!({
+            crate::task_execution_policy::POLICY_PAYLOAD_FIELD: {
+                "schema_version": 1,
+                "mode": "yolo",
+                "authority": "authenticated_admin",
+                "actor_role": "admin",
+                "approval_policy": "never",
+                "sandbox_mode": "danger_full",
+                "derivation": "admin_channel_default"
+            }
+        }),
+    );
+
+    let compact = build_compact_capability_map_for_task(&state, &task);
+
+    assert!(compact.contains("\"authority_scope\":\"unrestricted_admin\""));
+    assert!(compact.contains("\"network\":\"inherited\""));
+    assert!(!compact.contains("\"network\":\"denied\""));
 }
 
 #[test]

@@ -21,8 +21,12 @@ import {
   calculateBancorZoomViewport,
   isBancorCandleOpen,
   paginateBancorTrades,
+  persistBancorSlippagePercent,
   persistBancorTradeLayout,
+  persistBancorTradeSide,
+  readBancorSlippagePercent,
   readBancorTradeLayout,
+  readBancorTradeSide,
   formatBancorDayChangePercent,
   formatBancorAssetAccountOption,
   resolveBancorCandlePalette,
@@ -58,6 +62,12 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
         change_percent: "0.50",
         trade_count: 17,
       },
+      min_trade_usd: "0.00000200",
+      min_trade_usd_units: "200",
+      min_trade_aic: "0.00010052",
+      min_trade_aic_units: "10052",
+      minimum_fee_units: "1",
+      minimum_output_units: "1",
       fee_bps: 50,
       version: 1,
       updated_at_unix: 1_700_000_000,
@@ -341,6 +351,10 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /group min-w-0 max-w-full overflow-hidden/);
   assert.match(html, /title="点击填入全部 AIC 余额"/);
   assert.match(html, /title="点击填入全部 USD 余额"/);
+  assert.match(html, /data-bancor-balance-full-value="100"/);
+  assert.match(html, /data-bancor-balance-full-value="5"/);
+  assert.match(html, /data-nni-decimal-amount="100\.00"[^>]*data-nni-decimal-fraction-size="normal"/);
+  assert.match(html, /data-nni-decimal-amount="5\.00"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.doesNotMatch(html, />点击填入全部 (?:AIC|USD) 余额<\/span>/);
   assert.ok(html.indexOf("我的余额") > html.indexOf("<h2 class=\"text-lg font-semibold text-white\">交易</h2>"));
   assert.doesNotMatch(html, /没有成交的时间窗口沿用上一收盘价/);
@@ -422,6 +436,26 @@ test("BANCOR trade layout persists through the product-neutral storage key", () 
   assert.match([...values.keys()][0] ?? "", /^agent-runtime\./);
 });
 
+test("BANCOR swap direction and valid slippage survive a refresh", () => {
+  const values = new Map<string, string>();
+  const storage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+  };
+
+  assert.equal(readBancorTradeSide(storage), "sell");
+  assert.equal(readBancorSlippagePercent(storage), "3.00");
+
+  persistBancorTradeSide(storage, "buy");
+  persistBancorSlippagePercent(storage, "4.25");
+  assert.equal(readBancorTradeSide(storage), "buy");
+  assert.equal(readBancorSlippagePercent(storage), "4.25");
+
+  persistBancorSlippagePercent(storage, "invalid");
+  assert.equal(readBancorSlippagePercent(storage), "4.25");
+  assert.ok([...values.keys()].every((key) => key.startsWith("agent-runtime.")));
+});
+
 test("BANCOR account options keep the local binding first and leave room for external accounts", () => {
   const localPublicKey = "5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M";
   const externalPublicKey = "7gY3W3iKnU7Nd4MCY7N9FY4U5ABQG1nB7eVwjvp23uLnzUE5nL";
@@ -473,6 +507,7 @@ test("BANCOR swap mode uses stacked pay and estimated-output windows", () => {
       inputBalance="125.00000000"
       outputAsset="USD"
       outputAmount="0.00990000"
+      minimumInputAmount="0.00010052"
       onInputChange={() => undefined}
       onFillBalance={() => undefined}
       onFlip={() => undefined}
@@ -484,6 +519,7 @@ test("BANCOR swap mode uses stacked pay and estimated-output windows", () => {
   assert.match(html, /100\.0000/);
   assert.match(html, /0\.0099/);
   assert.match(html, /切换为 USD 支付/);
+  assert.match(html, /最低 0\.00010052 AIC/);
   assert.match(html, /最终到账以服务端签名报价为准/);
   assert.match(html, /aria-label="快速调整支付数量"/);
   assert.match(html, />−25%<\/button>/);
@@ -734,7 +770,7 @@ test("BANCOR quote review and final confirmation use a centered modal", () => {
   assert.match(html, /role="dialog"/);
   assert.match(html, /aria-modal="true"/);
   assert.match(html, /查看报价并确认交易/);
-  assert.match(html, />10 AIC<\/span>/);
+  assert.match(html, /data-nni-decimal-amount="10\.00000000 AIC"/);
   assert.match(html, /data-nni-decimal-amount="0\.00100000 USD"/);
   assert.match(html, /data-nni-decimal-amount="0\.00100000 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.match(html, /data-nni-decimal-amount="0\.05000000 AIC"/);
@@ -784,8 +820,10 @@ test("BANCOR quote modal warns but still permits confirmation when price impact 
   );
 
   assert.match(html, /价格影响 33\.53% 已超过你设置的 0\.50% 滑点警戒值/);
+  assert.match(html, /data-nni-decimal-amount="33222036\.72780000 AIC"/);
+  assert.match(html, /data-nni-decimal-amount="33055926\.54410000 AIC"/);
   assert.match(html, /确认后仍可继续/);
-  assert.match(html, /我已了解风险，继续签名/);
+  assert.match(html, /接受当前价格影响，确认签名/);
   assert.match(html, /role="alert"/);
 });
 

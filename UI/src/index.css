@@ -1989,9 +1989,9 @@
 
 .nni-decimal-fraction {
   display: inline-block;
-  font-size: 0.42em;
+  font-size: 0.5em;
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.015em;
+  letter-spacing: 0;
   vertical-align: 0.08em;
 }
 

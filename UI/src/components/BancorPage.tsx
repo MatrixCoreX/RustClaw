@@ -38,6 +38,8 @@ import type { useBancorRuntime } from "../hooks/useBancorRuntime";
 import type { NniBancorCandle, NniBancorQuoteResponse } from "../types/api";
 import {
   formatBancorAssetAmountForDisplay,
+  formatBancorBalanceAmount,
+  formatBancorBalanceHoverAmount,
   formatBancorTradeHistoryAmount,
 } from "../lib/bancor-amount-display";
 import { resolveBancorMarketDirectionColors } from "../lib/bancor-market-colors";
@@ -60,15 +62,18 @@ export const BANCOR_DEFAULT_VISIBLE_CANDLES = 100;
 const BANCOR_MIN_VISIBLE_CANDLES = 6;
 const BANCOR_DRAG_HISTORY_HEADROOM = 6;
 const BANCOR_TRADE_LAYOUT_STORAGE_KEY = appStorageKey("nni.bancor.tradeLayout");
+const BANCOR_TRADE_SIDE_STORAGE_KEY = appStorageKey("nni.bancor.tradeSide");
+const BANCOR_SLIPPAGE_STORAGE_KEY = appStorageKey("nni.bancor.slippagePercent");
 
 export type BancorTradeLayout = "standard" | "swap";
+export type BancorTradeSide = "buy" | "sell";
 
-interface BancorTradeLayoutStorage {
+interface BancorPreferenceStorage {
   getItem: (key: string) => string | null;
   setItem: (key: string, value: string) => void;
 }
 
-export function readBancorTradeLayout(storage?: BancorTradeLayoutStorage): BancorTradeLayout {
+export function readBancorTradeLayout(storage?: BancorPreferenceStorage): BancorTradeLayout {
   if (!storage) return "standard";
   try {
     return storage.getItem(BANCOR_TRADE_LAYOUT_STORAGE_KEY) === "swap" ? "swap" : "standard";
@@ -78,12 +83,59 @@ export function readBancorTradeLayout(storage?: BancorTradeLayoutStorage): Banco
 }
 
 export function persistBancorTradeLayout(
-  storage: BancorTradeLayoutStorage | undefined,
+  storage: BancorPreferenceStorage | undefined,
   layout: BancorTradeLayout,
 ): void {
   if (!storage) return;
   try {
     storage.setItem(BANCOR_TRADE_LAYOUT_STORAGE_KEY, layout);
+  } catch {
+    // Private browsing or a storage policy may make persistence unavailable.
+  }
+}
+
+export function readBancorTradeSide(storage?: BancorPreferenceStorage): BancorTradeSide {
+  if (!storage) return "sell";
+  try {
+    return storage.getItem(BANCOR_TRADE_SIDE_STORAGE_KEY) === "buy" ? "buy" : "sell";
+  } catch {
+    return "sell";
+  }
+}
+
+export function persistBancorTradeSide(
+  storage: BancorPreferenceStorage | undefined,
+  side: BancorTradeSide,
+): void {
+  if (!storage) return;
+  try {
+    storage.setItem(BANCOR_TRADE_SIDE_STORAGE_KEY, side);
+  } catch {
+    // Private browsing or a storage policy may make persistence unavailable.
+  }
+}
+
+export function readBancorSlippagePercent(storage?: BancorPreferenceStorage): string {
+  const fallback = (BANCOR_DEFAULT_SLIPPAGE_BPS / 100).toFixed(2);
+  if (!storage) return fallback;
+  try {
+    const stored = storage.getItem(BANCOR_SLIPPAGE_STORAGE_KEY);
+    const basisPoints = stored === null ? null : parseBancorSlippagePercent(stored);
+    return basisPoints === null ? fallback : (basisPoints / 100).toFixed(2);
+  } catch {
+    return fallback;
+  }
+}
+
+export function persistBancorSlippagePercent(
+  storage: BancorPreferenceStorage | undefined,
+  value: string,
+): void {
+  if (!storage) return;
+  const basisPoints = parseBancorSlippagePercent(value);
+  if (basisPoints === null) return;
+  try {
+    storage.setItem(BANCOR_SLIPPAGE_STORAGE_KEY, (basisPoints / 100).toFixed(2));
   } catch {
     // Private browsing or a storage policy may make persistence unavailable.
   }
@@ -399,12 +451,16 @@ export function BancorPage({
   assetOwnerPubkey: string | null;
   onOpenNni: () => void;
 }) {
-  const [side, setSide] = useState<"buy" | "sell">("sell");
+  const [side, setSide] = useState<BancorTradeSide>(() =>
+    readBancorTradeSide(typeof window === "undefined" ? undefined : window.localStorage),
+  );
   const [tradeLayout, setTradeLayout] = useState<BancorTradeLayout>(() =>
     readBancorTradeLayout(typeof window === "undefined" ? undefined : window.localStorage),
   );
   const [inputAmount, setInputAmount] = useState("");
-  const [slippagePercent, setSlippagePercent] = useState((BANCOR_DEFAULT_SLIPPAGE_BPS / 100).toFixed(2));
+  const [slippagePercent, setSlippagePercent] = useState(() =>
+    readBancorSlippagePercent(typeof window === "undefined" ? undefined : window.localStorage),
+  );
   const [marketTradesPage, setMarketTradesPage] = useState(1);
   const [activeView, setActiveView] = useState<"market" | "price_change">("market");
   const [chartMaximized, setChartMaximized] = useState(false);
@@ -447,6 +503,12 @@ export function BancorPage({
   } = runtime;
   const inputAsset = side === "buy" ? "USD" : "AIC";
   const outputAsset = side === "buy" ? "AIC" : "USD";
+  const configuredMinimumInputAmount = market
+    ? side === "buy" ? market.min_trade_usd : market.min_trade_aic
+    : null;
+  const minimumInputAmount = typeof configuredMinimumInputAmount === "string"
+    ? formatBancorTradeHistoryAmount(configuredMinimumInputAmount)
+    : null;
   const marketOpen = market?.status === "open";
   const hardwareSigningReady = signingDeviceReady && !hardwareAccountAccessUnavailable;
   const assetSigningReady = assetOwnerReady && selectedAssetAccount !== null;
@@ -462,13 +524,18 @@ export function BancorPage({
     })
     : null;
   const inputError = inputErrorCode
-    ? formatBancorApiError(inputErrorCode, t, t("金额无法交易。", "This amount cannot be traded."))
+    ? formatBancorApiError(
+      inputErrorCode,
+      t,
+      t("金额无法交易。", "This amount cannot be traded."),
+      minimumInputAmount ? { amount: minimumInputAmount, asset: inputAsset } : undefined,
+    )
     : null;
   const slippageBps = parseBancorSlippagePercent(slippagePercent);
   const slippageError = slippageBps === null
     ? t("滑点必须在 0% 到 50% 之间，最多保留两位小数。", "Slippage must be between 0% and 50%, with at most two decimal places.")
     : null;
-  const estimatedInputFee = market && inputAmount.trim()
+  const estimatedInputFee = market && inputAmount.trim() && !inputErrorCode
     ? calculateBancorInputFee(inputAmount, market.fee_bps)
     : null;
   const inputBalance = side === "buy" ? account?.usd_balance : account?.aic_balance;
@@ -479,13 +546,21 @@ export function BancorPage({
     ? quote.output_amount
     : estimatedSwapOutput;
   const paginatedMarketTrades = paginateBancorTrades(marketTrades?.trades ?? [], marketTradesPage);
-  const changeSide = (next: "buy" | "sell") => {
+  const changeSide = (next: BancorTradeSide) => {
     setSide(next);
+    persistBancorTradeSide(
+      typeof window === "undefined" ? undefined : window.localStorage,
+      next,
+    );
     setInputAmount("");
     clearQuote();
   };
-  const fillBalance = (next: "buy" | "sell", amount: string) => {
+  const fillBalance = (next: BancorTradeSide, amount: string) => {
     setSide(next);
+    persistBancorTradeSide(
+      typeof window === "undefined" ? undefined : window.localStorage,
+      next,
+    );
     setInputAmount(amount);
     clearQuote();
   };
@@ -499,6 +574,10 @@ export function BancorPage({
   };
   const changeSlippage = (value: string) => {
     setSlippagePercent(value);
+    persistBancorSlippagePercent(
+      typeof window === "undefined" ? undefined : window.localStorage,
+      value,
+    );
     clearQuote();
   };
   const confirmTrade = async (authorization: BancorTradeAuthorization) => {
@@ -825,11 +904,17 @@ export function BancorPage({
                 <label htmlFor="bancor-standard-input-amount" className="block text-xs text-white/70">
                   {t("支付数量", "Amount to pay")} ({inputAsset})
                 </label>
+                {minimumInputAmount ? (
+                  <p id="bancor-standard-input-minimum" className="mt-1 text-xs text-white/45">
+                    {t("最低", "Minimum")} {minimumInputAmount} {inputAsset}
+                  </p>
+                ) : null}
                 <div className="mt-1.5 flex items-center rounded-xl border border-white/10 bg-black/10 px-3 focus-within:border-sky-400/50">
                   <input
                     id="bancor-standard-input-amount"
                     value={inputAmount}
                     inputMode="decimal"
+                    aria-describedby={minimumInputAmount ? "bancor-standard-input-minimum" : undefined}
                     placeholder="0.00000000"
                     className="min-w-0 flex-1 bg-transparent py-2.5 text-base text-white outline-none placeholder:text-white/25"
                     onChange={(event) => {
@@ -844,7 +929,10 @@ export function BancorPage({
                     className="mt-1.5 break-all text-right text-xs font-medium text-sky-200/80"
                     aria-label={t("预计兑换数量", "Estimated exchange amount")}
                   >
-                    ≈ <NniDecimalAmount value={`${formatBancorAssetAmountForDisplay(quotedOutput, outputAsset)} ${outputAsset}`} />
+                    ≈ <NniDecimalAmount
+                      value={`${formatBancorAssetAmountForDisplay(quotedOutput, outputAsset)} ${outputAsset}`}
+                      shrinkFraction={false}
+                    />
                   </p>
                 ) : null}
                 <BancorAmountAdjustmentControls
@@ -866,6 +954,7 @@ export function BancorPage({
                 inputBalance={inputBalance ?? null}
                 outputAsset={outputAsset}
                 outputAmount={quotedOutput}
+                minimumInputAmount={minimumInputAmount}
                 onInputChange={(value) => {
                   setInputAmount(value);
                   clearQuote();
@@ -1116,6 +1205,7 @@ export function BancorSwapTradePanel({
   inputBalance,
   outputAsset,
   outputAmount,
+  minimumInputAmount,
   onInputChange,
   onFillBalance,
   onFlip,
@@ -1127,6 +1217,7 @@ export function BancorSwapTradePanel({
   inputBalance: string | null;
   outputAsset: "AIC" | "USD";
   outputAmount: string | null;
+  minimumInputAmount: string | null;
   onInputChange: (value: string) => void;
   onFillBalance: () => void;
   onFlip: () => void;
@@ -1145,12 +1236,18 @@ export function BancorSwapTradePanel({
             {t("余额", "Balance")}：<NniDecimalAmount value={inputBalance ?? "—"} />
           </button>
         </div>
+        {minimumInputAmount ? (
+          <p id="bancor-swap-input-minimum" className="mt-1 text-xs text-white/45">
+            {t("最低", "Minimum")} {minimumInputAmount} {inputAsset}
+          </p>
+        ) : null}
         <label className="mt-1 flex items-center gap-3">
           <span className="sr-only">{t("支付数量", "Amount to pay")}</span>
           <input
             id="bancor-swap-input-amount"
             value={inputAmount}
             inputMode="decimal"
+            aria-describedby={minimumInputAmount ? "bancor-swap-input-minimum" : undefined}
             placeholder="0.00000000"
             className="min-w-0 flex-1 bg-transparent py-1.5 text-xl font-medium text-white outline-none placeholder:text-white/20"
             onChange={(event) => onInputChange(event.target.value)}
@@ -1982,7 +2079,13 @@ export function BancorQuoteDialog({
                 type="password"
                 value={ownerPrivateKey}
                 disabled={tradeLoading}
-                autoComplete="off"
+                autoComplete="one-time-code"
+                autoCapitalize="none"
+                data-1p-ignore="true"
+                data-bwignore="true"
+                data-form-type="other"
+                data-lpignore="true"
+                data-protonpass-ignore="true"
                 spellCheck={false}
                 className="theme-input w-full font-mono"
                 placeholder={t("粘贴手抄保存的资产私钥", "Paste the saved asset private key")}
@@ -2022,7 +2125,7 @@ export function BancorQuoteDialog({
             {tradeLoading
               ? t("正在签名并提交...", "Signing and submitting...")
               : priceImpactWarning
-                ? t("我已了解风险，继续签名", "I understand the risk; sign and continue")
+                ? t("接受当前价格影响，确认签名", "Accept the current price impact and sign")
                 : t("确认签名交易", "Confirm signed trade")}
           </button>
         </footer>
@@ -2095,7 +2198,9 @@ function BalanceLine({
   disabled: boolean;
   onClick: () => void;
 }) {
-  const valueSizeClass = balanceValueSizeClass(value);
+  const displayValue = formatBancorBalanceAmount(value);
+  const fullValue = formatBancorBalanceHoverAmount(value);
+  const valueSizeClass = balanceValueSizeClass(displayValue);
   return (
     <button
       type="button"
@@ -2103,14 +2208,15 @@ function BalanceLine({
       disabled={disabled}
       onClick={onClick}
       title={actionLabel}
-      aria-label={`${actionLabel}: ${value}`}
+      aria-label={`${actionLabel}: ${fullValue}`}
     >
       <span className="text-xs text-white/45">{label}</span>
       <span
         className={`mt-1 block max-w-full break-all font-mono font-semibold leading-5 text-white ${valueSizeClass}`}
-        title={value}
+        title={fullValue}
+        data-bancor-balance-full-value={fullValue}
       >
-        <NniDecimalAmount value={value} />
+        <NniDecimalAmount value={displayValue} shrinkFraction={false} />
       </span>
     </button>
   );

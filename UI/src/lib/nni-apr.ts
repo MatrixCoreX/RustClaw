@@ -7,6 +7,7 @@ import type {
 } from "../types/api";
 
 const APR_REFERENCE_SECONDS = 365 * 24 * 60 * 60;
+const APR_REFERENCE_DAYS = 365;
 export const NNI_APR_AUTO_REFRESH_SECONDS = 10 * 60;
 
 export interface NniAprEstimate {
@@ -41,6 +42,12 @@ export function parsePositiveNniDevicePrice(value: string): number | null {
   if (!/^(?:\d+\.?\d*|\.\d+)$/.test(normalized)) return null;
   const parsed = Number(normalized);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+export function calculateNniSimplePaybackDays(aprPercent: number): number | null {
+  if (!Number.isFinite(aprPercent) || aprPercent <= 0) return null;
+  const days = (APR_REFERENCE_DAYS * 100) / aprPercent;
+  return Number.isFinite(days) && days > 0 ? days : null;
 }
 
 export function latestNniRewardRecord(

@@ -73,6 +73,8 @@ test("shows registered allowlist devices and active devices from the previous he
   assert.match(markup, /窗口奖励/);
   assert.match(markup, /总奖励/);
   assert.match(markup, /本机上个窗口/);
+  assert.match(markup, /data-nni-window-reward-layout="stacked"/);
+  assert.equal((markup.match(/font-mono text-xs font-semibold text-white\/90/g) ?? []).length, 2);
   assert.doesNotMatch(markup, /当前每 10 分钟总奖励/);
   assert.match(markup, />5000<\/span>/);
   assert.match(markup, />62\.50000000<\/span>/);
@@ -139,6 +141,10 @@ test("asset account UI keeps recovery while adding custom bind, replacement, and
   assert.match(dialogSource, /data-nni-recovery-warning="true"/);
   assert.match(dialogSource, /仅当原设备已损坏或无法再使用时/);
   assert.match(dialogSource, /撤销该资产账户当前关联的其他设备授权/);
+  assert.equal(dialogSource.match(/autoComplete="one-time-code"/g)?.length, 2);
+  assert.equal(dialogSource.match(/data-1p-ignore="true"/g)?.length, 2);
+  assert.equal(dialogSource.match(/data-lpignore="true"/g)?.length, 2);
+  assert.doesNotMatch(dialogSource, /autoComplete="new-password"/);
   assert.doesNotMatch(source, /previousOwnerAuthorizationSignature/);
 });
 

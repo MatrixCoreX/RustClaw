@@ -1369,6 +1369,12 @@ export interface NniBancorMarketResponse {
     change_percent: string;
     trade_count: number;
   };
+  min_trade_usd: string;
+  min_trade_usd_units: string;
+  min_trade_aic: string;
+  min_trade_aic_units: string;
+  minimum_fee_units: string;
+  minimum_output_units: string;
   fee_bps: number;
   version: number;
   last_trade_id?: string | null;

@@ -271,7 +271,21 @@ export function NniAssetAccountDialog({
               </p>
               <label className="grid gap-1.5 text-xs text-white/65">
                 <span>{t("原资产私钥", "Original asset private key")}</span>
-                <input type="password" autoComplete="new-password" spellCheck={false} value={privateKey} onChange={(event) => setPrivateKey(event.target.value)} className="theme-input w-full" placeholder={t("粘贴资产私钥", "Paste the asset private key")} />
+                <input
+                  type="password"
+                  autoComplete="one-time-code"
+                  autoCapitalize="none"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  data-lpignore="true"
+                  data-protonpass-ignore="true"
+                  spellCheck={false}
+                  value={privateKey}
+                  onChange={(event) => setPrivateKey(event.target.value)}
+                  className="theme-input w-full"
+                  placeholder={t("粘贴资产私钥", "Paste the asset private key")}
+                />
               </label>
               <div className="flex justify-end gap-2">
                 <button type="button" className="theme-secondary-btn px-3 py-2 text-sm" disabled={loading} onClick={close}>{t("取消", "Cancel")}</button>
@@ -299,7 +313,21 @@ export function NniAssetAccountDialog({
                   </div>
                   <label className="grid gap-1.5 text-xs text-white/65">
                     <span>{t("目标资产私钥", "Target asset private key")}</span>
-                    <input type="password" autoComplete="new-password" spellCheck={false} value={privateKey} onChange={(event) => setPrivateKey(event.target.value)} className="theme-input w-full" placeholder={t("粘贴 K1 资产私钥", "Paste a K1 asset private key")} />
+                    <input
+                      type="password"
+                      autoComplete="one-time-code"
+                      autoCapitalize="none"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
+                      data-form-type="other"
+                      data-lpignore="true"
+                      data-protonpass-ignore="true"
+                      spellCheck={false}
+                      value={privateKey}
+                      onChange={(event) => setPrivateKey(event.target.value)}
+                      className="theme-input w-full"
+                      placeholder={t("粘贴 K1 资产私钥", "Paste a K1 asset private key")}
+                    />
                   </label>
                   {privateKey && !privateKeyValidation.ok ? <p className="text-xs text-rose-200">{t("私钥格式无效，请检查 K1 Base58 密钥和校验和。", "Invalid private key. Check the K1 Base58 key and checksum.")}</p> : null}
                   {privateKeyValidation.ok ? (
