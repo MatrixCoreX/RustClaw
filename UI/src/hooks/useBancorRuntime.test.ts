@@ -189,6 +189,34 @@ test("BANCOR frontend preflight enforces the market minimum before settlement ma
   );
 });
 
+test("BANCOR leaves minimum validation to the backend during a rolling schema upgrade", () => {
+  const marketWithoutDynamicMinimums = {
+    ...(market as unknown as Record<string, unknown>),
+    min_trade_usd: undefined,
+    min_trade_usd_units: undefined,
+    min_trade_aic: undefined,
+    min_trade_aic_units: undefined,
+  } as never;
+  assert.equal(
+    validateBancorTradeInput({
+      side: "buy",
+      inputAmount: "1.00000000",
+      market: marketWithoutDynamicMinimums,
+      account,
+    }),
+    null,
+  );
+  assert.equal(
+    validateBancorTradeInput({
+      side: "sell",
+      inputAmount: "1.00000000",
+      market: marketWithoutDynamicMinimums,
+      account,
+    }),
+    null,
+  );
+});
+
 test("BANCOR frontend fee preview uses the backend integer rounding rule", () => {
   assert.equal(calculateBancorInputFee("100.00000000", 50), "0.50000000");
   assert.equal(calculateBancorInputFee("0.00010000", 50), "0.00000050");

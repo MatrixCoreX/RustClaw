@@ -202,10 +202,11 @@ export function validateBancorTradeInput({
   const inputUnits = parseBancorInputUnits(inputAmount);
   if (inputUnits === null) return "nni_bancor_amount_invalid";
   if (market) {
-    const minimumUnits = parseBancorStoredUnits(
-      side === "buy" ? market.min_trade_usd_units : market.min_trade_aic_units,
-    );
-    if (minimumUnits === null || inputUnits < minimumUnits) {
+    const rawMinimumUnits = side === "buy"
+      ? market.min_trade_usd_units
+      : market.min_trade_aic_units;
+    const minimumUnits = parseBancorStoredUnits(rawMinimumUnits);
+    if (minimumUnits !== null && inputUnits < minimumUnits) {
       return "nni_bancor_trade_below_minimum";
     }
   }
