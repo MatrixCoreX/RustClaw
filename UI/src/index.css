@@ -1546,11 +1546,11 @@
 
 .bancor-trade-submit-button {
   display: inline-flex;
-  min-height: 2.75rem;
+  min-height: 2.5rem;
   align-items: center;
   border: 1px solid color-mix(in srgb, var(--theme-primary-btn-start) 72%, white 18%);
   border-radius: 0.5rem;
-  padding: 0.7rem 1rem;
+  padding: 0.55rem 0.875rem;
   background: linear-gradient(180deg, var(--theme-primary-btn-start-hover) 0%, var(--theme-primary-btn-end) 100%);
   color: white;
   font-size: 0.9375rem;
