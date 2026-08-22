@@ -887,12 +887,14 @@ export function BancorPage({
           <div className="bancor-trade-order-panel">
             {tradeLayout === "standard" ? (
               <>
-              <div className="bancor-trade-side-tabs mt-3 grid grid-cols-2 rounded-xl bg-white/5 p-1">
+              <div className="bancor-trade-side-tabs mt-3 grid grid-cols-2 rounded-xl border border-white/10 bg-white/5 p-1 shadow-inner">
                 {(["sell", "buy"] as const).map((value) => (
                   <button
                     key={value}
                     type="button"
-                    className={`rounded-lg px-4 py-2 text-sm font-medium transition ${side === value ? "bg-sky-400/20 text-sky-100" : "text-white/55 hover:text-white/80"}`}
+                    data-bancor-trade-side={value}
+                    data-selected={side === value}
+                    className={`bancor-trade-side-button rounded-lg px-4 py-2 text-sm font-medium ${side === value ? "bg-sky-400/20 text-sky-100" : "text-white/55 hover:text-white/80"}`}
                     onClick={() => changeSide(value)}
                   >
                     {value === "sell" ? t("卖出 AIC", "Sell AIC") : t("买入 AIC", "Buy AIC")}
@@ -904,17 +906,11 @@ export function BancorPage({
                 <label htmlFor="bancor-standard-input-amount" className="block text-xs text-white/70">
                   {t("支付数量", "Amount to pay")} ({inputAsset})
                 </label>
-                {minimumInputAmount ? (
-                  <p id="bancor-standard-input-minimum" className="mt-1 text-xs text-white/45">
-                    {t("最低", "Minimum")} {minimumInputAmount} {inputAsset}
-                  </p>
-                ) : null}
                 <div className="mt-1.5 flex items-center rounded-xl border border-white/10 bg-black/10 px-3 focus-within:border-sky-400/50">
                   <input
                     id="bancor-standard-input-amount"
                     value={inputAmount}
                     inputMode="decimal"
-                    aria-describedby={minimumInputAmount ? "bancor-standard-input-minimum" : undefined}
                     placeholder="0.00000000"
                     className="min-w-0 flex-1 bg-transparent py-2.5 text-base text-white outline-none placeholder:text-white/25"
                     onChange={(event) => {
@@ -954,7 +950,6 @@ export function BancorPage({
                 inputBalance={inputBalance ?? null}
                 outputAsset={outputAsset}
                 outputAmount={quotedOutput}
-                minimumInputAmount={minimumInputAmount}
                 onInputChange={(value) => {
                   setInputAmount(value);
                   clearQuote();
@@ -1014,7 +1009,8 @@ export function BancorPage({
           <div className="bancor-trade-action-panel">
             <button
               type="button"
-              className="theme-primary-btn mt-3 w-full justify-center"
+              className="bancor-trade-submit-button mt-3 w-full justify-center"
+              data-bancor-trade-submit={side}
               disabled={!tradingReady || !inputAmount.trim() || Boolean(inputErrorCode) || slippageBps === null || quoteLoading || tradeLoading}
               onClick={() => slippageBps !== null && void preview(
                 side,
@@ -1051,9 +1047,9 @@ export function BancorPage({
             {lastTrade ? (
               <div className="mt-4 rounded-xl border border-emerald-400/20 bg-emerald-400/5 p-4 text-sm text-emerald-50">
                 {t("最近成交：", "Latest trade: ")}
-                <NniDecimalAmount value={`${formatBancorAssetAmountForDisplay(lastTrade.trade.input_amount, lastTrade.trade.input_asset)} ${lastTrade.trade.input_asset}`} />
+                <NniDecimalAmount value={`${formatBancorAssetAmountForDisplay(lastTrade.trade.input_amount, lastTrade.trade.input_asset)} ${lastTrade.trade.input_asset}`} shrinkFraction={false} />
                 {" → "}
-                <NniDecimalAmount value={`${formatBancorAssetAmountForDisplay(lastTrade.trade.output_amount, lastTrade.trade.output_asset)} ${lastTrade.trade.output_asset}`} />
+                <NniDecimalAmount value={`${formatBancorAssetAmountForDisplay(lastTrade.trade.output_amount, lastTrade.trade.output_asset)} ${lastTrade.trade.output_asset}`} shrinkFraction={false} />
               </div>
             ) : null}
           </div>
@@ -1205,7 +1201,6 @@ export function BancorSwapTradePanel({
   inputBalance,
   outputAsset,
   outputAmount,
-  minimumInputAmount,
   onInputChange,
   onFillBalance,
   onFlip,
@@ -1217,7 +1212,6 @@ export function BancorSwapTradePanel({
   inputBalance: string | null;
   outputAsset: "AIC" | "USD";
   outputAmount: string | null;
-  minimumInputAmount: string | null;
   onInputChange: (value: string) => void;
   onFillBalance: () => void;
   onFlip: () => void;
@@ -1233,21 +1227,15 @@ export function BancorSwapTradePanel({
             disabled={!inputBalance}
             onClick={onFillBalance}
           >
-            {t("余额", "Balance")}：<NniDecimalAmount value={inputBalance ?? "—"} />
+            {t("余额", "Balance")}：<NniDecimalAmount value={inputBalance ?? "—"} shrinkFraction={false} />
           </button>
         </div>
-        {minimumInputAmount ? (
-          <p id="bancor-swap-input-minimum" className="mt-1 text-xs text-white/45">
-            {t("最低", "Minimum")} {minimumInputAmount} {inputAsset}
-          </p>
-        ) : null}
         <label className="mt-1 flex items-center gap-3">
           <span className="sr-only">{t("支付数量", "Amount to pay")}</span>
           <input
             id="bancor-swap-input-amount"
             value={inputAmount}
             inputMode="decimal"
-            aria-describedby={minimumInputAmount ? "bancor-swap-input-minimum" : undefined}
             placeholder="0.00000000"
             className="min-w-0 flex-1 bg-transparent py-1.5 text-xl font-medium text-white outline-none placeholder:text-white/20"
             onChange={(event) => onInputChange(event.target.value)}

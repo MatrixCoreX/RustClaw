@@ -198,6 +198,27 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       onOpenNni={() => undefined}
     />,
   );
+  const latestTradeHtml = renderToStaticMarkup(
+    <BancorPage
+      t={(zh) => zh}
+      runtime={{
+        ...runtime,
+        lastTrade: {
+          trade: {
+            input_amount: "99.99999800",
+            input_asset: "USD",
+            output_amount: "149930.26917640",
+            output_asset: "AIC",
+          },
+        },
+      } as unknown as ReturnType<typeof useBancorRuntime>}
+      formatUnixDateTime={(value) => String(value ?? "")}
+      signingDeviceReady
+      assetOwnerReady
+      assetOwnerPubkey="5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M"
+      onOpenNni={() => undefined}
+    />,
+  );
   const signingUnavailableHtml = renderToStaticMarkup(
     <BancorPage
       t={(zh) => zh}
@@ -390,7 +411,11 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /滑点保护与警戒/);
   assert.match(html, /value="3\.00"/);
   assert.match(html, /价格影响超过此值时会标黄警告/);
-  assert.match(html, /class="theme-primary-btn mt-3 w-full justify-center"[^>]*>卖出<\/button>/);
+  assert.match(html, /data-bancor-trade-side="sell"[^>]*data-selected="true"/);
+  assert.match(html, /class="bancor-trade-submit-button mt-3 w-full justify-center"[^>]*data-bancor-trade-submit="sell"/);
+  assert.doesNotMatch(html, /最低 0\.000002 USD|最低 0\.00010052 AIC/);
+  assert.match(latestTradeHtml, /data-nni-decimal-amount="99\.99999800 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
+  assert.match(latestTradeHtml, /data-nni-decimal-amount="149930\.26917640 AIC"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.doesNotMatch(html, /红色表示上涨，绿色表示下跌/);
   assert.doesNotMatch(html, /左右拖动查看历史|点按查看详情|滚轮缩放|全部实际成交均价 K 线已显示/);
   assert.match(html, /回到最新/);
@@ -509,7 +534,6 @@ test("BANCOR swap mode uses stacked pay and estimated-output windows", () => {
       inputBalance="125.00000000"
       outputAsset="USD"
       outputAmount="0.00990000"
-      minimumInputAmount="0.00010052"
       onInputChange={() => undefined}
       onFillBalance={() => undefined}
       onFlip={() => undefined}
@@ -518,10 +542,11 @@ test("BANCOR swap mode uses stacked pay and estimated-output windows", () => {
 
   assert.match(html, /data-bancor-trade-layout="swap"/);
   assert.ok(html.indexOf("支付") < html.indexOf("预计收到"));
+  assert.match(html, /data-nni-decimal-amount="125\.00000000"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.match(html, /100\.0000/);
   assert.match(html, /0\.0099/);
   assert.match(html, /切换为 USD 支付/);
-  assert.match(html, /最低 0\.00010052 AIC/);
+  assert.doesNotMatch(html, /最低 0\.00010052 AIC/);
   assert.match(html, /最终到账以服务端签名报价为准/);
   assert.match(html, /aria-label="快速调整支付数量"/);
   assert.match(html, />−25%<\/button>/);
