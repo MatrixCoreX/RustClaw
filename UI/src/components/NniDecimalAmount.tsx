@@ -2,10 +2,12 @@ export function NniDecimalAmount({
   value,
   className = "",
   shrinkFraction = true,
+  title,
 }: {
   value: string;
   className?: string;
   shrinkFraction?: boolean;
+  title?: string;
 }) {
   const match = /^([+-]?\d+)(\.\d+)(.*)$/.exec(value.trim());
   if (!match) return <span className={className || undefined}>{value}</span>;
@@ -15,7 +17,7 @@ export function NniDecimalAmount({
         className={className || undefined}
         data-nni-decimal-amount={value}
         data-nni-decimal-fraction-size="normal"
-        title={value}
+        title={title ?? value}
       >
         {value}
       </span>
@@ -26,7 +28,7 @@ export function NniDecimalAmount({
       className={className || undefined}
       data-nni-decimal-amount={value}
       data-nni-decimal-fraction-size="compact"
-      title={value}
+      title={title ?? value}
     >
       <span>{match[1]}</span>
       <span className="nni-decimal-fraction">{match[2]}</span>
