@@ -16,15 +16,34 @@ import {
   formatBancorApiError,
   hasEarlierBancorCandles,
   parseBancorSlippagePercent,
+  persistBancorCandleInterval,
   projectBancorCandlesForInterval,
+  readBancorCandleInterval,
   validateBancorTradeInput,
 } from "./useBancorRuntime";
 
-test("BANCOR opens on the five-minute view by default", () => {
-  assert.equal(BANCOR_DEFAULT_CANDLE_INTERVAL_SECONDS, 300);
+test("BANCOR opens on the one-hour view by default", () => {
+  assert.equal(BANCOR_DEFAULT_CANDLE_INTERVAL_SECONDS, 3_600);
   assert.equal(BANCOR_MARKET_TRADE_LIMIT, 100);
   assert.equal(BANCOR_TRADE_PAGE_SIZE, 10);
   assert.equal(BANCOR_SUCCESS_MESSAGE_DURATION_MS, 5_000);
+});
+
+test("BANCOR persists a supported candle interval and rejects damaged preferences", () => {
+  const values = new Map<string, string>();
+  const storage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+  };
+
+  assert.equal(readBancorCandleInterval(storage), 3_600);
+  persistBancorCandleInterval(storage, 86_400);
+  assert.equal(readBancorCandleInterval(storage), 86_400);
+
+  persistBancorCandleInterval(storage, 123);
+  assert.equal(readBancorCandleInterval(storage), 86_400);
+  values.set([...values.keys()][0], "damaged");
+  assert.equal(readBancorCandleInterval(storage), 3_600);
 });
 
 test("BANCOR account history requests ten trades per page", () => {
