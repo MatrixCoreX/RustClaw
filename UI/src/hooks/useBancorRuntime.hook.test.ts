@@ -282,7 +282,7 @@ test("BANCOR hook never exposes old-period candles after a failed interval switc
     const interval = new URL(path, "http://runtime.invalid").searchParams.get("interval_seconds");
     return interval === "60"
       ? oneMinuteResponse
-      : Promise.resolve(response(candles(300)));
+      : Promise.resolve(response(candles(3_600)));
   };
   let runtime: ReturnType<typeof useBancorRuntime> | null = null;
   function Probe() {
@@ -295,9 +295,9 @@ test("BANCOR hook never exposes old-period candles after a failed interval switc
     renderer = create(React.createElement(Probe));
   });
   await act(async () => {
-    await runtime!.fetchCandles(300);
+    await runtime!.fetchCandles();
   });
-  assert.equal(runtime!.candles?.interval_seconds, 300);
+  assert.equal(runtime!.candles?.interval_seconds, 3_600);
 
   let switching: Promise<NniBancorCandlesResponse | null> | null = null;
   await act(async () => {
@@ -331,11 +331,11 @@ test("BANCOR hook paginates older candles without reusing the latest-page ETag",
     const query = new URL(path, "http://runtime.invalid").searchParams;
     if (query.has("end_time_unix")) {
       historicalHeaders = new Headers(init?.headers);
-      return Promise.resolve(response(candles(300, 1_800_000_000)));
+      return Promise.resolve(response(candles(3_600, 1_800_000_000)));
     }
     latestRequestCount += 1;
     if (latestRequestCount > 1) refreshedLatestHeaders = new Headers(init?.headers);
-    return Promise.resolve(response(candles(300, 1_800_000_300), '"latest-page"'));
+    return Promise.resolve(response(candles(3_600, 1_800_003_600), '"latest-page"'));
   };
   let runtime: ReturnType<typeof useBancorRuntime> | null = null;
   function Probe() {
@@ -348,7 +348,7 @@ test("BANCOR hook paginates older candles without reusing the latest-page ETag",
     renderer = create(React.createElement(Probe));
   });
   await act(async () => {
-    await runtime!.fetchCandles(300);
+    await runtime!.fetchCandles();
   });
   assert.equal(runtime!.candlesHasOlder, true);
   await act(async () => {
@@ -357,11 +357,11 @@ test("BANCOR hook paginates older candles without reusing the latest-page ETag",
   assert.equal(historicalHeaders?.has("If-None-Match"), false);
   assert.deepEqual(
     runtime!.candles?.candles.map((candle) => candle.bucket_start_unix),
-    [1_800_000_000, 1_800_000_300],
+    [1_800_000_000, 1_800_003_600],
   );
   assert.equal(runtime!.candlesHasOlder, false);
   await act(async () => {
-    await runtime!.fetchCandles(300);
+    await runtime!.fetchCandles();
   });
   assert.equal(refreshedLatestHeaders?.get("If-None-Match"), '"latest-page"');
 
@@ -381,7 +381,7 @@ test("BANCOR refreshes the active candlesticks without a stale ETag after a succ
     if (path.startsWith("/v1/nni/bancor/candles?")) {
       candleHeaders.push(new Headers(init?.headers));
       candleRequestCount += 1;
-      const data = candles(300);
+      const data = candles(3_600);
       data.market_version = candleRequestCount;
       data.candles[0].close = candleRequestCount === 1 ? "0.000100000000" : "0.000110000000";
       return Promise.resolve(response(data, `"candles-${candleRequestCount}"`));
@@ -461,7 +461,7 @@ test("BANCOR refreshes the active candlesticks without a stale ETag after a succ
 
   assert.equal(candleRequestCount, 2);
   assert.equal(candleHeaders[1].has("If-None-Match"), false);
-  assert.ok(requestedPaths.some((path) => path.includes("/v1/nni/bancor/candles?interval_seconds=300")));
+  assert.ok(requestedPaths.some((path) => path.includes("/v1/nni/bancor/candles?interval_seconds=3600")));
   assert.ok(requestedPaths.includes("/v1/nni/bancor/market"));
   assert.ok(requestedPaths.includes("/v1/nni/bancor/account?page=1&per_page=10"));
   assert.ok(requestedPaths.includes("/v1/nni/bancor/trades"));

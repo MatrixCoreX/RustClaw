@@ -18,6 +18,7 @@ import {
   writeBancorCandleCache,
 } from "../lib/bancor-candle-cache";
 import { formatBancorTradeHistoryAmount } from "../lib/bancor-amount-display";
+import { appStorageKey } from "../lib/product-identity";
 import { fetchResilientRead, runCoalescedRead } from "../lib/resilient-read";
 
 type Translate = (zh: string, en: string) => string;
@@ -25,12 +26,65 @@ type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
 const BANCOR_ASSET_SCALE = 100_000_000n;
 const BANCOR_AMOUNT_STEP_UNITS = BANCOR_ASSET_SCALE;
 const BANCOR_MAX_UNITS = 9_223_372_036_854_775_807n;
-export const BANCOR_DEFAULT_CANDLE_INTERVAL_SECONDS = 300;
+export const BANCOR_DEFAULT_CANDLE_INTERVAL_SECONDS = 3_600;
+export const BANCOR_SUPPORTED_CANDLE_INTERVAL_SECONDS = [
+  60,
+  300,
+  900,
+  3_600,
+  14_400,
+  86_400,
+  604_800,
+  31_536_000,
+] as const;
 export const BANCOR_DEFAULT_SLIPPAGE_BPS = 300;
 export const BANCOR_MAX_SLIPPAGE_BPS = 5_000;
 export const BANCOR_MARKET_TRADE_LIMIT = 100;
 export const BANCOR_TRADE_PAGE_SIZE = 10;
 export const BANCOR_SUCCESS_MESSAGE_DURATION_MS = 5_000;
+const BANCOR_CANDLE_INTERVAL_STORAGE_KEY = appStorageKey("nni.bancor.candleIntervalSeconds");
+
+interface BancorCandleIntervalStorage {
+  getItem: (key: string) => string | null;
+  setItem: (key: string, value: string) => void;
+}
+
+function browserPreferenceStorage(): BancorCandleIntervalStorage | undefined {
+  if (typeof window === "undefined") return undefined;
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+export function readBancorCandleInterval(
+  storage?: BancorCandleIntervalStorage,
+): number {
+  if (!storage) return BANCOR_DEFAULT_CANDLE_INTERVAL_SECONDS;
+  try {
+    const value = Number(storage.getItem(BANCOR_CANDLE_INTERVAL_STORAGE_KEY));
+    return BANCOR_SUPPORTED_CANDLE_INTERVAL_SECONDS.some((interval) => interval === value)
+      ? value
+      : BANCOR_DEFAULT_CANDLE_INTERVAL_SECONDS;
+  } catch {
+    return BANCOR_DEFAULT_CANDLE_INTERVAL_SECONDS;
+  }
+}
+
+export function persistBancorCandleInterval(
+  storage: BancorCandleIntervalStorage | undefined,
+  intervalSeconds: number,
+): void {
+  if (!storage || !BANCOR_SUPPORTED_CANDLE_INTERVAL_SECONDS.some((interval) => interval === intervalSeconds)) {
+    return;
+  }
+  try {
+    storage.setItem(BANCOR_CANDLE_INTERVAL_STORAGE_KEY, String(intervalSeconds));
+  } catch {
+    // Private browsing or a storage policy may make persistence unavailable.
+  }
+}
 
 export type BancorTradeAuthorization = {
   authorizationMode?: "delegated_hardware" | "asset_owner";
@@ -324,6 +378,7 @@ export function useBancorRuntime({
   cacheScope: string;
   t: Translate;
 }) {
+  const initialCandleInterval = readBancorCandleInterval(browserPreferenceStorage());
   const [market, setMarket] = useState<NniBancorMarketResponse | null>(null);
   const [candles, setCandles] = useState<NniBancorCandlesResponse | null>(null);
   const [account, setAccount] = useState<NniBancorAccountResponse | null>(null);
@@ -335,7 +390,7 @@ export function useBancorRuntime({
   const [candlesOlderLoading, setCandlesOlderLoading] = useState(false);
   const [candlesHasOlder, setCandlesHasOlder] = useState(false);
   const [candlesError, setCandlesError] = useState<string | null>(null);
-  const [candleIntervalSeconds, setCandleIntervalSeconds] = useState(BANCOR_DEFAULT_CANDLE_INTERVAL_SECONDS);
+  const [candleIntervalSeconds, setCandleIntervalSeconds] = useState(initialCandleInterval);
   const [accountLoading, setAccountLoading] = useState(false);
   const [marketTradesLoading, setMarketTradesLoading] = useState(false);
   const [marketTradesError, setMarketTradesError] = useState<string | null>(null);
@@ -346,7 +401,7 @@ export function useBancorRuntime({
   const [assetOwnerAccessErrorCode, setAssetOwnerAccessErrorCode] = useState<string | null>(null);
   const [hardwareAccountAccessUnavailable, setHardwareAccountAccessUnavailable] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const candleIntervalRef = useRef(BANCOR_DEFAULT_CANDLE_INTERVAL_SECONDS);
+  const candleIntervalRef = useRef(initialCandleInterval);
   const candleCacheRef = useRef(new Map<string, {
     response: NniBancorCandlesResponse;
     etag: string | null;
@@ -652,6 +707,7 @@ export function useBancorRuntime({
     const cached = candleCacheRef.current.get(`${cacheScope}\n${intervalSeconds}`)?.response ?? null;
     candleIntervalRef.current = intervalSeconds;
     setCandleIntervalSeconds(intervalSeconds);
+    persistBancorCandleInterval(browserPreferenceStorage(), intervalSeconds);
     setCandles((current) => projectBancorCandlesForInterval(current, intervalSeconds, cached));
     setCandlesError(null);
     setCandlesHasOlder(cached ? hasEarlierBancorCandles(cached) : false);

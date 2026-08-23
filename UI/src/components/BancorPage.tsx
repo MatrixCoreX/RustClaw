@@ -24,6 +24,7 @@ import type {
 
 import {
   BANCOR_DEFAULT_SLIPPAGE_BPS,
+  BANCOR_SUPPORTED_CANDLE_INTERVAL_SECONDS,
   BANCOR_TRADE_PAGE_SIZE,
   type BancorTradeAuthorization,
   type BancorAmountAdjustment,
@@ -198,6 +199,15 @@ export const BANCOR_CANDLE_INTERVALS = [
   { seconds: 604_800, zh: "1周", en: "1W" },
   { seconds: 31_536_000, zh: "1年", en: "1Y" },
 ] as const;
+
+if (
+  BANCOR_CANDLE_INTERVALS.length !== BANCOR_SUPPORTED_CANDLE_INTERVAL_SECONDS.length
+  || BANCOR_CANDLE_INTERVALS.some(
+    (interval, index) => interval.seconds !== BANCOR_SUPPORTED_CANDLE_INTERVAL_SECONDS[index],
+  )
+) {
+  throw new Error("BANCOR candle interval labels are out of sync with the runtime contract.");
+}
 
 export function resolveBancorCandlePalette(t: Translate): {
   up: CandleColor;
