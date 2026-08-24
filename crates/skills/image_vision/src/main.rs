@@ -328,16 +328,17 @@ fn execute(
         );
         let config_default_model =
             select_model_override(&cfg.image_vision, vendor, requested_model);
-        match call_vendor_vision(
+        match call_vendor_vision_for_action(
             vendor,
             cfg,
             config_default_model,
             timeout_seconds,
             &prompt,
+            action.as_str(),
             &images,
             max_input_bytes,
         ) {
-            Ok((text, model, model_kind)) => {
+            Ok((text, model, model_kind, schema_attempts)) => {
                 let structured = parse_structured_narrative_action_output(action.as_str(), &text);
                 let text = structured
                     .as_ref()
@@ -389,7 +390,8 @@ fn execute(
                     "model_kind": model_kind,
                     "latency_ms": 0,
                     "outputs": [{"type":"text","preview": truncate(&text, 800)}],
-                    "schema_validated": structured.is_some()
+                    "schema_validated": structured.is_some(),
+                    "schema_attempts": schema_attempts,
                 });
                 if let Some(structured) = structured {
                     extra["structured"] = structured.to_json_value();
@@ -439,6 +441,46 @@ fn execute(
         "all providers failed: {}",
         attempt_errors.join("; ")
     ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn call_vendor_vision_for_action(
+    vendor: VendorKind,
+    cfg: &RootConfig,
+    requested_model: Option<&str>,
+    timeout_seconds: u64,
+    prompt: &str,
+    action: &str,
+    images: &[ImageSource],
+    max_input_bytes: usize,
+) -> Result<(String, String, &'static str, u8), String> {
+    let (text, model, model_kind) = call_vendor_vision(
+        vendor,
+        cfg,
+        requested_model,
+        timeout_seconds,
+        prompt,
+        images,
+        max_input_bytes,
+    )?;
+    if action != "describe" || parse_structured_narrative_action_output(action, &text).is_some() {
+        return Ok((text, model, model_kind, 1));
+    }
+
+    let retry_prompt = structured_output_retry_prompt(prompt);
+    let (text, model, model_kind) = call_vendor_vision(
+        vendor,
+        cfg,
+        requested_model,
+        timeout_seconds,
+        &retry_prompt,
+        images,
+        max_input_bytes,
+    )?;
+    if parse_structured_narrative_action_output(action, &text).is_none() {
+        return Err("image describe output failed schema validation after 2 attempts".to_string());
+    }
+    Ok((text, model, model_kind, 2))
 }
 
 fn image_text_output_has_visible_text(

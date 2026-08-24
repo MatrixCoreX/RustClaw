@@ -368,6 +368,97 @@ fn minimax_compat_dispatches_multimodal_request() {
 }
 
 #[test]
+fn describe_retries_once_when_provider_output_is_not_structured() {
+    use std::io::{Read as _, Write as _};
+    use std::net::{TcpListener, TcpStream};
+
+    fn receive_and_reply(mut stream: TcpStream, expected_prompt: &str, content: &str) {
+        let mut request = Vec::new();
+        let mut chunk = [0_u8; 4096];
+        let header_end = loop {
+            let read = stream.read(&mut chunk).expect("read vision request");
+            assert!(read > 0, "request ended before headers");
+            request.extend_from_slice(&chunk[..read]);
+            if let Some(index) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+                break index + 4;
+            }
+        };
+        let headers = String::from_utf8_lossy(&request[..header_end]);
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                line.to_ascii_lowercase()
+                    .strip_prefix("content-length:")
+                    .and_then(|value| value.trim().parse::<usize>().ok())
+            })
+            .expect("content length");
+        while request.len() < header_end + content_length {
+            let read = stream.read(&mut chunk).expect("read vision body");
+            assert!(read > 0, "request ended before body");
+            request.extend_from_slice(&chunk[..read]);
+        }
+        let request = String::from_utf8_lossy(&request);
+        assert!(request.contains(expected_prompt), "{request}");
+
+        let body = json!({"choices":[{"message":{"content":content}}]}).to_string();
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        )
+        .expect("write vision response");
+    }
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock vision server");
+    let address = listener.local_addr().expect("mock server address");
+    let server = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().expect("accept first vision request");
+        receive_and_reply(stream, "base prompt", "unstructured response");
+        let (stream, _) = listener.accept().expect("accept retry vision request");
+        receive_and_reply(
+            stream,
+            "array order already records reading order",
+            r#"{"summary":"handwritten note","objects":["paper"],"visible_text":["first line","second line"],"uncertainties":[]}"#,
+        );
+    });
+
+    let mut cfg = RootConfig::default();
+    cfg.image_vision.adapter_mode = Some("compat".to_string());
+    cfg.image_vision.providers.minimax = Some(vendor_cfg(
+        &format!("http://{address}"),
+        "test-minimax-key",
+        "MiniMax-M3",
+    ));
+    let images = vec![ImageSource::Base64(
+        "data:image/png;base64,YWJj".to_string(),
+    )];
+
+    let result = call_vendor_vision_for_action(
+        VendorKind::MiniMax,
+        &cfg,
+        Some("MiniMax-M3"),
+        5,
+        "base prompt",
+        "describe",
+        &images,
+        1024,
+    )
+    .expect("schema retry should recover");
+    server.join().expect("mock vision server");
+
+    assert_eq!(result.3, 2);
+    let structured =
+        parse_structured_narrative_action_output("describe", &result.0).expect("structured result");
+    match structured {
+        StructuredNarrativeActionOutput::Describe(output) => {
+            assert_eq!(output.visible_text, vec!["first line", "second line"]);
+        }
+        _ => panic!("expected describe output"),
+    }
+}
+
+#[test]
 fn parse_language_choice_accepts_schema_valid_json() {
     assert_eq!(
         parse_language_choice_from_llm(r#"{"language":"Chinese (Simplified)"}"#).as_deref(),
@@ -483,6 +574,23 @@ fn describe_default_reply_includes_visible_text_from_same_model_result() {
     let rendered = render_structured_narrative_action_output(&output, Some("zh-CN"), true);
 
     assert_eq!(rendered, "一张店铺门口的照片。\n\n营业时间\n09:00-18:00");
+}
+
+#[test]
+fn describe_renderer_preserves_source_marker_without_numbering_other_lines() {
+    let output = StructuredNarrativeActionOutput::Describe(ImageDescribeOut {
+        summary: "A photographed note.".to_string(),
+        objects: vec!["note".to_string()],
+        visible_text: vec!["1. source marker".to_string(), "unmarked line".to_string()],
+        uncertainties: vec![],
+    });
+
+    let rendered = render_structured_narrative_action_output(&output, Some("en"), true);
+
+    assert_eq!(
+        rendered,
+        "A photographed note.\n\n1. source marker\nunmarked line"
+    );
 }
 
 #[test]
@@ -606,6 +714,33 @@ fn image_text_extraction_prompt_preserves_visible_markers_without_inventing_them
 
     assert!(prompt.contains("Preserve every line-start marker that is visibly present"));
     assert!(prompt.contains("Never add a line-start number"));
+}
+
+#[test]
+fn image_description_prompt_preserves_only_source_visible_line_markers() {
+    let workspace = tempfile::tempdir().expect("tempdir");
+    let prompt = build_prompt(
+        workspace.path(),
+        "minimax",
+        "describe",
+        "normal",
+        None,
+        Some("zh-CN"),
+        None,
+    );
+
+    assert!(prompt.contains("array items already represents reading order"));
+    assert!(prompt.contains("never add a number, bullet, Markdown prefix"));
+    assert!(prompt.contains("visibly part of the image, preserve that marker exactly"));
+}
+
+#[test]
+fn image_description_schema_retry_repeats_source_marker_contract() {
+    let prompt = structured_output_retry_prompt("base prompt");
+
+    assert!(prompt.contains("previous response did not satisfy the required JSON schema"));
+    assert!(prompt.contains("array order already records reading order"));
+    assert!(prompt.contains("Preserve a line-start marker only when it is visibly present"));
 }
 
 #[test]

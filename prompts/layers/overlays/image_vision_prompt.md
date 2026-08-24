@@ -21,6 +21,10 @@ Output rules:
 - Be accurate and concise.
 - For action=describe, preserve all readable visible text in natural reading
   order under `visible_text`; use an empty array when none is visible.
+- The order of `visible_text` array items already represents reading order. Do
+  not add ordinal numbers, bullets, Markdown list prefixes, or other line-start
+  markers merely to show that order. Preserve a line-start marker only when it
+  is visibly present in the source image, and keep that source marker verbatim.
 - If uncertain, state uncertainty briefly.
 - Return valid JSON only (no markdown, no code fences, no comments). Never output <think> tags, explanations, or prose outside the JSON.
 - Keep keys stable and do not rename schema fields.

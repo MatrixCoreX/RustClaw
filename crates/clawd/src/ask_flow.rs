@@ -58,11 +58,9 @@ pub(crate) async fn analyze_attached_images_for_ask(
     let outcome = crate::skills::run_skill_with_runner_outcome(state, task, "image_vision", args)
         .await
         .map_err(anyhow::Error::msg)?;
-    Ok(Some(attached_image_analysis_context(
-        images.len(),
-        typed_instruction_present,
-        &outcome,
-    )))
+    let context =
+        attached_image_analysis_context(images.len(), typed_instruction_present, &outcome)?;
+    Ok(Some(context))
 }
 
 fn attached_image_inputs(payload: &Value) -> Vec<Value> {
@@ -124,14 +122,15 @@ fn attached_image_analysis_context(
     image_count: usize,
     typed_instruction_present: bool,
     outcome: &crate::skills::SkillRunOutcome,
-) -> String {
+) -> anyhow::Result<String> {
     let structured = outcome
         .extra
         .as_ref()
         .and_then(|extra| extra.get("structured"))
         .cloned()
-        .unwrap_or(Value::Null);
-    json!({
+        .filter(Value::is_object)
+        .ok_or_else(|| anyhow::anyhow!("image_vision_describe_structured_output_missing"))?;
+    Ok(json!({
         "schema_version": 1,
         "source": "ask_attachment_materialization",
         "image_count": image_count,
@@ -140,7 +139,7 @@ fn attached_image_analysis_context(
         "structured": structured,
         "instruction_authority": "none",
     })
-    .to_string()
+    .to_string())
 }
 
 pub(crate) async fn transcribe_attached_audio_for_ask(
