@@ -1069,7 +1069,10 @@ async fn nni_skill_heartbeat_enable(state: &AppState) -> Result<Value, NniSkillD
             json!({"detail": error.to_string()}),
         )
     })?;
-    let selected_nodes = enabled.selected_node_url.iter().cloned().collect::<Vec<_>>();
+    let selected_nodes = nni_selected_remote_nodes(&enabled)
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>();
     match nni_recorded_heartbeat(state, &selected_nodes).await {
         Ok(_) => {
             let current = read_nni_config(state).map_err(|error| {
@@ -1189,7 +1192,10 @@ async fn nni_skill_heartbeat_now(state: &AppState) -> Result<Value, NniSkillDoma
             json!({"retry_after_seconds": 30}),
         ));
     }
-    let selected_nodes = config.selected_node_url.iter().cloned().collect::<Vec<_>>();
+    let selected_nodes = nni_selected_remote_nodes(&config)
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>();
     nni_recorded_heartbeat(state, &selected_nodes)
         .await
         .map_err(|error| {
