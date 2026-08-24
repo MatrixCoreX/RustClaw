@@ -16,6 +16,7 @@
 /skills_output/
 /.release-backups/
 /.release-rollback
+/.deploy-staging/
 /.release-tag
 /VERSION
 /.agent-runtime/
