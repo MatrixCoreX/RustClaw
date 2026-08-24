@@ -980,21 +980,6 @@ def _content_bundle(
                 },
                 "source_label_requirement": "label_each_result_in_request_language",
             }
-        elif scope == "none":
-            pass
-        else:
-            bundle["followup_policy"] = {
-                "text_conversion_action": "transcribe_audio",
-                "capability": "media_download.transcribe",
-                "input_field": "input_path",
-                **(
-                    {"input_value": original_video["path"]}
-                    if original_video is not None and original_video.get("path")
-                    else {}
-                ),
-                "never_use_image_ocr": True,
-                "result_label_kind": "audio_transcript",
-            }
     elif kind in {"image_audio", "image_audio_article"}:
         images = (processing_inputs or {}).get("images")
         background_audio = (processing_inputs or {}).get("background_audio")
@@ -1026,7 +1011,7 @@ def _content_bundle(
                 "result_label_kind": "audio_transcript",
             }
             scope = text_conversion_scope or "auto"
-            if scope == "none":
+            if scope not in {"all", "images_only", "audio_only"}:
                 return bundle
             if scope == "images_only":
                 steps = [image_step]
@@ -1063,8 +1048,7 @@ def _content_bundle(
                 },
                 "source_label_requirement": "label_each_result_in_request_language",
             }
-            if scope in {"all", "images_only", "audio_only"}:
-                policy["activation_requirement"] = "required"
+            policy["activation_requirement"] = "required"
             bundle["followup_policy"] = policy
     return bundle
 
