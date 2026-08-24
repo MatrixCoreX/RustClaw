@@ -1209,17 +1209,7 @@ class AdapterTest(unittest.TestCase):
             response["extra"]["delivery"],
             {"intent": "artifact", "deliver_to_user": True},
         )
-        self.assertEqual(
-            response["extra"]["content_bundle"]["followup_policy"],
-            {
-                "text_conversion_action": "transcribe_audio",
-                "capability": "media_download.transcribe",
-                "input_field": "input_path",
-                "input_value": str(artifacts / "public-video.mp4"),
-                "never_use_image_ocr": True,
-                "result_label_kind": "audio_transcript",
-            },
-        )
+        self.assertNotIn("followup_policy", response["extra"]["content_bundle"])
         command = runner.call_args.args[0]
         self.assertIn("--no-system-browser-cookies", command)
         self.assertNotIn("shell", runner.call_args.kwargs)
@@ -1518,6 +1508,68 @@ class AdapterTest(unittest.TestCase):
             [step["component_kind"] for step in policy["steps"]],
             ["background_audio"],
         )
+
+    def test_explicit_images_only_scope_does_not_require_audio(self) -> None:
+        artifacts = [
+            {
+                "artifact_role": "original_image",
+                "path": "/workspace/note.webp",
+                "filename": "note.webp",
+                "mime_type": "image/webp",
+                "size_bytes": 5,
+            },
+            {
+                "artifact_role": "background_audio",
+                "path": "/workspace/note.mp3",
+                "filename": "note.mp3",
+                "mime_type": "audio/mpeg",
+                "size_bytes": 5,
+            },
+        ]
+        processing_inputs = self.skill._composite_processing_inputs(artifacts, None)
+
+        bundle = self.skill._content_bundle(
+            artifacts,
+            processing_inputs=processing_inputs,
+            text_conversion_scope="images_only",
+        )
+
+        policy = bundle["followup_policy"]
+        self.assertEqual(policy["requested_scope"], "images_only")
+        self.assertEqual(policy["completion_requirement"], "selected_components")
+        self.assertEqual(policy["activation_requirement"], "required")
+        self.assertEqual(
+            [step["component_kind"] for step in policy["steps"]],
+            ["images"],
+        )
+        self.assertEqual(policy["synthesis_sources"], ["image_text"])
+
+    def test_omitted_scope_does_not_schedule_composite_text_conversion(self) -> None:
+        artifacts = [
+            {
+                "artifact_role": "original_image",
+                "path": "/workspace/note.webp",
+                "filename": "note.webp",
+                "mime_type": "image/webp",
+                "size_bytes": 5,
+            },
+            {
+                "artifact_role": "background_audio",
+                "path": "/workspace/note.mp3",
+                "filename": "note.mp3",
+                "mime_type": "audio/mpeg",
+                "size_bytes": 5,
+            },
+        ]
+        processing_inputs = self.skill._composite_processing_inputs(artifacts, None)
+
+        bundle = self.skill._content_bundle(
+            artifacts,
+            processing_inputs=processing_inputs,
+        )
+
+        self.assertEqual(bundle["kind"], "image_audio")
+        self.assertNotIn("followup_policy", bundle)
 
     def test_numbered_background_audio_remains_a_composite_component(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
