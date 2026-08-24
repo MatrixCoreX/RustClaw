@@ -70,6 +70,20 @@ fn provider_error_marks_breaker_impact_by_failure_class() {
         "provider_non_retryable_business"
     );
 
+    let malformed_model_output = ProviderError::retryable_model_output_with_response(
+        "model_turn_tool_name_missing index=0".to_string(),
+        Value::Null,
+        "{}".to_string(),
+        None,
+    );
+    assert!(malformed_model_output.retryable);
+    assert!(!malformed_model_output.should_trip_breaker());
+    assert!(malformed_model_output.should_reset_breaker());
+    assert_eq!(
+        malformed_model_output.observability_kind(),
+        "provider_retryable_response"
+    );
+
     let local = ProviderError::non_retryable("unsupported".to_string(), Value::Null);
     assert!(!local.should_trip_breaker());
     assert!(!local.should_reset_breaker());
