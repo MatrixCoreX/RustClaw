@@ -160,6 +160,26 @@ impl ProviderError {
         }
     }
 
+    pub(super) fn retryable_model_output_with_response(
+        message: String,
+        request_payload: Value,
+        raw_response: String,
+        usage: Option<LlmUsageSnapshot>,
+    ) -> Self {
+        Self {
+            retryable: true,
+            kind: ProviderErrorKind::ProviderRetryableResponse,
+            message,
+            request_payload,
+            raw_response: Some(raw_response),
+            usage,
+            attempts: 1,
+            retryable_error_count: 0,
+            // The provider answered successfully; only this model turn was malformed.
+            breaker_impact: BreakerImpact::Healthy,
+        }
+    }
+
     pub(super) fn non_retryable(message: String, request_payload: Value) -> Self {
         Self {
             retryable: false,

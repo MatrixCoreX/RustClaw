@@ -108,7 +108,7 @@ pub(super) async fn call_openai_model_turn(
     })?;
     let safe_body_text = provider_safe_raw_response(&value);
     let turn = parse_openai_model_turn(&value).map_err(|code| {
-        ProviderError::non_retryable_with_response(
+        ProviderError::retryable_model_output_with_response(
             code,
             req_body.clone(),
             safe_body_text.clone(),
@@ -554,7 +554,7 @@ async fn read_openai_stream(
     let finish_raw_response = accumulator.safe_raw_response();
     let finish_usage = accumulator.usage.clone();
     let mut output = accumulator.finish(event_sink.as_ref()).map_err(|code| {
-        ProviderError::non_retryable_with_response(
+        ProviderError::retryable_model_output_with_response(
             code,
             request_payload.clone(),
             finish_raw_response,
