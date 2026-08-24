@@ -1235,7 +1235,7 @@ class AdapterTest(unittest.TestCase):
                 "args": {
                     "action": "download",
                     "share": "https://example.test/public-video",
-                    "text_conversion_scope": "all",
+                    "text_conversion_scope": "images_and_audio",
                 },
                 "context": {
                     "artifact_output_directory": str(artifacts),
@@ -1393,7 +1393,7 @@ class AdapterTest(unittest.TestCase):
                 "args": {
                     "action": "download",
                     "share": "https://www.douyin.com/note/example",
-                    "text_conversion_scope": "all",
+                    "text_conversion_scope": "images_and_audio",
                 },
                 "context": {
                     "artifact_output_directory": str(artifacts),
@@ -1436,7 +1436,10 @@ class AdapterTest(unittest.TestCase):
             bundle["followup_policy"]["activation_requirement"],
             "required",
         )
-        self.assertEqual(bundle["followup_policy"]["requested_scope"], "all")
+        self.assertEqual(
+            bundle["followup_policy"]["requested_scope"],
+            "images_and_audio",
+        )
         self.assertEqual(
             bundle["followup_policy"]["source_label_requirement"],
             "label_each_result_in_request_language",

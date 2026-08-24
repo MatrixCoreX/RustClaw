@@ -266,6 +266,41 @@ fn seeded_agent_loop_with_new_checkpoint_is_deferred_not_terminal() {
 }
 
 #[test]
+fn seeded_agent_loop_provider_wait_preserves_checkpoint_and_completed_effects() {
+    let claimed = seeded_claimed_dispatch();
+    let blocker = crate::TaskProviderBlocker {
+        provider: "vendor-test".to_string(),
+        status_code: "provider_retryable_response".to_string(),
+        retry_after_seconds: 30,
+        external_provider_blocked: true,
+        message_key: "provider.temporarily_unavailable".to_string(),
+    };
+
+    let payload = super::dispatch_result::seeded_agent_loop_provider_wait_dispatch_result_payload(
+        &claimed, &blocker, 1_000,
+    )
+    .expect("provider wait payload");
+
+    assert_eq!(payload["executor_result_status"], "seeded_loop_deferred");
+    assert_eq!(payload["deferred_checkpoint_id"], claimed.checkpoint_id);
+    assert_eq!(payload["deferred_lifecycle_state"], "waiting");
+    assert_eq!(
+        payload["defer_reason_code"],
+        "provider_blocker_wait_background"
+    );
+    assert_eq!(payload["retry_after_seconds"], 30);
+    assert_eq!(payload["next_check_after"], 1_030);
+    assert_eq!(payload["completed_side_effect_count"], 1);
+    assert_eq!(
+        payload["provider_status"]["status_code"],
+        "provider_retryable_response"
+    );
+    assert!(payload.get("error_code").is_none());
+    assert!(payload.get("text").is_none());
+    assert!(payload.get("error_text").is_none());
+}
+
+#[test]
 fn seeded_agent_loop_terminal_payload_rejects_text_leaks_in_claim_chain() {
     let mut claimed = seeded_claimed_dispatch();
     claimed.dispatch_claim = json!({"text": "leak"});

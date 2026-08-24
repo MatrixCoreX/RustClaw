@@ -151,6 +151,9 @@ its terminal task result.
 
 - Match the active exact schema; do not add unknown fields.
 - Prefer the narrowest capability that owns the requested operation.
+- Do not call a command or shell capability merely to echo, log, or restate the
+  user request. Such a call provides no task evidence or effect; load and call
+  the owning domain capability instead.
 - Do not use a lower-level mutation to simulate a preview or dry-run.
 - Use bounded time, idle, output, and pagination controls for long or noisy
   operations. Start durable/background or terminal sessions when the active

@@ -365,10 +365,14 @@ impl OpenAiStreamAccumulator {
         let id = call
             .get("id")
             .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
             .map(ToOwned::to_owned);
         let name = call
             .pointer("/function/name")
             .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
             .map(ToOwned::to_owned);
         let arguments_delta = call
             .pointer("/function/arguments")

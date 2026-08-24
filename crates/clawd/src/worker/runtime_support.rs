@@ -16,6 +16,7 @@ pub(super) use dispatch_result::{
     planned_paused_checkpoint_resume_executor_handoff,
     record_concrete_paused_checkpoint_resume_dispatch_result,
     record_paused_checkpoint_resume_dispatch_result,
+    seeded_agent_loop_provider_wait_dispatch_result_payload,
     seeded_agent_loop_terminal_dispatch_result_payload, PausedCheckpointDispatchResultRecord,
 };
 

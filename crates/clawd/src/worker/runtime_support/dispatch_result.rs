@@ -744,6 +744,39 @@ pub(crate) fn seeded_agent_loop_terminal_dispatch_result_payload(
     }
 }
 
+pub(crate) fn seeded_agent_loop_provider_wait_dispatch_result_payload(
+    claimed: &repo::ClaimedDispatchedPausedCheckpointResumeExecution,
+    blocker: &crate::TaskProviderBlocker,
+    now_ts: i64,
+) -> Option<Value> {
+    if !claimed_seeded_agent_loop_dispatch_matches(claimed) {
+        return None;
+    }
+    let retry_after_seconds = blocker.retry_after_seconds.max(1).min(i64::MAX as u64) as i64;
+    let mut payload = seeded_agent_loop_base_payload(claimed, "seeded_loop_deferred");
+    let obj = payload.as_object_mut()?;
+    obj.insert(
+        "defer_reason_code".to_string(),
+        json!(claw_core::provider_failure_policy::PROVIDER_WAIT_RESUME_REASON),
+    );
+    obj.insert(
+        "deferred_checkpoint_id".to_string(),
+        json!(claimed.checkpoint_id),
+    );
+    obj.insert("deferred_lifecycle_state".to_string(), json!("waiting"));
+    obj.insert(
+        "retry_after_seconds".to_string(),
+        json!(retry_after_seconds),
+    );
+    obj.insert(
+        "next_check_after".to_string(),
+        json!(now_ts.saturating_add(retry_after_seconds)),
+    );
+    obj.insert("message_key".to_string(), json!(blocker.message_key));
+    obj.insert("provider_status".to_string(), blocker.to_machine_json());
+    Some(payload)
+}
+
 fn claimed_seeded_agent_loop_dispatch_matches(
     claimed: &repo::ClaimedDispatchedPausedCheckpointResumeExecution,
 ) -> bool {
