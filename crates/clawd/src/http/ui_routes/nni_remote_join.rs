@@ -2043,7 +2043,10 @@ async fn nni_heartbeat_tick(state: &AppState) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let selected_nodes = config.selected_node_url.iter().cloned().collect::<Vec<_>>();
+    let selected_nodes = nni_selected_remote_nodes(&config)
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>();
     match nni_recorded_heartbeat(state, &selected_nodes).await {
         Ok(_) => Ok(()),
         Err(error) => {
