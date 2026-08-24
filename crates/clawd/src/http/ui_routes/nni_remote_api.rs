@@ -62,13 +62,30 @@ where
 }
 
 fn nni_selected_remote_node(config: &NniConfigResponse) -> Option<&String> {
-    config.selected_node_url.as_ref()
+    config
+        .selected_node_url
+        .as_ref()
+        .or_else(|| config.remote_nodes.first())
 }
 
-fn nni_selected_remote_nodes(
-    config: &NniConfigResponse,
-) -> std::option::Iter<'_, String> {
-    config.selected_node_url.iter()
+fn prioritize_nni_nodes<'a>(
+    selected: Option<&'a String>,
+    remote_nodes: &'a [String],
+) -> Vec<&'a String> {
+    let mut nodes = Vec::with_capacity(remote_nodes.len());
+    if let Some(selected) = selected.or_else(|| remote_nodes.first()) {
+        nodes.push(selected);
+    }
+    for candidate in remote_nodes {
+        if nodes.iter().all(|existing| *existing != candidate) {
+            nodes.push(candidate);
+        }
+    }
+    nodes
+}
+
+fn nni_selected_remote_nodes(config: &NniConfigResponse) -> Vec<&String> {
+    prioritize_nni_nodes(config.selected_node_url.as_ref(), &config.remote_nodes)
 }
 
 #[cfg(test)]
@@ -100,6 +117,25 @@ mod nni_remote_api_tests {
         assert!(nni_remote_http_status_retryable(429));
         assert!(!nni_remote_http_status_retryable(400));
         assert!(!nni_remote_http_status_retryable(401));
+    }
+
+    #[test]
+    fn selected_node_is_preferred_and_other_nodes_remain_failover_candidates() {
+        let selected = "https://node-b.example.test".to_string();
+        let remote_nodes = vec![
+            "https://node-a.example.test".to_string(),
+            "https://node-b.example.test".to_string(),
+        ];
+        assert_eq!(
+            prioritize_nni_nodes(Some(&selected), &remote_nodes)
+                .into_iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec![
+                "https://node-b.example.test",
+                "https://node-a.example.test",
+            ]
+        );
     }
 
     #[tokio::test]
