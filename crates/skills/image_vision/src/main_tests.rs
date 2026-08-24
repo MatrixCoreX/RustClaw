@@ -595,6 +595,17 @@ fn image_text_revision_prompt_requires_semantic_reflow() {
     assert!(prompt.contains("Reflow text by semantic structure"));
     assert!(prompt.contains("Merge visual soft wraps"));
     assert!(prompt.contains("paragraph boundary, heading, list item, table row"));
+    assert!(prompt.contains("Do not introduce any new line-start numbering"));
+    assert!(prompt.contains("preserve it exactly"));
+}
+
+#[test]
+fn image_text_extraction_prompt_preserves_visible_markers_without_inventing_them() {
+    let workspace = tempfile::tempdir().expect("tempdir");
+    let prompt = action_instruction(workspace.path(), "minimax", "extract_text", "normal", None);
+
+    assert!(prompt.contains("Preserve every line-start marker that is visibly present"));
+    assert!(prompt.contains("Never add a line-start number"));
 }
 
 #[test]

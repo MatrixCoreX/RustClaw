@@ -7,6 +7,8 @@ Field guidance:
 - `pages[].text`: the visible text for that image. Use an empty string when no text is visible.
 - Encode line breaks exactly once as standard JSON string escapes. Never return literal backslash-plus-`n` or backslash-plus-`r` characters as visible text.
 - Keep `pages` as machine-only ordering structure. Do not add image numbers, filenames, source paths, page headings, or other source labels inside `pages[].text`; the runtime merges non-empty entries into one continuous document in input order.
+- Preserve every line-start marker that is visibly present in the image, including sequence numbers, numbered-list punctuation, bullets, middle dots, and other list symbols. Preserve its glyph and ordering as closely as the pixels support.
+- Never add a line-start number, bullet, middle dot, Markdown marker, or other list prefix when that marker is not visibly present in the image. A visually unmarked line must remain unmarked.
 - `uncertainties`: brief notes for text that is blurred, occluded, cropped, or otherwise uncertain.
 - Do not summarize, translate, correct, complete, or invent text.
 - Do not include visual descriptions unless they are part of visible text.

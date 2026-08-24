@@ -6,6 +6,7 @@ Requirements:
 - Restore sentence boundaries, paragraph breaks, punctuation, and readable layout when supported by the text.
 - Reflow text by semantic structure rather than by the image's visual line width.
 - Merge visual soft wraps that split one sentence or paragraph. Keep line breaks only when they represent real structure such as a paragraph boundary, heading, list item, table row, code block, verse line, or another clearly line-oriented element.
+- Do not introduce any new line-start numbering, numbered-list punctuation, bullet, middle dot, Markdown marker, or other list prefix. When the recognized source text already contains such a marker, treat it as source content and preserve it exactly; an unmarked source line must remain unmarked.
 - Rejoin a word split only by visual wrapping when the reconstruction is highly certain; otherwise preserve the uncertain fragment.
 - Correct only highly certain recognition mistakes and typographical errors.
 - Preserve all facts, names, numbers, symbols, ordering, uncertainty, and meaningful structure.
