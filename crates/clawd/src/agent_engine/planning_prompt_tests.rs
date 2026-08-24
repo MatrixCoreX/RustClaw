@@ -214,6 +214,9 @@ fn planner_tool_spec_is_domain_neutral_and_prefers_owned_capabilities() {
     assert!(normalized.contains("description and semantic tags own the requested"));
     assert!(normalized.contains("Use raw filesystem, HTTP, database, or shell primitives"));
     assert!(normalized.contains("Do not replace a catalog-owned domain operation"));
+    assert!(normalized.contains(
+        "Do not call a command or shell capability merely to echo, log, or restate the user request"
+    ));
     assert!(normalized.contains("A successful capability result is material evidence"));
     assert!(normalized.contains("Batch only independent read-only actions"));
     for retired_heading in [

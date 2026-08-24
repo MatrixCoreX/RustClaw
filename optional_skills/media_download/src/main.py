@@ -800,7 +800,7 @@ def _video_first_frame_processing_input(
     output_dir: Path,
     text_conversion_scope: str,
 ) -> dict[str, Any] | None:
-    if text_conversion_scope not in {"all", "images_only"}:
+    if text_conversion_scope not in {"images_and_audio", "images_only"}:
         return existing
     video = next(
         (item for item in artifacts if item.get("artifact_role") == "original_video"),
@@ -956,7 +956,7 @@ def _content_bundle(
                 "recommended_capability_pointer": "/extra/recommended_capability",
                 "result_label_kind": "audio_transcript",
             }
-        if scope in {"all", "images_only", "audio_only"}:
+        if scope in {"images_and_audio", "images_only", "audio_only"}:
             if scope == "images_only":
                 steps = [image_step] if image_step is not None else []
             elif scope == "audio_only":
@@ -1011,7 +1011,7 @@ def _content_bundle(
                 "result_label_kind": "audio_transcript",
             }
             scope = text_conversion_scope or "auto"
-            if scope not in {"all", "images_only", "audio_only"}:
+            if scope not in {"images_and_audio", "images_only", "audio_only"}:
                 return bundle
             if scope == "images_only":
                 steps = [image_step]

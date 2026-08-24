@@ -299,6 +299,53 @@ fn malformed_streamed_tool_arguments_are_preserved_for_planner_contract_repair()
 }
 
 #[test]
+fn empty_streamed_tool_metadata_does_not_erase_valid_identity() {
+    let mut decoder = SseDecoder::default();
+    let mut accumulator = OpenAiStreamAccumulator::default();
+    let frames = format!(
+        "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+        json!({
+            "choices": [{
+                "delta": {
+                    "tool_calls": [{
+                        "index": 0,
+                        "id": "call-1",
+                        "function": {
+                            "name": "respond",
+                            "arguments": "{\"content\":\"done"
+                        }
+                    }]
+                }
+            }]
+        }),
+        json!({
+            "choices": [{
+                "delta": {
+                    "tool_calls": [{
+                        "index": 0,
+                        "id": "",
+                        "function": {
+                            "name": "",
+                            "arguments": "\"}"
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        })
+    );
+    for frame in decoder.push(frames.as_bytes()).expect("decode stream") {
+        accumulator.apply(frame, None).expect("apply stream");
+    }
+
+    let output = accumulator.finish(None).expect("finish streamed tool call");
+    assert_eq!(output.turn.tool_calls.len(), 1);
+    assert_eq!(output.turn.tool_calls[0].id, "call-1");
+    assert_eq!(output.turn.tool_calls[0].name, "respond");
+    assert_eq!(output.turn.tool_calls[0].arguments["content"], "done");
+}
+
+#[test]
 fn sse_decoder_assembles_split_parallel_calls_and_usage() {
     let first_frame = format!(
         "data: {}\n\n",

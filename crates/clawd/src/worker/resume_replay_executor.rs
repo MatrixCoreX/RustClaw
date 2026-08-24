@@ -102,6 +102,19 @@ pub(super) async fn execute_seeded_agent_loop_dispatch_result(
         }
     }
 
+    if result.is_err() {
+        if let Some(blocker) = state.task_provider_blocker(&claimed.task_id) {
+            let payload =
+                super::runtime_support::seeded_agent_loop_provider_wait_dispatch_result_payload(
+                    claimed,
+                    &blocker,
+                    crate::now_ts_u64().min(i64::MAX as u64) as i64,
+                );
+            state.clear_task_provider_blocker(&claimed.task_id);
+            return Ok(payload);
+        }
+    }
+
     Ok(super::runtime_support::seeded_agent_loop_terminal_dispatch_result_payload(claimed, result))
 }
 
