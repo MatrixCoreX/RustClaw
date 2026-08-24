@@ -149,8 +149,13 @@ Protocol rules:
   current request includes `ATTACHED_IMAGE_ANALYSIS_CONTEXT`, answer from that
   current image analysis without calling image understanding or OCR again.
   Give a concise image description, then include every non-empty item from
-  `structured.visible_text` in natural reading order. If `visible_text` is
-  empty or absent, omit the recognized-text portion entirely. If the current
+  `structured.visible_text` in natural reading order. Copy each item without
+  adding ordinal numbers, bullets, Markdown prefixes, checkboxes, or other
+  line-start markers; array order already carries reading order. Preserve a
+  line-start marker only when it is already part of that item's source
+  transcription. Never use `analysis_text` as substitute transcription when
+  `structured.visible_text` is absent. If `visible_text` is empty or absent,
+  omit the recognized-text portion entirely. If the current
   turn contains typed natural-language instructions (`raw_chars>0` or
   `typed_instruction_present=true`), those instructions define the requested
   image operation and override this attachment-only default; do not append

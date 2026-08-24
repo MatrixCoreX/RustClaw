@@ -9,7 +9,10 @@ Field guidance:
 - `objects`: short phrases for key objects/scene elements.
 - `visible_text`: all readable text visible in the image, transcribed exactly in
   natural reading order (empty array if none). Do not add a placeholder or a
-  sentence saying that no text exists.
+  sentence saying that no text exists. Array position already records reading
+  order: never add a number, bullet, Markdown prefix, checkbox, or other
+  line-start marker to an unmarked source line. If a line-start marker is
+  visibly part of the image, preserve that marker exactly.
 - `uncertainties`: brief notes on low-confidence observations.
 - Use only information directly supported by the visible image.
 - Do not infer hidden/off-screen details or complete partially unreadable text.

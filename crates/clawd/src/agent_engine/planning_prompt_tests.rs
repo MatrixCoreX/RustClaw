@@ -127,6 +127,9 @@ fn native_action_protocol_requires_capability_owned_structured_observations() {
     assert!(prompt.contains("agent.subagent_persistent"));
     assert!(prompt.contains("input_materialization=attachment_only"));
     assert!(prompt.contains("structured.visible_text"));
+    assert!(normalized.contains("array order already carries reading order"));
+    assert!(normalized.contains("Preserve a line-start marker only when it is already part"));
+    assert!(normalized.contains("Never use `analysis_text` as substitute transcription"));
     assert!(prompt.contains("omit the recognized-text portion entirely"));
     assert!(prompt.contains("typed natural-language instructions"));
 }

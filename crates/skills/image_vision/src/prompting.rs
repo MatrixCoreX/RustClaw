@@ -442,6 +442,12 @@ pub(super) fn build_prompt(
         .replace("__LANGUAGE_HINT__", &language_hint)
 }
 
+pub(super) fn structured_output_retry_prompt(original_prompt: &str) -> String {
+    format!(
+        "{original_prompt}\n\nThe previous response did not satisfy the required JSON schema. Reinspect the source image and return exactly one valid JSON object with every required field. The `visible_text` array order already records reading order: do not add ordinal numbers, bullets, Markdown prefixes, checkboxes, or other line-start markers to unmarked source lines. Preserve a line-start marker only when it is visibly present in the source image."
+    )
+}
+
 pub(super) fn load_image_output_rewrite_prompt_template(
     workspace_root: &Path,
     prompt_vendor: &str,

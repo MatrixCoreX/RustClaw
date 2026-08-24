@@ -21,7 +21,7 @@ fn attached_image_context_preserves_description_and_visible_text() {
         })),
     };
 
-    let context = attached_image_analysis_context(1, false, &outcome);
+    let context = attached_image_analysis_context(1, false, &outcome).expect("image context");
     let parsed: serde_json::Value = serde_json::from_str(&context).expect("image context json");
 
     assert_eq!(parsed["image_count"], 1);
@@ -51,14 +51,14 @@ fn attached_image_context_keeps_empty_visible_text_empty() {
         })),
     };
 
-    let context = attached_image_analysis_context(1, false, &outcome);
+    let context = attached_image_analysis_context(1, false, &outcome).expect("image context");
     let parsed: serde_json::Value = serde_json::from_str(&context).expect("image context json");
 
     assert_eq!(parsed["structured"]["visible_text"], json!([]));
 }
 
 #[test]
-fn attached_image_context_marks_typed_instruction_without_interpreting_it() {
+fn attached_image_context_rejects_unstructured_analysis() {
     let outcome = crate::skills::SkillRunOutcome {
         text: "图像分析结果".to_string(),
         notify: None,
@@ -66,11 +66,12 @@ fn attached_image_context_marks_typed_instruction_without_interpreting_it() {
         extra: None,
     };
 
-    let context = attached_image_analysis_context(1, true, &outcome);
-    let parsed: serde_json::Value = serde_json::from_str(&context).expect("image context json");
+    let error = attached_image_analysis_context(1, true, &outcome)
+        .expect_err("unstructured image analysis must not enter planner context");
 
-    assert_eq!(parsed["typed_instruction_present"], true);
-    assert!(parsed["structured"].is_null());
+    assert!(error
+        .to_string()
+        .contains("image_vision_describe_structured_output_missing"));
 }
 
 #[test]
