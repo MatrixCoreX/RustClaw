@@ -1,0 +1,39 @@
+[Unit]
+Description=Managed LLM relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=llm-relay
+Group=llm-relay
+EnvironmentFile=/etc/llm-relay/relay.env
+ExecStart=/opt/llm-relay/current/llm-relay-server serve
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+StateDirectory=llm-relay
+StateDirectoryMode=0700
+UMask=0077
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/llm-relay
+
+[Install]
+WantedBy=multi-user.target

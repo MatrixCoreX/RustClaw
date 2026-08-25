@@ -754,7 +754,7 @@ timeout_seconds = 180
 }
 
 #[tokio::test]
-async fn test_llm_config_rejects_inline_api_key() {
+async fn test_llm_config_rejects_inline_api_key_for_direct_provider() {
     let root = temp_workspace_root();
     std::fs::create_dir_all(root.join("configs")).expect("configs dir");
     std::fs::write(
@@ -793,7 +793,81 @@ models = ["MiniMax-M3", "MiniMax-M2.7"]
     assert!(!body.ok);
     assert_eq!(
         body.error.as_deref(),
-        Some("vendor_api_key_must_use_environment")
+        Some("vendor_api_key_private_store_not_allowed")
+    );
+}
+
+#[tokio::test]
+async fn hosted_relay_key_is_saved_only_in_private_credentials() {
+    let root = temp_workspace_root();
+    std::fs::create_dir_all(root.join("configs")).expect("configs dir");
+    std::fs::write(
+        root.join("configs/config.toml"),
+        r#"
+[llm]
+selected_vendor = "minimax"
+selected_model = "MiniMax-M3"
+
+[llm.hosted_relay]
+enabled = true
+vendor = "custom"
+model = "minimax"
+base_url = "https://llm.example.test/v1"
+daily_request_limit = 100
+
+[llm.model_classes.default]
+provider = "minimax"
+model = "MiniMax-M3"
+
+[llm.model_classes.fast]
+provider = "minimax"
+model = "MiniMax-M3"
+
+[llm.model_classes.reasoning]
+provider = "minimax"
+model = "MiniMax-M3"
+
+[llm.custom]
+api_key = ""
+base_url = "https://api.example.test/v1"
+model = "custom-model"
+models = ["custom-model"]
+"#,
+    )
+    .expect("write config");
+    let mut state = AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.clone();
+    insert_ui_route_auth_key(&state);
+
+    let (status, Json(body)) = update_llm_config(
+        State(state),
+        ui_route_auth_headers(),
+        Json(UpdateLlmConfigRequest {
+            selected_vendor: "custom".to_string(),
+            selected_model: "minimax".to_string(),
+            vendor_base_url: Some("https://llm.example.test/v1".to_string()),
+            vendor_api_key: Some("device-relay-key".to_string()),
+            vendor_api_format: None,
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "response: {body:?}");
+    let raw = std::fs::read_to_string(root.join("configs/config.toml")).expect("read config");
+    assert!(!raw.contains("device-relay-key"));
+    let parsed = toml::from_str::<toml::Value>(&raw).expect("parse config");
+    assert_eq!(
+        parsed["llm"]["model_classes"]["default"]["provider"].as_str(),
+        Some("custom")
+    );
+    assert_eq!(
+        parsed["llm"]["model_classes"]["reasoning"]["model"].as_str(),
+        Some("minimax")
+    );
+    let credential_path = claw_core::git_remote_config::git_credential_store_path(&root);
+    assert!(
+        claw_core::secrets::file_secret_is_configured(&credential_path, "text_custom_api_key")
+            .expect("credential status")
     );
 }
 

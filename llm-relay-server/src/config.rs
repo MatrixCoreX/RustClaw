@@ -1,17 +1,28 @@
-use std::{env, net::SocketAddr, time::Duration};
+use std::{env, net::SocketAddr, path::PathBuf, time::Duration};
 
-use anyhow::{anyhow, Context};
+use anyhow::{anyhow, bail, Context};
 use serde::Serialize;
 
 use crate::quota::QuotaLimits;
 
 #[derive(Clone, Debug)]
+pub struct StoreConfig {
+    pub database_path: PathBuf,
+    pub key_pepper: String,
+}
+
+#[derive(Clone, Debug)]
 pub struct RelayConfig {
     pub listen_addr: SocketAddr,
-    pub api_keys: Vec<String>,
+    pub store: StoreConfig,
     pub default_model: String,
-    pub providers: Vec<ModelProvider>,
+    pub provider: ModelProvider,
     pub upstream_timeout: Duration,
+    pub max_request_body_bytes: usize,
+    pub max_messages: usize,
+    pub max_tools: usize,
+    pub max_inflight: usize,
+    pub max_inflight_per_key: u32,
     pub limits: QuotaLimits,
 }
 
@@ -25,67 +36,75 @@ pub struct ModelProvider {
     pub vendor: String,
 }
 
+impl StoreConfig {
+    pub fn from_env() -> anyhow::Result<Self> {
+        let database_path = env::var("RELAY_DATABASE_PATH")
+            .unwrap_or_else(|_| "data/llm-relay/relay.db".to_owned())
+            .into();
+        let key_pepper = required_env("RELAY_KEY_PEPPER")?;
+        if key_pepper.len() < 32 {
+            bail!("RELAY_KEY_PEPPER must contain at least 32 bytes");
+        }
+        Ok(Self {
+            database_path,
+            key_pepper,
+        })
+    }
+}
+
 impl RelayConfig {
     pub fn from_env() -> anyhow::Result<Self> {
-        let listen_addr = env_or("RELAY_LISTEN_ADDR", "127.0.0.1:8788")
+        let listen_addr: SocketAddr = env_or("RELAY_LISTEN_ADDR", "127.0.0.1:8796")
             .parse()
-            .context("RELAY_LISTEN_ADDR must be a socket address, for example 127.0.0.1:8788")?;
+            .context("RELAY_LISTEN_ADDR must be a socket address, for example 127.0.0.1:8796")?;
+        if !listen_addr.ip().is_loopback() && !env_bool("RELAY_ALLOW_PUBLIC_BIND", false)? {
+            bail!("public relay binding requires RELAY_ALLOW_PUBLIC_BIND=true");
+        }
 
-        let api_keys = env_or("RELAY_API_KEYS", "dev-local-key")
-            .split(',')
-            .map(str::trim)
-            .filter(|key| !key.is_empty())
-            .map(ToOwned::to_owned)
-            .collect();
+        let alias = env_or("RELAY_PUBLIC_MODEL", "minimax");
+        validate_alias(&alias)?;
+        let base_url = env_or("RELAY_UPSTREAM_BASE_URL", "https://api.minimaxi.com/v1")
+            .trim_end_matches('/')
+            .to_owned();
+        if !base_url.starts_with("https://") && !env_bool("RELAY_ALLOW_INSECURE_UPSTREAM", false)? {
+            bail!("RELAY_UPSTREAM_BASE_URL must use https");
+        }
 
-        let default_model = env_or("RELAY_PUBLIC_MODEL", "default");
-        let upstream_timeout = Duration::from_secs(env_u64("RELAY_UPSTREAM_TIMEOUT_SECONDS", 60)?);
-        let providers = load_providers(&default_model);
+        let provider = ModelProvider {
+            alias: alias.clone(),
+            base_url,
+            api_key: required_env("RELAY_UPSTREAM_API_KEY")?,
+            model: env_or("RELAY_UPSTREAM_MODEL", "MiniMax-M3"),
+            vendor: env_or("RELAY_UPSTREAM_VENDOR", "minimax"),
+        };
+        let max_request_body_bytes = env_usize("RELAY_MAX_REQUEST_BODY_BYTES", 2 * 1024 * 1024)?;
+        if !(1024..=16 * 1024 * 1024).contains(&max_request_body_bytes) {
+            bail!("RELAY_MAX_REQUEST_BODY_BYTES must be between 1024 and 16777216");
+        }
+        let max_inflight = env_usize("RELAY_MAX_INFLIGHT", 16)?;
+        let max_inflight_per_key = env_u32("RELAY_MAX_INFLIGHT_PER_KEY", 4)?;
+        if max_inflight == 0 || max_inflight_per_key == 0 {
+            bail!("relay inflight limits must be positive");
+        }
 
         Ok(Self {
             listen_addr,
-            api_keys,
-            default_model,
-            providers,
-            upstream_timeout,
+            store: StoreConfig::from_env()?,
+            default_model: alias,
+            provider,
+            upstream_timeout: Duration::from_secs(env_u64("RELAY_UPSTREAM_TIMEOUT_SECONDS", 180)?),
+            max_request_body_bytes,
+            max_messages: env_usize("RELAY_MAX_MESSAGES", 256)?,
+            max_tools: env_usize("RELAY_MAX_TOOLS", 128)?,
+            max_inflight,
+            max_inflight_per_key,
             limits: QuotaLimits::from_env()?,
         })
     }
 
     pub fn select_provider(&self, requested_model: Option<&str>) -> Option<&ModelProvider> {
-        let requested_model = requested_model.unwrap_or(&self.default_model);
-        self.providers.iter().find(|provider| {
-            provider.alias == requested_model
-                || provider.model == requested_model
-                || (requested_model == "default" && provider.alias == self.default_model)
-        })
-    }
-}
-
-impl Serialize for RelayConfig {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        #[derive(Serialize)]
-        struct PublicConfig<'a> {
-            listen_addr: String,
-            api_keys_count: usize,
-            default_model: &'a str,
-            providers: &'a [ModelProvider],
-            upstream_timeout_seconds: u64,
-            limits: &'a QuotaLimits,
-        }
-
-        let public = PublicConfig {
-            listen_addr: self.listen_addr.to_string(),
-            api_keys_count: self.api_keys.len(),
-            default_model: &self.default_model,
-            providers: &self.providers,
-            upstream_timeout_seconds: self.upstream_timeout.as_secs(),
-            limits: &self.limits,
-        };
-        public.serialize(serializer)
+        let requested = requested_model.unwrap_or("default");
+        (requested == "default" || requested == self.provider.alias).then_some(&self.provider)
     }
 }
 
@@ -95,67 +114,26 @@ impl ModelProvider {
     }
 }
 
-fn load_providers(default_model: &str) -> Vec<ModelProvider> {
-    let mut providers = Vec::new();
-
-    providers.push(ModelProvider {
-        alias: default_model.to_owned(),
-        base_url: env_or("RELAY_UPSTREAM_BASE_URL", "https://api.openai.com/v1")
-            .trim_end_matches('/')
-            .to_owned(),
-        api_key: env::var("RELAY_UPSTREAM_API_KEY").unwrap_or_default(),
-        model: env_or("RELAY_UPSTREAM_MODEL", "gpt-4o-mini"),
-        vendor: env_or("RELAY_UPSTREAM_VENDOR", "openai"),
-    });
-
-    push_optional_provider(
-        &mut providers,
-        "minimax",
-        "https://api.minimaxi.com/v1",
-        "MiniMax-M3",
-        "RELAY_MINIMAX",
-    );
-    push_optional_provider(
-        &mut providers,
-        "deepseek",
-        "https://api.deepseek.com/v1",
-        "deepseek-chat",
-        "RELAY_DEEPSEEK",
-    );
-    push_optional_provider(
-        &mut providers,
-        "mimo",
-        "https://token-plan-sgp.xiaomimimo.com/v1",
-        "mimo-v2.5-pro",
-        "RELAY_MIMO",
-    );
-
-    providers
-}
-
-fn push_optional_provider(
-    providers: &mut Vec<ModelProvider>,
-    alias: &str,
-    default_base_url: &str,
-    default_model: &str,
-    env_prefix: &str,
-) {
-    let api_key_name = format!("{env_prefix}_API_KEY");
-    let api_key = env::var(&api_key_name).unwrap_or_default();
-    if api_key.is_empty() {
-        return;
+fn validate_alias(alias: &str) -> anyhow::Result<()> {
+    if alias.is_empty()
+        || alias.len() > 64
+        || !alias
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+    {
+        bail!("RELAY_PUBLIC_MODEL contains invalid characters");
     }
-
-    providers.push(ModelProvider {
-        alias: env_or(&format!("{env_prefix}_ALIAS"), alias),
-        base_url: env_or(&format!("{env_prefix}_BASE_URL"), default_base_url)
-            .trim_end_matches('/')
-            .to_owned(),
-        api_key,
-        model: env_or(&format!("{env_prefix}_MODEL"), default_model),
-        vendor: alias.to_owned(),
-    });
+    Ok(())
 }
+
+fn required_env(name: &str) -> anyhow::Result<String> {
+    env::var(name)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| anyhow!("{name} is required"))
+}
+
 fn env_or(name: &str, default_value: &str) -> String {
     env::var(name).unwrap_or_else(|_| default_value.to_owned())
 }
@@ -164,7 +142,7 @@ pub fn env_u64(name: &str, default_value: u64) -> anyhow::Result<u64> {
     match env::var(name) {
         Ok(value) => value
             .parse()
-            .with_context(|| format!("{name} must be a positive integer")),
+            .with_context(|| format!("{name} must be a non-negative integer")),
         Err(_) => Ok(default_value),
     }
 }
@@ -172,4 +150,20 @@ pub fn env_u64(name: &str, default_value: u64) -> anyhow::Result<u64> {
 pub fn env_u32(name: &str, default_value: u32) -> anyhow::Result<u32> {
     let value = env_u64(name, u64::from(default_value))?;
     u32::try_from(value).map_err(|_| anyhow!("{name} is too large"))
+}
+
+fn env_usize(name: &str, default_value: usize) -> anyhow::Result<usize> {
+    let value = env_u64(name, default_value as u64)?;
+    usize::try_from(value).map_err(|_| anyhow!("{name} is too large"))
+}
+
+fn env_bool(name: &str, default_value: bool) -> anyhow::Result<bool> {
+    match env::var(name) {
+        Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => Ok(true),
+            "0" | "false" | "no" | "off" => Ok(false),
+            _ => bail!("{name} must be a boolean"),
+        },
+        Err(_) => Ok(default_value),
+    }
 }

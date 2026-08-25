@@ -930,8 +930,16 @@ export interface LlmVendorOption {
   api_format?: string;
   api_key_configured: boolean;
   api_key_masked?: string | null;
-  api_key_source?: "environment";
+  api_key_source?: "environment" | "private_file" | "none";
   api_key_env_names?: string[];
+}
+
+export interface HostedRelayPreset {
+  vendor: "custom";
+  model: string;
+  base_url: string;
+  api_format: "openai_compat";
+  daily_request_limit: number;
 }
 
 export interface LlmRuntimeInfo {
@@ -946,6 +954,7 @@ export interface LlmConfigResponse {
   selected_vendor: string;
   selected_model: string;
   vendors: LlmVendorOption[];
+  hosted_relay?: HostedRelayPreset | null;
   runtime?: LlmRuntimeInfo | null;
   restart_required: boolean;
 }

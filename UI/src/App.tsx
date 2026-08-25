@@ -505,6 +505,7 @@ export default function App() {
     llmConfigSaveMessage,
     llmDraftBaseUrl,
     llmDraftApiFormat,
+    llmDraftApiKey,
     llmTestLoading,
     llmTestMessage,
     llmTestError,
@@ -530,6 +531,7 @@ export default function App() {
     setLlmDraftModel,
     setLlmDraftBaseUrl,
     setLlmDraftApiFormat,
+    setLlmDraftApiKey,
     setModelsAdvancedOpen,
     fetchLlmConfig,
     saveLlmConfig,
@@ -540,6 +542,7 @@ export default function App() {
     setMultimodalSkillEnabledNow,
     setMultimodalDraftKey,
     applyLlmVendorDraft,
+    applyHostedRelayDraft,
     clearLlmConfigError,
   } = useModelConfigRuntime({
     apiFetch,
@@ -2109,6 +2112,7 @@ export default function App() {
               llmDraftModel={llmDraftModel}
               llmDraftBaseUrl={llmDraftBaseUrl}
               llmDraftApiFormat={llmDraftApiFormat}
+              llmDraftApiKey={llmDraftApiKey}
               llmConfigError={llmConfigError}
               llmConfigSaveMessage={llmConfigSaveMessage}
               llmTestMessage={llmTestMessage}
@@ -2130,9 +2134,11 @@ export default function App() {
               canManageMultimodalSkills={isAdminIdentity}
               hasUnsavedMultimodalChanges={hasUnsavedMultimodalChanges}
               onApplyLlmVendorDraft={applyLlmVendorDraft}
+              onApplyHostedRelayDraft={applyHostedRelayDraft}
               onLlmDraftModelChange={setLlmDraftModel}
               onLlmDraftBaseUrlChange={setLlmDraftBaseUrl}
               onLlmDraftApiFormatChange={setLlmDraftApiFormat}
+              onLlmDraftApiKeyChange={setLlmDraftApiKey}
               onTestLlmConfig={testLlmConfig}
               onSaveLlmConfig={saveLlmConfig}
               onToggleModelsAdvanced={() => setModelsAdvancedOpen((open) => !open)}
