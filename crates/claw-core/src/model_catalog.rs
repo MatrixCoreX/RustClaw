@@ -257,7 +257,13 @@ fn catalog_entry(
         base_url_kind: base_url_kind(&string_field(llm_table, "base_url")),
         context_window_tokens: usize_field(llm_table, "context_window_tokens"),
         timeout_seconds: u64_field(llm_table, "timeout_seconds"),
-        credential_state: credential_state(llm_table, provider, &inputs.env_values),
+        credential_state: credential_state(
+            llm_table,
+            provider,
+            &model,
+            &inputs.config,
+            &inputs.env_values,
+        ),
         input_modalities,
         output_modalities,
         supports_text,
@@ -514,6 +520,8 @@ fn u64_field(table: &toml::map::Map<String, toml::Value>, key: &str) -> Option<u
 fn credential_state(
     table: &toml::map::Map<String, toml::Value>,
     provider: &str,
+    model: &str,
+    config: &toml::Value,
     env_values: &BTreeMap<String, String>,
 ) -> String {
     let base_url = string_field(table, "base_url");
@@ -522,6 +530,9 @@ fn credential_state(
         || base_url.starts_with("http://[::1]")
     {
         return "not_required_local".to_string();
+    }
+    if matches_hosted_relay(config, provider, model, &base_url) {
+        return "device_enrollment".to_string();
     }
     if !string_field(table, "api_key").is_empty() {
         return "configured_inline".to_string();
@@ -535,6 +546,25 @@ fn credential_state(
         return "configured_env".to_string();
     }
     "missing".to_string()
+}
+
+fn matches_hosted_relay(config: &toml::Value, provider: &str, model: &str, base_url: &str) -> bool {
+    let Some(relay) = config
+        .get("llm")
+        .and_then(toml::Value::as_table)
+        .and_then(|llm| llm.get("hosted_relay"))
+        .and_then(toml::Value::as_table)
+    else {
+        return false;
+    };
+    relay
+        .get("enabled")
+        .and_then(toml::Value::as_bool)
+        .unwrap_or(false)
+        && string_field(relay, "vendor") == provider
+        && string_field(relay, "model") == model
+        && string_field(relay, "base_url") == base_url
+        && base_url.starts_with("https://")
 }
 
 fn read_runtime_env_values(workspace_root: &Path) -> BTreeMap<String, String> {

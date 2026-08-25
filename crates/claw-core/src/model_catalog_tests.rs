@@ -243,6 +243,80 @@ fn catalog_reports_missing_credential_state_without_secret_values() {
 }
 
 #[test]
+fn catalog_accepts_exact_hosted_relay_device_enrollment() {
+    let root = temp_workspace_root();
+    std::fs::write(
+        root.join("configs/config.toml"),
+        r#"
+[llm]
+selected_vendor = "custom"
+selected_model = "minimax"
+
+[llm.hosted_relay]
+enabled = true
+vendor = "custom"
+model = "minimax"
+base_url = "https://llm.example.test/v1"
+daily_request_limit = 100
+
+[llm.custom]
+api_key = ""
+base_url = "https://llm.example.test/v1"
+model = "minimax"
+models = ["minimax"]
+api_format = "openai_compat"
+"#,
+    )
+    .expect("write hosted relay config");
+
+    let catalog = build_model_catalog_from_workspace(&root).expect("catalog");
+    let relay = catalog
+        .entries
+        .iter()
+        .find(|entry| entry.provider == "custom" && entry.model == "minimax")
+        .expect("hosted relay entry");
+
+    assert!(relay.active_text_provider);
+    assert!(relay.supports_text);
+    assert_eq!(relay.credential_state, "device_enrollment");
+}
+
+#[test]
+fn catalog_rejects_mismatched_hosted_relay_credential_projection() {
+    let root = temp_workspace_root();
+    std::fs::write(
+        root.join("configs/config.toml"),
+        r#"
+[llm]
+selected_vendor = "custom"
+selected_model = "other-model"
+
+[llm.hosted_relay]
+enabled = true
+vendor = "custom"
+model = "minimax"
+base_url = "https://llm.example.test/v1"
+
+[llm.custom]
+api_key = ""
+base_url = "https://llm.example.test/v1"
+model = "other-model"
+models = ["other-model"]
+"#,
+    )
+    .expect("write mismatched relay config");
+
+    let catalog = build_model_catalog_from_workspace(&root).expect("catalog");
+    let custom = catalog
+        .entries
+        .iter()
+        .find(|entry| entry.provider == "custom" && entry.model == "other-model")
+        .expect("custom entry");
+
+    assert_eq!(custom.credential_state, "missing");
+}
+
+#[test]
 fn catalog_reports_env_credential_state_without_secret_values() {
     let _guard = ENV_LOCK.lock().expect("env lock");
     let _restore_mimo = EnvRestore::capture("MIMO_API_KEY");

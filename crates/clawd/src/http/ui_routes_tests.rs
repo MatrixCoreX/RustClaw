@@ -621,6 +621,48 @@ model = "MiniMax-M3"
 }
 
 #[test]
+fn collect_llm_vendor_info_reports_hosted_relay_device_enrollment() {
+    let root = temp_workspace_root();
+    let mut state = AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root;
+    let parsed = toml::from_str::<toml::Value>(
+        r#"
+[llm]
+selected_vendor = "custom"
+selected_model = "minimax"
+
+[llm.hosted_relay]
+enabled = true
+vendor = "custom"
+model = "minimax"
+base_url = "https://llm.example.test/v1"
+
+[llm.custom]
+api_key = ""
+base_url = "https://llm.example.test/v1"
+model = "minimax"
+models = ["minimax"]
+"#,
+    )
+    .expect("parse hosted relay config");
+
+    let vendors = collect_llm_vendor_info_for_state(&parsed, &state);
+    let relay = vendors
+        .iter()
+        .find(|vendor| vendor.get("name").and_then(Value::as_str) == Some("custom"))
+        .expect("custom relay vendor");
+
+    assert_eq!(
+        relay.get("api_key_configured").and_then(Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        relay.get("api_key_source").and_then(Value::as_str),
+        Some("device_enrollment")
+    );
+}
+
+#[test]
 fn collect_llm_vendor_info_defaults_mimo_api_format_to_openai() {
     let parsed = toml::from_str::<toml::Value>(
         r#"
