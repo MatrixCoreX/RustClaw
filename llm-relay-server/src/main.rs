@@ -8,22 +8,26 @@ use std::{io, sync::Arc};
 use anyhow::{bail, Context};
 use axum::{
     body::{Body, Bytes},
-    extract::{DefaultBodyLimit, State},
+    extract::{DefaultBodyLimit, Path as AxumPath, Query, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{get, post, put},
     Json, Router,
 };
+use chrono::{NaiveDate, Utc};
 use config::{RelayConfig, StoreConfig};
 use futures_util::StreamExt;
 use openai::{ChatCompletionRequest, ErrorBody, ErrorEnvelope, ModelList};
 use quota::MinuteRateLimiter;
+use serde::Deserialize;
 use serde_json::{json, Value};
 use store::{AuthenticatedKey, RelayStore, StoreError};
 use tokio::sync::Semaphore;
 use tower_http::trace::TraceLayer;
 use tracing::{info, warn};
 use uuid::Uuid;
+
+const MAX_ADMIN_DAILY_REQUEST_LIMIT: u32 = 1_000_000;
 
 #[derive(Clone)]
 struct AppState {
@@ -51,7 +55,7 @@ async fn main() -> anyhow::Result<()> {
         .first()
         .is_some_and(|argument| argument != "serve")
     {
-        bail!("usage: llm-relay-server [serve | key issue|list|revoke]");
+        bail!("usage: llm-relay-server [serve | key issue|issue-admin|list|revoke]");
     }
     run_server().await
 }
@@ -83,6 +87,11 @@ async fn run_server() -> anyhow::Result<()> {
         .route("/v1/models", get(models))
         .route("/v1/quota", get(quota))
         .route("/v1/chat/completions", post(chat_completions))
+        .route("/internal/admin/usage", get(admin_usage))
+        .route(
+            "/internal/admin/keys/:key_id/daily-limit",
+            put(update_admin_daily_limit),
+        )
         .with_state(state)
         .layer(DefaultBodyLimit::max(config.max_request_body_bytes))
         .layer(TraceLayer::new_for_http());
@@ -111,6 +120,11 @@ fn run_key_command(arguments: &[String]) -> anyhow::Result<()> {
                 .unwrap_or(config::env_u32("RELAY_REQUESTS_PER_DAY", 100)?);
             println!("{}", serde_json::to_string_pretty(&store.issue_key(label, daily_limit)?)?);
         }
+        Some("issue-admin") => {
+            let label = option_value(arguments, "--label")
+                .ok_or_else(|| anyhow::anyhow!("key issue-admin requires --label"))?;
+            println!("{}", serde_json::to_string_pretty(&store.issue_admin_key(label)?)?);
+        }
         Some("list") => {
             println!("{}", serde_json::to_string_pretty(&store.list_keys()?)?);
         }
@@ -120,7 +134,7 @@ fn run_key_command(arguments: &[String]) -> anyhow::Result<()> {
                 .ok_or_else(|| anyhow::anyhow!("key revoke requires a key ID"))?;
             println!("{}", json!({"key_id": key_id, "revoked": store.revoke_key(key_id)?}));
         }
-        _ => bail!("usage: llm-relay-server key issue --label LABEL [--daily-limit 100] | key list | key revoke KEY_ID"),
+        _ => bail!("usage: llm-relay-server key issue --label LABEL [--daily-limit 100] | key issue-admin --label LABEL | key list | key revoke KEY_ID"),
     }
     Ok(())
 }
@@ -173,6 +187,135 @@ async fn quota(State(state): State<AppState>, headers: HeaderMap) -> Result<Json
         ApiError::service_unavailable("quota_store_unavailable", "proxy.quota_store_unavailable")
     })?;
     Ok(Json(json!({"usage": usage})))
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminUsageQuery {
+    day: Option<String>,
+    page: Option<String>,
+    per_page: Option<String>,
+    status: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DailyLimitRequest {
+    daily_request_limit: u32,
+}
+
+async fn admin_usage(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<AdminUsageQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let key = authenticate(&state, &headers)?;
+    key.require_scope("usage.admin.read")
+        .map_err(ApiError::from_store)?;
+    let day = match query
+        .day
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) => NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(|_| {
+            ApiError::bad_request("admin_usage_day_invalid", "proxy.admin_usage_day_invalid")
+        })?,
+        None => Utc::now().date_naive(),
+    };
+    let page = parse_admin_page_value(
+        query.page.as_deref(),
+        1,
+        1_000_000,
+        "admin_usage_page_invalid",
+    )?;
+    let per_page = parse_admin_page_value(
+        query.per_page.as_deref(),
+        50,
+        100,
+        "admin_usage_per_page_invalid",
+    )?;
+    let status = query
+        .status
+        .as_deref()
+        .unwrap_or("all")
+        .trim()
+        .to_ascii_lowercase();
+    if !matches!(status.as_str(), "all" | "enabled" | "revoked") {
+        return Err(ApiError::bad_request(
+            "admin_usage_status_invalid",
+            "proxy.admin_usage_status_invalid",
+        ));
+    }
+    let usage = state
+        .store
+        .admin_usage_page(day, page, per_page, &status)
+        .map_err(|error| ApiError::from_store(StoreError::Database(error)))?;
+    info!(
+        actor_key_id = %key.key_id,
+        day = %usage.day_utc,
+        page,
+        per_page,
+        status,
+        "relay admin usage read"
+    );
+    Ok(Json(json!({"ok": true, "data": usage})))
+}
+
+async fn update_admin_daily_limit(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(target_key_id): AxumPath<String>,
+    Json(request): Json<DailyLimitRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let key = authenticate(&state, &headers)?;
+    key.require_scope("usage.admin.write")
+        .map_err(ApiError::from_store)?;
+    if request.daily_request_limit == 0
+        || request.daily_request_limit > MAX_ADMIN_DAILY_REQUEST_LIMIT
+    {
+        return Err(ApiError::bad_request(
+            "daily_request_limit_invalid",
+            "proxy.daily_request_limit_invalid",
+        ));
+    }
+    let update = state
+        .store
+        .update_daily_request_limit(
+            &key.key_id,
+            target_key_id.trim(),
+            request.daily_request_limit,
+        )
+        .map_err(|error| ApiError::from_store(StoreError::Database(error)))?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "relay_client_key_not_found",
+                "proxy.relay_client_key_not_found",
+            )
+        })?;
+    info!(
+        actor_key_id = %key.key_id,
+        target_key_id = %update.key_id,
+        previous_daily_request_limit = update.previous_daily_request_limit,
+        daily_request_limit = update.daily_request_limit,
+        "relay admin daily request limit updated"
+    );
+    Ok(Json(json!({"ok": true, "data": update})))
+}
+
+fn parse_admin_page_value(
+    value: Option<&str>,
+    default: u32,
+    maximum: u32,
+    code: &'static str,
+) -> Result<u32, ApiError> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(default);
+    };
+    let parsed = value
+        .parse::<u32>()
+        .ok()
+        .filter(|parsed| *parsed > 0 && *parsed <= maximum)
+        .ok_or_else(|| ApiError::bad_request(code, "proxy.admin_usage_pagination_invalid"))?;
+    Ok(parsed)
 }
 
 async fn chat_completions(
@@ -472,6 +615,13 @@ impl ApiError {
     fn forbidden(code: &'static str, message_key: &'static str) -> Self {
         Self {
             status: StatusCode::FORBIDDEN,
+            code,
+            message_key,
+        }
+    }
+    fn not_found(code: &'static str, message_key: &'static str) -> Self {
+        Self {
+            status: StatusCode::NOT_FOUND,
             code,
             message_key,
         }

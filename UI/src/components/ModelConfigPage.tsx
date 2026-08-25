@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
-import { ChevronDown, Database, KeyRound, Loader2, RefreshCw, Sparkles, Wrench } from "lucide-react";
+import { ChevronDown, Database, KeyRound, Loader2, RefreshCw } from "lucide-react";
 
-import { llmVendorSupportsApiFormat } from "../lib/llm-config";
+import { HOSTED_RELAY_SELECTION, isHostedRelayDraft as matchesHostedRelayDraft, llmVendorSupportsApiFormat } from "../lib/llm-config";
 import type { ModelCatalogEntryView, MultimodalDraft, MultimodalKey } from "../lib/model-config";
 import type { LlmConfigResponse, LlmVendorOption, ModelCatalogResponse, ModelConfigItem } from "../types/api";
 import { MultimodalConfigSection } from "./MultimodalConfigSection";
@@ -14,7 +14,6 @@ export interface ModelConfigPageProps {
   tSlash: TranslateSlash;
   llmConfigData: LlmConfigResponse | null;
   selectedLlmVendorInfo: LlmVendorOption | null;
-  hasCustomLlmVendor: boolean;
   llmConfigLoading: boolean;
   llmConfigSaving: boolean;
   llmTestLoading: boolean;
@@ -65,7 +64,6 @@ export function ModelConfigPage({
   tSlash,
   llmConfigData,
   selectedLlmVendorInfo,
-  hasCustomLlmVendor,
   llmConfigLoading,
   llmConfigSaving,
   llmTestLoading,
@@ -113,12 +111,16 @@ export function ModelConfigPage({
   const supportsApiFormat = llmVendorSupportsApiFormat(selectedLlmVendorInfo?.name);
   const credentialEnvNames = selectedLlmVendorInfo?.api_key_env_names ?? [];
   const isCustomVendor = selectedLlmVendorInfo?.name === "custom";
-  const isHostedRelayDraft = Boolean(
-    isCustomVendor
-      && llmConfigData?.hosted_relay
-      && llmDraftVendor === llmConfigData.hosted_relay.vendor
-      && llmDraftModel === llmConfigData.hosted_relay.model
-      && llmDraftBaseUrl === llmConfigData.hosted_relay.base_url,
+  const isHostedRelayDraft = matchesHostedRelayDraft(llmConfigData?.hosted_relay, {
+    vendor: llmDraftVendor,
+    model: llmDraftModel,
+    baseUrl: llmDraftBaseUrl,
+    apiFormat: llmDraftApiFormat,
+  });
+  const hostedRelayCredentialMissing = Boolean(
+    isHostedRelayDraft
+      && !selectedLlmVendorInfo?.api_key_configured
+      && !llmDraftApiKey.trim(),
   );
   const credentialLabel = selectedLlmVendorInfo?.api_key_configured
     ? selectedLlmVendorInfo.api_key_source === "private_file"
@@ -176,32 +178,10 @@ export function ModelConfigPage({
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-base font-semibold">{t("大模型设置", "LLM Settings")}</h3>
           <div className="flex flex-wrap items-center gap-2">
-            {llmConfigData?.hosted_relay ? (
-              <button
-                type="button"
-                onClick={onApplyHostedRelayDraft}
-                disabled={llmConfigLoading}
-                className="theme-accent-btn px-3 py-2 text-xs"
-              >
-                <Sparkles className="h-3.5 w-3.5" />
-                {t("使用默认中转", "Use hosted relay")}
-              </button>
-            ) : null}
-            {hasCustomLlmVendor ? (
-              <button
-                type="button"
-                onClick={() => onApplyLlmVendorDraft("custom")}
-                disabled={llmConfigLoading}
-                className="theme-secondary-btn px-3 py-2 text-xs"
-              >
-                <Wrench className="h-3.5 w-3.5" />
-                {t("自定义模型", "Custom model")}
-              </button>
-            ) : null}
             <button
               type="button"
               onClick={() => void onTestLlmConfig()}
-              disabled={llmTestLoading || llmConfigLoading || !llmDraftVendor || !llmDraftModel || !llmDraftBaseUrl.trim()}
+              disabled={llmTestLoading || llmConfigLoading || hostedRelayCredentialMissing || !llmDraftVendor || !llmDraftModel || !llmDraftBaseUrl.trim()}
               className="theme-secondary-btn px-3 py-2 text-xs"
             >
               {llmTestLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
@@ -210,11 +190,13 @@ export function ModelConfigPage({
             <button
               type="button"
               onClick={() => void onSaveLlmConfig()}
-              disabled={llmConfigSaving || llmConfigLoading || !hasUnsavedLlmChanges || !llmDraftVendor || !llmDraftModel || !llmDraftBaseUrl.trim()}
+              disabled={llmConfigSaving || llmConfigLoading || hostedRelayCredentialMissing || !hasUnsavedLlmChanges || !llmDraftVendor || !llmDraftModel || !llmDraftBaseUrl.trim()}
               className="theme-accent-btn px-3 py-2 text-xs"
             >
               {llmConfigSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Database className="h-3.5 w-3.5" />}
-              {tSlash("保存模型设置 / Save LLM Settings")}
+              {isHostedRelayDraft
+                ? t("保存并切换", "Save and switch")
+                : tSlash("保存模型设置 / Save LLM Settings")}
             </button>
           </div>
         </div>
@@ -222,22 +204,33 @@ export function ModelConfigPage({
         <div className="space-y-4">
           <div className="grid gap-4 md:grid-cols-2">
             <label className="block space-y-2">
-              <span className="text-xs uppercase tracking-widest text-white/50">{t("模型厂商", "Vendor")}</span>
+              <span className="text-xs uppercase tracking-widest text-white/50">{t("使用方式", "Connection mode")}</span>
               <select
                 className="theme-input"
-                value={llmDraftVendor}
-                onChange={(event) => onApplyLlmVendorDraft(event.target.value)}
+                value={isHostedRelayDraft ? HOSTED_RELAY_SELECTION : llmDraftVendor}
+                onChange={(event) => {
+                  if (event.target.value === HOSTED_RELAY_SELECTION) {
+                    onApplyHostedRelayDraft();
+                  } else {
+                    onApplyLlmVendorDraft(event.target.value);
+                  }
+                }}
               >
+                {llmConfigData?.hosted_relay ? (
+                  <option value={HOSTED_RELAY_SELECTION}>{t("默认（托管中转）", "Default (Hosted relay)")}</option>
+                ) : null}
                 <option value="">{t("请选择厂商", "Select a vendor")}</option>
-                {(llmConfigData?.vendors ?? []).map((vendor) => (
-                  <option key={vendor.name} value={vendor.name}>
-                    {vendor.name === "custom"
-                      ? t("custom（自定义）", "custom (Custom)")
-                      : vendor.name === "mimo"
-                        ? "mimo (Xiaomi MiMo)"
-                        : vendor.name}
-                  </option>
-                ))}
+                <optgroup label={t("自行配置", "Configure directly")}>
+                  {(llmConfigData?.vendors ?? []).map((vendor) => (
+                    <option key={vendor.name} value={vendor.name}>
+                      {vendor.name === "custom"
+                        ? t("custom（自定义接口）", "custom (Custom endpoint)")
+                        : vendor.name === "mimo"
+                          ? "mimo (Xiaomi MiMo)"
+                          : vendor.name}
+                    </option>
+                  ))}
+                </optgroup>
               </select>
             </label>
 
@@ -248,7 +241,7 @@ export function ModelConfigPage({
                 value={llmDraftModel}
                 onChange={(event) => onLlmDraftModelChange(event.target.value)}
                 list={selectedLlmVendorInfo ? `llm-models-${selectedLlmVendorInfo.name}` : undefined}
-                disabled={!selectedLlmVendorInfo}
+                disabled={!selectedLlmVendorInfo || isHostedRelayDraft}
                 placeholder={selectedLlmVendorInfo ? t("输入模型名", "Enter model name") : t("先选厂商", "Choose a vendor first")}
               />
               {selectedLlmVendorInfo ? (
@@ -272,7 +265,7 @@ export function ModelConfigPage({
                 value={llmDraftBaseUrl}
                 onChange={(event) => onLlmDraftBaseUrlChange(event.target.value)}
                 placeholder="https://api.openai.com/v1"
-                disabled={!selectedLlmVendorInfo}
+                disabled={!selectedLlmVendorInfo || isHostedRelayDraft}
               />
             </label>
 
@@ -283,6 +276,7 @@ export function ModelConfigPage({
                   className="theme-input"
                   value={llmDraftApiFormat || "openai_compat"}
                   onChange={(event) => onLlmDraftApiFormatChange(event.target.value)}
+                  disabled={isHostedRelayDraft}
                 >
                   <option value="openai_compat">{t("OpenAI（默认）", "OpenAI (Default)")}</option>
                   <option value="anthropic_claude">{t("Anthropic", "Anthropic")}</option>
@@ -321,6 +315,11 @@ export function ModelConfigPage({
                         : t("输入 API Key", "Enter API key")
                   }
                 />
+                {hostedRelayCredentialMissing ? (
+                  <p className="text-xs text-amber-200">
+                    {t("请输入这台设备的中转访问密钥后再测试或保存。", "Enter this device's relay access key before testing or saving.")}
+                  </p>
+                ) : null}
               </label>
               {isHostedRelayDraft && llmConfigData?.hosted_relay ? (
                 <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-xs leading-5 text-white/60">

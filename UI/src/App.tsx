@@ -523,7 +523,6 @@ export default function App() {
     modelCatalogLoading,
     modelCatalogError,
     selectedLlmVendorInfo,
-    hasCustomLlmVendor,
     hasUnsavedLlmChanges,
     llmConfigured,
     llmStepStatus,
@@ -2104,7 +2103,6 @@ export default function App() {
               tSlash={tSlash}
               llmConfigData={llmConfigData}
               selectedLlmVendorInfo={selectedLlmVendorInfo}
-              hasCustomLlmVendor={hasCustomLlmVendor}
               llmConfigLoading={llmConfigLoading}
               llmConfigSaving={llmConfigSaving}
               llmTestLoading={llmTestLoading}
