@@ -274,8 +274,11 @@ fn build_llm_test_runtime(
     vendor_base_url: &str,
     vendor_api_key: &str,
     vendor_api_format: Option<&str>,
+    device_key_enrollment: bool,
 ) -> Result<Arc<LlmProviderRuntime>, String> {
     let provider_type = llm_provider_type_for_vendor(selected_vendor, vendor_api_format);
+    let mut params = claw_core::config::LlmProviderParams::default();
+    params.device_key_enrollment = device_key_enrollment;
     let config = claw_core::config::LlmProviderConfig {
         name: format!("vendor-{}", selected_vendor.trim().to_ascii_lowercase()),
         provider_type,
@@ -289,7 +292,7 @@ fn build_llm_test_runtime(
         priority: 1,
         timeout_seconds: 20,
         max_concurrency: 1,
-        params: claw_core::config::LlmProviderParams::default(),
+        params,
     };
     let client = crate::providers::build_llm_http_client(config.timeout_seconds)
         .map_err(|err| format!("build llm test client failed: {err}"))?;
@@ -893,6 +896,22 @@ async fn update_llm_config(
             }),
         );
     }
+    let device_key_enrollment = matches_hosted_relay_preset(
+        &parsed,
+        &selected_vendor,
+        &selected_model,
+        vendor_base_url,
+    );
+    if device_key_enrollment && !inline_api_key.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("hosted_relay_manual_key_not_allowed".to_string()),
+            }),
+        );
+    }
 
     let updated_vendor = upsert_string_key_in_section(
         &raw,
@@ -942,12 +961,7 @@ async fn update_llm_config(
     } else {
         updated_api_key
     };
-    if matches_hosted_relay_preset(
-        &parsed,
-        &selected_vendor,
-        &selected_model,
-        vendor_base_url,
-    ) {
+    if device_key_enrollment {
         for class_name in ["default", "fast", "reasoning"] {
             final_updated = upsert_string_key_in_section(
                 &final_updated,
@@ -1102,7 +1116,23 @@ async fn test_llm_config(
     } else {
         inline_api_key.to_string()
     };
-    if vendor_api_key.is_empty() {
+    let device_key_enrollment = matches_hosted_relay_preset(
+        &parsed,
+        &selected_vendor,
+        &selected_model,
+        vendor_base_url,
+    );
+    if device_key_enrollment && !inline_api_key.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("hosted_relay_manual_key_not_allowed".to_string()),
+            }),
+        );
+    }
+    if vendor_api_key.is_empty() && !device_key_enrollment {
         return (
             StatusCode::BAD_REQUEST,
             Json(ApiResponse {
@@ -1118,6 +1148,7 @@ async fn test_llm_config(
         vendor_base_url,
         &vendor_api_key,
         req.vendor_api_format.as_deref(),
+        device_key_enrollment,
     ) {
         Ok(provider) => provider,
         Err(err) => {

@@ -2,6 +2,7 @@ pub(crate) mod anthropic_claude;
 pub(crate) mod anthropic_model_turn;
 pub(crate) mod circuit;
 pub(crate) mod client;
+mod device_key;
 pub(crate) mod fixture_replay;
 pub(crate) mod gemini_model_turn;
 pub(crate) mod google_gemini;

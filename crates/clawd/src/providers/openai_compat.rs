@@ -69,11 +69,13 @@ pub(super) async fn call_openai_compat(
 
     // §P4.4 E3.a: 通过 LlmProviderRuntime::api_key() 走 SecretsBroker；broker
     // 没装/没声明就回落到 config.api_key（行为零变化）。
-    let api_key = provider.api_key();
-    let resp = provider
+    let api_key = super::device_key::resolve_provider_api_key(&provider)
+        .await
+        .map_err(|code| ProviderError::non_retryable(code.to_string(), req_body.clone()))?;
+    let mut resp = provider
         .client
-        .post(url)
-        .bearer_auth(&*api_key)
+        .post(&url)
+        .bearer_auth(&api_key)
         .json(&req_body)
         .send()
         .await
@@ -84,6 +86,25 @@ pub(super) async fn call_openai_compat(
                 ProviderError::retryable(format!("request failed: {err}"), req_body.clone())
             }
         })?;
+    if resp.status().as_u16() == 401 && provider.config.params.device_key_enrollment {
+        let refreshed_key = super::device_key::refresh_provider_api_key(&provider)
+            .await
+            .map_err(|code| ProviderError::non_retryable(code.to_string(), req_body.clone()))?;
+        resp = provider
+            .client
+            .post(&url)
+            .bearer_auth(refreshed_key)
+            .json(&req_body)
+            .send()
+            .await
+            .map_err(|err| {
+                if err.is_timeout() {
+                    ProviderError::timeout(format!("timeout: {err}"), req_body.clone())
+                } else {
+                    ProviderError::retryable(format!("request failed: {err}"), req_body.clone())
+                }
+            })?;
+    }
 
     let status = resp.status();
     let body_text = resp.text().await.map_err(|err| {

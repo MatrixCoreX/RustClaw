@@ -798,7 +798,7 @@ models = ["MiniMax-M3", "MiniMax-M2.7"]
 }
 
 #[tokio::test]
-async fn hosted_relay_key_is_saved_only_in_private_credentials() {
+async fn hosted_relay_uses_automatic_device_key_enrollment() {
     let root = temp_workspace_root();
     std::fs::create_dir_all(root.join("configs")).expect("configs dir");
     std::fs::write(
@@ -846,7 +846,7 @@ models = ["custom-model"]
             selected_vendor: "custom".to_string(),
             selected_model: "minimax".to_string(),
             vendor_base_url: Some("https://llm.example.test/v1".to_string()),
-            vendor_api_key: Some("device-relay-key".to_string()),
+            vendor_api_key: None,
             vendor_api_format: None,
         }),
     )
@@ -854,7 +854,6 @@ models = ["custom-model"]
 
     assert_eq!(status, StatusCode::OK, "response: {body:?}");
     let raw = std::fs::read_to_string(root.join("configs/config.toml")).expect("read config");
-    assert!(!raw.contains("device-relay-key"));
     let parsed = toml::from_str::<toml::Value>(&raw).expect("parse config");
     assert_eq!(
         parsed["llm"]["model_classes"]["default"]["provider"].as_str(),
@@ -865,10 +864,11 @@ models = ["custom-model"]
         Some("minimax")
     );
     let credential_path = claw_core::git_remote_config::git_credential_store_path(&root);
-    assert!(
-        claw_core::secrets::file_secret_is_configured(&credential_path, "text_custom_api_key")
-            .expect("credential status")
-    );
+    assert!(!claw_core::secrets::file_secret_is_configured(
+        &credential_path,
+        "text_custom_api_key"
+    )
+    .expect("credential status"));
 }
 
 #[test]

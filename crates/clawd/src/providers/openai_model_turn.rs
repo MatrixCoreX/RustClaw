@@ -34,11 +34,13 @@ pub(super) async fn call_openai_model_turn(
         "{}/chat/completions",
         provider.config.base_url.trim_end_matches('/')
     );
-    let api_key = provider.api_key();
-    let response = provider
+    let api_key = super::device_key::resolve_provider_api_key(&provider)
+        .await
+        .map_err(|code| ProviderError::non_retryable(code.to_string(), req_body.clone()))?;
+    let mut response = provider
         .client
-        .post(url)
-        .bearer_auth(&*api_key)
+        .post(&url)
+        .bearer_auth(&api_key)
         .json(&req_body)
         .send()
         .await
@@ -49,6 +51,25 @@ pub(super) async fn call_openai_model_turn(
                 ProviderError::retryable(format!("request failed: {err}"), req_body.clone())
             }
         })?;
+    if response.status().as_u16() == 401 && provider.config.params.device_key_enrollment {
+        let refreshed_key = super::device_key::refresh_provider_api_key(&provider)
+            .await
+            .map_err(|code| ProviderError::non_retryable(code.to_string(), req_body.clone()))?;
+        response = provider
+            .client
+            .post(&url)
+            .bearer_auth(refreshed_key)
+            .json(&req_body)
+            .send()
+            .await
+            .map_err(|err| {
+                if err.is_timeout() {
+                    ProviderError::timeout(format!("timeout: {err}"), req_body.clone())
+                } else {
+                    ProviderError::retryable(format!("request failed: {err}"), req_body.clone())
+                }
+            })?;
+    }
     let status = response.status();
     if status.is_success() && request.stream {
         return read_openai_stream(response, req_body, event_sink).await;

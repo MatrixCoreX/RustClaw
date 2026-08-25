@@ -688,20 +688,25 @@ The model settings page exposes a managed OpenAI-compatible relay preset in
 addition to direct provider configuration. Selecting the preset configures the
 existing `custom` provider with public model alias `minimax`; it does not add a
 second provider adapter and never silently changes an existing installation.
-Each installation receives its own relay access key. The browser keeps that key
-only in transient form while testing or saving it, and `clawd` writes it to the
-machine-local private credential broker rather than tracked TOML.
+The relay maintains its own Slot 0 public-key allowlist. On first use, an
+allowlisted physical or simulated signing device signs one short-lived
+challenge; the relay then returns a device-specific access key once. `clawd`
+stores it in the machine-local private credential broker rather than tracked
+TOML or browser storage. Normal model calls use the access key and do not sign
+each request.
 
 ```mermaid
 flowchart LR
-    UI[Model settings] -->|preset + one-time device key| CL[clawd]
-    CL -->|Bearer device key| TLS[llm.matrixai.one TLS endpoint]
+    UI[Model settings] -->|select managed preset| CL[clawd]
+    CL -->|first use: Slot 0 signed challenge| TLS[llm.matrixai.one TLS endpoint]
+    TLS -->|one-time relay key response| CL
+    CL -->|later calls: bearer relay key| TLS
     TLS --> RELAY[standalone LLM relay]
     RELAY --> QUOTA[per-device authentication and UTC quota]
     RELAY -->|server-held provider credential| UPSTREAM[configured upstream model]
 ```
 
-The initial relay policy permits 100 upstream model attempts per device key
+The initial relay policy permits 100 upstream model attempts per allowlisted Slot 0 device
 per UTC day. Local validation failures, model-list reads, and quota reads do not
 consume that allowance. Once an authenticated request is dispatched upstream,
 successes and failures both count. The quota database and service credential

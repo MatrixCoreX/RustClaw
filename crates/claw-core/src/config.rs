@@ -1021,6 +1021,8 @@ pub struct LlmConfig {
     #[serde(default)]
     pub cost_governance: LlmCostGovernanceConfig,
     #[serde(default)]
+    pub hosted_relay: Option<LlmHostedRelayConfig>,
+    #[serde(default)]
     pub openai: Option<LlmVendorConfig>,
     #[serde(default)]
     pub google: Option<LlmVendorConfig>,
@@ -1041,6 +1043,17 @@ pub struct LlmConfig {
     // Legacy flat provider list, kept for backward compatibility.
     #[serde(default)]
     pub providers: Vec<LlmProviderConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LlmHostedRelayConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    pub vendor: String,
+    pub model: String,
+    pub base_url: String,
+    #[serde(default)]
+    pub daily_request_limit: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -1211,6 +1224,11 @@ pub struct LlmProviderConfig {
 /// 配置入口，但不强制每个 provider 都填。
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct LlmProviderParams {
+    /// The managed relay may bootstrap its private bearer key after a one-time
+    /// Slot 0 challenge. This is derived from `[llm.hosted_relay]`; ordinary
+    /// provider configuration must not set it as an authorization bypass.
+    #[serde(default)]
+    pub device_key_enrollment: bool,
     /// chat-class 调用没传 hints.temperature 时使用；不设走 vendor 默认。
     #[serde(default)]
     pub default_temperature: Option<f64>,
