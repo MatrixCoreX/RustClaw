@@ -1,3 +1,4 @@
+use chrono::Utc;
 use serde_json::json;
 use tempfile::tempdir;
 
@@ -127,6 +128,108 @@ fn per_key_inflight_limit_is_atomic() {
     store
         .reserve_attempt(&key, "request-after-settle", 10, 100, 1)
         .expect("reservation after settlement");
+}
+
+#[test]
+fn admin_key_is_isolated_from_client_usage() {
+    let directory = tempdir().expect("temp directory");
+    let store = RelayStore::open(&directory.path().join("relay.db"), TEST_PEPPER).expect("store");
+    let client = store
+        .issue_key("device-client", 100)
+        .expect("issue client key");
+    let admin = store
+        .issue_admin_key("website-admin")
+        .expect("issue admin key");
+    let admin_key = store
+        .authenticate(&admin.token)
+        .expect("authenticate admin");
+
+    assert!(admin_key.require_scope("usage.admin.read").is_ok());
+    assert!(admin_key.require_scope("usage.admin.write").is_ok());
+    assert!(matches!(
+        admin_key.require_scope("chat.completions"),
+        Err(StoreError::ScopeDenied)
+    ));
+    assert_eq!(store.active_key_count().expect("active client count"), 1);
+
+    let page = store
+        .admin_usage_page(Utc::now().date_naive(), 1, 50, "all")
+        .expect("admin usage page");
+    assert_eq!(page.schema_version, 1);
+    assert_eq!(page.total, 1);
+    assert_eq!(page.devices.len(), 1);
+    assert_eq!(page.devices[0].key_id, client.key_id);
+    assert_ne!(page.devices[0].key_id, admin.key_id);
+}
+
+#[test]
+fn admin_usage_and_daily_limit_update_are_consistent() {
+    let directory = tempdir().expect("temp directory");
+    let store = RelayStore::open(&directory.path().join("relay.db"), TEST_PEPPER).expect("store");
+    let client = store
+        .issue_key("device-usage", 3)
+        .expect("issue client key");
+    let other = store.issue_key("device-other", 5).expect("issue other key");
+    let admin = store
+        .issue_admin_key("website-admin")
+        .expect("issue admin key");
+    let key = store
+        .authenticate(&client.token)
+        .expect("authenticate client");
+
+    store
+        .reserve_attempt(&key, "request-success", 10, 100, 1)
+        .expect("reserve successful request");
+    store
+        .settle_attempt("request-success", true, 17)
+        .expect("settle successful request");
+    store
+        .reserve_attempt(&key, "request-failed", 10, 100, 1)
+        .expect("reserve failed request");
+    store
+        .settle_attempt("request-failed", false, 0)
+        .expect("settle failed request");
+
+    let first_page = store
+        .admin_usage_page(Utc::now().date_naive(), 1, 1, "enabled")
+        .expect("first usage page");
+    assert_eq!(first_page.total, 2);
+    assert_eq!(first_page.total_pages, 2);
+    let usage = &first_page.devices[0];
+    assert_eq!(usage.key_id, client.key_id);
+    assert_eq!(usage.request_count, 2);
+    assert_eq!(usage.successful_requests, 1);
+    assert_eq!(usage.failed_requests, 1);
+    assert_eq!(usage.total_tokens, 17);
+    assert_eq!(usage.remaining_requests, 1);
+
+    let update = store
+        .update_daily_request_limit(&admin.key_id, &client.key_id, 10)
+        .expect("update daily limit")
+        .expect("client exists");
+    assert_eq!(update.schema_version, 1);
+    assert_eq!(update.previous_daily_request_limit, 3);
+    assert_eq!(update.daily_request_limit, 10);
+    let updated_key = store
+        .authenticate(&client.token)
+        .expect("authenticate updated client");
+    assert_eq!(updated_key.daily_request_limit, 10);
+    assert_eq!(
+        store
+            .quota_snapshot(&updated_key)
+            .expect("updated quota snapshot")
+            .remaining_requests,
+        8
+    );
+    assert!(store
+        .update_daily_request_limit(&admin.key_id, &admin.key_id, 10)
+        .expect("admin target lookup")
+        .is_none());
+    assert!(store
+        .update_daily_request_limit(&admin.key_id, "missing-key", 10)
+        .expect("missing target lookup")
+        .is_none());
+    assert_ne!(other.key_id, client.key_id);
 }
 
 #[test]

@@ -3,9 +3,18 @@ import assert from "node:assert/strict";
 
 import {
   hasUnsavedLlmDraftChanges,
+  initialLlmDraft,
+  isHostedRelayDraft,
   isLlmConfigured,
   llmVendorSupportsApiFormat,
 } from "./llm-config.ts";
+
+const hostedRelay = {
+  vendor: "custom",
+  model: "minimax",
+  base_url: "https://relay.example/v1",
+  api_format: "openai_compat",
+};
 
 test("detects vendors with configurable api format", () => {
   assert.equal(llmVendorSupportsApiFormat("minimax"), true);
@@ -145,5 +154,71 @@ test("marks mimo api format edits as unsaved", () => {
       draftApiFormat: "anthropic_claude",
     }),
     true,
+  );
+});
+
+test("uses the hosted relay as the initial draft when no usable direct provider exists", () => {
+  assert.deepEqual(
+    initialLlmDraft({
+      selectedVendor: "minimax",
+      selectedModel: "MiniMax-M3",
+      vendors: [{
+        name: "minimax",
+        base_url: "https://api.minimaxi.com/v1",
+        api_key_configured: false,
+      }],
+      hostedRelay,
+      runtime: null,
+    }),
+    {
+      vendor: "custom",
+      model: "minimax",
+      baseUrl: "https://relay.example/v1",
+      apiFormat: "openai_compat",
+    },
+  );
+});
+
+test("keeps an active direct provider instead of overriding it with the hosted relay", () => {
+  assert.deepEqual(
+    initialLlmDraft({
+      selectedVendor: "minimax",
+      selectedModel: "MiniMax-M3",
+      vendors: [{
+        name: "minimax",
+        base_url: "https://api.minimaxi.com/v1",
+        api_format: "openai_compat",
+        api_key_configured: true,
+      }],
+      hostedRelay,
+      runtime: { vendor: "minimax", model: "MiniMax-M3" },
+    }),
+    {
+      vendor: "minimax",
+      model: "MiniMax-M3",
+      baseUrl: "https://api.minimaxi.com/v1",
+      apiFormat: "openai_compat",
+    },
+  );
+});
+
+test("recognizes only the complete hosted relay draft as the default mode", () => {
+  assert.equal(
+    isHostedRelayDraft(hostedRelay, {
+      vendor: "custom",
+      model: "minimax",
+      baseUrl: "https://relay.example/v1",
+      apiFormat: "openai_compat",
+    }),
+    true,
+  );
+  assert.equal(
+    isHostedRelayDraft(hostedRelay, {
+      vendor: "custom",
+      model: "another-model",
+      baseUrl: "https://relay.example/v1",
+      apiFormat: "openai_compat",
+    }),
+    false,
   );
 });

@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   hasUnsavedLlmDraftChanges,
+  hostedRelayDraft,
+  initialLlmDraft,
   isLlmConfigured,
   llmVendorSupportsApiFormat,
 } from "../lib/llm-config";
@@ -71,11 +73,6 @@ export function useModelConfigRuntime({
     [llmConfigData, llmDraftVendor],
   );
 
-  const hasCustomLlmVendor = useMemo(
-    () => (llmConfigData?.vendors ?? []).some((vendor) => vendor.name === "custom"),
-    [llmConfigData],
-  );
-
   const hasUnsavedLlmChanges = useMemo(() => {
     return llmDraftApiKey.trim().length > 0 || hasUnsavedLlmDraftChanges(
       llmConfigData
@@ -135,11 +132,17 @@ export function useModelConfigRuntime({
         throw new Error(body.error || `LLM config fetch failed (${res.status})`);
       }
       setLlmConfigData(body.data);
-      setLlmDraftVendor(body.data.selected_vendor || "");
-      setLlmDraftModel(body.data.selected_model || "");
-      const selectedVendor = body.data.vendors.find((vendor) => vendor.name === (body.data.selected_vendor || ""));
-      setLlmDraftBaseUrl(selectedVendor?.base_url || "");
-      setLlmDraftApiFormat(llmVendorSupportsApiFormat(selectedVendor?.name) ? (selectedVendor?.api_format || "openai_compat") : "");
+      const draft = initialLlmDraft({
+        selectedVendor: body.data.selected_vendor || "",
+        selectedModel: body.data.selected_model || "",
+        vendors: body.data.vendors,
+        hostedRelay: body.data.hosted_relay,
+        runtime: body.data.runtime,
+      });
+      setLlmDraftVendor(draft.vendor);
+      setLlmDraftModel(draft.model);
+      setLlmDraftBaseUrl(draft.baseUrl);
+      setLlmDraftApiFormat(draft.apiFormat);
       setLlmDraftApiKey("");
     } catch (err) {
       const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
@@ -366,10 +369,11 @@ export function useModelConfigRuntime({
   const applyHostedRelayDraft = () => {
     const preset = llmConfigData?.hosted_relay;
     if (!preset) return;
-    setLlmDraftVendor(preset.vendor);
-    setLlmDraftModel(preset.model);
-    setLlmDraftBaseUrl(preset.base_url);
-    setLlmDraftApiFormat(preset.api_format);
+    const draft = hostedRelayDraft(preset);
+    setLlmDraftVendor(draft.vendor);
+    setLlmDraftModel(draft.model);
+    setLlmDraftBaseUrl(draft.baseUrl);
+    setLlmDraftApiFormat(draft.apiFormat);
     setLlmDraftApiKey("");
   };
 
@@ -403,7 +407,6 @@ export function useModelConfigRuntime({
     modelCatalogLoading,
     modelCatalogError,
     selectedLlmVendorInfo,
-    hasCustomLlmVendor,
     hasUnsavedLlmChanges,
     llmRestartPending,
     llmConfigured,

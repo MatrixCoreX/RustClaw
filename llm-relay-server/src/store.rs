@@ -12,6 +12,9 @@ use uuid::Uuid;
 
 type HmacSha256 = Hmac<Sha256>;
 
+const CLIENT_SCOPES: &str = "chat.completions,models.read,quota.read";
+const ADMIN_SCOPES: &str = "usage.admin.read,usage.admin.write";
+
 #[derive(Debug)]
 pub enum StoreError {
     InvalidKey,
@@ -79,6 +82,44 @@ pub struct UsageSnapshot {
     pub reset_at_epoch: i64,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct AdminUsageItem {
+    pub key_id: String,
+    pub label: String,
+    pub enabled: bool,
+    pub day_utc: String,
+    pub request_count: u32,
+    pub successful_requests: u32,
+    pub failed_requests: u32,
+    pub total_tokens: u64,
+    pub daily_request_limit: u32,
+    pub remaining_requests: u32,
+    pub last_request_at_epoch: Option<i64>,
+    pub created_at_epoch: i64,
+    pub revoked_at_epoch: Option<i64>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct AdminUsagePage {
+    pub schema_version: u32,
+    pub day_utc: String,
+    pub page: u32,
+    pub per_page: u32,
+    pub total: u64,
+    pub total_pages: u64,
+    pub reset_at_epoch: i64,
+    pub devices: Vec<AdminUsageItem>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct DailyLimitUpdate {
+    pub schema_version: u32,
+    pub key_id: String,
+    pub previous_daily_request_limit: u32,
+    pub daily_request_limit: u32,
+    pub changed_at_epoch: i64,
+}
+
 pub struct RelayStore {
     connection: Mutex<Connection>,
     pepper: Vec<u8>,
@@ -138,7 +179,20 @@ impl RelayStore {
                  FOREIGN KEY (key_id) REFERENCES relay_keys(key_id)
              );
              CREATE INDEX IF NOT EXISTS relay_attempts_created_idx
-                 ON relay_attempts(created_at_epoch);",
+                 ON relay_attempts(created_at_epoch);
+             CREATE TABLE IF NOT EXISTS relay_admin_audit (
+                 event_id TEXT PRIMARY KEY,
+                 actor_key_id TEXT NOT NULL,
+                 action TEXT NOT NULL,
+                 target_key_id TEXT NOT NULL,
+                 previous_value INTEGER,
+                 new_value INTEGER,
+                 created_at_epoch INTEGER NOT NULL,
+                 FOREIGN KEY (actor_key_id) REFERENCES relay_keys(key_id),
+                 FOREIGN KEY (target_key_id) REFERENCES relay_keys(key_id)
+             );
+             CREATE INDEX IF NOT EXISTS relay_admin_audit_created_idx
+                 ON relay_admin_audit(created_at_epoch);",
         )?;
         if recover_interrupted {
             recover_interrupted_attempts(&mut connection)?;
@@ -154,6 +208,19 @@ impl RelayStore {
     }
 
     pub fn issue_key(&self, label: &str, daily_request_limit: u32) -> anyhow::Result<IssuedKey> {
+        self.issue_key_with_scopes(label, daily_request_limit, CLIENT_SCOPES)
+    }
+
+    pub fn issue_admin_key(&self, label: &str) -> anyhow::Result<IssuedKey> {
+        self.issue_key_with_scopes(label, 1, ADMIN_SCOPES)
+    }
+
+    fn issue_key_with_scopes(
+        &self,
+        label: &str,
+        daily_request_limit: u32,
+        scopes: &str,
+    ) -> anyhow::Result<IssuedKey> {
         let label = label.trim();
         if label.is_empty() || label.len() > 120 {
             bail!("key label must contain 1 to 120 characters");
@@ -179,7 +246,7 @@ impl RelayStore {
                     key_id,
                     label,
                     digest,
-                    "chat.completions,models.read,quota.read",
+                    scopes,
                     daily_request_limit,
                     created_at
                 ],
@@ -279,7 +346,8 @@ impl RelayStore {
             .lock()
             .expect("relay database mutex poisoned")
             .query_row(
-                "SELECT COUNT(*) FROM relay_keys WHERE enabled = 1",
+                "SELECT COUNT(*) FROM relay_keys
+                 WHERE enabled = 1 AND scopes NOT LIKE '%usage.admin.%'",
                 [],
                 |row| row.get(0),
             )
@@ -470,6 +538,142 @@ impl RelayStore {
             remaining_requests: key.daily_request_limit.saturating_sub(usage.0),
             reset_at_epoch: reset_at,
         })
+    }
+
+    pub fn admin_usage_page(
+        &self,
+        day: NaiveDate,
+        page: u32,
+        per_page: u32,
+        status: &str,
+    ) -> anyhow::Result<AdminUsagePage> {
+        let day_utc = day.format("%Y-%m-%d").to_string();
+        let offset = u64::from(page.saturating_sub(1)).saturating_mul(u64::from(per_page));
+        let connection = self
+            .connection
+            .lock()
+            .expect("relay database mutex poisoned");
+        let total = connection.query_row(
+            "SELECT COUNT(*) FROM relay_keys
+             WHERE scopes NOT LIKE '%usage.admin.%'
+               AND (?1 = 'all'
+                    OR (?1 = 'enabled' AND enabled = 1)
+                    OR (?1 = 'revoked' AND enabled = 0))",
+            params![status],
+            |row| row.get::<_, u64>(0),
+        )?;
+        let mut statement = connection.prepare(
+            "SELECT k.key_id, k.label, k.enabled,
+                    COALESCE(u.request_count, 0),
+                    COALESCE(u.successful_requests, 0),
+                    COALESCE(u.failed_requests, 0),
+                    COALESCE(u.total_tokens, 0),
+                    k.daily_request_limit,
+                    MAX(a.created_at_epoch),
+                    k.created_at_epoch, k.revoked_at_epoch
+             FROM relay_keys k
+             LEFT JOIN daily_usage u
+               ON u.key_id = k.key_id AND u.day_utc = ?1
+             LEFT JOIN relay_attempts a
+               ON a.key_id = k.key_id AND a.day_utc = ?1
+             WHERE k.scopes NOT LIKE '%usage.admin.%'
+               AND (?2 = 'all'
+                    OR (?2 = 'enabled' AND k.enabled = 1)
+                    OR (?2 = 'revoked' AND k.enabled = 0))
+             GROUP BY k.key_id, k.label, k.enabled, u.request_count,
+                      u.successful_requests, u.failed_requests, u.total_tokens,
+                      k.daily_request_limit, k.created_at_epoch, k.revoked_at_epoch
+             ORDER BY MAX(a.created_at_epoch) IS NULL,
+                      MAX(a.created_at_epoch) DESC,
+                      k.created_at_epoch DESC, k.key_id
+             LIMIT ?3 OFFSET ?4",
+        )?;
+        let rows = statement.query_map(params![day_utc, status, per_page, offset], |row| {
+            let daily_request_limit = row.get::<_, u32>(7)?;
+            let request_count = row.get::<_, u32>(3)?;
+            Ok(AdminUsageItem {
+                key_id: row.get(0)?,
+                label: row.get(1)?,
+                enabled: row.get(2)?,
+                day_utc: day_utc.clone(),
+                request_count,
+                successful_requests: row.get(4)?,
+                failed_requests: row.get(5)?,
+                total_tokens: row.get(6)?,
+                daily_request_limit,
+                remaining_requests: daily_request_limit.saturating_sub(request_count),
+                last_request_at_epoch: row.get(8)?,
+                created_at_epoch: row.get(9)?,
+                revoked_at_epoch: row.get(10)?,
+            })
+        })?;
+        let devices = rows.collect::<Result<Vec<_>, _>>()?;
+        let total_pages = if total == 0 {
+            0
+        } else {
+            total.div_ceil(u64::from(per_page))
+        };
+        Ok(AdminUsagePage {
+            schema_version: 1,
+            day_utc,
+            page,
+            per_page,
+            total,
+            total_pages,
+            reset_at_epoch: next_day_epoch(day),
+            devices,
+        })
+    }
+
+    pub fn update_daily_request_limit(
+        &self,
+        actor_key_id: &str,
+        target_key_id: &str,
+        daily_request_limit: u32,
+    ) -> anyhow::Result<Option<DailyLimitUpdate>> {
+        let now = Utc::now().timestamp();
+        let mut connection = self
+            .connection
+            .lock()
+            .expect("relay database mutex poisoned");
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let previous = tx
+            .query_row(
+                "SELECT daily_request_limit FROM relay_keys
+                 WHERE key_id = ?1 AND scopes NOT LIKE '%usage.admin.%'",
+                params![target_key_id],
+                |row| row.get::<_, u32>(0),
+            )
+            .optional()?;
+        let Some(previous_daily_request_limit) = previous else {
+            return Ok(None);
+        };
+        tx.execute(
+            "UPDATE relay_keys SET daily_request_limit = ?2 WHERE key_id = ?1",
+            params![target_key_id, daily_request_limit],
+        )?;
+        tx.execute(
+            "INSERT INTO relay_admin_audit
+             (event_id, actor_key_id, action, target_key_id,
+              previous_value, new_value, created_at_epoch)
+             VALUES (?1, ?2, 'daily_request_limit_updated', ?3, ?4, ?5, ?6)",
+            params![
+                Uuid::new_v4().to_string(),
+                actor_key_id,
+                target_key_id,
+                previous_daily_request_limit,
+                daily_request_limit,
+                now
+            ],
+        )?;
+        tx.commit()?;
+        Ok(Some(DailyLimitUpdate {
+            schema_version: 1,
+            key_id: target_key_id.to_owned(),
+            previous_daily_request_limit,
+            daily_request_limit,
+            changed_at_epoch: now,
+        }))
     }
 
     fn digest(&self, token: &str) -> anyhow::Result<Vec<u8>> {

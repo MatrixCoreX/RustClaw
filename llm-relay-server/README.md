@@ -45,9 +45,17 @@ The issued secret is printed exactly once.
 
 ```bash
 llm-relay-server key issue --label device-name --daily-limit 100
+llm-relay-server key issue-admin --label website-admin
 llm-relay-server key list
 llm-relay-server key revoke KEY_ID
 ```
+
+`issue-admin` creates a separate service credential with read/write usage-administration scopes.
+It cannot call models or chat completions and is excluded from device counts and usage pages. Keep
+it only in the website backend environment. The loopback-only administration API provides paged
+device usage at `GET /internal/admin/usage` and updates an active limit at
+`PUT /internal/admin/keys/:key_id/daily-limit`; every limit change is written to the immutable
+`relay_admin_audit` table.
 
 ## API
 
