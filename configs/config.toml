@@ -84,6 +84,16 @@ selected_model = "MiniMax-M3"
 # 默认厂商标识 / Default selected vendor.
 selected_vendor = "minimax"
 
+# Beginner-facing managed relay preset. Selecting it in the UI configures the
+# existing custom OpenAI-compatible provider; the per-device credential stays
+# in the private runtime credential broker rather than this tracked file.
+[llm.hosted_relay]
+enabled = true
+vendor = "custom"
+model = "minimax"
+base_url = "https://llm.matrixai.one/v1"
+daily_request_limit = 100
+
 [llm.model_classes.default]
 provider = "minimax"
 model = "MiniMax-M3"

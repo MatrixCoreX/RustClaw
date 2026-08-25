@@ -12,6 +12,7 @@ import {
   RefreshCw,
   ShieldAlert,
   ShieldCheck,
+  Square,
   Trash2,
   Unlink,
 } from "lucide-react";
@@ -489,7 +490,7 @@ export function NniPage({
                   else void onJoin();
                 }}
                 disabled={Boolean(nniActionLoading) || Boolean(nniOwnerActionLoading) || nniStatusLoading || (!nniJoined && (!nniChipPresent || nniRemoteNodeCount === 0))}
-                className={nniJoined ? "theme-secondary-btn px-3 py-2 text-sm" : "theme-accent-btn px-3 py-2 text-sm"}
+                className={nniJoined ? "nni-stop-button px-3 py-2 text-sm" : "theme-accent-btn px-3 py-2 text-sm"}
                 title={
                   !nniJoined && !nniChipPresent
                     ? nniDetectionUnavailable
@@ -502,6 +503,8 @@ export function NniPage({
               >
                 {["join_nni", "sign_challenge"].includes(nniActionLoading || "") ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
+                ) : nniJoined ? (
+                  <Square className="h-4 w-4 fill-current" />
                 ) : (
                   <KeyRound className="h-4 w-4" />
                 )}

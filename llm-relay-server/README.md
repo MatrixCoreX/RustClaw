@@ -1,124 +1,82 @@
-# LLM Relay Server
+# Managed LLM Relay
 
-一个独立的 OpenAI 兼容大模型中转服务端。客户端只连接本服务，本服务按环境变量配置转发到上游大模型，并按 API key 做请求次数与 token 配额限制。
+Standalone OpenAI-compatible chat relay. It keeps the upstream provider credential on the server,
+issues a unique credential to each device, and persists per-device UTC-day usage in its own SQLite
+database.
 
-客户端可以通过 `model` 字段选择公开模型别名，例如 `default`、`minimax`、`deepseek`、`mimo`。真实供应商地址、真实模型名和 API key 只保存在服务端。
+## Security model
 
-## 启动
+- The process binds to `127.0.0.1:8796` by default. nginx is the public TLS boundary.
+- Raw device keys are displayed once when issued and are never stored. SQLite stores a key ID and
+  HMAC-SHA256 digest protected by `RELAY_KEY_PEPPER`.
+- The default allowance is 100 dispatched upstream requests per device key per UTC day.
+- `/v1/models` and `/v1/quota` require authentication but do not consume model-call allowance.
+- Request bodies, responses, credentials, and tool arguments are not written to relay logs.
+- Caller-provided upstream URLs, headers, credentials, and unknown routing fields are rejected.
 
-```bash
-cd llm-relay-server
-export RELAY_API_KEYS=dev-local-key
-export RELAY_UPSTREAM_BASE_URL=https://api.openai.com/v1
-export RELAY_UPSTREAM_API_KEY=sk-your-upstream-key
-export RELAY_UPSTREAM_MODEL=gpt-4o-mini
-
-# 可选：中国模型。设置对应 key 后会自动出现在 /v1/models。
-export RELAY_MINIMAX_API_KEY=your-minimax-key
-export RELAY_DEEPSEEK_API_KEY=your-deepseek-key
-export RELAY_MIMO_API_KEY=your-mimo-key
-cargo run
-```
-
-默认监听：
+## Required environment
 
 ```text
-127.0.0.1:8788
-```
-
-## 常用环境变量
-
-```text
-RELAY_LISTEN_ADDR=127.0.0.1:8788
-RELAY_API_KEYS=dev-local-key,another-key
-RELAY_PUBLIC_MODEL=default
-RELAY_UPSTREAM_BASE_URL=https://api.openai.com/v1
-RELAY_UPSTREAM_API_KEY=sk-your-upstream-key
-RELAY_UPSTREAM_MODEL=gpt-4o-mini
-RELAY_UPSTREAM_VENDOR=openai
-RELAY_UPSTREAM_TIMEOUT_SECONDS=60
-
-RELAY_MINIMAX_ALIAS=minimax
-RELAY_MINIMAX_BASE_URL=https://api.minimaxi.com/v1
-RELAY_MINIMAX_API_KEY=
-RELAY_MINIMAX_MODEL=MiniMax-M3
-
-RELAY_DEEPSEEK_ALIAS=deepseek
-RELAY_DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
-RELAY_DEEPSEEK_API_KEY=
-RELAY_DEEPSEEK_MODEL=deepseek-chat
-
-RELAY_MIMO_ALIAS=mimo
-RELAY_MIMO_BASE_URL=https://token-plan-sgp.xiaomimimo.com/v1
-RELAY_MIMO_API_KEY=
-RELAY_MIMO_MODEL=mimo-v2.5-pro
-
+RELAY_KEY_PEPPER=<at-least-32-random-bytes>
+RELAY_DATABASE_PATH=/var/lib/llm-relay/relay.db
+RELAY_LISTEN_ADDR=127.0.0.1:8796
+RELAY_UPSTREAM_BASE_URL=https://api.minimaxi.com/v1
+RELAY_UPSTREAM_API_KEY=<server-side-provider-key>
+RELAY_UPSTREAM_MODEL=MiniMax-M3
+RELAY_UPSTREAM_VENDOR=minimax
+RELAY_PUBLIC_MODEL=minimax
+RELAY_REQUESTS_PER_DAY=100
 RELAY_REQUESTS_PER_MINUTE=20
-RELAY_REQUESTS_PER_DAY=1000
-RELAY_TOKENS_PER_DAY=200000
-RELAY_TOKENS_PER_MONTH=3000000
-RELAY_MAX_TOKENS_PER_REQUEST=4096
+RELAY_TOKENS_PER_DAY=100000000
+RELAY_MAX_TOKENS_PER_REQUEST=16384
+RELAY_MAX_INFLIGHT=16
+RELAY_MAX_INFLIGHT_PER_KEY=4
+RELAY_UPSTREAM_TIMEOUT_SECONDS=180
 ```
 
-## 接口
+Startup fails when the pepper, upstream key, database, bind policy, or enabled client-key set is
+invalid. Public binding additionally requires `RELAY_ALLOW_PUBLIC_BIND=true`; production should
+not use it.
 
-### 健康检查
+## Device-key administration
+
+The admin CLI reads only `RELAY_KEY_PEPPER`, `RELAY_DATABASE_PATH`, and the default daily limit.
+The issued secret is printed exactly once.
 
 ```bash
-curl http://127.0.0.1:8788/health
+llm-relay-server key issue --label device-name --daily-limit 100
+llm-relay-server key list
+llm-relay-server key revoke KEY_ID
 ```
 
-### 模型列表
+## API
 
 ```bash
-curl http://127.0.0.1:8788/v1/models \
-  -H 'Authorization: Bearer dev-local-key'
-```
+curl https://llm.example.test/health/ready
 
-### 配额查询
+curl https://llm.example.test/v1/models \
+  -H 'Authorization: Bearer DEVICE_KEY'
 
-```bash
-curl http://127.0.0.1:8788/v1/quota \
-  -H 'Authorization: Bearer dev-local-key'
-```
+curl https://llm.example.test/v1/quota \
+  -H 'Authorization: Bearer DEVICE_KEY'
 
-### Chat Completions
-
-使用默认模型：
-
-```bash
-curl http://127.0.0.1:8788/v1/chat/completions \
-  -H 'Authorization: Bearer dev-local-key' \
+curl https://llm.example.test/v1/chat/completions \
+  -H 'Authorization: Bearer DEVICE_KEY' \
   -H 'Content-Type: application/json' \
-  -d '{
-    "model": "default",
-    "messages": [
-      { "role": "user", "content": "你好" }
-    ],
-    "max_tokens": 1024
-  }'
+  -d '{"model":"minimax","messages":[{"role":"user","content":"Hello"}]}'
 ```
 
-选择中国模型：
+Both JSON and SSE (`stream=true`) Chat Completions responses are supported. Public model aliases
+are replaced with the server-owned upstream model before dispatch and restored in responses.
+
+## Verification
 
 ```bash
-curl http://127.0.0.1:8788/v1/chat/completions \
-  -H 'Authorization: Bearer dev-local-key' \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "model": "deepseek",
-    "messages": [
-      { "role": "user", "content": "请用一句话介绍你自己" }
-    ],
-    "max_tokens": 512
-  }'
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test
 ```
 
-把 `model` 改成 `minimax` 或 `mimo` 即可转发到对应供应商。只有设置了对应 `RELAY_*_API_KEY` 的模型才会出现在 `/v1/models` 中。
-
-## 当前边界
-
-- 第一版只支持非流式请求，`stream=true` 会返回 `stream_not_supported`。
-- 配额账本保存在内存中，服务重启后会清零。
-- 客户端不能传上游 `base_url`、`api_key` 或自定义 header。
-- 错误响应使用稳定的 `error.code` 和 `error.message_key`，便于以后接 UI 或多语言文案。
+Deployment templates are under `deploy/`. The service unit uses a dedicated unprivileged account,
+a private environment file, and a dedicated `/var/lib/llm-relay` data directory. Build the release
+binary on a compatible build host; do not install a Rust toolchain on a small production server.

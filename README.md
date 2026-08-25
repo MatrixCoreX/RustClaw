@@ -634,6 +634,8 @@ Useful endpoints (send `X-Agent-Key` for the current UI/user key):
 - `POST /v1/auth/channel/bind`
 - `GET/POST /v1/auth/crypto-credentials`: reads or overwrites exchange credentials scoped to the current `X-Agent-Key`
 - `GET /v1/models/catalog`: returns the secret-free model/provider capability catalog used by the UI Models page and teaching-mode `model_catalog_trace`
+- `GET/POST /v1/llm/config`: reads or updates the main text-model selection; administrators may store a custom-provider credential in the machine-local private credential broker
+- `POST /v1/llm/test`: tests a draft text-model configuration without persisting a supplied credential
 - `GET/POST /v1/admin/model-config`: reads or updates the independently selected provider, model, endpoint, and managed credential for each multimodal module
 - `GET/POST /v1/skills/config`: reads or updates skill enablement; each multimodal skill can be switched independently without discarding its model settings
 - `GET /v1/skills/store`: returns the registry-driven catalog for optional bundled and imported skills, including separate `installed` and `enabled` states
@@ -679,6 +681,32 @@ need to parse prose or inspect provider logs.
 See [Skills, media, and models](docs/architecture/05-skills-media-models.md) and
 [Release validation](docs/architecture/06-release-validation.md) for the full
 catalog, readiness, and provider-validation flow.
+
+### Hosted relay preset
+
+The model settings page exposes a managed OpenAI-compatible relay preset in
+addition to direct provider configuration. Selecting the preset configures the
+existing `custom` provider with public model alias `minimax`; it does not add a
+second provider adapter and never silently changes an existing installation.
+Each installation receives its own relay access key. The browser keeps that key
+only in transient form while testing or saving it, and `clawd` writes it to the
+machine-local private credential broker rather than tracked TOML.
+
+```mermaid
+flowchart LR
+    UI[Model settings] -->|preset + one-time device key| CL[clawd]
+    CL -->|Bearer device key| TLS[llm.matrixai.one TLS endpoint]
+    TLS --> RELAY[standalone LLM relay]
+    RELAY --> QUOTA[per-device authentication and UTC quota]
+    RELAY -->|server-held provider credential| UPSTREAM[configured upstream model]
+```
+
+The initial relay policy permits 100 upstream model attempts per device key
+per UTC day. Local validation failures, model-list reads, and quota reads do not
+consume that allowance. Once an authenticated request is dispatched upstream,
+successes and failures both count. The quota database and service credential
+remain on the relay host; prompts, responses, tool arguments, and raw keys are
+not exposed by the quota API.
 
 ### How providers are validated
 

@@ -39,8 +39,86 @@ fn llm_vendor_api_key_from_env(vendor_name: &str) -> String {
     llm_vendor_api_key_from_env_with(vendor_name, &|name| std::env::var(name).ok())
 }
 
+fn llm_vendor_api_key_for_state(state: &AppState, vendor_name: &str) -> (String, &'static str) {
+    let environment_value = llm_vendor_api_key_from_env(vendor_name);
+    if !environment_value.is_empty() {
+        return (environment_value, "environment");
+    }
+    let secret_name = claw_core::secrets::text_secret_name_for_vendor(vendor_name);
+    let credential_path = claw_core::git_remote_config::git_credential_store_path(
+        &state.skill_rt.workspace_root,
+    );
+    let broker = claw_core::secrets::EnvFileSecretsBroker::new(credential_path);
+    use claw_core::secrets::SecretsBroker as _;
+    match broker.lookup(&secret_name) {
+        Ok(Some(secret)) if !secret.is_empty() => {
+            (secret.expose().to_string(), "private_file")
+        }
+        _ => (String::new(), "none"),
+    }
+}
+
 fn collect_llm_vendor_info(value: &toml::Value) -> Vec<Value> {
     collect_llm_vendor_info_with_env(value, |name| std::env::var(name).ok())
+}
+
+fn collect_llm_vendor_info_for_state(value: &toml::Value, state: &AppState) -> Vec<Value> {
+    let mut vendors = collect_llm_vendor_info(value);
+    for vendor in &mut vendors {
+        let Some(vendor_name) = vendor.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        let (api_key, source) = llm_vendor_api_key_for_state(state, vendor_name);
+        if let Some(object) = vendor.as_object_mut() {
+            object.insert("api_key_configured".to_string(), json!(!api_key.is_empty()));
+            object.insert("api_key_source".to_string(), json!(source));
+        }
+    }
+    vendors
+}
+
+fn hosted_relay_preset(value: &toml::Value) -> Option<Value> {
+    let relay = value
+        .get("llm")
+        .and_then(|llm| llm.get("hosted_relay"))
+        .and_then(|value| value.as_table())?;
+    if !relay
+        .get("enabled")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    {
+        return None;
+    }
+    let vendor = relay.get("vendor")?.as_str()?.trim();
+    let model = relay.get("model")?.as_str()?.trim();
+    let base_url = relay.get("base_url")?.as_str()?.trim();
+    if vendor != "custom" || model.is_empty() || !base_url.starts_with("https://") {
+        return None;
+    }
+    Some(json!({
+        "vendor": vendor,
+        "model": model,
+        "base_url": base_url,
+        "api_format": "openai_compat",
+        "daily_request_limit": relay
+            .get("daily_request_limit")
+            .and_then(|value| value.as_integer())
+            .unwrap_or(100)
+    }))
+}
+
+fn matches_hosted_relay_preset(
+    value: &toml::Value,
+    vendor: &str,
+    model: &str,
+    base_url: &str,
+) -> bool {
+    let Some(preset) = hosted_relay_preset(value) else {
+        return false;
+    };
+    preset.get("vendor").and_then(Value::as_str) == Some(vendor)
+        && preset.get("model").and_then(Value::as_str) == Some(model)
+        && preset.get("base_url").and_then(Value::as_str) == Some(base_url)
 }
 
 fn collect_llm_vendor_info_with_env<F>(value: &toml::Value, env_value: F) -> Vec<Value>
@@ -164,6 +242,20 @@ where
     (base_url, api_key, provider_type)
 }
 
+fn saved_llm_vendor_runtime_fields_for_state(
+    state: &AppState,
+    parsed: &toml::Value,
+    selected_vendor: &str,
+) -> (String, String, String) {
+    let (base_url, _, provider_type) = saved_llm_vendor_runtime_fields_with_env(
+        parsed,
+        selected_vendor,
+        |_| None,
+    );
+    let (api_key, _) = llm_vendor_api_key_for_state(state, selected_vendor);
+    (base_url, api_key, provider_type)
+}
+
 fn llm_provider_type_for_vendor(selected_vendor: &str, vendor_api_format: Option<&str>) -> String {
     if llm_vendor_supports_api_format(selected_vendor) {
         normalize_llm_api_format(vendor_api_format)
@@ -246,9 +338,7 @@ fn llm_restart_required(
         .strip_prefix("vendor-")
         .unwrap_or(provider.config.name.as_str());
     let (saved_base_url, saved_api_key, saved_provider_type) =
-        saved_llm_vendor_runtime_fields_with_env(parsed, selected_vendor.trim(), |name| {
-            std::env::var(name).ok()
-        });
+        saved_llm_vendor_runtime_fields_for_state(state, parsed, selected_vendor.trim());
     llm_runtime_differs(
         runtime_vendor,
         &provider.config.model,
@@ -684,7 +774,8 @@ async fn get_llm_config(
         .unwrap_or("")
         .trim()
         .to_string();
-    let vendors = collect_llm_vendor_info(&parsed);
+    let vendors = collect_llm_vendor_info_for_state(&parsed, &state);
+    let hosted_relay = hosted_relay_preset(&parsed);
     let restart_required = llm_restart_required(&state, &parsed, &selected_vendor, &selected_model);
     (
         StatusCode::OK,
@@ -695,6 +786,7 @@ async fn get_llm_config(
                 "selected_vendor": selected_vendor,
                 "selected_model": selected_model,
                 "vendors": vendors,
+                "hosted_relay": hosted_relay,
                 "runtime": current_runtime_llm_info(&state),
                 "restart_required": restart_required
             })),
@@ -708,24 +800,24 @@ async fn update_llm_config(
     headers: HeaderMap,
     Json(req): Json<UpdateLlmConfigRequest>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    if let Err(resp) = require_ui_identity(&state, &headers) {
-        return resp;
-    }
-    if req
-        .vendor_api_key
-        .as_deref()
-        .is_some_and(|value| !value.trim().is_empty())
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err(resp) => return resp,
+    };
+    let inline_api_key = req.vendor_api_key.as_deref().map(str::trim).unwrap_or("");
+    let selected_vendor = req.selected_vendor.trim().to_ascii_lowercase();
+    if !inline_api_key.is_empty()
+        && (selected_vendor != "custom" || !identity.role.eq_ignore_ascii_case("admin"))
     {
         return (
             StatusCode::BAD_REQUEST,
             Json(ApiResponse {
                 ok: false,
                 data: None,
-                error: Some("vendor_api_key_must_use_environment".to_string()),
+                error: Some("vendor_api_key_private_store_not_allowed".to_string()),
             }),
         );
     }
-    let selected_vendor = req.selected_vendor.trim().to_ascii_lowercase();
     let selected_model = req.selected_model.trim().to_string();
     if selected_vendor.is_empty() {
         return (
@@ -761,7 +853,7 @@ async fn update_llm_config(
             );
         }
     };
-    let vendors = collect_llm_vendor_info(&parsed);
+    let vendors = collect_llm_vendor_info_for_state(&parsed, &state);
     let Some(vendor_info) = vendors.iter().find(|item| {
         item.get("name")
             .and_then(|v| v.as_str())
@@ -839,7 +931,7 @@ async fn update_llm_config(
         "api_key",
         "api_key = \"\"",
     );
-    let final_updated = if llm_vendor_supports_api_format(&selected_vendor) {
+    let mut final_updated = if llm_vendor_supports_api_format(&selected_vendor) {
         let vendor_api_format = normalize_llm_api_format(req.vendor_api_format.as_deref());
         upsert_string_key_in_section(
             &updated_api_key,
@@ -850,6 +942,45 @@ async fn update_llm_config(
     } else {
         updated_api_key
     };
+    if matches_hosted_relay_preset(
+        &parsed,
+        &selected_vendor,
+        &selected_model,
+        vendor_base_url,
+    ) {
+        for class_name in ["default", "fast", "reasoning"] {
+            final_updated = upsert_string_key_in_section(
+                &final_updated,
+                &format!("llm.model_classes.{class_name}"),
+                "provider",
+                &format!("provider = {:?}", selected_vendor),
+            );
+            final_updated = upsert_string_key_in_section(
+                &final_updated,
+                &format!("llm.model_classes.{class_name}"),
+                "model",
+                &format!("model = {:?}", selected_model),
+            );
+        }
+    }
+    if !inline_api_key.is_empty() {
+        let secret_name = claw_core::secrets::text_secret_name_for_vendor(&selected_vendor);
+        let credential_path = claw_core::git_remote_config::git_credential_store_path(
+            &state.skill_rt.workspace_root,
+        );
+        if claw_core::secrets::set_file_secret(&credential_path, &secret_name, inline_api_key)
+            .is_err()
+        {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some("llm_api_key_private_store_write_failed".to_string()),
+                }),
+            );
+        }
+    }
     if let Err(err) = write_runtime_config_file(&state, &final_updated) {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -885,24 +1016,24 @@ async fn test_llm_config(
     headers: HeaderMap,
     Json(req): Json<UpdateLlmConfigRequest>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    if let Err(resp) = require_ui_identity(&state, &headers) {
-        return resp;
-    }
-    if req
-        .vendor_api_key
-        .as_deref()
-        .is_some_and(|value| !value.trim().is_empty())
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err(resp) => return resp,
+    };
+    let inline_api_key = req.vendor_api_key.as_deref().map(str::trim).unwrap_or("");
+    let selected_vendor = req.selected_vendor.trim().to_ascii_lowercase();
+    if !inline_api_key.is_empty()
+        && (selected_vendor != "custom" || !identity.role.eq_ignore_ascii_case("admin"))
     {
         return (
             StatusCode::BAD_REQUEST,
             Json(ApiResponse {
                 ok: false,
                 data: None,
-                error: Some("vendor_api_key_must_use_environment".to_string()),
+                error: Some("vendor_api_key_private_store_not_allowed".to_string()),
             }),
         );
     }
-    let selected_vendor = req.selected_vendor.trim().to_ascii_lowercase();
     let selected_model = req.selected_model.trim().to_string();
     if selected_vendor.is_empty() {
         return (
@@ -938,7 +1069,7 @@ async fn test_llm_config(
             );
         }
     };
-    let vendors = collect_llm_vendor_info(&parsed);
+    let vendors = collect_llm_vendor_info_for_state(&parsed, &state);
     let Some(_vendor_info) = vendors.iter().find(|item| {
         item.get("name")
             .and_then(|v| v.as_str())
@@ -966,7 +1097,11 @@ async fn test_llm_config(
             }),
         );
     }
-    let vendor_api_key = llm_vendor_api_key_from_env(&selected_vendor);
+    let vendor_api_key = if inline_api_key.is_empty() {
+        llm_vendor_api_key_for_state(&state, &selected_vendor).0
+    } else {
+        inline_api_key.to_string()
+    };
     if vendor_api_key.is_empty() {
         return (
             StatusCode::BAD_REQUEST,

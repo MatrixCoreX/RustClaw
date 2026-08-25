@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ChevronDown, Database, Loader2, RefreshCw, Sparkles } from "lucide-react";
+import { ChevronDown, Database, KeyRound, Loader2, RefreshCw, Sparkles, Wrench } from "lucide-react";
 
 import { llmVendorSupportsApiFormat } from "../lib/llm-config";
 import type { ModelCatalogEntryView, MultimodalDraft, MultimodalKey } from "../lib/model-config";
@@ -22,6 +22,7 @@ export interface ModelConfigPageProps {
   llmDraftModel: string;
   llmDraftBaseUrl: string;
   llmDraftApiFormat: string;
+  llmDraftApiKey: string;
   llmConfigError: string | null;
   llmConfigSaveMessage: string | null;
   llmTestMessage: string | null;
@@ -43,9 +44,11 @@ export interface ModelConfigPageProps {
   canManageMultimodalSkills: boolean;
   hasUnsavedMultimodalChanges: boolean;
   onApplyLlmVendorDraft: (value: string) => void;
+  onApplyHostedRelayDraft: () => void;
   onLlmDraftModelChange: (value: string) => void;
   onLlmDraftBaseUrlChange: (value: string) => void;
   onLlmDraftApiFormatChange: (value: string) => void;
+  onLlmDraftApiKeyChange: (value: string) => void;
   onTestLlmConfig: () => unknown | Promise<unknown>;
   onSaveLlmConfig: () => unknown | Promise<unknown>;
   onToggleModelsAdvanced: () => void;
@@ -70,6 +73,7 @@ export function ModelConfigPage({
   llmDraftModel,
   llmDraftBaseUrl,
   llmDraftApiFormat,
+  llmDraftApiKey,
   llmConfigError,
   llmConfigSaveMessage,
   llmTestMessage,
@@ -91,9 +95,11 @@ export function ModelConfigPage({
   canManageMultimodalSkills,
   hasUnsavedMultimodalChanges,
   onApplyLlmVendorDraft,
+  onApplyHostedRelayDraft,
   onLlmDraftModelChange,
   onLlmDraftBaseUrlChange,
   onLlmDraftApiFormatChange,
+  onLlmDraftApiKeyChange,
   onTestLlmConfig,
   onSaveLlmConfig,
   onToggleModelsAdvanced,
@@ -106,21 +112,42 @@ export function ModelConfigPage({
 }: ModelConfigPageProps) {
   const supportsApiFormat = llmVendorSupportsApiFormat(selectedLlmVendorInfo?.name);
   const credentialEnvNames = selectedLlmVendorInfo?.api_key_env_names ?? [];
+  const isCustomVendor = selectedLlmVendorInfo?.name === "custom";
+  const isHostedRelayDraft = Boolean(
+    isCustomVendor
+      && llmConfigData?.hosted_relay
+      && llmDraftVendor === llmConfigData.hosted_relay.vendor
+      && llmDraftModel === llmConfigData.hosted_relay.model
+      && llmDraftBaseUrl === llmConfigData.hosted_relay.base_url,
+  );
+  const credentialLabel = selectedLlmVendorInfo?.api_key_configured
+    ? selectedLlmVendorInfo.api_key_source === "private_file"
+      ? t("已保存在设备私有凭据中", "Saved in this device's private credential store")
+      : t("已从环境变量加载", "Loaded from environment")
+    : t("尚未配置", "Not configured");
   const credentialStatus = (
     <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-xs uppercase tracking-widest text-white/50">API Key</span>
         <span className={selectedLlmVendorInfo?.api_key_configured ? "text-xs text-emerald-300" : "text-xs text-amber-200"}>
-          {selectedLlmVendorInfo?.api_key_configured
-            ? t("已从环境变量加载", "Loaded from environment")
-            : t("环境变量尚未配置", "Environment variable not configured")}
+          {credentialLabel}
         </span>
       </div>
       <p className="mt-2 text-xs leading-5 text-white/55">
-        {t(
-          "密钥不会保存到模型配置或浏览器中。请在服务运行环境中设置后重启服务。",
-          "The key is never stored in model settings or the browser. Set it in the service environment, then restart the service.",
-        )}
+        {isHostedRelayDraft
+          ? t(
+              "中转访问密钥只写入本机私有凭据文件，不进入模型配置或浏览器存储。环境变量仍具有更高优先级。",
+              "The relay access key is written only to this device's private credential file, never model config or browser storage. Environment variables still take precedence.",
+            )
+          : isCustomVendor
+            ? t(
+                "API Key 只写入本机私有凭据文件，不进入模型配置或浏览器存储。环境变量仍具有更高优先级。",
+                "The API key is written only to this device's private credential file, never model config or browser storage. Environment variables still take precedence.",
+              )
+          : t(
+              "密钥不会保存到模型配置或浏览器中。请在服务运行环境中设置后重启服务。",
+              "The key is never stored in model settings or the browser. Set it in the service environment, then restart the service.",
+            )}
       </p>
       {credentialEnvNames.length > 0 ? (
         <code className="mt-2 block break-all text-xs text-white/70">{credentialEnvNames.join(" / ")}</code>
@@ -148,7 +175,18 @@ export function ModelConfigPage({
       <div className="order-1 mb-5 rounded-2xl border border-white/10 bg-black/20 p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-base font-semibold">{t("大模型设置", "LLM Settings")}</h3>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {llmConfigData?.hosted_relay ? (
+              <button
+                type="button"
+                onClick={onApplyHostedRelayDraft}
+                disabled={llmConfigLoading}
+                className="theme-accent-btn px-3 py-2 text-xs"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                {t("使用默认中转", "Use hosted relay")}
+              </button>
+            ) : null}
             {hasCustomLlmVendor ? (
               <button
                 type="button"
@@ -156,7 +194,7 @@ export function ModelConfigPage({
                 disabled={llmConfigLoading}
                 className="theme-secondary-btn px-3 py-2 text-xs"
               >
-                <Sparkles className="h-3.5 w-3.5" />
+                <Wrench className="h-3.5 w-3.5" />
                 {t("自定义模型", "Custom model")}
               </button>
             ) : null}
@@ -260,6 +298,40 @@ export function ModelConfigPage({
 
             {supportsApiFormat ? <div /> : null}
           </div>
+
+          {isCustomVendor ? (
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="block space-y-2">
+                <span className="flex items-center gap-2 text-xs uppercase tracking-widest text-white/50">
+                  <KeyRound className="h-3.5 w-3.5" />
+                  {isHostedRelayDraft ? t("中转访问密钥", "Relay access key") : "API Key"}
+                </span>
+                <input
+                  className="theme-input"
+                  type="password"
+                  autoComplete="new-password"
+                  data-1p-ignore="true"
+                  value={llmDraftApiKey}
+                  onChange={(event) => onLlmDraftApiKeyChange(event.target.value)}
+                  placeholder={
+                    selectedLlmVendorInfo?.api_key_configured
+                      ? t("留空则保留当前密钥", "Leave blank to keep the current key")
+                      : isHostedRelayDraft
+                        ? t("输入设备专属密钥", "Enter this device's key")
+                        : t("输入 API Key", "Enter API key")
+                  }
+                />
+              </label>
+              {isHostedRelayDraft && llmConfigData?.hosted_relay ? (
+                <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-xs leading-5 text-white/60">
+                  {t(
+                    `每台设备独立计数，每个 UTC 日最多 ${llmConfigData.hosted_relay.daily_request_limit} 次模型请求。`,
+                    `Usage is counted per device, with up to ${llmConfigData.hosted_relay.daily_request_limit} model requests per UTC day.`,
+                  )}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           {llmConfigError ? (
             <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">

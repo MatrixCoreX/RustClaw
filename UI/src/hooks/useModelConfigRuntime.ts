@@ -48,6 +48,7 @@ export function useModelConfigRuntime({
   const [llmConfigSaveMessage, setLlmConfigSaveMessage] = useState<string | null>(null);
   const [llmDraftBaseUrl, setLlmDraftBaseUrl] = useState("");
   const [llmDraftApiFormat, setLlmDraftApiFormat] = useState("openai_compat");
+  const [llmDraftApiKey, setLlmDraftApiKey] = useState("");
   const [llmTestLoading, setLlmTestLoading] = useState(false);
   const [llmTestMessage, setLlmTestMessage] = useState<string | null>(null);
   const [llmTestError, setLlmTestError] = useState<string | null>(null);
@@ -76,7 +77,7 @@ export function useModelConfigRuntime({
   );
 
   const hasUnsavedLlmChanges = useMemo(() => {
-    return hasUnsavedLlmDraftChanges(
+    return llmDraftApiKey.trim().length > 0 || hasUnsavedLlmDraftChanges(
       llmConfigData
         ? {
             selectedVendor: llmConfigData.selected_vendor || "",
@@ -89,7 +90,7 @@ export function useModelConfigRuntime({
           }
         : null,
     );
-  }, [llmConfigData, llmDraftApiFormat, llmDraftBaseUrl, llmDraftModel, llmDraftVendor]);
+  }, [llmConfigData, llmDraftApiFormat, llmDraftApiKey, llmDraftBaseUrl, llmDraftModel, llmDraftVendor]);
 
   const llmRestartPending = useMemo(() => {
     if (!llmConfigData) return false;
@@ -139,6 +140,7 @@ export function useModelConfigRuntime({
       const selectedVendor = body.data.vendors.find((vendor) => vendor.name === (body.data.selected_vendor || ""));
       setLlmDraftBaseUrl(selectedVendor?.base_url || "");
       setLlmDraftApiFormat(llmVendorSupportsApiFormat(selectedVendor?.name) ? (selectedVendor?.api_format || "openai_compat") : "");
+      setLlmDraftApiKey("");
     } catch (err) {
       const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
       setLlmConfigError(message);
@@ -161,6 +163,7 @@ export function useModelConfigRuntime({
           selected_model: llmDraftModel,
           vendor_base_url: llmDraftBaseUrl,
           vendor_api_format: llmVendorSupportsApiFormat(llmDraftVendor) ? llmDraftApiFormat : undefined,
+          vendor_api_key: llmDraftVendor === "custom" && llmDraftApiKey.trim() ? llmDraftApiKey.trim() : undefined,
         }),
       });
       const body = (await res.json()) as ApiResponse<{
@@ -175,6 +178,7 @@ export function useModelConfigRuntime({
           "LLM settings saved to config.toml (restart clawd to apply)",
         ),
       );
+      setLlmDraftApiKey("");
       await fetchLlmConfig();
       await fetchModelCatalog();
     } catch (err) {
@@ -208,6 +212,7 @@ export function useModelConfigRuntime({
           selected_model: llmDraftModel,
           vendor_base_url: llmDraftBaseUrl,
           vendor_api_format: llmVendorSupportsApiFormat(llmDraftVendor) ? llmDraftApiFormat : undefined,
+          vendor_api_key: llmDraftVendor === "custom" && llmDraftApiKey.trim() ? llmDraftApiKey.trim() : undefined,
         }),
       });
       const body = (await res.json()) as ApiResponse<LlmTestResponse>;
@@ -345,6 +350,7 @@ export function useModelConfigRuntime({
   const applyLlmVendorDraft = (nextVendor: string) => {
     const vendorInfo = llmConfigData?.vendors.find((vendor) => vendor.name === nextVendor);
     setLlmDraftVendor(nextVendor);
+    setLlmDraftApiKey("");
     if (!vendorInfo) {
       setLlmDraftModel("");
       setLlmDraftBaseUrl("");
@@ -355,6 +361,16 @@ export function useModelConfigRuntime({
     setLlmDraftModel(nextModel);
     setLlmDraftBaseUrl(vendorInfo.base_url || "");
     setLlmDraftApiFormat(llmVendorSupportsApiFormat(vendorInfo.name) ? (vendorInfo.api_format || "openai_compat") : "");
+  };
+
+  const applyHostedRelayDraft = () => {
+    const preset = llmConfigData?.hosted_relay;
+    if (!preset) return;
+    setLlmDraftVendor(preset.vendor);
+    setLlmDraftModel(preset.model);
+    setLlmDraftBaseUrl(preset.base_url);
+    setLlmDraftApiFormat(preset.api_format);
+    setLlmDraftApiKey("");
   };
 
   const clearLlmConfigError = () => setLlmConfigError(null);
@@ -369,6 +385,7 @@ export function useModelConfigRuntime({
     llmConfigSaveMessage,
     llmDraftBaseUrl,
     llmDraftApiFormat,
+    llmDraftApiKey,
     llmTestLoading,
     llmTestMessage,
     llmTestError,
@@ -395,6 +412,7 @@ export function useModelConfigRuntime({
     setLlmDraftModel,
     setLlmDraftBaseUrl,
     setLlmDraftApiFormat,
+    setLlmDraftApiKey,
     setModelsAdvancedOpen,
     fetchLlmConfig,
     saveLlmConfig,
@@ -405,6 +423,7 @@ export function useModelConfigRuntime({
     setMultimodalSkillEnabledNow,
     setMultimodalDraftKey,
     applyLlmVendorDraft,
+    applyHostedRelayDraft,
     clearLlmConfigError,
   };
 }
