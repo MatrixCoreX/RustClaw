@@ -69,9 +69,26 @@ fn collect_llm_vendor_info_for_state(value: &toml::Value, state: &AppState) -> V
             continue;
         };
         let (api_key, source) = llm_vendor_api_key_for_state(state, vendor_name);
+        let device_key_enrollment = vendor
+            .get("default_model")
+            .and_then(Value::as_str)
+            .zip(vendor.get("base_url").and_then(Value::as_str))
+            .is_some_and(|(model, base_url)| {
+                matches_hosted_relay_preset(value, vendor_name, model, base_url)
+            });
         if let Some(object) = vendor.as_object_mut() {
-            object.insert("api_key_configured".to_string(), json!(!api_key.is_empty()));
-            object.insert("api_key_source".to_string(), json!(source));
+            object.insert(
+                "api_key_configured".to_string(),
+                json!(!api_key.is_empty() || device_key_enrollment),
+            );
+            object.insert(
+                "api_key_source".to_string(),
+                json!(if device_key_enrollment {
+                    "device_enrollment"
+                } else {
+                    source
+                }),
+            );
         }
     }
     vendors
