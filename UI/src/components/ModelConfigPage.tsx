@@ -117,12 +117,9 @@ export function ModelConfigPage({
     baseUrl: llmDraftBaseUrl,
     apiFormat: llmDraftApiFormat,
   });
-  const hostedRelayCredentialMissing = Boolean(
-    isHostedRelayDraft
-      && !selectedLlmVendorInfo?.api_key_configured
-      && !llmDraftApiKey.trim(),
-  );
-  const credentialLabel = selectedLlmVendorInfo?.api_key_configured
+  const credentialLabel = isHostedRelayDraft
+    ? t("由设备自动管理", "Managed automatically by this device")
+    : selectedLlmVendorInfo?.api_key_configured
     ? selectedLlmVendorInfo.api_key_source === "private_file"
       ? t("已保存在设备私有凭据中", "Saved in this device's private credential store")
       : t("已从环境变量加载", "Loaded from environment")
@@ -131,15 +128,15 @@ export function ModelConfigPage({
     <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-xs uppercase tracking-widest text-white/50">API Key</span>
-        <span className={selectedLlmVendorInfo?.api_key_configured ? "text-xs text-emerald-300" : "text-xs text-amber-200"}>
+        <span className={isHostedRelayDraft || selectedLlmVendorInfo?.api_key_configured ? "text-xs text-emerald-300" : "text-xs text-amber-200"}>
           {credentialLabel}
         </span>
       </div>
       <p className="mt-2 text-xs leading-5 text-white/55">
         {isHostedRelayDraft
           ? t(
-              "中转访问密钥只写入本机私有凭据文件，不进入模型配置或浏览器存储。环境变量仍具有更高优先级。",
-              "The relay access key is written only to this device's private credential file, never model config or browser storage. Environment variables still take precedence.",
+              "首次使用时，白名单设备会用 Slot 0 签名一次并自动领取中转密钥。密钥只保存在本机私有凭据中，不进入模型设置或浏览器存储。",
+              "On first use, an allowlisted device signs one challenge with Slot 0 and receives a relay key automatically. The key remains in the device's private credential store and is never saved in model settings or browser storage.",
             )
           : isCustomVendor
             ? t(
@@ -151,7 +148,7 @@ export function ModelConfigPage({
               "The key is never stored in model settings or the browser. Set it in the service environment, then restart the service.",
             )}
       </p>
-      {credentialEnvNames.length > 0 ? (
+      {credentialEnvNames.length > 0 && !isHostedRelayDraft ? (
         <code className="mt-2 block break-all text-xs text-white/70">{credentialEnvNames.join(" / ")}</code>
       ) : null}
     </div>
@@ -181,7 +178,7 @@ export function ModelConfigPage({
             <button
               type="button"
               onClick={() => void onTestLlmConfig()}
-              disabled={llmTestLoading || llmConfigLoading || hostedRelayCredentialMissing || !llmDraftVendor || !llmDraftModel || !llmDraftBaseUrl.trim()}
+              disabled={llmTestLoading || llmConfigLoading || !llmDraftVendor || !llmDraftModel || !llmDraftBaseUrl.trim()}
               className="theme-secondary-btn px-3 py-2 text-xs"
             >
               {llmTestLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
@@ -190,7 +187,7 @@ export function ModelConfigPage({
             <button
               type="button"
               onClick={() => void onSaveLlmConfig()}
-              disabled={llmConfigSaving || llmConfigLoading || hostedRelayCredentialMissing || !hasUnsavedLlmChanges || !llmDraftVendor || !llmDraftModel || !llmDraftBaseUrl.trim()}
+              disabled={llmConfigSaving || llmConfigLoading || !hasUnsavedLlmChanges || !llmDraftVendor || !llmDraftModel || !llmDraftBaseUrl.trim()}
               className="theme-accent-btn px-3 py-2 text-xs"
             >
               {llmConfigSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Database className="h-3.5 w-3.5" />}
@@ -293,12 +290,12 @@ export function ModelConfigPage({
             {supportsApiFormat ? <div /> : null}
           </div>
 
-          {isCustomVendor ? (
+          {isCustomVendor && !isHostedRelayDraft ? (
             <div className="grid gap-4 md:grid-cols-2">
               <label className="block space-y-2">
                 <span className="flex items-center gap-2 text-xs uppercase tracking-widest text-white/50">
                   <KeyRound className="h-3.5 w-3.5" />
-                  {isHostedRelayDraft ? t("中转访问密钥", "Relay access key") : "API Key"}
+                  API Key
                 </span>
                 <input
                   className="theme-input"
@@ -310,25 +307,19 @@ export function ModelConfigPage({
                   placeholder={
                     selectedLlmVendorInfo?.api_key_configured
                       ? t("留空则保留当前密钥", "Leave blank to keep the current key")
-                      : isHostedRelayDraft
-                        ? t("输入设备专属密钥", "Enter this device's key")
-                        : t("输入 API Key", "Enter API key")
+                      : t("输入 API Key", "Enter API key")
                   }
                 />
-                {hostedRelayCredentialMissing ? (
-                  <p className="text-xs text-amber-200">
-                    {t("请输入这台设备的中转访问密钥后再测试或保存。", "Enter this device's relay access key before testing or saving.")}
-                  </p>
-                ) : null}
               </label>
-              {isHostedRelayDraft && llmConfigData?.hosted_relay ? (
-                <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-xs leading-5 text-white/60">
-                  {t(
-                    `每台设备独立计数，每个 UTC 日最多 ${llmConfigData.hosted_relay.daily_request_limit} 次模型请求。`,
-                    `Usage is counted per device, with up to ${llmConfigData.hosted_relay.daily_request_limit} model requests per UTC day.`,
-                  )}
-                </div>
-              ) : null}
+            </div>
+          ) : null}
+
+          {isHostedRelayDraft && llmConfigData?.hosted_relay ? (
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-xs leading-5 text-white/60">
+              {t(
+                `首次连接会由本机 Slot 0 签名领取访问密钥。每台设备独立计数，每个 UTC 日最多 ${llmConfigData.hosted_relay.daily_request_limit} 次模型请求。`,
+                `The first connection uses this device's Slot 0 signature to obtain an access key. Usage is counted per device, with up to ${llmConfigData.hosted_relay.daily_request_limit} model requests per UTC day.`,
+              )}
             </div>
           ) : null}
 

@@ -85,8 +85,9 @@ selected_model = "MiniMax-M3"
 selected_vendor = "minimax"
 
 # Beginner-facing managed relay preset. Selecting it in the UI configures the
-# existing custom OpenAI-compatible provider; the per-device credential stays
-# in the private runtime credential broker rather than this tracked file.
+# existing custom OpenAI-compatible provider. An allowlisted Slot 0 device
+# enrolls automatically; its relay credential stays in the private runtime
+# credential broker rather than this tracked file or browser storage.
 [llm.hosted_relay]
 enabled = true
 vendor = "custom"

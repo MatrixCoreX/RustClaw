@@ -1,14 +1,16 @@
 # Managed LLM Relay
 
 Standalone OpenAI-compatible chat relay. It keeps the upstream provider credential on the server,
-issues a unique credential to each device, and persists per-device UTC-day usage in its own SQLite
-database.
+admits devices by Slot 0 public key, automatically issues a unique credential after one signed
+challenge, and persists per-device UTC-day usage in its own SQLite database.
 
 ## Security model
 
 - The process binds to `127.0.0.1:8796` by default. nginx is the public TLS boundary.
-- Raw device keys are displayed once when issued and are never stored. SQLite stores a key ID and
-  HMAC-SHA256 digest protected by `RELAY_KEY_PEPPER`.
+- Only Slot 0 public keys in the relay-owned allowlist can enroll. Physical and configured simulated
+  signing devices use the same P-256 proof contract.
+- Raw relay keys are returned once to the enrolling device and are never stored. SQLite stores the
+  Slot 0 public key, key ID, and an HMAC-SHA256 digest protected by `RELAY_KEY_PEPPER`.
 - The default allowance is 100 dispatched upstream requests per device key per UTC day.
 - `/v1/models` and `/v1/quota` require authentication but do not consume model-call allowance.
 - Request bodies, responses, credentials, and tool arguments are not written to relay logs.
@@ -34,17 +36,20 @@ RELAY_MAX_INFLIGHT_PER_KEY=4
 RELAY_UPSTREAM_TIMEOUT_SECONDS=180
 ```
 
-Startup fails when the pepper, upstream key, database, bind policy, or enabled client-key set is
-invalid. Public binding additionally requires `RELAY_ALLOW_PUBLIC_BIND=true`; production should
-not use it.
+Startup fails when the pepper, upstream key, database, or bind policy is invalid. An empty device
+allowlist is valid during initial provisioning. Public binding additionally requires
+`RELAY_ALLOW_PUBLIC_BIND=true`; production should not use it.
 
 ## Device-key administration
 
 The admin CLI reads only `RELAY_KEY_PEPPER`, `RELAY_DATABASE_PATH`, and the default daily limit.
-The issued secret is printed exactly once.
+Client keys cannot be issued through the CLI: enrollment must prove possession of the allowlisted
+Slot 0 private key.
 
 ```bash
-llm-relay-server key issue --label device-name --daily-limit 100
+llm-relay-server device allow --label device-name --device-pubkey SLOT0_PUBKEY --daily-limit 100
+llm-relay-server device list
+llm-relay-server device revoke SLOT0_PUBKEY
 llm-relay-server key issue-admin --label website-admin
 llm-relay-server key list
 llm-relay-server key revoke KEY_ID
@@ -54,8 +59,14 @@ llm-relay-server key revoke KEY_ID
 It cannot call models or chat completions and is excluded from device counts and usage pages. Keep
 it only in the website backend environment. The loopback-only administration API provides paged
 device usage at `GET /internal/admin/usage` and updates an active limit at
-`PUT /internal/admin/keys/:key_id/daily-limit`; every limit change is written to the immutable
+`PUT /internal/admin/devices/:device_pubkey/daily-limit`; every limit change is written to the immutable
 `relay_admin_audit` table.
+
+On first use, an allowlisted installation calls `POST /v1/device-key/request`, signs the returned
+canonical challenge with Slot 0, and submits it to `POST /v1/device-key/verify`. The raw relay key
+is returned once and stored in the installation's private credential broker. Normal model calls use
+that bearer key and do not sign every request. A 401 response permits one automatic re-enrollment;
+revoked devices cannot obtain a replacement.
 
 ## API
 

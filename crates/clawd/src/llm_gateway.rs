@@ -282,6 +282,8 @@ fn build_providers_with_overrides(
             if let Some(model) = model_override {
                 runtime_cfg.model = model.to_string();
             }
+            runtime_cfg.params.device_key_enrollment =
+                hosted_relay_matches_provider(config, &runtime_cfg);
             let pricing = crate::providers::resolve_model_pricing(
                 &config.llm.pricing,
                 &runtime_cfg.name,
@@ -309,6 +311,24 @@ fn build_providers_with_overrides(
 
     providers.sort_by_key(|p| p.config.priority);
     providers
+}
+
+fn hosted_relay_matches_provider(config: &AppConfig, provider: &LlmProviderConfig) -> bool {
+    let Some(relay) = config
+        .llm
+        .hosted_relay
+        .as_ref()
+        .filter(|relay| relay.enabled)
+    else {
+        return false;
+    };
+    provider.provider_type == "openai_compat"
+        && provider
+            .name
+            .strip_prefix("vendor-")
+            .is_some_and(|vendor| vendor == relay.vendor.trim())
+        && provider.model.trim() == relay.model.trim()
+        && provider.base_url.trim_end_matches('/') == relay.base_url.trim_end_matches('/')
 }
 
 /// 双协议 vendor 的 `api_format`：未配置或为空时默认 `openai_compat`；显式

@@ -1,4 +1,5 @@
 mod config;
+mod device_proof;
 mod openai;
 mod quota;
 mod store;
@@ -16,12 +17,13 @@ use axum::{
 };
 use chrono::{NaiveDate, Utc};
 use config::{RelayConfig, StoreConfig};
+use device_proof::verify_enrollment_signature;
 use futures_util::StreamExt;
 use openai::{ChatCompletionRequest, ErrorBody, ErrorEnvelope, ModelList};
 use quota::MinuteRateLimiter;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use store::{AuthenticatedKey, RelayStore, StoreError};
+use store::{normalize_device_pubkey, AuthenticatedKey, RelayStore, StoreError};
 use tokio::sync::Semaphore;
 use tower_http::trace::TraceLayer;
 use tracing::{info, warn};
@@ -53,9 +55,15 @@ async fn main() -> anyhow::Result<()> {
     }
     if arguments
         .first()
+        .is_some_and(|argument| argument == "device")
+    {
+        return run_device_command(&arguments[1..]);
+    }
+    if arguments
+        .first()
         .is_some_and(|argument| argument != "serve")
     {
-        bail!("usage: llm-relay-server [serve | key issue|issue-admin|list|revoke]");
+        bail!("usage: llm-relay-server [serve | device allow|list|revoke | key issue-admin|list|revoke]");
     }
     run_server().await
 }
@@ -66,9 +74,6 @@ async fn run_server() -> anyhow::Result<()> {
         &config.store.database_path,
         &config.store.key_pepper,
     )?);
-    if store.active_key_count()? == 0 {
-        bail!("no enabled relay client key exists; issue one before starting the service");
-    }
     let state = AppState {
         config: Arc::clone(&config),
         http: reqwest::Client::builder()
@@ -84,12 +89,14 @@ async fn run_server() -> anyhow::Result<()> {
         .route("/health", get(health_live))
         .route("/health/live", get(health_live))
         .route("/health/ready", get(health_ready))
+        .route("/v1/device-key/request", post(request_device_key))
+        .route("/v1/device-key/verify", post(verify_device_key))
         .route("/v1/models", get(models))
         .route("/v1/quota", get(quota))
         .route("/v1/chat/completions", post(chat_completions))
         .route("/internal/admin/usage", get(admin_usage))
         .route(
-            "/internal/admin/keys/:key_id/daily-limit",
+            "/internal/admin/devices/:device_pubkey/daily-limit",
             put(update_admin_daily_limit),
         )
         .with_state(state)
@@ -110,20 +117,13 @@ fn run_key_command(arguments: &[String]) -> anyhow::Result<()> {
     let config = StoreConfig::from_env()?;
     let store = RelayStore::open(&config.database_path, &config.key_pepper)?;
     match arguments.first().map(String::as_str) {
-        Some("issue") => {
-            let label = option_value(arguments, "--label")
-                .ok_or_else(|| anyhow::anyhow!("key issue requires --label"))?;
-            let daily_limit = option_value(arguments, "--daily-limit")
-                .map(str::parse)
-                .transpose()
-                .context("--daily-limit must be a positive integer")?
-                .unwrap_or(config::env_u32("RELAY_REQUESTS_PER_DAY", 100)?);
-            println!("{}", serde_json::to_string_pretty(&store.issue_key(label, daily_limit)?)?);
-        }
         Some("issue-admin") => {
             let label = option_value(arguments, "--label")
                 .ok_or_else(|| anyhow::anyhow!("key issue-admin requires --label"))?;
-            println!("{}", serde_json::to_string_pretty(&store.issue_admin_key(label)?)?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&store.issue_admin_key(label)?)?
+            );
         }
         Some("list") => {
             println!("{}", serde_json::to_string_pretty(&store.list_keys()?)?);
@@ -132,9 +132,58 @@ fn run_key_command(arguments: &[String]) -> anyhow::Result<()> {
             let key_id = arguments
                 .get(1)
                 .ok_or_else(|| anyhow::anyhow!("key revoke requires a key ID"))?;
-            println!("{}", json!({"key_id": key_id, "revoked": store.revoke_key(key_id)?}));
+            println!(
+                "{}",
+                json!({"key_id": key_id, "revoked": store.revoke_key(key_id)?})
+            );
         }
-        _ => bail!("usage: llm-relay-server key issue --label LABEL [--daily-limit 100] | key issue-admin --label LABEL | key list | key revoke KEY_ID"),
+        _ => bail!(
+            "usage: llm-relay-server key issue-admin --label LABEL | key list | key revoke KEY_ID"
+        ),
+    }
+    Ok(())
+}
+
+fn run_device_command(arguments: &[String]) -> anyhow::Result<()> {
+    let config = StoreConfig::from_env()?;
+    let store = RelayStore::open(&config.database_path, &config.key_pepper)?;
+    match arguments.first().map(String::as_str) {
+        Some("allow") => {
+            let label = option_value(arguments, "--label")
+                .ok_or_else(|| anyhow::anyhow!("device allow requires --label"))?;
+            let device_pubkey = option_value(arguments, "--device-pubkey")
+                .ok_or_else(|| anyhow::anyhow!("device allow requires --device-pubkey"))?;
+            let daily_limit = option_value(arguments, "--daily-limit")
+                .map(str::parse)
+                .transpose()
+                .context("--daily-limit must be a positive integer")?
+                .unwrap_or(config::env_u32("RELAY_REQUESTS_PER_DAY", 100)?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&store.allow_device(
+                    label,
+                    device_pubkey,
+                    daily_limit,
+                )?)?
+            );
+        }
+        Some("list") => println!(
+            "{}",
+            serde_json::to_string_pretty(&store.list_allowed_devices()?)?
+        ),
+        Some("revoke") => {
+            let device_pubkey = arguments
+                .get(1)
+                .ok_or_else(|| anyhow::anyhow!("device revoke requires a Slot 0 public key"))?;
+            println!(
+                "{}",
+                json!({
+                    "device_pubkey": device_pubkey,
+                    "revoked": store.revoke_device(device_pubkey)?
+                })
+            );
+        }
+        _ => bail!("usage: llm-relay-server device allow --label LABEL --device-pubkey SLOT0_PUBKEY [--daily-limit 100] | device list | device revoke SLOT0_PUBKEY"),
     }
     Ok(())
 }
@@ -155,17 +204,79 @@ async fn health_ready(State(state): State<AppState>) -> Result<Json<Value>, ApiE
         warn!(error = %error, "relay readiness check failed");
         ApiError::service_unavailable("relay_store_unavailable", "proxy.relay_store_unavailable")
     })?;
-    if active_keys == 0 {
-        return Err(ApiError::service_unavailable(
-            "relay_no_active_keys",
-            "proxy.relay_no_active_keys",
-        ));
-    }
     Ok(Json(json!({
         "ok": true,
         "service": "llm-relay-server",
         "active_key_count": active_keys
     })))
+}
+
+#[derive(Debug, Deserialize)]
+struct DeviceKeyRequest {
+    device_pubkey: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct DeviceKeyVerifyRequest {
+    device_pubkey: String,
+    challenge_id: String,
+    signature: String,
+}
+
+async fn request_device_key(
+    State(state): State<AppState>,
+    Json(request): Json<DeviceKeyRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let device_pubkey = normalize_device_pubkey(&request.device_pubkey).map_err(|_| {
+        ApiError::bad_request(
+            "device_enrollment_invalid",
+            "proxy.device_enrollment_invalid",
+        )
+    })?;
+    state.minute_rate.reserve(&format!(
+        "enroll:{}",
+        device_pubkey
+    ))?;
+    let challenge = state
+        .store
+        .create_enrollment_challenge(&device_pubkey)
+        .map_err(ApiError::from_store)?;
+    Ok(Json(json!({"ok": true, "data": challenge})))
+}
+
+async fn verify_device_key(
+    State(state): State<AppState>,
+    Json(request): Json<DeviceKeyVerifyRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let device_pubkey = normalize_device_pubkey(&request.device_pubkey).map_err(|_| {
+        ApiError::bad_request(
+            "device_enrollment_invalid",
+            "proxy.device_enrollment_invalid",
+        )
+    })?;
+    state.minute_rate.reserve(&format!(
+        "verify:{}",
+        device_pubkey
+    ))?;
+    let challenge = state
+        .store
+        .pending_enrollment_challenge(&request.challenge_id, &device_pubkey)
+        .map_err(ApiError::from_store)?;
+    if !verify_enrollment_signature(
+        &challenge.device_pubkey,
+        &challenge.challenge,
+        &request.signature,
+    ) {
+        return Err(ApiError::unauthorized(
+            "device_signature_invalid",
+            "proxy.device_signature_invalid",
+        ));
+    }
+    let issued = state
+        .store
+        .complete_enrollment(&challenge.challenge_id, &challenge.device_pubkey)
+        .map_err(ApiError::from_store)?;
+    Ok(Json(json!({"ok": true, "data": issued})))
 }
 
 async fn models(
@@ -263,7 +374,7 @@ async fn admin_usage(
 async fn update_admin_daily_limit(
     State(state): State<AppState>,
     headers: HeaderMap,
-    AxumPath(target_key_id): AxumPath<String>,
+    AxumPath(device_pubkey): AxumPath<String>,
     Json(request): Json<DailyLimitRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let key = authenticate(&state, &headers)?;
@@ -281,7 +392,7 @@ async fn update_admin_daily_limit(
         .store
         .update_daily_request_limit(
             &key.key_id,
-            target_key_id.trim(),
+            device_pubkey.trim(),
             request.daily_request_limit,
         )
         .map_err(|error| ApiError::from_store(StoreError::Database(error)))?
@@ -293,7 +404,7 @@ async fn update_admin_daily_limit(
         })?;
     info!(
         actor_key_id = %key.key_id,
-        target_key_id = %update.key_id,
+        device_pubkey = %update.device_pubkey,
         previous_daily_request_limit = update.previous_daily_request_limit,
         daily_request_limit = update.daily_request_limit,
         "relay admin daily request limit updated"
@@ -321,11 +432,13 @@ fn parse_admin_page_value(
 async fn chat_completions(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(request): Json<ChatCompletionRequest>,
+    body: Bytes,
 ) -> Result<Response, ApiError> {
     let key = authenticate(&state, &headers)?;
     key.require_scope("chat.completions")
         .map_err(ApiError::from_store)?;
+    let request: ChatCompletionRequest = serde_json::from_slice(&body)
+        .map_err(|_| ApiError::bad_request("request_json_invalid", "proxy.request_json_invalid"))?;
     request.validate(&state.config)?;
     let provider = state
         .config
@@ -673,6 +786,21 @@ impl ApiError {
             StoreError::KeyInflightLimit => Self::too_many_requests(
                 "key_inflight_limit_exceeded",
                 "proxy.key_inflight_limit_exceeded",
+            ),
+            StoreError::DeviceNotAllowed => {
+                Self::forbidden("device_not_allowlisted", "proxy.device_not_allowlisted")
+            }
+            StoreError::EnrollmentInvalid => Self::bad_request(
+                "device_enrollment_invalid",
+                "proxy.device_enrollment_invalid",
+            ),
+            StoreError::EnrollmentExpired => Self::unauthorized(
+                "device_enrollment_expired",
+                "proxy.device_enrollment_expired",
+            ),
+            StoreError::EnrollmentReplay => Self::unauthorized(
+                "device_enrollment_replayed",
+                "proxy.device_enrollment_replayed",
             ),
             StoreError::Database(error) => {
                 warn!(error = %error, "relay database operation failed");
