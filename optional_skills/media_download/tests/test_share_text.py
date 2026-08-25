@@ -35,6 +35,36 @@ class ShareTextTest(unittest.TestCase):
         self.assertEqual(self.downloader.extract_urls(text), [expected_url])
         self.assertEqual(self.downloader.detect_platform(text), expected_platform)
 
+    def test_chrome_devtools_endpoint_uses_a_host_visible_loopback_port(self) -> None:
+        port, arguments = self.downloader.chrome_devtools_endpoint_args()
+
+        self.assertGreater(port, 0)
+        self.assertLessEqual(port, 65535)
+        self.assertIn(f"--remote-debugging-port={port}", arguments)
+        self.assertIn("--remote-debugging-address=127.0.0.1", arguments)
+        self.assertNotIn("--remote-debugging-port=0", arguments)
+
+    def test_wait_for_devtools_polls_the_explicit_loopback_endpoint(self) -> None:
+        response = io.BytesIO(
+            b'[{"type":"page","webSocketDebuggerUrl":"ws://127.0.0.1:43123/devtools/page/1"}]'
+        )
+        process = mock.Mock()
+        process.poll.return_value = None
+
+        with mock.patch.object(
+            self.downloader.urllib.request,
+            "urlopen",
+            return_value=response,
+        ) as urlopen:
+            websocket_url = self.downloader.wait_for_devtools_page_url(
+                43123,
+                process,
+                timeout=1,
+            )
+
+        self.assertEqual(websocket_url, "ws://127.0.0.1:43123/devtools/page/1")
+        self.assertEqual(urlopen.call_args.args[0].full_url, "http://127.0.0.1:43123/json/list")
+
     def test_douyin_phone_share_text(self) -> None:
         url = "https://v.douyin.com/s3eZp4vFHeU/"
         self.assert_share_text(

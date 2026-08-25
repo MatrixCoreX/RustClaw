@@ -21,6 +21,7 @@ import queue
 import re
 import shlex
 import shutil
+import socket
 import sqlite3
 import subprocess
 import sys
@@ -1821,6 +1822,17 @@ def find_chrome_executable(chrome_path: str | None = None) -> str | None:
     return None
 
 
+def chrome_devtools_endpoint_args() -> tuple[int, list[str]]:
+    """Reserve a host-visible loopback port for a local Chromium CDP endpoint."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        port = int(listener.getsockname()[1])
+    return port, [
+        f"--remote-debugging-port={port}",
+        "--remote-debugging-address=127.0.0.1",
+    ]
+
+
 def chromium_user_data_roots(chrome_path: str) -> list[Path]:
     """Return likely user-data roots for the selected Chromium-family executable."""
     executable = Path(chrome_path).name.lower()
@@ -2265,6 +2277,7 @@ def gather_douyin_browser_item_candidates(
 
     with tempfile.TemporaryDirectory(prefix="media_downloader_item_", ignore_cleanup_errors=True) as tmpdir:
         profile_dir = Path(tmpdir)
+        devtools_port, devtools_args = chrome_devtools_endpoint_args()
         system_cookie_import: SystemBrowserCookieImport | None = None
         if not cookie and use_system_browser_cookies:
             try:
@@ -2287,7 +2300,7 @@ def gather_douyin_browser_item_candidates(
             "--disable-blink-features=AutomationControlled",
             "--mute-audio",
             "--autoplay-policy=no-user-gesture-required",
-            "--remote-debugging-port=0",
+            *devtools_args,
             "--remote-allow-origins=*",
             "--window-size=1280,2000",
             f"--user-agent={DEFAULT_HEADERS['User-Agent']}",
@@ -2304,7 +2317,7 @@ def gather_douyin_browser_item_candidates(
             )
             if token is not None:
                 token.register_process(process)
-            websocket_url = wait_for_devtools_page_url(profile_dir, process, timeout=timeout)
+            websocket_url = wait_for_devtools_page_url(devtools_port, process, timeout=timeout)
             client = DevToolsConnection(websocket_url, timeout=min(max(timeout, 1.0), 10.0))
             logs.append("douyin: exact-item browser collector is ready")
 
@@ -2758,12 +2771,11 @@ def cookie_params_for_xiaohongshu(cookie: str | None) -> list[dict[str, Any]]:
 
 
 def wait_for_devtools_page_url(
-    profile_dir: Path,
+    port: int,
     process: subprocess.Popen[Any],
     *,
     timeout: float,
 ) -> str:
-    active_port_path = profile_dir / "DevToolsActivePort"
     deadline = time.monotonic() + max(1.0, min(timeout, 15.0))
     last_error: Exception | None = None
     while time.monotonic() < deadline:
@@ -2773,8 +2785,6 @@ def wait_for_devtools_page_url(
                 f"Chrome exited before its DevTools endpoint was ready (exit={process.returncode})."
             )
         try:
-            lines = active_port_path.read_text(encoding="utf-8").splitlines()
-            port = int(lines[0])
             request = urllib.request.Request(f"http://127.0.0.1:{port}/json/list")
             with urllib.request.urlopen(request, timeout=2.0) as response:
                 targets = json.load(response)
@@ -2783,7 +2793,7 @@ def wait_for_devtools_page_url(
                     websocket_url = target.get("webSocketDebuggerUrl")
                     if isinstance(websocket_url, str):
                         return websocket_url
-        except (OSError, ValueError, IndexError, json.JSONDecodeError, urllib.error.URLError) as exc:
+        except (OSError, json.JSONDecodeError, urllib.error.URLError) as exc:
             last_error = exc
         time.sleep(0.1)
     detail = f": {last_error}" if last_error else ""
@@ -2987,6 +2997,7 @@ def gather_douyin_profile_posts(
 
     with tempfile.TemporaryDirectory(prefix="media_downloader_profile_", ignore_cleanup_errors=True) as tmpdir:
         profile_dir = Path(tmpdir)
+        devtools_port, devtools_args = chrome_devtools_endpoint_args()
         system_cookie_import: SystemBrowserCookieImport | None = None
         if not cookie and use_system_browser_cookies:
             try:
@@ -3008,7 +3019,7 @@ def gather_douyin_profile_posts(
             "--disable-blink-features=AutomationControlled",
             "--mute-audio",
             "--autoplay-policy=no-user-gesture-required",
-            "--remote-debugging-port=0",
+            *devtools_args,
             "--remote-allow-origins=*",
             "--window-size=1280,2000",
             f"--user-agent={DEFAULT_HEADERS['User-Agent']}",
@@ -3025,7 +3036,7 @@ def gather_douyin_profile_posts(
             )
             if token is not None:
                 token.register_process(process)
-            websocket_url = wait_for_devtools_page_url(profile_dir, process, timeout=timeout)
+            websocket_url = wait_for_devtools_page_url(devtools_port, process, timeout=timeout)
             client = DevToolsConnection(websocket_url, timeout=min(max(timeout, 1.0), 10.0))
             record("douyin profile: browser collector is ready")
 
@@ -3529,6 +3540,7 @@ def gather_xiaohongshu_profile_posts(
 
     with tempfile.TemporaryDirectory(prefix="media_downloader_xhs_profile_", ignore_cleanup_errors=True) as tmpdir:
         profile_dir = Path(tmpdir)
+        devtools_port, devtools_args = chrome_devtools_endpoint_args()
         system_cookie_import: SystemBrowserCookieImport | None = None
         if not cookie and use_system_browser_cookies:
             try:
@@ -3549,7 +3561,7 @@ def gather_xiaohongshu_profile_posts(
             "--disable-dev-shm-usage",
             "--disable-blink-features=AutomationControlled",
             "--mute-audio",
-            "--remote-debugging-port=0",
+            *devtools_args,
             "--remote-allow-origins=*",
             "--window-size=1280,2000",
             f"--user-agent={DEFAULT_HEADERS['User-Agent']}",
@@ -3566,7 +3578,7 @@ def gather_xiaohongshu_profile_posts(
             )
             if token is not None:
                 token.register_process(process)
-            websocket_url = wait_for_devtools_page_url(profile_dir, process, timeout=timeout)
+            websocket_url = wait_for_devtools_page_url(devtools_port, process, timeout=timeout)
             client = DevToolsConnection(websocket_url, timeout=min(max(timeout, 1.0), 10.0))
             record("xiaohongshu profile: browser collector is ready")
 
