@@ -196,6 +196,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       assetOwnerReady
       assetOwnerPubkey="5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M"
       onOpenNni={() => undefined}
+      onOpenApr={() => undefined}
     />,
   );
   const latestTradeHtml = renderToStaticMarkup(
@@ -217,6 +218,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       assetOwnerReady
       assetOwnerPubkey="5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M"
       onOpenNni={() => undefined}
+      onOpenApr={() => undefined}
     />,
   );
   const signingUnavailableHtml = renderToStaticMarkup(
@@ -228,6 +230,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       assetOwnerReady={false}
       assetOwnerPubkey={null}
       onOpenNni={() => undefined}
+      onOpenApr={() => undefined}
     />,
   );
   const assetOwnerRequiredHtml = renderToStaticMarkup(
@@ -243,6 +246,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       assetOwnerReady={false}
       assetOwnerPubkey={null}
       onOpenNni={() => undefined}
+      onOpenApr={() => undefined}
     />,
   );
   const revokedDeviceHtml = renderToStaticMarkup(
@@ -259,6 +263,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       assetOwnerReady={false}
       assetOwnerPubkey={null}
       onOpenNni={() => undefined}
+      onOpenApr={() => undefined}
     />,
   );
   const hardwareAccountUnavailableHtml = renderToStaticMarkup(
@@ -274,6 +279,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       assetOwnerReady
       assetOwnerPubkey="5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M"
       onOpenNni={() => undefined}
+      onOpenApr={() => undefined}
     />,
   );
   assert.match(signingUnavailableHtml, /请选择并准备一种可用的账户签名方式/);
@@ -304,6 +310,8 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /data-nni-decimal-amount="10000\.00000000 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.match(html, /BANCOR储备曲线市场/);
   assert.match(html, /获得奖励/);
+  assert.match(html, /data-bancor-open-apr="true"/);
+  assert.match(html, />APR<\/button>/);
   assert.match(html, /data-bancor-open-price-change="true"/);
   assert.match(html, /价格变化计算/);
   assert.equal((html.match(/theme-shadow-card/g) ?? []).length, 6);

@@ -143,9 +143,14 @@ export function NniAprPage({
               <ArrowLeft className="h-4 w-4" />
               {t("返回 NNI", "Back to NNI")}
             </button>
-            <button type="button" className="theme-secondary-btn" onClick={onOpenBancor}>
+            <button
+              type="button"
+              className="theme-secondary-btn"
+              data-nni-apr-back-to-bancor="true"
+              onClick={onOpenBancor}
+            >
               <ArrowLeftRight className="h-4 w-4" />
-              {t("查看市场", "Open market")}
+              {t("返回 Bancor", "Back to Bancor")}
             </button>
             <button
               type="button"
