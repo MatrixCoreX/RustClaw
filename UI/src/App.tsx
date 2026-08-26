@@ -1967,6 +1967,7 @@ export default function App() {
               assetOwnerReady={Boolean(nniAssetOwnerPubkey)}
               assetOwnerPubkey={nniAssetOwnerPubkey}
               onOpenNni={() => setCurrentPage("nni")}
+              onOpenApr={() => setCurrentPage("nni_apr")}
             />
           ) : null}
 

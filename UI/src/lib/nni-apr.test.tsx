@@ -286,5 +286,6 @@ test("NNI APR page explains its inputs, refresh cadence, and estimate boundary",
   const prohibitedRiskTerm = String.fromCodePoint(0x5e74, 0x5316);
   assert.doesNotMatch(markup, new RegExp(prohibitedRiskTerm));
   assert.match(markup, /返回 NNI/);
-  assert.match(markup, /查看市场/);
+  assert.match(markup, /data-nni-apr-back-to-bancor="true"/);
+  assert.match(markup, /返回 Bancor/);
 });

@@ -8,6 +8,7 @@ import {
   Maximize2,
   Minimize2,
   Minus,
+  Percent,
   Plus,
   RefreshCw,
   ShieldCheck,
@@ -452,6 +453,7 @@ export function BancorPage({
   assetOwnerReady,
   assetOwnerPubkey,
   onOpenNni,
+  onOpenApr,
 }: {
   t: Translate;
   runtime: BancorRuntime;
@@ -460,6 +462,7 @@ export function BancorPage({
   assetOwnerReady: boolean;
   assetOwnerPubkey: string | null;
   onOpenNni: () => void;
+  onOpenApr: () => void;
 }) {
   const [side, setSide] = useState<BancorTradeSide>(() =>
     readBancorTradeSide(typeof window === "undefined" ? undefined : window.localStorage),
@@ -628,6 +631,15 @@ export function BancorPage({
             >
               <Gift className="h-4 w-4" />
               {t("获得奖励", "Earn rewards")}
+            </button>
+            <button
+              type="button"
+              className="theme-secondary-btn"
+              data-bancor-open-apr="true"
+              onClick={onOpenApr}
+            >
+              <Percent className="h-4 w-4" />
+              APR
             </button>
             <button
               type="button"
