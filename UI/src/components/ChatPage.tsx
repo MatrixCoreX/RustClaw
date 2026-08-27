@@ -1255,6 +1255,11 @@ function ChatWorkingIndicator({
               `${activity.activeName} returned; continuing`,
             )
           : t("工具已返回，继续处理", "The tool returned; continuing");
+      case "verifying_response":
+        return t(
+          "回复已生成，正在完成校验",
+          "The response is ready; completing verification",
+        );
       case "finalizing":
         return t("正在整理最终结果", "Preparing the final result");
       default:

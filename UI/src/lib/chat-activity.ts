@@ -8,7 +8,10 @@ export type ChatActivityStage =
   | "choosing_tool"
   | "running_tool"
   | "tool_returned"
+  | "verifying_response"
   | "finalizing";
+
+const TERMINAL_PRESENTATION_ACTIONS = new Set(["respond", "synthesize_answer"]);
 
 export interface ChatActivitySummary {
   stage: ChatActivityStage;
@@ -51,6 +54,17 @@ function readableName(payload: Record<string, unknown>): string | null {
     if (compact) return compact;
   }
   return null;
+}
+
+function isTerminalPresentationAction(payload: Record<string, unknown>): boolean {
+  for (const key of ["requested_action_type", "action_kind"]) {
+    const value = payload[key];
+    if (typeof value === "string" && TERMINAL_PRESENTATION_ACTIONS.has(value.trim())) {
+      return true;
+    }
+  }
+  const name = readableName(payload);
+  return name !== null && TERMINAL_PRESENTATION_ACTIONS.has(name);
 }
 
 function nonNegativeInteger(value: unknown): number | null {
@@ -133,6 +147,17 @@ export function reduceChatActivity(
         progressTotal: null,
       };
     } else if (phase === "tool_call" || phase === "tool_call_delta") {
+      if (isTerminalPresentationAction(payload)) {
+        return {
+          ...next,
+          stage: "verifying_response",
+          activeName: null,
+          commandPreview: null,
+          progressDetailKey: null,
+          progressCurrent: null,
+          progressTotal: null,
+        };
+      }
       next = {
         ...next,
         stage: "choosing_tool",
@@ -147,6 +172,17 @@ export function reduceChatActivity(
   }
 
   if (eventType === "tool_active" || eventType === "tool_started") {
+    if (isTerminalPresentationAction(payload)) {
+      return {
+        ...next,
+        stage: "verifying_response",
+        activeName: null,
+        commandPreview: null,
+        progressDetailKey: null,
+        progressCurrent: null,
+        progressTotal: null,
+      };
+    }
     return {
       ...next,
       stage: "running_tool",
@@ -180,6 +216,17 @@ export function reduceChatActivity(
     };
   }
   if (eventType === "tool_finished") {
+    if (isTerminalPresentationAction(payload)) {
+      return {
+        ...next,
+        stage: "verifying_response",
+        activeName: null,
+        commandPreview: null,
+        progressDetailKey: null,
+        progressCurrent: null,
+        progressTotal: null,
+      };
+    }
     return {
       ...next,
       stage: "tool_returned",

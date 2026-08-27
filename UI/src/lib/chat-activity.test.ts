@@ -103,3 +103,37 @@ test("uses the shared skill progress event without exposing frame params", () =>
   assert.equal(activity.progressTotal, 3);
   assert.equal(JSON.stringify(activity).includes("do not render me"), false);
 });
+
+test("projects terminal respond actions as response verification instead of returned tools", () => {
+  const activity = reduceChatActivity(emptyChatActivity(), {
+    schema_version: 1,
+    seq: 7,
+    task_id: "task-respond",
+    event_kind: "tool_finished",
+    payload: {
+      action_kind: "respond",
+      skill: "respond",
+      status: "ok",
+    },
+  });
+
+  assert.equal(activity.stage, "verifying_response");
+  assert.equal(activity.activeName, null);
+});
+
+test("keeps ordinary completed capabilities in the tool-returned stage", () => {
+  const activity = reduceChatActivity(emptyChatActivity(), {
+    schema_version: 1,
+    seq: 8,
+    task_id: "task-skill",
+    event_kind: "tool_finished",
+    payload: {
+      action_kind: "call_skill",
+      resolved_tool_or_skill: "rss_fetch",
+      status: "ok",
+    },
+  });
+
+  assert.equal(activity.stage, "tool_returned");
+  assert.equal(activity.activeName, "rss_fetch");
+});
