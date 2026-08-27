@@ -4,6 +4,15 @@ COMPONENT_COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "$COMPONENT_COMMON_DIR/../scripts/product_identity.sh"
 
+component_load_runtime_environment() {
+  local runtime_env_script
+  runtime_env_script="${APP_RUNTIME_ENV_SCRIPT:-$HOME/runtime_env_filled.sh}"
+  if [[ -f "$runtime_env_script" ]]; then
+    # shellcheck source=/dev/null
+    source "$runtime_env_script"
+  fi
+}
+
 component_start_init() {
   local root_dir="$1"
   local requested_profile="$2"
@@ -33,12 +42,7 @@ component_start_init() {
     source "$HOME/.cargo/env"
   fi
 
-  local runtime_env_script
-  runtime_env_script="${APP_RUNTIME_ENV_SCRIPT:-$HOME/runtime_env_filled.sh}"
-  if [[ -f "$runtime_env_script" ]]; then
-    # shellcheck source=/dev/null
-    source "$runtime_env_script"
-  fi
+  component_load_runtime_environment
   configure_platform_command_path
 
   COMPONENT_CONFIG_PATH="${APP_CONFIG_PATH:-$COMPONENT_ROOT/configs/config.toml}"

@@ -7,6 +7,9 @@ cd "$SCRIPT_DIR"
 source "$SCRIPT_DIR/scripts/version_info.sh"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/scripts/shell_compat.sh"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/component_start/common.sh"
+component_load_runtime_environment
 configure_platform_command_path
 configure_python3_with_tomllib
 configure_cargo_build_environment
