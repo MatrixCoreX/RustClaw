@@ -6,6 +6,14 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/common.sh"
 
+runtime_env_fixture="$(mktemp)"
+printf '%s\n' 'export COMPONENT_RUNTIME_ENV_TEST=loaded' > "$runtime_env_fixture"
+APP_RUNTIME_ENV_SCRIPT="$runtime_env_fixture" component_load_runtime_environment
+[[ "${COMPONENT_RUNTIME_ENV_TEST:-}" == "loaded" ]]
+grep -Fq 'component_load_runtime_environment' "$ROOT_DIR/start-all.sh"
+rm -f "$runtime_env_fixture"
+unset COMPONENT_RUNTIME_ENV_TEST
+
 APP_MODEL_SELECT=0 component_start_init "$ROOT_DIR" release "test-entry"
 [[ "$COMPONENT_ROOT" == "$ROOT_DIR" ]]
 [[ "$COMPONENT_PROFILE" == "release" ]]
