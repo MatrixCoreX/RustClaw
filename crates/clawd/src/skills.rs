@@ -185,7 +185,7 @@ const CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX: &str = "__RC_CRYPTO_ACCOUNT_ACCESS_ERR
 struct SkillDispatchPermits {
     serialization: Option<OwnedSemaphorePermit>,
     _skill: Option<OwnedSemaphorePermit>,
-    _global: OwnedSemaphorePermit,
+    _global: Option<OwnedSemaphorePermit>,
 }
 
 #[cfg(test)]
@@ -256,7 +256,7 @@ async fn acquire_skill_dispatch_permits_with_serialization(
     Ok(SkillDispatchPermits {
         serialization: serialization_permit,
         _skill: skill_permit,
-        _global: global_permit,
+        _global: Some(global_permit),
     })
 }
 
@@ -1919,25 +1919,36 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
             "can_cancel": true,
         }),
     );
-    let serialization_key = dispatch_queue
-        .as_ref()
-        .map(|selection| selection.key.clone())
-        .or_else(|| skill_dispatch_serialization_key(state, &skill_name, &args));
-    let queue_was_waiting = dispatch_queue.as_ref().is_some_and(|selection| {
-        state
+    let action_mapping = action_scoped_planner_mapping(state, &skill_name, &args);
+    let durable_background =
+        runner::local_process_durable_background_requested(action_mapping.as_ref());
+    // Durable runner processes own their filesystem-backed skill/global queue.
+    // Waiting in the foreground semaphore would consume the agent tool budget
+    // before a resumable job can be created.
+    let serialization_key = (!durable_background).then(|| {
+        dispatch_queue
+            .as_ref()
+            .map(|selection| selection.key.clone())
+            .or_else(|| skill_dispatch_serialization_key(state, &skill_name, &args))
+    });
+    let serialization_key = serialization_key.flatten();
+    let queue_was_waiting = !durable_background
+        && dispatch_queue.as_ref().is_some_and(|selection| {
+            state
+                .skill_rt
+                .skill_concurrency_gates
+                .semaphore(&selection.key, 1)
+                .available_permits()
+                == 0
+        });
+    let resource_queue_was_waiting = !durable_background
+        && (state
             .skill_rt
             .skill_concurrency_gates
-            .semaphore(&selection.key, 1)
+            .semaphore(&skill_name, resource_grant.max_concurrency)
             .available_permits()
             == 0
-    });
-    let resource_queue_was_waiting = state
-        .skill_rt
-        .skill_concurrency_gates
-        .semaphore(&skill_name, resource_grant.max_concurrency)
-        .available_permits()
-        == 0
-        || state.skill_rt.skill_semaphore.available_permits() == 0;
+            || state.skill_rt.skill_semaphore.available_permits() == 0);
     if queue_was_waiting {
         let selection = dispatch_queue.as_ref().expect("queue selection");
         publish_skill_dispatch_queue_progress(state, task, &skill_name, selection.scope, true);
@@ -1945,15 +1956,23 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
     if resource_queue_was_waiting {
         publish_skill_dispatch_queue_progress(state, task, &skill_name, "host_resource", true);
     }
-    let mut dispatch_permits = acquire_skill_dispatch_permits_with_serialization(
-        &state.skill_rt.skill_concurrency_gates,
-        &state.skill_rt.skill_semaphore,
-        &task.task_id,
-        &skill_name,
-        Some(resource_grant.max_concurrency),
-        serialization_key.as_deref(),
-    )
-    .await?;
+    let mut dispatch_permits = if durable_background {
+        SkillDispatchPermits {
+            serialization: None,
+            _skill: None,
+            _global: None,
+        }
+    } else {
+        acquire_skill_dispatch_permits_with_serialization(
+            &state.skill_rt.skill_concurrency_gates,
+            &state.skill_rt.skill_semaphore,
+            &task.task_id,
+            &skill_name,
+            Some(resource_grant.max_concurrency),
+            serialization_key.as_deref(),
+        )
+        .await?
+    };
     if queue_was_waiting {
         let selection = dispatch_queue.as_ref().expect("queue selection");
         publish_skill_dispatch_queue_progress(state, task, &skill_name, selection.scope, false);

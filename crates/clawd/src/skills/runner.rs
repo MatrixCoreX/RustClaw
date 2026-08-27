@@ -232,7 +232,9 @@ fn stable_queue_path_component(queue_key: &str) -> String {
     hex::encode(Sha256::digest(queue_key.as_bytes()))
 }
 
-fn local_process_durable_background_requested(mapping: Option<&PlannerCapabilityMapping>) -> bool {
+pub(super) fn local_process_durable_background_requested(
+    mapping: Option<&PlannerCapabilityMapping>,
+) -> bool {
     mapping.is_some_and(|mapping| {
         matches!(
             mapping.execution_mode,
