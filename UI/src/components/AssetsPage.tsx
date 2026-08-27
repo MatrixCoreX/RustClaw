@@ -131,10 +131,9 @@ export function AssetsPage({
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-[var(--theme-icon-accent-color)]">
             <WalletCards className="h-5 w-5" />
-            <span className="text-xs font-semibold uppercase tracking-wide">{t("钱包视图", "Wallet view")}</span>
+            <span className="text-xs font-semibold uppercase tracking-wide">{t("资产总览", "Asset overview")}</span>
           </div>
-          <h2 className="mt-2 text-2xl font-semibold text-[var(--theme-text-strong)]">{t("资产", "Assets")}</h2>
-          <p className="mt-1 max-w-2xl text-sm leading-6 text-[var(--theme-text-muted)]">
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--theme-text-muted)]">
             {t("查看当前资产账户中的余额与按市场价格估算的价值。", "View balances in the current asset account and their estimated market value.")}
           </p>
         </div>

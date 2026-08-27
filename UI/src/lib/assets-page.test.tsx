@@ -87,6 +87,7 @@ test("asset wallet shows AIC, USD, account identity, and market estimate", () =>
   const markup = renderToStaticMarkup(<AssetsPage {...baseProps} />);
 
   assert.match(markup, /data-assets-page="true"/);
+  assert.match(markup, /资产总览/);
   assert.match(markup, /总资产估值/);
   assert.match(markup, /data-assets-total-value="5\.01000000"/);
   assert.match(markup, /data-assets-list-ready="true"/);
@@ -94,6 +95,7 @@ test("asset wallet shows AIC, USD, account identity, and market estimate", () =>
   assert.match(markup, />USD</);
   assert.match(markup, /asset-owner-public-key/);
   assert.match(markup, /不代表实际成交金额/);
+  assert.doesNotMatch(markup, /<h2[^>]*>资产<\/h2>/);
 });
 
 test("asset wallet explains missing account setup without exposing stale balances", () => {
@@ -120,11 +122,11 @@ test("asset wallet keeps the English interface fully localized", () => {
     />,
   );
 
-  assert.match(markup, /Wallet view/);
+  assert.match(markup, /Asset overview/);
   assert.match(markup, /Estimated portfolio value/);
   assert.match(markup, /Asset list/);
   assert.match(markup, /Manage account/);
-  assert.doesNotMatch(markup, /总资产估值|资产列表|管理账户/);
+  assert.doesNotMatch(markup, /资产总览|总资产估值|资产列表|管理账户/);
 });
 
 test("asset navigation is between Bancor and account binding", () => {
