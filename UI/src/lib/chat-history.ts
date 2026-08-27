@@ -11,6 +11,7 @@ import {
   normalizeTaskArtifacts,
 } from "./task-artifacts";
 import { appStorageKey } from "./product-identity";
+import { sha256Hex } from "./sha256";
 
 type Translate = (zh: string, en: string) => string;
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
@@ -154,7 +155,6 @@ export async function verifyConversationHistoryPage(
       throw new Error("conversation_history_turn_invalid");
     }
   }
-  if (!globalThis.crypto?.subtle) return;
   const digest = await sha256Hex(JSON.stringify(page.turns));
   if (digest !== page.content_sha256.toLowerCase()) {
     throw new Error("conversation_history_digest_mismatch");
@@ -374,14 +374,4 @@ function withConversationBodyStart(value: string, startByte: number): string {
   const url = new URL(value, "http://agent.invalid");
   url.searchParams.set("start_byte", String(startByte));
   return `${url.pathname}?${url.searchParams.toString()}`;
-}
-
-async function sha256Hex(value: string): Promise<string> {
-  const digest = await globalThis.crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(value),
-  );
-  return Array.from(new Uint8Array(digest), (byte) =>
-    byte.toString(16).padStart(2, "0"),
-  ).join("");
 }

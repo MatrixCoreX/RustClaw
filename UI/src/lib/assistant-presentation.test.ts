@@ -168,6 +168,33 @@ await assert.rejects(
   /assistant_presentation_digest_mismatch/,
 );
 
+const cryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+Object.defineProperty(globalThis, "crypto", { configurable: true, value: undefined });
+try {
+  const httpReducer = new AssistantPresentationReducer();
+  const httpContent = "局域网 HTTP 回复";
+  const httpBytes = new TextEncoder().encode(httpContent).byteLength;
+  const httpStart = decodeAssistantPresentationEvent(
+    envelope("assistant_output_started", 0, 0),
+  );
+  const httpDelta = decodeAssistantPresentationEvent(
+    envelope("assistant_output_delta", 1, 0, { content: httpContent }),
+  );
+  const httpCompleted = decodeAssistantPresentationEvent(
+    envelope("assistant_output_completed", 2, httpBytes, {
+      total_content_bytes: httpBytes,
+      content_sha256: digest(httpContent),
+    }),
+  );
+  assert.ok(httpStart && httpDelta && httpCompleted);
+  await httpReducer.apply(httpStart);
+  await httpReducer.apply(httpDelta);
+  assert.equal((await httpReducer.apply(httpCompleted))?.status, "completed");
+} finally {
+  if (cryptoDescriptor) Object.defineProperty(globalThis, "crypto", cryptoDescriptor);
+  else delete (globalThis as { crypto?: Crypto }).crypto;
+}
+
 function digest(content: string): string {
   return `sha256:${createHash("sha256").update(content).digest("hex")}`;
 }

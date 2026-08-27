@@ -10,6 +10,7 @@ import {
   fetchConversationHistoryPage,
   fetchNextConversationBodyPage,
   projectConversationHistory,
+  verifyConversationHistoryPage,
 } from "./chat-history";
 import type { ConversationHistoryPage } from "../types/api";
 
@@ -224,6 +225,26 @@ test("loads one history page at a time for browser memory isolation", async () =
 
   assert.match(requested, /limit=60/);
   assert.equal(loaded.next_cursor, "101:task-older");
+});
+
+test("verifies history digests without Web Crypto in a local HTTP context", async () => {
+  const value = page();
+  value.content_sha256 = createHash("sha256")
+    .update(JSON.stringify(value.turns))
+    .digest("hex");
+  const cryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+  Object.defineProperty(globalThis, "crypto", { configurable: true, value: undefined });
+  try {
+    await verifyConversationHistoryPage(value);
+    value.content_sha256 = "b".repeat(64);
+    await assert.rejects(
+      () => verifyConversationHistoryPage(value),
+      /conversation_history_digest_mismatch/,
+    );
+  } finally {
+    if (cryptoDescriptor) Object.defineProperty(globalThis, "crypto", cryptoDescriptor);
+    else delete (globalThis as { crypto?: Crypto }).crypto;
+  }
 });
 
 test("validates and advances a snapshot-bound conversation body page", async () => {

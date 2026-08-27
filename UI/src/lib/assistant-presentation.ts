@@ -1,4 +1,5 @@
 import type { TaskEventEnvelope } from "../types/api";
+import { prefixedSha256 } from "./sha256";
 
 export type AssistantPresentationEventKind =
   | "assistant_output_started"
@@ -178,7 +179,7 @@ export class AssistantPresentationReducer {
       ) {
         throw new Error("assistant_presentation_completion_size_mismatch");
       }
-      const expectedDigest = await contentSha256(state.content);
+      const expectedDigest = await prefixedSha256(state.content);
       if (event.contentSha256 !== expectedDigest) {
         throw new Error("assistant_presentation_digest_mismatch");
       }
@@ -230,15 +231,4 @@ function sha256(value: unknown): string {
     throw new Error("assistant_presentation_digest_invalid");
   }
   return result;
-}
-
-async function contentSha256(content: string): Promise<string> {
-  if (!globalThis.crypto?.subtle) {
-    throw new Error("assistant_presentation_digest_unavailable");
-  }
-  const digest = await globalThis.crypto.subtle.digest("SHA-256", encoder.encode(content));
-  const hex = Array.from(new Uint8Array(digest), (byte) =>
-    byte.toString(16).padStart(2, "0"),
-  ).join("");
-  return `sha256:${hex}`;
 }
