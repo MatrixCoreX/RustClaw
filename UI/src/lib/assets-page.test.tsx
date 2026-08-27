@@ -94,8 +94,31 @@ test("asset wallet shows AIC, USD, account identity, and market estimate", () =>
   assert.match(markup, />AIC</);
   assert.match(markup, />USD</);
   assert.match(markup, /asset-owner-public-key/);
+  assert.match(markup, /data-assets-account-selector="true"/);
+  assert.match(markup, /本机绑定账户/);
   assert.match(markup, /不代表实际成交金额/);
+  assert.doesNotMatch(markup, /查看当前资产账户中的余额与按市场价格估算的价值/);
   assert.doesNotMatch(markup, /<h2[^>]*>资产<\/h2>/);
+});
+
+test("asset account selector reserves additional wallet options", () => {
+  const markup = renderToStaticMarkup(
+    <AssetsPage
+      {...baseProps}
+      additionalAssetAccounts={[{
+        id: "cold-wallet",
+        publicKey: "external-asset-public-key",
+        source: "external",
+        label: "冷钱包",
+      }]}
+    />,
+  );
+
+  assert.match(markup, /本机绑定账户/);
+  assert.match(markup, /冷钱包/);
+  assert.match(markup, /value="cold-wallet"/);
+  assert.match(markup, /external\.\.\.blic-key/);
+  assert.equal((markup.match(/<option/g) ?? []).length, 2);
 });
 
 test("asset wallet explains missing account setup without exposing stale balances", () => {
@@ -110,7 +133,8 @@ test("asset wallet explains missing account setup without exposing stale balance
 
   assert.match(markup, /data-assets-empty-state="true"/);
   assert.match(markup, /尚未绑定资产账户/);
-  assert.match(markup, /管理资产账户/);
+  assert.match(markup, /请前往 NNI 页面创建或绑定资产账户/);
+  assert.match(markup, /前往 NNI 绑定/);
   assert.doesNotMatch(markup, /data-assets-list-ready/);
 });
 
@@ -126,6 +150,7 @@ test("asset wallet keeps the English interface fully localized", () => {
   assert.match(markup, /Estimated portfolio value/);
   assert.match(markup, /Asset list/);
   assert.match(markup, /Manage account/);
+  assert.doesNotMatch(markup, /View balances in the current asset account/);
   assert.doesNotMatch(markup, /资产总览|总资产估值|资产列表|管理账户/);
 });
 
