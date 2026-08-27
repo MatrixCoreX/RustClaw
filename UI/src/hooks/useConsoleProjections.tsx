@@ -10,6 +10,7 @@ import {
   MessageCircle,
   Network,
   Store,
+  WalletCards,
 } from "lucide-react";
 
 import type { DashboardOnboardingStep } from "../components/DashboardPage";
@@ -423,6 +424,11 @@ export function useConsoleProjections({
         id: "bancor" as const,
         label: "BANCOR",
         icon: <ArrowLeftRight className="h-4 w-4" />,
+      },
+      {
+        id: "assets" as const,
+        label: t("资产", "Assets"),
+        icon: <WalletCards className="h-4 w-4" />,
       },
       {
         id: "channels" as const,

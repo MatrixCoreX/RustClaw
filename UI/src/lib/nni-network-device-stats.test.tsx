@@ -148,13 +148,14 @@ test("asset account UI keeps recovery while adding custom bind, replacement, and
   assert.doesNotMatch(source, /previousOwnerAuthorizationSignature/);
 });
 
-test("non-admin console sessions cannot display NNI or Bancor pages", () => {
+test("non-admin console sessions cannot display NNI, Bancor, or asset pages", () => {
   const source = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
-  assert.match(source, /ADMIN_ONLY_UI_PAGES = new Set<ConsolePage>\(\["nni", "nni_apr", "bancor"\]\)/);
+  assert.match(source, /ADMIN_ONLY_UI_PAGES = new Set<ConsolePage>\(\["nni", "nni_apr", "bancor", "assets"\]\)/);
   assert.match(source, /navItems\.filter\(\(item\) => !ADMIN_ONLY_UI_PAGES\.has\(item\.id\)\)/);
   assert.match(source, /!isAdminIdentity && ADMIN_ONLY_UI_PAGES\.has\(currentPage\)/);
   assert.match(source, /isAdminIdentity && currentPage === "nni"/);
   assert.match(source, /isAdminIdentity && currentPage === "bancor"/);
+  assert.match(source, /isAdminIdentity && currentPage === "assets"/);
 });
 
 test("network counters never imply that public aggregate data requires joining", () => {

@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AuthKeysPage } from "./components/AuthKeysPage";
+import { AssetsPage } from "./components/AssetsPage";
 import { BANCOR_CANDLE_AUTO_REFRESH_SECONDS, BancorPage } from "./components/BancorPage";
 import { ChatPage } from "./components/ChatPage";
 import { CommunicationSetupPage } from "./components/CommunicationSetupPage";
@@ -92,8 +93,8 @@ const AiLearningPage = lazy(() =>
   })),
 );
 
-const CONSOLE_PAGES: ConsolePage[] = ["dashboard", "chat", "ai_learning", "nni", "nni_apr", "bancor", "services", "channels", "models", "skills", "skill_store", "memory", "logs", "tasks"];
-const ADMIN_ONLY_UI_PAGES = new Set<ConsolePage>(["nni", "nni_apr", "bancor"]);
+const CONSOLE_PAGES: ConsolePage[] = ["dashboard", "chat", "ai_learning", "nni", "nni_apr", "bancor", "assets", "services", "channels", "models", "skills", "skill_store", "memory", "logs", "tasks"];
+const ADMIN_ONLY_UI_PAGES = new Set<ConsolePage>(["nni", "nni_apr", "bancor", "assets"]);
 
 const STORAGE_KEYS = {
   baseUrl: appStorageKey("monitor.baseUrl"),
@@ -1591,7 +1592,15 @@ export default function App() {
   }, [currentPage, apiBase, uiAuthReady, isAdminIdentity, bancorRuntime.candleIntervalSeconds]);
 
   useEffect(() => {
-    if (!uiAuthReady || !isAdminIdentity || currentPage !== "bancor" || !nniStatus?.signature_chip_present) return;
+    if (!uiAuthReady || !isAdminIdentity || currentPage !== "assets") return;
+    void ensureNniDeviceStatus(true);
+    void fetchNniConfig(true);
+    void bancorRuntime.fetchMarket();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, apiBase, uiAuthReady, isAdminIdentity]);
+
+  useEffect(() => {
+    if (!uiAuthReady || !isAdminIdentity || (currentPage !== "bancor" && currentPage !== "assets") || !nniStatus?.signature_chip_present) return;
     void bancorRuntime.fetchAccount(1);
     // Private account reads require a fresh device signature, but Bancor
     // access is independent from participation in NNI heartbeat rewards.
@@ -1968,6 +1977,26 @@ export default function App() {
               assetOwnerPubkey={nniAssetOwnerPubkey}
               onOpenNni={() => setCurrentPage("nni")}
               onOpenApr={() => setCurrentPage("nni_apr")}
+            />
+          ) : null}
+
+          {isAdminIdentity && currentPage === "assets" ? (
+            <AssetsPage
+              t={t}
+              account={nniAssetOwnerPubkey ? bancorRuntime.account : null}
+              market={bancorRuntime.market}
+              assetOwnerPubkey={nniAssetOwnerPubkey}
+              signingDeviceReady={nniStatus?.signature_chip_present === true}
+              accountLoading={bancorRuntime.accountLoading}
+              marketLoading={bancorRuntime.marketLoading}
+              error={bancorRuntime.error}
+              hardwareAccountAccessUnavailable={bancorRuntime.hardwareAccountAccessUnavailable}
+              onRefresh={() => Promise.allSettled([
+                bancorRuntime.fetchMarket(),
+                bancorRuntime.fetchAccount(1),
+              ])}
+              onOpenBancor={() => setCurrentPage("bancor")}
+              onOpenNni={() => setCurrentPage("nni")}
             />
           ) : null}
 
