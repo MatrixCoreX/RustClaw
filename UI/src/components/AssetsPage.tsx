@@ -228,7 +228,7 @@ export function AssetsPage({
               >
                 {assetAccountOptions.map((accountOption) => (
                   <option key={accountOption.id} value={accountOption.id}>
-                    {formatAssetAccountOption(accountOption, t)}
+                    {formatAssetAccountOption(accountOption, t, { fullPublicKey: true })}
                   </option>
                 ))}
               </select>
@@ -237,7 +237,6 @@ export function AssetsPage({
                 t={t}
                 className="mt-0.5"
                 valueClassName="text-[10px] leading-4 text-[var(--theme-text-muted)]"
-                shorten={{ head: 12, tail: 10 }}
                 allowFormatSwitch={false}
               />
             </label>

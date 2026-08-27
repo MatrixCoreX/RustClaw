@@ -17,6 +17,23 @@ fn wechat_delivery_part_ids_are_stable_and_part_scoped() {
     );
 }
 
+#[test]
+fn wechat_part_failure_is_retained_without_suppressing_later_parts() {
+    let mut first_error = None;
+    let mut accepted = Vec::new();
+    for (index, result) in [Ok(()), Err("video rejected".to_string()), Ok(())]
+        .into_iter()
+        .enumerate()
+    {
+        if record_wechat_part_result(&mut first_error, result, "fixture", index) {
+            accepted.push(index);
+        }
+    }
+
+    assert_eq!(accepted, vec![0, 2]);
+    assert_eq!(first_error.as_deref(), Some("video rejected"));
+}
+
 #[tokio::test]
 async fn channel_send_progress_survives_a_later_part_failure() {
     let (result, provider_message_ids) = capture_channel_send_progress(async {

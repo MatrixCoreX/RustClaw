@@ -4,9 +4,9 @@ use std::time::Duration;
 use tokio::sync::Semaphore;
 
 use super::{
-    acquire_skill_dispatch_permits_with_serialization, dispatch_queue_job_is_terminal,
-    retain_dispatch_queue_permit_until_job_terminal, skill_dispatch_queue_selection,
-    skill_dispatch_serialization_key,
+    acquire_skill_dispatch_permits_with_serialization, action_scoped_planner_mapping,
+    dispatch_queue_job_is_terminal, retain_dispatch_queue_permit_until_job_terminal, runner,
+    skill_dispatch_queue_selection, skill_dispatch_serialization_key,
 };
 
 fn claimed_task(task_id: &str, user_id: i64, chat_id: i64) -> crate::ClaimedTask {
@@ -114,6 +114,34 @@ fn declared_dispatch_queue_is_per_user_and_undeclared_skills_keep_existing_behav
         &serde_json::json!({"action": "transform_data"}),
     )
     .is_none());
+}
+
+#[test]
+fn media_download_queue_is_owned_by_the_durable_runner() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let registry_path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml");
+    let registry = claw_core::skill_registry::SkillsRegistry::load_from_path(&registry_path)
+        .expect("load registry");
+    let enabled = registry
+        .enabled_names()
+        .into_iter()
+        .collect::<std::collections::HashSet<_>>();
+    *state.core.skill_views_snapshot.write().expect("snapshot") =
+        Arc::new(crate::SkillViewsSnapshot {
+            binding: Default::default(),
+            registry: Some(Arc::new(registry)),
+            skills_list: Arc::new(enabled),
+        });
+
+    let mapping = action_scoped_planner_mapping(
+        &state,
+        "media_download",
+        &serde_json::json!({"action": "download"}),
+    );
+    assert!(runner::local_process_durable_background_requested(
+        mapping.as_ref()
+    ));
 }
 
 #[tokio::test]

@@ -1,7 +1,9 @@
 use super::*;
+use claw_core::types::TaskExecutionState;
 
 const WECHAT_TASK_FAILED_FALLBACK_ERROR_KEY: &str = "wechat.msg.task_failed_fallback_error";
 const WECHAT_REQUEST_TIMEOUT_RETRY_LATER_KEY: &str = "wechat.msg.request_timeout_retry_later";
+const WECHAT_TASK_REQUIRES_ATTENTION_KEY: &str = "wechat.msg.task_requires_attention";
 const WECHAT_SKILL_PROGRESS_KB_KEY: &str = "wechat.msg.skill_progress_kb";
 const WECHAT_SKILL_PROGRESS_PACKAGE_KEY: &str = "wechat.msg.skill_progress_package";
 const WECHAT_SKILL_PROGRESS_GENERIC_KEY: &str = "wechat.msg.skill_progress_generic";
@@ -28,6 +30,42 @@ pub(super) enum WechatTaskTerminalKind {
     Failed,
     Canceled,
     Timeout,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WechatTaskPollDisposition {
+    Continue,
+    DeliverTerminal,
+    RequiresAttention,
+}
+
+fn wechat_task_poll_disposition(task: &TaskQueryResponse) -> WechatTaskPollDisposition {
+    if wechat_task_terminal_kind(task.status.clone()).is_some() {
+        return WechatTaskPollDisposition::DeliverTerminal;
+    }
+    let lifecycle_requires_attention = matches!(
+        task.lifecycle
+            .as_ref()
+            .and_then(|lifecycle| lifecycle.get("state"))
+            .and_then(Value::as_str),
+        Some("needs_user" | "failed" | "cancelled" | "canceled")
+    );
+    if lifecycle_requires_attention
+        || matches!(
+            task.execution_state,
+            Some(
+                TaskExecutionState::NeedsConfirmation
+                    | TaskExecutionState::Blocked
+                    | TaskExecutionState::Cancelled
+                    | TaskExecutionState::Failed
+                    | TaskExecutionState::Completed
+            )
+        )
+    {
+        WechatTaskPollDisposition::RequiresAttention
+    } else {
+        WechatTaskPollDisposition::Continue
+    }
 }
 
 pub(super) fn wechat_inbound_idempotency_key(
@@ -581,8 +619,8 @@ pub(super) async fn submit_wechat_task_with_payload(
             continue;
         };
         last_seen_status = Some(task.status.clone());
-        match task.status {
-            TaskStatus::Queued | TaskStatus::Running => {
+        match wechat_task_poll_disposition(&task) {
+            WechatTaskPollDisposition::Continue => {
                 if let Some((seq, message)) = skill_progress_message(&task, &state.config) {
                     if seq > last_skill_progress_seq {
                         last_skill_progress_seq = seq;
@@ -610,11 +648,28 @@ pub(super) async fn submit_wechat_task_with_payload(
                 tokio::time::sleep(poll_interval).await;
                 continue;
             }
-            terminal_status @ (TaskStatus::Succeeded
-            | TaskStatus::Failed
-            | TaskStatus::Canceled
-            | TaskStatus::Timeout) => {
-                debug_assert!(wechat_task_terminal_kind(terminal_status).is_some());
+            WechatTaskPollDisposition::RequiresAttention => {
+                finish_typing_heartbeat(&mut typing_heartbeat).await;
+                let attention_text = wechat_t_with(
+                    &state.config,
+                    WECHAT_TASK_REQUIRES_ATTENTION_KEY,
+                    &[("task_id", &task_id)],
+                );
+                deliver_pinned_terminal_text(&state, &context, &attention_text).await;
+                warn!(
+                    task_id,
+                    execution_state = ?task.execution_state,
+                    lifecycle_state = task
+                        .lifecycle
+                        .as_ref()
+                        .and_then(|lifecycle| lifecycle.get("state"))
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("unknown"),
+                    "wechatd: task requires attention; polling stopped"
+                );
+                break;
+            }
+            WechatTaskPollDisposition::DeliverTerminal => {
                 finish_typing_heartbeat(&mut typing_heartbeat).await;
                 request_unified_terminal_delivery(
                     &state,
@@ -628,6 +683,10 @@ pub(super) async fn submit_wechat_task_with_payload(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "task_flow_tests.rs"]
+mod tests;
 
 async fn request_unified_terminal_delivery(
     state: &State,

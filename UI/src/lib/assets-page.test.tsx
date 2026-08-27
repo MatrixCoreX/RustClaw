@@ -96,6 +96,7 @@ test("asset wallet shows AIC, USD, account identity, and market estimate", () =>
   assert.match(markup, /asset-owner-public-key/);
   assert.match(markup, /data-assets-account-selector="true"/);
   assert.match(markup, /本机绑定账户/);
+  assert.match(markup, /本机绑定账户 · asset-owner-public-key/);
   assert.match(markup, /不代表实际成交金额/);
   assert.doesNotMatch(markup, /查看当前资产账户中的余额与按市场价格估算的价值/);
   assert.doesNotMatch(markup, /<h2[^>]*>资产<\/h2>/);
@@ -117,7 +118,7 @@ test("asset account selector reserves additional wallet options", () => {
   assert.match(markup, /本机绑定账户/);
   assert.match(markup, /冷钱包/);
   assert.match(markup, /value="cold-wallet"/);
-  assert.match(markup, /external\.\.\.blic-key/);
+  assert.match(markup, /冷钱包 · external-asset-public-key/);
   assert.equal((markup.match(/<option/g) ?? []).length, 2);
 });
 

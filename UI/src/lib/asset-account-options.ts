@@ -41,10 +41,14 @@ export function buildAssetAccountOptions(
 export function formatAssetAccountOption(
   account: AssetAccountOption,
   t: Translate,
+  options: { fullPublicKey?: boolean } = {},
 ): string {
   const defaultLabel = account.source === "local_binding"
     ? t("本机绑定账户", "Local bound account")
     : t("其他资产账户", "Other asset account");
   const compactPublicKey = nniPublicKeyFormats(account.publicKey)?.compact ?? account.publicKey;
-  return `${account.label?.trim() || defaultLabel} · ${shortenHex(compactPublicKey, 8, 8)}`;
+  const visiblePublicKey = options.fullPublicKey
+    ? compactPublicKey
+    : shortenHex(compactPublicKey, 8, 8);
+  return `${account.label?.trim() || defaultLabel} · ${visiblePublicKey}`;
 }
