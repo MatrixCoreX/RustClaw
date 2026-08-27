@@ -44,8 +44,12 @@ import {
   formatBancorBalanceHoverAmount,
   formatBancorTradeHistoryAmount,
 } from "../lib/bancor-amount-display";
+import {
+  buildAssetAccountOptions,
+  formatAssetAccountOption,
+  type AssetAccountOption,
+} from "../lib/asset-account-options";
 import { resolveBancorMarketDirectionColors } from "../lib/bancor-market-colors";
-import { nniPublicKeyFormats, shortenHex } from "../lib/nni-display";
 import { appStorageKey } from "../lib/product-identity";
 import { BancorPriceChangePage } from "./BancorPriceChangePage";
 import { NniDecimalAmount } from "./NniDecimalAmount";
@@ -143,52 +147,9 @@ export function persistBancorSlippagePercent(
   }
 }
 
-export interface BancorAssetAccountOption {
-  id: string;
-  publicKey: string;
-  source: "local_binding" | "external";
-  label?: string;
-}
-
-export function buildBancorAssetAccountOptions(
-  localBindingPublicKey: string | null | undefined,
-  additionalAccounts: readonly BancorAssetAccountOption[] = [],
-): BancorAssetAccountOption[] {
-  const options: BancorAssetAccountOption[] = [];
-  const seenPublicKeys = new Set<string>();
-  const seenIds = new Set<string>();
-  const localPublicKey = localBindingPublicKey?.trim();
-  if (localPublicKey) {
-    const id = `local-binding:${localPublicKey}`;
-    options.push({
-      id,
-      publicKey: localPublicKey,
-      source: "local_binding",
-    });
-    seenIds.add(id);
-    seenPublicKeys.add(localPublicKey);
-  }
-  for (const account of additionalAccounts) {
-    const id = account.id.trim();
-    const publicKey = account.publicKey.trim();
-    if (!id || !publicKey || seenIds.has(id) || seenPublicKeys.has(publicKey)) continue;
-    options.push({ ...account, id, publicKey });
-    seenIds.add(id);
-    seenPublicKeys.add(publicKey);
-  }
-  return options;
-}
-
-export function formatBancorAssetAccountOption(
-  account: BancorAssetAccountOption,
-  t: Translate,
-): string {
-  const defaultLabel = account.source === "local_binding"
-    ? t("本机绑定账户", "Local bound account")
-    : t("其他资产账户", "Other asset account");
-  const compactPublicKey = nniPublicKeyFormats(account.publicKey)?.compact ?? account.publicKey;
-  return `${account.label?.trim() || defaultLabel} · ${shortenHex(compactPublicKey, 8, 8)}`;
-}
+export type BancorAssetAccountOption = AssetAccountOption;
+export const buildBancorAssetAccountOptions = buildAssetAccountOptions;
+export const formatBancorAssetAccountOption = formatAssetAccountOption;
 
 export const BANCOR_CANDLE_INTERVALS = [
   { seconds: 60, zh: "1分", en: "1m" },

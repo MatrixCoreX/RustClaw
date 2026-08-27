@@ -6,8 +6,14 @@ import {
   Settings2,
   WalletCards,
 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { NniBancorAccountResponse, NniBancorMarketResponse } from "../types/api";
+import {
+  buildAssetAccountOptions,
+  formatAssetAccountOption,
+  type AssetAccountOption,
+} from "../lib/asset-account-options";
 import {
   formatBancorBalanceAmount,
   formatBancorBalanceHoverAmount,
@@ -16,6 +22,7 @@ import {
 import { NniPublicKeyDisplay } from "./NniPublicKeyDisplay";
 
 type Translate = (zh: string, en: string) => string;
+const EMPTY_ASSET_ACCOUNTS: readonly AssetAccountOption[] = [];
 
 interface FixedDecimal {
   units: bigint;
@@ -90,6 +97,7 @@ export function AssetsPage({
   account,
   market,
   assetOwnerPubkey,
+  additionalAssetAccounts = EMPTY_ASSET_ACCOUNTS,
   signingDeviceReady,
   accountLoading,
   marketLoading,
@@ -103,6 +111,7 @@ export function AssetsPage({
   account: NniBancorAccountResponse | null;
   market: NniBancorMarketResponse | null;
   assetOwnerPubkey?: string | null;
+  additionalAssetAccounts?: readonly AssetAccountOption[];
   signingDeviceReady: boolean;
   accountLoading: boolean;
   marketLoading: boolean;
@@ -112,11 +121,37 @@ export function AssetsPage({
   onOpenBancor: () => void;
   onOpenNni: () => void;
 }) {
-  const portfolio = account && market ? calculateAssetPortfolioValues(account, market) : null;
+  const assetAccountOptions = useMemo(
+    () => buildAssetAccountOptions(assetOwnerPubkey, additionalAssetAccounts),
+    [additionalAssetAccounts, assetOwnerPubkey],
+  );
+  const [preferredAssetAccountId, setPreferredAssetAccountId] = useState(
+    assetAccountOptions[0]?.id ?? "",
+  );
+  const selectedAssetAccount = assetAccountOptions.find(
+    (accountOption) => accountOption.id === preferredAssetAccountId,
+  ) ?? assetAccountOptions[0] ?? null;
+  const selectedUsesLoadedAccount = selectedAssetAccount?.source === "local_binding"
+    && selectedAssetAccount.publicKey === assetOwnerPubkey?.trim();
+  const selectedAccount = selectedUsesLoadedAccount ? account : null;
+  const portfolio = selectedAccount && market
+    ? calculateAssetPortfolioValues(selectedAccount, market)
+    : null;
   const loading = accountLoading || marketLoading;
-  const accountAvailable = Boolean(assetOwnerPubkey && account);
-  const statusMessage = !assetOwnerPubkey
-    ? t("尚未绑定资产账户。请先完成资产账户设置。", "No asset account is bound yet. Set up an asset account first.")
+  const accountAvailable = Boolean(selectedAssetAccount && selectedAccount);
+
+  useEffect(() => {
+    if (assetAccountOptions.some((option) => option.id === preferredAssetAccountId)) return;
+    setPreferredAssetAccountId(assetAccountOptions[0]?.id ?? "");
+  }, [assetAccountOptions, preferredAssetAccountId]);
+
+  const statusMessage = selectedAssetAccount?.source === "external"
+    ? t("这个外部账户的余额尚未同步。", "Balances for this external account have not been synchronized yet.")
+    : !assetOwnerPubkey
+    ? t(
+      "尚未绑定资产账户。请前往 NNI 页面创建或绑定资产账户。",
+      "No asset account is bound yet. Go to the NNI page to create or bind one.",
+    )
     : !signingDeviceReady
       ? t("当前设备无法签名读取私有余额。", "This device cannot sign a private balance request.")
       : hardwareAccountAccessUnavailable
@@ -133,9 +168,6 @@ export function AssetsPage({
             <WalletCards className="h-5 w-5" />
             <span className="text-xs font-semibold uppercase tracking-wide">{t("资产总览", "Asset overview")}</span>
           </div>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--theme-text-muted)]">
-            {t("查看当前资产账户中的余额与按市场价格估算的价值。", "View balances in the current asset account and their estimated market value.")}
-          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button type="button" className="theme-secondary-btn px-3 py-2 text-sm" onClick={onOpenNni}>
@@ -176,7 +208,7 @@ export function AssetsPage({
           <button
             type="button"
             className="theme-secondary-btn shrink-0 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={loading || !assetOwnerPubkey || !signingDeviceReady}
+            disabled={loading || !selectedUsesLoadedAccount || !signingDeviceReady}
             onClick={() => void onRefresh()}
           >
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
@@ -185,18 +217,35 @@ export function AssetsPage({
         </div>
 
         <div className="mt-5 border-t border-[var(--theme-border)] pt-4">
-          <p className="text-xs font-medium text-[var(--theme-text-muted)]">{t("资产账户", "Asset account")}</p>
-          {assetOwnerPubkey ? (
-            <NniPublicKeyDisplay
-              value={assetOwnerPubkey}
-              t={t}
-              className="mt-2"
-              valueClassName="text-xs text-[var(--theme-text-body)]"
-              shorten={{ head: 12, tail: 10 }}
-              allowFormatSwitch={false}
-            />
+          {selectedAssetAccount ? (
+            <label className="grid gap-1.5" data-assets-account-selector="true">
+              <span className="text-xs font-medium text-[var(--theme-text-muted)]">{t("资产账户", "Asset account")}</span>
+              <select
+                className="theme-input w-full font-mono text-xs"
+                value={selectedAssetAccount.id}
+                aria-label={t("选择资产账户", "Select asset account")}
+                onChange={(event) => setPreferredAssetAccountId(event.target.value)}
+              >
+                {assetAccountOptions.map((accountOption) => (
+                  <option key={accountOption.id} value={accountOption.id}>
+                    {formatAssetAccountOption(accountOption, t)}
+                  </option>
+                ))}
+              </select>
+              <NniPublicKeyDisplay
+                value={selectedAssetAccount.publicKey}
+                t={t}
+                className="mt-0.5"
+                valueClassName="text-[10px] leading-4 text-[var(--theme-text-muted)]"
+                shorten={{ head: 12, tail: 10 }}
+                allowFormatSwitch={false}
+              />
+            </label>
           ) : (
-            <p className="mt-2 text-sm text-[var(--theme-text-faint)]">{t("未绑定", "Not bound")}</p>
+            <div>
+              <p className="text-xs font-medium text-[var(--theme-text-muted)]">{t("资产账户", "Asset account")}</p>
+              <p className="mt-2 text-sm text-[var(--theme-text-faint)]">{t("未绑定", "Not bound")}</p>
+            </div>
           )}
         </div>
       </section>
@@ -214,7 +263,7 @@ export function AssetsPage({
           </span>
         </div>
 
-        {accountAvailable && account ? (
+        {accountAvailable && selectedAccount ? (
           <div className="divide-y divide-[var(--theme-border)]" data-assets-list-ready="true">
             <div className="grid min-h-24 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-5 py-4 sm:grid-cols-[minmax(180px,1fr)_minmax(150px,0.7fr)_auto] sm:px-6">
               <div className="flex min-w-0 items-center gap-3">
@@ -235,7 +284,7 @@ export function AssetsPage({
                   {portfolio ? `≈ ${formatBancorBalanceAmount(portfolio.aicValueUsd)} USD` : ""}
                 </p>
               </div>
-              <WalletAmount value={account.aic_balance} suffix="AIC" />
+              <WalletAmount value={selectedAccount.aic_balance} suffix="AIC" />
             </div>
 
             <div className="grid min-h-24 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-5 py-4 sm:grid-cols-[minmax(180px,1fr)_minmax(150px,0.7fr)_auto] sm:px-6">
@@ -252,7 +301,7 @@ export function AssetsPage({
                 <p className="text-xs text-[var(--theme-text-muted)]">{t("参考价格", "Reference price")}</p>
                 <p className="mt-1 text-sm text-[var(--theme-text-body)]">1 USD</p>
               </div>
-              <WalletAmount value={account.usd_balance} suffix="USD" />
+              <WalletAmount value={selectedAccount.usd_balance} suffix="USD" />
             </div>
           </div>
         ) : (
@@ -262,9 +311,11 @@ export function AssetsPage({
             <div className="mt-4 flex flex-wrap justify-center gap-2">
               <button type="button" className="theme-secondary-btn px-3 py-2 text-sm" onClick={onOpenNni}>
                 <Settings2 className="h-4 w-4" />
-                {t("管理资产账户", "Manage asset account")}
+                {assetOwnerPubkey
+                  ? t("管理资产账户", "Manage asset account")
+                  : t("前往 NNI 绑定", "Bind in NNI")}
               </button>
-              {assetOwnerPubkey && signingDeviceReady ? (
+              {selectedUsesLoadedAccount && signingDeviceReady ? (
                 <button type="button" className="theme-secondary-btn px-3 py-2 text-sm" disabled={loading} onClick={() => void onRefresh()}>
                   <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
                   {t("重试", "Retry")}
