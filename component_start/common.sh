@@ -98,6 +98,35 @@ component_vendor_api_key_from_env() {
   printf '%s' "$resolved"
 }
 
+component_model_uses_hosted_relay_enrollment() {
+  local config_path="$1"
+  local selected_vendor="$2"
+  local selected_model="$3"
+
+  python3 - "$config_path" "$selected_vendor" "$selected_model" <<'PY'
+import sys
+import tomllib
+from pathlib import Path
+
+config_path = Path(sys.argv[1])
+selected_vendor = sys.argv[2].strip()
+selected_model = sys.argv[3].strip()
+config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+llm = config.get("llm") or {}
+relay = llm.get("hosted_relay") or {}
+provider = llm.get(selected_vendor) or {}
+
+matches = (
+    relay.get("enabled") is True
+    and selected_vendor == str(relay.get("vendor") or "").strip()
+    and selected_model == str(relay.get("model") or "").strip()
+    and str(provider.get("base_url") or "").strip().rstrip("/")
+    == str(relay.get("base_url") or "").strip().rstrip("/")
+)
+raise SystemExit(0 if matches else 1)
+PY
+}
+
 component_binary_path() {
   local binary_name="$1"
   printf '%s\n' "$COMPONENT_ROOT/target/$COMPONENT_PROFILE/$binary_name"
