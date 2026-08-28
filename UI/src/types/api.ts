@@ -9,6 +9,8 @@ export interface ApiResponse<T> {
 export interface NniAssetTransferResponse {
   schema_version: 1;
   status: "asset_transfer_completed";
+  request_id: string;
+  idempotent_replay: boolean;
   node_url?: string;
   transfer: {
     transfer_id: string;

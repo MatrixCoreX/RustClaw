@@ -104,9 +104,10 @@ that controls the signer can unbind that device and redirect its future rewards 
 that party can prove, but cannot bind an unrelated third-party public key without that target key's
 signature. Existing balances and other devices remain under their current asset authorization.
 
-The visual console exposes NNI, APR, Bancor, and Assets pages only to an authenticated administrator. This
-is a UI access boundary only; public NNI node APIs and their cryptographic contracts remain
-independent of console roles.
+The visual console exposes NNI, APR, Bancor, and Assets pages only to an authenticated administrator.
+The local `clawd` asset-transfer endpoint independently enforces the administrator role instead of
+treating a hidden UI page as authorization. Public NNI node APIs and their cryptographic contracts
+remain independent of console roles.
 
 ## Asset Transfer
 
@@ -117,13 +118,22 @@ memo, and signing method before confirmation. The user may authorize with the cu
 hardware signer or enter the matching asset private key for one in-memory signature; the private
 key is never persisted.
 
-`clawd` requests a short-lived v2 transfer payload from the selected NNI node and verifies its exact
-field set, account bindings, amount units, memo, nonce, expiry, and SHA-256 digest before signing. A
-verification response with an unknown outcome is not retried on another node. NNI Core then commits
-the sender debit, recipient credit, two immutable ledger entries, one immutable transfer record with
-the memo, one-time task consumption, and the public Explorer flow in one transaction. The recipient
-key does not need an existing device binding. The public asset explorer remains read-only but
-immediately shows the `asset_transfer` transaction and memo in both address histories.
+`clawd` creates one UUID idempotency key for each user submission and reuses it across candidate Edges.
+Core persistently binds that key to a canonical request digest: an identical request receives the original
+challenge, while different content under the same key is rejected. Before signing the short-lived v2
+payload, `clawd` verifies its exact field set, account bindings, amount units, memo, nonce, expiry, request
+key, and SHA-256 digest. If verification has an unknown network or `5xx` outcome, the same signature is
+retried once against the same node; it is never submitted to a different node.
+
+NNI Core commits the sender debit, recipient credit, two immutable ledger entries, immutable memo-bearing
+transfer record, one-time task consumption, and public Explorer flow in one transaction. Replaying the
+exact accepted signature only returns the stored result and cannot mutate balances again; another signature
+or a rejected task cannot be reused. After signature verification and before balance mutation, Core applies
+an atomic sender-account rate policy, while Edge and Core also shed abusive traffic by source IP and business
+class. Database unique indexes and triggers reject duplicate request keys, duplicate nonces, self-transfer,
+and mutation of intent identity fields. The recipient key does not need an existing device binding. The
+public asset explorer remains read-only but immediately shows the `asset_transfer` transaction and memo in
+both address histories.
 
 Asset transfer is intentionally not an `nni.*` natural-language mutation capability. This keeps a
 financial write behind the administrator UI's explicit review and signing flow while the agent can
