@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
+const darkTheme = css.match(/:root\s*\{([\s\S]*?)\n\}/)?.[1] ?? "";
 const lightTheme = css.match(/:root\[data-theme="light"\]\s*\{([\s\S]*?)\n\}/)?.[1] ?? "";
 
 function themeValue(name: string): string {
@@ -73,6 +74,7 @@ test("every light-theme surface uses neutral gray instead of pure white", () => 
     "header-bg",
     "card",
     "card-strong",
+    "dialog-bg",
     "input-bg",
     "code-bg",
     "table-head",
@@ -86,6 +88,14 @@ test("every light-theme surface uses neutral gray instead of pure white", () => 
     assert.doesNotMatch(value, /#fff(?:fff)?\b|rgba?\(\s*255\s*,\s*255\s*,\s*255/i);
     const channels = colorChannels(value);
     assert.ok(Math.max(...channels) - Math.min(...channels) <= 8, `--theme-${name} is not neutral gray`);
+  }
+});
+
+test("dialog surfaces are opaque in both themes", () => {
+  for (const [themeName, theme] of [["dark", darkTheme], ["light", lightTheme]] as const) {
+    const value = theme.match(/--theme-dialog-bg:\s*([^;]+);/i)?.[1]?.trim();
+    assert.ok(value, `missing ${themeName} dialog background`);
+    assert.match(value, /^#[0-9a-f]{6}$/i, `${themeName} dialog background must be opaque`);
   }
 });
 

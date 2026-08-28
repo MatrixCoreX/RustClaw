@@ -20,6 +20,7 @@ import {
   formatBancorBalanceHoverAmount,
   formatBancorTradeHistoryAmount,
 } from "../lib/bancor-amount-display";
+import type { AssetTransferAsset } from "../lib/asset-transfer";
 import { NniPublicKeyDisplay } from "./NniPublicKeyDisplay";
 import { AssetTransferDialog } from "./AssetTransferDialog";
 import type { AssetTransferInput } from "../hooks/useAssetTransferRuntime";
@@ -142,6 +143,7 @@ export function AssetsPage({
     assetAccountOptions[0]?.id ?? "",
   );
   const [transferDialogOpen, setTransferDialogOpen] = useState(false);
+  const [transferAsset, setTransferAsset] = useState<AssetTransferAsset>("AIC");
   const selectedAssetAccount = assetAccountOptions.find(
     (accountOption) => accountOption.id === preferredAssetAccountId,
   ) ?? assetAccountOptions[0] ?? null;
@@ -153,6 +155,12 @@ export function AssetsPage({
     : null;
   const loading = accountLoading || marketLoading;
   const accountAvailable = Boolean(selectedAssetAccount && selectedAccount);
+
+  const openTransferDialog = (asset: AssetTransferAsset) => {
+    onClearTransferFeedback();
+    setTransferAsset(asset);
+    setTransferDialogOpen(true);
+  };
 
   useEffect(() => {
     if (assetAccountOptions.some((option) => option.id === preferredAssetAccountId)) return;
@@ -220,18 +228,6 @@ export function AssetsPage({
             </p>
           </div>
           <div className="flex flex-wrap gap-2 lg:justify-end" data-assets-overview-actions="true">
-            <button
-              type="button"
-              className="theme-secondary-btn shrink-0 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={!accountAvailable || !selectedUsesLoadedAccount}
-              onClick={() => {
-                onClearTransferFeedback();
-                setTransferDialogOpen(true);
-              }}
-            >
-              <SendHorizontal className="h-4 w-4" />
-              {t("转账", "Transfer")}
-            </button>
             <button
               type="button"
               className="theme-secondary-btn shrink-0 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
@@ -311,7 +307,18 @@ export function AssetsPage({
                   {portfolio ? `≈ ${formatBancorBalanceAmount(portfolio.aicValueUsd)} USD` : ""}
                 </p>
               </div>
-              <WalletAmount value={selectedAccount.aic_balance} suffix="AIC" />
+              <div className="flex items-center justify-end gap-2">
+                <WalletAmount value={selectedAccount.aic_balance} suffix="AIC" />
+                <button
+                  type="button"
+                  className="theme-secondary-btn h-9 shrink-0 px-2.5 text-xs"
+                  data-asset-transfer="AIC"
+                  onClick={() => openTransferDialog("AIC")}
+                >
+                  <SendHorizontal className="h-4 w-4" />
+                  {t("转账", "Transfer")}
+                </button>
+              </div>
             </div>
 
             <div className="grid min-h-24 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-5 py-4 sm:grid-cols-[minmax(180px,1fr)_minmax(150px,0.7fr)_auto] sm:px-6">
@@ -325,10 +332,23 @@ export function AssetsPage({
                 </div>
               </div>
               <div className="hidden min-w-0 text-right sm:block">
-                <p className="text-xs text-[var(--theme-text-muted)]">{t("参考价格", "Reference price")}</p>
-                <p className="mt-1 text-sm text-[var(--theme-text-body)]">1 USD</p>
+                <p className="text-xs text-[var(--theme-text-muted)]">{t("资产估值", "Asset value")}</p>
+                <p className="mt-1 text-sm text-[var(--theme-text-body)]">
+                  ≈ {formatBancorBalanceAmount(selectedAccount.usd_balance)} USD
+                </p>
               </div>
-              <WalletAmount value={selectedAccount.usd_balance} suffix="USD" />
+              <div className="flex items-center justify-end gap-2">
+                <WalletAmount value={selectedAccount.usd_balance} suffix="USD" />
+                <button
+                  type="button"
+                  className="theme-secondary-btn h-9 shrink-0 px-2.5 text-xs"
+                  data-asset-transfer="USD"
+                  onClick={() => openTransferDialog("USD")}
+                >
+                  <SendHorizontal className="h-4 w-4" />
+                  {t("转账", "Transfer")}
+                </button>
+              </div>
             </div>
           </div>
         ) : (
@@ -361,6 +381,7 @@ export function AssetsPage({
 
       <AssetTransferDialog
         open={transferDialogOpen}
+        asset={transferAsset}
         t={t}
         sourcePublicKey={selectedUsesLoadedAccount ? selectedAssetAccount?.publicKey ?? "" : ""}
         aicBalance={selectedAccount?.aic_balance ?? "0.00000000"}

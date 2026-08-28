@@ -104,8 +104,9 @@ test("asset wallet shows AIC, USD, account identity, and market estimate", () =>
   assert.match(markup, /本机绑定账户 · asset-owner-public-key/);
   assert.match(markup, /不代表实际成交金额/);
   assert.match(markup, /data-assets-overview-actions="true"/);
-  assert.match(markup, />转账</);
-  assert.ok(markup.indexOf(">转账<") < markup.indexOf(">刷新资产<"));
+  assert.match(markup, /data-assets-full-value="100"[\s\S]*data-asset-transfer="AIC"/);
+  assert.match(markup, /data-assets-full-value="5"[\s\S]*data-asset-transfer="USD"/);
+  assert.equal((markup.match(/>转账</g) ?? []).length, 2);
   assert.doesNotMatch(markup, /查看当前资产账户中的余额与按市场价格估算的价值/);
   assert.doesNotMatch(markup, /<h2[^>]*>资产<\/h2>/);
 });
@@ -128,6 +129,19 @@ test("asset account selector reserves additional wallet options", () => {
   assert.match(markup, /value="cold-wallet"/);
   assert.match(markup, /冷钱包 · external-asset-public-key/);
   assert.equal((markup.match(/<option/g) ?? []).length, 2);
+});
+
+test("USD row shows the held asset value instead of a fixed unit price", () => {
+  const markup = renderToStaticMarkup(
+    <AssetsPage
+      {...baseProps}
+      account={{ ...account, usd_balance_units: "0", usd_balance: "0.00000000" }}
+    />,
+  );
+
+  assert.match(markup, /资产估值/);
+  assert.match(markup, /≈ 0\.00 USD/);
+  assert.doesNotMatch(markup, />1 USD</);
 });
 
 test("asset wallet explains missing account setup without exposing stale balances", () => {
