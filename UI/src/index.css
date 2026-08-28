@@ -15,6 +15,7 @@
   --theme-header-bg: rgba(18, 22, 31, 0.88);
   --theme-card: rgba(255, 255, 255, 0.05);
   --theme-card-strong: rgba(0, 0, 0, 0.2);
+  --theme-dialog-bg: #181d27;
   --theme-border: rgba(255, 255, 255, 0.1);
   --theme-border-strong: rgba(255, 255, 255, 0.15);
   --theme-text-strong: #f6f2ea;
@@ -74,6 +75,7 @@
   --theme-header-bg: rgba(222, 225, 228, 0.97);
   --theme-card: rgba(232, 234, 236, 0.94);
   --theme-card-strong: rgba(215, 219, 223, 0.96);
+  --theme-dialog-bg: #e8eaec;
   --theme-border: rgba(61, 67, 75, 0.34);
   --theme-border-strong: rgba(55, 61, 69, 0.48);
   --theme-text-strong: #252a30;
@@ -196,6 +198,13 @@
     border-color: var(--theme-border);
     background: var(--theme-card);
     box-shadow: var(--theme-panel-shadow-soft);
+  }
+
+  .theme-dialog-panel {
+    @apply rounded-[22px] border;
+    border-color: var(--theme-border);
+    background: var(--theme-dialog-bg);
+    box-shadow: var(--theme-panel-shadow);
   }
 
   .theme-panel-soft {

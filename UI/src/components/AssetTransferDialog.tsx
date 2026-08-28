@@ -37,6 +37,7 @@ function draftErrorMessage(error: AssetTransferDraftError, asset: AssetTransferA
 
 export function AssetTransferDialog({
   open,
+  asset,
   t,
   sourcePublicKey,
   aicBalance,
@@ -48,6 +49,7 @@ export function AssetTransferDialog({
   onSubmit,
 }: {
   open: boolean;
+  asset: AssetTransferAsset;
   t: Translate;
   sourcePublicKey: string;
   aicBalance: string;
@@ -58,7 +60,6 @@ export function AssetTransferDialog({
   onClose: () => void;
   onSubmit: (input: AssetTransferInput) => Promise<unknown>;
 }) {
-  const [asset, setAsset] = useState<AssetTransferAsset>("AIC");
   const [amount, setAmount] = useState("");
   const [recipientPublicKey, setRecipientPublicKey] = useState("");
   const [memo, setMemo] = useState("");
@@ -141,7 +142,7 @@ export function AssetTransferDialog({
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/55 p-4" role="presentation" onMouseDown={(event) => {
       if (event.currentTarget === event.target && !loading) onClose();
     }}>
-      <section className="theme-panel max-h-[92vh] w-full max-w-xl overflow-y-auto p-5 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="asset-transfer-title">
+      <section className="theme-dialog-panel max-h-[92vh] w-full max-w-xl overflow-y-auto p-5 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="asset-transfer-title">
         <header className="flex items-start justify-between gap-4">
           <div>
             <h2 id="asset-transfer-title" className="text-lg font-semibold text-[var(--theme-text-strong)]">
@@ -205,17 +206,10 @@ export function AssetTransferDialog({
           </div>
         ) : (
           <div className="mt-6 space-y-5">
-            <fieldset>
-              <legend className="text-sm font-medium text-[var(--theme-text-strong)]">{t("选择资产", "Choose asset")}</legend>
-              <div className="mt-2 grid grid-cols-2 gap-2" role="tablist">
-                {(["AIC", "USD"] as const).map((option) => (
-                  <button key={option} type="button" role="tab" aria-selected={asset === option} className={asset === option ? "theme-accent-btn justify-center px-3 py-2" : "theme-secondary-btn justify-center px-3 py-2"} onClick={() => {
-                    setAsset(option);
-                    setLocalError(null);
-                  }}>{option}</button>
-                ))}
-              </div>
-            </fieldset>
+            <div className="rounded-md border border-[var(--theme-border)] bg-[var(--theme-card-strong)] px-3 py-3" data-transfer-asset={asset}>
+              <p className="text-xs text-[var(--theme-text-muted)]">{t("转账资产", "Transfer asset")}</p>
+              <p className="mt-1 font-semibold text-[var(--theme-text-strong)]">{asset}</p>
+            </div>
             <label className="grid gap-1.5">
               <span className="text-sm font-medium text-[var(--theme-text-strong)]">{t("转账金额", "Amount")}</span>
               <input className="theme-input" inputMode="decimal" value={amount} placeholder="0.00000000" onChange={(event) => {
