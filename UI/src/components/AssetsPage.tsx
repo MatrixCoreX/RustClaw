@@ -184,18 +184,6 @@ export function AssetsPage({
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            className="theme-secondary-btn px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={!accountAvailable || !selectedUsesLoadedAccount}
-            onClick={() => {
-              onClearTransferFeedback();
-              setTransferDialogOpen(true);
-            }}
-          >
-            <SendHorizontal className="h-4 w-4" />
-            {t("转账", "Transfer")}
-          </button>
           <button type="button" className="theme-secondary-btn px-3 py-2 text-sm" onClick={onOpenNni}>
             <Settings2 className="h-4 w-4" />
             {t("管理账户", "Manage account")}
@@ -231,15 +219,29 @@ export function AssetsPage({
               {t("按当前 BANCOR 边际价格估算，不代表实际成交金额。", "Estimated using the current BANCOR marginal price; this is not an executable quote.")}
             </p>
           </div>
-          <button
-            type="button"
-            className="theme-secondary-btn shrink-0 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={loading || !selectedUsesLoadedAccount || !signingDeviceReady}
-            onClick={() => void onRefresh()}
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-            {loading ? t("读取中", "Loading") : t("刷新资产", "Refresh assets")}
-          </button>
+          <div className="flex flex-wrap gap-2 lg:justify-end" data-assets-overview-actions="true">
+            <button
+              type="button"
+              className="theme-secondary-btn shrink-0 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={!accountAvailable || !selectedUsesLoadedAccount}
+              onClick={() => {
+                onClearTransferFeedback();
+                setTransferDialogOpen(true);
+              }}
+            >
+              <SendHorizontal className="h-4 w-4" />
+              {t("转账", "Transfer")}
+            </button>
+            <button
+              type="button"
+              className="theme-secondary-btn shrink-0 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={loading || !selectedUsesLoadedAccount || !signingDeviceReady}
+              onClick={() => void onRefresh()}
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+              {loading ? t("读取中", "Loading") : t("刷新资产", "Refresh assets")}
+            </button>
+          </div>
         </div>
 
         <div className="mt-5 border-t border-[var(--theme-border)] pt-4">
