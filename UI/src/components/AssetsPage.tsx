@@ -3,6 +3,7 @@ import {
   CircleDollarSign,
   Coins,
   RefreshCw,
+  SendHorizontal,
   Settings2,
   WalletCards,
 } from "lucide-react";
@@ -20,6 +21,8 @@ import {
   formatBancorTradeHistoryAmount,
 } from "../lib/bancor-amount-display";
 import { NniPublicKeyDisplay } from "./NniPublicKeyDisplay";
+import { AssetTransferDialog } from "./AssetTransferDialog";
+import type { AssetTransferInput } from "../hooks/useAssetTransferRuntime";
 
 type Translate = (zh: string, en: string) => string;
 const EMPTY_ASSET_ACCOUNTS: readonly AssetAccountOption[] = [];
@@ -103,6 +106,11 @@ export function AssetsPage({
   marketLoading,
   error,
   hardwareAccountAccessUnavailable,
+  transferLoading,
+  transferError,
+  transferMessage,
+  onTransfer,
+  onClearTransferFeedback,
   onRefresh,
   onOpenBancor,
   onOpenNni,
@@ -117,6 +125,11 @@ export function AssetsPage({
   marketLoading: boolean;
   error: string | null;
   hardwareAccountAccessUnavailable: boolean;
+  transferLoading: boolean;
+  transferError: string | null;
+  transferMessage: string | null;
+  onTransfer: (input: AssetTransferInput) => Promise<unknown>;
+  onClearTransferFeedback: () => void;
   onRefresh: () => void | Promise<unknown>;
   onOpenBancor: () => void;
   onOpenNni: () => void;
@@ -128,6 +141,7 @@ export function AssetsPage({
   const [preferredAssetAccountId, setPreferredAssetAccountId] = useState(
     assetAccountOptions[0]?.id ?? "",
   );
+  const [transferDialogOpen, setTransferDialogOpen] = useState(false);
   const selectedAssetAccount = assetAccountOptions.find(
     (accountOption) => accountOption.id === preferredAssetAccountId,
   ) ?? assetAccountOptions[0] ?? null;
@@ -170,6 +184,18 @@ export function AssetsPage({
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="theme-secondary-btn px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!accountAvailable || !selectedUsesLoadedAccount}
+            onClick={() => {
+              onClearTransferFeedback();
+              setTransferDialogOpen(true);
+            }}
+          >
+            <SendHorizontal className="h-4 w-4" />
+            {t("转账", "Transfer")}
+          </button>
           <button type="button" className="theme-secondary-btn px-3 py-2 text-sm" onClick={onOpenNni}>
             <Settings2 className="h-4 w-4" />
             {t("管理账户", "Manage account")}
@@ -324,6 +350,27 @@ export function AssetsPage({
           </div>
         )}
       </section>
+
+      {transferMessage && !transferDialogOpen ? (
+        <p className="rounded-md border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100" role="status">
+          {transferMessage}
+        </p>
+      ) : null}
+
+      <AssetTransferDialog
+        open={transferDialogOpen}
+        t={t}
+        sourcePublicKey={selectedUsesLoadedAccount ? selectedAssetAccount?.publicKey ?? "" : ""}
+        aicBalance={selectedAccount?.aic_balance ?? "0.00000000"}
+        usdBalance={selectedAccount?.usd_balance ?? "0.00000000"}
+        signingDeviceReady={signingDeviceReady}
+        loading={transferLoading}
+        remoteError={transferError}
+        onClose={() => {
+          if (!transferLoading) setTransferDialogOpen(false);
+        }}
+        onSubmit={onTransfer}
+      />
     </div>
   );
 }

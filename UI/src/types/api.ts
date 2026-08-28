@@ -6,6 +6,26 @@ export interface ApiResponse<T> {
   error?: string;
 }
 
+export interface NniAssetTransferResponse {
+  schema_version: 1;
+  status: "asset_transfer_completed";
+  node_url?: string;
+  transfer: {
+    transfer_id: string;
+    from_asset_owner_pubkey: string;
+    to_asset_owner_pubkey: string;
+    asset: "AIC" | "USD";
+    amount_units: string;
+    amount: string;
+    from_balance_after_units: string;
+    from_balance_after: string;
+    to_balance_after_units: string;
+    to_balance_after: string;
+    authorization_mode: "delegated_hardware" | "asset_owner";
+    created_at_unix: number;
+  };
+}
+
 export interface HealthResponse {
   version: string;
   queue_length: number;

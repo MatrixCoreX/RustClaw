@@ -104,9 +104,29 @@ that controls the signer can unbind that device and redirect its future rewards 
 that party can prove, but cannot bind an unrelated third-party public key without that target key's
 signature. Existing balances and other devices remain under their current asset authorization.
 
-The visual console exposes NNI, APR, and Bancor pages only to an authenticated administrator. This
+The visual console exposes NNI, APR, Bancor, and Assets pages only to an authenticated administrator. This
 is a UI access boundary only; public NNI node APIs and their cryptographic contracts remain
 independent of console roles.
+
+## Asset Transfer
+
+The Assets page can transfer exact eight-decimal AIC or USD amounts to any valid K1 asset public
+key. The browser validates the full K1 envelope, prevents self-transfer and overspending, and shows
+the complete sender, recipient, asset, amount, and signing method before confirmation. The user may
+authorize with the currently bound hardware signer or enter the matching asset private key for one
+in-memory signature; the private key is never persisted.
+
+`clawd` requests a short-lived transfer payload from the selected NNI node and verifies its exact
+field set, account bindings, amount units, nonce, expiry, and SHA-256 digest before signing. A
+verification response with an unknown outcome is not retried on another node. NNI Core then commits
+the sender debit, recipient credit, two immutable ledger entries, one immutable transfer record,
+one-time task consumption, and the public Explorer flow in one transaction. The recipient key does
+not need an existing device binding. The public asset explorer remains read-only but immediately
+shows the `asset_transfer` transaction in both address histories.
+
+Asset transfer is intentionally not an `nni.*` natural-language mutation capability. This keeps a
+financial write behind the administrator UI's explicit review and signing flow while the agent can
+continue to query structured account and market data.
 
 ## Device Contract
 
