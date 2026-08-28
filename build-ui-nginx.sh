@@ -579,16 +579,19 @@ nginx_ui_root_from_config() {
   [[ -f "$conf_path" ]] || return 1
   python3 - "$conf_path" <<'PY'
 from pathlib import Path
+import re
 import sys
 
-for raw_line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
-    line = raw_line.strip()
-    if line.startswith("#") or not line.startswith("root ") or not line.endswith(";"):
+text = Path(sys.argv[1]).read_text(encoding="utf-8")
+server_blocks = re.split(r"(?m)^\s*server\s*\{", text)[1:]
+for block in server_blocks:
+    if "location ^~ /v1/" not in block or "location ^~ /webd/" not in block:
         continue
-    root = line[len("root ") : -1].strip()
-    if root and "$" not in root:
-        print(root)
-        raise SystemExit(0)
+    for root in re.findall(r"(?m)^\s*root\s+([^;]+);", block):
+        root = root.strip()
+        if root and "$" not in root:
+            print(root)
+            raise SystemExit(0)
 raise SystemExit(1)
 PY
 }
