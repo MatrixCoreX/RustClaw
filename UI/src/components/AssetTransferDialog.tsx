@@ -86,8 +86,9 @@ export function AssetTransferDialog({
       setLocalError(null);
       setReviewing(false);
       setCompleted(false);
+      setAuthorizationMode(signingDeviceReady ? "delegated_hardware" : "asset_owner");
     }
-  }, [open]);
+  }, [open, signingDeviceReady]);
 
   if (!open) return null;
 
@@ -218,9 +219,9 @@ export function AssetTransferDialog({
               }} />
               <span className="text-xs text-[var(--theme-text-muted)]">{t("可用余额", "Available")}: {availableBalance} {asset}</span>
             </label>
-            <label className="grid gap-1.5">
+            <label className="grid max-w-md gap-1.5">
               <span className="text-sm font-medium text-[var(--theme-text-strong)]">{t("收款账户公钥", "Recipient public key")}</span>
-              <textarea className="theme-input min-h-20 resize-y font-mono text-xs" value={recipientPublicKey} spellCheck={false} autoComplete="off" onChange={(event) => {
+              <input className="theme-input font-mono text-xs" type="text" aria-label={t("收款账户公钥", "Recipient public key")} value={recipientPublicKey} spellCheck={false} autoComplete="off" onChange={(event) => {
                 setRecipientPublicKey(event.target.value);
                 setLocalError(null);
               }} />
@@ -230,9 +231,9 @@ export function AssetTransferDialog({
                 </span>
               ) : null}
             </label>
-            <label className="grid gap-1.5">
+            <label className="grid max-w-md gap-1.5">
               <span className="text-sm font-medium text-[var(--theme-text-strong)]">Memo <span className="font-normal text-[var(--theme-text-muted)]">{t("（可选）", "(optional)")}</span></span>
-              <textarea className="theme-input min-h-20 resize-y text-sm" value={memo} onChange={(event) => {
+              <input className="theme-input text-sm" type="text" aria-label="Memo" value={memo} onChange={(event) => {
                 setMemo(event.target.value);
                 setLocalError(null);
               }} />
@@ -243,7 +244,7 @@ export function AssetTransferDialog({
             <fieldset>
               <legend className="text-sm font-medium text-[var(--theme-text-strong)]">{t("签名方式", "Signing method")}</legend>
               <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                <button type="button" disabled={!signingDeviceReady} className={authorizationMode === "delegated_hardware" ? "theme-accent-btn justify-start px-3 py-3" : "theme-secondary-btn justify-start px-3 py-3 disabled:opacity-45"} onClick={() => {
+                <button type="button" aria-pressed={authorizationMode === "delegated_hardware"} disabled={!signingDeviceReady} className={authorizationMode === "delegated_hardware" ? "theme-accent-btn justify-start px-3 py-3" : "theme-secondary-btn justify-start px-3 py-3 disabled:opacity-45"} onClick={() => {
                   setAuthorizationMode("delegated_hardware");
                   setOwnerPrivateKey("");
                   setLocalError(null);
@@ -251,7 +252,7 @@ export function AssetTransferDialog({
                   <ShieldCheck className="h-4 w-4" />
                   {t("硬件设备代签", "Hardware signing")}
                 </button>
-                <button type="button" className={authorizationMode === "asset_owner" ? "theme-accent-btn justify-start px-3 py-3" : "theme-secondary-btn justify-start px-3 py-3"} onClick={() => {
+                <button type="button" aria-pressed={authorizationMode === "asset_owner"} className={authorizationMode === "asset_owner" ? "theme-accent-btn justify-start px-3 py-3" : "theme-secondary-btn justify-start px-3 py-3"} onClick={() => {
                   setAuthorizationMode("asset_owner");
                   setLocalError(null);
                 }}>
