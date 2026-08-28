@@ -103,7 +103,9 @@ test("asset wallet shows AIC, USD, account identity, and market estimate", () =>
   assert.match(markup, /本机绑定账户/);
   assert.match(markup, /本机绑定账户 · asset-owner-public-key/);
   assert.match(markup, /不代表实际成交金额/);
+  assert.match(markup, /data-assets-overview-actions="true"/);
   assert.match(markup, />转账</);
+  assert.ok(markup.indexOf(">转账<") < markup.indexOf(">刷新资产<"));
   assert.doesNotMatch(markup, /查看当前资产账户中的余额与按市场价格估算的价值/);
   assert.doesNotMatch(markup, /<h2[^>]*>资产<\/h2>/);
 });
