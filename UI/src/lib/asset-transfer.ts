@@ -2,6 +2,7 @@ import { validateNniOwnerPublicKey } from "./nni-owner-public-key";
 
 const ASSET_SCALE = 100_000_000n;
 const MAX_ASSET_UNITS = 9_223_372_036_854_775_807n;
+export const ASSET_TRANSFER_MEMO_MAX_BYTES = 256;
 
 export type AssetTransferAsset = "AIC" | "USD";
 
@@ -12,7 +13,8 @@ export type AssetTransferDraftError =
   | "same_account"
   | "amount_invalid"
   | "amount_too_large"
-  | "insufficient_balance";
+  | "insufficient_balance"
+  | "memo_too_long";
 
 export type AssetTransferDraftValidation =
   | {
@@ -22,6 +24,7 @@ export type AssetTransferDraftValidation =
     asset: AssetTransferAsset;
     amount: string;
     amountUnits: bigint;
+    memo: string;
   }
   | { ok: false; error: AssetTransferDraftError };
 
@@ -45,12 +48,14 @@ export function validateAssetTransferDraft({
   asset,
   amount,
   availableBalance,
+  memo = "",
 }: {
   sourcePublicKey: string;
   recipientPublicKey: string;
   asset: AssetTransferAsset;
   amount: string;
   availableBalance: string;
+  memo?: string;
 }): AssetTransferDraftValidation {
   const source = validateNniOwnerPublicKey(sourcePublicKey);
   if (!source.ok) return { ok: false, error: "source_required" };
@@ -70,6 +75,9 @@ export function validateAssetTransferDraft({
   if (parsedAmount.units > balanceUnits) {
     return { ok: false, error: "insufficient_balance" };
   }
+  if (assetTransferMemoByteLength(memo) > ASSET_TRANSFER_MEMO_MAX_BYTES) {
+    return { ok: false, error: "memo_too_long" };
+  }
   return {
     ok: true,
     sourcePublicKey: source.normalized,
@@ -77,5 +85,10 @@ export function validateAssetTransferDraft({
     asset,
     amount: parsedAmount.amount,
     amountUnits: parsedAmount.units,
+    memo,
   };
+}
+
+export function assetTransferMemoByteLength(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
 }

@@ -5,7 +5,7 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { ripemd160 } from "@noble/hashes/legacy.js";
 import { base58 } from "@scure/base";
 
-import { validateAssetTransferDraft } from "./asset-transfer";
+import { assetTransferMemoByteLength, validateAssetTransferDraft } from "./asset-transfer";
 
 const KEY_SUFFIX = new TextEncoder().encode("K1");
 
@@ -31,6 +31,7 @@ test("asset transfer draft validates K1 accounts and exact eight-decimal units",
     asset: "AIC",
     amount: "1.25",
     availableBalance: "2.00000000",
+    memo: "设备订购 #42",
   }), {
     ok: true,
     sourcePublicKey: source,
@@ -38,6 +39,28 @@ test("asset transfer draft validates K1 accounts and exact eight-decimal units",
     asset: "AIC",
     amount: "1.25000000",
     amountUnits: 125_000_000n,
+    memo: "设备订购 #42",
+  });
+});
+
+test("asset transfer draft enforces the memo limit in UTF-8 bytes", () => {
+  const source = ownerPublicKey(3);
+  const recipient = ownerPublicKey(43);
+  const exactLimitMemo = `${"界".repeat(85)}a`;
+  const tooLongMemo = `${exactLimitMemo}b`;
+  const common = {
+    sourcePublicKey: source,
+    recipientPublicKey: recipient,
+    asset: "AIC" as const,
+    amount: "1",
+    availableBalance: "2.00000000",
+  };
+  assert.equal(assetTransferMemoByteLength(exactLimitMemo), 256);
+  assert.equal(validateAssetTransferDraft({ ...common, memo: exactLimitMemo }).ok, true);
+  assert.equal(assetTransferMemoByteLength(tooLongMemo), 257);
+  assert.deepEqual(validateAssetTransferDraft({ ...common, memo: tooLongMemo }), {
+    ok: false,
+    error: "memo_too_long",
   });
 });
 
