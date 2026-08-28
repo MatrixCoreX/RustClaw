@@ -55,6 +55,7 @@ import {
   useNniRuntime,
 } from "./hooks/useNniRuntime";
 import { useBancorRuntime } from "./hooks/useBancorRuntime";
+import { useAssetTransferRuntime } from "./hooks/useAssetTransferRuntime";
 import { useMemoryRuntime } from "./hooks/useMemoryRuntime";
 import { useLogsRuntime } from "./hooks/useLogsRuntime";
 import { useFactoryResetRuntime } from "./hooks/useFactoryResetRuntime";
@@ -281,6 +282,11 @@ export default function App() {
   };
   const publicApiFetch = (path: string, init?: RequestInit) => safeFetch(path, init, false);
   const bancorRuntime = useBancorRuntime({ apiFetch, cacheScope: apiBase, t });
+  const assetTransferRuntime = useAssetTransferRuntime({
+    apiFetch,
+    t,
+    onCompleted: () => bancorRuntime.fetchAccount(1),
+  });
   const {
     agentConfig,
     agentConfigLoading,
@@ -1991,6 +1997,11 @@ export default function App() {
               marketLoading={bancorRuntime.marketLoading}
               error={bancorRuntime.error}
               hardwareAccountAccessUnavailable={bancorRuntime.hardwareAccountAccessUnavailable}
+              transferLoading={assetTransferRuntime.loading}
+              transferError={assetTransferRuntime.error}
+              transferMessage={assetTransferRuntime.message}
+              onTransfer={assetTransferRuntime.transfer}
+              onClearTransferFeedback={assetTransferRuntime.clearFeedback}
               onRefresh={() => Promise.allSettled([
                 bancorRuntime.fetchMarket(),
                 bancorRuntime.fetchAccount(1),

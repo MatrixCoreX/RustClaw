@@ -241,6 +241,11 @@ async fn nni_bancor_routes_require_ui_authentication() {
             "/v1/nni/bancor/trade",
             r#"{"side":"sell","input_amount":"1.0000","min_output":"0.0001"}"#,
         ),
+        (
+            "POST",
+            "/v1/nni/assets/transfer",
+            r#"{"asset":"AIC","amount":"1.00000000","to_asset_owner_pubkey":"invalid"}"#,
+        ),
     ] {
         let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
         let mut builder = Request::builder().method(method).uri(uri);

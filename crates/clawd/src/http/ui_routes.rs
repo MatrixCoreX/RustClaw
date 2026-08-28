@@ -275,6 +275,7 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         .route("/nni/bancor/quote", post(nni_bancor_quote))
         .route("/nni/bancor/account", get(nni_bancor_account))
         .route("/nni/bancor/trade", post(nni_bancor_trade))
+        .route("/nni/assets/transfer", post(nni_asset_transfer))
         .route(
             "/nni/heartbeat/errors/clear",
             post(nni_clear_heartbeat_errors),
@@ -468,6 +469,7 @@ include!("ui_routes/nni_owner_identity.rs");
 include!("ui_routes/nni_remote_join.rs");
 include!("ui_routes/nni_rewards.rs");
 include!("ui_routes/nni_bancor.rs");
+include!("ui_routes/nni_asset_transfer.rs");
 include!("ui_routes/nni_skill_gateway.rs");
 include!("ui_routes/auth_feishu_bind.rs");
 include!("ui_routes/factory_reset.rs");
