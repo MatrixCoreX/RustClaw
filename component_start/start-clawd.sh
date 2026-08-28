@@ -156,7 +156,8 @@ ACTIVE_MODEL="${CHOSEN_MODEL:-$CURRENT_MODEL}"
 
 if [[ -n "${ACTIVE_VENDOR}" ]]; then
   ENV_API_KEY="$(component_vendor_api_key_from_env "$ACTIVE_VENDOR")"
-  if [[ -z "${ENV_API_KEY}" ]]; then
+  if [[ -z "${ENV_API_KEY}" ]] && ! component_model_uses_hosted_relay_enrollment \
+    "$APP_CONFIG_PATH" "$ACTIVE_VENDOR" "$ACTIVE_MODEL"; then
     echo "The API key for the current vendor (${ACTIVE_VENDOR}) is missing from the runtime environment." >&2
     echo "Set the vendor API-key environment variable in ${APP_RUNTIME_ENV_SCRIPT:-$HOME/runtime_env_filled.sh}, then start the service again." >&2
     exit 1

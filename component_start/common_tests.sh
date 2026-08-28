@@ -35,6 +35,37 @@ export MIMO_API_KEY
 [[ "$(component_vendor_api_key_from_env mimo)" == "xiaomi-test-key" ]]
 unset MINIMAX_API_KEY MIMO_API_KEY XIAOMI_API_KEY
 
+relay_config_fixture="$(mktemp)"
+cat > "$relay_config_fixture" <<'TOML'
+[llm]
+selected_vendor = "custom"
+selected_model = "relay-model"
+
+[llm.hosted_relay]
+enabled = true
+vendor = "custom"
+model = "relay-model"
+base_url = "https://relay.example/v1"
+
+[llm.custom]
+base_url = "https://relay.example/v1/"
+TOML
+component_model_uses_hosted_relay_enrollment "$relay_config_fixture" custom relay-model
+if component_model_uses_hosted_relay_enrollment "$relay_config_fixture" custom other-model; then
+  echo "Hosted relay enrollment accepted the wrong model." >&2
+  exit 1
+fi
+if component_model_uses_hosted_relay_enrollment "$relay_config_fixture" minimax relay-model; then
+  echo "Hosted relay enrollment accepted the wrong vendor." >&2
+  exit 1
+fi
+sed -i.bak 's#https://relay.example/v1/#https://other.example/v1#' "$relay_config_fixture"
+if component_model_uses_hosted_relay_enrollment "$relay_config_fixture" custom relay-model; then
+  echo "Hosted relay enrollment accepted the wrong provider endpoint." >&2
+  exit 1
+fi
+rm -f "$relay_config_fixture" "$relay_config_fixture.bak"
+
 if component_start_init "$ROOT_DIR" debug "test-entry" >/dev/null 2>&1; then
   echo "Unsupported profile was accepted." >&2
   exit 1
