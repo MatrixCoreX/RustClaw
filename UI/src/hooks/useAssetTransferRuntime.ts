@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import type { ApiResponse, NniAssetTransferResponse } from "../types/api";
 import type { AssetTransferAsset } from "../lib/asset-transfer";
@@ -51,8 +51,13 @@ function transferErrorMessage(code: string | null, t: Translate): string {
     case "nni_asset_transfer_expired":
       return t("本次签名请求已过期，请重新提交。", "This signing request expired. Submit it again.");
     case "nni_asset_transfer_rate_limited":
+    case "nni_asset_transfer_account_cooldown":
+    case "nni_asset_transfer_account_rate_limited":
     case "nni_rate_limit_asset_transfer":
       return t("操作过于频繁，请稍后再试。", "Too many requests. Try again shortly.");
+    case "nni_asset_transfer_idempotency_conflict":
+    case "nni_asset_transfer_request_id_consumed":
+      return t("这次转账请求已结束，请刷新余额后重新提交。", "This transfer request has ended. Refresh the balance before submitting again.");
     case "nni_asset_transfer_outcome_unknown":
       return t("暂时无法确认转账结果，请先刷新余额和资产浏览器，避免重复提交。", "The transfer outcome is temporarily unknown. Refresh the balance and asset explorer before trying again.");
     default:
@@ -73,8 +78,11 @@ export function useAssetTransferRuntime({
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [lastTransfer, setLastTransfer] = useState<NniAssetTransferResponse | null>(null);
+  const transferInFlight = useRef(false);
 
   const transfer = async (input: AssetTransferInput) => {
+    if (transferInFlight.current) return null;
+    transferInFlight.current = true;
     setLoading(true);
     setError(null);
     setMessage(null);
@@ -112,6 +120,7 @@ export function useAssetTransferRuntime({
       setError(cause instanceof Error ? cause.message : t("转账未完成。", "The transfer was not completed."));
       return null;
     } finally {
+      transferInFlight.current = false;
       setLoading(false);
     }
   };

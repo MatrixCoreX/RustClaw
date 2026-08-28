@@ -16,6 +16,7 @@ struct NniAssetTransferRequest {
 
 #[derive(Debug, Serialize)]
 struct NniAssetTransferRemoteRequest {
+    request_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     device_pubkey: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -62,6 +63,13 @@ async fn nni_asset_transfer(
             )
         }
     };
+    if !identity.role.eq_ignore_ascii_case("admin") {
+        return nni_join_error(
+            StatusCode::FORBIDDEN,
+            "admin_required",
+            json!({"status": "asset_transfer_forbidden"}),
+        );
+    }
     let asset = match normalize_asset_transfer_asset(&request.asset) {
         Ok(value) => value,
         Err(error) => {
@@ -194,9 +202,11 @@ async fn nni_asset_transfer(
         );
     }
 
+    let request_id = uuid::Uuid::new_v4().to_string();
     let mut attempts = Vec::new();
     for node_url in nni_selected_remote_nodes(&config) {
         let remote_request = NniAssetTransferRemoteRequest {
+            request_id: request_id.clone(),
             device_pubkey: device_pubkey.clone(),
             from_asset_owner_pubkey: (authorization_mode == "asset_owner")
                 .then(|| from_owner_pubkey.clone()),
@@ -218,6 +228,7 @@ async fn nni_asset_transfer(
             asset,
             &amount_units,
             &request.memo,
+            &request_id,
             &remote_request,
             owner_private_key.as_deref_mut(),
         )
@@ -248,6 +259,23 @@ async fn nni_asset_transfer(
             }
         }
     }
+    if let Some(terminal) = attempts
+        .last()
+        .filter(|attempt| attempt.get("terminal").and_then(Value::as_bool) == Some(true))
+    {
+        let status = terminal
+            .get("http_status")
+            .and_then(Value::as_u64)
+            .and_then(|value| u16::try_from(value).ok())
+            .and_then(|value| StatusCode::from_u16(value).ok())
+            .unwrap_or(StatusCode::BAD_GATEWAY);
+        let error_code = terminal
+            .get("error_code")
+            .and_then(Value::as_str)
+            .unwrap_or("nni_asset_transfer_failed")
+            .to_string();
+        return nni_join_error(status, error_code, json!({"attempts": attempts}));
+    }
     nni_join_error(
         StatusCode::BAD_GATEWAY,
         "nni_asset_transfer_nodes_unavailable",
@@ -266,6 +294,7 @@ async fn execute_nni_asset_transfer_for_node(
     asset: &str,
     amount_units: &str,
     memo: &str,
+    request_id: &str,
     request: &NniAssetTransferRemoteRequest,
     owner_private_key: Option<&mut String>,
 ) -> Result<Value, Value> {
@@ -299,11 +328,18 @@ async fn execute_nni_asset_transfer_for_node(
         })?;
     if !status.is_success() || !body.ok {
         let error_code = nni_remote_api_error_code(&body, "nni_asset_transfer_request_failed");
+        let retry_after_seconds = body
+            .data
+            .as_ref()
+            .and_then(|data| data.get("retry_after_seconds"))
+            .and_then(Value::as_u64);
         return Err(json!({
             "node_url": node_url,
             "http_status": status.as_u16(),
             "error_code": error_code,
             "retryable": nni_remote_http_status_retryable(status.as_u16()),
+            "terminal": status.is_client_error(),
+            "retry_after_seconds": retry_after_seconds,
         }));
     }
     let data = body.data.ok_or_else(|| {
@@ -321,6 +357,7 @@ async fn execute_nni_asset_transfer_for_node(
         asset,
         amount_units,
         memo,
+        request_id,
     )
     .map_err(|error| json!({"node_url": node_url, "error_code": error, "terminal": true}))?;
 
@@ -372,54 +409,94 @@ async fn execute_nni_asset_transfer_for_node(
         )?
     };
 
-    let response = state
-        .core
-        .http_client
-        .post(nni_remote_api_endpoint(node_url, "assets/transfer/verify"))
-        .timeout(nni_remote_api_timeout())
-        .json(&NniAssetTransferVerifyRequest {
-            task_id: validated.task_id,
-            transfer_id: validated.transfer_id,
-            signature,
-        })
-        .send()
-        .await
-        .map_err(|error| {
+    let verify_request = NniAssetTransferVerifyRequest {
+        task_id: validated.task_id,
+        transfer_id: validated.transfer_id,
+        signature,
+    };
+    let mut last_transport_error = None;
+    for attempt in 0..2 {
+        let response = match state
+            .core
+            .http_client
+            .post(nni_remote_api_endpoint(node_url, "assets/transfer/verify"))
+            .timeout(nni_remote_api_timeout())
+            .json(&verify_request)
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(error) => {
+                last_transport_error = Some(json!({
+                    "node_url": node_url,
+                    "error_code": "nni_asset_transfer_outcome_unknown",
+                    "detail": error.to_string(),
+                    "terminal": true,
+                }));
+                if attempt == 0 {
+                    continue;
+                }
+                break;
+            }
+        };
+        let status = response.status();
+        let body = match response.json::<ApiResponse<Value>>().await {
+            Ok(body) => body,
+            Err(error) => {
+                last_transport_error = Some(json!({
+                    "node_url": node_url,
+                    "error_code": "nni_asset_transfer_outcome_unknown",
+                    "detail": error.to_string(),
+                    "terminal": true,
+                }));
+                if attempt == 0 {
+                    continue;
+                }
+                break;
+            }
+        };
+        if !status.is_success() || !body.ok {
+            if status.is_server_error() && attempt == 0 {
+                continue;
+            }
+            let error_code =
+                nni_remote_api_error_code(&body, "nni_asset_transfer_outcome_unknown");
+            let retry_after_seconds = body
+                .data
+                .as_ref()
+                .and_then(|data| data.get("retry_after_seconds"))
+                .and_then(Value::as_u64);
+            return Err(json!({
+                "node_url": node_url,
+                "http_status": status.as_u16(),
+                "error_code": error_code,
+                "terminal": true,
+                "retry_after_seconds": retry_after_seconds,
+            }));
+        }
+        let data = body.data.ok_or_else(|| {
             json!({
                 "node_url": node_url,
                 "error_code": "nni_asset_transfer_outcome_unknown",
-                "detail": error.to_string(),
                 "terminal": true,
             })
         })?;
-    let status = response.status();
-    let body = response
-        .json::<ApiResponse<Value>>()
-        .await
-        .map_err(|error| {
-            json!({
+        if data.get("request_id").and_then(Value::as_str) != Some(request_id) {
+            return Err(json!({
                 "node_url": node_url,
-                "error_code": "nni_asset_transfer_outcome_unknown",
-                "detail": error.to_string(),
+                "error_code": "nni_asset_transfer_request_id_mismatch",
                 "terminal": true,
-            })
-        })?;
-    if !status.is_success() || !body.ok {
-        let error_code = nni_remote_api_error_code(&body, "nni_asset_transfer_outcome_unknown");
-        return Err(json!({
-            "node_url": node_url,
-            "http_status": status.as_u16(),
-            "error_code": error_code,
-            "terminal": true,
-        }));
+            }));
+        }
+        return Ok(data);
     }
-    body.data.ok_or_else(|| {
+    Err(last_transport_error.unwrap_or_else(|| {
         json!({
             "node_url": node_url,
             "error_code": "nni_asset_transfer_outcome_unknown",
             "terminal": true,
         })
-    })
+    }))
 }
 
 fn validate_asset_transfer_signing_payload(
@@ -431,6 +508,7 @@ fn validate_asset_transfer_signing_payload(
     expected_asset: &str,
     expected_amount_units: &str,
     expected_memo: &str,
+    expected_request_id: &str,
 ) -> Result<ValidatedAssetTransferPayload, &'static str> {
     let signing_payload = response
         .get("signing_payload")
@@ -463,6 +541,9 @@ fn validate_asset_transfer_signing_payload(
     ]);
     if object.keys().map(String::as_str).collect::<BTreeSet<_>>() != expected_keys {
         return Err("nni_asset_transfer_signing_payload_fields_invalid");
+    }
+    if response.get("request_id").and_then(Value::as_str) != Some(expected_request_id) {
+        return Err("nni_asset_transfer_request_id_mismatch");
     }
     let payload_device_pubkey = payload
         .get("device_pubkey")
@@ -607,6 +688,7 @@ mod nni_asset_transfer_tests {
         .to_string();
         let digest = format!("{:x}", Sha256::digest(payload.as_bytes()));
         let response = json!({
+            "request_id": "0c42e3f7-f5f0-43ff-bc55-ab032daf7eaf",
             "task_id": "nni-asset-transfer-test",
             "transfer_id": "asset-transfer-test",
             "device_pubkey": "aa".repeat(64),
@@ -630,8 +712,24 @@ mod nni_asset_transfer_tests {
             "AIC",
             "100000000",
             "device order #42",
+            "0c42e3f7-f5f0-43ff-bc55-ab032daf7eaf",
         )
         .is_ok());
+        assert_eq!(
+            validate_asset_transfer_signing_payload(
+                &response,
+                Some(&"aa".repeat(64)),
+                response["from_asset_owner_pubkey"].as_str().unwrap(),
+                response["to_asset_owner_pubkey"].as_str().unwrap(),
+                "delegated_hardware",
+                "AIC",
+                "100000000",
+                "device order #42",
+                "89f1d6c2-82d7-48c7-922c-d72d102dbf36",
+            )
+            .unwrap_err(),
+            "nni_asset_transfer_request_id_mismatch",
+        );
     }
 
     #[test]
@@ -659,6 +757,7 @@ mod nni_asset_transfer_tests {
         })
         .to_string();
         let response = json!({
+            "request_id": "0c42e3f7-f5f0-43ff-bc55-ab032daf7eaf",
             "task_id": "nni-asset-transfer-test",
             "transfer_id": "asset-transfer-test",
             "device_pubkey": "aa".repeat(64),
@@ -683,6 +782,7 @@ mod nni_asset_transfer_tests {
                 "USD",
                 "100000000",
                 "invoice-7",
+                "0c42e3f7-f5f0-43ff-bc55-ab032daf7eaf",
             )
             .unwrap_err(),
             "nni_asset_transfer_signing_payload_binding_invalid",
@@ -697,6 +797,7 @@ mod nni_asset_transfer_tests {
                 "USD",
                 "200000000",
                 "invoice-7",
+                "0c42e3f7-f5f0-43ff-bc55-ab032daf7eaf",
             )
             .unwrap_err(),
             "nni_asset_transfer_signing_payload_binding_invalid",
@@ -711,6 +812,7 @@ mod nni_asset_transfer_tests {
                 "USD",
                 "100000000",
                 "invoice-8",
+                "0c42e3f7-f5f0-43ff-bc55-ab032daf7eaf",
             )
             .unwrap_err(),
             "nni_asset_transfer_signing_payload_binding_invalid",
