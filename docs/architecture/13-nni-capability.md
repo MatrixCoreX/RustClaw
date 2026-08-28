@@ -111,18 +111,19 @@ independent of console roles.
 ## Asset Transfer
 
 The Assets page can transfer exact eight-decimal AIC or USD amounts to any valid K1 asset public
-key. The browser validates the full K1 envelope, prevents self-transfer and overspending, and shows
-the complete sender, recipient, asset, amount, and signing method before confirmation. The user may
-authorize with the currently bound hardware signer or enter the matching asset private key for one
-in-memory signature; the private key is never persisted.
+key. An optional memo is limited to 256 UTF-8 bytes. The browser validates the full K1 envelope,
+prevents self-transfer and overspending, and shows the complete sender, recipient, asset, amount,
+memo, and signing method before confirmation. The user may authorize with the currently bound
+hardware signer or enter the matching asset private key for one in-memory signature; the private
+key is never persisted.
 
-`clawd` requests a short-lived transfer payload from the selected NNI node and verifies its exact
-field set, account bindings, amount units, nonce, expiry, and SHA-256 digest before signing. A
+`clawd` requests a short-lived v2 transfer payload from the selected NNI node and verifies its exact
+field set, account bindings, amount units, memo, nonce, expiry, and SHA-256 digest before signing. A
 verification response with an unknown outcome is not retried on another node. NNI Core then commits
-the sender debit, recipient credit, two immutable ledger entries, one immutable transfer record,
-one-time task consumption, and the public Explorer flow in one transaction. The recipient key does
-not need an existing device binding. The public asset explorer remains read-only but immediately
-shows the `asset_transfer` transaction in both address histories.
+the sender debit, recipient credit, two immutable ledger entries, one immutable transfer record with
+the memo, one-time task consumption, and the public Explorer flow in one transaction. The recipient
+key does not need an existing device binding. The public asset explorer remains read-only but
+immediately shows the `asset_transfer` transaction and memo in both address histories.
 
 Asset transfer is intentionally not an `nni.*` natural-language mutation capability. This keeps a
 financial write behind the administrator UI's explicit review and signing flow while the agent can

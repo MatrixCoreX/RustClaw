@@ -17,6 +17,7 @@ export interface NniAssetTransferResponse {
     asset: "AIC" | "USD";
     amount_units: string;
     amount: string;
+    memo: string;
     from_balance_after_units: string;
     from_balance_after: string;
     to_balance_after_units: string;

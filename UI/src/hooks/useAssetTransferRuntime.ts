@@ -10,6 +10,7 @@ export interface AssetTransferInput {
   asset: AssetTransferAsset;
   amount: string;
   recipientPublicKey: string;
+  memo: string;
   authorizationMode: "delegated_hardware" | "asset_owner";
   ownerPrivateKey?: string;
 }
@@ -35,6 +36,9 @@ function transferErrorMessage(code: string | null, t: Translate): string {
       return t("收款账户公钥不合规。", "The recipient public key is not valid.");
     case "nni_asset_transfer_same_account":
       return t("不能向当前账户转账。", "You cannot transfer to the current account.");
+    case "nni_asset_transfer_memo_invalid":
+    case "nni_asset_transfer_memo_too_long":
+      return t("Memo 不能超过 256 字节。", "The memo cannot exceed 256 bytes.");
     case "nni_owner_private_key_mismatch":
       return t("私钥与当前资产账户不匹配。", "The private key does not match the current asset account.");
     case "nni_asset_owner_required":
@@ -82,6 +86,7 @@ export function useAssetTransferRuntime({
           asset: input.asset,
           amount: input.amount,
           to_asset_owner_pubkey: input.recipientPublicKey,
+          memo: input.memo,
           authorization_mode: input.authorizationMode,
           ...(input.authorizationMode === "asset_owner"
             ? { owner_private_key: input.ownerPrivateKey ?? "" }

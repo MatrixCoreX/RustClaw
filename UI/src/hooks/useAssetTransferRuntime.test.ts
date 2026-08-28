@@ -24,6 +24,7 @@ test("asset transfer runtime sends one-time authorization and refreshes after su
           asset: "USD",
           amount_units: "125000000",
           amount: "1.25000000",
+          memo: "invoice-7",
           from_balance_after_units: "175000000",
           from_balance_after: "1.75000000",
           to_balance_after_units: "125000000",
@@ -54,6 +55,7 @@ test("asset transfer runtime sends one-time authorization and refreshes after su
       asset: "USD",
       amount: "1.25000000",
       recipientPublicKey: "recipient",
+      memo: "invoice-7",
       authorizationMode: "asset_owner",
       ownerPrivateKey: "transient-private-key",
     });
@@ -64,6 +66,7 @@ test("asset transfer runtime sends one-time authorization and refreshes after su
       asset: "USD",
       amount: "1.25000000",
       to_asset_owner_pubkey: "recipient",
+      memo: "invoice-7",
       authorization_mode: "asset_owner",
       owner_private_key: "transient-private-key",
     },
@@ -95,6 +98,7 @@ test("asset transfer runtime renders structured nested errors without exposing t
       asset: "AIC",
       amount: "1.00000000",
       recipientPublicKey: "recipient",
+      memo: "",
       authorizationMode: "delegated_hardware",
     });
   });

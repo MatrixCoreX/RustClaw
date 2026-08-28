@@ -2,6 +2,8 @@ import { ArrowLeft, CheckCircle2, KeyRound, SendHorizontal, ShieldCheck, X } fro
 import { useEffect, useMemo, useState } from "react";
 
 import {
+  ASSET_TRANSFER_MEMO_MAX_BYTES,
+  assetTransferMemoByteLength,
   validateAssetTransferDraft,
   type AssetTransferAsset,
   type AssetTransferDraftError,
@@ -28,6 +30,8 @@ function draftErrorMessage(error: AssetTransferDraftError, asset: AssetTransferA
       return t("金额超出系统可处理范围。", "The amount exceeds the supported range.");
     case "insufficient_balance":
       return t(`${asset} 余额不足。`, `The ${asset} balance is insufficient.`);
+    case "memo_too_long":
+      return t("Memo 不能超过 256 字节。", "The memo cannot exceed 256 bytes.");
   }
 }
 
@@ -57,6 +61,7 @@ export function AssetTransferDialog({
   const [asset, setAsset] = useState<AssetTransferAsset>("AIC");
   const [amount, setAmount] = useState("");
   const [recipientPublicKey, setRecipientPublicKey] = useState("");
+  const [memo, setMemo] = useState("");
   const [authorizationMode, setAuthorizationMode] = useState<AuthorizationMode>(
     signingDeviceReady ? "delegated_hardware" : "asset_owner",
   );
@@ -69,11 +74,13 @@ export function AssetTransferDialog({
     () => recipientPublicKey.trim() ? validateNniOwnerPublicKey(recipientPublicKey) : null,
     [recipientPublicKey],
   );
+  const memoByteLength = useMemo(() => assetTransferMemoByteLength(memo), [memo]);
 
   useEffect(() => {
     if (!open) {
       setAmount("");
       setRecipientPublicKey("");
+      setMemo("");
       setOwnerPrivateKey("");
       setLocalError(null);
       setReviewing(false);
@@ -90,6 +97,7 @@ export function AssetTransferDialog({
       asset,
       amount,
       availableBalance,
+      memo,
     });
     if (draft.ok === false) {
       setLocalError(draftErrorMessage(draft.error, asset, t));
@@ -121,6 +129,7 @@ export function AssetTransferDialog({
       asset: draft.asset,
       amount: draft.amount,
       recipientPublicKey: draft.recipientPublicKey,
+      memo: draft.memo,
       authorizationMode,
       ...(authorizationMode === "asset_owner" ? { ownerPrivateKey } : {}),
     });
@@ -169,6 +178,12 @@ export function AssetTransferDialog({
                 <p className="text-xs text-[var(--theme-text-muted)]">{t("收款账户", "To")}</p>
                 <p className="mt-1 break-all font-mono text-xs text-[var(--theme-text-body)]">{recipientPublicKey.trim()}</p>
               </div>
+              {memo ? (
+                <div>
+                  <p className="text-xs text-[var(--theme-text-muted)]">Memo</p>
+                  <p className="mt-1 whitespace-pre-wrap break-words text-sm text-[var(--theme-text-body)]">{memo}</p>
+                </div>
+              ) : null}
               <div>
                 <p className="text-xs text-[var(--theme-text-muted)]">{t("签名方式", "Signing method")}</p>
                 <p className="mt-1 text-sm text-[var(--theme-text-body)]">
@@ -220,6 +235,16 @@ export function AssetTransferDialog({
                   {recipientValidation.ok ? t("公钥格式有效", "Valid public key") : t("公钥格式无效", "Invalid public key")}
                 </span>
               ) : null}
+            </label>
+            <label className="grid gap-1.5">
+              <span className="text-sm font-medium text-[var(--theme-text-strong)]">Memo <span className="font-normal text-[var(--theme-text-muted)]">{t("（可选）", "(optional)")}</span></span>
+              <textarea className="theme-input min-h-20 resize-y text-sm" value={memo} onChange={(event) => {
+                setMemo(event.target.value);
+                setLocalError(null);
+              }} />
+              <span className={`text-xs ${memoByteLength > ASSET_TRANSFER_MEMO_MAX_BYTES ? "text-rose-400" : "text-[var(--theme-text-muted)]"}`}>
+                {memoByteLength} / {ASSET_TRANSFER_MEMO_MAX_BYTES} {t("字节", "bytes")}
+              </span>
             </label>
             <fieldset>
               <legend className="text-sm font-medium text-[var(--theme-text-strong)]">{t("签名方式", "Signing method")}</legend>

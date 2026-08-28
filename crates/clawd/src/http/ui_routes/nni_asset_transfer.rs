@@ -1,10 +1,13 @@
-const NNI_ASSET_TRANSFER_SIGNING_SCHEMA_VERSION: u64 = 1;
+const NNI_ASSET_TRANSFER_SIGNING_SCHEMA_VERSION: u64 = 2;
+const NNI_ASSET_TRANSFER_MEMO_MAX_BYTES: usize = 256;
 
 #[derive(Debug, Deserialize)]
 struct NniAssetTransferRequest {
     asset: String,
     amount: String,
     to_asset_owner_pubkey: String,
+    #[serde(default)]
+    memo: String,
     #[serde(default)]
     authorization_mode: Option<String>,
     #[serde(default)]
@@ -22,6 +25,8 @@ struct NniAssetTransferRemoteRequest {
     client_user_key: String,
     asset: String,
     amount: String,
+    signing_payload_schema_version: u64,
+    memo: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -87,6 +92,13 @@ async fn nni_asset_transfer(
             )
         }
     };
+    if request.memo.len() > NNI_ASSET_TRANSFER_MEMO_MAX_BYTES {
+        return nni_join_error(
+            StatusCode::BAD_REQUEST,
+            "nni_asset_transfer_memo_too_long",
+            json!({"status": "asset_transfer_invalid"}),
+        );
+    }
     let authorization_mode =
         match normalize_asset_transfer_authorization_mode(request.authorization_mode.as_deref()) {
             Ok(value) => value,
@@ -193,6 +205,8 @@ async fn nni_asset_transfer(
             client_user_key: identity.user_key.clone(),
             asset: asset.to_string(),
             amount: amount.clone(),
+            signing_payload_schema_version: NNI_ASSET_TRANSFER_SIGNING_SCHEMA_VERSION,
+            memo: request.memo.clone(),
         };
         match execute_nni_asset_transfer_for_node(
             &state,
@@ -203,6 +217,7 @@ async fn nni_asset_transfer(
             authorization_mode,
             asset,
             &amount_units,
+            &request.memo,
             &remote_request,
             owner_private_key.as_deref_mut(),
         )
@@ -250,6 +265,7 @@ async fn execute_nni_asset_transfer_for_node(
     authorization_mode: &str,
     asset: &str,
     amount_units: &str,
+    memo: &str,
     request: &NniAssetTransferRemoteRequest,
     owner_private_key: Option<&mut String>,
 ) -> Result<Value, Value> {
@@ -304,6 +320,7 @@ async fn execute_nni_asset_transfer_for_node(
         authorization_mode,
         asset,
         amount_units,
+        memo,
     )
     .map_err(|error| json!({"node_url": node_url, "error_code": error, "terminal": true}))?;
 
@@ -413,6 +430,7 @@ fn validate_asset_transfer_signing_payload(
     expected_authorization_mode: &str,
     expected_asset: &str,
     expected_amount_units: &str,
+    expected_memo: &str,
 ) -> Result<ValidatedAssetTransferPayload, &'static str> {
     let signing_payload = response
         .get("signing_payload")
@@ -439,6 +457,7 @@ fn validate_asset_transfer_signing_payload(
         "authorization_mode",
         "asset",
         "amount_units",
+        "memo",
         "nonce",
         "expires_at_unix",
     ]);
@@ -472,6 +491,8 @@ fn validate_asset_transfer_signing_payload(
             != Some(expected_authorization_mode)
         || payload.get("asset").and_then(Value::as_str) != Some(expected_asset)
         || payload.get("amount_units").and_then(Value::as_str) != Some(expected_amount_units)
+        || payload.get("memo").and_then(Value::as_str) != Some(expected_memo)
+        || expected_memo.len() > NNI_ASSET_TRANSFER_MEMO_MAX_BYTES
     {
         return Err("nni_asset_transfer_signing_payload_binding_invalid");
     }
@@ -485,6 +506,7 @@ fn validate_asset_transfer_signing_payload(
         "authorization_mode",
         "asset",
         "amount_units",
+        "memo",
         "expires_at_unix",
     ] {
         if payload.get(field) != response.get(field) {
@@ -566,7 +588,7 @@ mod nni_asset_transfer_tests {
         let recipient = generate_nni_owner_key_pair();
         let expires = current_unix_ts() + 120;
         let payload = json!({
-            "schema_version": 1,
+            "schema_version": 2,
             "action": "nni_asset_transfer",
             "server_identity": "nni-server-v1",
             "transfer_id": "asset-transfer-test",
@@ -578,6 +600,7 @@ mod nni_asset_transfer_tests {
             "authorization_mode": "delegated_hardware",
             "asset": "AIC",
             "amount_units": "100000000",
+            "memo": "device order #42",
             "nonce": "bb".repeat(16),
             "expires_at_unix": expires,
         })
@@ -593,6 +616,7 @@ mod nni_asset_transfer_tests {
             "authorization_mode": "delegated_hardware",
             "asset": "AIC",
             "amount_units": "100000000",
+            "memo": "device order #42",
             "expires_at_unix": expires,
             "signing_payload": payload,
             "signing_payload_digest": digest,
@@ -605,6 +629,7 @@ mod nni_asset_transfer_tests {
             "delegated_hardware",
             "AIC",
             "100000000",
+            "device order #42",
         )
         .is_ok());
     }
@@ -616,7 +641,7 @@ mod nni_asset_transfer_tests {
         let other = generate_nni_owner_key_pair();
         let expires = current_unix_ts() + 120;
         let payload = json!({
-            "schema_version": 1,
+            "schema_version": 2,
             "action": "nni_asset_transfer",
             "server_identity": "nni-server-v1",
             "transfer_id": "asset-transfer-test",
@@ -628,6 +653,7 @@ mod nni_asset_transfer_tests {
             "authorization_mode": "delegated_hardware",
             "asset": "USD",
             "amount_units": "100000000",
+            "memo": "invoice-7",
             "nonce": "bb".repeat(16),
             "expires_at_unix": expires,
         })
@@ -642,6 +668,7 @@ mod nni_asset_transfer_tests {
             "authorization_mode": "delegated_hardware",
             "asset": "USD",
             "amount_units": "100000000",
+            "memo": "invoice-7",
             "expires_at_unix": expires,
             "signing_payload_digest": format!("{:x}", Sha256::digest(payload.as_bytes())),
             "signing_payload": payload,
@@ -655,6 +682,7 @@ mod nni_asset_transfer_tests {
                 "delegated_hardware",
                 "USD",
                 "100000000",
+                "invoice-7",
             )
             .unwrap_err(),
             "nni_asset_transfer_signing_payload_binding_invalid",
@@ -668,6 +696,21 @@ mod nni_asset_transfer_tests {
                 "delegated_hardware",
                 "USD",
                 "200000000",
+                "invoice-7",
+            )
+            .unwrap_err(),
+            "nni_asset_transfer_signing_payload_binding_invalid",
+        );
+        assert_eq!(
+            validate_asset_transfer_signing_payload(
+                &response,
+                Some(&"aa".repeat(64)),
+                response["from_asset_owner_pubkey"].as_str().unwrap(),
+                response["to_asset_owner_pubkey"].as_str().unwrap(),
+                "delegated_hardware",
+                "USD",
+                "100000000",
+                "invoice-8",
             )
             .unwrap_err(),
             "nni_asset_transfer_signing_payload_binding_invalid",
