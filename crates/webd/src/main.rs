@@ -12,6 +12,7 @@ use axum::body::{to_bytes, Body};
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::header::{self, HeaderMap, HeaderName, HeaderValue};
 use axum::http::StatusCode;
+use axum::middleware;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get, get_service, post};
 use axum::Json;
@@ -66,6 +67,8 @@ struct LoginAttemptEntry {
 
 const LOGIN_ATTEMPT_RETENTION_SECS: u64 = 60 * 60;
 const MAX_LOGIN_ATTEMPT_KEYS: usize = 10_000;
+const MAX_LOGIN_USERNAME_BYTES: usize = 128;
+const MAX_LOGIN_PASSWORD_BYTES: usize = 1024;
 
 fn now_unix_secs() -> u64 {
     SystemTime::now()
@@ -108,10 +111,8 @@ async fn main() -> anyhow::Result<()> {
         .build()
         .context("build long-running reqwest client failed")?;
 
-    let upstream = config.webd.upstream.trim().to_string();
-    if upstream.is_empty() {
-        anyhow::bail!("[webd].upstream is empty");
-    }
+    let upstream = normalize_loopback_upstream(&config.webd.upstream)
+        .map_err(|error| anyhow::anyhow!("invalid [webd].upstream: {error}"))?;
 
     let session_store_path = PathBuf::from(config.webd.session_store_path.trim());
     let restored_sessions = match session_store::load_sessions(&session_store_path, now_unix_secs())
@@ -192,6 +193,12 @@ fn build_webd_router(state: AppState, ui_dist_dir: PathBuf) -> Router {
         .route("/v1/*path", any(proxy_handler))
         .fallback_service(ui_service)
         .with_state(state)
+        .layer(middleware::map_response(add_security_headers_to_response))
+}
+
+async fn add_security_headers_to_response(mut response: Response) -> Response {
+    apply_security_headers(&mut response);
+    response
 }
 
 fn resolve_ui_dist_dir() -> PathBuf {
@@ -214,8 +221,20 @@ async fn webd_login(
     headers: HeaderMap,
     Json(body): Json<WebdLoginBody>,
 ) -> impl IntoResponse {
-    let origin = cors_allow_origin_from_headers(&headers);
+    let origin = match require_valid_origin(&headers) {
+        Ok(Some(origin)) => Some(origin),
+        Ok(None) | Err(()) => {
+            return webd_error_response(StatusCode::FORBIDDEN, "webd_origin_required", None);
+        }
+    };
     let secure_cookie = request_uses_https(&headers, client_addr, state.forward_x_forwarded);
+    if !valid_login_input(&body.username, &body.password) {
+        return webd_error_response(
+            StatusCode::BAD_REQUEST,
+            "webd_login_input_invalid",
+            origin.as_ref(),
+        );
+    }
     let attempt_key = LoginAttemptKey {
         client_ip: login_client_ip(&headers, client_addr, state.forward_x_forwarded),
         username: body.username.trim().to_lowercase(),
@@ -449,7 +468,12 @@ async fn webd_logout(
     ConnectInfo(client_addr): ConnectInfo<SocketAddr>,
     req: Request,
 ) -> impl IntoResponse {
-    let origin = cors_allow_origin_from_headers(req.headers());
+    let origin = match require_valid_origin(req.headers()) {
+        Ok(Some(origin)) => Some(origin),
+        Ok(None) | Err(()) => {
+            return webd_error_response(StatusCode::FORBIDDEN, "webd_origin_required", None);
+        }
+    };
     let secure_cookie = request_uses_https(req.headers(), client_addr, state.forward_x_forwarded);
     if let Some(sid) = extract_session_id(req.headers(), &state.cookie_name) {
         let mut guard = state.sessions.lock().expect("sessions mutex");
@@ -470,7 +494,12 @@ async fn webd_logout(
 }
 
 async fn webd_session(State(state): State<AppState>, req: Request) -> impl IntoResponse {
-    let origin = cors_allow_origin_from_headers(req.headers());
+    let origin = match require_valid_origin(req.headers()) {
+        Ok(origin) => origin,
+        Err(()) => {
+            return webd_error_response(StatusCode::FORBIDDEN, "webd_origin_not_allowed", None);
+        }
+    };
     let logged_in = session_user_key(&state, req.headers()).is_some();
     with_cors(
         Json(json!({ "ok": true, "data": { "logged_in": logged_in } })).into_response(),
@@ -479,7 +508,12 @@ async fn webd_session(State(state): State<AppState>, req: Request) -> impl IntoR
 }
 
 async fn webd_options(headers: HeaderMap) -> impl IntoResponse {
-    let origin = cors_allow_origin_from_headers(&headers);
+    let origin = match require_valid_origin(&headers) {
+        Ok(Some(origin)) => Some(origin),
+        Ok(None) | Err(()) => {
+            return webd_error_response(StatusCode::FORBIDDEN, "webd_origin_not_allowed", None);
+        }
+    };
     let mut res = Response::builder()
         .status(StatusCode::NO_CONTENT)
         .body(Body::empty())
@@ -552,10 +586,18 @@ async fn proxy_handler(
 }
 
 async fn proxy_inner(state: AppState, client_addr: SocketAddr, req: Request) -> Response {
+    if is_internal_upstream_path(req.uri().path()) {
+        return webd_error_response(StatusCode::NOT_FOUND, "webd_route_not_found", None);
+    }
     if req.method() == axum::http::Method::OPTIONS {
         return webd_options(req.headers().clone()).await.into_response();
     }
-    let origin = cors_allow_origin_from_headers(req.headers());
+    let origin = match require_valid_origin(req.headers()) {
+        Ok(origin) => origin,
+        Err(()) => {
+            return webd_error_response(StatusCode::FORBIDDEN, "webd_origin_not_allowed", None);
+        }
+    };
     let method = req.method().clone();
     let path_and_query = req
         .uri()
@@ -567,6 +609,9 @@ async fn proxy_inner(state: AppState, client_addr: SocketAddr, req: Request) -> 
     let full_url = format!("{}{}", base, path_and_query);
 
     let session_key = session_user_key(&state, req.headers());
+    if session_key.is_some() && method_is_unsafe(&method) && origin.is_none() {
+        return webd_error_response(StatusCode::FORBIDDEN, "webd_origin_required", None);
+    }
 
     let incoming_headers = req.headers();
     let upstream_host = match upstream_host_header(&state.upstream) {
@@ -648,6 +693,18 @@ async fn proxy_inner(state: AppState, client_addr: SocketAddr, req: Request) -> 
     }
 }
 
+fn is_internal_upstream_path(path: &str) -> bool {
+    path == "/v1/internal" || path.starts_with("/v1/internal/")
+}
+
+fn valid_login_input(username: &str, password: &str) -> bool {
+    let username = username.trim();
+    !username.is_empty()
+        && username.len() <= MAX_LOGIN_USERNAME_BYTES
+        && !password.is_empty()
+        && password.len() <= MAX_LOGIN_PASSWORD_BYTES
+}
+
 fn uses_long_running_upstream_wait(method: &axum::http::Method, path_and_query: &str) -> bool {
     let path = path_and_query.split('?').next().unwrap_or(path_and_query);
     if *method == axum::http::Method::POST && path == "/v1/skills/store/install" {
@@ -695,7 +752,26 @@ fn cors_allow_origin_from_headers(headers: &HeaderMap) -> Option<HeaderValue> {
     if origin_url.host_str()? != request_url.host_str()? {
         return None;
     }
+    match request_url.port() {
+        Some(port) if origin_url.port_or_known_default() != Some(port) => return None,
+        None if origin_url.port().is_some() => return None,
+        _ => {}
+    }
     Some(origin.clone())
+}
+
+fn require_valid_origin(headers: &HeaderMap) -> Result<Option<HeaderValue>, ()> {
+    if !headers.contains_key(header::ORIGIN) {
+        return Ok(None);
+    }
+    cors_allow_origin_from_headers(headers).map(Some).ok_or(())
+}
+
+fn method_is_unsafe(method: &axum::http::Method) -> bool {
+    !matches!(
+        *method,
+        axum::http::Method::GET | axum::http::Method::HEAD | axum::http::Method::OPTIONS
+    )
 }
 
 fn webd_error_response(
@@ -763,7 +839,61 @@ fn with_cors(mut response: Response, origin: Option<&HeaderValue>) -> Response {
             .headers_mut()
             .append(header::VARY, HeaderValue::from_static("Origin"));
     }
+    apply_security_headers(&mut response);
     response
+}
+
+fn apply_security_headers(response: &mut Response) {
+    let headers = response.headers_mut();
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    headers.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("no-referrer"),
+    );
+    headers.insert(
+        HeaderName::from_static("permissions-policy"),
+        HeaderValue::from_static("camera=(), geolocation=(), microphone=(self)"),
+    );
+    headers.insert(
+        HeaderName::from_static("content-security-policy"),
+        HeaderValue::from_static(
+            "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:",
+        ),
+    );
+}
+
+fn normalize_loopback_upstream(raw: &str) -> Result<String, &'static str> {
+    let url = reqwest::Url::parse(raw.trim()).map_err(|_| "invalid URL")?;
+    if url.scheme() != "http" {
+        return Err("scheme must be http");
+    }
+    if !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err("credentials, query, and fragment are forbidden");
+    }
+    if url.path() != "/" && !url.path().is_empty() {
+        return Err("path must be empty");
+    }
+    let host = url.host_str().ok_or("host is required")?;
+    let address = host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse::<IpAddr>()
+        .map_err(|_| "host must be a loopback IP literal")?;
+    if !address.is_loopback() {
+        return Err("host must be loopback");
+    }
+    if url.port().is_none() {
+        return Err("an explicit upstream port is required");
+    }
+    Ok(url.as_str().trim_end_matches('/').to_string())
 }
 
 fn upstream_host_header(upstream: &str) -> Result<String, &'static str> {

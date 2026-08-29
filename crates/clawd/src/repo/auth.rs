@@ -68,9 +68,21 @@ fn map_pending_channel_bind_session(
 }
 
 const DEFAULT_WEBD_USERNAME: &str = "admin";
-const DEFAULT_WEBD_PASSWORD: &str = "123456";
 
-pub(crate) fn ensure_bootstrap_admin_key(db: &Connection) -> anyhow::Result<Option<String>> {
+#[derive(Debug, Clone)]
+pub(crate) struct BootstrapAdminResult {
+    pub(crate) admin_user_key: Option<String>,
+    pub(crate) webd_username: Option<String>,
+    pub(crate) webd_password: Option<String>,
+}
+
+fn generate_webd_password() -> String {
+    format!("pw-{}", uuid::Uuid::new_v4().simple())
+}
+
+pub(crate) fn ensure_bootstrap_admin_key(
+    db: &Connection,
+) -> anyhow::Result<Option<BootstrapAdminResult>> {
     super::principal_ownership::ensure_principal_ownership_schema(db)?;
     let existing_count: i64 =
         db.query_row("SELECT COUNT(*) FROM auth_keys", [], |row| row.get(0))?;
@@ -86,14 +98,23 @@ pub(crate) fn ensure_bootstrap_admin_key(db: &Connection) -> anyhow::Result<Opti
         auth_principal::create_principal_for_auth_key(db, &user_key, "admin")?;
         Some(user_key)
     };
-    ensure_default_webd_admin_login(db, bootstrap_key.as_deref())?;
-    Ok(bootstrap_key)
+    let webd_password = ensure_default_webd_admin_login(db, bootstrap_key.as_deref())?;
+    if bootstrap_key.is_none() && webd_password.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(BootstrapAdminResult {
+        admin_user_key: bootstrap_key,
+        webd_username: webd_password
+            .as_ref()
+            .map(|_| DEFAULT_WEBD_USERNAME.to_string()),
+        webd_password,
+    }))
 }
 
 fn ensure_default_webd_admin_login(
     db: &Connection,
     preferred_admin_key: Option<&str>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Option<String>> {
     let existing_login: bool = db
         .query_row(
             "SELECT 1 FROM webd_login_accounts WHERE username = ?1 LIMIT 1",
@@ -103,7 +124,7 @@ fn ensure_default_webd_admin_login(
         .optional()?
         .is_some();
     if existing_login {
-        return Ok(());
+        return Ok(None);
     }
 
     let admin_key = match preferred_admin_key {
@@ -121,10 +142,11 @@ fn ensure_default_webd_admin_login(
             .unwrap_or_default(),
     };
     if admin_key.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
 
-    let password_hash = auth_webd::hash_password_for_webd_login(DEFAULT_WEBD_PASSWORD)?;
+    let password = generate_webd_password();
+    let password_hash = auth_webd::hash_password_for_webd_login(&password)?;
     let now = now_ts();
     db.execute(
         "INSERT INTO webd_login_accounts (username, password_hash, user_key, principal_id, enabled, created_at, updated_at)
@@ -133,7 +155,7 @@ fn ensure_default_webd_admin_login(
          ON CONFLICT(username) DO NOTHING",
         params![DEFAULT_WEBD_USERNAME, password_hash, admin_key, now],
     )?;
-    Ok(())
+    Ok(Some(password))
 }
 
 pub(crate) struct AuthKeyListRow {
@@ -150,6 +172,7 @@ pub(crate) struct AuthKeyListRow {
 #[derive(Debug, Clone)]
 pub(crate) struct FactoryResetDbResult {
     pub(crate) admin_user_key: String,
+    pub(crate) webd_password: String,
     pub(crate) auth_keys_deleted: usize,
     pub(crate) webd_accounts_deleted: usize,
     pub(crate) channel_bindings_deleted: usize,
@@ -257,7 +280,8 @@ fn clear_audit_logs_if_exists(audit_db: &DbPool) -> anyhow::Result<usize> {
 
 pub(crate) fn factory_reset_auth_state(state: &AppState) -> anyhow::Result<FactoryResetDbResult> {
     let admin_user_key = generate_user_key();
-    let password_hash = auth_webd::hash_password_for_webd_login(DEFAULT_WEBD_PASSWORD)?;
+    let webd_password = generate_webd_password();
+    let password_hash = auth_webd::hash_password_for_webd_login(&webd_password)?;
     let now = now_ts();
     let mut db = state
         .core
@@ -319,6 +343,7 @@ pub(crate) fn factory_reset_auth_state(state: &AppState) -> anyhow::Result<Facto
 
     Ok(FactoryResetDbResult {
         admin_user_key,
+        webd_password,
         auth_keys_deleted,
         webd_accounts_deleted,
         channel_bindings_deleted,

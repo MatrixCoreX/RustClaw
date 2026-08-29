@@ -118,7 +118,7 @@ export function FactoryResetModal({
                 t("清空配置里的 key/token/secret/password", "Clear key/token/secret/password fields in configs"),
                 t("删除其它用户 key 与绑定", "Delete other user keys and bindings"),
                 t("重置 admin key", "Reset the admin key"),
-                t("用户名重置为 admin，密码重置为 123456", "Reset username to admin and password to 123456"),
+                t("用户名重置为 admin，并生成新的随机密码", "Reset username to admin and generate a new random password"),
               ].map((item) => (
                 <div key={item} className="flex items-start gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2">
                   <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-200" />

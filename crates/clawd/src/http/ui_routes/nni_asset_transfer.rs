@@ -148,7 +148,7 @@ async fn query_nni_asset_transfer_history_for_node(
     let per_page = NNI_ASSET_TRANSFER_HISTORY_REMOTE_PAGE_SIZE.to_string();
     let response = state
         .core
-        .http_client
+        .public_http_client
         .get(endpoint)
         .query(&[("address", owner_pubkey), ("per_page", per_page.as_str())])
         .timeout(nni_remote_api_timeout())
@@ -596,7 +596,7 @@ async fn execute_nni_asset_transfer_for_node(
 ) -> Result<Value, Value> {
     let response = state
         .core
-        .http_client
+        .public_http_client
         .post(nni_remote_api_endpoint(node_url, "assets/transfer/request"))
         .timeout(nni_remote_api_timeout())
         .json(request)
@@ -714,7 +714,7 @@ async fn execute_nni_asset_transfer_for_node(
     for attempt in 0..2 {
         let response = match state
             .core
-            .http_client
+            .public_http_client
             .post(nni_remote_api_endpoint(node_url, "assets/transfer/verify"))
             .timeout(nni_remote_api_timeout())
             .json(&verify_request)

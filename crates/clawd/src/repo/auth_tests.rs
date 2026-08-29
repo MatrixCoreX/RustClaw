@@ -386,12 +386,14 @@ fn ensure_bootstrap_admin_key_creates_default_webd_login_for_empty_db() {
     db.execute_batch(crate::WEBD_LOGIN_SQL)
         .expect("create webd login schema");
 
-    let created_key = ensure_bootstrap_admin_key(&db)
+    let created = ensure_bootstrap_admin_key(&db)
         .expect("bootstrap admin key")
-        .expect("created key");
+        .expect("created credentials");
+    let created_key = created.admin_user_key.expect("created key");
+    let created_password = created.webd_password.expect("created password");
 
-    let login_key =
-        verify_webd_password_login(&db, "admin", "123456").expect("verify default webd login");
+    let login_key = verify_webd_password_login(&db, "admin", &created_password)
+        .expect("verify generated webd login");
     assert_eq!(login_key.as_deref(), Some(created_key.as_str()));
 }
 
@@ -409,11 +411,20 @@ fn ensure_bootstrap_admin_key_backfills_default_webd_login_for_existing_admin() 
     )
     .expect("insert existing admin key");
 
-    let created_key = ensure_bootstrap_admin_key(&db).expect("bootstrap admin key");
+    let created = ensure_bootstrap_admin_key(&db)
+        .expect("bootstrap admin key")
+        .expect("backfilled credentials");
 
-    assert_eq!(created_key, None);
-    let login_key =
-        verify_webd_password_login(&db, "admin", "123456").expect("verify default webd login");
+    assert_eq!(created.admin_user_key, None);
+    let login_key = verify_webd_password_login(
+        &db,
+        "admin",
+        created
+            .webd_password
+            .as_deref()
+            .expect("generated password"),
+    )
+    .expect("verify generated webd login");
     assert_eq!(login_key.as_deref(), Some("rk-existing-admin"));
 }
 
@@ -603,6 +614,12 @@ fn factory_reset_clears_skill_owned_data_and_recreates_one_admin() {
         .expect("admin after reset");
     assert_eq!(count, 1);
     assert_eq!(admin_key, result.admin_user_key);
+    assert_eq!(
+        verify_webd_password_login(&db, "admin", &result.webd_password)
+            .expect("verify reset login")
+            .as_deref(),
+        Some(result.admin_user_key.as_str())
+    );
 }
 
 #[test]
@@ -757,8 +774,10 @@ fn upsert_webd_login_account_replaces_previous_username_for_same_key() {
     )
     .expect("insert auth key");
 
-    upsert_webd_login_account(&db, "alice", "pw-1", "rk-user-1").expect("create first username");
-    upsert_webd_login_account(&db, "alice_new", "pw-2", "rk-user-1").expect("replace username");
+    upsert_webd_login_account(&db, "alice", "password-one", "rk-user-1")
+        .expect("create first username");
+    upsert_webd_login_account(&db, "alice_new", "password-two", "rk-user-1")
+        .expect("replace username");
 
     let usernames: Vec<String> = db
         .prepare("SELECT username FROM webd_login_accounts ORDER BY username")
@@ -769,7 +788,7 @@ fn upsert_webd_login_account_replaces_previous_username_for_same_key() {
         .collect();
     assert_eq!(usernames, vec!["alice_new".to_string()]);
     assert_eq!(
-        verify_webd_password_login(&db, "alice_new", "pw-2").expect("verify login"),
+        verify_webd_password_login(&db, "alice_new", "password-two").expect("verify login"),
         Some("rk-user-1".to_string())
     );
 }
@@ -803,8 +822,9 @@ fn upsert_webd_login_account_rejects_username_used_by_another_key() {
     )
     .expect("insert second auth key");
 
-    upsert_webd_login_account(&db, "alice", "pw-1", "rk-user-1").expect("create first username");
-    let err = upsert_webd_login_account(&db, "alice", "pw-2", "rk-user-2")
+    upsert_webd_login_account(&db, "alice", "password-one", "rk-user-1")
+        .expect("create first username");
+    let err = upsert_webd_login_account(&db, "alice", "password-two", "rk-user-2")
         .expect_err("reject duplicate username");
     assert!(
         err.to_string().contains("username already assigned"),

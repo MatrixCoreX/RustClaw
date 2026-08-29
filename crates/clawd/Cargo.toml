@@ -40,7 +40,6 @@ k256.workspace = true
 ripemd.workspace = true
 zeroize.workspace = true
 libc.workspace = true
-tower-http = { version = "0.6", features = ["cors"] }
 regex = "1"
 argon2 = "0.5"
 proc-macro2.workspace = true

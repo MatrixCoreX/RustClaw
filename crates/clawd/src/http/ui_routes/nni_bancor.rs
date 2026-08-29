@@ -373,7 +373,7 @@ async fn nni_financial_market(
         let endpoint = nni_remote_api_endpoint(node_url, "bancor/market");
         match state
             .core
-            .http_client
+            .public_http_client
             .get(&endpoint)
             .timeout(nni_remote_api_timeout())
             .send()
@@ -480,7 +480,7 @@ async fn nni_bancor_candles(
         }
         let mut request = state
             .core
-            .http_client
+            .public_http_client
             .get(&endpoint)
             .timeout(nni_remote_api_timeout());
         if let Some(if_none_match) = headers
@@ -619,7 +619,7 @@ async fn nni_bancor_market_trades(
         let endpoint = nni_remote_api_endpoint(node_url, "bancor/trades");
         match state
             .core
-            .http_client
+            .public_http_client
             .get(&endpoint)
             .timeout(nni_remote_api_timeout())
             .send()
@@ -739,7 +739,7 @@ async fn nni_bancor_quote(
     let mut attempts = Vec::new();
     for node_url in nni_bancor_service_remote_nodes(&config) {
         let endpoint = nni_remote_api_endpoint(node_url, "bancor/quote");
-        match state.core.http_client.post(&endpoint)
+        match state.core.public_http_client.post(&endpoint)
             .timeout(nni_remote_api_timeout())
             .json(&request).send().await
         {
@@ -872,7 +872,7 @@ async fn query_nni_bancor_account_for_node(
     page: usize,
     per_page: usize,
 ) -> Result<Value, Value> {
-    let request_response = state.core.http_client
+    let request_response = state.core.public_http_client
         .post(nni_remote_api_endpoint(node_url, "bancor/account/request"))
         .timeout(nni_remote_api_timeout())
         .json(&NniBancorAuthenticatedRequest {
@@ -907,7 +907,7 @@ async fn query_nni_bancor_account_for_node(
         "signature",
         "nni_bancor_account_signature_missing",
     )?;
-    let response = state.core.http_client
+    let response = state.core.public_http_client
         .post(nni_remote_api_endpoint(node_url, "bancor/account/verify"))
         .timeout(nni_remote_api_timeout())
         .json(&NniBancorAccountVerifyRequest { task_id, signature, page, per_page })
@@ -1146,7 +1146,7 @@ async fn execute_nni_bancor_trade_for_node(
     request: &NniBancorTradeRemoteRequest,
     owner_private_key: Option<&mut String>,
 ) -> Result<Value, Value> {
-    let response = state.core.http_client
+    let response = state.core.public_http_client
         .post(nni_remote_api_endpoint(node_url, "bancor/trade/request"))
         .timeout(nni_remote_api_timeout())
         .json(request).send().await
@@ -1222,7 +1222,7 @@ async fn execute_nni_bancor_trade_for_node(
     };
     let response = state
         .core
-        .http_client
+        .public_http_client
         .post(nni_remote_api_endpoint(node_url, "bancor/trade/verify"))
         .timeout(nni_remote_api_timeout())
         .json(&NniBancorTradeVerifyRequest {

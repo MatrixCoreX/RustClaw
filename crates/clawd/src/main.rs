@@ -15,7 +15,6 @@ use reqwest::Client;
 use serde::Serialize;
 use serde_json::json;
 use tokio::sync::Semaphore;
-use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -82,6 +81,7 @@ mod process_sandbox;
 mod prompt_budget;
 mod prompt_utils;
 mod providers;
+mod public_http_client;
 mod read_range_utils;
 mod remote_executor_admission;
 mod remote_executor_contract;
@@ -194,8 +194,8 @@ pub(crate) use repo::{
     stable_i64_from_key, store_pending_channel_request, submit_task_audit_detail,
     task_count_by_status, task_count_by_status_for_user, task_kind_name, update_auth_key_by_id,
     upsert_exchange_credential_for_user_key, upsert_webd_login_account, verify_webd_password_login,
-    FactoryResetDbResult, PendingChannelBindSession, SubmitTaskAccessError, SubmitTaskContextError,
-    SubmitTaskLimitError, TaskAdminTarget, TaskViewerAccessError,
+    BootstrapAdminResult, FactoryResetDbResult, PendingChannelBindSession, SubmitTaskAccessError,
+    SubmitTaskContextError, SubmitTaskLimitError, TaskAdminTarget, TaskViewerAccessError,
 };
 use repo::{ensure_bootstrap_admin_key, ensure_key_auth_schema, seed_channel_bindings};
 #[cfg(test)]
@@ -273,6 +273,79 @@ const MIN_TOKIO_WORKER_STACK_BYTES: usize = 2 * 1024 * 1024;
 const MAX_TOKIO_WORKER_STACK_BYTES: usize = 64 * 1024 * 1024;
 const DEFAULT_AGENT_ID: &str = "main";
 
+fn write_bootstrap_credentials(
+    workspace_root: &std::path::Path,
+    credentials: &BootstrapAdminResult,
+) -> anyhow::Result<std::path::PathBuf> {
+    use std::io::Write;
+
+    let data_dir = workspace_root.join("data");
+    std::fs::create_dir_all(&data_dir)?;
+    let destination = data_dir.join("bootstrap-credentials.txt");
+    let temporary = data_dir.join(format!(
+        ".bootstrap-credentials.{}.tmp",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let mut options = std::fs::OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&temporary)?;
+    if let Some(user_key) = credentials.admin_user_key.as_deref() {
+        writeln!(file, "admin_key={user_key}")?;
+    }
+    if let Some(username) = credentials.webd_username.as_deref() {
+        writeln!(file, "username={username}")?;
+    }
+    if let Some(password) = credentials.webd_password.as_deref() {
+        writeln!(file, "password={password}")?;
+    }
+    file.sync_all()?;
+    drop(file);
+    std::fs::rename(&temporary, &destination)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&destination, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(destination)
+}
+
+#[cfg(test)]
+mod bootstrap_credentials_tests {
+    use super::*;
+
+    #[test]
+    fn bootstrap_credentials_are_written_to_a_private_file() {
+        let root = std::env::temp_dir().join(format!(
+            "agent-bootstrap-credentials-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&root).expect("create fixture root");
+        let result = BootstrapAdminResult {
+            admin_user_key: Some("rk-test-value".to_string()),
+            webd_username: Some("admin".to_string()),
+            webd_password: Some("pw-test-value".to_string()),
+        };
+        let path = write_bootstrap_credentials(&root, &result).expect("write credentials");
+        let text = std::fs::read_to_string(&path).expect("read credentials");
+        assert!(text.contains("admin_key=rk-test-value"));
+        assert!(text.contains("password=pw-test-value"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        std::fs::remove_dir_all(root).expect("remove fixture root");
+    }
+}
+
 /// 统一错误响应，避免重复手写 (StatusCode, Json(ApiResponse)).
 fn api_err<T: Serialize>(
     status: StatusCode,
@@ -304,27 +377,6 @@ pub(crate) fn auth_key_from_headers(headers: &HeaderMap) -> Option<&str> {
     headers
         .get(claw_core::product_identity::AUTH_KEY_HEADER)
         .and_then(|value| value.to_str().ok())
-}
-
-fn api_cors_layer() -> CorsLayer {
-    let allowed_headers = vec![
-        axum::http::header::CONTENT_TYPE,
-        axum::http::header::IF_NONE_MATCH,
-        axum::http::HeaderName::from_static("last-event-id"),
-        axum::http::HeaderName::from_static(claw_core::product_identity::AUTH_KEY_HEADER),
-        axum::http::HeaderName::from_static(claw_core::product_identity::CLIENT_ORIGIN_HEADER),
-    ];
-    CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods([
-            axum::http::Method::GET,
-            axum::http::Method::POST,
-            axum::http::Method::PUT,
-            axum::http::Method::DELETE,
-            axum::http::Method::OPTIONS,
-        ])
-        .allow_headers(allowed_headers)
-        .expose_headers([axum::http::header::ETAG])
 }
 
 fn resolve_startup_config_path_from<I>(
@@ -532,7 +584,7 @@ async fn run() -> anyhow::Result<()> {
             memory::indexing::rebuild_retrieval_index(&db, &config.memory)?;
         }
     }
-    let bootstrap_admin_key = {
+    let bootstrap_admin = {
         let db = db_pool
             .get()
             .map_err(|e| anyhow::anyhow!("get db conn: {e}"))?;
@@ -545,17 +597,17 @@ async fn run() -> anyhow::Result<()> {
         &config.database,
         &db_pool,
     )?);
-    if let Some(user_key) = bootstrap_admin_key.as_deref() {
+    if let Some(credentials) = bootstrap_admin.as_ref() {
+        let credential_path = write_bootstrap_credentials(&workspace_root, credentials)?;
         warn!("============================================================");
-        warn!("No auth key found in database. Generated initial admin key.");
-        warn!("Initial admin key: {}", user_key);
-        warn!("Default web login: username=admin password=123456");
-        warn!("Please save it now and use it to bind UI / Telegram / WhatsApp.");
+        warn!("New bootstrap credentials were generated.");
+        warn!(path = %credential_path.display(), "Read them from the protected local file");
+        warn!("Delete that file after the credentials are stored safely.");
         warn!("============================================================");
         eprintln!("============================================================");
-        eprintln!("Initial admin key: {}", user_key);
-        eprintln!("Default web login: username=admin password=123456");
-        eprintln!("Please save it now and use it to bind UI / Telegram / WhatsApp.");
+        eprintln!("New bootstrap credentials were generated.");
+        eprintln!("Read them from: {}", credential_path.display());
+        eprintln!("Delete that file after the credentials are stored safely.");
         eprintln!("============================================================");
     }
     let worker_id = format!("worker:{}", Uuid::new_v4());
@@ -924,6 +976,7 @@ async fn run() -> anyhow::Result<()> {
             agents_by_id: Arc::new(RwLock::new(Arc::new(agents_by_id))),
             agent_runtime_leases: Arc::new(RwLock::new(agent_runtime_leases)),
             http_client: Client::new(),
+            public_http_client: crate::public_http_client::build_public_http_client()?,
             skill_views_snapshot: Arc::new(RwLock::new(Arc::new(initial_skill_views))),
             active_provider_type,
             mcp_runtime,
@@ -1184,7 +1237,7 @@ async fn run() -> anyhow::Result<()> {
         )
         .with_state(state.clone());
 
-    let app = Router::new().nest("/v1", api).layer(api_cors_layer());
+    let app = Router::new().nest("/v1", api);
 
     let clawd_listen = clawd_internal_listen()?;
     let listener = tokio::net::TcpListener::bind(&clawd_listen).await?;

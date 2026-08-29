@@ -1,5 +1,4 @@
 const FACTORY_RESET_WEBD_USERNAME: &str = "admin";
-const FACTORY_RESET_WEBD_PASSWORD: &str = "123456";
 
 #[derive(Debug, Default, Serialize)]
 struct FactoryResetConfigScrubResult {
@@ -68,7 +67,7 @@ async fn factory_reset_handler(
                 },
                 "admin_user_key": db.admin_user_key,
                 "webd_username": FACTORY_RESET_WEBD_USERNAME,
-                "webd_password": FACTORY_RESET_WEBD_PASSWORD,
+                "webd_password": &db.webd_password,
                 "database": factory_reset_db_json(&db),
                 "config": config,
                 "logs": logs,

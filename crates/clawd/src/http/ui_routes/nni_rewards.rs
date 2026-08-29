@@ -318,7 +318,7 @@ async fn query_nni_network_stats_for_node(
     let endpoint = nni_remote_api_endpoint(node_url, "network-stats");
     let response = state
         .core
-        .http_client
+        .public_http_client
         .get(&endpoint)
         .timeout(nni_remote_api_timeout())
         .send()
@@ -450,7 +450,7 @@ async fn query_nni_rewards_for_node(
     let request_endpoint = nni_remote_api_endpoint(node_url, "rewards/request");
     let request_response = state
         .core
-        .http_client
+        .public_http_client
         .post(&request_endpoint)
         .timeout(nni_remote_api_timeout())
         .json(&NniRemoteRewardQueryRequest {
@@ -529,7 +529,7 @@ async fn query_nni_rewards_for_node(
     let verify_endpoint = nni_remote_api_endpoint(node_url, "rewards/verify");
     let verify_response = state
         .core
-        .http_client
+        .public_http_client
         .post(&verify_endpoint)
         .timeout(nni_remote_api_timeout())
         .json(&NniRemoteRewardQueryVerifyRequest {

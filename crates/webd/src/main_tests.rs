@@ -13,9 +13,11 @@ use tower::ServiceExt;
 
 use super::{
     build_outgoing_headers, build_webd_router, clear_login_failures,
-    cors_allow_origin_from_headers, login_client_ip, login_locked_response, login_retry_after,
-    proxy_inner, record_login_failure, request_uses_https, session_cookie_value,
-    uses_long_running_upstream_wait, webd_error_response, with_cors, AppState, LoginAttemptKey,
+    cors_allow_origin_from_headers, is_internal_upstream_path, login_client_ip,
+    login_locked_response, login_retry_after, normalize_loopback_upstream, proxy_inner,
+    record_login_failure, request_uses_https, session_cookie_value,
+    uses_long_running_upstream_wait, valid_login_input, webd_error_response, with_cors, AppState,
+    LoginAttemptKey,
 };
 
 fn login_test_state(failure_limit: u32, lockout_secs: u64) -> AppState {
@@ -61,6 +63,14 @@ async fn webd_serves_ui_assets_without_forwarding_them_to_clawd() {
             .and_then(|value| value.to_str().ok()),
         Some("no-store, max-age=0")
     );
+    assert_eq!(
+        response
+            .headers()
+            .get(header::X_FRAME_OPTIONS)
+            .and_then(|value| value.to_str().ok()),
+        Some("DENY")
+    );
+    assert!(response.headers().contains_key("content-security-policy"));
     let body = to_bytes(response.into_body(), 4096)
         .await
         .expect("read UI response");
@@ -311,19 +321,55 @@ fn credentialed_cors_is_limited_to_the_request_hostname() {
     headers.insert(header::HOST, HeaderValue::from_static("localhost:8788"));
     headers.insert(
         header::ORIGIN,
-        HeaderValue::from_static("http://localhost:3000"),
+        HeaderValue::from_static("http://localhost:8788"),
     );
     assert_eq!(
         cors_allow_origin_from_headers(&headers)
             .and_then(|value| value.to_str().ok().map(str::to_string)),
-        Some("http://localhost:3000".to_string())
+        Some("http://localhost:8788".to_string())
     );
+
+    headers.insert(
+        header::ORIGIN,
+        HeaderValue::from_static("http://localhost:3000"),
+    );
+    assert!(cors_allow_origin_from_headers(&headers).is_none());
 
     headers.insert(
         header::ORIGIN,
         HeaderValue::from_static("https://untrusted.example"),
     );
     assert!(cors_allow_origin_from_headers(&headers).is_none());
+}
+
+#[tokio::test]
+async fn proxy_rejects_a_present_cross_origin_before_contacting_upstream() {
+    let mut request = Request::builder()
+        .method(Method::POST)
+        .uri("/v1/tasks")
+        .header(header::HOST, "localhost:8788")
+        .header(header::ORIGIN, "https://untrusted.example")
+        .body(Body::empty())
+        .expect("request");
+    request
+        .extensions_mut()
+        .insert(axum::extract::ConnectInfo(SocketAddr::from((
+            [127, 0, 0, 1],
+            41009,
+        ))));
+
+    let response = proxy_inner(
+        login_test_state(6, 900),
+        SocketAddr::from(([127, 0, 0, 1], 41009)),
+        request,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body = to_bytes(response.into_body(), 2048)
+        .await
+        .expect("read forbidden response");
+    let payload: serde_json::Value = serde_json::from_slice(&body).expect("JSON response");
+    assert_eq!(payload["data"]["error_code"], "webd_origin_not_allowed");
 }
 
 #[test]
@@ -343,6 +389,54 @@ fn credentialed_cors_preserves_upstream_vary_dimensions() {
         .filter_map(|value| value.to_str().ok())
         .collect::<Vec<_>>();
     assert_eq!(vary, vec!["Accept-Encoding", "Origin"]);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::X_FRAME_OPTIONS)
+            .and_then(|value| value.to_str().ok()),
+        Some("DENY")
+    );
+    assert!(response.headers().contains_key("content-security-policy"));
+}
+
+#[test]
+fn webd_upstream_is_restricted_to_explicit_loopback_http() {
+    assert_eq!(
+        normalize_loopback_upstream("http://127.0.0.1:8787/").unwrap(),
+        "http://127.0.0.1:8787"
+    );
+    assert_eq!(
+        normalize_loopback_upstream("http://[::1]:8787").unwrap(),
+        "http://[::1]:8787"
+    );
+    for invalid in [
+        "https://127.0.0.1:8787",
+        "http://localhost:8787",
+        "http://192.168.1.10:8787",
+        "http://127.0.0.1",
+        "http://127.0.0.1:8787/v1",
+        "http://user@127.0.0.1:8787",
+    ] {
+        assert!(normalize_loopback_upstream(invalid).is_err(), "{invalid}");
+    }
+}
+
+#[test]
+fn internal_clawd_routes_are_never_exposed_by_webd() {
+    assert!(is_internal_upstream_path("/v1/internal"));
+    assert!(is_internal_upstream_path("/v1/internal/webd/verify-login"));
+    assert!(is_internal_upstream_path("/v1/internal/skills/admit"));
+    assert!(!is_internal_upstream_path("/v1/tasks"));
+    assert!(!is_internal_upstream_path("/v1/internalized"));
+}
+
+#[test]
+fn login_inputs_are_bounded_before_hash_verification_or_lockout_tracking() {
+    assert!(valid_login_input("admin", "a sufficiently long password"));
+    assert!(!valid_login_input("", "password"));
+    assert!(!valid_login_input("admin", ""));
+    assert!(!valid_login_input(&"u".repeat(129), "password"));
+    assert!(!valid_login_input("admin", &"p".repeat(1025)));
 }
 
 #[tokio::test]
