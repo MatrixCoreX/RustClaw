@@ -341,7 +341,7 @@ fn normalize_asset_transfer_history_response(
         .get("total_pages")
         .and_then(Value::as_u64)
         .ok_or("nni_asset_transfer_history_contract_invalid")?;
-    let expected_total_pages = total_transactions.div_ceil(per_page);
+    let expected_total_pages = total_transactions.div_ceil(per_page).max(1);
     if total_pages != expected_total_pages {
         return Err("nni_asset_transfer_history_contract_invalid");
     }

@@ -137,7 +137,7 @@ fn history_accepts_a_filtered_empty_page() {
         "page": 1,
         "per_page": 100,
         "total": 0,
-        "total_pages": 0,
+        "total_pages": 1,
         "filter": {
             "transaction_kind": null,
             "transaction_class": "peer_transfer",
@@ -154,7 +154,7 @@ fn history_accepts_a_filtered_empty_page() {
     )
     .expect("a valid empty filtered page must not make the node unavailable");
     assert_eq!(normalized["total_transactions"], 0);
-    assert_eq!(normalized["total_pages"], 0);
+    assert_eq!(normalized["total_pages"], 1);
     assert_eq!(normalized["transactions"], json!([]));
 }
 
@@ -167,7 +167,7 @@ fn history_rejects_inconsistent_pagination_totals() {
         "page": 1,
         "per_page": 100,
         "total": 0,
-        "total_pages": 1,
+        "total_pages": 2,
         "filter": {
             "transaction_kind": null,
             "transaction_class": null,
