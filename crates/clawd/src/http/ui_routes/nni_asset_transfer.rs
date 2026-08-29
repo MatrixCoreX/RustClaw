@@ -3,6 +3,7 @@ const NNI_ASSET_TRANSFER_MEMO_MAX_BYTES: usize = 256;
 const NNI_ASSET_TRANSFER_HISTORY_DEFAULT_LIMIT: usize = 10;
 const NNI_ASSET_TRANSFER_HISTORY_MAX_LIMIT: usize = 20;
 const NNI_ASSET_TRANSFER_HISTORY_REMOTE_PAGE_SIZE: usize = 100;
+const NNI_ASSET_TRANSFER_HISTORY_TRANSACTION_KIND: &str = "asset_transfer";
 
 #[derive(Debug, Deserialize)]
 struct NniAssetTransferHistoryQuery {
@@ -150,7 +151,10 @@ async fn query_nni_asset_transfer_history_for_node(
         .core
         .public_http_client
         .get(endpoint)
-        .query(&[("address", owner_pubkey), ("per_page", per_page.as_str())])
+        .query(&nni_asset_transfer_history_remote_query(
+            owner_pubkey,
+            per_page.as_str(),
+        ))
         .timeout(nni_remote_api_timeout())
         .send()
         .await
@@ -199,6 +203,20 @@ async fn query_nni_asset_transfer_history_for_node(
     })
 }
 
+fn nni_asset_transfer_history_remote_query<'a>(
+    owner_pubkey: &'a str,
+    per_page: &'a str,
+) -> [(&'static str, &'a str); 3] {
+    [
+        ("address", owner_pubkey),
+        (
+            "transaction_kind",
+            NNI_ASSET_TRANSFER_HISTORY_TRANSACTION_KIND,
+        ),
+        ("per_page", per_page),
+    ]
+}
+
 fn normalize_asset_transfer_history_response(
     data: &Value,
     owner_pubkey: &str,
@@ -228,9 +246,9 @@ fn normalize_asset_transfer_history_response(
     let mut projected = Vec::new();
     for transaction in transactions {
         if transaction.get("transaction_kind").and_then(Value::as_str)
-            != Some("asset_transfer")
+            != Some(NNI_ASSET_TRANSFER_HISTORY_TRANSACTION_KIND)
         {
-            continue;
+            return Err("nni_asset_transfer_history_contract_invalid");
         }
         let transaction_id = transaction
             .get("transaction_id")
@@ -238,9 +256,9 @@ fn normalize_asset_transfer_history_response(
             .filter(|value| {
                 !value.is_empty()
                     && value.len() <= 160
-                    && value
-                        .bytes()
-                        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b':' | b'_' | b'-'))
+                    && value.bytes().all(|byte| {
+                        byte.is_ascii_alphanumeric() || matches!(byte, b':' | b'_' | b'-')
+                    })
             })
             .ok_or("nni_asset_transfer_history_contract_invalid")?;
         let created_at_unix = transaction
@@ -755,8 +773,7 @@ async fn execute_nni_asset_transfer_for_node(
             if status.is_server_error() && attempt == 0 {
                 continue;
             }
-            let error_code =
-                nni_remote_api_error_code(&body, "nni_asset_transfer_outcome_unknown");
+            let error_code = nni_remote_api_error_code(&body, "nni_asset_transfer_outcome_unknown");
             let retry_after_seconds = body
                 .data
                 .as_ref()
