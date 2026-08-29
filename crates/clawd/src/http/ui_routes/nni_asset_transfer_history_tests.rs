@@ -10,7 +10,7 @@ fn history_projects_both_outgoing_and_incoming_transfers() {
         "status": "explorer_transactions",
         "pagination_mode": "cursor",
         "per_page": 100,
-        "total": 3,
+        "total": 2,
         "has_more": false,
         "next_cursor": null,
         "transactions": [
@@ -42,13 +42,6 @@ fn history_projects_both_outgoing_and_incoming_transfers() {
                     "to": {"account_kind": "asset_owner", "address": owner},
                 }],
             },
-            {
-                "transaction_id": "bancor-trade",
-                "transaction_kind": "bancor_trade",
-                "created_at_unix": 1_700_000_000,
-                "memo": null,
-                "flows": [],
-            },
         ],
     });
 
@@ -64,6 +57,41 @@ fn history_projects_both_outgoing_and_incoming_transfers() {
     assert_eq!(
         normalized["transactions"][1]["flows"][0]["to"]["address"],
         owner
+    );
+}
+
+#[test]
+fn history_remote_query_filters_before_pagination() {
+    assert_eq!(
+        nni_asset_transfer_history_remote_query("owner", "100"),
+        [
+            ("address", "owner"),
+            ("transaction_kind", "asset_transfer"),
+            ("per_page", "100"),
+        ]
+    );
+}
+
+#[test]
+fn history_rejects_an_unfiltered_transaction_kind() {
+    let owner = generate_nni_owner_key_pair().public_key;
+    let payload = json!({
+        "schema_version": 1,
+        "status": "explorer_transactions",
+        "total": 1,
+        "has_more": false,
+        "transactions": [{
+            "transaction_id": "reward-not-a-transfer",
+            "transaction_kind": "heartbeat_reward_credit",
+            "created_at_unix": 1_700_000_000,
+            "memo": null,
+            "flows": [],
+        }],
+    });
+
+    assert_eq!(
+        normalize_asset_transfer_history_response(&payload, &owner, 10),
+        Err("nni_asset_transfer_history_contract_invalid")
     );
 }
 
