@@ -32,12 +32,7 @@ export function FinancialServiceNodeSelector({
 }) {
   if (nodes.length === 0) return null;
   const unavailable = disabled || saving || nodes.length < 2;
-  const title = service === "bancor"
-    ? t("BANCOR 节点", "BANCOR node")
-    : t("资产节点", "Asset node");
-  const description = service === "bancor"
-    ? t("用于行情、报价与交易，不改变 NNI 和资产节点。", "Used for markets, quotes, and trades without changing NNI or asset nodes.")
-    : t("用于资产余额、转账与历史，不改变 NNI 和 BANCOR 节点。", "Used for balances, transfers, and history without changing NNI or BANCOR nodes.");
+  const title = t("节点切换", "Switch node");
   return (
     <div className="flex justify-end" data-financial-service-node-selector={service}>
       <div className="w-full max-w-md rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface-muted)] px-3 py-2.5">
@@ -47,16 +42,13 @@ export function FinancialServiceNodeSelector({
             <span className="block text-xs font-semibold text-[var(--theme-text-strong)]">
               {title}
             </span>
-            <span className="mt-0.5 block text-[11px] leading-4 text-[var(--theme-text-muted)]">
-              {description}
-            </span>
           </label>
           <div className="relative shrink-0">
             <select
               className="theme-input h-9 max-w-44 appearance-none py-1 pl-2.5 pr-8 text-xs disabled:cursor-not-allowed disabled:opacity-60"
               value={selectedNodeUrl}
               disabled={unavailable}
-              aria-label={t(`选择${title}`, `Select ${title}`)}
+              aria-label={t("选择节点", "Select node")}
               onChange={(event) => void onChange(event.target.value)}
             >
               {nodes.length === 0 ? (

@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { FinancialServiceNodeSelector } from "../components/FinancialServiceNodeSelector";
 
-test("asset service selector explains its independent scope", () => {
+test("asset service selector uses the compact node-switch label", () => {
   const markup = renderToStaticMarkup(
     <FinancialServiceNodeSelector
       t={(zh) => zh}
@@ -19,13 +19,13 @@ test("asset service selector explains its independent scope", () => {
     />,
   );
 
-  assert.match(markup, /资产节点/);
-  assert.match(markup, /不改变 NNI 和 BANCOR 节点/);
+  assert.match(markup, /节点切换/);
+  assert.doesNotMatch(markup, /资产节点|不改变 NNI 和 BANCOR 节点/);
   assert.match(markup, /api-2\.example\.test/);
   assert.match(markup, /data-financial-service-node-selector="assets"/);
 });
 
-test("BANCOR selector explains that it does not change the other nodes", () => {
+test("BANCOR selector uses the same compact node-switch label", () => {
   const markup = renderToStaticMarkup(
     <FinancialServiceNodeSelector
       t={(zh) => zh}
@@ -38,7 +38,7 @@ test("BANCOR selector explains that it does not change the other nodes", () => {
     />,
   );
 
-  assert.match(markup, /BANCOR 节点/);
-  assert.match(markup, /不改变 NNI 和资产节点/);
+  assert.match(markup, /节点切换/);
+  assert.doesNotMatch(markup, /BANCOR 节点|不改变 NNI 和资产节点/);
   assert.match(markup, /data-financial-service-node-selector="bancor"/);
 });
