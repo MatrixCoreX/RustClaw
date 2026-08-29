@@ -139,17 +139,17 @@ fn reward_apr_uses_latest_period_and_actual_window_coverage() {
 }
 
 #[test]
-fn reward_apr_rejects_invalid_price_and_cross_node_snapshots() {
+fn reward_apr_rejects_invalid_price_and_accepts_independent_service_nodes() {
     let (rewards, mut market) = reward_apr_fixture();
     let invalid_price = nni_skill_reward_apr_projection("0", &rewards, &market)
         .expect_err("zero device price must be rejected");
     assert_eq!(invalid_price.error_code, "nni_argument_invalid");
 
     market["node_url"] = json!("https://other.example.test");
-    let inconsistent = nni_skill_reward_apr_projection("1000", &rewards, &market)
-        .expect_err("cross-node observations must not be combined");
-    assert_eq!(inconsistent.error_code, "nni_apr_snapshot_inconsistent");
-    assert!(inconsistent.retryable);
+    let projection = nni_skill_reward_apr_projection("1000", &rewards, &market)
+        .expect("reward and market reads may use independent edge nodes");
+    assert_eq!(projection["reward_node_host"], "nni.example.test");
+    assert_eq!(projection["market_node_host"], "other.example.test");
 }
 
 fn isolated_nni_state(root: &std::path::Path) -> AppState {
@@ -319,6 +319,8 @@ fn nni_gateway_uses_persisted_error_code_without_parsing_error_text() {
     let projection = nni_skill_heartbeat_projection(&NniConfigResponse {
         remote_nodes: vec!["https://nni.example.test".to_string()],
         selected_node_url: Some("https://nni.example.test".to_string()),
+        bancor_service_node_url: Some("https://nni.example.test".to_string()),
+        asset_service_node_url: Some("https://nni.example.test".to_string()),
         joined: true,
         asset_owner_pubkey: None,
         heartbeat_interval_seconds: 590,

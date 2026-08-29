@@ -11,6 +11,8 @@ const NNI_HEARTBEAT_RUNTIME_STATE_SCHEMA_VERSION: u32 = 2;
 struct NniConfigResponse {
     remote_nodes: Vec<String>,
     selected_node_url: Option<String>,
+    bancor_service_node_url: Option<String>,
+    asset_service_node_url: Option<String>,
     joined: bool,
     asset_owner_pubkey: Option<String>,
     heartbeat_interval_seconds: u64,
@@ -38,6 +40,10 @@ struct NniConfigUpdateRequest {
     #[serde(default)]
     selected_node_url: Option<String>,
     #[serde(default)]
+    bancor_service_node_url: Option<String>,
+    #[serde(default)]
+    asset_service_node_url: Option<String>,
+    #[serde(default)]
     joined: Option<bool>,
 }
 
@@ -50,6 +56,10 @@ struct NniRuntimeConfig {
     #[serde(default)]
     selected_node_url: Option<String>,
     #[serde(default)]
+    bancor_service_node_url: Option<String>,
+    #[serde(default)]
+    asset_service_node_url: Option<String>,
+    #[serde(default)]
     joined: bool,
     #[serde(default)]
     asset_owner_pubkey: Option<String>,
@@ -61,6 +71,8 @@ impl Default for NniRuntimeConfig {
             schema_version: NNI_RUNTIME_CONFIG_SCHEMA_VERSION,
             remote_nodes: Vec::new(),
             selected_node_url: None,
+            bancor_service_node_url: None,
+            asset_service_node_url: None,
             joined: false,
             asset_owner_pubkey: None,
         }
@@ -343,6 +355,8 @@ async fn update_nni_config(
         &state,
         remote_nodes.as_deref(),
         req.selected_node_url.as_deref(),
+        req.bancor_service_node_url.as_deref(),
+        req.asset_service_node_url.as_deref(),
         req.joined,
     ) {
         Ok(config) => (
@@ -1519,6 +1533,8 @@ fn read_nni_config(state: &AppState) -> anyhow::Result<NniConfigResponse> {
     );
     Ok(NniConfigResponse {
         selected_node_url: config.selected_node_url,
+        bancor_service_node_url: config.bancor_service_node_url,
+        asset_service_node_url: config.asset_service_node_url,
         remote_nodes: config.remote_nodes,
         joined: config.joined,
         asset_owner_pubkey: config.asset_owner_pubkey,
@@ -1603,6 +1619,20 @@ fn read_nni_runtime_config(state: &AppState) -> anyhow::Result<NniRuntimeConfig>
         config.selected_node_url.as_deref(),
         &config.remote_nodes,
     )?;
+    config.asset_service_node_url = normalize_selected_nni_node(
+        config
+            .asset_service_node_url
+            .as_deref()
+            .or(config.selected_node_url.as_deref()),
+        &config.remote_nodes,
+    )?;
+    config.bancor_service_node_url = normalize_selected_nni_node(
+        config
+            .bancor_service_node_url
+            .as_deref()
+            .or(config.selected_node_url.as_deref()),
+        &config.remote_nodes,
+    )?;
     config.asset_owner_pubkey = config
         .asset_owner_pubkey
         .as_deref()
@@ -1640,6 +1670,8 @@ fn read_legacy_nni_config(state: &AppState) -> anyhow::Result<Option<NniRuntimeC
     Ok(Some(NniRuntimeConfig {
         schema_version: NNI_RUNTIME_CONFIG_SCHEMA_VERSION,
         selected_node_url: remote_nodes.first().cloned(),
+        bancor_service_node_url: remote_nodes.first().cloned(),
+        asset_service_node_url: remote_nodes.first().cloned(),
         remote_nodes,
         joined,
         asset_owner_pubkey: None,
@@ -1866,13 +1898,15 @@ fn write_nni_config(
     remote_nodes: Option<&[String]>,
     joined: Option<bool>,
 ) -> anyhow::Result<NniConfigResponse> {
-    write_nni_config_with_selected_node(state, remote_nodes, None, joined)
+    write_nni_config_with_selected_node(state, remote_nodes, None, None, None, joined)
 }
 
 fn write_nni_config_with_selected_node(
     state: &AppState,
     remote_nodes: Option<&[String]>,
     selected_node_url: Option<&str>,
+    bancor_service_node_url: Option<&str>,
+    asset_service_node_url: Option<&str>,
     joined: Option<bool>,
 ) -> anyhow::Result<NniConfigResponse> {
     let mut config = read_nni_runtime_config(state)?;
@@ -1892,6 +1926,26 @@ fn write_nni_config_with_selected_node(
         anyhow::bail!("nni_selected_node_change_requires_stop");
     }
     config.selected_node_url = next_selected_node_url;
+    let current_bancor_node = config
+        .bancor_service_node_url
+        .as_deref()
+        .filter(|candidate| config.remote_nodes.iter().any(|node| node == *candidate));
+    config.bancor_service_node_url = normalize_selected_nni_node(
+        bancor_service_node_url
+            .or(current_bancor_node)
+            .or(config.selected_node_url.as_deref()),
+        &config.remote_nodes,
+    )?;
+    let current_asset_node = config
+        .asset_service_node_url
+        .as_deref()
+        .filter(|candidate| config.remote_nodes.iter().any(|node| node == *candidate));
+    config.asset_service_node_url = normalize_selected_nni_node(
+        asset_service_node_url
+            .or(current_asset_node)
+            .or(config.selected_node_url.as_deref()),
+        &config.remote_nodes,
+    )?;
     if let Some(joined) = joined {
         config.joined = joined;
     }

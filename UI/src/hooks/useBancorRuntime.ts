@@ -133,12 +133,15 @@ export function buildBancorCandlesPath(
   return `/v1/nni/bancor/candles?${params}`;
 }
 
-export function buildBancorAccountPath(page: number): string {
+export function buildBancorAccountPath(
+  page: number,
+  routePrefix = "/v1/nni/bancor",
+): string {
   const params = new URLSearchParams({
     page: String(Math.max(1, Math.floor(page))),
     per_page: String(BANCOR_TRADE_PAGE_SIZE),
   });
-  return `/v1/nni/bancor/account?${params}`;
+  return `${routePrefix}/account?${params}`;
 }
 
 export function hasEarlierBancorCandles(response: NniBancorCandlesResponse): boolean {
@@ -372,10 +375,12 @@ export function formatBancorApiError(
 export function useBancorRuntime({
   apiFetch,
   cacheScope,
+  overviewRoutePrefix = "/v1/nni/bancor",
   t,
 }: {
   apiFetch: ApiFetch;
   cacheScope: string;
+  overviewRoutePrefix?: "/v1/nni/bancor" | "/v1/nni/assets";
   t: Translate;
 }) {
   const initialCandleInterval = readBancorCandleInterval(browserPreferenceStorage());
@@ -434,7 +439,7 @@ export function useBancorRuntime({
     async () => {
     if (!silent) setMarketLoading(true);
     try {
-      const response = await fetchResilientRead(apiFetch, "/v1/nni/bancor/market");
+      const response = await fetchResilientRead(apiFetch, `${overviewRoutePrefix}/market`);
       const body = (await response.json()) as ApiResponse<NniBancorMarketResponse>;
       if (!response.ok || !body.ok || !body.data) throw readError(body, `Market load failed (${response.status})`);
       setMarket(body.data);
@@ -480,7 +485,10 @@ export function useBancorRuntime({
     async () => {
     if (!silent) setAccountLoading(true);
     try {
-      const response = await fetchResilientRead(apiFetch, buildBancorAccountPath(page));
+      const response = await fetchResilientRead(
+        apiFetch,
+        buildBancorAccountPath(page, overviewRoutePrefix),
+      );
       const body = (await response.json()) as ApiResponse<NniBancorAccountResponse>;
       if (!response.ok || !body.ok || !body.data) throw readError(body, `Account load failed (${response.status})`);
       setAccount(body.data);

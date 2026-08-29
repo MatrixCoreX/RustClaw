@@ -89,6 +89,47 @@ fn nni_selected_remote_nodes(config: &NniConfigResponse) -> Vec<&String> {
 }
 
 #[cfg(test)]
+fn nni_asset_service_remote_node(config: &NniConfigResponse) -> Option<&String> {
+    config
+        .asset_service_node_url
+        .as_ref()
+        .or(config.selected_node_url.as_ref())
+        .or_else(|| config.remote_nodes.first())
+}
+
+fn nni_bancor_service_remote_node(config: &NniConfigResponse) -> Option<&String> {
+    config
+        .bancor_service_node_url
+        .as_ref()
+        .or(config.selected_node_url.as_ref())
+        .or_else(|| config.remote_nodes.first())
+}
+
+fn nni_asset_service_remote_nodes(config: &NniConfigResponse) -> Vec<&String> {
+    prioritize_nni_nodes(
+        config
+            .asset_service_node_url
+            .as_ref()
+            .or(config.selected_node_url.as_ref()),
+        &config.remote_nodes,
+    )
+}
+
+fn nni_bancor_service_remote_nodes(config: &NniConfigResponse) -> Vec<&String> {
+    prioritize_nni_nodes(
+        config
+            .bancor_service_node_url
+            .as_ref()
+            .or(config.selected_node_url.as_ref()),
+        &config.remote_nodes,
+    )
+}
+
+#[cfg(test)]
+#[path = "nni_asset_service_node_tests.rs"]
+mod nni_asset_service_node_tests;
+
+#[cfg(test)]
 mod nni_remote_api_tests {
     use super::*;
 

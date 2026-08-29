@@ -78,6 +78,12 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     useState<NniOwnerAuthorizationChallenge | null>(null);
   const [nniRemoteNodes, setNniRemoteNodes] = useState("");
   const [nniSelectedNodeUrl, setNniSelectedNodeUrl] = useState("");
+  const [nniBancorServiceNodeUrl, setNniBancorServiceNodeUrl] = useState("");
+  const [nniBancorServiceNodeSaving, setNniBancorServiceNodeSaving] = useState(false);
+  const [nniBancorServiceNodeError, setNniBancorServiceNodeError] = useState<string | null>(null);
+  const [nniAssetServiceNodeUrl, setNniAssetServiceNodeUrl] = useState("");
+  const [nniAssetServiceNodeSaving, setNniAssetServiceNodeSaving] = useState(false);
+  const [nniAssetServiceNodeError, setNniAssetServiceNodeError] = useState<string | null>(null);
   const [nniHeartbeatIntervalSeconds, setNniHeartbeatIntervalSeconds] = useState<number | null>(null);
   const [nniHeartbeatRequestCount, setNniHeartbeatRequestCount] = useState(0);
   const [nniHeartbeatRetryLimit, setNniHeartbeatRetryLimit] = useState(3);
@@ -115,12 +121,34 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     const nodeUrls = nniRemoteNodeUrls();
     return nodeUrls.includes(nniSelectedNodeUrl) ? nniSelectedNodeUrl : nodeUrls[0] ?? "";
   };
+  const selectedNniAssetServiceNodeUrl = () => {
+    const nodeUrls = nniRemoteNodeUrls();
+    if (nodeUrls.includes(nniAssetServiceNodeUrl)) return nniAssetServiceNodeUrl;
+    return selectedNniNodeUrl();
+  };
+  const selectedNniBancorServiceNodeUrl = () => {
+    const nodeUrls = nniRemoteNodeUrls();
+    if (nodeUrls.includes(nniBancorServiceNodeUrl)) return nniBancorServiceNodeUrl;
+    return selectedNniNodeUrl();
+  };
 
   const applyNniConfigResponse = (config: NniConfigResponse) => {
     setNniJoined(config.joined);
     setNniAssetOwnerPubkey(config.asset_owner_pubkey ?? null);
     setNniRemoteNodes(config.remote_nodes.join("\n"));
     setNniSelectedNodeUrl(config.selected_node_url ?? config.remote_nodes[0] ?? "");
+    setNniBancorServiceNodeUrl(
+      config.bancor_service_node_url
+      ?? config.selected_node_url
+      ?? config.remote_nodes[0]
+      ?? "",
+    );
+    setNniAssetServiceNodeUrl(
+      config.asset_service_node_url
+      ?? config.selected_node_url
+      ?? config.remote_nodes[0]
+      ?? "",
+    );
     setNniHeartbeatIntervalSeconds(config.heartbeat_interval_seconds ?? null);
     setNniHeartbeatRequestCount(config.heartbeat_request_count ?? 0);
     setNniHeartbeatRetryLimit(config.heartbeat_network_retry_limit ?? 3);
@@ -131,10 +159,18 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
   const setNniJoinedPersisted = async (joined: boolean, options?: { persistRemoteNodes?: boolean }) => {
     setNniJoined(joined);
     try {
-      const payload: { joined: boolean; remote_nodes?: string[]; selected_node_url?: string } = { joined };
+      const payload: {
+        joined: boolean;
+        remote_nodes?: string[];
+        selected_node_url?: string;
+        bancor_service_node_url?: string;
+        asset_service_node_url?: string;
+      } = { joined };
       if (options?.persistRemoteNodes) {
         payload.remote_nodes = nniRemoteNodeUrls();
         payload.selected_node_url = selectedNniNodeUrl();
+        payload.bancor_service_node_url = selectedNniBancorServiceNodeUrl();
+        payload.asset_service_node_url = selectedNniAssetServiceNodeUrl();
       }
       const res = await apiFetch(`/v1/nni/config`, {
         method: "POST",
@@ -882,6 +918,8 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         body: JSON.stringify({
           remote_nodes: nniRemoteNodeUrls(),
           selected_node_url: selectedNniNodeUrl(),
+          bancor_service_node_url: selectedNniBancorServiceNodeUrl(),
+          asset_service_node_url: selectedNniAssetServiceNodeUrl(),
         }),
       });
       const body = (await res.json()) as ApiResponse<NniConfigResponse>;
@@ -995,6 +1033,16 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     if (!nodeUrls.includes(nniSelectedNodeUrl)) {
       setNniSelectedNodeUrl(nodeUrls[0] ?? "");
     }
+    if (!nodeUrls.includes(nniAssetServiceNodeUrl)) {
+      setNniAssetServiceNodeUrl(
+        nodeUrls.includes(nniSelectedNodeUrl) ? nniSelectedNodeUrl : nodeUrls[0] ?? "",
+      );
+    }
+    if (!nodeUrls.includes(nniBancorServiceNodeUrl)) {
+      setNniBancorServiceNodeUrl(
+        nodeUrls.includes(nniSelectedNodeUrl) ? nniSelectedNodeUrl : nodeUrls[0] ?? "",
+      );
+    }
     setNniDeviceAuthorizationDenied(false);
     setNniConfigMessage(null);
     setNniConfigError(null);
@@ -1006,6 +1054,66 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     setNniDeviceAuthorizationDenied(false);
     setNniConfigMessage(null);
     setNniConfigError(null);
+  };
+
+  const updateNniAssetServiceNodeUrl = async (value: string): Promise<boolean> => {
+    if (!nniRemoteNodeUrls().includes(value)) {
+      setNniAssetServiceNodeError(t("请选择已配置的节点。", "Select a configured node."));
+      return false;
+    }
+    if (value === selectedNniAssetServiceNodeUrl()) return true;
+    setNniAssetServiceNodeSaving(true);
+    setNniAssetServiceNodeError(null);
+    try {
+      const res = await apiFetch(`/v1/nni/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ asset_service_node_url: value }),
+      });
+      const body = (await res.json()) as ApiResponse<NniConfigResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `Asset service node update failed (${res.status})`);
+      }
+      applyNniConfigResponse(body.data);
+      return true;
+    } catch (err) {
+      setNniAssetServiceNodeError(
+        err instanceof Error ? err.message : t("资产服务节点切换失败。", "Asset service node switch failed."),
+      );
+      return false;
+    } finally {
+      setNniAssetServiceNodeSaving(false);
+    }
+  };
+
+  const updateNniBancorServiceNodeUrl = async (value: string): Promise<boolean> => {
+    if (!nniRemoteNodeUrls().includes(value)) {
+      setNniBancorServiceNodeError(t("请选择已配置的节点。", "Select a configured node."));
+      return false;
+    }
+    if (value === selectedNniBancorServiceNodeUrl()) return true;
+    setNniBancorServiceNodeSaving(true);
+    setNniBancorServiceNodeError(null);
+    try {
+      const res = await apiFetch(`/v1/nni/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bancor_service_node_url: value }),
+      });
+      const body = (await res.json()) as ApiResponse<NniConfigResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `BANCOR service node update failed (${res.status})`);
+      }
+      applyNniConfigResponse(body.data);
+      return true;
+    } catch (err) {
+      setNniBancorServiceNodeError(
+        err instanceof Error ? err.message : t("BANCOR 节点切换失败。", "BANCOR node switch failed."),
+      );
+      return false;
+    } finally {
+      setNniBancorServiceNodeSaving(false);
+    }
   };
 
   return {
@@ -1023,7 +1131,14 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     nniOwnerActionLoading,
     nniOwnerAuthorizationChallenge,
     nniRemoteNodes,
+    nniRemoteNodeUrls: nniRemoteNodeUrls(),
     nniSelectedNodeUrl: selectedNniNodeUrl(),
+    nniBancorServiceNodeUrl: selectedNniBancorServiceNodeUrl(),
+    nniBancorServiceNodeSaving,
+    nniBancorServiceNodeError,
+    nniAssetServiceNodeUrl: selectedNniAssetServiceNodeUrl(),
+    nniAssetServiceNodeSaving,
+    nniAssetServiceNodeError,
     nniRemoteNodeCount: nniRemoteNodeUrls().length,
     nniHeartbeatIntervalSeconds,
     nniHeartbeatRequestCount,
@@ -1075,6 +1190,8 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     saveNniConfig,
     updateNniRemoteNodes,
     updateNniSelectedNodeUrl,
+    updateNniBancorServiceNodeUrl,
+    updateNniAssetServiceNodeUrl,
     fetchNniHeartbeatRecords,
     clearNniHeartbeatRecords,
     fetchNniHeartbeatErrors,

@@ -32,9 +32,11 @@ import type { AssetTransferAsset } from "../lib/asset-transfer";
 import { NniPublicKeyDisplay } from "./NniPublicKeyDisplay";
 import { AssetTransferDialog } from "./AssetTransferDialog";
 import type { AssetTransferInput } from "../hooks/useAssetTransferRuntime";
+import { FinancialServiceNodeSelector } from "./FinancialServiceNodeSelector";
 
 type Translate = (zh: string, en: string) => string;
 const EMPTY_ASSET_ACCOUNTS: readonly AssetAccountOption[] = [];
+export const ASSET_TRANSFER_HISTORY_DEFER_MS = 600;
 
 interface FixedDecimal {
   units: bigint;
@@ -55,6 +57,16 @@ export interface AssetTransferHistoryEntry {
   amount: string;
   memo: string | null;
   createdAtUnix: number;
+}
+
+export function assetTransferHistoryAutoLoadDelay(
+  hasSelectedAccount: boolean,
+  selectedUsesLoadedAccount: boolean,
+  accountLoading: boolean,
+): number | null {
+  if (!hasSelectedAccount) return null;
+  if (selectedUsesLoadedAccount && accountLoading) return null;
+  return selectedUsesLoadedAccount ? ASSET_TRANSFER_HISTORY_DEFER_MS : 0;
 }
 
 export function buildAssetTransferHistoryEntries(
@@ -170,9 +182,14 @@ export function AssetsPage({
   transferHistory,
   transferHistoryLoading,
   transferHistoryError,
+  assetServiceNodes = [],
+  assetServiceNodeUrl = "",
+  assetServiceNodeSaving = false,
+  assetServiceNodeError = null,
   onTransfer,
   onLoadTransferHistory,
   onClearTransferFeedback,
+  onAssetServiceNodeChange = async () => false,
   onRefresh,
   onOpenBancor,
   onOpenNni,
@@ -193,9 +210,14 @@ export function AssetsPage({
   transferHistory: NniAssetTransferHistoryResponse | null;
   transferHistoryLoading: boolean;
   transferHistoryError: string | null;
+  assetServiceNodes?: readonly string[];
+  assetServiceNodeUrl?: string;
+  assetServiceNodeSaving?: boolean;
+  assetServiceNodeError?: string | null;
   onTransfer: (input: AssetTransferInput) => Promise<unknown>;
   onLoadTransferHistory: (ownerPublicKey: string) => Promise<unknown>;
   onClearTransferFeedback: () => void;
+  onAssetServiceNodeChange?: (nodeUrl: string) => Promise<boolean>;
   onRefresh: () => void | Promise<unknown>;
   onOpenBancor: () => void;
   onOpenNni: () => void;
@@ -240,8 +262,27 @@ export function AssetsPage({
   }, [assetAccountOptions, preferredAssetAccountId]);
 
   useEffect(() => {
-    void onLoadTransferHistory(selectedAssetAccount?.publicKey ?? "");
-  }, [onLoadTransferHistory, selectedAssetAccount?.publicKey]);
+    const publicKey = selectedAssetAccount?.publicKey ?? "";
+    if (!publicKey) {
+      void onLoadTransferHistory("");
+      return;
+    }
+    const delay = assetTransferHistoryAutoLoadDelay(
+      true,
+      selectedUsesLoadedAccount,
+      accountLoading,
+    );
+    if (delay === null) return;
+    const timer = window.setTimeout(() => {
+      void onLoadTransferHistory(publicKey);
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [
+    accountLoading,
+    onLoadTransferHistory,
+    selectedAssetAccount?.publicKey,
+    selectedUsesLoadedAccount,
+  ]);
 
   const submitTransfer = async (input: AssetTransferInput) => {
     const result = await onTransfer(input);
@@ -249,6 +290,15 @@ export function AssetsPage({
       void onLoadTransferHistory(selectedAssetAccount.publicKey);
     }
     return result;
+  };
+
+  const changeAssetServiceNode = async (nodeUrl: string) => {
+    if (!(await onAssetServiceNodeChange(nodeUrl))) return false;
+    await onRefresh();
+    if (selectedAssetAccount) {
+      await onLoadTransferHistory(selectedAssetAccount.publicKey);
+    }
+    return true;
   };
 
   const statusMessage = selectedAssetAccount?.source === "external"
@@ -563,6 +613,17 @@ export function AssetsPage({
           {transferMessage}
         </p>
       ) : null}
+
+      <FinancialServiceNodeSelector
+        t={t}
+        service="assets"
+        nodes={assetServiceNodes}
+        selectedNodeUrl={assetServiceNodeUrl}
+        saving={assetServiceNodeSaving}
+        error={assetServiceNodeError}
+        disabled={loading || transferLoading || transferHistoryLoading}
+        onChange={changeAssetServiceNode}
+      />
 
       <AssetTransferDialog
         open={transferDialogOpen}

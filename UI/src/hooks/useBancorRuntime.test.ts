@@ -49,6 +49,10 @@ test("BANCOR persists a supported candle interval and rejects damaged preference
 test("BANCOR account history requests ten trades per page", () => {
   assert.equal(buildBancorAccountPath(3), "/v1/nni/bancor/account?page=3&per_page=10");
   assert.equal(buildBancorAccountPath(-5), "/v1/nni/bancor/account?page=1&per_page=10");
+  assert.equal(
+    buildBancorAccountPath(2, "/v1/nni/assets"),
+    "/v1/nni/assets/account?page=2&per_page=10",
+  );
 });
 
 test("BANCOR interval projection never labels old-period candles as the new period", () => {

@@ -105,7 +105,7 @@ async fn nni_asset_transfer_history(
     };
 
     let mut attempts = Vec::new();
-    for node_url in nni_selected_remote_nodes(&config) {
+    for node_url in nni_asset_service_remote_nodes(&config) {
         match nni_remote_read_with_retry(|| {
             query_nni_asset_transfer_history_for_node(&state, node_url, &owner_pubkey, limit)
         })
@@ -500,7 +500,7 @@ async fn nni_asset_transfer(
 
     let request_id = uuid::Uuid::new_v4().to_string();
     let mut attempts = Vec::new();
-    for node_url in nni_selected_remote_nodes(&config) {
+    for node_url in nni_asset_service_remote_nodes(&config) {
         let remote_request = NniAssetTransferRemoteRequest {
             request_id: request_id.clone(),
             device_pubkey: device_pubkey.clone(),

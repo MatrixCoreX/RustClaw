@@ -275,6 +275,8 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         .route("/nni/bancor/quote", post(nni_bancor_quote))
         .route("/nni/bancor/account", get(nni_bancor_account))
         .route("/nni/bancor/trade", post(nni_bancor_trade))
+        .route("/nni/assets/market", get(nni_assets_market))
+        .route("/nni/assets/account", get(nni_assets_account))
         .route("/nni/assets/transfer", post(nni_asset_transfer))
         .route("/nni/assets/transfers", get(nni_asset_transfer_history))
         .route(
