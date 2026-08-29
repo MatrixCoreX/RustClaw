@@ -56,6 +56,7 @@ import {
 } from "./hooks/useNniRuntime";
 import { useBancorRuntime } from "./hooks/useBancorRuntime";
 import { useAssetTransferRuntime } from "./hooks/useAssetTransferRuntime";
+import { useAssetTransferHistoryRuntime } from "./hooks/useAssetTransferHistoryRuntime";
 import { useMemoryRuntime } from "./hooks/useMemoryRuntime";
 import { useLogsRuntime } from "./hooks/useLogsRuntime";
 import { useFactoryResetRuntime } from "./hooks/useFactoryResetRuntime";
@@ -287,6 +288,7 @@ export default function App() {
     t,
     onCompleted: () => bancorRuntime.fetchAccount(1),
   });
+  const assetTransferHistoryRuntime = useAssetTransferHistoryRuntime({ apiFetch, t });
   const {
     agentConfig,
     agentConfigLoading,
@@ -2000,7 +2002,11 @@ export default function App() {
               transferLoading={assetTransferRuntime.loading}
               transferError={assetTransferRuntime.error}
               transferMessage={assetTransferRuntime.message}
+              transferHistory={assetTransferHistoryRuntime.history}
+              transferHistoryLoading={assetTransferHistoryRuntime.loading}
+              transferHistoryError={assetTransferHistoryRuntime.error}
               onTransfer={assetTransferRuntime.transfer}
+              onLoadTransferHistory={assetTransferHistoryRuntime.load}
               onClearTransferFeedback={assetTransferRuntime.clearFeedback}
               onRefresh={() => Promise.allSettled([
                 bancorRuntime.fetchMarket(),

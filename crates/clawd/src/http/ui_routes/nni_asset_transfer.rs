@@ -1,5 +1,15 @@
 const NNI_ASSET_TRANSFER_SIGNING_SCHEMA_VERSION: u64 = 2;
 const NNI_ASSET_TRANSFER_MEMO_MAX_BYTES: usize = 256;
+const NNI_ASSET_TRANSFER_HISTORY_DEFAULT_LIMIT: usize = 10;
+const NNI_ASSET_TRANSFER_HISTORY_MAX_LIMIT: usize = 20;
+const NNI_ASSET_TRANSFER_HISTORY_REMOTE_PAGE_SIZE: usize = 100;
+
+#[derive(Debug, Deserialize)]
+struct NniAssetTransferHistoryQuery {
+    owner_pubkey: String,
+    #[serde(default)]
+    limit: Option<usize>,
+}
 
 #[derive(Debug, Deserialize)]
 struct NniAssetTransferRequest {
@@ -42,6 +52,292 @@ struct ValidatedAssetTransferPayload {
     signing_payload: String,
     task_id: String,
     transfer_id: String,
+}
+
+async fn nni_asset_transfer_history(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<NniAssetTransferHistoryQuery>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err((status, Json(resp))) => {
+            return (
+                status,
+                Json(ApiResponse {
+                    ok: resp.ok,
+                    data: None,
+                    error: resp.error,
+                }),
+            )
+        }
+    };
+    if !identity.role.eq_ignore_ascii_case("admin") {
+        return nni_join_error(
+            StatusCode::FORBIDDEN,
+            "admin_required",
+            json!({"status": "asset_transfer_history_forbidden"}),
+        );
+    }
+    let owner_pubkey = match normalize_nni_owner_public_key(&query.owner_pubkey) {
+        Ok(value) => value,
+        Err(error) => {
+            return nni_join_error(
+                StatusCode::BAD_REQUEST,
+                error,
+                json!({"status": "asset_transfer_history_query_invalid"}),
+            )
+        }
+    };
+    let limit = query
+        .limit
+        .unwrap_or(NNI_ASSET_TRANSFER_HISTORY_DEFAULT_LIMIT)
+        .clamp(1, NNI_ASSET_TRANSFER_HISTORY_MAX_LIMIT);
+    let config = match read_nni_config(&state) {
+        Ok(config) => config,
+        Err(error) => {
+            return nni_join_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "nni_config_read_failed",
+                json!({"error": error.to_string()}),
+            )
+        }
+    };
+
+    let mut attempts = Vec::new();
+    for node_url in nni_selected_remote_nodes(&config) {
+        match nni_remote_read_with_retry(|| {
+            query_nni_asset_transfer_history_for_node(&state, node_url, &owner_pubkey, limit)
+        })
+        .await
+        {
+            Ok(mut data) => {
+                if let Some(object) = data.as_object_mut() {
+                    object.insert("node_url".to_string(), Value::String(node_url.clone()));
+                }
+                return (
+                    StatusCode::OK,
+                    Json(ApiResponse {
+                        ok: true,
+                        data: Some(data),
+                        error: None,
+                    }),
+                );
+            }
+            Err(attempt) => attempts.push(attempt),
+        }
+    }
+
+    nni_join_error(
+        StatusCode::BAD_GATEWAY,
+        "nni_asset_transfer_history_nodes_unavailable",
+        json!({
+            "status": "asset_transfer_history_nodes_unavailable",
+            "attempts": attempts,
+        }),
+    )
+}
+
+async fn query_nni_asset_transfer_history_for_node(
+    state: &AppState,
+    node_url: &str,
+    owner_pubkey: &str,
+    limit: usize,
+) -> Result<Value, Value> {
+    let endpoint = nni_remote_api_endpoint(node_url, "explorer/transactions");
+    let per_page = NNI_ASSET_TRANSFER_HISTORY_REMOTE_PAGE_SIZE.to_string();
+    let response = state
+        .core
+        .http_client
+        .get(endpoint)
+        .query(&[("address", owner_pubkey), ("per_page", per_page.as_str())])
+        .timeout(nni_remote_api_timeout())
+        .send()
+        .await
+        .map_err(|error| {
+            json!({
+                "node_url": node_url,
+                "error_code": "nni_asset_transfer_history_network_failed",
+                "detail": error.to_string(),
+                "retryable": true,
+            })
+        })?;
+    let status = response.status();
+    let body = response
+        .json::<ApiResponse<Value>>()
+        .await
+        .map_err(|error| {
+            json!({
+                "node_url": node_url,
+                "http_status": status.as_u16(),
+                "error_code": "nni_asset_transfer_history_body_invalid",
+                "detail": error.to_string(),
+                "retryable": nni_remote_http_status_retryable(status.as_u16()),
+            })
+        })?;
+    if !status.is_success() || !body.ok {
+        let error_code =
+            nni_remote_api_error_code(&body, "nni_asset_transfer_history_request_failed");
+        return Err(json!({
+            "node_url": node_url,
+            "http_status": status.as_u16(),
+            "error_code": error_code,
+            "retryable": nni_remote_http_status_retryable(status.as_u16()),
+        }));
+    }
+    let data = body.data.ok_or_else(|| {
+        json!({
+            "node_url": node_url,
+            "error_code": "nni_asset_transfer_history_data_missing",
+        })
+    })?;
+    normalize_asset_transfer_history_response(&data, owner_pubkey, limit).map_err(|error_code| {
+        json!({
+            "node_url": node_url,
+            "error_code": error_code,
+        })
+    })
+}
+
+fn normalize_asset_transfer_history_response(
+    data: &Value,
+    owner_pubkey: &str,
+    limit: usize,
+) -> Result<Value, &'static str> {
+    if data.get("schema_version").and_then(Value::as_u64) != Some(1)
+        || data.get("status").and_then(Value::as_str) != Some("explorer_transactions")
+    {
+        return Err("nni_asset_transfer_history_contract_invalid");
+    }
+    let transactions = data
+        .get("transactions")
+        .and_then(Value::as_array)
+        .ok_or("nni_asset_transfer_history_contract_invalid")?;
+    if transactions.len() > NNI_ASSET_TRANSFER_HISTORY_REMOTE_PAGE_SIZE {
+        return Err("nni_asset_transfer_history_contract_invalid");
+    }
+    let total_address_activity = data
+        .get("total")
+        .and_then(Value::as_u64)
+        .ok_or("nni_asset_transfer_history_contract_invalid")?;
+    let has_more_activity = data
+        .get("has_more")
+        .and_then(Value::as_bool)
+        .ok_or("nni_asset_transfer_history_contract_invalid")?;
+
+    let mut projected = Vec::new();
+    for transaction in transactions {
+        if transaction.get("transaction_kind").and_then(Value::as_str)
+            != Some("asset_transfer")
+        {
+            continue;
+        }
+        let transaction_id = transaction
+            .get("transaction_id")
+            .and_then(Value::as_str)
+            .filter(|value| {
+                !value.is_empty()
+                    && value.len() <= 160
+                    && value
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b':' | b'_' | b'-'))
+            })
+            .ok_or("nni_asset_transfer_history_contract_invalid")?;
+        let created_at_unix = transaction
+            .get("created_at_unix")
+            .and_then(Value::as_i64)
+            .filter(|value| (0..=8_640_000_000).contains(value))
+            .ok_or("nni_asset_transfer_history_contract_invalid")?;
+        let memo = match transaction.get("memo") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(value)) if value.len() <= NNI_ASSET_TRANSFER_MEMO_MAX_BYTES => {
+                Some(value.clone())
+            }
+            _ => return Err("nni_asset_transfer_history_contract_invalid"),
+        };
+        let flows = transaction
+            .get("flows")
+            .and_then(Value::as_array)
+            .filter(|flows| !flows.is_empty() && flows.len() <= 8)
+            .ok_or("nni_asset_transfer_history_contract_invalid")?;
+        let mut projected_flows = Vec::new();
+        for flow in flows {
+            let flow_index = flow
+                .get("flow_index")
+                .and_then(Value::as_u64)
+                .filter(|value| *value <= 100)
+                .ok_or("nni_asset_transfer_history_contract_invalid")?;
+            let asset = normalize_asset_transfer_asset(
+                flow.get("asset")
+                    .and_then(Value::as_str)
+                    .ok_or("nni_asset_transfer_history_contract_invalid")?,
+            )
+            .map_err(|_| "nni_asset_transfer_history_contract_invalid")?;
+            let amount = flow
+                .get("amount")
+                .and_then(Value::as_str)
+                .ok_or("nni_asset_transfer_history_contract_invalid")?;
+            let (normalized_amount, amount_units) = normalize_bancor_amount(amount)
+                .map_err(|_| "nni_asset_transfer_history_contract_invalid")?;
+            if flow.get("amount_units").and_then(Value::as_str) != Some(amount_units.as_str()) {
+                return Err("nni_asset_transfer_history_contract_invalid");
+            }
+            let from = normalize_asset_transfer_history_account(flow.get("from"))?;
+            let to = normalize_asset_transfer_history_account(flow.get("to"))?;
+            if from.1 != owner_pubkey && to.1 != owner_pubkey {
+                return Err("nni_asset_transfer_history_contract_invalid");
+            }
+            projected_flows.push(json!({
+                "flow_index": flow_index,
+                "asset": asset,
+                "amount_units": amount_units,
+                "amount": normalized_amount,
+                "from": {"account_kind": from.0, "address": from.1},
+                "to": {"account_kind": to.0, "address": to.1},
+            }));
+        }
+        projected.push(json!({
+            "transaction_id": transaction_id,
+            "transaction_kind": "asset_transfer",
+            "created_at_unix": created_at_unix,
+            "memo": memo,
+            "flows": projected_flows,
+        }));
+        if projected.len() == limit {
+            break;
+        }
+    }
+
+    Ok(json!({
+        "schema_version": 1,
+        "status": "asset_transfer_history",
+        "owner_pubkey": owner_pubkey,
+        "limit": limit,
+        "total_address_activity": total_address_activity,
+        "has_more_activity": has_more_activity,
+        "transactions": projected,
+    }))
+}
+
+fn normalize_asset_transfer_history_account(
+    value: Option<&Value>,
+) -> Result<(&str, String), &'static str> {
+    let value = value
+        .and_then(Value::as_object)
+        .ok_or("nni_asset_transfer_history_contract_invalid")?;
+    let account_kind = value
+        .get("account_kind")
+        .and_then(Value::as_str)
+        .filter(|kind| *kind == "asset_owner")
+        .ok_or("nni_asset_transfer_history_contract_invalid")?;
+    let address = normalize_nni_owner_public_key(
+        value
+            .get("address")
+            .and_then(Value::as_str)
+            .ok_or("nni_asset_transfer_history_contract_invalid")?,
+    )
+    .map_err(|_| "nni_asset_transfer_history_contract_invalid")?;
+    Ok((account_kind, address))
 }
 
 async fn nni_asset_transfer(
@@ -658,6 +954,10 @@ fn normalize_asset_transfer_authorization_mode(
         _ => Err("nni_asset_transfer_authorization_mode_invalid"),
     }
 }
+
+#[cfg(test)]
+#[path = "nni_asset_transfer_history_tests.rs"]
+mod nni_asset_transfer_history_tests;
 
 #[cfg(test)]
 mod nni_asset_transfer_tests {
