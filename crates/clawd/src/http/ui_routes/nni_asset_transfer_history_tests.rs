@@ -129,6 +129,65 @@ fn history_remote_query_filters_before_pagination() {
 }
 
 #[test]
+fn history_accepts_a_filtered_empty_page() {
+    let owner = generate_nni_owner_key_pair().public_key;
+    let payload = json!({
+        "schema_version": 1,
+        "status": "explorer_transactions",
+        "page": 1,
+        "per_page": 100,
+        "total": 0,
+        "total_pages": 0,
+        "filter": {
+            "transaction_kind": null,
+            "transaction_class": "peer_transfer",
+            "direction": "incoming",
+        },
+        "transactions": [],
+    });
+
+    let normalized = normalize_asset_transfer_history_response(
+        &payload,
+        &owner,
+        NniAssetHistorySourceFilter::Transfer,
+        NniAssetHistoryDirectionFilter::Incoming,
+    )
+    .expect("a valid empty filtered page must not make the node unavailable");
+    assert_eq!(normalized["total_transactions"], 0);
+    assert_eq!(normalized["total_pages"], 0);
+    assert_eq!(normalized["transactions"], json!([]));
+}
+
+#[test]
+fn history_rejects_inconsistent_pagination_totals() {
+    let owner = generate_nni_owner_key_pair().public_key;
+    let payload = json!({
+        "schema_version": 1,
+        "status": "explorer_transactions",
+        "page": 1,
+        "per_page": 100,
+        "total": 0,
+        "total_pages": 1,
+        "filter": {
+            "transaction_kind": null,
+            "transaction_class": null,
+            "direction": null,
+        },
+        "transactions": [],
+    });
+
+    assert_eq!(
+        normalize_asset_transfer_history_response(
+            &payload,
+            &owner,
+            NniAssetHistorySourceFilter::All,
+            NniAssetHistoryDirectionFilter::All,
+        ),
+        Err("nni_asset_transfer_history_contract_invalid")
+    );
+}
+
+#[test]
 fn history_rejects_an_unfiltered_transaction_kind() {
     let owner = generate_nni_owner_key_pair().public_key;
     let payload = json!({

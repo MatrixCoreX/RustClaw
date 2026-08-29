@@ -340,8 +340,11 @@ fn normalize_asset_transfer_history_response(
     let total_pages = data
         .get("total_pages")
         .and_then(Value::as_u64)
-        .filter(|value| *value >= 1)
         .ok_or("nni_asset_transfer_history_contract_invalid")?;
+    let expected_total_pages = total_transactions.div_ceil(per_page);
+    if total_pages != expected_total_pages {
+        return Err("nni_asset_transfer_history_contract_invalid");
+    }
     validate_asset_transfer_history_remote_filter(data.get("filter"), source, direction)?;
 
     let mut projected = Vec::new();
