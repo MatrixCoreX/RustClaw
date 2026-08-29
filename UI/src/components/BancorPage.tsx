@@ -419,6 +419,7 @@ export function BancorPage({
   bancorServiceNodeSaving = false,
   bancorServiceNodeError = null,
   onBancorServiceNodeChange = async () => false,
+  onAddBancorServiceNode = async () => false,
   onOpenNni,
   onOpenApr,
 }: {
@@ -433,6 +434,7 @@ export function BancorPage({
   bancorServiceNodeSaving?: boolean;
   bancorServiceNodeError?: string | null;
   onBancorServiceNodeChange?: (nodeUrl: string) => Promise<boolean>;
+  onAddBancorServiceNode?: (nodeUrl: string) => Promise<boolean>;
   onOpenNni: () => void;
   onOpenApr: () => void;
 }) {
@@ -575,8 +577,11 @@ export function BancorPage({
     || marketTradesLoading
     || quoteLoading
     || tradeLoading;
-  const changeAssetServiceNode = async (nodeUrl: string) => {
-    if (!(await onBancorServiceNodeChange(nodeUrl))) return false;
+  const activateBancorServiceNode = async (
+    nodeUrl: string,
+    persist: (value: string) => Promise<boolean>,
+  ) => {
+    if (!(await persist(nodeUrl))) return false;
     clearQuote();
     setMarketTradesPage(1);
     await Promise.allSettled([
@@ -587,6 +592,10 @@ export function BancorPage({
     ]);
     return true;
   };
+  const changeAssetServiceNode = (nodeUrl: string) =>
+    activateBancorServiceNode(nodeUrl, onBancorServiceNodeChange);
+  const addAssetServiceNode = (nodeUrl: string) =>
+    activateBancorServiceNode(nodeUrl, onAddBancorServiceNode);
   if (activeView === "price_change") {
     return (
       <BancorPriceChangePage
@@ -1211,6 +1220,7 @@ export function BancorPage({
         error={bancorServiceNodeError}
         disabled={assetServiceNodeBusy}
         onChange={changeAssetServiceNode}
+        onAddNode={addAssetServiceNode}
       />
     </div>
   );
