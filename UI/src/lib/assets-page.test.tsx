@@ -70,13 +70,17 @@ const transferHistory: NniAssetTransferHistoryResponse = {
   schema_version: 1,
   status: "asset_transfer_history",
   owner_pubkey: "asset-owner-public-key",
-  limit: 10,
-  total_address_activity: 2,
-  has_more_activity: false,
+  page: 1,
+  per_page: 100,
+  total_transactions: 2,
+  total_pages: 1,
+  source_filter: "all",
+  direction_filter: "all",
   transactions: [
     {
       transaction_id: "asset-transfer-outgoing",
       transaction_kind: "asset_transfer",
+      transaction_class: "peer_transfer",
       created_at_unix: 1_700_000_100,
       memo: "invoice 7",
       flows: [{
@@ -91,6 +95,7 @@ const transferHistory: NniAssetTransferHistoryResponse = {
     {
       transaction_id: "asset-transfer-incoming",
       transaction_kind: "asset_transfer",
+      transaction_class: "peer_transfer",
       created_at_unix: 1_700_000_000,
       memo: null,
       flows: [{
@@ -195,8 +200,10 @@ test("asset wallet shows AIC, USD, account identity, and market estimate", () =>
   assert.match(markup, /data-assets-overview-actions="true"/);
   assert.match(markup, /data-assets-full-value="100"[\s\S]*data-asset-transfer="AIC"/);
   assert.match(markup, /data-assets-full-value="5"[\s\S]*data-asset-transfer="USD"/);
-  assert.equal((markup.match(/>转账</g) ?? []).length, 2);
+  assert.equal((markup.match(/data-asset-transfer=/g) ?? []).length, 2);
   assert.match(markup, /data-asset-transfer-history="true"/);
+  assert.match(markup, /data-asset-history-source-filter="true"/);
+  assert.match(markup, /data-asset-history-direction-filter="true"/);
   assert.match(markup, /data-transfer-direction="outgoing"/);
   assert.match(markup, /data-transfer-direction="incoming"/);
   assert.match(markup, /recipient-public-key/);

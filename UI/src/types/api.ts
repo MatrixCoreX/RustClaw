@@ -30,8 +30,8 @@ export interface NniAssetTransferResponse {
 }
 
 export interface NniAssetTransferHistoryAccountRef {
-  account_kind: "asset_owner";
-  address: string;
+  account_kind: "asset_owner" | "pool" | "fee" | "system";
+  address: string | null;
 }
 
 export interface NniAssetTransferHistoryFlow {
@@ -45,7 +45,8 @@ export interface NniAssetTransferHistoryFlow {
 
 export interface NniAssetTransferHistoryRecord {
   transaction_id: string;
-  transaction_kind: "asset_transfer";
+  transaction_kind: string;
+  transaction_class: "peer_transfer" | "market_trade" | "system_issuance" | "other";
   created_at_unix: number;
   memo: string | null;
   flows: NniAssetTransferHistoryFlow[];
@@ -55,9 +56,12 @@ export interface NniAssetTransferHistoryResponse {
   schema_version: 1;
   status: "asset_transfer_history";
   owner_pubkey: string;
-  limit: number;
-  total_address_activity: number;
-  has_more_activity: boolean;
+  page: number;
+  per_page: number;
+  total_transactions: number;
+  total_pages: number;
+  source_filter: "all" | "transfer" | "trade" | "issuance";
+  direction_filter: "all" | "incoming" | "outgoing";
   transactions: NniAssetTransferHistoryRecord[];
   node_url?: string;
 }
