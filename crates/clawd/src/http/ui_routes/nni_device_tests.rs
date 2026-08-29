@@ -548,6 +548,34 @@ fn nni_settings_keep_one_explicit_active_node() {
         Some("https://node-a.example.test")
     );
 
+    let expanded_nodes = vec![
+        "https://node-a.example.test".to_string(),
+        "https://node-b.example.test".to_string(),
+        "https://node-c.example.test/v1/".to_string(),
+    ];
+    let custom_bancor = write_nni_config_with_selected_node(
+        &state,
+        Some(&expanded_nodes),
+        Some("https://node-b.example.test"),
+        Some("https://node-c.example.test"),
+        Some("https://node-a.example.test"),
+        None,
+    )
+    .expect("append a custom BANCOR node without switching the active heartbeat");
+    assert!(custom_bancor.joined);
+    assert_eq!(
+        custom_bancor.selected_node_url.as_deref(),
+        Some("https://node-b.example.test")
+    );
+    assert_eq!(
+        custom_bancor.bancor_service_node_url.as_deref(),
+        Some("https://node-c.example.test")
+    );
+    assert_eq!(
+        custom_bancor.asset_service_node_url.as_deref(),
+        Some("https://node-a.example.test")
+    );
+
     let switch_error = write_nni_config_with_selected_node(
         &state,
         None,

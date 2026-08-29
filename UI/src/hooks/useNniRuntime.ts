@@ -1116,6 +1116,69 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     }
   };
 
+  const addNniFinancialServiceNodeUrl = async (
+    service: "assets" | "bancor",
+    value: string,
+  ): Promise<boolean> => {
+    const currentNodes = nniRemoteNodeUrls();
+    if (currentNodes.includes(value)) {
+      return service === "assets"
+        ? updateNniAssetServiceNodeUrl(value)
+        : updateNniBancorServiceNodeUrl(value);
+    }
+    const setSaving = service === "assets"
+      ? setNniAssetServiceNodeSaving
+      : setNniBancorServiceNodeSaving;
+    const setError = service === "assets"
+      ? setNniAssetServiceNodeError
+      : setNniBancorServiceNodeError;
+    setSaving(true);
+    setError(null);
+    try {
+      const selectedHeartbeatNode = selectedNniNodeUrl();
+      const payload: {
+        remote_nodes: string[];
+        selected_node_url?: string;
+        bancor_service_node_url: string;
+        asset_service_node_url: string;
+      } = {
+        remote_nodes: [...currentNodes, value],
+        bancor_service_node_url: service === "bancor"
+          ? value
+          : selectedNniBancorServiceNodeUrl(),
+        asset_service_node_url: service === "assets"
+          ? value
+          : selectedNniAssetServiceNodeUrl(),
+      };
+      if (selectedHeartbeatNode) payload.selected_node_url = selectedHeartbeatNode;
+      const res = await apiFetch(`/v1/nni/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const body = (await res.json()) as ApiResponse<NniConfigResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `Financial service node update failed (${res.status})`);
+      }
+      applyNniConfigResponse(body.data);
+      return true;
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : t("自定义节点添加失败。", "Failed to add the custom node."),
+      );
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addNniAssetServiceNodeUrl = (value: string) =>
+    addNniFinancialServiceNodeUrl("assets", value);
+  const addNniBancorServiceNodeUrl = (value: string) =>
+    addNniFinancialServiceNodeUrl("bancor", value);
+
   return {
     nniStatus,
     nniStatusLoading,
@@ -1192,6 +1255,8 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     updateNniSelectedNodeUrl,
     updateNniBancorServiceNodeUrl,
     updateNniAssetServiceNodeUrl,
+    addNniBancorServiceNodeUrl,
+    addNniAssetServiceNodeUrl,
     fetchNniHeartbeatRecords,
     clearNniHeartbeatRecords,
     fetchNniHeartbeatErrors,

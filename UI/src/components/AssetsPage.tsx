@@ -190,6 +190,7 @@ export function AssetsPage({
   onLoadTransferHistory,
   onClearTransferFeedback,
   onAssetServiceNodeChange = async () => false,
+  onAddAssetServiceNode = async () => false,
   onRefresh,
   onOpenBancor,
   onOpenNni,
@@ -218,6 +219,7 @@ export function AssetsPage({
   onLoadTransferHistory: (ownerPublicKey: string) => Promise<unknown>;
   onClearTransferFeedback: () => void;
   onAssetServiceNodeChange?: (nodeUrl: string) => Promise<boolean>;
+  onAddAssetServiceNode?: (nodeUrl: string) => Promise<boolean>;
   onRefresh: () => void | Promise<unknown>;
   onOpenBancor: () => void;
   onOpenNni: () => void;
@@ -292,14 +294,21 @@ export function AssetsPage({
     return result;
   };
 
-  const changeAssetServiceNode = async (nodeUrl: string) => {
-    if (!(await onAssetServiceNodeChange(nodeUrl))) return false;
+  const activateAssetServiceNode = async (
+    nodeUrl: string,
+    persist: (value: string) => Promise<boolean>,
+  ) => {
+    if (!(await persist(nodeUrl))) return false;
     await onRefresh();
     if (selectedAssetAccount) {
       await onLoadTransferHistory(selectedAssetAccount.publicKey);
     }
     return true;
   };
+  const changeAssetServiceNode = (nodeUrl: string) =>
+    activateAssetServiceNode(nodeUrl, onAssetServiceNodeChange);
+  const addAssetServiceNode = (nodeUrl: string) =>
+    activateAssetServiceNode(nodeUrl, onAddAssetServiceNode);
 
   const statusMessage = selectedAssetAccount?.source === "external"
     ? t("这个外部账户的余额尚未同步。", "Balances for this external account have not been synchronized yet.")
@@ -623,6 +632,7 @@ export function AssetsPage({
         error={assetServiceNodeError}
         disabled={loading || transferLoading || transferHistoryLoading}
         onChange={changeAssetServiceNode}
+        onAddNode={addAssetServiceNode}
       />
 
       <AssetTransferDialog

@@ -387,6 +387,8 @@ export default function App() {
     updateNniSelectedNodeUrl,
     updateNniBancorServiceNodeUrl,
     updateNniAssetServiceNodeUrl,
+    addNniBancorServiceNodeUrl,
+    addNniAssetServiceNodeUrl,
     fetchNniHeartbeatRecords,
     clearNniHeartbeatRecords,
     fetchNniHeartbeatErrors,
@@ -2009,6 +2011,7 @@ export default function App() {
               bancorServiceNodeSaving={nniBancorServiceNodeSaving}
               bancorServiceNodeError={nniBancorServiceNodeError}
               onBancorServiceNodeChange={updateNniBancorServiceNodeUrl}
+              onAddBancorServiceNode={addNniBancorServiceNodeUrl}
               onOpenNni={() => setCurrentPage("nni")}
               onOpenApr={() => setCurrentPage("nni_apr")}
             />
@@ -2039,6 +2042,7 @@ export default function App() {
               onLoadTransferHistory={assetTransferHistoryRuntime.load}
               onClearTransferFeedback={assetTransferRuntime.clearFeedback}
               onAssetServiceNodeChange={updateNniAssetServiceNodeUrl}
+              onAddAssetServiceNode={addNniAssetServiceNodeUrl}
               onRefresh={() => Promise.allSettled([
                 assetOverviewRuntime.fetchMarket(),
                 assetOverviewRuntime.fetchAccount(1),

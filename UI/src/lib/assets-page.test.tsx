@@ -225,7 +225,11 @@ test("asset account selector reserves additional wallet options", () => {
   assert.match(markup, /冷钱包/);
   assert.match(markup, /value="cold-wallet"/);
   assert.match(markup, /冷钱包 · external-asset-public-key/);
-  assert.equal((markup.match(/<option/g) ?? []).length, 2);
+  const accountSelector = markup.match(
+    /<label[^>]*data-assets-account-selector="true"[^>]*>[\s\S]*?<\/label>/,
+  )?.[0];
+  assert.ok(accountSelector);
+  assert.equal((accountSelector.match(/<option/g) ?? []).length, 2);
 });
 
 test("USD row shows the held asset value instead of a fixed unit price", () => {

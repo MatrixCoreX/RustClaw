@@ -167,6 +167,55 @@ test("BANCOR and asset nodes change independently from the NNI heartbeat node", 
   await mounted.unmount();
 });
 
+test("custom financial nodes are appended without changing the active heartbeat node", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  let config: NniConfigResponse = {
+    ...joinedConfig(),
+    remote_nodes: ["https://node-a.example.test", "https://node-b.example.test"],
+    selected_node_url: "https://node-a.example.test",
+    bancor_service_node_url: "https://node-a.example.test",
+    asset_service_node_url: "https://node-b.example.test",
+  };
+  const payloads: Array<Record<string, unknown>> = [];
+  const apiFetch = async (path: string, init?: RequestInit) => {
+    assert.equal(path, "/v1/nni/config");
+    if (init?.method === "POST") {
+      const payload = JSON.parse(String(init.body)) as Record<string, unknown>;
+      payloads.push(payload);
+      config = { ...config, ...payload } as NniConfigResponse;
+    }
+    return apiResponse(config);
+  };
+  const mounted = await mountRuntime(apiFetch);
+
+  await act(async () => mounted.runtime().fetchNniConfig(true));
+  await act(async () => {
+    assert.equal(
+      await mounted.runtime().addNniBancorServiceNodeUrl("https://node-c.example.test"),
+      true,
+    );
+  });
+  await act(async () => {
+    assert.equal(
+      await mounted.runtime().addNniAssetServiceNodeUrl("https://node-d.example.test"),
+      true,
+    );
+  });
+
+  assert.equal(mounted.runtime().nniSelectedNodeUrl, "https://node-a.example.test");
+  assert.equal(mounted.runtime().nniBancorServiceNodeUrl, "https://node-c.example.test");
+  assert.equal(mounted.runtime().nniAssetServiceNodeUrl, "https://node-d.example.test");
+  assert.deepEqual(mounted.runtime().nniRemoteNodeUrls, [
+    "https://node-a.example.test",
+    "https://node-b.example.test",
+    "https://node-c.example.test",
+    "https://node-d.example.test",
+  ]);
+  assert.equal(payloads[0]?.selected_node_url, "https://node-a.example.test");
+  assert.equal(payloads[1]?.bancor_service_node_url, "https://node-c.example.test");
+  await mounted.unmount();
+});
+
 test("NNI page entry reuses the device status until an explicit refresh", async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   let statusReads = 0;
