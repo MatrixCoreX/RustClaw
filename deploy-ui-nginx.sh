@@ -401,7 +401,15 @@ nginx_ui_config_is_tls_managed() {
 ensure_deployed_ui_readable() {
   local ui_root="$1"
   if [[ -w "$ui_root" ]]; then
-    chmod -R a+rX "$ui_root"
+    if chmod -R a+rX "$ui_root" 2>/dev/null; then
+      return
+    fi
+    if command -v sudo >/dev/null 2>&1; then
+      sudo chmod -R a+rX "$ui_root"
+      return
+    fi
+    echo "Error: deployed UI contains files that the current user cannot make readable: $ui_root" >&2
+    exit 1
   else
     sudo chmod -R a+rX "$ui_root"
   fi
