@@ -29,6 +29,39 @@ export interface NniAssetTransferResponse {
   };
 }
 
+export interface NniAssetTransferHistoryAccountRef {
+  account_kind: "asset_owner";
+  address: string;
+}
+
+export interface NniAssetTransferHistoryFlow {
+  flow_index: number;
+  asset: "AIC" | "USD";
+  amount_units: string;
+  amount: string;
+  from: NniAssetTransferHistoryAccountRef;
+  to: NniAssetTransferHistoryAccountRef;
+}
+
+export interface NniAssetTransferHistoryRecord {
+  transaction_id: string;
+  transaction_kind: "asset_transfer";
+  created_at_unix: number;
+  memo: string | null;
+  flows: NniAssetTransferHistoryFlow[];
+}
+
+export interface NniAssetTransferHistoryResponse {
+  schema_version: 1;
+  status: "asset_transfer_history";
+  owner_pubkey: string;
+  limit: number;
+  total_address_activity: number;
+  has_more_activity: boolean;
+  transactions: NniAssetTransferHistoryRecord[];
+  node_url?: string;
+}
+
 export interface HealthResponse {
   version: string;
   queue_length: number;

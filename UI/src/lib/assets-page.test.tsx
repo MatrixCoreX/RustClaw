@@ -3,8 +3,16 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { AssetsPage, calculateAssetPortfolioValues } from "../components/AssetsPage";
-import type { NniBancorAccountResponse, NniBancorMarketResponse } from "../types/api";
+import {
+  AssetsPage,
+  buildAssetTransferHistoryEntries,
+  calculateAssetPortfolioValues,
+} from "../components/AssetsPage";
+import type {
+  NniAssetTransferHistoryResponse,
+  NniBancorAccountResponse,
+  NniBancorMarketResponse,
+} from "../types/api";
 
 const account: NniBancorAccountResponse = {
   schema_version: 1,
@@ -56,6 +64,45 @@ const market: NniBancorMarketResponse = {
   updated_at_unix: 1_700_000_000,
 };
 
+const transferHistory: NniAssetTransferHistoryResponse = {
+  schema_version: 1,
+  status: "asset_transfer_history",
+  owner_pubkey: "asset-owner-public-key",
+  limit: 10,
+  total_address_activity: 2,
+  has_more_activity: false,
+  transactions: [
+    {
+      transaction_id: "asset-transfer-outgoing",
+      transaction_kind: "asset_transfer",
+      created_at_unix: 1_700_000_100,
+      memo: "invoice 7",
+      flows: [{
+        flow_index: 0,
+        asset: "AIC",
+        amount_units: "125000000",
+        amount: "1.25000000",
+        from: { account_kind: "asset_owner", address: "asset-owner-public-key" },
+        to: { account_kind: "asset_owner", address: "recipient-public-key" },
+      }],
+    },
+    {
+      transaction_id: "asset-transfer-incoming",
+      transaction_kind: "asset_transfer",
+      created_at_unix: 1_700_000_000,
+      memo: null,
+      flows: [{
+        flow_index: 0,
+        asset: "USD",
+        amount_units: "250000000",
+        amount: "2.50000000",
+        from: { account_kind: "asset_owner", address: "sender-public-key" },
+        to: { account_kind: "asset_owner", address: "asset-owner-public-key" },
+      }],
+    },
+  ],
+};
+
 const baseProps = {
   t: (zh: string) => zh,
   account,
@@ -69,7 +116,11 @@ const baseProps = {
   transferLoading: false,
   transferError: null,
   transferMessage: null,
+  transferHistory,
+  transferHistoryLoading: false,
+  transferHistoryError: null,
   onTransfer: async () => null,
+  onLoadTransferHistory: async () => null,
   onClearTransferFeedback: () => undefined,
   onRefresh: () => undefined,
   onOpenBancor: () => undefined,
@@ -86,6 +137,32 @@ test("asset portfolio valuation uses fixed decimal arithmetic", () => {
     { ...account, aic_balance: "not-a-number" },
     market,
   ), null);
+});
+
+test("asset transfer history derives both sender and recipient directions", () => {
+  assert.deepEqual(
+    buildAssetTransferHistoryEntries(transferHistory.transactions, transferHistory.owner_pubkey)
+      .map(({ direction, counterparty, asset, amount }) => ({
+        direction,
+        counterparty,
+        asset,
+        amount,
+      })),
+    [
+      {
+        direction: "outgoing",
+        counterparty: "recipient-public-key",
+        asset: "AIC",
+        amount: "1.25000000",
+      },
+      {
+        direction: "incoming",
+        counterparty: "sender-public-key",
+        asset: "USD",
+        amount: "2.50000000",
+      },
+    ],
+  );
 });
 
 test("asset wallet shows AIC, USD, account identity, and market estimate", () => {
@@ -107,6 +184,14 @@ test("asset wallet shows AIC, USD, account identity, and market estimate", () =>
   assert.match(markup, /data-assets-full-value="100"[\s\S]*data-asset-transfer="AIC"/);
   assert.match(markup, /data-assets-full-value="5"[\s\S]*data-asset-transfer="USD"/);
   assert.equal((markup.match(/>转账</g) ?? []).length, 2);
+  assert.match(markup, /data-asset-transfer-history="true"/);
+  assert.match(markup, /data-transfer-direction="outgoing"/);
+  assert.match(markup, /data-transfer-direction="incoming"/);
+  assert.match(markup, /recipient-public-key/);
+  assert.match(markup, /sender-public-key/);
+  assert.match(markup, />转出</);
+  assert.match(markup, />转入</);
+  assert.match(markup, /Memo: invoice 7/);
   assert.doesNotMatch(markup, /查看当前资产账户中的余额与按市场价格估算的价值/);
   assert.doesNotMatch(markup, /<h2[^>]*>资产<\/h2>/);
 });

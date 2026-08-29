@@ -1,4 +1,13 @@
-import { ArrowLeft, CheckCircle2, KeyRound, SendHorizontal, ShieldCheck, X } from "lucide-react";
+import {
+  ArrowLeft,
+  CheckCircle2,
+  CircleDollarSign,
+  Coins,
+  KeyRound,
+  SendHorizontal,
+  ShieldCheck,
+  X,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import {
@@ -76,6 +85,14 @@ export function AssetTransferDialog({
     [recipientPublicKey],
   );
   const memoByteLength = useMemo(() => assetTransferMemoByteLength(memo), [memo]);
+  const AssetIcon = asset === "AIC" ? Coins : CircleDollarSign;
+  const assetPanelClass = asset === "AIC"
+    ? "border-emerald-400/40 bg-emerald-500/10"
+    : "border-amber-400/40 bg-amber-500/10";
+  const assetIconClass = asset === "AIC"
+    ? "border-emerald-400/30 bg-emerald-500/15 text-emerald-300"
+    : "border-amber-400/30 bg-amber-500/15 text-amber-300";
+  const assetTextClass = asset === "AIC" ? "text-emerald-300" : "text-amber-300";
 
   useEffect(() => {
     if (!open) {
@@ -147,11 +164,8 @@ export function AssetTransferDialog({
         <header className="flex items-start justify-between gap-4">
           <div>
             <h2 id="asset-transfer-title" className="text-lg font-semibold text-[var(--theme-text-strong)]">
-              {t("资产转账", "Asset transfer")}
+              {t(`${asset} 转账`, `${asset} transfer`)}
             </h2>
-            <p className="mt-1 text-sm leading-5 text-[var(--theme-text-muted)]">
-              {t("向合规的资产公钥转出 AIC 或 USD。", "Send AIC or USD to a valid asset public key.")}
-            </p>
           </div>
           <button type="button" className="theme-icon-btn" aria-label={t("关闭", "Close")} disabled={loading} onClick={onClose}>
             <X className="h-4 w-4" />
@@ -167,10 +181,15 @@ export function AssetTransferDialog({
           </div>
         ) : reviewing ? (
           <div className="mt-6 space-y-5" data-asset-transfer-review="true">
-            <div className="space-y-3 rounded-md border border-[var(--theme-border)] bg-[var(--theme-card-strong)] p-4">
-              <div>
-                <p className="text-xs text-[var(--theme-text-muted)]">{t("转出", "Amount")}</p>
-                <p className="mt-1 text-xl font-semibold text-[var(--theme-text-strong)]">{amount} {asset}</p>
+            <div className={`space-y-3 rounded-md border p-4 ${assetPanelClass}`}>
+              <div className="flex items-center gap-3" data-transfer-review-asset={asset}>
+                <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full border ${assetIconClass}`}>
+                  <AssetIcon className="h-5 w-5" />
+                </span>
+                <div>
+                  <p className="text-xs text-[var(--theme-text-muted)]">{t("转出资产与金额", "Asset and amount")}</p>
+                  <p className={`mt-0.5 text-2xl font-bold ${assetTextClass}`}>{amount} {asset}</p>
+                </div>
               </div>
               <div>
                 <p className="text-xs text-[var(--theme-text-muted)]">{t("付款账户", "From")}</p>
@@ -207,9 +226,18 @@ export function AssetTransferDialog({
           </div>
         ) : (
           <div className="mt-6 space-y-5">
-            <div className="rounded-md border border-[var(--theme-border)] bg-[var(--theme-card-strong)] px-3 py-3" data-transfer-asset={asset}>
-              <p className="text-xs text-[var(--theme-text-muted)]">{t("转账资产", "Transfer asset")}</p>
-              <p className="mt-1 font-semibold text-[var(--theme-text-strong)]">{asset}</p>
+            <div
+              className={`flex items-center gap-3 rounded-md border px-4 py-3 ${assetPanelClass}`}
+              data-transfer-asset={asset}
+              aria-label={t(`本次转账资产：${asset}`, `Transfer asset: ${asset}`)}
+            >
+              <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full border ${assetIconClass}`}>
+                <AssetIcon className="h-5 w-5" />
+              </span>
+              <div>
+                <p className="text-xs font-medium text-[var(--theme-text-muted)]">{t("本次转账资产", "Transfer asset")}</p>
+                <p className={`mt-0.5 text-2xl font-bold ${assetTextClass}`} data-transfer-asset-symbol={asset}>{asset}</p>
+              </div>
             </div>
             <label className="grid gap-1.5">
               <span className="text-sm font-medium text-[var(--theme-text-strong)]">{t("转账金额", "Amount")}</span>

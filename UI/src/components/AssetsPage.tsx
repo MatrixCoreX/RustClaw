@@ -1,7 +1,10 @@
 import {
+  ArrowDownLeft,
   ArrowLeftRight,
+  ArrowUpRight,
   CircleDollarSign,
   Coins,
+  History,
   RefreshCw,
   SendHorizontal,
   Settings2,
@@ -9,7 +12,12 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import type { NniBancorAccountResponse, NniBancorMarketResponse } from "../types/api";
+import type {
+  NniAssetTransferHistoryRecord,
+  NniAssetTransferHistoryResponse,
+  NniBancorAccountResponse,
+  NniBancorMarketResponse,
+} from "../types/api";
 import {
   buildAssetAccountOptions,
   formatAssetAccountOption,
@@ -36,6 +44,55 @@ interface FixedDecimal {
 export interface AssetPortfolioValues {
   aicValueUsd: string;
   totalValueUsd: string;
+}
+
+export interface AssetTransferHistoryEntry {
+  id: string;
+  transactionId: string;
+  direction: "incoming" | "outgoing";
+  counterparty: string;
+  asset: "AIC" | "USD";
+  amount: string;
+  memo: string | null;
+  createdAtUnix: number;
+}
+
+export function buildAssetTransferHistoryEntries(
+  transactions: readonly NniAssetTransferHistoryRecord[],
+  ownerPublicKey: string,
+): AssetTransferHistoryEntry[] {
+  const entries: AssetTransferHistoryEntry[] = [];
+  for (const transaction of transactions) {
+    for (const flow of transaction.flows) {
+      const outgoing = flow.from.address === ownerPublicKey;
+      const incoming = flow.to.address === ownerPublicKey;
+      if (!outgoing && !incoming) continue;
+      entries.push({
+        id: `${transaction.transaction_id}:${flow.flow_index}`,
+        transactionId: transaction.transaction_id,
+        direction: outgoing ? "outgoing" : "incoming",
+        counterparty: outgoing ? flow.to.address : flow.from.address,
+        asset: flow.asset,
+        amount: flow.amount,
+        memo: transaction.memo,
+        createdAtUnix: transaction.created_at_unix,
+      });
+    }
+  }
+  return entries;
+}
+
+function formatTransferHistoryTime(createdAtUnix: number): string {
+  if (!Number.isSafeInteger(createdAtUnix) || createdAtUnix < 0) return "--";
+  const date = new Date(createdAtUnix * 1000);
+  if (Number.isNaN(date.getTime())) return "--";
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
 }
 
 function parseUnsignedDecimal(value: string): FixedDecimal | null {
@@ -110,7 +167,11 @@ export function AssetsPage({
   transferLoading,
   transferError,
   transferMessage,
+  transferHistory,
+  transferHistoryLoading,
+  transferHistoryError,
   onTransfer,
+  onLoadTransferHistory,
   onClearTransferFeedback,
   onRefresh,
   onOpenBancor,
@@ -129,7 +190,11 @@ export function AssetsPage({
   transferLoading: boolean;
   transferError: string | null;
   transferMessage: string | null;
+  transferHistory: NniAssetTransferHistoryResponse | null;
+  transferHistoryLoading: boolean;
+  transferHistoryError: string | null;
   onTransfer: (input: AssetTransferInput) => Promise<unknown>;
+  onLoadTransferHistory: (ownerPublicKey: string) => Promise<unknown>;
   onClearTransferFeedback: () => void;
   onRefresh: () => void | Promise<unknown>;
   onOpenBancor: () => void;
@@ -155,6 +220,13 @@ export function AssetsPage({
     : null;
   const loading = accountLoading || marketLoading;
   const accountAvailable = Boolean(selectedAssetAccount && selectedAccount);
+  const visibleTransferHistory = transferHistory?.owner_pubkey === selectedAssetAccount?.publicKey
+    ? transferHistory
+    : null;
+  const transferHistoryEntries = buildAssetTransferHistoryEntries(
+    visibleTransferHistory?.transactions ?? [],
+    selectedAssetAccount?.publicKey ?? "",
+  );
 
   const openTransferDialog = (asset: AssetTransferAsset) => {
     onClearTransferFeedback();
@@ -166,6 +238,18 @@ export function AssetsPage({
     if (assetAccountOptions.some((option) => option.id === preferredAssetAccountId)) return;
     setPreferredAssetAccountId(assetAccountOptions[0]?.id ?? "");
   }, [assetAccountOptions, preferredAssetAccountId]);
+
+  useEffect(() => {
+    void onLoadTransferHistory(selectedAssetAccount?.publicKey ?? "");
+  }, [onLoadTransferHistory, selectedAssetAccount?.publicKey]);
+
+  const submitTransfer = async (input: AssetTransferInput) => {
+    const result = await onTransfer(input);
+    if (result && selectedAssetAccount) {
+      void onLoadTransferHistory(selectedAssetAccount.publicKey);
+    }
+    return result;
+  };
 
   const statusMessage = selectedAssetAccount?.source === "external"
     ? t("这个外部账户的余额尚未同步。", "Balances for this external account have not been synchronized yet.")
@@ -373,6 +457,107 @@ export function AssetsPage({
         )}
       </section>
 
+      <section className="theme-panel overflow-hidden" aria-labelledby="asset-transfer-history-title">
+        <div className="flex items-center justify-between gap-3 border-b border-[var(--theme-border)] px-5 py-4 sm:px-6">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <History className="h-4 w-4 text-[var(--theme-icon-accent-color)]" />
+              <h3 id="asset-transfer-history-title" className="text-base font-semibold text-[var(--theme-text-strong)]">
+                {t("转账历史", "Transfer history")}
+              </h3>
+            </div>
+            <p className="mt-1 text-xs text-[var(--theme-text-muted)]">
+              {t("当前选定账户最近的转入和转出", "Recent incoming and outgoing transfers for the selected account")}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="theme-secondary-btn h-9 shrink-0 px-2.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!selectedAssetAccount || transferHistoryLoading}
+            onClick={() => void onLoadTransferHistory(selectedAssetAccount?.publicKey ?? "")}
+          >
+            <RefreshCw className={`h-4 w-4 ${transferHistoryLoading ? "animate-spin" : ""}`} />
+            {t("刷新", "Refresh")}
+          </button>
+        </div>
+
+        {!selectedAssetAccount ? (
+          <p className="px-5 py-8 text-center text-sm text-[var(--theme-text-muted)] sm:px-6">
+            {t("绑定资产账户后可查看转账历史。", "Bind an asset account to view transfer history.")}
+          </p>
+        ) : transferHistoryLoading && !visibleTransferHistory ? (
+          <p className="px-5 py-8 text-center text-sm text-[var(--theme-text-muted)] sm:px-6" role="status">
+            {t("正在读取转账历史…", "Loading transfer history…")}
+          </p>
+        ) : transferHistoryError ? (
+          <div className="px-5 py-7 text-center sm:px-6">
+            <p className="text-sm text-[var(--theme-text-muted)]" role="alert">{transferHistoryError}</p>
+            <button
+              type="button"
+              className="theme-secondary-btn mt-3 px-3 py-2 text-sm"
+              onClick={() => void onLoadTransferHistory(selectedAssetAccount.publicKey)}
+            >
+              <RefreshCw className="h-4 w-4" />
+              {t("重试", "Retry")}
+            </button>
+          </div>
+        ) : transferHistoryEntries.length === 0 ? (
+          <p className="px-5 py-8 text-center text-sm text-[var(--theme-text-muted)] sm:px-6">
+            {t("当前账户暂无转账记录。", "This account has no transfer records yet.")}
+          </p>
+        ) : (
+          <div className="divide-y divide-[var(--theme-border)]" data-asset-transfer-history="true">
+            {transferHistoryEntries.map((entry) => {
+              const incoming = entry.direction === "incoming";
+              const DirectionIcon = incoming ? ArrowDownLeft : ArrowUpRight;
+              return (
+                <div
+                  key={entry.id}
+                  className="grid gap-3 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-6"
+                  data-transfer-direction={entry.direction}
+                >
+                  <div className="flex min-w-0 items-start gap-3">
+                    <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border ${incoming
+                      ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-300"
+                      : "border-amber-400/25 bg-amber-500/10 text-amber-300"}`}
+                    >
+                      <DirectionIcon className="h-4 w-4" />
+                    </span>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                        <span className="text-sm font-semibold text-[var(--theme-text-strong)]">
+                          {incoming ? t("转入", "Received") : t("转出", "Sent")}
+                        </span>
+                        <span className="text-xs text-[var(--theme-text-muted)]">
+                          {incoming ? t("来自", "From") : t("发往", "To")}
+                        </span>
+                        <span className="max-w-full truncate font-mono text-xs text-[var(--theme-text-body)]" title={entry.counterparty}>
+                          {entry.counterparty}
+                        </span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-[var(--theme-text-faint)]">
+                        <span>{formatTransferHistoryTime(entry.createdAtUnix)}</span>
+                        <span className="font-mono" title={entry.transactionId}>
+                          {t("交易", "Transaction")} {entry.transactionId.slice(0, 12)}…
+                        </span>
+                      </div>
+                      {entry.memo ? (
+                        <p className="mt-1.5 break-words text-xs text-[var(--theme-text-muted)]">
+                          Memo: {entry.memo}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                  <p className={`text-right text-base font-semibold ${incoming ? "text-emerald-300" : "text-amber-300"}`}>
+                    {incoming ? "+" : "-"}{formatBancorTradeHistoryAmount(entry.amount)} {entry.asset}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
       {transferMessage && !transferDialogOpen ? (
         <p className="rounded-md border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100" role="status">
           {transferMessage}
@@ -392,7 +577,7 @@ export function AssetsPage({
         onClose={() => {
           if (!transferLoading) setTransferDialogOpen(false);
         }}
-        onSubmit={onTransfer}
+        onSubmit={submitTransfer}
       />
     </div>
   );
