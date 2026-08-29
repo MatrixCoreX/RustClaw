@@ -5,10 +5,8 @@ use axum::Router;
 use tower::ServiceExt;
 
 #[tokio::test]
-async fn task_submit_preflight_accepts_ui_client_header() {
-    let app = Router::new()
-        .route("/v1/tasks", post(|| async { StatusCode::NO_CONTENT }))
-        .layer(super::api_cors_layer());
+async fn clawd_does_not_accept_browser_cross_origin_preflight() {
+    let app = Router::new().route("/v1/tasks", post(|| async { StatusCode::NO_CONTENT }));
     let response = app
         .oneshot(
             Request::builder()
@@ -26,33 +24,18 @@ async fn task_submit_preflight_accepts_ui_client_header() {
         .await
         .expect("execute CORS preflight");
 
-    assert_eq!(response.status(), StatusCode::OK);
-    let allowed = response
+    assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+    assert!(!response
         .headers()
-        .get(header::ACCESS_CONTROL_ALLOW_HEADERS)
-        .and_then(|value| value.to_str().ok())
-        .expect("access-control-allow-headers");
-    for expected in [
-        "content-type",
-        "if-none-match",
-        "x-agent-client",
-        "x-agent-key",
-    ] {
-        assert!(
-            allowed.split(',').any(|value| value.trim() == expected),
-            "missing {expected} in {allowed}"
-        );
-    }
+        .contains_key(header::ACCESS_CONTROL_ALLOW_ORIGIN));
 }
 
 #[tokio::test]
-async fn cors_exposes_etag_for_browser_market_cache_validation() {
-    let app = Router::new()
-        .route(
-            "/v1/candles",
-            get(|| async { ([(header::ETAG, "\"candles-v1\"")], StatusCode::OK) }),
-        )
-        .layer(super::api_cors_layer());
+async fn clawd_leaves_browser_response_policy_to_webd() {
+    let app = Router::new().route(
+        "/v1/candles",
+        get(|| async { ([(header::ETAG, "\"candles-v1\"")], StatusCode::OK) }),
+    );
     let response = app
         .oneshot(
             Request::builder()
@@ -66,13 +49,14 @@ async fn cors_exposes_etag_for_browser_market_cache_validation() {
         .expect("execute CORS cache request");
 
     assert_eq!(response.status(), StatusCode::OK);
-    let exposed = response
-        .headers()
-        .get(header::ACCESS_CONTROL_EXPOSE_HEADERS)
-        .and_then(|value| value.to_str().ok())
-        .expect("access-control-expose-headers");
-    assert!(
-        exposed.split(',').any(|value| value.trim() == "etag"),
-        "missing etag in {exposed}"
+    assert_eq!(
+        response
+            .headers()
+            .get(header::ETAG)
+            .and_then(|value| value.to_str().ok()),
+        Some("\"candles-v1\"")
     );
+    assert!(!response
+        .headers()
+        .contains_key(header::ACCESS_CONTROL_ALLOW_ORIGIN));
 }

@@ -484,7 +484,7 @@ async fn nni_join_request(
         let endpoint = nni_remote_api_endpoint(&node_url, "join/request");
         let response = state
             .core
-            .http_client
+            .public_http_client
             .post(&endpoint)
             .timeout(nni_remote_api_timeout())
             .json(&NniRemoteJoinRequest {
@@ -727,7 +727,7 @@ async fn nni_join_verify(
     let endpoint = nni_remote_api_endpoint(&node_url, "join/verify");
     let response = state
         .core
-        .http_client
+        .public_http_client
         .post(&endpoint)
         .timeout(nni_remote_api_timeout())
         .json(&NniRemoteJoinVerifyRequest {
@@ -924,7 +924,7 @@ async fn nni_owner_recover(
 
     let challenge_response = match state
         .core
-        .http_client
+        .public_http_client
         .post(nni_remote_api_endpoint(&node_url, "asset-owner/recovery/request"))
         .timeout(nni_remote_api_timeout())
         .json(&NniRemoteOwnerRecoveryRequest {
@@ -1038,7 +1038,7 @@ async fn nni_owner_recover(
 
     let verify_response = match state
         .core
-        .http_client
+        .public_http_client
         .post(nni_remote_api_endpoint(&node_url, "asset-owner/recovery/verify"))
         .timeout(nni_remote_api_timeout())
         .json(&NniRemoteOwnerRecoveryVerifyRequest {
@@ -1121,7 +1121,7 @@ async fn nni_owner_unbind_request(
     };
     let response = match state
         .core
-        .http_client
+        .public_http_client
         .post(nni_remote_api_endpoint(
             &node_url,
             "asset-owner/unbind/request",
@@ -1208,7 +1208,7 @@ async fn nni_owner_unbind_verify(
     };
     let response = match state
         .core
-        .http_client
+        .public_http_client
         .post(nni_remote_api_endpoint(
             &node_url,
             "asset-owner/unbind/verify",
@@ -1499,10 +1499,21 @@ fn normalize_nni_node_url(raw: &str) -> Result<String, &'static str> {
     if trimmed.is_empty() {
         return Err("nni_remote_node_required");
     }
-    if !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
-        return Err("nni_remote_node_scheme_invalid");
+    let trimmed = trimmed.strip_suffix("/v1").unwrap_or(trimmed);
+    let url = crate::public_http_client::validate_public_https_base_url(trimmed).map_err(
+        |error| match error {
+            "remote_url_https_required" => "nni_remote_node_https_required",
+            "remote_url_non_public_address" => "nni_remote_node_non_public_address",
+            "remote_url_credentials_forbidden" | "remote_url_components_forbidden" => {
+                "nni_remote_node_components_invalid"
+            }
+            _ => "nni_remote_node_invalid",
+        },
+    )?;
+    if url.path() != "/" && !url.path().is_empty() {
+        return Err("nni_remote_node_path_invalid");
     }
-    Ok(trimmed.strip_suffix("/v1").unwrap_or(trimmed).to_string())
+    Ok(url.as_str().trim_end_matches('/').to_string())
 }
 
 fn read_nni_config(state: &AppState) -> anyhow::Result<NniConfigResponse> {
@@ -2379,7 +2390,7 @@ async fn run_nni_heartbeat_once_for_node(
     let request_endpoint = nni_remote_api_endpoint(node_url, "heartbeat/request");
     let request_resp = state
         .core
-        .http_client
+        .public_http_client
         .post(&request_endpoint)
         .timeout(nni_remote_api_timeout())
         .json(&NniRemoteHeartbeatRequest {
@@ -2466,7 +2477,7 @@ async fn run_nni_heartbeat_once_for_node(
     let verify_endpoint = nni_remote_api_endpoint(node_url, "heartbeat/verify");
     let verify_resp = state
         .core
-        .http_client
+        .public_http_client
         .post(&verify_endpoint)
         .timeout(nni_remote_api_timeout())
         .json(&NniRemoteHeartbeatVerifyRequest { task_id, signature })

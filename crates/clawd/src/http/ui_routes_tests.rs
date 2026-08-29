@@ -2023,6 +2023,8 @@ fn workspace_update_nginx_scripts_cover_upgrade_disable_and_release_packaging() 
     assert!(deploy_script.contains("brew upgrade nginx"));
     assert!(deploy_script.contains("apt-get install -y nginx"));
     assert!(deploy_script.contains("apk add --upgrade nginx"));
+    assert!(deploy_script.contains("add_header X-Frame-Options \"DENY\" always;"));
+    assert!(deploy_script.contains("add_header Content-Security-Policy"));
 
     let build_script = include_str!("../../../../build-all.sh");
     assert!(build_script.contains("preserve-nginx"));

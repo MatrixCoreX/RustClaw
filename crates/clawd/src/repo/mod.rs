@@ -40,7 +40,7 @@ pub(crate) use auth::{
     normalize_user_key, reset_channel_binding_state_for_user_key, resolve_auth_identity_by_key,
     resolve_channel_binding_identity, seed_channel_bindings, update_auth_key_by_id,
     upsert_exchange_credential_for_user_key, upsert_webd_login_account, verify_webd_password_login,
-    FactoryResetDbResult, PendingChannelBindSession,
+    BootstrapAdminResult, FactoryResetDbResult, PendingChannelBindSession,
 };
 pub(crate) use channel_delivery_outbox::{
     claim_due_channel_terminal_delivery, ensure_channel_delivery_outbox_schema,

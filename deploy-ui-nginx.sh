@@ -388,6 +388,8 @@ nginx_ui_config_matches() {
   grep -Fq "proxy_pass $proxy_upstream;" "$conf_path" || return 1
   grep -Fq "try_files \$uri \$uri/ /index.html;" "$conf_path" || return 1
   grep -Fq 'add_header Cache-Control "no-store, no-cache, must-revalidate" always;' "$conf_path" || return 1
+  grep -Fq 'add_header X-Content-Type-Options "nosniff" always;' "$conf_path" || return 1
+  grep -Fq 'add_header Content-Security-Policy' "$conf_path" || return 1
   grep -qE "listen[[:space:]]+.*80[[:space:]]*(default_server)?;" "$conf_path" || return 1
   return 0
 }
@@ -483,6 +485,11 @@ server {
     listen [::]:80;
     root $ui_root;
     index index.html;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header Permissions-Policy "camera=(), geolocation=(), microphone=(self)" always;
+    add_header Content-Security-Policy "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:" always;
 
     location ^~ /v1/ {
         proxy_pass $proxy_upstream;
@@ -505,6 +512,11 @@ server {
     location = /index.html {
         add_header Cache-Control "no-store, no-cache, must-revalidate" always;
         add_header Pragma "no-cache" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header Permissions-Policy "camera=(), geolocation=(), microphone=(self)" always;
+        add_header Content-Security-Policy "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:" always;
         expires -1;
     }
 

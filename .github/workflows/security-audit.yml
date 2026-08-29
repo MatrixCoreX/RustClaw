@@ -1,0 +1,61 @@
+name: Security Audit
+
+"on":
+  pull_request:
+    paths:
+      - Cargo.lock
+      - Cargo.toml
+      - "crates/**/Cargo.toml"
+      - "optional_skills/**/Cargo.toml"
+      - UI/package.json
+      - UI/package-lock.json
+      - .github/workflows/security-audit.yml
+  push:
+    branches:
+      - main
+    paths:
+      - Cargo.lock
+      - Cargo.toml
+      - "crates/**/Cargo.toml"
+      - "optional_skills/**/Cargo.toml"
+      - UI/package.json
+      - UI/package-lock.json
+      - .github/workflows/security-audit.yml
+  schedule:
+    - cron: "23 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rustsec:
+    name: Rust dependency audit
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Audit Cargo.lock
+        uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  npm:
+    name: UI dependency audit
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: UI
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: UI/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+      - name: Audit production and development dependencies
+        run: npm audit --audit-level=high

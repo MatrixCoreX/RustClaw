@@ -150,6 +150,7 @@ pub(crate) struct CoreServices {
     pub(crate) agents_by_id: Arc<RwLock<Arc<HashMap<String, AgentRuntimeConfig>>>>,
     pub(crate) agent_runtime_leases: Arc<RwLock<HashMap<String, AgentRuntimeConfig>>>,
     pub(crate) http_client: Client,
+    pub(crate) public_http_client: Client,
     pub(crate) skill_views_snapshot: Arc<RwLock<Arc<SkillViewsSnapshot>>>,
     pub(crate) active_provider_type: Option<String>,
     pub(crate) mcp_runtime: Arc<crate::mcp_runtime::McpRuntime>,
@@ -177,6 +178,8 @@ impl CoreServices {
             agents_by_id: Arc::new(RwLock::new(Arc::new(agents_by_id))),
             agent_runtime_leases: Arc::new(RwLock::new(agent_runtime_leases)),
             http_client: Client::new(),
+            public_http_client: crate::public_http_client::build_public_http_client()
+                .expect("test public HTTP client should build"),
             skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
                 binding: Default::default(),
                 registry: None,

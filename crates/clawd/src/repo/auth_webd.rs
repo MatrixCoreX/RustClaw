@@ -6,6 +6,10 @@ use rusqlite::{params, Connection, OptionalExtension};
 use super::normalize_user_key;
 use crate::now_ts;
 
+const MAX_WEBD_USERNAME_BYTES: usize = 64;
+const MIN_WEBD_PASSWORD_BYTES: usize = 12;
+const MAX_WEBD_PASSWORD_BYTES: usize = 1024;
+
 /// Returns `user_key` when username/password match and both webd row and auth_keys are enabled.
 pub(crate) fn verify_webd_password_login(
     db: &Connection,
@@ -62,8 +66,15 @@ pub(crate) fn upsert_webd_login_account(
     if username_norm.is_empty() || uk.is_empty() {
         anyhow::bail!("username and user_key required");
     }
-    if password.is_empty() {
-        anyhow::bail!("password required");
+    if username_norm.len() > MAX_WEBD_USERNAME_BYTES
+        || !username_norm
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    {
+        anyhow::bail!("username format invalid");
+    }
+    if !(MIN_WEBD_PASSWORD_BYTES..=MAX_WEBD_PASSWORD_BYTES).contains(&password.len()) {
+        anyhow::bail!("password length invalid");
     }
     let exists: bool = db
         .query_row(

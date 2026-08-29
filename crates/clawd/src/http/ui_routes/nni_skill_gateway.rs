@@ -789,9 +789,9 @@ async fn nni_skill_public_node_data(
     for node_url in nni_bancor_service_remote_nodes(&config) {
         let endpoint = nni_remote_api_endpoint(node_url, path);
         let request = if let Some(body) = body {
-            state.core.http_client.post(&endpoint).json(body)
+            state.core.public_http_client.post(&endpoint).json(body)
         } else {
-            state.core.http_client.get(&endpoint)
+            state.core.public_http_client.get(&endpoint)
         }
         .timeout(nni_remote_api_timeout());
         match request.send().await {
