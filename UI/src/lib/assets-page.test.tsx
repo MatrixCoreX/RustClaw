@@ -4,7 +4,9 @@ import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import {
+  ASSET_TRANSFER_HISTORY_DEFER_MS,
   AssetsPage,
+  assetTransferHistoryAutoLoadDelay,
   buildAssetTransferHistoryEntries,
   calculateAssetPortfolioValues,
 } from "../components/AssetsPage";
@@ -163,6 +165,16 @@ test("asset transfer history derives both sender and recipient directions", () =
       },
     ],
   );
+});
+
+test("asset transfer history waits for the primary balance and loads external accounts directly", () => {
+  assert.equal(assetTransferHistoryAutoLoadDelay(false, false, false), null);
+  assert.equal(assetTransferHistoryAutoLoadDelay(true, true, true), null);
+  assert.equal(
+    assetTransferHistoryAutoLoadDelay(true, true, false),
+    ASSET_TRANSFER_HISTORY_DEFER_MS,
+  );
+  assert.equal(assetTransferHistoryAutoLoadDelay(true, false, false), 0);
 });
 
 test("asset wallet shows AIC, USD, account identity, and market estimate", () => {

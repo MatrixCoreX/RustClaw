@@ -547,14 +547,6 @@ fn nni_skill_reward_apr_projection(
 
     let reward_node = rewards.get("node_url").and_then(Value::as_str);
     let market_node = market.get("node_url").and_then(Value::as_str);
-    if reward_node.is_some() && market_node.is_some() && reward_node != market_node {
-        return Err(NniSkillDomainError::new(
-            StatusCode::BAD_GATEWAY,
-            "nni_apr_snapshot_inconsistent",
-            true,
-            json!({}),
-        ));
-    }
 
     let records = rewards
         .get("records")
@@ -712,7 +704,8 @@ fn nni_skill_reward_apr_projection(
         },
         "live": live,
         "periods": periods,
-        "node_url": reward_node.or(market_node),
+        "reward_node_host": reward_node.and_then(nni_node_host),
+        "market_node_host": market_node.and_then(nni_node_host),
     }))
 }
 
@@ -729,7 +722,7 @@ async fn nni_skill_bancor_account_data(
             json!({"detail": error.to_string()}),
         )
     })?;
-    if nni_selected_remote_node(&config).is_none() {
+    if nni_bancor_service_remote_node(&config).is_none() {
         return Err(NniSkillDomainError::new(
             StatusCode::PRECONDITION_FAILED,
             "nni_remote_node_unconfigured",
@@ -741,7 +734,7 @@ async fn nni_skill_bancor_account_data(
         .await
         .map_err(|(status, error, data)| NniSkillDomainError::new(status, error, false, data))?;
     let mut attempts = Vec::new();
-    for node_url in nni_selected_remote_nodes(&config) {
+    for node_url in nni_bancor_service_remote_nodes(&config) {
         match query_nni_bancor_account_for_node(
             state,
             node_url,
@@ -784,7 +777,7 @@ async fn nni_skill_public_node_data(
             json!({"detail": error.to_string()}),
         )
     })?;
-    if nni_selected_remote_node(&config).is_none() {
+    if nni_bancor_service_remote_node(&config).is_none() {
         return Err(NniSkillDomainError::new(
             StatusCode::PRECONDITION_FAILED,
             "nni_remote_node_unconfigured",
@@ -793,7 +786,7 @@ async fn nni_skill_public_node_data(
         ));
     }
     let mut attempts = Vec::new();
-    for node_url in nni_selected_remote_nodes(&config) {
+    for node_url in nni_bancor_service_remote_nodes(&config) {
         let endpoint = nni_remote_api_endpoint(node_url, path);
         let request = if let Some(body) = body {
             state.core.http_client.post(&endpoint).json(body)

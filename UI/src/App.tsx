@@ -283,10 +283,16 @@ export default function App() {
   };
   const publicApiFetch = (path: string, init?: RequestInit) => safeFetch(path, init, false);
   const bancorRuntime = useBancorRuntime({ apiFetch, cacheScope: apiBase, t });
+  const assetOverviewRuntime = useBancorRuntime({
+    apiFetch,
+    cacheScope: `${apiBase}\nassets`,
+    overviewRoutePrefix: "/v1/nni/assets",
+    t,
+  });
   const assetTransferRuntime = useAssetTransferRuntime({
     apiFetch,
     t,
-    onCompleted: () => bancorRuntime.fetchAccount(1),
+    onCompleted: () => assetOverviewRuntime.fetchAccount(1),
   });
   const assetTransferHistoryRuntime = useAssetTransferHistoryRuntime({ apiFetch, t });
   const {
@@ -320,7 +326,14 @@ export default function App() {
     nniOwnerActionLoading,
     nniOwnerAuthorizationChallenge,
     nniRemoteNodes,
+    nniRemoteNodeUrls,
     nniSelectedNodeUrl,
+    nniBancorServiceNodeUrl,
+    nniBancorServiceNodeSaving,
+    nniBancorServiceNodeError,
+    nniAssetServiceNodeUrl,
+    nniAssetServiceNodeSaving,
+    nniAssetServiceNodeError,
     nniRemoteNodeCount,
     nniHeartbeatIntervalSeconds,
     nniHeartbeatRequestCount,
@@ -372,6 +385,8 @@ export default function App() {
     saveNniConfig,
     updateNniRemoteNodes,
     updateNniSelectedNodeUrl,
+    updateNniBancorServiceNodeUrl,
+    updateNniAssetServiceNodeUrl,
     fetchNniHeartbeatRecords,
     clearNniHeartbeatRecords,
     fetchNniHeartbeatErrors,
@@ -1539,7 +1554,7 @@ export default function App() {
 
   useEffect(() => {
     if (!uiAuthReady || !isAdminIdentity || currentPage !== "nni" || !nniJoined || !nniStatus?.signature_chip_present) return;
-    void bancorRuntime.fetchAccount(1);
+    void assetOverviewRuntime.fetchAccount(1);
     // Current holdings are private account data and require a fresh device
     // signature. Load them independently from the public reward ledger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1603,13 +1618,19 @@ export default function App() {
     if (!uiAuthReady || !isAdminIdentity || currentPage !== "assets") return;
     void ensureNniDeviceStatus(true);
     void fetchNniConfig(true);
-    void bancorRuntime.fetchMarket();
+    void assetOverviewRuntime.fetchMarket();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage, apiBase, uiAuthReady, isAdminIdentity]);
 
   useEffect(() => {
-    if (!uiAuthReady || !isAdminIdentity || (currentPage !== "bancor" && currentPage !== "assets") || !nniStatus?.signature_chip_present) return;
-    void bancorRuntime.fetchAccount(1);
+    if (!uiAuthReady || !isAdminIdentity || !nniStatus?.signature_chip_present) return;
+    if (currentPage === "bancor") {
+      void bancorRuntime.fetchAccount(1);
+    } else if (currentPage === "assets") {
+      void assetOverviewRuntime.fetchAccount(1);
+    } else {
+      return;
+    }
     // Private account reads require a fresh device signature, but Bancor
     // access is independent from participation in NNI heartbeat rewards.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1915,8 +1936,8 @@ export default function App() {
               nniNetworkStats={nniNetworkStats}
               nniNetworkStatsLoading={nniNetworkStatsLoading}
               nniNetworkStatsError={nniNetworkStatsError}
-              nniCurrentAicBalance={bancorRuntime.account?.aic_balance ?? null}
-              nniCurrentAicBalanceLoading={bancorRuntime.accountLoading}
+              nniCurrentAicBalance={assetOverviewRuntime.account?.aic_balance ?? null}
+              nniCurrentAicBalanceLoading={assetOverviewRuntime.accountLoading}
               nniConfigLoading={nniConfigLoading}
               nniConfigSaving={nniConfigSaving}
               nniConfigError={nniConfigError}
@@ -1944,7 +1965,7 @@ export default function App() {
               onClearHeartbeatErrors={clearNniHeartbeatErrors}
               onFetchRewards={fetchNniRewards}
               onFetchNetworkStats={fetchNniNetworkStats}
-              onFetchCurrentAicBalance={() => bancorRuntime.fetchAccount(1)}
+              onFetchCurrentAicBalance={() => assetOverviewRuntime.fetchAccount(1)}
               onRunDeviceAction={runNniDeviceAction}
               onSetDeviceSimulation={setNniDeviceSimulation}
               onOpenApr={() => setCurrentPage("nni_apr")}
@@ -1983,6 +2004,11 @@ export default function App() {
               signingDeviceReady={nniStatus?.signature_chip_present === true}
               assetOwnerReady={Boolean(nniAssetOwnerPubkey)}
               assetOwnerPubkey={nniAssetOwnerPubkey}
+              bancorServiceNodes={nniRemoteNodeUrls}
+              bancorServiceNodeUrl={nniBancorServiceNodeUrl}
+              bancorServiceNodeSaving={nniBancorServiceNodeSaving}
+              bancorServiceNodeError={nniBancorServiceNodeError}
+              onBancorServiceNodeChange={updateNniBancorServiceNodeUrl}
               onOpenNni={() => setCurrentPage("nni")}
               onOpenApr={() => setCurrentPage("nni_apr")}
             />
@@ -1991,26 +2017,31 @@ export default function App() {
           {isAdminIdentity && currentPage === "assets" ? (
             <AssetsPage
               t={t}
-              account={nniAssetOwnerPubkey ? bancorRuntime.account : null}
-              market={bancorRuntime.market}
+              account={nniAssetOwnerPubkey ? assetOverviewRuntime.account : null}
+              market={assetOverviewRuntime.market}
               assetOwnerPubkey={nniAssetOwnerPubkey}
               signingDeviceReady={nniStatus?.signature_chip_present === true}
-              accountLoading={bancorRuntime.accountLoading}
-              marketLoading={bancorRuntime.marketLoading}
-              error={bancorRuntime.error}
-              hardwareAccountAccessUnavailable={bancorRuntime.hardwareAccountAccessUnavailable}
+              accountLoading={assetOverviewRuntime.accountLoading}
+              marketLoading={assetOverviewRuntime.marketLoading}
+              error={assetOverviewRuntime.error}
+              hardwareAccountAccessUnavailable={assetOverviewRuntime.hardwareAccountAccessUnavailable}
               transferLoading={assetTransferRuntime.loading}
               transferError={assetTransferRuntime.error}
               transferMessage={assetTransferRuntime.message}
               transferHistory={assetTransferHistoryRuntime.history}
               transferHistoryLoading={assetTransferHistoryRuntime.loading}
               transferHistoryError={assetTransferHistoryRuntime.error}
+              assetServiceNodes={nniRemoteNodeUrls}
+              assetServiceNodeUrl={nniAssetServiceNodeUrl}
+              assetServiceNodeSaving={nniAssetServiceNodeSaving}
+              assetServiceNodeError={nniAssetServiceNodeError}
               onTransfer={assetTransferRuntime.transfer}
               onLoadTransferHistory={assetTransferHistoryRuntime.load}
               onClearTransferFeedback={assetTransferRuntime.clearFeedback}
+              onAssetServiceNodeChange={updateNniAssetServiceNodeUrl}
               onRefresh={() => Promise.allSettled([
-                bancorRuntime.fetchMarket(),
-                bancorRuntime.fetchAccount(1),
+                assetOverviewRuntime.fetchMarket(),
+                assetOverviewRuntime.fetchAccount(1),
               ])}
               onOpenBancor={() => setCurrentPage("bancor")}
               onOpenNni={() => setCurrentPage("nni")}

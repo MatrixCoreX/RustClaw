@@ -1257,6 +1257,8 @@ export interface NniOwnerUnbindVerifyResponse {
 export interface NniConfigResponse {
   remote_nodes: string[];
   selected_node_url?: string | null;
+  bancor_service_node_url?: string | null;
+  asset_service_node_url?: string | null;
   joined: boolean;
   asset_owner_pubkey?: string | null;
   heartbeat_interval_seconds: number;

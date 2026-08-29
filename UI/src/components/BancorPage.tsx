@@ -38,6 +38,7 @@ import {
 } from "../hooks/useBancorRuntime";
 import type { useBancorRuntime } from "../hooks/useBancorRuntime";
 import type { NniBancorCandle, NniBancorQuoteResponse } from "../types/api";
+import { FinancialServiceNodeSelector } from "./FinancialServiceNodeSelector";
 import {
   formatBancorAssetAmountForDisplay,
   formatBancorBalanceAmount,
@@ -413,6 +414,11 @@ export function BancorPage({
   signingDeviceReady,
   assetOwnerReady,
   assetOwnerPubkey,
+  bancorServiceNodes = [],
+  bancorServiceNodeUrl = "",
+  bancorServiceNodeSaving = false,
+  bancorServiceNodeError = null,
+  onBancorServiceNodeChange = async () => false,
   onOpenNni,
   onOpenApr,
 }: {
@@ -422,6 +428,11 @@ export function BancorPage({
   signingDeviceReady: boolean;
   assetOwnerReady: boolean;
   assetOwnerPubkey: string | null;
+  bancorServiceNodes?: readonly string[];
+  bancorServiceNodeUrl?: string;
+  bancorServiceNodeSaving?: boolean;
+  bancorServiceNodeError?: string | null;
+  onBancorServiceNodeChange?: (nodeUrl: string) => Promise<boolean>;
   onOpenNni: () => void;
   onOpenApr: () => void;
 }) {
@@ -557,6 +568,24 @@ export function BancorPage({
   const confirmTrade = async (authorization: BancorTradeAuthorization) => {
     const result = await trade(authorization);
     if (result) setInputAmount("");
+  };
+  const assetServiceNodeBusy = marketLoading
+    || candlesLoading
+    || accountLoading
+    || marketTradesLoading
+    || quoteLoading
+    || tradeLoading;
+  const changeAssetServiceNode = async (nodeUrl: string) => {
+    if (!(await onBancorServiceNodeChange(nodeUrl))) return false;
+    clearQuote();
+    setMarketTradesPage(1);
+    await Promise.allSettled([
+      fetchMarket(),
+      fetchCandles(candleIntervalSeconds, false, true),
+      fetchMarketTrades(),
+      ...(assetOwnerReady ? [fetchAccount(1)] : []),
+    ]);
+    return true;
   };
   if (activeView === "price_change") {
     return (
@@ -1172,6 +1201,17 @@ export function BancorPage({
       </section>
 
       <BancorFormulaCard t={t} market={market} />
+
+      <FinancialServiceNodeSelector
+        t={t}
+        service="bancor"
+        nodes={bancorServiceNodes}
+        selectedNodeUrl={bancorServiceNodeUrl}
+        saving={bancorServiceNodeSaving}
+        error={bancorServiceNodeError}
+        disabled={assetServiceNodeBusy}
+        onChange={changeAssetServiceNode}
+      />
     </div>
   );
 }

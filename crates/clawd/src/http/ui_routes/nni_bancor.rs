@@ -313,9 +313,40 @@ struct NniBancorTradeVerifyRequest {
     signature: String,
 }
 
+#[derive(Clone, Copy)]
+enum NniFinancialNodeScope {
+    Bancor,
+    Assets,
+}
+
+fn nni_financial_remote_nodes(
+    config: &NniConfigResponse,
+    scope: NniFinancialNodeScope,
+) -> Vec<&String> {
+    match scope {
+        NniFinancialNodeScope::Bancor => nni_bancor_service_remote_nodes(config),
+        NniFinancialNodeScope::Assets => nni_asset_service_remote_nodes(config),
+    }
+}
+
 async fn nni_bancor_market(
     State(state): State<AppState>,
     headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    nni_financial_market(state, headers, NniFinancialNodeScope::Bancor).await
+}
+
+async fn nni_assets_market(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    nni_financial_market(state, headers, NniFinancialNodeScope::Assets).await
+}
+
+async fn nni_financial_market(
+    state: AppState,
+    headers: HeaderMap,
+    scope: NniFinancialNodeScope,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
     if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
         return (
@@ -338,7 +369,7 @@ async fn nni_bancor_market(
         }
     };
     let mut attempts = Vec::new();
-    for node_url in nni_selected_remote_nodes(&config) {
+    for node_url in nni_financial_remote_nodes(&config, scope) {
         let endpoint = nni_remote_api_endpoint(node_url, "bancor/market");
         match state
             .core
@@ -439,7 +470,7 @@ async fn nni_bancor_candles(
         }
     };
     let mut attempts = Vec::new();
-    for node_url in nni_selected_remote_nodes(&config) {
+    for node_url in nni_bancor_service_remote_nodes(&config) {
         let mut endpoint = nni_remote_api_endpoint(
             node_url,
             &format!("bancor/candles?interval_seconds={interval_seconds}&limit={limit}"),
@@ -584,7 +615,7 @@ async fn nni_bancor_market_trades(
         }
     };
     let mut attempts = Vec::new();
-    for node_url in nni_selected_remote_nodes(&config) {
+    for node_url in nni_bancor_service_remote_nodes(&config) {
         let endpoint = nni_remote_api_endpoint(node_url, "bancor/trades");
         match state
             .core
@@ -706,7 +737,7 @@ async fn nni_bancor_quote(
         }
     };
     let mut attempts = Vec::new();
-    for node_url in nni_selected_remote_nodes(&config) {
+    for node_url in nni_bancor_service_remote_nodes(&config) {
         let endpoint = nni_remote_api_endpoint(node_url, "bancor/quote");
         match state.core.http_client.post(&endpoint)
             .timeout(nni_remote_api_timeout())
@@ -750,6 +781,23 @@ async fn nni_bancor_account(
     headers: HeaderMap,
     Query(query): Query<NniRequestRecordsQuery>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
+    nni_financial_account(state, headers, query, NniFinancialNodeScope::Bancor).await
+}
+
+async fn nni_assets_account(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<NniRequestRecordsQuery>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    nni_financial_account(state, headers, query, NniFinancialNodeScope::Assets).await
+}
+
+async fn nni_financial_account(
+    state: AppState,
+    headers: HeaderMap,
+    query: NniRequestRecordsQuery,
+    scope: NniFinancialNodeScope,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
     let identity = match require_ui_identity(&state, &headers) {
         Ok(identity) => identity,
         Err((status, Json(resp))) => {
@@ -780,7 +828,7 @@ async fn nni_bancor_account(
     let page = query.page.unwrap_or(1).clamp(1, 1_000_000);
     let per_page = query.per_page.unwrap_or(20).clamp(1, 100);
     let mut attempts = Vec::new();
-    for node_url in nni_selected_remote_nodes(&config) {
+    for node_url in nni_financial_remote_nodes(&config, scope) {
         match nni_remote_read_with_retry(|| {
             query_nni_bancor_account_for_node(
                 &state,
@@ -1032,7 +1080,7 @@ async fn nni_bancor_trade(
         (Some(device_pubkey), owner_pubkey)
     };
     let mut attempts = Vec::new();
-    for node_url in nni_selected_remote_nodes(&config) {
+    for node_url in nni_bancor_service_remote_nodes(&config) {
         let remote_request = NniBancorTradeRemoteRequest {
             device_pubkey: device_pubkey.clone(),
             asset_owner_pubkey: asset_owner_pubkey.clone(),

@@ -231,6 +231,8 @@ async fn nni_bancor_routes_require_ui_authentication() {
         ),
         ("GET", "/v1/nni/bancor/trades", ""),
         ("GET", "/v1/nni/bancor/account?page=1&per_page=20", ""),
+        ("GET", "/v1/nni/assets/market", ""),
+        ("GET", "/v1/nni/assets/account?page=1&per_page=20", ""),
         (
             "POST",
             "/v1/nni/bancor/quote",
@@ -488,6 +490,8 @@ fn nni_settings_keep_one_explicit_active_node() {
         &state,
         Some(&nodes),
         Some("https://node-b.example.test"),
+        None,
+        None,
         Some(true),
     )
     .expect("persist selected NNI node");
@@ -502,10 +506,54 @@ fn nni_settings_keep_one_explicit_active_node() {
         Some("https://node-b.example.test")
     );
 
+    let asset_switched = write_nni_config_with_selected_node(
+        &state,
+        None,
+        None,
+        None,
+        Some("https://node-a.example.test"),
+        None,
+    )
+    .expect("switch asset services while NNI heartbeat remains active");
+    assert!(asset_switched.joined);
+    assert_eq!(
+        asset_switched.selected_node_url.as_deref(),
+        Some("https://node-b.example.test")
+    );
+    assert_eq!(
+        asset_switched.asset_service_node_url.as_deref(),
+        Some("https://node-a.example.test")
+    );
+
+    let bancor_switched = write_nni_config_with_selected_node(
+        &state,
+        None,
+        None,
+        Some("https://node-a.example.test"),
+        None,
+        None,
+    )
+    .expect("switch BANCOR services while other selections remain active");
+    assert!(bancor_switched.joined);
+    assert_eq!(
+        bancor_switched.selected_node_url.as_deref(),
+        Some("https://node-b.example.test")
+    );
+    assert_eq!(
+        bancor_switched.bancor_service_node_url.as_deref(),
+        Some("https://node-a.example.test")
+    );
+    assert_eq!(
+        bancor_switched.asset_service_node_url.as_deref(),
+        Some("https://node-a.example.test")
+    );
+
     let switch_error = write_nni_config_with_selected_node(
         &state,
         None,
         Some("https://node-a.example.test"),
+        None,
+        None,
         None,
     )
     .expect_err("active NNI must stop before switching nodes");
@@ -518,6 +566,8 @@ fn nni_settings_keep_one_explicit_active_node() {
         &state,
         None,
         Some("https://node-a.example.test"),
+        None,
+        None,
         Some(false),
     )
     .expect("stop NNI and select another bound node");
