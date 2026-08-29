@@ -2,6 +2,8 @@ import {
   ArrowDownLeft,
   ArrowLeftRight,
   ArrowUpRight,
+  ChevronLeft,
+  ChevronRight,
   CircleDollarSign,
   Coins,
   History,
@@ -29,6 +31,15 @@ import {
   formatBancorTradeHistoryAmount,
 } from "../lib/bancor-amount-display";
 import type { AssetTransferAsset } from "../lib/asset-transfer";
+import {
+  ASSET_HISTORY_DISPLAY_PAGE_SIZE,
+  assetHistoryDisplayTotalPages,
+  assetHistoryLocalTransactionOffset,
+  assetHistoryRemotePage,
+  type AssetHistoryDirectionFilter,
+  type AssetHistoryLoadOptions,
+  type AssetHistorySourceFilter,
+} from "../lib/asset-transfer-history";
 import { NniPublicKeyDisplay } from "./NniPublicKeyDisplay";
 import { AssetTransferDialog } from "./AssetTransferDialog";
 import type { AssetTransferInput } from "../hooks/useAssetTransferRuntime";
@@ -53,6 +64,8 @@ export interface AssetTransferHistoryEntry {
   transactionId: string;
   direction: "incoming" | "outgoing";
   counterparty: string;
+  counterpartyKind: "asset_owner" | "pool" | "fee" | "system";
+  transactionClass: "peer_transfer" | "market_trade" | "system_issuance" | "other";
   asset: "AIC" | "USD";
   amount: string;
   memo: string | null;
@@ -83,7 +96,9 @@ export function buildAssetTransferHistoryEntries(
         id: `${transaction.transaction_id}:${flow.flow_index}`,
         transactionId: transaction.transaction_id,
         direction: outgoing ? "outgoing" : "incoming",
-        counterparty: outgoing ? flow.to.address : flow.from.address,
+        counterparty: (outgoing ? flow.to.address : flow.from.address) ?? "",
+        counterpartyKind: outgoing ? flow.to.account_kind : flow.from.account_kind,
+        transactionClass: transaction.transaction_class,
         asset: flow.asset,
         amount: flow.amount,
         memo: transaction.memo,
@@ -216,7 +231,10 @@ export function AssetsPage({
   assetServiceNodeSaving?: boolean;
   assetServiceNodeError?: string | null;
   onTransfer: (input: AssetTransferInput) => Promise<unknown>;
-  onLoadTransferHistory: (ownerPublicKey: string) => Promise<unknown>;
+  onLoadTransferHistory: (
+    ownerPublicKey: string,
+    options?: AssetHistoryLoadOptions,
+  ) => Promise<unknown>;
   onClearTransferFeedback: () => void;
   onAssetServiceNodeChange?: (nodeUrl: string) => Promise<boolean>;
   onAddAssetServiceNode?: (nodeUrl: string) => Promise<boolean>;
@@ -233,6 +251,9 @@ export function AssetsPage({
   );
   const [transferDialogOpen, setTransferDialogOpen] = useState(false);
   const [transferAsset, setTransferAsset] = useState<AssetTransferAsset>("AIC");
+  const [historySource, setHistorySource] = useState<AssetHistorySourceFilter>("all");
+  const [historyDirection, setHistoryDirection] = useState<AssetHistoryDirectionFilter>("all");
+  const [historyDisplayPage, setHistoryDisplayPage] = useState(1);
   const selectedAssetAccount = assetAccountOptions.find(
     (accountOption) => accountOption.id === preferredAssetAccountId,
   ) ?? assetAccountOptions[0] ?? null;
@@ -244,12 +265,26 @@ export function AssetsPage({
     : null;
   const loading = accountLoading || marketLoading;
   const accountAvailable = Boolean(selectedAssetAccount && selectedAccount);
-  const visibleTransferHistory = transferHistory?.owner_pubkey === selectedAssetAccount?.publicKey
+  const expectedHistoryRemotePage = assetHistoryRemotePage(historyDisplayPage);
+  const matchingHistoryScope = transferHistory?.owner_pubkey === selectedAssetAccount?.publicKey
+    && transferHistory.source_filter === historySource
+    && transferHistory.direction_filter === historyDirection
     ? transferHistory
     : null;
+  const visibleTransferHistory = matchingHistoryScope?.page === expectedHistoryRemotePage
+    ? matchingHistoryScope
+    : null;
+  const historyBatchOffset = assetHistoryLocalTransactionOffset(historyDisplayPage);
+  const visibleHistoryTransactions = visibleTransferHistory?.transactions.slice(
+    historyBatchOffset,
+    historyBatchOffset + ASSET_HISTORY_DISPLAY_PAGE_SIZE,
+  ) ?? [];
   const transferHistoryEntries = buildAssetTransferHistoryEntries(
-    visibleTransferHistory?.transactions ?? [],
+    visibleHistoryTransactions,
     selectedAssetAccount?.publicKey ?? "",
+  );
+  const historyTotalDisplayPages = assetHistoryDisplayTotalPages(
+    matchingHistoryScope?.total_transactions ?? 0,
   );
 
   const openTransferDialog = (asset: AssetTransferAsset) => {
@@ -261,6 +296,7 @@ export function AssetsPage({
   useEffect(() => {
     if (assetAccountOptions.some((option) => option.id === preferredAssetAccountId)) return;
     setPreferredAssetAccountId(assetAccountOptions[0]?.id ?? "");
+    setHistoryDisplayPage(1);
   }, [assetAccountOptions, preferredAssetAccountId]);
 
   useEffect(() => {
@@ -276,11 +312,18 @@ export function AssetsPage({
     );
     if (delay === null) return;
     const timer = window.setTimeout(() => {
-      void onLoadTransferHistory(publicKey);
+      void onLoadTransferHistory(publicKey, {
+        source: historySource,
+        direction: historyDirection,
+        displayPage: historyDisplayPage,
+      });
     }, delay);
     return () => window.clearTimeout(timer);
   }, [
     accountLoading,
+    historyDirection,
+    historyDisplayPage,
+    historySource,
     onLoadTransferHistory,
     selectedAssetAccount?.publicKey,
     selectedUsesLoadedAccount,
@@ -289,7 +332,12 @@ export function AssetsPage({
   const submitTransfer = async (input: AssetTransferInput) => {
     const result = await onTransfer(input);
     if (result && selectedAssetAccount) {
-      void onLoadTransferHistory(selectedAssetAccount.publicKey);
+      void onLoadTransferHistory(selectedAssetAccount.publicKey, {
+        source: historySource,
+        direction: historyDirection,
+        displayPage: historyDisplayPage,
+        force: true,
+      });
     }
     return result;
   };
@@ -301,7 +349,12 @@ export function AssetsPage({
     if (!(await persist(nodeUrl))) return false;
     await onRefresh();
     if (selectedAssetAccount) {
-      await onLoadTransferHistory(selectedAssetAccount.publicKey);
+      await onLoadTransferHistory(selectedAssetAccount.publicKey, {
+        source: historySource,
+        direction: historyDirection,
+        displayPage: historyDisplayPage,
+        force: true,
+      });
     }
     return true;
   };
@@ -391,7 +444,10 @@ export function AssetsPage({
                 className="theme-input w-full font-mono text-xs"
                 value={selectedAssetAccount.id}
                 aria-label={t("选择资产账户", "Select asset account")}
-                onChange={(event) => setPreferredAssetAccountId(event.target.value)}
+                onChange={(event) => {
+                  setPreferredAssetAccountId(event.target.value);
+                  setHistoryDisplayPage(1);
+                }}
               >
                 {assetAccountOptions.map((accountOption) => (
                   <option key={accountOption.id} value={accountOption.id}>
@@ -522,31 +578,76 @@ export function AssetsPage({
             <div className="flex items-center gap-2">
               <History className="h-4 w-4 text-[var(--theme-icon-accent-color)]" />
               <h3 id="asset-transfer-history-title" className="text-base font-semibold text-[var(--theme-text-strong)]">
-                {t("转账历史", "Transfer history")}
+                {t("资产流水", "Asset activity")}
               </h3>
             </div>
             <p className="mt-1 text-xs text-[var(--theme-text-muted)]">
-              {t("当前选定账户最近的转入和转出", "Recent incoming and outgoing transfers for the selected account")}
+              {t("当前选定账户的转账、交易和系统发放记录", "Transfers, trades, and system issuance for the selected account")}
             </p>
           </div>
           <button
             type="button"
             className="theme-secondary-btn h-9 shrink-0 px-2.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
             disabled={!selectedAssetAccount || transferHistoryLoading}
-            onClick={() => void onLoadTransferHistory(selectedAssetAccount?.publicKey ?? "")}
+            onClick={() => void onLoadTransferHistory(selectedAssetAccount?.publicKey ?? "", {
+              source: historySource,
+              direction: historyDirection,
+              displayPage: historyDisplayPage,
+              force: true,
+            })}
           >
             <RefreshCw className={`h-4 w-4 ${transferHistoryLoading ? "animate-spin" : ""}`} />
             {t("刷新", "Refresh")}
           </button>
         </div>
 
+        <div className="grid gap-3 border-b border-[var(--theme-border)] bg-[var(--theme-card-strong)]/40 px-5 py-3 sm:grid-cols-2 sm:px-6">
+          <label className="grid gap-1">
+            <span className="text-[11px] font-medium text-[var(--theme-text-muted)]">
+              {t("记录类型", "Activity type")}
+            </span>
+            <select
+              className="theme-input h-9 text-xs"
+              value={historySource}
+              data-asset-history-source-filter="true"
+              onChange={(event) => {
+                setHistorySource(event.target.value as AssetHistorySourceFilter);
+                setHistoryDisplayPage(1);
+              }}
+            >
+              <option value="all">{t("全部", "All")}</option>
+              <option value="transfer">{t("转账", "Transfers")}</option>
+              <option value="trade">{t("交易", "Trades")}</option>
+              <option value="issuance">{t("系统发放", "System issuance")}</option>
+            </select>
+          </label>
+          <label className="grid gap-1">
+            <span className="text-[11px] font-medium text-[var(--theme-text-muted)]">
+              {t("资金方向", "Direction")}
+            </span>
+            <select
+              className="theme-input h-9 text-xs"
+              value={historyDirection}
+              data-asset-history-direction-filter="true"
+              onChange={(event) => {
+                setHistoryDirection(event.target.value as AssetHistoryDirectionFilter);
+                setHistoryDisplayPage(1);
+              }}
+            >
+              <option value="all">{t("全部", "All")}</option>
+              <option value="incoming">{t("转入", "Incoming")}</option>
+              <option value="outgoing">{t("转出", "Outgoing")}</option>
+            </select>
+          </label>
+        </div>
+
         {!selectedAssetAccount ? (
           <p className="px-5 py-8 text-center text-sm text-[var(--theme-text-muted)] sm:px-6">
-            {t("绑定资产账户后可查看转账历史。", "Bind an asset account to view transfer history.")}
+            {t("绑定资产账户后可查看资产流水。", "Bind an asset account to view asset activity.")}
           </p>
         ) : transferHistoryLoading && !visibleTransferHistory ? (
           <p className="px-5 py-8 text-center text-sm text-[var(--theme-text-muted)] sm:px-6" role="status">
-            {t("正在读取转账历史…", "Loading transfer history…")}
+            {t("正在读取资产流水…", "Loading asset activity…")}
           </p>
         ) : transferHistoryError ? (
           <div className="px-5 py-7 text-center sm:px-6">
@@ -554,7 +655,12 @@ export function AssetsPage({
             <button
               type="button"
               className="theme-secondary-btn mt-3 px-3 py-2 text-sm"
-              onClick={() => void onLoadTransferHistory(selectedAssetAccount.publicKey)}
+              onClick={() => void onLoadTransferHistory(selectedAssetAccount.publicKey, {
+                source: historySource,
+                direction: historyDirection,
+                displayPage: historyDisplayPage,
+                force: true,
+              })}
             >
               <RefreshCw className="h-4 w-4" />
               {t("重试", "Retry")}
@@ -562,13 +668,29 @@ export function AssetsPage({
           </div>
         ) : transferHistoryEntries.length === 0 ? (
           <p className="px-5 py-8 text-center text-sm text-[var(--theme-text-muted)] sm:px-6">
-            {t("当前账户暂无转账记录。", "This account has no transfer records yet.")}
+            {t("当前筛选条件下暂无资产流水。", "There is no asset activity for these filters.")}
           </p>
         ) : (
           <div className="divide-y divide-[var(--theme-border)]" data-asset-transfer-history="true">
             {transferHistoryEntries.map((entry) => {
               const incoming = entry.direction === "incoming";
               const DirectionIcon = incoming ? ArrowDownLeft : ArrowUpRight;
+              const counterparty = entry.counterparty || (
+                entry.counterpartyKind === "system"
+                  ? t("系统账户", "System account")
+                  : entry.counterpartyKind === "pool"
+                    ? t("市场资金池", "Market pool")
+                    : entry.counterpartyKind === "fee"
+                      ? t("手续费账户", "Fee account")
+                      : t("资产账户", "Asset account")
+              );
+              const activityLabel = entry.transactionClass === "peer_transfer"
+                ? t("转账", "Transfer")
+                : entry.transactionClass === "market_trade"
+                  ? t("交易", "Trade")
+                  : entry.transactionClass === "system_issuance"
+                    ? t("系统发放", "System issuance")
+                    : t("其他", "Other");
               return (
                 <div
                   key={entry.id}
@@ -590,8 +712,11 @@ export function AssetsPage({
                         <span className="text-xs text-[var(--theme-text-muted)]">
                           {incoming ? t("来自", "From") : t("发往", "To")}
                         </span>
-                        <span className="max-w-full truncate font-mono text-xs text-[var(--theme-text-body)]" title={entry.counterparty}>
-                          {entry.counterparty}
+                        <span className="rounded border border-[var(--theme-border)] px-1.5 py-0.5 text-[10px] text-[var(--theme-text-muted)]">
+                          {activityLabel}
+                        </span>
+                        <span className="max-w-full truncate font-mono text-xs text-[var(--theme-text-body)]" title={counterparty}>
+                          {counterparty}
                         </span>
                       </div>
                       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-[var(--theme-text-faint)]">
@@ -615,6 +740,31 @@ export function AssetsPage({
             })}
           </div>
         )}
+        {historyTotalDisplayPages > 1 ? (
+          <div className="flex items-center justify-between border-t border-[var(--theme-border)] px-5 py-3 sm:px-6" data-asset-history-pagination="true">
+            <button
+              type="button"
+              className="theme-secondary-btn h-8 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={historyDisplayPage <= 1 || transferHistoryLoading}
+              aria-label={t("上一页", "Previous page")}
+              onClick={() => setHistoryDisplayPage((page) => Math.max(1, page - 1))}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <span className="text-xs text-[var(--theme-text-muted)]">
+              {historyDisplayPage} / {historyTotalDisplayPages}
+            </span>
+            <button
+              type="button"
+              className="theme-secondary-btn h-8 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={historyDisplayPage >= historyTotalDisplayPages || transferHistoryLoading}
+              aria-label={t("下一页", "Next page")}
+              onClick={() => setHistoryDisplayPage((page) => Math.min(historyTotalDisplayPages, page + 1))}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        ) : null}
       </section>
 
       {transferMessage && !transferDialogOpen ? (

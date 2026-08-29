@@ -1,15 +1,77 @@
 const NNI_ASSET_TRANSFER_SIGNING_SCHEMA_VERSION: u64 = 2;
 const NNI_ASSET_TRANSFER_MEMO_MAX_BYTES: usize = 256;
-const NNI_ASSET_TRANSFER_HISTORY_DEFAULT_LIMIT: usize = 10;
-const NNI_ASSET_TRANSFER_HISTORY_MAX_LIMIT: usize = 20;
+const NNI_ASSET_TRANSFER_HISTORY_DEFAULT_LIMIT: usize = 100;
+const NNI_ASSET_TRANSFER_HISTORY_MAX_LIMIT: usize = 100;
 const NNI_ASSET_TRANSFER_HISTORY_REMOTE_PAGE_SIZE: usize = 100;
-const NNI_ASSET_TRANSFER_HISTORY_TRANSACTION_KIND: &str = "asset_transfer";
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum NniAssetHistorySourceFilter {
+    #[default]
+    All,
+    Transfer,
+    Trade,
+    Issuance,
+}
+
+impl NniAssetHistorySourceFilter {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Transfer => "transfer",
+            Self::Trade => "trade",
+            Self::Issuance => "issuance",
+        }
+    }
+
+    fn remote_class(self) -> Option<&'static str> {
+        match self {
+            Self::All => None,
+            Self::Transfer => Some("peer_transfer"),
+            Self::Trade => Some("market_trade"),
+            Self::Issuance => Some("system_issuance"),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum NniAssetHistoryDirectionFilter {
+    #[default]
+    All,
+    Incoming,
+    Outgoing,
+}
+
+impl NniAssetHistoryDirectionFilter {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Incoming => "incoming",
+            Self::Outgoing => "outgoing",
+        }
+    }
+
+    fn remote_direction(self) -> Option<&'static str> {
+        match self {
+            Self::All => None,
+            Self::Incoming => Some("incoming"),
+            Self::Outgoing => Some("outgoing"),
+        }
+    }
+}
 
 #[derive(Debug, Deserialize)]
 struct NniAssetTransferHistoryQuery {
     owner_pubkey: String,
     #[serde(default)]
     limit: Option<usize>,
+    #[serde(default)]
+    page: Option<usize>,
+    #[serde(default)]
+    source: NniAssetHistorySourceFilter,
+    #[serde(default)]
+    direction: NniAssetHistoryDirectionFilter,
 }
 
 #[derive(Debug, Deserialize)]
@@ -94,6 +156,7 @@ async fn nni_asset_transfer_history(
         .limit
         .unwrap_or(NNI_ASSET_TRANSFER_HISTORY_DEFAULT_LIMIT)
         .clamp(1, NNI_ASSET_TRANSFER_HISTORY_MAX_LIMIT);
+    let page = query.page.unwrap_or(1).clamp(1, 1_000_000);
     let config = match read_nni_config(&state) {
         Ok(config) => config,
         Err(error) => {
@@ -108,7 +171,15 @@ async fn nni_asset_transfer_history(
     let mut attempts = Vec::new();
     for node_url in nni_asset_service_remote_nodes(&config) {
         match nni_remote_read_with_retry(|| {
-            query_nni_asset_transfer_history_for_node(&state, node_url, &owner_pubkey, limit)
+            query_nni_asset_transfer_history_for_node(
+                &state,
+                node_url,
+                &owner_pubkey,
+                limit,
+                page,
+                query.source,
+                query.direction,
+            )
         })
         .await
         {
@@ -144,16 +215,21 @@ async fn query_nni_asset_transfer_history_for_node(
     node_url: &str,
     owner_pubkey: &str,
     limit: usize,
+    page: usize,
+    source: NniAssetHistorySourceFilter,
+    direction: NniAssetHistoryDirectionFilter,
 ) -> Result<Value, Value> {
     let endpoint = nni_remote_api_endpoint(node_url, "explorer/transactions");
-    let per_page = NNI_ASSET_TRANSFER_HISTORY_REMOTE_PAGE_SIZE.to_string();
     let response = state
         .core
         .public_http_client
         .get(endpoint)
         .query(&nni_asset_transfer_history_remote_query(
             owner_pubkey,
-            per_page.as_str(),
+            page,
+            limit,
+            source,
+            direction,
         ))
         .timeout(nni_remote_api_timeout())
         .send()
@@ -195,32 +271,45 @@ async fn query_nni_asset_transfer_history_for_node(
             "error_code": "nni_asset_transfer_history_data_missing",
         })
     })?;
-    normalize_asset_transfer_history_response(&data, owner_pubkey, limit).map_err(|error_code| {
-        json!({
-            "node_url": node_url,
-            "error_code": error_code,
-        })
-    })
+    normalize_asset_transfer_history_response(&data, owner_pubkey, source, direction).map_err(
+        |error_code| {
+            json!({
+                "node_url": node_url,
+                "error_code": error_code,
+            })
+        },
+    )
 }
 
-fn nni_asset_transfer_history_remote_query<'a>(
-    owner_pubkey: &'a str,
-    per_page: &'a str,
-) -> [(&'static str, &'a str); 3] {
-    [
-        ("address", owner_pubkey),
+fn nni_asset_transfer_history_remote_query(
+    owner_pubkey: &str,
+    page: usize,
+    per_page: usize,
+    source: NniAssetHistorySourceFilter,
+    direction: NniAssetHistoryDirectionFilter,
+) -> Vec<(&'static str, String)> {
+    let mut query = vec![
+        ("address", owner_pubkey.to_string()),
+        ("page", page.to_string()),
         (
-            "transaction_kind",
-            NNI_ASSET_TRANSFER_HISTORY_TRANSACTION_KIND,
+            "per_page",
+            per_page.min(NNI_ASSET_TRANSFER_HISTORY_REMOTE_PAGE_SIZE).to_string(),
         ),
-        ("per_page", per_page),
-    ]
+    ];
+    if let Some(transaction_class) = source.remote_class() {
+        query.push(("transaction_class", transaction_class.to_string()));
+    }
+    if let Some(remote_direction) = direction.remote_direction() {
+        query.push(("direction", remote_direction.to_string()));
+    }
+    query
 }
 
 fn normalize_asset_transfer_history_response(
     data: &Value,
     owner_pubkey: &str,
-    limit: usize,
+    source: NniAssetHistorySourceFilter,
+    direction: NniAssetHistoryDirectionFilter,
 ) -> Result<Value, &'static str> {
     if data.get("schema_version").and_then(Value::as_u64) != Some(1)
         || data.get("status").and_then(Value::as_str) != Some("explorer_transactions")
@@ -234,19 +323,38 @@ fn normalize_asset_transfer_history_response(
     if transactions.len() > NNI_ASSET_TRANSFER_HISTORY_REMOTE_PAGE_SIZE {
         return Err("nni_asset_transfer_history_contract_invalid");
     }
-    let total_address_activity = data
+    let page = data
+        .get("page")
+        .and_then(Value::as_u64)
+        .filter(|value| *value >= 1)
+        .ok_or("nni_asset_transfer_history_contract_invalid")?;
+    let per_page = data
+        .get("per_page")
+        .and_then(Value::as_u64)
+        .filter(|value| (1..=NNI_ASSET_TRANSFER_HISTORY_REMOTE_PAGE_SIZE as u64).contains(value))
+        .ok_or("nni_asset_transfer_history_contract_invalid")?;
+    let total_transactions = data
         .get("total")
         .and_then(Value::as_u64)
         .ok_or("nni_asset_transfer_history_contract_invalid")?;
-    let has_more_activity = data
-        .get("has_more")
-        .and_then(Value::as_bool)
+    let total_pages = data
+        .get("total_pages")
+        .and_then(Value::as_u64)
+        .filter(|value| *value >= 1)
         .ok_or("nni_asset_transfer_history_contract_invalid")?;
+    validate_asset_transfer_history_remote_filter(data.get("filter"), source, direction)?;
 
     let mut projected = Vec::new();
     for transaction in transactions {
-        if transaction.get("transaction_kind").and_then(Value::as_str)
-            != Some(NNI_ASSET_TRANSFER_HISTORY_TRANSACTION_KIND)
+        let transaction_kind = transaction
+            .get("transaction_kind")
+            .and_then(Value::as_str)
+            .filter(|value| valid_nni_explorer_machine_token(value))
+            .ok_or("nni_asset_transfer_history_contract_invalid")?;
+        let transaction_class = classify_nni_asset_history_transaction(transaction_kind);
+        if transaction.get("transaction_class").and_then(Value::as_str)
+            != Some(transaction_class)
+            || !nni_asset_history_source_matches(source, transaction_class)
         {
             return Err("nni_asset_transfer_history_contract_invalid");
         }
@@ -300,62 +408,127 @@ fn normalize_asset_transfer_history_response(
             if flow.get("amount_units").and_then(Value::as_str) != Some(amount_units.as_str()) {
                 return Err("nni_asset_transfer_history_contract_invalid");
             }
-            let from = normalize_asset_transfer_history_account(flow.get("from"))?;
-            let to = normalize_asset_transfer_history_account(flow.get("to"))?;
-            if from.1 != owner_pubkey && to.1 != owner_pubkey {
-                return Err("nni_asset_transfer_history_contract_invalid");
+            let (from, from_address) = normalize_asset_transfer_history_account(flow.get("from"))?;
+            let (to, to_address) = normalize_asset_transfer_history_account(flow.get("to"))?;
+            let owner_is_sender = from_address.as_deref() == Some(owner_pubkey);
+            let owner_is_recipient = to_address.as_deref() == Some(owner_pubkey);
+            let include = match direction {
+                NniAssetHistoryDirectionFilter::All => owner_is_sender || owner_is_recipient,
+                NniAssetHistoryDirectionFilter::Incoming => owner_is_recipient,
+                NniAssetHistoryDirectionFilter::Outgoing => owner_is_sender,
+            };
+            if !include {
+                continue;
             }
             projected_flows.push(json!({
                 "flow_index": flow_index,
                 "asset": asset,
                 "amount_units": amount_units,
                 "amount": normalized_amount,
-                "from": {"account_kind": from.0, "address": from.1},
-                "to": {"account_kind": to.0, "address": to.1},
+                "from": from,
+                "to": to,
             }));
+        }
+        if projected_flows.is_empty() {
+            return Err("nni_asset_transfer_history_contract_invalid");
         }
         projected.push(json!({
             "transaction_id": transaction_id,
-            "transaction_kind": "asset_transfer",
+            "transaction_kind": transaction_kind,
+            "transaction_class": transaction_class,
             "created_at_unix": created_at_unix,
             "memo": memo,
             "flows": projected_flows,
         }));
-        if projected.len() == limit {
-            break;
-        }
     }
 
     Ok(json!({
         "schema_version": 1,
         "status": "asset_transfer_history",
         "owner_pubkey": owner_pubkey,
-        "limit": limit,
-        "total_address_activity": total_address_activity,
-        "has_more_activity": has_more_activity,
+        "page": page,
+        "per_page": per_page,
+        "total_transactions": total_transactions,
+        "total_pages": total_pages,
+        "source_filter": source.as_str(),
+        "direction_filter": direction.as_str(),
         "transactions": projected,
     }))
 }
 
 fn normalize_asset_transfer_history_account(
     value: Option<&Value>,
-) -> Result<(&str, String), &'static str> {
+) -> Result<(Value, Option<String>), &'static str> {
     let value = value
         .and_then(Value::as_object)
         .ok_or("nni_asset_transfer_history_contract_invalid")?;
     let account_kind = value
         .get("account_kind")
         .and_then(Value::as_str)
-        .filter(|kind| *kind == "asset_owner")
         .ok_or("nni_asset_transfer_history_contract_invalid")?;
-    let address = normalize_nni_owner_public_key(
-        value
-            .get("address")
-            .and_then(Value::as_str)
-            .ok_or("nni_asset_transfer_history_contract_invalid")?,
-    )
-    .map_err(|_| "nni_asset_transfer_history_contract_invalid")?;
-    Ok((account_kind, address))
+    if account_kind == "system" {
+        if !matches!(value.get("address"), None | Some(Value::Null)) {
+            return Err("nni_asset_transfer_history_contract_invalid");
+        }
+        return Ok((json!({"account_kind": "system", "address": null}), None));
+    }
+    if !matches!(account_kind, "asset_owner" | "pool" | "fee") {
+        return Err("nni_asset_transfer_history_contract_invalid");
+    }
+    let address = normalize_nni_owner_public_key(value.get("address").and_then(Value::as_str)
+        .ok_or("nni_asset_transfer_history_contract_invalid")?)
+        .map_err(|_| "nni_asset_transfer_history_contract_invalid")?;
+    Ok((json!({"account_kind": account_kind, "address": address}), Some(address)))
+}
+
+fn valid_nni_explorer_machine_token(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    !bytes.is_empty()
+        && bytes.len() <= 64
+        && bytes[0].is_ascii_lowercase()
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'_')
+}
+
+fn classify_nni_asset_history_transaction(transaction_kind: &str) -> &'static str {
+    match transaction_kind {
+        "asset_transfer" => "peer_transfer",
+        "bancor_buy" | "bancor_sell" => "market_trade",
+        "heartbeat_reward_credit" | "admin_usd_credit" | "market_bootstrap" => {
+            "system_issuance"
+        }
+        _ => "other",
+    }
+}
+
+fn nni_asset_history_source_matches(
+    source: NniAssetHistorySourceFilter,
+    transaction_class: &str,
+) -> bool {
+    match source {
+        NniAssetHistorySourceFilter::All => true,
+        NniAssetHistorySourceFilter::Transfer => transaction_class == "peer_transfer",
+        NniAssetHistorySourceFilter::Trade => transaction_class == "market_trade",
+        NniAssetHistorySourceFilter::Issuance => transaction_class == "system_issuance",
+    }
+}
+
+fn validate_asset_transfer_history_remote_filter(
+    value: Option<&Value>,
+    source: NniAssetHistorySourceFilter,
+    direction: NniAssetHistoryDirectionFilter,
+) -> Result<(), &'static str> {
+    let filter = value
+        .and_then(Value::as_object)
+        .ok_or("nni_asset_transfer_history_contract_invalid")?;
+    if !matches!(filter.get("transaction_kind"), None | Some(Value::Null))
+        || filter.get("transaction_class").and_then(Value::as_str) != source.remote_class()
+        || filter.get("direction").and_then(Value::as_str) != direction.remote_direction()
+    {
+        return Err("nni_asset_transfer_history_contract_invalid");
+    }
+    Ok(())
 }
 
 async fn nni_asset_transfer(
