@@ -266,7 +266,9 @@ export function AssetsPage({
   const loading = accountLoading || marketLoading;
   const accountAvailable = Boolean(selectedAssetAccount && selectedAccount);
   const expectedHistoryRemotePage = assetHistoryRemotePage(historyDisplayPage);
-  const matchingHistoryScope = transferHistory?.owner_pubkey === selectedAssetAccount?.publicKey
+  const matchingHistoryScope = transferHistory !== null
+    && selectedAssetAccount !== null
+    && transferHistory.owner_pubkey === selectedAssetAccount.publicKey
     && transferHistory.source_filter === historySource
     && transferHistory.direction_filter === historyDirection
     ? transferHistory
