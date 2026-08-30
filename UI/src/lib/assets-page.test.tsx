@@ -215,6 +215,23 @@ test("asset wallet shows AIC, USD, account identity, and market estimate", () =>
   assert.doesNotMatch(markup, /<h2[^>]*>资产<\/h2>/);
 });
 
+test("asset wallet renders its initial unloaded state without history metadata", () => {
+  const markup = renderToStaticMarkup(
+    <AssetsPage
+      {...baseProps}
+      account={null}
+      market={null}
+      assetOwnerPubkey={null}
+      accountLoading
+      marketLoading
+      transferHistory={null}
+    />,
+  );
+
+  assert.match(markup, /data-assets-page="true"/);
+  assert.match(markup, /资产总览/);
+});
+
 test("asset account selector reserves additional wallet options", () => {
   const markup = renderToStaticMarkup(
     <AssetsPage
