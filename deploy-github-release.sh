@@ -682,7 +682,14 @@ if [[ "$PACKAGE_MODE" -eq 1 ]]; then
     local target="$STAGED_ROOT/$relative"
     [[ -d "$source" ]] || return 0
     mkdir -p "$target"
-    cp -a "$source/." "$target/"
+    if [[ "$relative" == "data" ]]; then
+      # The stage lives beside ROOT_DIR on the same filesystem. Preserve large
+      # runtime databases/package caches without requiring a second full copy;
+      # local state keeps the same precedence as the previous copy overlay.
+      cp -al --remove-destination "$source/." "$target/"
+    else
+      cp -a "$source/." "$target/"
+    fi
   }
 
   printf 'release_package_step=preserving_runtime_state\n'
@@ -763,6 +770,10 @@ if [[ "$PACKAGE_MODE" -eq 1 ]]; then
   fi
 
   PACKAGE_MODE_COMMITTED=1
+  # The active package now owns the hard-linked runtime data. The rollback
+  # directory is a source-code backup, so retaining a second data tree would
+  # keep stale database/package-cache links alive and waste space over time.
+  rm -rf "$BACKUP_DIR/data"
   printf 'deployed_release_tag=%s\n' "$TAG"
   printf 'release_package_backup=%s\n' "$BACKUP_DIR"
 

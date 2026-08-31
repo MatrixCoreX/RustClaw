@@ -513,6 +513,7 @@ cmp /bin/true "$SOURCE_RUNTIME/target/release/clawd"
 SOURCE_BACKUP="$(find "$TMP_ROOT/.source-runtime-release-mode-backups" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
 test -d "$SOURCE_BACKUP/.git"
 grep -Fxq 'source-only' "$SOURCE_BACKUP/Cargo.toml"
+test ! -e "$SOURCE_BACKUP/data"
 test ! -e "$TMP_ROOT/.source-runtime-release-mode.lock"
 
 ALREADY_PACKAGE_OUTPUT="$(
