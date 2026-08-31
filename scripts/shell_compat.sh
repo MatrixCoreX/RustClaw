@@ -208,6 +208,82 @@ configure_python3_with_tomllib() {
   }
 }
 
+configure_local_whisper_model_environment() {
+  local root_dir="${1:-}"
+  local audio_config_path=""
+  local configured_model=""
+  local candidate=""
+  local model_path=""
+
+  [[ -n "$root_dir" ]] || {
+    echo "configure_local_whisper_model_environment requires a project root." >&2
+    return 2
+  }
+  root_dir="$(cd "$root_dir" && pwd -P)"
+
+  # Preserve an explicit operator choice. The aliases are normalized below so
+  # every admitted skill sees the same host-selected whisper.cpp model.
+  for candidate in \
+    "${WHISPER_MODEL:-}" \
+    "${WHISPER_MODEL_PATH:-}" \
+    "${WHISPER_CPP_MODEL:-}"; do
+    if [[ -n "$candidate" ]]; then
+      model_path="$candidate"
+      break
+    fi
+  done
+
+  if [[ -z "$model_path" ]]; then
+    audio_config_path="${APP_AUDIO_CONFIG_PATH:-$root_dir/configs/audio.toml}"
+    case "$audio_config_path" in
+      /*) ;;
+      *) audio_config_path="$root_dir/$audio_config_path" ;;
+    esac
+    if [[ -f "$audio_config_path" ]]; then
+      configured_model="$("${APP_PYTHON_BIN:-python3}" - "$audio_config_path" <<'PY'
+import sys
+import tomllib
+from pathlib import Path
+
+config = tomllib.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+audio = config.get("audio_transcribe") or {}
+print(str(audio.get("local_model_path") or "").strip())
+PY
+)"
+    fi
+    if [[ -n "$configured_model" ]]; then
+      case "$configured_model" in
+        /*) model_path="$configured_model" ;;
+        *) model_path="$root_dir/$configured_model" ;;
+      esac
+    fi
+  fi
+
+  if [[ -z "$model_path" ]]; then
+    model_path="$({
+      for candidate in "$root_dir"/data/models/whisper.cpp/ggml-*.bin; do
+        [[ -f "$candidate" ]] || continue
+        [[ "$candidate" == *.en.bin ]] && continue
+        printf '%s\n' "$candidate"
+      done
+    } | LC_ALL=C sort | head -n 1 || true)"
+  fi
+
+  [[ -n "$model_path" ]] || return 0
+  case "$model_path" in
+    /*) ;;
+    *) model_path="$root_dir/$model_path" ;;
+  esac
+  if [[ ! -f "$model_path" ]]; then
+    echo "Configured whisper.cpp model is missing: $model_path" >&2
+    return 1
+  fi
+  model_path="$(cd "$(dirname "$model_path")" && pwd -P)/$(basename "$model_path")"
+  export WHISPER_MODEL="$model_path"
+  export WHISPER_MODEL_PATH="$model_path"
+  export WHISPER_CPP_MODEL="$model_path"
+}
+
 append_to_array() {
   local array_name="$1"
   local value="$2"

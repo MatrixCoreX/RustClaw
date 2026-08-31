@@ -91,6 +91,30 @@ PATH="$SAVED_PATH"
 export PATH
 rmdir "$USER_CARGO_BIN" "$EXPLICIT_CARGO_BIN" "$TEST_ROOT/cargo-cache"
 
+WHISPER_TEST_ROOT="$TEST_ROOT/whisper-runtime"
+mkdir -p "$WHISPER_TEST_ROOT/configs" "$WHISPER_TEST_ROOT/data/models/whisper.cpp"
+touch "$WHISPER_TEST_ROOT/data/models/whisper.cpp/ggml-small.bin"
+unset WHISPER_MODEL WHISPER_MODEL_PATH WHISPER_CPP_MODEL APP_AUDIO_CONFIG_PATH
+configure_local_whisper_model_environment "$WHISPER_TEST_ROOT"
+[[ "$WHISPER_MODEL" == "$WHISPER_TEST_ROOT/data/models/whisper.cpp/ggml-small.bin" ]]
+[[ "$WHISPER_MODEL_PATH" == "$WHISPER_MODEL" ]]
+[[ "$WHISPER_CPP_MODEL" == "$WHISPER_MODEL" ]]
+
+touch "$WHISPER_TEST_ROOT/data/models/whisper.cpp/selected.bin"
+printf '[audio_transcribe]\nlocal_model_path = "data/models/whisper.cpp/selected.bin"\n' \
+  >"$WHISPER_TEST_ROOT/configs/audio.toml"
+unset WHISPER_MODEL WHISPER_MODEL_PATH WHISPER_CPP_MODEL
+configure_local_whisper_model_environment "$WHISPER_TEST_ROOT"
+[[ "$WHISPER_MODEL" == "$WHISPER_TEST_ROOT/data/models/whisper.cpp/selected.bin" ]]
+
+unset WHISPER_MODEL_PATH WHISPER_CPP_MODEL
+WHISPER_MODEL="$WHISPER_TEST_ROOT/data/models/whisper.cpp/ggml-small.bin"
+export WHISPER_MODEL
+configure_local_whisper_model_environment "$WHISPER_TEST_ROOT"
+[[ "$WHISPER_MODEL_PATH" == "$WHISPER_MODEL" ]]
+[[ "$WHISPER_CPP_MODEL" == "$WHISPER_MODEL" ]]
+unset WHISPER_MODEL WHISPER_MODEL_PATH WHISPER_CPP_MODEL
+
 unset RUSTC_WRAPPER CARGO_INCREMENTAL CI
 HOME="$TEST_ROOT"
 CARGO_HOME="$TEST_ROOT/.cargo"

@@ -12,6 +12,7 @@ source "$SCRIPT_DIR/component_start/common.sh"
 component_load_runtime_environment
 configure_platform_command_path
 configure_python3_with_tomllib
+configure_local_whisper_model_environment "$SCRIPT_DIR"
 configure_cargo_build_environment
 print_app_version "$SCRIPT_DIR"
 
