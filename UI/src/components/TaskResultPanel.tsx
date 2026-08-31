@@ -44,6 +44,7 @@ import {
   type SubagentPanelView,
 } from "../lib/task-result";
 import { buildTaskCostGovernance, formatUsdNanos } from "../lib/task-cost";
+import { formatUiError } from "../lib/ui-error";
 import type { TaskApprovalDecision, TaskLlmDebugResponse, TaskQueryResponse } from "../types/api";
 import { TaskLlmTracePanel } from "./TaskLlmTracePanel";
 
@@ -446,7 +447,11 @@ export function TaskResultPanel({
             </div>
             <div>
               <p className="mb-1 text-white/60">{tSlash("错误信息 / Error")}</p>
-              <p className="text-red-200">{taskResult.error_text || "--"}</p>
+              <p className="text-red-200">
+                {taskResult.error_text
+                  ? formatUiError(taskResult.error_text, t, "任务未完成，请查看任务过程或日志。", "The task did not complete. Review the task trace or logs.")
+                  : "--"}
+              </p>
             </div>
           </div>
           {taskPlanView ? (

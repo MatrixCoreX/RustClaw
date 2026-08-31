@@ -51,6 +51,7 @@ import {
   type AssetAccountOption,
 } from "../lib/asset-account-options";
 import { resolveBancorMarketDirectionColors } from "../lib/bancor-market-colors";
+import { nniPrivateKeyOperationsAllowed } from "../lib/nni-owner-public-key";
 import { appStorageKey } from "../lib/product-identity";
 import { BancorPriceChangePage } from "./BancorPriceChangePage";
 import { NniDecimalAmount } from "./NniDecimalAmount";
@@ -1973,13 +1974,14 @@ export function BancorQuoteDialog({
 }) {
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
   const priceImpactWarning = quote.price_impact_bps > quote.slippage_bps;
+  const privateKeyOperationsAllowed = nniPrivateKeyOperationsAllowed();
   const [authorizationMode, setAuthorizationMode] = useState<"delegated_hardware" | "asset_owner">(
-    signingDeviceReady ? "delegated_hardware" : "asset_owner",
+    signingDeviceReady || !privateKeyOperationsAllowed ? "delegated_hardware" : "asset_owner",
   );
   const [ownerPrivateKey, setOwnerPrivateKey] = useState("");
   const canConfirm = authorizationMode === "delegated_hardware"
     ? signingDeviceReady
-    : assetOwnerReady && ownerPrivateKey.trim().length > 0;
+    : privateKeyOperationsAllowed && assetOwnerReady && ownerPrivateKey.trim().length > 0;
   const close = () => {
     setOwnerPrivateKey("");
     onClose();
@@ -1992,6 +1994,12 @@ export function BancorQuoteDialog({
     setOwnerPrivateKey("");
     onConfirm(authorization);
   };
+
+  useEffect(() => {
+    if (privateKeyOperationsAllowed || authorizationMode !== "asset_owner") return;
+    setAuthorizationMode("delegated_hardware");
+    setOwnerPrivateKey("");
+  }, [authorizationMode, privateKeyOperationsAllowed]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => confirmButtonRef.current?.focus());
@@ -2078,19 +2086,21 @@ export function BancorQuoteDialog({
               </span>
             </span>
           </label>
-          <label className={`flex items-start gap-3 rounded-lg border p-3 ${assetOwnerReady ? "cursor-pointer border-white/10" : "border-white/5 opacity-50"}`}>
+          <label className={`flex items-start gap-3 rounded-lg border p-3 ${assetOwnerReady && privateKeyOperationsAllowed ? "cursor-pointer border-white/10" : "border-white/5 opacity-50"}`}>
             <input
               type="radio"
               name="bancor-authorization-mode"
               value="asset_owner"
               checked={authorizationMode === "asset_owner"}
-              disabled={!assetOwnerReady || tradeLoading}
+              disabled={!assetOwnerReady || !privateKeyOperationsAllowed || tradeLoading}
               onChange={() => setAuthorizationMode("asset_owner")}
             />
             <span className="min-w-0 flex-1">
               <span className="block font-medium text-white">{t("使用资产密钥自行签名", "Sign with the asset key")}</span>
               <span className="mt-1 block text-xs leading-5 text-white/50">
-                {assetOwnerReady
+                {!privateKeyOperationsAllowed
+                  ? t("非本机 HTTP 页面已禁用私钥签名，请改用 HTTPS 或设备本机 localhost。", "Private-key signing is disabled over non-loopback HTTP. Use HTTPS or localhost on this device.")
+                  : assetOwnerReady
                   ? t("私钥只用于这一次签名，提交后立即从本机请求内存中清除。", "The private key is used for this signature only and cleared from local request memory immediately afterward.")
                   : t("请先在 NNI 页面完成资产账户与硬件芯片的绑定。", "Bind the asset account to the hardware chip on the NNI page first.")}
               </span>

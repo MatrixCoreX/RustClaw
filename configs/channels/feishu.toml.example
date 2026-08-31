@@ -11,7 +11,7 @@ enabled = true
 # 入站模式：webhook | long_connection
 mode = "long_connection"
 # 本服务监听地址（webhook 模式时用于接收回调；long_connection 模式可选用于健康检查等）
-listen = "0.0.0.0:8789"
+listen = "127.0.0.1:8789"
 # clawd 基地址，用于提交任务与轮询结果
 clawd_base_url = "http://127.0.0.1:8787"
 # 飞书中国站 API 根地址（与 lark.toml 的国际版分开，勿改为 open.larksuite.com）

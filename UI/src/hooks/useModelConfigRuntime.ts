@@ -17,6 +17,7 @@ import {
   updateMultimodalDraftField,
   type MultimodalKey,
 } from "../lib/model-config";
+import { formatUiError } from "../lib/ui-error";
 import type {
   ApiResponse,
   LlmConfigResponse,
@@ -129,7 +130,7 @@ export function useModelConfigRuntime({
       const res = await apiFetch(`/v1/llm/config`);
       const body = (await res.json()) as ApiResponse<LlmConfigResponse>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `LLM config fetch failed (${res.status})`);
+        throw new Error(body.error || `llm_config_fetch_http_${res.status}`);
       }
       setLlmConfigData(body.data);
       const draft = initialLlmDraft({
@@ -145,7 +146,7 @@ export function useModelConfigRuntime({
       setLlmDraftApiFormat(draft.apiFormat);
       setLlmDraftApiKey("");
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "大模型设置暂时无法读取。", "LLM settings are temporarily unavailable.");
       setLlmConfigError(message);
     } finally {
       setLlmConfigLoading(false);
@@ -173,7 +174,7 @@ export function useModelConfigRuntime({
         restart_required?: boolean;
       }>;
       if (!res.ok || !body.ok) {
-        throw new Error(body.error || `LLM config save failed (${res.status})`);
+        throw new Error(body.error || `llm_config_save_http_${res.status}`);
       }
       setLlmConfigSaveMessage(
         t(
@@ -185,7 +186,7 @@ export function useModelConfigRuntime({
       await fetchLlmConfig();
       await fetchModelCatalog();
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "大模型设置保存失败，请稍后重试。", "LLM settings could not be saved. Try again shortly.");
       setLlmConfigError(message);
     } finally {
       setLlmConfigSaving(false);
@@ -220,7 +221,7 @@ export function useModelConfigRuntime({
       });
       const body = (await res.json()) as ApiResponse<LlmTestResponse>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `LLM connection test failed (${res.status})`);
+        throw new Error(body.error || `llm_connection_test_http_${res.status}`);
       }
       const responseMessage = formatLlmTestMessage(body.data, t);
       const message = hasUnsavedLlmChanges
@@ -231,7 +232,7 @@ export function useModelConfigRuntime({
         : responseMessage;
       setLlmTestMessage(message);
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "大模型连接测试失败，请检查设置和网络。", "The LLM connection test failed. Check the settings and network.");
       setLlmTestError(message);
     } finally {
       setLlmTestLoading(false);
@@ -249,16 +250,16 @@ export function useModelConfigRuntime({
       const modelBody = (await modelRes.json()) as ApiResponse<ModelConfigResponse>;
       const skillsBody = (await skillsRes.json()) as ApiResponse<SkillsConfigResponse>;
       if (!modelRes.ok || !modelBody.ok || !modelBody.data) {
-        throw new Error(modelBody.error || `model config fetch failed (${modelRes.status})`);
+        throw new Error(modelBody.error || `model_config_fetch_http_${modelRes.status}`);
       }
       if (!skillsRes.ok || !skillsBody.ok || !skillsBody.data) {
-        throw new Error(skillsBody.error || `skill config fetch failed (${skillsRes.status})`);
+        throw new Error(skillsBody.error || `skill_config_fetch_http_${skillsRes.status}`);
       }
       setMultimodalConfigData(modelBody.data);
       setMultimodalDraft(buildMultimodalDraft(modelBody.data));
       setMultimodalSkillEnabled(buildMultimodalSkillEnabledState(skillsBody.data));
     } catch (err) {
-      setMultimodalConfigError(err instanceof Error ? err.message : t("未知错误", "Unknown error"));
+      setMultimodalConfigError(formatUiError(err, t, "多模态设置暂时无法读取。", "Multimodal settings are temporarily unavailable."));
     } finally {
       setMultimodalConfigLoading(false);
     }
@@ -271,11 +272,11 @@ export function useModelConfigRuntime({
       const res = await apiFetch("/v1/models/catalog");
       const body = (await res.json()) as ApiResponse<ModelCatalogResponse>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `model catalog fetch failed (${res.status})`);
+        throw new Error(body.error || `model_catalog_fetch_http_${res.status}`);
       }
       setModelCatalogData(body.data);
     } catch (err) {
-      setModelCatalogError(err instanceof Error ? err.message : t("未知错误", "Unknown error"));
+      setModelCatalogError(formatUiError(err, t, "模型列表暂时无法读取。", "The model catalog is temporarily unavailable."));
     } finally {
       setModelCatalogLoading(false);
     }
@@ -294,13 +295,13 @@ export function useModelConfigRuntime({
       });
       const body = (await res.json()) as ApiResponse<{ restart_required?: boolean }>;
       if (!res.ok || !body.ok) {
-        throw new Error(body.error || `model config save failed (${res.status})`);
+        throw new Error(body.error || `model_config_save_http_${res.status}`);
       }
       setMultimodalConfigSaveMessage(t("多模态模块配置已保存，需重启 clawd 生效。", "Multimodal config saved. Restart clawd to apply."));
       await fetchMultimodalConfig();
       await fetchModelCatalog();
     } catch (err) {
-      setMultimodalConfigError(err instanceof Error ? err.message : t("未知错误", "Unknown error"));
+      setMultimodalConfigError(formatUiError(err, t, "多模态设置保存失败，请稍后重试。", "Multimodal settings could not be saved. Try again shortly."));
     } finally {
       setMultimodalConfigSaving(false);
     }
@@ -315,7 +316,7 @@ export function useModelConfigRuntime({
       const currentRes = await apiFetch("/v1/skills/config");
       const currentBody = (await currentRes.json()) as ApiResponse<SkillsConfigResponse>;
       if (!currentRes.ok || !currentBody.ok || !currentBody.data) {
-        throw new Error(currentBody.error || `skill config fetch failed (${currentRes.status})`);
+        throw new Error(currentBody.error || `skill_config_fetch_http_${currentRes.status}`);
       }
       const skillSwitches = {
         ...(currentBody.data.skill_switches ?? {}),
@@ -331,7 +332,7 @@ export function useModelConfigRuntime({
         restart_required?: boolean;
       }>;
       if (!saveRes.ok || !saveBody.ok) {
-        throw new Error(saveBody.error || `skill config save failed (${saveRes.status})`);
+        throw new Error(saveBody.error || `skill_config_save_http_${saveRes.status}`);
       }
       setMultimodalSkillEnabled((previous) => ({ ...previous, [key]: enabled }));
       setMultimodalSkillSwitchMessage(
@@ -340,7 +341,7 @@ export function useModelConfigRuntime({
           : t("这个多模态技能已关闭，已有模型设置会保留。", "This multimodal skill is disabled; its model settings are preserved."),
       );
     } catch (err) {
-      setMultimodalConfigError(err instanceof Error ? err.message : t("未知错误", "Unknown error"));
+      setMultimodalConfigError(formatUiError(err, t, "多模态技能状态修改失败，请稍后重试。", "The multimodal skill state could not be changed. Try again shortly."));
     } finally {
       setMultimodalSkillSwitchSaving(null);
     }

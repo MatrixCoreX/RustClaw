@@ -894,8 +894,13 @@ if [[ -n "$DO_DEPLOY" ]]; then
   ensure_nginx
   if path_writable_or_creatable "$NGINX_ROOT"; then
     mkdir -p "$NGINX_ROOT"
-    cp -R "$DIST_DIR/." "$NGINX_ROOT/"
-    echo "Copied UI to $NGINX_ROOT (no sudo)."
+    if cp -R "$DIST_DIR/." "$NGINX_ROOT/"; then
+      echo "Copied UI to $NGINX_ROOT (no sudo)."
+    else
+      echo "The nginx root is writable, but one or more deployed files require elevated replacement; retrying with sudo."
+      sudo cp -R "$DIST_DIR/." "$NGINX_ROOT/"
+      echo "Copied UI to $NGINX_ROOT (sudo fallback)."
+    fi
   else
     sudo mkdir -p "$NGINX_ROOT"
     sudo cp -R "$DIST_DIR/." "$NGINX_ROOT/"

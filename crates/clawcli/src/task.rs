@@ -700,6 +700,7 @@ pub(crate) fn cancel_task_by_id(
     let url = format!("{}/tasks/cancel-by-task-id", client::base_v1(base_url));
     let payload = json!({
         "task_id": task_id,
+        "idempotency_key": format!("cli-cancel-{}", uuid::Uuid::new_v4()),
     });
     let resp = client::make_client()?
         .post(&url)
@@ -844,8 +845,19 @@ fn task_control_by_id(
     key: &str,
     path: &str,
     operation: &str,
-    payload: serde_json::Value,
+    mut payload: serde_json::Value,
 ) -> Result<serde_json::Value> {
+    if matches!(
+        path,
+        "/tasks/resume-by-task-id" | "/tasks/pause-by-task-id" | "/tasks/steer-by-task-id"
+    ) {
+        if let Some(object) = payload.as_object_mut() {
+            object.insert(
+                "idempotency_key".to_string(),
+                json!(format!("cli-{operation}-{}", uuid::Uuid::new_v4())),
+            );
+        }
+    }
     let url = format!("{}{}", client::base_v1(base_url), path);
     let resp = client::make_client()?
         .post(&url)

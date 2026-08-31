@@ -35,6 +35,8 @@ impl TurnInputMaterialization {
 pub(crate) struct TurnAttachmentRef {
     pub(crate) kind: String,
     pub(crate) path: String,
+    pub(crate) content_trust: &'static str,
+    pub(crate) instruction_authority: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) mime_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -45,6 +47,8 @@ pub(crate) struct TurnAttachmentRef {
 pub(crate) struct TurnSafetyContext {
     pub(crate) task_identity_bound: bool,
     pub(crate) attachments_validated: bool,
+    pub(crate) user_content_can_grant: bool,
+    pub(crate) external_content_can_change_policy: bool,
     pub(crate) allow_path_outside_workspace: bool,
     pub(crate) allow_sudo: bool,
 }
@@ -117,6 +121,8 @@ impl TurnBoundaryEnvelope {
             safety_context: TurnSafetyContext {
                 task_identity_bound: true,
                 attachments_validated: true,
+                user_content_can_grant: false,
+                external_content_can_change_policy: false,
                 allow_path_outside_workspace,
                 allow_sudo,
             },
@@ -183,6 +189,8 @@ fn attachment_refs(payload: &Value) -> Vec<TurnAttachmentRef> {
                 kind: non_empty_bounded(item.get("kind").and_then(Value::as_str))
                     .unwrap_or_else(|| "file".to_string()),
                 path,
+                content_trust: "untrusted_user_attachment",
+                instruction_authority: "none",
                 mime_type: non_empty_bounded(item.get("mime_type").and_then(Value::as_str)),
                 size: item.get("size").and_then(Value::as_u64),
             })

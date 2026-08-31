@@ -576,6 +576,8 @@ flowchart LR
 - `webd` 是浏览器安全边界，负责密码登录、会话持久化、凭据注入、请求限制和 API 代理
 - `clawd` 不再托管浏览器资源，也不能绑定非 loopback 地址；本地通道守护进程和 `clawcli` 可以使用其内部 API
 - 首页把入口管理分成左右两个区域：“webd 对外端口”在设备 IP 直连（`0.0.0.0:<端口>`）与仅本机（`127.0.0.1:<端口>`）之间切换；“WEB服务器配置入口”显示 nginx 安装、进程、站点和 UI 部署状态。本地不配置 nginx 时要保持 webd 对外端口打开；原生部署配置 nginx 后，关闭 webd 对外直连不影响 nginx 页面和 API。
+- 首页把 WEBD、nginx、可选局域网 HTTPS 和局域网访问名称集中到独立的“Web 访问”分区。Linux 通过 Avahi 广播单段设备名称，macOS 使用 mDNSResponder。mDNS 与 HTTPS 互不依赖：Web 入口可达时可直接使用 `http://<名称>.local/`；只有选择启用本地 CA 安全访问后，才使用 `https://<名称>.local/`。
+- 修改局域网访问名称时只接受安全的单段 DNS 标签，并更新系统 mDNS 名称、重启局域网发现服务。如果设备已经准备过本地 CA，同一次操作会为新的 `.local` 名称续签叶证书，但不会更换浏览器已经信任的根 CA。旧名称失效后，设备 IP 仍可作为恢复入口。
 - 通过域名打开 UI 时，登录页默认沿用当前 origin，不再附加 `:8787` 或 `:8788`；只有本地直连时才推导服务端口
 - `AI 学习` 页面读取随 UI 打包的 README 与架构指南，提供初次使用、使用与运维、开发与维护三条路线，并支持全文搜索、页内导航、阅读进度保存和 Mermaid 缩放/拖动/全屏查看。
 - Agent 页面使用服务端会话历史。每个任务都提供直接可见的重命名按钮，名称在刷新页面或重启后仍会保留。
@@ -603,6 +605,8 @@ flowchart LR
 - `POST /v1/tasks/cancel-one`：按 active-list index 取消
 - `POST /v1/services/{service}/{action}`：浏览器控制台服务启动/停止/重启；失败时返回 `error_code`、`status_code`、`message_key`、`service`、`action` 等机器字段
 - `GET /v1/admin/nginx`：返回仅管理员可见的 nginx 安装、进程、站点和已部署 UI 状态
+- `GET /v1/admin/local-mdns`：返回当前本地主机名、`.local` 地址、平台支持和发现服务状态
+- `POST /v1/admin/local-mdns`：校验并修改单段局域网主机名；本地 HTTPS 已准备时，同时为新名称续签叶证书
 - `GET /v1/admin/webd-exposure`：返回 webd 的监听地址、端口、进程和对外直连状态
 - `POST /v1/admin/webd-exposure`：原子切换 webd 的对外/仅本机监听范围，并按平台安排重启
 - `POST /v1/admin/workspace-update/nginx-enable`：按 Linux/macOS 平台检查、安装或更新 nginx，修复并启动入口，再部署已有 UI 资源

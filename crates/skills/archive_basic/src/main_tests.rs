@@ -210,6 +210,15 @@ fn execute_pack_and_unpack_project_generic_paths_and_artifact() {
             .and_then(Value::as_str),
         Some(archive_path.as_str())
     );
+    let listing = list_archive(&archive).expect("list packed archive");
+    assert_eq!(
+        listing.entries,
+        vec!["source/".to_string(), "source/notes.txt".to_string()]
+    );
+    assert!(listing
+        .entries
+        .iter()
+        .all(|entry| !entry.contains(root.to_string_lossy().as_ref())));
 
     let (_text, unpack_extra) = execute_with_root_and_context(
         json!({
@@ -229,8 +238,7 @@ fn execute_pack_and_unpack_project_generic_paths_and_artifact() {
             .and_then(Value::as_str),
         Some(dest_path.as_str())
     );
-    let archived_source = source.strip_prefix("/").unwrap_or(source.as_path());
-    assert!(dest.join(archived_source).join("notes.txt").is_file());
+    assert!(dest.join("source/notes.txt").is_file());
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -259,9 +267,8 @@ fn archive_paths_fail_closed_and_allow_verified_admin_external_access() {
     assert_eq!(denied.kind, "path_outside_workspace");
 
     let context = json!({
-        "authority_scope": "unrestricted_admin",
+        "authority_scope": "host_policy_grant",
         "permissions": {
-            "unrestricted_admin": true,
             "allow_path_outside_workspace": true
         }
     });
@@ -270,6 +277,6 @@ fn archive_paths_fail_closed_and_allow_verified_admin_external_access() {
         workspace.path(),
         Some(&context),
     )
-    .expect("admin may inspect external archive");
-    assert_eq!(extra["authority_scope"], "unrestricted_admin");
+    .expect("host policy may inspect external archive");
+    assert_eq!(extra["authority_scope"], "host_policy_grant");
 }

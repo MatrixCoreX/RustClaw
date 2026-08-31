@@ -6,6 +6,21 @@ const OWNER_PUBLIC_KEY_BYTES = 33;
 const OWNER_PRIVATE_KEY_BYTES = 32;
 const OWNER_CHECKSUM_BYTES = 4;
 const OWNER_KEY_SUFFIX = new TextEncoder().encode("K1");
+const OWNER_RANDOM_SEED_BYTES = 48;
+
+export const NNI_PRIVATE_KEY_INSECURE_TRANSPORT_ERROR = "nni_private_key_insecure_transport";
+
+export interface NniOwnerKeyPair {
+  key_type: "K1";
+  encoding: "eos_base58_v1";
+  public_key: string;
+  private_key: string;
+}
+
+export interface NniPrivateKeyLocation {
+  protocol: string;
+  hostname: string;
+}
 
 export type NniOwnerPublicKeyError =
   | "required"
@@ -53,6 +68,63 @@ function ownerChecksum(payload: Uint8Array): Uint8Array {
 
 function encodeOwnerPublicKey(publicKey: Uint8Array): string {
   return base58.encode(concatenate(publicKey, ownerChecksum(publicKey)));
+}
+
+function encodeOwnerPrivateKey(secretKey: Uint8Array): string {
+  return base58.encode(concatenate(secretKey, ownerChecksum(secretKey)));
+}
+
+function browserLocation(): NniPrivateKeyLocation | null {
+  return typeof window === "undefined"
+    ? null
+    : { protocol: window.location.protocol, hostname: window.location.hostname };
+}
+
+function isIpv4Loopback(hostname: string): boolean {
+  const parts = hostname.split(".");
+  return parts.length === 4
+    && parts[0] === "127"
+    && parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255);
+}
+
+export function nniPrivateKeyOperationsAllowed(
+  location: NniPrivateKeyLocation | null = browserLocation(),
+): boolean {
+  // Non-browser callers cannot collect a key through a web transport. Browser callers must
+  // use TLS unless they are on the loopback secure-context exception.
+  if (!location) return true;
+  if (location.protocol === "https:") return true;
+  if (location.protocol !== "http:") return false;
+  const hostname = location.hostname.trim().toLowerCase().replace(/^\[|\]$/g, "");
+  return hostname === "localhost" || hostname === "::1" || isIpv4Loopback(hostname);
+}
+
+export function assertNniPrivateKeyOperationsAllowed(
+  location: NniPrivateKeyLocation | null = browserLocation(),
+): void {
+  if (!nniPrivateKeyOperationsAllowed(location)) {
+    throw new Error(NNI_PRIVATE_KEY_INSECURE_TRANSPORT_ERROR);
+  }
+}
+
+export function generateNniOwnerKeyPair(): NniOwnerKeyPair {
+  assertNniPrivateKeyOperationsAllowed();
+  if (!globalThis.crypto?.getRandomValues) {
+    throw new Error("nni_private_key_secure_random_unavailable");
+  }
+  const seed = globalThis.crypto.getRandomValues(new Uint8Array(OWNER_RANDOM_SEED_BYTES));
+  const secretKey = secp256k1.utils.randomSecretKey(seed);
+  seed.fill(0);
+  try {
+    return {
+      key_type: "K1",
+      encoding: "eos_base58_v1",
+      public_key: encodeOwnerPublicKey(secp256k1.getPublicKey(secretKey, true)),
+      private_key: encodeOwnerPrivateKey(secretKey),
+    };
+  } finally {
+    secretKey.fill(0);
+  }
 }
 
 function decodeOwnerPrivateKey(value: string):

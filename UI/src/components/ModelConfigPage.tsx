@@ -120,9 +120,15 @@ export function ModelConfigPage({
   const credentialLabel = isHostedRelayDraft
     ? t("由设备自动管理", "Managed automatically by this device")
     : selectedLlmVendorInfo?.api_key_configured
-    ? selectedLlmVendorInfo.api_key_source === "private_file"
-      ? t("已保存在设备私有凭据中", "Saved in this device's private credential store")
-      : t("已从环境变量加载", "Loaded from environment")
+    ? selectedLlmVendorInfo.api_key_source === "systemd_credential"
+      ? t("由系统凭据保护", "Protected by system credentials")
+      : selectedLlmVendorInfo.api_key_source === "macos_keychain"
+        ? t("由 macOS 钥匙串保护", "Protected by macOS Keychain")
+        : selectedLlmVendorInfo.api_key_source === "private_file_fallback"
+          ? t("由本机文件权限保护", "Protected by local file permissions")
+          : selectedLlmVendorInfo.api_key_source === "device_enrollment"
+            ? t("由设备自动管理", "Managed automatically by this device")
+            : t("已从环境变量加载", "Loaded from environment")
     : t("尚未配置", "Not configured");
   const credentialStatus = (
     <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
@@ -140,12 +146,12 @@ export function ModelConfigPage({
             )
           : isCustomVendor
             ? t(
-                "API Key 只写入本机私有凭据文件，不进入模型配置或浏览器存储。环境变量仍具有更高优先级。",
-                "The API key is written only to this device's private credential file, never model config or browser storage. Environment variables still take precedence.",
+                "API Key 不进入模型配置或浏览器存储。系统凭据或 macOS 钥匙串优先；不可用时回退到仅由本机文件权限保护的私有凭据文件。",
+                "The API key is never stored in model config or browser storage. System credentials or macOS Keychain take precedence; otherwise it falls back to a private file protected only by local file permissions.",
               )
           : t(
-              "密钥不会保存到模型配置或浏览器中。请在服务运行环境中设置后重启服务。",
-              "The key is never stored in model settings or the browser. Set it in the service environment, then restart the service.",
+              "密钥不会保存到模型配置或浏览器中。系统凭据或 macOS 钥匙串优先；不可用时仅由本机私有文件权限保护。",
+              "The key is never stored in model settings or the browser. System credentials or macOS Keychain take precedence; otherwise it is protected only by local private-file permissions.",
             )}
       </p>
       {credentialEnvNames.length > 0 && !isHostedRelayDraft ? (

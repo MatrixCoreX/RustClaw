@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn unrestricted_admin_can_execute_enabled_non_planner_skill() {
+fn yolo_admin_cannot_execute_a_skill_hidden_from_the_planner() {
     let state = test_state();
     state.seed_test_auth_identity("rk-verifier-admin", "admin");
     let identity = crate::resolve_auth_identity_by_key(&state, "rk-verifier-admin")
@@ -40,8 +40,8 @@ fn unrestricted_admin_can_execute_enabled_non_planner_skill() {
         VerifyMode::Enforce,
     );
 
-    assert!(result.approved, "issues: {:?}", result.issues);
-    assert!(!result
+    assert!(!result.approved, "issues: {:?}", result.issues);
+    assert!(result
         .issues
         .iter()
         .any(|issue| matches!(issue.kind, VerifyIssueKind::SkillNotVisible)));

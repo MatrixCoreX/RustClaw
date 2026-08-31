@@ -64,7 +64,9 @@ export function useWhatsappWebRuntime({
       }
     } catch (err) {
       setWaWebBridgeReachable(false);
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = err instanceof Error
+        ? err.message
+        : whatsappWebRequestError(t, "whatsapp_web.login_status_unavailable");
       if (!silent) {
         setWaLoginError(message);
       }
@@ -93,7 +95,9 @@ export function useWhatsappWebRuntime({
         text: t("已发起 WhatsApp Web 退出登录。", "WhatsApp Web logout requested."),
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = err instanceof Error
+        ? err.message
+        : whatsappWebRequestError(t, "whatsapp_web.logout_failed");
       setWaLoginError(message);
     } finally {
       setWaLogoutLoading(false);

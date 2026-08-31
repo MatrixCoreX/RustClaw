@@ -891,11 +891,12 @@ run_lifecycle_cancel_case() {
   else
     printf '%s\n' "$pending_raw" > "$case_dir/pending.json"
     array_from_command_lines auth_args curl_auth_args
-    cancel_first="$(curl -sS -X POST "${BASE_URL}/v1/tasks/cancel-by-task-id" -H "Content-Type: application/json" "${auth_args[@]}" -d "{\"task_id\":\"${task_id}\"}")"
+    cancel_idempotency_key="long-tail-cancel-${task_id}"
+    cancel_first="$(curl -sS -X POST "${BASE_URL}/v1/tasks/cancel-by-task-id" -H "Content-Type: application/json" "${auth_args[@]}" -d "{\"task_id\":\"${task_id}\",\"idempotency_key\":\"${cancel_idempotency_key}\"}")"
     printf '%s\n' "$cancel_first" > "$case_dir/cancel_first.json"
     final_raw="$(wait_task_until_terminal_with_limit "$task_id" 30 || true)"
     printf '%s\n' "$final_raw" > "$case_dir/final.json"
-    cancel_second="$(curl -sS -X POST "${BASE_URL}/v1/tasks/cancel-by-task-id" -H "Content-Type: application/json" "${auth_args[@]}" -d "{\"task_id\":\"${task_id}\"}")"
+    cancel_second="$(curl -sS -X POST "${BASE_URL}/v1/tasks/cancel-by-task-id" -H "Content-Type: application/json" "${auth_args[@]}" -d "{\"task_id\":\"${task_id}\",\"idempotency_key\":\"${cancel_idempotency_key}\"}")"
     printf '%s\n' "$cancel_second" > "$case_dir/cancel_second.json"
     sleep 2
     stable_raw="$(query_task "$task_id")"; printf '%s\n' "$stable_raw" > "$case_dir/stable_terminal.json"
@@ -911,7 +912,7 @@ expected = [part for part in sys.argv[6].split(";;") if part]
 serialized = json.dumps(pending, ensure_ascii=False) + json.dumps(final, ensure_ascii=False)
 missing = []
 if not first.get("ok") or ((first.get("data") or {}).get("status") != "task_cancelled"): missing.append("first_cancel_failed")
-if not second.get("ok") or ((second.get("data") or {}).get("status") != "task_already_cancelled"): missing.append("second_cancel_not_idempotent")
+if not second.get("ok") or ((second.get("data") or {}).get("status") != "task_cancelled"): missing.append("second_cancel_not_idempotent")
 if (final.get("data") or {}).get("status") != "canceled": missing.append("task_not_canceled")
 if (stable.get("data") or {}).get("status") != "canceled": missing.append("canceled_status_not_stable")
 for marker in expected:

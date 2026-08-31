@@ -5,7 +5,7 @@ use claw_core::channel_i18n::{text_from_path, text_with_vars_from_path};
 use super::FeishuConfig;
 
 pub(super) fn default_listen() -> String {
-    "0.0.0.0:8789".to_string()
+    "127.0.0.1:8789".to_string()
 }
 
 pub(super) fn default_clawd_base_url() -> String {

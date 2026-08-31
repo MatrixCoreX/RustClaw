@@ -34,20 +34,9 @@ pub(crate) const SKILL_RUNNER_ENV_WHITELIST: &[&str] = &[
     "SSL_CERT_DIR",
 ];
 
-/// Runtime switch for strict child-process environment isolation.
-///
-/// Isolation is enabled by default. Set `APP_SKILL_ENV_STRICT=0|false|off|no`
-/// only as an explicit compatibility escape hatch.
+/// Child-process environment isolation is a mandatory host boundary.
 pub(crate) fn skill_runner_env_strict_enabled() -> bool {
-    !matches!(
-        claw_core::product_identity::env_string("SKILL_ENV_STRICT")
-            .ok()
-            .as_deref()
-            .map(str::trim)
-            .map(str::to_ascii_lowercase)
-            .as_deref(),
-        Some("0") | Some("false") | Some("off") | Some("no")
-    )
+    true
 }
 
 /// §E2 step1: 在 strict 模式下从一个 source env map 计算应当注入子进程的白名单 env。
@@ -1111,10 +1100,7 @@ fn task_is_admin(state: &AppState, task: &ClaimedTask) -> bool {
 }
 
 pub(crate) fn task_allows_sudo(state: &AppState, task: Option<&ClaimedTask>) -> bool {
-    task.is_some_and(|task| {
-        crate::task_execution_policy::task_has_unrestricted_admin_authority(state, task)
-            || (state.policy.allow_sudo && task_is_admin(state, task))
-    })
+    task.is_some_and(|task| state.policy.allow_sudo && task_is_admin(state, task))
 }
 
 pub(crate) fn command_requests_sudo(command: &str) -> bool {
@@ -1125,10 +1111,7 @@ pub(crate) fn task_allows_path_outside_workspace(
     state: &AppState,
     task: Option<&ClaimedTask>,
 ) -> bool {
-    task.is_some_and(|task| {
-        crate::task_execution_policy::task_has_unrestricted_admin_authority(state, task)
-            || (state.policy.allow_path_outside_workspace && task_is_admin(state, task))
-    })
+    task.is_some_and(|task| state.policy.allow_path_outside_workspace && task_is_admin(state, task))
 }
 
 fn request_reply_language(user_text: &str) -> RequestReplyLanguage {
@@ -1727,11 +1710,15 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
     if let Some(capability_policy_token) = capability_policy_token.as_deref() {
         policy_tokens.push(capability_policy_token);
     }
-    if !state.skill_rt.tools_policy.is_any_allowed_for_execution(
-        &policy_tokens,
-        state.core.active_provider_type.as_deref(),
-        execution_policy.mode == crate::task_execution_policy::TaskExecutionMode::Yolo,
-    ) {
+    if !state
+        .skill_rt
+        .tools_policy
+        .is_any_allowed_for_execution_for_actor(
+            &policy_tokens,
+            state.core.active_provider_type.as_deref(),
+            crate::task_execution_policy::task_has_current_admin_identity(state, task),
+        )
+    {
         let observed_facts = vec![
             format!("skill: {skill_name}"),
             format!("policy_token: {policy_token}"),

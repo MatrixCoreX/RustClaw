@@ -837,13 +837,12 @@ struct ChildLaunch {
     execution_binding: Option<ExecutionBinding>,
 }
 
-const RUNTIME_CHILD_ENV_ALLOWLIST: [&str; 5] = [
+const RUNTIME_CHILD_ENV_ALLOWLIST: [&str; 4] = [
     // Credentials arrive as short-lived references.  The child must see the
     // broker-owned token directory in order to redeem an allowed credential
     // environment variable; package manifests should not need to declare
     // this runtime implementation detail themselves.
     "APP_SECRET_TOKEN_DIR",
-    "APP_UNRESTRICTED_ADMIN",
     "APP_ALLOW_PATH_OUTSIDE_WORKSPACE",
     "APP_ALLOW_SUDO",
     "APP_WORKSPACE_STATE_DIR",
@@ -1237,27 +1236,26 @@ fn child_process_command(launch: &ChildLaunch) -> Result<Command, String> {
         .working_directory
         .as_deref()
         .ok_or_else(|| "installed launch working directory is missing".to_string())?;
-    let std_command =
-        if inherited_parent_sandbox_backend().is_some() || unrestricted_admin_authority() {
-            let mut command = std::process::Command::new(&launch.program);
-            command.current_dir(working_directory);
-            command
+    let std_command = if inherited_parent_sandbox_backend().is_some() {
+        let mut command = std::process::Command::new(&launch.program);
+        command.current_dir(working_directory);
+        command
+    } else {
+        let network = if launch.runtime_network {
+            SandboxNetwork::Allow
         } else {
-            let network = if launch.runtime_network {
-                SandboxNetwork::Allow
-            } else {
-                SandboxNetwork::Deny
-            };
-            let writable_paths = installed_writable_paths(launch)?;
-            prepare_sandboxed_command(&launch.program, working_directory, &writable_paths, network)
-                .map_err(|error| {
-                    format!(
-                        "sandbox failed closed: code={} detail={}",
-                        error.code, error.detail
-                    )
-                })?
-                .command
+            SandboxNetwork::Deny
         };
+        let writable_paths = installed_writable_paths(launch)?;
+        prepare_sandboxed_command(&launch.program, working_directory, &writable_paths, network)
+            .map_err(|error| {
+                format!(
+                    "sandbox failed closed: code={} detail={}",
+                    error.code, error.detail
+                )
+            })?
+            .command
+    };
     let mut command = Command::new(std_command.get_program());
     command.args(std_command.get_args());
     if let Some(directory) = std_command.get_current_dir() {
@@ -1367,7 +1365,7 @@ async fn run_http_json_skill(
     request: &Value,
     timeout: Option<Duration>,
 ) -> Result<Vec<u8>, ExecutionFailure> {
-    if !unrestricted_admin_authority() && !launch.runtime_network {
+    if !launch.runtime_network {
         return Err(ExecutionFailure::new(
             "http_runtime_network_denied",
             "http_json runtime network is not allowed by the receipt",
@@ -1437,10 +1435,7 @@ async fn run_http_json_skill(
     Ok(output)
 }
 
-fn unrestricted_admin_authority() -> bool {
-    environment_flag_value_is_enabled(std::env::var("APP_UNRESTRICTED_ADMIN").ok().as_deref())
-}
-
+#[cfg(test)]
 fn environment_flag_value_is_enabled(value: Option<&str>) -> bool {
     value == Some("1")
 }

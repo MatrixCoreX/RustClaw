@@ -15,6 +15,10 @@ challenge, and persists per-device UTC-day usage in its own SQLite database.
 - `/v1/models` and `/v1/quota` require authentication but do not consume model-call allowance.
 - Request bodies, responses, credentials, and tool arguments are not written to relay logs.
 - Caller-provided upstream URLs, headers, credentials, and unknown routing fields are rejected.
+- Both buffered and streaming upstream responses have a strict byte limit so a provider or proxy
+  cannot force the relay to retain unbounded response data.
+- nginx exposes only `/health` and `/v1/*`; readiness details and administration routes remain on
+  the loopback listener. Forwarded client-address headers are removed at this trust boundary.
 
 ## Required environment
 
@@ -34,6 +38,7 @@ RELAY_MAX_TOKENS_PER_REQUEST=16384
 RELAY_MAX_INFLIGHT=16
 RELAY_MAX_INFLIGHT_PER_KEY=4
 RELAY_UPSTREAM_TIMEOUT_SECONDS=180
+RELAY_MAX_UPSTREAM_RESPONSE_BYTES=16777216
 ```
 
 Startup fails when the pepper, upstream key, database, or bind policy is invalid. An empty device
@@ -71,7 +76,7 @@ revoked devices cannot obtain a replacement.
 ## API
 
 ```bash
-curl https://llm.example.test/health/ready
+curl https://llm.example.test/health
 
 curl https://llm.example.test/v1/models \
   -H 'Authorization: Bearer DEVICE_KEY'
@@ -87,6 +92,8 @@ curl https://llm.example.test/v1/chat/completions \
 
 Both JSON and SSE (`stream=true`) Chat Completions responses are supported. Public model aliases
 are replaced with the server-owned upstream model before dispatch and restored in responses.
+`/health/live`, `/health/ready`, and `/internal/admin/*` are loopback-only endpoints and must not be
+published by the reverse proxy.
 
 ## Verification
 

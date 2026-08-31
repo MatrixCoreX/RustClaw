@@ -70,7 +70,7 @@ pub(super) fn inspect(
                 }),
             ));
         }
-        let before = read_optional_regular_file(&target)?;
+        let before = read_optional_regular_file(root, &target)?;
         if file.old_missing && before.is_some() {
             return Err(context_error(&file.path, 0, "target_already_exists"));
         }
@@ -106,7 +106,7 @@ pub(super) fn inspect(
 pub(super) fn apply(root: &Path, patch: &PureRustPatch) -> Result<(), String> {
     for file in &patch.files {
         validate_relative_patch_path(root, &file.path)?;
-        let current = read_optional_regular_file(&file.target)?;
+        let current = read_optional_regular_file(root, &file.target)?;
         if current != file.before {
             return Err(context_error(&file.path, 0, "pre_apply_state_changed"));
         }
@@ -123,14 +123,14 @@ pub(super) fn apply(root: &Path, patch: &PureRustPatch) -> Result<(), String> {
                         )
                     })?;
                 }
-                super::super::builtin_workspace_mutation::atomic_write_file(&file.target, bytes)
+                crate::secure_workspace_fs::atomic_write_workspace_file(root, &file.target, bytes)
                     .map_err(|error| {
                         patch_io_error("patch_apply_failed", "workspace.patch.apply_failed", error)
                     })?;
             }
-            None => fs::remove_file(&file.target).map_err(|error| {
-                patch_io_error("patch_apply_failed", "workspace.patch.apply_failed", error)
-            })?,
+            None => crate::secure_workspace_fs::remove_workspace_file(root, &file.target).map_err(
+                |error| patch_io_error("patch_apply_failed", "workspace.patch.apply_failed", error),
+            )?,
         }
     }
     Ok(())

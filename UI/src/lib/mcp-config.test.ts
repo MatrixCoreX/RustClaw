@@ -71,5 +71,5 @@ test("creates a disabled, untrusted server with a unique machine id", () => {
 test("maps machine errors to beginner-facing keyed UI copy", () => {
   const en = (_zh: string, text: string) => text;
   assert.equal(mcpErrorLabel("mcp_server_untrusted", en), "Confirm trust before enabling this server.");
-  assert.match(mcpErrorLabel("mcp_unknown", en), /mcp_unknown/);
+  assert.equal(mcpErrorLabel("mcp_unknown", en), "The MCP operation did not complete. Try again later.");
 });

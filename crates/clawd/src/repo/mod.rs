@@ -3,6 +3,7 @@ pub(crate) mod audit;
 pub(crate) mod auth;
 pub(crate) mod channel_delivery_outbox;
 pub(crate) mod channel_delivery_receipt;
+pub(crate) mod channel_event_admission;
 mod child_approval;
 pub(crate) mod child_patch;
 pub(crate) mod child_task_control;
@@ -14,6 +15,7 @@ pub(crate) mod pending_channel_requests;
 pub(crate) mod principal_ownership;
 pub(crate) mod submit;
 pub(crate) mod task_admin;
+pub(crate) mod task_admin_mutation_receipts;
 pub(crate) mod task_approval;
 pub(crate) mod task_checkpoint_action;
 pub(crate) mod task_control_mailbox;
@@ -52,6 +54,10 @@ pub(crate) use channel_delivery_receipt::{
     record_whatsapp_cloud_inbound, record_whatsapp_cloud_provider_status,
     renew_channel_delivery_dispatch, whatsapp_cloud_conversation_window,
     ClaimChannelDeliveryDispatchOutcome, RecordWhatsappProviderStatusOutcome,
+};
+pub(crate) use channel_event_admission::{
+    claim_channel_event, ensure_channel_event_admission_schema, finish_channel_event,
+    ChannelEventAdmissionError, ClaimChannelEventOutcome, FinishChannelEventOutcome,
 };
 pub(crate) use child_approval::fail_noninteractive_child_approval;
 pub(crate) use child_task_control::retry_child_task_with_revised_goal;

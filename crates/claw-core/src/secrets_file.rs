@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
+#[cfg(target_os = "macos")]
+use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -10,6 +12,25 @@ use super::{validate_secret_name, EnvSecretsBroker, SecretValue, SecretsBroker, 
 
 const FILE_SECRET_SCHEMA_VERSION: u32 = 1;
 const MAX_SECRET_BYTES: usize = 64 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecretProtectionSource {
+    Environment,
+    SystemdCredential,
+    MacosKeychain,
+    PrivateFile,
+}
+
+impl SecretProtectionSource {
+    pub fn machine_name(self) -> &'static str {
+        match self {
+            Self::Environment => "environment",
+            Self::SystemdCredential => "systemd_credential",
+            Self::MacosKeychain => "macos_keychain",
+            Self::PrivateFile => "private_file_fallback",
+        }
+    }
+}
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -39,13 +60,20 @@ impl EnvFileSecretsBroker {
     pub fn path(&self) -> &Path {
         &self.path
     }
-}
 
-impl SecretsBroker for EnvFileSecretsBroker {
-    fn lookup(&self, name: &str) -> Result<Option<SecretValue>, SecretsError> {
+    pub fn lookup_with_source(
+        &self,
+        name: &str,
+    ) -> Result<Option<(SecretValue, SecretProtectionSource)>, SecretsError> {
         validate_secret_name(name)?;
         if let Some(value) = self.environment.lookup(name)? {
-            return Ok(Some(value));
+            return Ok(Some((value, SecretProtectionSource::Environment)));
+        }
+        if let Some(value) = lookup_systemd_credential(name)? {
+            return Ok(Some((value, SecretProtectionSource::SystemdCredential)));
+        }
+        if let Some(value) = lookup_macos_keychain(name)? {
+            return Ok(Some((value, SecretProtectionSource::MacosKeychain)));
         }
         let document = read_document(&self.path, name)?;
         Ok(document
@@ -53,12 +81,93 @@ impl SecretsBroker for EnvFileSecretsBroker {
             .get(name)
             .filter(|value| !value.is_empty())
             .cloned()
-            .map(SecretValue::new))
+            .map(|value| (SecretValue::new(value), SecretProtectionSource::PrivateFile)))
+    }
+}
+
+impl SecretsBroker for EnvFileSecretsBroker {
+    fn lookup(&self, name: &str) -> Result<Option<SecretValue>, SecretsError> {
+        Ok(self.lookup_with_source(name)?.map(|(value, _)| value))
     }
 
     fn label(&self) -> &str {
-        "environment+private_file"
+        "environment+os_broker+private_file_fallback"
     }
+}
+
+fn lookup_systemd_credential(name: &str) -> Result<Option<SecretValue>, SecretsError> {
+    let Some(directory) = std::env::var_os("CREDENTIALS_DIRECTORY") else {
+        return Ok(None);
+    };
+    let directory = PathBuf::from(directory);
+    let path = directory.join(name);
+    reject_symlink(&path, name)?;
+    let metadata = match fs::metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(SecretsError::BackendIo {
+                name: name.to_string(),
+                source,
+            })
+        }
+    };
+    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_SECRET_BYTES as u64 {
+        return Err(SecretsError::BackendIo {
+            name: name.to_string(),
+            source: invalid_data("systemd_credential_file_invalid"),
+        });
+    }
+    let raw = fs::read_to_string(&path).map_err(|source| SecretsError::BackendIo {
+        name: name.to_string(),
+        source,
+    })?;
+    let value = raw.strip_suffix('\n').unwrap_or(&raw);
+    if value.is_empty() || value.contains('\0') {
+        return Err(SecretsError::BackendIo {
+            name: name.to_string(),
+            source: invalid_data("systemd_credential_value_invalid"),
+        });
+    }
+    Ok(Some(SecretValue::new(value)))
+}
+
+#[cfg(target_os = "macos")]
+fn lookup_macos_keychain(name: &str) -> Result<Option<SecretValue>, SecretsError> {
+    let service = format!("agent-runtime/{name}");
+    let output = Command::new("/usr/bin/security")
+        .args(["find-generic-password", "-s", &service, "-w"])
+        .output()
+        .map_err(|source| SecretsError::BackendIo {
+            name: name.to_string(),
+            source,
+        })?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    if output.stdout.is_empty() || output.stdout.len() > MAX_SECRET_BYTES {
+        return Err(SecretsError::BackendIo {
+            name: name.to_string(),
+            source: invalid_data("macos_keychain_value_invalid"),
+        });
+    }
+    let raw = String::from_utf8(output.stdout).map_err(|error| SecretsError::BackendIo {
+        name: name.to_string(),
+        source: invalid_data(format!("macos_keychain_value_not_utf8:{error}")),
+    })?;
+    let value = raw.strip_suffix('\n').unwrap_or(&raw);
+    if value.is_empty() || value.contains('\0') {
+        return Err(SecretsError::BackendIo {
+            name: name.to_string(),
+            source: invalid_data("macos_keychain_value_invalid"),
+        });
+    }
+    Ok(Some(SecretValue::new(value)))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn lookup_macos_keychain(_name: &str) -> Result<Option<SecretValue>, SecretsError> {
+    Ok(None)
 }
 
 pub fn set_file_secret(path: &Path, name: &str, value: &str) -> Result<(), SecretsError> {

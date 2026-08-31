@@ -29,6 +29,7 @@ description_zh = "检查命令权限、预览可恢复的后台命令流程、�
 semantic_tags = ["command_execution", "command_permission_preview", "background_command_preview", "async_checkpoint_preview", "cli_help", "terminal_session", "pty_session", "interactive_process"]
 planner_capability_aliases = { "system.run_cmd" = "system.run_command", "system.shell_run" = "system.run_command", "run_cmd" = "system.run_command" }
 planner_capabilities = [
+  { name = "system.run_command_direct", description = "Fail-closed policy for an actionless direct command invocation; ordinary planner calls should use system.run_command.", effect = "external", required = ["command"], optional = ["cwd", "timeout_seconds", "idle_timeout_seconds", "max_output_bytes", "async_start", "poll_after_seconds", "expires_in_seconds"], risk_level = "high", auto_invocable = false, once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = true, credential_access = true, subprocess = true, package_install = true, privilege_escalation = true },
   { name = "system.preview_command_permission", action = "preview_command_permission", effect = "observe", required = ["command"], optional = ["cwd"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
   { name = "system.preview_background_command", action = "preview_background_command", effect = "observe", required = ["command"], optional = ["cwd", "poll_after_seconds", "expires_in_seconds"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false, final_answer_shape = "lifecycle_result" },
   { name = "system.inspect_cli_help", action = "inspect_cli_help", effect = "observe", required = ["command"], optional = ["cwd", "timeout_seconds", "idle_timeout_seconds", "max_output_bytes"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false },
@@ -68,6 +69,9 @@ side_effect = false
 retryable = true
 capabilities = ["fs.read"]
 supported_os = ["linux", "macos"]
+planner_capabilities = [
+  { name = "filesystem.read_file", effect = "observe", required = ["path"], optional = ["start_byte", "max_bytes"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
+]
 input_schema = { type = "object", required = ["path"], properties = { path = { type = "string" }, start_byte = { type = "integer", minimum = 0 }, max_bytes = { type = "integer", minimum = 256, maximum = 1048576 } } }
 output_schema = { type = "object", required = ["schema_version", "status", "path", "content", "complete"], properties = { schema_version = { type = "integer", minimum = 1 }, status = { type = "string", enum = ["ok"] }, requested_path = { type = "string" }, path = { type = "string" }, canonical_path = { type = "string" }, start_byte = { type = "integer", minimum = 0 }, end_byte = { type = "integer", minimum = 0 }, returned_bytes = { type = "integer", minimum = 0 }, size_bytes = { type = "integer", minimum = 0 }, sha256 = { type = "string", minLength = 64, maxLength = 64 }, encoding = { type = "string", enum = ["utf-8", "utf-8-lossy"] }, lossy = { type = "boolean" }, content = { type = "string" }, complete = { type = "boolean" }, continuation = { anyOf = [{ type = "object" }, { type = "null" }] }, artifacts = { type = "array", items = { type = "object" } } } }
 
@@ -92,6 +96,9 @@ side_effect = true
 retryable = false
 capabilities = ["fs.write"]
 supported_os = ["linux", "macos"]
+planner_capabilities = [
+  { name = "filesystem.write_file", effect = "mutate", required = ["path", "content"], optional = ["append", "mode", "create_parents", "parents"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "resource", dedup_fields = ["path"], execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = true, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
+]
 input_schema = { type = "object", required = ["path", "content"], properties = { path = { type = "string" }, content = { type = "string" }, append = { type = "boolean" }, mode = { type = "string", enum = ["overwrite", "replace", "write", "append"] }, create_parents = { type = "boolean" }, parents = { type = "boolean" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
@@ -219,6 +226,16 @@ side_effect = true
 retryable = false
 capabilities = ["fs.read", "fs.write"]
 supported_os = ["linux", "macos"]
+planner_capabilities = [
+  { name = "workspace.preview_replace_text", action = "preview_replace_text", effect = "observe", required = ["path", "old_text", "new_text"], optional = ["expected_occurrences", "replace_all", "edits", "expected_sha256", "preserve_line_endings"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
+  { name = "workspace.replace_text", action = "replace_text", effect = "mutate", required = ["path", "old_text", "new_text"], optional = ["expected_occurrences", "replace_all", "edits", "expected_sha256", "preserve_line_endings"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "resource", dedup_fields = ["path"], execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = true, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
+  { name = "workspace.apply_patch", action = "apply_patch", effect = "mutate", required = ["patch"], optional = ["precondition_hashes"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = true, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
+  { name = "workspace.diff", action = "diff", effect = "observe", optional = ["checkpoint_id", "paths"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
+  { name = "workspace.rewind", action = "rewind", effect = "mutate", required = ["checkpoint_id"], optional = ["paths"], risk_level = "high", preferred = false, once_per_task = true, idempotent = false, dedup_scope = "resource", dedup_fields = ["checkpoint_id"], execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = true, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
+  { name = "workspace.review_child_patch", action = "review_child_patch", effect = "observe", required = ["child_task_id", "patch_ref"], optional = ["paths"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
+  { name = "workspace.apply_child_patch", action = "apply_child_patch", effect = "mutate", required = ["child_task_id", "patch_ref"], optional = ["precondition_hashes"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "resource", dedup_fields = ["patch_ref"], execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = true, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
+  { name = "workspace.reject_child_patch", action = "reject_child_patch", effect = "mutate", required = ["child_task_id", "patch_ref"], risk_level = "medium", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "resource", dedup_fields = ["patch_ref"], execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
+]
 input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["preview_replace_text", "replace_text", "apply_patch", "diff", "rewind", "review_child_patch", "apply_child_patch", "reject_child_patch"] }, path = { type = "string" }, old_text = { type = "string" }, new_text = { type = "string" }, expected_occurrences = { type = "integer", minimum = 1, maximum = 10000 }, replace_all = { type = "boolean" }, edits = { type = "array", minItems = 1, maxItems = 128, items = { type = "object", required = ["old_text", "new_text"], additionalProperties = false, properties = { old_text = { type = "string" }, new_text = { type = "string" }, expected_occurrences = { type = "integer", minimum = 1, maximum = 10000 }, replace_all = { type = "boolean" } } } }, expected_sha256 = { type = "string" }, preserve_line_endings = { type = "boolean" }, patch = { type = "string" }, checkpoint_id = { type = "string" }, child_task_id = { type = "string" }, patch_ref = { type = "string" }, paths = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, precondition_hashes = { type = "object" } } }
 output_schema = { type = "object", required = ["status", "action"], properties = { status = { type = "string" }, action = { type = "string" }, patch_id = { type = "string" }, checkpoint_id = { type = "string" }, changed_files = { type = "array", items = { type = "string" } }, patch = { type = "string" } } }
 
@@ -314,6 +331,9 @@ retryable = true
 capabilities = ["fs.read"]
 preferred_over_run_cmd = true
 supported_os = ["linux", "macos"]
+planner_capabilities = [
+  { name = "filesystem.list_directory", effect = "observe", optional = ["path", "names_only", "limit", "max_entries", "cursor"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
+]
 runtime_skill = "system_basic"
 runtime_action = "inventory_dir"
 runtime_default_args = { names_only = true }
@@ -343,6 +363,9 @@ side_effect = true
 retryable = false
 capabilities = ["fs.write"]
 supported_os = ["linux", "macos"]
+planner_capabilities = [
+  { name = "filesystem.make_directory", effect = "mutate", required = ["path"], optional = ["parents", "recursive"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "resource", dedup_fields = ["path"], execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = true, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
+]
 input_schema = { type = "object", required = ["path"], properties = { path = { type = "string" }, parents = { type = "boolean" }, recursive = { type = "boolean" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
@@ -367,6 +390,9 @@ side_effect = true
 retryable = false
 capabilities = ["fs.write"]
 supported_os = ["linux", "macos"]
+planner_capabilities = [
+  { name = "filesystem.remove_file", effect = "mutate", required = ["path"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "resource", dedup_fields = ["path"], execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = true, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
+]
 input_schema = { type = "object", required = ["path"], properties = { path = { type = "string" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
@@ -1025,7 +1051,7 @@ planner_capabilities = [
   { name = "archive.unpack", action = "unpack", effect = "mutate", required = ["archive", "dest"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },
 ]
 input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["list", "read", "pack", "unpack"] }, archive = { type = "string" }, archive_path = { type = "string" }, path = { type = "string" }, member = { type = "string" }, entry = { type = "string" }, file = { type = "string" }, file_path = { type = "string" }, source = { type = "string" }, source_path = { type = "string" }, dest = { type = "string" }, dest_path = { type = "string" }, format = { type = "string", enum = ["zip", "tar.gz", "tgz"] }, continuation = { type = "string", pattern = "^archive-members:[0-9]+$" } } }
-output_schema = { type = "object", required = ["text", "extra"], properties = { text = { type = "string" }, extra = { type = "object", required = ["action", "authority_scope"], properties = { action = { type = "string", enum = ["list", "read", "pack", "unpack"] }, authority_scope = { type = "string", enum = ["workspace", "unrestricted_admin"] }, archive = { type = "string" }, source = { type = "string" }, dest = { type = "string" }, member = { type = "string" }, member_count = { type = "integer", minimum = 0 }, expanded_bytes = { type = "integer", minimum = 0 }, complete = { type = "boolean" }, continuation = { anyOf = [{ type = "object" }, { type = "null" }] }, artifacts = { type = "array", items = { type = "object" } }, bounded_result = { type = "object" }, field_value = { type = "object" } } } } }
+output_schema = { type = "object", required = ["text", "extra"], properties = { text = { type = "string" }, extra = { type = "object", required = ["action", "authority_scope"], properties = { action = { type = "string", enum = ["list", "read", "pack", "unpack"] }, authority_scope = { type = "string", enum = ["workspace", "host_policy_grant"] }, archive = { type = "string" }, source = { type = "string" }, dest = { type = "string" }, member = { type = "string" }, member_count = { type = "integer", minimum = 0 }, expanded_bytes = { type = "integer", minimum = 0 }, complete = { type = "boolean" }, continuation = { anyOf = [{ type = "object" }, { type = "null" }] }, artifacts = { type = "array", items = { type = "object" } }, bounded_result = { type = "object" }, field_value = { type = "object" } } } } }
 
 [[skills]]
 name = "db_basic"
@@ -1143,6 +1169,9 @@ capabilities = ["fs.read"]
 supported_os = ["linux", "macos"]
 storage = { kind = "sqlite", schema_version = 1, migration_owner = "fs_search" }
 platform_notes = ["Uses a verified ripgrep file/content fast path with typed argv and bounded JSON parsing; unavailable or unsupported cases fall back to the in-process Rust backend."]
+planner_capabilities = [
+  { name = "filesystem.search_runtime", effect = "observe", risk_level = "low", auto_invocable = false, preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false },
+]
 
 [[skills]]
 name = "rss_fetch"
@@ -1593,6 +1622,9 @@ description = "Inspect host runtime configuration for missing, inconsistent, or 
 description_zh = "检查宿主运行配置中缺失、不一致或有风险的结构化值。"
 capabilities = ["fs.read"]
 supported_os = ["linux", "macos"]
+planner_capabilities = [
+  { name = "config.guard", action = "scan", effect = "validate", optional = ["path", "profile"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
+]
 input_schema = { type = "object", properties = { action = { type = "string", enum = ["scan"] }, path = { type = "string" }, profile = { type = "string" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 

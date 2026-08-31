@@ -394,7 +394,7 @@ export function McpConfigSection({
               </div>
               {runtime?.last_error_code ? (
                 <p className="mt-3 text-xs text-amber-100">
-                  {mcpErrorLabel(runtime.last_error_code, t)} <code className="ml-1 text-white/40">{runtime.last_error_code}</code>
+                  {mcpErrorLabel(runtime.last_error_code, t)}
                 </p>
               ) : null}
               {serverTools.length > 0 ? (

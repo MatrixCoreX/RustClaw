@@ -1,6 +1,6 @@
 use super::{
-    extract_bind_key_candidate, is_unbound_allowed_command, whatsapp_typing_indicator_payload,
-    WA_BIND_REQUIRED_FALLBACK, WA_I18N_BIND_REQUIRED_KEY,
+    build_inbox_rel_path, extract_bind_key_candidate, is_unbound_allowed_command,
+    whatsapp_typing_indicator_payload, WA_BIND_REQUIRED_FALLBACK, WA_I18N_BIND_REQUIRED_KEY,
 };
 use claw_core::channel_commands::ChannelCommandCatalog;
 use claw_core::channel_i18n::text_from_path;
@@ -35,6 +35,14 @@ fn whatsapp_cloud_media_specs_reject_unsupported_formats_and_oversize_files() {
             .starts_with("whatsapp_cloud_video_format_unsupported:")
     );
     std::fs::remove_dir_all(root).expect("remove media limit dir");
+}
+
+#[test]
+fn whatsapp_media_path_is_stable_for_provider_message() {
+    let first = build_inbox_rel_path("data/wa", "+15551234567", 7, "wamid-9", "jpg");
+    let replay = build_inbox_rel_path("data/wa", "+15551234567", 7, "wamid-9", "jpg");
+    assert_eq!(first, replay);
+    assert!(first.ends_with("wa_15551234567_7_wamid-9.jpg"));
 }
 
 fn default_catalog() -> ChannelCommandCatalog {

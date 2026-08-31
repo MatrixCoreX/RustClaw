@@ -5,9 +5,29 @@ import {
   copyAuthKeyValue,
   formatAuthenticationError,
   maskStoredKey,
+  restorePersistedAuthMode,
   responseIndicatesExpiredAuthentication,
   writeTextToClipboard,
 } from "./auth-keys.ts";
+
+test("direct auth keys are purged instead of restored from browser storage", () => {
+  const values = new Map<string, string>([
+    ["auth-mode", "key"],
+    ["direct-key", "rk-persisted-secret"],
+  ]);
+  const storage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    removeItem: (key: string) => values.delete(key),
+  };
+
+  assert.equal(restorePersistedAuthMode(storage, "direct-key", "auth-mode"), null);
+  assert.equal(values.has("direct-key"), false);
+  assert.equal(values.has("auth-mode"), false);
+
+  values.set("auth-mode", "webd");
+  assert.equal(restorePersistedAuthMode(storage, "direct-key", "auth-mode"), "webd");
+  assert.equal(values.get("auth-mode"), "webd");
+});
 
 test("copies plaintext key directly when it is already available", async () => {
   const writes: string[] = [];
@@ -150,10 +170,14 @@ test("localizes stable authentication codes without matching natural-language er
   );
   assert.equal(
     formatAuthenticationError("upstream_unavailable", 503, t),
-    "upstream_unavailable",
+    "登录服务暂时不可用，请稍后重试。",
   );
   assert.equal(
     formatAuthenticationError("webd_login_upstream_unavailable", 502, t),
     "登录服务暂时无法连接核心服务，请稍后重试。",
+  );
+  assert.equal(
+    formatAuthenticationError("future_auth_machine_code", 500, t),
+    "身份验证失败 (500)，请重新登录。",
   );
 });

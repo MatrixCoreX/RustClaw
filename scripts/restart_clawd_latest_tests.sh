@@ -55,11 +55,23 @@ else
   printf '%s\n' "$pid"
 fi
 EOF
+cat > "$MOCK_BIN/setsid" <<'EOF'
+#!/bin/bash
+if [[ "${1:-}" == "--help" ]]; then
+  printf '%s\n' '  -w, --wait  wait program to exit, and use the same return'
+  exit 0
+fi
+[[ "${1:-}" == "--wait" ]] && shift
+"$@" &
+child_pid=$!
+wait "$child_pid"
+EOF
 chmod +x \
   "$TEST_ROOT/runtime/scripts/restart_clawd_latest.sh" \
   "$TEST_ROOT/runtime/target/release/clawd" \
   "$MOCK_BIN/ss" \
-  "$MOCK_BIN/pgrep"
+  "$MOCK_BIN/pgrep" \
+  "$MOCK_BIN/setsid"
 
 PATH="$MOCK_BIN:/bin" \
 HOME="$TEST_ROOT/home" \
@@ -72,4 +84,5 @@ RESTART_TEST_CLAWD_BIN="$TEST_ROOT/runtime/target/release/clawd" \
 
 grep -Fq '127.0.0.1:8787' "$TEST_ROOT/output.log"
 [[ -s "$TEST_ROOT/runtime/.pids/clawd.pid" ]]
+[[ "$(cat "$TEST_ROOT/runtime/.pids/clawd.pid")" == "$(cat "$PROCESS_MARKER")" ]]
 echo "RESTART_CLAWD_LATEST_TESTS ok"

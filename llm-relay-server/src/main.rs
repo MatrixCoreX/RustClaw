@@ -10,7 +10,8 @@ use anyhow::{bail, Context};
 use axum::{
     body::{Body, Bytes},
     extract::{DefaultBodyLimit, Path as AxumPath, Query, State},
-    http::{header, HeaderMap, HeaderValue, StatusCode},
+    http::{header, HeaderMap, HeaderValue, Request, StatusCode},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post, put},
     Json, Router,
@@ -101,6 +102,7 @@ async fn run_server() -> anyhow::Result<()> {
         )
         .with_state(state)
         .layer(DefaultBodyLimit::max(config.max_request_body_bytes))
+        .layer(middleware::from_fn(response_security_headers))
         .layer(TraceLayer::new_for_http());
 
     let listener = tokio::net::TcpListener::bind(config.listen_addr)
@@ -211,6 +213,32 @@ async fn health_ready(State(state): State<AppState>) -> Result<Json<Value>, ApiE
     })))
 }
 
+async fn response_security_headers(request: Request<Body>, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(
+            "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+        ),
+    );
+    headers.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("no-referrer"),
+    );
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert("x-frame-options", HeaderValue::from_static("DENY"));
+    headers.insert(
+        "permissions-policy",
+        HeaderValue::from_static("camera=(), microphone=(), geolocation=(), payment=()"),
+    );
+    response
+}
+
 #[derive(Debug, Deserialize)]
 struct DeviceKeyRequest {
     device_pubkey: String,
@@ -233,10 +261,9 @@ async fn request_device_key(
             "proxy.device_enrollment_invalid",
         )
     })?;
-    state.minute_rate.reserve(&format!(
-        "enroll:{}",
-        device_pubkey
-    ))?;
+    state
+        .minute_rate
+        .reserve(&format!("enroll:{}", device_pubkey))?;
     let challenge = state
         .store
         .create_enrollment_challenge(&device_pubkey)
@@ -254,10 +281,9 @@ async fn verify_device_key(
             "proxy.device_enrollment_invalid",
         )
     })?;
-    state.minute_rate.reserve(&format!(
-        "verify:{}",
-        device_pubkey
-    ))?;
+    state
+        .minute_rate
+        .reserve(&format!("verify:{}", device_pubkey))?;
     let challenge = state
         .store
         .pending_enrollment_challenge(&request.challenge_id, &device_pubkey)
@@ -507,10 +533,21 @@ async fn chat_completions(
             request_id,
             provider.alias.clone(),
             u64::from(reserved_tokens),
+            state.config.max_upstream_response_bytes,
         ));
     }
 
-    let mut body: Value = upstream_response.json().await.map_err(|error| {
+    let response_bytes =
+        read_bounded_upstream_response(upstream_response, state.config.max_upstream_response_bytes)
+            .await
+            .inspect_err(|error| {
+                settle_quietly(&state.store, &request_id, false, 0);
+                warn!(
+                    code = error.code,
+                    request_id, "upstream response was rejected"
+                );
+            })?;
+    let mut body: Value = serde_json::from_slice(&response_bytes).map_err(|error| {
         settle_quietly(&state.store, &request_id, false, 0);
         warn!(error = %error, request_id, "upstream response was not valid JSON");
         ApiError::bad_gateway("upstream_invalid_json", "proxy.upstream_invalid_json")
@@ -534,16 +571,31 @@ fn streaming_response(
     request_id: String,
     public_model: String,
     fallback_tokens: u64,
+    max_response_bytes: usize,
 ) -> Response {
     let mut upstream = response.bytes_stream();
     let guard = StreamSettlement::new(store, request_id.clone(), fallback_tokens);
     let stream = async_stream::stream! {
         let mut guard = guard;
         let mut pending = Vec::new();
+        let mut received_bytes = 0_usize;
         let mut total_tokens = 0_u64;
         while let Some(chunk) = upstream.next().await {
             match chunk {
                 Ok(chunk) => {
+                    received_bytes = match checked_upstream_response_size(
+                        received_bytes,
+                        chunk.len(),
+                        max_response_bytes,
+                    ) {
+                        Ok(value) => value,
+                        Err(_) => {
+                            yield Err(io::Error::other(
+                                "upstream response exceeded the configured byte limit",
+                            ));
+                            return;
+                        }
+                    };
                     pending.extend_from_slice(&chunk);
                     while let Some(position) = pending.iter().position(|byte| *byte == b'\n') {
                         let line = pending.drain(..=position).collect::<Vec<_>>();
@@ -577,6 +629,51 @@ fn streaming_response(
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
     insert_request_id(response.headers_mut(), &request_id);
     response
+}
+
+async fn read_bounded_upstream_response(
+    response: reqwest::Response,
+    maximum_bytes: usize,
+) -> Result<Bytes, ApiError> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > maximum_bytes as u64)
+    {
+        return Err(ApiError::bad_gateway(
+            "upstream_response_too_large",
+            "proxy.upstream_response_too_large",
+        ));
+    }
+    let mut stream = response.bytes_stream();
+    let mut body = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|_| {
+            ApiError::bad_gateway("upstream_response_failed", "proxy.upstream_response_failed")
+        })?;
+        checked_upstream_response_size(body.len(), chunk.len(), maximum_bytes)?;
+        body.extend_from_slice(&chunk);
+    }
+    Ok(Bytes::from(body))
+}
+
+fn checked_upstream_response_size(
+    current_bytes: usize,
+    next_chunk_bytes: usize,
+    maximum_bytes: usize,
+) -> Result<usize, ApiError> {
+    let total = current_bytes.checked_add(next_chunk_bytes).ok_or_else(|| {
+        ApiError::bad_gateway(
+            "upstream_response_too_large",
+            "proxy.upstream_response_too_large",
+        )
+    })?;
+    if total > maximum_bytes {
+        return Err(ApiError::bad_gateway(
+            "upstream_response_too_large",
+            "proxy.upstream_response_too_large",
+        ));
+    }
+    Ok(total)
 }
 
 fn rewrite_sse_line(line: Vec<u8>, public_model: &str) -> (Vec<u8>, u64) {

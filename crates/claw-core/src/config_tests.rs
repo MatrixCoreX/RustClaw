@@ -462,6 +462,7 @@ oauth_resource = "https://mcp.example.invalid/mcp"
 fn tools_defaults_are_least_privilege_coding_defaults() {
     let tools = ToolsConfig::default();
     assert_eq!(tools.access_profile, "coding");
+    assert_eq!(tools.admin_access_profile, "full");
     assert_eq!(tools.sandbox_mode.as_token(), "workspace_write");
     assert_eq!(tools.sandbox_backend.as_token(), "auto");
     assert_eq!(tools.approval_policy.as_token(), "on_risk");

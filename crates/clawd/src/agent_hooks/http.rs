@@ -4,6 +4,8 @@ use std::net::IpAddr;
 use std::time::Instant;
 use tokio_util::sync::CancellationToken;
 
+use crate::public_http_client::{build_public_http_client, is_public_ip};
+
 use super::shared::{
     elapsed_ms, handler_failure, is_env_reference, parse_handler_output, validate_common_handler,
     ExecutedHook, HandlerRunResult, HookHandlerConfig, ValidatedHookHandler,
@@ -14,6 +16,13 @@ pub(super) struct ValidatedHttpHandler {
     common: ValidatedHookHandler,
     url: Url,
     auth_token: Option<String>,
+    endpoint_policy: HttpEndpointPolicy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HttpEndpointPolicy {
+    PublicHttps,
+    ExplicitLoopback,
 }
 
 #[derive(Debug)]
@@ -48,14 +57,26 @@ pub(super) fn validate_http_handler(
     if !url.username().is_empty() || url.password().is_some() || url.fragment().is_some() {
         return Err((common.id, "hook_http_url_credentials_forbidden"));
     }
-    match url.scheme() {
-        "https" => {}
-        "http"
-            if handler.allow_insecure_loopback
-                && url.host_str().is_some_and(is_literal_loopback_host) => {}
-        "http" => return Err((common.id, "hook_http_https_required")),
-        _ => return Err((common.id, "hook_http_scheme_unsupported")),
-    }
+    let host = url
+        .host_str()
+        .ok_or_else(|| (common.id.clone(), "hook_http_host_required"))?;
+    let endpoint_policy = if is_literal_loopback_host(host) {
+        if !handler.allow_insecure_loopback {
+            return Err((common.id, "hook_http_loopback_policy_required"));
+        }
+        match url.scheme() {
+            "http" | "https" => HttpEndpointPolicy::ExplicitLoopback,
+            _ => return Err((common.id, "hook_http_scheme_unsupported")),
+        }
+    } else {
+        if url.scheme() != "https" {
+            return Err((common.id, "hook_http_https_required"));
+        }
+        if parse_ip_literal(host).is_some_and(|address| !is_public_ip(address)) {
+            return Err((common.id, "hook_http_non_public_address"));
+        }
+        HttpEndpointPolicy::PublicHttps
+    };
     let auth_token = match handler.auth_token_env.as_deref() {
         Some(reference) if is_env_reference(reference) => Some(
             std::env::var(reference)
@@ -68,6 +89,7 @@ pub(super) fn validate_http_handler(
         common,
         url,
         auth_token,
+        endpoint_policy,
     })
 }
 
@@ -92,11 +114,7 @@ pub(super) async fn execute_http_handler(
             );
         }
     };
-    let client = match reqwest::Client::builder()
-        .redirect(Policy::none())
-        .timeout(handler.common.timeout)
-        .build()
-    {
+    let client = match build_http_client(handler) {
         Ok(client) => client,
         Err(_) => {
             return handler_failure(
@@ -182,6 +200,16 @@ pub(super) async fn execute_http_handler(
     }
 }
 
+fn build_http_client(handler: &ValidatedHttpHandler) -> anyhow::Result<reqwest::Client> {
+    match handler.endpoint_policy {
+        HttpEndpointPolicy::PublicHttps => build_public_http_client(),
+        HttpEndpointPolicy::ExplicitLoopback => Ok(reqwest::Client::builder()
+            .redirect(Policy::none())
+            .timeout(handler.common.timeout)
+            .build()?),
+    }
+}
+
 async fn execute_http_attempt(
     handler: &ValidatedHttpHandler,
     client: &reqwest::Client,
@@ -234,7 +262,12 @@ async fn execute_http_attempt(
 
 fn is_literal_loopback_host(host: &str) -> bool {
     host.eq_ignore_ascii_case("localhost")
-        || host
-            .parse::<IpAddr>()
-            .is_ok_and(|address| address.is_loopback())
+        || parse_ip_literal(host).is_some_and(|address| address.is_loopback())
+}
+
+fn parse_ip_literal(host: &str) -> Option<IpAddr> {
+    host.trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse()
+        .ok()
 }

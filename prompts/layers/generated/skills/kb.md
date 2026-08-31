@@ -133,7 +133,7 @@ Natural-language intent mapping:
 - Search selects a bounded FTS5 candidate set before BM25 ranking and reports
   `stats.retrieval_mode`, `total_candidates`, and `retrieval_candidates`.
 - Non-admin source paths are confined to the canonical workspace root. A
-  verified `unrestricted_admin` runner context may index absolute paths visible
+  verified `host_policy_grant` runner context may index absolute paths visible
   to the agent-runtime operating-system user; request arguments cannot grant this.
 
 ## Error Contract (from interface)

@@ -1,5 +1,22 @@
 export { writeTextToClipboard } from "./clipboard";
 
+interface AuthPreferenceStorage {
+  getItem: (key: string) => string | null;
+  removeItem: (key: string) => void;
+}
+
+export function restorePersistedAuthMode(
+  storage: AuthPreferenceStorage,
+  directKeyStorageKey: string,
+  authModeStorageKey: string,
+): "webd" | null {
+  const savedMode = storage.getItem(authModeStorageKey);
+  storage.removeItem(directKeyStorageKey);
+  if (savedMode === "webd") return "webd";
+  storage.removeItem(authModeStorageKey);
+  return null;
+}
+
 export async function copyAuthKeyValue(options: {
   keyId?: number | null;
   plaintextKey?: string | null;
@@ -51,13 +68,16 @@ export function formatAuthenticationError(
   if (code === "webd_login_upstream_unavailable") {
     return t("登录服务暂时无法连接核心服务，请稍后重试。", "The sign-in service cannot reach the core service right now. Try again shortly.");
   }
+  if (code === "upstream_unavailable") {
+    return t("登录服务暂时不可用，请稍后重试。", "The sign-in service is temporarily unavailable. Try again shortly.");
+  }
   if (
     code === "webd_login_upstream_body_read_failed" ||
     code === "webd_login_upstream_response_invalid"
   ) {
     return t("登录服务收到无效响应，请检查服务状态后重试。", "The sign-in service received an invalid response. Check service status and try again.");
   }
-  return code || t(`身份验证失败 (${status})`, `Authentication failed (${status})`);
+  return t(`身份验证失败 (${status})，请重新登录。`, `Authentication failed (${status}). Please sign in again.`);
 }
 
 export async function responseIndicatesExpiredAuthentication(

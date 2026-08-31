@@ -70,8 +70,10 @@ if port_is_listening; then
   exit 1
 fi
 
-if command -v setsid >/dev/null 2>&1; then
-  setsid "${CLAWD_BIN}" --config "${CONFIG_PATH}" >"${LOG_FILE}" 2>&1 </dev/null &
+if command -v setsid >/dev/null 2>&1 && setsid --help 2>&1 | grep -q -- '--wait'; then
+  # Some SSH shells make the background setsid process a group leader. In that
+  # case setsid forks; --wait keeps the tracked launcher alive until clawd exits.
+  setsid --wait "${CLAWD_BIN}" --config "${CONFIG_PATH}" >"${LOG_FILE}" 2>&1 </dev/null &
   started_pid=$!
 else
   nohup "${CLAWD_BIN}" --config "${CONFIG_PATH}" >"${LOG_FILE}" 2>&1 </dev/null &
@@ -98,7 +100,12 @@ if ! port_is_listening; then
   exit 1
 fi
 
-printf '%s\n' "${started_pid}" > "${PID_FILE}"
+actual_pid="$(clawd_pids | tail -n 1)"
+if [[ -z "${actual_pid}" ]]; then
+  echo "clawd is listening but its process id could not be resolved" >&2
+  exit 1
+fi
+printf '%s\n' "${actual_pid}" > "${PID_FILE}"
 
 cat "${PID_FILE}"
 echo '---'

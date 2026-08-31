@@ -1,7 +1,8 @@
 use super::{
     build_lark_long_connection_config, build_lark_submit_request, extract_bind_key_candidate,
     extract_pending_bind_token_candidate, install_tls_crypto_provider, is_unbound_allowed_command,
-    lark_delivery_error_text, lark_provider_http_error, parse_im_text_from_event_body, LarkConfig,
+    lark_delivery_error_text, lark_provider_http_error, lark_saved_file_name,
+    parse_im_text_from_event_body, provider_event_id, validate_webhook_security, LarkConfig,
     LarkSection, LARK_BIND_REQUIRED_FALLBACK, LARK_I18N_BIND_REQUIRED_KEY,
 };
 use crate::config_helpers::lark_t;
@@ -12,6 +13,43 @@ fn tls_crypto_provider_installation_is_idempotent() {
     install_tls_crypto_provider().expect("initial provider installation");
     install_tls_crypto_provider().expect("repeated provider installation");
     assert!(rustls::crypto::CryptoProvider::get_default().is_some());
+}
+
+#[test]
+fn provider_event_identity_prefers_event_id_and_falls_back_to_message_id() {
+    let event = json!({
+        "header": {"event_id": "event-1"},
+        "event": {"message": {"message_id": "message-1"}}
+    });
+    assert_eq!(provider_event_id(&event).as_deref(), Some("event-1"));
+
+    let fallback = json!({"event": {"message": {"message_id": "message-2"}}});
+    assert_eq!(provider_event_id(&fallback).as_deref(), Some("message-2"));
+}
+
+#[test]
+fn webhook_rejects_static_verification_token_without_signature_secret() {
+    let section = LarkSection {
+        verification_token: "static-token".to_string(),
+        encrypt_key: String::new(),
+        ..LarkSection::default()
+    };
+    assert!(validate_webhook_security(&section).is_err());
+
+    let signed = LarkSection {
+        encrypt_key: "signature-secret".to_string(),
+        ..section
+    };
+    assert!(validate_webhook_security(&signed).is_ok());
+}
+
+#[test]
+fn media_storage_name_is_stable_for_provider_identity() {
+    let content = json!({"file_name": "report.pdf"});
+    let first = lark_saved_file_name("file", &content, "stable-id");
+    let replay = lark_saved_file_name("file", &content, "stable-id");
+    assert_eq!(first, replay);
+    assert!(first.starts_with("stable-id_"));
 }
 
 #[test]

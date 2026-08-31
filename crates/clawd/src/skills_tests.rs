@@ -453,8 +453,8 @@ async fn high_risk_skill_dispatch_start_is_audited() {
         &task,
         "run_cmd",
         json!({
+            "action": "exec",
             "command": "true",
-            "timeout_seconds": 5,
             "idle_timeout_seconds": 5,
             "max_output_bytes": 8000
         }),
@@ -890,6 +890,7 @@ async fn builtin_run_cmd_async_start_outcome_exposes_pending_async_job_extra() {
         &task,
         "run_cmd",
         json!({
+            "action": "exec",
             "command": "sleep 0.05; echo async-ok",
             "cwd": ".",
             "async_start": true,
@@ -1183,7 +1184,7 @@ fn task_allows_privileged_tools_for_admin_only() {
 }
 
 #[test]
-fn authenticated_admin_yolo_bypasses_ordinary_permission_switches() {
+fn authenticated_admin_yolo_keeps_host_permission_switches() {
     let state = test_state("zh-CN");
     assert!(!state.policy.allow_sudo);
     assert!(!state.policy.allow_path_outside_workspace);
@@ -1203,8 +1204,8 @@ fn authenticated_admin_yolo_bypasses_ordinary_permission_switches() {
     .expect("stamp admin policy");
     let mut admin_task = test_task(admin_payload);
     admin_task.user_key = Some("rk-admin-yolo".to_string());
-    assert!(task_allows_sudo(&state, Some(&admin_task)));
-    assert!(task_allows_path_outside_workspace(
+    assert!(!task_allows_sudo(&state, Some(&admin_task)));
+    assert!(!task_allows_path_outside_workspace(
         &state,
         Some(&admin_task)
     ));

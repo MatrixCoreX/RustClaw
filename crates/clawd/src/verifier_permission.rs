@@ -1,6 +1,7 @@
 use std::path::{Component, Path, PathBuf};
 
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
 use super::*;
 
@@ -381,8 +382,84 @@ pub(super) fn audit_permission_decision(
     task: &ClaimedTask,
     permission_decision: &Value,
 ) {
+    let principal_material = task
+        .user_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("{}:{}:{}", task.channel, task.user_id, task.chat_id));
+    let principal_ref = format!("sha256:{:x}", Sha256::digest(principal_material.as_bytes()));
+    let grant_value = permission_decision
+        .pointer("/steps/0/task_execution_policy")
+        .or_else(|| permission_decision.get("approval_grant"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let grant_digest = format!(
+        "sha256:{:x}",
+        Sha256::digest(serde_json::to_vec(&grant_value).unwrap_or_default())
+    );
+    let effect_classes = permission_decision
+        .get("steps")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .flat_map(|step| {
+            let mut effects = Vec::new();
+            if step
+                .pointer("/action_effect/observes")
+                .and_then(Value::as_bool)
+                == Some(true)
+            {
+                effects.push("observe");
+            }
+            if step
+                .pointer("/action_effect/mutates")
+                .and_then(Value::as_bool)
+                == Some(true)
+            {
+                effects.push("mutate");
+            }
+            if step
+                .pointer("/action_effect/validates")
+                .and_then(Value::as_bool)
+                == Some(true)
+            {
+                effects.push("validate");
+            }
+            for field in [
+                "network_access",
+                "filesystem_write",
+                "external_publish",
+                "credential_access",
+                "subprocess",
+                "package_install",
+                "privilege_escalation",
+            ] {
+                if step
+                    .pointer(&format!("/registry_policy/{field}"))
+                    .and_then(Value::as_bool)
+                    == Some(true)
+                {
+                    effects.push(field);
+                }
+            }
+            effects
+        })
+        .fold(Vec::<&str>::new(), |mut effects, effect| {
+            if !effects.contains(&effect) {
+                effects.push(effect);
+            }
+            effects
+        });
     let detail = json!({
+        "schema_version": 1,
         "task_id": task.task_id,
+        "principal_ref": principal_ref,
+        "source_channel": task.channel,
+        "actor_user_id": task.user_id,
+        "effect_classes": effect_classes,
+        "grant_digest": grant_digest,
         "permission_decision": permission_decision,
     })
     .to_string();

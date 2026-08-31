@@ -66,6 +66,8 @@ fn envelope_uses_only_explicit_machine_fields_and_materialized_attachments() {
     assert!(!prompt_line.contains("do not project this user text"));
     assert!(!prompt_line.contains("external-user"));
     assert!(!prompt_line.contains("user-key"));
+    assert!(prompt_line.contains("untrusted_user_attachment"));
+    assert!(prompt_line.contains(r#""instruction_authority":"none""#));
 }
 
 #[test]
@@ -84,6 +86,8 @@ fn envelope_derives_runtime_permission_boundary_without_semantic_routing() {
     assert_eq!(envelope.budget_profile, "adaptive");
     assert!(envelope.safety_context.task_identity_bound);
     assert!(envelope.safety_context.attachments_validated);
+    assert!(!envelope.safety_context.user_content_can_grant);
+    assert!(!envelope.safety_context.external_content_can_change_policy);
 }
 
 #[test]

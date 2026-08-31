@@ -16,9 +16,32 @@ max_incoming_body_bytes = 104857600
 # HttpOnly 会话 Cookie 名；浏览器须与 webd 对外地址同源访问 UI，Cookie 才能随 `/v1/*` 代理请求发送。
 #session_cookie_name = "webd_sid"
 # 会话秒数；会话索引保存在服务端，webd 重启后仍可继续使用未过期 Cookie。
-#session_ttl_seconds = 86400
+#session_ttl_seconds = 43200
 # 服务端会话索引路径；文件包含敏感认证材料，只允许部署用户读取。
 #session_store_path = "data/webd_sessions.json"
 # 同一真实 IP + 规范化用户名连续失败 6 次后，锁定该组合 15 分钟。
 login_failure_limit = 6
 login_lockout_seconds = 900
+
+# WEBD 应用层资源边界。nginx 可以设置更严格的公网门禁，但不能替代这些限制。
+[webd.request_limits]
+# 普通 JSON 使用较小上限；任务附件和显式上传仍受上面的 100 MiB 总上限约束。
+max_header_bytes = 32768
+max_json_body_bytes = 2097152
+body_read_timeout_seconds = 30
+upload_body_read_timeout_seconds = 300
+# 默认值为普通 UI、SSE 重连和多轮任务保留余量；超限立即返回结构化 429。
+global_concurrency = 128
+per_ip_concurrency = 64
+per_session_concurrency = 24
+sse_per_ip_concurrency = 8
+# 单条事件流到期后由客户端携带 cursor 重连，避免永久占用连接和文件描述符。
+sse_max_lifetime_seconds = 21600
+upload_concurrency = 2
+high_cost_concurrency = 8
+per_ip_rpm = 600
+per_session_rpm = 360
+login_per_ip_rpm = 30
+task_per_ip_rpm = 120
+upload_per_ip_rpm = 20
+high_cost_per_ip_rpm = 60

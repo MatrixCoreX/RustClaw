@@ -16,7 +16,11 @@ enum WorkspaceUpdateMode {
     ClawdOnly,
     NginxEnable,
     NginxDisable,
+    LocalHttpsPrepare,
+    LocalHttpsEnable,
+    LocalHttpsRestore,
     ReleaseDeploy,
+    ReleaseRestore,
     SourceCheckout,
 }
 
@@ -29,7 +33,11 @@ impl WorkspaceUpdateMode {
             Self::ClawdOnly => "clawd_only",
             Self::NginxEnable => "nginx_enable",
             Self::NginxDisable => "nginx_disable",
+            Self::LocalHttpsPrepare => "local_https_prepare",
+            Self::LocalHttpsEnable => "local_https_enable",
+            Self::LocalHttpsRestore => "local_https_restore",
             Self::ReleaseDeploy => "release_deploy",
+            Self::ReleaseRestore => "release_restore",
             Self::SourceCheckout => "source_checkout",
         }
     }
@@ -500,6 +508,13 @@ async fn start_workspace_update_release_deploy(
     start_workspace_update_with_mode(state, headers, WorkspaceUpdateMode::ReleaseDeploy).await
 }
 
+async fn start_workspace_update_release_restore(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<WorkspaceUpdateStatus>>) {
+    start_workspace_update_with_mode(state, headers, WorkspaceUpdateMode::ReleaseRestore).await
+}
+
 async fn start_workspace_update_source_checkout(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -532,7 +547,10 @@ async fn start_workspace_update_with_mode(
             None,
         );
     }
-    if mode == WorkspaceUpdateMode::ReleaseDeploy && release_platform_prefixes().is_none()
+    if matches!(
+        mode,
+        WorkspaceUpdateMode::ReleaseDeploy | WorkspaceUpdateMode::ReleaseRestore
+    ) && release_platform_prefixes().is_none()
     {
         return workspace_update_api_error(
             StatusCode::PRECONDITION_FAILED,
@@ -574,6 +592,13 @@ async fn start_workspace_update_with_mode(
                 return workspace_update_api_error(
                     StatusCode::CONFLICT,
                     "workspace_update_source_checkout_already_enabled",
+                    Some(guard.clone()),
+                );
+            }
+            WorkspaceUpdateMode::ReleaseRestore if !source_update_available => {
+                return workspace_update_api_error(
+                    StatusCode::CONFLICT,
+                    "workspace_update_release_restore_source_required",
                     Some(guard.clone()),
                 );
             }
@@ -708,8 +733,24 @@ async fn run_workspace_update_job(
             run_workspace_update_nginx_disable_job(workspace_root, shared, control).await;
             return;
         }
+        WorkspaceUpdateMode::LocalHttpsPrepare => {
+            run_local_https_prepare_job(workspace_root, shared, control).await;
+            return;
+        }
+        WorkspaceUpdateMode::LocalHttpsEnable => {
+            run_local_https_enable_job(workspace_root, shared, control).await;
+            return;
+        }
+        WorkspaceUpdateMode::LocalHttpsRestore => {
+            run_local_https_restore_job(workspace_root, shared, control).await;
+            return;
+        }
         WorkspaceUpdateMode::ReleaseDeploy => {
-            run_workspace_update_release_deploy_job(workspace_root, shared, control).await;
+            run_workspace_update_release_deploy_job(workspace_root, shared, control, false).await;
+            return;
+        }
+        WorkspaceUpdateMode::ReleaseRestore => {
+            run_workspace_update_release_deploy_job(workspace_root, shared, control, true).await;
             return;
         }
         WorkspaceUpdateMode::SourceCheckout => {
@@ -1191,22 +1232,34 @@ async fn run_workspace_update_release_deploy_job(
     workspace_root: PathBuf,
     shared: Arc<Mutex<WorkspaceUpdateStatus>>,
     control: Arc<Mutex<WorkspaceUpdateControl>>,
+    restore_package_mode: bool,
 ) {
     record_workspace_update_current_version(&workspace_root, &shared).await;
     if finish_workspace_update_if_canceled(&shared, &control) {
         return;
     }
 
-    set_workspace_update_step(&shared, "downloading_release");
+    set_workspace_update_step(
+        &shared,
+        if restore_package_mode {
+            "restoring_release"
+        } else {
+            "downloading_release"
+        },
+    );
     reset_workspace_update_build_logs(&shared);
     {
         let mut guard = workspace_update_status_lock(shared.as_ref());
         set_workspace_update_next_step(
             &mut guard,
-            "workspace_update.release_deploy_downloading",
+            if restore_package_mode {
+                "workspace_update.release_restore_downloading"
+            } else {
+                "workspace_update.release_deploy_downloading"
+            },
         );
     }
-    let deploy_args = ["./deploy-github-release.sh", "--root", ".", "--no-restart"];
+    let deploy_args = workspace_release_deploy_args(restore_package_mode);
     match run_workspace_update_command_streaming(
         "bash",
         &deploy_args,
@@ -1225,8 +1278,16 @@ async fn run_workspace_update_release_deploy_job(
         Ok(out) => {
             fail_workspace_update(
                 &shared,
-                "release deploy failed",
-                "workspace_update.release_deploy_check_network_or_permissions",
+                if restore_package_mode {
+                    "release restore failed"
+                } else {
+                    "release deploy failed"
+                },
+                if restore_package_mode {
+                    "workspace_update.release_restore_check_network_or_permissions"
+                } else {
+                    "workspace_update.release_deploy_check_network_or_permissions"
+                },
                 out,
             );
             return;
@@ -1240,7 +1301,11 @@ async fn run_workspace_update_release_deploy_job(
             fail_workspace_update_with_error(
                 &shared,
                 err,
-                "workspace_update.release_deploy_check_network_or_permissions",
+                if restore_package_mode {
+                    "workspace_update.release_restore_check_network_or_permissions"
+                } else {
+                    "workspace_update.release_deploy_check_network_or_permissions"
+                },
             );
             return;
         }
@@ -1254,22 +1319,44 @@ async fn run_workspace_update_release_deploy_job(
         Ok(()) => {
             let mut guard = workspace_update_status_lock(shared.as_ref());
             guard.status = "restarting".to_string();
-            guard.step = "release_restart_scheduled".to_string();
+            guard.step = if restore_package_mode {
+                guard.installation_kind = "release_package".to_string();
+                guard.source_update_available = false;
+                "release_restore_restart_scheduled".to_string()
+            } else {
+                "release_restart_scheduled".to_string()
+            };
             guard.finished_ts = Some(current_unix_ts());
             guard.error = None;
             set_workspace_update_next_step(
                 &mut guard,
-                "workspace_update.release_deploy_restart_scheduled",
+                if restore_package_mode {
+                    "workspace_update.release_restore_restart_scheduled"
+                } else {
+                    "workspace_update.release_deploy_restart_scheduled"
+                },
             );
         }
         Err(err) => {
             fail_workspace_update_with_error(
                 &shared,
                 err,
-                "workspace_update.release_deploy_restart_failed",
+                if restore_package_mode {
+                    "workspace_update.release_restore_restart_failed"
+                } else {
+                    "workspace_update.release_deploy_restart_failed"
+                },
             );
         }
     }
+}
+
+fn workspace_release_deploy_args(restore_package_mode: bool) -> Vec<&'static str> {
+    let mut args = vec!["./deploy-github-release.sh", "--root", ".", "--no-restart"];
+    if restore_package_mode {
+        args.push("--package-mode");
+    }
+    args
 }
 
 async fn run_workspace_update_source_checkout_job(
@@ -1469,7 +1556,7 @@ fn schedule_workspace_update_direct_restart(workspace_root: &Path) -> Result<(),
            esac; \
            rm -f .pids/clawd.pid; \
          fi; \
-         pkill -TERM -f '[t]arget/release/clawd|cargo run -p clawd' >/dev/null 2>&1 || true; \
+         pkill -TERM -f '[t]arget/release/clawd|cargo run -p [c]lawd' >/dev/null 2>&1 || true; \
          sleep 1; \
          APP_SKIP_BANNER=1 nohup bash ./component_start/start-clawd.sh release > logs/restart-clawd.log 2>&1 &",
         shell_escape_arg(workspace.as_ref())

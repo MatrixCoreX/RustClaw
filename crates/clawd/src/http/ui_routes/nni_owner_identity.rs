@@ -1,21 +1,22 @@
+#[cfg(test)]
 use k256::ecdsa::{signature::Signer, Signature, SigningKey};
+#[cfg(test)]
 use k256::elliptic_curve::rand_core::OsRng;
 use k256::PublicKey;
 use ripemd::Ripemd160;
+#[cfg(test)]
 use zeroize::{Zeroize, Zeroizing};
 
 const NNI_OWNER_KEY_SUFFIX: &[u8] = b"K1";
 const NNI_OWNER_CHECKSUM_BYTES: usize = 4;
 const NNI_OWNER_PUBLIC_KEY_BYTES: usize = 33;
+#[cfg(test)]
 const NNI_OWNER_PRIVATE_KEY_BYTES: usize = 32;
 
-#[derive(Serialize)]
+#[cfg(test)]
 struct NniOwnerKeyPairResponse {
-    key_type: &'static str,
-    encoding: &'static str,
     public_key: String,
     private_key: String,
-    private_key_persisted: bool,
 }
 
 fn nni_owner_checksum(payload: &[u8]) -> [u8; NNI_OWNER_CHECKSUM_BYTES] {
@@ -59,18 +60,17 @@ fn decode_nni_owner_payload(
     Ok(payload.to_vec())
 }
 
+#[cfg(test)]
 fn nni_owner_public_key_from_signing_key(signing_key: &SigningKey) -> String {
     encode_nni_owner_payload(signing_key.verifying_key().to_encoded_point(true).as_bytes())
 }
 
+#[cfg(test)]
 fn generate_nni_owner_key_pair() -> NniOwnerKeyPairResponse {
     let signing_key = SigningKey::random(&mut OsRng);
     NniOwnerKeyPairResponse {
-        key_type: "K1",
-        encoding: "eos_base58_v1",
         public_key: nni_owner_public_key_from_signing_key(&signing_key),
         private_key: encode_nni_owner_payload(signing_key.to_bytes().as_slice()),
-        private_key_persisted: false,
     }
 }
 
@@ -92,17 +92,7 @@ fn normalize_nni_owner_signature(value: &str) -> Result<String, &'static str> {
     Ok(normalized.to_ascii_lowercase())
 }
 
-fn nni_owner_public_key_from_private(value: &str) -> Result<String, &'static str> {
-    let private_bytes = Zeroizing::new(decode_nni_owner_payload(
-        value,
-        NNI_OWNER_PRIVATE_KEY_BYTES,
-        "nni_owner_private_key_invalid",
-    )?);
-    let signing_key = SigningKey::from_slice(&private_bytes)
-        .map_err(|_| "nni_owner_private_key_invalid")?;
-    Ok(nni_owner_public_key_from_signing_key(&signing_key))
-}
-
+#[cfg(test)]
 fn sign_nni_owner_payload(
     owner_private_key: &mut String,
     payload: &str,
@@ -121,30 +111,6 @@ fn sign_nni_owner_payload(
     })();
     owner_private_key.zeroize();
     result
-}
-
-async fn nni_owner_generate(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> (StatusCode, Json<ApiResponse<NniOwnerKeyPairResponse>>) {
-    if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
-        return (
-            status,
-            Json(ApiResponse {
-                ok: resp.ok,
-                data: None,
-                error: resp.error,
-            }),
-        );
-    }
-    (
-        StatusCode::OK,
-        Json(ApiResponse {
-            ok: true,
-            data: Some(generate_nni_owner_key_pair()),
-            error: None,
-        }),
-    )
 }
 
 #[cfg(test)]

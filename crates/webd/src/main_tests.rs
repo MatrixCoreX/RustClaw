@@ -7,18 +7,37 @@ use axum::body::{to_bytes, Body};
 use axum::http::{header, HeaderMap, HeaderValue, Method, Request, StatusCode};
 use axum::response::Response;
 use axum::routing::{get, post};
-use axum::Router;
+use axum::{Json, Router};
+use claw_core::config::WebdRequestLimitsConfig;
 use tokio::net::TcpListener;
 use tower::ServiceExt;
 
 use super::{
-    build_outgoing_headers, build_webd_router, clear_login_failures,
-    cors_allow_origin_from_headers, is_internal_upstream_path, login_client_ip,
-    login_locked_response, login_retry_after, normalize_loopback_upstream, proxy_inner,
-    record_login_failure, request_uses_https, session_cookie_value,
-    uses_long_running_upstream_wait, valid_login_input, webd_error_response, with_cors, AppState,
-    LoginAttemptKey,
+    authenticated_session, build_outgoing_headers, build_webd_router, clear_login_failures,
+    cookie_transport_allowed, cors_allow_origin_from_headers, extract_session_ids,
+    is_internal_upstream_path, login_client_ip, login_locked_response, login_retry_after,
+    normalize_loopback_upstream, proxy_inner, record_login_failure, request_uses_https,
+    session_cookie_name, session_cookie_value, session_id_digest, uses_long_running_upstream_wait,
+    valid_login_input, webd_error_response, with_cors, AppState, LoginAttemptKey, RequestLimits,
+    SessionEntry, WEBD_CSRF_HEADER,
 };
+
+fn test_session_entry(user_key: &str, csrf_token: String) -> SessionEntry {
+    let now = super::now_unix_secs();
+    SessionEntry {
+        user_key: user_key.to_string(),
+        session_handle: uuid::Uuid::new_v4().to_string(),
+        username: "test-user".to_string(),
+        role: "admin".to_string(),
+        client_ip: "127.0.0.1".to_string(),
+        client_platform: "TestOS".to_string(),
+        user_agent: "test-browser/1.0".to_string(),
+        created_unix: now,
+        last_activity_unix: now,
+        expires_unix: now + 60,
+        csrf_token,
+    }
+}
 
 fn login_test_state(failure_limit: u32, lockout_secs: u64) -> AppState {
     AppState {
@@ -26,7 +45,6 @@ fn login_test_state(failure_limit: u32, lockout_secs: u64) -> AppState {
         client: reqwest::Client::new(),
         long_running_client: reqwest::Client::new(),
         forward_x_forwarded: false,
-        max_incoming_body_bytes: 1024,
         cookie_name: "test-session".to_string(),
         session_ttl_secs: 60,
         session_store_path: std::path::PathBuf::new(),
@@ -34,6 +52,7 @@ fn login_test_state(failure_limit: u32, lockout_secs: u64) -> AppState {
         login_failure_limit: failure_limit,
         login_lockout_secs: lockout_secs,
         login_attempts: Arc::new(Mutex::new(HashMap::new())),
+        request_limits: RequestLimits::new(WebdRequestLimitsConfig::default(), 1024),
     }
 }
 
@@ -468,6 +487,102 @@ fn https_sessions_use_secure_http_only_cookies() {
 }
 
 #[test]
+fn local_http_sessions_use_a_cookie_name_distinct_from_https() {
+    assert_eq!(session_cookie_name("webd_sid", true), "webd_sid");
+    assert_eq!(
+        session_cookie_name("webd_sid", false),
+        "webd_sid_local_http"
+    );
+    let cookie = session_cookie_value(
+        &session_cookie_name("webd_sid", false),
+        "session-id",
+        60,
+        false,
+    );
+    assert!(cookie.starts_with("webd_sid_local_http=session-id;"));
+    assert!(!cookie.contains("; Secure"));
+}
+
+#[test]
+fn session_lookup_accepts_http_cookie_when_a_stale_https_cookie_is_present() {
+    let state = login_test_state(6, 900);
+    let current_session_id = uuid::Uuid::new_v4().to_string();
+    state.sessions.lock().expect("sessions").insert(
+        session_id_digest(&current_session_id),
+        test_session_entry("rk-current-session", "05".repeat(16)),
+    );
+    let mut headers = HeaderMap::new();
+    headers.append(
+        header::COOKIE,
+        HeaderValue::from_static("test-session=stale-secure-session"),
+    );
+    headers.append(
+        header::COOKIE,
+        HeaderValue::from_str(&format!(
+            "test-session_local_http={current_session_id}; test-session=duplicate-stale-session"
+        ))
+        .expect("cookie header"),
+    );
+
+    assert_eq!(extract_session_ids(&headers, "test-session").len(), 3);
+    let session = authenticated_session(&state, &headers).expect("current HTTP session");
+    assert_eq!(session.user_key, "rk-current-session");
+}
+
+#[test]
+fn cookie_sessions_support_local_http_without_opening_public_http() {
+    let direct_headers = HeaderMap::new();
+    assert!(cookie_transport_allowed(
+        &direct_headers,
+        SocketAddr::from(([192, 168, 31, 104], 41008)),
+        false,
+    ));
+    assert!(cookie_transport_allowed(
+        &direct_headers,
+        SocketAddr::from(([169, 254, 10, 20], 41008)),
+        false,
+    ));
+    assert!(!cookie_transport_allowed(
+        &direct_headers,
+        SocketAddr::from(([203, 0, 113, 20], 41008)),
+        false,
+    ));
+
+    let mut forwarded_lan = HeaderMap::new();
+    forwarded_lan.insert("x-forwarded-for", HeaderValue::from_static("192.168.31.55"));
+    assert!(cookie_transport_allowed(
+        &forwarded_lan,
+        SocketAddr::from(([127, 0, 0, 1], 41008)),
+        true,
+    ));
+
+    let mut forwarded_public_http = HeaderMap::new();
+    forwarded_public_http.insert("x-forwarded-for", HeaderValue::from_static("203.0.113.55"));
+    assert!(!cookie_transport_allowed(
+        &forwarded_public_http,
+        SocketAddr::from(([127, 0, 0, 1], 41008)),
+        true,
+    ));
+    forwarded_public_http.insert("x-forwarded-proto", HeaderValue::from_static("https"));
+    assert!(cookie_transport_allowed(
+        &forwarded_public_http,
+        SocketAddr::from(([127, 0, 0, 1], 41008)),
+        true,
+    ));
+
+    assert!(cookie_transport_allowed(
+        &direct_headers,
+        SocketAddr::new("fd12:3456::10".parse().expect("private IPv6"), 41008),
+        false,
+    ));
+    assert!(!cookie_transport_allowed(
+        &direct_headers,
+        SocketAddr::new("2001:db8::10".parse().expect("public IPv6"), 41008),
+        false,
+    ));
+}
+
+#[test]
 fn skill_store_install_uses_long_running_upstream_wait() {
     assert!(uses_long_running_upstream_wait(
         &Method::POST,
@@ -533,6 +648,574 @@ async fn delayed_upstream_response() -> &'static str {
     "ok"
 }
 
+async fn immediate_upstream_response() -> &'static str {
+    "ok"
+}
+
+#[tokio::test]
+async fn proxy_stream_holds_global_concurrency_until_the_body_finishes() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind upstream");
+    let addr = listener.local_addr().expect("read upstream address");
+    let upstream = Router::new().route("/v1/health", get(immediate_upstream_response));
+    let upstream_task = tokio::spawn(async move {
+        axum::serve(listener, upstream)
+            .await
+            .expect("serve upstream");
+    });
+
+    let mut state = login_test_state(6, 900);
+    state.upstream = format!("http://{addr}");
+    let limit_config = WebdRequestLimitsConfig {
+        global_concurrency: 1,
+        ..WebdRequestLimitsConfig::default()
+    };
+    state.request_limits = RequestLimits::new(limit_config, 1024);
+    let client_addr = SocketAddr::from(([198, 51, 100, 20], 41010));
+
+    let first = proxy_inner(
+        state.clone(),
+        client_addr,
+        Request::builder()
+            .uri("/v1/health")
+            .body(Body::empty())
+            .expect("first request"),
+    )
+    .await;
+    assert_eq!(first.status(), StatusCode::OK);
+
+    let blocked = proxy_inner(
+        state.clone(),
+        client_addr,
+        Request::builder()
+            .uri("/v1/health")
+            .body(Body::empty())
+            .expect("blocked request"),
+    )
+    .await;
+    assert_eq!(blocked.status(), StatusCode::TOO_MANY_REQUESTS);
+    let blocked_body = to_bytes(blocked.into_body(), 2048)
+        .await
+        .expect("read blocked response");
+    let blocked_payload: serde_json::Value =
+        serde_json::from_slice(&blocked_body).expect("decode blocked response");
+    assert_eq!(
+        blocked_payload["data"]["error_code"],
+        "webd_global_concurrency_limited"
+    );
+
+    assert_eq!(
+        &to_bytes(first.into_body(), 32)
+            .await
+            .expect("finish first response")[..],
+        b"ok"
+    );
+    let recovered = proxy_inner(
+        state,
+        client_addr,
+        Request::builder()
+            .uri("/v1/health")
+            .body(Body::empty())
+            .expect("recovered request"),
+    )
+    .await;
+    assert_eq!(recovered.status(), StatusCode::OK);
+
+    upstream_task.abort();
+}
+
+#[tokio::test]
+async fn proxy_rejects_oversized_or_compressed_json_before_upstream() {
+    let mut state = login_test_state(6, 900);
+    let limit_config = WebdRequestLimitsConfig {
+        max_json_body_bytes: 8,
+        ..WebdRequestLimitsConfig::default()
+    };
+    state.request_limits = RequestLimits::new(limit_config, 1024);
+    let client_addr = SocketAddr::from(([198, 51, 100, 21], 41011));
+
+    let oversized = proxy_inner(
+        state.clone(),
+        client_addr,
+        Request::builder()
+            .method(Method::POST)
+            .uri("/v1/tasks/history")
+            .header(header::CONTENT_LENGTH, "9")
+            .body(Body::from("123456789"))
+            .expect("oversized request"),
+    )
+    .await;
+    assert_eq!(oversized.status(), StatusCode::PAYLOAD_TOO_LARGE);
+
+    let compressed = proxy_inner(
+        state,
+        client_addr,
+        Request::builder()
+            .method(Method::POST)
+            .uri("/v1/tasks/history")
+            .header(header::CONTENT_ENCODING, "gzip")
+            .body(Body::from("compressed"))
+            .expect("compressed request"),
+    )
+    .await;
+    assert_eq!(compressed.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+}
+
+#[tokio::test]
+async fn login_body_limit_returns_a_structured_error() {
+    let root = std::env::temp_dir().join(format!("agent-runtime-webd-ui-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).expect("create UI fixture");
+    std::fs::write(root.join("index.html"), "<html></html>").expect("write UI fixture");
+    let app = build_webd_router(login_test_state(6, 900), root.clone());
+    let body = serde_json::json!({
+        "username": "admin",
+        "password": "p".repeat(9 * 1024),
+    })
+    .to_string();
+    let mut request = Request::builder()
+        .method(Method::POST)
+        .uri("/webd/login")
+        .header(header::HOST, "localhost:8788")
+        .header(header::ORIGIN, "http://localhost:8788")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body))
+        .expect("login request");
+    request
+        .extensions_mut()
+        .insert(axum::extract::ConnectInfo(SocketAddr::from((
+            [127, 0, 0, 1],
+            41012,
+        ))));
+
+    let response = app.oneshot(request).await.expect("login response");
+    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    let payload: serde_json::Value = serde_json::from_slice(
+        &to_bytes(response.into_body(), 2048)
+            .await
+            .expect("read login response"),
+    )
+    .expect("decode login response");
+    assert_eq!(payload["data"]["error_code"], "webd_request_body_too_large");
+
+    std::fs::remove_dir_all(root).expect("remove UI fixture");
+}
+
+#[tokio::test]
+async fn bounded_login_preserves_cookie_session_flow() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind login upstream");
+    let addr = listener.local_addr().expect("read upstream address");
+    let upstream = Router::new().route(
+        "/v1/internal/webd/verify-login",
+        post(|| async {
+            Json(serde_json::json!({
+                "ok": true,
+                "data": { "user_key": "rk-login-test", "role": "admin" }
+            }))
+        }),
+    );
+    let upstream_task = tokio::spawn(async move {
+        axum::serve(listener, upstream)
+            .await
+            .expect("serve login upstream");
+    });
+
+    let root = std::env::temp_dir().join(format!("agent-runtime-webd-ui-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).expect("create UI fixture");
+    std::fs::write(root.join("index.html"), "<html></html>").expect("write UI fixture");
+    let mut state = login_test_state(6, 900);
+    state.upstream = format!("http://{addr}");
+    let previous_session_id = uuid::Uuid::new_v4().to_string();
+    state.sessions.lock().expect("sessions").insert(
+        session_id_digest(&previous_session_id),
+        test_session_entry("rk-previous-session", "03".repeat(16)),
+    );
+    let shared_state = state.clone();
+    let app = build_webd_router(state, root.clone());
+    let mut request = Request::builder()
+        .method(Method::POST)
+        .uri("/webd/login")
+        .header(header::HOST, "localhost:8788")
+        .header(header::ORIGIN, "http://localhost:8788")
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::USER_AGENT, "BrowserFixture/12.4")
+        .header("sec-ch-ua-platform", "\"FixtureOS\"")
+        .header(
+            header::COOKIE,
+            format!("test-session={previous_session_id}"),
+        )
+        .body(Body::from(
+            serde_json::json!({"username":"admin","password":"correct-password"}).to_string(),
+        ))
+        .expect("login request");
+    request
+        .extensions_mut()
+        .insert(axum::extract::ConnectInfo(SocketAddr::from((
+            [127, 0, 0, 1],
+            41013,
+        ))));
+
+    let response = app.oneshot(request).await.expect("login response");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(response
+        .headers()
+        .get(header::SET_COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.contains("HttpOnly") && value.contains("SameSite=Lax")));
+    let body: serde_json::Value = serde_json::from_slice(
+        &to_bytes(response.into_body(), 2048)
+            .await
+            .expect("read login response"),
+    )
+    .expect("decode login response");
+    let csrf_token = body["data"]["csrf_token"]
+        .as_str()
+        .expect("login CSRF token");
+    assert_eq!(csrf_token.len(), 32);
+    let sessions = shared_state.sessions.lock().expect("sessions");
+    assert_eq!(sessions.len(), 1);
+    assert!(!sessions.contains_key(&session_id_digest(&previous_session_id)));
+    let session = sessions.values().next().unwrap();
+    assert_eq!(session.csrf_token, csrf_token);
+    assert_eq!(session.client_ip, "127.0.0.1");
+    assert_eq!(session.client_platform, "FixtureOS");
+    assert_eq!(session.user_agent, "BrowserFixture/12.4");
+
+    upstream_task.abort();
+    std::fs::remove_dir_all(root).expect("remove UI fixture");
+}
+
+#[tokio::test]
+async fn remote_plain_http_cannot_create_a_cookie_session() {
+    let root = std::env::temp_dir().join(format!("agent-runtime-webd-ui-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).expect("create UI fixture");
+    std::fs::write(root.join("index.html"), "<html></html>").expect("write UI fixture");
+    let app = build_webd_router(login_test_state(6, 900), root.clone());
+    let mut request = Request::builder()
+        .method(Method::POST)
+        .uri("/webd/login")
+        .header(header::HOST, "192.0.2.10:8788")
+        .header(header::ORIGIN, "http://192.0.2.10:8788")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(r#"{"username":"admin","password":"password"}"#))
+        .expect("login request");
+    request
+        .extensions_mut()
+        .insert(axum::extract::ConnectInfo(SocketAddr::from((
+            [192, 0, 2, 20],
+            41013,
+        ))));
+
+    let response = app.oneshot(request).await.expect("login response");
+    assert_eq!(response.status(), StatusCode::UPGRADE_REQUIRED);
+    let payload: serde_json::Value = serde_json::from_slice(
+        &to_bytes(response.into_body(), 2048)
+            .await
+            .expect("read login response"),
+    )
+    .expect("decode login response");
+    assert_eq!(payload["data"]["error_code"], "webd_https_required");
+    std::fs::remove_dir_all(root).expect("remove UI fixture");
+}
+
+#[tokio::test]
+async fn admin_can_list_and_revoke_digest_backed_sessions() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind identity upstream");
+    let addr = listener
+        .local_addr()
+        .expect("read identity upstream address");
+    let upstream = Router::new().route(
+        "/v1/auth/me",
+        get(|| async {
+            Json(serde_json::json!({
+                "ok": true,
+                "data": { "role": "admin" }
+            }))
+        }),
+    );
+    let upstream_task = tokio::spawn(async move {
+        axum::serve(listener, upstream)
+            .await
+            .expect("serve identity upstream");
+    });
+
+    let root = std::env::temp_dir().join(format!("agent-runtime-webd-ui-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).expect("create UI fixture");
+    std::fs::write(root.join("index.html"), "<html></html>").expect("write UI fixture");
+    let mut state = login_test_state(6, 900);
+    state.upstream = format!("http://{addr}");
+    let current_secret = uuid::Uuid::new_v4().to_string();
+    let target_secret = uuid::Uuid::new_v4().to_string();
+    let csrf_token = "05".repeat(16);
+    let current = test_session_entry("rk-admin", csrf_token.clone());
+    let target = test_session_entry("rk-user", "06".repeat(16));
+    let target_handle = target.session_handle.clone();
+    state.sessions.lock().expect("sessions").extend([
+        (session_id_digest(&current_secret), current),
+        (session_id_digest(&target_secret), target),
+    ]);
+    let shared_state = state.clone();
+    let app = build_webd_router(state, root.clone());
+
+    let mut list_request = Request::builder()
+        .uri("/webd/sessions")
+        .header(header::HOST, "localhost:8788")
+        .header(header::COOKIE, format!("test-session={current_secret}"))
+        .body(Body::empty())
+        .expect("session list request");
+    list_request
+        .extensions_mut()
+        .insert(axum::extract::ConnectInfo(SocketAddr::from((
+            [127, 0, 0, 1],
+            41016,
+        ))));
+    let list_response = app
+        .clone()
+        .oneshot(list_request)
+        .await
+        .expect("session list response");
+    assert_eq!(list_response.status(), StatusCode::OK);
+    let list: serde_json::Value = serde_json::from_slice(
+        &to_bytes(list_response.into_body(), 8192)
+            .await
+            .expect("read session list"),
+    )
+    .expect("decode session list");
+    let listed_sessions = list["data"]["sessions"].as_array().unwrap();
+    assert_eq!(listed_sessions.len(), 2);
+    assert!(listed_sessions.iter().all(|entry| {
+        entry["client_ip"] == "127.0.0.1"
+            && entry["client_platform"] == "TestOS"
+            && entry["user_agent"] == "test-browser/1.0"
+    }));
+    assert!(!list.to_string().contains(&current_secret));
+    assert!(!list.to_string().contains(&target_secret));
+
+    let mut revoke_request = Request::builder()
+        .method(Method::POST)
+        .uri("/webd/sessions/revoke")
+        .header(header::HOST, "localhost:8788")
+        .header(header::ORIGIN, "http://localhost:8788")
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::COOKIE, format!("test-session={current_secret}"))
+        .header(WEBD_CSRF_HEADER, csrf_token)
+        .body(Body::from(
+            serde_json::json!({ "session_handle": target_handle }).to_string(),
+        ))
+        .expect("session revoke request");
+    revoke_request
+        .extensions_mut()
+        .insert(axum::extract::ConnectInfo(SocketAddr::from((
+            [127, 0, 0, 1],
+            41016,
+        ))));
+    let revoke_response = app
+        .oneshot(revoke_request)
+        .await
+        .expect("session revoke response");
+    assert_eq!(revoke_response.status(), StatusCode::OK);
+    assert_eq!(shared_state.sessions.lock().expect("sessions").len(), 1);
+
+    upstream_task.abort();
+    std::fs::remove_dir_all(root).expect("remove UI fixture");
+}
+
+#[tokio::test]
+async fn cookie_session_mutations_require_same_origin_csrf_without_forwarding_it() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mutation upstream");
+    let addr = listener
+        .local_addr()
+        .expect("read mutation upstream address");
+    let upstream = Router::new()
+        .route(
+            "/v1/test-mutation",
+            post(|headers: HeaderMap| async move {
+                Json(serde_json::json!({
+                    "ok": true,
+                    "csrf_forwarded": headers.contains_key(WEBD_CSRF_HEADER),
+                    "auth_key": headers
+                        .get(claw_core::product_identity::AUTH_KEY_HEADER)
+                        .and_then(|value| value.to_str().ok()),
+                }))
+            }),
+        )
+        .route(
+            "/v1/auth/me",
+            get(|| async {
+                Json(serde_json::json!({
+                    "ok": true,
+                    "data": { "role": "admin" }
+                }))
+            }),
+        );
+    let upstream_task = tokio::spawn(async move {
+        axum::serve(listener, upstream)
+            .await
+            .expect("serve mutation upstream");
+    });
+
+    let root = std::env::temp_dir().join(format!("agent-runtime-webd-ui-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).expect("create UI fixture");
+    std::fs::write(root.join("index.html"), "<html></html>").expect("write UI fixture");
+    let mut state = login_test_state(6, 900);
+    state.upstream = format!("http://{addr}");
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let csrf_token = "04".repeat(16);
+    state.sessions.lock().expect("sessions").insert(
+        session_id_digest(&session_id),
+        test_session_entry("rk-csrf-session", csrf_token.clone()),
+    );
+    let app = build_webd_router(state, root.clone());
+
+    let request = |origin: &str, token: Option<&str>| {
+        let mut builder = Request::builder()
+            .method(Method::POST)
+            .uri("/v1/test-mutation")
+            .header(header::HOST, "localhost:8788")
+            .header(header::ORIGIN, origin)
+            .header(header::COOKIE, format!("test-session={session_id}"));
+        if let Some(token) = token {
+            builder = builder.header(WEBD_CSRF_HEADER, token);
+        }
+        let mut request = builder.body(Body::empty()).expect("mutation request");
+        request
+            .extensions_mut()
+            .insert(axum::extract::ConnectInfo(SocketAddr::from((
+                [127, 0, 0, 1],
+                41014,
+            ))));
+        request
+    };
+
+    let mut session_request = Request::builder()
+        .method(Method::GET)
+        .uri("/webd/session")
+        .header(header::HOST, "localhost:8788")
+        .header(header::ORIGIN, "http://localhost:8788")
+        .header(header::COOKIE, format!("test-session={session_id}"))
+        .body(Body::empty())
+        .expect("session request");
+    session_request
+        .extensions_mut()
+        .insert(axum::extract::ConnectInfo(SocketAddr::from((
+            [127, 0, 0, 1],
+            41014,
+        ))));
+    let session_response = app
+        .clone()
+        .oneshot(session_request)
+        .await
+        .expect("session response");
+    assert_eq!(session_response.status(), StatusCode::OK);
+    assert_eq!(
+        session_response.headers().get(header::CACHE_CONTROL),
+        Some(&HeaderValue::from_static("no-store, max-age=0"))
+    );
+    let session_body: serde_json::Value = serde_json::from_slice(
+        &to_bytes(session_response.into_body(), 2048)
+            .await
+            .expect("read session response"),
+    )
+    .expect("decode session response");
+    assert_eq!(session_body["data"]["csrf_token"], csrf_token);
+
+    let missing = app
+        .clone()
+        .oneshot(request("http://localhost:8788", None))
+        .await
+        .expect("missing-token response");
+    assert_eq!(missing.status(), StatusCode::FORBIDDEN);
+    let missing_body: serde_json::Value = serde_json::from_slice(
+        &to_bytes(missing.into_body(), 2048)
+            .await
+            .expect("read missing-token response"),
+    )
+    .expect("decode missing-token response");
+    assert_eq!(
+        missing_body["data"]["error_code"],
+        "webd_csrf_token_required"
+    );
+
+    let invalid_token = "05".repeat(16);
+    let invalid = app
+        .clone()
+        .oneshot(request("http://localhost:8788", Some(&invalid_token)))
+        .await
+        .expect("invalid-token response");
+    assert_eq!(invalid.status(), StatusCode::FORBIDDEN);
+    let invalid_body: serde_json::Value = serde_json::from_slice(
+        &to_bytes(invalid.into_body(), 2048)
+            .await
+            .expect("read invalid-token response"),
+    )
+    .expect("decode invalid-token response");
+    assert_eq!(
+        invalid_body["data"]["error_code"],
+        "webd_csrf_token_invalid"
+    );
+
+    let cross_origin = app
+        .clone()
+        .oneshot(request("https://untrusted.example", Some(&csrf_token)))
+        .await
+        .expect("cross-origin response");
+    assert_eq!(cross_origin.status(), StatusCode::FORBIDDEN);
+
+    let accepted = app
+        .clone()
+        .oneshot(request("http://localhost:8788", Some(&csrf_token)))
+        .await
+        .expect("accepted mutation response");
+    assert_eq!(accepted.status(), StatusCode::OK);
+    let accepted_body: serde_json::Value = serde_json::from_slice(
+        &to_bytes(accepted.into_body(), 2048)
+            .await
+            .expect("read accepted mutation response"),
+    )
+    .expect("decode accepted mutation response");
+    assert_eq!(accepted_body["csrf_forwarded"], false);
+    assert_eq!(accepted_body["auth_key"], "rk-csrf-session");
+
+    let mut direct_key_request = Request::builder()
+        .method(Method::POST)
+        .uri("/v1/test-mutation")
+        .header(header::HOST, "localhost:8788")
+        .header(
+            claw_core::product_identity::AUTH_KEY_HEADER,
+            "rk-direct-key",
+        )
+        .body(Body::empty())
+        .expect("direct-key mutation request");
+    direct_key_request
+        .extensions_mut()
+        .insert(axum::extract::ConnectInfo(SocketAddr::from((
+            [127, 0, 0, 1],
+            41015,
+        ))));
+    let direct_key = app
+        .oneshot(direct_key_request)
+        .await
+        .expect("direct-key mutation response");
+    assert_eq!(direct_key.status(), StatusCode::OK);
+    let direct_key_body: serde_json::Value = serde_json::from_slice(
+        &to_bytes(direct_key.into_body(), 2048)
+            .await
+            .expect("read direct-key mutation response"),
+    )
+    .expect("decode direct-key mutation response");
+    assert_eq!(direct_key_body["csrf_forwarded"], false);
+    assert_eq!(direct_key_body["auth_key"], "rk-direct-key");
+
+    upstream_task.abort();
+    std::fs::remove_dir_all(root).expect("remove UI fixture");
+}
+
 #[tokio::test]
 async fn install_wait_outlives_normal_proxy_deadline() {
     let listener = TcpListener::bind("127.0.0.1:0")
@@ -565,7 +1248,6 @@ async fn install_wait_outlives_normal_proxy_deadline() {
         client,
         long_running_client,
         forward_x_forwarded: false,
-        max_incoming_body_bytes: 1024,
         cookie_name: "test-session".to_string(),
         session_ttl_secs: 60,
         session_store_path: std::path::PathBuf::new(),
@@ -573,6 +1255,7 @@ async fn install_wait_outlives_normal_proxy_deadline() {
         login_failure_limit: 6,
         login_lockout_secs: 900,
         login_attempts: Arc::new(Mutex::new(HashMap::new())),
+        request_limits: RequestLimits::new(WebdRequestLimitsConfig::default(), 1024),
     };
     let client_addr = SocketAddr::from(([127, 0, 0, 1], 41002));
 
@@ -626,7 +1309,6 @@ async fn task_event_stream_outlives_normal_proxy_deadline() {
             .build()
             .expect("build long-running client"),
         forward_x_forwarded: false,
-        max_incoming_body_bytes: 1024,
         cookie_name: "test-session".to_string(),
         session_ttl_secs: 60,
         session_store_path: std::path::PathBuf::new(),
@@ -634,6 +1316,7 @@ async fn task_event_stream_outlives_normal_proxy_deadline() {
         login_failure_limit: 6,
         login_lockout_secs: 900,
         login_attempts: Arc::new(Mutex::new(HashMap::new())),
+        request_limits: RequestLimits::new(WebdRequestLimitsConfig::default(), 1024),
     };
     let request = Request::builder()
         .method(Method::GET)

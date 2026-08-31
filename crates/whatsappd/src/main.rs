@@ -23,7 +23,7 @@ use claw_core::types::{
 };
 use hmac::{Hmac, Mac};
 use reqwest::Client;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::Sha256;
 use tracing::{info, warn};
@@ -88,7 +88,6 @@ struct AppState {
     quick_result_wait_seconds: u64,
     image_inbox_dir: String,
     audio_inbox_dir: String,
-    inbound_dedup: Arc<Mutex<HashMap<String, u64>>>,
     last_inbound_at_by_user: Arc<Mutex<HashMap<String, u64>>>,
     pending_key_bind: Arc<Mutex<HashSet<String>>>,
     bound_identity_by_user: Arc<Mutex<HashMap<String, AuthIdentity>>>,
@@ -135,7 +134,7 @@ struct WaValue {
     messages: Vec<WaMessage>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct WaMessage {
     #[serde(default)]
     from: String,
@@ -153,13 +152,13 @@ struct WaMessage {
     document: Option<WaMedia>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct WaText {
     #[serde(default)]
     body: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct WaMedia {
     #[serde(default)]
     id: String,
@@ -217,7 +216,6 @@ async fn main() -> anyhow::Result<()> {
         quick_result_wait_seconds: config.whatsapp.quick_result_wait_seconds.max(1),
         image_inbox_dir: config.whatsapp.image_inbox_dir.clone(),
         audio_inbox_dir: config.whatsapp.audio_inbox_dir.clone(),
-        inbound_dedup: Arc::new(Mutex::new(HashMap::new())),
         last_inbound_at_by_user: Arc::new(Mutex::new(HashMap::new())),
         pending_key_bind: Arc::new(Mutex::new(HashSet::new())),
         bound_identity_by_user: Arc::new(Mutex::new(HashMap::new())),
@@ -312,6 +310,11 @@ async fn handle_webhook(
             for msg in change.value.messages {
                 if let Err(err) = handle_inbound_message(&state, msg).await {
                     warn!("handle inbound message failed: {}", err);
+                    return (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "whatsapp_cloud_event_admission_or_processing_failed",
+                    )
+                        .into_response();
                 }
             }
         }
@@ -562,48 +565,70 @@ fn now_ts() -> u64 {
         .as_secs()
 }
 
-fn dedup_message_key(msg: &WaMessage) -> String {
-    if !msg.id.trim().is_empty() {
-        return format!("wa_msg:{}", msg.id.trim());
-    }
-    let text = msg.text.as_ref().map(|t| t.body.trim()).unwrap_or("");
-    format!(
-        "wa_fallback:{}:{}:{}",
-        msg.from.trim(),
-        msg.message_type.trim(),
-        text
-    )
-}
-
-fn should_process_inbound(state: &AppState, msg: &WaMessage) -> bool {
-    const DEDUP_WINDOW_SECONDS: u64 = 10 * 60;
-    let key = dedup_message_key(msg);
-    if key.trim().is_empty() {
-        return true;
-    }
-    let now = now_ts();
-    let mut guard = match state.inbound_dedup.lock() {
-        Ok(g) => g,
-        Err(_) => return true,
-    };
-    guard.retain(|_, ts| now.saturating_sub(*ts) <= DEDUP_WINDOW_SECONDS);
-    if let Some(last_ts) = guard.get(&key) {
-        if now.saturating_sub(*last_ts) <= DEDUP_WINDOW_SECONDS {
-            return false;
-        }
-    }
-    guard.insert(key, now);
-    true
-}
-
 async fn handle_inbound_message(state: &AppState, msg: WaMessage) -> anyhow::Result<()> {
-    if !should_process_inbound(state, &msg) {
+    let provider_event_id = msg.id.trim();
+    if provider_event_id.is_empty() {
+        warn!("whatsapp inbound event rejected because provider message id is absent");
+        return Ok(());
+    }
+    let payload = serde_json::to_vec(&msg).context("serialize whatsapp inbound event")?;
+    let claim = claw_core::channel_event_admission::ChannelEventClaimRequest::new(
+        ChannelKind::Whatsapp,
+        state.phone_number_id.clone(),
+        provider_event_id,
+        &payload,
+    );
+    let claim_response = claw_core::channel_event_admission::claim_channel_event(
+        &state.client,
+        &state.clawd_base_url,
+        &state.app_secret,
+        &claim,
+    )
+    .await
+    .context("claim whatsapp inbound event")?;
+    if claim_response.status
+        != claw_core::channel_event_admission::ChannelEventClaimStatus::Acquired
+    {
         info!(
-            "skip duplicated inbound message: wa_id={} msg_id={} type={}",
-            msg.from, msg.id, msg.message_type
+            "skip duplicated inbound message: wa_id={} msg_id={} status={:?}",
+            msg.from, msg.id, claim_response.status
         );
         return Ok(());
     }
+    let lease_token = claim_response
+        .lease_token
+        .context("whatsapp inbound event admission lease missing")?;
+    let processing = handle_claimed_inbound_message(state, msg).await;
+    let finish = claw_core::channel_event_admission::ChannelEventFinishRequest {
+        schema_version: claw_core::channel_event_admission::CHANNEL_EVENT_ADMISSION_SCHEMA_VERSION,
+        channel: ChannelKind::Whatsapp,
+        account_id: state.phone_number_id.clone(),
+        provider_event_id: claim.provider_event_id.clone(),
+        payload_sha256: claim.payload_sha256,
+        lease_token,
+        outcome: if processing.is_ok() {
+            claw_core::channel_event_admission::ChannelEventFinishOutcome::Completed
+        } else {
+            claw_core::channel_event_admission::ChannelEventFinishOutcome::RetryableFailure
+        },
+    };
+    let finish_result = claw_core::channel_event_admission::finish_channel_event(
+        &state.client,
+        &state.clawd_base_url,
+        &state.app_secret,
+        &finish,
+    )
+    .await;
+    if let Err(error) = finish_result {
+        warn!("whatsapp inbound event admission finish failed error={error}");
+        if processing.is_ok() {
+            return Err(error).context("finish whatsapp inbound event admission");
+        }
+    }
+    processing
+}
+
+async fn handle_claimed_inbound_message(state: &AppState, msg: WaMessage) -> anyhow::Result<()> {
     if msg.from.trim().is_empty() {
         return Ok(());
     }
@@ -774,7 +799,7 @@ async fn handle_image_message(
         .as_deref()
         .and_then(ext_from_mime)
         .unwrap_or("jpg");
-    let rel_path = build_inbox_rel_path(&state.image_inbox_dir, wa_id, user_id, ext);
+    let rel_path = build_inbox_rel_path(&state.image_inbox_dir, wa_id, user_id, message_id, ext);
     let abs_path = std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join(&rel_path);
@@ -821,7 +846,7 @@ async fn handle_audio_message(
         .as_deref()
         .and_then(ext_from_mime)
         .unwrap_or("ogg");
-    let rel_path = build_inbox_rel_path(&state.audio_inbox_dir, wa_id, user_id, ext);
+    let rel_path = build_inbox_rel_path(&state.audio_inbox_dir, wa_id, user_id, message_id, ext);
     let abs_path = std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join(&rel_path);
@@ -871,16 +896,25 @@ fn ext_from_mime(mime: &str) -> Option<&'static str> {
     }
 }
 
-fn build_inbox_rel_path(base_dir: &str, wa_id: &str, user_id: i64, ext: &str) -> String {
+fn build_inbox_rel_path(
+    base_dir: &str,
+    wa_id: &str,
+    user_id: i64,
+    provider_message_id: &str,
+    ext: &str,
+) -> String {
     let clean_id = wa_id
         .chars()
         .filter(|c| c.is_ascii_alphanumeric())
         .collect::<String>();
-    let ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    format!("{}/wa_{}_{}_{}.{}", base_dir, clean_id, user_id, ts, ext)
+    let message_id = provider_message_id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+        .collect::<String>();
+    format!(
+        "{}/wa_{}_{}_{}.{}",
+        base_dir, clean_id, user_id, message_id, ext
+    )
 }
 
 async fn download_whatsapp_media(

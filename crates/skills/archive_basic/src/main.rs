@@ -171,8 +171,8 @@ fn execute_with_root_and_context(
         .ok_or_else(|| SkillError::invalid_input("args must be object"))?;
     let action = obj.get("action").and_then(|v| v.as_str()).unwrap_or("list");
     let path_policy = SkillPathPolicy::new(workspace_root, context).map_err(path_policy_error)?;
-    let authority_scope = if path_policy.authority().is_unrestricted_admin() {
-        "unrestricted_admin"
+    let authority_scope = if path_policy.authority().outside_workspace_granted() {
+        "host_policy_grant"
     } else {
         "workspace"
     };
@@ -470,7 +470,20 @@ fn pack_archive(format: &str, source: &Path, archive: &Path) -> Result<String, S
     if !source.exists() {
         return Err(SkillError::not_found(source, "source"));
     }
-    let src = source.to_string_lossy().to_string();
+    let source_parent = source.parent().ok_or_else(|| {
+        SkillError::invalid_input(format!("source has no parent: {}", source.display()))
+    })?;
+    let src = source
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| {
+            SkillError::invalid_input(format!(
+                "source has no portable archive name: {}",
+                source.display()
+            ))
+        })?
+        .to_string();
     let out = archive.to_string_lossy().to_string();
     if let Some(parent) = archive.parent() {
         std::fs::create_dir_all(parent)
@@ -478,8 +491,12 @@ fn pack_archive(format: &str, source: &Path, archive: &Path) -> Result<String, S
     }
 
     match format {
-        "zip" => run("zip", &[String::from("-q"), String::from("-r"), out, src]),
-        "tar.gz" | "tgz" => run("tar", &[String::from("-czf"), out, src]),
+        "zip" => run_in_dir(
+            "zip",
+            &[String::from("-q"), String::from("-r"), out, src],
+            source_parent,
+        ),
+        "tar.gz" | "tgz" => run_in_dir("tar", &[String::from("-czf"), out, src], source_parent),
         _ => Err(SkillError::unsupported_format(
             "unsupported format; use zip|tar.gz",
         )),
@@ -538,9 +555,10 @@ fn archive_sdk_error(error: skill_sdk::SkillSdkError) -> SkillError {
     )
 }
 
-fn run(bin: &str, args: &[String]) -> Result<String, SkillError> {
+fn run_in_dir(bin: &str, args: &[String], current_dir: &Path) -> Result<String, SkillError> {
     let output = Command::new(bin)
         .args(args)
+        .current_dir(current_dir)
         .output()
         .map_err(|err| SkillError::command_failed(format!("run {bin} failed: {err}")))?;
     let text = format_command_output(&output.stdout, &output.stderr);

@@ -386,6 +386,10 @@ pub(super) fn default_tools_profile() -> String {
     "coding".to_string()
 }
 
+pub(super) fn default_admin_tools_profile() -> String {
+    "full".to_string()
+}
+
 pub(super) fn default_tool_access_profiles() -> std::collections::HashMap<String, Vec<String>> {
     #[derive(serde::Deserialize)]
     struct ProfileFile {

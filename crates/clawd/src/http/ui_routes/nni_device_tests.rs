@@ -268,6 +268,223 @@ async fn nni_bancor_routes_require_ui_authentication() {
     }
 }
 
+#[tokio::test]
+async fn nni_browser_routes_reject_non_admin_identities() {
+    const USER_KEY: &str = "rk-nni-user-role-test";
+    for (method, uri, body) in [
+        ("GET", "/v1/nni/device/status", ""),
+        ("GET", "/v1/nni/config", ""),
+        ("POST", "/v1/nni/config", r#"{}"#),
+        ("GET", "/v1/nni/network-stats", ""),
+        ("GET", "/v1/nni/rewards?page=1&per_page=10", ""),
+        ("GET", "/v1/nni/bancor/market", ""),
+        (
+            "POST",
+            "/v1/nni/bancor/quote",
+            r#"{"side":"sell","input_amount":"1.00000000"}"#,
+        ),
+        (
+            "POST",
+            "/v1/nni/assets/transfer",
+            r#"{"asset":"AIC","amount":"1.00000000","to_asset_owner_pubkey":"invalid"}"#,
+        ),
+    ] {
+        let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+        state.seed_test_auth_identity(USER_KEY, "user");
+        let mut builder = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("x-agent-key", USER_KEY);
+        if method == "POST" && !body.is_empty() {
+            builder = builder.header("content-type", "application/json");
+        }
+        let response = axum::Router::new()
+            .nest("/v1", build_ui_router())
+            .with_state(state)
+            .oneshot(builder.body(Body::from(body)).expect("NNI request"))
+            .await
+            .expect("NNI response");
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{method} {uri}");
+    }
+}
+
+#[tokio::test]
+async fn nni_owner_private_key_generation_route_is_physically_removed() {
+    const ADMIN_KEY: &str = "rk-nni-admin-no-server-private-key-generation";
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    state.seed_test_auth_identity(ADMIN_KEY, "admin");
+    let response = axum::Router::new()
+        .nest("/v1", build_ui_router())
+        .with_state(state)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/nni/owner/generate")
+                .header("x-agent-key", ADMIN_KEY)
+                .body(Body::empty())
+                .expect("removed NNI owner generation request"),
+        )
+        .await
+        .expect("removed NNI owner generation response");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn nni_browser_write_routes_reject_legacy_private_key_fields() {
+    const ADMIN_KEY: &str = "rk-nni-admin-private-key-boundary";
+    let owner = generate_nni_owner_key_pair().public_key;
+    let recipient = generate_nni_owner_key_pair().public_key;
+    let cases = [
+        (
+            "/v1/nni/device/action",
+            json!({
+                "action": "status",
+                "owner_private_key": "must-not-cross-browser-boundary",
+            }),
+        ),
+        (
+            "/v1/nni/config",
+            json!({
+                "joined": false,
+                "owner_private_key": "must-not-cross-browser-boundary",
+            }),
+        ),
+        (
+            "/v1/nni/join/request",
+            json!({
+                "node_url": "https://nni.example.test",
+                "owner_private_key": "must-not-cross-browser-boundary",
+            }),
+        ),
+        (
+            "/v1/nni/join/verify",
+            json!({
+                "task_id": "private-key-boundary",
+                "node_url": "https://nni.example.test",
+                "signature": "00",
+                "owner_private_key": "must-not-cross-browser-boundary",
+            }),
+        ),
+        (
+            "/v1/nni/owner/recover",
+            json!({
+                "node_url": "https://nni.example.test",
+                "asset_owner_pubkey": owner,
+                "owner_private_key": "must-not-cross-browser-boundary",
+            }),
+        ),
+        (
+            "/v1/nni/owner/unbind/request",
+            json!({
+                "node_url": "https://nni.example.test",
+                "owner_private_key": "must-not-cross-browser-boundary",
+            }),
+        ),
+        (
+            "/v1/nni/owner/unbind/verify",
+            json!({
+                "task_id": "private-key-boundary",
+                "node_url": "https://nni.example.test",
+                "device_signature": "00",
+                "owner_private_key": "must-not-cross-browser-boundary",
+            }),
+        ),
+        (
+            "/v1/nni/bancor/quote",
+            json!({
+                "side": "sell",
+                "input_amount": "1.00000000",
+                "owner_private_key": "must-not-cross-browser-boundary",
+            }),
+        ),
+        (
+            "/v1/nni/bancor/trade",
+            json!({
+                "side": "sell",
+                "input_amount": "1.00000000",
+                "min_output": "0.00000001",
+                "authorization_mode": "asset_owner",
+                "asset_owner_pubkey": owner,
+                "owner_private_key": "must-not-cross-browser-boundary",
+            }),
+        ),
+        (
+            "/v1/nni/assets/transfer",
+            json!({
+                "asset": "AIC",
+                "amount": "1.00000000",
+                "to_asset_owner_pubkey": recipient,
+                "authorization_mode": "asset_owner",
+                "asset_owner_pubkey": owner,
+                "owner_private_key": "must-not-cross-browser-boundary",
+            }),
+        ),
+    ];
+    for (uri, body) in cases {
+        let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+        state.seed_test_auth_identity(ADMIN_KEY, "admin");
+        let response = axum::Router::new()
+            .nest("/v1", build_ui_router())
+            .with_state(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(uri)
+                    .header("content-type", "application/json")
+                    .header("x-agent-key", ADMIN_KEY)
+                    .body(Body::from(body.to_string()))
+                    .expect("private-key boundary request"),
+            )
+            .await
+            .expect("private-key boundary response");
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY, "{uri}");
+    }
+}
+
+#[test]
+fn nni_hardened_browser_write_schemas_accept_current_contracts() {
+    serde_json::from_value::<NniDeviceActionRequest>(json!({
+        "action": "sign_challenge",
+        "challenge": "current-contract",
+    }))
+    .expect("device action contract");
+    serde_json::from_value::<NniConfigUpdateRequest>(json!({
+        "remote_nodes": ["https://nni.example.test"],
+        "selected_node_url": "https://nni.example.test",
+        "joined": true,
+    }))
+    .expect("NNI config contract");
+    serde_json::from_value::<NniLocalJoinRequest>(json!({
+        "node_url": "https://nni.example.test",
+        "asset_owner_pubkey": generate_nni_owner_key_pair().public_key,
+        "replace_existing_owner": false,
+    }))
+    .expect("NNI join request contract");
+    serde_json::from_value::<NniLocalJoinVerifyRequest>(json!({
+        "task_id": "current-contract",
+        "node_url": "https://nni.example.test",
+        "signature": "00",
+        "replace_existing_owner": false,
+    }))
+    .expect("NNI join verify contract");
+    serde_json::from_value::<NniOwnerUnbindRequest>(json!({
+        "node_url": "https://nni.example.test",
+    }))
+    .expect("NNI owner unbind request contract");
+    serde_json::from_value::<NniOwnerUnbindVerifyRequest>(json!({
+        "task_id": "current-contract",
+        "node_url": "https://nni.example.test",
+        "device_signature": "00",
+    }))
+    .expect("NNI owner unbind verify contract");
+    serde_json::from_value::<NniBancorQuoteRequest>(json!({
+        "side": "sell",
+        "input_amount": "1.00000000",
+        "slippage_bps": 300,
+    }))
+    .expect("Bancor quote contract");
+}
+
 #[test]
 fn nni_bancor_market_trades_are_sanitized_and_limited_to_the_latest_hundred() {
     let hardware_pubkey = concat!(

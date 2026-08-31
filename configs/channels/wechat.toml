@@ -8,7 +8,8 @@
 
 [wechat]
 enabled = true
-listen = "0.0.0.0:8792"
+# 仅供本机 UI/守护进程控制；微信消息通过官方 API 长轮询进入，不需要公网监听。
+listen = "127.0.0.1:8792"
 clawd_base_url = "http://127.0.0.1:8787"
 api_base_url = "https://ilinkai.weixin.qq.com"
 # i18n 语言（优先尝试 configs/i18n/wechatd.<language>.toml）

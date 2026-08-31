@@ -17,6 +17,7 @@ import {
   type CommunicationServiceAction,
 } from "../lib/communication-service-controls";
 import { formatBytes } from "../lib/display-format";
+import { formatUiError } from "../lib/ui-error";
 
 type UiLanguage = "zh" | "en";
 type Translate = (zh: string, en: string) => string;
@@ -476,7 +477,12 @@ export function CommunicationSetupPage({
 
                 {wechatLoginStatus?.last_error ? (
                   <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
-                    {wechatLoginStatus.last_error}
+                    {formatUiError(
+                      wechatLoginStatus.last_error,
+                      t,
+                      "微信连接遇到问题，请刷新二维码或重启通信端。",
+                      "The WeChat connection encountered a problem. Refresh the QR code or restart the channel.",
+                    )}
                   </p>
                 ) : null}
                 {wechatLoginError ? (

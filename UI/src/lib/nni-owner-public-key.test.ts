@@ -6,6 +6,9 @@ import { ripemd160 } from "@noble/hashes/legacy.js";
 import { base58 } from "@scure/base";
 
 import {
+  assertNniPrivateKeyOperationsAllowed,
+  generateNniOwnerKeyPair,
+  nniPrivateKeyOperationsAllowed,
   normalizeNniOwnerSignature,
   signNniOwnerChallenge,
   validateNniOwnerPrivateKey,
@@ -84,4 +87,27 @@ test("NNI owner private-key validation rejects wrappers, bad checksums, and zero
     ok: false,
     error: "scalar_invalid",
   });
+});
+
+test("NNI owner key pairs are generated locally with a valid K1 envelope", () => {
+  const generated = generateNniOwnerKeyPair();
+  const privateKey = validateNniOwnerPrivateKey(generated.private_key);
+  assert.equal(privateKey.ok, true);
+  if (!privateKey.ok) return;
+  assert.equal(privateKey.publicKey, generated.public_key);
+  assert.equal(validateNniOwnerPublicKey(generated.public_key).ok, true);
+});
+
+test("NNI private-key operations require HTTPS except on loopback", () => {
+  assert.equal(nniPrivateKeyOperationsAllowed({ protocol: "https:", hostname: "device.example" }), true);
+  assert.equal(nniPrivateKeyOperationsAllowed({ protocol: "http:", hostname: "localhost" }), true);
+  assert.equal(nniPrivateKeyOperationsAllowed({ protocol: "http:", hostname: "127.9.8.7" }), true);
+  assert.equal(nniPrivateKeyOperationsAllowed({ protocol: "http:", hostname: "[::1]" }), true);
+  assert.equal(nniPrivateKeyOperationsAllowed({ protocol: "http:", hostname: "192.168.1.9" }), false);
+  assert.equal(nniPrivateKeyOperationsAllowed({ protocol: "http:", hostname: "device.example" }), false);
+  assert.equal(nniPrivateKeyOperationsAllowed({ protocol: "file:", hostname: "" }), false);
+  assert.throws(
+    () => assertNniPrivateKeyOperationsAllowed({ protocol: "http:", hostname: "192.168.1.9" }),
+    /nni_private_key_insecure_transport/,
+  );
 });

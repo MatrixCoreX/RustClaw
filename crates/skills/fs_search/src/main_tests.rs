@@ -1238,7 +1238,7 @@ fn find_name_fuzzy_mode_tolerates_typos_and_ranks_relevance() {
 
     let files = execute(json!({
         "action": "find_name",
-        "pattern": "rustclw",
+        "pattern": "agent-runtmie.toml",
         "match_mode": "fuzzy",
         "target_kind": "file",
         "root": root.to_string_lossy().to_string(),
@@ -1261,7 +1261,7 @@ fn find_name_fuzzy_mode_tolerates_typos_and_ranks_relevance() {
 
     let directories = execute(json!({
         "action": "find_name",
-        "pattern": "rstclwcache",
+        "pattern": "agent-runtmie-cache",
         "match_mode": "fuzzy",
         "target_kind": "dir",
         "root": root.to_string_lossy().to_string(),

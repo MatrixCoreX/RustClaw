@@ -149,6 +149,19 @@ test("BANCOR formats NNI device admission errors for users", () => {
   }
 });
 
+test("BANCOR formats Core business rate limits instead of exposing machine codes", () => {
+  const chinese = formatBancorApiError("nni_rate_limit_bancor_private", zh, "fallback");
+  const english = formatBancorApiError(
+    "nni_rate_limit_bancor_private",
+    (_zh, en) => en,
+    "fallback",
+  );
+  assert.equal(chinese, "账户与交易请求过于频繁，请稍后再试。");
+  assert.equal(english, "Account and trading requests are too frequent. Try again shortly.");
+  assert.doesNotMatch(chinese, /nni_rate_limit/);
+  assert.doesNotMatch(english, /nni_rate_limit/);
+});
+
 test("BANCOR accepts configurable slippage up to fifty percent", () => {
   assert.equal(BANCOR_DEFAULT_SLIPPAGE_BPS, 300);
   assert.equal(BANCOR_MAX_SLIPPAGE_BPS, 5_000);

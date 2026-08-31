@@ -195,7 +195,7 @@ ISOLATION_ROOT=""
 ISOLATED_WORKSPACE=""
 
 prepare_isolated_workspace() {
-  local source_path name skill_name
+  local name skill_name
   ISOLATED_WORKSPACE="${ISOLATION_ROOT}/workspace"
   mkdir -p \
     "${ISOLATED_WORKSPACE}/data/skill-packages" \
@@ -203,31 +203,28 @@ prepare_isolated_workspace() {
     "${ISOLATED_WORKSPACE}/logs" \
     "${ISOLATED_WORKSPACE}/optional_skills" \
     "${ISOLATED_WORKSPACE}/tmp" \
-    "${ISOLATED_WORKSPACE}/.pids"
+    "${ISOLATED_WORKSPACE}/.pids" \
+    "${ISOLATED_WORKSPACE}/.agent-runtime"
 
-  # clawd owns package receipts relative to its workspace. Give the isolated
-  # server a private workspace while reusing immutable source/build inputs.
-  # Mutable runtime directories stay local to ISOLATION_ROOT.
-  shopt -s dotglob nullglob
-  for source_path in "${ROOT_DIR}"/*; do
-    name="$(basename "${source_path}")"
-    case "${name}" in
-      Cargo.lock|Cargo.toml|data|logs|optional_skills|tmp|.pids)
-        continue
-        ;;
-    esac
-    ln -s "${source_path}" "${ISOLATED_WORKSPACE}/${name}"
+  # Runtime path policy deliberately rejects workspace symlink escapes. Copy
+  # only Git-visible source and fixtures so normal NL file operations exercise
+  # real paths inside the isolated root without copying caches or model data.
+  python3 "${SCRIPT_DIR}/materialize_isolated_workspace.py" \
+    --source "${ROOT_DIR}" \
+    --destination "${ISOLATED_WORKSPACE}" \
+    --include-root docs
+
+  # Build output and Git object storage are immutable inputs for this harness.
+  # They are not exposed as ordinary workspace files to capability tests.
+  for name in target .git; do
+    if [[ -e "${ROOT_DIR}/${name}" && ! -e "${ISOLATED_WORKSPACE}/${name}" ]]; then
+      ln -s "${ROOT_DIR}/${name}" "${ISOLATED_WORKSPACE}/${name}"
+    fi
   done
-  shopt -u dotglob nullglob
-  cp -p \
-    "${ROOT_DIR}/Cargo.lock" \
-    "${ROOT_DIR}/Cargo.toml" \
-    "${ISOLATED_WORKSPACE}/"
 
   # Admission canonicalizes package manifests and rejects symlink escapes.
-  # Cargo also validates every workspace member before a one-package build,
-  # so copy the small optional source tree when an on-demand test is requested.
-  # Build output still reuses the shared target directory.
+  # Optional source was materialized above, while build output still reuses the
+  # shared target directory.
   for skill_name in "${INSTALL_ON_DEMAND_SKILLS[@]}"; do
     if [[ ! "${skill_name}" =~ ^[a-z0-9_]+$ ]] \
       || [[ ! -d "${ROOT_DIR}/optional_skills/${skill_name}" ]]; then
@@ -235,11 +232,6 @@ prepare_isolated_workspace() {
       return 2
     fi
   done
-  if [[ "${#INSTALL_ON_DEMAND_SKILLS[@]}" -gt 0 ]]; then
-    cp -R \
-      "${ROOT_DIR}/optional_skills/." \
-      "${ISOLATED_WORKSPACE}/optional_skills/"
-  fi
 }
 
 skill_store_response_ok() {

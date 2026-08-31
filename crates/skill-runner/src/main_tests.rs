@@ -419,7 +419,7 @@ fn inherited_parent_sandbox_accepts_only_runtime_backend_tokens() {
 }
 
 #[test]
-fn unrestricted_admin_flag_is_exact_and_server_owned() {
+fn server_owned_boolean_flags_accept_only_one() {
     assert!(!super::environment_flag_value_is_enabled(None));
     assert!(!super::environment_flag_value_is_enabled(Some("true")));
     assert!(!super::environment_flag_value_is_enabled(Some("0")));

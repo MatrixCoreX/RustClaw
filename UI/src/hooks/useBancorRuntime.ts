@@ -18,11 +18,27 @@ import {
   writeBancorCandleCache,
 } from "../lib/bancor-candle-cache";
 import { formatBancorTradeHistoryAmount } from "../lib/bancor-amount-display";
+import { formatNniApiError as formatSharedNniApiError } from "../lib/nni-api-error";
 import { appStorageKey } from "../lib/product-identity";
+import {
+  assertNniPrivateKeyOperationsAllowed,
+  NNI_PRIVATE_KEY_INSECURE_TRANSPORT_ERROR,
+  signNniOwnerChallenge,
+  validateNniOwnerPrivateKey,
+} from "../lib/nni-owner-public-key";
 import { fetchResilientRead, runCoalescedRead } from "../lib/resilient-read";
 
 type Translate = (zh: string, en: string) => string;
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
+
+interface NniBancorTradeChallengeResponse {
+  status: "bancor_trade_challenge_created";
+  task_id: string;
+  quote_id: string;
+  signing_payload: string;
+  asset_owner_pubkey: string;
+  node_url: string;
+}
 const BANCOR_ASSET_SCALE = 100_000_000n;
 const BANCOR_AMOUNT_STEP_UNITS = BANCOR_ASSET_SCALE;
 const BANCOR_MAX_UNITS = 9_223_372_036_854_775_807n;
@@ -283,6 +299,12 @@ export function formatBancorApiError(
   fallback: string,
   minimum?: { amount: string; asset: "AIC" | "USD" },
 ) {
+  if (code === NNI_PRIVATE_KEY_INSECURE_TRANSPORT_ERROR) {
+    return t(
+      "当前页面使用非本机 HTTP 连接，已禁用资产私钥签名。请改用 HTTPS 或设备本机 localhost。",
+      "Asset private-key signing is disabled over non-loopback HTTP. Use HTTPS or localhost on this device.",
+    );
+  }
   if (code === "nni_bancor_amount_invalid" || code === "nni_bancor_input_amount_invalid") {
     return t(
       "交易金额必须大于 0、最多保留 8 位小数，并且不能超过系统可安全保存的范围。",
@@ -369,7 +391,7 @@ export function formatBancorApiError(
       "The candlestick response is incomplete, so older data was not merged. Refresh and try again.",
     );
   }
-  return code || fallback;
+  return formatSharedNniApiError(code, t, fallback);
 }
 
 export function useBancorRuntime({
@@ -441,12 +463,12 @@ export function useBancorRuntime({
     try {
       const response = await fetchResilientRead(apiFetch, `${overviewRoutePrefix}/market`);
       const body = (await response.json()) as ApiResponse<NniBancorMarketResponse>;
-      if (!response.ok || !body.ok || !body.data) throw readError(body, `Market load failed (${response.status})`);
+      if (!response.ok || !body.ok || !body.data) throw readError(body, t("市场数据读取失败。", "Market data could not be loaded."));
       setMarket(body.data);
       setError(null);
       return body.data;
     } catch (cause) {
-      if (!silent) setError(cause instanceof Error ? cause.message : t("市场读取失败。", "Market load failed."));
+      if (!silent) setError(formatBancorApiError(cause instanceof Error ? cause.message : null, t, t("市场读取失败。", "Market load failed.")));
       return null;
     } finally {
       if (!silent) setMarketLoading(false);
@@ -490,7 +512,7 @@ export function useBancorRuntime({
         buildBancorAccountPath(page, overviewRoutePrefix),
       );
       const body = (await response.json()) as ApiResponse<NniBancorAccountResponse>;
-      if (!response.ok || !body.ok || !body.data) throw readError(body, `Account load failed (${response.status})`);
+      if (!response.ok || !body.ok || !body.data) throw readError(body, t("账户余额读取失败。", "Account balances could not be loaded."));
       setAccount(body.data);
       setAssetOwnerRequired(false);
       setAssetOwnerAccessErrorCode(null);
@@ -503,7 +525,7 @@ export function useBancorRuntime({
         setHardwareAccountAccessUnavailable(true);
         if (!silent) setError(null);
       } else if (!silent) {
-        setError(cause instanceof Error ? cause.message : t("余额读取失败。", "Balance load failed."));
+        setError(formatBancorApiError(cause instanceof Error ? cause.message : null, t, t("余额读取失败。", "Balance load failed.")));
       }
       return null;
     } finally {
@@ -521,7 +543,7 @@ export function useBancorRuntime({
       const response = await fetchResilientRead(apiFetch, "/v1/nni/bancor/trades");
       const body = (await response.json()) as ApiResponse<NniBancorMarketTradesResponse>;
       if (!response.ok || !body.ok || !body.data) {
-        throw readError(body, `Market trades load failed (${response.status})`);
+        throw readError(body, t("市场成交记录读取失败。", "Market trades could not be loaded."));
       }
       setMarketTrades(body.data);
       setMarketTradesError(null);
@@ -529,7 +551,7 @@ export function useBancorRuntime({
     } catch (cause) {
       if (!silent) {
         setMarketTradesError(
-          cause instanceof Error ? cause.message : t("市场成交记录读取失败。", "Market trades could not be loaded."),
+          formatBancorApiError(cause instanceof Error ? cause.message : null, t, t("市场成交记录读取失败。", "Market trades could not be loaded.")),
         );
       }
       return null;
@@ -630,7 +652,7 @@ export function useBancorRuntime({
 
         const body = (await response.json()) as ApiResponse<NniBancorCandlesResponse>;
         if (!response.ok || !body.ok || !body.data) {
-          throw readError(body, `Candle load failed (${response.status})`);
+          throw readError(body, t("K 线数据读取失败。", "Candlestick data could not be loaded."));
         }
         if (!isBancorCandleResponse(body.data, intervalSeconds)) {
           throw new Error(formatBancorApiError("nni_bancor_candles_contract_invalid", t, ""));
@@ -687,7 +709,7 @@ export function useBancorRuntime({
               "The latest update is unavailable, so the most recently saved candlesticks are shown.",
             ));
           } else {
-            setCandlesError(cause instanceof Error ? cause.message : t("K 线读取失败。", "Candlestick data could not be loaded."));
+            setCandlesError(formatBancorApiError(cause instanceof Error ? cause.message : null, t, t("K 线读取失败。", "Candlestick data could not be loaded.")));
           }
         }
         return cachedSnapshot?.response ?? null;
@@ -787,13 +809,13 @@ export function useBancorRuntime({
         body: JSON.stringify({ side, input_amount: inputAmount, slippage_bps: slippageBps }),
       });
       const body = (await response.json()) as ApiResponse<NniBancorQuoteResponse>;
-      if (!response.ok || !body.ok || !body.data) throw readError(body, `Quote failed (${response.status})`);
+      if (!response.ok || !body.ok || !body.data) throw readError(body, t("报价失败。", "Quote failed."));
       setQuote(body.data);
       return body.data;
     } catch (cause) {
       setQuote(null);
       if (!(await refreshDynamicMinimumError(cause, side))) {
-        setError(cause instanceof Error ? cause.message : t("报价失败。", "Quote failed."));
+        setError(formatBancorApiError(cause instanceof Error ? cause.message : null, t, t("报价失败。", "Quote failed.")));
       }
       return null;
     } finally {
@@ -810,22 +832,53 @@ export function useBancorRuntime({
     setError(null);
     setMessage(null);
     try {
-      const response = await apiFetch("/v1/nni/bancor/trade", {
+      if (authorizationMode === "asset_owner") {
+        assertNniPrivateKeyOperationsAllowed();
+      }
+      const ownerValidation = authorizationMode === "asset_owner"
+        ? validateNniOwnerPrivateKey(ownerPrivateKey ?? "")
+        : null;
+      if (ownerValidation?.ok === false) {
+        throw new Error(t("资产私钥格式无效。", "The asset private key is invalid."));
+      }
+      const requestBody = {
+        side: quote.side,
+        input_amount: quote.input_amount,
+        min_output: quote.min_output_amount,
+        slippage_bps: quote.slippage_bps,
+        authorization_mode: authorizationMode,
+        ...(ownerValidation?.ok ? { asset_owner_pubkey: ownerValidation.publicKey } : {}),
+      };
+      let response = await apiFetch("/v1/nni/bancor/trade", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          side: quote.side,
-          input_amount: quote.input_amount,
-          min_output: quote.min_output_amount,
-          slippage_bps: quote.slippage_bps,
-          authorization_mode: authorizationMode,
-          ...(authorizationMode === "asset_owner"
-            ? { owner_private_key: ownerPrivateKey ?? "" }
-            : {}),
-        }),
+        body: JSON.stringify(requestBody),
       });
-      const body = (await response.json()) as ApiResponse<NniBancorTradeResponse>;
-      if (!response.ok || !body.ok || !body.data) throw readError(body, `Trade failed (${response.status})`);
+      let body = (await response.json()) as ApiResponse<
+        NniBancorTradeResponse | NniBancorTradeChallengeResponse
+      >;
+      if (ownerValidation?.ok && response.ok && body.ok && body.data && "signing_payload" in body.data) {
+        const challenge = body.data as NniBancorTradeChallengeResponse;
+        const signed = signNniOwnerChallenge(ownerValidation.normalized, challenge.signing_payload);
+        if (signed.publicKey !== ownerValidation.publicKey
+          || challenge.asset_owner_pubkey !== ownerValidation.publicKey) {
+          throw new Error(t("签名账户与交易账户不一致。", "The signing account does not match the trading account."));
+        }
+        response = await apiFetch("/v1/nni/bancor/trade", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...requestBody,
+            node_url: challenge.node_url,
+            task_id: challenge.task_id,
+            quote_id: challenge.quote_id,
+            owner_signature: signed.signature,
+          }),
+        });
+        body = (await response.json()) as ApiResponse<NniBancorTradeResponse>;
+      }
+      if (!response.ok || !body.ok || !body.data) throw readError(body, t("交易没有完成。", "The trade was not completed."));
+      if (!("trade" in body.data)) throw new Error(t("交易结果格式不完整，请刷新后重试。", "The trade result is incomplete. Refresh and try again."));
       setLastTrade(body.data);
       setQuote(null);
       await Promise.allSettled([
@@ -841,7 +894,8 @@ export function useBancorRuntime({
       return body.data;
     } catch (cause) {
       if (!(await refreshDynamicMinimumError(cause, quote.side))) {
-        setError(cause instanceof Error ? cause.message : t("交易没有完成。", "The trade was not completed."));
+        const code = cause instanceof Error ? cause.message : null;
+        setError(formatBancorApiError(code, t, t("交易没有完成。", "The trade was not completed.")));
       }
       return null;
     } finally {

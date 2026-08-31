@@ -14,7 +14,7 @@ configure_python3_with_tomllib
 ensure_cargo() {
 	if ! command -v cargo >/dev/null 2>&1; then
 		echo "cargo not found. Installing Rust toolchain (rustup)..."
-		curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+		"$SCRIPT_DIR/scripts/install_pinned_rustup.sh"
 	fi
 	if [[ -f "$HOME/.cargo/env" ]]; then
 		. "$HOME/.cargo/env"
@@ -218,7 +218,7 @@ ensure_npm() {
 	else
 		echo "Please install Node.js and npm first."
 		echo "macOS: brew install node"
-		echo "Other systems: https://nodejs.org or: curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash"
+		echo "Other systems: install a supported Node.js release from https://nodejs.org/"
 		exit 1
 	fi
 	if ! command -v npm >/dev/null 2>&1; then

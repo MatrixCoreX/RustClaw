@@ -380,25 +380,14 @@ test("NNI join exposes a structured public-key authorization rejection", async (
   await mounted.unmount();
 });
 
-test("NNI asset owner generation keeps the private key in transient UI state only", async () => {
+test("NNI asset owner generation is local and keeps the private key in transient UI state only", async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-  const assetOwnerPubkey = "5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M";
-  const ownerPrivateKey = "5K3exampleTransientOwnerPrivateKey";
   const requests: Array<{ path: string; body: unknown }> = [];
   const apiFetch = async (path: string, init?: RequestInit) => {
     requests.push({
       path,
       body: init?.body ? JSON.parse(String(init.body)) : null,
     });
-    if (path === "/v1/nni/owner/generate") {
-      return apiResponse({
-        key_type: "K1",
-        encoding: "eos_base58_v1",
-        public_key: assetOwnerPubkey,
-        private_key: ownerPrivateKey,
-        private_key_persisted: false,
-      });
-    }
     throw new Error(`unexpected request: ${path}`);
   };
   const mounted = await mountRuntime(apiFetch);
@@ -407,22 +396,48 @@ test("NNI asset owner generation keeps the private key in transient UI state onl
     await mounted.runtime().generateNniOwnerKeyPair();
   });
 
-  assert.equal(mounted.runtime().nniOwnerKeyPair?.private_key, ownerPrivateKey);
-  assert.deepEqual(requests, [{ path: "/v1/nni/owner/generate", body: null }]);
+  const generated = mounted.runtime().nniOwnerKeyPair;
+  assert.ok(generated);
+  const validation = validateNniOwnerPrivateKey(generated.private_key);
+  assert.equal(validation.ok, true);
+  assert.equal(validation.ok ? validation.publicKey : null, generated.public_key);
+  assert.deepEqual(requests, []);
   await act(async () => mounted.runtime().clearNniOwnerKeyPair());
   assert.equal(mounted.runtime().nniOwnerKeyPair, null);
   await mounted.unmount();
 });
 
-test("NNI recovery sends the owner private key once and persists only the public identity", async () => {
+test("NNI recovery signs in the browser and never sends the owner private key", async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-  const assetOwnerPubkey = "5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M";
-  const ownerPrivateKey = "5K3exampleTransientRecoveryPrivateKey";
+  const ownerPrivateKey = encodeTestOwnerPrivateKey(
+    Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+  );
+  const validation = validateNniOwnerPrivateKey(ownerPrivateKey);
+  assert.equal(validation.ok, true);
+  if (!validation.ok) return;
+  const assetOwnerPubkey = validation.publicKey;
+  const signingPayload = JSON.stringify({
+    action: "rotate_asset_device",
+    task_id: "recovery-task-1",
+    asset_owner_pubkey: assetOwnerPubkey,
+  });
   const requests: Array<{ path: string; body: Record<string, unknown> | null }> = [];
+  let recoveryRequestCount = 0;
   const apiFetch = async (path: string, init?: RequestInit) => {
     const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : null;
     requests.push({ path, body });
     if (path === "/v1/nni/owner/recover") {
+      recoveryRequestCount += 1;
+      if (recoveryRequestCount === 1) {
+        return apiResponse({
+          schema_version: 1,
+          status: "asset_recovery_challenge_created",
+          task_id: "recovery-task-1",
+          signing_payload: signingPayload,
+          device_signature: "ab".repeat(64),
+          asset_owner_pubkey: assetOwnerPubkey,
+        });
+      }
       return apiResponse({
         schema_version: 1,
         status: "asset_device_rotated",
@@ -452,10 +467,15 @@ test("NNI recovery sends the owner private key once and persists only the public
   assert.equal(mounted.runtime().nniAssetOwnerPubkey, assetOwnerPubkey);
   assert.equal(mounted.runtime().nniOwnerKeyPair, null);
   assert.equal(requests[0].path, "/v1/nni/owner/recover");
-  assert.equal(requests[0].body?.owner_private_key, ownerPrivateKey);
-  assert.equal(requests[1].path, "/v1/nni/config");
-  assert.equal(Object.hasOwn(requests[1].body ?? {}, "owner_private_key"), false);
-  assert.equal(Object.hasOwn(requests[1].body ?? {}, "private_key"), false);
+  assert.equal(requests[0].body?.asset_owner_pubkey, assetOwnerPubkey);
+  assert.equal(requests[1].path, "/v1/nni/owner/recover");
+  assert.equal(requests[1].body?.task_id, "recovery-task-1");
+  assert.equal(typeof requests[1].body?.owner_signature, "string");
+  assert.equal(requests[2].path, "/v1/nni/config");
+  for (const request of requests) {
+    assert.equal(Object.hasOwn(request.body ?? {}, "owner_private_key"), false);
+    assert.equal(Object.hasOwn(request.body ?? {}, "private_key"), false);
+  }
   await mounted.unmount();
 });
 

@@ -529,6 +529,10 @@ note = "placeholder"
 [tools]
 allow = []
 access_profile = "coding"
+# Authenticated administrators use this host-owned capability profile in every
+# execution mode. `yolo` changes confirmation behavior only; it does not grant
+# this profile or bypass deny/provider/sandbox policy.
+admin_access_profile = "full"
 approval_policy = "on_risk"
 # Global baseline switch. Runtime only honors this for admin-authenticated tasks;
 # ordinary users are always treated as false even when this is true.

@@ -200,7 +200,7 @@ struct GetUpdatesResp {
     longpolling_timeout_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct WeixinMessage {
     #[serde(default)]
     seq: Option<u64>,
@@ -220,7 +220,7 @@ struct WeixinMessage {
     context_token: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct CdnMedia {
     #[serde(default)]
     encrypt_query_param: Option<String>,
@@ -231,7 +231,7 @@ struct CdnMedia {
     encrypt_type: Option<i64>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct ImageItemSerde {
     #[serde(default)]
     media: Option<CdnMedia>,
@@ -239,7 +239,7 @@ struct ImageItemSerde {
     aeskey: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct VideoItemSerde {
     #[serde(default)]
     media: Option<CdnMedia>,
@@ -247,7 +247,7 @@ struct VideoItemSerde {
     aeskey: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct FileItemSerde {
     #[serde(default)]
     media: Option<CdnMedia>,
@@ -255,7 +255,7 @@ struct FileItemSerde {
     file_name: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct MessageItem {
     #[serde(default)]
     r#type: Option<i64>,
@@ -273,7 +273,7 @@ struct MessageItem {
     file_item: Option<FileItemSerde>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct RefMessage {
     #[serde(default)]
     message_item: Option<Box<MessageItem>>,
@@ -281,13 +281,13 @@ struct RefMessage {
     title: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct TextItem {
     #[serde(default)]
     text: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct VoiceItem {
     #[serde(default)]
     text: Option<String>,

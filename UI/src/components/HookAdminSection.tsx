@@ -93,7 +93,9 @@ export function HookAdminSection({
               </p>
               <p className="mt-1 break-words text-xs text-white/50">
                 {t("配置入口", "Configuration")}: <span className="font-mono">{status.config_path}</span>
-                {status.config_error_code ? ` · ${status.config_error_code}` : ""}
+                {status.config_error_code
+                  ? ` · ${t("配置需要检查", "Configuration needs attention")}`
+                  : ""}
               </p>
               {!status.setup.ui_enable_supported ? (
                 <p className="mt-1 text-xs text-white/45">
@@ -129,7 +131,7 @@ export function HookAdminSection({
                 <div className="mt-3 flex flex-wrap gap-2 text-xs text-white/55">
                   <span>trust={handler.trust_status}</span>
                   <span>hash={handler.content_hash_configured ? "configured" : "missing"}</span>
-                  {handler.error_code ? <span className="text-red-200">error={handler.error_code}</span> : null}
+                  {handler.error_code ? <span className="text-red-200">{t("配置无效", "Invalid configuration")}</span> : null}
                 </div>
                 <details className="mt-3 rounded-md border border-white/10 bg-black/20 p-3">
                   <summary className="cursor-pointer text-xs font-medium text-white/60">

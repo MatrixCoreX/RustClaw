@@ -51,11 +51,13 @@ pub(crate) fn test_audit_pool() -> DbPool {
 }
 
 pub(crate) fn init_db(config: &AppConfig) -> anyhow::Result<DbPool> {
-    if let Some(parent) = Path::new(&config.database.sqlite_path).parent() {
+    let database_path = Path::new(&config.database.sqlite_path);
+    if let Some(parent) = database_path.parent() {
         if !parent.as_os_str().is_empty() {
             std::fs::create_dir_all(parent)?;
         }
     }
+    apply_private_sqlite_permissions(database_path)?;
 
     let busy_ms = config.database.busy_timeout_ms;
     let manager = SqliteConnectionManager::file(&config.database.sqlite_path).with_init(
@@ -78,17 +80,20 @@ pub(crate) fn init_db(config: &AppConfig) -> anyhow::Result<DbPool> {
         .get()
         .map_err(|e| anyhow::anyhow!("get db conn: {e}"))?;
     conn.execute_batch(crate::INIT_SQL)?;
+    apply_private_sqlite_permissions(database_path)?;
     Ok(pool)
 }
 
 /// Phase 2.2 Stage 2: 初始化 audit 专用 SQLite 库 + 连接池。
 /// schema 由 [`INIT_AUDIT_SQL`] 建立；与主库相同的 WAL/busy_timeout 配置。
 pub(crate) fn init_audit_db(config: &AppConfig) -> anyhow::Result<DbPool> {
-    if let Some(parent) = Path::new(&config.database.audit_sqlite_path).parent() {
+    let database_path = Path::new(&config.database.audit_sqlite_path);
+    if let Some(parent) = database_path.parent() {
         if !parent.as_os_str().is_empty() {
             std::fs::create_dir_all(parent)?;
         }
     }
+    apply_private_sqlite_permissions(database_path)?;
 
     let busy_ms = config.database.busy_timeout_ms;
     let manager = SqliteConnectionManager::file(&config.database.audit_sqlite_path).with_init(
@@ -111,7 +116,101 @@ pub(crate) fn init_audit_db(config: &AppConfig) -> anyhow::Result<DbPool> {
         .get()
         .map_err(|e| anyhow::anyhow!("get audit db conn: {e}"))?;
     conn.execute_batch(INIT_AUDIT_SQL)?;
+    apply_private_sqlite_permissions(database_path)?;
     Ok(pool)
+}
+
+#[cfg(unix)]
+fn apply_private_sqlite_permissions(database_path: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let Some(file_name) = database_path.file_name().and_then(|value| value.to_str()) else {
+        anyhow::bail!("database path must end with a valid UTF-8 file name");
+    };
+    for path in [
+        database_path.to_path_buf(),
+        database_path.with_file_name(format!("{file_name}-wal")),
+        database_path.with_file_name(format!("{file_name}-shm")),
+    ] {
+        match std::fs::symlink_metadata(&path) {
+            Ok(metadata) if !metadata.file_type().is_symlink() && metadata.is_file() => {
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+            }
+            Ok(_) => anyhow::bail!(
+                "database storage path is not a regular file: {}",
+                path.display()
+            ),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn apply_private_sqlite_permissions(_database_path: &Path) -> anyhow::Result<()> {
+    Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod private_sqlite_permissions_tests {
+    use super::apply_private_sqlite_permissions;
+    use std::os::unix::fs::{symlink, PermissionsExt};
+
+    #[test]
+    fn sqlite_database_family_is_private() {
+        let root = std::env::temp_dir().join(format!(
+            "agent-runtime-sqlite-permissions-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&root).expect("create fixture root");
+        let database = root.join("runtime.db");
+        for path in [
+            database.clone(),
+            root.join("runtime.db-wal"),
+            root.join("runtime.db-shm"),
+        ] {
+            std::fs::write(&path, b"fixture").expect("write fixture");
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
+                .expect("relax fixture permissions");
+        }
+        apply_private_sqlite_permissions(&database).expect("secure database family");
+        for path in [
+            database,
+            root.join("runtime.db-wal"),
+            root.join("runtime.db-shm"),
+        ] {
+            assert_eq!(
+                std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        std::fs::remove_dir_all(root).expect("remove fixture root");
+    }
+
+    #[test]
+    fn sqlite_database_family_rejects_symbolic_links() {
+        let root = std::env::temp_dir().join(format!(
+            "agent-runtime-sqlite-symlink-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&root).expect("create fixture root");
+        let target = root.join("target.db");
+        let database = root.join("runtime.db");
+        std::fs::write(&target, b"fixture").expect("write target");
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644))
+            .expect("set target permissions");
+        symlink(&target, &database).expect("create database symlink");
+
+        let error = apply_private_sqlite_permissions(&database)
+            .expect_err("database symlinks must be rejected");
+        assert!(error.to_string().contains("not a regular file"));
+        assert_eq!(
+            std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+        std::fs::remove_dir_all(root).expect("remove fixture root");
+    }
 }
 
 /// Phase 2.2 Stage 2 一次性数据迁移：如果主库 `audit_logs` 还有行（旧部署），

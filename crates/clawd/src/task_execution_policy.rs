@@ -58,13 +58,6 @@ pub(crate) struct TaskExecutionPolicy {
 }
 
 impl TaskExecutionPolicy {
-    pub(crate) fn has_unrestricted_admin_authority(self) -> bool {
-        self.mode == TaskExecutionMode::Yolo
-            && self.actor_role == Some("admin")
-            && self.approval_policy == ToolApprovalPolicy::Never
-            && self.sandbox_mode == ToolSandboxMode::DangerFull
-    }
-
     pub(crate) fn approval_required(
         self,
         risk_requires_approval: bool,
@@ -87,7 +80,6 @@ impl TaskExecutionPolicy {
     }
 
     pub(crate) fn to_machine_json(self) -> Value {
-        let unrestricted_admin = self.has_unrestricted_admin_authority();
         json!({
             "schema_version": 1,
             "mode": self.mode.as_token(),
@@ -95,8 +87,8 @@ impl TaskExecutionPolicy {
             "actor_role": self.actor_role,
             "approval_policy": self.approval_policy.as_token(),
             "sandbox_mode": self.sandbox_mode.as_token(),
-            "authority_scope": if unrestricted_admin { "unrestricted_admin" } else { "configured" },
-            "host_scope": if unrestricted_admin { "system" } else { "workspace" },
+            "authority_scope": "configured",
+            "host_scope": "workspace",
         })
     }
 }
@@ -195,7 +187,7 @@ pub(crate) fn stamp_authenticated_submission_policy(
                 "actor_role": "admin",
                 "derivation": derivation,
                 "approval_policy": ToolApprovalPolicy::Never.as_token(),
-                "sandbox_mode": ToolSandboxMode::DangerFull.as_token(),
+                "sandbox_mode": "configured",
             }),
         );
     }
@@ -244,10 +236,11 @@ pub(crate) fn effective_policy_for_task(
         Some(YOLO_MODE)
             if valid_yolo_stamp(policy) && task_has_current_admin_identity(state, task) =>
         {
+            let configured = configured();
             TaskExecutionPolicy {
                 mode: TaskExecutionMode::Yolo,
                 approval_policy: ToolApprovalPolicy::Never,
-                sandbox_mode: ToolSandboxMode::DangerFull,
+                sandbox_mode: configured.sandbox_mode,
                 derivation: match policy.get("derivation").and_then(Value::as_str) {
                     Some("clawcli_explicit_admin") => "clawcli_explicit_admin",
                     Some("admin_channel_default") => "admin_channel_default",
@@ -292,10 +285,6 @@ pub(crate) fn configured_policy(state: &AppState) -> TaskExecutionPolicy {
     }
 }
 
-pub(crate) fn task_has_unrestricted_admin_authority(state: &AppState, task: &ClaimedTask) -> bool {
-    effective_policy_for_task(state, task).has_unrestricted_admin_authority()
-}
-
 pub(crate) fn inheritable_policy_stamp(state: &AppState, task: &ClaimedTask) -> Option<Value> {
     let policy = effective_policy_for_task(state, task);
     if policy.mode == TaskExecutionMode::Configured {
@@ -322,7 +311,7 @@ pub(crate) fn inheritable_policy_stamp(state: &AppState, task: &ClaimedTask) -> 
         "actor_role": "admin",
         "derivation": "authenticated_parent_task",
         "approval_policy": ToolApprovalPolicy::Never.as_token(),
-        "sandbox_mode": ToolSandboxMode::DangerFull.as_token(),
+        "sandbox_mode": "configured",
     }))
 }
 
@@ -367,7 +356,7 @@ fn stricter_approval(
     }
 }
 
-fn task_has_current_admin_identity(state: &AppState, task: &ClaimedTask) -> bool {
+pub(crate) fn task_has_current_admin_identity(state: &AppState, task: &ClaimedTask) -> bool {
     task.user_key
         .as_deref()
         .and_then(|key| {
@@ -385,8 +374,7 @@ fn valid_yolo_stamp(policy: &Value) -> bool {
         && policy.get("actor_role").and_then(Value::as_str) == Some("admin")
         && policy.get("approval_policy").and_then(Value::as_str)
             == Some(ToolApprovalPolicy::Never.as_token())
-        && policy.get("sandbox_mode").and_then(Value::as_str)
-            == Some(ToolSandboxMode::DangerFull.as_token())
+        && policy.get("sandbox_mode").and_then(Value::as_str) == Some("configured")
 }
 
 fn valid_restrictive_stamp(policy: &Value, mode: &str) -> bool {

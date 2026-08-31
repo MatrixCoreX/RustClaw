@@ -267,7 +267,7 @@ ensure_cargo() {
     return 0
   fi
   echo "cargo not found. Installing Rust toolchain (rustup)..."
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+  "$SCRIPT_DIR/scripts/install_pinned_rustup.sh"
   if [[ -f "$HOME/.cargo/env" ]]; then
     . "$HOME/.cargo/env"
   fi
@@ -432,7 +432,7 @@ ensure_npm() {
   elif command -v yum >/dev/null 2>&1; then
     sudo yum install -y nodejs npm
   else
-    echo "Please install Node.js and npm first: https://nodejs.org or: curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash"
+    echo "Please install a supported Node.js release from https://nodejs.org/"
     exit 1
   fi
   if ! command -v npm >/dev/null 2>&1; then

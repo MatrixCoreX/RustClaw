@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use super::SessionEntry;
 
-const SESSION_STORE_SCHEMA_VERSION: u32 = 1;
+const SESSION_STORE_SCHEMA_VERSION: u32 = 4;
+const PREVIOUS_SESSION_STORE_SCHEMA_VERSION: u32 = 3;
 const MAX_SESSION_STORE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_SESSION_COUNT: usize = 10_000;
 
@@ -25,12 +26,15 @@ pub(super) fn load_sessions(
     if path.as_os_str().is_empty() || !path.exists() {
         return Ok(HashMap::new());
     }
-    let metadata = fs::metadata(path).with_context(|| {
+    let metadata = fs::symlink_metadata(path).with_context(|| {
         format!(
             "webd_session_store_metadata_read_failed:path={}",
             path.display()
         )
     })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        anyhow::bail!("webd_session_store_path_invalid");
+    }
     if metadata.len() > MAX_SESSION_STORE_BYTES {
         anyhow::bail!("webd_session_store_too_large");
     }
@@ -38,13 +42,37 @@ pub(super) fn load_sessions(
         .with_context(|| format!("webd_session_store_read_failed:path={}", path.display()))?;
     let mut document: SessionStoreDocument =
         serde_json::from_slice(&raw).context("webd_session_store_parse_failed")?;
-    if document.schema_version != SESSION_STORE_SCHEMA_VERSION {
+    if !matches!(
+        document.schema_version,
+        PREVIOUS_SESSION_STORE_SCHEMA_VERSION | SESSION_STORE_SCHEMA_VERSION
+    ) {
         anyhow::bail!("webd_session_store_schema_unsupported");
     }
-    document.sessions.retain(|session_id, entry| {
-        uuid::Uuid::parse_str(session_id).is_ok()
+    document.sessions.retain(|session_digest, entry| {
+        super::valid_session_digest(session_digest)
+            && uuid::Uuid::parse_str(&entry.session_handle).is_ok()
             && !entry.user_key.trim().is_empty()
             && entry.user_key.len() <= 1024
+            && !entry.username.trim().is_empty()
+            && entry.username.len() <= super::MAX_LOGIN_USERNAME_BYTES
+            && !entry.role.trim().is_empty()
+            && entry.role.len() <= 128
+            && (entry.client_ip.is_empty()
+                || (entry.client_ip.len() <= super::MAX_SESSION_CLIENT_IP_BYTES
+                    && entry.client_ip.parse::<std::net::IpAddr>().is_ok()))
+            && entry.client_platform.len() <= super::MAX_SESSION_PLATFORM_BYTES
+            && entry.user_agent.len() <= super::MAX_SESSION_USER_AGENT_BYTES
+            && entry
+                .client_platform
+                .chars()
+                .all(|character| !character.is_control())
+            && entry
+                .user_agent
+                .chars()
+                .all(|character| !character.is_control())
+            && entry.created_unix <= entry.last_activity_unix
+            && entry.last_activity_unix <= entry.expires_unix
+            && super::valid_csrf_token(&entry.csrf_token)
             && entry.expires_unix > now_unix
     });
     if document.sessions.len() > MAX_SESSION_COUNT {
@@ -73,6 +101,21 @@ pub(super) fn persist_sessions(
                 parent.display()
             )
         })?;
+        let metadata = fs::symlink_metadata(parent).with_context(|| {
+            format!(
+                "webd_session_store_parent_metadata_failed:path={}",
+                parent.display()
+            )
+        })?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            anyhow::bail!("webd_session_store_parent_invalid");
+        }
+    }
+    if path.exists() {
+        let metadata = fs::symlink_metadata(path).context("webd_session_store_metadata_failed")?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            anyhow::bail!("webd_session_store_path_invalid");
+        }
     }
     let document = SessionStoreDocument {
         schema_version: SESSION_STORE_SCHEMA_VERSION,
@@ -82,9 +125,9 @@ pub(super) fn persist_sessions(
     if encoded.len() as u64 > MAX_SESSION_STORE_BYTES {
         anyhow::bail!("webd_session_store_too_large");
     }
-    let temporary = path.with_extension(format!("tmp.{}", std::process::id()));
+    let temporary = path.with_extension(format!("tmp.{}", uuid::Uuid::new_v4().simple()));
     let mut options = fs::OpenOptions::new();
-    options.create(true).truncate(true).write(true);
+    options.create_new(true).write(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;

@@ -5,6 +5,7 @@ export type DashboardSection =
   | "setup"
   | "persona"
   | "dependencies"
+  | "web"
   | "updates"
   | "communications"
   | "git";

@@ -409,10 +409,9 @@ fn path_policy_confines_regular_users_and_allows_verified_admin_absolute_sources
     let external_text = external.display().to_string();
     assert!(build_scan_targets(&regular, std::slice::from_ref(&external_text)).is_err());
 
-    let admin_context = json!({
-        "authority_scope": "unrestricted_admin",
+    let host_grant_context = json!({
+        "authority_scope": "host_policy_grant",
         "permissions": {
-            "unrestricted_admin": true,
             "allow_path_outside_workspace": true
         }
     });
@@ -421,8 +420,8 @@ fn path_policy_confines_regular_users_and_allows_verified_admin_absolute_sources
         workspace_root: workspace.clone(),
         storage_database_path: workspace.join("data/skills/kb/state.db"),
         storage_busy_timeout_ms: 5_000,
-        path_policy: skill_sdk::SkillPathPolicy::new(&workspace, Some(&admin_context))
-            .expect("admin path policy"),
+        path_policy: skill_sdk::SkillPathPolicy::new(&workspace, Some(&host_grant_context))
+            .expect("host path policy"),
     };
     let targets = build_scan_targets(&admin, &[external_text]).expect("admin external source");
     assert_eq!(targets.len(), 1);

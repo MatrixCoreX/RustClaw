@@ -8,6 +8,7 @@ import type {
   TelegramConfigResponse,
   WechatConfigResponse,
 } from "../types/api";
+import { formatUiError } from "../lib/ui-error";
 
 type Translate = (zh: string, en: string) => string;
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
@@ -56,11 +57,11 @@ export function useChannelConfigRuntime({ apiFetch, t }: UseChannelConfigRuntime
       const res = await apiFetch(`/v1/wechat/config`);
       const body = (await res.json()) as ApiResponse<WechatConfigResponse>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `WeChat config fetch failed (${res.status})`);
+        throw new Error(body.error || `wechat_config_fetch_http_${res.status}`);
       }
       setWechatConfigData(body.data);
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "微信配置暂时无法读取。", "WeChat configuration is temporarily unavailable.");
       setWechatConfigError(message);
     } finally {
       setWechatConfigLoading(false);
@@ -91,12 +92,12 @@ export function useChannelConfigRuntime({ apiFetch, t }: UseChannelConfigRuntime
       });
       const body = (await res.json()) as ApiResponse<WechatConfigResponse>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `WeChat config save failed (${res.status})`);
+        throw new Error(body.error || `wechat_config_save_http_${res.status}`);
       }
       setWechatConfigData(body.data);
       return true;
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "微信配置保存失败，请稍后重试。", "WeChat configuration could not be saved. Try again shortly.");
       setWechatConfigError(message);
       return false;
     } finally {
@@ -111,11 +112,11 @@ export function useChannelConfigRuntime({ apiFetch, t }: UseChannelConfigRuntime
       const res = await apiFetch(`/v1/feishu/config`);
       const body = (await res.json()) as ApiResponse<FeishuConfigResponse>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `Feishu config fetch failed (${res.status})`);
+        throw new Error(body.error || `feishu_config_fetch_http_${res.status}`);
       }
       setFeishuConfigData(body.data);
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "飞书配置暂时无法读取。", "Feishu configuration is temporarily unavailable.");
       setFeishuConfigError(message);
     } finally {
       setFeishuConfigLoading(false);
@@ -129,11 +130,11 @@ export function useChannelConfigRuntime({ apiFetch, t }: UseChannelConfigRuntime
       const res = await apiFetch(`/v1/lark/config`);
       const body = (await res.json()) as ApiResponse<LarkConfigResponse>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `Lark config fetch failed (${res.status})`);
+        throw new Error(body.error || `lark_config_fetch_http_${res.status}`);
       }
       setLarkConfigData(body.data);
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "Lark 配置暂时无法读取。", "Lark configuration is temporarily unavailable.");
       setLarkConfigError(message);
     } finally {
       setLarkConfigLoading(false);
@@ -147,12 +148,12 @@ export function useChannelConfigRuntime({ apiFetch, t }: UseChannelConfigRuntime
       const res = await apiFetch(`/v1/telegram/config`);
       const body = (await res.json()) as ApiResponse<TelegramConfigResponse>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `Telegram config fetch failed (${res.status})`);
+        throw new Error(body.error || `telegram_config_fetch_http_${res.status}`);
       }
       setTelegramConfigData(body.data);
       setTelegramConfigDraft(body.data);
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "Telegram 配置暂时无法读取。", "Telegram configuration is temporarily unavailable.");
       setTelegramConfigError(message);
     } finally {
       setTelegramConfigLoading(false);
@@ -197,7 +198,7 @@ export function useChannelConfigRuntime({ apiFetch, t }: UseChannelConfigRuntime
       });
       const body = (await res.json()) as ApiResponse<TelegramConfigResponse>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `Telegram config save failed (${res.status})`);
+        throw new Error(body.error || `telegram_config_save_http_${res.status}`);
       }
       setTelegramConfigData(body.data);
       setTelegramConfigDraft(body.data);
@@ -208,7 +209,7 @@ export function useChannelConfigRuntime({ apiFetch, t }: UseChannelConfigRuntime
         ),
       );
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "Telegram 配置保存失败，请稍后重试。", "Telegram configuration could not be saved. Try again shortly.");
       setTelegramConfigError(message);
     } finally {
       setTelegramConfigSaving(false);

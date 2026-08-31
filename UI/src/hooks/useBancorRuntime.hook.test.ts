@@ -3,9 +3,24 @@ import test from "node:test";
 
 import React from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
+import { ripemd160 } from "@noble/hashes/legacy.js";
+import { base58 } from "@scure/base";
 
+import { validateNniOwnerPrivateKey } from "../lib/nni-owner-public-key";
 import type { ApiResponse, NniBancorCandlesResponse } from "../types/api";
 import { formatBancorApiError, useBancorRuntime } from "./useBancorRuntime";
+
+function encodeTestOwnerPrivateKey(secretKey: Uint8Array): string {
+  const suffix = new TextEncoder().encode("K1");
+  const payload = new Uint8Array(secretKey.length + suffix.length);
+  payload.set(secretKey);
+  payload.set(suffix, secretKey.length);
+  const checksum = ripemd160(payload).slice(0, 4);
+  const encoded = new Uint8Array(secretKey.length + checksum.length);
+  encoded.set(secretKey);
+  encoded.set(checksum, secretKey.length);
+  return base58.encode(encoded);
+}
 
 function candles(intervalSeconds: number, bucketStartUnix = 1_800_000_000): NniBancorCandlesResponse {
   return {
@@ -374,6 +389,12 @@ test("BANCOR refreshes the active candlesticks without a stale ETag after a succ
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const requestedPaths: string[] = [];
   const tradeBodies: Array<Record<string, unknown>> = [];
+  const ownerPrivateKey = encodeTestOwnerPrivateKey(
+    Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+  );
+  const ownerValidation = validateNniOwnerPrivateKey(ownerPrivateKey);
+  assert.equal(ownerValidation.ok, true);
+  if (!ownerValidation.ok) return;
   const candleHeaders: Headers[] = [];
   let candleRequestCount = 0;
   const apiFetch = (path: string, init?: RequestInit): Promise<Response> => {
@@ -397,6 +418,16 @@ test("BANCOR refreshes the active candlesticks without a stale ETag after a succ
     }
     if (path === "/v1/nni/bancor/trade") {
       tradeBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      if (tradeBodies.length === 1) {
+        return Promise.resolve(apiResponse({
+          status: "bancor_trade_challenge_created",
+          task_id: "trade-task-1",
+          quote_id: "quote-1",
+          signing_payload: "bancor-trade-signing-payload",
+          asset_owner_pubkey: ownerValidation.publicKey,
+          node_url: "https://nni.example.test",
+        }));
+      }
       return Promise.resolve(apiResponse({ trade: { trade_id: "trade-1" } }));
     }
     if (path === "/v1/nni/bancor/market") {
@@ -455,7 +486,7 @@ test("BANCOR refreshes the active candlesticks without a stale ETag after a succ
   await act(async () => {
     assert.ok(await runtime!.trade({
       authorizationMode: "asset_owner",
-      ownerPrivateKey: "transient-owner-private-key",
+      ownerPrivateKey,
     }));
   });
 
@@ -465,14 +496,13 @@ test("BANCOR refreshes the active candlesticks without a stale ETag after a succ
   assert.ok(requestedPaths.includes("/v1/nni/bancor/market"));
   assert.ok(requestedPaths.includes("/v1/nni/bancor/account?page=1&per_page=10"));
   assert.ok(requestedPaths.includes("/v1/nni/bancor/trades"));
-  assert.deepEqual(tradeBodies, [{
-    side: "sell",
-    input_amount: "100.00000000",
-    min_output: "0.00010000",
-    slippage_bps: 50,
-    authorization_mode: "asset_owner",
-    owner_private_key: "transient-owner-private-key",
-  }]);
+  assert.equal(tradeBodies.length, 2);
+  assert.equal(tradeBodies[0].asset_owner_pubkey, ownerValidation.publicKey);
+  assert.equal(tradeBodies[1].task_id, "trade-task-1");
+  assert.equal(typeof tradeBodies[1].owner_signature, "string");
+  for (const body of tradeBodies) {
+    assert.equal(Object.hasOwn(body, "owner_private_key"), false);
+  }
   assert.equal(runtime!.candles?.candles[0]?.close, "0.000110000000");
   assert.equal(runtime!.message, "交易已完成，余额和市场储备已经更新。");
 

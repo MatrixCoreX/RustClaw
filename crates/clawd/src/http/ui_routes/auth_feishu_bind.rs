@@ -1259,6 +1259,27 @@ pub(crate) fn require_ui_identity(
     }
 }
 
+pub(crate) fn require_ui_admin(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<AuthIdentity, (StatusCode, Json<ApiResponse<Value>>)> {
+    let identity = require_ui_identity(state, headers)?;
+    if !identity.role.eq_ignore_ascii_case("admin") {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ApiResponse {
+                ok: false,
+                data: Some(json!({
+                    "error_code": "admin_required",
+                    "message_key": "clawd.ui.auth.admin_required",
+                })),
+                error: Some("admin_required".to_string()),
+            }),
+        ));
+    }
+    Ok(identity)
+}
+
 #[derive(Debug, Deserialize)]
 struct WebdInternalVerifyRequest {
     username: String,
@@ -1279,28 +1300,53 @@ async fn webd_internal_verify_login(
     State(state): State<AppState>,
     Json(req): Json<WebdInternalVerifyRequest>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    let db = match state.core.db.get() {
-        Ok(g) => g,
-        Err(_) => {
-            return (
+    let verified = {
+        let db = match state.core.db.get() {
+            Ok(g) => g,
+            Err(_) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiResponse {
+                        ok: false,
+                        data: None,
+                        error: Some("db lock poisoned".to_string()),
+                    }),
+                );
+            }
+        };
+        verify_webd_password_login(&db, &req.username, &req.password)
+    };
+    match verified {
+        Ok(Some(user_key)) => match resolve_auth_identity_by_key(&state, &user_key) {
+            Ok(Some(identity)) => (
+                StatusCode::OK,
+                Json(ApiResponse {
+                    ok: true,
+                    data: Some(json!({
+                        "user_key": user_key,
+                        "role": identity.role,
+                        "principal_id": identity.principal_id,
+                    })),
+                    error: None,
+                }),
+            ),
+            Ok(None) => (
+                StatusCode::UNAUTHORIZED,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some("invalid_credentials".to_string()),
+                }),
+            ),
+            Err(err) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ApiResponse {
                     ok: false,
                     data: None,
-                    error: Some("db lock poisoned".to_string()),
+                    error: Some(format!("identity resolution failed: {err}")),
                 }),
-            );
-        }
-    };
-    match verify_webd_password_login(&db, &req.username, &req.password) {
-        Ok(Some(user_key)) => (
-            StatusCode::OK,
-            Json(ApiResponse {
-                ok: true,
-                data: Some(json!({ "user_key": user_key })),
-                error: None,
-            }),
-        ),
+            ),
+        },
         Ok(None) => (
             StatusCode::UNAUTHORIZED,
             Json(ApiResponse {

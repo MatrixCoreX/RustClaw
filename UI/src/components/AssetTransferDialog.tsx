@@ -17,7 +17,11 @@ import {
   type AssetTransferAsset,
   type AssetTransferDraftError,
 } from "../lib/asset-transfer";
-import { validateNniOwnerPrivateKey, validateNniOwnerPublicKey } from "../lib/nni-owner-public-key";
+import {
+  nniPrivateKeyOperationsAllowed,
+  validateNniOwnerPrivateKey,
+  validateNniOwnerPublicKey,
+} from "../lib/nni-owner-public-key";
 import type { AssetTransferInput } from "../hooks/useAssetTransferRuntime";
 
 type Translate = (zh: string, en: string) => string;
@@ -69,11 +73,12 @@ export function AssetTransferDialog({
   onClose: () => void;
   onSubmit: (input: AssetTransferInput) => Promise<unknown>;
 }) {
+  const privateKeyOperationsAllowed = nniPrivateKeyOperationsAllowed();
   const [amount, setAmount] = useState("");
   const [recipientPublicKey, setRecipientPublicKey] = useState("");
   const [memo, setMemo] = useState("");
   const [authorizationMode, setAuthorizationMode] = useState<AuthorizationMode>(
-    signingDeviceReady ? "delegated_hardware" : "asset_owner",
+    signingDeviceReady || !privateKeyOperationsAllowed ? "delegated_hardware" : "asset_owner",
   );
   const [ownerPrivateKey, setOwnerPrivateKey] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
@@ -103,9 +108,15 @@ export function AssetTransferDialog({
       setLocalError(null);
       setReviewing(false);
       setCompleted(false);
-      setAuthorizationMode(signingDeviceReady ? "delegated_hardware" : "asset_owner");
+      setAuthorizationMode(signingDeviceReady || !privateKeyOperationsAllowed ? "delegated_hardware" : "asset_owner");
     }
-  }, [open, signingDeviceReady]);
+  }, [open, privateKeyOperationsAllowed, signingDeviceReady]);
+
+  useEffect(() => {
+    if (privateKeyOperationsAllowed || authorizationMode !== "asset_owner") return;
+    setAuthorizationMode("delegated_hardware");
+    setOwnerPrivateKey("");
+  }, [authorizationMode, privateKeyOperationsAllowed]);
 
   if (!open) return null;
 
@@ -127,6 +138,13 @@ export function AssetTransferDialog({
       return null;
     }
     if (authorizationMode === "asset_owner") {
+      if (!privateKeyOperationsAllowed) {
+        setLocalError(t(
+          "当前页面使用非本机 HTTP 连接，已禁用资产私钥签名。请改用 HTTPS 或设备本机 localhost。",
+          "Asset private-key signing is disabled over non-loopback HTTP. Use HTTPS or localhost on this device.",
+        ));
+        return null;
+      }
       const privateKey = validateNniOwnerPrivateKey(ownerPrivateKey);
       if (!privateKey.ok) {
         setLocalError(t("资产私钥不合规。", "The asset private key is not valid."));
@@ -280,7 +298,7 @@ export function AssetTransferDialog({
                   <ShieldCheck className="h-4 w-4" />
                   {t("硬件设备代签", "Hardware signing")}
                 </button>
-                <button type="button" aria-pressed={authorizationMode === "asset_owner"} className={authorizationMode === "asset_owner" ? "theme-accent-btn justify-start px-3 py-3" : "theme-secondary-btn justify-start px-3 py-3"} onClick={() => {
+                <button type="button" aria-pressed={authorizationMode === "asset_owner"} disabled={!privateKeyOperationsAllowed} className={authorizationMode === "asset_owner" ? "theme-accent-btn justify-start px-3 py-3" : "theme-secondary-btn justify-start px-3 py-3 disabled:opacity-45"} onClick={() => {
                   setAuthorizationMode("asset_owner");
                   setLocalError(null);
                 }}>
@@ -289,13 +307,34 @@ export function AssetTransferDialog({
                 </button>
               </div>
             </fieldset>
+            {!privateKeyOperationsAllowed ? (
+              <p role="note" className="rounded-md border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-100">
+                {t(
+                  "非本机 HTTP 页面不接收资产私钥。请使用硬件签名，或改用 HTTPS / 设备本机 localhost。",
+                  "Asset private keys are not accepted over non-loopback HTTP. Use hardware signing, HTTPS, or localhost on this device.",
+                )}
+              </p>
+            ) : null}
             {authorizationMode === "asset_owner" ? (
               <label className="grid gap-1.5">
                 <span className="text-sm font-medium text-[var(--theme-text-strong)]">{t("资产私钥", "Asset private key")}</span>
-                <input className="theme-input font-mono text-xs" type="password" autoComplete="new-password" value={ownerPrivateKey} onChange={(event) => {
+                <input
+                  className="theme-input font-mono text-xs"
+                  type="password"
+                  autoComplete="one-time-code"
+                  autoCapitalize="none"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  data-lpignore="true"
+                  data-protonpass-ignore="true"
+                  spellCheck={false}
+                  value={ownerPrivateKey}
+                  onChange={(event) => {
                   setOwnerPrivateKey(event.target.value);
                   setLocalError(null);
-                }} />
+                  }}
+                />
                 <span className="text-xs leading-5 text-[var(--theme-text-muted)]">{t("私钥只用于本次签名，不会保存。", "The private key is used only for this signature and is not saved.")}</span>
               </label>
             ) : null}

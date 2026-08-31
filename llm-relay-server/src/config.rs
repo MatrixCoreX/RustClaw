@@ -19,6 +19,7 @@ pub struct RelayConfig {
     pub provider: ModelProvider,
     pub upstream_timeout: Duration,
     pub max_request_body_bytes: usize,
+    pub max_upstream_response_bytes: usize,
     pub max_messages: usize,
     pub max_tools: usize,
     pub max_inflight: usize,
@@ -66,7 +67,18 @@ impl RelayConfig {
         let base_url = env_or("RELAY_UPSTREAM_BASE_URL", "https://api.minimaxi.com/v1")
             .trim_end_matches('/')
             .to_owned();
-        if !base_url.starts_with("https://") && !env_bool("RELAY_ALLOW_INSECURE_UPSTREAM", false)? {
+        let parsed_base_url = reqwest::Url::parse(&base_url)
+            .context("RELAY_UPSTREAM_BASE_URL must be an absolute URL")?;
+        if parsed_base_url.host_str().is_none()
+            || !parsed_base_url.username().is_empty()
+            || parsed_base_url.password().is_some()
+            || parsed_base_url.query().is_some()
+            || parsed_base_url.fragment().is_some()
+        {
+            bail!("RELAY_UPSTREAM_BASE_URL must not contain credentials, query, or fragment components");
+        }
+        if parsed_base_url.scheme() != "https" && !env_bool("RELAY_ALLOW_INSECURE_UPSTREAM", false)?
+        {
             bail!("RELAY_UPSTREAM_BASE_URL must use https");
         }
 
@@ -81,10 +93,27 @@ impl RelayConfig {
         if !(1024..=16 * 1024 * 1024).contains(&max_request_body_bytes) {
             bail!("RELAY_MAX_REQUEST_BODY_BYTES must be between 1024 and 16777216");
         }
+        let max_upstream_response_bytes =
+            env_usize("RELAY_MAX_UPSTREAM_RESPONSE_BYTES", 16 * 1024 * 1024)?;
+        if !(1024..=64 * 1024 * 1024).contains(&max_upstream_response_bytes) {
+            bail!("RELAY_MAX_UPSTREAM_RESPONSE_BYTES must be between 1024 and 67108864");
+        }
+        let upstream_timeout_seconds = env_u64("RELAY_UPSTREAM_TIMEOUT_SECONDS", 180)?;
+        if !(5..=600).contains(&upstream_timeout_seconds) {
+            bail!("RELAY_UPSTREAM_TIMEOUT_SECONDS must be between 5 and 600");
+        }
+        let max_messages = env_usize("RELAY_MAX_MESSAGES", 256)?;
+        let max_tools = env_usize("RELAY_MAX_TOOLS", 128)?;
+        if !(1..=1024).contains(&max_messages) || max_tools > 512 {
+            bail!("relay message/tool limits are outside supported bounds");
+        }
         let max_inflight = env_usize("RELAY_MAX_INFLIGHT", 16)?;
         let max_inflight_per_key = env_u32("RELAY_MAX_INFLIGHT_PER_KEY", 4)?;
-        if max_inflight == 0 || max_inflight_per_key == 0 {
-            bail!("relay inflight limits must be positive");
+        if !(1..=1024).contains(&max_inflight)
+            || !(1..=128).contains(&max_inflight_per_key)
+            || usize::try_from(max_inflight_per_key).unwrap_or(usize::MAX) > max_inflight
+        {
+            bail!("relay inflight limits are outside supported bounds");
         }
 
         Ok(Self {
@@ -92,10 +121,11 @@ impl RelayConfig {
             store: StoreConfig::from_env()?,
             default_model: alias,
             provider,
-            upstream_timeout: Duration::from_secs(env_u64("RELAY_UPSTREAM_TIMEOUT_SECONDS", 180)?),
+            upstream_timeout: Duration::from_secs(upstream_timeout_seconds),
             max_request_body_bytes,
-            max_messages: env_usize("RELAY_MAX_MESSAGES", 256)?,
-            max_tools: env_usize("RELAY_MAX_TOOLS", 128)?,
+            max_upstream_response_bytes,
+            max_messages,
+            max_tools,
             max_inflight,
             max_inflight_per_key,
             limits: QuotaLimits::from_env()?,

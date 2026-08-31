@@ -84,6 +84,10 @@ fn async_completion_replaces_the_matching_waiting_result() {
         envelope.provenance["source"],
         "async_job_completion_checkpoint"
     );
+    assert_eq!(
+        envelope.provenance["content_trust"],
+        "untrusted_async_job_output"
+    );
 }
 
 #[test]
