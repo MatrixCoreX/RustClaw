@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { formatUiError } from "../lib/ui-error";
 import type { ApiResponse, FactoryResetResponse } from "../types/api";
 
 type Translate = (zh: string, en: string) => string;
@@ -37,7 +38,7 @@ export function useFactoryResetRuntime({
   const readApiBody = async <T,>(res: Response, label: string): Promise<T> => {
     const body = (await res.json()) as ApiResponse<T>;
     if (!res.ok || !body.ok || body.data === undefined) {
-      throw new Error(body.error || `${label} request failed (${res.status})`);
+      throw new Error(body.error || `${label.replace(/\s+/g, "_")}_http_${res.status}`);
     }
     return body.data;
   };
@@ -76,7 +77,7 @@ export function useFactoryResetRuntime({
       setResult(data);
       onResetComplete(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("未知错误", "Unknown error"));
+      setError(formatUiError(err, t, "恢复出厂设置未完成，请稍后重试。", "Factory reset did not complete. Try again later."));
     } finally {
       setLoading(false);
     }

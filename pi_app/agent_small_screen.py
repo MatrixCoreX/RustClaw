@@ -4824,10 +4824,7 @@ class SmallScreenApp:
         self._settings_reset_status_var.set(self._t("resetting_admin_login"))
 
         def worker():
-            ok, err = reset_admin_login_account(
-                username="admin",
-                password="123456",
-            )
+            ok, err, password = reset_admin_login_account(username="admin")
 
             def finish():
                 b = getattr(self, "_settings_reset_admin_btn", None)
@@ -4843,7 +4840,10 @@ class SmallScreenApp:
 
                         messagebox.showinfo(
                             self._t("reset_admin_login_dialog_title"),
-                            self._t("reset_admin_login_dialog_body"),
+                            self._t("reset_admin_login_dialog_body").format(
+                                username="admin",
+                                password=password,
+                            ),
                         )
                     except Exception:
                         pass

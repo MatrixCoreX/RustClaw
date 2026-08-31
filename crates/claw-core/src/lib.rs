@@ -7,6 +7,7 @@ pub mod channel_commands;
 pub mod channel_delivery;
 pub mod channel_delivery_client;
 pub mod channel_delivery_tokens;
+pub mod channel_event_admission;
 pub mod channel_i18n;
 pub mod channel_ingress;
 pub mod channel_media_limits;

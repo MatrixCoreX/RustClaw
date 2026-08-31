@@ -11,11 +11,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { NniOwnerAuthorizationChallenge } from "../hooks/useNniRuntime";
 import {
+  nniPrivateKeyOperationsAllowed,
   normalizeNniOwnerSignature,
   validateNniOwnerPrivateKey,
   validateNniOwnerPublicKey,
+  type NniOwnerKeyPair,
 } from "../lib/nni-owner-public-key";
-import type { NniOwnerKeyPairResponse } from "../types/api";
 import { useUiDialog } from "./UiDialogProvider";
 
 type Translate = (zh: string, en: string) => string;
@@ -29,7 +30,7 @@ export interface NniAssetAccountDialogProps {
   remoteNodeReady: boolean;
   loading: boolean;
   actionError: string | null;
-  generatedKeyPair: NniOwnerKeyPairResponse | null;
+  generatedKeyPair: NniOwnerKeyPair | null;
   authorizationChallenge: NniOwnerAuthorizationChallenge | null;
   privateKeyCopied: boolean;
   onClose: () => void;
@@ -66,7 +67,10 @@ export function NniAssetAccountDialog({
   onCopyText,
 }: NniAssetAccountDialogProps) {
   const { confirm } = useUiDialog();
-  const [authorizationMode, setAuthorizationMode] = useState<AuthorizationMode>("private_key");
+  const privateKeyOperationsAllowed = nniPrivateKeyOperationsAllowed();
+  const [authorizationMode, setAuthorizationMode] = useState<AuthorizationMode>(
+    privateKeyOperationsAllowed ? "private_key" : "external_signature",
+  );
   const [privateKey, setPrivateKey] = useState("");
   const [publicKey, setPublicKey] = useState("");
   const [externalSignature, setExternalSignature] = useState("");
@@ -113,7 +117,15 @@ export function NniAssetAccountDialog({
     setExternalSignature("");
   }, [authorizationChallenge?.taskId]);
 
+  useEffect(() => {
+    if (privateKeyOperationsAllowed || authorizationMode !== "private_key") return;
+    if (authorizationChallenge) onCancelExternalAuthorization();
+    setAuthorizationMode("external_signature");
+    setPrivateKey("");
+  }, [authorizationChallenge, authorizationMode, onCancelExternalAuthorization, privateKeyOperationsAllowed]);
+
   const selectAuthorizationMode = (nextMode: AuthorizationMode) => {
+    if (nextMode === "private_key" && !privateKeyOperationsAllowed) return;
     if (nextMode === authorizationMode) return;
     if (authorizationChallenge) onCancelExternalAuthorization();
     setAuthorizationMode(nextMode);
@@ -205,7 +217,21 @@ export function NniAssetAccountDialog({
             </p>
           ) : null}
 
-          {mode === "create" ? (
+          {!privateKeyOperationsAllowed ? (
+            <div role="alert" className="flex items-start gap-2 rounded-md border border-amber-400/30 bg-amber-500/10 px-3 py-2.5 text-sm leading-6 text-amber-100">
+              <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{t(
+                "当前页面使用非本机 HTTP 连接，私钥输入、显示和签名已禁用。请改用 HTTPS，或在设备本机通过 localhost 操作。",
+                "Private-key input, display, and signing are disabled over non-loopback HTTP. Use HTTPS or operate through localhost on this device.",
+              )}</span>
+            </div>
+          ) : null}
+
+          {!privateKeyOperationsAllowed && (mode === "create" || mode === "recover") ? (
+            <div className="flex justify-end pt-1">
+              <button type="button" className="theme-secondary-btn px-3 py-2 text-sm" disabled={loading} onClick={close}>{t("关闭", "Close")}</button>
+            </div>
+          ) : mode === "create" ? (
             generatedKeyPair ? (
               <>
                 <div className="flex items-start gap-2 rounded-md border border-amber-400/30 bg-amber-500/10 px-3 py-2.5 text-sm leading-6 text-amber-100">
@@ -298,7 +324,7 @@ export function NniAssetAccountDialog({
           ) : (
             <>
               <div className="grid grid-cols-2 rounded-md border border-white/10 bg-black/10 p-1" role="tablist" aria-label={t("签名方式", "Signing method")}>
-                <button type="button" role="tab" aria-selected={authorizationMode === "private_key"} className={authorizationMode === "private_key" ? "theme-accent-btn justify-center px-3 py-2 text-sm" : "theme-secondary-btn justify-center border-transparent px-3 py-2 text-sm"} onClick={() => selectAuthorizationMode("private_key")}>
+                <button type="button" role="tab" aria-selected={authorizationMode === "private_key"} disabled={!privateKeyOperationsAllowed} className={authorizationMode === "private_key" ? "theme-accent-btn justify-center px-3 py-2 text-sm" : "theme-secondary-btn justify-center border-transparent px-3 py-2 text-sm disabled:opacity-45"} onClick={() => selectAuthorizationMode("private_key")}>
                   {t("输入私钥", "Use private key")}
                 </button>
                 <button type="button" role="tab" aria-selected={authorizationMode === "external_signature"} className={authorizationMode === "external_signature" ? "theme-accent-btn justify-center px-3 py-2 text-sm" : "theme-secondary-btn justify-center border-transparent px-3 py-2 text-sm"} onClick={() => selectAuthorizationMode("external_signature")}>

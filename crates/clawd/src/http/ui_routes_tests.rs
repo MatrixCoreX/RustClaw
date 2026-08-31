@@ -2011,9 +2011,39 @@ fn workspace_update_release_deploy_uses_stable_release_and_prebuilt_ui() {
     assert!(!script.contains("cp -a \"$PACKAGE_DIR/target/release/.\""));
     assert!(!script.contains("build-ui-nginx.sh --deploy-if-configured"));
     let source_checkout_script = include_str!("../../../../scripts/switch-to-source-checkout.sh");
-    assert!(source_checkout_script.contains("git clone --quiet --single-branch"));
+    assert!(
+        source_checkout_script.contains("git clone --quiet --depth 1 --no-tags --single-branch")
+    );
     assert!(source_checkout_script.contains("source_checkout_status=enabled"));
     assert!(source_checkout_script.contains("mv \"$ROOT_DIR\" \"$BACKUP_DIR\""));
+    let workspace_update = include_str!("ui_routes/workspace_update.rs");
+    assert!(
+        workspace_update.contains("pkill -TERM -f '[t]arget/release/clawd|cargo run -p [c]lawd'")
+    );
+}
+
+#[test]
+fn workspace_update_release_restore_uses_atomic_package_mode() {
+    assert_eq!(
+        workspace_release_deploy_args(false),
+        vec!["./deploy-github-release.sh", "--root", ".", "--no-restart"]
+    );
+    assert_eq!(
+        workspace_release_deploy_args(true),
+        vec![
+            "./deploy-github-release.sh",
+            "--root",
+            ".",
+            "--no-restart",
+            "--package-mode",
+        ]
+    );
+    assert_eq!(
+        WorkspaceUpdateMode::ReleaseRestore.as_str(),
+        "release_restore"
+    );
+    let routes = include_str!("ui_routes.rs");
+    assert!(routes.contains("/admin/workspace-update/restore-release"));
 }
 
 #[test]

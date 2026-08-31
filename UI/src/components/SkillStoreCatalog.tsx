@@ -41,6 +41,7 @@ import {
   latestUnresolvedSkillStoreFailure,
   skillStoreInstallState,
 } from "../lib/skill-store";
+import { formatUiError } from "../lib/ui-error";
 import type {
   SkillStoreDependencyResponse,
   SkillStoreDependencyStatus,
@@ -265,7 +266,7 @@ export function SkillStoreCatalog({
         [skillName]: {
           loading: false,
           data: current[skillName]?.data ?? null,
-          error: error instanceof Error ? error.message : t("依赖状态检查失败", "Dependency check failed"),
+          error: formatUiError(error, t, "依赖状态检查失败。", "Dependency check failed."),
         },
       }));
     }
@@ -483,7 +484,7 @@ export function SkillStoreCatalog({
         <details className="mt-3 rounded border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-white/55">
           <summary className="cursor-pointer text-white/65">{t("诊断信息", "Diagnostics")}</summary>
           <p className="mt-2 text-white/60">
-            {recentFailure.skill_name} · {recentFailure.failure.error_code}
+            {recentFailure.skill_name} · {t("诊断编号", "Diagnostic code")}: {recentFailure.failure.error_code}
           </p>
           <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-black/20 p-2 text-[11px] text-white/55">
             {recentFailure.failure.diagnostic}

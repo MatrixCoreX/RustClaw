@@ -51,6 +51,7 @@ use crate::skill_registry::Capability;
 mod file;
 pub use file::{
     delete_file_secret, file_secret_is_configured, set_file_secret, EnvFileSecretsBroker,
+    SecretProtectionSource,
 };
 
 /// secret 内容的强类型包装。

@@ -359,16 +359,17 @@ fn build_telegram_inbox_rel_path(
     bot_name: &str,
     chat_id: i64,
     user_id: i64,
-    ts: u64,
+    provider_message_id: &str,
     ext: &str,
 ) -> String {
     let base = root_dir.trim().trim_end_matches('/');
     let safe_bot = safe_telegram_storage_segment(bot_name, "bot");
+    let safe_message_id = safe_telegram_storage_segment(provider_message_id, "message");
     let safe_ext = ext.trim().trim_start_matches('.');
     if base.is_empty() {
-        format!("{safe_bot}/{chat_id}/{user_id}/{ts}.{safe_ext}")
+        format!("{safe_bot}/{chat_id}/{user_id}/{safe_message_id}.{safe_ext}")
     } else {
-        format!("{base}/{safe_bot}/{chat_id}/{user_id}/{ts}.{safe_ext}")
+        format!("{base}/{safe_bot}/{chat_id}/{user_id}/{safe_message_id}.{safe_ext}")
     }
 }
 

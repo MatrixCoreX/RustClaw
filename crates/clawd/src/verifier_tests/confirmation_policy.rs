@@ -3,7 +3,8 @@ use super::*;
 #[test]
 fn destructive_run_cmd_requires_confirmation_without_resume() {
     let state = test_state();
-    let task = test_task();
+    let mut task = test_task();
+    task.user_key = Some("rk-audit-fixture-secret".to_string());
     let result = verify_plan(
         &state,
         &task,
@@ -79,6 +80,21 @@ fn destructive_run_cmd_requires_confirmation_without_resume() {
     let detail: serde_json::Value =
         serde_json::from_str(detail_json.as_deref().expect("audit detail json")).unwrap();
     assert_eq!(detail["task_id"], task.task_id);
+    assert_eq!(detail["source_channel"], task.channel);
+    assert_eq!(detail["actor_user_id"], task.user_id);
+    assert!(detail["principal_ref"]
+        .as_str()
+        .is_some_and(|value| value.starts_with("sha256:")));
+    assert!(detail["grant_digest"]
+        .as_str()
+        .is_some_and(|value| value.starts_with("sha256:")));
+    assert!(detail["effect_classes"]
+        .as_array()
+        .is_some_and(|values| values.iter().any(|value| value == "mutate")));
+    assert!(!detail_json
+        .as_deref()
+        .unwrap_or_default()
+        .contains("rk-audit-fixture-secret"));
     assert_eq!(
         detail
             .pointer("/permission_decision/decision")
@@ -171,7 +187,7 @@ fn destructive_run_cmd_uses_authenticated_yolo_policy() {
             .permission_decision
             .pointer("/steps/0/global_sandbox_mode")
             .and_then(serde_json::Value::as_str),
-        Some("danger_full")
+        Some("workspace_write")
     );
 }
 

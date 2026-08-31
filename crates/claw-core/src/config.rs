@@ -545,6 +545,9 @@ pub struct WebdConfig {
     /// 登录失败达到阈值后的锁定秒数。
     #[serde(default = "default_webd_login_lockout_seconds")]
     pub login_lockout_seconds: u64,
+    /// WEBD 自身的应用层资源边界；nginx 只能作为额外的第一层保护。
+    #[serde(default)]
+    pub request_limits: WebdRequestLimitsConfig,
 }
 
 impl Default for WebdConfig {
@@ -562,8 +565,139 @@ impl Default for WebdConfig {
             session_store_path: default_webd_session_store_path(),
             login_failure_limit: default_webd_login_failure_limit(),
             login_lockout_seconds: default_webd_login_lockout_seconds(),
+            request_limits: WebdRequestLimitsConfig::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WebdRequestLimitsConfig {
+    #[serde(default = "default_webd_max_header_bytes")]
+    pub max_header_bytes: usize,
+    #[serde(default = "default_webd_max_json_body_bytes")]
+    pub max_json_body_bytes: usize,
+    #[serde(default = "default_webd_body_read_timeout_seconds")]
+    pub body_read_timeout_seconds: u64,
+    #[serde(default = "default_webd_upload_body_read_timeout_seconds")]
+    pub upload_body_read_timeout_seconds: u64,
+    #[serde(default = "default_webd_global_concurrency")]
+    pub global_concurrency: usize,
+    #[serde(default = "default_webd_per_ip_concurrency")]
+    pub per_ip_concurrency: usize,
+    #[serde(default = "default_webd_per_session_concurrency")]
+    pub per_session_concurrency: usize,
+    #[serde(default = "default_webd_sse_per_ip_concurrency")]
+    pub sse_per_ip_concurrency: usize,
+    #[serde(default = "default_webd_sse_max_lifetime_seconds")]
+    pub sse_max_lifetime_seconds: u64,
+    #[serde(default = "default_webd_upload_concurrency")]
+    pub upload_concurrency: usize,
+    #[serde(default = "default_webd_high_cost_concurrency")]
+    pub high_cost_concurrency: usize,
+    #[serde(default = "default_webd_per_ip_rpm")]
+    pub per_ip_rpm: u32,
+    #[serde(default = "default_webd_per_session_rpm")]
+    pub per_session_rpm: u32,
+    #[serde(default = "default_webd_login_per_ip_rpm")]
+    pub login_per_ip_rpm: u32,
+    #[serde(default = "default_webd_task_per_ip_rpm")]
+    pub task_per_ip_rpm: u32,
+    #[serde(default = "default_webd_upload_per_ip_rpm")]
+    pub upload_per_ip_rpm: u32,
+    #[serde(default = "default_webd_high_cost_per_ip_rpm")]
+    pub high_cost_per_ip_rpm: u32,
+}
+
+impl Default for WebdRequestLimitsConfig {
+    fn default() -> Self {
+        Self {
+            max_header_bytes: default_webd_max_header_bytes(),
+            max_json_body_bytes: default_webd_max_json_body_bytes(),
+            body_read_timeout_seconds: default_webd_body_read_timeout_seconds(),
+            upload_body_read_timeout_seconds: default_webd_upload_body_read_timeout_seconds(),
+            global_concurrency: default_webd_global_concurrency(),
+            per_ip_concurrency: default_webd_per_ip_concurrency(),
+            per_session_concurrency: default_webd_per_session_concurrency(),
+            sse_per_ip_concurrency: default_webd_sse_per_ip_concurrency(),
+            sse_max_lifetime_seconds: default_webd_sse_max_lifetime_seconds(),
+            upload_concurrency: default_webd_upload_concurrency(),
+            high_cost_concurrency: default_webd_high_cost_concurrency(),
+            per_ip_rpm: default_webd_per_ip_rpm(),
+            per_session_rpm: default_webd_per_session_rpm(),
+            login_per_ip_rpm: default_webd_login_per_ip_rpm(),
+            task_per_ip_rpm: default_webd_task_per_ip_rpm(),
+            upload_per_ip_rpm: default_webd_upload_per_ip_rpm(),
+            high_cost_per_ip_rpm: default_webd_high_cost_per_ip_rpm(),
+        }
+    }
+}
+
+fn default_webd_max_header_bytes() -> usize {
+    32 * 1024
+}
+
+fn default_webd_max_json_body_bytes() -> usize {
+    2 * 1024 * 1024
+}
+
+fn default_webd_body_read_timeout_seconds() -> u64 {
+    30
+}
+
+fn default_webd_upload_body_read_timeout_seconds() -> u64 {
+    300
+}
+
+fn default_webd_global_concurrency() -> usize {
+    128
+}
+
+fn default_webd_per_ip_concurrency() -> usize {
+    64
+}
+
+fn default_webd_per_session_concurrency() -> usize {
+    24
+}
+
+fn default_webd_sse_per_ip_concurrency() -> usize {
+    8
+}
+
+fn default_webd_sse_max_lifetime_seconds() -> u64 {
+    6 * 60 * 60
+}
+
+fn default_webd_upload_concurrency() -> usize {
+    2
+}
+
+fn default_webd_high_cost_concurrency() -> usize {
+    8
+}
+
+fn default_webd_per_ip_rpm() -> u32 {
+    600
+}
+
+fn default_webd_per_session_rpm() -> u32 {
+    360
+}
+
+fn default_webd_login_per_ip_rpm() -> u32 {
+    30
+}
+
+fn default_webd_task_per_ip_rpm() -> u32 {
+    120
+}
+
+fn default_webd_upload_per_ip_rpm() -> u32 {
+    20
+}
+
+fn default_webd_high_cost_per_ip_rpm() -> u32 {
+    60
 }
 
 fn default_webd_session_cookie_name() -> String {
@@ -571,7 +705,7 @@ fn default_webd_session_cookie_name() -> String {
 }
 
 fn default_webd_session_ttl_seconds() -> u64 {
-    86400
+    43200
 }
 
 fn default_webd_session_store_path() -> String {
@@ -1583,6 +1717,8 @@ impl ToolApprovalPolicy {
 pub struct ToolsConfig {
     #[serde(default = "default_tools_profile")]
     pub access_profile: String,
+    #[serde(default = "default_admin_tools_profile")]
+    pub admin_access_profile: String,
     #[serde(default)]
     pub sandbox_mode: ToolSandboxMode,
     #[serde(default)]
@@ -1724,6 +1860,7 @@ impl Default for ToolsConfig {
     fn default() -> Self {
         Self {
             access_profile: default_tools_profile(),
+            admin_access_profile: default_admin_tools_profile(),
             sandbox_mode: ToolSandboxMode::default(),
             sandbox_backend: ToolSandboxBackend::default(),
             approval_policy: ToolApprovalPolicy::default(),

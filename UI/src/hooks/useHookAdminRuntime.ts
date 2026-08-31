@@ -1,10 +1,12 @@
 import { useState } from "react";
 
+import { formatUiError } from "../lib/ui-error";
 import type { ApiResponse, HookAdminStatus } from "../types/api";
 
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
+type Translate = (zh: string, en: string) => string;
 
-export function useHookAdminRuntime(apiFetch: ApiFetch) {
+export function useHookAdminRuntime(apiFetch: ApiFetch, t: Translate) {
   const [hookStatus, setHookStatus] = useState<HookAdminStatus | null>(null);
   const [hookStatusLoading, setHookStatusLoading] = useState(false);
   const [hookStatusError, setHookStatusError] = useState<string | null>(null);
@@ -21,7 +23,7 @@ export function useHookAdminRuntime(apiFetch: ApiFetch) {
       setHookStatus(body.data);
       return body.data;
     } catch (error) {
-      setHookStatusError(error instanceof Error ? error.message : "hook_admin_unknown_error");
+      setHookStatusError(formatUiError(error, t, "无法读取 Hook 状态。", "Could not load hook status."));
       return null;
     } finally {
       setHookStatusLoading(false);

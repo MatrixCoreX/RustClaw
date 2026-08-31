@@ -62,12 +62,16 @@ pub(super) fn feishu_inbox_root_for_message_type<'a>(
     }
 }
 
-pub(super) fn feishu_saved_file_name(message_type: &str, content: &Value, ts: u64) -> String {
+pub(super) fn feishu_saved_file_name(
+    message_type: &str,
+    content: &Value,
+    storage_id: &str,
+) -> String {
     if let Some(name) = content.get("file_name").and_then(|v| v.as_str()) {
         let n = name.trim();
         if !n.is_empty() && !n.contains('/') && !n.contains('\\') {
             let safe = safe_feishu_storage_segment(n, "file");
-            return format!("{}_{}", ts, safe);
+            return format!("{}_{}", storage_id, safe);
         }
     }
     let ext = match message_type {
@@ -77,7 +81,7 @@ pub(super) fn feishu_saved_file_name(message_type: &str, content: &Value, ts: u6
         "file" => "bin",
         _ => "bin",
     };
-    format!("{}.{}", ts, ext)
+    format!("{}.{}", storage_id, ext)
 }
 
 pub(super) fn feishu_media_kind_token(message_type: &str) -> &'static str {

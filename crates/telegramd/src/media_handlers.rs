@@ -21,14 +21,13 @@ pub(super) async fn handle_image_message(
     ext: &str,
     prompt: &str,
 ) -> anyhow::Result<()> {
-    let ts = unix_ts();
     let normalized_ext = normalize_image_ext(ext);
     let rel_path = build_telegram_inbox_rel_path(
         &state.image_inbox_dir,
         &state.bot_name,
         msg.chat.id.0,
         user_id,
-        ts,
+        &msg.id.0.to_string(),
         &normalized_ext,
     );
     let abs_path = std::env::current_dir()
@@ -59,14 +58,13 @@ pub(super) async fn handle_audio_message(
     ext: &str,
     prompt: &str,
 ) -> anyhow::Result<()> {
-    let ts = unix_ts();
     let normalized_ext = normalize_audio_ext(ext);
     let rel_path = build_telegram_inbox_rel_path(
         &state.audio_inbox_dir,
         &state.bot_name,
         msg.chat.id.0,
         user_id,
-        ts,
+        &msg.id.0.to_string(),
         &normalized_ext,
     );
     let abs_path = std::env::current_dir()
@@ -113,14 +111,13 @@ pub(super) async fn handle_file_message(
     ext: &str,
     prompt: &str,
 ) -> anyhow::Result<()> {
-    let ts = unix_ts();
     let normalized_ext = normalize_file_ext(ext);
     let rel_path = build_telegram_inbox_rel_path(
         &state.file_inbox_dir,
         &state.bot_name,
         msg.chat.id.0,
         user_id,
-        ts,
+        &msg.id.0.to_string(),
         &normalized_ext,
     );
     let abs_path = std::env::current_dir()
@@ -149,14 +146,13 @@ pub(super) async fn handle_video_message(
     ext: &str,
     prompt: &str,
 ) -> anyhow::Result<()> {
-    let ts = unix_ts();
     let normalized_ext = normalize_video_ext(ext);
     let rel_path = build_telegram_inbox_rel_path(
         &state.video_inbox_dir,
         &state.bot_name,
         msg.chat.id.0,
         user_id,
-        ts,
+        &msg.id.0.to_string(),
         &normalized_ext,
     );
     let abs_path = std::env::current_dir()
@@ -211,7 +207,7 @@ pub(super) async fn store_pending_telegram_attachment(
         &state.bot_name,
         msg.chat.id.0,
         platform_user_id,
-        unix_ts(),
+        &msg.id.0.to_string(),
         &normalized_ext,
     );
     let abs_path = std::env::current_dir()

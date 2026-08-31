@@ -203,11 +203,13 @@ case "$PLATFORM" in
     RELEASE_PREFIX="ubuntu-x86_64-"
     ASSET_PREFIX="${APP_RELEASE_ARTIFACT_ID}-ubuntu-x86_64-"
     ELF_MACHINE=62
+    RUST_TARGET="x86_64-unknown-linux-gnu"
     ;;
   pi-aarch64)
     RELEASE_PREFIX="pi-aarch64-"
     ASSET_PREFIX="${APP_RELEASE_ARTIFACT_ID}-pi-aarch64-"
     ELF_MACHINE=183
+    RUST_TARGET="aarch64-unknown-linux-gnu"
     ;;
   *)
     die "unsupported_release_platform:$PLATFORM"
@@ -472,6 +474,23 @@ for release in releases:
     )
     if checksum is None:
         continue
+    manifest_name = f"{archive_name}.manifest.json"
+    signature_name = f"{manifest_name}.sig"
+    sbom_name = f"{archive_name}.spdx.json"
+    manifest = next(
+        (asset for asset in assets if isinstance(asset, dict) and str(asset.get("name") or "") == manifest_name),
+        None,
+    )
+    signature = next(
+        (asset for asset in assets if isinstance(asset, dict) and str(asset.get("name") or "") == signature_name),
+        None,
+    )
+    sbom = next(
+        (asset for asset in assets if isinstance(asset, dict) and str(asset.get("name") or "") == sbom_name),
+        None,
+    )
+    if manifest is None or signature is None or sbom is None:
+        continue
     result = {
         "tag": tag,
         "archive_name": archive_name,
@@ -482,8 +501,14 @@ for release in releases:
         "checksum_url": str(
             checksum.get("url") or checksum.get("browser_download_url") or ""
         ),
+        "manifest_name": manifest_name,
+        "manifest_url": str(manifest.get("url") or manifest.get("browser_download_url") or ""),
+        "signature_name": signature_name,
+        "signature_url": str(signature.get("url") or signature.get("browser_download_url") or ""),
+        "sbom_name": sbom_name,
+        "sbom_url": str(sbom.get("url") or sbom.get("browser_download_url") or ""),
     }
-    if not result["archive_url"] or not result["checksum_url"]:
+    if not all(result[key] for key in ("archive_url", "checksum_url", "manifest_url", "signature_url", "sbom_url")):
         continue
     print(json.dumps(result))
     break
@@ -527,14 +552,72 @@ fi
 
 ARCHIVE_PATH="$WORK_DIR/$ARCHIVE_NAME"
 CHECKSUM_PATH="$WORK_DIR/$CHECKSUM_NAME"
+MANIFEST_PATH="$WORK_DIR/$MANIFEST_NAME"
+SIGNATURE_PATH="$WORK_DIR/$SIGNATURE_NAME"
+SBOM_PATH="$WORK_DIR/$SBOM_NAME"
 download_file "$ARCHIVE_URL" "$ARCHIVE_PATH"
 download_file "$CHECKSUM_URL" "$CHECKSUM_PATH"
+download_file "$MANIFEST_URL" "$MANIFEST_PATH"
+download_file "$SIGNATURE_URL" "$SIGNATURE_PATH"
+download_file "$SBOM_URL" "$SBOM_PATH"
+
+RELEASE_ALLOWED_SIGNERS="${APP_RELEASE_ALLOWED_SIGNERS_FILE:-$ROOT_DIR/configs/release_allowed_signers}"
+RELEASE_MANIFEST_TOOL="${APP_RELEASE_MANIFEST_TOOL:-$ROOT_DIR/scripts/security/release_manifest.py}"
+[[ -f "$RELEASE_ALLOWED_SIGNERS" && ! -L "$RELEASE_ALLOWED_SIGNERS" ]] ||
+  die "release_allowed_signers_missing"
+[[ -f "$RELEASE_MANIFEST_TOOL" && ! -L "$RELEASE_MANIFEST_TOOL" ]] ||
+  die "release_manifest_verifier_missing"
+command -v ssh-keygen >/dev/null 2>&1 || die "release_signature_verifier_missing"
+if ! ssh-keygen -q -Y verify \
+  -f "$RELEASE_ALLOWED_SIGNERS" \
+  -I release \
+  -n agent-runtime-release \
+  -s "$SIGNATURE_PATH" < "$MANIFEST_PATH"; then
+  die "release_manifest_signature_invalid"
+fi
+printf 'release_signature=verified\n'
+MANIFEST_DIGEST="$(hash_file "$MANIFEST_PATH")"
+
+MANIFEST_RECORD="$WORK_DIR/verified-manifest.json"
+python3 "$RELEASE_MANIFEST_TOOL" verify \
+  --artifact "$ARCHIVE_PATH" \
+  --sbom "$SBOM_PATH" \
+  --manifest "$MANIFEST_PATH" \
+  --expected-target "$RUST_TARGET" \
+  --expected-package-root "$APP_RELEASE_ARTIFACT_ID" > "$MANIFEST_RECORD" ||
+  die "release_manifest_invalid"
+MANIFEST_VERSION="$(python3 - "$MANIFEST_RECORD" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+print(json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))["release"]["version"])
+PY
+)"
 
 EXPECTED_HASH="$(awk 'NR == 1 {print tolower($1)}' "$CHECKSUM_PATH")"
 [[ "$EXPECTED_HASH" =~ ^[0-9a-f]{64}$ ]] || die "invalid_release_checksum_file"
 ACTUAL_HASH="$(hash_file "$ARCHIVE_PATH")"
 [[ "$ACTUAL_HASH" == "$EXPECTED_HASH" ]] || die "release_checksum_mismatch"
 printf 'release_checksum=verified\n'
+
+if [[ -f "$ROOT_DIR/VERSION" ]]; then
+  INSTALLED_VERSION="$(head -n 1 "$ROOT_DIR/VERSION" | tr -d '\r\n')"
+  python3 - "$INSTALLED_VERSION" "$MANIFEST_VERSION" <<'PY' ||
+import re
+import sys
+
+def version(value):
+    match = re.fullmatch(r"(?:v)?([0-9]+)\.([0-9]+)\.([0-9]+)", value)
+    if not match:
+        raise SystemExit("release_version_invalid")
+    return tuple(map(int, match.groups()))
+
+if version(sys.argv[2]) < version(sys.argv[1]):
+    raise SystemExit("release_version_downgrade_rejected")
+PY
+  die "release_version_downgrade_rejected"
+fi
 
 EXTRACT_DIR="$WORK_DIR/extract"
 mkdir -p "$EXTRACT_DIR"
@@ -570,6 +653,8 @@ if [[ -d "$EXTRACT_DIR/$APP_RELEASE_ARTIFACT_ID" ]]; then
 else
   die "release_package_root_missing:$APP_RELEASE_ARTIFACT_ID"
 fi
+[[ "$(head -n 1 "$PACKAGE_DIR/VERSION" | tr -d '\r\n')" == "$MANIFEST_VERSION" ]] ||
+  die "release_package_version_manifest_mismatch"
 [[ -x "$PACKAGE_DIR/target/release/clawd" ]] ||
   die "release_package_missing_clawd"
 python3 - "$PACKAGE_DIR/target/release/clawd" "$ELF_MACHINE" <<'PY'
@@ -654,6 +739,7 @@ if [[ "$PACKAGE_MODE" -eq 1 ]]; then
   chmod 700 "$BACKUP_ROOT"
   printf '%s\n' "$TAG" > "$STAGED_ROOT/.release-tag"
   printf '%s\n' "$BACKUP_DIR" > "$STAGED_ROOT/.release-rollback"
+  printf '%s\n' "$MANIFEST_DIGEST" > "$STAGED_ROOT/.release-manifest-digest"
 
   printf 'release_package_step=activating\n'
   mv "$ROOT_DIR" "$BACKUP_DIR"
@@ -781,6 +867,7 @@ if [[ -d "$PACKAGE_DIR/prebuilt/skill-packages" ]]; then
 fi
 printf '%s\n' ".release-tag" >> "$MANAGED_PATHS_FILE"
 printf '%s\n' ".release-rollback" >> "$MANAGED_PATHS_FILE"
+printf '%s\n' ".release-manifest-digest" >> "$MANAGED_PATHS_FILE"
 
 while IFS= read -r relative; do
   [[ -n "$relative" ]] || continue
@@ -824,7 +911,7 @@ DEPLOY_STARTED=1
 while IFS= read -r relative; do
   [[ -n "$relative" ]] || continue
   case "$relative" in
-    .release-tag|.release-rollback) continue ;;
+    .release-tag|.release-rollback|.release-manifest-digest) continue ;;
   esac
   install_managed_path "$relative"
 done < "$MANAGED_PATHS_FILE"
@@ -838,6 +925,7 @@ if [[ -d "$PACKAGE_DIR/configs" ]]; then
 fi
 printf '%s\n' "$TAG" > "$ROOT_DIR/.release-tag"
 printf '%s\n' "$BACKUP_DIR" > "$ROOT_DIR/.release-rollback"
+printf '%s\n' "$MANIFEST_DIGEST" > "$ROOT_DIR/.release-manifest-digest"
 
 if [[ -x "$ROOT_DIR/build-ui-nginx.sh" && -f "$ROOT_DIR/UI/dist/index.html" ]]; then
   "$ROOT_DIR/build-ui-nginx.sh" --copy-if-configured

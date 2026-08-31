@@ -434,6 +434,7 @@ note = "placeholder"
 [tools]
 allow = []
 access_profile = "coding"
+admin_access_profile = "full"
 approval_policy = "on_risk"
 allow_path_outside_workspace = false
 allow_sudo = false

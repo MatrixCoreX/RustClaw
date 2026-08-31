@@ -118,6 +118,11 @@ RUN_ALL_WITH_SERVER_REQUIRED_SNIPPETS = {
     "receipt_projection_uses_host_platform": "--target host",
     "receipt_projection_uses_proactive_scope": "--scope proactive",
     "isolated_workspace_is_created": 'ISOLATED_WORKSPACE="${ISOLATION_ROOT}/workspace"',
+    "isolated_runtime_state_is_private": '"${ISOLATED_WORKSPACE}/.agent-runtime"',
+    "isolated_source_is_materialized": "materialize_isolated_workspace.py",
+    "isolated_materializer_uses_git_visible_source": "--destination \"${ISOLATED_WORKSPACE}\"",
+    "isolated_materializer_includes_docs": "--include-root docs",
+    "isolated_build_cache_is_reused": "for name in target .git; do",
     "isolated_package_root_is_private": '--package-root "${ISOLATED_WORKSPACE}/data/skill-packages"',
     "isolated_server_always_projects_core_receipts": (
         'if [[ "${REUSE_SERVER}" -eq 0 ]]; then\n  project_proactive_skill_receipts'
@@ -128,11 +133,7 @@ RUN_ALL_WITH_SERVER_REQUIRED_SNIPPETS = {
         'NL_MODEL_IO_LOG="${ISOLATED_WORKSPACE}/logs/model_io.log"'
     ),
     "on_demand_manifest_source_is_explicit": '${ROOT_DIR}/optional_skills/${skill_name}',
-    "optional_workspace_members_are_private": (
-        '"${ISOLATED_WORKSPACE}/optional_skills/"'
-    ),
-    "cargo_lock_is_copied_into_workspace": '"${ROOT_DIR}/Cargo.lock"',
-    "cargo_manifest_is_copied_into_workspace": '"${ROOT_DIR}/Cargo.toml"',
+    "optional_workspace_members_are_private": '${ROOT_DIR}/optional_skills/${skill_name}',
 }
 
 RUN_CLIENT_LIKE_CONTINUOUS_REQUIRED_SNIPPETS = {

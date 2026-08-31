@@ -26,6 +26,13 @@ function currentHttpOrigin(location: BrowserLocation): string | null {
   }
 }
 
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname.trim().toLowerCase().replace(/^\[|\]$/g, "");
+  if (normalized === "localhost" || normalized === "::1") return true;
+  const octets = normalized.split(".");
+  return octets.length === 4 && octets[0] === "127" && octets.every((octet) => /^\d{1,3}$/.test(octet));
+}
+
 export function defaultWebdBaseUrl(
   location?: BrowserLocation,
 ): string {
@@ -53,6 +60,13 @@ function preferredServiceBaseUrl(
   const normalized = stored?.trim() ?? "";
   if (!normalized) return defaultUrl;
   const currentOrigin = location ? currentHttpOrigin(location) : null;
+  if (location && !isLoopbackHostname(location.hostname)) {
+    try {
+      if (isLoopbackHostname(new URL(normalized).hostname)) return defaultUrl;
+    } catch {
+      return defaultUrl;
+    }
+  }
   if (
     location &&
     LOCAL_FRONTEND_PORTS.has(location.port) &&

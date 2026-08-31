@@ -60,3 +60,61 @@ fn office_mime_types_keep_machine_readable_extensions_without_a_name() {
         );
     }
 }
+
+#[test]
+fn channel_ingress_attachment_validation_accepts_one_stable_regular_file() {
+    let root = std::env::temp_dir().join(format!("channel-attachment-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(root.join("data/channel")).expect("create fixture");
+    std::fs::write(root.join("data/channel/message.bin"), b"payload").expect("write fixture");
+    let attachment = ChannelIngressAttachment {
+        kind: "file".to_string(),
+        path: "data/channel/message.bin".to_string(),
+        mime_type: Some("application/octet-stream".to_string()),
+        size: Some(7),
+    };
+    assert_eq!(
+        validate_channel_ingress_attachments(&root, &[attachment]),
+        Ok(())
+    );
+    std::fs::remove_dir_all(root).expect("remove fixture");
+}
+
+#[test]
+fn channel_ingress_attachment_validation_rejects_escape_symlink_and_size_mismatch() {
+    let root = std::env::temp_dir().join(format!("channel-attachment-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(root.join("data/channel")).expect("create fixture");
+    std::fs::write(root.join("data/channel/message.bin"), b"payload").expect("write fixture");
+    let attachment = |path: &str, size| ChannelIngressAttachment {
+        kind: "file".to_string(),
+        path: path.to_string(),
+        mime_type: None,
+        size,
+    };
+    assert_eq!(
+        validate_channel_ingress_attachments(&root, &[attachment("../outside", None)]),
+        Err("channel_attachment_path_invalid")
+    );
+    assert_eq!(
+        validate_channel_ingress_attachments(
+            &root,
+            &[attachment("data/channel/message.bin", Some(8))]
+        ),
+        Err("channel_attachment_size_mismatch")
+    );
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(
+            root.join("data/channel/message.bin"),
+            root.join("data/channel/link.bin"),
+        )
+        .expect("create symlink");
+        assert_eq!(
+            validate_channel_ingress_attachments(
+                &root,
+                &[attachment("data/channel/link.bin", None)]
+            ),
+            Err("channel_attachment_type_invalid")
+        );
+    }
+    std::fs::remove_dir_all(root).expect("remove fixture");
+}

@@ -20,6 +20,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { writeTextToClipboard } from "../lib/auth-keys";
 import { latestNniRewardRecord, latestVisibleNniRewardAic } from "../lib/nni-apr";
+import type { NniOwnerKeyPair } from "../lib/nni-owner-public-key";
 import type { NniOwnerAuthorizationChallenge } from "../hooks/useNniRuntime";
 import {
   NniAssetAccountDialog,
@@ -41,13 +42,14 @@ import {
   shortenHex,
   shortNniValue,
 } from "../lib/nni-display";
+import { formatNniApiError } from "../lib/nni-api-error";
+import { formatUiError } from "../lib/ui-error";
 import type {
   NniDeviceActionResponse,
   NniDeviceStatusResponse,
   NniHeartbeatErrorRecord,
   NniHeartbeatRecord,
   NniNetworkStatsResponse,
-  NniOwnerKeyPairResponse,
   NniRewardsResponse,
 } from "../types/api";
 
@@ -67,7 +69,7 @@ export interface NniPageProps {
   nniDeviceAuthorizationDenied: boolean;
   nniJoined: boolean;
   nniAssetOwnerPubkey: string | null;
-  nniOwnerKeyPair: NniOwnerKeyPairResponse | null;
+  nniOwnerKeyPair: NniOwnerKeyPair | null;
   nniOwnerActionLoading: "generate" | "recover" | "custom" | "unbind" | null;
   nniOwnerAuthorizationChallenge: NniOwnerAuthorizationChallenge | null;
   nniRemoteNodes: string;
@@ -368,7 +370,7 @@ export function NniPage({
     if (!copyValue) return;
     void writeTextToClipboard(copyValue)
       .then(() => onActionMessageChange(t("已复制结果。", "Result copied.")))
-      .catch((err) => onActionErrorChange(err instanceof Error ? err.message : t("复制失败", "Copy failed")));
+      .catch((err) => onActionErrorChange(formatUiError(err, t, "复制失败。", "Copy failed.")));
   };
 
   const copyOwnerPrivateKey = async () => {
@@ -386,7 +388,7 @@ export function NniPage({
       }, NNI_COPY_FEEDBACK_MS);
     } catch (err) {
       setOwnerPrivateKeyCopied(false);
-      onActionErrorChange(err instanceof Error ? err.message : t("复制失败", "Copy failed"));
+      onActionErrorChange(formatUiError(err, t, "私钥复制失败。", "The private key could not be copied."));
     }
   };
 
@@ -1045,7 +1047,7 @@ export function NniPage({
                   <span className="text-xs text-white/50">{formatUnixDateTime(record.created_at_ts)}</span>
                 </div>
                 <p className="mt-3 break-words rounded-xl border border-white/10 bg-black/25 px-3 py-2 font-mono text-xs leading-5 text-white/75">
-                  {record.error}
+                  {formatNniApiError(record.error, t, record.error)}
                 </p>
               </div>
             ))
@@ -1184,7 +1186,7 @@ export function NniPage({
                     ? t("心跳", "Heartbeat")
                     : record.request_kind || t("请求", "Request");
               const resultLabel =
-                record.error_code ||
+                (record.error_code ? formatNniApiError(record.error_code, t) : null) ||
                 (record.compliant === true
                   ? t("合规", "Compliant")
                   : record.compliant === false

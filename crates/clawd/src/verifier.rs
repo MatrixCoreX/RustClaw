@@ -316,6 +316,40 @@ fn planner_mapping_required_args(
     })
 }
 
+fn planner_step_has_structured_policy(
+    state: &AppState,
+    normalized_skill: &str,
+    args: &serde_json::Value,
+) -> bool {
+    if crate::agent_engine::planner_internal_tool_is_visible(normalized_skill)
+        || state.mcp_tool(normalized_skill).is_some()
+    {
+        return true;
+    }
+    let action = args
+        .as_object()
+        .and_then(|obj| obj.get("action"))
+        .and_then(|value| value.as_str())
+        .map(normalize_schema_token)
+        .filter(|value| !value.is_empty());
+    state
+        .skill_manifest(normalized_skill)
+        .is_none_or(|manifest| {
+            if manifest.planner_capabilities.is_empty() {
+                // Synthetic/test registries and legacy isolated fixtures may
+                // intentionally exercise schema-only behavior. Production
+                // registry admission separately ratchets every executable
+                // skill to at least one host-owned capability policy.
+                return true;
+            }
+            claw_core::skill_registry::select_planner_capability_mapping(
+                &manifest.planner_capabilities,
+                action.as_deref(),
+            )
+            .is_some()
+        })
+}
+
 fn action_scoped_risk_level(
     state: &AppState,
     normalized_skill: &str,
@@ -967,8 +1001,6 @@ pub(crate) fn verify_plan(
         .planner_available_skills_for_task(task)
         .into_iter()
         .collect();
-    let unrestricted_admin = execution_policy.has_unrestricted_admin_authority();
-    let enabled_execution_skills = state.get_skills_list();
     let all_step_ids: HashSet<String> = effective_plan_result
         .steps
         .iter()
@@ -1018,7 +1050,6 @@ pub(crate) fn verify_plan(
         } else if matches!(step.action_type.as_str(), "call_skill" | "call_tool") {
             let normalized_skill = state.resolve_canonical_skill_name(&step.skill);
             if !visible_skills.contains(&normalized_skill)
-                && !(unrestricted_admin && enabled_execution_skills.contains(&normalized_skill))
                 && !crate::agent_engine::planner_internal_tool_is_visible(&normalized_skill)
                 && state.mcp_tool(&normalized_skill).is_none()
             {
@@ -1026,6 +1057,16 @@ pub(crate) fn verify_plan(
                     step_id: step.step_id.clone(),
                     kind: VerifyIssueKind::SkillNotVisible,
                     detail: format!("skill `{normalized_skill}` is not in planner visible skills"),
+                    missing_fields: Vec::new(),
+                });
+            }
+            if !planner_step_has_structured_policy(state, &normalized_skill, &step.args) {
+                issues.push(VerifyIssue {
+                    step_id: step.step_id.clone(),
+                    kind: VerifyIssueKind::CapabilityUnavailable,
+                    detail: format!(
+                        "error_code=capability_policy_mapping_missing skill={normalized_skill}"
+                    ),
                     missing_fields: Vec::new(),
                 });
             }

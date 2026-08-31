@@ -593,6 +593,8 @@ flowchart LR
 - `webd` is the browser security boundary and provides password login, session persistence, credential injection, request limits, and API proxying
 - `clawd` does not serve browser assets and cannot bind a non-loopback address; local channel daemons and `clawcli` may use its internal API
 - The dashboard keeps two separate entry controls: **webd public port** switches between direct device-IP access (`0.0.0.0:<port>`) and loopback-only access (`127.0.0.1:<port>`), while **Web server entry configuration** reports nginx installation, process, site, and UI deployment status. Keep direct webd access open when running locally without nginx. Closing it does not interrupt a configured native nginx deployment, because nginx keeps proxying over loopback.
+- Home keeps WEBD, nginx, optional LAN HTTPS, and the local-network name in the separate **Web Access** section. Linux devices advertise the configured single-label name through Avahi and macOS uses mDNSResponder. mDNS and HTTPS are independent: `http://<name>.local/` works whenever the active Web entry is reachable, while `https://<name>.local/` additionally requires the optional local CA setup.
+- Changing the local-network name validates one DNS-safe label, updates the operating-system mDNS hostname, and restarts local discovery. If the local CA has already been prepared, the same operation renews the leaf certificate for the new `.local` name without replacing the trusted root CA. The device IP remains a recovery address if the old name stops resolving.
 - when the UI is opened through a domain, login defaults use the current origin without appending `:8787` or `:8788`; direct local ports are inferred only for local access
 - Browser voice input uses hold-to-talk: press and hold to record, then release to send the voice turn automatically. Browsers expose the microphone only to secure contexts: remote access through a LAN IP must use a trusted HTTPS endpoint; plain `http://<pi-ip>` cannot be granted microphone access by UI code. `http://localhost` remains available when the browser runs on the Agent Runtime host itself.
 - The `Learning / Maintenance` page reads the bundled README and architecture guides. It provides beginner, operator, and developer routes, full-text search, per-page navigation, saved reading progress, and Mermaid zoom/pan/full-screen controls in both UI languages.
@@ -626,6 +628,8 @@ Useful endpoints (send `X-Agent-Key` for the current UI/user key):
 - `POST /v1/tasks/cancel-one`: cancels by active-list index
 - `POST /v1/services/{service}/{action}`: browser-console service start/stop/restart; failures return machine fields such as `error_code`, `status_code`, `message_key`, `service`, and `action`
 - `GET /v1/admin/nginx`: returns admin-only nginx installation, process, site, and deployed-UI status
+- `GET /v1/admin/local-mdns`: returns the current local hostname, `.local` address, platform support, and responder status
+- `POST /v1/admin/local-mdns`: validates and changes the single-label local hostname; when local HTTPS was prepared, it also renews the leaf certificate for the new name
 - `GET /v1/admin/webd-exposure`: returns the configured webd listener, port, process state, and direct-access state
 - `POST /v1/admin/webd-exposure`: atomically switches webd between direct and loopback-only access, then schedules a platform-appropriate restart
 - `POST /v1/admin/workspace-update/nginx-enable`: checks, installs, or updates nginx on Linux/macOS, repairs and starts the entry, then deploys existing UI assets

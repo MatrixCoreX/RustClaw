@@ -187,6 +187,7 @@ async fn cancel_task_by_id_is_idempotent_after_the_task_is_cancelled() {
         auth_headers(),
         Json(CancelTaskByIdRequest {
             task_id: task_id.to_string(),
+            idempotency_key: "cancel-route-idempotency-1".to_string(),
         }),
     )
     .await;
@@ -200,14 +201,14 @@ async fn cancel_task_by_id_is_idempotent_after_the_task_is_cancelled() {
         auth_headers(),
         Json(CancelTaskByIdRequest {
             task_id: task_id.to_string(),
+            idempotency_key: "cancel-route-idempotency-1".to_string(),
         }),
     )
     .await;
     assert_eq!(second_status, StatusCode::OK);
     let second = second_response.data.expect("second cancel response");
-    assert_eq!(second["status"], "task_already_cancelled");
-    assert_eq!(second["canceled"], 0);
-    assert_eq!(second["already_terminal"], true);
+    assert_eq!(second["status"], "task_cancelled");
+    assert_eq!(second["canceled"], 1);
     assert_eq!(second["task_id"], task_id);
 }
 
@@ -661,6 +662,7 @@ async fn resume_needs_user_task_requires_and_applies_exact_approval_request() {
             new_constraints: None,
             approval_request_id: None,
             approval_decision: None,
+            idempotency_key: "approval-route-missing-1".to_string(),
         }),
     )
     .await;
@@ -677,6 +679,7 @@ async fn resume_needs_user_task_requires_and_applies_exact_approval_request() {
             new_constraints: None,
             approval_request_id: Some(request_id.to_string()),
             approval_decision: Some("approve".to_string()),
+            idempotency_key: "approval-route-invalid-1".to_string(),
         }),
     )
     .await;
@@ -693,6 +696,7 @@ async fn resume_needs_user_task_requires_and_applies_exact_approval_request() {
             new_constraints: None,
             approval_request_id: Some(request_id.to_string()),
             approval_decision: Some("approve_once".to_string()),
+            idempotency_key: "approval-route-approve-1".to_string(),
         }),
     )
     .await;
@@ -742,6 +746,7 @@ async fn resume_needs_user_task_can_deny_the_exact_approval_request() {
             new_constraints: None,
             approval_request_id: Some(request_id.to_string()),
             approval_decision: Some("deny".to_string()),
+            idempotency_key: "approval-route-deny-1".to_string(),
         }),
     )
     .await;
@@ -786,6 +791,7 @@ async fn scoped_approval_can_be_listed_and_revoked_by_the_same_actor() {
             new_constraints: None,
             approval_request_id: Some(request_id.to_string()),
             approval_decision: Some("always_for_scope".to_string()),
+            idempotency_key: "approval-route-scope-1".to_string(),
         }),
     )
     .await;

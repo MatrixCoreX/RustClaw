@@ -34,6 +34,7 @@ mod browser_session_service;
 mod capability_map;
 mod capability_resolver;
 mod capability_result;
+mod channel_event_admission;
 mod channel_send;
 mod child_task_contract;
 mod clarify_state;
@@ -94,6 +95,7 @@ mod runtime;
 mod schedule_service;
 mod scheduled_run_contract;
 mod schema_contract;
+mod secure_workspace_fs;
 mod semantic_judge;
 mod skill_admission;
 mod skill_availability;
@@ -273,6 +275,32 @@ const MIN_TOKIO_WORKER_STACK_BYTES: usize = 2 * 1024 * 1024;
 const MAX_TOKIO_WORKER_STACK_BYTES: usize = 64 * 1024 * 1024;
 const DEFAULT_AGENT_ID: &str = "main";
 
+fn ensure_private_runtime_directory(path: &std::path::Path) -> anyhow::Result<()> {
+    std::fs::create_dir_all(path)?;
+    let metadata = std::fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        anyhow::bail!(
+            "runtime state path must be a real directory: {}",
+            path.display()
+        );
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
+}
+
+fn ensure_private_runtime_directories(workspace_root: &std::path::Path) -> anyhow::Result<()> {
+    ensure_private_runtime_directory(&workspace_root.join("data"))?;
+    ensure_private_runtime_directory(&workspace_root.join("logs"))?;
+    ensure_private_runtime_directory(&workspace_root.join(".pids"))?;
+    ensure_private_runtime_directory(&claw_core::workspace_state::workspace_state_root(
+        workspace_root,
+    ))
+}
+
 fn write_bootstrap_credentials(
     workspace_root: &std::path::Path,
     credentials: &BootstrapAdminResult,
@@ -341,6 +369,37 @@ mod bootstrap_credentials_tests {
                 std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
                 0o600
             );
+        }
+        std::fs::remove_dir_all(root).expect("remove fixture root");
+    }
+
+    #[test]
+    fn runtime_state_directories_are_private_and_reject_symlinks() {
+        let root = std::env::temp_dir().join(format!(
+            "agent-runtime-state-permissions-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(root.join("data")).expect("create data fixture");
+        ensure_private_runtime_directories(&root).expect("secure runtime directories");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for path in [
+                root.join("data"),
+                root.join("logs"),
+                root.join(".pids"),
+                root.join(".agent-runtime"),
+            ] {
+                assert_eq!(
+                    std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                    0o700
+                );
+            }
+            let linked_root = root.join("linked");
+            std::fs::create_dir(&linked_root).expect("create linked root");
+            std::os::unix::fs::symlink(root.join("data"), linked_root.join("data"))
+                .expect("create data symlink");
+            assert!(ensure_private_runtime_directory(&linked_root.join("data")).is_err());
         }
         std::fs::remove_dir_all(root).expect("remove fixture root");
     }
@@ -514,6 +573,7 @@ async fn run() -> anyhow::Result<()> {
         "runtime_concurrency_plan"
     );
     let workspace_root = std::env::current_dir()?;
+    ensure_private_runtime_directories(&workspace_root)?;
     let credential_store_path =
         claw_core::git_remote_config::git_credential_store_path(&workspace_root);
     claw_core::secrets::install_global(Arc::new(claw_core::secrets::EnvFileSecretsBroker::new(
@@ -565,6 +625,7 @@ async fn run() -> anyhow::Result<()> {
         ensure_memory_schema(&db)?;
         ensure_channel_schema(&db)?;
         repo::ensure_channel_delivery_receipt_schema(&db)?;
+        repo::ensure_channel_event_admission_schema(&db)?;
         repo::ensure_channel_delivery_outbox_schema(&db)?;
         ensure_task_lease_schema(&db)?;
         ensure_key_auth_schema(&db)?;
@@ -1235,6 +1296,14 @@ async fn run() -> anyhow::Result<()> {
             "/internal/channel-events/whatsapp-cloud/accepted",
             post(whatsapp_cloud_events::handle_whatsapp_cloud_accepted),
         )
+        .route(
+            "/internal/channel-ingress/claim",
+            post(channel_event_admission::claim),
+        )
+        .route(
+            "/internal/channel-ingress/finish",
+            post(channel_event_admission::finish),
+        )
         .with_state(state.clone());
 
     let app = Router::new().nest("/v1", api);
@@ -1512,6 +1581,15 @@ async fn submit_task(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "task_idempotency_lookup_failed",
             );
+        }
+    }
+
+    if let Some(ingress) = req.ingress.as_ref() {
+        if let Err(error_code) = ui_attachments::validate_channel_ingress_attachments(
+            &state.skill_rt.workspace_root,
+            &ingress.attachments,
+        ) {
+            return api_err::<SubmitTaskResponse>(StatusCode::BAD_REQUEST, error_code);
         }
     }
 

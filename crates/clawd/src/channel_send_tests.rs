@@ -34,6 +34,38 @@ fn wechat_part_failure_is_retained_without_suppressing_later_parts() {
     assert_eq!(first_error.as_deref(), Some("video rejected"));
 }
 
+#[test]
+fn wechat_send_config_uses_persisted_login_token_when_tracked_config_is_empty() {
+    let root = std::env::temp_dir().join(format!(
+        "agent-runtime-wechat-config-{}",
+        uuid::Uuid::new_v4()
+    ));
+    let config_dir = root.join("configs/channels");
+    let session_dir = root.join("data/wechatd");
+    std::fs::create_dir_all(&config_dir).expect("create config directory");
+    std::fs::create_dir_all(&session_dir).expect("create session directory");
+    std::fs::write(
+        config_dir.join("wechat.toml"),
+        r#"[wechat]
+enabled = true
+api_base_url = "https://ilinkai.weixin.qq.com"
+bot_token = ""
+text_chunk_chars = 1200
+"#,
+    )
+    .expect("write wechat config");
+    std::fs::write(
+        session_dir.join("session.json"),
+        r#"{"bot_token":"persisted-login-token","base_url":"https://ilinkai.weixin.qq.com"}"#,
+    )
+    .expect("write wechat session");
+
+    let config = load_wechat_send_config_from_workspace(&root).expect("resolve config");
+    assert_eq!(config.bot_token, "persisted-login-token");
+
+    std::fs::remove_dir_all(root).expect("remove temp workspace");
+}
+
 #[tokio::test]
 async fn channel_send_progress_survives_a_later_part_failure() {
     let (result, provider_message_ids) = capture_channel_send_progress(async {

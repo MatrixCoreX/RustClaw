@@ -32,7 +32,7 @@ AUTHORITY_MARKERS = (
     "PathAuthority",
     "authority_scope",
     "allow_path_outside_workspace",
-    "unrestricted_admin",
+    "host_policy_grant",
 )
 GENERIC_ERROR_WRITER_RE = re.compile(
     r"(?:[\"']error_kind[\"']\s*:|(?:insert|entry)\(\s*[\"']error_kind[\"'])"

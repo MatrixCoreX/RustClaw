@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { followTaskEventStream } from "../lib/task-event-stream";
 import { shouldTrackTaskLive } from "../lib/task-lifecycle";
 import { appendLiveTaskEvent } from "../lib/task-result";
+import { formatUiError } from "../lib/ui-error";
 import type {
   ActiveTaskItem,
   ActiveTasksResponse,
@@ -105,7 +106,7 @@ export function useTaskRuntime({
     const res = await apiFetch(`/v1/tasks/${id.trim()}`);
     const body = (await res.json()) as ApiResponse<TaskQueryResponse>;
     if (!res.ok || !body.ok || !body.data) {
-      throw new Error(body.error || `task query failed (${res.status})`);
+      throw new Error(body.error || `task_query_http_${res.status}`);
     }
     return body.data;
   };
@@ -115,7 +116,7 @@ export function useTaskRuntime({
     const res = await apiFetch(`/v1/debug/tasks/${normalizedId}?teaching=true`);
     const body = (await res.json()) as ApiResponse<TaskLlmDebugResponse>;
     if (!res.ok || !body.ok || !body.data) {
-      throw new Error(body.error || `task llm debug query failed (${res.status})`);
+      throw new Error(body.error || `task_llm_debug_query_http_${res.status}`);
     }
     return body.data;
   };
@@ -143,7 +144,7 @@ export function useTaskRuntime({
       });
       const body = (await res.json()) as ApiResponse<ActiveTasksResponse>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `active tasks fetch failed (${res.status})`);
+        throw new Error(body.error || `active_tasks_fetch_http_${res.status}`);
       }
       const tasks = body.data.tasks ?? [];
       setActiveTasks(tasks);
@@ -151,7 +152,7 @@ export function useTaskRuntime({
       setActiveTasksLastUpdated(Date.now());
       return tasks;
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "正在处理的任务暂时无法读取。", "Active tasks are temporarily unavailable.");
       setActiveTasksError(message);
       return [];
     } finally {
@@ -184,7 +185,7 @@ export function useTaskRuntime({
       });
       const body = (await res.json()) as ApiResponse<TaskHistoryResponse>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `task history fetch failed (${res.status})`);
+        throw new Error(body.error || `task_history_fetch_http_${res.status}`);
       }
       if (requestEpoch !== taskHistoryRequestEpoch.current) return [];
       setTaskHistory(body.data.tasks ?? []);
@@ -195,7 +196,7 @@ export function useTaskRuntime({
       return body.data.tasks ?? [];
     } catch (error) {
       if (requestEpoch !== taskHistoryRequestEpoch.current) return [];
-      const message = error instanceof Error ? error.message : t("未知错误", "Unknown error");
+      const message = formatUiError(error, t, "无法读取任务历史。", "Could not load task history.");
       setTaskHistoryError(message);
       return [];
     } finally {
@@ -220,7 +221,7 @@ export function useTaskRuntime({
       setTaskError(null);
       return result;
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "任务详情暂时无法读取。", "Task details are temporarily unavailable.");
       setTaskError(message);
       return null;
     } finally {
@@ -247,7 +248,7 @@ export function useTaskRuntime({
       setTaskLlmDebug(result);
       return result;
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "教学过程暂时无法读取。", "The teaching trace is temporarily unavailable.");
       setTaskLlmDebugError(message);
       setTaskLlmDebug(null);
       return null;
@@ -324,7 +325,7 @@ export function useTaskRuntime({
       });
       const resp = (await res.json()) as ApiResponse<SubmitTaskResponse>;
       if (!res.ok || !resp.ok || !resp.data?.task_id) {
-        throw new Error(resp.error || `resume submit failed (${res.status})`);
+        throw new Error(resp.error || `task_resume_submit_http_${res.status}`);
       }
 
       setResumeDrafts((prev) => {
@@ -337,7 +338,7 @@ export function useTaskRuntime({
       markTaskSubmitted(resp.data.task_id);
       void fetchActiveTasks(true);
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "任务继续执行失败，请稍后重试。", "The task could not resume. Try again shortly.");
       setResumeTaskError(message);
     } finally {
       setResumeSubmittingTaskId(null);
@@ -354,11 +355,12 @@ export function useTaskRuntime({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           task_id: item.task_id,
+          idempotency_key: `ui-cancel-${crypto.randomUUID()}`,
         }),
       });
       const body = (await res.json()) as ApiResponse<{ canceled?: number }>;
       if (!res.ok || !body.ok) {
-        throw new Error(body.error || `cancel task failed (${res.status})`);
+        throw new Error(body.error || `task_cancel_http_${res.status}`);
       }
       setCancelTaskMessage(t("任务取消请求已提交。", "Task cancel request submitted."));
       await fetchActiveTasks(true);
@@ -366,7 +368,7 @@ export function useTaskRuntime({
         void queryTaskById(item.task_id, false);
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "任务取消失败，请稍后重试。", "The task could not be cancelled. Try again shortly.");
       setCancelTaskError(message);
     } finally {
       setCancelingTaskId(null);
@@ -403,7 +405,10 @@ export function useTaskRuntime({
                 pause_seconds: 3600,
                 idempotency_key: `ui-pause-${crypto.randomUUID()}`,
               }
-            : { task_id: normalizedTaskId };
+            : {
+                task_id: normalizedTaskId,
+                idempotency_key: `ui-resume-${crypto.randomUUID()}`,
+              };
       const res = await apiFetch(path, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -411,7 +416,7 @@ export function useTaskRuntime({
       });
       const body = (await res.json()) as ApiResponse<{ status?: string; task_id?: string }>;
       if (!res.ok || !body.ok) {
-        throw new Error(body.error || `task control failed (${res.status})`);
+        throw new Error(body.error || `task_control_http_${res.status}`);
       }
       setTaskControlMessage(
         control === "steer"
@@ -428,7 +433,7 @@ export function useTaskRuntime({
         void queryTaskById(normalizedTaskId, false);
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "任务控制操作未完成，请稍后重试。", "The task control action did not complete. Try again shortly.");
       setTaskControlError(message);
     } finally {
       setTaskControlSubmittingId(null);
@@ -450,21 +455,26 @@ export function useTaskRuntime({
     setTaskControlError(null);
     try {
       let path = "/v1/tasks/resume-by-task-id";
-      let payload: Record<string, unknown> = { task_id: normalizedChildId };
+      const idempotencyKey = `ui-subagent-${control}-${crypto.randomUUID()}`;
+      let payload: Record<string, unknown> = {
+        task_id: normalizedChildId,
+        idempotency_key: idempotencyKey,
+      };
       if (control === "steer") {
         payload = {
           task_id: normalizedChildId,
           resume_reason: "subagent_steered",
           user_message: userMessage?.trim(),
+          idempotency_key: idempotencyKey,
         };
       } else if (control === "pause") {
         path = "/v1/tasks/pause-by-task-id";
-        payload = { task_id: normalizedChildId, pause_seconds: 3600 };
+        payload = { task_id: normalizedChildId, pause_seconds: 3600, idempotency_key: idempotencyKey };
       } else if (control === "resume") {
-        payload = { task_id: normalizedChildId, resume_reason: "subagent_resumed" };
+        payload = { task_id: normalizedChildId, resume_reason: "subagent_resumed", idempotency_key: idempotencyKey };
       } else if (control === "stop") {
         path = "/v1/tasks/cancel-by-task-id";
-        payload = { task_id: normalizedChildId };
+        payload = { task_id: normalizedChildId, idempotency_key: idempotencyKey };
       } else if (control === "stop_all") {
         path = "/v1/tasks/stop-child-tasks-by-parent";
         payload = { parent_task_id: normalizedParentId };
@@ -482,7 +492,7 @@ export function useTaskRuntime({
       });
       const body = (await res.json()) as ApiResponse<Record<string, unknown>>;
       if (!res.ok || !body.ok) {
-        throw new Error(body.error || `subagent control failed (${res.status})`);
+        throw new Error(body.error || `subagent_control_http_${res.status}`);
       }
       setTaskControlMessage(
         control === "stop_all"
@@ -494,7 +504,7 @@ export function useTaskRuntime({
       await fetchActiveTasks(true);
       await queryTaskById(normalizedParentId, false);
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "子任务控制操作未完成，请稍后重试。", "The subtask control action did not complete. Try again shortly.");
       setTaskControlError(message);
     } finally {
       setTaskControlSubmittingId(null);
@@ -520,11 +530,12 @@ export function useTaskRuntime({
           task_id: normalizedTaskId,
           approval_request_id: normalizedRequestId,
           approval_decision: approvalDecision,
+          idempotency_key: `ui-approval-${crypto.randomUUID()}`,
         }),
       });
       const body = (await res.json()) as ApiResponse<{ status?: string; task_id?: string }>;
       if (!res.ok || !body.ok) {
-        throw new Error(body.error || `task approval failed (${res.status})`);
+        throw new Error(body.error || `task_approval_http_${res.status}`);
       }
       setTaskControlMessage(
         approvalDecision === "deny"
@@ -542,7 +553,7 @@ export function useTaskRuntime({
       await fetchActiveTasks(true);
       void queryTaskById(normalizedTaskId, false);
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "任务确认操作未完成，请稍后重试。", "The task approval action did not complete. Try again shortly.");
       setTaskControlError(message);
     } finally {
       setTaskControlSubmittingId(null);
@@ -558,14 +569,14 @@ export function useTaskRuntime({
       const res = await apiFetch("/v1/tasks/approval-grants");
       const body = (await res.json()) as ApiResponse<ApprovalScopeGrantListResponse>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `approval scope grants fetch failed (${res.status})`);
+        throw new Error(body.error || `approval_scope_grants_fetch_http_${res.status}`);
       }
       const grants = body.data.grants ?? [];
       setApprovalScopeGrants(grants);
       setApprovalScopeGrantsError(null);
       return grants;
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "确认授权范围暂时无法读取。", "Approval scopes are temporarily unavailable.");
       setApprovalScopeGrantsError(message);
       return [];
     } finally {
@@ -588,11 +599,11 @@ export function useTaskRuntime({
       });
       const body = (await res.json()) as ApiResponse<{ status?: string; grant_id?: string }>;
       if (!res.ok || !body.ok) {
-        throw new Error(body.error || `approval scope grant revoke failed (${res.status})`);
+        throw new Error(body.error || `approval_scope_grant_revoke_http_${res.status}`);
       }
       await fetchApprovalScopeGrants(true);
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "确认授权撤销失败，请稍后重试。", "The approval grant could not be revoked. Try again shortly.");
       setApprovalScopeGrantsError(message);
     } finally {
       setApprovalScopeGrantRevokingId(null);
@@ -621,7 +632,7 @@ export function useTaskRuntime({
       });
       const body = (await res.json()) as ApiResponse<{ status?: string; task_id?: string }>;
       if (!res.ok || !body.ok) {
-        throw new Error(body.error || `task goal control failed (${res.status})`);
+        throw new Error(body.error || `task_goal_control_http_${res.status}`);
       }
       setTaskControlMessage(
         operation === "edit"
@@ -633,7 +644,7 @@ export function useTaskRuntime({
         void queryTaskById(normalizedTaskId, false);
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "目标任务控制操作未完成，请稍后重试。", "The goal control action did not complete. Try again shortly.");
       setTaskControlError(message);
     } finally {
       setTaskControlSubmittingId(null);
@@ -693,14 +704,14 @@ export function useTaskRuntime({
       });
       const resp = (await res.json()) as ApiResponse<SubmitTaskResponse>;
       if (!res.ok || !resp.ok || !resp.data?.task_id) {
-        throw new Error(resp.error || `task submit failed (${res.status})`);
+        throw new Error(resp.error || `task_submit_http_${res.status}`);
       }
 
       setInteractionSubmittedTaskId(resp.data.task_id);
       markTaskSubmitted(resp.data.task_id);
       void fetchActiveTasks(true);
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "任务提交失败，请稍后重试。", "The task could not be submitted. Try again shortly.");
       setInteractionError(message);
     } finally {
       setInteractionLoading(false);
@@ -765,7 +776,7 @@ export function useTaskRuntime({
       })
       .catch((error) => {
         if (controller.signal.aborted) return;
-        setTaskError(error instanceof Error ? error.message : "task_event_stream_failed");
+        setTaskError(formatUiError(error, t, "任务进度连接已中断，请刷新后重试。", "The task progress connection was interrupted. Refresh and try again."));
       });
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps

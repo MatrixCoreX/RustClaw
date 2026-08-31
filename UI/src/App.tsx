@@ -21,11 +21,19 @@ import { TasksPage } from "./components/TasksPage";
 import {
   formatAuthenticationError,
   maskStoredKey,
+  restorePersistedAuthMode,
   responseIndicatesExpiredAuthentication,
 } from "./lib/auth-keys";
 import { conversationHistoryScope } from "./lib/chat-history";
 import { formatDuration, toLocalTime } from "./lib/display-format";
 import { runCoalescedResponseRead } from "./lib/resilient-read";
+import { formatUiError } from "./lib/ui-error";
+import {
+  buildRuntimeRequestHeaders,
+  normalizeWebdCsrfToken,
+  runtimeRequestCredentials,
+  WEBD_CSRF_HEADER,
+} from "./lib/webd-csrf";
 import {
   appStorageKey,
   AUTH_KEY_HEADER,
@@ -125,6 +133,14 @@ function readNumber(key: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function readPersistedAuthMode(): "webd" | null {
+  return restorePersistedAuthMode(
+    window.localStorage,
+    STORAGE_KEYS.userKey,
+    STORAGE_KEYS.authMode,
+  );
+}
+
 export default function App() {
   const [lang, setLang] = useState<"zh" | "en">(() => {
     const saved = window.localStorage.getItem(STORAGE_KEYS.lang);
@@ -138,12 +154,9 @@ export default function App() {
     return preferredBrowserApiBaseUrl(saved, window.location);
   });
   const apiBase = baseUrl || getDefaultBrowserApiBaseUrl();
-  const [uiKey, setUiKey] = useState(() => window.localStorage.getItem(STORAGE_KEYS.userKey)?.trim() ?? "");
-  const [authMode, setAuthMode] = useState<"key" | "webd" | null>(() => {
-    const saved = window.localStorage.getItem(STORAGE_KEYS.authMode);
-    if (saved === "webd" || saved === "key") return saved;
-    return null;
-  });
+  const [uiKey, setUiKey] = useState("");
+  const [authMode, setAuthMode] = useState<"key" | "webd" | null>(readPersistedAuthMode);
+  const [webdCsrfToken, setWebdCsrfToken] = useState("");
   const [loginTab, setLoginTab] = useState<"key" | "webd">("webd");
   const [webdBaseUrlDraft, setWebdBaseUrlDraft] = useState(() => {
     const saved = window.localStorage.getItem(STORAGE_KEYS.webdBaseUrl);
@@ -232,16 +245,19 @@ export default function App() {
 
   const safeFetch = async (path: string, init?: RequestInit, withAuth = true) => {
     const targetUrl = `${apiBase.replace(/\/$/, "")}${path}`;
-    const credentials =
-      authMode === "webd" ? "include" : init?.credentials ?? "same-origin";
+    const credentials = runtimeRequestCredentials(withAuth, authMode, init?.credentials);
     try {
       const response = await fetch(targetUrl, {
         ...init,
         credentials,
-        headers: {
-          ...(init?.headers ?? {}),
-          ...(withAuth ? authHeaders : {}),
-        },
+        headers: buildRuntimeRequestHeaders({
+          initialHeaders: init?.headers,
+          directAuthHeaders: authHeaders,
+          withAuth,
+          authMode,
+          method: init?.method,
+          csrfToken: webdCsrfToken,
+        }),
       });
       if (
         withAuth &&
@@ -252,6 +268,7 @@ export default function App() {
         window.localStorage.removeItem(STORAGE_KEYS.userKey);
         window.localStorage.removeItem(STORAGE_KEYS.authMode);
         setAuthMode(null);
+        setWebdCsrfToken("");
         setUiKey("");
         setUiKeyDraft("");
         setUiAuthReady(false);
@@ -470,9 +487,15 @@ export default function App() {
     webdLoginEditorKeyId,
     webdLoginUsernameDraft,
     webdLoginPasswordDraft,
+    webdSessions,
+    webdSessionsLoading,
+    webdSessionsError,
+    webdSessionRevoking,
     setWebdLoginUsernameDraft,
     setWebdLoginPasswordDraft,
     fetchAuthKeys,
+    fetchWebdSessions,
+    revokeWebdSession,
     createAuthKey,
     promptCreateCustomAuthKey,
     copyAuthKey,
@@ -599,7 +622,7 @@ export default function App() {
     hookStatusLoading,
     hookStatusError,
     refreshHookStatus,
-  } = useHookAdminRuntime(apiFetch);
+  } = useHookAdminRuntime(apiFetch, t);
   const {
     skillImportSource,
     setSkillImportSource,
@@ -871,7 +894,7 @@ export default function App() {
       }
       return body.data;
     } catch (err) {
-      const message = err instanceof Error ? err.message : "未知错误";
+      const message = formatUiError(err, t, "无法读取当前登录信息。", "Could not load the current sign-in information.");
       if (!silent) {
         setAuthMeError(message);
       }
@@ -883,7 +906,7 @@ export default function App() {
     }
   };
 
-  const verifyUiKey = async (candidate: string, persist = true) => {
+  const verifyUiKey = async (candidate: string) => {
     const authEpoch = authFlowEpochRef.current;
     const normalized = candidate.trim();
     if (!normalized) {
@@ -905,15 +928,13 @@ export default function App() {
         throw new Error(formatAuthenticationError(body.error, res.status, t));
       }
       setUiKey(normalized);
-      setUiKeyDraft(normalized);
+      setUiKeyDraft("");
       setUiAuthReady(true);
       setAuthMeError(null);
       applyIdentity(body.data);
       setAuthMode("key");
-      window.localStorage.setItem(STORAGE_KEYS.authMode, "key");
-      if (persist) {
-        window.localStorage.setItem(STORAGE_KEYS.userKey, normalized);
-      }
+      window.localStorage.removeItem(STORAGE_KEYS.userKey);
+      window.localStorage.removeItem(STORAGE_KEYS.authMode);
       return true;
     } catch (err) {
       if (authEpoch !== authFlowEpochRef.current) return false;
@@ -923,7 +944,7 @@ export default function App() {
       setInteractionUserId(null);
       setInteractionChatId(null);
       setInteractionRole("-");
-      const message = err instanceof Error ? err.message : "未知错误";
+      const message = formatUiError(err, t, "登录未完成，请重试。", "Sign-in did not complete. Try again.");
       setUiAuthError(message);
       window.localStorage.removeItem(STORAGE_KEYS.userKey);
       setAuthMode(null);
@@ -940,7 +961,11 @@ export default function App() {
     if (authMode === "webd") {
       try {
         const webdBase = apiBase.replace(/\/$/, "");
-        await fetch(`${webdBase}/webd/logout`, { method: "POST", credentials: "include" });
+        await fetch(`${webdBase}/webd/logout`, {
+          method: "POST",
+          credentials: "include",
+          headers: webdCsrfToken ? { [WEBD_CSRF_HEADER]: webdCsrfToken } : undefined,
+        });
       } catch {
         // ignore network errors on logout
       }
@@ -948,6 +973,7 @@ export default function App() {
     window.localStorage.removeItem(STORAGE_KEYS.userKey);
     window.localStorage.removeItem(STORAGE_KEYS.authMode);
     setAuthMode(null);
+    setWebdCsrfToken("");
     setUiKey("");
     setUiKeyDraft("");
     setUiAuthReady(false);
@@ -984,7 +1010,7 @@ export default function App() {
         ok?: boolean;
         error?: string;
         error_code?: string;
-        data?: { retry_after_seconds?: number };
+        data?: { retry_after_seconds?: number; csrf_token?: string };
       };
       if (!res.ok || !body.ok) {
         if (body.error_code === "invalid_credentials") {
@@ -1003,6 +1029,10 @@ export default function App() {
           formatAuthenticationError(body.error_code ?? body.error, res.status, t),
         );
       }
+      const csrfToken = normalizeWebdCsrfToken(body.data?.csrf_token);
+      if (!csrfToken) {
+        throw new Error("webd_csrf_token_missing");
+      }
       setBaseUrl(webdBase);
       window.localStorage.setItem(STORAGE_KEYS.baseUrl, webdBase);
       window.localStorage.removeItem(STORAGE_KEYS.userKey);
@@ -1010,6 +1040,7 @@ export default function App() {
       setUiKeyDraft("");
       setWebdPassword("");
       setAuthMode("webd");
+      setWebdCsrfToken(csrfToken);
       window.localStorage.setItem(STORAGE_KEYS.authMode, "webd");
       setUiAuthReady(true);
       setAuthMeError(null);
@@ -1053,12 +1084,12 @@ export default function App() {
       const res = await apiFetch(`/v1/health`);
       const body = (await res.json()) as ApiResponse<HealthResponse>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `health 请求失败 (${res.status})`);
+        throw new Error(body.error || `health_http_${res.status}`);
       }
       setHealth(body.data);
     } catch (err) {
       if (!options?.silent) {
-        const message = err instanceof Error ? err.message : "未知错误";
+        const message = formatUiError(err, t, "无法读取系统状态。", "Could not load system status.");
         setError(message);
       }
     } finally {
@@ -1299,13 +1330,13 @@ export default function App() {
       const res = await apiFetch(`/v1/local/interaction-context`);
       const body = (await res.json()) as ApiResponse<LocalInteractionContextResponse>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `本地上下文获取失败 (${res.status})`);
+        throw new Error(body.error || `interaction_context_http_${res.status}`);
       }
       setInteractionUserId(body.data.user_id);
       setInteractionChatId(body.data.chat_id);
       setInteractionRole(body.data.role);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "未知错误";
+      const message = formatUiError(err, t, "无法读取本机交互信息。", "Could not load local interaction information.");
       setLocalContextError(message);
     } finally {
       setLocalContextLoading(false);
@@ -1360,6 +1391,17 @@ export default function App() {
         setUiAuthLoading(true);
         setUiAuthError(null);
         try {
+          const sessionUrl = `${apiBase.replace(/\/$/, "")}/webd/session`;
+          const sessionRes = await fetch(sessionUrl, { credentials: "include" });
+          const sessionBody = (await sessionRes.json()) as {
+            ok?: boolean;
+            data?: { logged_in?: boolean; csrf_token?: string | null };
+          };
+          const csrfToken = normalizeWebdCsrfToken(sessionBody.data?.csrf_token);
+          if (!sessionRes.ok || !sessionBody.ok || !sessionBody.data?.logged_in || !csrfToken) {
+            throw new Error("webd_session_invalid");
+          }
+          setWebdCsrfToken(csrfToken);
           const targetUrl = `${apiBase.replace(/\/$/, "")}/v1/auth/me`;
           const res = await fetch(targetUrl, { credentials: "include" });
           if (authEpoch !== authFlowEpochRef.current) return;
@@ -1371,6 +1413,7 @@ export default function App() {
             setInteractionChatId(null);
             setInteractionRole("-");
             setAuthMode(null);
+            setWebdCsrfToken("");
             window.localStorage.removeItem(STORAGE_KEYS.authMode);
             setUiAuthError(
               t("Web 会话已失效，请重新登录", "Web session expired; please sign in again."),
@@ -1384,6 +1427,7 @@ export default function App() {
           if (authEpoch !== authFlowEpochRef.current) return;
           setUiAuthReady(false);
           setAuthMode(null);
+          setWebdCsrfToken("");
           window.localStorage.removeItem(STORAGE_KEYS.authMode);
           const message =
             err instanceof Error ? normalizeFetchError(err, `${apiBase.replace(/\/$/, "")}/v1/auth/me`) : t("未知错误", "Unknown error");
@@ -1413,7 +1457,7 @@ export default function App() {
       setInteractionRole("-");
       return;
     }
-    void verifyUiKey(uiKey, false);
+    void verifyUiKey(uiKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiBase, authMode, uiKey, uiAuthLoading, uiAuthReady, authIdentity]);
 
@@ -1443,18 +1487,15 @@ export default function App() {
   }, [webdBaseUrlDraft]);
 
   useEffect(() => {
-    if (uiKey) {
-      window.localStorage.setItem(STORAGE_KEYS.userKey, uiKey);
-    } else {
-      window.localStorage.removeItem(STORAGE_KEYS.userKey);
-    }
+    window.localStorage.removeItem(STORAGE_KEYS.userKey);
   }, [uiKey]);
 
   useEffect(() => {
-    if (authMode === null) {
-      window.localStorage.removeItem(STORAGE_KEYS.authMode);
-    } else {
+    if (authMode === "webd") {
       window.localStorage.setItem(STORAGE_KEYS.authMode, authMode);
+    } else {
+      window.localStorage.removeItem(STORAGE_KEYS.authMode);
+      setWebdCsrfToken("");
     }
   }, [authMode]);
 
@@ -1508,6 +1549,7 @@ export default function App() {
     if (!uiAuthReady) return;
     if (currentPage === "channels") {
       void fetchAuthKeys();
+      if (isAdminIdentity) void fetchWebdSessions();
       void fetchWechatConfig();
       void fetchFeishuConfig();
       void fetchLarkConfig();
@@ -2163,6 +2205,10 @@ export default function App() {
               webdLoginEditorKeyId={webdLoginEditorKeyId}
               webdLoginUsernameDraft={webdLoginUsernameDraft}
               webdLoginPasswordDraft={webdLoginPasswordDraft}
+              webdSessions={webdSessions}
+              webdSessionsLoading={webdSessionsLoading}
+              webdSessionsError={webdSessionsError}
+              webdSessionRevoking={webdSessionRevoking}
               onFetchAuthKeys={fetchAuthKeys}
               onCreateAuthKey={createAuthKey}
               onPromptCreateCustomAuthKey={promptCreateCustomAuthKey}
@@ -2176,6 +2222,8 @@ export default function App() {
               onWebdLoginUsernameDraftChange={setWebdLoginUsernameDraft}
               onWebdLoginPasswordDraftChange={setWebdLoginPasswordDraft}
               onSaveWebdLoginEditor={saveWebdLoginEditor}
+              onFetchWebdSessions={fetchWebdSessions}
+              onRevokeWebdSession={revokeWebdSession}
             />
           ) : null}
 

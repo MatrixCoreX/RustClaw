@@ -448,7 +448,11 @@ export type WorkspaceUpdateMode =
   | "clawd_only"
   | "nginx_enable"
   | "nginx_disable"
+  | "local_https_prepare"
+  | "local_https_enable"
+  | "local_https_restore"
   | "release_deploy"
+  | "release_restore"
   | "source_checkout";
 
 export interface WorkspaceUpdateStatus {
@@ -484,6 +488,26 @@ export interface NginxUiStatus {
   configured: boolean;
   ui_deployed: boolean;
   clawd_exposure: "loopback_only" | string;
+  local_https_supported: boolean;
+  local_https_prepared: boolean;
+  local_https_enabled: boolean;
+  local_https_ca_fingerprint_sha256?: string | null;
+}
+
+export interface LocalMdnsStatus {
+  supported: boolean;
+  platform: string;
+  hostname: string;
+  mdns_name: string;
+  responder_installed: boolean;
+  responder_running: boolean;
+}
+
+export interface LocalMdnsUpdateResult {
+  status: LocalMdnsStatus;
+  previous_mdns_name: string;
+  https_certificate_refreshed: boolean;
+  https_refresh_error_code?: string | null;
 }
 
 export interface WebdExposureStatus {
@@ -525,6 +549,19 @@ export interface AuthKeyListItem {
   last_used_at: string | null;
   webd_username?: string | null;
   current_key?: boolean;
+}
+
+export interface WebdSessionListItem {
+  session_handle: string;
+  username: string;
+  role: string;
+  client_ip?: string;
+  client_platform?: string;
+  user_agent?: string;
+  created_unix: number;
+  last_activity_unix: number;
+  expires_unix: number;
+  current: boolean;
 }
 
 export interface ResolveChannelBindingResponse {
@@ -990,7 +1027,13 @@ export interface LlmVendorOption {
   api_format?: string;
   api_key_configured: boolean;
   api_key_masked?: string | null;
-  api_key_source?: "environment" | "private_file" | "none";
+  api_key_source?:
+    | "environment"
+    | "systemd_credential"
+    | "macos_keychain"
+    | "private_file_fallback"
+    | "device_enrollment"
+    | "none";
   api_key_env_names?: string[];
 }
 
@@ -1216,14 +1259,6 @@ export interface NniJoinVerifyResponse {
   authorization_status?: string;
 }
 
-export interface NniOwnerKeyPairResponse {
-  key_type: "K1";
-  encoding: "eos_base58_v1";
-  public_key: string;
-  private_key: string;
-  private_key_persisted: false;
-}
-
 export interface NniOwnerRecoveryResponse {
   status: string;
   asset_owner_pubkey: string;
@@ -1231,6 +1266,23 @@ export interface NniOwnerRecoveryResponse {
   authorization_epoch: number;
   authorization_status: string;
   authorized_at_unix: number;
+  node_url: string;
+}
+
+export interface NniOwnerRecoveryChallengeResponse {
+  schema_version: 1;
+  status: "asset_recovery_challenge_created";
+  task_id: string;
+  signing_payload: string;
+  device_signature: string;
+  asset_owner_pubkey: string;
+  previous_device_pubkey: string;
+  new_device_pubkey: string;
+  previous_authorization_epoch: number;
+  authorization_epoch: number;
+  device_signature_required: true;
+  owner_signature_required: true;
+  expires_at_unix: number;
   node_url: string;
 }
 

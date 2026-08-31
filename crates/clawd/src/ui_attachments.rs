@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Component, Path};
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
@@ -5,10 +6,14 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::AppState;
+use claw_core::channel_ingress::ChannelIngressAttachment;
 
 pub(crate) const MAX_UI_ATTACHMENTS: usize = 10;
 pub(crate) const MAX_UI_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
 pub(crate) const MAX_UI_TOTAL_ATTACHMENT_BYTES: usize = 60 * 1024 * 1024;
+pub(crate) const MAX_CHANNEL_ATTACHMENTS: usize = 20;
+pub(crate) const MAX_CHANNEL_ATTACHMENT_BYTES: u64 = 100 * 1024 * 1024;
+pub(crate) const MAX_CHANNEL_TOTAL_ATTACHMENT_BYTES: u64 = 250 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct UiAttachmentConstraints {
@@ -114,6 +119,67 @@ pub(crate) fn materialize_ui_task_attachments(
     }
 
     rewrite_payload_attachments(payload, &materialized);
+    Ok(())
+}
+
+pub(crate) fn validate_channel_ingress_attachments(
+    workspace_root: &Path,
+    attachments: &[ChannelIngressAttachment],
+) -> Result<(), &'static str> {
+    if attachments.len() > MAX_CHANNEL_ATTACHMENTS {
+        return Err("channel_attachments_too_many");
+    }
+    let canonical_root = workspace_root
+        .canonicalize()
+        .map_err(|_| "channel_attachment_workspace_unavailable")?;
+    let mut total_bytes = 0_u64;
+    let mut canonical_paths = HashSet::new();
+    for attachment in attachments {
+        let raw_path = attachment.path.trim();
+        if raw_path.is_empty()
+            || Path::new(raw_path).is_absolute()
+            || Path::new(raw_path)
+                .components()
+                .any(|component| matches!(component, Component::ParentDir))
+        {
+            return Err("channel_attachment_path_invalid");
+        }
+        if attachment.kind.trim().is_empty()
+            || attachment.kind.len() > 64
+            || attachment
+                .mime_type
+                .as_deref()
+                .is_some_and(|value| value.len() > 256)
+        {
+            return Err("channel_attachment_metadata_invalid");
+        }
+        let candidate = canonical_root.join(raw_path);
+        let metadata =
+            std::fs::symlink_metadata(&candidate).map_err(|_| "channel_attachment_missing")?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err("channel_attachment_type_invalid");
+        }
+        let canonical = candidate
+            .canonicalize()
+            .map_err(|_| "channel_attachment_missing")?;
+        if !canonical.starts_with(&canonical_root) {
+            return Err("channel_attachment_path_outside_workspace");
+        }
+        if !canonical_paths.insert(canonical) {
+            return Err("channel_attachment_duplicate");
+        }
+        let size = metadata.len();
+        if size > MAX_CHANNEL_ATTACHMENT_BYTES {
+            return Err("channel_attachment_too_large");
+        }
+        if attachment.size.is_some_and(|declared| declared != size) {
+            return Err("channel_attachment_size_mismatch");
+        }
+        total_bytes = total_bytes.saturating_add(size);
+        if total_bytes > MAX_CHANNEL_TOTAL_ATTACHMENT_BYTES {
+            return Err("channel_attachments_total_too_large");
+        }
+    }
     Ok(())
 }
 

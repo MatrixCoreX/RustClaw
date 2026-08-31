@@ -53,9 +53,6 @@ pub(super) fn prepare_skill_execution_isolation(
             })),
         ));
     }
-    if crate::task_execution_policy::task_has_unrestricted_admin_authority(state, task) {
-        return Ok(None);
-    }
     if let Some(current_profile) =
         crate::execution_isolation::execution_isolation_root_profile(&state.skill_rt.workspace_root)
     {

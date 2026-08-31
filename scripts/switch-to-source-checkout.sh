@@ -15,6 +15,7 @@ LOCK_DIR=""
 BACKUP_DIR=""
 ORIGINAL_MOVED=0
 MIGRATION_COMMITTED=0
+RUNTIME_DATA_MOVED=0
 
 usage() {
   cat <<'USAGE'
@@ -141,6 +142,13 @@ cleanup() {
     MIGRATION_COMMITTED=1
   fi
   if [[ "$MIGRATION_COMMITTED" -eq 0 && "$ORIGINAL_MOVED" -eq 1 ]]; then
+    if [[ "$RUNTIME_DATA_MOVED" -eq 1 ]]; then
+      rm -f "$BACKUP_DIR/data"
+      if [[ -d "$CHECKOUT_DIR/data" && ! -e "$BACKUP_DIR/data" ]]; then
+        mv "$CHECKOUT_DIR/data" "$BACKUP_DIR/data" || true
+      fi
+      RUNTIME_DATA_MOVED=0
+    fi
     if [[ ! -e "$ROOT_DIR" && -d "$BACKUP_DIR" ]]; then
       mv "$BACKUP_DIR" "$ROOT_DIR" || true
     fi
@@ -167,7 +175,7 @@ trap 'exit 143' TERM HUP
 STAGE_DIR="$(mktemp -d "$ROOT_PARENT/.${ROOT_NAME}-source-stage.XXXXXX")"
 CHECKOUT_DIR="$STAGE_DIR/checkout"
 printf 'source_checkout_step=cloning\n'
-git clone --quiet --single-branch --branch "$BRANCH" -- "$REPOSITORY" "$CHECKOUT_DIR"
+git clone --quiet --depth 1 --no-tags --single-branch --branch "$BRANCH" -- "$REPOSITORY" "$CHECKOUT_DIR"
 
 for required in \
   Cargo.toml \
@@ -193,7 +201,6 @@ merge_runtime_directory() {
 printf 'source_checkout_step=preserving_runtime_state\n'
 for relative in \
   configs \
-  data \
   logs \
   .pids \
   external_skills \
@@ -223,7 +230,18 @@ mkdir -p "$BACKUP_ROOT"
 printf 'source_checkout_step=activating\n'
 mv "$ROOT_DIR" "$BACKUP_DIR"
 ORIGINAL_MOVED=1
+if [[ -d "$BACKUP_DIR/data" ]]; then
+  [[ ! -e "$CHECKOUT_DIR/data" ]] || die "source_checkout_data_target_exists"
+  mv "$BACKUP_DIR/data" "$CHECKOUT_DIR/data" || die "source_checkout_data_move_failed"
+  RUNTIME_DATA_MOVED=1
+  ln -s "$ROOT_DIR/data" "$BACKUP_DIR/data" || die "source_checkout_data_link_failed"
+fi
 if ! mv "$CHECKOUT_DIR" "$ROOT_DIR"; then
+  if [[ "$RUNTIME_DATA_MOVED" -eq 1 ]]; then
+    rm -f "$BACKUP_DIR/data"
+    mv "$CHECKOUT_DIR/data" "$BACKUP_DIR/data" || true
+    RUNTIME_DATA_MOVED=0
+  fi
   mv "$BACKUP_DIR" "$ROOT_DIR" || true
   ORIGINAL_MOVED=0
   die "source_checkout_activation_failed"

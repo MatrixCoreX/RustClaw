@@ -478,6 +478,8 @@ echo "AGENT_PARITY_GATE_STEP maintainability_skill_contracts"
   python3 "${ROOT_DIR}/scripts/check_model_input_surface.py"
   python3 "${ROOT_DIR}/scripts/check_builtin_capability_inventory.py" --self-test
   python3 "${ROOT_DIR}/scripts/check_builtin_capability_inventory.py"
+  python3 "${SCRIPT_DIR}/check_fresh_builtin_tool_skill_suite.py" --self-test
+  python3 "${SCRIPT_DIR}/check_fresh_builtin_tool_skill_suite.py"
   python3 "${ROOT_DIR}/scripts/check_skill_hotplug_coupling_inventory.py" --self-test
   python3 "${ROOT_DIR}/scripts/check_skill_hotplug_coupling_inventory.py"
   python3 "${ROOT_DIR}/scripts/check_tool_output_artifact_contracts.py" --self-test

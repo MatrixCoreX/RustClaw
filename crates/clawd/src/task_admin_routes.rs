@@ -47,11 +47,15 @@ pub(super) struct CancelOneTaskRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct CancelTaskByIdRequest {
     task_id: String,
+    #[serde(default)]
+    idempotency_key: String,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct ResumeTaskByIdRequest {
     task_id: String,
     checkpoint_id: Option<String>,
@@ -60,23 +64,29 @@ pub(super) struct ResumeTaskByIdRequest {
     new_constraints: Option<Value>,
     approval_request_id: Option<String>,
     approval_decision: Option<String>,
+    #[serde(default)]
+    idempotency_key: String,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct PauseTaskByIdRequest {
     task_id: String,
     pause_seconds: Option<u64>,
     expected_control_seq: Option<i64>,
-    idempotency_key: Option<String>,
+    #[serde(default)]
+    idempotency_key: String,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct SteerTaskByIdRequest {
     task_id: String,
     user_message: Option<String>,
     new_constraints: Option<Value>,
     expected_control_seq: Option<i64>,
-    idempotency_key: Option<String>,
+    #[serde(default)]
+    idempotency_key: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -263,6 +273,106 @@ fn authorized_task_admin_target_by_id(
     Ok(target)
 }
 
+type TaskAdminApiResponse = (StatusCode, Json<ApiResponse<Value>>);
+
+enum RouteMutationStart<'a> {
+    Guard(RouteMutationGuard<'a>),
+    Replay(TaskAdminApiResponse),
+}
+
+struct RouteMutationGuard<'a> {
+    state: &'a AppState,
+    lease: Option<crate::repo::task_admin_mutation_receipts::TaskAdminMutationLease>,
+}
+
+impl RouteMutationGuard<'_> {
+    fn complete(mut self, response: TaskAdminApiResponse) -> TaskAdminApiResponse {
+        let Some(lease) = self.lease.take() else {
+            return response;
+        };
+        let data = response.1 .0.data.as_ref();
+        if !response.0.is_success() || !response.1 .0.ok || data.is_none() {
+            let _ = crate::repo::task_admin_mutation_receipts::release_task_admin_mutation(
+                self.state, &lease,
+            );
+            return response;
+        }
+        if let Err(error) = crate::repo::task_admin_mutation_receipts::complete_task_admin_mutation(
+            self.state,
+            &lease,
+            data.expect("checked mutation response data"),
+        ) {
+            error!(error = %error, "task_admin_mutation_receipt_finalize_failed");
+            return super::api_err::<Value>(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "task_mutation_receipt_finalize_failed",
+            );
+        }
+        response
+    }
+}
+
+impl Drop for RouteMutationGuard<'_> {
+    fn drop(&mut self) {
+        let Some(lease) = self.lease.take() else {
+            return;
+        };
+        if let Err(error) = crate::repo::task_admin_mutation_receipts::release_task_admin_mutation(
+            self.state, &lease,
+        ) {
+            error!(error = %error, "task_admin_mutation_receipt_release_failed");
+        }
+    }
+}
+
+fn begin_route_mutation<'a>(
+    state: &'a AppState,
+    headers: &HeaderMap,
+    idempotency_key: &str,
+    action: &str,
+    target_id: &str,
+    payload: &Value,
+) -> Result<RouteMutationStart<'a>, TaskAdminApiResponse> {
+    let actor_key = crate::auth_key_from_headers(headers)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| super::api_err::<Value>(StatusCode::UNAUTHORIZED, "auth_key_required"))?;
+    match crate::repo::task_admin_mutation_receipts::claim_task_admin_mutation(
+        state,
+        actor_key,
+        idempotency_key,
+        action,
+        target_id,
+        payload,
+    ) {
+        Ok(crate::repo::task_admin_mutation_receipts::TaskAdminMutationClaim::Acquired(lease)) => {
+            Ok(RouteMutationStart::Guard(RouteMutationGuard {
+                state,
+                lease: Some(lease),
+            }))
+        }
+        Ok(crate::repo::task_admin_mutation_receipts::TaskAdminMutationClaim::Replay(data)) => {
+            Ok(RouteMutationStart::Replay(super::api_ok(data)))
+        }
+        Ok(crate::repo::task_admin_mutation_receipts::TaskAdminMutationClaim::InProgress) => Err(
+            super::api_err::<Value>(StatusCode::CONFLICT, "task_mutation_in_progress"),
+        ),
+        Ok(crate::repo::task_admin_mutation_receipts::TaskAdminMutationClaim::Conflict) => Err(
+            super::api_err::<Value>(StatusCode::CONFLICT, "idempotency_key_payload_conflict"),
+        ),
+        Err(error) if error.to_string() == "task_mutation_idempotency_key_invalid" => Err(
+            super::api_err::<Value>(StatusCode::BAD_REQUEST, "idempotency_key_invalid"),
+        ),
+        Err(error) => {
+            error!(error = %error, "task_admin_mutation_receipt_claim_failed");
+            Err(super::api_err::<Value>(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "task_mutation_receipt_claim_failed",
+            ))
+        }
+    }
+}
+
 pub(super) async fn list_active_tasks(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -407,8 +517,19 @@ pub(super) async fn cancel_task_by_id(
         Ok(target) => target,
         Err(resp) => return resp,
     };
+    let mutation = match begin_route_mutation(
+        &state,
+        &headers,
+        &req.idempotency_key,
+        "cancel",
+        &target.task_id,
+        &json!({}),
+    ) {
+        Ok(RouteMutationStart::Guard(guard)) => guard,
+        Ok(RouteMutationStart::Replay(response)) | Err(response) => return response,
+    };
     if matches!(target.status.as_str(), "canceled" | "cancelled") {
-        return super::api_ok(json!({
+        return mutation.complete(super::api_ok(json!({
             "status": "task_already_cancelled",
             "canceled": 0,
             "already_terminal": true,
@@ -416,12 +537,12 @@ pub(super) async fn cancel_task_by_id(
             "user_id": target.user_id,
             "chat_id": target.chat_id,
             "channel": target.channel,
-        }));
+        })));
     }
     if !matches!(target.status.as_str(), "queued" | "running") {
         return super::api_err::<serde_json::Value>(StatusCode::CONFLICT, "task_not_active");
     }
-    match crate::cancel_task_by_id(&state, &target.task_id) {
+    let response = match crate::cancel_task_by_id(&state, &target.task_id) {
         Ok(count) if count > 0 => super::api_ok(json!({
             "status": "task_cancelled",
             "canceled": count,
@@ -438,7 +559,8 @@ pub(super) async fn cancel_task_by_id(
                 "task_cancel_failed",
             )
         }
-    }
+    };
+    mutation.complete(response)
 }
 
 pub(super) async fn resume_task_by_id(
@@ -449,6 +571,25 @@ pub(super) async fn resume_task_by_id(
     let target = match authorized_task_admin_target_by_id(&state, &headers, &req.task_id) {
         Ok(target) => target,
         Err(resp) => return resp,
+    };
+    let mutation_payload = json!({
+        "checkpoint_id": req.checkpoint_id,
+        "resume_reason": req.resume_reason,
+        "user_message": req.user_message,
+        "new_constraints": req.new_constraints,
+        "approval_request_id": req.approval_request_id,
+        "approval_decision": req.approval_decision,
+    });
+    let mutation = match begin_route_mutation(
+        &state,
+        &headers,
+        &req.idempotency_key,
+        "resume",
+        &target.task_id,
+        &mutation_payload,
+    ) {
+        Ok(RouteMutationStart::Guard(guard)) => guard,
+        Ok(RouteMutationStart::Replay(response)) | Err(response) => return response,
     };
     let request_id = req
         .approval_request_id
@@ -499,7 +640,7 @@ pub(super) async fn resume_task_by_id(
         } else {
             None
         };
-        return match crate::repo::decide_task_approval_request_for_actor(
+        let response = match crate::repo::decide_task_approval_request_for_actor(
             &state,
             &target.task_id,
             request_id,
@@ -552,6 +693,7 @@ pub(super) async fn resume_task_by_id(
                 )
             }
         };
+        return mutation.complete(response);
     }
     if target.status.as_str() != "running" {
         return super::api_err::<serde_json::Value>(StatusCode::CONFLICT, "task_not_resumable");
@@ -564,7 +706,7 @@ pub(super) async fn resume_task_by_id(
         user_message: req.user_message,
         new_constraints: req.new_constraints,
     };
-    match crate::repo::resume_task_with_input(&state, resume_input) {
+    let response = match crate::repo::resume_task_with_input(&state, resume_input) {
         Ok(Some(update)) => super::api_ok(json!({
             "status": "task_resume_requested",
             "task_id": update.task_id,
@@ -585,7 +727,8 @@ pub(super) async fn resume_task_by_id(
                 "task_resume_failed",
             )
         }
-    }
+    };
+    mutation.complete(response)
 }
 
 pub(super) async fn list_approval_scope_grants(
@@ -657,15 +800,30 @@ pub(super) async fn pause_task_by_id(
         Ok(target) => target,
         Err(resp) => return resp,
     };
+    let pause_seconds = req.pause_seconds.unwrap_or(3600);
+    let mutation = match begin_route_mutation(
+        &state,
+        &headers,
+        &req.idempotency_key,
+        "pause",
+        &target.task_id,
+        &json!({
+            "pause_seconds": pause_seconds,
+            "expected_control_seq": req.expected_control_seq,
+        }),
+    ) {
+        Ok(RouteMutationStart::Guard(guard)) => guard,
+        Ok(RouteMutationStart::Replay(response)) | Err(response) => return response,
+    };
     if target.status.as_str() != "running" {
         return super::api_err::<serde_json::Value>(StatusCode::CONFLICT, "task_not_pauseable");
     }
-    match crate::repo::pause_task_by_id_with_control(
+    let response = match crate::repo::pause_task_by_id_with_control(
         &state,
         &target.task_id,
-        req.pause_seconds.unwrap_or(3600),
+        pause_seconds,
         req.expected_control_seq,
-        req.idempotency_key.as_deref(),
+        Some(&req.idempotency_key),
     ) {
         Ok(Some(update)) => super::api_ok(json!({
             "status": "task_pause_requested",
@@ -683,7 +841,8 @@ pub(super) async fn pause_task_by_id(
                 "task_pause_failed",
             )
         }
-    }
+    };
+    mutation.complete(response)
 }
 
 pub(super) async fn steer_task_by_id(
@@ -695,16 +854,31 @@ pub(super) async fn steer_task_by_id(
         Ok(target) => target,
         Err(resp) => return resp,
     };
+    let mutation = match begin_route_mutation(
+        &state,
+        &headers,
+        &req.idempotency_key,
+        "steer",
+        &target.task_id,
+        &json!({
+            "user_message": req.user_message,
+            "new_constraints": req.new_constraints,
+            "expected_control_seq": req.expected_control_seq,
+        }),
+    ) {
+        Ok(RouteMutationStart::Guard(guard)) => guard,
+        Ok(RouteMutationStart::Replay(response)) | Err(response) => return response,
+    };
     if target.status.as_str() != "running" {
         return super::api_err::<serde_json::Value>(StatusCode::CONFLICT, "task_not_steerable");
     }
-    match crate::repo::steer_task_by_id(
+    let response = match crate::repo::steer_task_by_id(
         &state,
         &target.task_id,
         req.user_message.as_deref(),
         req.new_constraints.as_ref(),
         req.expected_control_seq,
-        req.idempotency_key.as_deref(),
+        Some(&req.idempotency_key),
     ) {
         Ok(Some(directive)) => {
             let payload = json!({
@@ -736,7 +910,8 @@ pub(super) async fn steer_task_by_id(
             };
             super::api_err::<serde_json::Value>(status, code)
         }
-    }
+    };
+    mutation.complete(response)
 }
 
 pub(super) async fn retry_child_task_by_id(

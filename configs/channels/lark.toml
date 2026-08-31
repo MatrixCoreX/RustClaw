@@ -10,8 +10,8 @@
 enabled = false
 # 入站模式：webhook | long_connection
 mode = "long_connection"
-# 本服务监听地址（webhook 模式时用于接收回调；long_connection 模式可选用于健康检查等）
-listen = "0.0.0.0:8790"
+# 本服务监听地址。长连接模式保持本机监听；webhook 模式如需公网回调，显式改为受反向代理保护的监听地址。
+listen = "127.0.0.1:8790"
 # clawd 基地址，用于提交任务与轮询结果
 clawd_base_url = "http://127.0.0.1:8787"
 # 国际版 Lark API 根地址（与 feishud 的 open.feishu.cn 分开，勿改为中国站）

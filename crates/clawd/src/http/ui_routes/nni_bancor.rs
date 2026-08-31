@@ -259,6 +259,7 @@ fn normalize_bancor_market_trades(data: &mut Value) {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct NniBancorQuoteRequest {
     side: String,
     input_amount: String,
@@ -267,6 +268,7 @@ struct NniBancorQuoteRequest {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct NniBancorTradeRequest {
     side: String,
     input_amount: String,
@@ -276,7 +278,15 @@ struct NniBancorTradeRequest {
     #[serde(default)]
     authorization_mode: Option<String>,
     #[serde(default)]
-    owner_private_key: Option<String>,
+    asset_owner_pubkey: Option<String>,
+    #[serde(default)]
+    node_url: Option<String>,
+    #[serde(default)]
+    task_id: Option<String>,
+    #[serde(default)]
+    quote_id: Option<String>,
+    #[serde(default)]
+    owner_signature: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -348,7 +358,7 @@ async fn nni_financial_market(
     headers: HeaderMap,
     scope: NniFinancialNodeScope,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
+    if let Err((status, Json(resp))) = require_ui_admin(&state, &headers) {
         return (
             status,
             Json(ApiResponse {
@@ -436,7 +446,7 @@ async fn nni_bancor_candles(
     headers: HeaderMap,
     Query(query): Query<NniBancorCandlesQuery>,
 ) -> axum::response::Response {
-    if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
+    if let Err((status, Json(resp))) = require_ui_admin(&state, &headers) {
         return (
             status,
             Json(ApiResponse::<Value> {
@@ -594,7 +604,7 @@ async fn nni_bancor_market_trades(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
+    if let Err((status, Json(resp))) = require_ui_admin(&state, &headers) {
         return (
             status,
             Json(ApiResponse {
@@ -685,7 +695,7 @@ async fn nni_bancor_quote(
     headers: HeaderMap,
     Json(mut request): Json<NniBancorQuoteRequest>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
+    if let Err((status, Json(resp))) = require_ui_admin(&state, &headers) {
         return (
             status,
             Json(ApiResponse {
@@ -798,7 +808,7 @@ async fn nni_financial_account(
     query: NniRequestRecordsQuery,
     scope: NniFinancialNodeScope,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    let identity = match require_ui_identity(&state, &headers) {
+    let identity = match require_ui_admin(&state, &headers) {
         Ok(identity) => identity,
         Err((status, Json(resp))) => {
             return (
@@ -933,8 +943,7 @@ async fn nni_bancor_trade(
     headers: HeaderMap,
     Json(mut request): Json<NniBancorTradeRequest>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    let mut owner_private_key = request.owner_private_key.take().map(Zeroizing::new);
-    let identity = match require_ui_identity(&state, &headers) {
+    let identity = match require_ui_admin(&state, &headers) {
         Ok(identity) => identity,
         Err((status, Json(resp))) => {
             return (
@@ -1026,15 +1035,19 @@ async fn nni_bancor_trade(
         },
         None => None,
     };
+    let verify_requested = request.task_id.is_some()
+        || request.quote_id.is_some()
+        || request.owner_signature.is_some()
+        || request.node_url.is_some();
     let (device_pubkey, asset_owner_pubkey) = if authorization_mode == "asset_owner" {
-        let Some(private_key) = owner_private_key.as_deref() else {
+        let Some(owner_pubkey) = request.asset_owner_pubkey.as_deref() else {
             return nni_join_error(
                 StatusCode::BAD_REQUEST,
-                "nni_owner_private_key_required",
+                "nni_asset_owner_required",
                 json!({"status": "trade_invalid"}),
             );
         };
-        let owner_pubkey = match nni_owner_public_key_from_private(private_key) {
+        let owner_pubkey = match normalize_nni_owner_public_key(owner_pubkey) {
             Ok(value) => value,
             Err(error) => {
                 return nni_join_error(
@@ -1050,16 +1063,16 @@ async fn nni_bancor_trade(
         {
             return nni_join_error(
                 StatusCode::CONFLICT,
-                "nni_owner_private_key_mismatch",
+                "nni_asset_owner_mismatch",
                 json!({"status": "trade_invalid"}),
             );
         }
         (None, owner_pubkey)
     } else {
-        if owner_private_key.is_some() {
+        if request.asset_owner_pubkey.is_some() || verify_requested {
             return nni_join_error(
                 StatusCode::BAD_REQUEST,
-                "nni_owner_private_key_unexpected",
+                "nni_owner_signature_unexpected",
                 json!({"status": "trade_invalid"}),
             );
         }
@@ -1079,6 +1092,93 @@ async fn nni_bancor_trade(
         };
         (Some(device_pubkey), owner_pubkey)
     };
+
+    if verify_requested {
+        let node_url = match request
+            .node_url
+            .as_deref()
+            .ok_or("nni_remote_node_required")
+            .and_then(normalize_nni_node_url)
+        {
+            Ok(value) if nni_bancor_service_remote_nodes(&config).contains(&&value) => value,
+            Ok(_) => {
+                return nni_join_error(
+                    StatusCode::BAD_REQUEST,
+                    "nni_bancor_node_not_configured",
+                    json!({"status": "trade_verify_invalid"}),
+                )
+            }
+            Err(error) => {
+                return nni_join_error(
+                    StatusCode::BAD_REQUEST,
+                    error,
+                    json!({"status": "trade_verify_invalid"}),
+                )
+            }
+        };
+        let required_token = |value: Option<&str>, error: &'static str| {
+            value
+                .map(str::trim)
+                .filter(|value| !value.is_empty() && value.len() <= 160)
+                .map(str::to_string)
+                .ok_or(error)
+        };
+        let task_id = match required_token(
+            request.task_id.as_deref(),
+            "nni_bancor_trade_task_id_required",
+        ) {
+            Ok(value) => value,
+            Err(error) => {
+                return nni_join_error(StatusCode::BAD_REQUEST, error, json!({"status": "trade_verify_invalid"}))
+            }
+        };
+        let quote_id = match required_token(
+            request.quote_id.as_deref(),
+            "nni_bancor_trade_quote_id_required",
+        ) {
+            Ok(value) => value,
+            Err(error) => {
+                return nni_join_error(StatusCode::BAD_REQUEST, error, json!({"status": "trade_verify_invalid"}))
+            }
+        };
+        let signature = match request
+            .owner_signature
+            .as_deref()
+            .ok_or("nni_owner_signature_required")
+            .and_then(normalize_nni_owner_signature)
+        {
+            Ok(value) => value,
+            Err(error) => {
+                return nni_join_error(StatusCode::BAD_REQUEST, error, json!({"status": "trade_verify_invalid"}))
+            }
+        };
+        return match verify_nni_bancor_trade_for_node(
+            &state,
+            &node_url,
+            NniBancorTradeVerifyRequest {
+                task_id,
+                quote_id,
+                signature,
+            },
+        )
+        .await
+        {
+            Ok(mut data) => {
+                if let Some(object) = data.as_object_mut() {
+                    object.insert("node_url".to_string(), Value::String(node_url));
+                }
+                (StatusCode::OK, Json(ApiResponse { ok: true, data: Some(data), error: None }))
+            }
+            Err(attempt) => {
+                let error = attempt
+                    .get("error_code")
+                    .and_then(Value::as_str)
+                    .unwrap_or("nni_bancor_trade_outcome_unknown")
+                    .to_string();
+                nni_join_error(StatusCode::BAD_GATEWAY, error, attempt)
+            }
+        };
+    }
     let mut attempts = Vec::new();
     for node_url in nni_bancor_service_remote_nodes(&config) {
         let remote_request = NniBancorTradeRemoteRequest {
@@ -1101,7 +1201,6 @@ async fn nni_bancor_trade(
             &expected_input_units,
             &expected_min_output_units,
             &remote_request,
-            owner_private_key.as_deref_mut(),
         )
         .await
         {
@@ -1144,7 +1243,6 @@ async fn execute_nni_bancor_trade_for_node(
     expected_input_units: &str,
     expected_min_output_units: &str,
     request: &NniBancorTradeRemoteRequest,
-    owner_private_key: Option<&mut String>,
 ) -> Result<Value, Value> {
     let response = state.core.public_http_client
         .post(nni_remote_api_endpoint(node_url, "bancor/trade/request"))
@@ -1174,62 +1272,53 @@ async fn execute_nni_bancor_trade_for_node(
         expected_min_output_units,
     )
     .map_err(|error| json!({"node_url": node_url, "error_code": error}))?;
-    let signature = if authorization_mode == "asset_owner" {
-        let private_key = owner_private_key.ok_or_else(|| {
-            json!({
-                "node_url": node_url,
-                "error_code": "nni_owner_private_key_required",
-                "terminal": true,
-            })
-        })?;
-        let (signing_pubkey, signature) = sign_nni_owner_payload(
-            private_key,
-            &validated.signing_payload,
-        )
-        .map_err(|error| {
-            json!({"node_url": node_url, "error_code": error, "terminal": true})
-        })?;
-        if signing_pubkey != asset_owner_pubkey {
-            return Err(json!({
-                "node_url": node_url,
-                "error_code": "nni_owner_private_key_mismatch",
-                "terminal": true,
-            }));
-        }
-        signature
-    } else {
-        let sign_output = run_nni_signature_helper(
-            state,
-            &[
-                "sign_challenge".to_string(),
-                validated.signing_payload.clone(),
-            ],
-        )
-        .await
-        .map_err(
-            |_| json!({"node_url": node_url, "error_code": "nni_bancor_trade_signature_helper_failed"}),
-        )?;
-        if !sign_output.ok {
-            return Err(
-                json!({"node_url": node_url, "error_code": "nni_bancor_trade_signature_failed"}),
-            );
-        }
-        value_string(
-            &sign_output.payload,
-            "signature",
-            "nni_bancor_trade_signature_missing",
-        )?
-    };
+    if authorization_mode == "asset_owner" {
+        return Ok(data);
+    }
+    let sign_output = run_nni_signature_helper(
+        state,
+        &[
+            "sign_challenge".to_string(),
+            validated.signing_payload.clone(),
+        ],
+    )
+    .await
+    .map_err(
+        |_| json!({"node_url": node_url, "error_code": "nni_bancor_trade_signature_helper_failed"}),
+    )?;
+    if !sign_output.ok {
+        return Err(
+            json!({"node_url": node_url, "error_code": "nni_bancor_trade_signature_failed"}),
+        );
+    }
+    let signature = value_string(
+        &sign_output.payload,
+        "signature",
+        "nni_bancor_trade_signature_missing",
+    )?;
+    verify_nni_bancor_trade_for_node(
+        state,
+        node_url,
+        NniBancorTradeVerifyRequest {
+            task_id: validated.task_id,
+            quote_id: validated.quote_id,
+            signature,
+        },
+    )
+    .await
+}
+
+async fn verify_nni_bancor_trade_for_node(
+    state: &AppState,
+    node_url: &str,
+    verify_request: NniBancorTradeVerifyRequest,
+) -> Result<Value, Value> {
     let response = state
         .core
         .public_http_client
         .post(nni_remote_api_endpoint(node_url, "bancor/trade/verify"))
         .timeout(nni_remote_api_timeout())
-        .json(&NniBancorTradeVerifyRequest {
-            task_id: validated.task_id,
-            quote_id: validated.quote_id,
-            signature,
-        })
+        .json(&verify_request)
         .send()
         .await
         .map_err(|err| {

@@ -268,6 +268,7 @@ def approve_if_needed(
             "task_id": (task.get("data") or {}).get("task_id"),
             "approval_request_id": request_id,
             "approval_decision": "approve_once",
+            "idempotency_key": f"restart-boundary-approval-{request_id}",
         },
     )
     write_json(case_dir / "approval_response.json", response)
@@ -505,8 +506,9 @@ def run_cancel_boundary(
         job_dir = job_dir_from_ref(str(job.get("cancel_ref") or ""))
         pid = int((job_dir / "pid").read_text(encoding="utf-8").strip())
         cancel_started = time.monotonic()
+        idempotency_key = f"restart-boundary-cancel-{task_id}"
         first = runtime.request(
-            "POST", "/v1/tasks/cancel-by-task-id", {"task_id": task_id}
+            "POST", "/v1/tasks/cancel-by-task-id", {"task_id": task_id, "idempotency_key": idempotency_key}
         )
         write_json(case_dir / "cancel_before_restart.json", first)
         if (first.get("data") or {}).get("status") != "task_cancelled":
@@ -536,10 +538,10 @@ def run_cancel_boundary(
         if (stable.get("data") or {}).get("status") != "canceled":
             raise RestartBoundaryFailure("canceled task terminal state regressed after restart")
         second = runtime.request(
-            "POST", "/v1/tasks/cancel-by-task-id", {"task_id": task_id}
+            "POST", "/v1/tasks/cancel-by-task-id", {"task_id": task_id, "idempotency_key": idempotency_key}
         )
         write_json(case_dir / "cancel_after_restart.json", second)
-        if (second.get("data") or {}).get("status") != "task_already_cancelled":
+        if (second.get("data") or {}).get("status") != "task_cancelled":
             raise RestartBoundaryFailure("repeated cancel was not idempotent after restart")
         counter = runtime.workspace / "document" / "cancel-boundary-counter.txt"
         if counter.read_text(encoding="utf-8").splitlines() != ["mutation-once"]:

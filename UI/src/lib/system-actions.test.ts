@@ -22,4 +22,12 @@ test("formats system action errors from stable machine fields", () => {
     ),
     "系统重启未能启动，请查看服务日志后重试。",
   );
+  assert.equal(
+    formatSystemActionError(
+      { ok: false, error: "future_system_machine_code" },
+      500,
+      t,
+    ),
+    "系统操作未完成 (500)，请稍后重试；如果仍然失败，请查看日志。",
+  );
 });

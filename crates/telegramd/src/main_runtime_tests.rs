@@ -1,6 +1,15 @@
 use super::*;
 
 #[test]
+fn telegram_media_path_is_stable_for_provider_message() {
+    let first = build_telegram_inbox_rel_path("data/inbox", "primary", 10, 20, "message-30", "jpg");
+    let replay =
+        build_telegram_inbox_rel_path("data/inbox", "primary", 10, 20, "message-30", "jpg");
+    assert_eq!(first, replay);
+    assert!(first.ends_with("/message-30.jpg"));
+}
+
+#[test]
 fn telegram_api_retry_delay_uses_bounded_exponential_backoff() {
     let seconds = (0..=6)
         .map(|attempt| telegram_api_retry_delay(attempt).as_secs())

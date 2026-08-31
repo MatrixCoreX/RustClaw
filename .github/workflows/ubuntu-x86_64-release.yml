@@ -18,6 +18,8 @@ name: Build Ubuntu x86_64 Release
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   build-ubuntu-x86-64:
@@ -31,7 +33,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Resolve release metadata
         id: meta
@@ -88,24 +90,24 @@ jobs:
             protobuf-compiler
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: UI/package-lock.json
 
       - name: Setup Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.11"
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: "1.23.x"
 
       - name: Cache Cargo registry and git
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
@@ -146,24 +148,40 @@ jobs:
 
       - name: Package runtime
         shell: bash
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
         run: |
           set -euo pipefail
+          [[ -n "${RELEASE_SIGNING_KEY}" ]] || { echo "RELEASE_SIGNING_KEY is required" >&2; exit 1; }
+          signing_key="${RUNNER_TEMP}/release-signing-key"
+          printf '%s\n' "${RELEASE_SIGNING_KEY}" > "${signing_key}"
+          chmod 600 "${signing_key}"
           mkdir -p dist-release
           APP_RELEASE_BIN_DIR="$PWD/target/release" \
             APP_PACKAGE_TARGET="x86_64-unknown-linux-gnu" \
+            APP_RELEASE_COMMIT="${GITHUB_SHA}" \
+            APP_RELEASE_SIGNING_KEY="${signing_key}" \
             APP_BUNDLE_DIR="$PWD/dist-release" \
             APP_PACKAGE_BASENAME="${{ steps.meta.outputs.package_name }}" \
             APP_SKIP_LOCAL_PACKAGE_COPY=1 \
             ./package-release.sh
           (cd dist-release && sha256sum "${{ steps.meta.outputs.package_name }}" > "${{ steps.meta.outputs.package_name }}.sha256")
 
+      - name: Attest release provenance
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
+        with:
+          subject-path: dist-release/${{ steps.meta.outputs.package_name }}
+
       - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: agent-runtime-ubuntu-x86_64
           path: |
             dist-release/${{ steps.meta.outputs.package_name }}
             dist-release/${{ steps.meta.outputs.package_name }}.sha256
+            dist-release/${{ steps.meta.outputs.package_name }}.spdx.json
+            dist-release/${{ steps.meta.outputs.package_name }}.manifest.json
+            dist-release/${{ steps.meta.outputs.package_name }}.manifest.json.sig
           if-no-files-found: error
 
       - name: Write release notes
@@ -197,11 +215,17 @@ jobs:
             gh release upload "${RELEASE_TAG}" \
               "dist-release/${PACKAGE_NAME}" \
               "dist-release/${PACKAGE_NAME}.sha256" \
+              "dist-release/${PACKAGE_NAME}.spdx.json" \
+              "dist-release/${PACKAGE_NAME}.manifest.json" \
+              "dist-release/${PACKAGE_NAME}.manifest.json.sig" \
               --clobber
           else
             gh release create "${RELEASE_TAG}" \
               "dist-release/${PACKAGE_NAME}" \
               "dist-release/${PACKAGE_NAME}.sha256" \
+              "dist-release/${PACKAGE_NAME}.spdx.json" \
+              "dist-release/${PACKAGE_NAME}.manifest.json" \
+              "dist-release/${PACKAGE_NAME}.manifest.json.sig" \
             --title "Agent runtime Ubuntu x86_64 ${RELEASE_TAG}" \
               --notes-file release-notes.md \
               "${release_flags[@]}"

@@ -7,6 +7,62 @@ DEPLOY_SCRIPT="$ROOT_DIR/deploy-github-release.sh"
 source "$ROOT_DIR/scripts/product_identity.sh"
 TMP_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TMP_ROOT"' EXIT
+SIGNING_KEY="$TMP_ROOT/release-signing-key"
+ALLOWED_SIGNERS="$TMP_ROOT/release-allowed-signers"
+ssh-keygen -q -t ed25519 -N '' -f "$SIGNING_KEY"
+printf 'release %s %s\n' "$(awk '{print $1}' "$SIGNING_KEY.pub")" "$(awk '{print $2}' "$SIGNING_KEY.pub")" > "$ALLOWED_SIGNERS"
+export APP_RELEASE_ALLOWED_SIGNERS_FILE="$ALLOWED_SIGNERS"
+export APP_RELEASE_MANIFEST_TOOL="$ROOT_DIR/scripts/security/release_manifest.py"
+
+create_release_evidence() {
+  local archive="$1"
+  local version="$2"
+  local target="${3:-x86_64-unknown-linux-gnu}"
+  printf '%s\n' '{"SPDXID":"SPDXRef-DOCUMENT","dataLicense":"CC0-1.0","name":"test","spdxVersion":"SPDX-2.3"}' > "$archive.spdx.json"
+  python3 "$ROOT_DIR/scripts/security/release_manifest.py" create \
+    --artifact "$archive" \
+    --sbom "$archive.spdx.json" \
+    --output "$archive.manifest.json" \
+    --version "$version" \
+    --commit 0123456789abcdef0123456789abcdef01234567 \
+    --target "$target" \
+    --package-root "$APP_RELEASE_ARTIFACT_ID"
+  ssh-keygen -q -Y sign -f "$SIGNING_KEY" -n agent-runtime-release "$archive.manifest.json"
+}
+
+write_release_metadata() {
+  local output="$1"
+  local tag="$2"
+  local archive="$3"
+  local checksum="$4"
+  local manifest="$5"
+  local signature="$6"
+  local sbom="$7"
+  python3 - "$output" "$tag" "$archive" "$checksum" "$manifest" "$signature" "$sbom" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+output, tag, archive, checksum, manifest, signature, sbom = sys.argv[1:]
+paths = [Path(value).resolve() for value in (archive, checksum, manifest, signature, sbom)]
+archive_path = paths[0]
+names = [
+    archive_path.name,
+    f"{archive_path.name}.sha256",
+    f"{archive_path.name}.manifest.json",
+    f"{archive_path.name}.manifest.json.sig",
+    f"{archive_path.name}.spdx.json",
+]
+assets = [
+    {"name": name, "browser_download_url": path.as_uri()}
+    for name, path in zip(names, paths, strict=True)
+]
+Path(output).write_text(
+    json.dumps([{"tag_name": tag, "draft": False, "prerelease": False, "assets": assets}]),
+    encoding="utf-8",
+)
+PY
+}
 
 PACKAGE_DIR="$TMP_ROOT/package/$APP_RELEASE_ARTIFACT_ID"
 mkdir -p \
@@ -35,16 +91,20 @@ tar -czf "$ARCHIVE" -C "$TMP_ROOT/package" "$APP_RELEASE_ARTIFACT_ID"
 ARCHIVE_HASH="$(sha256sum "$ARCHIVE" | awk '{print $1}')"
 CHECKSUM="$ARCHIVE.sha256"
 printf '%s  %s\n' "$ARCHIVE_HASH" "$(basename "$ARCHIVE")" > "$CHECKSUM"
+create_release_evidence "$ARCHIVE" 9.8.7
 
 RELEASES_JSON="$TMP_ROOT/releases.json"
-python3 - "$RELEASES_JSON" "$ARCHIVE" "$CHECKSUM" <<'PY'
+python3 - "$RELEASES_JSON" "$ARCHIVE" "$CHECKSUM" "$ARCHIVE.manifest.json" "$ARCHIVE.manifest.json.sig" "$ARCHIVE.spdx.json" <<'PY'
 import json
 from pathlib import Path
 import sys
 
-output, archive, checksum = sys.argv[1:]
+output, archive, checksum, manifest, signature, sbom = sys.argv[1:]
 archive = Path(archive).resolve()
 checksum = Path(checksum).resolve()
+manifest = Path(manifest).resolve()
+signature = Path(signature).resolve()
+sbom = Path(sbom).resolve()
 releases = [
     {
         "tag_name": "pi-aarch64-newer-but-wrong-platform",
@@ -67,6 +127,9 @@ releases = [
                 "url": checksum.as_uri(),
                 "browser_download_url": "file:///api-asset-preference-must-win/checksum",
             },
+            {"name": manifest.name, "url": manifest.as_uri()},
+            {"name": signature.name, "url": signature.as_uri()},
+            {"name": sbom.name, "url": sbom.as_uri()},
         ],
     },
 ]
@@ -123,6 +186,26 @@ OUTPUT="$(
 grep -Fq 'release_checksum=verified' <<< "$OUTPUT"
 grep -Fq 'release_update_status=deployed' <<< "$OUTPUT"
 grep -Fxq 'ubuntu-x86_64-test' "$RUNTIME/.release-tag"
+
+assert_rejected_release() {
+  local label="$1"
+  local metadata="$2"
+  local tag="$3"
+  local before_hash after_hash
+  before_hash="$(sha256sum "$RUNTIME/target/release/clawd" | awk '{print $1}')"
+  if APP_RELEASES_JSON_FILE="$metadata" \
+    "$DEPLOY_SCRIPT" \
+      --root "$RUNTIME" \
+      --platform ubuntu-x86_64 \
+      --tag "$tag" \
+      --no-restart >/dev/null 2>&1; then
+    echo "$label unexpectedly succeeded" >&2
+    exit 1
+  fi
+  after_hash="$(sha256sum "$RUNTIME/target/release/clawd" | awk '{print $1}')"
+  [[ "$before_hash" == "$after_hash" ]]
+  grep -Fxq 'ubuntu-x86_64-test' "$RUNTIME/.release-tag"
+}
 grep -Fxq 'local-secret = "preserve"' "$RUNTIME/configs/config.toml"
 grep -Fxq 'new-default = true' "$RUNTIME/configs/new-default.toml"
 grep -Fxq 'new release readme' "$RUNTIME/README.md"
@@ -141,14 +224,17 @@ ROLLBACK_MARKER_BEFORE="$(cat "$RUNTIME/.release-rollback")"
 BAD_CHECKSUM="$TMP_ROOT/bad.sha256"
 printf '%064d  %s\n' 0 "$(basename "$ARCHIVE")" > "$BAD_CHECKSUM"
 BAD_RELEASES_JSON="$TMP_ROOT/bad-releases.json"
-python3 - "$BAD_RELEASES_JSON" "$ARCHIVE" "$BAD_CHECKSUM" <<'PY'
+python3 - "$BAD_RELEASES_JSON" "$ARCHIVE" "$BAD_CHECKSUM" "$ARCHIVE.manifest.json" "$ARCHIVE.manifest.json.sig" "$ARCHIVE.spdx.json" <<'PY'
 import json
 from pathlib import Path
 import sys
 
-output, archive, checksum = sys.argv[1:]
+output, archive, checksum, manifest, signature, sbom = sys.argv[1:]
 archive = Path(archive).resolve()
 checksum = Path(checksum).resolve()
+manifest = Path(manifest).resolve()
+signature = Path(signature).resolve()
+sbom = Path(sbom).resolve()
 Path(output).write_text(
     json.dumps(
         [
@@ -162,6 +248,9 @@ Path(output).write_text(
                         "name": f"{archive.name}.sha256",
                         "browser_download_url": checksum.as_uri(),
                     },
+                    {"name": manifest.name, "browser_download_url": manifest.as_uri()},
+                    {"name": signature.name, "browser_download_url": signature.as_uri()},
+                    {"name": sbom.name, "browser_download_url": sbom.as_uri()},
                 ],
             }
         ]
@@ -184,6 +273,137 @@ AFTER_HASH="$(sha256sum "$RUNTIME/target/release/clawd" | awk '{print $1}')"
 [[ "$BEFORE_HASH" == "$AFTER_HASH" ]]
 grep -Fxq 'ubuntu-x86_64-test' "$RUNTIME/.release-tag"
 
+TAMPERED_SIGNATURE="$TMP_ROOT/tampered-signature.sig"
+cp "$ARCHIVE.manifest.json.sig" "$TAMPERED_SIGNATURE"
+python3 - "$TAMPERED_SIGNATURE" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+lines = path.read_text(encoding="ascii").splitlines()
+lines[1] = ("A" if lines[1][0] != "A" else "B") + lines[1][1:]
+path.write_text("\n".join(lines) + "\n", encoding="ascii")
+PY
+TAMPERED_SIGNATURE_JSON="$TMP_ROOT/tampered-signature.json"
+write_release_metadata "$TAMPERED_SIGNATURE_JSON" ubuntu-x86_64-tampered-signature \
+  "$ARCHIVE" "$CHECKSUM" "$ARCHIVE.manifest.json" "$TAMPERED_SIGNATURE" "$ARCHIVE.spdx.json"
+assert_rejected_release signature_tamper "$TAMPERED_SIGNATURE_JSON" ubuntu-x86_64-tampered-signature
+
+TAMPERED_ARCHIVE="$TMP_ROOT/$APP_RELEASE_ARTIFACT_ID-ubuntu-x86_64-tampered-package.tar.gz"
+cp "$ARCHIVE" "$TAMPERED_ARCHIVE"
+create_release_evidence "$TAMPERED_ARCHIVE" 9.8.8
+printf 'tamper' >> "$TAMPERED_ARCHIVE"
+TAMPERED_CHECKSUM="$TAMPERED_ARCHIVE.sha256"
+printf '%s  %s\n' "$(sha256sum "$TAMPERED_ARCHIVE" | awk '{print $1}')" "$(basename "$TAMPERED_ARCHIVE")" > "$TAMPERED_CHECKSUM"
+TAMPERED_ARCHIVE_JSON="$TMP_ROOT/tampered-package.json"
+write_release_metadata "$TAMPERED_ARCHIVE_JSON" ubuntu-x86_64-tampered-package \
+  "$TAMPERED_ARCHIVE" "$TAMPERED_CHECKSUM" "$TAMPERED_ARCHIVE.manifest.json" \
+  "$TAMPERED_ARCHIVE.manifest.json.sig" "$TAMPERED_ARCHIVE.spdx.json"
+assert_rejected_release package_tamper "$TAMPERED_ARCHIVE_JSON" ubuntu-x86_64-tampered-package
+
+TAMPERED_SBOM="$TMP_ROOT/tampered.spdx.json"
+cp "$ARCHIVE.spdx.json" "$TAMPERED_SBOM"
+printf 'x' >> "$TAMPERED_SBOM"
+TAMPERED_SBOM_JSON="$TMP_ROOT/tampered-sbom.json"
+write_release_metadata "$TAMPERED_SBOM_JSON" ubuntu-x86_64-tampered-sbom \
+  "$ARCHIVE" "$CHECKSUM" "$ARCHIVE.manifest.json" "$ARCHIVE.manifest.json.sig" "$TAMPERED_SBOM"
+assert_rejected_release sbom_tamper "$TAMPERED_SBOM_JSON" ubuntu-x86_64-tampered-sbom
+
+WRONG_TARGET_ARCHIVE="$TMP_ROOT/$APP_RELEASE_ARTIFACT_ID-ubuntu-x86_64-wrong-target.tar.gz"
+cp "$ARCHIVE" "$WRONG_TARGET_ARCHIVE"
+printf '%s  %s\n' "$(sha256sum "$WRONG_TARGET_ARCHIVE" | awk '{print $1}')" "$(basename "$WRONG_TARGET_ARCHIVE")" > "$WRONG_TARGET_ARCHIVE.sha256"
+create_release_evidence "$WRONG_TARGET_ARCHIVE" 9.8.8 aarch64-unknown-linux-gnu
+WRONG_TARGET_JSON="$TMP_ROOT/wrong-target.json"
+write_release_metadata "$WRONG_TARGET_JSON" ubuntu-x86_64-wrong-target \
+  "$WRONG_TARGET_ARCHIVE" "$WRONG_TARGET_ARCHIVE.sha256" "$WRONG_TARGET_ARCHIVE.manifest.json" \
+  "$WRONG_TARGET_ARCHIVE.manifest.json.sig" "$WRONG_TARGET_ARCHIVE.spdx.json"
+assert_rejected_release target_mismatch "$WRONG_TARGET_JSON" ubuntu-x86_64-wrong-target
+
+DOWNGRADE_STAGE="$TMP_ROOT/downgrade-stage"
+mkdir -p "$DOWNGRADE_STAGE"
+cp -a "$PACKAGE_DIR" "$DOWNGRADE_STAGE/$APP_RELEASE_ARTIFACT_ID"
+printf '1.0.0\n' > "$DOWNGRADE_STAGE/$APP_RELEASE_ARTIFACT_ID/VERSION"
+DOWNGRADE_ARCHIVE="$TMP_ROOT/$APP_RELEASE_ARTIFACT_ID-ubuntu-x86_64-downgrade.tar.gz"
+tar -czf "$DOWNGRADE_ARCHIVE" -C "$DOWNGRADE_STAGE" "$APP_RELEASE_ARTIFACT_ID"
+printf '%s  %s\n' "$(sha256sum "$DOWNGRADE_ARCHIVE" | awk '{print $1}')" "$(basename "$DOWNGRADE_ARCHIVE")" > "$DOWNGRADE_ARCHIVE.sha256"
+create_release_evidence "$DOWNGRADE_ARCHIVE" 1.0.0
+DOWNGRADE_JSON="$TMP_ROOT/downgrade.json"
+write_release_metadata "$DOWNGRADE_JSON" ubuntu-x86_64-downgrade \
+  "$DOWNGRADE_ARCHIVE" "$DOWNGRADE_ARCHIVE.sha256" "$DOWNGRADE_ARCHIVE.manifest.json" \
+  "$DOWNGRADE_ARCHIVE.manifest.json.sig" "$DOWNGRADE_ARCHIVE.spdx.json"
+assert_rejected_release version_downgrade "$DOWNGRADE_JSON" ubuntu-x86_64-downgrade
+
+make_unsafe_archive() {
+  local kind="$1"
+  local output="$2"
+  python3 - "$PACKAGE_DIR" "$APP_RELEASE_ARTIFACT_ID" "$kind" "$output" <<'PY'
+import io
+from pathlib import Path
+import sys
+import tarfile
+
+source, root, kind, output = sys.argv[1:]
+with tarfile.open(output, "w:gz") as archive:
+    archive.add(source, arcname=root)
+    info = tarfile.TarInfo(f"{root}/unsafe-entry")
+    if kind == "traversal":
+        info.name = f"{root}/../../escape"
+        payload = b"escape"
+        info.size = len(payload)
+        archive.addfile(info, io.BytesIO(payload))
+    elif kind == "symlink":
+        info.type = tarfile.SYMTYPE
+        info.linkname = "/etc/passwd"
+        archive.addfile(info)
+    elif kind == "hardlink":
+        info.type = tarfile.LNKTYPE
+        info.linkname = f"{root}/VERSION"
+        archive.addfile(info)
+    elif kind == "device":
+        info.type = tarfile.CHRTYPE
+        info.devmajor = 1
+        info.devminor = 3
+        archive.addfile(info)
+    else:
+        raise SystemExit("unsupported fixture")
+PY
+}
+
+for unsafe_kind in traversal symlink hardlink device; do
+  unsafe_archive="$TMP_ROOT/$APP_RELEASE_ARTIFACT_ID-ubuntu-x86_64-${unsafe_kind}.tar.gz"
+  make_unsafe_archive "$unsafe_kind" "$unsafe_archive"
+  printf '%s  %s\n' "$(sha256sum "$unsafe_archive" | awk '{print $1}')" "$(basename "$unsafe_archive")" > "$unsafe_archive.sha256"
+  create_release_evidence "$unsafe_archive" 9.8.8
+  unsafe_json="$TMP_ROOT/${unsafe_kind}.json"
+  write_release_metadata "$unsafe_json" "ubuntu-x86_64-${unsafe_kind}" \
+    "$unsafe_archive" "$unsafe_archive.sha256" "$unsafe_archive.manifest.json" \
+    "$unsafe_archive.manifest.json.sig" "$unsafe_archive.spdx.json"
+  assert_rejected_release "archive_${unsafe_kind}" "$unsafe_json" "ubuntu-x86_64-${unsafe_kind}"
+done
+
+WRONG_ARCH_STAGE="$TMP_ROOT/wrong-arch-stage"
+mkdir -p "$WRONG_ARCH_STAGE"
+cp -a "$PACKAGE_DIR" "$WRONG_ARCH_STAGE/$APP_RELEASE_ARTIFACT_ID"
+python3 - "$WRONG_ARCH_STAGE/$APP_RELEASE_ARTIFACT_ID/target/release/clawd" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+data = bytearray(path.read_bytes())
+byteorder = "little" if data[5] == 1 else "big"
+data[18:20] = (183).to_bytes(2, byteorder=byteorder)
+path.write_bytes(data)
+PY
+WRONG_ARCHIVE="$TMP_ROOT/$APP_RELEASE_ARTIFACT_ID-ubuntu-x86_64-wrong-arch.tar.gz"
+tar -czf "$WRONG_ARCHIVE" -C "$WRONG_ARCH_STAGE" "$APP_RELEASE_ARTIFACT_ID"
+printf '%s  %s\n' "$(sha256sum "$WRONG_ARCHIVE" | awk '{print $1}')" "$(basename "$WRONG_ARCHIVE")" > "$WRONG_ARCHIVE.sha256"
+create_release_evidence "$WRONG_ARCHIVE" 9.8.8
+WRONG_ARCH_JSON="$TMP_ROOT/wrong-arch.json"
+write_release_metadata "$WRONG_ARCH_JSON" ubuntu-x86_64-wrong-arch \
+  "$WRONG_ARCHIVE" "$WRONG_ARCHIVE.sha256" "$WRONG_ARCHIVE.manifest.json" \
+  "$WRONG_ARCHIVE.manifest.json.sig" "$WRONG_ARCHIVE.spdx.json"
+assert_rejected_release architecture_mismatch "$WRONG_ARCH_JSON" ubuntu-x86_64-wrong-arch
+
 FAIL_STAGE="$TMP_ROOT/fail-stage"
 FAIL_PACKAGE_ROOT="$FAIL_STAGE/$APP_RELEASE_ARTIFACT_ID"
 mkdir -p "$FAIL_STAGE"
@@ -199,15 +419,19 @@ tar -czf "$FAIL_ARCHIVE" -C "$FAIL_STAGE" "$APP_RELEASE_ARTIFACT_ID"
 FAIL_HASH="$(sha256sum "$FAIL_ARCHIVE" | awk '{print $1}')"
 FAIL_CHECKSUM="$FAIL_ARCHIVE.sha256"
 printf '%s  %s\n' "$FAIL_HASH" "$(basename "$FAIL_ARCHIVE")" > "$FAIL_CHECKSUM"
+create_release_evidence "$FAIL_ARCHIVE" 9.8.7
 FAIL_RELEASES_JSON="$TMP_ROOT/fail-releases.json"
-python3 - "$FAIL_RELEASES_JSON" "$FAIL_ARCHIVE" "$FAIL_CHECKSUM" <<'PY'
+python3 - "$FAIL_RELEASES_JSON" "$FAIL_ARCHIVE" "$FAIL_CHECKSUM" "$FAIL_ARCHIVE.manifest.json" "$FAIL_ARCHIVE.manifest.json.sig" "$FAIL_ARCHIVE.spdx.json" <<'PY'
 import json
 from pathlib import Path
 import sys
 
-output, archive, checksum = sys.argv[1:]
+output, archive, checksum, manifest, signature, sbom = sys.argv[1:]
 archive = Path(archive).resolve()
 checksum = Path(checksum).resolve()
+manifest = Path(manifest).resolve()
+signature = Path(signature).resolve()
+sbom = Path(sbom).resolve()
 Path(output).write_text(
     json.dumps(
         [
@@ -218,6 +442,9 @@ Path(output).write_text(
                 "assets": [
                     {"name": archive.name, "browser_download_url": archive.as_uri()},
                     {"name": checksum.name, "browser_download_url": checksum.as_uri()},
+                    {"name": manifest.name, "browser_download_url": manifest.as_uri()},
+                    {"name": signature.name, "browser_download_url": signature.as_uri()},
+                    {"name": sbom.name, "browser_download_url": sbom.as_uri()},
                 ],
             }
         ]

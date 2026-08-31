@@ -11,6 +11,7 @@ import {
   visibleSkillNames,
 } from "../lib/skill-display";
 import { removableSkillNames, resolveSkillStoreActionName, skillStoreErrorMessage } from "../lib/skill-store";
+import { formatUiError } from "../lib/ui-error";
 import type {
   ApiResponse,
   BrowserFileWithPath,
@@ -66,7 +67,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       const res = await apiFetch(`/v1/skills`);
       const body = (await res.json()) as ApiResponse<SkillsResponse>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `skills fetch failed (${res.status})`);
+        throw new Error(body.error || `skills_fetch_http_${res.status}`);
       }
       setSkillsData(body.data);
     } catch {
@@ -81,7 +82,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       const res = await apiFetch(`/v1/skills/config`);
       const body = (await res.json()) as ApiResponse<SkillsConfigResponse>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `skill config fetch failed (${res.status})`);
+        throw new Error(body.error || `skill_config_fetch_http_${res.status}`);
       }
       setSkillsConfigData(body.data);
       const nextSwitchDraft = { ...(body.data.skill_switches || {}) };
@@ -90,7 +91,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       });
       setSkillSwitchDraft(nextSwitchDraft);
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "技能设置暂时无法读取。", "Skill settings are temporarily unavailable.");
       setSkillsConfigError(message);
     } finally {
       setSkillsConfigLoading(false);
@@ -161,7 +162,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
           await fetchSkills();
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+        const message = formatUiError(err, t, "Skill Store 暂时无法读取。", "Skill Store is temporarily unavailable.");
         setSkillStoreError(message);
       } finally {
         setSkillStoreLoading(false);
@@ -320,7 +321,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
         restart_required?: boolean;
       }>;
       if (!res.ok || !body.ok) {
-        throw new Error(body.error || `skill config save failed (${res.status})`);
+        throw new Error(body.error || `skill_config_save_http_${res.status}`);
       }
       const restartRequired = body.data?.restart_required ?? true;
       let savedMessage = t(
@@ -364,7 +365,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       await fetchSkillsConfig();
       await fetchSkills();
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "技能设置保存失败，请稍后重试。", "Skill settings could not be saved. Try again shortly.");
       setSkillsConfigError(message);
     } finally {
       setSkillSwitchSaving(false);
@@ -397,7 +398,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       });
       const body = (await res.json()) as ApiResponse<ImportedSkillResponse>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `skill import failed (${res.status})`);
+        throw new Error(body.error || `skill_import_http_${res.status}`);
       }
       setSkillImportPreview(body.data);
       setRecentImportedSkillName(body.data.skill_name);
@@ -413,7 +414,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       await fetchSkillStore(true);
       scrollToSkillRow(body.data.skill_name);
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "技能导入失败，请检查技能包后重试。", "Skill import failed. Check the package and try again.");
       setSkillImportError(message);
     } finally {
       setSkillImportLoading(false);
@@ -458,7 +459,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       });
       const body = (await res.json()) as ApiResponse<ImportedSkillResponse>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `local skill import failed (${res.status})`);
+        throw new Error(body.error || `local_skill_import_http_${res.status}`);
       }
       setSkillImportPreview(body.data);
       setRecentImportedSkillName(body.data.skill_name);
@@ -474,7 +475,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       await fetchSkillStore(true);
       scrollToSkillRow(body.data.skill_name);
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "技能导入失败，请检查技能包后重试。", "Skill import failed. Check the package and try again.");
       setSkillImportError(message);
     } finally {
       setSkillImportLoading(false);
@@ -520,7 +521,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       );
       await fetchSkillStore(true);
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "技能操作未完成，请稍后重试。", "The skill operation did not complete. Try again shortly.");
       setSkillStoreError(message);
     } finally {
       setLocalSkillStoreActionName(null);
@@ -563,7 +564,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       );
       setSkillStoreMessage(t("正在安全取消操作…", "Cancelling the operation safely…"));
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "技能操作暂时无法取消，请稍后重试。", "The skill operation could not be cancelled. Try again shortly.");
       setSkillStoreError(message);
     }
   };

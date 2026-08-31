@@ -5,7 +5,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
@@ -161,13 +161,6 @@ struct FeishuSection {
     audio_inbox_dir: String,
     #[serde(default = "default_feishu_file_inbox_dir")]
     file_inbox_dir: String,
-}
-
-fn current_ts_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
 }
 
 /// 解析 `im.message.receive_v1` 公共字段。
@@ -345,7 +338,7 @@ async fn handle_incoming_feishu_text(
     message_id: String,
     text: String,
     is_group: bool,
-) {
+) -> bool {
     let base = state.config.feishu.clawd_base_url.clone();
     let client = state.client.clone();
     let config = state.config.clone();
@@ -358,7 +351,7 @@ async fn handle_incoming_feishu_text(
             FEISHU_BIND_REQUIRED_FALLBACK,
         );
         let _ = send_feishu_text(&config, &client, &token_cache, &chat_id, &msg).await;
-        return;
+        return true;
     }
 
     info!(
@@ -379,7 +372,7 @@ async fn handle_incoming_feishu_text(
                 FEISHU_IDENTITY_CHECK_UNAVAILABLE_FALLBACK,
             );
             let _ = send_feishu_text(&config, &client, &token_cache, &chat_id, &msg).await;
-            return;
+            return false;
         }
     };
 
@@ -389,7 +382,7 @@ async fn handle_incoming_feishu_text(
             "feishud: binding resolve result bound=true external_chat_id={}",
             chat_id
         );
-        handle_text_message_to_clawd(
+        return handle_text_message_to_clawd(
             state,
             open_id,
             chat_id,
@@ -398,8 +391,8 @@ async fn handle_incoming_feishu_text(
             Vec::new(),
             Some(ident.user_key),
             None,
-        );
-        return;
+        )
+        .await;
     }
 
     info!(
@@ -427,7 +420,7 @@ async fn handle_incoming_feishu_text(
                     (bind_result.identity, bind_result.pending_resume)
                 {
                     if let Some(task_id) = resume.task_id {
-                        handle_text_message_to_clawd(
+                        return handle_text_message_to_clawd(
                             state.clone(),
                             resume.external_user_id.unwrap_or_else(|| open_id.clone()),
                             resume.external_chat_id.unwrap_or_else(|| chat_id.clone()),
@@ -436,7 +429,8 @@ async fn handle_incoming_feishu_text(
                             Vec::new(),
                             Some(identity.user_key),
                             Some(task_id.to_string()),
-                        );
+                        )
+                        .await;
                     } else if resume.error_code.is_some() {
                         let stopped = feishu_t(
                             &config,
@@ -448,7 +442,7 @@ async fn handle_incoming_feishu_text(
                                 .await;
                     }
                 }
-                return;
+                return true;
             }
             Ok(None) => {}
             Err(e) => {
@@ -467,7 +461,7 @@ async fn handle_incoming_feishu_text(
             FEISHU_BIND_HELP_FALLBACK,
         );
         let _ = send_feishu_text(&config, &client, &token_cache, &chat_id, &msg).await;
-        return;
+        return true;
     }
     if is_group {
         if !should_expect_key_reply(&state, &chat_id) {
@@ -479,6 +473,7 @@ async fn handle_incoming_feishu_text(
                     "feishud: group pending request persistence failed external_chat_id={} error={}",
                     chat_id, error
                 );
+                return false;
             }
         }
         set_expect_key_reply(&state, &chat_id, true);
@@ -488,7 +483,7 @@ async fn handle_incoming_feishu_text(
             FEISHU_BIND_REQUIRED_FALLBACK,
         );
         let _ = send_feishu_text(&config, &client, &token_cache, &chat_id, &msg).await;
-        return;
+        return true;
     }
     let maybe_candidate = explicit_bind_candidate
         .or_else(|| extract_bind_key_candidate(trimmed, should_expect_key_reply(&state, &chat_id)));
@@ -510,7 +505,7 @@ async fn handle_incoming_feishu_text(
                 let _ = send_feishu_text(&config, &client, &token_cache, &chat_id, &msg).await;
                 if let Some(resume) = bind_result.pending_resume {
                     if let Some(task_id) = resume.task_id {
-                        handle_text_message_to_clawd(
+                        return handle_text_message_to_clawd(
                             state.clone(),
                             resume.external_user_id.unwrap_or_else(|| open_id.clone()),
                             resume.external_chat_id.unwrap_or_else(|| chat_id.clone()),
@@ -519,7 +514,8 @@ async fn handle_incoming_feishu_text(
                             Vec::new(),
                             Some(bind_result.identity.user_key),
                             Some(task_id.to_string()),
-                        );
+                        )
+                        .await;
                     } else if resume.error_code.is_some() {
                         let stopped = feishu_t(
                             &config,
@@ -557,9 +553,10 @@ async fn handle_incoming_feishu_text(
                     FEISHU_BIND_REQUEST_FAILED_FALLBACK,
                 );
                 let _ = send_feishu_text(&config, &client, &token_cache, &chat_id, &msg).await;
+                return false;
             }
         }
-        return;
+        return true;
     }
     if trimmed.is_empty() {
         info!(
@@ -574,6 +571,7 @@ async fn handle_incoming_feishu_text(
             "feishud: pending request persistence failed external_chat_id={} error={}",
             chat_id, error
         );
+        return false;
     }
     set_expect_key_reply(&state, &chat_id, true);
     let msg = feishu_t(
@@ -582,10 +580,11 @@ async fn handle_incoming_feishu_text(
         FEISHU_BIND_REQUIRED_FALLBACK,
     );
     let _ = send_feishu_text(&config, &client, &token_cache, &chat_id, &msg).await;
+    true
 }
 
 /// 入站媒体：下载并落盘后，将提示文本交给 clawd ask（与文本链路一致）。
-async fn handle_incoming_feishu_media(state: AppState, ctx: FeishuMediaCtx) {
+async fn handle_incoming_feishu_media(state: AppState, ctx: FeishuMediaCtx) -> bool {
     let base = state.config.feishu.clawd_base_url.clone();
     let client = state.client.clone();
     let config = state.config.clone();
@@ -607,7 +606,7 @@ async fn handle_incoming_feishu_media(state: AppState, ctx: FeishuMediaCtx) {
                 FEISHU_IDENTITY_CHECK_UNAVAILABLE_FALLBACK,
             );
             let _ = send_feishu_text(&config, &client, &token_cache, &ctx.chat_id, &msg).await;
-            return;
+            return false;
         }
     };
 
@@ -626,6 +625,7 @@ async fn handle_incoming_feishu_media(state: AppState, ctx: FeishuMediaCtx) {
         .await
         {
             warn!("feishud: pending media reference persistence failed err={error}");
+            return false;
         }
         set_expect_key_reply(&state, &ctx.chat_id, true);
         let msg = feishu_t(
@@ -634,14 +634,14 @@ async fn handle_incoming_feishu_media(state: AppState, ctx: FeishuMediaCtx) {
             FEISHU_BIND_REQUIRED_FALLBACK,
         );
         let _ = send_feishu_text(&config, &client, &token_cache, &ctx.chat_id, &msg).await;
-        return;
+        return true;
     };
 
     let token = match get_tenant_access_token(&config.feishu, &client, &token_cache).await {
         Ok(t) => t,
         Err(e) => {
             warn!("feishud: media token failed err={}", e);
-            return;
+            return false;
         }
     };
 
@@ -665,7 +665,7 @@ async fn handle_incoming_feishu_media(state: AppState, ctx: FeishuMediaCtx) {
                 FEISHU_MEDIA_DOWNLOAD_FAILED_FALLBACK,
             );
             let _ = send_feishu_text(&config, &client, &token_cache, &ctx.chat_id, &msg).await;
-            return;
+            return false;
         }
     };
 
@@ -686,23 +686,25 @@ async fn handle_incoming_feishu_media(state: AppState, ctx: FeishuMediaCtx) {
             FEISHU_MEDIA_FILE_TOO_LARGE_FALLBACK,
         );
         let _ = send_feishu_text(&config, &client, &token_cache, &ctx.chat_id, &msg).await;
-        return;
+        return true;
     }
 
-    let ts = current_ts_ms();
+    let storage_id = claw_core::channel_event_admission::sha256_hex(
+        format!("{}\0{}", ctx.message_id, ctx.resource_key).as_bytes(),
+    );
     let root_dir = feishu_inbox_root_for_message_type(&ctx.message_type, &config.feishu);
-    let fname = feishu_saved_file_name(&ctx.message_type, &ctx.content, ts);
+    let fname = feishu_saved_file_name(&ctx.message_type, &ctx.content, &storage_id[..32]);
     let rel = build_feishu_inbox_rel_path(root_dir, &ctx.chat_id, &fname);
     let abs = workspace_root.join(&rel);
     if let Some(parent) = abs.parent() {
         if let Err(e) = tokio::fs::create_dir_all(parent).await {
             warn!("feishud: create media inbox dir failed err={}", e);
-            return;
+            return false;
         }
     }
     if let Err(e) = tokio::fs::write(&abs, &bytes).await {
         warn!("feishud: write media file failed err={}", e);
-        return;
+        return false;
     }
 
     let attachment = claw_core::channel_ingress::ChannelIngressAttachment {
@@ -720,24 +722,105 @@ async fn handle_incoming_feishu_media(state: AppState, ctx: FeishuMediaCtx) {
         vec![attachment],
         Some(ident.user_key),
         None,
-    );
+    )
+    .await
 }
 
 /// webhook / 长连接统一分发：文本走绑定与 ask；媒体先落盘再 ask。
-fn dispatch_im_incoming_event(state: AppState, body: Value) {
+async fn dispatch_im_incoming_event(state: AppState, body: Value) -> bool {
     if let Some((open_id, chat_id, message_id, text, is_group)) =
         parse_im_text_from_event_body(&body)
     {
-        tokio::spawn(handle_incoming_feishu_text(
-            state, open_id, chat_id, message_id, text, is_group,
-        ));
-        return;
+        return handle_incoming_feishu_text(state, open_id, chat_id, message_id, text, is_group)
+            .await;
     }
     if let Some(ctx) = parse_im_media_from_event_body(&body) {
-        tokio::spawn(handle_incoming_feishu_media(state, ctx));
-        return;
+        return handle_incoming_feishu_media(state, ctx).await;
     }
     debug!("feishud: im.message.receive_v1 ignored (unsupported type or missing fields)");
+    true
+}
+
+fn provider_event_id(body: &Value) -> Option<String> {
+    body.get("header")
+        .and_then(|header| header.get("event_id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| {
+            body.get("event")
+                .and_then(|event| event.get("message"))
+                .and_then(|message| message.get("message_id"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+        })
+}
+
+async fn admit_and_dispatch_event(
+    state: AppState,
+    body: Value,
+    raw_body: &[u8],
+    provider_nonce: Option<&str>,
+    provider_timestamp: Option<u64>,
+) -> Result<(), claw_core::channel_event_admission::ChannelEventAdmissionClientError> {
+    let Some(event_id) = provider_event_id(&body) else {
+        debug!("feishud: event ignored because provider event id is absent");
+        return Ok(());
+    };
+    let mut claim = claw_core::channel_event_admission::ChannelEventClaimRequest::new(
+        ChannelKind::Feishu,
+        state.config.feishu.app_id.clone(),
+        event_id.clone(),
+        raw_body,
+    );
+    claim.provider_nonce = provider_nonce.map(ToString::to_string);
+    claim.provider_timestamp = provider_timestamp;
+    let response = claw_core::channel_event_admission::claim_channel_event(
+        &state.client,
+        &state.config.feishu.clawd_base_url,
+        &state.config.feishu.app_secret,
+        &claim,
+    )
+    .await?;
+    if response.status != claw_core::channel_event_admission::ChannelEventClaimStatus::Acquired {
+        debug!(
+            "feishud: duplicate event suppressed event_id={} status={:?}",
+            event_id, response.status
+        );
+        return Ok(());
+    }
+    let lease_token = response.lease_token.ok_or(
+        claw_core::channel_event_admission::ChannelEventAdmissionClientError::InvalidResponse,
+    )?;
+    let dispatch_succeeded = dispatch_im_incoming_event(state.clone(), body).await;
+    let finish = claw_core::channel_event_admission::ChannelEventFinishRequest {
+        schema_version: claw_core::channel_event_admission::CHANNEL_EVENT_ADMISSION_SCHEMA_VERSION,
+        channel: ChannelKind::Feishu,
+        account_id: state.config.feishu.app_id.clone(),
+        provider_event_id: event_id,
+        payload_sha256: claim.payload_sha256,
+        lease_token,
+        outcome: if dispatch_succeeded {
+            claw_core::channel_event_admission::ChannelEventFinishOutcome::Completed
+        } else {
+            claw_core::channel_event_admission::ChannelEventFinishOutcome::RetryableFailure
+        },
+    };
+    claw_core::channel_event_admission::finish_channel_event(
+        &state.client,
+        &state.config.feishu.clawd_base_url,
+        &state.config.feishu.app_secret,
+        &finish,
+    )
+    .await?;
+    if dispatch_succeeded {
+        Ok(())
+    } else {
+        Err(claw_core::channel_event_admission::ChannelEventAdmissionClientError::Request)
+    }
 }
 
 /// 共享主链：提交任务并 spawn 轮询与回发。供 webhook 与 long_connection 复用。
@@ -778,7 +861,7 @@ fn build_feishu_submit_request(
     }
 }
 
-fn handle_text_message_to_clawd(
+async fn handle_text_message_to_clawd(
     state: AppState,
     open_id: String,
     chat_id: String,
@@ -787,7 +870,7 @@ fn handle_text_message_to_clawd(
     attachments: Vec<claw_core::channel_ingress::ChannelIngressAttachment>,
     user_key: Option<String>,
     existing_task_id: Option<String>,
-) {
+) -> bool {
     let submit_req = build_feishu_submit_request(
         &state.config.feishu.language,
         &open_id,
@@ -806,57 +889,57 @@ fn handle_text_message_to_clawd(
     let delivery_timeout_secs = state.config.feishu.task_delivery_timeout_seconds;
     let user_key_poll = user_key.clone();
 
-    tokio::spawn(async move {
-        let task_id = if let Some(task_id) = existing_task_id {
-            task_id
-        } else {
-            let submit_resp = match client.post(&submit_url).json(&submit_req).send().await {
-                Ok(r) => r,
-                Err(e) => {
-                    warn!("feishud: task submit failed err={}", e);
-                    return;
-                }
-            };
-
-            if !submit_resp.status().is_success() {
-                let status = submit_resp.status();
-                let resp_body = submit_resp.text().await.unwrap_or_default();
-                let error = feishu_provider_http_error("submit_task", status.as_u16(), &resp_body);
-                let decoded =
-                    claw_core::channel_provider_error::ChannelProviderError::decode(&error);
-                warn!(
-                    "feishud: task submit failed error_code={} diagnostic_id={}",
-                    decoded
-                        .as_ref()
-                        .map(|value| value.error_code.as_str())
-                        .unwrap_or("channel.provider.unknown"),
-                    decoded
-                        .as_ref()
-                        .map(|value| value.diagnostic_id.as_str())
-                        .unwrap_or("none")
-                );
-                return;
+    let task_id = if let Some(task_id) = existing_task_id {
+        task_id
+    } else {
+        let submit_resp = match client.post(&submit_url).json(&submit_req).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                warn!("feishud: task submit failed err={}", e);
+                return false;
             }
-
-            let submit_body: ApiResponse<SubmitTaskResponse> = match submit_resp.json().await {
-                Ok(b) => b,
-                Err(e) => {
-                    warn!("feishud: task submit response parse failed err={}", e);
-                    return;
-                }
-            };
-
-            let Some(data) = submit_body.data else {
-                warn!("feishud: task submit no task_id");
-                return;
-            };
-            let task_id = data.task_id.to_string();
-            info!(
-                "feishud: bound user task submitted task_id={} external_chat_id={}",
-                task_id, chat_id
-            );
-            task_id
         };
+
+        if !submit_resp.status().is_success() {
+            let status = submit_resp.status();
+            let resp_body = submit_resp.text().await.unwrap_or_default();
+            let error = feishu_provider_http_error("submit_task", status.as_u16(), &resp_body);
+            let decoded = claw_core::channel_provider_error::ChannelProviderError::decode(&error);
+            warn!(
+                "feishud: task submit failed error_code={} diagnostic_id={}",
+                decoded
+                    .as_ref()
+                    .map(|value| value.error_code.as_str())
+                    .unwrap_or("channel.provider.unknown"),
+                decoded
+                    .as_ref()
+                    .map(|value| value.diagnostic_id.as_str())
+                    .unwrap_or("none")
+            );
+            return false;
+        }
+
+        let submit_body: ApiResponse<SubmitTaskResponse> = match submit_resp.json().await {
+            Ok(b) => b,
+            Err(e) => {
+                warn!("feishud: task submit response parse failed err={}", e);
+                return false;
+            }
+        };
+
+        let Some(data) = submit_body.data else {
+            warn!("feishud: task submit no task_id");
+            return false;
+        };
+        let task_id = data.task_id.to_string();
+        info!(
+            "feishud: bound user task submitted task_id={} external_chat_id={}",
+            task_id, chat_id
+        );
+        task_id
+    };
+
+    tokio::spawn(async move {
         let running_notice_text = feishu_t_with(
             &config,
             FEISHU_I18N_REQUEST_TIMEOUT_RETRY_LATER_KEY,
@@ -1053,6 +1136,7 @@ fn handle_text_message_to_clawd(
             }
         }
     });
+    true
 }
 
 async fn request_unified_terminal_delivery(
@@ -1169,6 +1253,13 @@ fn verify_verification_token(
     }
 }
 
+fn validate_webhook_security(section: &FeishuSection) -> anyhow::Result<()> {
+    if section.encrypt_key.trim().is_empty() {
+        anyhow::bail!("feishud webhook mode requires encrypt_key for signed event delivery");
+    }
+    Ok(())
+}
+
 async fn callback_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1240,7 +1331,29 @@ async fn callback_handler(
     }
     info!("feishud: event token verification success");
 
-    dispatch_im_incoming_event(state, body_json);
+    let provider_nonce = headers
+        .get("x-lark-request-nonce")
+        .and_then(|value| value.to_str().ok());
+    let provider_timestamp = headers
+        .get("x-lark-request-timestamp")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok());
+    if let Err(error) = admit_and_dispatch_event(
+        state,
+        body_json,
+        body.as_bytes(),
+        provider_nonce,
+        provider_timestamp,
+    )
+    .await
+    {
+        warn!("feishud: event admission failed error={}", error);
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": "event_admission_unavailable" })),
+        )
+            .into_response();
+    }
     Json(json!({})).into_response()
 }
 
@@ -1459,7 +1572,17 @@ async fn run_long_connection_loop(state: AppState) -> anyhow::Result<()> {
                     );
 
                     let st = (*state).clone();
-                    dispatch_im_incoming_event(st, body);
+                    let raw = payload.to_vec();
+                    tokio::spawn(async move {
+                        if let Err(error) =
+                            admit_and_dispatch_event(st, body, &raw, None, None).await
+                        {
+                            warn!(
+                                "feishud: long_connection event admission failed error={}",
+                                error
+                            );
+                        }
+                    });
                     Ok(())
                 }
             })
@@ -1537,13 +1660,7 @@ async fn main() -> anyhow::Result<()> {
 
     match config.feishu.mode {
         FeishuMode::Webhook => {
-            let token_ok = !config.feishu.verification_token.trim().is_empty();
-            let encrypt_ok = !config.feishu.encrypt_key.trim().is_empty();
-            if !token_ok && !encrypt_ok {
-                anyhow::bail!(
-                    "feishud webhook mode requires verification_token or encrypt_key (at least one must be set)"
-                );
-            }
+            validate_webhook_security(&config.feishu)?;
             let app = Router::new()
                 .route("/", post(callback_handler))
                 .with_state(state);

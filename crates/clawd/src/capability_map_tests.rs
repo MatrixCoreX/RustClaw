@@ -618,32 +618,30 @@ fn compact_capability_map_omits_registry_skill_detail_duplication() {
 }
 
 #[test]
-fn authenticated_admin_capability_map_does_not_claim_network_is_denied() {
+fn authenticated_admin_yolo_capability_map_keeps_configured_network_boundary() {
     let user_key = "rk-capability-map-admin";
     let state = crate::AppState::test_default_with_fixture_provider()
         .with_prompt_layers_installed()
         .with_real_skill_registry();
     state.seed_test_auth_identity(user_key, "admin");
-    let task = task_with_payload(
-        Some(user_key),
-        serde_json::json!({
-            crate::task_execution_policy::POLICY_PAYLOAD_FIELD: {
-                "schema_version": 1,
-                "mode": "yolo",
-                "authority": "authenticated_admin",
-                "actor_role": "admin",
-                "approval_policy": "never",
-                "sandbox_mode": "danger_full",
-                "derivation": "admin_channel_default"
-            }
-        }),
-    );
+    let identity = crate::resolve_auth_identity_by_key(&state, user_key)
+        .expect("resolve admin")
+        .expect("admin identity");
+    let mut payload = serde_json::json!({"text": "inspect capabilities"});
+    crate::task_execution_policy::stamp_authenticated_submission_policy(
+        &mut payload,
+        Some(&identity),
+        Some("ui"),
+        None,
+    )
+    .expect("stamp yolo policy");
+    let task = task_with_payload(Some(user_key), payload);
 
     let compact = build_compact_capability_map_for_task(&state, &task);
 
-    assert!(compact.contains("\"authority_scope\":\"unrestricted_admin\""));
-    assert!(compact.contains("\"network\":\"inherited\""));
-    assert!(!compact.contains("\"network\":\"denied\""));
+    assert!(compact.contains("\"authority_scope\":\"configured\""));
+    assert!(compact.contains("\"network\":\"denied\""));
+    assert!(!compact.contains("\"network\":\"inherited\""));
 }
 
 #[test]

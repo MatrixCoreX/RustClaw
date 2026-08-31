@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { useUiDialog } from "../components/UiDialogProvider";
+import { formatUiError } from "../lib/ui-error";
 import type {
   ApiResponse,
   MemoryClearPreview,
@@ -68,7 +69,7 @@ export function useMemoryRuntime({ apiFetch, t }: UseMemoryRuntimeParams) {
   const readApiBody = async <T,>(res: Response, label: string): Promise<T> => {
     const body = (await res.json()) as ApiResponse<T>;
     if (!res.ok || !body.ok || body.data === undefined) {
-      throw new Error(body.error || `${label} request failed (${res.status})`);
+      throw new Error(body.error || `${label.replace(/\s+/g, "_")}_http_${res.status}`);
     }
     return body.data;
   };
@@ -114,7 +115,7 @@ export function useMemoryRuntime({ apiFetch, t }: UseMemoryRuntimeParams) {
       setMemoryVectorStatus(await vectorStatusPromise);
       setMemoryError(null);
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "记忆数据暂时无法读取。", "Memory data is temporarily unavailable.");
       setMemoryError(message);
     } finally {
       if (!silent) {
@@ -138,7 +139,7 @@ export function useMemoryRuntime({ apiFetch, t }: UseMemoryRuntimeParams) {
       setMemoryPage(await readApiBody<MemoryPageResult>(response, "memory items"));
       setMemoryFilters(filters);
     } catch (err) {
-      setMemoryError(err instanceof Error ? err.message : t("未知错误", "Unknown error"));
+      setMemoryError(formatUiError(err, t, "记忆数据暂时无法读取。", "Memory data is temporarily unavailable."));
     } finally {
       setMemoryLoading(false);
     }
@@ -158,7 +159,7 @@ export function useMemoryRuntime({ apiFetch, t }: UseMemoryRuntimeParams) {
       setMemoryMessage(t("已保存纠正，旧内容已停止使用。", "Correction saved; the old item is no longer used."));
       await fetchMemoryPage(memoryFilters, memoryPage?.page ?? 1);
     } catch (err) {
-      setMemoryError(err instanceof Error ? err.message : t("未知错误", "Unknown error"));
+      setMemoryError(formatUiError(err, t, "记忆设置保存失败，请稍后重试。", "Memory settings could not be saved. Try again shortly."));
     } finally {
       setMemoryActionLoading(null);
     }
@@ -185,7 +186,7 @@ export function useMemoryRuntime({ apiFetch, t }: UseMemoryRuntimeParams) {
       );
       await fetchMemoryPage(memoryFilters, memoryPage?.page ?? 1);
     } catch (err) {
-      setMemoryError(err instanceof Error ? err.message : t("未知错误", "Unknown error"));
+      setMemoryError(formatUiError(err, t, "记忆偏好保存失败，请稍后重试。", "The memory preference could not be saved. Try again shortly."));
     } finally {
       setMemoryActionLoading(null);
     }
@@ -211,7 +212,7 @@ export function useMemoryRuntime({ apiFetch, t }: UseMemoryRuntimeParams) {
       setMemoryMessage(t("记忆已删除，短暂撤销期后会清除恢复副本。", "Memory deleted; its recovery copy is scrubbed after the short undo window."));
       await fetchMemoryPage(memoryFilters, memoryPage?.page ?? 1);
     } catch (err) {
-      setMemoryError(err instanceof Error ? err.message : t("未知错误", "Unknown error"));
+      setMemoryError(formatUiError(err, t, "记忆条目更新失败，请稍后重试。", "The memory entry could not be updated. Try again shortly."));
     } finally {
       setMemoryActionLoading(null);
     }
@@ -232,7 +233,7 @@ export function useMemoryRuntime({ apiFetch, t }: UseMemoryRuntimeParams) {
       setMemoryMessage(t("已撤销刚才的记忆修改。", "The last memory change was undone."));
       await fetchMemoryData(true);
     } catch (err) {
-      setMemoryError(err instanceof Error ? err.message : t("未知错误", "Unknown error"));
+      setMemoryError(formatUiError(err, t, "记忆导出失败，请稍后重试。", "Memory export failed. Try again shortly."));
     } finally {
       setMemoryActionLoading(null);
     }
@@ -265,7 +266,7 @@ export function useMemoryRuntime({ apiFetch, t }: UseMemoryRuntimeParams) {
       anchor.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      setMemoryError(err instanceof Error ? err.message : t("未知错误", "Unknown error"));
+      setMemoryError(formatUiError(err, t, "记忆导出失败，请稍后重试。", "Memory export failed. Try again shortly."));
     } finally {
       setMemoryActionLoading(null);
     }
@@ -306,7 +307,7 @@ export function useMemoryRuntime({ apiFetch, t }: UseMemoryRuntimeParams) {
       ));
       await fetchMemoryData(true);
     } catch (err) {
-      setMemoryError(err instanceof Error ? err.message : t("导入文件无效", "Invalid import file"));
+      setMemoryError(formatUiError(err, t, "导入文件无效或无法读取。", "The import file is invalid or unreadable."));
     } finally {
       setMemoryActionLoading(null);
     }
@@ -329,7 +330,7 @@ export function useMemoryRuntime({ apiFetch, t }: UseMemoryRuntimeParams) {
       setMemorySettingScope(scope);
       setMemorySettings(data);
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "记忆设置保存失败，请稍后重试。", "Memory settings could not be saved. Try again shortly.");
       setMemoryError(message);
     } finally {
       setMemorySettingsSaving(false);
@@ -347,7 +348,7 @@ export function useMemoryRuntime({ apiFetch, t }: UseMemoryRuntimeParams) {
       const response = await apiFetch(`/v1/memory/clear/preview?mode=${mode}`);
       scopedPreview = await readApiBody<MemoryClearPreview>(response, "memory clear preview");
     } catch (err) {
-      setMemoryError(err instanceof Error ? err.message : t("未知错误", "Unknown error"));
+      setMemoryError(formatUiError(err, t, "记忆导入失败，请稍后重试。", "Memory import failed. Try again shortly."));
       return;
     }
     const confirmed = await showConfirm({
@@ -377,7 +378,7 @@ export function useMemoryRuntime({ apiFetch, t }: UseMemoryRuntimeParams) {
       setMemoryMessage(t("清理完成。", "Memory cleared."));
       await fetchMemoryData(true);
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "记忆清理失败，请稍后重试。", "Memory cleanup failed. Try again shortly.");
       setMemoryError(message);
     } finally {
       setMemoryActionLoading(null);
@@ -404,7 +405,7 @@ export function useMemoryRuntime({ apiFetch, t }: UseMemoryRuntimeParams) {
       setMemoryMessage(t("远程处理范围已更新。", "Remote processing scope updated."));
       await fetchMemoryData(true);
     } catch (err) {
-      setMemoryError(err instanceof Error ? err.message : t("未知错误", "Unknown error"));
+      setMemoryError(formatUiError(err, t, "记忆清理失败，请稍后重试。", "Memory cleanup failed. Try again shortly."));
     } finally {
       setMemorySettingsSaving(false);
     }
@@ -434,7 +435,7 @@ export function useMemoryRuntime({ apiFetch, t }: UseMemoryRuntimeParams) {
       );
       setMemoryMessage(t("记忆设置已立即生效。", "Memory setting is now active."));
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "记忆设置保存失败，请稍后重试。", "Memory settings could not be saved. Try again shortly.");
       setMemoryError(message);
     } finally {
       setMemorySettingsSaving(false);
@@ -460,7 +461,7 @@ export function useMemoryRuntime({ apiFetch, t }: UseMemoryRuntimeParams) {
         : t("搜索索引状态已更新。", "Search-index state updated."));
       await fetchMemoryData(true);
     } catch (err) {
-      setMemoryError(err instanceof Error ? err.message : t("搜索索引操作失败", "Search-index action failed"));
+      setMemoryError(formatUiError(err, t, "搜索索引操作失败，请稍后重试。", "The search-index action failed. Try again shortly."));
     } finally {
       setMemoryActionLoading(null);
     }

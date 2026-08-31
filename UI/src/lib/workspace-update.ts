@@ -83,9 +83,16 @@ export function formatWorkspaceUpdateStep(step: string | null | undefined, lang:
     nginx_enabled: copy(lang, "nginx 已启用", "nginx enabled"),
     disabling_nginx: copy(lang, "正在关闭 nginx", "Disabling nginx"),
     nginx_disabled: copy(lang, "nginx 已关闭", "nginx disabled"),
+    preparing_local_https: copy(lang, "正在准备设备证书", "Preparing device certificate"),
+    local_https_prepared: copy(lang, "设备证书已准备", "Device certificate prepared"),
+    enabling_local_https: copy(lang, "正在启用 HTTPS", "Enabling HTTPS"),
+    local_https_enabled: copy(lang, "HTTPS 已启用", "HTTPS enabled"),
+    restoring_local_http: copy(lang, "正在恢复 HTTP", "Restoring HTTP"),
+    local_https_restored: copy(lang, "HTTP 已恢复", "HTTP restored"),
     building_clawd: copy(lang, "正在编译 clawd", "Building clawd"),
     downloading_release: copy(lang, "正在下载 Release 包", "Downloading Release package"),
     deploying_release: copy(lang, "正在部署 Release 包", "Deploying Release package"),
+    restoring_release: copy(lang, "正在恢复 Release 部署", "Restoring Release deployment"),
     cloning_source_checkout: copy(lang, "正在获取完整源码", "Fetching complete source"),
     cancel_requested: copy(lang, "正在停止编译", "Stopping build"),
     canceled: copy(lang, "已停止", "Stopped"),
@@ -93,9 +100,11 @@ export function formatWorkspaceUpdateStep(step: string | null | undefined, lang:
     restart_scheduled: copy(lang, "已安排重启", "Restart scheduled"),
     clawd_restart_scheduled: copy(lang, "clawd 已安排重启", "clawd restart scheduled"),
     release_restart_scheduled: copy(lang, "Release 已部署，正在重启", "Release deployed, restarting"),
+    release_restore_restart_scheduled: copy(lang, "Release 模式已恢复，正在重启", "Release mode restored, restarting"),
     source_checkout_restart_scheduled: copy(lang, "源码模式已启用，正在重启", "Source mode enabled, restarting"),
   };
-  return labels[step || ""] || step || "--";
+  if (!step) return "--";
+  return labels[step] || copy(lang, "处理中", "Working");
 }
 
 export function formatWorkspaceUpdateStatus(
@@ -107,7 +116,11 @@ export function formatWorkspaceUpdateStatus(
     if (mode === "ui_only" || mode === "clawd_only") return copy(lang, "编译中", "Building");
     if (mode === "nginx_enable") return copy(lang, "配置中", "Configuring");
     if (mode === "nginx_disable") return copy(lang, "关闭中", "Disabling");
+    if (mode === "local_https_prepare") return copy(lang, "准备证书", "Preparing certificate");
+    if (mode === "local_https_enable") return copy(lang, "启用 HTTPS", "Enabling HTTPS");
+    if (mode === "local_https_restore") return copy(lang, "恢复 HTTP", "Restoring HTTP");
     if (mode === "release_deploy") return copy(lang, "部署中", "Deploying");
+    if (mode === "release_restore") return copy(lang, "恢复中", "Restoring");
     if (mode === "source_checkout") return copy(lang, "切换中", "Switching");
     return copy(lang, "更新中", "Updating");
   }
@@ -123,6 +136,11 @@ export function formatWorkspaceUpdateApiError(error: string | null | undefined, 
   const code = error?.trim();
   const labels: Record<string, string> = {
     workspace_update_admin_required: copy(lang, "只有管理员可以执行这个操作。", "Only an admin can perform this action."),
+    local_https_ca_fingerprint_mismatch: copy(
+      lang,
+      "设备 CA 已变化，请重新下载并安装当前证书后再启用 HTTPS。",
+      "The device CA changed. Download and install the current certificate before enabling HTTPS.",
+    ),
     workspace_update_already_running: copy(lang, "更新已经在进行中。", "An update is already running."),
     workspace_update_not_running: copy(lang, "当前没有正在运行的更新。", "No update is currently running."),
     workspace_update_source_checkout_required: copy(
@@ -135,13 +153,20 @@ export function formatWorkspaceUpdateApiError(error: string | null | undefined, 
       "当前已经是源码模式。",
       "Source mode is already enabled.",
     ),
+    workspace_update_release_restore_source_required: copy(
+      lang,
+      "当前不是源码模式，无需恢复 Release 部署。",
+      "This installation is not in source mode, so no Release restoration is needed.",
+    ),
     workspace_update_release_platform_unsupported: copy(
       lang,
       "当前系统或架构没有可用的预编译 Release 包，请继续使用源码模式。",
       "No prebuilt Release package is available for this operating system or architecture. Continue using source mode.",
     ),
   };
-  return code ? labels[code] || code : copy(lang, "未知错误", "Unknown error");
+  return code
+    ? labels[code] || copy(lang, "更新操作未完成，请查看操作日志后重试。", "The update did not complete. Check the operation log and try again.")
+    : copy(lang, "未知错误", "Unknown error");
 }
 
 export function formatWorkspaceUpdateNextStep(
@@ -265,6 +290,21 @@ export function formatWorkspaceUpdateNextStep(
       "nginx 管理命令未能启动，请确认部署脚本完整且当前用户具有所需权限。",
       "The nginx management command could not start. Confirm the deployment scripts are present and the current user has the required privileges.",
     ),
+    "workspace_update.local_https_prepare_failed": copy(
+      lang,
+      "设备证书准备失败。请检查系统管理员权限、网络和操作日志。",
+      "Device certificate preparation failed. Check administrator privileges, network access, and the operation log.",
+    ),
+    "workspace_update.local_https_enable_failed": copy(
+      lang,
+      "HTTPS 启用失败。HTTP 入口保持不变，请检查 nginx 和证书日志后重试。",
+      "HTTPS activation failed. The HTTP entry is unchanged; check nginx and certificate logs, then retry.",
+    ),
+    "workspace_update.local_https_restore_failed": copy(
+      lang,
+      "HTTP 恢复失败。请检查 nginx 配置和系统管理员权限。",
+      "HTTP restore failed. Check nginx configuration and administrator privileges.",
+    ),
     "workspace_update.clawd_build_failed": copy(
       lang,
       "请查看 clawd 编译日志；修复 Rust 编译错误后再重试。",
@@ -300,6 +340,26 @@ export function formatWorkspaceUpdateNextStep(
       "Release 包已部署，但自动重启失败。请在服务器上手动重启 clawd。",
       "The Release package was deployed, but automatic restart failed. Restart clawd manually on the server.",
     ),
+    "workspace_update.release_restore_downloading": copy(
+      lang,
+      "正在下载并验证 Release 包；当前源码部署会在验证成功后原子替换。",
+      "Downloading and verifying the Release package. The current source deployment is replaced atomically only after verification succeeds.",
+    ),
+    "workspace_update.release_restore_check_network_or_permissions": copy(
+      lang,
+      "恢复 Release 部署失败；当前源码目录未被不完整包覆盖。请检查部署日志、网络和目录写入权限。",
+      "Restoring the Release deployment failed. The source directory was not overwritten by an incomplete package. Check deployment logs, network access, and directory permissions.",
+    ),
+    "workspace_update.release_restore_restart_scheduled": copy(
+      lang,
+      "已恢复为 Release 部署，{product_name} 正在重启；恢复后源码编译入口将隐藏。",
+      "The Release deployment was restored and {product_name} is restarting. Source build controls will be hidden after recovery.",
+    ),
+    "workspace_update.release_restore_restart_failed": copy(
+      lang,
+      "Release 部署已恢复，但自动重启失败。请在服务器上手动重启 {product_name}。",
+      "The Release deployment was restored, but automatic restart failed. Restart {product_name} manually on the server.",
+    ),
     "workspace_update.source_checkout_cloning": copy(
       lang,
       "正在克隆并验证完整源码，现有 Release 安装在验证成功前不会改变。",
@@ -326,7 +386,11 @@ export function formatWorkspaceUpdateNextStep(
       "The build stopped. Fix any issues, then build again.",
     ),
   };
-  return labels[key] || status?.next_step || key;
+  return labels[key] || status?.next_step || copy(
+    lang,
+    "请查看操作日志了解详细原因，然后重试。",
+    "Check the operation log for details, then try again.",
+  );
 }
 
 export function formatWorkspaceUpdateTime(ts: number | null | undefined, lang: UiLanguage): string {
@@ -353,9 +417,13 @@ function workspaceUpdateProgressPercent(status: WorkspaceUpdateStatus | null | u
     building_ui: 82,
     enabling_nginx: 45,
     disabling_nginx: 45,
+    preparing_local_https: 45,
+    enabling_local_https: 60,
+    restoring_local_http: 60,
     building_clawd: 82,
     downloading_release: 35,
     deploying_release: 78,
+    restoring_release: 55,
     cloning_source_checkout: 45,
     cancel_requested: 92,
     restarting_clawd: 96,
@@ -393,6 +461,13 @@ function workspaceUpdateProgressLabel(status: WorkspaceUpdateStatus | null | und
   if (running && status?.mode === "release_deploy") {
     return copy(lang, "Release 包部署中，完成后会保留配置并重启 clawd。", "Deploying the Release package; configs will be preserved and clawd will restart.");
   }
+  if (running && status?.mode === "release_restore") {
+    return copy(
+      lang,
+      "正在验证 Release 包并原子替换源码部署；配置、数据、日志和运行时技能会保留。",
+      "Verifying the Release package and atomically replacing the source deployment; configuration, data, logs, and runtime skills are preserved.",
+    );
+  }
   if (running && status?.mode === "source_checkout") {
     return copy(
       lang,
@@ -429,14 +504,14 @@ function workspaceUpdateErrorNotice(
     title,
     detail: copy(
       lang,
-      status.mode === "release_deploy"
+      status.mode === "release_deploy" || status.mode === "release_restore"
         ? "请查看下方日志摘要；修复网络、GitHub Release 或写入权限问题后再重试。"
         : status.mode === "source_checkout"
           ? "请查看下方日志摘要；当前 Release 安装仍然保留，可修复网络、Git 或写入权限后重试。"
         : status.mode === "nginx_enable" || status.mode === "nginx_disable"
           ? "请查看下方日志摘要；修复 nginx、UI 产物或系统权限问题后再重试。"
           : "请查看下方日志摘要；修复 Git、网络或编译问题后再重试。",
-      status.mode === "release_deploy"
+      status.mode === "release_deploy" || status.mode === "release_restore"
         ? "Check the log summary below, then fix network, GitHub Release, or write-permission issues and retry."
         : status.mode === "source_checkout"
           ? "Check the log summary below. The current Release installation is still preserved; fix network, Git, or write permissions and retry."
@@ -481,11 +556,15 @@ function workspaceUpdateNotice(
         lang,
         status.mode === "release_deploy"
           ? "Release 包已部署，{product_name} 正在重启。"
+          : status.mode === "release_restore"
+            ? "已恢复为 Release 部署，{product_name} 正在重启。"
           : status.mode === "source_checkout"
             ? "源码模式已启用，{product_name} 正在重启。"
             : "编译/部署已完成，{product_name} 正在重启。",
         status.mode === "release_deploy"
           ? "Release package deployed and {product_name} is restarting."
+          : status.mode === "release_restore"
+            ? "Release deployment restored and {product_name} is restarting."
           : status.mode === "source_checkout"
             ? "Source mode is enabled and {product_name} is restarting."
             : "Build/deploy completed and {product_name} is restarting.",
@@ -505,6 +584,8 @@ function workspaceUpdateNotice(
         lang,
         status.mode === "release_deploy"
           ? "Release 部署正在进行，日志会在下方持续刷新。"
+          : status.mode === "release_restore"
+            ? "正在安全恢复为 Release 部署，操作日志会在下方持续刷新。"
           : status.mode === "source_checkout"
             ? "正在安全切换到源码模式，操作日志会在下方持续刷新。"
           : status.mode === "nginx_disable"
@@ -514,6 +595,8 @@ function workspaceUpdateNotice(
           : "更新流程正在进行，编译日志会在下方持续刷新。",
         status.mode === "release_deploy"
           ? "Release deployment is running. Logs will keep refreshing below."
+          : status.mode === "release_restore"
+            ? "The safe Release restoration is running. Operation logs will keep refreshing below."
           : status.mode === "source_checkout"
             ? "The safe source-mode migration is running. Operation logs will keep refreshing below."
           : status.mode === "nginx_disable"
@@ -609,6 +692,6 @@ export function shouldReloadAfterWorkspaceBuild(
   mode: WorkspaceUpdateStatus["mode"] | undefined,
   status: WorkspaceUpdateStatus["status"] | undefined,
 ): boolean {
-  if (!wasActive || mode === "release_deploy" || mode === "nginx_enable" || mode === "nginx_disable") return false;
+  if (!wasActive || mode === "release_deploy" || mode === "release_restore" || mode === "nginx_enable" || mode === "nginx_disable") return false;
   return status === "succeeded" || status === "idle" || status === "up_to_date";
 }

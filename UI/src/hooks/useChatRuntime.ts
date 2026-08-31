@@ -34,6 +34,7 @@ import {
   CLIENT_ORIGIN_HEADER,
 } from "../lib/product-identity";
 import { extractTaskText } from "../lib/task-result";
+import { formatUiError } from "../lib/ui-error";
 import {
   extractTaskArtifactDeliverySummary,
   extractTaskArtifacts,
@@ -366,11 +367,7 @@ export function useChatRuntime({
       setChatHistoryCursor(page.truncated ? page.next_cursor?.trim() || null : null);
       setChatError(null);
     } catch (error) {
-      setChatError(
-        error instanceof Error
-          ? error.message
-          : t("加载更早的任务失败。", "Failed to load earlier tasks."),
-      );
+      setChatError(formatUiError(error, t, "加载更早的任务失败。", "Failed to load earlier tasks."));
     } finally {
       chatHistoryLoadingRef.current = false;
       setChatHistoryLoading(false);
@@ -401,11 +398,7 @@ export function useChatRuntime({
       }));
       setChatError(null);
     } catch (error) {
-      setChatError(
-        error instanceof Error
-          ? error.message
-          : t("继续读取完整内容失败。", "Failed to load more of this message."),
-      );
+      setChatError(formatUiError(error, t, "继续读取完整内容失败。", "Failed to load more of this message."));
     } finally {
       setChatBodyLoadingMessageId(null);
     }
@@ -705,7 +698,7 @@ export function useChatRuntime({
     const res = await apiFetch(`/v1/debug/tasks/${normalizedId}?teaching=true`);
     const body = (await res.json()) as ApiResponse<TaskLlmDebugResponse>;
     if (!res.ok || !body.ok || !body.data) {
-      throw new Error(body.error || `chat teaching trace query failed (${res.status})`);
+      throw new Error(body.error || `chat_teaching_trace_query_http_${res.status}`);
     }
     return body.data;
   };
@@ -741,7 +734,7 @@ export function useChatRuntime({
       }));
       return result;
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "教学过程暂时无法读取。", "The teaching trace is temporarily unavailable.");
       updateChatThreadById(threadAtQuery.id, (thread) => ({
         ...thread,
         lastTaskId: targetTaskId,
@@ -889,11 +882,7 @@ export function useChatRuntime({
       if (!terminal) suspendedChatTaskIdsRef.current.add(taskId);
     } catch (error) {
       if (!controller.signal.aborted) {
-        setChatError(
-          error instanceof Error
-            ? error.message
-            : t("恢复未完成任务失败。", "Failed to resume the unfinished task."),
-        );
+        setChatError(formatUiError(error, t, "恢复未完成任务失败。", "Failed to resume the unfinished task."));
         suspendedChatTaskIdsRef.current.add(taskId);
       }
     } finally {
@@ -1019,7 +1008,7 @@ export function useChatRuntime({
       chatRecordingValueRef.current = false;
       setChatRecording(false);
       setChatError(
-        err instanceof Error ? err.message : t("无法开始录音。", "Unable to start recording."),
+        formatUiError(err, t, "无法开始录音。", "Unable to start recording."),
       );
     }
   };
@@ -1223,7 +1212,7 @@ export function useChatRuntime({
       });
       const submitData = (await submitRes.json()) as ApiResponse<SubmitTaskResponse>;
       if (!submitRes.ok || !submitData.ok || !submitData.data?.task_id) {
-        throw new Error(submitData.error || `chat task submit failed (${submitRes.status})`);
+        throw new Error(submitData.error || `chat_task_submit_http_${submitRes.status}`);
       }
 
       submittedTaskId = submitData.data.task_id;
@@ -1302,7 +1291,10 @@ export function useChatRuntime({
         completedPresentationText !== null &&
         completedPresentationText !== finalTaskText
       ) {
-        setChatError("assistant_presentation_final_mismatch");
+        setChatError(t(
+          "流式回复与最终结果不一致，页面已保留最终结果。",
+          "The streamed reply differed from the final result. The final result has been kept.",
+        ));
       }
       onTaskResult(submittedTaskId, finalResult);
       updateChatThreadById(submitThreadId, (thread) => ({
@@ -1342,7 +1334,7 @@ export function useChatRuntime({
         updatedAt: Date.now(),
       }));
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "消息发送失败，请稍后重试。", "The message could not be sent. Try again later.");
       setChatError(message);
       const systemErrMsg: ChatMessage = {
         id: `e-${Date.now()}`,
@@ -1434,7 +1426,7 @@ export function useChatRuntime({
       });
       const submitted = (await submitRes.json()) as ApiResponse<SubmitTaskResponse>;
       if (!submitRes.ok || !submitted.ok || !submitted.data?.task_id) {
-        throw new Error(submitted.error || `context compaction submit failed (${submitRes.status})`);
+        throw new Error(submitted.error || `context_compaction_submit_http_${submitRes.status}`);
       }
       submittedTaskId = submitted.data.task_id;
       onTaskSubmitted(submittedTaskId);
@@ -1460,11 +1452,7 @@ export function useChatRuntime({
       }));
       return true;
     } catch (error) {
-      setChatError(
-        error instanceof Error
-          ? error.message
-          : t("压缩上下文失败。", "Failed to compact context."),
-      );
+      setChatError(formatUiError(error, t, "压缩上下文失败。", "Failed to compact context."));
       return false;
     } finally {
       setChatCompacting(false);
@@ -1837,7 +1825,7 @@ function formatChatAttachmentError(
   t: Translate,
 ): string {
   if (!(error instanceof ChatAttachmentConstraintError)) {
-    return error instanceof Error ? error.message : t("读取文件失败。", "Failed to read files.");
+    return formatUiError(error, t, "读取文件失败。", "Failed to read files.");
   }
   switch (error.code) {
     case "ui_attachments_too_many":

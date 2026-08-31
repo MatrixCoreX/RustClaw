@@ -207,12 +207,11 @@ fn effective_yolo_policy_requires_a_current_admin_identity() {
     let effective = effective_policy_for_task(&state, &task);
     assert_eq!(effective.mode, TaskExecutionMode::Yolo);
     assert_eq!(effective.approval_policy, ToolApprovalPolicy::Never);
-    assert_eq!(effective.sandbox_mode, ToolSandboxMode::DangerFull);
+    assert_eq!(effective.sandbox_mode, ToolSandboxMode::WorkspaceWrite);
     assert_eq!(effective.actor_role, Some("admin"));
-    assert!(effective.has_unrestricted_admin_authority());
     let machine = effective.to_machine_json();
-    assert_eq!(machine["authority_scope"], "unrestricted_admin");
-    assert_eq!(machine["host_scope"], "system");
+    assert_eq!(machine["authority_scope"], "configured");
+    assert_eq!(machine["host_scope"], "workspace");
     assert!(!effective.approval_required(true, true, true));
     assert!(effective
         .sandbox_denial(crate::runtime::policy::SandboxRequirements {
@@ -226,7 +225,7 @@ fn effective_yolo_policy_requires_a_current_admin_identity() {
             privilege_escalation: true,
             isolation_profile: None,
         })
-        .is_none());
+        .is_some());
     let inherited = inheritable_policy_stamp(&state, &task).expect("inheritable policy");
     assert_eq!(inherited["mode"], "yolo");
     assert_eq!(inherited["derivation"], "authenticated_parent_task");
@@ -260,7 +259,6 @@ fn effective_yolo_policy_requires_a_current_admin_identity() {
     assert_eq!(fallback.approval_policy, ToolApprovalPolicy::OnRisk);
     assert_eq!(fallback.sandbox_mode, ToolSandboxMode::WorkspaceWrite);
     assert_eq!(fallback.actor_role, None);
-    assert!(!fallback.has_unrestricted_admin_authority());
     let fallback_machine = fallback.to_machine_json();
     assert_eq!(fallback_machine["authority_scope"], "configured");
     assert_eq!(fallback_machine["host_scope"], "workspace");

@@ -1,5 +1,4 @@
 use serde_json::Value;
-use std::io::{Read as IoRead, Seek as IoSeek, SeekFrom};
 use std::path::{Component, Path, PathBuf};
 
 use crate::{AppState, ClaimedTask};
@@ -164,11 +163,17 @@ pub(crate) async fn execute_builtin_skill_with_task(
         .map(|task| crate::task_execution_policy::effective_policy_for_task(state, task))
         .unwrap_or_else(|| crate::task_execution_policy::configured_policy(state));
     let policy_token = format!("skill:{skill_name}");
-    if !state.skill_rt.tools_policy.is_any_allowed_for_execution(
-        &[&policy_token],
-        state.core.active_provider_type.as_deref(),
-        execution_policy.mode == crate::task_execution_policy::TaskExecutionMode::Yolo,
-    ) {
+    if !state
+        .skill_rt
+        .tools_policy
+        .is_any_allowed_for_execution_for_actor(
+            &[&policy_token],
+            state.core.active_provider_type.as_deref(),
+            task.is_some_and(|task| {
+                crate::task_execution_policy::task_has_current_admin_identity(state, task)
+            }),
+        )
+    {
         return Err(crate::skills::policy_block_error(
             "skill_policy_denied",
             vec![
@@ -236,24 +241,26 @@ pub(crate) async fn execute_builtin_skill_with_task(
             }
             let start_byte = map.get("start_byte").and_then(Value::as_u64).unwrap_or(0);
             let max_bytes = optional_usize(map, "max_bytes");
-            let value = builtin_read_file::read_file_page(path, &real_path, start_byte, max_bytes)
-                .map_err(|err| {
-                    if err.kind() == std::io::ErrorKind::NotFound {
-                        format!(
-                            "{}{}",
-                            super::READ_FILE_NOT_FOUND_PREFIX,
-                            real_path.display()
-                        )
-                    } else {
-                        io_builtin_error(
-                            "read_file",
-                            "read file",
-                            &err,
-                            Some(path),
-                            Some(&real_path),
-                        )
-                    }
-                })?;
+            let workspace_scoped =
+                builtin_path_is_workspace_scoped(&state.skill_rt.workspace_root, &real_path);
+            let value = builtin_read_file::read_file_page(
+                path,
+                &real_path,
+                workspace_scoped.then_some(state.skill_rt.workspace_root.as_path()),
+                start_byte,
+                max_bytes,
+            )
+            .map_err(|err| {
+                if err.kind() == std::io::ErrorKind::NotFound {
+                    format!(
+                        "{}{}",
+                        super::READ_FILE_NOT_FOUND_PREFIX,
+                        real_path.display()
+                    )
+                } else {
+                    io_builtin_error("read_file", "read file", &err, Some(path), Some(&real_path))
+                }
+            })?;
             Ok(value.to_string())
         }
         "write_file" => {
@@ -288,7 +295,11 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 &real_path,
                 builtin_allows_path_outside_workspace(state, task),
                 || {
-                    if create_parents {
+                    let workspace_scoped = builtin_path_is_workspace_scoped(
+                        &state.skill_rt.workspace_root,
+                        &real_path,
+                    );
+                    if create_parents && !workspace_scoped {
                         if let Some(parent) = real_path.parent() {
                             std::fs::create_dir_all(parent).map_err(|err| {
                                 io_builtin_error(
@@ -302,17 +313,14 @@ pub(crate) async fn execute_builtin_skill_with_task(
                         }
                     }
                     if append {
-                        let prepend_line_separator =
-                            append_needs_line_separator(&real_path, content).map_err(|err| {
-                                io_builtin_error(
-                                    "write_file",
-                                    "inspect_before_append",
-                                    &err,
-                                    Some(path),
-                                    Some(&real_path),
-                                )
-                            })?;
-                        let mut bytes = match std::fs::read(&real_path) {
+                        let mut bytes = match if workspace_scoped {
+                            crate::secure_workspace_fs::read_workspace_file(
+                                &state.skill_rt.workspace_root,
+                                &real_path,
+                            )
+                        } else {
+                            std::fs::read(&real_path)
+                        } {
                             Ok(bytes) => bytes,
                             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Vec::new(),
                             Err(err) => {
@@ -325,11 +333,18 @@ pub(crate) async fn execute_builtin_skill_with_task(
                                 ));
                             }
                         };
-                        if prepend_line_separator {
+                        if append_needs_line_separator(&bytes, content) {
                             bytes.push(b'\n');
                         }
                         bytes.extend_from_slice(content.as_bytes());
-                        atomic_write_file(&real_path, &bytes).map_err(|err| {
+                        atomic_write_builtin_file(
+                            &state.skill_rt.workspace_root,
+                            &real_path,
+                            &bytes,
+                            create_parents,
+                            workspace_scoped,
+                        )
+                        .map_err(|err| {
                             io_builtin_error(
                                 "write_file",
                                 "atomic_append_file",
@@ -339,7 +354,14 @@ pub(crate) async fn execute_builtin_skill_with_task(
                             )
                         })?;
                     } else {
-                        atomic_write_file(&real_path, content.as_bytes()).map_err(|err| {
+                        atomic_write_builtin_file(
+                            &state.skill_rt.workspace_root,
+                            &real_path,
+                            content.as_bytes(),
+                            create_parents,
+                            workspace_scoped,
+                        )
+                        .map_err(|err| {
                             io_builtin_error(
                                 "write_file",
                                 "atomic_write_file",
@@ -692,11 +714,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
                     })),
                 ));
             }
-            if disable_timeout
-                && !task.is_some_and(|task| {
-                    crate::task_execution_policy::task_has_unrestricted_admin_authority(state, task)
-                })
-            {
+            if disable_timeout && !task.is_some_and(|task| super::task_is_admin(state, task)) {
                 return Err(builtin_error(
                     "run_cmd",
                     "permission_denied",
@@ -1124,23 +1142,39 @@ fn write_file_create_parents_flag(map: &serde_json::Map<String, Value>) -> Resul
     Ok(create_parents.or(parents).unwrap_or(true))
 }
 
-fn append_needs_line_separator(path: &Path, content: &str) -> std::io::Result<bool> {
+fn append_needs_line_separator(existing: &[u8], content: &str) -> bool {
     if content.is_empty() || content.starts_with('\n') || !content.ends_with('\n') {
-        return Ok(false);
+        return false;
     }
-    let metadata = match std::fs::metadata(path) {
-        Ok(metadata) => metadata,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(err) => return Err(err),
-    };
-    if metadata.len() == 0 {
-        return Ok(false);
+    existing
+        .last()
+        .is_some_and(|last| !matches!(*last, b'\n' | b'\r'))
+}
+
+fn atomic_write_builtin_file(
+    workspace_root: &Path,
+    target: &Path,
+    bytes: &[u8],
+    create_missing_parents: bool,
+    workspace_scoped: bool,
+) -> std::io::Result<()> {
+    if workspace_scoped {
+        crate::secure_workspace_fs::atomic_write_workspace_file_with_options(
+            workspace_root,
+            target,
+            bytes,
+            create_missing_parents,
+        )
+    } else {
+        atomic_write_file(target, bytes)
     }
-    let mut file = std::fs::File::open(path)?;
-    file.seek(SeekFrom::End(-1))?;
-    let mut last = [0u8; 1];
-    file.read_exact(&mut last)?;
-    Ok(!matches!(last[0], b'\n' | b'\r'))
+}
+
+fn builtin_path_is_workspace_scoped(workspace_root: &Path, target: &Path) -> bool {
+    let canonical_root = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    target.starts_with(&canonical_root) || target.starts_with(workspace_root)
 }
 
 fn resolve_workspace_path(

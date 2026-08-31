@@ -240,6 +240,6 @@ export function mcpErrorLabel(errorCode: string, t: Translate): string {
     case "mcp_capability_prefix_duplicate":
       return t("服务器能力命名空间冲突。", "Server capability namespaces conflict.");
     default:
-      return `${t("操作未完成", "The operation did not complete")} (${errorCode})`;
+      return t("MCP 操作未完成，请稍后重试。", "The MCP operation did not complete. Try again later.");
   }
 }

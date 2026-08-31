@@ -217,7 +217,7 @@ pub(crate) fn settle_waiting_async_result(
         Some(final_result_json),
         extra,
         &step_id,
-        "trusted_async_job_completion",
+        "untrusted_async_job_output",
     );
     bind_artifacts_to_task(&mut completed, task_id, &step_id, retention_deadline_at);
     let mut provenance = original_provenance;
@@ -236,7 +236,7 @@ pub(crate) fn settle_waiting_async_result(
     provenance.insert("step_id".to_string(), json!(machine_evidence_id(&step_id)));
     provenance.insert(
         "content_trust".to_string(),
-        json!("trusted_async_job_completion"),
+        json!("untrusted_async_job_output"),
     );
     provenance.insert("task_id".to_string(), json!(task_id));
     completed.provenance = Value::Object(provenance);

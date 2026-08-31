@@ -381,7 +381,7 @@ fn rewind(workspace_root: &Path, args: &Map<String, Value>) -> Result<String, St
 
     for file in &manifest.files {
         validate_relative_patch_path(&root, &file.path)?;
-        let current_hash = hash_existing_file(&root.join(&file.path))?;
+        let current_hash = hash_existing_file(&root, &root.join(&file.path))?;
         if current_hash != file.after_sha256 {
             return Err(patch_error(
                 "rewind_precondition_failed",
@@ -532,7 +532,7 @@ fn snapshot_files(
     let mut files = Vec::with_capacity(stats.len());
     for (index, stat) in stats.iter().enumerate() {
         let path = root.join(&stat.path);
-        let bytes = read_optional_regular_file(&path)?;
+        let bytes = read_optional_regular_file(root, &path)?;
         let backup_file = bytes.as_ref().map(|_| format!("before/{index}.bin"));
         if let (Some(bytes), Some(backup_file)) = (&bytes, &backup_file) {
             fs::write(checkpoint_dir.join(backup_file), bytes).map_err(|err| {
@@ -559,7 +559,7 @@ fn snapshot_files(
 fn capture_after_hashes(root: &Path, files: &mut [CheckpointFile]) -> Result<(), String> {
     for file in files {
         validate_relative_patch_path(root, &file.path)?;
-        file.after_sha256 = hash_existing_file(&root.join(&file.path))?;
+        file.after_sha256 = hash_existing_file(root, &root.join(&file.path))?;
     }
     Ok(())
 }
@@ -595,7 +595,7 @@ fn verify_preconditions(
                 serde_json::json!({"path": path}),
             )
         })?;
-        let actual = hash_existing_file(&root.join(path))?;
+        let actual = hash_existing_file(root, &root.join(path))?;
         let matches = match expected {
             "missing" => actual.is_none(),
             value => actual.as_deref() == Some(value),
@@ -645,29 +645,25 @@ pub(super) fn validate_relative_patch_path(root: &Path, path: &str) -> Result<Pa
     Ok(target)
 }
 
-fn read_optional_regular_file(path: &Path) -> Result<Option<Vec<u8>>, String> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
-            Err(patch_error(
-                "unsupported_file_type",
-                "workspace.patch.unsupported_file_type",
-                serde_json::json!({"path": path.display().to_string()}),
-            ))
-        }
-        Ok(_) => fs::read(path).map(Some).map_err(|err| {
-            patch_io_error("file_read_failed", "workspace.patch.file_read_failed", err)
-        }),
+fn read_optional_regular_file(root: &Path, path: &Path) -> Result<Option<Vec<u8>>, String> {
+    match crate::secure_workspace_fs::read_workspace_file(root, path) {
+        Ok(bytes) => Ok(Some(bytes)),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => Err(patch_error(
+            "unsupported_file_type",
+            "workspace.patch.unsupported_file_type",
+            serde_json::json!({"path": path.display().to_string()}),
+        )),
         Err(err) => Err(patch_io_error(
-            "path_inspection_failed",
-            "workspace.patch.path_inspection_failed",
+            "file_read_failed",
+            "workspace.patch.file_read_failed",
             err,
         )),
     }
 }
 
-fn hash_existing_file(path: &Path) -> Result<Option<String>, String> {
-    read_optional_regular_file(path).map(|bytes| bytes.as_deref().map(sha256_label))
+fn hash_existing_file(root: &Path, path: &Path) -> Result<Option<String>, String> {
+    read_optional_regular_file(root, path).map(|bytes| bytes.as_deref().map(sha256_label))
 }
 
 fn restore_snapshot(root: &Path, checkpoint_dir: &Path, files: &[CheckpointFile]) {

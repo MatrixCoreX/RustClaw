@@ -6,6 +6,7 @@ use super::policy::{SandboxRequirements, ToolsPolicy};
 fn default_coding_profile_is_an_explicit_local_capability_set() {
     let config = ToolsConfig::default();
     assert_eq!(config.access_profile, "coding");
+    assert_eq!(config.admin_access_profile, "full");
     assert_eq!(config.sandbox_mode.as_token(), "workspace_write");
     assert_eq!(config.sandbox_backend.as_token(), "auto");
     assert_eq!(config.approval_policy.as_token(), "on_risk");
@@ -137,20 +138,69 @@ fn access_profile_membership_comes_from_host_configuration() {
 }
 
 #[test]
-fn unrestricted_admin_execution_bypasses_all_application_skill_lists() {
+fn authenticated_admin_profile_is_host_owned_and_independent_of_execution_mode() {
+    let policy = ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy");
+    for token in ["skill:http_basic", "skill:nni", "skill:docker_basic"] {
+        assert!(!policy.is_any_allowed_for_execution_for_actor(&[token], None, false));
+        assert!(policy.is_any_allowed_for_execution_for_actor(&[token], None, true));
+    }
+}
+
+#[test]
+fn authenticated_admin_profile_cannot_bypass_explicit_or_provider_deny() {
+    let mut config = ToolsConfig::default();
+    config.deny = vec!["skill:http_basic".to_string()];
+    config
+        .by_provider
+        .entry("openai".to_string())
+        .or_default()
+        .deny = vec!["skill:nni".to_string()];
+    let policy = ToolsPolicy::from_config(&config).expect("tools policy");
+
+    assert!(!policy.is_any_allowed_for_execution_for_actor(&["skill:http_basic"], None, true));
+    assert!(!policy.is_any_allowed_for_execution_for_actor(
+        &["skill:nni"],
+        Some("openai_compat"),
+        true
+    ));
+    assert!(policy.is_any_allowed_for_execution_for_actor(&["skill:nni"], None, true));
+}
+
+#[test]
+fn explicit_allow_remains_a_host_constraint_for_authenticated_admins() {
+    let mut config = ToolsConfig::default();
+    config.allow = vec!["skill:fs_basic".to_string()];
+    let policy = ToolsPolicy::from_config(&config).expect("tools policy");
+
+    assert!(policy.is_any_allowed_for_execution_for_actor(&["skill:fs_basic"], None, true));
+    assert!(!policy.is_any_allowed_for_execution_for_actor(&["skill:http_basic"], None, true));
+}
+
+#[test]
+fn unknown_admin_access_profile_fails_closed() {
+    let mut config = ToolsConfig::default();
+    config.admin_access_profile = "missing".to_string();
+    assert!(ToolsPolicy::from_config(&config)
+        .err()
+        .expect("unknown admin profile must fail")
+        .contains("invalid_tools_admin_access_profile"));
+}
+
+#[test]
+fn execution_policy_deny_sets_have_no_yolo_bypass() {
     let policy = ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy");
     assert!(!policy.is_allowed("skill:docker_basic", None));
-    assert!(policy.is_any_allowed_for_execution(&["skill:docker_basic"], None, true));
+    assert!(!policy.is_any_allowed_for_execution(&["skill:docker_basic"], None));
 
     let mut denied_config = ToolsConfig::default();
     denied_config.deny = vec!["skill:docker_basic".to_string()];
     let denied = ToolsPolicy::from_config(&denied_config).expect("denied tools policy");
-    assert!(denied.is_any_allowed_for_execution(&["skill:docker_basic"], None, true));
+    assert!(!denied.is_any_allowed_for_execution(&["skill:docker_basic"], None));
 
     let mut allow_config = ToolsConfig::default();
     allow_config.allow = vec!["skill:fs_basic".to_string()];
     let allow_only = ToolsPolicy::from_config(&allow_config).expect("allow-only tools policy");
-    assert!(allow_only.is_any_allowed_for_execution(&["skill:docker_basic"], None, true));
+    assert!(!allow_only.is_any_allowed_for_execution(&["skill:docker_basic"], None));
 
     let mut provider_config = ToolsConfig::default();
     provider_config
@@ -160,11 +210,8 @@ fn unrestricted_admin_execution_bypasses_all_application_skill_lists() {
         .deny = vec!["skill:docker_basic".to_string()];
     let provider_denied =
         ToolsPolicy::from_config(&provider_config).expect("provider-denied tools policy");
-    assert!(provider_denied.is_any_allowed_for_execution(
-        &["skill:docker_basic"],
-        Some("openai_compat"),
-        true,
-    ));
+    assert!(!provider_denied
+        .is_any_allowed_for_execution(&["skill:docker_basic"], Some("openai_compat")));
 
     let mut combined_config = ToolsConfig::default();
     combined_config.allow = vec!["skill:docker_basic".to_string()];
@@ -174,15 +221,11 @@ fn unrestricted_admin_execution_bypasses_all_application_skill_lists() {
         .or_default()
         .deny = vec!["skill:docker_basic".to_string()];
     let combined = ToolsPolicy::from_config(&combined_config).expect("combined tools policy");
-    assert!(combined.is_any_allowed_for_execution(
-        &["skill:docker_basic"],
-        Some("openai_compat"),
-        true,
-    ));
+    assert!(!combined.is_any_allowed_for_execution(&["skill:docker_basic"], Some("openai_compat")));
 }
 
 #[test]
-fn unrestricted_admin_policy_covers_every_registered_builtin_skill_and_capability() {
+fn deny_all_policy_covers_every_registered_builtin_skill_and_capability() {
     let registry_path =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml");
     let registry = claw_core::skill_registry::SkillsRegistry::load_from_path(&registry_path)
@@ -196,24 +239,15 @@ fn unrestricted_admin_policy_covers_every_registered_builtin_skill_and_capabilit
     for skill in registry.all_names() {
         let token = format!("skill:{skill}");
         assert!(
-            policy.is_any_allowed_for_execution(&[&token], None, true),
-            "unrestricted admin must be able to invoke registered skill {skill}"
-        );
-        assert!(
-            !policy.is_any_allowed_for_execution(&[&token], None, false),
-            "ordinary user must keep the deny-all policy for {skill}"
+            !policy.is_any_allowed_for_execution(&[&token], None),
+            "deny-all host policy must cover registered skill {skill}"
         );
         checked_skills += 1;
         for capability in registry.planner_capabilities(&skill) {
             let token = format!("capability:{}", capability.name);
             assert!(
-                policy.is_any_allowed_for_execution(&[&token], None, true),
-                "unrestricted admin must be able to invoke {}",
-                capability.name
-            );
-            assert!(
-                !policy.is_any_allowed_for_execution(&[&token], None, false),
-                "ordinary user must keep the deny-all policy for {}",
+                !policy.is_any_allowed_for_execution(&[&token], None),
+                "deny-all host policy must cover capability {}",
                 capability.name
             );
             checked_capabilities += 1;

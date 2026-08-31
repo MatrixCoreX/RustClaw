@@ -121,6 +121,41 @@ async fn http_hook_rejects_external_plaintext_and_redirects() {
     assert_eq!(result.error_code, Some("hook_http_redirect_forbidden"));
 }
 
+#[test]
+fn http_hook_rejects_private_and_implicit_loopback_endpoints() {
+    for (url, expected_error) in [
+        ("https://10.0.0.8/hook", "hook_http_non_public_address"),
+        (
+            "https://169.254.169.254/latest/meta-data",
+            "hook_http_non_public_address",
+        ),
+        ("https://192.168.1.8/hook", "hook_http_non_public_address"),
+        ("https://[::1]/hook", "hook_http_loopback_policy_required"),
+        ("https://[fc00::1]/hook", "hook_http_non_public_address"),
+    ] {
+        let mut handler = http_handler(url.to_string());
+        handler.allow_insecure_loopback = false;
+        assert_eq!(
+            validate_http_handler(handler)
+                .expect_err("non-public endpoint must fail")
+                .1,
+            expected_error
+        );
+    }
+
+    let mut localhost = http_handler("https://localhost/hook".to_string());
+    localhost.allow_insecure_loopback = false;
+    assert_eq!(
+        validate_http_handler(localhost)
+            .expect_err("loopback requires an explicit policy")
+            .1,
+        "hook_http_loopback_policy_required"
+    );
+
+    validate_http_handler(http_handler("https://1.1.1.1/hook".to_string()))
+        .expect("public HTTPS endpoint");
+}
+
 #[tokio::test]
 async fn trusted_observation_only_mcp_hook_uses_structured_content_only() {
     let mut config = crate::mcp_runtime::test_support::fixture_config();

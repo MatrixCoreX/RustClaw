@@ -2,11 +2,10 @@ use serde_json::json;
 
 use super::{ExpectedPathKind, SkillPathPolicy};
 
-fn admin_context() -> serde_json::Value {
+fn host_path_grant_context() -> serde_json::Value {
     json!({
-        "authority_scope": "unrestricted_admin",
+        "authority_scope": "host_policy_grant",
         "permissions": {
-            "unrestricted_admin": true,
             "allow_path_outside_workspace": true
         }
     })
@@ -42,22 +41,22 @@ fn confined_policy_resolves_workspace_paths_and_rejects_escape() {
 }
 
 #[test]
-fn admin_policy_allows_external_paths_only_with_complete_verified_shape() {
+fn host_policy_allows_external_paths_only_with_complete_verified_shape() {
     let workspace = tempfile::tempdir().expect("workspace");
     let outside = tempfile::NamedTempFile::new().expect("outside");
-    let context = admin_context();
-    let admin = SkillPathPolicy::new(workspace.path(), Some(&context)).expect("admin policy");
-    assert!(admin.authority().is_unrestricted_admin());
-    assert!(admin
+    let context = host_path_grant_context();
+    let granted = SkillPathPolicy::new(workspace.path(), Some(&context)).expect("host policy");
+    assert!(granted.authority().outside_workspace_granted());
+    assert!(granted
         .resolve_existing(outside.path().to_str().unwrap(), ExpectedPathKind::File)
         .is_ok());
 
     let incomplete = json!({
-        "authority_scope": "unrestricted_admin",
+        "authority_scope": "workspace",
         "permissions": { "allow_path_outside_workspace": true }
     });
     let confined = SkillPathPolicy::new(workspace.path(), Some(&incomplete)).expect("policy");
-    assert!(!confined.authority().is_unrestricted_admin());
+    assert!(!confined.authority().outside_workspace_granted());
     assert!(confined
         .resolve_existing(outside.path().to_str().unwrap(), ExpectedPathKind::File)
         .is_err());
@@ -118,5 +117,31 @@ fn confined_policy_rejects_symlink_escape_and_symlink_mutation_target() {
     assert_eq!(
         policy.resolve_create_target("target.txt").unwrap_err().code,
         "path_target_symlink_forbidden"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn path_policy_rejects_unix_sockets_as_inputs_and_mutation_targets() {
+    use std::os::unix::net::UnixListener;
+
+    let workspace = tempfile::tempdir().expect("workspace");
+    let socket_path = workspace.path().join("service.sock");
+    let _listener = UnixListener::bind(&socket_path).expect("bind fixture socket");
+    let policy = SkillPathPolicy::new(workspace.path(), None).expect("policy");
+
+    assert_eq!(
+        policy
+            .resolve_existing("service.sock", ExpectedPathKind::Any)
+            .unwrap_err()
+            .code,
+        "path_kind_mismatch"
+    );
+    assert_eq!(
+        policy
+            .resolve_create_target("service.sock")
+            .unwrap_err()
+            .code,
+        "path_kind_mismatch"
     );
 }

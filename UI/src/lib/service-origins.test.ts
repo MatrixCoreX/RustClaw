@@ -55,6 +55,26 @@ test("standard HTTP ports do not gain explicit backend ports", () => {
   assert.equal(defaultWebdBaseUrl(deployed), "http://agent.example.com");
 });
 
+test("remote device pages discard stale browser-loopback service addresses", () => {
+  const byIp = location("http://192.168.31.243/");
+  assert.equal(
+    preferredWebdBaseUrl("http://127.0.0.1:8788", byIp),
+    "http://192.168.31.243",
+  );
+  assert.equal(
+    preferredBrowserApiBaseUrl("http://localhost:8787", location("http://home-agent.local/")),
+    "http://home-agent.local",
+  );
+});
+
+test("loopback pages retain existing legacy-port normalization", () => {
+  const local = location("http://127.0.0.1/");
+  assert.equal(
+    preferredWebdBaseUrl("http://127.0.0.1:8788", local),
+    "http://127.0.0.1",
+  );
+});
+
 test("legacy generated domain ports migrate to the current reverse-proxy origin", () => {
   const deployed = location("https://agent-runtime.example.com/");
   assert.equal(

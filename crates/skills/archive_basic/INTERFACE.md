@@ -26,7 +26,7 @@
 | `read` | `archive` | yes | string(path) | - | Archive file path (relative to workspace or explicit absolute path). Runtime also accepts `archive_path` or `path` as aliases and normalizes to `archive`. |
 | `read` | `member` | yes | string(relative path) | - | File path inside the archive. Runtime also accepts `entry`, `file`, or `file_path` as aliases. Must be relative and reject `..`. |
 | `pack` | `action` | yes | string | - | Must be `pack`. |
-| `pack` | `source` | yes | string(path) | - | Source file or directory to archive. |
+| `pack` | `source` | yes | string(path) | - | Source file or directory to archive. Members start with the source basename; absolute ancestor directories are never stored. |
 | `pack` | `archive` | yes | string(path) | - | Output archive file path. Parent dir is auto-created. Runtime also accepts `archive_path` as an alias and normalizes to `archive`. |
 | `pack` | `format` | no | string | `zip` | Supported: `zip`, `tar.gz`, `tgz` (`tgz` handled as `tar.gz`). |
 | `unpack` | `action` | yes | string | - | Must be `unpack`. |
@@ -54,6 +54,7 @@
   - On malformed stdin JSON request: `invalid input: <serde error>`
 - Successful `list` returns a single-line JSON object in `text` with `action`, `archive`, `count`, `entries`, `candidates`, and `output`.
 - Successful `pack`/`unpack` command execution output is returned in `text` as `exit=<code>\n<stdout/stderr>`.
+- `pack` stores only the source basename and descendants (for example, source `/workspace/bundle_src` produces `bundle_src/...` members); it never exposes absolute ancestor directories in member names.
 - Successful `read` returns a single-line JSON object in `text` with `action`, `archive`, `member`, and `content`.
 - Non-zero archive command exit codes are returned as `status=error` with `error_text=archive command failed: exit=<code>\n<stdout/stderr>`.
 - Successful responses also mirror structured metadata into `extra`, including `action`, relevant paths, and `output`.

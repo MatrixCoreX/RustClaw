@@ -1,6 +1,71 @@
 use super::*;
 
 pub(super) async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Result<()> {
+    let provider_event_id = format!("{}:{}", msg.chat.id.0, msg.id.0);
+    let payload = serde_json::to_vec(&msg).context("serialize telegram event for admission")?;
+    let claim = claw_core::channel_event_admission::ChannelEventClaimRequest::new(
+        ChannelKind::Telegram,
+        state.bot_name.clone(),
+        provider_event_id.clone(),
+        &payload,
+    );
+    let claim_response = claw_core::channel_event_admission::claim_channel_event(
+        &state.client,
+        &state.clawd_base_url,
+        &state.bot_token,
+        &claim,
+    )
+    .await
+    .context("claim telegram event admission")?;
+    if claim_response.status
+        != claw_core::channel_event_admission::ChannelEventClaimStatus::Acquired
+    {
+        debug!(
+            bot_name = %state.bot_name,
+            provider_event_id = %provider_event_id,
+            status = ?claim_response.status,
+            "telegram duplicate event suppressed"
+        );
+        return Ok(());
+    }
+    let lease_token = claim_response
+        .lease_token
+        .context("telegram event admission lease missing")?;
+    let processing = handle_claimed_message(bot, msg, state.clone()).await;
+    let finish = claw_core::channel_event_admission::ChannelEventFinishRequest {
+        schema_version: claw_core::channel_event_admission::CHANNEL_EVENT_ADMISSION_SCHEMA_VERSION,
+        channel: ChannelKind::Telegram,
+        account_id: state.bot_name.clone(),
+        provider_event_id,
+        payload_sha256: claim.payload_sha256,
+        lease_token,
+        outcome: if processing.is_ok() {
+            claw_core::channel_event_admission::ChannelEventFinishOutcome::Completed
+        } else {
+            claw_core::channel_event_admission::ChannelEventFinishOutcome::RetryableFailure
+        },
+    };
+    let finish_result = claw_core::channel_event_admission::finish_channel_event(
+        &state.client,
+        &state.clawd_base_url,
+        &state.bot_token,
+        &finish,
+    )
+    .await;
+    if let Err(error) = finish_result {
+        warn!(
+            bot_name = %state.bot_name,
+            error = %error,
+            "telegram event admission finish failed"
+        );
+        if processing.is_ok() {
+            return Err(error).context("finish telegram event admission");
+        }
+    }
+    processing
+}
+
+async fn handle_claimed_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Result<()> {
     let platform_user_id = msg
         .from()
         .map(|u| i64::try_from(u.id.0).unwrap_or_default())

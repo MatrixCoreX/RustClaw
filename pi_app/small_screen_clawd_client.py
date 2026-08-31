@@ -1,5 +1,6 @@
 import http.client
 import json
+import secrets
 import threading
 import urllib.parse
 
@@ -111,8 +112,10 @@ def post_admin_webd_account(user_key, username, password):
         return False, str(exc)
 
 
-def reset_admin_login_account(username="admin", password="123456"):
+def reset_admin_login_account(username="admin", password=None):
     admin_key = load_enabled_admin_user_key()
     if not admin_key:
-        return False, "enabled admin key not found"
-    return post_admin_webd_account(admin_key, username, password)
+        return False, "enabled admin key not found", ""
+    generated_password = password or secrets.token_urlsafe(24)
+    ok, error = post_admin_webd_account(admin_key, username, generated_password)
+    return ok, error, generated_password if ok else ""

@@ -91,7 +91,6 @@ def runner_env(repo: Path) -> dict[str, str]:
         "SKILL_TIMEOUT_SECONDS": "60",
         "APP_ALLOW_PATH_OUTSIDE_WORKSPACE": "0",
         "APP_ALLOW_SUDO": "0",
-        "APP_UNRESTRICTED_ADMIN": "0",
     }
 
 

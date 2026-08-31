@@ -52,6 +52,10 @@ grep -Fqx 'state' "$RUNTIME_ROOT/data/state.db"
 grep -Fqx '<html>runtime UI</html>' "$RUNTIME_ROOT/UI/dist/index.html"
 test -x "$RUNTIME_ROOT/target/release/clawd"
 test "$(find "$TMP_DIR/.runtime-source-backups" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 1
+BACKUP_DIR="$(find "$TMP_DIR/.runtime-source-backups" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+test -L "$BACKUP_DIR/data"
+test "$(readlink "$BACKUP_DIR/data")" = "$RUNTIME_ROOT/data"
+grep -Fqx 'state' "$BACKUP_DIR/data/state.db"
 
 SECOND_OUTPUT="$(
   "$ROOT_DIR/scripts/switch-to-source-checkout.sh" \

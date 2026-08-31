@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
 mod response_contract;
 
@@ -451,6 +452,7 @@ fn execute(
                     input.resume_reason.as_deref(),
                     input.user_message.as_deref(),
                     input.new_constraints.clone(),
+                    &request_id,
                     user_key.as_deref(),
                 )
                 .await?;
@@ -545,6 +547,7 @@ fn execute(
                     &base_url,
                     task_id,
                     pause_seconds,
+                    &request_id,
                     user_key.as_deref(),
                 )
                 .await?;
@@ -701,9 +704,13 @@ async fn resume_task_by_id(
     resume_reason: Option<&str>,
     user_message: Option<&str>,
     new_constraints: Option<Value>,
+    request_id: &str,
     user_key: Option<&str>,
 ) -> Result<Value, String> {
-    let mut payload = json!({ "task_id": task_id });
+    let mut payload = json!({
+        "task_id": task_id,
+        "idempotency_key": task_control_idempotency_key("resume", request_id, task_id),
+    });
     if let Some(obj) = payload.as_object_mut() {
         insert_optional_token(obj, "checkpoint_id", checkpoint_id);
         insert_optional_token(obj, "resume_reason", resume_reason);
@@ -727,6 +734,7 @@ async fn pause_task_by_id(
     base_url: &str,
     task_id: &str,
     pause_seconds: u64,
+    request_id: &str,
     user_key: Option<&str>,
 ) -> Result<Value, String> {
     post_task_control_by_id(
@@ -736,10 +744,18 @@ async fn pause_task_by_id(
         json!({
             "task_id": task_id,
             "pause_seconds": pause_seconds,
+            "idempotency_key": task_control_idempotency_key("pause", request_id, task_id),
         }),
         user_key,
     )
     .await
+}
+
+fn task_control_idempotency_key(action: &str, request_id: &str, task_id: &str) -> String {
+    format!(
+        "skill-{action}-{:x}",
+        Sha256::digest(format!("{request_id}\n{task_id}").as_bytes())
+    )
 }
 
 async fn post_task_control_by_id(

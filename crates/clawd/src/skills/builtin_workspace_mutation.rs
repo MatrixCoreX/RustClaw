@@ -170,7 +170,7 @@ where
         "state": "applied",
         "target_path": target.display().to_string(),
         "isolation_root": "host://service-account",
-        "authority_scope": "unrestricted_admin",
+        "authority_scope": "host_policy_grant",
         "reversible": false,
         "rollback_unavailable_reason": "outside_workspace_checkpoint_scope",
         "changed_files": [target.display().to_string()],

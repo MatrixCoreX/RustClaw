@@ -49,10 +49,9 @@ fn llm_vendor_api_key_for_state(state: &AppState, vendor_name: &str) -> (String,
         &state.skill_rt.workspace_root,
     );
     let broker = claw_core::secrets::EnvFileSecretsBroker::new(credential_path);
-    use claw_core::secrets::SecretsBroker as _;
-    match broker.lookup(&secret_name) {
-        Ok(Some(secret)) if !secret.is_empty() => {
-            (secret.expose().to_string(), "private_file")
+    match broker.lookup_with_source(&secret_name) {
+        Ok(Some((secret, source))) if !secret.is_empty() => {
+            (secret.expose().to_string(), source.machine_name())
         }
         _ => (String::new(), "none"),
     }

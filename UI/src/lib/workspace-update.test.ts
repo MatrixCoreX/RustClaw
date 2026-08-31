@@ -65,8 +65,9 @@ test("shows only Release versions for release packages", () => {
 test("formats workspace update steps and statuses", () => {
   assert.equal(formatWorkspaceUpdateStep("building_ui", "en"), "Building UI");
   assert.equal(formatWorkspaceUpdateStep("building_clawd", "zh"), "正在编译 clawd");
-  assert.equal(formatWorkspaceUpdateStep("custom_step", "en"), "custom_step");
+  assert.equal(formatWorkspaceUpdateStep("custom_step", "en"), "Working");
   assert.equal(formatWorkspaceUpdateStatus("running", "release_deploy", "en"), "Deploying");
+  assert.equal(formatWorkspaceUpdateStatus("running", "release_restore", "zh"), "恢复中");
   assert.equal(formatWorkspaceUpdateStatus("running", "source_checkout", "en"), "Switching");
   assert.equal(formatWorkspaceUpdateStatus("running", "ui_only", "zh"), "编译中");
   assert.equal(formatWorkspaceUpdateStatus("running", "full_preserve_nginx", "zh"), "更新中");
@@ -84,7 +85,14 @@ test("formats workspace update steps and statuses", () => {
     formatWorkspaceUpdateApiError("workspace_update_release_platform_unsupported", "zh"),
     "当前系统或架构没有可用的预编译 Release 包，请继续使用源码模式。",
   );
-  assert.equal(formatWorkspaceUpdateApiError("custom_code", "en"), "custom_code");
+  assert.equal(
+    formatWorkspaceUpdateApiError("workspace_update_release_restore_source_required", "en"),
+    "This installation is not in source mode, so no Release restoration is needed.",
+  );
+  assert.equal(
+    formatWorkspaceUpdateApiError("custom_code", "en"),
+    "The update did not complete. Check the operation log and try again.",
+  );
 });
 
 test("builds running workspace update view", () => {
@@ -124,6 +132,22 @@ test("builds release deployment progress view", () => {
   assert.equal(view.progressPercent, 78);
   assert.equal(view.progressLabel, "Deploying the Release package; configs will be preserved and clawd will restart.");
   assert.equal(view.notice?.detail, "Release deployment is running. Logs will keep refreshing below.");
+});
+
+test("builds source-to-release restoration progress view", () => {
+  const view = buildWorkspaceUpdateView(
+    status({
+      status: "running",
+      mode: "release_restore",
+      step: "restoring_release",
+      next_step_key: "workspace_update.release_restore_downloading",
+    }),
+    "en",
+  );
+  assert.equal(view.progressPercent, 55);
+  assert.match(view.progressLabel, /atomically replacing the source deployment/);
+  assert.match(view.notice?.detail ?? "", /replaced atomically only after verification succeeds/);
+  assert.equal(shouldReloadAfterWorkspaceBuild(true, "release_restore", "succeeded"), false);
 });
 
 test("builds nginx repair and UI deployment progress view", () => {
@@ -220,7 +244,7 @@ test("formats workspace update next-step keys and legacy fallback", () => {
   );
   assert.equal(
     formatWorkspaceUpdateNextStep(status({ next_step_key: "workspace_update.unknown" }), "en"),
-    "workspace_update.unknown",
+    "Check the operation log for details, then try again.",
   );
 });
 

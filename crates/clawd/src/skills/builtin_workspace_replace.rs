@@ -1,9 +1,9 @@
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
-use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use super::builtin_workspace_mutation::{atomic_write_file, run_checkpointed_workspace_mutation};
+use super::builtin_workspace_mutation::run_checkpointed_workspace_mutation;
 use super::builtin_workspace_patch::{canonical_workspace_root, validate_relative_patch_path};
 
 #[path = "builtin_workspace_replace_edit.rs"]
@@ -68,7 +68,7 @@ pub(super) fn execute_workspace_replace_for_root(
         })?
         .to_string_lossy()
         .into_owned();
-    let replacement = prepare_replacement(args, &path, &target)?;
+    let replacement = prepare_replacement(args, &root, &path, &target)?;
     let preview = replacement_preview(action, &replacement);
 
     if action == "preview_replace_text" {
@@ -93,7 +93,7 @@ pub(super) fn execute_workspace_replace_for_root(
     let after = replacement.after.as_bytes().to_vec();
     let mutation =
         run_checkpointed_workspace_mutation(&root, task_id, "replace_text", &target, || {
-            let current = read_text_file(&target, &path)?;
+            let current = read_text_file(&root, &target, &path)?;
             let current_hash = sha256_label(current.as_bytes());
             if current_hash != expected_before_hash {
                 return Err(replace_error(
@@ -106,16 +106,18 @@ pub(super) fn execute_workspace_replace_for_root(
                     }),
                 ));
             }
-            atomic_write_file(&target, &after).map_err(|error| {
-                replace_error(
-                    "replacement_write_failed",
-                    "workspace.replace.write_failed",
-                    json!({
-                        "path": path,
-                        "io_kind": format!("{:?}", error.kind()),
-                    }),
-                )
-            })
+            crate::secure_workspace_fs::atomic_write_workspace_file(&root, &target, &after).map_err(
+                |error| {
+                    replace_error(
+                        "replacement_write_failed",
+                        "workspace.replace.write_failed",
+                        json!({
+                            "path": path,
+                            "io_kind": format!("{:?}", error.kind()),
+                        }),
+                    )
+                },
+            )
         })?;
 
     let mut result: Value = serde_json::from_str(&mutation).map_err(|error| {
@@ -187,10 +189,11 @@ fn validate_replace_path(
 
 fn prepare_replacement(
     args: &Map<String, Value>,
+    workspace_root: &Path,
     requested_path: &str,
     target: &Path,
 ) -> Result<Replacement, String> {
-    let before = read_text_file(target, requested_path)?;
+    let before = read_text_file(workspace_root, target, requested_path)?;
     if let Some(expected) = optional_nonempty_string(args, "expected_sha256") {
         let actual = sha256_label(before.as_bytes());
         if normalize_hash(expected) != actual {
@@ -261,32 +264,40 @@ fn replacement_preview(action: &str, replacement: &Replacement) -> Value {
     })
 }
 
-fn read_text_file(path: &Path, requested_path: &str) -> Result<String, String> {
-    let metadata = fs::symlink_metadata(path).map_err(|error| {
+fn read_text_file(
+    workspace_root: &Path,
+    path: &Path,
+    requested_path: &str,
+) -> Result<String, String> {
+    let mut file =
+        crate::secure_workspace_fs::open_workspace_file(workspace_root, path).map_err(|error| {
+            replace_error(
+                if error.kind() == std::io::ErrorKind::NotFound {
+                    "replacement_target_not_found"
+                } else {
+                    "replacement_target_inspection_failed"
+                },
+                if error.kind() == std::io::ErrorKind::NotFound {
+                    "workspace.replace.target_not_found"
+                } else {
+                    "workspace.replace.target_inspection_failed"
+                },
+                json!({
+                    "path": requested_path,
+                    "io_kind": format!("{:?}", error.kind()),
+                }),
+            )
+        })?;
+    let metadata = file.metadata().map_err(|error| {
         replace_error(
-            if error.kind() == std::io::ErrorKind::NotFound {
-                "replacement_target_not_found"
-            } else {
-                "replacement_target_inspection_failed"
-            },
-            if error.kind() == std::io::ErrorKind::NotFound {
-                "workspace.replace.target_not_found"
-            } else {
-                "workspace.replace.target_inspection_failed"
-            },
+            "replacement_target_inspection_failed",
+            "workspace.replace.target_inspection_failed",
             json!({
                 "path": requested_path,
                 "io_kind": format!("{:?}", error.kind()),
             }),
         )
     })?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err(replace_error(
-            "unsupported_file_type",
-            "workspace.replace.unsupported_file_type",
-            json!({"path": requested_path}),
-        ));
-    }
     if metadata.len() > MAX_FILE_BYTES as u64 {
         return Err(replace_error(
             "replacement_target_too_large",
@@ -298,7 +309,8 @@ fn read_text_file(path: &Path, requested_path: &str) -> Result<String, String> {
             }),
         ));
     }
-    let bytes = fs::read(path).map_err(|error| {
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.read_to_end(&mut bytes).map_err(|error| {
         replace_error(
             "replacement_read_failed",
             "workspace.replace.read_failed",

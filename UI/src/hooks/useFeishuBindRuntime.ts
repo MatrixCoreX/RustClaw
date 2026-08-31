@@ -9,6 +9,7 @@ import {
   type AgentAppChannel,
   type FeishuBindSessionResponse,
 } from "../lib/feishu-bind";
+import { formatUiError } from "../lib/ui-error";
 import type { ApiResponse } from "../types/api";
 
 type Translate = (zh: string, en: string) => string;
@@ -49,7 +50,7 @@ export function useChannelBindRuntime({
       const session = await startChannelBindSession(apiFetch, platform);
       setBindSession(session);
     } catch (err) {
-      setBindError(err instanceof Error ? err.message : t("未知错误", "Unknown error"));
+      setBindError(formatUiError(err, t, `${channelLabel}绑定未能开始。`, `${channelLabel} binding could not start.`));
     } finally {
       setBindLoading(false);
     }
@@ -69,9 +70,8 @@ export function useChannelBindRuntime({
       }
       return session;
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
       if (!silent) {
-        setBindError(message);
+        setBindError(formatUiError(err, t, `无法刷新${channelLabel}绑定状态。`, `Could not refresh ${channelLabel} binding status.`));
       }
       return null;
     } finally {
@@ -98,15 +98,14 @@ export function useChannelBindRuntime({
       const res = await apiFetch(`/v1/admin/${platform}/reset`, { method: "POST" });
       const body = (await res.json()) as ApiResponse<Record<string, unknown>>;
       if (!res.ok || !body.ok) {
-        throw new Error(body.error || `${platform} reset failed (${res.status})`);
+        throw new Error(body.error || `${platform}_reset_http_${res.status}`);
       }
       setBindSession(null);
       setBindQrDataUrl(null);
       await onConfigRefresh();
       await onHealthRefresh();
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
-      setBindError(message);
+      setBindError(formatUiError(err, t, `${channelLabel}接入未能重置。`, `${channelLabel} setup could not be reset.`));
     } finally {
       setResetLoading(false);
     }
@@ -134,7 +133,7 @@ export function useChannelBindRuntime({
       })
       .catch((err) => {
         if (!cancelled) {
-          setBindError(err instanceof Error ? err.message : t("未知错误", "Unknown error"));
+          setBindError(formatUiError(err, t, "无法生成绑定二维码。", "Could not generate the binding QR code."));
           setBindQrDataUrl(null);
         }
       });

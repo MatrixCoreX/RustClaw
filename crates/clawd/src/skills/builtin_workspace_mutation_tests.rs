@@ -316,7 +316,7 @@ fn authorized_host_scope_mutation_is_applied_without_workspace_checkpoint() {
     );
     assert_eq!(
         value.get("authority_scope").and_then(Value::as_str),
-        Some("unrestricted_admin")
+        Some("host_policy_grant")
     );
     assert_eq!(
         value.get("reversible").and_then(Value::as_bool),

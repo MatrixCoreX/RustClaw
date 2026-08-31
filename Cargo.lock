@@ -715,6 +715,7 @@ dependencies = [
  "anyhow",
  "config",
  "fs2",
+ "hmac",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -4684,6 +4685,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
 ]
 
@@ -5619,6 +5621,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "tower 0.5.3",
  "tower-http 0.6.8",

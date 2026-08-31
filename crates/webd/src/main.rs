@@ -22,13 +22,17 @@ use claw_core::product_identity::AUTH_KEY_HEADER;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use tokio::net::TcpListener;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+mod request_limits;
 mod session_store;
+
+use request_limits::{classify_request, LimitRejection, RequestClass, RequestLimits};
 
 #[derive(Clone)]
 struct AppState {
@@ -36,7 +40,6 @@ struct AppState {
     client: reqwest::Client,
     long_running_client: reqwest::Client,
     forward_x_forwarded: bool,
-    max_incoming_body_bytes: usize,
     cookie_name: String,
     session_ttl_secs: u64,
     session_store_path: PathBuf,
@@ -44,12 +47,34 @@ struct AppState {
     login_failure_limit: u32,
     login_lockout_secs: u64,
     login_attempts: Arc<Mutex<HashMap<LoginAttemptKey, LoginAttemptEntry>>>,
+    request_limits: RequestLimits,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct SessionEntry {
     user_key: String,
+    session_handle: String,
+    username: String,
+    role: String,
+    #[serde(default)]
+    client_ip: String,
+    #[serde(default)]
+    client_platform: String,
+    #[serde(default)]
+    user_agent: String,
+    created_unix: u64,
+    last_activity_unix: u64,
     expires_unix: u64,
+    csrf_token: String,
+}
+
+#[derive(Clone, Debug)]
+struct AuthenticatedSession {
+    session_handle: String,
+    user_key: String,
+    username: String,
+    role: String,
+    csrf_token: String,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -69,6 +94,14 @@ const LOGIN_ATTEMPT_RETENTION_SECS: u64 = 60 * 60;
 const MAX_LOGIN_ATTEMPT_KEYS: usize = 10_000;
 const MAX_LOGIN_USERNAME_BYTES: usize = 128;
 const MAX_LOGIN_PASSWORD_BYTES: usize = 1024;
+const MAX_LOGIN_REQUEST_BODY_BYTES: usize = 8 * 1024;
+const MAX_SESSION_CLIENT_IP_BYTES: usize = 64;
+const MAX_SESSION_PLATFORM_BYTES: usize = 64;
+const MAX_SESSION_USER_AGENT_BYTES: usize = 512;
+const WEBD_CSRF_HEADER: &str = "x-agent-csrf-token";
+const WEBD_CSRF_TOKEN_HEX_BYTES: usize = 32;
+const SESSION_ACTIVITY_PERSIST_INTERVAL_SECS: u64 = 60;
+const LOCAL_HTTP_SESSION_COOKIE_SUFFIX: &str = "_local_http";
 
 fn now_unix_secs() -> u64 {
     SystemTime::now()
@@ -132,7 +165,6 @@ async fn main() -> anyhow::Result<()> {
         client,
         long_running_client,
         forward_x_forwarded: config.webd.forward_x_forwarded,
-        max_incoming_body_bytes: config.webd.max_incoming_body_bytes.max(1),
         cookie_name: config.webd.session_cookie_name.clone(),
         session_ttl_secs: config.webd.session_ttl_seconds.max(60),
         session_store_path,
@@ -140,6 +172,10 @@ async fn main() -> anyhow::Result<()> {
         login_failure_limit: config.webd.login_failure_limit.max(1),
         login_lockout_secs: config.webd.login_lockout_seconds.max(1),
         login_attempts,
+        request_limits: RequestLimits::new(
+            config.webd.request_limits.clone(),
+            config.webd.max_incoming_body_bytes,
+        ),
     };
 
     let listen = config.webd.listen.trim().to_string();
@@ -189,6 +225,11 @@ fn build_webd_router(state: AppState, ui_dist_dir: PathBuf) -> Router {
         .route("/webd/login", post(webd_login).options(webd_options))
         .route("/webd/logout", post(webd_logout).options(webd_options))
         .route("/webd/session", get(webd_session).options(webd_options))
+        .route("/webd/sessions", get(webd_sessions).options(webd_options))
+        .route(
+            "/webd/sessions/revoke",
+            post(webd_revoke_session).options(webd_options),
+        )
         .route("/v1", any(proxy_handler))
         .route("/v1/*path", any(proxy_handler))
         .fallback_service(ui_service)
@@ -218,16 +259,76 @@ struct WebdLoginBody {
 async fn webd_login(
     State(state): State<AppState>,
     ConnectInfo(client_addr): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
-    Json(body): Json<WebdLoginBody>,
+    req: Request,
 ) -> impl IntoResponse {
+    let (parts, incoming_body) = req.into_parts();
+    let headers = parts.headers;
     let origin = match require_valid_origin(&headers) {
         Ok(Some(origin)) => Some(origin),
         Ok(None) | Err(()) => {
             return webd_error_response(StatusCode::FORBIDDEN, "webd_origin_required", None);
         }
     };
+    if let Err(error_code) = state
+        .request_limits
+        .validate_headers(&headers, RequestClass::Login)
+    {
+        return request_envelope_error_response(error_code, origin.as_ref());
+    }
+    let client_ip = login_client_ip(&headers, client_addr, state.forward_x_forwarded);
+    let _request_lease = match state.request_limits.try_acquire(
+        client_ip,
+        None,
+        RequestClass::Login,
+        now_unix_secs(),
+    ) {
+        Ok(lease) => lease,
+        Err(rejection) => return request_limit_response(rejection, origin.as_ref()),
+    };
+    if !request_has_json_content_type(&headers) {
+        return webd_error_response(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "webd_login_content_type_invalid",
+            origin.as_ref(),
+        );
+    }
+    let body_bytes = match tokio::time::timeout(
+        state.request_limits.body_read_timeout(RequestClass::Login),
+        to_bytes(incoming_body, MAX_LOGIN_REQUEST_BODY_BYTES),
+    )
+    .await
+    {
+        Ok(Ok(bytes)) => bytes,
+        Ok(Err(error)) => {
+            error!(error = %error, "webd_login_body_read_failed");
+            return request_envelope_error_response("webd_request_body_too_large", origin.as_ref());
+        }
+        Err(_) => {
+            return request_envelope_error_response(
+                "webd_request_body_read_timeout",
+                origin.as_ref(),
+            );
+        }
+    };
+    let body: WebdLoginBody = match serde_json::from_slice(&body_bytes) {
+        Ok(body) => body,
+        Err(_) => {
+            return webd_error_response(
+                StatusCode::BAD_REQUEST,
+                "webd_login_body_invalid",
+                origin.as_ref(),
+            );
+        }
+    };
     let secure_cookie = request_uses_https(&headers, client_addr, state.forward_x_forwarded);
+    let previous_session_ids = extract_session_ids(&headers, &state.cookie_name);
+    if !cookie_transport_allowed(&headers, client_addr, state.forward_x_forwarded) {
+        return webd_error_response(
+            StatusCode::UPGRADE_REQUIRED,
+            "webd_https_required",
+            origin.as_ref(),
+        );
+    }
     if !valid_login_input(&body.username, &body.password) {
         return webd_error_response(
             StatusCode::BAD_REQUEST,
@@ -341,35 +442,79 @@ async fn webd_login(
             );
         }
     };
+    let role = match val
+        .get("data")
+        .and_then(|d| d.get("role"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(role) => role.to_string(),
+        None => {
+            error!("webd_login_upstream_role_missing");
+            return webd_error_response(
+                StatusCode::BAD_GATEWAY,
+                "webd_login_upstream_response_invalid",
+                origin.as_ref(),
+            );
+        }
+    };
     clear_login_failures(&state, &attempt_key);
     let sid = Uuid::new_v4().to_string();
-    let expires = now_unix_secs() + state.session_ttl_secs;
+    let session_digest = session_id_digest(&sid);
+    let session_handle = Uuid::new_v4().to_string();
+    let csrf_token = new_csrf_token();
+    let created = now_unix_secs();
+    let expires = created + state.session_ttl_secs;
     {
         let mut guard = state.sessions.lock().expect("sessions mutex");
+        for previous_session_id in previous_session_ids {
+            guard.remove(&session_id_digest(&previous_session_id));
+        }
         guard.insert(
-            sid.clone(),
+            session_digest,
             SessionEntry {
                 user_key,
+                session_handle,
+                username: body.username.trim().to_string(),
+                role,
+                client_ip: client_ip.to_string(),
+                client_platform: bounded_session_header(
+                    &headers,
+                    &HeaderName::from_static("sec-ch-ua-platform"),
+                    MAX_SESSION_PLATFORM_BYTES,
+                ),
+                user_agent: bounded_session_header(
+                    &headers,
+                    &header::USER_AGENT,
+                    MAX_SESSION_USER_AGENT_BYTES,
+                ),
+                created_unix: created,
+                last_activity_unix: created,
                 expires_unix: expires,
+                csrf_token: csrf_token.clone(),
             },
         );
         persist_session_snapshot(&state, &guard);
     }
     let cookie = session_cookie_value(
-        &state.cookie_name,
+        &session_cookie_name(&state.cookie_name, secure_cookie),
         &sid,
         state.session_ttl_secs,
         secure_cookie,
     );
     let mut res = Json(json!({
         "ok": true,
-        "data": { "logged_in": true }
+        "data": {
+            "logged_in": true,
+            "csrf_token": csrf_token,
+        }
     }))
     .into_response();
     if let Ok(v) = HeaderValue::from_str(&cookie) {
         res.headers_mut().insert(header::SET_COOKIE, v);
     }
-    with_cors(res, origin.as_ref())
+    with_cors(with_no_store(res), origin.as_ref())
 }
 
 fn login_client_ip(
@@ -463,6 +608,41 @@ fn login_locked_response(retry_after: u64, origin: Option<&HeaderValue>) -> Resp
     with_cors(response, origin)
 }
 
+fn request_limit_response(rejection: LimitRejection, origin: Option<&HeaderValue>) -> Response {
+    let mut response = (
+        StatusCode::TOO_MANY_REQUESTS,
+        Json(json!({
+            "ok": false,
+            "data": {
+                "owner_layer": "webd",
+                "error_code": rejection.error_code,
+                "status_code": rejection.error_code,
+                "retry_after_seconds": rejection.retry_after_seconds,
+            },
+            "error": rejection.error_code,
+        })),
+    )
+        .into_response();
+    if let Ok(value) = HeaderValue::from_str(&rejection.retry_after_seconds.to_string()) {
+        response.headers_mut().insert(header::RETRY_AFTER, value);
+    }
+    with_cors(response, origin)
+}
+
+fn request_envelope_error_response(
+    error_code: &'static str,
+    origin: Option<&HeaderValue>,
+) -> Response {
+    let status = match error_code {
+        "webd_request_headers_too_large" => StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE,
+        "webd_request_body_too_large" => StatusCode::PAYLOAD_TOO_LARGE,
+        "webd_request_content_encoding_unsupported" => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+        "webd_request_body_read_timeout" => StatusCode::REQUEST_TIMEOUT,
+        _ => StatusCode::BAD_REQUEST,
+    };
+    webd_error_response(status, error_code, origin)
+}
+
 async fn webd_logout(
     State(state): State<AppState>,
     ConnectInfo(client_addr): ConnectInfo<SocketAddr>,
@@ -474,35 +654,246 @@ async fn webd_logout(
             return webd_error_response(StatusCode::FORBIDDEN, "webd_origin_required", None);
         }
     };
+    if cookie_auth_requires_https(req.headers())
+        && !cookie_transport_allowed(req.headers(), client_addr, state.forward_x_forwarded)
+    {
+        return webd_error_response(
+            StatusCode::UPGRADE_REQUIRED,
+            "webd_https_required",
+            origin.as_ref(),
+        );
+    }
+    let session = authenticated_session(&state, req.headers());
+    if let Some(session) = session.as_ref() {
+        if let Err(error_code) = require_session_csrf(req.headers(), &session.csrf_token) {
+            return webd_error_response(StatusCode::FORBIDDEN, error_code, origin.as_ref());
+        }
+    }
+    let session_id = session
+        .as_ref()
+        .map(|session| session.session_handle.as_str());
+    let client_ip = login_client_ip(req.headers(), client_addr, state.forward_x_forwarded);
+    let _request_lease = match state.request_limits.try_acquire(
+        client_ip,
+        session_id,
+        RequestClass::General,
+        now_unix_secs(),
+    ) {
+        Ok(lease) => lease,
+        Err(rejection) => return request_limit_response(rejection, origin.as_ref()),
+    };
     let secure_cookie = request_uses_https(req.headers(), client_addr, state.forward_x_forwarded);
-    if let Some(sid) = extract_session_id(req.headers(), &state.cookie_name) {
+    let session_ids = extract_session_ids(req.headers(), &state.cookie_name);
+    if !session_ids.is_empty() {
         let mut guard = state.sessions.lock().expect("sessions mutex");
-        if guard.remove(&sid).is_some() {
+        let mut removed = false;
+        for sid in session_ids {
+            removed |= guard.remove(&session_id_digest(&sid)).is_some();
+        }
+        if removed {
             persist_session_snapshot(&state, &guard);
         }
     }
-    let clear = session_cookie_value(&state.cookie_name, "", 0, secure_cookie);
     let mut res = Json(json!({
         "ok": true,
         "data": { "logged_in": false }
     }))
     .into_response();
-    if let Ok(v) = HeaderValue::from_str(&clear) {
-        res.headers_mut().insert(header::SET_COOKIE, v);
+    for cookie_name in session_cookie_names(&state.cookie_name) {
+        let clear = session_cookie_value(&cookie_name, "", 0, secure_cookie);
+        if let Ok(value) = HeaderValue::from_str(&clear) {
+            res.headers_mut().append(header::SET_COOKIE, value);
+        }
     }
-    with_cors(res, origin.as_ref())
+    with_cors(with_no_store(res), origin.as_ref())
 }
 
-async fn webd_session(State(state): State<AppState>, req: Request) -> impl IntoResponse {
+async fn webd_session(
+    State(state): State<AppState>,
+    ConnectInfo(client_addr): ConnectInfo<SocketAddr>,
+    req: Request,
+) -> impl IntoResponse {
     let origin = match require_valid_origin(req.headers()) {
         Ok(origin) => origin,
         Err(()) => {
             return webd_error_response(StatusCode::FORBIDDEN, "webd_origin_not_allowed", None);
         }
     };
-    let logged_in = session_user_key(&state, req.headers()).is_some();
+    if cookie_auth_requires_https(req.headers())
+        && !cookie_transport_allowed(req.headers(), client_addr, state.forward_x_forwarded)
+    {
+        return webd_error_response(
+            StatusCode::UPGRADE_REQUIRED,
+            "webd_https_required",
+            origin.as_ref(),
+        );
+    }
+    let mut session = authenticated_session(&state, req.headers());
+    if let Some(current) = session.as_ref() {
+        match inspect_upstream_identity(&state, &current.user_key).await {
+            Ok(role) if role.eq_ignore_ascii_case(&current.role) => {}
+            Ok(_) => {
+                revoke_session_by_handle(&state, &current.session_handle);
+                session = None;
+            }
+            Err(response) if response.status() == StatusCode::UNAUTHORIZED => {
+                revoke_session_by_handle(&state, &current.session_handle);
+                session = None;
+            }
+            Err(response) => return with_cors(response, origin.as_ref()),
+        }
+    }
+    let session_id = session
+        .as_ref()
+        .map(|session| session.session_handle.as_str());
+    let client_ip = login_client_ip(req.headers(), client_addr, state.forward_x_forwarded);
+    let _request_lease = match state.request_limits.try_acquire(
+        client_ip,
+        session_id,
+        RequestClass::General,
+        now_unix_secs(),
+    ) {
+        Ok(lease) => lease,
+        Err(rejection) => return request_limit_response(rejection, origin.as_ref()),
+    };
     with_cors(
-        Json(json!({ "ok": true, "data": { "logged_in": logged_in } })).into_response(),
+        with_no_store(
+            Json(json!({
+                "ok": true,
+                "data": {
+                    "logged_in": session.is_some(),
+                    "csrf_token": session.as_ref().map(|session| session.csrf_token.as_str()),
+                    "username": session.as_ref().map(|session| session.username.as_str()),
+                    "role": session.as_ref().map(|session| session.role.as_str()),
+                }
+            }))
+            .into_response(),
+        ),
+        origin.as_ref(),
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RevokeWebdSessionBody {
+    session_handle: String,
+}
+
+async fn webd_sessions(
+    State(state): State<AppState>,
+    ConnectInfo(client_addr): ConnectInfo<SocketAddr>,
+    req: Request,
+) -> impl IntoResponse {
+    let origin = match require_valid_origin(req.headers()) {
+        Ok(origin) => origin,
+        Err(()) => {
+            return webd_error_response(StatusCode::FORBIDDEN, "webd_origin_not_allowed", None);
+        }
+    };
+    let session = match authorize_webd_session_admin(&state, req.headers(), client_addr).await {
+        Ok(session) => session,
+        Err(response) => return with_cors(response, origin.as_ref()),
+    };
+    let now = now_unix_secs();
+    let mut guard = state.sessions.lock().expect("sessions mutex");
+    let before = guard.len();
+    guard.retain(|_, entry| entry.expires_unix > now);
+    if guard.len() != before {
+        persist_session_snapshot(&state, &guard);
+    }
+    let mut sessions = guard
+        .values()
+        .map(|entry| {
+            json!({
+                "session_handle": entry.session_handle,
+                "username": entry.username,
+                "role": entry.role,
+                "client_ip": entry.client_ip,
+                "client_platform": entry.client_platform,
+                "user_agent": entry.user_agent,
+                "created_unix": entry.created_unix,
+                "last_activity_unix": entry.last_activity_unix,
+                "expires_unix": entry.expires_unix,
+                "current": session.as_ref().is_some_and(|current| current.session_handle == entry.session_handle),
+            })
+        })
+        .collect::<Vec<_>>();
+    sessions.sort_by_key(|entry| {
+        std::cmp::Reverse(
+            entry
+                .get("last_activity_unix")
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
+        )
+    });
+    with_cors(
+        with_no_store(
+            Json(json!({ "ok": true, "data": { "sessions": sessions } })).into_response(),
+        ),
+        origin.as_ref(),
+    )
+}
+
+async fn webd_revoke_session(
+    State(state): State<AppState>,
+    ConnectInfo(client_addr): ConnectInfo<SocketAddr>,
+    req: Request,
+) -> impl IntoResponse {
+    let origin = match require_valid_origin(req.headers()) {
+        Ok(Some(origin)) => Some(origin),
+        Ok(None) | Err(()) => {
+            return webd_error_response(StatusCode::FORBIDDEN, "webd_origin_required", None);
+        }
+    };
+    let current = match authorize_webd_session_admin(&state, req.headers(), client_addr).await {
+        Ok(session) => session,
+        Err(response) => return with_cors(response, origin.as_ref()),
+    };
+    if let Some(session) = current.as_ref() {
+        if let Err(error_code) = require_session_csrf(req.headers(), &session.csrf_token) {
+            return webd_error_response(StatusCode::FORBIDDEN, error_code, origin.as_ref());
+        }
+    }
+    if !request_has_json_content_type(req.headers()) {
+        return webd_error_response(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "webd_session_revoke_content_type_invalid",
+            origin.as_ref(),
+        );
+    }
+    let body = match to_bytes(req.into_body(), MAX_LOGIN_REQUEST_BODY_BYTES).await {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return webd_error_response(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "webd_session_revoke_body_invalid",
+                origin.as_ref(),
+            );
+        }
+    };
+    let body: RevokeWebdSessionBody = match serde_json::from_slice::<RevokeWebdSessionBody>(&body) {
+        Ok(body) if Uuid::parse_str(body.session_handle.trim()).is_ok() => body,
+        _ => {
+            return webd_error_response(
+                StatusCode::BAD_REQUEST,
+                "webd_session_revoke_body_invalid",
+                origin.as_ref(),
+            );
+        }
+    };
+    let mut guard = state.sessions.lock().expect("sessions mutex");
+    let target = guard
+        .iter()
+        .find(|(_, entry)| entry.session_handle == body.session_handle)
+        .map(|(digest, _)| digest.clone());
+    let revoked = target
+        .as_ref()
+        .is_some_and(|digest| guard.remove(digest).is_some());
+    if revoked {
+        persist_session_snapshot(&state, &guard);
+    }
+    with_cors(
+        with_no_store(Json(json!({ "ok": true, "data": { "revoked": revoked } })).into_response()),
         origin.as_ref(),
     )
 }
@@ -524,6 +915,7 @@ async fn webd_options(headers: HeaderMap) -> impl IntoResponse {
     } else {
         let allowed = std::iter::once("content-type")
             .chain(std::iter::once(AUTH_KEY_HEADER))
+            .chain(std::iter::once(WEBD_CSRF_HEADER))
             .collect::<Vec<_>>()
             .join(", ");
         if let Ok(value) = HeaderValue::from_str(&allowed) {
@@ -538,24 +930,80 @@ async fn webd_options(headers: HeaderMap) -> impl IntoResponse {
     with_cors(res, origin.as_ref())
 }
 
-fn extract_session_id(headers: &HeaderMap, cookie_name: &str) -> Option<String> {
-    let cookie = headers.get(axum::http::header::COOKIE)?.to_str().ok()?;
-    for part in cookie.split(';') {
-        let part = part.trim();
-        if let Some((name, value)) = part.split_once('=') {
-            if name.trim() == cookie_name {
-                let v = value.trim();
-                if !v.is_empty() {
-                    return Some(v.to_string());
+fn session_cookie_name(base_name: &str, secure: bool) -> String {
+    if secure {
+        base_name.to_string()
+    } else {
+        format!("{base_name}{LOCAL_HTTP_SESSION_COOKIE_SUFFIX}")
+    }
+}
+
+fn session_cookie_names(base_name: &str) -> [String; 2] {
+    [base_name.to_string(), session_cookie_name(base_name, false)]
+}
+
+fn extract_session_ids(headers: &HeaderMap, base_cookie_name: &str) -> Vec<String> {
+    let accepted_names = session_cookie_names(base_cookie_name);
+    let mut session_ids = Vec::new();
+    for cookie in headers.get_all(axum::http::header::COOKIE) {
+        let Ok(cookie) = cookie.to_str() else {
+            continue;
+        };
+        for part in cookie.split(';') {
+            let part = part.trim();
+            if let Some((name, value)) = part.split_once('=') {
+                if accepted_names
+                    .iter()
+                    .any(|accepted| name.trim() == accepted)
+                {
+                    let value = value.trim();
+                    if !value.is_empty() && !session_ids.iter().any(|current| current == value) {
+                        session_ids.push(value.to_string());
+                    }
                 }
             }
         }
     }
-    None
+    session_ids
 }
 
-fn session_user_key(state: &AppState, headers: &HeaderMap) -> Option<String> {
-    let sid = extract_session_id(headers, &state.cookie_name)?;
+fn session_id_digest(session_id: &str) -> String {
+    let digest = Sha256::digest(session_id.as_bytes());
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn valid_session_digest(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+fn bounded_session_header(headers: &HeaderMap, name: &HeaderName, max_bytes: usize) -> String {
+    let Some(raw) = headers.get(name).and_then(|value| value.to_str().ok()) else {
+        return String::new();
+    };
+    let sanitized = raw
+        .trim()
+        .trim_matches('"')
+        .chars()
+        .filter(|character| !character.is_control())
+        .collect::<String>();
+    if sanitized.len() <= max_bytes {
+        return sanitized;
+    }
+    let mut end = max_bytes.min(sanitized.len());
+    while !sanitized.is_char_boundary(end) {
+        end = end.saturating_sub(1);
+    }
+    sanitized[..end].to_string()
+}
+
+fn authenticated_session(state: &AppState, headers: &HeaderMap) -> Option<AuthenticatedSession> {
+    let session_ids = extract_session_ids(headers, &state.cookie_name);
+    if session_ids.is_empty() {
+        return None;
+    }
     let mut guard = state.sessions.lock().expect("sessions mutex");
     let now = now_unix_secs();
     let before = guard.len();
@@ -563,12 +1011,175 @@ fn session_user_key(state: &AppState, headers: &HeaderMap) -> Option<String> {
     if guard.len() != before {
         persist_session_snapshot(state, &guard);
     }
-    let entry = guard.get(&sid)?;
-    if entry.expires_unix <= now {
-        guard.remove(&sid);
-        return None;
+    let session_digest = session_ids
+        .iter()
+        .map(|session_id| session_id_digest(session_id))
+        .find(|digest| guard.contains_key(digest))?;
+    let entry = guard.get_mut(&session_digest)?;
+    let should_persist =
+        now.saturating_sub(entry.last_activity_unix) >= SESSION_ACTIVITY_PERSIST_INTERVAL_SECS;
+    if should_persist {
+        entry.last_activity_unix = now;
     }
-    Some(entry.user_key.clone())
+    let session = AuthenticatedSession {
+        session_handle: entry.session_handle.clone(),
+        user_key: entry.user_key.clone(),
+        username: entry.username.clone(),
+        role: entry.role.clone(),
+        csrf_token: entry.csrf_token.clone(),
+    };
+    if should_persist {
+        persist_session_snapshot(state, &guard);
+    }
+    Some(session)
+}
+
+async fn inspect_upstream_identity(state: &AppState, user_key: &str) -> Result<String, Response> {
+    let url = format!("{}/v1/auth/me", state.upstream.trim_end_matches('/'));
+    let response = state
+        .client
+        .get(url)
+        .header(AUTH_KEY_HEADER, user_key)
+        .send()
+        .await
+        .map_err(|_| {
+            webd_error_response(
+                StatusCode::BAD_GATEWAY,
+                "webd_identity_upstream_unavailable",
+                None,
+            )
+        })?;
+    if response.status() == StatusCode::UNAUTHORIZED || response.status() == StatusCode::FORBIDDEN {
+        return Err(webd_error_response(
+            StatusCode::UNAUTHORIZED,
+            "webd_session_invalid",
+            None,
+        ));
+    }
+    if !response.status().is_success() {
+        return Err(webd_error_response(
+            StatusCode::BAD_GATEWAY,
+            "webd_identity_upstream_invalid",
+            None,
+        ));
+    }
+    let body: Value = response.json().await.map_err(|_| {
+        webd_error_response(
+            StatusCode::BAD_GATEWAY,
+            "webd_identity_upstream_invalid",
+            None,
+        )
+    })?;
+    body.get("data")
+        .and_then(|data| data.get("role"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|role| !role.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| {
+            webd_error_response(
+                StatusCode::BAD_GATEWAY,
+                "webd_identity_upstream_invalid",
+                None,
+            )
+        })
+}
+
+async fn authorize_webd_session_admin(
+    state: &AppState,
+    headers: &HeaderMap,
+    client_addr: SocketAddr,
+) -> Result<Option<AuthenticatedSession>, Response> {
+    let session = authenticated_session(state, headers);
+    if session.is_some()
+        && !cookie_transport_allowed(headers, client_addr, state.forward_x_forwarded)
+    {
+        return Err(webd_error_response(
+            StatusCode::UPGRADE_REQUIRED,
+            "webd_https_required",
+            None,
+        ));
+    }
+    let direct_key = headers
+        .get(AUTH_KEY_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let user_key = direct_key
+        .or_else(|| session.as_ref().map(|session| session.user_key.as_str()))
+        .ok_or_else(|| {
+            webd_error_response(StatusCode::UNAUTHORIZED, "webd_session_required", None)
+        })?;
+    let current_role = inspect_upstream_identity(state, user_key).await?;
+    if let Some(session) = session.as_ref() {
+        if !session.role.eq_ignore_ascii_case(&current_role) {
+            revoke_session_by_handle(state, &session.session_handle);
+            return Err(webd_error_response(
+                StatusCode::UNAUTHORIZED,
+                "webd_session_identity_changed",
+                None,
+            ));
+        }
+    }
+    if !current_role.eq_ignore_ascii_case("admin") {
+        return Err(webd_error_response(
+            StatusCode::FORBIDDEN,
+            "webd_admin_required",
+            None,
+        ));
+    }
+    Ok(session)
+}
+
+fn revoke_session_by_handle(state: &AppState, session_handle: &str) -> bool {
+    let mut guard = state.sessions.lock().expect("sessions mutex");
+    let digest = guard
+        .iter()
+        .find(|(_, entry)| entry.session_handle == session_handle)
+        .map(|(digest, _)| digest.clone());
+    let revoked = digest
+        .as_ref()
+        .is_some_and(|digest| guard.remove(digest).is_some());
+    if revoked {
+        persist_session_snapshot(state, &guard);
+    }
+    revoked
+}
+
+fn new_csrf_token() -> String {
+    Uuid::new_v4().simple().to_string()
+}
+
+fn valid_csrf_token(value: &str) -> bool {
+    value.len() == WEBD_CSRF_TOKEN_HEX_BYTES
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+fn constant_time_bytes_equal(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    left.iter()
+        .zip(right)
+        .fold(0_u8, |difference, (left, right)| {
+            difference | (*left ^ *right)
+        })
+        == 0
+}
+
+fn require_session_csrf(headers: &HeaderMap, expected_token: &str) -> Result<(), &'static str> {
+    let supplied = headers
+        .get(WEBD_CSRF_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .ok_or("webd_csrf_token_required")?;
+    if !valid_csrf_token(supplied)
+        || !constant_time_bytes_equal(supplied.as_bytes(), expected_token.as_bytes())
+    {
+        return Err("webd_csrf_token_invalid");
+    }
+    Ok(())
 }
 
 fn persist_session_snapshot(state: &AppState, sessions: &HashMap<String, SessionEntry>) {
@@ -605,12 +1216,47 @@ async fn proxy_inner(state: AppState, client_addr: SocketAddr, req: Request) -> 
         .map(|pq| pq.as_str())
         .unwrap_or("/");
     let use_long_running_client = uses_long_running_upstream_wait(&method, path_and_query);
+    let request_class = classify_request(&method, req.uri().path());
     let base = state.upstream.trim_end_matches('/');
     let full_url = format!("{}{}", base, path_and_query);
 
-    let session_key = session_user_key(&state, req.headers());
-    if session_key.is_some() && method_is_unsafe(&method) && origin.is_none() {
-        return webd_error_response(StatusCode::FORBIDDEN, "webd_origin_required", None);
+    if cookie_auth_requires_https(req.headers())
+        && !cookie_transport_allowed(req.headers(), client_addr, state.forward_x_forwarded)
+    {
+        return webd_error_response(
+            StatusCode::UPGRADE_REQUIRED,
+            "webd_https_required",
+            origin.as_ref(),
+        );
+    }
+
+    let session = authenticated_session(&state, req.headers());
+    if let Some(session) = session.as_ref().filter(|_| method_is_unsafe(&method)) {
+        if origin.is_none() {
+            return webd_error_response(StatusCode::FORBIDDEN, "webd_origin_required", None);
+        }
+        if let Err(error_code) = require_session_csrf(req.headers(), &session.csrf_token) {
+            return webd_error_response(StatusCode::FORBIDDEN, error_code, origin.as_ref());
+        }
+    }
+    let session_id = session
+        .as_ref()
+        .map(|session| session.session_handle.as_str());
+    let client_ip = login_client_ip(req.headers(), client_addr, state.forward_x_forwarded);
+    let request_lease = match state.request_limits.try_acquire(
+        client_ip,
+        session_id,
+        request_class,
+        now_unix_secs(),
+    ) {
+        Ok(lease) => lease,
+        Err(rejection) => return request_limit_response(rejection, origin.as_ref()),
+    };
+    if let Err(error_code) = state
+        .request_limits
+        .validate_headers(req.headers(), request_class)
+    {
+        return request_envelope_error_response(error_code, origin.as_ref());
     }
 
     let incoming_headers = req.headers();
@@ -631,17 +1277,26 @@ async fn proxy_inner(state: AppState, client_addr: SocketAddr, req: Request) -> 
         &upstream_host,
         client_addr,
         state.forward_x_forwarded,
-        session_key.as_deref(),
+        session.as_ref().map(|session| session.user_key.as_str()),
     );
 
     let body_in = req.into_body();
-    let bytes = match to_bytes(body_in, state.max_incoming_body_bytes).await {
-        Ok(b) => b,
-        Err(e) => {
-            error!("request body over limit or read error: {}", e);
+    let body_limit = state.request_limits.body_limit(request_class);
+    let body_timeout = state.request_limits.body_read_timeout(request_class);
+    let bytes = match tokio::time::timeout(body_timeout, to_bytes(body_in, body_limit)).await {
+        Ok(Ok(bytes)) => bytes,
+        Ok(Err(error)) => {
+            error!(error = %error, "webd_request_body_read_failed");
             return plain_error(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "webd_request_body_too_large",
+                origin.as_ref(),
+            );
+        }
+        Err(_) => {
+            return plain_error(
+                StatusCode::REQUEST_TIMEOUT,
+                "webd_request_body_read_timeout",
                 origin.as_ref(),
             );
         }
@@ -670,10 +1325,26 @@ async fn proxy_inner(state: AppState, client_addr: SocketAddr, req: Request) -> 
     };
 
     let status = res.status();
+    if status == StatusCode::UNAUTHORIZED {
+        if let Some(session) = session.as_ref() {
+            revoke_session_by_handle(&state, &session.session_handle);
+        }
+    }
     let resp_headers = sanitize_response_headers(res.headers());
     let stream = res
         .bytes_stream()
-        .map(|r| r.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string())));
+        .map(|r| r.map_err(|e| std::io::Error::other(e.to_string())));
+    let stream = if request_class == RequestClass::Sse {
+        stream
+            .take_until(tokio::time::sleep(state.request_limits.sse_max_lifetime()))
+            .boxed()
+    } else {
+        stream.boxed()
+    };
+    let stream = futures_util::stream::unfold(
+        (stream, Some(request_lease)),
+        |(mut stream, lease)| async move { stream.next().await.map(|item| (item, (stream, lease))) },
+    );
     let body = Body::from_stream(stream);
 
     let mut builder = Response::builder().status(status);
@@ -703,6 +1374,14 @@ fn valid_login_input(username: &str, password: &str) -> bool {
         && username.len() <= MAX_LOGIN_USERNAME_BYTES
         && !password.is_empty()
         && password.len() <= MAX_LOGIN_PASSWORD_BYTES
+}
+
+fn request_has_json_content_type(headers: &HeaderMap) -> bool {
+    headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("application/json"))
 }
 
 fn uses_long_running_upstream_wait(method: &axum::http::Method, path_and_query: &str) -> bool {
@@ -774,6 +1453,14 @@ fn method_is_unsafe(method: &axum::http::Method) -> bool {
     )
 }
 
+fn with_no_store(mut response: Response) -> Response {
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("no-store, max-age=0"),
+    );
+    response
+}
+
 fn webd_error_response(
     status: StatusCode,
     error_code: &str,
@@ -809,21 +1496,46 @@ fn request_uses_https(
     client_addr: SocketAddr,
     trust_forwarded_from_loopback: bool,
 ) -> bool {
-    if trust_forwarded_from_loopback && client_addr.ip().is_loopback() {
-        if headers
+    trust_forwarded_from_loopback
+        && client_addr.ip().is_loopback()
+        && headers
             .get("x-forwarded-proto")
             .and_then(|value| value.to_str().ok())
             .and_then(|value| value.split(',').next())
             .is_some_and(|value| value.trim().eq_ignore_ascii_case("https"))
-        {
-            return true;
+}
+
+fn cookie_transport_allowed(
+    headers: &HeaderMap,
+    client_addr: SocketAddr,
+    trust_forwarded_from_loopback: bool,
+) -> bool {
+    request_uses_https(headers, client_addr, trust_forwarded_from_loopback)
+        || local_http_cookie_client(login_client_ip(
+            headers,
+            client_addr,
+            trust_forwarded_from_loopback,
+        ))
+}
+
+fn local_http_cookie_client(client_ip: IpAddr) -> bool {
+    match client_ip {
+        IpAddr::V4(address) => {
+            address.is_loopback() || address.is_private() || address.is_link_local()
+        }
+        IpAddr::V6(address) => {
+            address.is_loopback()
+                || address.is_unique_local()
+                || address.is_unicast_link_local()
+                || address.to_ipv4_mapped().is_some_and(|mapped| {
+                    mapped.is_loopback() || mapped.is_private() || mapped.is_link_local()
+                })
         }
     }
-    headers
-        .get(header::ORIGIN)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| reqwest::Url::parse(value.trim()).ok())
-        .is_some_and(|url| url.scheme() == "https")
+}
+
+fn cookie_auth_requires_https(headers: &HeaderMap) -> bool {
+    headers.contains_key(header::COOKIE) && !headers.contains_key(AUTH_KEY_HEADER)
 }
 
 fn with_cors(mut response: Response, origin: Option<&HeaderValue>) -> Response {
@@ -949,6 +1661,9 @@ fn build_outgoing_headers(
             continue;
         }
         if session_user_key.is_some() && k.as_str().eq_ignore_ascii_case(AUTH_KEY_HEADER) {
+            continue;
+        }
+        if k.as_str().eq_ignore_ascii_case(WEBD_CSRF_HEADER) {
             continue;
         }
         if k.as_str().eq_ignore_ascii_case("x-forwarded-for") && forward_x {

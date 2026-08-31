@@ -1114,7 +1114,6 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
     };
     let sandbox_mode =
         action_scoped_runner_sandbox_mode(execution_policy.sandbox_mode, action_mapping.as_ref());
-    let unrestricted_admin = execution_policy.has_unrestricted_admin_authority();
     let allow_path_outside_workspace = task_allows_path_outside_workspace(state, Some(task));
     let allow_sudo = task_allows_sudo(state, Some(task));
     let has_secrets = secret_token_scope.is_some()
@@ -1287,14 +1286,6 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
     cmd.kill_on_drop(true);
     cmd.env("SKILL_TIMEOUT_SECONDS", skill_timeout_secs.to_string())
         .env("CLAWD_BASE_URL", &local_clawd_base_url)
-        .env(
-            "APP_UNRESTRICTED_ADMIN",
-            if unrestricted_admin && !warm_reuse_allowed {
-                "1"
-            } else {
-                "0"
-            },
-        )
         .env(
             "APP_ALLOW_PATH_OUTSIDE_WORKSPACE",
             if allow_path_outside_workspace && !warm_reuse_allowed {
@@ -1926,18 +1917,16 @@ pub(crate) fn build_runner_skill_context(
     ctx.insert("source".to_string(), Value::String(source.to_string()));
     ctx.insert("kind".to_string(), Value::String("run_skill".to_string()));
     let auth_role = current_task_auth_role(state, task).unwrap_or_else(|| "unknown".to_string());
-    let unrestricted_admin =
-        crate::task_execution_policy::task_has_unrestricted_admin_authority(state, task);
     let allow_path_outside_workspace = task_allows_path_outside_workspace(state, Some(task));
     let allow_sudo = task_allows_sudo(state, Some(task));
     ctx.insert("auth_role".to_string(), Value::String(auth_role));
     ctx.insert(
         "authority_scope".to_string(),
         Value::String(
-            if unrestricted_admin {
-                "unrestricted_admin"
+            if allow_path_outside_workspace {
+                "host_policy_grant"
             } else {
-                "configured"
+                "workspace"
             }
             .to_string(),
         ),
@@ -1950,7 +1939,6 @@ pub(crate) fn build_runner_skill_context(
     ctx.insert(
         "permissions".to_string(),
         serde_json::json!({
-            "unrestricted_admin": unrestricted_admin,
             "allow_path_outside_workspace": allow_path_outside_workspace,
             "allow_sudo": allow_sudo,
         }),

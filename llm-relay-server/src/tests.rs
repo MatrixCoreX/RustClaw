@@ -5,6 +5,7 @@ use sha2::{Digest, Sha256};
 use tempfile::tempdir;
 
 use crate::{
+    checked_upstream_response_size,
     config::{ModelProvider, RelayConfig, StoreConfig},
     openai::ChatCompletionRequest,
     quota::QuotaLimits,
@@ -351,6 +352,51 @@ fn sse_rewriter_masks_upstream_model_and_preserves_usage() {
     assert_eq!(tokens, 9);
 }
 
+#[test]
+fn upstream_response_size_limit_rejects_overflow_and_oversized_chunks() {
+    assert_eq!(
+        checked_upstream_response_size(512, 512, 1024).unwrap(),
+        1024
+    );
+    let oversized = checked_upstream_response_size(1024, 1, 1024).unwrap_err();
+    assert_eq!(oversized.code, "upstream_response_too_large");
+    let overflow = checked_upstream_response_size(usize::MAX, 1, usize::MAX).unwrap_err();
+    assert_eq!(overflow.code, "upstream_response_too_large");
+}
+
+#[test]
+fn deployment_contract_hides_internal_routes_and_hardens_the_service() {
+    let nginx = include_str!("../deploy/nginx-llm-relay.conf");
+    for expected in [
+        "location = /health",
+        "location ^~ /health/",
+        "location ^~ /internal/",
+        "ssl_protocols TLSv1.2 TLSv1.3",
+        "Strict-Transport-Security",
+        "proxy_set_header Forwarded \"\"",
+        "limit_except GET POST",
+    ] {
+        assert!(
+            nginx.contains(expected),
+            "missing nginx hardening: {expected}"
+        );
+    }
+    let service = include_str!("../deploy/llm-relay.service");
+    for expected in [
+        "NoNewPrivileges=true",
+        "PrivateMounts=true",
+        "ProtectProc=invisible",
+        "RestrictNamespaces=true",
+        "CapabilityBoundingSet=",
+        "LimitCORE=0",
+    ] {
+        assert!(
+            service.contains(expected),
+            "missing service hardening: {expected}"
+        );
+    }
+}
+
 fn test_config() -> RelayConfig {
     RelayConfig {
         listen_addr: "127.0.0.1:8796".parse().expect("listen address"),
@@ -368,6 +414,7 @@ fn test_config() -> RelayConfig {
         },
         upstream_timeout: std::time::Duration::from_secs(30),
         max_request_body_bytes: 1024 * 1024,
+        max_upstream_response_bytes: 4 * 1024 * 1024,
         max_messages: 16,
         max_tools: 16,
         max_inflight: 4,

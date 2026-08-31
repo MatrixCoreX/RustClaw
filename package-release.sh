@@ -347,9 +347,79 @@ PACKAGE_BASENAME="${APP_PACKAGE_BASENAME:-${APP_RELEASE_ARTIFACT_ID}-runtime-rel
 OUT="$BUNDLE_DIR/$PACKAGE_BASENAME"
 remove_macos_archive_metadata "$STAGE_ROOT"
 tar -czf "$OUT" -C "$STAGE_ROOT" "$APP_RELEASE_ARTIFACT_ID"
+RELEASE_COMMIT="${APP_RELEASE_COMMIT:-}"
+if [[ -z "$RELEASE_COMMIT" ]]; then
+  RELEASE_COMMIT="$(git rev-parse --verify HEAD 2>/dev/null || true)"
+fi
+[[ "$RELEASE_COMMIT" =~ ^[0-9a-fA-F]{40}$ ]] || {
+  echo "Unable to resolve a full release commit digest."
+  exit 1
+}
+RELEASE_COMMIT_LOWER="$(printf '%s' "$RELEASE_COMMIT" | tr '[:upper:]' '[:lower:]')"
+RELEASE_SBOM="$OUT.spdx.json"
+python3 "$SCRIPT_DIR/scripts/security/generate_release_sbom.py" \
+  --root "$SCRIPT_DIR" \
+  --output "$RELEASE_SBOM" \
+  --name "$APP_RELEASE_ARTIFACT_ID" \
+  --version "$PACKAGE_VERSION" \
+  --commit "$RELEASE_COMMIT_LOWER"
+RELEASE_MANIFEST="$OUT.manifest.json"
+python3 "$SCRIPT_DIR/scripts/security/release_manifest.py" create \
+  --artifact "$OUT" \
+  --sbom "$RELEASE_SBOM" \
+  --output "$RELEASE_MANIFEST" \
+  --version "$PACKAGE_VERSION" \
+  --commit "$RELEASE_COMMIT_LOWER" \
+  --target "$APP_PACKAGE_TARGET" \
+  --package-root "$APP_RELEASE_ARTIFACT_ID"
+RELEASE_SIGNING_KEY="${APP_RELEASE_SIGNING_KEY:-$HOME/.config/agent-runtime/release-signing/release_ed25519}"
+RELEASE_ALLOWED_SIGNERS="${APP_RELEASE_ALLOWED_SIGNERS_FILE:-$SCRIPT_DIR/configs/release_allowed_signers}"
+[[ -f "$RELEASE_SIGNING_KEY" && ! -L "$RELEASE_SIGNING_KEY" ]] || {
+  echo "Missing protected release signing key: $RELEASE_SIGNING_KEY"
+  exit 1
+}
+[[ -f "$RELEASE_ALLOWED_SIGNERS" && ! -L "$RELEASE_ALLOWED_SIGNERS" ]] || {
+  echo "Missing release allowed-signers file: $RELEASE_ALLOWED_SIGNERS"
+  exit 1
+}
+ssh-keygen -q -Y sign \
+  -f "$RELEASE_SIGNING_KEY" \
+  -n agent-runtime-release \
+  "$RELEASE_MANIFEST"
+ssh-keygen -q -Y verify \
+  -f "$RELEASE_ALLOWED_SIGNERS" \
+  -I release \
+  -n agent-runtime-release \
+  -s "$RELEASE_MANIFEST.sig" < "$RELEASE_MANIFEST"
+RELEASE_SECONDARY_SIGNING_KEY="${APP_RELEASE_SECONDARY_SIGNING_KEY:-}"
+if [[ -n "$RELEASE_SECONDARY_SIGNING_KEY" ]]; then
+  [[ -f "$RELEASE_SECONDARY_SIGNING_KEY" && ! -L "$RELEASE_SECONDARY_SIGNING_KEY" ]] || {
+    echo "Invalid secondary release signing key: $RELEASE_SECONDARY_SIGNING_KEY"
+    exit 1
+  }
+  secondary_input="$STAGE_ROOT/release-manifest-secondary"
+  cp "$RELEASE_MANIFEST" "$secondary_input"
+  ssh-keygen -q -Y sign \
+    -f "$RELEASE_SECONDARY_SIGNING_KEY" \
+    -n agent-runtime-release \
+    "$secondary_input"
+  mv "$secondary_input.sig" "$RELEASE_MANIFEST.sig.next"
+  rm -f "$secondary_input"
+  ssh-keygen -q -Y verify \
+    -f "$RELEASE_ALLOWED_SIGNERS" \
+    -I release \
+    -n agent-runtime-release \
+    -s "$RELEASE_MANIFEST.sig.next" < "$RELEASE_MANIFEST"
+fi
 LOCAL_OUT="$SCRIPT_DIR/$(basename "$OUT")"
 if [[ "${APP_SKIP_LOCAL_PACKAGE_COPY:-0}" != "1" ]]; then
   cp -f "$OUT" "$LOCAL_OUT"
+  cp -f "$RELEASE_SBOM" "$LOCAL_OUT.spdx.json"
+  cp -f "$RELEASE_MANIFEST" "$LOCAL_OUT.manifest.json"
+  cp -f "$RELEASE_MANIFEST.sig" "$LOCAL_OUT.manifest.json.sig"
+  if [[ -f "$RELEASE_MANIFEST.sig.next" ]]; then
+    cp -f "$RELEASE_MANIFEST.sig.next" "$LOCAL_OUT.manifest.json.sig.next"
+  fi
 fi
 
 cleanup_old_packages() {
@@ -361,7 +431,7 @@ cleanup_old_packages() {
   shopt -u nullglob
   for f in "${files[@]}"; do
     if [[ "$f" != "$keep_file" ]]; then
-      rm -f "$f"
+      rm -f "$f" "$f.sha256" "$f.spdx.json" "$f.manifest.json" "$f.manifest.json.sig" "$f.manifest.json.sig.next"
       echo "Removed old package: $f"
     fi
   done
@@ -375,6 +445,8 @@ fi
 
 echo "Package created: $OUT"
 ls -lh "$OUT"
+echo "Signed manifest created: $RELEASE_MANIFEST"
+echo "Signed SPDX SBOM created: $RELEASE_SBOM"
 if [[ "${APP_SKIP_LOCAL_PACKAGE_COPY:-0}" != "1" ]]; then
   echo "Local copy created: $LOCAL_OUT"
   ls -lh "$LOCAL_OUT"

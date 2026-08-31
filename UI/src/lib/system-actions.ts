@@ -31,5 +31,8 @@ export function formatSystemActionError(
   if (code === "pi_app_restart_schedule_failed") {
     return t("Pi App 重启未能启动，请查看服务日志后重试。", "The Pi App restart could not be scheduled. Check service logs and try again.");
   }
-  return code || t(`系统操作失败 (${status})`, `System action failed (${status})`);
+  return t(
+    `系统操作未完成 (${status})，请稍后重试；如果仍然失败，请查看日志。`,
+    `The system action did not complete (${status}). Try again later; if it still fails, check the logs.`,
+  );
 }

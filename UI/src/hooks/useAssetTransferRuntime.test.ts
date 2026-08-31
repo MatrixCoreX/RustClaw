@@ -3,15 +3,53 @@ import test from "node:test";
 
 import React from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
+import { ripemd160 } from "@noble/hashes/legacy.js";
+import { base58 } from "@scure/base";
 
+import { validateNniOwnerPrivateKey } from "../lib/nni-owner-public-key";
 import { useAssetTransferRuntime } from "./useAssetTransferRuntime";
+
+function encodeTestOwnerPrivateKey(secretKey: Uint8Array): string {
+  const suffix = new TextEncoder().encode("K1");
+  const payload = new Uint8Array(secretKey.length + suffix.length);
+  payload.set(secretKey);
+  payload.set(suffix, secretKey.length);
+  const checksum = ripemd160(payload).slice(0, 4);
+  const encoded = new Uint8Array(secretKey.length + checksum.length);
+  encoded.set(secretKey);
+  encoded.set(checksum, secretKey.length);
+  return base58.encode(encoded);
+}
 
 test("asset transfer runtime sends one-time authorization and refreshes after success", async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
   let refreshCount = 0;
+  const ownerPrivateKey = encodeTestOwnerPrivateKey(
+    Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+  );
+  const ownerValidation = validateNniOwnerPrivateKey(ownerPrivateKey);
+  assert.equal(ownerValidation.ok, true);
+  if (!ownerValidation.ok) return;
+  let transferRequestCount = 0;
   const apiFetch = async (path: string, init?: RequestInit) => {
-    requests.push({ path, body: JSON.parse(String(init?.body)) as Record<string, unknown> });
+    const requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    requests.push({ path, body: requestBody });
+    transferRequestCount += 1;
+    if (transferRequestCount === 1) {
+      return new Response(JSON.stringify({
+        ok: true,
+        data: {
+          status: "asset_transfer_challenge_created",
+          request_id: "0c42e3f7-f5f0-43ff-bc55-ab032daf7eaf",
+          task_id: "asset-task-test",
+          transfer_id: "asset-transfer-test",
+          signing_payload: "asset-transfer-signing-payload",
+          from_asset_owner_pubkey: ownerValidation.publicKey,
+          node_url: "https://nni.example.test",
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
     return new Response(JSON.stringify({
       ok: true,
       data: {
@@ -59,20 +97,16 @@ test("asset transfer runtime sends one-time authorization and refreshes after su
       recipientPublicKey: "recipient",
       memo: "invoice-7",
       authorizationMode: "asset_owner",
-      ownerPrivateKey: "transient-private-key",
+      ownerPrivateKey,
     });
   });
-  assert.deepEqual(requests, [{
-    path: "/v1/nni/assets/transfer",
-    body: {
-      asset: "USD",
-      amount: "1.25000000",
-      to_asset_owner_pubkey: "recipient",
-      memo: "invoice-7",
-      authorization_mode: "asset_owner",
-      owner_private_key: "transient-private-key",
-    },
-  }]);
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].body.asset_owner_pubkey, ownerValidation.publicKey);
+  assert.equal(requests[1].body.task_id, "asset-task-test");
+  assert.equal(typeof requests[1].body.owner_signature, "string");
+  for (const request of requests) {
+    assert.equal(Object.hasOwn(request.body, "owner_private_key"), false);
+  }
   assert.equal(refreshCount, 1);
   assert.equal(runtime!.message, "转账已完成，余额和资产浏览器记录已经更新。");
   assert.equal(runtime!.error, null);

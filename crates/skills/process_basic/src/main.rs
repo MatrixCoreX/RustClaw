@@ -153,7 +153,7 @@ fn execute_with_root_and_context(
             tail_file(&full, n).map(|text| {
                 (
                     text.clone(),
-                    json!({"action":"tail_log","path":path,"resolved_path":full.display().to_string(),"n":n,"authority_scope":if policy.authority().is_unrestricted_admin(){"unrestricted_admin"}else{"workspace"},"platform":std::env::consts::OS,"output":text}),
+                    json!({"action":"tail_log","path":path,"resolved_path":full.display().to_string(),"n":n,"authority_scope":if policy.authority().outside_workspace_granted(){"host_policy_grant"}else{"workspace"},"platform":std::env::consts::OS,"output":text}),
                 )
             })
         }

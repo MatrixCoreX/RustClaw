@@ -485,6 +485,7 @@ def approve_if_needed(server: Server, task: dict[str, Any], case: str) -> bool:
             "task_id": (task.get("data") or {}).get("task_id"),
             "approval_request_id": request_id,
             "approval_decision": "approve_once",
+            "idempotency_key": f"lifecycle-approval-{request_id}",
         },
     )
     write_json(LOG_DIR / case / "approval_response.json", response)
@@ -867,10 +868,11 @@ def run_cancel_case(server: Server) -> dict[str, Any]:
         case,
     )
     wait_for_checkpoint(server, task_id, case)
-    first = server.request("POST", "/v1/tasks/cancel-by-task-id", {"task_id": task_id})
+    idempotency_key = f"lifecycle-cancel-{task_id}"
+    first = server.request("POST", "/v1/tasks/cancel-by-task-id", {"task_id": task_id, "idempotency_key": idempotency_key})
     write_json(LOG_DIR / case / "cancel_first.json", first)
     final, _ = wait_for_terminal(server, task_id, case, timeout=30)
-    second = server.request("POST", "/v1/tasks/cancel-by-task-id", {"task_id": task_id})
+    second = server.request("POST", "/v1/tasks/cancel-by-task-id", {"task_id": task_id, "idempotency_key": idempotency_key})
     write_json(LOG_DIR / case / "cancel_second.json", second)
     time.sleep(2)
     stable = query_task(server, task_id)
@@ -880,7 +882,7 @@ def run_cancel_case(server: Server) -> dict[str, Any]:
     second_status = (second.get("data") or {}).get("status")
     if not first.get("ok") or first_status != "task_cancelled":
         raise RegressionFailure(f"{case}: first cancel failed: {first_status}")
-    if not second.get("ok") or second_status != "task_already_cancelled":
+    if not second.get("ok") or second_status != "task_cancelled":
         raise RegressionFailure(f"{case}: second cancel was not idempotent: {second_status}")
     if (final.get("data") or {}).get("status") != "canceled":
         raise RegressionFailure(f"{case}: task did not become canceled")

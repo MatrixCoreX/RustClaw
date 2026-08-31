@@ -75,6 +75,7 @@ struct NniAssetTransferHistoryQuery {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct NniAssetTransferRequest {
     asset: String,
     amount: String,
@@ -84,7 +85,17 @@ struct NniAssetTransferRequest {
     #[serde(default)]
     authorization_mode: Option<String>,
     #[serde(default)]
-    owner_private_key: Option<String>,
+    asset_owner_pubkey: Option<String>,
+    #[serde(default)]
+    node_url: Option<String>,
+    #[serde(default)]
+    request_id: Option<String>,
+    #[serde(default)]
+    task_id: Option<String>,
+    #[serde(default)]
+    transfer_id: Option<String>,
+    #[serde(default)]
+    owner_signature: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -122,24 +133,14 @@ async fn nni_asset_transfer_history(
     headers: HeaderMap,
     Query(query): Query<NniAssetTransferHistoryQuery>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    let identity = match require_ui_identity(&state, &headers) {
-        Ok(identity) => identity,
-        Err((status, Json(resp))) => {
-            return (
-                status,
-                Json(ApiResponse {
-                    ok: resp.ok,
-                    data: None,
-                    error: resp.error,
-                }),
-            )
-        }
-    };
-    if !identity.role.eq_ignore_ascii_case("admin") {
-        return nni_join_error(
-            StatusCode::FORBIDDEN,
-            "admin_required",
-            json!({"status": "asset_transfer_history_forbidden"}),
+    if let Err((status, Json(resp))) = require_ui_admin(&state, &headers) {
+        return (
+            status,
+            Json(ApiResponse {
+                ok: resp.ok,
+                data: None,
+                error: resp.error,
+            }),
         );
     }
     let owner_pubkey = match normalize_nni_owner_public_key(&query.owner_pubkey) {
@@ -537,10 +538,9 @@ fn validate_asset_transfer_history_remote_filter(
 async fn nni_asset_transfer(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(mut request): Json<NniAssetTransferRequest>,
+    Json(request): Json<NniAssetTransferRequest>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    let mut owner_private_key = request.owner_private_key.take().map(Zeroizing::new);
-    let identity = match require_ui_identity(&state, &headers) {
+    let identity = match require_ui_admin(&state, &headers) {
         Ok(identity) => identity,
         Err((status, Json(resp))) => {
             return (
@@ -553,13 +553,6 @@ async fn nni_asset_transfer(
             )
         }
     };
-    if !identity.role.eq_ignore_ascii_case("admin") {
-        return nni_join_error(
-            StatusCode::FORBIDDEN,
-            "admin_required",
-            json!({"status": "asset_transfer_forbidden"}),
-        );
-    }
     let asset = match normalize_asset_transfer_asset(&request.asset) {
         Ok(value) => value,
         Err(error) => {
@@ -631,15 +624,19 @@ async fn nni_asset_transfer(
         },
         None => None,
     };
+    let verify_requested = request.task_id.is_some()
+        || request.transfer_id.is_some()
+        || request.owner_signature.is_some()
+        || request.node_url.is_some();
     let (device_pubkey, from_owner_pubkey) = if authorization_mode == "asset_owner" {
-        let Some(private_key) = owner_private_key.as_deref() else {
+        let Some(owner_pubkey) = request.asset_owner_pubkey.as_deref() else {
             return nni_join_error(
                 StatusCode::BAD_REQUEST,
-                "nni_owner_private_key_required",
+                "nni_asset_owner_required",
                 json!({"status": "asset_transfer_invalid"}),
             );
         };
-        let owner_pubkey = match nni_owner_public_key_from_private(private_key) {
+        let owner_pubkey = match normalize_nni_owner_public_key(owner_pubkey) {
             Ok(value) => value,
             Err(error) => {
                 return nni_join_error(
@@ -655,16 +652,16 @@ async fn nni_asset_transfer(
         {
             return nni_join_error(
                 StatusCode::CONFLICT,
-                "nni_owner_private_key_mismatch",
+                "nni_asset_owner_mismatch",
                 json!({"status": "asset_transfer_invalid"}),
             );
         }
         (None, owner_pubkey)
     } else {
-        if owner_private_key.is_some() {
+        if request.asset_owner_pubkey.is_some() || verify_requested {
             return nni_join_error(
                 StatusCode::BAD_REQUEST,
-                "nni_owner_private_key_unexpected",
+                "nni_owner_signature_unexpected",
                 json!({"status": "asset_transfer_invalid"}),
             );
         }
@@ -690,6 +687,103 @@ async fn nni_asset_transfer(
             "nni_asset_transfer_same_account",
             json!({"status": "asset_transfer_invalid"}),
         );
+    }
+
+    if verify_requested {
+        let node_url = match request
+            .node_url
+            .as_deref()
+            .ok_or("nni_remote_node_required")
+            .and_then(normalize_nni_node_url)
+        {
+            Ok(value) if nni_asset_service_remote_nodes(&config).contains(&&value) => value,
+            Ok(_) => {
+                return nni_join_error(
+                    StatusCode::BAD_REQUEST,
+                    "nni_asset_node_not_configured",
+                    json!({"status": "asset_transfer_verify_invalid"}),
+                )
+            }
+            Err(error) => {
+                return nni_join_error(
+                    StatusCode::BAD_REQUEST,
+                    error,
+                    json!({"status": "asset_transfer_verify_invalid"}),
+                )
+            }
+        };
+        let required_token = |value: Option<&str>, error: &'static str| {
+            value
+                .map(str::trim)
+                .filter(|value| !value.is_empty() && value.len() <= 160)
+                .map(str::to_string)
+                .ok_or(error)
+        };
+        let request_id = match required_token(
+            request.request_id.as_deref(),
+            "nni_asset_transfer_request_id_required",
+        ) {
+            Ok(value) => value,
+            Err(error) => {
+                return nni_join_error(StatusCode::BAD_REQUEST, error, json!({"status": "asset_transfer_verify_invalid"}))
+            }
+        };
+        let task_id = match required_token(
+            request.task_id.as_deref(),
+            "nni_asset_transfer_task_id_required",
+        ) {
+            Ok(value) => value,
+            Err(error) => {
+                return nni_join_error(StatusCode::BAD_REQUEST, error, json!({"status": "asset_transfer_verify_invalid"}))
+            }
+        };
+        let transfer_id = match required_token(
+            request.transfer_id.as_deref(),
+            "nni_asset_transfer_id_required",
+        ) {
+            Ok(value) => value,
+            Err(error) => {
+                return nni_join_error(StatusCode::BAD_REQUEST, error, json!({"status": "asset_transfer_verify_invalid"}))
+            }
+        };
+        let signature = match request
+            .owner_signature
+            .as_deref()
+            .ok_or("nni_owner_signature_required")
+            .and_then(normalize_nni_owner_signature)
+        {
+            Ok(value) => value,
+            Err(error) => {
+                return nni_join_error(StatusCode::BAD_REQUEST, error, json!({"status": "asset_transfer_verify_invalid"}))
+            }
+        };
+        return match verify_nni_asset_transfer_for_node(
+            &state,
+            &node_url,
+            &request_id,
+            NniAssetTransferVerifyRequest {
+                task_id,
+                transfer_id,
+                signature,
+            },
+        )
+        .await
+        {
+            Ok(mut data) => {
+                if let Some(object) = data.as_object_mut() {
+                    object.insert("node_url".to_string(), Value::String(node_url));
+                }
+                (StatusCode::OK, Json(ApiResponse { ok: true, data: Some(data), error: None }))
+            }
+            Err(attempt) => {
+                let error = attempt
+                    .get("error_code")
+                    .and_then(Value::as_str)
+                    .unwrap_or("nni_asset_transfer_outcome_unknown")
+                    .to_string();
+                nni_join_error(StatusCode::BAD_GATEWAY, error, attempt)
+            }
+        };
     }
 
     let request_id = uuid::Uuid::new_v4().to_string();
@@ -720,7 +814,6 @@ async fn nni_asset_transfer(
             &request.memo,
             &request_id,
             &remote_request,
-            owner_private_key.as_deref_mut(),
         )
         .await
         {
@@ -786,7 +879,6 @@ async fn execute_nni_asset_transfer_for_node(
     memo: &str,
     request_id: &str,
     request: &NniAssetTransferRemoteRequest,
-    owner_private_key: Option<&mut String>,
 ) -> Result<Value, Value> {
     let response = state
         .core
@@ -851,59 +943,53 @@ async fn execute_nni_asset_transfer_for_node(
     )
     .map_err(|error| json!({"node_url": node_url, "error_code": error, "terminal": true}))?;
 
-    let signature = if authorization_mode == "asset_owner" {
-        let private_key = owner_private_key.ok_or_else(|| {
-            json!({
-                "node_url": node_url,
-                "error_code": "nni_owner_private_key_required",
-                "terminal": true,
-            })
-        })?;
-        let (signing_pubkey, signature) =
-            sign_nni_owner_payload(private_key, &validated.signing_payload).map_err(
-                |error| json!({"node_url": node_url, "error_code": error, "terminal": true}),
-            )?;
-        if signing_pubkey != from_owner_pubkey {
-            return Err(json!({
-                "node_url": node_url,
-                "error_code": "nni_owner_private_key_mismatch",
-                "terminal": true,
-            }));
-        }
-        signature
-    } else {
-        let sign_output = run_nni_signature_helper(
-            state,
-            &[
-                "sign_challenge".to_string(),
-                validated.signing_payload.clone(),
-            ],
-        )
-        .await
-        .map_err(|_| {
-            json!({
-                "node_url": node_url,
-                "error_code": "nni_asset_transfer_signature_helper_failed",
-            })
-        })?;
-        if !sign_output.ok {
-            return Err(json!({
-                "node_url": node_url,
-                "error_code": "nni_asset_transfer_signature_failed",
-            }));
-        }
-        value_string(
-            &sign_output.payload,
-            "signature",
-            "nni_asset_transfer_signature_missing",
-        )?
-    };
-
-    let verify_request = NniAssetTransferVerifyRequest {
+    if authorization_mode == "asset_owner" {
+        return Ok(data);
+    }
+    let sign_output = run_nni_signature_helper(
+        state,
+        &[
+            "sign_challenge".to_string(),
+            validated.signing_payload.clone(),
+        ],
+    )
+    .await
+    .map_err(|_| {
+        json!({
+            "node_url": node_url,
+            "error_code": "nni_asset_transfer_signature_helper_failed",
+        })
+    })?;
+    if !sign_output.ok {
+        return Err(json!({
+            "node_url": node_url,
+            "error_code": "nni_asset_transfer_signature_failed",
+        }));
+    }
+    let signature = value_string(
+        &sign_output.payload,
+        "signature",
+        "nni_asset_transfer_signature_missing",
+    )?;
+    verify_nni_asset_transfer_for_node(
+        state,
+        node_url,
+        request_id,
+        NniAssetTransferVerifyRequest {
         task_id: validated.task_id,
         transfer_id: validated.transfer_id,
         signature,
-    };
+        },
+    )
+    .await
+}
+
+async fn verify_nni_asset_transfer_for_node(
+    state: &AppState,
+    node_url: &str,
+    request_id: &str,
+    verify_request: NniAssetTransferVerifyRequest,
+) -> Result<Value, Value> {
     let mut last_transport_error = None;
     for attempt in 0..2 {
         let response = match state

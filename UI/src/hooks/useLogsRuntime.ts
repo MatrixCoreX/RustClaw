@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 
+import { formatUiError } from "../lib/ui-error";
 import type { ApiResponse, LogFilesResponse, LogLatestResponse } from "../types/api";
 
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
@@ -49,7 +50,7 @@ export function useLogsRuntime({
       const body = (await res.json()) as ApiResponse<LogFilesResponse>;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(
-          body.error || t(`日志列表读取失败 (${res.status})`, `Log list failed (${res.status})`),
+          body.error || `log_files_http_${res.status}`,
         );
       }
       const files = Array.isArray(body.data.files)
@@ -65,8 +66,7 @@ export function useLogsRuntime({
       }
       return next;
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
-      setLogFilesError(message);
+      setLogFilesError(formatUiError(err, t, "无法读取日志列表。", "Could not load the log list."));
       return selectedLogFileRef.current;
     } finally {
       setLogFilesLoading(false);
@@ -85,13 +85,12 @@ export function useLogsRuntime({
       const res = await apiFetch(`/v1/logs/latest?${params.toString()}`);
       const body = (await res.json()) as ApiResponse<LogLatestResponse>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || t(`日志读取失败 (${res.status})`, `Log read failed (${res.status})`));
+        throw new Error(body.error || `log_latest_http_${res.status}`);
       }
       setLogText(body.data.text || "");
       setLogLastUpdated(Date.now());
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
-      setLogError(message);
+      setLogError(formatUiError(err, t, "无法读取日志内容。", "Could not load the log content."));
     } finally {
       setLogLoading(false);
     }

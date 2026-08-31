@@ -11,10 +11,21 @@ const MAX_READ_BYTES: usize = 1024 * 1024;
 pub(super) fn read_file_page(
     requested_path: &str,
     path: &Path,
+    workspace_root: Option<&Path>,
     start_byte: u64,
     requested_max_bytes: Option<usize>,
 ) -> io::Result<Value> {
-    let metadata = path.metadata()?;
+    let mut file = match workspace_root {
+        Some(root) => crate::secure_workspace_fs::open_workspace_file(root, path)?,
+        None => File::open(path)?,
+    };
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "read_file_target_not_regular_file",
+        ));
+    }
     let total_size = metadata.len();
     if start_byte > total_size {
         return Err(io::Error::new(
@@ -26,8 +37,7 @@ pub(super) fn read_file_page(
     let max_bytes = requested_max_bytes
         .unwrap_or(DEFAULT_READ_BYTES)
         .clamp(MIN_READ_BYTES, MAX_READ_BYTES);
-    let sha256 = file_sha256(path)?;
-    let mut file = File::open(path)?;
+    let sha256 = file_sha256(&mut file)?;
     file.seek(SeekFrom::Start(start_byte))?;
     let remaining = total_size.saturating_sub(start_byte);
     let read_budget = remaining.min(max_bytes as u64) as usize;
@@ -78,8 +88,8 @@ pub(super) fn read_file_page(
     }))
 }
 
-fn file_sha256(path: &Path) -> io::Result<String> {
-    let mut file = File::open(path)?;
+fn file_sha256(file: &mut File) -> io::Result<String> {
+    file.seek(SeekFrom::Start(0))?;
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
     loop {

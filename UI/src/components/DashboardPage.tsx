@@ -3,12 +3,14 @@ import {
   AlertTriangle,
   ArrowRight,
   BellRing,
+  ChevronDown,
   Cpu,
   Download,
   GitBranch,
   LayoutDashboard,
   Loader2,
   MessageCircle,
+  PackageCheck,
   PowerOff,
   Radio,
   RefreshCw,
@@ -36,6 +38,8 @@ import { useUiDialog } from "./UiDialogProvider";
 import { HostSystemSummaryPanel } from "./HostSystemSummaryPanel";
 import { SystemDependenciesPanel } from "./SystemDependenciesPanel";
 import { AgentPersonaCard } from "./AgentPersonaCard";
+import { LocalHttpsSetupPanel } from "./LocalHttpsSetupPanel";
+import { LocalMdnsPanel } from "./LocalMdnsPanel";
 import { GitRemoteSetupPanel, type GitRemoteSetupPanelProps } from "./GitRemoteSetupPanel";
 import type {
   AgentConfigResponse,
@@ -63,11 +67,13 @@ interface DashboardNavigationItem {
 }
 
 const DASHBOARD_SECTION_STORAGE_KEY = appStorageKey("monitor.dashboardSection");
+const DASHBOARD_SOURCE_BUILD_STORAGE_KEY = appStorageKey("monitor.sourceBuildExpanded");
 const DASHBOARD_SECTION_IDS = new Set<DashboardSection>([
   "overview",
   "setup",
   "persona",
   "dependencies",
+  "web",
   "updates",
   "communications",
   "git",
@@ -245,12 +251,22 @@ export function DashboardPage({
   const [activeDashboardSection, setActiveDashboardSection] = useState<DashboardSection>(() => {
     const saved = window.localStorage.getItem(DASHBOARD_SECTION_STORAGE_KEY);
     if (saved === "host") return "overview";
-    return DASHBOARD_SECTION_IDS.has(saved as DashboardSection)
+    return DASHBOARD_SECTION_IDS.has(saved as DashboardSection) && (saved !== "web" || isAdminIdentity)
       ? (saved as DashboardSection)
       : getDefaultDashboardSection(onboardingSteps);
   });
+  const [sourceBuildExpanded, setSourceBuildExpanded] = useState(
+    () => window.localStorage.getItem(DASHBOARD_SOURCE_BUILD_STORAGE_KEY) !== "false",
+  );
+  const toggleSourceBuildExpanded = () => {
+    setSourceBuildExpanded((expanded) => {
+      const next = !expanded;
+      window.localStorage.setItem(DASHBOARD_SOURCE_BUILD_STORAGE_KEY, String(next));
+      return next;
+    });
+  };
   const nginxReady = Boolean(nginxStatus?.running && nginxStatus.configured && nginxStatus.ui_deployed);
-  const dashboardSections: DashboardNavigationItem[] = [
+  const dashboardSections = ([
     {
       key: "overview",
       section: "overview",
@@ -294,11 +310,14 @@ export function DashboardPage({
       icon: <ServerCog className="h-4 w-4" />,
     },
     {
-      key: "updates",
-      section: "updates",
-      label: t("更新部署", "Update & Deploy"),
-      description: t("检查版本、更新程序、配置 Web 服务或重启。", "Check versions, update the app, configure web access, or restart."),
-      icon: <Download className="h-4 w-4" />,
+      key: "web",
+      section: "web",
+      label: t("Web 访问", "Web Access"),
+      description: t(
+        "管理 WEBD 对外访问、nginx 和可选的局域网 HTTPS。",
+        "Manage external WEBD access, nginx, and optional LAN HTTPS.",
+      ),
+      icon: <ServerCog className="h-4 w-4" />,
     },
     {
       key: "communications",
@@ -314,7 +333,16 @@ export function DashboardPage({
       description: t("管理 GitHub 仓库范围，以及读取、推送和 Pull Request 凭据。", "Manage allowed GitHub repositories and credentials for reads, pushes, and pull requests."),
       icon: <GitBranch className="h-4 w-4" />,
     },
-  ];
+    {
+      key: "updates",
+      section: "updates",
+      label: t("更新部署", "Update & Deploy"),
+      description: t("检查版本、更新程序、编译源码或重启。", "Check versions, update the app, compile source, or restart."),
+      icon: <Download className="h-4 w-4" />,
+    },
+  ] satisfies DashboardNavigationItem[]).filter(
+    (item) => isAdminIdentity || item.section !== "web",
+  );
   const selectedDashboardSection =
     dashboardSections.find((item) => item.section === activeDashboardSection) ?? dashboardSections[0];
 
@@ -644,68 +672,102 @@ export function DashboardPage({
 
             {sourceUpdateAvailable ? (
               <div className="rounded-lg border border-amber-400/25 bg-amber-400/[0.06] p-4 sm:p-5">
-                <div className="flex items-start gap-3">
-                  <span className="rounded-lg bg-amber-400/10 p-2 text-amber-200">
-                    <Cpu className="h-5 w-5" />
-                  </span>
-                  <div>
-                    <h4 className="text-sm font-semibold text-white">
-                      {t("拉取源码并编译/部署", "Pull, Build, and Deploy Source")}
-                    </h4>
-                    <p className="mt-2 text-sm leading-6 text-white/65">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <span className="rounded-lg bg-amber-400/10 p-2 text-amber-200">
+                      <Cpu className="h-5 w-5" />
+                    </span>
+                    <div>
+                      <h4 className="text-sm font-semibold text-white">
+                        {t("拉取源码并编译/部署", "Pull, Build, and Deploy Source")}
+                      </h4>
+                      <p className="mt-1 text-xs leading-5 text-white/55">
+                        {t("用于开发和排障的高级操作。", "Advanced controls for development and troubleshooting.")}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={toggleSourceBuildExpanded}
+                    className="theme-secondary-btn shrink-0 px-3 py-2 text-xs"
+                    aria-expanded={sourceBuildExpanded}
+                    aria-controls="dashboard-source-build-controls"
+                  >
+                    <ChevronDown className={`h-4 w-4 transition-transform ${sourceBuildExpanded ? "rotate-180" : ""}`} />
+                    {sourceBuildExpanded ? t("收起", "Collapse") : t("展开", "Expand")}
+                  </button>
+                </div>
+                {sourceBuildExpanded ? (
+                  <div id="dashboard-source-build-controls">
+                    <p className="mt-3 text-sm leading-6 text-white/65">
                       {t(
-                        "用于开发或排障。完整流程会拉取并编译全部内容；如果已配置 nginx，还会自动替换为最新 UI。也可以只编译 UI 或 clawd。",
-                        "For development or troubleshooting. The full flow pulls and builds everything, then replaces the nginx-hosted UI when nginx is already configured. You can also build only the UI or clawd.",
+                        "完整流程会拉取并编译全部内容；如果已配置 nginx，还会自动替换为最新 UI。也可以只编译 UI 或 clawd。",
+                        "The full flow pulls and builds everything, then replaces the nginx-hosted UI when nginx is already configured. You can also build only the UI or clawd.",
                       )}
                     </p>
+                    <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-300/20 bg-amber-300/[0.06] px-3 py-2 text-xs leading-5 text-amber-100/85">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                      <span>
+                        {t(
+                          "自己编译存在风险：耗时较长，会占用较多 CPU、内存和磁盘；依赖、网络或本地源码冲突都可能导致失败，低配置设备可能暂时无法响应。",
+                          "Compiling locally carries risk: it can take a long time and consume significant CPU, memory, and disk. Dependencies, network issues, or local source conflicts can fail the build, and low-resource devices may become temporarily unresponsive.",
+                        )}
+                      </span>
+                    </div>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void onStartWorkspaceUpdate("full")}
+                        disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
+                        className="theme-secondary-btn px-3 py-2 text-sm"
+                      >
+                        <RefreshCw className="h-4 w-4" />
+                        {workspaceUpdateHasRemoteDiff
+                          ? t("拉取、编译并部署", "Pull, Build, and Deploy")
+                          : t("完整编译/部署", "Build and Deploy All")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void onStartWorkspaceUpdate("ui_only")}
+                        disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
+                        className="theme-secondary-btn px-3 py-2 text-sm"
+                      >
+                        <LayoutDashboard className="h-4 w-4" />
+                        {t("只编译 UI", "Build UI")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void onStartWorkspaceUpdate("clawd_only")}
+                        disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
+                        className="theme-secondary-btn px-3 py-2 text-sm"
+                      >
+                        <Cpu className="h-4 w-4" />
+                        {t("只编译 clawd", "Build clawd")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void onStartWorkspaceUpdate("release_restore")}
+                        disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
+                        className="theme-secondary-btn px-3 py-2 text-sm"
+                      >
+                        <PackageCheck className="h-4 w-4" />
+                        {t("恢复为 Release 部署", "Restore Release deployment")}
+                      </button>
+                    </div>
                   </div>
-                </div>
-                <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-300/20 bg-amber-300/[0.06] px-3 py-2 text-xs leading-5 text-amber-100/85">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                  <span>
-                    {t(
-                      "自己编译存在风险：耗时较长，会占用较多 CPU、内存和磁盘；依赖、网络或本地源码冲突都可能导致失败，低配置设备可能暂时无法响应。",
-                      "Compiling locally carries risk: it can take a long time and consume significant CPU, memory, and disk. Dependencies, network issues, or local source conflicts can fail the build, and low-resource devices may become temporarily unresponsive.",
-                    )}
-                  </span>
-                </div>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void onStartWorkspaceUpdate("full")}
-                    disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
-                    className="theme-secondary-btn px-3 py-2 text-sm"
-                  >
-                    <RefreshCw className="h-4 w-4" />
-                    {workspaceUpdateHasRemoteDiff
-                      ? t("拉取、编译并部署", "Pull, Build, and Deploy")
-                      : t("完整编译/部署", "Build and Deploy All")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void onStartWorkspaceUpdate("ui_only")}
-                    disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
-                    className="theme-secondary-btn px-3 py-2 text-sm"
-                  >
-                    <LayoutDashboard className="h-4 w-4" />
-                    {t("只编译 UI", "Build UI")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void onStartWorkspaceUpdate("clawd_only")}
-                    disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
-                    className="theme-secondary-btn px-3 py-2 text-sm"
-                  >
-                    <Cpu className="h-4 w-4" />
-                    {t("只编译 clawd", "Build clawd")}
-                  </button>
-                </div>
+                ) : null}
               </div>
             ) : null}
           </div>
         ) : null}
 
+        </section>
+      ) : null}
+
+      {activeDashboardSection === "web" ? (
+        <section className="space-y-4">
         {isAdminIdentity ? (
+          <>
           <div className="grid items-stretch gap-4 lg:grid-cols-2">
           <div className="rounded-lg border border-emerald-400/20 bg-emerald-400/[0.05] p-4 sm:p-5">
             <div className="flex flex-wrap items-start justify-between gap-4">
@@ -890,10 +952,32 @@ export function DashboardPage({
                 </button>
               ) : null}
             </div>
-          </div>
-          </div>
-        ) : null}
 
+          </div>
+          </div>
+          <LocalHttpsSetupPanel
+            t={t}
+            apiFetch={apiFetch}
+            status={nginxStatus}
+            busy={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
+            activeMode={workspaceUpdateStatus?.mode}
+            onStart={onStartWorkspaceUpdate}
+          />
+          <LocalMdnsPanel
+            t={t}
+            apiFetch={apiFetch}
+            nginxStatus={nginxStatus}
+            webdExposureStatus={webdExposureStatus}
+            disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting || webdExposureUpdating}
+            onUpdated={onFetchNginxStatus}
+          />
+          </>
+        ) : null}
+        </section>
+      ) : null}
+
+      {activeDashboardSection === "updates" ? (
+        <section className="space-y-4">
         {isAdminIdentity ? (
           <div className="flex flex-wrap items-center gap-2">
             {workspaceUpdateStatus?.status === "running" ? (

@@ -4,6 +4,7 @@ import { useUiDialog } from "../components/UiDialogProvider";
 import { ApiResponseFormatError, readJsonApiResponse } from "../lib/api-response";
 import { sleep } from "../lib/display-format";
 import { formatSystemActionError } from "../lib/system-actions";
+import { formatUiError } from "../lib/ui-error";
 import {
   formatWorkspaceUpdateApiError,
   shouldReloadAfterWorkspaceBuild,
@@ -162,13 +163,13 @@ export function useSystemRuntime({
       const res = await apiFetch(`/v1/admin/workspace-update${refreshQuery}`);
       const body = (await res.json()) as ApiResponse<WorkspaceUpdateStatus>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error ? workspaceUpdateApiErrorMessage(body.error) : `workspace update status failed (${res.status})`);
+        throw new Error(body.error ? workspaceUpdateApiErrorMessage(body.error) : `workspace_update_status_http_${res.status}`);
       }
       setWorkspaceUpdateStatus(body.data);
       return body.data;
     } catch (err) {
       if (!silent) {
-        const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+        const message = formatUiError(err, t, "更新状态暂时无法读取。", "Update status is temporarily unavailable.");
         setWorkspaceUpdateMessage(`${t("查询更新状态失败", "Failed to query update status")}: ${message}`);
       }
       return null;
@@ -186,7 +187,7 @@ export function useSystemRuntime({
       const res = await apiFetch("/v1/admin/nginx");
       const body = await readJsonApiResponse<ApiResponse<NginxUiStatus>>(res);
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `nginx status failed (${res.status})`);
+        throw new Error(body.error || `nginx_status_http_${res.status}`);
       }
       setNginxStatus(body.data);
       return body.data;
@@ -201,9 +202,12 @@ export function useSystemRuntime({
               "状态接口返回了无法识别的数据，请更新并重启 {product_name} 后重试。",
               "The status endpoint returned unrecognized data. Update and restart {product_name}, then retry.",
             )
-        : err instanceof Error
-          ? err.message
-          : t("未知错误", "Unknown error");
+        : formatUiError(
+          err,
+          t,
+          "nginx 状态暂时无法读取，请稍后重试。",
+          "The nginx status is temporarily unavailable. Try again shortly.",
+        );
       setNginxStatusError(message);
       return null;
     } finally {
@@ -218,7 +222,7 @@ export function useSystemRuntime({
       const res = await apiFetch("/v1/admin/webd-exposure");
       const body = await readJsonApiResponse<ApiResponse<WebdExposureStatus>>(res);
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `webd exposure status failed (${res.status})`);
+        throw new Error(body.error || `webd_exposure_status_http_${res.status}`);
       }
       setWebdExposureStatus(body.data);
       return body.data;
@@ -228,9 +232,12 @@ export function useSystemRuntime({
             "webd 状态接口返回了无法识别的数据，请更新并重启 {product_name} 后重试。",
             "The webd status endpoint returned unrecognized data. Update and restart {product_name}, then retry.",
           )
-        : err instanceof Error
-          ? err.message
-          : t("未知错误", "Unknown error");
+        : formatUiError(
+          err,
+          t,
+          "Web 入口状态暂时无法读取，请稍后重试。",
+          "The web entry status is temporarily unavailable. Try again shortly.",
+        );
       setWebdExposureError(message);
       return null;
     } finally {
@@ -268,7 +275,7 @@ export function useSystemRuntime({
       });
       const body = await readJsonApiResponse<ApiResponse<WebdExposureStatus>>(res);
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `webd exposure update failed (${res.status})`);
+        throw new Error(body.error || `webd_exposure_update_http_${res.status}`);
       }
       setWebdExposureStatus(body.data);
       setWebdExposureMessage(body.data.restart_scheduled
@@ -281,7 +288,12 @@ export function useSystemRuntime({
         window.setTimeout(() => void fetchWebdExposureStatus(true), 5000);
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(
+        err,
+        t,
+        "Web 入口访问范围修改失败，请稍后重试。",
+        "The web entry access scope could not be changed. Try again shortly.",
+      );
       setWebdExposureError(`${t("修改 webd 访问范围失败", "Failed to update webd access scope")}: ${message}`);
     } finally {
       setWebdExposureUpdating(false);
@@ -347,6 +359,30 @@ export function useSystemRuntime({
           "Disabling nginx and removing the deployed UI. The remote entry may disconnect immediately.",
         ),
       },
+      local_https_prepare: {
+        confirm: t(
+          "为当前局域网地址生成设备 CA 和 HTTPS 证书？这一步不会切换当前页面，也不会启用 HTTPS。",
+          "Generate a device CA and HTTPS certificate for the current LAN address? This step does not switch the current page or enable HTTPS.",
+        ),
+        endpoint: "/v1/admin/workspace-update/local-https-prepare",
+        started: t("正在准备设备证书。完成后请先下载并安装 CA。", "Preparing the device certificate. Download and install the CA when this finishes."),
+      },
+      local_https_enable: {
+        confirm: t(
+          "确认浏览器已经信任页面显示的设备 CA 后再继续。系统将启用 HTTPS，同时保留 HTTP 入口用于恢复。",
+          "Continue only after the browser trusts the device CA shown on this page. HTTPS will be enabled while HTTP remains available for recovery.",
+        ),
+        endpoint: "/v1/admin/workspace-update/local-https-enable",
+        started: t("正在启用 HTTPS。完成后请点击安全地址切换访问。", "Enabling HTTPS. Open the secure address when the operation finishes."),
+      },
+      local_https_restore: {
+        confirm: t(
+          "恢复启用 HTTPS 之前的 nginx 配置？证书会保留，稍后可以重新启用。",
+          "Restore the nginx configuration from before HTTPS was enabled? Certificates are retained so HTTPS can be enabled again later.",
+        ),
+        endpoint: "/v1/admin/workspace-update/local-https-restore",
+        started: t("正在恢复原来的 HTTP 配置。", "Restoring the previous HTTP configuration."),
+      },
       release_deploy: {
         confirm: t(
           "直接下载 GitHub Releases 里适合当前机器的预编译包并部署；会保留 configs、data、logs 和 .pids，完成后重启 clawd。确认现在开始吗？",
@@ -354,6 +390,17 @@ export function useSystemRuntime({
         ),
         endpoint: "/v1/admin/workspace-update/deploy-release",
         started: t("Release 包部署已开始，下面会自动刷新进度。", "Release package deployment started. Progress will refresh automatically."),
+      },
+      release_restore: {
+        confirm: t(
+          "将下载适合当前机器的预编译 Release 包，并原子替换当前源码部署。configs、data、logs、.pids 和运行时技能会保留，当前源码树会保存为回滚备份；完成后将不再显示 Git 拉取和本机编译入口。确认恢复为 Release 部署吗？",
+          "Download the prebuilt Release package for this machine and atomically replace the current source deployment. configs, data, logs, .pids, and runtime skills are preserved, while the current source tree is retained as a rollback backup. Git pull and local build controls will no longer be shown. Restore the Release deployment?",
+        ),
+        endpoint: "/v1/admin/workspace-update/restore-release",
+        started: t(
+          "正在安全恢复为 Release 部署，下面会自动刷新进度。",
+          "Safely restoring the Release deployment. Progress will refresh automatically.",
+        ),
       },
       source_checkout: {
         confirm: t(
@@ -395,6 +442,8 @@ export function useSystemRuntime({
       if (!choice) return;
       selectedModeKey = choice === "preserve_nginx" ? "full_preserve_nginx" : "full";
       confirmed = true;
+    } else if (mode === "local_https_enable") {
+      confirmed = true;
     } else {
       const selectedMode = modeConfig[selectedModeKey];
       confirmed = await showConfirm({
@@ -411,7 +460,14 @@ export function useSystemRuntime({
     setWorkspaceUpdateLoading(true);
     setWorkspaceUpdateMessage(null);
     try {
-      const res = await apiFetch(selectedMode.endpoint, { method: "POST" });
+      const requestInit: RequestInit = { method: "POST" };
+      if (selectedModeKey === "local_https_enable") {
+        requestInit.headers = { "Content-Type": "application/json" };
+        requestInit.body = JSON.stringify({
+          ca_fingerprint_sha256: nginxStatus?.local_https_ca_fingerprint_sha256 || "",
+        });
+      }
+      const res = await apiFetch(selectedMode.endpoint, requestInit);
       const body = (await res.json()) as ApiResponse<WorkspaceUpdateStatus>;
       if (!res.ok || !body.ok || !body.data) {
         if (res.status === 409 && body.data) {
@@ -421,12 +477,12 @@ export function useSystemRuntime({
           );
           return;
         }
-        throw new Error(body.error ? workspaceUpdateApiErrorMessage(body.error) : `workspace update start failed (${res.status})`);
+        throw new Error(body.error ? workspaceUpdateApiErrorMessage(body.error) : `workspace_update_start_http_${res.status}`);
       }
       setWorkspaceUpdateStatus(body.data);
       setWorkspaceUpdateMessage(selectedMode.started);
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "系统重启未完成，请查看日志。", "The system restart did not complete. Check the logs.");
       setWorkspaceUpdateMessage(`${t("启动更新失败", "Failed to start update")}: ${message}`);
     } finally {
       setWorkspaceUpdateLoading(false);
@@ -437,14 +493,14 @@ export function useSystemRuntime({
     const confirmed = await showConfirm({
       title: t("停止当前操作", "Stop current operation"),
       message: t(
-        workspaceUpdateStatus?.mode === "release_deploy"
+        workspaceUpdateStatus?.mode === "release_deploy" || workspaceUpdateStatus?.mode === "release_restore"
           ? "停止当前部署？已经完成的下载或文件复制不会自动回滚，后续可重新点击下载 Release 部署。"
           : workspaceUpdateStatus?.mode === "nginx_disable"
             ? "停止关闭 nginx？已经停止的服务或已经删除的 UI 不会自动恢复。"
           : workspaceUpdateStatus?.mode === "source_checkout"
             ? "停止切换源码模式？如果尚未完成原子切换，当前 Release 安装会保持不变。"
             : "停止当前编译？已经完成的拉取或文件复制不会自动回滚，后续可重新点击完整编译。",
-        workspaceUpdateStatus?.mode === "release_deploy"
+        workspaceUpdateStatus?.mode === "release_deploy" || workspaceUpdateStatus?.mode === "release_restore"
           ? "Stop the current deployment? Completed download or copy steps will not be rolled back. You can deploy the Release again later."
           : workspaceUpdateStatus?.mode === "nginx_disable"
             ? "Stop disabling nginx? A service already stopped or UI files already removed will not be restored automatically."
@@ -463,12 +519,12 @@ export function useSystemRuntime({
       const body = (await res.json()) as ApiResponse<WorkspaceUpdateStatus>;
       if (!res.ok || !body.ok || !body.data) {
         if (body.data) setWorkspaceUpdateStatus(body.data);
-        throw new Error(body.error ? workspaceUpdateApiErrorMessage(body.error) : `workspace update cancel failed (${res.status})`);
+        throw new Error(body.error ? workspaceUpdateApiErrorMessage(body.error) : `workspace_update_cancel_http_${res.status}`);
       }
       setWorkspaceUpdateStatus(body.data);
       setWorkspaceUpdateMessage(t("已请求停止编译，正在结束当前进程。", "Stop requested. Ending the current build process."));
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "硬件设备服务重启未完成，请查看日志。", "The hardware-device service restart did not complete. Check the logs.");
       setWorkspaceUpdateMessage(`${t("停止编译失败", "Failed to stop build")}: ${message}`);
     } finally {
       setWorkspaceUpdateCanceling(false);
@@ -533,7 +589,7 @@ export function useSystemRuntime({
       setSystemRestarting(false);
       return recovered;
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "系统重启未完成，请查看日志。", "The system restart did not complete. Check the logs.");
       setSystemRestartMessage(`${t("重启失败", "Restart failed")}: ${message}`);
       return false;
     } finally {
@@ -548,7 +604,7 @@ export function useSystemRuntime({
       const res = await apiFetch(`/v1/pi-app/status`);
       const body = (await res.json()) as ApiResponse<PiAppStatusResponse>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `Pi App status failed (${res.status})`);
+        throw new Error(body.error || `hardware_device_status_http_${res.status}`);
       }
       setPiAppStatus(body.data);
     } catch {
@@ -567,7 +623,7 @@ export function useSystemRuntime({
       }
       setPiAppRestartMessage(t("已发起 Pi App 小程序重启。", "Pi App restart requested."));
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      const message = formatUiError(err, t, "硬件设备服务重启未完成，请查看日志。", "The hardware-device service restart did not complete. Check the logs.");
       setPiAppRestartMessage(`${t("Pi App 重启失败", "Pi App restart failed")}: ${message}`);
     } finally {
       setPiAppRestarting(false);
@@ -602,7 +658,13 @@ export function useSystemRuntime({
   useEffect(() => {
     const status = workspaceUpdateStatus?.status;
     if (
-      (workspaceUpdateStatus?.mode === "nginx_enable" || workspaceUpdateStatus?.mode === "nginx_disable") &&
+      (
+        workspaceUpdateStatus?.mode === "nginx_enable"
+        || workspaceUpdateStatus?.mode === "nginx_disable"
+        || workspaceUpdateStatus?.mode === "local_https_prepare"
+        || workspaceUpdateStatus?.mode === "local_https_enable"
+        || workspaceUpdateStatus?.mode === "local_https_restore"
+      ) &&
       (status === "succeeded" || status === "failed" || status === "canceled")
     ) {
       void fetchNginxStatus(true);

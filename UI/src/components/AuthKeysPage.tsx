@@ -2,7 +2,7 @@ import { Fragment } from "react";
 import { Check, Copy, Loader2, RefreshCw } from "lucide-react";
 
 import { formatDateOnlyHuman, formatDateTimeHuman } from "../lib/date-format";
-import type { AuthKeyListItem } from "../types/api";
+import type { AuthKeyListItem, WebdSessionListItem } from "../types/api";
 
 type UiLanguage = "zh" | "en";
 type Translate = (zh: string, en: string) => string;
@@ -28,6 +28,10 @@ export interface AuthKeysPageProps {
   webdLoginEditorKeyId: number | null;
   webdLoginUsernameDraft: string;
   webdLoginPasswordDraft: string;
+  webdSessions: WebdSessionListItem[];
+  webdSessionsLoading: boolean;
+  webdSessionsError: string | null;
+  webdSessionRevoking: string | null;
   onFetchAuthKeys: () => unknown | Promise<unknown>;
   onCreateAuthKey: (role?: string) => unknown | Promise<unknown>;
   onPromptCreateCustomAuthKey: () => unknown | Promise<unknown>;
@@ -41,6 +45,8 @@ export interface AuthKeysPageProps {
   onWebdLoginUsernameDraftChange: (value: string) => void;
   onWebdLoginPasswordDraftChange: (value: string) => void;
   onSaveWebdLoginEditor: (row: AuthKeyListItem) => unknown | Promise<unknown>;
+  onFetchWebdSessions: () => unknown | Promise<unknown>;
+  onRevokeWebdSession: (session: WebdSessionListItem) => unknown | Promise<unknown>;
 }
 
 function copyButtonText(
@@ -73,6 +79,10 @@ export function AuthKeysPage({
   webdLoginEditorKeyId,
   webdLoginUsernameDraft,
   webdLoginPasswordDraft,
+  webdSessions,
+  webdSessionsLoading,
+  webdSessionsError,
+  webdSessionRevoking,
   onFetchAuthKeys,
   onCreateAuthKey,
   onPromptCreateCustomAuthKey,
@@ -86,6 +96,8 @@ export function AuthKeysPage({
   onWebdLoginUsernameDraftChange,
   onWebdLoginPasswordDraftChange,
   onSaveWebdLoginEditor,
+  onFetchWebdSessions,
+  onRevokeWebdSession,
 }: AuthKeysPageProps) {
   const locale = lang === "zh" ? "zh-CN" : "en-US";
 
@@ -349,6 +361,70 @@ export function AuthKeysPage({
           </table>
         </div>
       </section>
+      {isAdminIdentity ? (
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-base font-semibold">{t("Web 登录会话", "Web sign-in sessions")}</h3>
+              <p className="mt-2 text-sm text-white/65">
+                {t("查看仍可使用的网页登录、登录来源和浏览器信息，并撤销不认识或不再使用的设备。", "Review active web sign-ins, their source and browser details, and revoke devices you do not recognize or no longer use.")}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void onFetchWebdSessions()}
+              disabled={webdSessionsLoading}
+              className="theme-topbar-btn px-3 py-2 text-sm"
+            >
+              {webdSessionsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              {t("刷新会话", "Refresh sessions")}
+            </button>
+          </div>
+          {webdSessionsError ? (
+            <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{webdSessionsError}</p>
+          ) : null}
+          <div className="mt-4 divide-y divide-white/10 overflow-hidden rounded-xl border border-white/10 bg-black/20">
+            {webdSessions.length === 0 && !webdSessionsLoading ? (
+              <p className="px-4 py-6 text-center text-sm text-white/50">{t("没有可显示的 Web 会话", "No web sessions to display")}</p>
+            ) : (
+              webdSessions.map((session) => (
+                <div key={session.session_handle} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium text-white/90">{session.username}</span>
+                      <span className="rounded border border-white/10 px-1.5 py-0.5 text-xs text-white/60">{session.role}</span>
+                      {session.current ? (
+                        <span className="rounded border border-emerald-400/25 bg-emerald-500/10 px-1.5 py-0.5 text-xs text-emerald-200">{t("当前会话", "Current")}</span>
+                      ) : null}
+                    </div>
+                    <p className="mt-1 text-xs text-white/50">
+                      {t("设备", "Device")}: {session.client_platform || t("信息不可用", "Unavailable")} · IP: {session.client_ip || "--"}
+                    </p>
+                    {session.user_agent ? (
+                      <details className="mt-1 text-xs text-white/45">
+                        <summary className="cursor-pointer">{t("查看浏览器标识", "View browser identifier")}</summary>
+                        <p className="mt-1 break-words" title={session.user_agent}>{session.user_agent}</p>
+                      </details>
+                    ) : null}
+                    <p className="mt-1 text-xs text-white/50">
+                      {t("登录", "Signed in")}: {new Date(session.created_unix * 1000).toLocaleString(locale)} · {t("最近活动", "Last active")}: {new Date(session.last_activity_unix * 1000).toLocaleString(locale)} · {t("到期", "Expires")}: {new Date(session.expires_unix * 1000).toLocaleString(locale)}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void onRevokeWebdSession(session)}
+                    disabled={webdSessionRevoking === session.session_handle}
+                    className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200 transition hover:bg-red-500/20 disabled:opacity-50"
+                  >
+                    {webdSessionRevoking === session.session_handle ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                    {t("撤销", "Revoke")}
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

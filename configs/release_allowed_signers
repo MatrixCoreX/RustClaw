@@ -1,0 +1,2 @@
+# OpenSSH allowed-signers format. Release manifests must verify as this identity.
+release ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIKbJCXjVhmujzWsX+Re8CrjJFP5wrvwCE7XGDJjZym/

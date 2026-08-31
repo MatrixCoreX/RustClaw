@@ -565,7 +565,7 @@ async fn nni_device_status(
     headers: HeaderMap,
     Query(query): Query<NniDeviceStatusQuery>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
+    if let Err((status, Json(resp))) = require_ui_admin(&state, &headers) {
         return (
             status,
             Json(ApiResponse {
@@ -591,7 +591,7 @@ async fn nni_device_action(
     headers: HeaderMap,
     Json(req): Json<NniDeviceActionRequest>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
+    if let Err((status, Json(resp))) = require_ui_admin(&state, &headers) {
         return (
             status,
             Json(ApiResponse {

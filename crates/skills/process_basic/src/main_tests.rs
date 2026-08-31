@@ -23,7 +23,7 @@ fn kill_signal_contract_is_finite_and_normalized() {
 }
 
 #[test]
-fn tail_log_honors_runner_admin_path_authority() {
+fn tail_log_honors_runner_host_path_grant() {
     let workspace = tempfile::tempdir().expect("workspace");
     let external = tempfile::NamedTempFile::new().expect("external log");
     std::fs::write(external.path(), "line one\nline two\n").expect("write external log");
@@ -36,9 +36,8 @@ fn tail_log_honors_runner_admin_path_authority() {
     assert!(denied.unwrap_err().contains("path_outside_workspace"));
 
     let context = json!({
-        "authority_scope": "unrestricted_admin",
+        "authority_scope": "host_policy_grant",
         "permissions": {
-            "unrestricted_admin": true,
             "allow_path_outside_workspace": true
         }
     });
@@ -47,9 +46,9 @@ fn tail_log_honors_runner_admin_path_authority() {
         workspace.path(),
         Some(&context),
     )
-    .expect("admin external tail");
+    .expect("host policy external tail");
     assert_eq!(text, "line two");
-    assert_eq!(extra["authority_scope"], "unrestricted_admin");
+    assert_eq!(extra["authority_scope"], "host_policy_grant");
 }
 
 #[test]

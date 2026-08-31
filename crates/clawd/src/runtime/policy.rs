@@ -13,6 +13,7 @@ pub(crate) struct RateLimiter {
 
 pub(crate) struct ToolsPolicy {
     profile_allow: Vec<String>,
+    admin_profile_allow: Vec<String>,
     pub(crate) sandbox_mode: ToolSandboxMode,
     pub(crate) sandbox_backend: ToolSandboxBackend,
     pub(crate) approval_policy: ToolApprovalPolicy,
@@ -102,6 +103,18 @@ impl ToolsPolicy {
             .map(|value| normalize_capability_pattern(value.trim()))
             .filter(|value| !value.is_empty())
             .collect();
+        let admin_access_profile = cfg.admin_access_profile.trim().to_ascii_lowercase();
+        let admin_profile_allow = cfg.profiles.get(&admin_access_profile).ok_or_else(|| {
+            format!(
+                "{}:{}",
+                "invalid_tools_admin_access_profile", cfg.admin_access_profile
+            )
+        })?;
+        let admin_profile_allow: Vec<String> = admin_profile_allow
+            .iter()
+            .map(|value| normalize_capability_pattern(value.trim()))
+            .filter(|value| !value.is_empty())
+            .collect();
         let allow: Vec<String> = cfg
             .allow
             .iter()
@@ -115,7 +128,12 @@ impl ToolsPolicy {
             .filter(|v| !v.is_empty())
             .collect();
 
-        for p in allow.iter().chain(deny.iter()).chain(profile_allow.iter()) {
+        for p in allow
+            .iter()
+            .chain(deny.iter())
+            .chain(profile_allow.iter())
+            .chain(admin_profile_allow.iter())
+        {
             if p != "*" && !p.starts_with("skill:") && !p.starts_with("capability:") {
                 return Err(format!(
                     "invalid tools pattern: {p}; expected '*' or prefix 'skill:'/'capability:' (legacy 'tool:' is auto-converted to 'skill:')"
@@ -161,6 +179,7 @@ impl ToolsPolicy {
 
         Ok(Self {
             profile_allow,
+            admin_profile_allow,
             sandbox_mode: cfg.sandbox_mode,
             sandbox_backend: cfg.sandbox_backend,
             approval_policy: cfg.approval_policy,
@@ -177,20 +196,26 @@ impl ToolsPolicy {
 
     #[cfg(test)]
     pub(crate) fn is_any_allowed(&self, tokens: &[&str], provider_type: Option<&str>) -> bool {
-        self.is_any_allowed_for_execution(tokens, provider_type, false)
+        self.is_any_allowed_for_execution(tokens, provider_type)
     }
 
+    #[cfg(test)]
     pub(crate) fn is_any_allowed_for_execution(
         &self,
         tokens: &[&str],
         provider_type: Option<&str>,
-        unrestricted_admin: bool,
+    ) -> bool {
+        self.is_any_allowed_for_execution_for_actor(tokens, provider_type, false)
+    }
+
+    pub(crate) fn is_any_allowed_for_execution_for_actor(
+        &self,
+        tokens: &[&str],
+        provider_type: Option<&str>,
+        use_admin_profile: bool,
     ) -> bool {
         if tokens.is_empty() {
             return false;
-        }
-        if unrestricted_admin {
-            return true;
         }
         if self
             .deny
@@ -201,7 +226,9 @@ impl ToolsPolicy {
         }
 
         let mut allowed = if self.allow.is_empty() {
-            tokens.iter().any(|token| self.default_allowed(token))
+            tokens
+                .iter()
+                .any(|token| self.default_allowed(token, use_admin_profile))
         } else {
             self.allow
                 .iter()
@@ -353,10 +380,13 @@ impl ToolsPolicy {
         }
     }
 
-    fn default_allowed(&self, token: &str) -> bool {
-        self.profile_allow
-            .iter()
-            .any(|pattern| wildcard_match(pattern, token))
+    fn default_allowed(&self, token: &str, use_admin_profile: bool) -> bool {
+        let profile = if use_admin_profile {
+            &self.admin_profile_allow
+        } else {
+            &self.profile_allow
+        };
+        profile.iter().any(|pattern| wildcard_match(pattern, token))
     }
 }
 

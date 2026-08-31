@@ -256,7 +256,6 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         .route("/models/catalog", get(get_model_catalog))
         .route("/nni/device/status", get(nni_device_status))
         .route("/nni/device/action", post(nni_device_action))
-        .route("/nni/owner/generate", post(nni_owner_generate))
         .route("/nni/owner/recover", post(nni_owner_recover))
         .route("/nni/owner/unbind/request", post(nni_owner_unbind_request))
         .route("/nni/owner/unbind/verify", post(nni_owner_unbind_verify))
@@ -317,6 +316,11 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         )
         .route("/admin/nginx", get(get_nginx_ui_status))
         .route(
+            "/admin/local-mdns",
+            get(get_local_mdns_status).post(update_local_mdns),
+        )
+        .route("/system/local-https-ca", get(download_local_https_ca))
+        .route(
             "/admin/webd-exposure",
             get(get_webd_exposure_status).post(update_webd_exposure),
         )
@@ -329,8 +333,24 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             post(start_workspace_update_nginx_disable),
         )
         .route(
+            "/admin/workspace-update/local-https-prepare",
+            post(start_local_https_prepare),
+        )
+        .route(
+            "/admin/workspace-update/local-https-enable",
+            post(start_local_https_enable),
+        )
+        .route(
+            "/admin/workspace-update/local-https-restore",
+            post(start_local_https_restore),
+        )
+        .route(
             "/admin/workspace-update/deploy-release",
             post(start_workspace_update_release_deploy),
+        )
+        .route(
+            "/admin/workspace-update/restore-release",
+            post(start_workspace_update_release_restore),
         )
         .route(
             "/admin/workspace-update/enable-source",
@@ -444,6 +464,7 @@ struct NniSignatureHelperOutput {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct NniDeviceActionRequest {
     action: String,
     #[serde(default)]

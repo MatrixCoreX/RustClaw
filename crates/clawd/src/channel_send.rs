@@ -1152,7 +1152,7 @@ pub(crate) async fn send_wechat_text_message(
     first_error.map_or(Ok(()), Err)
 }
 
-fn resolve_wechat_send_config(state: &AppState) -> Option<WechatSendConfig> {
+pub(crate) fn resolve_wechat_send_config(state: &AppState) -> Option<WechatSendConfig> {
     let fallback = state.channels.wechat_send_config.clone();
     let loaded = load_wechat_send_config_from_workspace(&state.skill_rt.workspace_root);
     match (loaded, fallback) {

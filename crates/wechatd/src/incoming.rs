@@ -1,6 +1,89 @@
 use super::*;
 
 pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
+    let Some(provider_message_id) = inbound_provider_message_id(&msg) else {
+        warn!("wechatd: inbound message skipped because provider identity is missing");
+        return;
+    };
+    let (account_id, admission_secret) = {
+        let session = state.session.read().await;
+        (
+            session_account_id(session.as_ref()),
+            session_token(&state.config, session.as_ref()),
+        )
+    };
+    let Some(admission_secret) = admission_secret else {
+        warn!("wechatd: inbound event admission secret unavailable");
+        return;
+    };
+    let payload = match serde_json::to_vec(&msg) {
+        Ok(payload) => payload,
+        Err(error) => {
+            warn!("wechatd: inbound event serialization failed error={error}");
+            return;
+        }
+    };
+    let claim = claw_core::channel_event_admission::ChannelEventClaimRequest::new(
+        ChannelKind::Wechat,
+        account_id.clone(),
+        provider_message_id.clone(),
+        &payload,
+    );
+    let claim_response = match claw_core::channel_event_admission::claim_channel_event(
+        &state.client,
+        &state.config.clawd_base_url,
+        &admission_secret,
+        &claim,
+    )
+    .await
+    {
+        Ok(response) => response,
+        Err(error) => {
+            warn!("wechatd: inbound event admission failed error={error}");
+            return;
+        }
+    };
+    if claim_response.status
+        != claw_core::channel_event_admission::ChannelEventClaimStatus::Acquired
+    {
+        tracing::debug!(
+            provider_message_id = %provider_message_id,
+            status = ?claim_response.status,
+            "wechat duplicate event suppressed"
+        );
+        return;
+    }
+    let Some(lease_token) = claim_response.lease_token else {
+        warn!("wechatd: inbound event admission lease missing");
+        return;
+    };
+    handle_claimed_incoming_message(state.clone(), msg, provider_message_id.clone()).await;
+    let finish = claw_core::channel_event_admission::ChannelEventFinishRequest {
+        schema_version: claw_core::channel_event_admission::CHANNEL_EVENT_ADMISSION_SCHEMA_VERSION,
+        channel: ChannelKind::Wechat,
+        account_id,
+        provider_event_id: provider_message_id,
+        payload_sha256: claim.payload_sha256,
+        lease_token,
+        outcome: claw_core::channel_event_admission::ChannelEventFinishOutcome::Completed,
+    };
+    if let Err(error) = claw_core::channel_event_admission::finish_channel_event(
+        &state.client,
+        &state.config.clawd_base_url,
+        &admission_secret,
+        &finish,
+    )
+    .await
+    {
+        warn!("wechatd: inbound event admission finish failed error={error}");
+    }
+}
+
+async fn handle_claimed_incoming_message(
+    state: State,
+    msg: WeixinMessage,
+    provider_message_id: String,
+) {
     let Some(from_user_id) = msg
         .from_user_id
         .as_deref()
@@ -14,10 +97,6 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
         pin_inbound_task_context(&state, &from_user_id, msg.context_token.as_deref()).await
     else {
         warn!("wechatd: inbound message skipped because task context could not be pinned");
-        return;
-    };
-    let Some(provider_message_id) = inbound_provider_message_id(&msg) else {
-        warn!("wechatd: inbound message skipped because provider identity is missing");
         return;
     };
     // Cover CDN download / decrypt / transcode latency before the clawd task heartbeat starts.
@@ -63,7 +142,7 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
                     let rel = build_wechat_inbox_rel_path(
                         &state.config.image_inbox_dir,
                         &from_user_id,
-                        &format!("{}.jpg", current_ts_ms()),
+                        &format!("{}.jpg", provider_message_id),
                     );
                     let abs = state.workspace_root.join(&rel);
                     if let Some(parent) = abs.parent() {
@@ -109,7 +188,7 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
                     let rel = build_wechat_inbox_rel_path(
                         &state.config.video_inbox_dir,
                         &from_user_id,
-                        &format!("{}.mp4", current_ts_ms()),
+                        &format!("{}.mp4", provider_message_id),
                     );
                     let abs = state.workspace_root.join(&rel);
                     if let Some(parent) = abs.parent() {
@@ -155,7 +234,7 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
                     let rel = build_wechat_inbox_rel_path(
                         &state.config.file_inbox_dir,
                         &from_user_id,
-                        &format!("{}_{}", current_ts_ms(), safe_name),
+                        &format!("{}_{}", provider_message_id, safe_name),
                     );
                     let abs = state.workspace_root.join(&rel);
                     if let Some(parent) = abs.parent() {
@@ -198,14 +277,13 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
                         warn!("wechatd: inbound voice too large");
                         return;
                     }
-                    let ts = current_ts_ms();
                     let (rel, data_to_write) =
                         if let Some(wav) = wechat_silk_wav::try_silk_to_wav(&bytes) {
                             (
                                 build_wechat_inbox_rel_path(
                                     &state.config.audio_inbox_dir,
                                     &from_user_id,
-                                    &format!("v{}.wav", ts),
+                                    &format!("v{}.wav", provider_message_id),
                                 ),
                                 wav,
                             )
@@ -214,7 +292,7 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
                                 build_wechat_inbox_rel_path(
                                     &state.config.audio_inbox_dir,
                                     &from_user_id,
-                                    &format!("v{}.bin", ts),
+                                    &format!("v{}.bin", provider_message_id),
                                 ),
                                 bytes,
                             )

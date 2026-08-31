@@ -257,6 +257,7 @@ Path(sys.argv[1]).write_text(json.dumps({
     "task_id": sys.argv[2],
     "approval_request_id": sys.argv[3],
     "approval_decision": "approve_once",
+    "idempotency_key": f"restart-approval-{sys.argv[3]}",
 }, ensure_ascii=False), encoding="utf-8")
 PY
   curl -fsS -X POST "${BASE_URL}/v1/tasks/resume-by-task-id" \

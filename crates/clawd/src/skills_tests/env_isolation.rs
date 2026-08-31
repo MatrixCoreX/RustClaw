@@ -6,11 +6,11 @@ static STRICT_ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
 // `apply_skill_runner_env_isolation` reads the process environment directly, so
 // these tests use an explicit source map to verify the whitelist deterministically.
 #[test]
-fn skill_env_strict_defaults_on_and_accepts_explicit_opt_out() {
+fn skill_env_strict_is_mandatory_and_cannot_be_disabled_by_environment() {
     let _guard = STRICT_ENV_TEST_LOCK.lock().expect("strict env test lock");
     let prev = claw_core::product_identity::env_os("SKILL_ENV_STRICT");
     std::env::remove_var("APP_SKILL_ENV_STRICT");
-    assert!(skill_runner_env_strict_enabled(), "default must be ON");
+    assert!(skill_runner_env_strict_enabled(), "boundary must be ON");
 
     std::env::set_var("APP_SKILL_ENV_STRICT", "");
     assert!(
@@ -18,31 +18,14 @@ fn skill_env_strict_defaults_on_and_accepts_explicit_opt_out() {
         "empty value keeps default ON"
     );
 
-    for val in ["0", "false", "FALSE", "off", "no"] {
-        std::env::set_var("APP_SKILL_ENV_STRICT", val);
-        assert!(
-            !skill_runner_env_strict_enabled(),
-            "APP_SKILL_ENV_STRICT={val:?} must opt out"
-        );
-    }
-
-    match prev {
-        Some(v) => std::env::set_var("APP_SKILL_ENV_STRICT", v),
-        None => std::env::remove_var("APP_SKILL_ENV_STRICT"),
-    }
-}
-
-#[test]
-fn skill_env_strict_on_for_truthy_values() {
-    let _guard = STRICT_ENV_TEST_LOCK.lock().expect("strict env test lock");
-    let prev = claw_core::product_identity::env_os("SKILL_ENV_STRICT");
-    for val in ["1", "true", "TRUE", "True", "on", "yes"] {
+    for val in ["0", "false", "FALSE", "off", "no", "1", "true"] {
         std::env::set_var("APP_SKILL_ENV_STRICT", val);
         assert!(
             skill_runner_env_strict_enabled(),
-            "APP_SKILL_ENV_STRICT={val:?} should be enabled"
+            "APP_SKILL_ENV_STRICT={val:?} must not weaken isolation"
         );
     }
+
     match prev {
         Some(v) => std::env::set_var("APP_SKILL_ENV_STRICT", v),
         None => std::env::remove_var("APP_SKILL_ENV_STRICT"),

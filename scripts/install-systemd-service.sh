@@ -15,6 +15,8 @@ RUNTIME_ENV_SCRIPT="${APP_RUNTIME_ENV_SCRIPT:-}"
 OUTPUT_PATH=""
 ENABLE_SERVICE=0
 START_SERVICE=0
+declare -a SYSTEMD_CREDENTIALS=()
+declare -a SYSTEMD_CREDENTIALS_ABS=()
 
 usage() {
   cat <<'EOF'
@@ -25,6 +27,9 @@ Options:
   --workspace PATH       Agent workspace/runtime directory
   --user USER            Operating-system user that runs the Agent runtime
   --runtime-env PATH     Optional shell environment file sourced by startup scripts
+  --credential NAME:PATH
+                         Load one root-owned secret with systemd credentials
+                         (repeatable; exposed through CREDENTIALS_DIRECTORY)
   --unit-name NAME       Systemd unit name (default: configured product service name)
   --unit-dir PATH        Systemd unit directory (default: /etc/systemd/system)
   --output PATH          Render the unit to PATH without installing it
@@ -51,6 +56,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --runtime-env)
       RUNTIME_ENV_SCRIPT="${2:-}"
+      shift 2
+      ;;
+    --credential)
+      SYSTEMD_CREDENTIALS+=("${2:-}")
       shift 2
       ;;
     --unit-name)
@@ -173,6 +182,22 @@ if [[ -n "$RUNTIME_ENV_SCRIPT" ]]; then
   RUNTIME_ENV_SCRIPT="$(cd "$(dirname "$RUNTIME_ENV_SCRIPT")" && pwd)/$(basename "$RUNTIME_ENV_SCRIPT")"
 fi
 
+for credential in "${SYSTEMD_CREDENTIALS[@]}"; do
+  credential_name="${credential%%:*}"
+  credential_path="${credential#*:}"
+  if [[ "$credential" != *:* \
+    || ! "$credential_name" =~ ^[A-Za-z_][A-Za-z0-9_]{0,127}$ \
+    || -z "$credential_path" \
+    || ! -f "$credential_path" \
+    || -L "$credential_path" ]]; then
+    echo "Invalid systemd credential binding: $credential" >&2
+    exit 2
+  fi
+  SYSTEMD_CREDENTIALS_ABS+=(
+    "$credential_name:$(cd "$(dirname "$credential_path")" && pwd)/$(basename "$credential_path")"
+  )
+done
+
 systemd_quote() {
   local value="$1"
   value="${value//\\/\\\\}"
@@ -222,6 +247,14 @@ EOF
     printf 'Environment=%s\n' \
       "$(systemd_quote "APP_RUNTIME_ENV_SCRIPT=$RUNTIME_ENV_SCRIPT")"
   fi
+  local credential credential_name credential_path
+  for credential in "${SYSTEMD_CREDENTIALS_ABS[@]:-}"; do
+    [[ -n "$credential" ]] || continue
+    credential_name="${credential%%:*}"
+    credential_path="${credential#*:}"
+    printf 'LoadCredential=%s:%s\n' \
+      "$credential_name" "$(systemd_path "$credential_path")"
+  done
   cat <<EOF
 ExecStart=/bin/bash $start_q release
 ExecStop=/bin/bash $stop_q
@@ -232,6 +265,24 @@ TimeoutStartSec=0
 TimeoutStopSec=45
 KillMode=control-group
 TasksMax=512
+UMask=0077
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictSUIDSGID=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=$workspace_path
 
 [Install]
 WantedBy=multi-user.target

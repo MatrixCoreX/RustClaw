@@ -13,7 +13,7 @@ pub enum ExpectedPathKind {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PathAuthority {
-    unrestricted_admin: bool,
+    outside_workspace_granted: bool,
 }
 
 impl PathAuthority {
@@ -22,21 +22,19 @@ impl PathAuthority {
             return Self::default();
         };
         let permissions = context.get("permissions").and_then(Value::as_object);
-        let unrestricted_admin = context.get("authority_scope").and_then(Value::as_str)
-            == Some("unrestricted_admin")
-            && permissions
-                .and_then(|value| value.get("unrestricted_admin"))
-                .and_then(Value::as_bool)
-                == Some(true)
+        let outside_workspace_granted = context.get("authority_scope").and_then(Value::as_str)
+            == Some("host_policy_grant")
             && permissions
                 .and_then(|value| value.get("allow_path_outside_workspace"))
                 .and_then(Value::as_bool)
                 == Some(true);
-        Self { unrestricted_admin }
+        Self {
+            outside_workspace_granted,
+        }
     }
 
-    pub fn is_unrestricted_admin(self) -> bool {
-        self.unrestricted_admin
+    pub fn outside_workspace_granted(self) -> bool {
+        self.outside_workspace_granted
     }
 }
 
@@ -87,6 +85,9 @@ impl SkillPathPolicy {
         })?;
         self.require_allowed(&resolved)?;
         match expected {
+            ExpectedPathKind::Any if !resolved.is_file() && !resolved.is_dir() => {
+                return Err(self.kind_error(&resolved, "regular_file_or_directory"));
+            }
             ExpectedPathKind::Any => {}
             ExpectedPathKind::File if !resolved.is_file() => {
                 return Err(self.kind_error(&resolved, "file"));
@@ -136,6 +137,9 @@ impl SkillPathPolicy {
             canonical_ancestor.join(suffix)
         };
         self.require_allowed(&resolved)?;
+        if resolved.exists() && !resolved.is_file() && !resolved.is_dir() {
+            return Err(self.kind_error(&resolved, "regular_file_or_directory"));
+        }
         Ok(resolved)
     }
 
@@ -166,7 +170,7 @@ impl SkillPathPolicy {
     }
 
     fn require_allowed(&self, path: &Path) -> SkillSdkResult<()> {
-        if self.authority.is_unrestricted_admin() || path.starts_with(&self.workspace_root) {
+        if self.authority.outside_workspace_granted() || path.starts_with(&self.workspace_root) {
             return Ok(());
         }
         Err(SkillSdkError::new(
