@@ -23,6 +23,7 @@ if [[ -f "$RUNTIME_ENV_SCRIPT" ]]; then
 fi
 configure_platform_command_path
 configure_python3_with_tomllib
+configure_local_whisper_model_environment "$SCRIPT_DIR"
 
 # Enable colored log tags on interactive terminals unless overridden.
 if [[ -t 1 && -z "${APP_LOG_COLOR:-}" ]]; then
