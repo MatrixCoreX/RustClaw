@@ -93,7 +93,7 @@ enabled = true
 vendor = "custom"
 model = "minimax"
 base_url = "https://llm.matrixai.one/v1"
-daily_request_limit = 100
+daily_request_limit = 1000
 
 [llm.model_classes.default]
 provider = "minimax"

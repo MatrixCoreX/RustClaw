@@ -154,10 +154,6 @@ const NNI_DEVICE_ACTIONS = [
 
 const NNI_TEST_JOIN_ACTIVITY_MS = 2200;
 const NNI_COPY_FEEDBACK_MS = 2200;
-export const NNI_DEVICE_MANAGEMENT_COPY = {
-  zh: "这里管理硬件设备的 NNI 入口和设备签名能力。",
-  en: "This page manages the hardware device's NNI entry and device-signing capability.",
-} as const;
 export const NNI_DEVICE_AUTHORIZATION_DENIED_COPY = {
   zh: "你不是合法设备，不能参与 NNI 网络。",
   en: "This is not an authorized device and cannot participate in the NNI network.",
@@ -420,12 +416,6 @@ export function NniPage({
               <Network className="h-6 w-6 theme-icon-accent" />
               <span>{t("NNI 网络原生智能", "NNI Network-Native Intelligence")}</span>
             </h3>
-            <p className="mt-3 text-sm leading-7 text-white/70">
-              {t(
-                NNI_DEVICE_MANAGEMENT_COPY.zh,
-                NNI_DEVICE_MANAGEMENT_COPY.en,
-              )}
-            </p>
             {nniDeviceAuthorizationDenied ? (
               <div
                 role="alert"

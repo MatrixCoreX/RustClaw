@@ -9,14 +9,10 @@ import {
 } from "../components/NniNetworkDeviceStats";
 import {
   NNI_DEVICE_AUTHORIZATION_DENIED_COPY,
-  NNI_DEVICE_MANAGEMENT_COPY,
   shouldOfferNniOwnerRecovery,
 } from "../components/NniPage";
 
-test("describes NNI as a hardware-device capability instead of a Pi App feature", () => {
-  assert.equal(NNI_DEVICE_MANAGEMENT_COPY.zh, "这里管理硬件设备的 NNI 入口和设备签名能力。");
-  assert.match(NNI_DEVICE_MANAGEMENT_COPY.en, /hardware device/);
-  assert.doesNotMatch(Object.values(NNI_DEVICE_MANAGEMENT_COPY).join(" "), /Pi App/);
+test("keeps the unauthorized-device guidance user-facing", () => {
   assert.equal(NNI_DEVICE_AUTHORIZATION_DENIED_COPY.zh, "你不是合法设备，不能参与 NNI 网络。");
   assert.match(NNI_DEVICE_AUTHORIZATION_DENIED_COPY.en, /not an authorized device/);
 });
