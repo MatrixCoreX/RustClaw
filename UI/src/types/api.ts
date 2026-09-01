@@ -1243,6 +1243,7 @@ export interface NniJoinTaskResponse {
   owner_signature_required?: boolean;
   previous_owner_signature_required?: boolean;
   previous_asset_owner_pubkey?: string | null;
+  local_binding_restored?: boolean;
 }
 
 export interface NniJoinVerifyResponse {

@@ -101,6 +101,15 @@ test("formats NNI join errors from structured codes", () => {
     ),
     /尚未获远程 NNI 服务端允许/,
   );
+  assert.match(
+    nniJoinErrorMessage(
+      "nni_asset_device_already_bound",
+      { local_binding_restored: true },
+      "fallback",
+      "zh",
+    ),
+    /已恢复本机绑定显示/,
+  );
 });
 
 test("detects only structured public-key authorization rejection codes", () => {

@@ -380,6 +380,43 @@ test("NNI join exposes a structured public-key authorization rejection", async (
   await mounted.unmount();
 });
 
+test("NNI restores the server-side asset binding when local state is empty", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const existingOwner = "7tkEuc2r5gBxejbtDsEn72rJHHcst3t9bmHJxZNEXZo9Nz9CxB";
+  const requestedOwner = "5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M";
+  const apiFetch = async (path: string, init?: RequestInit) => {
+    if (path === "/v1/nni/config") {
+      return apiResponse({ ...joinedConfig(), joined: false, asset_owner_pubkey: null });
+    }
+    if (path === "/v1/nni/device/status?refresh=true") return apiResponse(readyChipStatus());
+    if (path === "/v1/nni/join/request") {
+      return new Response(JSON.stringify({
+        ok: false,
+        error: "nni_asset_device_already_bound",
+        data: {
+          status: "asset_owner_conflict",
+          asset_owner_pubkey: existingOwner,
+          local_binding_restored: true,
+          joined: false,
+        },
+      }), { status: 409, headers: { "content-type": "application/json" } });
+    }
+    throw new Error(`unexpected request: ${path} ${init?.method ?? "GET"}`);
+  };
+  const mounted = await mountRuntime(apiFetch);
+
+  await act(async () => mounted.runtime().fetchNniConfig());
+  await act(async () => {
+    await mounted.runtime().startNniCustomOwnerAuthorization(requestedOwner);
+  });
+
+  assert.equal(mounted.runtime().nniAssetOwnerPubkey, existingOwner);
+  assert.equal(mounted.runtime().nniJoined, false);
+  assert.equal(mounted.runtime().nniOwnerAuthorizationChallenge, null);
+  assert.match(mounted.runtime().nniActionError ?? "", /已恢复本机绑定显示/);
+  await mounted.unmount();
+});
+
 test("NNI starts heartbeats only after the user explicitly joins", async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const assetOwnerPubkey = "5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M";

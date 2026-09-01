@@ -306,6 +306,10 @@ function isNniPublicKeyWhitelistEmptyCode(code: string | null | undefined): bool
   return code === "nni_public_key_whitelist_empty" || code === "public_key_whitelist_empty";
 }
 
+function isNniAssetDeviceAlreadyBoundCode(code: string | null | undefined): boolean {
+  return code === "nni_asset_device_already_bound" || code === "asset_device_already_bound";
+}
+
 export function nniJoinRejectsDevicePublicKey(error: string | undefined, data: unknown): boolean {
   const detailCode = findNniJoinErrorCode(data);
   return (
@@ -333,6 +337,7 @@ export function nniJoinErrorMessage(
   const code =
     [error, detailCode].find(isNniPublicKeyNotAllowlistedCode) ??
     [error, detailCode].find(isNniPublicKeyWhitelistEmptyCode) ??
+    [error, detailCode].find(isNniAssetDeviceAlreadyBoundCode) ??
     error ??
     detailCode;
   if (isNniPublicKeyNotAllowlistedCode(code)) {
@@ -348,6 +353,22 @@ export function nniJoinErrorMessage(
       "当前设备尚未获得 NNI 网络准入。请使用合法设备。",
       "This device has not been admitted to the NNI network. Use an authorized device.",
     );
+  }
+  if (isNniAssetDeviceAlreadyBoundCode(code)) {
+    const restored = Boolean(
+      data && typeof data === "object" && (data as Record<string, unknown>).local_binding_restored === true,
+    );
+    return restored
+      ? copy(
+        lang,
+        "远端已有这台设备的资产绑定，已恢复本机绑定显示。若要使用新账户，请再次选择更换资产账户。",
+        "The remote service already has an asset binding for this device. The local binding display was restored. To use a new account, choose Replace asset account again.",
+      )
+      : copy(
+        lang,
+        "这台设备已经绑定其他资产账户。请先恢复原绑定，或明确选择更换资产账户。",
+        "This device is already bound to another asset account. Restore the existing binding or explicitly replace the asset account.",
+      );
   }
   if (code) {
     return copy(
