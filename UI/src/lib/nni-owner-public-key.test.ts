@@ -8,10 +8,14 @@ import { base58 } from "@scure/base";
 import {
   assertNniPrivateKeyOperationsAllowed,
   generateNniOwnerKeyPair,
+  NNI_INSECURE_HTTP_PRIVATE_KEY_SESSION_KEY,
+  nniInsecureHttpPrivateKeyRiskAccepted,
   nniPrivateKeyOperationsAllowed,
+  nniPrivateKeyOperationsRequireHttpRiskAcceptance,
   nniOwnerKeyPairBackupFilename,
   normalizeNniOwnerSignature,
   serializeNniOwnerKeyPairBackup,
+  setNniInsecureHttpPrivateKeyRiskAccepted,
   signNniOwnerChallenge,
   validateNniOwnerPrivateKey,
   validateNniOwnerPublicKey,
@@ -124,9 +128,31 @@ test("NNI private-key operations require HTTPS except on loopback", () => {
   assert.equal(nniPrivateKeyOperationsAllowed({ protocol: "http:", hostname: "[::1]" }), true);
   assert.equal(nniPrivateKeyOperationsAllowed({ protocol: "http:", hostname: "192.168.1.9" }), false);
   assert.equal(nniPrivateKeyOperationsAllowed({ protocol: "http:", hostname: "device.example" }), false);
+  assert.equal(nniPrivateKeyOperationsAllowed({ protocol: "http:", hostname: "192.168.1.9" }, true), true);
+  assert.equal(nniPrivateKeyOperationsAllowed({ protocol: "file:", hostname: "" }, true), false);
   assert.equal(nniPrivateKeyOperationsAllowed({ protocol: "file:", hostname: "" }), false);
+  assert.equal(nniPrivateKeyOperationsRequireHttpRiskAcceptance({ protocol: "http:", hostname: "192.168.1.9" }), true);
+  assert.equal(nniPrivateKeyOperationsRequireHttpRiskAcceptance({ protocol: "http:", hostname: "localhost" }), false);
+  assert.equal(nniPrivateKeyOperationsRequireHttpRiskAcceptance({ protocol: "https:", hostname: "device.example" }), false);
   assert.throws(
     () => assertNniPrivateKeyOperationsAllowed({ protocol: "http:", hostname: "192.168.1.9" }),
     /nni_private_key_insecure_transport/,
   );
+});
+
+test("NNI insecure HTTP risk acceptance is scoped to caller-provided session storage", () => {
+  const values = new Map<string, string>();
+  const storage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => { values.set(key, value); },
+    removeItem: (key: string) => { values.delete(key); },
+  };
+
+  setNniInsecureHttpPrivateKeyRiskAccepted(false, storage);
+  assert.equal(nniInsecureHttpPrivateKeyRiskAccepted(storage), false);
+  setNniInsecureHttpPrivateKeyRiskAccepted(true, storage);
+  assert.equal(values.get(NNI_INSECURE_HTTP_PRIVATE_KEY_SESSION_KEY), "true");
+  assert.equal(nniInsecureHttpPrivateKeyRiskAccepted(storage), true);
+  setNniInsecureHttpPrivateKeyRiskAccepted(false, storage);
+  assert.equal(nniInsecureHttpPrivateKeyRiskAccepted(storage), false);
 });

@@ -5,7 +5,10 @@ import { BANCOR_CANDLE_AUTO_REFRESH_SECONDS, BancorPage } from "./components/Ban
 import { ChatPage } from "./components/ChatPage";
 import { CommunicationSetupPage } from "./components/CommunicationSetupPage";
 import { ConsoleLayout } from "./components/ConsoleLayout";
-import { DashboardPage } from "./components/DashboardPage";
+import {
+  DASHBOARD_SECTION_STORAGE_KEY,
+  DashboardPage,
+} from "./components/DashboardPage";
 import { FactoryResetModal } from "./components/FactoryResetModal";
 import { HookAdminSection } from "./components/HookAdminSection";
 import { LogsPage } from "./components/LogsPage";
@@ -2012,6 +2015,10 @@ export default function App() {
               onSetDeviceSimulation={setNniDeviceSimulation}
               onOpenApr={() => setCurrentPage("nni_apr")}
               onOpenBancor={() => setCurrentPage("bancor")}
+              onOpenHttpsSettings={() => {
+                window.localStorage.setItem(DASHBOARD_SECTION_STORAGE_KEY, "web");
+                setCurrentPage("dashboard");
+              }}
               onActionMessageChange={setNniActionMessage}
               onActionErrorChange={setNniActionError}
             />

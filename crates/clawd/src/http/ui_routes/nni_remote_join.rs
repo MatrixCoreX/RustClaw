@@ -359,6 +359,10 @@ async fn update_nni_config(
         None => None,
     };
 
+    let heartbeat_was_joined = read_nni_runtime_config(&state)
+        .map(|config| config.joined)
+        .unwrap_or(false);
+    let start_heartbeat_now = nni_join_transition_starts_heartbeat(req.joined, heartbeat_was_joined);
     match write_nni_config_with_selected_node(
         &state,
         remote_nodes.as_deref(),
@@ -367,14 +371,20 @@ async fn update_nni_config(
         req.asset_service_node_url.as_deref(),
         req.joined,
     ) {
-        Ok(config) => (
-            StatusCode::OK,
-            Json(ApiResponse {
-                ok: true,
-                data: Some(config),
-                error: None,
-            }),
-        ),
+        Ok(config) => {
+            if start_heartbeat_now {
+                nni_heartbeat_immediate_request_flag().store(true, Ordering::Release);
+                nni_heartbeat_worker_notify().notify_one();
+            }
+            (
+                StatusCode::OK,
+                Json(ApiResponse {
+                    ok: true,
+                    data: Some(config),
+                    error: None,
+                }),
+            )
+        }
         Err(err) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse {
@@ -1748,6 +1758,8 @@ fn persist_nni_asset_owner_pubkey(
         anyhow::bail!("nni_asset_owner_conflict");
     }
     config.asset_owner_pubkey = Some(normalized);
+    // Asset authorization and heartbeat participation are separate user actions.
+    config.joined = false;
     write_nni_runtime_config(state, &config)
 }
 
@@ -2104,6 +2116,24 @@ fn nni_heartbeat_operation_lock() -> &'static tokio::sync::Mutex<()> {
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
+fn nni_heartbeat_worker_notify() -> &'static Notify {
+    static NOTIFY: OnceLock<Notify> = OnceLock::new();
+    NOTIFY.get_or_init(Notify::new)
+}
+
+fn nni_heartbeat_immediate_request_flag() -> &'static AtomicBool {
+    static REQUESTED: AtomicBool = AtomicBool::new(false);
+    &REQUESTED
+}
+
+fn nni_join_transition_starts_heartbeat(requested_joined: Option<bool>, was_joined: bool) -> bool {
+    requested_joined == Some(true) && !was_joined
+}
+
+fn nni_heartbeat_is_due(force_immediate: bool, next_due_at_ts: Option<u64>, now: u64) -> bool {
+    force_immediate || !next_due_at_ts.is_some_and(|next_due| now < next_due)
+}
+
 fn nni_heartbeat_worker_sleep_seconds(next_due_at_ts: Option<u64>, now: u64) -> u64 {
     next_due_at_ts
         .map(|next_due| {
@@ -2117,7 +2147,8 @@ fn nni_heartbeat_worker_sleep_seconds(next_due_at_ts: Option<u64>, now: u64) -> 
 pub(crate) fn spawn_nni_heartbeat_worker(state: AppState) {
     tokio::spawn(async move {
         loop {
-            if let Err(err) = nni_heartbeat_tick(&state).await {
+            let force_immediate = nni_heartbeat_immediate_request_flag().swap(false, Ordering::AcqRel);
+            if let Err(err) = nni_heartbeat_tick(&state, force_immediate).await {
                 append_nni_log_event_best_effort(
                     &state,
                     "heartbeat_tick_error",
@@ -2128,26 +2159,25 @@ pub(crate) fn spawn_nni_heartbeat_worker(state: AppState) {
             let next_due_at_ts = read_nni_config(&state)
                 .ok()
                 .and_then(|config| config.next_heartbeat_due_at_ts);
-            tokio::time::sleep(Duration::from_secs(nni_heartbeat_worker_sleep_seconds(
-                next_due_at_ts,
-                now,
-            )))
-            .await;
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(nni_heartbeat_worker_sleep_seconds(
+                    next_due_at_ts,
+                    now,
+                ))) => {}
+                _ = nni_heartbeat_worker_notify().notified() => {}
+            }
         }
     });
 }
 
-async fn nni_heartbeat_tick(state: &AppState) -> anyhow::Result<()> {
+async fn nni_heartbeat_tick(state: &AppState, force_immediate: bool) -> anyhow::Result<()> {
     let _guard = nni_heartbeat_operation_lock().lock().await;
     let config = read_nni_config(state)?;
     if !config.joined || nni_selected_remote_node(&config).is_none() {
         return Ok(());
     }
     let now = u64::try_from(current_unix_ts()).unwrap_or_default();
-    if config
-        .next_heartbeat_due_at_ts
-        .is_some_and(|next_due| now < next_due)
-    {
+    if !nni_heartbeat_is_due(force_immediate, config.next_heartbeat_due_at_ts, now) {
         return Ok(());
     }
 

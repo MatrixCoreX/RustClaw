@@ -476,10 +476,10 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       }
       setNniAssetOwnerPubkey(body.data.asset_owner_pubkey);
       setNniOwnerKeyPair(null);
-      await setNniJoinedPersisted(true, { persistRemoteNodes: true });
+      await setNniJoinedPersisted(false, { persistRemoteNodes: true });
       setNniActionMessage(t(
-        "资产账户已恢复到当前设备，旧设备授权已撤销。",
-        "The asset account was recovered to this device and the old device authorization was revoked.",
+        "资产账户已恢复到当前设备，旧设备授权已撤销。心跳尚未开启，请点击加入后启动。",
+        "The asset account was recovered to this device and the old device authorization was revoked. Heartbeats remain off until you select Join.",
       ));
       return body.data;
     } catch (err) {
@@ -649,17 +649,17 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         },
       );
       if (!verified?.joined || !verified.compliant) throw new Error("nni_join_verify_rejected");
-      await setNniJoinedPersisted(true, { persistRemoteNodes: true });
+      await setNniJoinedPersisted(false, { persistRemoteNodes: true });
       setNniAssetOwnerPubkey(verified.asset_owner_pubkey ?? challenge.targetOwnerPublicKey);
       setNniOwnerKeyPair(null);
       setNniOwnerAuthorizationChallenge(null);
       setNniActionMessage(t(
         challenge.replaceExistingOwner
-          ? "目标资产签名已验证，资产公钥已更换。"
-          : "目标资产签名已验证，资产账户已绑定。",
+          ? "目标资产签名已验证，资产公钥已更换。心跳尚未开启，请点击加入后启动。"
+          : "目标资产签名已验证，资产账户已绑定。心跳尚未开启，请点击加入后启动。",
         challenge.replaceExistingOwner
-          ? "The target asset signature was verified and the asset public key was replaced."
-          : "The target asset signature was verified and the asset account was bound.",
+          ? "The target asset signature was verified and the asset public key was replaced. Heartbeats remain off until you select Join."
+          : "The target asset signature was verified and the asset account was bound. Heartbeats remain off until you select Join.",
       ));
       return verified;
     } catch (err) {

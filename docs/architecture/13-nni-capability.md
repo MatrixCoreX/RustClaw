@@ -93,10 +93,11 @@ Initial custom binding and rebinding require the current hardware signature plus
 the target asset key. Rebinding does not require the previous asset private key, so a lost old key
 does not permanently lock the device to an obsolete account. Unbinding requires only the current
 hardware signature. Rebinding changes only that device's future reward destination; unbinding
-revokes only that device and stops local heartbeat intent until it is bound again. Lost-device
-recovery remains a separate flow: it authorizes a newly allowlisted device and intentionally
-revokes the owner's old device
-authorizations. The custom-public-key UI validates the full Base58 K1 envelope before submission
+revokes only that device and stops local heartbeat intent. Initial binding, rebinding, and device
+recovery authorize the asset account only and never enable heartbeats; the user must explicitly
+select Join afterward to start them. Lost-device recovery remains a separate flow: it authorizes a
+newly allowlisted device and intentionally revokes the owner's old device authorizations. The
+custom-public-key UI validates the full Base58 K1 envelope before submission
 and never receives or stores the corresponding private key.
 
 Hardware-only unbinding intentionally makes physical signer control a recovery boundary. A party
