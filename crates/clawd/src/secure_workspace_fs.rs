@@ -177,7 +177,7 @@ pub(crate) fn atomic_write_workspace_file_with_options(
             parent.as_raw_fd(),
             temporary_name.as_ptr(),
             libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_CLOEXEC | libc::O_NOFOLLOW,
-            existing_mode.unwrap_or(0o600) as libc::mode_t,
+            existing_mode.unwrap_or(0o600) as libc::c_uint,
         )
     };
     if fd < 0 {
