@@ -839,7 +839,7 @@ async fn nni_financial_account(
     let per_page = query.per_page.unwrap_or(20).clamp(1, 100);
     let mut attempts = Vec::new();
     for node_url in nni_financial_remote_nodes(&config, scope) {
-        match nni_remote_read_with_retry(|| {
+        match nni_remote_signed_read_with_retry(|| {
             query_nni_bancor_account_for_node(
                 &state,
                 node_url,
@@ -896,8 +896,9 @@ async fn query_nni_bancor_account_for_node(
     if !status.is_success() || !body.ok {
         let error_code =
             nni_remote_api_error_code(&body, "nni_bancor_account_request_failed");
+        let retry_after_seconds = nni_remote_api_retry_after_seconds(&body);
         return Err(
-            json!({"node_url": node_url, "http_status": status.as_u16(), "error_code": error_code, "retryable": nni_remote_http_status_retryable(status.as_u16())}),
+            json!({"node_url": node_url, "http_status": status.as_u16(), "error_code": error_code, "retryable": nni_remote_http_status_retryable(status.as_u16()), "retry_after_seconds": retry_after_seconds}),
         );
     }
     let data = body.data.ok_or_else(
@@ -929,8 +930,9 @@ async fn query_nni_bancor_account_for_node(
     if !status.is_success() || !body.ok {
         let error_code =
             nni_remote_api_error_code(&body, "nni_bancor_account_verify_failed");
+        let retry_after_seconds = nni_remote_api_retry_after_seconds(&body);
         return Err(
-            json!({"node_url": node_url, "http_status": status.as_u16(), "error_code": error_code, "retryable": nni_remote_http_status_retryable(status.as_u16())}),
+            json!({"node_url": node_url, "http_status": status.as_u16(), "error_code": error_code, "retryable": nni_remote_http_status_retryable(status.as_u16()), "retry_after_seconds": retry_after_seconds}),
         );
     }
     body.data.ok_or_else(

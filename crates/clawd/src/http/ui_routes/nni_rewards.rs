@@ -401,7 +401,7 @@ async fn nni_rewards(
     let per_page = query.per_page.unwrap_or(10).clamp(1, 100);
     let mut attempts = Vec::new();
     for node_url in nni_selected_remote_nodes(&config) {
-        match nni_remote_read_with_retry(|| {
+        match nni_remote_signed_read_with_retry(|| {
             query_nni_rewards_for_node(
                 &state,
                 node_url,
@@ -482,11 +482,13 @@ async fn query_nni_rewards_for_node(
         })?;
     if !request_status.is_success() || !request_body.ok {
         let error_code = nni_remote_api_error_code(&request_body, "nni_reward_request_failed");
+        let retry_after_seconds = nni_remote_api_retry_after_seconds(&request_body);
         return Err(json!({
             "node_url": node_url,
             "http_status": request_status.as_u16(),
             "error_code": error_code,
             "retryable": nni_remote_http_status_retryable(request_status.as_u16()),
+            "retry_after_seconds": retry_after_seconds,
         }));
     }
     let request_data = request_body.data.ok_or_else(
@@ -563,11 +565,13 @@ async fn query_nni_rewards_for_node(
         })?;
     if !verify_status.is_success() || !verify_body.ok {
         let error_code = nni_remote_api_error_code(&verify_body, "nni_reward_verify_failed");
+        let retry_after_seconds = nni_remote_api_retry_after_seconds(&verify_body);
         return Err(json!({
             "node_url": node_url,
             "http_status": verify_status.as_u16(),
             "error_code": error_code,
             "retryable": nni_remote_http_status_retryable(verify_status.as_u16()),
+            "retry_after_seconds": retry_after_seconds,
         }));
     }
     let data = verify_body.data.ok_or_else(

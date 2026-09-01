@@ -2,7 +2,9 @@ const NNI_REMOTE_API_PREFIX: &str = "/v1/nni/server";
 const NNI_REMOTE_API_TIMEOUT_SECONDS: u64 = 45;
 const NNI_REMOTE_READ_MAX_ATTEMPTS: usize = 2;
 const NNI_REMOTE_READ_ATTEMPT_TIMEOUT_SECONDS: u64 = 12;
+const NNI_REMOTE_SIGNED_READ_GRACE_SECONDS: u64 = 5;
 const NNI_REMOTE_READ_RETRY_DELAY_MILLIS: u64 = 250;
+const NNI_REMOTE_READ_RETRY_AFTER_MAX_SECONDS: u64 = 60;
 
 fn nni_remote_api_endpoint(node_url: &str, route: &str) -> String {
     let node_url = node_url.trim_end_matches('/');
@@ -25,19 +27,67 @@ fn nni_remote_read_attempt_retryable(attempt: &Value) -> bool {
         .unwrap_or(false)
 }
 
+fn nni_remote_api_retry_after_seconds(body: &ApiResponse<Value>) -> Option<u64> {
+    body.data
+        .as_ref()
+        .and_then(|data| data.get("retry_after_seconds"))
+        .and_then(Value::as_u64)
+        .filter(|seconds| *seconds > 0)
+}
+
+fn nni_remote_read_retry_delay(error: &Value) -> Duration {
+    error
+        .get("retry_after_seconds")
+        .and_then(Value::as_u64)
+        .filter(|seconds| *seconds > 0)
+        .map(|seconds| Duration::from_secs(seconds.min(NNI_REMOTE_READ_RETRY_AFTER_MAX_SECONDS)))
+        .unwrap_or_else(|| Duration::from_millis(NNI_REMOTE_READ_RETRY_DELAY_MILLIS))
+}
+
 async fn nni_remote_read_with_retry<F, Fut>(mut operation: F) -> Result<Value, Value>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<Value, Value>>,
+{
+    nni_remote_read_with_retry_budget(
+        &mut operation,
+        Duration::from_secs(NNI_REMOTE_READ_ATTEMPT_TIMEOUT_SECONDS),
+    )
+    .await
+}
+
+fn nni_remote_signed_read_attempt_timeout() -> Duration {
+    Duration::from_secs(
+        NNI_REMOTE_API_TIMEOUT_SECONDS
+            .saturating_mul(2)
+            .saturating_add(nni_signature_helper_timeout_seconds())
+            .saturating_add(NNI_REMOTE_SIGNED_READ_GRACE_SECONDS),
+    )
+}
+
+async fn nni_remote_signed_read_with_retry<F, Fut>(mut operation: F) -> Result<Value, Value>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<Value, Value>>,
+{
+    nni_remote_read_with_retry_budget(
+        &mut operation,
+        nni_remote_signed_read_attempt_timeout(),
+    )
+    .await
+}
+
+async fn nni_remote_read_with_retry_budget<F, Fut>(
+    operation: &mut F,
+    attempt_timeout: Duration,
+) -> Result<Value, Value>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<Value, Value>>,
 {
     let mut attempt_number = 1;
     loop {
-        let attempt = match tokio::time::timeout(
-            Duration::from_secs(NNI_REMOTE_READ_ATTEMPT_TIMEOUT_SECONDS),
-            operation(),
-        )
-        .await
-        {
+        let attempt = match tokio::time::timeout(attempt_timeout, operation()).await {
             Ok(result) => result,
             Err(_) => Err(json!({
                 "error_code": "nni_remote_read_attempt_timeout",
@@ -51,10 +101,7 @@ where
                     && nni_remote_read_attempt_retryable(&error) =>
             {
                 attempt_number += 1;
-                tokio::time::sleep(Duration::from_millis(
-                    NNI_REMOTE_READ_RETRY_DELAY_MILLIS,
-                ))
-                .await;
+                tokio::time::sleep(nni_remote_read_retry_delay(&error)).await;
             }
             Err(error) => return Err(error),
         }
@@ -130,95 +177,5 @@ fn nni_bancor_service_remote_nodes(config: &NniConfigResponse) -> Vec<&String> {
 mod nni_asset_service_node_tests;
 
 #[cfg(test)]
-mod nni_remote_api_tests {
-    use super::*;
-
-    #[test]
-    fn endpoint_uses_one_versioned_api_prefix() {
-        assert_eq!(
-            nni_remote_api_endpoint("https://node.example/", "/bancor/market"),
-            "https://node.example/v1/nni/server/bancor/market"
-        );
-    }
-
-    #[test]
-    fn remote_timeout_allows_slow_nodes_without_becoming_unbounded() {
-        assert_eq!(nni_remote_api_timeout(), Duration::from_secs(45));
-        assert_eq!(NNI_REMOTE_READ_ATTEMPT_TIMEOUT_SECONDS, 12);
-        assert!(
-            NNI_REMOTE_READ_MAX_ATTEMPTS as u64 * NNI_REMOTE_READ_ATTEMPT_TIMEOUT_SECONDS
-                + NNI_REMOTE_READ_RETRY_DELAY_MILLIS.div_ceil(1_000)
-                < 30
-        );
-    }
-
-    #[test]
-    fn only_explicit_transient_remote_statuses_are_retryable() {
-        assert!(nni_remote_http_status_retryable(502));
-        assert!(nni_remote_http_status_retryable(429));
-        assert!(!nni_remote_http_status_retryable(400));
-        assert!(!nni_remote_http_status_retryable(401));
-    }
-
-    #[test]
-    fn selected_node_is_preferred_and_other_nodes_remain_failover_candidates() {
-        let selected = "https://node-b.example.test".to_string();
-        let remote_nodes = vec![
-            "https://node-a.example.test".to_string(),
-            "https://node-b.example.test".to_string(),
-        ];
-        assert_eq!(
-            prioritize_nni_nodes(Some(&selected), &remote_nodes)
-                .into_iter()
-                .map(String::as_str)
-                .collect::<Vec<_>>(),
-            vec![
-                "https://node-b.example.test",
-                "https://node-a.example.test",
-            ]
-        );
-    }
-
-    #[tokio::test]
-    async fn remote_read_retries_one_explicitly_retryable_failure() {
-        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let result = nni_remote_read_with_retry({
-            let calls = Arc::clone(&calls);
-            move || {
-                let calls = Arc::clone(&calls);
-                async move {
-                    let call = calls.fetch_add(1, Ordering::SeqCst);
-                    if call == 0 {
-                        Err(json!({"error_code": "test_transient", "retryable": true}))
-                    } else {
-                        Ok(json!({"status": "ok"}))
-                    }
-                }
-            }
-        })
-        .await
-        .expect("second read attempt should succeed");
-
-        assert_eq!(result.get("status").and_then(Value::as_str), Some("ok"));
-        assert_eq!(calls.load(Ordering::SeqCst), 2);
-    }
-
-    #[tokio::test]
-    async fn remote_read_does_not_retry_unmarked_failures() {
-        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let result = nni_remote_read_with_retry({
-            let calls = Arc::clone(&calls);
-            move || {
-                let calls = Arc::clone(&calls);
-                async move {
-                    calls.fetch_add(1, Ordering::SeqCst);
-                    Err(json!({"error_code": "test_terminal"}))
-                }
-            }
-        })
-        .await;
-
-        assert!(result.is_err());
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
-    }
-}
+#[path = "nni_remote_api_tests.rs"]
+mod nni_remote_api_tests;
