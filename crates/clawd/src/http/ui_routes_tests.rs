@@ -108,6 +108,11 @@ api_base_url = "https://ilinkai.weixin.qq.com"
 }
 
 #[test]
+fn communication_service_start_uses_a_non_login_shell() {
+    assert_eq!(SERVICE_CONTROL_SHELL_FLAG, "-c");
+}
+
+#[test]
 fn communication_service_stop_persists_disabled_state_to_both_config_copies() {
     let root = temp_workspace_root();
     std::fs::create_dir_all(root.join("configs/channels")).expect("channel config dir");
