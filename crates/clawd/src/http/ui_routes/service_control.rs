@@ -261,7 +261,11 @@ async fn terminate_channel_service_processes(service: &str) {
         if let Some(pids) = daemon_process_pids_by_name(process_name) {
             for pid in pids {
                 let cmd = format!("kill -TERM {} >/dev/null 2>&1 || true", pid);
-                let _ = Command::new("bash").arg("-lc").arg(cmd).output().await;
+                let _ = Command::new("bash")
+                    .arg(SERVICE_CONTROL_SHELL_FLAG)
+                    .arg(cmd)
+                    .output()
+                    .await;
             }
         }
     }
@@ -269,7 +273,11 @@ async fn terminate_channel_service_processes(service: &str) {
         if let Some(pids) = daemon_process_pids_by_name(extra_name) {
             for pid in pids {
                 let cmd = format!("kill -TERM {} >/dev/null 2>&1 || true", pid);
-                let _ = Command::new("bash").arg("-lc").arg(cmd).output().await;
+                let _ = Command::new("bash")
+                    .arg(SERVICE_CONTROL_SHELL_FLAG)
+                    .arg(cmd)
+                    .output()
+                    .await;
             }
         }
     }
@@ -387,9 +395,13 @@ fn runtime_profile_default() -> &'static str {
     }
 }
 
+const SERVICE_CONTROL_SHELL_FLAG: &str = "-c";
+
 fn spawn_background_shell(cmd: &str) -> std::io::Result<()> {
     Command::new("bash")
-        .arg("-lc")
+        // Service scripts load the runtime environment explicitly. A login
+        // shell can run unrelated profile actions such as startx on a Pi.
+        .arg(SERVICE_CONTROL_SHELL_FLAG)
         .arg(cmd)
         .stdin(StdProcessStdio::null())
         .stdout(StdProcessStdio::null())
@@ -672,7 +684,11 @@ async fn control_service(
             if let Some(pids) = daemon_process_pids_by_name(process_name) {
                 for pid in pids {
                     let cmd = format!("kill -TERM {} >/dev/null 2>&1 || true", pid);
-                    let _ = Command::new("bash").arg("-lc").arg(cmd).output().await;
+                    let _ = Command::new("bash")
+                        .arg(SERVICE_CONTROL_SHELL_FLAG)
+                        .arg(cmd)
+                        .output()
+                        .await;
                     killed += 1;
                 }
             }
@@ -680,7 +696,11 @@ async fn control_service(
                 if let Some(pids) = daemon_process_pids_by_name(extra_name) {
                     for pid in pids {
                         let cmd = format!("kill -TERM {} >/dev/null 2>&1 || true", pid);
-                        let _ = Command::new("bash").arg("-lc").arg(cmd).output().await;
+                        let _ = Command::new("bash")
+                            .arg(SERVICE_CONTROL_SHELL_FLAG)
+                            .arg(cmd)
+                            .output()
+                            .await;
                         killed += 1;
                     }
                 }
@@ -713,7 +733,12 @@ async fn control_service(
                 shell_escape_arg(workspace.as_ref()),
                 shell_escape_arg(pid_file)
             );
-            let output = match Command::new("bash").arg("-lc").arg(cmd).output().await {
+            let output = match Command::new("bash")
+                .arg(SERVICE_CONTROL_SHELL_FLAG)
+                .arg(cmd)
+                .output()
+                .await
+            {
                 Ok(v) => v,
                 Err(err) => {
                     return service_control_error_response(
@@ -798,7 +823,11 @@ async fn control_service(
                     shell_escape_arg(workspace.as_ref()),
                     shell_escape_arg(pid_file)
                 );
-                let _ = Command::new("bash").arg("-lc").arg(cmd).output().await;
+                let _ = Command::new("bash")
+                    .arg(SERVICE_CONTROL_SHELL_FLAG)
+                    .arg(cmd)
+                    .output()
+                    .await;
             }
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             let profile = claw_core::product_identity::env_string("START_PROFILE")
@@ -940,7 +969,7 @@ async fn restart_system(
 
     if std::path::Path::new("/.dockerenv").exists() {
         let mut cmd = Command::new("bash");
-        cmd.arg("-lc")
+        cmd.arg(SERVICE_CONTROL_SHELL_FLAG)
             .arg("sleep 1 && kill -TERM 1 >/dev/null 2>&1")
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
