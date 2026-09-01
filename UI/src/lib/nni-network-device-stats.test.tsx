@@ -109,6 +109,8 @@ test("asset account setup avoids key-letter jargon and protects key actions", ()
   assert.match(source, /硬件芯片只识别设备并证明当前授权/);
   assert.doesNotMatch(source, /资产账户 A|芯片公钥 H|资产公钥 A/);
   assert.match(dialogSource, /data-nni-copy-owner-private-key="true"/);
+  assert.match(dialogSource, /data-nni-download-owner-key-pair="true"/);
+  assert.match(dialogSource, /t\("下载 JSON 备份", "Download JSON backup"\)/);
   assert.match(dialogSource, /privateKeyCopied \? t\("已复制", "Copied"\)/);
   assert.match(dialogSource, /data-nni-discard-owner-key-pair="true"/);
 });

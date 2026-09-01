@@ -17,6 +17,15 @@ export interface NniOwnerKeyPair {
   private_key: string;
 }
 
+export interface NniOwnerKeyPairBackup {
+  schema_version: 1;
+  document_type: "asset_account_key_pair";
+  key_type: NniOwnerKeyPair["key_type"];
+  encoding: NniOwnerKeyPair["encoding"];
+  public_key: string;
+  private_key: string;
+}
+
 export interface NniPrivateKeyLocation {
   protocol: string;
   hostname: string;
@@ -125,6 +134,23 @@ export function generateNniOwnerKeyPair(): NniOwnerKeyPair {
   } finally {
     secretKey.fill(0);
   }
+}
+
+export function serializeNniOwnerKeyPairBackup(keyPair: NniOwnerKeyPair): string {
+  const backup: NniOwnerKeyPairBackup = {
+    schema_version: 1,
+    document_type: "asset_account_key_pair",
+    key_type: keyPair.key_type,
+    encoding: keyPair.encoding,
+    public_key: keyPair.public_key,
+    private_key: keyPair.private_key,
+  };
+  return `${JSON.stringify(backup, null, 2)}\n`;
+}
+
+export function nniOwnerKeyPairBackupFilename(keyPair: NniOwnerKeyPair): string {
+  const publicKeyPrefix = keyPair.public_key.slice(0, 12);
+  return `asset-account-keypair-${publicKeyPrefix}.json`;
 }
 
 function decodeOwnerPrivateKey(value: string):
