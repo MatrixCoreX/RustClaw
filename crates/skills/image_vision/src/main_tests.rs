@@ -328,6 +328,8 @@ fn minimax_compat_dispatches_multimodal_request() {
         assert!(request.starts_with("POST /chat/completions "));
         assert!(request.contains("\"model\":\"MiniMax-M3\""));
         assert!(request.contains("data:image/png;base64,YWJj"));
+        assert!(request.contains("\"temperature\":0.0"));
+        assert!(!request.contains("\"detail\":\"high\""));
 
         let body = r#"{"choices":[{"message":{"content":"识别成功"}}]}"#;
         write!(
@@ -350,16 +352,14 @@ fn minimax_compat_dispatches_multimodal_request() {
         "data:image/png;base64,YWJj".to_string(),
     )];
 
-    let result = call_vendor_vision(
-        VendorKind::MiniMax,
-        &cfg,
-        Some("MiniMax-M3"),
-        5,
-        "识别图片文字",
-        &images,
-        1024,
-    )
-    .expect("minimax vision request");
+    let request = VisionRequest {
+        prompt: "识别图片文字",
+        images: &images,
+        max_input_bytes: 1024,
+        options: VisionRequestOptions { exact_text: true },
+    };
+    let result = call_vendor_vision(VendorKind::MiniMax, &cfg, Some("MiniMax-M3"), 5, request)
+        .expect("minimax vision request");
     server.join().expect("mock minimax server");
 
     assert_eq!(result.0, "识别成功");
@@ -368,7 +368,7 @@ fn minimax_compat_dispatches_multimodal_request() {
 }
 
 #[test]
-fn describe_retries_once_when_provider_output_is_not_structured() {
+fn extract_text_retries_once_when_provider_omits_an_input_page() {
     use std::io::{Read as _, Write as _};
     use std::net::{TcpListener, TcpStream};
 
@@ -414,12 +414,16 @@ fn describe_retries_once_when_provider_output_is_not_structured() {
     let address = listener.local_addr().expect("mock server address");
     let server = std::thread::spawn(move || {
         let (stream, _) = listener.accept().expect("accept first vision request");
-        receive_and_reply(stream, "base prompt", "unstructured response");
+        receive_and_reply(
+            stream,
+            "base prompt",
+            r#"{"pages":[{"text":"first image"}],"uncertainties":[]}"#,
+        );
         let (stream, _) = listener.accept().expect("accept retry vision request");
         receive_and_reply(
             stream,
-            "array order already records reading order",
-            r#"{"summary":"handwritten note","objects":["paper"],"visible_text":["first line","second line"],"uncertainties":[]}"#,
+            "exactly 2 entries",
+            r#"{"pages":[{"text":"first image"},{"text":"second image"}],"uncertainties":[]}"#,
         );
     });
 
@@ -430,9 +434,10 @@ fn describe_retries_once_when_provider_output_is_not_structured() {
         "test-minimax-key",
         "MiniMax-M3",
     ));
-    let images = vec![ImageSource::Base64(
-        "data:image/png;base64,YWJj".to_string(),
-    )];
+    let images = vec![
+        ImageSource::Base64("data:image/png;base64,YWJj".to_string()),
+        ImageSource::Base64("data:image/png;base64,ZGVm".to_string()),
+    ];
 
     let result = call_vendor_vision_for_action(
         VendorKind::MiniMax,
@@ -440,7 +445,7 @@ fn describe_retries_once_when_provider_output_is_not_structured() {
         Some("MiniMax-M3"),
         5,
         "base prompt",
-        "describe",
+        "extract_text",
         &images,
         1024,
     )
@@ -448,13 +453,14 @@ fn describe_retries_once_when_provider_output_is_not_structured() {
     server.join().expect("mock vision server");
 
     assert_eq!(result.3, 2);
-    let structured =
-        parse_structured_narrative_action_output("describe", &result.0).expect("structured result");
+    let structured = parse_structured_narrative_action_output("extract_text", &result.0)
+        .expect("structured result");
     match structured {
-        StructuredNarrativeActionOutput::Describe(output) => {
-            assert_eq!(output.visible_text, vec!["first line", "second line"]);
+        StructuredNarrativeActionOutput::ExtractText(output) => {
+            assert_eq!(output.pages.len(), 2);
+            assert_eq!(output.pages[1].text, "second image");
         }
-        _ => panic!("expected describe output"),
+        _ => panic!("expected extract_text output"),
     }
 }
 
@@ -638,6 +644,23 @@ fn extract_text_merges_pages_in_input_order_without_source_labels() {
 }
 
 #[test]
+fn extract_text_structure_requires_one_page_per_input_image() {
+    let two_pages = r#"{
+        "pages":[{"text":"first"},{"text":"second"}],
+        "uncertainties":[]
+    }"#;
+
+    assert!(structured_output_is_complete("extract_text", two_pages, 2));
+    assert!(!structured_output_is_complete("extract_text", two_pages, 3));
+    assert!(!structured_output_is_complete(
+        "extract_text",
+        "unstructured text",
+        1
+    ));
+    assert!(structured_output_is_complete("extract", "free form", 9));
+}
+
+#[test]
 fn extract_text_converts_double_escaped_newline_markers_to_real_line_breaks() {
     let raw = r#"{
         "pages":[{"text":"第一行\\n第二行\\r\\n第三行\\r第四行"}],
@@ -736,11 +759,20 @@ fn image_description_prompt_preserves_only_source_visible_line_markers() {
 
 #[test]
 fn image_description_schema_retry_repeats_source_marker_contract() {
-    let prompt = structured_output_retry_prompt("base prompt");
+    let prompt = structured_output_retry_prompt("base prompt", "describe", 1);
 
     assert!(prompt.contains("previous response did not satisfy the required JSON schema"));
-    assert!(prompt.contains("array order already records reading order"));
+    assert!(prompt.contains("Array order already records reading order"));
     assert!(prompt.contains("Preserve a line-start marker only when it is visibly present"));
+}
+
+#[test]
+fn image_text_schema_retry_requires_exact_input_cardinality() {
+    let prompt = structured_output_retry_prompt("base prompt", "extract_text", 7);
+
+    assert!(prompt.contains("exactly 7 entries"));
+    assert!(prompt.contains("Never merge, omit, or duplicate an input image"));
+    assert!(prompt.contains("empty `text` string"));
 }
 
 #[test]
@@ -756,6 +788,22 @@ fn image_text_revision_integrity_rejects_changed_numbers_and_large_omissions() {
     assert!(image_text_revision_preserves_source(
         "今天天汽很好 20260811",
         "今天天气很好。20260811"
+    ));
+}
+
+#[test]
+fn image_text_revision_integrity_protects_identifiers_and_limits_rewriting() {
+    assert!(image_text_revision_preserves_source(
+        "访问 https://example.com/A-1 型号 MiniMax-M3，状态 OK",
+        "访问 https://example.com/A-1，型号 MiniMax-M3；状态 OK。"
+    ));
+    assert!(!image_text_revision_preserves_source(
+        "访问 https://example.com/A-1 型号 MiniMax-M3",
+        "访问 https://example.com/B-1 型号 MiniMax-M3"
+    ));
+    assert!(!image_text_revision_preserves_source(
+        &"the original recognized passage contains stable words ".repeat(12),
+        &"completely rewritten content replaces every source token ".repeat(12)
     ));
 }
 

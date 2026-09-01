@@ -67,6 +67,39 @@ class ImageOcrDocumentTest(unittest.TestCase):
             self.image_ocr._ocr_candidate_score(cjk),
         )
 
+    def test_tesseract_evaluates_all_preprocessing_candidates_and_keeps_best(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source.png"
+            source.write_bytes(b"test")
+            prepared = [Path(directory) / "enhanced.png", Path(directory) / "binary.png"]
+            results = [
+                self.image_ocr.ParsedOcrText("original", 40.0),
+                self.image_ocr.ParsedOcrText("enhanced result", 92.0),
+                self.image_ocr.ParsedOcrText("binary", 65.0),
+            ]
+            with (
+                mock.patch.object(
+                    self.image_ocr,
+                    "preprocess_image_candidates_for_ocr",
+                    return_value=prepared,
+                ),
+                mock.patch.object(
+                    self.image_ocr,
+                    "_run_tesseract_tsv",
+                    side_effect=results,
+                ) as run_tesseract,
+            ):
+                result = self.image_ocr.tesseract_ocr_image(
+                    source,
+                    tesseract_bin=sys.executable,
+                    language="eng",
+                )
+
+            self.assertEqual(result.text, "enhanced result")
+            self.assertEqual(run_tesseract.call_count, 3)
+
     def test_auto_language_uses_all_installed_recognition_data(self) -> None:
         self.image_ocr.available_tesseract_languages.cache_clear()
         completed = subprocess.CompletedProcess(
@@ -80,6 +113,46 @@ class ImageOcrDocumentTest(unittest.TestCase):
 
         self.assertEqual(resolved, "ara+chi_sim+eng")
         self.image_ocr.available_tesseract_languages.cache_clear()
+
+    @unittest.skipUnless(importlib.util.find_spec("PIL"), "Pillow is not installed")
+    def test_preprocessing_produces_enhanced_and_adaptive_binary_candidates(self) -> None:
+        from PIL import Image, ImageDraw
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "low-contrast.png"
+            image = Image.new("RGB", (120, 50), (205, 205, 205))
+            ImageDraw.Draw(image).text((8, 12), "OCR 2026", fill=(130, 130, 130))
+            image.save(source)
+
+            candidates = self.image_ocr.preprocess_image_candidates_for_ocr(
+                source,
+                root / "prepared",
+            )
+
+            self.assertEqual(len(candidates), 2)
+            self.assertTrue(all(candidate.exists() for candidate in candidates))
+            self.assertEqual({candidate.suffix for candidate in candidates}, {".png"})
+            self.assertEqual(len(set(candidates)), len(candidates))
+
+    @unittest.skipUnless(importlib.util.find_spec("PIL"), "Pillow is not installed")
+    def test_dark_background_adds_an_inverted_candidate(self) -> None:
+        from PIL import Image
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "dark.png"
+            Image.new("RGB", (20, 20), (10, 10, 10)).save(source)
+
+            candidates = self.image_ocr.preprocess_image_candidates_for_ocr(
+                source,
+                root,
+            )
+
+            self.assertEqual(len(candidates), 3)
+            self.assertTrue(candidates[-1].name.endswith("_ocr_inverted.png"))
 
 
 if __name__ == "__main__":

@@ -151,6 +151,27 @@ enum AdapterMode {
     Compat,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct VisionRequestOptions {
+    exact_text: bool,
+}
+
+impl VisionRequestOptions {
+    fn for_action(action: &str) -> Self {
+        Self {
+            exact_text: action == "extract_text",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct VisionRequest<'a> {
+    prompt: &'a str,
+    images: &'a [ImageSource],
+    max_input_bytes: usize,
+    options: VisionRequestOptions,
+}
+
 #[derive(Debug, Clone)]
 enum ImageSource {
     Path(PathBuf),
@@ -421,6 +442,9 @@ fn execute(
                         "provider": vendor_name(vendor),
                         "model": model,
                         "model_kind": model_kind,
+                        "input_image_count": images.len(),
+                        "recognized_page_count": images.len(),
+                        "page_count_validated": true,
                         "reviewed_by_model": review
                             .get("reviewed_by_model")
                             .and_then(Value::as_bool)
@@ -454,33 +478,48 @@ fn call_vendor_vision_for_action(
     images: &[ImageSource],
     max_input_bytes: usize,
 ) -> Result<(String, String, &'static str, u8), String> {
-    let (text, model, model_kind) = call_vendor_vision(
-        vendor,
-        cfg,
-        requested_model,
-        timeout_seconds,
+    let request_options = VisionRequestOptions::for_action(action);
+    let request = VisionRequest {
         prompt,
         images,
         max_input_bytes,
-    )?;
-    if action != "describe" || parse_structured_narrative_action_output(action, &text).is_some() {
+        options: request_options,
+    };
+    let (text, model, model_kind) =
+        call_vendor_vision(vendor, cfg, requested_model, timeout_seconds, request)?;
+    if structured_output_is_complete(action, &text, images.len()) {
         return Ok((text, model, model_kind, 1));
     }
 
-    let retry_prompt = structured_output_retry_prompt(prompt);
-    let (text, model, model_kind) = call_vendor_vision(
-        vendor,
-        cfg,
-        requested_model,
-        timeout_seconds,
-        &retry_prompt,
-        images,
-        max_input_bytes,
-    )?;
-    if parse_structured_narrative_action_output(action, &text).is_none() {
-        return Err("image describe output failed schema validation after 2 attempts".to_string());
+    let retry_prompt = structured_output_retry_prompt(prompt, action, images.len());
+    let retry_request = VisionRequest {
+        prompt: &retry_prompt,
+        ..request
+    };
+    let (text, model, model_kind) =
+        call_vendor_vision(vendor, cfg, requested_model, timeout_seconds, retry_request)?;
+    if !structured_output_is_complete(action, &text, images.len()) {
+        return Err(format!(
+            "image {action} output failed schema or image-count validation after 2 attempts"
+        ));
     }
     Ok((text, model, model_kind, 2))
+}
+
+fn structured_output_is_complete(action: &str, text: &str, expected_images: usize) -> bool {
+    if !matches!(
+        action,
+        "describe" | "compare" | "screenshot_summary" | "extract_text"
+    ) {
+        return true;
+    }
+    match parse_structured_narrative_action_output(action, text) {
+        Some(StructuredNarrativeActionOutput::ExtractText(output)) => {
+            output.pages.len() == expected_images
+        }
+        Some(_) => true,
+        None => false,
+    }
 }
 
 fn image_text_output_has_visible_text(
