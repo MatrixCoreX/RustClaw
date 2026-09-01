@@ -1,6 +1,7 @@
 import {
   Check,
   Copy,
+  Download,
   KeyRound,
   Loader2,
   ShieldAlert,
@@ -12,7 +13,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { NniOwnerAuthorizationChallenge } from "../hooks/useNniRuntime";
 import {
   nniPrivateKeyOperationsAllowed,
+  nniOwnerKeyPairBackupFilename,
   normalizeNniOwnerSignature,
+  serializeNniOwnerKeyPairBackup,
   validateNniOwnerPrivateKey,
   validateNniOwnerPublicKey,
   type NniOwnerKeyPair,
@@ -161,6 +164,23 @@ export function NniAssetAccountDialog({
     if (result) onClose();
   };
 
+  const downloadGeneratedKeyPair = () => {
+    if (!generatedKeyPair) return;
+    const blob = new Blob(
+      [serializeNniOwnerKeyPairBackup(generatedKeyPair)],
+      { type: "application/json;charset=utf-8" },
+    );
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = nniOwnerKeyPairBackupFilename(generatedKeyPair);
+    link.hidden = true;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  };
+
   const startExternalAuthorization = async () => {
     if (!publicKeyValidation.ok) return;
     await Promise.resolve(onStartExternalAuthorization(publicKeyValidation.normalized));
@@ -236,19 +256,28 @@ export function NniAssetAccountDialog({
               <>
                 <div className="flex items-start gap-2 rounded-md border border-amber-400/30 bg-amber-500/10 px-3 py-2.5 text-sm leading-6 text-amber-100">
                   <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
-                  <span>{t("私钥不会保存。请先离线备份，再点击加入。", "The private key is not saved. Back it up offline before joining.")}</span>
+                  <span>{t(
+                    "系统不会保存私钥。JSON 备份包含明文私钥；下载后请转移到安全的离线位置，确认备份后再点击加入。",
+                    "The system does not save the private key. The JSON backup contains it in plain text; move the file to a secure offline location and confirm the backup before joining.",
+                  )}</span>
                 </div>
                 <label className="grid gap-1.5 text-xs text-white/60">
                   <span>{t("资产公钥", "Asset public key")}</span>
                   <code className="break-all rounded-md bg-black/20 p-3 text-sm text-white/85">{generatedKeyPair.public_key}</code>
                 </label>
                 <div className="grid gap-1.5">
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <span className="text-xs text-white/60">{t("一次性显示的私钥", "One-time private key")}</span>
-                    <button type="button" className="theme-secondary-btn px-2 py-1.5 text-xs" data-nni-copy-owner-private-key="true" onClick={() => void onCopyGeneratedPrivateKey()}>
-                      {privateKeyCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                      {privateKeyCopied ? t("已复制", "Copied") : t("复制私钥", "Copy private key")}
-                    </button>
+                    <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-end">
+                      <button type="button" className="theme-secondary-btn px-2 py-1.5 text-xs" data-nni-download-owner-key-pair="true" onClick={downloadGeneratedKeyPair}>
+                        <Download className="h-3.5 w-3.5" />
+                        {t("下载 JSON 备份", "Download JSON backup")}
+                      </button>
+                      <button type="button" className="theme-secondary-btn px-2 py-1.5 text-xs" data-nni-copy-owner-private-key="true" onClick={() => void onCopyGeneratedPrivateKey()}>
+                        {privateKeyCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                        {privateKeyCopied ? t("已复制", "Copied") : t("复制私钥", "Copy private key")}
+                      </button>
+                    </div>
                   </div>
                   <code className="break-all rounded-md bg-black/25 p-3 text-sm text-amber-100">{generatedKeyPair.private_key}</code>
                 </div>

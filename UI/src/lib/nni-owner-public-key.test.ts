@@ -9,7 +9,9 @@ import {
   assertNniPrivateKeyOperationsAllowed,
   generateNniOwnerKeyPair,
   nniPrivateKeyOperationsAllowed,
+  nniOwnerKeyPairBackupFilename,
   normalizeNniOwnerSignature,
+  serializeNniOwnerKeyPairBackup,
   signNniOwnerChallenge,
   validateNniOwnerPrivateKey,
   validateNniOwnerPublicKey,
@@ -96,6 +98,23 @@ test("NNI owner key pairs are generated locally with a valid K1 envelope", () =>
   if (!privateKey.ok) return;
   assert.equal(privateKey.publicKey, generated.public_key);
   assert.equal(validateNniOwnerPublicKey(generated.public_key).ok, true);
+});
+
+test("NNI owner key-pair backups are versioned JSON files containing the exact generated keys", () => {
+  const generated = generateNniOwnerKeyPair();
+  const backup = JSON.parse(serializeNniOwnerKeyPairBackup(generated));
+  assert.deepEqual(backup, {
+    schema_version: 1,
+    document_type: "asset_account_key_pair",
+    key_type: "K1",
+    encoding: "eos_base58_v1",
+    public_key: generated.public_key,
+    private_key: generated.private_key,
+  });
+  assert.equal(
+    nniOwnerKeyPairBackupFilename(generated),
+    `asset-account-keypair-${generated.public_key.slice(0, 12)}.json`,
+  );
 });
 
 test("NNI private-key operations require HTTPS except on loopback", () => {
