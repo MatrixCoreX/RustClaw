@@ -27,8 +27,6 @@ DEFAULT_PREPROCESS = True
 DEFAULT_MIN_LINE_CONFIDENCE = 15.0
 DEFAULT_SUFFIX = "_ocr"
 PREPROCESS_SCALE = 2
-PREPROCESS_CONTRAST = 2.0
-PREPROCESS_THRESHOLD = 180
 IMAGE_EXTENSIONS = {
     ".jpg",
     ".jpeg",
@@ -221,16 +219,54 @@ def _lanczos_resampling(image_module: object) -> object:
     return getattr(image_module, "LANCZOS")
 
 
-def preprocess_image_for_ocr(image_path: Path, output_dir: Path, *, verbose: bool = False) -> Path:
+def _otsu_threshold(grayscale: object) -> int:
+    histogram = grayscale.histogram()
+    total = sum(histogram)
+    if total <= 0:
+        return 127
+    weighted_total = sum(index * count for index, count in enumerate(histogram))
+    background_weight = 0
+    background_sum = 0
+    best_variance = -1.0
+    best_threshold = 127
+    for threshold, count in enumerate(histogram):
+        background_weight += count
+        if background_weight == 0:
+            continue
+        foreground_weight = total - background_weight
+        if foreground_weight == 0:
+            break
+        background_sum += threshold * count
+        background_mean = background_sum / background_weight
+        foreground_mean = (weighted_total - background_sum) / foreground_weight
+        between_class_variance = (
+            background_weight
+            * foreground_weight
+            * (background_mean - foreground_mean) ** 2
+        )
+        if between_class_variance > best_variance:
+            best_variance = between_class_variance
+            best_threshold = threshold
+    return best_threshold
+
+
+def preprocess_image_candidates_for_ocr(
+    image_path: Path,
+    output_dir: Path,
+    *,
+    verbose: bool = False,
+) -> list[Path]:
     try:
-        from PIL import Image, ImageEnhance, ImageOps
+        from PIL import Image, ImageFilter, ImageOps
     except ImportError:
         if verbose:
             print("Pillow is not available; OCR preprocessing skipped.", file=sys.stderr)
-        return image_path
+        return []
 
     try:
+        output_dir.mkdir(parents=True, exist_ok=True)
         with Image.open(image_path) as image:
+            image = ImageOps.exif_transpose(image)
             image = image.convert("RGB")
             width, height = image.size
             if width > 0 and height > 0:
@@ -239,18 +275,47 @@ def preprocess_image_for_ocr(image_path: Path, output_dir: Path, *, verbose: boo
                     _lanczos_resampling(Image),
                 )
             grayscale = ImageOps.grayscale(image)
-            enhanced = ImageEnhance.Contrast(grayscale).enhance(PREPROCESS_CONTRAST)
-            prepared = enhanced.point(
-                lambda pixel: 0 if pixel < PREPROCESS_THRESHOLD else 255,
+            enhanced = ImageOps.autocontrast(grayscale, cutoff=1).filter(
+                ImageFilter.UnsharpMask(radius=1.4, percent=160, threshold=3)
+            )
+            enhanced_path = output_dir / f"{image_path.stem}_ocr_enhanced.png"
+            enhanced.save(enhanced_path)
+
+            threshold = _otsu_threshold(enhanced)
+            binary = enhanced.point(
+                lambda pixel: 0 if pixel <= threshold else 255,
                 mode="1",
             )
-            output_path = output_dir / f"{image_path.stem}_ocr_preprocessed.png"
-            prepared.save(output_path)
-            return output_path
+            binary_path = output_dir / f"{image_path.stem}_ocr_binary.png"
+            binary.save(binary_path)
+
+            histogram = enhanced.histogram()
+            pixel_count = sum(histogram)
+            mean_luminance = (
+                sum(index * count for index, count in enumerate(histogram)) / pixel_count
+                if pixel_count
+                else 255
+            )
+            candidates = [enhanced_path, binary_path]
+            if mean_luminance < 127:
+                inverted_path = output_dir / f"{image_path.stem}_ocr_inverted.png"
+                ImageOps.invert(enhanced).save(inverted_path)
+                candidates.append(inverted_path)
+            return candidates
     except Exception as exc:
         if verbose:
             print(f"OCR preprocessing skipped for {image_path}: {exc}", file=sys.stderr)
-        return image_path
+        return []
+
+
+def preprocess_image_for_ocr(image_path: Path, output_dir: Path, *, verbose: bool = False) -> Path:
+    """Return the primary enhanced candidate for callers using the legacy helper."""
+    candidates = preprocess_image_candidates_for_ocr(
+        image_path,
+        output_dir,
+        verbose=verbose,
+    )
+    return candidates[0] if candidates else image_path
 
 
 def output_path_for(
@@ -304,9 +369,13 @@ def tesseract_ocr_image(
         image_candidates = [image_path]
         if preprocess:
             temp_dir = Path(stack.enter_context(tempfile.TemporaryDirectory()))
-            prepared = preprocess_image_for_ocr(image_path, temp_dir, verbose=verbose)
-            if prepared != image_path:
-                image_candidates.append(prepared)
+            image_candidates.extend(
+                preprocess_image_candidates_for_ocr(
+                    image_path,
+                    temp_dir,
+                    verbose=verbose,
+                )
+            )
 
         ocr_candidates = [
             _run_tesseract_tsv(

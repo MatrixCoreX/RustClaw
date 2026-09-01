@@ -3,7 +3,7 @@ Return JSON only with this shape:
 {"pages":[{"text":""}],"uncertainties":[]}
 
 Field guidance:
-- `pages`: exactly one entry per input image, in the same order as the inputs.
+- `pages`: exactly one entry per input image, in the same order as the inputs. Never merge, omit, or duplicate an input image.
 - `pages[].text`: the visible text for that image. Use an empty string when no text is visible.
 - Encode line breaks exactly once as standard JSON string escapes. Never return literal backslash-plus-`n` or backslash-plus-`r` characters as visible text.
 - Keep `pages` as machine-only ordering structure. Do not add image numbers, filenames, source paths, page headings, or other source labels inside `pages[].text`; the runtime merges non-empty entries into one continuous document in input order.

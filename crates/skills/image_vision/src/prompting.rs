@@ -442,9 +442,20 @@ pub(super) fn build_prompt(
         .replace("__LANGUAGE_HINT__", &language_hint)
 }
 
-pub(super) fn structured_output_retry_prompt(original_prompt: &str) -> String {
+pub(super) fn structured_output_retry_prompt(
+    original_prompt: &str,
+    action: &str,
+    expected_images: usize,
+) -> String {
+    let cardinality = if action == "extract_text" {
+        format!(
+            " The `pages` array must contain exactly {expected_images} entries, one for every input image in the original order. Never merge, omit, or duplicate an input image; use an empty `text` string when an image has no visible text."
+        )
+    } else {
+        String::new()
+    };
     format!(
-        "{original_prompt}\n\nThe previous response did not satisfy the required JSON schema. Reinspect the source image and return exactly one valid JSON object with every required field. The `visible_text` array order already records reading order: do not add ordinal numbers, bullets, Markdown prefixes, checkboxes, or other line-start markers to unmarked source lines. Preserve a line-start marker only when it is visibly present in the source image."
+        "{original_prompt}\n\nThe previous response did not satisfy the required JSON schema or input-image cardinality. Reinspect every source image and return exactly one valid JSON object with every required field.{cardinality} Array order already records reading order: do not add ordinal numbers, bullets, Markdown prefixes, checkboxes, or other line-start markers to unmarked source lines. Preserve a line-start marker only when it is visibly present in the source image."
     )
 }
 
@@ -635,22 +646,24 @@ pub(super) fn review_recognized_image_text(
                 }),
             );
         };
+        if !image_text_revision_preserves_source(chunk, &reviewed_chunk) {
+            return (
+                recognized_text,
+                json!({
+                    "status": "fallback_raw",
+                    "reviewed_by_model": false,
+                    "error_code": "revision_integrity_failed",
+                    "failed_chunk_index": index + 1,
+                    "chunk_count": chunks.len(),
+                    "raw_character_count": raw_character_count,
+                    "reviewed_character_count": reviewed_chunk.chars().count(),
+                    "integrity_policy": "numbers+protected_identifiers+bounded_character_drift",
+                }),
+            );
+        }
         reviewed_chunks.push(reviewed_chunk);
     }
     let reviewed_text = join_image_text_revision_chunks(&chunks, &reviewed_chunks);
-    if !image_text_revision_preserves_source(raw_text, &reviewed_text) {
-        return (
-            recognized_text,
-            json!({
-                "status": "fallback_raw",
-                "reviewed_by_model": false,
-                "error_code": "revision_integrity_failed",
-                "chunk_count": chunks.len(),
-                "raw_character_count": raw_character_count,
-                "reviewed_character_count": reviewed_text.chars().count(),
-            }),
-        );
-    }
     (
         reviewed_text.clone(),
         json!({
@@ -663,6 +676,7 @@ pub(super) fn review_recognized_image_text(
             "reviewed_character_count": reviewed_text.chars().count(),
             "source_language_policy": "preserve_source_language",
             "layout_policy": "semantic_reflow",
+            "integrity_policy": "numbers+protected_identifiers+bounded_character_drift",
         }),
     )
 }
@@ -670,6 +684,8 @@ pub(super) fn review_recognized_image_text(
 pub(super) fn image_text_revision_preserves_source(raw_text: &str, reviewed_text: &str) -> bool {
     if reviewed_text.trim().is_empty()
         || image_text_numeric_tokens(raw_text) != image_text_numeric_tokens(reviewed_text)
+        || image_text_protected_identifiers(raw_text)
+            != image_text_protected_identifiers(reviewed_text)
     {
         return false;
     }
@@ -681,11 +697,27 @@ pub(super) fn image_text_revision_preserves_source(raw_text: &str, reviewed_text
         .chars()
         .filter(|character| !character.is_whitespace())
         .count();
-    if raw_count < 40 {
-        return reviewed_count <= raw_count.saturating_mul(2).saturating_add(16);
+    let length_is_plausible = if raw_count < 40 {
+        reviewed_count <= raw_count.saturating_mul(2).saturating_add(16)
+    } else {
+        reviewed_count.saturating_mul(10) >= raw_count.saturating_mul(6)
+            && reviewed_count.saturating_mul(2) <= raw_count.saturating_mul(3)
+    };
+    if !length_is_plausible {
+        return false;
     }
-    reviewed_count.saturating_mul(10) >= raw_count.saturating_mul(6)
-        && reviewed_count.saturating_mul(2) <= raw_count.saturating_mul(3)
+
+    let raw_normalized = normalized_image_text_content(raw_text);
+    let reviewed_normalized = normalized_image_text_content(reviewed_text);
+    if raw_normalized.is_empty() {
+        return reviewed_normalized.is_empty();
+    }
+    let max_edits = if raw_normalized.len() < 40 {
+        raw_normalized.len().div_ceil(5).max(2)
+    } else {
+        (raw_normalized.len() * 12 / 100).max(4)
+    };
+    bounded_levenshtein_within(&raw_normalized, &reviewed_normalized, max_edits)
 }
 
 fn image_text_numeric_tokens(text: &str) -> Vec<String> {
@@ -702,6 +734,91 @@ fn image_text_numeric_tokens(text: &str) -> Vec<String> {
         tokens.push(current);
     }
     tokens
+}
+
+fn image_text_protected_identifiers(text: &str) -> Vec<String> {
+    static IDENTIFIER_RE: OnceLock<Regex> = OnceLock::new();
+    IDENTIFIER_RE
+        .get_or_init(|| {
+            Regex::new(
+                r#"(?i)(?:https?://|www\.)[^\s<>{}\[\]\"'，。；！？、（）]+|[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}|[a-z0-9](?:[a-z0-9._:/-]*[a-z0-9])?"#,
+            )
+            .expect("image text identifier regex compiles")
+        })
+        .find_iter(text)
+        .filter_map(|found| {
+            let token = found.as_str().trim_end_matches(|character: char| {
+                matches!(
+                    character,
+                    ',' | ';' | '!' | '?' | '，' | '。' | '；' | '！' | '？' | ')' | ']' | '}'
+                )
+            });
+            let letter_count = token
+                .chars()
+                .filter(|character| character.is_ascii_alphabetic())
+                .count();
+            let uppercase_count = token
+                .chars()
+                .filter(|character| character.is_ascii_uppercase())
+                .count();
+            let has_digit = token.chars().any(|character| character.is_ascii_digit());
+            let has_identifier_separator = token
+                .chars()
+                .any(|character| matches!(character, '@' | ':' | '/' | '_' | '-' | '.'));
+            let is_url_or_email = token.contains("://") || token.contains('@');
+            let is_acronym = letter_count >= 2 && uppercase_count == letter_count;
+            (is_url_or_email
+                || (letter_count > 0 && has_digit)
+                || (has_identifier_separator && token.len() >= 4)
+                || is_acronym)
+                .then(|| token.to_string())
+        })
+        .collect()
+}
+
+fn normalized_image_text_content(text: &str) -> Vec<char> {
+    text.chars()
+        .filter(|character| character.is_alphanumeric())
+        .collect()
+}
+
+fn bounded_levenshtein_within(left: &[char], right: &[char], max_distance: usize) -> bool {
+    if left.len().abs_diff(right.len()) > max_distance {
+        return false;
+    }
+    if left.is_empty() || right.is_empty() {
+        return left.len().max(right.len()) <= max_distance;
+    }
+
+    let unreachable = max_distance.saturating_add(1);
+    let mut previous = vec![unreachable; right.len() + 1];
+    for (index, value) in previous.iter_mut().enumerate().take(max_distance + 1) {
+        *value = index;
+    }
+    let mut current = vec![unreachable; right.len() + 1];
+    for (left_index, left_character) in left.iter().enumerate() {
+        let row = left_index + 1;
+        current.fill(unreachable);
+        if row <= max_distance {
+            current[0] = row;
+        }
+        let start = row.saturating_sub(max_distance).max(1);
+        let end = row.saturating_add(max_distance).min(right.len());
+        let mut row_minimum = unreachable;
+        for column in start..=end {
+            let substitution_cost = usize::from(*left_character != right[column - 1]);
+            current[column] = current[column - 1]
+                .saturating_add(1)
+                .min(previous[column].saturating_add(1))
+                .min(previous[column - 1].saturating_add(substitution_cost));
+            row_minimum = row_minimum.min(current[column]);
+        }
+        if row_minimum > max_distance {
+            return false;
+        }
+        std::mem::swap(&mut previous, &mut current);
+    }
+    previous[right.len()] <= max_distance
 }
 
 pub(super) fn join_image_text_revision_chunks(

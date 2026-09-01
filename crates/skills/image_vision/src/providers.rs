@@ -5,9 +5,7 @@ pub(super) fn call_vendor_vision(
     cfg: &RootConfig,
     requested_model: Option<&str>,
     timeout_seconds: u64,
-    prompt: &str,
-    images: &[ImageSource],
-    max_input_bytes: usize,
+    request: VisionRequest<'_>,
 ) -> Result<(String, String, &'static str), String> {
     let mode = resolve_adapter_mode(&cfg.image_vision);
     let (vendor_name, vcfg) = resolve_vendor_config(cfg, vendor)?;
@@ -21,7 +19,7 @@ pub(super) fn call_vendor_vision(
                 ))
                 .build()
                 .map_err(|err| format!("build openai client failed: {err}"))?;
-            let text = openai_vision(&client, &vcfg, &model, prompt, images, max_input_bytes)?;
+            let text = openai_vision(&client, &vcfg, &model, request)?;
             Ok((text, model, "native"))
         }
         VendorKind::Google => {
@@ -32,7 +30,7 @@ pub(super) fn call_vendor_vision(
                 ))
                 .build()
                 .map_err(|err| format!("build google client failed: {err}"))?;
-            let text = google_vision(&client, &vcfg, &model, prompt, images, max_input_bytes)?;
+            let text = google_vision(&client, &vcfg, &model, request)?;
             Ok((text, model, "native"))
         }
         VendorKind::Anthropic => {
@@ -43,7 +41,7 @@ pub(super) fn call_vendor_vision(
                 ))
                 .build()
                 .map_err(|err| format!("build anthropic client failed: {err}"))?;
-            let text = anthropic_vision(&client, &vcfg, &model, prompt, images, max_input_bytes)?;
+            let text = anthropic_vision(&client, &vcfg, &model, request)?;
             Ok((text, model, "native"))
         }
         VendorKind::Grok | VendorKind::DeepSeek => {
@@ -63,11 +61,8 @@ pub(super) fn call_vendor_vision(
                 &client,
                 &vcfg,
                 &model,
-                prompt,
-                images,
-                max_input_bytes,
-                vendor_name,
-                false,
+                request,
+                OpenAiCompatOptions::new(vendor_name),
             )?;
             Ok((text, model, "compat"))
         }
@@ -85,7 +80,7 @@ pub(super) fn call_vendor_vision(
                 ))
                 .build()
                 .map_err(|err| format!("build mimo client failed: {err}"))?;
-            let text = mimo_vision(&client, &vcfg, &model, prompt, images, max_input_bytes)?;
+            let text = mimo_vision(&client, &vcfg, &model, request)?;
             Ok((text, model, "compat"))
         }
         VendorKind::MiniMax => {
@@ -106,11 +101,8 @@ pub(super) fn call_vendor_vision(
                 &client,
                 &vcfg,
                 &model,
-                prompt,
-                images,
-                max_input_bytes,
-                vendor_name,
-                false,
+                request,
+                OpenAiCompatOptions::new(vendor_name),
             )?;
             Ok((text, model, "compat"))
         }
@@ -132,11 +124,8 @@ pub(super) fn call_vendor_vision(
                 &client,
                 &vcfg,
                 &model,
-                prompt,
-                images,
-                max_input_bytes,
-                vendor_name,
-                false,
+                request,
+                OpenAiCompatOptions::new(vendor_name),
             )?;
             Ok((text, model, "compat"))
         }
@@ -162,19 +151,18 @@ pub(super) fn openai_vision(
     client: &Client,
     cfg: &VendorConfig,
     model: &str,
-    prompt: &str,
-    images: &[ImageSource],
-    max_input_bytes: usize,
+    request: VisionRequest<'_>,
 ) -> Result<String, String> {
     openai_compat_vision(
         client,
         cfg,
         model,
-        prompt,
-        images,
-        max_input_bytes,
-        "openai",
-        false,
+        request,
+        OpenAiCompatOptions {
+            error_label: "openai",
+            include_api_key_header: false,
+            supports_image_detail: true,
+        },
     )
 }
 
@@ -182,39 +170,52 @@ pub(super) fn mimo_vision(
     client: &Client,
     cfg: &VendorConfig,
     model: &str,
-    prompt: &str,
-    images: &[ImageSource],
-    max_input_bytes: usize,
+    request: VisionRequest<'_>,
 ) -> Result<String, String> {
     openai_compat_vision(
         client,
         cfg,
         model,
-        prompt,
-        images,
-        max_input_bytes,
-        "mimo",
-        true,
+        request,
+        OpenAiCompatOptions {
+            error_label: "mimo",
+            include_api_key_header: true,
+            supports_image_detail: false,
+        },
     )
 }
 
-pub(super) fn openai_compat_vision(
+#[derive(Debug, Clone, Copy)]
+struct OpenAiCompatOptions<'a> {
+    error_label: &'a str,
+    include_api_key_header: bool,
+    supports_image_detail: bool,
+}
+
+impl<'a> OpenAiCompatOptions<'a> {
+    fn new(error_label: &'a str) -> Self {
+        Self {
+            error_label,
+            include_api_key_header: false,
+            supports_image_detail: false,
+        }
+    }
+}
+
+fn openai_compat_vision(
     client: &Client,
     cfg: &VendorConfig,
     model: &str,
-    prompt: &str,
-    images: &[ImageSource],
-    max_input_bytes: usize,
-    error_label: &str,
-    include_api_key_header: bool,
+    request: VisionRequest<'_>,
+    options: OpenAiCompatOptions<'_>,
 ) -> Result<String, String> {
-    let mut content = vec![json!({"type":"text","text":prompt})];
-    for image in images {
+    let mut content = vec![json!({"type":"text","text":request.prompt})];
+    for image in request.images {
         let url = match image {
             ImageSource::Url(s) => s.to_string(),
             ImageSource::Path(p) => {
                 let bytes = std::fs::read(p).map_err(|err| format!("read image failed: {err}"))?;
-                if bytes.len() > max_input_bytes {
+                if bytes.len() > request.max_input_bytes {
                     return Err(format!("image too large: {} bytes", bytes.len()));
                 }
                 let mime = guess_mime_from_path(p);
@@ -222,29 +223,35 @@ pub(super) fn openai_compat_vision(
             }
             ImageSource::Base64(s) => normalize_base64_image(s),
         };
-        content.push(json!({"type":"image_url","image_url":{"url":url}}));
+        let image_url = if request.options.exact_text && options.supports_image_detail {
+            json!({"url":url,"detail":"high"})
+        } else {
+            json!({"url":url})
+        };
+        content.push(json!({"type":"image_url","image_url":image_url}));
     }
     let body = json!({
         "model": model,
         "messages": [{"role":"user","content":content}],
-        "temperature": 0.2
+        "temperature": if request.options.exact_text { 0.0 } else { 0.2 }
     });
     let url = format!("{}/chat/completions", trim_trailing_slash(&cfg.base_url));
-    let mut request = client.post(url).bearer_auth(&cfg.api_key);
-    if include_api_key_header {
-        request = request.header("api-key", &cfg.api_key);
+    let mut http_request = client.post(url).bearer_auth(&cfg.api_key);
+    if options.include_api_key_header {
+        http_request = http_request.header("api-key", &cfg.api_key);
     }
-    let resp = request
+    let resp = http_request
         .json(&body)
         .send()
-        .map_err(|err| format!("{error_label} request failed: {err}"))?;
+        .map_err(|err| format!("{} request failed: {err}", options.error_label))?;
     let status = resp.status().as_u16();
     let v: Value = resp
         .json()
         .map_err(|err| format!("parse openai response failed: {err}"))?;
     if status >= 300 {
         return Err(format!(
-            "{error_label} error status={status}: {}",
+            "{} error status={status}: {}",
+            options.error_label,
             provider_error_excerpt(&v, 400)
         ));
     }
@@ -258,7 +265,8 @@ pub(super) fn openai_compat_vision(
         return Ok(s.to_string());
     }
     Err(format!(
-        "{error_label} response missing text: {}",
+        "{} response missing text: {}",
+        options.error_label,
         provider_error_excerpt(&v, 400)
     ))
 }
@@ -267,16 +275,14 @@ pub(super) fn google_vision(
     client: &Client,
     cfg: &VendorConfig,
     model: &str,
-    prompt: &str,
-    images: &[ImageSource],
-    max_input_bytes: usize,
+    request: VisionRequest<'_>,
 ) -> Result<String, String> {
-    let mut parts = vec![json!({"text":prompt})];
-    for image in images {
+    let mut parts = vec![json!({"text":request.prompt})];
+    for image in request.images {
         match image {
             ImageSource::Path(p) => {
                 let bytes = std::fs::read(p).map_err(|err| format!("read image failed: {err}"))?;
-                if bytes.len() > max_input_bytes {
+                if bytes.len() > request.max_input_bytes {
                     return Err(format!("image too large: {} bytes", bytes.len()));
                 }
                 let mime = guess_mime_from_path(p);
@@ -291,7 +297,12 @@ pub(super) fn google_vision(
             }
         }
     }
-    let body = json!({"contents":[{"parts":parts}]});
+    let body = json!({
+        "contents":[{"parts":parts}],
+        "generationConfig": {
+            "temperature": if request.options.exact_text { 0.0 } else { 0.2 }
+        }
+    });
     let url = format!(
         "{}/models/{}:generateContent?key={}",
         trim_trailing_slash(&cfg.base_url),
@@ -343,16 +354,14 @@ pub(super) fn anthropic_vision(
     client: &Client,
     cfg: &VendorConfig,
     model: &str,
-    prompt: &str,
-    images: &[ImageSource],
-    max_input_bytes: usize,
+    request: VisionRequest<'_>,
 ) -> Result<String, String> {
-    let mut content = vec![json!({"type":"text","text":prompt})];
-    for image in images {
+    let mut content = vec![json!({"type":"text","text":request.prompt})];
+    for image in request.images {
         match image {
             ImageSource::Path(p) => {
                 let bytes = std::fs::read(p).map_err(|err| format!("read image failed: {err}"))?;
-                if bytes.len() > max_input_bytes {
+                if bytes.len() > request.max_input_bytes {
                     return Err(format!("image too large: {} bytes", bytes.len()));
                 }
                 let mime = guess_mime_from_path(p);
@@ -375,7 +384,8 @@ pub(super) fn anthropic_vision(
     }
     let body = json!({
         "model": model,
-        "max_tokens": 1024,
+        "max_tokens": if request.options.exact_text { 8192 } else { 2048 },
+        "temperature": if request.options.exact_text { 0.0 } else { 0.2 },
         "messages": [{"role":"user","content":content}]
     });
     let url = format!("{}/messages", trim_trailing_slash(&cfg.base_url));
