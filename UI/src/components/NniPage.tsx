@@ -38,7 +38,6 @@ import {
   nniPayloadHexField,
   parseNniRemoteNodeUrls,
   nniSimulationControlMode,
-  nniTimestampSignatureReady,
   shortenHex,
   shortNniValue,
 } from "../lib/nni-display";
@@ -123,7 +122,6 @@ export interface NniPageProps {
   onStartOwnerUnbind: () => unknown | Promise<unknown>;
   onCompleteOwnerAuthorization: (ownerSignature: string) => unknown | Promise<unknown>;
   onCancelOwnerAuthorization: () => void;
-  onTestJoin: () => unknown | Promise<unknown>;
   onFetchConfig: () => unknown | Promise<unknown>;
   onSaveConfig: () => unknown | Promise<unknown>;
   onRemoteNodesChange: (value: string) => void;
@@ -152,7 +150,6 @@ const NNI_DEVICE_ACTIONS = [
   "tng_root_cert",
 ];
 
-const NNI_TEST_JOIN_ACTIVITY_MS = 2200;
 const NNI_COPY_FEEDBACK_MS = 2200;
 export const NNI_DEVICE_AUTHORIZATION_DENIED_COPY = {
   zh: "你不是合法设备，不能参与 NNI 网络。",
@@ -234,7 +231,6 @@ export function NniPage({
   onStartOwnerUnbind,
   onCompleteOwnerAuthorization,
   onCancelOwnerAuthorization,
-  onTestJoin,
   onFetchConfig,
   onSaveConfig,
   onRemoteNodesChange,
@@ -257,11 +253,9 @@ export function NniPage({
     devicePubkey: string;
     rewardAic: string | null;
   } | null>(null);
-  const [nniTestJoinPulse, setNniTestJoinPulse] = useState(false);
   const [nniHistoryView, setNniHistoryView] = useState<NniHistoryView>("overview");
   const [ownerPrivateKeyCopied, setOwnerPrivateKeyCopied] = useState(false);
   const [ownerDialogMode, setOwnerDialogMode] = useState<NniAssetAccountDialogMode | null>(null);
-  const nniTestJoinPulseTimer = useRef<number | null>(null);
   const ownerPrivateKeyCopyTimer = useRef<number | null>(null);
   const nniChipPresent = nniStatus?.signature_chip_present === true;
   const nniChipMissing = nniStatus?.status === "signature_chip_missing";
@@ -294,7 +288,7 @@ export function NniPage({
       : "the configured interval";
   const actionLabel = (action: string) => nniActionLabel(action, lang);
   const nniRuntimeActivity =
-    nniJoined || nniTestJoinPulse || ["join_nni", "sign_challenge", "sign_timestamp"].includes(nniActionLoading || "");
+    nniJoined || ["join_nni", "sign_challenge", "sign_timestamp"].includes(nniActionLoading || "");
   const nniStatusMessage = nniStatusLoading
     ? t(
         "正在检测真实芯片，请稍候。",
@@ -318,9 +312,6 @@ export function NniPage({
 
   useEffect(() => {
     return () => {
-      if (nniTestJoinPulseTimer.current !== null) {
-        window.clearTimeout(nniTestJoinPulseTimer.current);
-      }
       if (ownerPrivateKeyCopyTimer.current !== null) {
         window.clearTimeout(ownerPrivateKeyCopyTimer.current);
       }
@@ -337,28 +328,6 @@ export function NniPage({
     onActionErrorChange(null);
     setOwnerDialogMode(mode);
     if (mode === "create" && !nniOwnerKeyPair) void onGenerateOwner();
-  };
-
-  const runTestJoinWithRuntimePulse = async () => {
-    if (nniTestJoinPulseTimer.current !== null) {
-      window.clearTimeout(nniTestJoinPulseTimer.current);
-      nniTestJoinPulseTimer.current = null;
-    }
-    setNniTestJoinPulse(true);
-    let shouldHoldPulse = false;
-    try {
-      const result = await Promise.resolve(onTestJoin());
-      shouldHoldPulse = nniTimestampSignatureReady(result as NniDeviceActionResponse | null);
-    } finally {
-      if (shouldHoldPulse) {
-        nniTestJoinPulseTimer.current = window.setTimeout(() => {
-          setNniTestJoinPulse(false);
-          nniTestJoinPulseTimer.current = null;
-        }, NNI_TEST_JOIN_ACTIVITY_MS);
-      } else {
-        setNniTestJoinPulse(false);
-      }
-    }
   };
 
   const copyPrimaryHex = (value?: string) => {
@@ -508,32 +477,6 @@ export function NniPage({
                       ? t("继续创建", "Continue setup")
                       : t("加入", "Join")}
               </button>
-              {!nniJoined ? (
-                <button
-                  type="button"
-                  onClick={() => void runTestJoinWithRuntimePulse()}
-                  disabled={Boolean(nniActionLoading) || nniStatusLoading}
-                  className="theme-secondary-btn px-3 py-2 text-sm"
-                  title={
-                    nniChipMissing
-                      ? t(
-                          "上次检测未找到芯片；测试加入会重新尝试本机时间戳签名，不请求远程 NNI 服务端。",
-                          "The last check did not find a chip. Test Join retries a local timestamp signature and does not contact the remote NNI server.",
-                        )
-                      : t(
-                          "测试加入只做本机时间戳签名，不请求远程 NNI 服务端。",
-                          "Test join only signs a local timestamp and does not contact the remote NNI server.",
-                        )
-                  }
-                >
-                  {nniActionLoading === "sign_timestamp" ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <KeyRound className="h-4 w-4" />
-                  )}
-                  {t("测试加入", "Test Join")}
-                </button>
-              ) : null}
             </div>
           </div>
         </div>
@@ -801,7 +744,7 @@ export function NniPage({
               ) : nniRuntimeActivity ? (
                 <>
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  {t("测试中", "Testing")}
+                  {t("处理中", "Working")}
                 </>
               ) : (
                 t("未加入", "Not joined")
@@ -873,8 +816,8 @@ export function NniPage({
                     `The server verified the device signature, and the NNI runtime entry is active. The Agent will send a hardware-signed heartbeat to the server every ${nniHeartbeatIntervalEn}.`,
                   )
                 : t(
-                    "点击加入会向远程服务端请求一次随机挑战，验签通过后开启运行入口；测试加入只做本机时间戳签名，不请求远程服务端。",
-                    "Click Join to request a random challenge from the remote server. The runtime is enabled after verification. Test Join only signs a local timestamp and does not contact the remote server.",
+                    "点击加入会向远程服务端请求一次随机挑战，验签通过后开启运行入口。",
+                    "Click Join to request a random challenge from the remote server. The runtime is enabled after verification.",
                   )}
           </p>
 

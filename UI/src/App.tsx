@@ -397,7 +397,6 @@ export default function App() {
     startNniOwnerUnbind,
     completeNniOwnerAuthorization,
     cancelNniOwnerAuthorization,
-    testJoinNni,
     fetchNniConfig,
     saveNniConfig,
     updateNniRemoteNodes,
@@ -1998,7 +1997,6 @@ export default function App() {
               onStartOwnerUnbind={startNniOwnerUnbind}
               onCompleteOwnerAuthorization={completeNniOwnerAuthorization}
               onCancelOwnerAuthorization={cancelNniOwnerAuthorization}
-              onTestJoin={testJoinNni}
               onFetchConfig={fetchNniConfig}
               onSaveConfig={saveNniConfig}
               onRemoteNodesChange={updateNniRemoteNodes}
