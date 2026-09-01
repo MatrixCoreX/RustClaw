@@ -63,7 +63,7 @@ export function NniRewardsPanel({
     update();
     const timer = window.setInterval(update, 1_000);
     return () => window.clearInterval(timer);
-  }, [rewardPolicy?.phase, rewardPolicy?.reward_start_time_unix, rewardPolicy?.starts_in_seconds]);
+  }, [rewardPolicy?.activation_not_before_unix, rewardPolicy?.phase, rewardPolicy?.starts_in_seconds]);
 
   return (
     <div
@@ -126,7 +126,26 @@ export function NniRewardsPanel({
             )}
           </p>
           <p className="mt-2 text-xs text-white/45">
-            {t("开始", "Starts")}: {formatUnixDateTime(rewardPolicy.reward_start_time_unix)} · {t("首次结算", "First settlement")}: {formatUnixDateTime(rewardPolicy.first_settlement_at_unix)}
+            {t("最早开放", "Not before")}: {formatUnixDateTime(
+              rewardPolicy.activation_not_before_unix ?? rewardPolicy.reward_start_time_unix,
+            )}
+          </p>
+        </div>
+      ) : null}
+
+      {rewardPolicy?.phase === "waiting_first_heartbeat" ? (
+        <div className="mt-4 rounded-2xl border border-sky-300/20 bg-sky-300/[0.08] p-4">
+          <div className="flex items-center gap-2 text-sky-100">
+            <Clock3 className="h-4 w-4" />
+            <p className="text-sm font-semibold">
+              {t("等待全网首个有效心跳", "Waiting for the first eligible network heartbeat")}
+            </p>
+          </div>
+          <p className="mt-2 text-xs leading-5 text-white/60">
+            {t(
+              "首个有效心跳将同时确定奖励启动时间、首个十分钟结算窗口和减半周期起点。",
+              "The first eligible heartbeat sets the reward start, the first ten-minute settlement window, and the halving epoch.",
+            )}
           </p>
         </div>
       ) : null}

@@ -22,9 +22,10 @@ const rewards: NniRewardsResponse = {
   reward_policy: {
     phase: "scheduled",
     accepting_reward_heartbeats: false,
-    reward_start_time_unix: 1_800_010_000,
+    activation_not_before_unix: 1_800_010_000,
+    reward_start_time_unix: null,
     starts_in_seconds: 3_661,
-    first_settlement_at_unix: 1_800_010_600,
+    first_settlement_at_unix: null,
     interval_seconds: 600,
     initial_reward_pool_aic: 5000,
     current_reward_pool_units: null,
@@ -95,4 +96,33 @@ test("renders the signed device reward total and period record", () => {
 test("formats reward countdowns without hiding long durations", () => {
   assert.equal(formatNniRewardCountdown(90_061, (zh) => zh), "1 天 1 小时 1 分 1 秒");
   assert.equal(formatNniRewardCountdown(0, (_zh, en) => en), "0s");
+});
+
+test("explains that the first eligible heartbeat anchors rewards and halving", () => {
+  const waitingRewards: NniRewardsResponse = {
+    ...rewards,
+    reward_policy: {
+      ...rewards.reward_policy,
+      phase: "waiting_first_heartbeat",
+      accepting_reward_heartbeats: true,
+      starts_in_seconds: 0,
+    },
+  };
+  const markup = renderToStaticMarkup(
+    <NniRewardsPanel
+      rewards={waitingRewards}
+      currentAicBalance="0.00000000"
+      currentAicBalanceLoading={false}
+      loading={false}
+      error={null}
+      pageSize={100}
+      t={(zh) => zh}
+      formatUnixDateTime={(value) => (value ? String(value) : "--")}
+      onRefresh={() => undefined}
+    />,
+  );
+
+  assert.match(markup, /等待全网首个有效心跳/);
+  assert.match(markup, /同时确定奖励启动时间、首个十分钟结算窗口和减半周期起点/);
+  assert.doesNotMatch(markup, /奖励开始倒计时/);
 });

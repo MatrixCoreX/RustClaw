@@ -1410,9 +1410,10 @@ export interface NniNetworkDeviceStats {
 }
 
 export interface NniRewardPolicy {
-  phase?: "disabled" | "scheduled" | "active" | string;
+  phase?: "disabled" | "scheduled" | "waiting_first_heartbeat" | "active" | string;
   accepting_reward_heartbeats?: boolean;
-  reward_start_time_unix?: number;
+  activation_not_before_unix?: number;
+  reward_start_time_unix?: number | null;
   starts_in_seconds?: number | null;
   first_settlement_at_unix?: number | null;
   interval_seconds: number;

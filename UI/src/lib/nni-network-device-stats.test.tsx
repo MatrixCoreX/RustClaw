@@ -37,9 +37,9 @@ test("shows registered allowlist devices and active devices from the previous he
       }}
       rewardPolicy={{
         interval_seconds: 600,
-        initial_reward_pool_aic: 5000,
-        current_reward_pool_units: "500000000000",
-        current_reward_pool_aic: "5000.00000000",
+        initial_reward_pool_aic: 500000,
+        current_reward_pool_units: "50000000000000",
+        current_reward_pool_aic: "500000.00000000",
         distribution: "equal_per_eligible_device",
         halving_epoch_unix: 1_799_000_000,
         halving_interval_seconds: 126_144_000,
@@ -72,9 +72,9 @@ test("shows registered allowlist devices and active devices from the previous he
   assert.match(markup, /data-nni-window-reward-layout="stacked"/);
   assert.equal((markup.match(/font-mono text-xs font-semibold text-white\/90/g) ?? []).length, 2);
   assert.doesNotMatch(markup, /当前每 10 分钟总奖励/);
-  assert.match(markup, />5000<\/span>/);
+  assert.match(markup, />500000<\/span>/);
   assert.match(markup, />62\.50000000<\/span>/);
-  assert.doesNotMatch(markup, /5000\.00000000/);
+  assert.doesNotMatch(markup, /500000\.00000000/);
   assert.doesNotMatch(markup, /AIC/);
   assert.doesNotMatch(markup, /由本周期有效心跳设备平分/);
   assert.match(markup, /首跳/);
@@ -133,7 +133,10 @@ test("asset account UI keeps recovery while adding custom bind, replacement, and
   assert.match(dialogSource, /data-nni-asset-account-dialog/);
   assert.match(dialogSource, /t\("输入私钥", "Use private key"\)/);
   assert.match(dialogSource, /t\("外部签名", "External signature"\)/);
-  assert.match(dialogSource, /data-nni-created-owner-join/);
+  assert.match(dialogSource, /t\("前往 HTTPS 设置", "Open HTTPS settings"\)/);
+  assert.match(dialogSource, /data-nni-insecure-http-risk-acceptance="true"/);
+  assert.match(dialogSource, /本浏览器会话通过 HTTP 操作资产私钥的风险/);
+  assert.match(dialogSource, /data-nni-created-owner-bind/);
   assert.match(dialogSource, /t\("确认已保存私钥", "Confirm private-key backup"\)/);
   assert.match(dialogSource, /不会发送给本机服务、远程节点或写入存储/);
   assert.match(dialogSource, /data-nni-recovery-warning="true"/);
