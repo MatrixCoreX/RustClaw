@@ -360,6 +360,10 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       if (nniJoinRejectsDevicePublicKey(body.error, body.data)) {
         setNniDeviceAuthorizationDenied(true);
       }
+      if (body.error === "nni_asset_device_already_bound" && body.data?.local_binding_restored) {
+        setNniAssetOwnerPubkey(body.data.asset_owner_pubkey ?? null);
+        setNniJoined(false);
+      }
       throw new Error(nniJoinErrorMessage(body.error, body.data, t("NNI 加入请求未完成。", "The NNI join request did not complete."), lang));
     }
     return body.data;
@@ -571,11 +575,10 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       tone: "danger",
     });
     if (!confirmed) return null;
+    setNniAssetOwnerPubkey(null);
+    setNniJoined(false);
+    setNniOwnerAuthorizationChallenge(null);
     const nodeUrl = selectedNniNodeUrl();
-    if (!nodeUrl) {
-      setNniActionError(t("请先选择 NNI 节点。", "Select an NNI node first."));
-      return null;
-    }
     setNniOwnerActionLoading("unbind");
     setNniActionError(null);
     setNniActionMessage(null);
@@ -619,8 +622,11 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         "The device signature was verified and the asset key was unbound from this device.",
       ));
       return verifyBody.data;
-    } catch (err) {
-      setNniActionError(formatNniErrorCause(err, t, t("资产解绑请求失败。", "Asset unbind request failed.")));
+    } catch {
+      setNniActionError(t(
+        "本机保存的资产公钥已清除，心跳已停止；远端解绑尚未确认，请在网络恢复后重新绑定或检查远端记录。",
+        "The locally stored asset public key was cleared and heartbeats stopped. Remote unbinding is not confirmed; reconnect or review the remote record after network recovery.",
+      ));
       return null;
     } finally {
       setNniOwnerActionLoading(null);

@@ -548,8 +548,10 @@ async fn nni_join_request(
                         }
                         return (StatusCode::OK, Json(body));
                     }
-                    Ok(body) => {
+                    Ok(mut body) => {
                         let data_ref = body.data.as_ref();
+                        let remote_error_code =
+                            nni_remote_api_error_code(&body, "nni_remote_join_failed");
                         let mut record = nni_request_record(
                             "nni_join",
                             data_ref
@@ -565,13 +567,54 @@ async fn nni_join_request(
                         record.device_pubkey = Some(device_pubkey.clone());
                         record.node_url = Some(node_url.clone());
                         record.compliant = Some(false);
-                        record.error_code = Some(nni_remote_api_error_code(
-                            &body,
-                            "nni_remote_join_failed",
-                        ));
+                        record.error_code = Some(remote_error_code.clone());
                         record.created_at_ts =
                             Some(u64::try_from(current_unix_ts()).unwrap_or_default());
                         record_nni_request_event(&state, record);
+                        if remote_error_code == "nni_asset_device_already_bound" {
+                            let existing_owner = body
+                                .data
+                                .as_ref()
+                                .and_then(|data| data.get("asset_owner_pubkey"))
+                                .and_then(Value::as_str)
+                                .ok_or_else(|| anyhow::anyhow!("nni_remote_asset_owner_missing"))
+                                .and_then(|value| {
+                                    normalize_nni_owner_public_key(value).map_err(anyhow::Error::msg)
+                                });
+                            let existing_owner = match existing_owner {
+                                Ok(value) => value,
+                                Err(error) => {
+                                    return nni_join_error(
+                                        StatusCode::BAD_GATEWAY,
+                                        "nni_remote_asset_owner_invalid",
+                                        json!({
+                                            "status": "remote_asset_owner_invalid",
+                                            "detail": error.to_string(),
+                                        }),
+                                    );
+                                }
+                            };
+                            if let Err(error) =
+                                persist_nni_asset_owner_pubkey(&state, &existing_owner, true)
+                            {
+                                return nni_join_error(
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    "nni_asset_owner_persist_failed",
+                                    json!({
+                                        "status": "asset_owner_persist_failed",
+                                        "detail": error.to_string(),
+                                    }),
+                                );
+                            }
+                            if let Some(data) = body.data.as_mut().and_then(Value::as_object_mut) {
+                                data.insert("node_url".to_string(), Value::String(node_url));
+                                data.insert("local_binding_restored".to_string(), Value::Bool(true));
+                                data.insert("joined".to_string(), Value::Bool(false));
+                            }
+                            let axum_status = StatusCode::from_u16(status.as_u16())
+                                .unwrap_or(StatusCode::CONFLICT);
+                            return (axum_status, Json(body));
+                        }
                         attempts.push(json!({
                             "node_url": node_url,
                             "http_status": status.as_u16(),
@@ -785,10 +828,9 @@ async fn nni_join_verify(
                         .and_then(|data| data.get("compliant"))
                         .and_then(Value::as_bool)
                         .or_else(|| (status.is_success() && body.ok).then_some(true));
-                    record.error_code = Some(nni_remote_api_error_code(
-                        &body,
-                        "nni_remote_verify_failed",
-                    ));
+                    record.error_code = (!(status.is_success() && body.ok)).then(|| {
+                        nni_remote_api_error_code(&body, "nni_remote_verify_failed")
+                    });
                     record.created_at_ts = data_ref
                         .and_then(|data| data.get("verified_at_ts"))
                         .and_then(Value::as_u64)
@@ -1158,6 +1200,13 @@ async fn nni_owner_unbind_request(
             );
         }
     };
+    if let Err(error) = clear_nni_asset_owner_binding(&state) {
+        return nni_join_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "nni_asset_owner_clear_failed",
+            json!({"status": "asset_owner_clear_failed", "detail": error.to_string()}),
+        );
+    }
     let node_url = match normalize_nni_node_url(&req.node_url) {
         Ok(value) => value,
         Err(error) => {
@@ -1192,7 +1241,11 @@ async fn nni_owner_unbind_request(
             return nni_join_error(
                 StatusCode::BAD_GATEWAY,
                 "nni_owner_unbind_request_failed",
-                json!({"status": "remote_request_failed", "detail": error.to_string()}),
+                json!({
+                    "status": "remote_request_failed",
+                    "detail": error.to_string(),
+                    "local_binding_cleared": true,
+                }),
             );
         }
     };
@@ -1203,12 +1256,17 @@ async fn nni_owner_unbind_request(
             return nni_join_error(
                 StatusCode::BAD_GATEWAY,
                 "nni_owner_unbind_response_invalid",
-                json!({"status": "remote_bad_response", "detail": error.to_string()}),
+                json!({
+                    "status": "remote_bad_response",
+                    "detail": error.to_string(),
+                    "local_binding_cleared": true,
+                }),
             );
         }
     };
     if let Some(data) = body.data.as_mut().and_then(Value::as_object_mut) {
         data.insert("node_url".to_string(), Value::String(node_url));
+        data.insert("local_binding_cleared".to_string(), Value::Bool(true));
     }
     (
         StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY),
