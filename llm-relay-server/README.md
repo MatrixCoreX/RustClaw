@@ -14,6 +14,8 @@ challenge, and persists per-device UTC-day usage in its own SQLite database.
 - The default allowance is 100 dispatched upstream requests per device key per UTC day.
 - `/v1/models` and `/v1/quota` require authentication but do not consume model-call allowance.
 - Request bodies, responses, credentials, and tool arguments are not written to relay logs.
+- The nginx origin audit log records request IDs, paths, timing, source addresses, and AOP status,
+  but excludes query strings, cookies, authorization headers, and request bodies.
 - Caller-provided upstream URLs, headers, credentials, and unknown routing fields are rejected.
 - Both buffered and streaming upstream responses have a strict byte limit so a provider or proxy
   cannot force the relay to retain unbounded response data.
@@ -103,6 +105,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-Deployment templates are under `deploy/`. The service unit uses a dedicated unprivileged account,
+Deployment templates are under `deploy/`. Install `nginx-llm-relay-logging.conf` in nginx's `http`
+context before enabling `nginx-llm-relay.conf`. The service unit uses a dedicated unprivileged account,
 a private environment file, and a dedicated `/var/lib/llm-relay` data directory. Build the release
 binary on a compatible build host; do not install a Rust toolchain on a small production server.

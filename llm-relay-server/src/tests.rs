@@ -367,6 +367,7 @@ fn upstream_response_size_limit_rejects_overflow_and_oversized_chunks() {
 #[test]
 fn deployment_contract_hides_internal_routes_and_hardens_the_service() {
     let nginx = include_str!("../deploy/nginx-llm-relay.conf");
+    let security_logging = include_str!("../deploy/nginx-llm-relay-logging.conf");
     for expected in [
         "location = /health",
         "location ^~ /health/",
@@ -374,6 +375,7 @@ fn deployment_contract_hides_internal_routes_and_hardens_the_service() {
         "ssl_protocols TLSv1.2 TLSv1.3",
         "ssl_client_certificate /etc/nginx/certs/cloudflare-origin-pull-ca.pem",
         "ssl_verify_client on",
+        "access_log /var/log/nginx/llm-relay-origin-access.log llm_relay_origin",
         "Strict-Transport-Security",
         "proxy_set_header Forwarded \"\"",
         "limit_except GET POST",
@@ -387,6 +389,33 @@ fn deployment_contract_hides_internal_routes_and_hardens_the_service() {
         assert!(
             !nginx.lines().any(|line| line.trim() == forbidden),
             "IPv4 origin listener must remain absent: {forbidden}"
+        );
+    }
+    for expected in [
+        "$request_id",
+        "$remote_addr",
+        "$realip_remote_addr",
+        "$ssl_client_verify",
+        "$request_method",
+        "$uri",
+        "$status",
+        "$request_time",
+    ] {
+        assert!(
+            security_logging.contains(expected),
+            "missing origin audit field: {expected}"
+        );
+    }
+    for forbidden in [
+        "$request_uri",
+        "$args",
+        "$http_cookie",
+        "$http_authorization",
+        "$request_body",
+    ] {
+        assert!(
+            !security_logging.contains(forbidden),
+            "origin audit log must not include {forbidden}"
         );
     }
     let service = include_str!("../deploy/llm-relay.service");
