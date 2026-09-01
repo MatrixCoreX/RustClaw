@@ -372,6 +372,8 @@ fn deployment_contract_hides_internal_routes_and_hardens_the_service() {
         "location ^~ /health/",
         "location ^~ /internal/",
         "ssl_protocols TLSv1.2 TLSv1.3",
+        "ssl_client_certificate /etc/nginx/certs/cloudflare-origin-pull-ca.pem",
+        "ssl_verify_client on",
         "Strict-Transport-Security",
         "proxy_set_header Forwarded \"\"",
         "limit_except GET POST",
@@ -379,6 +381,12 @@ fn deployment_contract_hides_internal_routes_and_hardens_the_service() {
         assert!(
             nginx.contains(expected),
             "missing nginx hardening: {expected}"
+        );
+    }
+    for forbidden in ["listen 80;", "listen 443 ssl;"] {
+        assert!(
+            !nginx.lines().any(|line| line.trim() == forbidden),
+            "IPv4 origin listener must remain absent: {forbidden}"
         );
     }
     let service = include_str!("../deploy/llm-relay.service");
