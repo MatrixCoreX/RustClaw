@@ -322,14 +322,14 @@ test("NNI device action failure does not persist an implicit leave", async () =>
   await mounted.unmount();
 });
 
-test("NNI join exposes a structured public-key authorization rejection", async () => {
+test("NNI initial binding exposes a structured public-key authorization rejection", async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const assetOwnerPubkey = "5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M";
   let joinRequest: unknown = null;
   const apiFetch = async (path: string, init?: RequestInit) => {
     if (path === "/v1/nni/device/status?refresh=true") return apiResponse(readyChipStatus());
     if (path === "/v1/nni/config" && !init?.method) {
-      return apiResponse({ ...joinedConfig(), joined: false, asset_owner_pubkey: assetOwnerPubkey });
+      return apiResponse({ ...joinedConfig(), joined: false, asset_owner_pubkey: null });
     }
     if (path === "/v1/nni/join/request") {
       joinRequest = JSON.parse(String(init?.body));
@@ -362,7 +362,7 @@ test("NNI join exposes a structured public-key authorization rejection", async (
     mounted.runtime().updateNniSelectedNodeUrl("https://nni.example.test");
   });
   await act(async () => {
-    await mounted.runtime().joinNni();
+    await mounted.runtime().startNniCustomOwnerAuthorization(assetOwnerPubkey);
   });
 
   assert.equal(mounted.runtime().nniDeviceAuthorizationDenied, true);
@@ -417,7 +417,7 @@ test("NNI restores the server-side asset binding when local state is empty", asy
   await mounted.unmount();
 });
 
-test("NNI starts heartbeats only after the user explicitly joins", async () => {
+test("NNI starts heartbeats for an existing binding without creating another join challenge", async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const assetOwnerPubkey = "5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M";
   const requests: Array<{ path: string; body: Record<string, unknown> | null }> = [];
@@ -428,39 +428,6 @@ test("NNI starts heartbeats only after the user explicitly joins", async () => {
       return apiResponse({ ...joinedConfig(), joined: false, asset_owner_pubkey: assetOwnerPubkey });
     }
     if (path === "/v1/nni/device/status?refresh=true") return apiResponse(readyChipStatus());
-    if (path === "/v1/nni/join/request") {
-      return apiResponse({
-        status: "challenge_created",
-        task_id: "explicit-join",
-        challenge: "explicit-join-challenge",
-        device_pubkey: "ab".repeat(64),
-        node_url: "https://nni.example.test",
-        expires_at_ts: 1_900_000_000,
-        request_interval_seconds: 60,
-        asset_owner_pubkey: assetOwnerPubkey,
-        owner_signature_required: false,
-      });
-    }
-    if (path === "/v1/nni/device/action") {
-      return apiResponse({
-        action: "sign_challenge",
-        signature_chip_present: true,
-        payload: { signature: "cd".repeat(64) },
-      });
-    }
-    if (path === "/v1/nni/join/verify") {
-      return apiResponse({
-        status: "joined",
-        task_id: "explicit-join",
-        device_pubkey: "ab".repeat(64),
-        node_url: "https://nni.example.test",
-        compliant: true,
-        joined: true,
-        verified_at_ts: 1_800_000_000,
-        next_allowed_ts: 1_800_000_060,
-        asset_owner_pubkey: assetOwnerPubkey,
-      });
-    }
     if (path === "/v1/nni/config" && init?.method === "POST") {
       return apiResponse({ ...joinedConfig(), joined: true, asset_owner_pubkey: assetOwnerPubkey });
     }
@@ -480,6 +447,8 @@ test("NNI starts heartbeats only after the user explicitly joins", async () => {
 
   const configRequest = requests.find((request) => request.path === "/v1/nni/config" && request.body);
   assert.equal(configRequest?.body?.joined, true);
+  assert.equal(requests.some((request) => request.path === "/v1/nni/join/request"), false);
+  assert.equal(requests.some((request) => request.path === "/v1/nni/join/verify"), false);
   assert.equal(mounted.runtime().nniJoined, true);
   await mounted.unmount();
 });

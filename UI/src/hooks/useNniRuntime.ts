@@ -204,9 +204,11 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       }
       applyNniConfigResponse(body.data);
       setNniConfigError(null);
+      return true;
     } catch (err) {
       const message = formatNniErrorCause(err, t, t("NNI 配置更新失败。", "NNI configuration update failed."));
       setNniConfigError(message);
+      return false;
     }
   };
 
@@ -1036,32 +1038,10 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         await authorizeNniOwnerWithPrivateKey(ownerKeyPair.private_key);
         return;
       }
-      const task = await requestNniJoinTask(nniAssetOwnerPubkey);
-      if (!task?.challenge) {
-        throw new Error("nni_join_challenge_missing");
+      const enabled = await setNniJoinedPersisted(true, { persistRemoteNodes: true });
+      if (!enabled) {
+        throw new Error("nni_config_update_failed");
       }
-      if (task.owner_signature_required) {
-        throw new Error(t(
-          "远程节点要求资产密钥签名，请通过资产账户的重新绑定流程完成授权。",
-          "The remote node requires an asset-key signature. Complete authorization through the asset-account rebind flow.",
-        ));
-      }
-      const signatureResult = await runNniDeviceAction("sign_challenge", { challenge: task.challenge });
-      const signature = signatureResult?.payload?.signature;
-      if (!signature) {
-        throw new Error("nni_join_signature_missing");
-      }
-      setNniActionLoading("join_nni");
-      const verified = await verifyNniJoinTask(
-        task.task_id,
-        task.node_url,
-        signature,
-      );
-      if (!verified?.joined || !verified.compliant) {
-        throw new Error("nni_join_verify_rejected");
-      }
-      await setNniJoinedPersisted(true, { persistRemoteNodes: true });
-      setNniAssetOwnerPubkey(verified.asset_owner_pubkey ?? task.asset_owner_pubkey ?? null);
       setNniOwnerKeyPair(null);
       setNniDeviceAuthorizationDenied(false);
       setNniActionMessage(
