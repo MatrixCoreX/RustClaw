@@ -53,7 +53,12 @@ fn validate_nni_network_stats_sections(
     let phase_is_valid = policy
         .get("phase")
         .and_then(Value::as_str)
-        .is_some_and(|phase| matches!(phase, "disabled" | "scheduled" | "active"));
+        .is_some_and(|phase| {
+            matches!(
+                phase,
+                "disabled" | "scheduled" | "waiting_first_heartbeat" | "active"
+            )
+        });
     let current_reward_units_are_valid = policy
         .get("current_reward_pool_units")
         .is_some_and(|value| value.is_null() || nni_network_stats_integer_string(value));
@@ -81,14 +86,10 @@ fn validate_nni_network_stats_sections(
             .get("accepting_reward_heartbeats")
             .and_then(Value::as_bool)
             .is_none()
-        || policy
-            .get("reward_start_time_unix")
-            .and_then(Value::as_i64)
-            .is_none_or(|unix| unix < 0)
-        || policy
+        || !nni_network_stats_optional_unix(policy.get("reward_start_time_unix"))
+        || !policy
             .get("starts_in_seconds")
-            .and_then(Value::as_u64)
-            .is_none()
+            .is_some_and(|value| value.is_null() || value.as_u64().is_some())
         || !nni_network_stats_optional_unix(policy.get("first_settlement_at_unix"))
         || policy
             .get("interval_seconds")
@@ -600,11 +601,12 @@ mod nni_network_stats_unit_tests {
                 "window_seconds": 600
             },
             "reward_policy": {
-                "phase": "scheduled",
-                "accepting_reward_heartbeats": false,
-                "reward_start_time_unix": 1_800_000_000,
-                "starts_in_seconds": 300,
-                "first_settlement_at_unix": 1_800_000_600,
+                "phase": "waiting_first_heartbeat",
+                "accepting_reward_heartbeats": true,
+                "activation_not_before_unix": 1_800_000_000,
+                "reward_start_time_unix": null,
+                "starts_in_seconds": 0,
+                "first_settlement_at_unix": null,
                 "interval_seconds": 600,
                 "initial_reward_pool_aic": 5000,
                 "current_reward_pool_units": "500000000000",
