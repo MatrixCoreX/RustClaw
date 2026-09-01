@@ -7,7 +7,6 @@ import {
   nniJoinRejectsDevicePublicKey,
   parseNniRemoteNodeUrls,
   shortenHex,
-  nniTimestampSignatureReady,
   type UiLanguage,
 } from "../lib/nni-display";
 import { formatNniApiError, formatNniErrorCause } from "../lib/nni-api-error";
@@ -1003,19 +1002,6 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     }
   };
 
-  const testJoinNni = async () => {
-    const result = await runNniDeviceAction("sign_timestamp");
-    if (nniTimestampSignatureReady(result)) {
-      setNniActionMessage(
-        t(
-          "测试签名已完成：本机已生成时间戳签名。只有点击加入并通过服务端验签后，才会开启运行状态。",
-          "Test signature completed: this device generated a timestamp signature. The runtime starts only after Join passes server verification.",
-        ),
-      );
-    }
-    return result;
-  };
-
   const joinNni = async () => {
     setNniActionLoading("join_nni");
     setNniActionError(null);
@@ -1314,7 +1300,6 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     startNniOwnerUnbind,
     completeNniOwnerAuthorization,
     cancelNniOwnerAuthorization,
-    testJoinNni,
     fetchNniConfig,
     saveNniConfig,
     updateNniRemoteNodes,

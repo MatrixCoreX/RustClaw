@@ -12,7 +12,6 @@ import {
   nniJoinRejectsDevicePublicKey,
   nniPayloadHexField,
   nniSimulationControlMode,
-  nniTimestampSignatureReady,
   parseNniRemoteNodeUrls,
   rawNniPublicKeyHex,
   shortenHex,
@@ -65,36 +64,6 @@ test("shows raw P-256 NNI public keys as lossless compressed Base58", () => {
     value: "ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C",
     size: 33,
   });
-});
-
-test("recognizes completed timestamp signatures for NNI test join", () => {
-  assert.equal(
-    nniTimestampSignatureReady({
-      action: "sign_timestamp",
-      signature_chip_present: true,
-      message: "ok",
-      payload: { timestamp: 1_800_000_000, signature: "ab".repeat(64) },
-    }),
-    true,
-  );
-  assert.equal(
-    nniTimestampSignatureReady({
-      action: "sign_timestamp",
-      signature_chip_present: true,
-      message: "missing timestamp",
-      payload: { signature: "ab".repeat(64) },
-    }),
-    false,
-  );
-  assert.equal(
-    nniTimestampSignatureReady({
-      action: "sign_challenge",
-      signature_chip_present: true,
-      message: "different action",
-      payload: { timestamp: 1_800_000_000, signature: "ab".repeat(64) },
-    }),
-    false,
-  );
 });
 
 test("finds nested NNI join error codes", () => {

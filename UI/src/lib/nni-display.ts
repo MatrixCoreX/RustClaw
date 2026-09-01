@@ -178,17 +178,6 @@ export function nniPayloadHexField(payload?: NniDevicePayload | null): NniPayloa
   return null;
 }
 
-export function nniTimestampSignatureReady(value?: NniDeviceActionResponse | null): boolean {
-  const payload = value?.payload;
-  return (
-    value?.action === "sign_timestamp" &&
-    typeof payload?.timestamp === "number" &&
-    Number.isFinite(payload.timestamp) &&
-    typeof payload.signature === "string" &&
-    payload.signature.trim().length > 0
-  );
-}
-
 export function nniDeviceMessage(
   value: NniDeviceStatusResponse | NniDeviceActionResponse | null | undefined,
   lang: UiLanguage,
