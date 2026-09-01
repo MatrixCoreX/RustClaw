@@ -196,6 +196,43 @@ fn admin_key_is_isolated_from_client_usage() {
 }
 
 #[test]
+fn admin_allowlist_includes_devices_before_and_after_enrollment() {
+    let directory = tempdir().expect("temp directory");
+    let store = RelayStore::open(&directory.path().join("relay.db"), TEST_PEPPER).expect("store");
+    let pending_pubkey = "ab".repeat(64);
+    store
+        .allow_device("device-pending", &pending_pubkey, 250)
+        .expect("allow pending device");
+    let active = enroll_device(&store, "device-active", 100, 13);
+
+    let page = store
+        .admin_allowlist_page(1, 50, "enabled")
+        .expect("admin allowlist page");
+    assert_eq!(page.schema_version, 1);
+    assert_eq!(page.total, 2);
+    assert_eq!(page.enrolled_total, 1);
+    assert_eq!(page.devices.len(), 2);
+
+    let pending = page
+        .devices
+        .iter()
+        .find(|device| device.device_pubkey == pending_pubkey)
+        .expect("pending device");
+    assert_eq!(pending.enrollment_status, "not_enrolled");
+    assert!(pending.key_id.is_none());
+    assert_eq!(pending.daily_request_limit, 250);
+
+    let enrolled = page
+        .devices
+        .iter()
+        .find(|device| Some(device.device_pubkey.as_str()) == active.device_pubkey.as_deref())
+        .expect("enrolled device");
+    assert_eq!(enrolled.enrollment_status, "active");
+    assert_eq!(enrolled.key_id.as_deref(), Some(active.key_id.as_str()));
+    assert!(enrolled.key_created_at_epoch.is_some());
+}
+
+#[test]
 fn admin_usage_and_daily_limit_update_are_consistent() {
     let directory = tempdir().expect("temp directory");
     let store = RelayStore::open(&directory.path().join("relay.db"), TEST_PEPPER).expect("store");
