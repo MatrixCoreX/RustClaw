@@ -97,6 +97,10 @@ async fn run_server() -> anyhow::Result<()> {
         .route("/v1/chat/completions", post(chat_completions))
         .route("/internal/admin/usage", get(admin_usage))
         .route(
+            "/internal/admin/device-allowlist",
+            get(admin_device_allowlist),
+        )
+        .route(
             "/internal/admin/devices/:device_pubkey/daily-limit",
             put(update_admin_daily_limit),
         )
@@ -335,6 +339,13 @@ struct AdminUsageQuery {
 }
 
 #[derive(Debug, Deserialize)]
+struct AdminAllowlistQuery {
+    page: Option<String>,
+    per_page: Option<String>,
+    status: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct DailyLimitRequest {
     daily_request_limit: u32,
 }
@@ -395,6 +406,52 @@ async fn admin_usage(
         "relay admin usage read"
     );
     Ok(Json(json!({"ok": true, "data": usage})))
+}
+
+async fn admin_device_allowlist(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<AdminAllowlistQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let key = authenticate(&state, &headers)?;
+    key.require_scope("usage.admin.read")
+        .map_err(ApiError::from_store)?;
+    let page = parse_admin_page_value(
+        query.page.as_deref(),
+        1,
+        1_000_000,
+        "admin_allowlist_page_invalid",
+    )?;
+    let per_page = parse_admin_page_value(
+        query.per_page.as_deref(),
+        50,
+        100,
+        "admin_allowlist_per_page_invalid",
+    )?;
+    let status = query
+        .status
+        .as_deref()
+        .unwrap_or("all")
+        .trim()
+        .to_ascii_lowercase();
+    if !matches!(status.as_str(), "all" | "enabled" | "revoked") {
+        return Err(ApiError::bad_request(
+            "admin_allowlist_status_invalid",
+            "proxy.admin_allowlist_status_invalid",
+        ));
+    }
+    let allowlist = state
+        .store
+        .admin_allowlist_page(page, per_page, &status)
+        .map_err(|error| ApiError::from_store(StoreError::Database(error)))?;
+    info!(
+        actor_key_id = %key.key_id,
+        page,
+        per_page,
+        status,
+        "relay admin device allowlist read"
+    );
+    Ok(Json(json!({"ok": true, "data": allowlist})))
 }
 
 async fn update_admin_daily_limit(

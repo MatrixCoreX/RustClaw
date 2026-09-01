@@ -65,7 +65,8 @@ llm-relay-server key revoke KEY_ID
 `issue-admin` creates a separate service credential with read/write usage-administration scopes.
 It cannot call models or chat completions and is excluded from device counts and usage pages. Keep
 it only in the website backend environment. The loopback-only administration API provides paged
-device usage at `GET /internal/admin/usage` and updates an active limit at
+allowlist and enrollment state at `GET /internal/admin/device-allowlist`, paged device usage at
+`GET /internal/admin/usage`, and updates an active limit at
 `PUT /internal/admin/devices/:device_pubkey/daily-limit`; every limit change is written to the immutable
 `relay_admin_audit` table.
 

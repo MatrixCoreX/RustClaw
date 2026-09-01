@@ -121,6 +121,30 @@ pub struct AdminUsagePage {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct AdminAllowlistItem {
+    pub device_pubkey: String,
+    pub label: String,
+    pub enabled: bool,
+    pub daily_request_limit: u32,
+    pub created_at_epoch: i64,
+    pub revoked_at_epoch: Option<i64>,
+    pub enrollment_status: String,
+    pub key_id: Option<String>,
+    pub key_created_at_epoch: Option<i64>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct AdminAllowlistPage {
+    pub schema_version: u32,
+    pub page: u32,
+    pub per_page: u32,
+    pub total: u64,
+    pub total_pages: u64,
+    pub enrolled_total: u64,
+    pub devices: Vec<AdminAllowlistItem>,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct DailyLimitUpdate {
     pub schema_version: u32,
     pub device_pubkey: String,
@@ -957,6 +981,91 @@ impl RelayStore {
             total,
             total_pages,
             reset_at_epoch: next_day_epoch(day),
+            devices,
+        })
+    }
+
+    pub fn admin_allowlist_page(
+        &self,
+        page: u32,
+        per_page: u32,
+        status: &str,
+    ) -> anyhow::Result<AdminAllowlistPage> {
+        let offset = u64::from(page.saturating_sub(1)).saturating_mul(u64::from(per_page));
+        let connection = self
+            .connection
+            .lock()
+            .expect("relay database mutex poisoned");
+        let status_filter =
+            "(?1 = 'all' OR (?1 = 'enabled' AND a.enabled = 1) OR (?1 = 'revoked' AND a.enabled = 0))";
+        let total = connection.query_row(
+            &format!("SELECT COUNT(*) FROM relay_device_allowlist a WHERE {status_filter}"),
+            params![status],
+            |row| row.get::<_, u64>(0),
+        )?;
+        let enrolled_total = connection.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM relay_device_allowlist a
+                 WHERE {status_filter}
+                   AND EXISTS (
+                     SELECT 1 FROM relay_keys k
+                     WHERE k.device_pubkey = a.device_pubkey
+                       AND k.scopes NOT LIKE '%usage.admin.%'
+                   )"
+            ),
+            params![status],
+            |row| row.get::<_, u64>(0),
+        )?;
+        let mut statement = connection.prepare(&format!(
+            "SELECT a.device_pubkey, a.label, a.enabled, a.daily_request_limit,
+                    a.created_at_epoch, a.revoked_at_epoch,
+                    k.key_id, k.enabled, k.created_at_epoch
+             FROM relay_device_allowlist a
+             LEFT JOIN relay_keys k ON k.key_id = (
+               SELECT candidate.key_id FROM relay_keys candidate
+               WHERE candidate.device_pubkey = a.device_pubkey
+                 AND candidate.scopes NOT LIKE '%usage.admin.%'
+               ORDER BY candidate.enabled DESC, candidate.created_at_epoch DESC,
+                        candidate.key_id DESC
+               LIMIT 1
+             )
+             WHERE {status_filter}
+             ORDER BY a.enabled DESC, a.created_at_epoch DESC, a.device_pubkey
+             LIMIT ?2 OFFSET ?3"
+        ))?;
+        let rows = statement.query_map(params![status, per_page, offset], |row| {
+            let key_id = row.get::<_, Option<String>>(6)?;
+            let key_enabled = row.get::<_, Option<bool>>(7)?;
+            let enrollment_status = match (key_id.is_some(), key_enabled) {
+                (true, Some(true)) => "active",
+                (true, _) => "revoked",
+                (false, _) => "not_enrolled",
+            };
+            Ok(AdminAllowlistItem {
+                device_pubkey: row.get(0)?,
+                label: row.get(1)?,
+                enabled: row.get(2)?,
+                daily_request_limit: row.get(3)?,
+                created_at_epoch: row.get(4)?,
+                revoked_at_epoch: row.get(5)?,
+                enrollment_status: enrollment_status.to_string(),
+                key_id,
+                key_created_at_epoch: row.get(8)?,
+            })
+        })?;
+        let devices = rows.collect::<Result<Vec<_>, _>>()?;
+        let total_pages = if total == 0 {
+            0
+        } else {
+            total.div_ceil(u64::from(per_page))
+        };
+        Ok(AdminAllowlistPage {
+            schema_version: 1,
+            page,
+            per_page,
+            total,
+            total_pages,
+            enrolled_total,
             devices,
         })
     }
