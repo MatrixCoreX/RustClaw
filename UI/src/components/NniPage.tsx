@@ -20,7 +20,10 @@ import { useEffect, useRef, useState } from "react";
 
 import { writeTextToClipboard } from "../lib/auth-keys";
 import { latestNniRewardRecord, latestVisibleNniRewardAic } from "../lib/nni-apr";
-import type { NniOwnerKeyPair } from "../lib/nni-owner-public-key";
+import {
+  nniPrivateKeyOperationsAllowed,
+  type NniOwnerKeyPair,
+} from "../lib/nni-owner-public-key";
 import type { NniOwnerAuthorizationChallenge } from "../hooks/useNniRuntime";
 import {
   NniAssetAccountDialog,
@@ -137,6 +140,7 @@ export interface NniPageProps {
   onSetDeviceSimulation: (enabled: boolean) => unknown | Promise<unknown>;
   onOpenApr: () => void;
   onOpenBancor: () => void;
+  onOpenHttpsSettings: () => void;
   onActionMessageChange: (message: string | null) => void;
   onActionErrorChange: (message: string | null) => void;
 }
@@ -246,6 +250,7 @@ export function NniPage({
   onSetDeviceSimulation,
   onOpenApr,
   onOpenBancor,
+  onOpenHttpsSettings,
   onActionMessageChange,
   onActionErrorChange,
 }: NniPageProps) {
@@ -327,7 +332,9 @@ export function NniPage({
   const openOwnerDialog = (mode: NniAssetAccountDialogMode) => {
     onActionErrorChange(null);
     setOwnerDialogMode(mode);
-    if (mode === "create" && !nniOwnerKeyPair) void onGenerateOwner();
+    if (mode === "create" && !nniOwnerKeyPair && nniPrivateKeyOperationsAllowed()) {
+      void onGenerateOwner();
+    }
   };
 
   const copyPrimaryHex = (value?: string) => {
@@ -569,6 +576,7 @@ export function NniPage({
           onCompleteExternalAuthorization={onCompleteOwnerAuthorization}
           onCancelExternalAuthorization={onCancelOwnerAuthorization}
           onCopyText={copyPrimaryHex}
+          onOpenHttpsSettings={onOpenHttpsSettings}
         />
       ) : null}
 

@@ -380,6 +380,73 @@ test("NNI join exposes a structured public-key authorization rejection", async (
   await mounted.unmount();
 });
 
+test("NNI starts heartbeats only after the user explicitly joins", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const assetOwnerPubkey = "5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M";
+  const requests: Array<{ path: string; body: Record<string, unknown> | null }> = [];
+  const apiFetch = async (path: string, init?: RequestInit) => {
+    const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : null;
+    requests.push({ path, body });
+    if (path === "/v1/nni/config" && !init?.method) {
+      return apiResponse({ ...joinedConfig(), joined: false, asset_owner_pubkey: assetOwnerPubkey });
+    }
+    if (path === "/v1/nni/device/status?refresh=true") return apiResponse(readyChipStatus());
+    if (path === "/v1/nni/join/request") {
+      return apiResponse({
+        status: "challenge_created",
+        task_id: "explicit-join",
+        challenge: "explicit-join-challenge",
+        device_pubkey: "ab".repeat(64),
+        node_url: "https://nni.example.test",
+        expires_at_ts: 1_900_000_000,
+        request_interval_seconds: 60,
+        asset_owner_pubkey: assetOwnerPubkey,
+        owner_signature_required: false,
+      });
+    }
+    if (path === "/v1/nni/device/action") {
+      return apiResponse({
+        action: "sign_challenge",
+        signature_chip_present: true,
+        payload: { signature: "cd".repeat(64) },
+      });
+    }
+    if (path === "/v1/nni/join/verify") {
+      return apiResponse({
+        status: "joined",
+        task_id: "explicit-join",
+        device_pubkey: "ab".repeat(64),
+        node_url: "https://nni.example.test",
+        compliant: true,
+        joined: true,
+        verified_at_ts: 1_800_000_000,
+        next_allowed_ts: 1_800_000_060,
+        asset_owner_pubkey: assetOwnerPubkey,
+      });
+    }
+    if (path === "/v1/nni/config" && init?.method === "POST") {
+      return apiResponse({ ...joinedConfig(), joined: true, asset_owner_pubkey: assetOwnerPubkey });
+    }
+    if (path.startsWith("/v1/nni/records?")) {
+      return apiResponse({ records: [], page: 1, per_page: 10, total: 0, total_pages: 1 });
+    }
+    if (path.startsWith("/v1/nni/rewards?")) {
+      return apiResponse({ records: [], page: 1, per_page: 10, total: 0, total_pages: 1 });
+    }
+    throw new Error(`unexpected request: ${path}`);
+  };
+  const mounted = await mountRuntime(apiFetch);
+
+  await act(async () => mounted.runtime().fetchNniConfig());
+  assert.equal(mounted.runtime().nniJoined, false);
+  await act(async () => mounted.runtime().joinNni());
+
+  const configRequest = requests.find((request) => request.path === "/v1/nni/config" && request.body);
+  assert.equal(configRequest?.body?.joined, true);
+  assert.equal(mounted.runtime().nniJoined, true);
+  await mounted.unmount();
+});
+
 test("NNI asset owner generation is local and keeps the private key in transient UI state only", async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const requests: Array<{ path: string; body: unknown }> = [];
@@ -450,6 +517,7 @@ test("NNI recovery signs in the browser and never sends the owner private key", 
     if (path === "/v1/nni/config" && init?.method === "POST") {
       return apiResponse({
         ...joinedConfig(),
+        joined: false,
         asset_owner_pubkey: assetOwnerPubkey,
       });
     }
@@ -472,6 +540,8 @@ test("NNI recovery signs in the browser and never sends the owner private key", 
   assert.equal(requests[1].body?.task_id, "recovery-task-1");
   assert.equal(typeof requests[1].body?.owner_signature, "string");
   assert.equal(requests[2].path, "/v1/nni/config");
+  assert.equal(requests[2].body?.joined, false);
+  assert.equal(mounted.runtime().nniJoined, false);
   for (const request of requests) {
     assert.equal(Object.hasOwn(request.body ?? {}, "owner_private_key"), false);
     assert.equal(Object.hasOwn(request.body ?? {}, "private_key"), false);
@@ -523,7 +593,7 @@ test("NNI custom owner binding forwards external signatures without private key 
       });
     }
     if (path === "/v1/nni/config" && init?.method === "POST") {
-      return apiResponse({ ...joinedConfig(), asset_owner_pubkey: assetOwnerPubkey });
+      return apiResponse({ ...joinedConfig(), joined: false, asset_owner_pubkey: assetOwnerPubkey });
     }
     throw new Error(`unexpected request: ${path}`);
   };
@@ -550,6 +620,9 @@ test("NNI custom owner binding forwards external signatures without private key 
   assert.equal(verifyRequest?.body?.replace_existing_owner, false);
   assert.equal(Object.hasOwn(verifyRequest?.body ?? {}, "owner_private_key"), false);
   assert.equal(Object.hasOwn(verifyRequest?.body ?? {}, "private_key"), false);
+  const configRequest = requests.find((request) => request.path === "/v1/nni/config");
+  assert.equal(configRequest?.body?.joined, false);
+  assert.equal(mounted.runtime().nniJoined, false);
   assert.equal(mounted.runtime().nniAssetOwnerPubkey, assetOwnerPubkey);
   assert.equal(mounted.runtime().nniOwnerAuthorizationChallenge, null);
   await mounted.unmount();
@@ -602,7 +675,7 @@ test("NNI convenient binding signs in the browser and never sends private key ma
       });
     }
     if (path === "/v1/nni/config" && init?.method === "POST") {
-      return apiResponse({ ...joinedConfig(), asset_owner_pubkey: ownerValidation.publicKey });
+      return apiResponse({ ...joinedConfig(), joined: false, asset_owner_pubkey: ownerValidation.publicKey });
     }
     throw new Error(`unexpected request: ${path}`);
   };
@@ -620,6 +693,9 @@ test("NNI convenient binding signs in the browser and never sends private key ma
   assert.equal(Object.hasOwn(verify?.body ?? {}, "owner_private_key"), false);
   assert.equal(Object.hasOwn(verify?.body ?? {}, "private_key"), false);
   assert.equal(JSON.stringify(requests).includes(ownerPrivateKey), false);
+  const configRequest = requests.find((item) => item.path === "/v1/nni/config");
+  assert.equal(configRequest?.body?.joined, false);
+  assert.equal(mounted.runtime().nniJoined, false);
   assert.equal(mounted.runtime().nniAssetOwnerPubkey, ownerValidation.publicKey);
   assert.equal(mounted.runtime().nniOwnerAuthorizationChallenge, null);
   await mounted.unmount();
@@ -674,7 +750,7 @@ test("NNI owner replacement requires the hardware and target-owner signatures", 
       });
     }
     if (path === "/v1/nni/config" && init?.method === "POST") {
-      return apiResponse({ ...joinedConfig(), asset_owner_pubkey: targetOwner });
+      return apiResponse({ ...joinedConfig(), joined: false, asset_owner_pubkey: targetOwner });
     }
     throw new Error(`unexpected request: ${path}`);
   };
@@ -701,6 +777,9 @@ test("NNI owner replacement requires the hardware and target-owner signatures", 
   assert.equal(Object.hasOwn(verify?.body ?? {}, "previous_owner_signature"), false);
   assert.equal(verify?.body?.replace_existing_owner, true);
   assert.equal(Object.hasOwn(verify?.body ?? {}, "owner_private_key"), false);
+  const configRequest = requests.find((item) => item.path === "/v1/nni/config" && item.body);
+  assert.equal(configRequest?.body?.joined, false);
+  assert.equal(mounted.runtime().nniJoined, false);
   assert.equal(mounted.runtime().nniAssetOwnerPubkey, targetOwner);
   await mounted.unmount();
 });

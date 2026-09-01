@@ -66,7 +66,7 @@ interface DashboardNavigationItem {
   page?: ConsolePage;
 }
 
-const DASHBOARD_SECTION_STORAGE_KEY = appStorageKey("monitor.dashboardSection");
+export const DASHBOARD_SECTION_STORAGE_KEY = appStorageKey("monitor.dashboardSection");
 const DASHBOARD_SOURCE_BUILD_STORAGE_KEY = appStorageKey("monitor.sourceBuildExpanded");
 const DASHBOARD_SECTION_IDS = new Set<DashboardSection>([
   "overview",

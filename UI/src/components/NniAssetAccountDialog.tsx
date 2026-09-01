@@ -6,16 +6,20 @@ import {
   Loader2,
   ShieldAlert,
   ShieldCheck,
+  SquareArrowOutUpRight,
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { NniOwnerAuthorizationChallenge } from "../hooks/useNniRuntime";
 import {
+  nniInsecureHttpPrivateKeyRiskAccepted,
   nniPrivateKeyOperationsAllowed,
+  nniPrivateKeyOperationsRequireHttpRiskAcceptance,
   nniOwnerKeyPairBackupFilename,
   normalizeNniOwnerSignature,
   serializeNniOwnerKeyPairBackup,
+  setNniInsecureHttpPrivateKeyRiskAccepted,
   validateNniOwnerPrivateKey,
   validateNniOwnerPublicKey,
   type NniOwnerKeyPair,
@@ -46,6 +50,7 @@ export interface NniAssetAccountDialogProps {
   onCompleteExternalAuthorization: (signature: string) => unknown | Promise<unknown>;
   onCancelExternalAuthorization: () => void;
   onCopyText: (value: string) => void;
+  onOpenHttpsSettings: () => void;
 }
 
 export function NniAssetAccountDialog({
@@ -68,9 +73,17 @@ export function NniAssetAccountDialog({
   onCompleteExternalAuthorization,
   onCancelExternalAuthorization,
   onCopyText,
+  onOpenHttpsSettings,
 }: NniAssetAccountDialogProps) {
   const { confirm } = useUiDialog();
-  const privateKeyOperationsAllowed = nniPrivateKeyOperationsAllowed();
+  const insecureHttpRiskRequired = nniPrivateKeyOperationsRequireHttpRiskAcceptance();
+  const [insecureHttpRiskAccepted, setInsecureHttpRiskAccepted] = useState(
+    () => nniInsecureHttpPrivateKeyRiskAccepted(),
+  );
+  const privateKeyOperationsAllowed = nniPrivateKeyOperationsAllowed(
+    undefined,
+    insecureHttpRiskAccepted,
+  );
   const [authorizationMode, setAuthorizationMode] = useState<AuthorizationMode>(
     privateKeyOperationsAllowed ? "private_key" : "external_signature",
   );
@@ -135,6 +148,25 @@ export function NniAssetAccountDialog({
     setExternalSignature("");
   };
 
+  const updateInsecureHttpRiskAcceptance = (accepted: boolean) => {
+    setNniInsecureHttpPrivateKeyRiskAccepted(accepted);
+    setInsecureHttpRiskAccepted(accepted);
+    if (accepted && (mode === "bind" || mode === "replace")) {
+      if (authorizationChallenge) onCancelExternalAuthorization();
+      setAuthorizationMode("private_key");
+      setExternalSignature("");
+    } else if (!accepted && authorizationMode === "private_key") {
+      setAuthorizationMode("external_signature");
+      setPrivateKey("");
+    }
+  };
+
+  const openHttpsSettings = () => {
+    if (loading) return;
+    close();
+    onOpenHttpsSettings();
+  };
+
   const submitPrivateKeyAuthorization = async () => {
     if (!privateKeyValidation.ok) return;
     const result = await Promise.resolve(onAuthorizeWithPrivateKey(privateKeyValidation.normalized));
@@ -149,15 +181,15 @@ export function NniAssetAccountDialog({
     if (result) onClose();
   };
 
-  const joinCreatedAccount = async () => {
+  const bindCreatedAccount = async () => {
     if (!generatedKeyPair) return;
     const saved = await confirm({
       title: t("确认已保存私钥", "Confirm private-key backup"),
       message: t(
-        "请确认你已经把私钥安全地离线保存。加入后页面将不再显示这把私钥；私钥丢失会影响换机恢复和资产控制。",
-        "Confirm that you saved the private key securely offline. It will no longer be shown after joining. Losing it affects device recovery and asset control.",
+        "请确认你已经把私钥安全地离线保存。绑定后页面将不再显示这把私钥；私钥丢失会影响换机恢复和资产控制。绑定不会开启心跳，你仍需在 NNI 页面点击加入。",
+        "Confirm that you saved the private key securely offline. It will no longer be shown after binding. Losing it affects device recovery and asset control. Binding does not start heartbeats; you must still select Join on the NNI page.",
       ),
-      confirmLabel: t("已保存，加入", "Saved, join now"),
+      confirmLabel: t("已保存，绑定", "Saved, bind account"),
     });
     if (!saved) return;
     const result = await Promise.resolve(onAuthorizeWithPrivateKey(generatedKeyPair.private_key));
@@ -237,13 +269,32 @@ export function NniAssetAccountDialog({
             </p>
           ) : null}
 
-          {!privateKeyOperationsAllowed ? (
-            <div role="alert" className="flex items-start gap-2 rounded-md border border-amber-400/30 bg-amber-500/10 px-3 py-2.5 text-sm leading-6 text-amber-100">
-              <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>{t(
-                "当前页面使用非本机 HTTP 连接，私钥输入、显示和签名已禁用。请改用 HTTPS，或在设备本机通过 localhost 操作。",
-                "Private-key input, display, and signing are disabled over non-loopback HTTP. Use HTTPS or operate through localhost on this device.",
-              )}</span>
+          {insecureHttpRiskRequired ? (
+            <div role="alert" className="grid gap-3 rounded-md border border-amber-400/30 bg-amber-500/10 px-3 py-3 text-sm leading-6 text-amber-100">
+              <div className="flex items-start gap-2">
+                <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{t(
+                  "当前页面使用局域网 HTTP。建议先配置 HTTPS；否则中间人可能篡改页面并窃取资产私钥。",
+                  "This page uses LAN HTTP. Set up HTTPS first when possible; otherwise a man-in-the-middle could alter the page and steal an asset private key.",
+                )}</span>
+              </div>
+              <button type="button" className="theme-secondary-btn w-fit px-3 py-2 text-sm" disabled={loading} onClick={openHttpsSettings}>
+                <SquareArrowOutUpRight className="h-4 w-4" />
+                {t("前往 HTTPS 设置", "Open HTTPS settings")}
+              </button>
+              <label className="flex cursor-pointer items-start gap-2 rounded-md border border-amber-300/20 bg-black/10 px-3 py-2.5 text-sm leading-5">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 shrink-0 accent-amber-400"
+                  checked={insecureHttpRiskAccepted}
+                  onChange={(event) => updateInsecureHttpRiskAcceptance(event.target.checked)}
+                  data-nni-insecure-http-risk-acceptance="true"
+                />
+                <span>{t(
+                  "我确认当前内网、路由器以及这台电脑或手机可信，并接受本浏览器会话通过 HTTP 操作资产私钥的风险。",
+                  "I confirm that this LAN, router, and computer or phone are trusted, and I accept the risk of using asset private keys over HTTP for this browser session.",
+                )}</span>
+              </label>
             </div>
           ) : null}
 
@@ -257,8 +308,8 @@ export function NniAssetAccountDialog({
                 <div className="flex items-start gap-2 rounded-md border border-amber-400/30 bg-amber-500/10 px-3 py-2.5 text-sm leading-6 text-amber-100">
                   <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
                   <span>{t(
-                    "系统不会保存私钥。JSON 备份包含明文私钥；下载后请转移到安全的离线位置，确认备份后再点击加入。",
-                    "The system does not save the private key. The JSON backup contains it in plain text; move the file to a secure offline location and confirm the backup before joining.",
+                    "系统不会保存私钥。JSON 备份包含明文私钥；下载后请转移到安全的离线位置，确认备份后再绑定资产账户。绑定不会开启心跳。",
+                    "The system does not save the private key. The JSON backup contains it in plain text; move the file to a secure offline location before binding the asset account. Binding does not start heartbeats.",
                   )}</span>
                 </div>
                 <label className="grid gap-1.5 text-xs text-white/60">
@@ -289,11 +340,11 @@ export function NniAssetAccountDialog({
                     type="button"
                     className="theme-accent-btn px-4 py-2 text-sm"
                     disabled={!chipReady || !remoteNodeReady || loading}
-                    onClick={() => void joinCreatedAccount()}
-                    data-nni-created-owner-join="true"
+                    onClick={() => void bindCreatedAccount()}
+                    data-nni-created-owner-bind="true"
                   >
                     {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-                    {t("加入", "Join")}
+                    {t("绑定资产账户", "Bind asset account")}
                   </button>
                 </div>
               </>

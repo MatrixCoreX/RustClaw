@@ -2,6 +2,8 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { ripemd160 } from "@noble/hashes/legacy.js";
 import { base58 } from "@scure/base";
 
+import { appStorageKey } from "./product-identity";
+
 const OWNER_PUBLIC_KEY_BYTES = 33;
 const OWNER_PRIVATE_KEY_BYTES = 32;
 const OWNER_CHECKSUM_BYTES = 4;
@@ -9,6 +11,13 @@ const OWNER_KEY_SUFFIX = new TextEncoder().encode("K1");
 const OWNER_RANDOM_SEED_BYTES = 48;
 
 export const NNI_PRIVATE_KEY_INSECURE_TRANSPORT_ERROR = "nni_private_key_insecure_transport";
+export const NNI_INSECURE_HTTP_PRIVATE_KEY_SESSION_KEY = appStorageKey(
+  "security.allowInsecureHttpPrivateKeySession",
+);
+
+type RiskAcceptanceStorage = Pick<Storage, "getItem" | "removeItem" | "setItem">;
+
+let insecureHttpPrivateKeyRiskAcceptedInMemory = false;
 
 export interface NniOwnerKeyPair {
   key_type: "K1";
@@ -89,6 +98,15 @@ function browserLocation(): NniPrivateKeyLocation | null {
     : { protocol: window.location.protocol, hostname: window.location.hostname };
 }
 
+function browserSessionStorage(): RiskAcceptanceStorage | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
 function isIpv4Loopback(hostname: string): boolean {
   const parts = hostname.split(".");
   return parts.length === 4
@@ -98,14 +116,55 @@ function isIpv4Loopback(hostname: string): boolean {
 
 export function nniPrivateKeyOperationsAllowed(
   location: NniPrivateKeyLocation | null = browserLocation(),
+  insecureHttpRiskAccepted = nniInsecureHttpPrivateKeyRiskAccepted(),
 ): boolean {
   // Non-browser callers cannot collect a key through a web transport. Browser callers must
-  // use TLS unless they are on the loopback secure-context exception.
+  // use TLS unless they are on loopback or explicitly accepted the current HTTP-session risk.
   if (!location) return true;
   if (location.protocol === "https:") return true;
   if (location.protocol !== "http:") return false;
   const hostname = location.hostname.trim().toLowerCase().replace(/^\[|\]$/g, "");
-  return hostname === "localhost" || hostname === "::1" || isIpv4Loopback(hostname);
+  return hostname === "localhost"
+    || hostname === "::1"
+    || isIpv4Loopback(hostname)
+    || insecureHttpRiskAccepted;
+}
+
+export function nniPrivateKeyOperationsRequireHttpRiskAcceptance(
+  location: NniPrivateKeyLocation | null = browserLocation(),
+): boolean {
+  if (!location || location.protocol !== "http:") return false;
+  const hostname = location.hostname.trim().toLowerCase().replace(/^\[|\]$/g, "");
+  return hostname !== "localhost" && hostname !== "::1" && !isIpv4Loopback(hostname);
+}
+
+export function nniInsecureHttpPrivateKeyRiskAccepted(
+  storage: RiskAcceptanceStorage | null = browserSessionStorage(),
+): boolean {
+  if (insecureHttpPrivateKeyRiskAcceptedInMemory) return true;
+  if (!storage) return false;
+  try {
+    return storage.getItem(NNI_INSECURE_HTTP_PRIVATE_KEY_SESSION_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+export function setNniInsecureHttpPrivateKeyRiskAccepted(
+  accepted: boolean,
+  storage: RiskAcceptanceStorage | null = browserSessionStorage(),
+): void {
+  insecureHttpPrivateKeyRiskAcceptedInMemory = accepted;
+  if (!storage) return;
+  try {
+    if (accepted) {
+      storage.setItem(NNI_INSECURE_HTTP_PRIVATE_KEY_SESSION_KEY, "true");
+    } else {
+      storage.removeItem(NNI_INSECURE_HTTP_PRIVATE_KEY_SESSION_KEY);
+    }
+  } catch {
+    // The in-memory grant still supports this page session when browser storage is unavailable.
+  }
 }
 
 export function assertNniPrivateKeyOperationsAllowed(

@@ -118,6 +118,18 @@ fn nni_heartbeat_worker_sleeps_to_the_exact_due_time_without_busy_polling() {
 }
 
 #[test]
+fn explicit_join_forces_the_first_heartbeat_without_waiting_for_an_old_due_time() {
+    assert!(nni_join_transition_starts_heartbeat(Some(true), false));
+    assert!(!nni_join_transition_starts_heartbeat(Some(true), true));
+    assert!(!nni_join_transition_starts_heartbeat(Some(false), false));
+    assert!(!nni_join_transition_starts_heartbeat(None, false));
+    assert!(!nni_heartbeat_is_due(false, Some(1_590), 1_550));
+    assert!(nni_heartbeat_is_due(true, Some(1_590), 1_550));
+    assert!(nni_heartbeat_is_due(false, Some(1_590), 1_590));
+    assert!(nni_heartbeat_is_due(false, None, 1_550));
+}
+
+#[test]
 fn nni_remote_error_compatibility_never_treats_prose_as_a_machine_token() {
     let prose = ApiResponse::<Value> {
         ok: false,
@@ -846,8 +858,15 @@ fn nni_asset_owner_binding_can_replace_and_clear_only_when_explicit() {
         "nni_asset_owner_conflict"
     );
 
+    let mut active_config = read_nni_runtime_config(&state).expect("read owner before replacement");
+    active_config.joined = true;
+    write_nni_runtime_config(&state, &active_config).expect("enable NNI before replacement");
     persist_nni_asset_owner_pubkey(&state, &second, true).expect("replace owner explicitly");
     let mut config = read_nni_runtime_config(&state).expect("read replacement");
+    assert!(
+        !config.joined,
+        "binding an asset owner must not keep heartbeats enabled"
+    );
     config.joined = true;
     write_nni_runtime_config(&state, &config).expect("enable NNI for clear test");
     clear_nni_asset_owner_binding(&state).expect("clear current device binding");
