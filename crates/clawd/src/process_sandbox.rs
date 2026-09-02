@@ -116,6 +116,12 @@ enum ProcessLifetime {
     DurableAsync,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProcessNamespacePolicy {
+    Isolated,
+    HostVisible,
+}
+
 trait ProcessSandboxBackend {
     fn token(&self) -> &'static str;
     fn available(&self) -> bool;
@@ -207,20 +213,43 @@ pub(crate) fn prepare_process_command(
     program: impl AsRef<OsStr>,
     request: ProcessSandboxRequest<'_>,
 ) -> Result<PreparedProcessCommand, &'static str> {
-    prepare_process_command_for_lifetime(program, request, ProcessLifetime::ParentBound)
+    prepare_process_command_for_lifetime(
+        program,
+        request,
+        ProcessLifetime::ParentBound,
+        ProcessNamespacePolicy::Isolated,
+    )
+}
+
+pub(crate) fn prepare_host_process_command(
+    program: impl AsRef<OsStr>,
+    request: ProcessSandboxRequest<'_>,
+) -> Result<PreparedProcessCommand, &'static str> {
+    prepare_process_command_for_lifetime(
+        program,
+        request,
+        ProcessLifetime::ParentBound,
+        ProcessNamespacePolicy::HostVisible,
+    )
 }
 
 pub(crate) fn prepare_durable_process_command(
     program: impl AsRef<OsStr>,
     request: ProcessSandboxRequest<'_>,
 ) -> Result<PreparedProcessCommand, &'static str> {
-    prepare_process_command_for_lifetime(program, request, ProcessLifetime::DurableAsync)
+    prepare_process_command_for_lifetime(
+        program,
+        request,
+        ProcessLifetime::DurableAsync,
+        ProcessNamespacePolicy::Isolated,
+    )
 }
 
 fn prepare_process_command_for_lifetime(
     program: impl AsRef<OsStr>,
     request: ProcessSandboxRequest<'_>,
     lifetime: ProcessLifetime,
+    process_namespace: ProcessNamespacePolicy,
 ) -> Result<PreparedProcessCommand, &'static str> {
     if request.mode == ToolSandboxMode::DangerFull {
         return Ok(PreparedProcessCommand {
@@ -238,7 +267,31 @@ fn prepare_process_command_for_lifetime(
             _ => "sandbox_backend_unavailable",
         });
     }
-    driver.prepare(program.as_ref(), request, lifetime)
+    match process_namespace {
+        ProcessNamespacePolicy::Isolated => driver.prepare(program.as_ref(), request, lifetime),
+        ProcessNamespacePolicy::HostVisible => {
+            #[cfg(target_os = "linux")]
+            {
+                match &resolved {
+                    ResolvedBackend::Bubblewrap(_) => prepare_bubblewrap_with_process_namespace(
+                        program.as_ref(),
+                        request,
+                        lifetime,
+                        ProcessNamespacePolicy::HostVisible,
+                    ),
+                    _ => Err("sandbox_host_process_backend_unsupported"),
+                }
+            }
+            #[cfg(target_os = "macos")]
+            {
+                driver.prepare(program.as_ref(), request, lifetime)
+            }
+            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+            {
+                Err("sandbox_backend_unsupported_platform")
+            }
+        }
+    }
 }
 
 fn resolve_backend(requested: ToolSandboxBackend) -> Result<ResolvedBackend, &'static str> {
@@ -374,24 +427,41 @@ fn prepare_bubblewrap(
     request: ProcessSandboxRequest<'_>,
     lifetime: ProcessLifetime,
 ) -> Result<PreparedProcessCommand, &'static str> {
+    prepare_bubblewrap_with_process_namespace(
+        program,
+        request,
+        lifetime,
+        ProcessNamespacePolicy::Isolated,
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn prepare_bubblewrap_with_process_namespace(
+    program: &OsStr,
+    request: ProcessSandboxRequest<'_>,
+    lifetime: ProcessLifetime,
+    process_namespace: ProcessNamespacePolicy,
+) -> Result<PreparedProcessCommand, &'static str> {
     let backend = find_bubblewrap().ok_or("sandbox_backend_unavailable")?;
     let (workspace_root, execution_root) = canonical_roots(request)?;
     let mut command = Command::new(backend);
     if lifetime == ProcessLifetime::ParentBound {
         command.arg("--die-with-parent");
     }
+    command.arg("--new-session");
+    if process_namespace == ProcessNamespacePolicy::Isolated {
+        command.arg("--unshare-pid");
+    }
     command
-        .arg("--new-session")
-        .arg("--unshare-pid")
         .arg("--unshare-ipc")
         .arg("--unshare-uts")
         .arg("--ro-bind")
         .arg("/")
-        .arg("/")
-        .arg("--proc")
-        .arg("/proc")
-        .arg("--dev")
-        .arg("/dev");
+        .arg("/");
+    if process_namespace == ProcessNamespacePolicy::Isolated {
+        command.arg("--proc").arg("/proc");
+    }
+    command.arg("--dev").arg("/dev");
     if request.network == ProcessNetworkPolicy::Deny {
         command.arg("--unshare-net");
     }

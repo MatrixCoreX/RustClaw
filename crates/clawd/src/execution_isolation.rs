@@ -87,6 +87,18 @@ pub(crate) fn plan_execution_isolation(
             remote: false,
             requires_cleanup: false,
         },
+        CapabilityIsolationProfile::HostProcess => ExecutionIsolationPlan {
+            profile: profile_token,
+            task_key,
+            workspace_root: workspace_root.to_path_buf(),
+            execution_root: workspace_root.to_path_buf(),
+            allocation_root: None,
+            creation_kind: "reuse_host_process_view".to_string(),
+            cleanup_ref: None,
+            read_only: true,
+            remote: false,
+            requires_cleanup: false,
+        },
         CapabilityIsolationProfile::LocalTempWorkspace => {
             let allocation_root = base.join(TEMP_DIR).join(&task_key);
             let cleanup_ref = Some(format!("isolation:{TEMP_DIR}:{task_key}"));
@@ -152,7 +164,7 @@ pub(crate) fn create_execution_isolation(
             create_git_worktree(plan)?;
             write_isolation_marker(plan, created_at_unix)?;
         }
-        "reuse_current_workspace" | "reuse_read_only_workspace" => {}
+        "reuse_current_workspace" | "reuse_read_only_workspace" | "reuse_host_process_view" => {}
         "delegate_remote_executor" => bail!("remote_executor_unavailable"),
         other => bail!("unknown_isolation_creation_kind:{other}"),
     }
@@ -275,6 +287,7 @@ pub(crate) fn isolation_profile_from_token(token: &str) -> Option<CapabilityIsol
         "local_temp_workspace" => Some(CapabilityIsolationProfile::LocalTempWorkspace),
         "remote_executor" => Some(CapabilityIsolationProfile::RemoteExecutor),
         "read_only" => Some(CapabilityIsolationProfile::ReadOnly),
+        "host_process" => Some(CapabilityIsolationProfile::HostProcess),
         _ => None,
     }
 }

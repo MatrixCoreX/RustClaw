@@ -1154,17 +1154,27 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
             additional_writable_targets: Vec::new(),
         }
     } else {
-        crate::process_sandbox::prepare_process_command(
-            &state.skill_rt.skill_runner_path,
-            crate::process_sandbox::ProcessSandboxRequest {
-                mode: sandbox_mode,
-                backend: state.skill_rt.tools_policy.sandbox_backend,
-                workspace_root: &state.skill_rt.workspace_root,
-                execution_root: &state.skill_rt.workspace_root,
-                network,
-                additional_writable_paths: &additional_writable_paths,
-            },
-        )
+        let request = crate::process_sandbox::ProcessSandboxRequest {
+            mode: sandbox_mode,
+            backend: state.skill_rt.tools_policy.sandbox_backend,
+            workspace_root: &state.skill_rt.workspace_root,
+            execution_root: &state.skill_rt.workspace_root,
+            network,
+            additional_writable_paths: &additional_writable_paths,
+        };
+        if action_mapping.as_ref().is_some_and(|mapping| {
+            mapping.isolation_profile == Some(CapabilityIsolationProfile::HostProcess)
+        }) {
+            crate::process_sandbox::prepare_host_process_command(
+                &state.skill_rt.skill_runner_path,
+                request,
+            )
+        } else {
+            crate::process_sandbox::prepare_process_command(
+                &state.skill_rt.skill_runner_path,
+                request,
+            )
+        }
         .map_err(|reason_code| {
             format!(
                 "skill-runner sandbox unavailable: reason_code={reason_code} sandbox_mode={} sandbox_backend={}",
@@ -1837,8 +1847,10 @@ fn action_scoped_runner_sandbox_mode(
     if default_mode == ToolSandboxMode::DangerFull {
         ToolSandboxMode::DangerFull
     } else if mapping.is_some_and(|mapping| {
-        mapping.isolation_profile == Some(CapabilityIsolationProfile::ReadOnly)
-            || mapping.filesystem_write == Some(false)
+        matches!(
+            mapping.isolation_profile,
+            Some(CapabilityIsolationProfile::ReadOnly | CapabilityIsolationProfile::HostProcess)
+        ) || mapping.filesystem_write == Some(false)
     }) {
         ToolSandboxMode::ReadOnly
     } else {

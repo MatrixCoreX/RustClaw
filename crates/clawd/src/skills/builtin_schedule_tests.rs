@@ -1,6 +1,7 @@
 use super::builtin_schedule::{
     explicit_schedule_intent_from_args, schedule_args_contain_structured_intent,
     schedule_kind_for_action, schedule_replan_error, schedule_workflow_prompt,
+    schedule_workflow_prompt_for_task,
 };
 use serde_json::json;
 
@@ -27,6 +28,35 @@ fn schedule_workflow_prompt_prefers_explicit_text_over_intent_alias() {
     assert_eq!(
         schedule_workflow_prompt(map, &args),
         "primary schedule source"
+    );
+}
+
+#[test]
+fn schedule_preview_binds_to_original_task_text_instead_of_planner_rewrite() {
+    let task = crate::ClaimedTask {
+        claim_attempt: 0,
+        task_id: "schedule-prompt-test".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: serde_json::json!({
+            "text": "Original multilingual schedule request"
+        })
+        .to_string(),
+    };
+    let args = serde_json::json!({
+        "action": "preview",
+        "text": "planner-authored rewrite"
+    });
+    let map = args.as_object().expect("args object");
+
+    assert_eq!(
+        schedule_workflow_prompt_for_task(&task, map, &args, "preview"),
+        "Original multilingual schedule request"
     );
 }
 

@@ -1126,30 +1126,23 @@ fn office_create_capability_exposes_structured_operation_fields() {
 }
 
 #[test]
-fn schedule_create_variants_have_distinct_machine_actions_and_contracts() {
+fn schedule_planner_requires_preview_then_structured_create() {
     let registry_path =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml");
     let registry =
         SkillsRegistry::load_from_path(&registry_path).expect("load workspace skill registry");
     let capabilities = registry.planner_capabilities("schedule");
-    let create = capabilities
-        .iter()
-        .find(|mapping| mapping.name == "schedule.create")
-        .expect("natural-language create capability");
     let structured = capabilities
         .iter()
         .find(|mapping| mapping.name == "schedule.create_structured")
         .expect("structured create capability");
 
-    assert_eq!(create.action.as_deref(), Some("create"));
-    assert_eq!(create.required, ["text|intent"]);
+    assert!(capabilities
+        .iter()
+        .all(|mapping| mapping.name != "schedule.create"));
     assert_eq!(structured.action.as_deref(), Some("create_structured"));
     assert_eq!(structured.required, ["intent_json"]);
-    assert_eq!(
-        select_planner_capability_mapping(capabilities, Some("create"))
-            .map(|mapping| mapping.name.as_str()),
-        Some("schedule.create")
-    );
+    assert!(select_planner_capability_mapping(capabilities, Some("create")).is_none());
     assert_eq!(
         select_planner_capability_mapping(capabilities, Some("create_structured"))
             .map(|mapping| mapping.name.as_str()),

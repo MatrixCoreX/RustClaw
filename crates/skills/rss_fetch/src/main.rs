@@ -1704,12 +1704,9 @@ fn strip_cdata(input: &str) -> &str {
 }
 
 fn xml_unescape(input: &str) -> String {
-    input
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
-        .replace("&amp;", "&")
+    quick_xml::escape::unescape(input)
+        .map(|value| value.into_owned())
+        .unwrap_or_else(|_| input.to_string())
 }
 
 fn normalize_lang_tag(lang: &str) -> &'static str {

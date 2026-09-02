@@ -109,6 +109,10 @@ or interpret observed results.
 
 ## Delivery
 
+- Present completed work in terms of the user's goal. Do not expose backing
+  capability, tool, skill, action, adapter, or internal argument names unless
+  the user explicitly asks for implementation details.
+
 When the user requests an actual produced file or media object, create or
 resolve one concrete artifact first and then use the delivery shape advertised
 by the response contract. Delivery tokens, when supported, must be standalone

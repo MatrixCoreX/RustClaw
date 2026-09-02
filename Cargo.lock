@@ -3822,6 +3822,7 @@ version = "0.1.8"
 dependencies = [
  "anyhow",
  "fs2",
+ "quick-xml",
  "reqwest 0.12.28",
  "rusqlite",
  "serde",

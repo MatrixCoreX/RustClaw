@@ -14,6 +14,7 @@ use claw_core::skill_registry::{SkillKind, SkillsRegistry};
 const SCHEDULE_INTENT_MIN_CONFIDENCE: f64 = 0.5;
 pub(crate) const SCHEDULE_TASK_MODE_AGENT: &str = "agent";
 pub(crate) const SCHEDULE_TASK_MODE_DIRECT_TEXT: &str = "direct_text";
+pub(crate) const SCHEDULE_USER_REQUEST_FIELD: &str = "schedule_user_request";
 const SCHEDULE_OWNER_PREDICATE: &str = "(
     (?1 IS NOT NULL AND principal_id = ?1 AND channel = ?2)
     OR (
@@ -229,9 +230,41 @@ fn render_schedule_skill_contracts(state: &AppState) -> String {
     let mut enabled = state.get_skills_list().iter().cloned().collect::<Vec<_>>();
     enabled.sort_unstable();
     for name in enabled {
-        if let Some(hint) = load_skill_contract_hint(state, registry, &name) {
-            lines.push(format!("- {name}: {}", hint.summary));
+        let action_contracts = registry
+            .planner_exposed_capabilities(&name)
+            .into_iter()
+            .filter_map(|mapping| {
+                let action = mapping.action.as_deref()?;
+                let required = if mapping.required.is_empty() {
+                    "none".to_string()
+                } else {
+                    mapping.required.join(",")
+                };
+                let optional = if mapping.optional.is_empty() {
+                    "none".to_string()
+                } else {
+                    mapping.optional.join(",")
+                };
+                Some(format!(
+                    "action={action}; required={required}; optional={optional}"
+                ))
+            })
+            .collect::<Vec<_>>();
+        let hint = load_skill_contract_hint(state, registry, &name);
+        if action_contracts.is_empty() && hint.is_none() {
+            continue;
         }
+        let mut parts = Vec::new();
+        if !action_contracts.is_empty() {
+            parts.push(format!(
+                "registry_actions=[{}]",
+                action_contracts.join(" | ")
+            ));
+        }
+        if let Some(hint) = hint {
+            parts.push(format!("interface_fields=[{}]", hint.summary));
+        }
+        lines.push(format!("- {name}: {}", parts.join("; ")));
     }
     lines.join("\n")
 }
@@ -246,11 +279,30 @@ pub(crate) fn validate_schedule_run_skill(
         .get_skills_registry()
         .ok_or_else(|| "skills registry not available".to_string())?;
     let enabled = state.get_skills_list();
-    validate_schedule_run_skill_with_allow_set(registry_arc.as_ref(), enabled.as_ref(), payload)
+    let normalized = validate_schedule_run_skill_with_allow_set(
+        registry_arc.as_ref(),
+        enabled.as_ref(),
+        payload,
+    )
+    .map_err(|contract_error| {
+        schedule_creation_error(
+            "scheduled_skill_contract_invalid",
+            "schedule.error.scheduled_skill_contract_invalid",
+            json!({ "contract_error": contract_error }),
+        )
+    })?;
+    let canonical = normalized
+        .get("skill_name")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let args = normalized.get("args").cloned().unwrap_or_else(|| json!({}));
+    crate::agent_engine::validate_skill_input_contract_for_runtime(state, canonical, &args)?;
+    Ok(normalized)
 }
 
 /// Core validation/normalization using a registry reference. Used by validate_schedule_run_skill and by tests.
-/// Per-action/schema checks remain in skill runtime (or future registry metadata), not in schedule layer.
+/// Action selection is checked against registry metadata before persistence. Full JSON-schema
+/// validation additionally runs in the state-aware production wrapper above.
 #[cfg(test)]
 pub(crate) fn validate_schedule_run_skill_with_registry(
     registry: &SkillsRegistry,
@@ -295,6 +347,24 @@ pub(crate) fn validate_schedule_run_skill_with_allow_set(
         .unwrap_or(Value::Object(serde_json::Map::new()));
     if !args.is_object() {
         return Err("run_skill payload args must be an object".to_string());
+    }
+    let action = args
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let mappings = registry.planner_capabilities(canonical);
+    if mappings.iter().any(|mapping| mapping.action.is_some()) {
+        let action = action.ok_or_else(|| {
+            format!("run_skill payload args must contain action for skill: {canonical}")
+        })?;
+        if claw_core::skill_registry::select_planner_capability_mapping(mappings, Some(action))
+            .is_none()
+        {
+            return Err(format!(
+                "unknown action `{action}` for scheduled skill: {canonical}"
+            ));
+        }
     }
     let mut out = serde_json::Map::new();
     out.insert(
@@ -632,6 +702,7 @@ fn is_supported_schedule_type(schedule_type: &str) -> bool {
 }
 
 fn summarize_task_content(task_kind: &str, payload: &Value, fallback_prompt: &str) -> String {
+    let fallback = sanitize_schedule_task_text(fallback_prompt);
     if task_kind == "ask" {
         if let Some(text) = payload.get("text").and_then(|v| v.as_str()) {
             let t = sanitize_schedule_task_text(text);
@@ -639,11 +710,13 @@ fn summarize_task_content(task_kind: &str, payload: &Value, fallback_prompt: &st
                 return t;
             }
         }
-        let p = sanitize_schedule_task_text(fallback_prompt);
-        if !p.is_empty() {
-            return p;
+        if !fallback.is_empty() {
+            return fallback;
         }
     } else if task_kind == "run_skill" {
+        if !fallback.is_empty() {
+            return fallback;
+        }
         let skill = payload
             .get("skill_name")
             .or_else(|| payload.get("skill"))
@@ -913,7 +986,55 @@ fn schedule_compile_only_response(
     push_schedule_preview_kv_value(&mut lines, "task_kind", extra.get("task_kind"));
     push_schedule_preview_kv_value(&mut lines, "task_content", extra.get("task_content"));
     push_schedule_preview_kv_value(&mut lines, "title", extra.get("task_content"));
+    push_schedule_preview_kv_value(&mut lines, "intent_json", extra.get("intent_json"));
     lines.join("\n")
+}
+
+fn schedule_creation_error(error_code: &str, message_key: &str, details: Value) -> String {
+    crate::skills::structured_skill_error_from_parts(
+        "schedule",
+        error_code,
+        error_code,
+        None,
+        Some(json!({
+            "schema_version": 1,
+            "source_skill": "schedule",
+            "status": "error",
+            "error_code": error_code,
+            "message_key": message_key,
+            "retryable": false,
+            "failure_phase": "pre_dispatch",
+            "side_effect_applied": false,
+            "recovery_action": "replan_arguments",
+            "details": details,
+        })),
+    )
+}
+
+fn execution_ready_schedule_intent_json(
+    intent: &ScheduleIntentOutput,
+    timezone: &str,
+    schedule_type: &str,
+    task_kind: &str,
+    task_payload: &Value,
+) -> Result<String, String> {
+    let mut ready = intent.clone();
+    ready.kind = "create".to_string();
+    ready.timezone = timezone.to_string();
+    ready.schedule.r#type = schedule_type.to_string();
+    ready.task.kind = task_kind.to_string();
+    ready.task.payload = task_payload.clone();
+    ready.mode = "execute".to_string();
+    ready.dry_run = false;
+    ready.preview_only = false;
+    ready.create_real = Some(true);
+    serde_json::to_string(&ready).map_err(|error| {
+        schedule_creation_error(
+            "schedule_intent_serialize_failed",
+            "schedule.error.intent_serialize_failed",
+            json!({ "detail": error.to_string() }),
+        )
+    })
 }
 
 fn push_schedule_preview_kv(lines: &mut Vec<String>, key: &str, value: &str) {
@@ -1228,27 +1349,26 @@ pub(crate) async fn try_handle_schedule_request(
             let timezone = schedule_timezone_from_intent(state, &intent.timezone);
             let schedule_type = clean_schedule_kind(&intent.schedule.r#type);
             if !is_supported_schedule_type(&schedule_type) {
-                return Ok(Some(schedule_t(
-                    state,
-                    "schedule.msg.create_fail_cannot_compute_next_run",
-                )));
+                return Err(schedule_creation_error(
+                    "schedule_type_unsupported",
+                    "schedule.error.schedule_type_unsupported",
+                    json!({ "schedule_type": schedule_type }),
+                ));
             }
             let task_kind = clean_schedule_kind(&intent.task.kind);
             if !matches!(task_kind.as_str(), "ask" | "run_skill") {
-                return Ok(Some(schedule_t(
-                    state,
-                    "schedule.msg.create_fail_task_kind",
-                )));
+                return Err(schedule_creation_error(
+                    "schedule_task_kind_invalid",
+                    "schedule.error.task_kind_invalid",
+                    json!({ "task_kind": task_kind }),
+                ));
             }
             if schedule_type == "cron" {
-                if intent.schedule.cron.trim().is_empty() {
-                    return Ok(Some(schedule_t(state, "schedule.msg.cron_not_supported")));
-                }
-                return Ok(Some(schedule_t_with(
-                    state,
-                    "schedule.msg.cron_not_supported_with_expr",
-                    &[("cron", intent.schedule.cron.trim())],
-                )));
+                return Err(schedule_creation_error(
+                    "schedule_cron_unsupported",
+                    "schedule.error.cron_unsupported",
+                    json!({ "cron": intent.schedule.cron.trim() }),
+                ));
             }
 
             let now = crate::now_ts_u64() as i64;
@@ -1270,16 +1390,18 @@ pub(crate) async fn try_handle_schedule_request(
             let run_at = if schedule_type == "once" {
                 let ts = parse_local_datetime(&intent.schedule.run_at, parse_timezone(&timezone));
                 let Some(ts) = ts else {
-                    return Ok(Some(schedule_t(
-                        state,
-                        "schedule.msg.create_fail_invalid_run_at",
-                    )));
+                    return Err(schedule_creation_error(
+                        "schedule_run_at_invalid",
+                        "schedule.error.run_at_invalid",
+                        json!({ "run_at": intent.schedule.run_at.trim(), "timezone": timezone }),
+                    ));
                 };
                 if ts <= now {
-                    return Ok(Some(schedule_t(
-                        state,
-                        "schedule.msg.create_fail_run_at_must_be_future",
-                    )));
+                    return Err(schedule_creation_error(
+                        "schedule_run_at_not_future",
+                        "schedule.error.run_at_not_future",
+                        json!({ "run_at": intent.schedule.run_at.trim(), "timezone": timezone }),
+                    ));
                 }
                 Some(ts)
             } else {
@@ -1299,10 +1421,11 @@ pub(crate) async fn try_handle_schedule_request(
                 )
             };
             let Some(next_run_at) = next_run_at else {
-                return Ok(Some(schedule_t(
-                    state,
-                    "schedule.msg.create_fail_cannot_compute_next_run",
-                )));
+                return Err(schedule_creation_error(
+                    "schedule_next_run_unavailable",
+                    "schedule.error.next_run_unavailable",
+                    json!({ "schedule_type": schedule_type, "timezone": timezone }),
+                ));
             };
 
             let payload = if task_kind == "ask" {
@@ -1327,25 +1450,29 @@ pub(crate) async fn try_handle_schedule_request(
                 intent.task.payload.clone()
             };
 
-            let mut payload = inherit_schedule_delivery_context(task, payload);
+            let mut payload = if task_kind == "run_skill" {
+                validate_schedule_run_skill(state, &payload)?
+            } else {
+                payload
+            };
             if task_kind == "ask" {
                 sanitize_schedule_ask_payload_text(&mut payload, prompt);
                 normalize_schedule_ask_execution_mode(&mut payload);
             }
+            let intent_payload = payload.clone();
+            let mut payload = inherit_schedule_delivery_context(task, payload);
             inherit_schedule_task_execution_policy(state, task, &mut payload);
-
-            let payload = if task_kind == "run_skill" {
-                match validate_schedule_run_skill(state, &payload) {
-                    Ok(normalized) => normalized,
-                    Err(err) => return Ok(Some(err)),
-                }
-            } else {
-                payload
-            };
 
             let next_run_human = humanize_next_run_at(next_run_at, &timezone);
             let task_content = summarize_task_content(&task_kind, &payload, prompt);
             if schedule_intent_is_compile_only(&intent) {
+                let intent_json = execution_ready_schedule_intent_json(
+                    &intent,
+                    &timezone,
+                    &schedule_type,
+                    &task_kind,
+                    &intent_payload,
+                )?;
                 return Ok(Some(schedule_compile_only_response(
                     &intent,
                     &kind,
@@ -1358,8 +1485,29 @@ pub(crate) async fn try_handle_schedule_request(
                         "task_kind": task_kind,
                         "task_payload": payload,
                         "task_content": task_content,
+                        "intent_json": intent_json,
                     }),
                 )));
+            }
+
+            if task_kind == "run_skill" {
+                let user_request = crate::language_policy::task_original_user_text(task)
+                    .map(|text| sanitize_schedule_task_text(&text))
+                    .filter(|text| !text.is_empty())
+                    .or_else(|| {
+                        let text = sanitize_schedule_task_text(&intent.raw);
+                        (!text.is_empty()).then_some(text)
+                    })
+                    .unwrap_or_else(|| sanitize_schedule_task_text(prompt));
+                if !user_request.is_empty() {
+                    payload
+                        .as_object_mut()
+                        .expect("validated run_skill payload is an object")
+                        .insert(
+                            SCHEDULE_USER_REQUEST_FIELD.to_string(),
+                            Value::String(user_request),
+                        );
+                }
             }
 
             let job_id = format!("job_{}", &Uuid::new_v4().simple().to_string()[..10]);

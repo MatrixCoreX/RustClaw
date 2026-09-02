@@ -13,6 +13,12 @@ aliases = ["rss", "rss_reader", "rss_fetcher", "news", "news_fetcher"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/rss_fetch.md"
 output_kind = "text"
+planner_capabilities = [
+  { name = "rss.latest", action = "latest", required = ["category"] },
+  { name = "rss.fetch", action = "fetch", required = ["url"] },
+  { name = "rss.list_categories", action = "list_categories" },
+]
+input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["latest", "fetch", "list_categories"] }, category = { type = "string" }, url = { type = "string" }, topic_token = { type = "string" } } }
 
 [[skills]]
 name = "crypto"
@@ -22,6 +28,10 @@ aliases = []
 timeout_seconds = 30
 prompt_file = "prompts/skills/crypto.md"
 output_kind = "text"
+planner_capabilities = [
+  { name = "crypto.quote", action = "quote", required = ["symbol"] },
+]
+input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["quote"] }, symbol = { type = "string" } } }
 
 [[skills]]
 name = "demo_runner"
@@ -475,6 +485,60 @@ async fn schedule_create_persists_agent_execution_for_ask_tasks_on_every_channel
 }
 
 #[tokio::test]
+async fn schedule_create_persists_original_user_request_for_direct_skill_delivery() {
+    let state = AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry()
+        .with_seeded_db_schema();
+    let task = claimed_task_with_payload(
+        "ui",
+        json!({"text": "Original multilingual schedule request"}),
+    );
+    let intent = ScheduleIntentOutput {
+        kind: "create".to_string(),
+        timezone: "Asia/Shanghai".to_string(),
+        mode: "execute".to_string(),
+        raw: "planner-authored explanation".to_string(),
+        schedule: ScheduleIntentSchedule {
+            r#type: "once".to_string(),
+            run_at: "2099-01-01 09:00:00".to_string(),
+            ..Default::default()
+        },
+        task: ScheduleIntentTask {
+            kind: "run_skill".to_string(),
+            payload: json!({
+                "skill_name": "rss_fetch",
+                "args": {"action": "list_categories"}
+            }),
+        },
+        confidence: 0.99,
+        ..Default::default()
+    };
+
+    try_handle_schedule_request(&state, &task, "planner-authored explanation", Some(&intent))
+        .await
+        .expect("schedule handler")
+        .expect("schedule creation reply");
+
+    let db = state.core.db.get().expect("db");
+    let raw_payload: String = db
+        .query_row(
+            "SELECT task_payload_json FROM scheduled_jobs LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read scheduled payload");
+    let payload: serde_json::Value =
+        serde_json::from_str(&raw_payload).expect("parse scheduled payload");
+    assert_eq!(
+        payload[SCHEDULE_USER_REQUEST_FIELD],
+        "Original multilingual schedule request"
+    );
+    assert_eq!(payload["skill_name"], "rss_fetch");
+    assert_eq!(payload["args"]["action"], "list_categories");
+}
+
+#[tokio::test]
 async fn schedule_create_inherits_server_validated_admin_execution_policy() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let admin_key = "rk-schedule-admin-policy";
@@ -588,12 +652,57 @@ async fn schedule_compile_only_create_returns_preview_without_insert() {
     assert!(reply.contains("schedule.run_at=2099-01-01 09:00:00"));
     assert!(reply.contains("task_content=check service"));
     assert!(reply.contains("title=check service"));
+    let intent_json = reply
+        .lines()
+        .find_map(|line| line.strip_prefix("intent_json="))
+        .expect("preview includes execution-ready intent");
+    let ready: ScheduleIntentOutput =
+        serde_json::from_str(intent_json).expect("parse execution-ready intent");
+    assert_eq!(ready.kind, "create");
+    assert_eq!(ready.mode, "execute");
+    assert!(!ready.dry_run);
+    assert!(!ready.preview_only);
+    assert_eq!(ready.create_real, Some(true));
+    assert_eq!(ready.task.payload["text"], "check service");
     assert!(!reply.contains("contract_marker"));
     let db = state.core.db.get().expect("db");
     let count: i64 = db
         .query_row("SELECT COUNT(*) FROM scheduled_jobs", [], |row| row.get(0))
         .expect("count scheduled jobs");
     assert_eq!(count, 0);
+}
+
+#[tokio::test]
+async fn schedule_create_validation_failure_is_a_structured_error() {
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let task = claimed_task_with_payload("ui", json!({"text": "invalid schedule fixture"}));
+    let intent = ScheduleIntentOutput {
+        kind: "create".to_string(),
+        timezone: "Asia/Shanghai".to_string(),
+        schedule: ScheduleIntentSchedule {
+            r#type: "once".to_string(),
+            run_at: "2099-01-01 09:00:00".to_string(),
+            ..Default::default()
+        },
+        task: ScheduleIntentTask {
+            kind: "unsupported_task_kind".to_string(),
+            payload: json!({}),
+        },
+        confidence: 0.99,
+        ..Default::default()
+    };
+
+    let error =
+        try_handle_schedule_request(&state, &task, "invalid schedule fixture", Some(&intent))
+            .await
+            .expect_err("invalid task kind must not look successful");
+    let structured =
+        crate::skills::parse_structured_skill_error(&error).expect("structured schedule error");
+    assert_eq!(structured.error_code, "schedule_task_kind_invalid");
+    let extra = structured.extra.expect("error metadata");
+    assert_eq!(extra["status"], "error");
+    assert_eq!(extra["failure_phase"], "pre_dispatch");
+    assert_eq!(extra["side_effect_applied"], false);
 }
 
 #[tokio::test]
@@ -671,6 +780,23 @@ async fn schedule_compile_only_preview_strips_internal_context_from_ask_payload(
     assert!(reply.contains("task_content=check service"));
     assert!(!reply.contains("ACTIVE_EXECUTION_ANCHOR"));
     assert!(!reply.contains("followup_bound_target"));
+}
+
+#[test]
+fn run_skill_schedule_summary_prefers_sanitized_user_goal() {
+    let summary = summarize_task_content(
+        "run_skill",
+        &json!({
+            "skill_name": "rss_fetch",
+            "args": {"action": "latest", "category": "business", "limit": 3}
+        }),
+        "fetch three business headlines\n\n### ACTIVE_TASK_CONTEXT\ninternal-only",
+    );
+
+    assert_eq!(summary, "fetch three business headlines");
+    assert!(!summary.contains("run_skill"));
+    assert!(!summary.contains("args="));
+    assert!(!summary.contains("ACTIVE_TASK_CONTEXT"));
 }
 
 #[test]
@@ -874,40 +1000,69 @@ fn validate_schedule_run_skill_valid_rss_fetch_kept() {
 }
 
 #[test]
-fn validate_schedule_run_skill_rss_fetch_unknown_action_passes_through() {
+fn scheduled_builtin_skill_cases_pass_current_registry_contracts() {
+    let state = AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+    for payload in [
+        json!({"skill_name": "system_basic", "args": {"action": "info"}}),
+        json!({"skill_name": "process_basic", "args": {"action": "ps", "limit": 10}}),
+        json!({"skill_name": "rss_fetch", "args": {"action": "list_categories"}}),
+        json!({"skill_name": "rss_fetch", "args": {"action": "latest", "category": "business", "limit": 3}}),
+        json!({"skill_name": "nni", "args": {"action": "network_stats"}}),
+    ] {
+        validate_schedule_run_skill(&state, &payload)
+            .unwrap_or_else(|error| panic!("valid scheduled payload rejected: {error}"));
+    }
+}
+
+#[test]
+fn scheduled_skill_args_fail_current_registry_schema_before_persistence() {
+    let state = AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+    for payload in [
+        json!({"skill_name": "process_basic", "args": {"action": "list"}}),
+        json!({"skill_name": "rss_fetch", "args": {"limit": 3}}),
+        json!({"skill_name": "nni", "args": {"action": "network_stats", "unexpected": true}}),
+    ] {
+        let error = validate_schedule_run_skill(&state, &payload)
+            .expect_err("invalid scheduled payload must fail before persistence");
+        assert!(crate::skills::parse_structured_skill_error(&error).is_some());
+    }
+}
+
+#[test]
+fn validate_schedule_run_skill_rss_fetch_unknown_action_is_rejected() {
     let reg = test_registry();
     let payload = json!({
         "skill_name": "rss_fetch",
         "args": { "action": "totally_fake_action" }
     });
-    let out = validate_schedule_run_skill_with_registry(&reg, &payload).unwrap();
-    assert_eq!(
-        out.get("args")
-            .and_then(|v| v.as_object())
-            .and_then(|a| a.get("action"))
-            .and_then(|v| v.as_str()),
-        Some("totally_fake_action")
-    );
+    let error = validate_schedule_run_skill_with_registry(&reg, &payload).unwrap_err();
+    assert!(error.contains("unknown action"));
 }
 
-/// Schedule does not validate `crypto` actions; bogus actions pass through for the skill to reject at runtime.
 #[test]
-fn validate_schedule_run_skill_crypto_action_passes_through_unvalidated() {
+fn validate_schedule_run_skill_crypto_unknown_action_is_rejected() {
     let reg = test_registry();
     let payload = json!({
         "skill_name": "crypto",
         "args": { "action": "totally_bogus_crypto_action_xyz", "symbol": "BTCUSDT" }
     });
-    let out = validate_schedule_run_skill_with_registry(&reg, &payload).unwrap();
-    assert_eq!(
-        out.get("skill_name").and_then(|v| v.as_str()),
-        Some("crypto")
-    );
-    let args = out.get("args").and_then(|v| v.as_object()).unwrap();
-    assert_eq!(
-        args.get("action").and_then(|v| v.as_str()),
-        Some("totally_bogus_crypto_action_xyz")
-    );
+    let error = validate_schedule_run_skill_with_registry(&reg, &payload).unwrap_err();
+    assert!(error.contains("unknown action"));
+}
+
+#[test]
+fn validate_schedule_run_skill_requires_action_for_action_scoped_skill() {
+    let reg = test_registry();
+    let payload = json!({
+        "skill_name": "rss_fetch",
+        "args": { "category": "science" }
+    });
+    let error = validate_schedule_run_skill_with_registry(&reg, &payload).unwrap_err();
+    assert!(error.contains("must contain action"));
 }
 
 /// Generic `run_skill` validation must not rewrite args (no per-skill merge paths or symbol subprocesses).

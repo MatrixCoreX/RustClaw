@@ -53,7 +53,7 @@ schema_version = 1
 input_schema = { "type" = "object", "properties" = { "action" = { "type" = "string", "enum" = ["scan"] }, "path" = { "type" = "string" }, "profile" = { "type" = "string" } } }
 output_schema = { "type" = "object", "required" = ["text"], "properties" = { "text" = { "type" = "string" }, "extra" = { "type" = "object" } } }
 config_entry_points = []
-capabilities = [{ "name" = "config_guard.run", "effect" = "external", "execution_mode" = "sync_short", "required" = [], "optional" = [], "timeout_seconds" = 30 }]
+capabilities = [{ "name" = "config.guard", "effect" = "validate", "execution_mode" = "sync_short", "required" = [], "optional" = ["path", "profile"], "timeout_seconds" = 30, "action" = "scan" }]
 
 [capability_request.permissions]
 llm_gateway = false

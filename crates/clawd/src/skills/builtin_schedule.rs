@@ -39,7 +39,7 @@ pub(super) async fn execute_schedule_workflow_for_task(
     if action == "delete_matching" {
         return crate::schedule_service::delete_matching_skill_schedules(state, task, args);
     }
-    let prompt = schedule_workflow_prompt(map, args);
+    let prompt = schedule_workflow_prompt_for_task(task, map, args, action);
     let mut intent = explicit_schedule_intent_from_args(args, action, &prompt)?;
     if intent.is_none() {
         intent = crate::schedule_service::parse_schedule_intent(state, task, &prompt).await;
@@ -60,6 +60,20 @@ pub(super) async fn execute_schedule_workflow_for_task(
     ))
     .await?
     .ok_or_else(|| schedule_workflow_error("schedule_intent_not_detected", None))
+}
+
+pub(super) fn schedule_workflow_prompt_for_task(
+    task: &ClaimedTask,
+    map: &serde_json::Map<String, Value>,
+    args: &Value,
+    action: &str,
+) -> String {
+    if matches!(action, "preview" | "dry_run" | "create") {
+        if let Some(original) = crate::language_policy::task_original_user_text(task) {
+            return original;
+        }
+    }
+    schedule_workflow_prompt(map, args)
 }
 
 pub(super) fn schedule_workflow_prompt(

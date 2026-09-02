@@ -122,6 +122,7 @@ pub enum CapabilityIsolationProfile {
     LocalTempWorkspace,
     RemoteExecutor,
     ReadOnly,
+    HostProcess,
 }
 
 impl CapabilityIsolationProfile {
@@ -132,6 +133,7 @@ impl CapabilityIsolationProfile {
             Self::LocalTempWorkspace => "local_temp_workspace",
             Self::RemoteExecutor => "remote_executor",
             Self::ReadOnly => "read_only",
+            Self::HostProcess => "host_process",
         }
     }
 }

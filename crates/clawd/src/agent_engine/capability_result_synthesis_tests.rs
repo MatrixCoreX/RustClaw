@@ -9,8 +9,8 @@ use super::{
     attach_reviewed_transcript_artifact, attach_unreviewed_transcript_fallback,
     audio_transcript_label, bounded_result, eligible_for_capability_result_synthesis,
     normalize_transcript_script_for_language, normalized_transcript_language,
-    pending_transcript_review, safe_transcript_filename, split_transcript_chunks,
-    synthesis_evidence_catalog, transcript_review_contract,
+    pending_transcript_review, safe_transcript_filename, scheduled_terminal_step_is_synthesizable,
+    split_transcript_chunks, synthesis_evidence_catalog, transcript_review_contract,
     FALLBACK_TRANSCRIPT_REVISION_CHUNK_CHARS, MAX_RESULT_JSON_CHARS,
 };
 use crate::agent_engine::{AgentRunContext, LoopState};
@@ -29,6 +29,29 @@ fn ordinary_free_response_uses_generic_synthesis() {
         &loop_state,
         Some(&AgentRunContext::default())
     ));
+}
+
+#[test]
+fn scheduled_terminal_step_can_synthesize_a_bounded_requested_page() {
+    let mut result = CapabilityResultEnvelope::ok(
+        "filesystem.list",
+        Some("list".to_string()),
+        json!({"entries": ["one", "two", "three"]}),
+    );
+    result.continuation = Some(Continuation {
+        kind: ContinuationKind::Opaque,
+        reference: Some("cursor:3".to_string()),
+        poll_after_ms: None,
+        state: json!({"next_cursor": 3}),
+    });
+    let mut loop_state = LoopState::default();
+    loop_state.capability_results.push(result.clone());
+
+    assert!(!eligible_for_capability_result_synthesis(
+        &loop_state,
+        Some(&AgentRunContext::default())
+    ));
+    assert!(scheduled_terminal_step_is_synthesizable(&[result]));
 }
 
 #[test]

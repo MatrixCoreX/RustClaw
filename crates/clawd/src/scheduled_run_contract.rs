@@ -5,6 +5,59 @@ use serde_json::{json, Value};
 
 pub(crate) const SCHEDULED_RUN_SCHEMA_VERSION: u64 = 1;
 
+pub(crate) fn ensure_scheduled_run_terminal_sync(db: &Connection) -> anyhow::Result<usize> {
+    db.execute_batch(
+        "DROP TRIGGER IF EXISTS trg_scheduled_run_terminal_on_task_update;
+         CREATE TRIGGER trg_scheduled_run_terminal_on_task_update
+         AFTER UPDATE OF status ON tasks
+         WHEN NEW.status IN ('succeeded', 'failed', 'canceled', 'timeout')
+          AND OLD.status NOT IN ('succeeded', 'failed', 'canceled', 'timeout')
+         BEGIN
+             UPDATE scheduled_job_runs
+             SET task_status = NEW.status,
+                 triage_status = CASE
+                     WHEN NEW.status = 'failed' OR NEW.status = 'timeout' THEN 'failed'
+                     WHEN NEW.status = 'canceled' THEN 'cancelled'
+                     ELSE triage_status
+                 END,
+                 finished_at = COALESCE(finished_at, NEW.updated_at),
+                 updated_at = NEW.updated_at
+             WHERE task_id = NEW.task_id
+               AND task_status NOT IN ('succeeded', 'failed', 'canceled', 'cancelled', 'timeout');
+         END;",
+    )?;
+
+    let repaired = db.execute(
+        "UPDATE scheduled_job_runs
+         SET task_status = (
+                 SELECT tasks.status FROM tasks WHERE tasks.task_id = scheduled_job_runs.task_id
+             ),
+             triage_status = CASE
+                 WHEN (SELECT tasks.status FROM tasks WHERE tasks.task_id = scheduled_job_runs.task_id)
+                      IN ('failed', 'timeout') THEN 'failed'
+                 WHEN (SELECT tasks.status FROM tasks WHERE tasks.task_id = scheduled_job_runs.task_id)
+                      = 'canceled' THEN 'cancelled'
+                 ELSE triage_status
+             END,
+             finished_at = COALESCE(
+                 finished_at,
+                 (SELECT tasks.updated_at FROM tasks WHERE tasks.task_id = scheduled_job_runs.task_id)
+             ),
+             updated_at = COALESCE(
+                 (SELECT tasks.updated_at FROM tasks WHERE tasks.task_id = scheduled_job_runs.task_id),
+                 updated_at
+             )
+         WHERE task_status NOT IN ('succeeded', 'failed', 'canceled', 'cancelled', 'timeout')
+           AND EXISTS (
+               SELECT 1 FROM tasks
+               WHERE tasks.task_id = scheduled_job_runs.task_id
+                 AND tasks.status IN ('succeeded', 'failed', 'canceled', 'timeout')
+           )",
+        [],
+    )?;
+    Ok(repaired)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ScheduledRunTriage {
     NoFindings,

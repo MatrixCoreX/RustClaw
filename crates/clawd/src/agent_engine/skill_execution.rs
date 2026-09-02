@@ -61,6 +61,14 @@ use skill_execution_subagent::{record_subagent_hook_stage, record_subagent_step_
 use skill_output_contract::validate_skill_output_contract;
 use skill_output_contract::{enforce_skill_output_contract, skill_input_contract_error};
 
+pub(super) fn validate_skill_input_contract_for_runtime(
+    state: &AppState,
+    normalized_skill: &str,
+    args: &Value,
+) -> Result<(), String> {
+    skill_input_contract_error(state, normalized_skill, args).map_or(Ok(()), Err)
+}
+
 async fn run_with_tool_budget_timeout<F>(
     tool_timeout: Option<(u64, &'static str)>,
     cancellation: Option<CancellationToken>,

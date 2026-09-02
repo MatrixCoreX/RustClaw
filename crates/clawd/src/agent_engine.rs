@@ -65,6 +65,14 @@ pub(crate) fn normalize_resolved_planner_action_for_verifier(
     self::planning_action_normalization::normalize_resolved_executable_action(state, action)
 }
 
+pub(crate) fn validate_skill_input_contract_for_runtime(
+    state: &AppState,
+    normalized_skill: &str,
+    args: &Value,
+) -> Result<(), String> {
+    self::skill_execution::validate_skill_input_contract_for_runtime(state, normalized_skill, args)
+}
+
 pub(crate) fn planner_internal_tool_is_visible(tool: &str) -> bool {
     matches!(tool, "subagent" | "load_capability_groups")
 }
@@ -314,6 +322,21 @@ impl LoopState {
             .take()
             .zip(self.pending_resume_context.take())
     }
+}
+
+pub(crate) async fn synthesize_scheduled_skill_result(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    result: claw_core::capability_result::CapabilityResultEnvelope,
+) -> Option<String> {
+    capability_result_synthesis::synthesize_scheduled_capability_result(
+        state, task, user_text, result,
+    )
+    .await
+    .ok()
+    .flatten()
+    .map(|synthesis| synthesis.answer)
 }
 
 #[cfg(test)]

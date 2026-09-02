@@ -17,10 +17,13 @@ Compile natural-language scheduling requests into structured schedule plans.
 
 ## Planner capabilities
 - `schedule.create_structured`: create a scheduled job from an observed `intent_json` string. Copy the string unchanged in the parent loop; do not reconstruct nested values, turn it back into natural-language intent, or delegate this mutating call.
-- `schedule.create`: create a scheduled job. Prefer args `{ "text": "<original user request>" }` unless a complete `intent` object is already available.
 - `schedule.preview`: parse or preview a schedule without mutating state. Call this capability with only
   `{ "text": "<original user request>" }`; runtime forces `compile_only` / `dry_run`, so do not add
-  `action`, `dry_run`, or `preview_only` to capability args.
+  `action`, `dry_run`, or `preview_only` to capability args. Do not read system time or the working
+  directory before preview; those observations are not required by the schedule contract.
+- Every ordinary schedule creation starts with `schedule.preview`, then uses the exact observed
+  `intent_json` in `schedule.create_structured`. The direct `create` action is an internal protocol
+  entry and is not a planner capability.
 - `schedule.list`: list scheduled jobs.
 - `schedule.delete`: delete scheduled jobs; use `target_job_id` when the user names one.
 - `schedule.delete_matching`: delete only jobs matching structured task ownership fields. Pass `match_task_kind`, `match_skill_name`, `match_task_action`, and `match_platforms`; never derive these fields from localized prose. A shared multi-platform job is retained unless every platform in that job is included in `match_platforms`.
@@ -34,7 +37,8 @@ or dry-run schedule operation.
 ## Output
 - JSON string with fields matching `ScheduleIntentOutput`:
   - `kind`, `timezone`, `schedule`, `task`, `target_job_id`, `confidence`
-- Preview output exposes `dry_run=true`, `preview_only=true`, `would_mutate=false`, stable
+- Preview output exposes `dry_run=true`, `preview_only=true`, `would_mutate=false`, an exact
+  execution-ready `intent_json` for `schedule.create_structured`, stable
   `datetime` (for a parsed one-time `run_at`), and `title` (the parsed task content), while
   preserving the canonical schedule/task fields.
 - For an ordinary preview, set `requires_content_evidence=true` and let the
