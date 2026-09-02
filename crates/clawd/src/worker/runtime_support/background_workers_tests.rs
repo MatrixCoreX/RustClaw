@@ -3,6 +3,16 @@ use uuid::Uuid;
 
 use super::*;
 
+#[test]
+fn terminal_delivery_retry_delay_is_bounded_and_increases() {
+    assert_eq!(channel_terminal_delivery_retry_delay(5, 1), 5);
+    assert_eq!(channel_terminal_delivery_retry_delay(5, 2), 10);
+    assert_eq!(channel_terminal_delivery_retry_delay(5, 7), 300);
+    assert_eq!(channel_terminal_delivery_retry_delay(30, u32::MAX), 300);
+    assert!(!channel_terminal_delivery_retry_budget_exhausted(96));
+    assert!(channel_terminal_delivery_retry_budget_exhausted(97));
+}
+
 fn test_state() -> crate::AppState {
     let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     {

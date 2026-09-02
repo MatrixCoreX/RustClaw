@@ -114,9 +114,52 @@ pub(super) async fn synthesize_from_capability_results(
     loop_state: &mut LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Result<Option<CapabilitySynthesis>, String> {
+    synthesize_from_capability_results_with_policy(
+        state,
+        task,
+        user_text,
+        loop_state,
+        agent_run_context,
+        false,
+        "ordinary_agent_loop",
+    )
+    .await
+}
+
+pub(super) async fn synthesize_scheduled_capability_result(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    result: CapabilityResultEnvelope,
+) -> Result<Option<CapabilitySynthesis>, String> {
+    let mut loop_state = LoopState::default();
+    loop_state.capability_results.push(result);
+    synthesize_from_capability_results_with_policy(
+        state,
+        task,
+        user_text,
+        &mut loop_state,
+        None,
+        true,
+        "scheduled_job_triggered",
+    )
+    .await
+}
+
+async fn synthesize_from_capability_results_with_policy(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    loop_state: &mut LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    allow_scheduled_terminal_step: bool,
+    execution_context: &str,
+) -> Result<Option<CapabilitySynthesis>, String> {
     let transcript_contract = transcript_review_contract(&loop_state.capability_results);
     if transcript_contract.is_none()
-        && !eligible_for_capability_result_synthesis(loop_state, agent_run_context)
+        && !(eligible_for_capability_result_synthesis(loop_state, agent_run_context)
+            || (allow_scheduled_terminal_step
+                && scheduled_terminal_step_is_synthesizable(&loop_state.capability_results)))
     {
         return Ok(None);
     }
@@ -174,6 +217,7 @@ pub(super) async fn synthesize_from_capability_results(
             ("__DELIVERY_CONSTRAINTS__", &constraints_json),
             ("__REQUEST_LANGUAGE_HINT__", &request_language_hint),
             ("__CAPABILITY_RESULTS__", &result_json),
+            ("__EXECUTION_CONTEXT__", execution_context),
         ],
     );
     crate::log_prompt_render(
@@ -209,6 +253,17 @@ pub(super) async fn synthesize_from_capability_results(
             .as_array()
             .map_or(0, |entries| entries.len()),
     }))
+}
+
+fn scheduled_terminal_step_is_synthesizable(results: &[CapabilityResultEnvelope]) -> bool {
+    !results.is_empty()
+        && results.iter().all(|result| {
+            result.delivery.intent == CapabilityDeliveryIntent::ModelSynthesis
+                && matches!(
+                    result.status,
+                    CapabilityResultStatus::Ok | CapabilityResultStatus::Error
+                )
+        })
 }
 
 fn transcript_review_contract(

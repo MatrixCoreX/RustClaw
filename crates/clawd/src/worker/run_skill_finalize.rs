@@ -500,7 +500,42 @@ async fn finalize_run_skill_success(
     verification: &DirectRunSkillVerification,
     outcome: crate::skills::SkillRunOutcome,
 ) -> Result<()> {
-    let clean_text = crate::intercept_response_text_for_delivery(&outcome.text);
+    let raw_clean_text = crate::intercept_response_text_for_delivery(&outcome.text);
+    let step_result = build_run_skill_step_result(
+        skill_name,
+        crate::executor::StepExecutionStatus::Ok,
+        Some(raw_clean_text.clone()),
+        None,
+    );
+    let args = payload.get("args").cloned().unwrap_or_else(|| json!({}));
+    let capability_result = crate::capability_result::envelope_for_step_execution(
+        skill_name,
+        &args,
+        &step_result,
+        outcome.extra.as_ref(),
+    )?;
+    let clean_text = if payload.get("schedule_triggered").and_then(Value::as_bool) == Some(true)
+        && outcome.notify.unwrap_or(true)
+    {
+        match payload
+            .get(crate::schedule_service::SCHEDULE_USER_REQUEST_FIELD)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        {
+            Some(user_request) => crate::agent_engine::synthesize_scheduled_skill_result(
+                state,
+                task,
+                user_request,
+                capability_result.clone(),
+            )
+            .await
+            .unwrap_or_else(|| raw_clean_text.clone()),
+            None => raw_clean_text.clone(),
+        }
+    } else {
+        raw_clean_text.clone()
+    };
     let mut journal = crate::task_journal::TaskJournal::for_task(
         &task.task_id,
         "run_skill",
@@ -511,21 +546,7 @@ async fn finalize_run_skill_success(
     journal.record_used_evidence_ids_count(0);
     journal.record_context_bundle_summary(run_skill_trace_safe_args_summary(payload));
     record_direct_run_skill_verification(&mut journal, verification);
-    let step_result = build_run_skill_step_result(
-        skill_name,
-        crate::executor::StepExecutionStatus::Ok,
-        Some(clean_text.clone()),
-        None,
-    );
-    let args = payload.get("args").cloned().unwrap_or_else(|| json!({}));
-    journal
-        .capability_results
-        .push(crate::capability_result::envelope_for_step_execution(
-            skill_name,
-            &args,
-            &step_result,
-            outcome.extra.as_ref(),
-        )?);
+    journal.capability_results.push(capability_result);
     journal.push_step_result(&step_result);
     let capability_contract = run_skill_capability_contract(state, payload, skill_name);
     let machine_payload = run_skill_success_machine_payload();
@@ -536,7 +557,7 @@ async fn finalize_run_skill_success(
         "ok",
         &capability_contract,
         &machine_payload,
-        Some(&clean_text),
+        Some(&raw_clean_text),
         None,
         outcome.validation.as_ref(),
         outcome.extra.as_ref(),

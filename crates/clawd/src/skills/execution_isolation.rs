@@ -60,11 +60,14 @@ pub(super) fn prepare_skill_execution_isolation(
             (current_profile.as_str(), profile),
             (
                 "local_worktree",
-                CapabilityIsolationProfile::LocalWorktree | CapabilityIsolationProfile::ReadOnly
+                CapabilityIsolationProfile::LocalWorktree
+                    | CapabilityIsolationProfile::ReadOnly
+                    | CapabilityIsolationProfile::HostProcess
             ) | (
                 "local_temp_workspace",
                 CapabilityIsolationProfile::LocalTempWorkspace
                     | CapabilityIsolationProfile::ReadOnly
+                    | CapabilityIsolationProfile::HostProcess
             )
         );
         if compatible {

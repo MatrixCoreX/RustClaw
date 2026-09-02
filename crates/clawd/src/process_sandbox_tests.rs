@@ -4,12 +4,12 @@ use std::process::Stdio;
 
 use claw_core::config::{ToolSandboxBackend, ToolSandboxMode};
 
-#[cfg(target_os = "linux")]
-use super::prepare_durable_process_command;
 use super::{
     network_allowlist_spike, prepare_process_command, sandbox_backend_diagnostics,
     ProcessNetworkPolicy, ProcessSandboxRequest,
 };
+#[cfg(target_os = "linux")]
+use super::{prepare_durable_process_command, prepare_host_process_command};
 
 #[test]
 fn domain_allowlist_spike_is_validated_and_never_silently_inherits_network() {
@@ -202,6 +202,41 @@ fn durable_sandbox_omits_parent_death_while_foreground_keeps_it() {
     assert!(!durable_args.iter().any(|arg| arg == "--die-with-parent"));
     assert!(durable_args.iter().any(|arg| arg == "--new-session"));
     assert!(durable_args.iter().any(|arg| arg == "--unshare-pid"));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn host_process_sandbox_keeps_host_pid_view_and_other_boundaries() {
+    if !std::path::Path::new("/usr/bin/bwrap").is_file()
+        && !std::path::Path::new("/bin/bwrap").is_file()
+    {
+        return;
+    }
+    let root = TestDir::new("host_process_view");
+    let prepared = prepare_host_process_command(
+        "bash",
+        ProcessSandboxRequest {
+            mode: ToolSandboxMode::ReadOnly,
+            backend: ToolSandboxBackend::Auto,
+            workspace_root: root.path(),
+            execution_root: root.path(),
+            network: ProcessNetworkPolicy::Deny,
+            additional_writable_paths: &[],
+        },
+    )
+    .expect("host process command");
+    let args = prepared
+        .command
+        .as_std()
+        .get_args()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+
+    assert!(!args.iter().any(|arg| arg == "--unshare-pid"));
+    assert!(!args.iter().any(|arg| arg == "--proc"));
+    assert!(args.iter().any(|arg| arg == "--unshare-ipc"));
+    assert!(args.iter().any(|arg| arg == "--unshare-uts"));
+    assert!(args.iter().any(|arg| arg == "--unshare-net"));
 }
 
 #[cfg(target_os = "linux")]

@@ -634,6 +634,14 @@ fn success_resets_failure_count_in_state() {
     assert_eq!(entries[0].failure_count, 0);
 }
 
+#[test]
+fn xml_unescape_decodes_named_decimal_and_hex_entities() {
+    assert_eq!(
+        xml_unescape("Tom &amp; Jerry &#39;s &#x2019; quote"),
+        "Tom & Jerry 's ’ quote"
+    );
+}
+
 /// 连续失败达到阈值后，该 source 会从 category 移入 deprecated（需短超时以快速跑完）。
 #[test]
 fn consecutive_failures_reach_threshold_then_moved_to_deprecated() {

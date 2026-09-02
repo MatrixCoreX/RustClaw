@@ -628,6 +628,14 @@ async fn run() -> anyhow::Result<()> {
         repo::ensure_channel_event_admission_schema(&db)?;
         repo::ensure_channel_delivery_outbox_schema(&db)?;
         ensure_task_lease_schema(&db)?;
+        let repaired_scheduled_runs =
+            scheduled_run_contract::ensure_scheduled_run_terminal_sync(&db)?;
+        if repaired_scheduled_runs > 0 {
+            warn!(
+                repaired_scheduled_runs,
+                "reconciled stale scheduled-run terminal states"
+            );
+        }
         ensure_key_auth_schema(&db)?;
         repo::child_task_graph::ensure_child_task_graph_schema(&db)?;
         repo::task_plan::ensure_task_plan_schema(&db)?;

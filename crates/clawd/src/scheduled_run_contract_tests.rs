@@ -2,10 +2,11 @@ use rusqlite::Connection;
 use serde_json::json;
 
 use super::{
-    insert_scheduled_run_enqueued, list_scheduled_run_history, scheduled_run_payload_metadata,
-    scheduled_run_policy_metadata, scheduled_run_terminal_result, scheduled_run_thread_ref,
-    scheduled_run_thread_resume_metadata, scheduled_run_triage_from_machine,
-    update_scheduled_run_terminal, ScheduledRunEnqueued, ScheduledRunTriage,
+    ensure_scheduled_run_terminal_sync, insert_scheduled_run_enqueued, list_scheduled_run_history,
+    scheduled_run_payload_metadata, scheduled_run_policy_metadata, scheduled_run_terminal_result,
+    scheduled_run_thread_ref, scheduled_run_thread_resume_metadata,
+    scheduled_run_triage_from_machine, update_scheduled_run_terminal, ScheduledRunEnqueued,
+    ScheduledRunTriage,
 };
 
 #[test]
@@ -221,6 +222,79 @@ fn scheduled_run_history_insert_and_terminal_update_are_machine_rows() {
         .expect("updated row");
     assert_eq!(status, "succeeded");
     assert_eq!(triage, "findings");
+}
+
+#[test]
+fn scheduled_run_terminal_sync_repairs_and_tracks_terminal_task_status() {
+    let db = Connection::open_in_memory().expect("open test db");
+    db.execute_batch(
+        "CREATE TABLE tasks (
+            task_id TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+         );",
+    )
+    .expect("task schema");
+    crate::db_init::ensure_schedule_schema(&db).expect("schedule schema");
+    insert_test_scheduled_job(&db, "job_abc123", 7, 11);
+    insert_scheduled_run_enqueued(
+        &db,
+        &ScheduledRunEnqueued {
+            run_id: "run_trigger",
+            job_id: "job_abc123",
+            task_id: "task_trigger",
+            thread_ref: "scheduled_job:job_abc123",
+            started_at: "1000",
+        },
+    )
+    .expect("insert run");
+    db.execute(
+        "INSERT INTO tasks (task_id, status, updated_at) VALUES ('task_trigger', 'running', '1001')",
+        [],
+    )
+    .expect("insert task");
+
+    ensure_scheduled_run_terminal_sync(&db).expect("install terminal sync");
+    db.execute(
+        "UPDATE tasks SET status = 'timeout', updated_at = '1010' WHERE task_id = 'task_trigger'",
+        [],
+    )
+    .expect("finish task");
+
+    let (status, triage, finished_at): (String, String, String) = db
+        .query_row(
+            "SELECT task_status, triage_status, finished_at
+             FROM scheduled_job_runs WHERE run_id = 'run_trigger'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("read synced run");
+    assert_eq!(status, "timeout");
+    assert_eq!(triage, "failed");
+    assert_eq!(finished_at, "1010");
+
+    db.execute(
+        "UPDATE scheduled_job_runs
+         SET task_status = 'queued', triage_status = NULL, finished_at = NULL, updated_at = '1000'
+         WHERE run_id = 'run_trigger'",
+        [],
+    )
+    .expect("make stale fixture");
+    assert_eq!(
+        ensure_scheduled_run_terminal_sync(&db).expect("reconcile stale run"),
+        1
+    );
+    let repaired: (String, String, String) = db
+        .query_row(
+            "SELECT task_status, triage_status, finished_at
+             FROM scheduled_job_runs WHERE run_id = 'run_trigger'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("read reconciled run");
+    assert_eq!(repaired.0, "timeout");
+    assert_eq!(repaired.1, "failed");
+    assert_eq!(repaired.2, "1010");
 }
 
 #[test]

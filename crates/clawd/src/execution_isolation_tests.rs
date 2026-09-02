@@ -260,6 +260,10 @@ fn isolation_profile_from_token_accepts_only_machine_tokens() {
         Some(CapabilityIsolationProfile::LocalTempWorkspace)
     );
     assert_eq!(isolation_profile_from_token("Local Temp Workspace"), None);
+    assert_eq!(
+        isolation_profile_from_token("host_process"),
+        Some(CapabilityIsolationProfile::HostProcess)
+    );
 }
 
 fn init_git_repo(path: &Path) {

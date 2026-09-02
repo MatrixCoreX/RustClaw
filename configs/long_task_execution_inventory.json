@@ -488,6 +488,15 @@
     },
     {
       "adapter_kind": null,
+      "capability": "config.guard",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "config_guard",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
       "capability": "crypto.multi_quote",
       "execution_mode": "sync_short",
       "isolation_profile": "local_current_workspace",
@@ -1370,6 +1379,15 @@
     },
     {
       "adapter_kind": null,
+      "capability": "filesystem.search_runtime",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "fs_search",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
       "capability": "git.ahead_behind",
       "execution_mode": "sync_short",
       "isolation_profile": "read_only",
@@ -1928,6 +1946,15 @@
     },
     {
       "adapter_kind": null,
+      "capability": "filesystem.list_directory",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "list_dir",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
       "capability": "log_analyze",
       "execution_mode": "sync_short",
       "isolation_profile": null,
@@ -1942,6 +1969,15 @@
       "isolation_profile": null,
       "progress_contract": "not_long_tail",
       "skill": "log_analyze",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.make_directory",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "make_dir",
       "timeout_seconds": 30
     },
     {
@@ -1964,12 +2000,120 @@
     },
     {
       "adapter_kind": null,
+      "capability": "media_discovery.capabilities",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "native_progress",
+      "skill": "media_discovery",
+      "timeout_seconds": 15
+    },
+    {
+      "adapter_kind": null,
+      "capability": "media_discovery.disable",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "native_progress",
+      "skill": "media_discovery",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "media_discovery.enable",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "native_progress",
+      "skill": "media_discovery",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "media_discovery.export_results",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "native_progress",
+      "skill": "media_discovery",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "media_discovery.list_runs",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "native_progress",
+      "skill": "media_discovery",
+      "timeout_seconds": 15
+    },
+    {
+      "adapter_kind": null,
+      "capability": "media_discovery.pause",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "native_progress",
+      "skill": "media_discovery",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "media_discovery.preview_enable",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "native_progress",
+      "skill": "media_discovery",
+      "timeout_seconds": 15
+    },
+    {
+      "adapter_kind": null,
+      "capability": "media_discovery.resume",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "native_progress",
+      "skill": "media_discovery",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "media_discovery.run_enabled_once",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "native_progress",
+      "skill": "media_discovery",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "media_discovery.run_once",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "native_progress",
+      "skill": "media_discovery",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "media_discovery.status",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "native_progress",
+      "skill": "media_discovery",
+      "timeout_seconds": 15
+    },
+    {
+      "adapter_kind": null,
+      "capability": "media_discovery.stop_current",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "native_progress",
+      "skill": "media_discovery",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
       "capability": "media_download.capabilities",
       "execution_mode": "sync_short",
       "isolation_profile": "read_only",
       "progress_contract": "native_progress",
       "skill": "media_download",
-      "timeout_seconds": 15
+      "timeout_seconds": 60
     },
     {
       "adapter_kind": "local_process_poll",
@@ -2096,6 +2240,132 @@
       "progress_contract": "not_long_tail",
       "skill": "music_generate",
       "timeout_seconds": 360
+    },
+    {
+      "adapter_kind": null,
+      "capability": "nni.bancor_account",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "nni",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "nni.bancor_candles",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "nni",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "nni.bancor_market",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "nni",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "nni.bancor_market_trades",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "nni",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "nni.bancor_quote",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "nni",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "nni.device_status",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "nni",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "nni.heartbeat_disable",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "nni",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "nni.heartbeat_enable",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "nni",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "nni.heartbeat_now",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "nni",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "nni.heartbeat_status",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "nni",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "nni.my_rewards",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "nni",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "nni.network_stats",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "nni",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "nni.reward_apr",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "nni",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": null,
+      "capability": "nni.status",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "nni",
+      "timeout_seconds": 60
     },
     {
       "adapter_kind": null,
@@ -2362,7 +2632,7 @@
       "adapter_kind": "local_process_poll",
       "capability": "process.kill",
       "execution_mode": "async_preferred",
-      "isolation_profile": null,
+      "isolation_profile": "host_process",
       "progress_contract": "poll_status",
       "skill": "process_basic",
       "timeout_seconds": 30
@@ -2371,7 +2641,7 @@
       "adapter_kind": null,
       "capability": "process.port_list",
       "execution_mode": "sync_short",
-      "isolation_profile": null,
+      "isolation_profile": "host_process",
       "progress_contract": "not_long_tail",
       "skill": "process_basic",
       "timeout_seconds": 30
@@ -2380,7 +2650,7 @@
       "adapter_kind": null,
       "capability": "process.ps",
       "execution_mode": "sync_short",
-      "isolation_profile": null,
+      "isolation_profile": "host_process",
       "progress_contract": "not_long_tail",
       "skill": "process_basic",
       "timeout_seconds": 30
@@ -2389,9 +2659,27 @@
       "adapter_kind": null,
       "capability": "process.tail_log",
       "execution_mode": "sync_short",
-      "isolation_profile": null,
+      "isolation_profile": "read_only",
       "progress_contract": "not_long_tail",
       "skill": "process_basic",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.read_file",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "read_file",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.remove_file",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "remove_file",
       "timeout_seconds": 30
     },
     {
@@ -2407,7 +2695,7 @@
       "adapter_kind": "http_job_poll",
       "capability": "rss.fetch_feed",
       "execution_mode": "async_preferred",
-      "isolation_profile": null,
+      "isolation_profile": "local_current_workspace",
       "progress_contract": "poll_status",
       "skill": "rss_fetch",
       "timeout_seconds": 30
@@ -2416,7 +2704,7 @@
       "adapter_kind": "http_job_poll",
       "capability": "rss.latest_news",
       "execution_mode": "async_preferred",
-      "isolation_profile": null,
+      "isolation_profile": "local_current_workspace",
       "progress_contract": "poll_status",
       "skill": "rss_fetch",
       "timeout_seconds": 30
@@ -2434,7 +2722,7 @@
       "adapter_kind": "http_job_poll",
       "capability": "rss.preview_category",
       "execution_mode": "async_preferred",
-      "isolation_profile": null,
+      "isolation_profile": "local_current_workspace",
       "progress_contract": "poll_status",
       "skill": "rss_fetch",
       "timeout_seconds": 30
@@ -2491,7 +2779,7 @@
       "isolation_profile": "local_current_workspace",
       "progress_contract": "poll_status",
       "skill": "run_cmd",
-      "timeout_seconds": 60
+      "timeout_seconds": 180
     },
     {
       "adapter_kind": null,
@@ -2500,7 +2788,7 @@
       "isolation_profile": "read_only",
       "progress_contract": "not_long_tail",
       "skill": "run_cmd",
-      "timeout_seconds": 60
+      "timeout_seconds": 180
     },
     {
       "adapter_kind": null,
@@ -2509,7 +2797,7 @@
       "isolation_profile": "read_only",
       "progress_contract": "not_long_tail",
       "skill": "run_cmd",
-      "timeout_seconds": 60
+      "timeout_seconds": 180
     },
     {
       "adapter_kind": null,
@@ -2518,7 +2806,7 @@
       "isolation_profile": "read_only",
       "progress_contract": "not_long_tail",
       "skill": "run_cmd",
-      "timeout_seconds": 60
+      "timeout_seconds": 180
     },
     {
       "adapter_kind": "local_process_poll",
@@ -2527,7 +2815,7 @@
       "isolation_profile": "local_current_workspace",
       "progress_contract": "poll_status",
       "skill": "run_cmd",
-      "timeout_seconds": 60
+      "timeout_seconds": 180
     },
     {
       "adapter_kind": "local_process_poll",
@@ -2536,7 +2824,16 @@
       "isolation_profile": "local_current_workspace",
       "progress_contract": "poll_status",
       "skill": "run_cmd",
-      "timeout_seconds": 60
+      "timeout_seconds": 180
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "system.run_command_direct",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "run_cmd",
+      "timeout_seconds": 180
     },
     {
       "adapter_kind": "local_process_poll",
@@ -2545,7 +2842,7 @@
       "isolation_profile": "local_current_workspace",
       "progress_contract": "poll_status",
       "skill": "run_cmd",
-      "timeout_seconds": 60
+      "timeout_seconds": 180
     },
     {
       "adapter_kind": "local_process_poll",
@@ -2554,7 +2851,7 @@
       "isolation_profile": "local_current_workspace",
       "progress_contract": "poll_status",
       "skill": "run_cmd",
-      "timeout_seconds": 60
+      "timeout_seconds": 180
     },
     {
       "adapter_kind": "local_process_poll",
@@ -2563,7 +2860,7 @@
       "isolation_profile": "local_current_workspace",
       "progress_contract": "poll_status",
       "skill": "run_cmd",
-      "timeout_seconds": 60
+      "timeout_seconds": 180
     },
     {
       "adapter_kind": null,
@@ -2572,7 +2869,7 @@
       "isolation_profile": "read_only",
       "progress_contract": "not_long_tail",
       "skill": "run_cmd",
-      "timeout_seconds": 60
+      "timeout_seconds": 180
     },
     {
       "adapter_kind": null,
@@ -2581,7 +2878,7 @@
       "isolation_profile": "local_current_workspace",
       "progress_contract": "not_long_tail",
       "skill": "run_cmd",
-      "timeout_seconds": 60
+      "timeout_seconds": 180
     },
     {
       "adapter_kind": null,
@@ -2590,7 +2887,7 @@
       "isolation_profile": "local_current_workspace",
       "progress_contract": "not_long_tail",
       "skill": "run_cmd",
-      "timeout_seconds": 60
+      "timeout_seconds": 180
     },
     {
       "adapter_kind": null,
@@ -2599,7 +2896,7 @@
       "isolation_profile": "local_current_workspace",
       "progress_contract": "not_long_tail",
       "skill": "run_cmd",
-      "timeout_seconds": 60
+      "timeout_seconds": 180
     },
     {
       "adapter_kind": null,
@@ -2608,7 +2905,7 @@
       "isolation_profile": "local_current_workspace",
       "progress_contract": "not_long_tail",
       "skill": "run_cmd",
-      "timeout_seconds": 60
+      "timeout_seconds": 180
     },
     {
       "adapter_kind": null,
@@ -2617,11 +2914,11 @@
       "isolation_profile": "local_current_workspace",
       "progress_contract": "not_long_tail",
       "skill": "run_cmd",
-      "timeout_seconds": 60
+      "timeout_seconds": 180
     },
     {
       "adapter_kind": null,
-      "capability": "schedule.create",
+      "capability": "schedule.create_structured",
       "execution_mode": "sync_short",
       "isolation_profile": null,
       "progress_contract": "not_long_tail",
@@ -2631,6 +2928,15 @@
     {
       "adapter_kind": null,
       "capability": "schedule.delete",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "not_long_tail",
+      "skill": "schedule",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "schedule.delete_matching",
       "execution_mode": "sync_short",
       "isolation_profile": null,
       "progress_contract": "not_long_tail",
@@ -3142,6 +3448,87 @@
       "timeout_seconds": 25
     },
     {
+      "adapter_kind": null,
+      "capability": "workspace.apply_child_patch",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "workspace_patch",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "workspace.apply_patch",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "workspace_patch",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "workspace.diff",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "workspace_patch",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "workspace.preview_replace_text",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "workspace_patch",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "workspace.reject_child_patch",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "workspace_patch",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "workspace.replace_text",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "workspace_patch",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "workspace.review_child_patch",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "not_long_tail",
+      "skill": "workspace_patch",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "workspace.rewind",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "workspace_patch",
+      "timeout_seconds": 45
+    },
+    {
+      "adapter_kind": null,
+      "capability": "filesystem.write_file",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "write_file",
+      "timeout_seconds": 30
+    },
+    {
       "adapter_kind": "http_job_poll",
       "capability": "x.draft_preview",
       "execution_mode": "async_preferred",
@@ -3167,23 +3554,23 @@
     "configs/agent_guard.toml"
   ],
   "summary": {
-    "capability_count": 351,
+    "capability_count": 394,
     "execution_modes": {
-      "async_preferred": 69,
+      "async_preferred": 72,
       "async_required": 9,
-      "sync_short": 273
+      "sync_short": 313
     },
     "progress_contracts": {
-      "native_progress": 37,
-      "not_long_tail": 254,
-      "poll_status": 60
+      "native_progress": 49,
+      "not_long_tail": 284,
+      "poll_status": 61
     },
     "remote_executor_capability_count": 0
   },
   "timeout_and_lease_fields": [
     {
       "path": "database.busy_timeout_ms",
-      "value": 2000
+      "value": 5000
     },
     {
       "path": "llm.anthropic.timeout_seconds",
@@ -3247,11 +3634,11 @@
     },
     {
       "path": "tools.cmd_idle_timeout_seconds",
-      "value": 60
+      "value": 120
     },
     {
       "path": "tools.cmd_timeout_seconds",
-      "value": 60
+      "value": 180
     },
     {
       "path": "worker.running_no_progress_timeout_seconds",

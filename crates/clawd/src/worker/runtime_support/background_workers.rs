@@ -10,6 +10,20 @@ use uuid::Uuid;
 use crate::{now_ts, now_ts_u64, repo, schedule_service, AppState, ScheduledJobDue};
 
 const CHANNEL_TERMINAL_DELIVERY_LEASE_SECONDS: u64 = 300;
+const CHANNEL_TERMINAL_DELIVERY_MAX_ATTEMPTS: u32 = 96;
+const CHANNEL_TERMINAL_DELIVERY_MAX_RETRY_DELAY_SECONDS: u64 = 300;
+
+fn channel_terminal_delivery_retry_delay(base_seconds: u64, attempt_count: u32) -> u64 {
+    let exponent = attempt_count.saturating_sub(1).min(6);
+    base_seconds
+        .max(1)
+        .saturating_mul(1_u64 << exponent)
+        .min(CHANNEL_TERMINAL_DELIVERY_MAX_RETRY_DELAY_SECONDS)
+}
+
+fn channel_terminal_delivery_retry_budget_exhausted(attempt_count: u32) -> bool {
+    attempt_count > CHANNEL_TERMINAL_DELIVERY_MAX_ATTEMPTS
+}
 
 pub(crate) fn start_task_heartbeat(
     state: AppState,
@@ -115,6 +129,22 @@ async fn channel_terminal_delivery_once(state: &AppState) -> anyhow::Result<bool
     else {
         return Ok(false);
     };
+    if channel_terminal_delivery_retry_budget_exhausted(claim.attempt_count) {
+        warn!(
+            task_id = claim.task_id,
+            attempt_count = claim.attempt_count,
+            "channel terminal delivery retry budget exhausted"
+        );
+        repo::finish_channel_terminal_delivery(
+            &state.core.db,
+            &claim,
+            false,
+            None,
+            Some("channel_delivery_retry_budget_exhausted"),
+            now_ts_u64(),
+        )?;
+        return Ok(true);
+    }
     let record = match repo::get_task_delivery_record(state, &claim.task_id)? {
         Some(record) => record,
         None => {
@@ -156,13 +186,14 @@ async fn channel_terminal_delivery_once(state: &AppState) -> anyhow::Result<bool
             )?
         }
         Ok(response) => {
-            let delay = if response.status
+            let base_delay = if response.status
                 == claw_core::channel_delivery::ChannelTaskDeliveryStatus::QueryRequired
             {
                 30
             } else {
                 5
             };
+            let delay = channel_terminal_delivery_retry_delay(base_delay, claim.attempt_count);
             repo::finish_channel_terminal_delivery(
                 &state.core.db,
                 &claim,
@@ -173,7 +204,7 @@ async fn channel_terminal_delivery_once(state: &AppState) -> anyhow::Result<bool
             )?;
         }
         Err(error) => {
-            let delay = (1_u64 << claim.attempt_count.saturating_sub(1).min(6)).min(60);
+            let delay = channel_terminal_delivery_retry_delay(1, claim.attempt_count);
             let error_code = error.to_string();
             repo::finish_channel_terminal_delivery(
                 &state.core.db,
