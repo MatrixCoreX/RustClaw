@@ -471,7 +471,11 @@ export function CommunicationSetupPage({
               <div className="flex flex-1 flex-col gap-4">
                 {wechatLoginStatus?.connected ? (
                   <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/8 px-3 py-2 text-sm text-emerald-100/85">
-                    {t("当前登录状态可继续使用；如果要更换登录，也可以重新生成二维码。", "The current login is active. If you want to switch accounts, you can also regenerate the QR code.")}
+                    {t("微信已登录，并已自动绑定到当前用户。", "WeChat is signed in and automatically bound to the current user.")}
+                  </div>
+                ) : wechatLoginStatus?.provider_connected && !wechatLoginStatus?.current_user_bound ? (
+                  <div className="rounded-xl border border-amber-400/25 bg-amber-400/8 px-3 py-2 text-sm text-amber-100/85">
+                    {t("现有微信登录不属于当前用户。请重新生成二维码并扫码，完成后会自动绑定。", "The current WeChat sign-in does not belong to this user. Generate and scan a new QR code to bind automatically.")}
                   </div>
                 ) : null}
 

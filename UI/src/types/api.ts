@@ -1807,6 +1807,9 @@ export interface WhatsappWebLoginStatus {
 
 export interface WechatLoginStatus {
   connected?: boolean;
+  provider_connected?: boolean;
+  current_user_bound?: boolean;
+  binding_status?: "bound" | "connected_unbound" | "bound_offline" | "unbound" | string;
   qr_ready?: boolean;
   session_key?: string | null;
   qr_status?: string | null;
@@ -1826,6 +1829,9 @@ export interface WechatQrStartResponse {
 
 export interface WechatQrWaitResponse {
   connected?: boolean;
+  provider_connected?: boolean;
+  current_user_bound?: boolean;
+  binding_status?: "bound" | "connected_unbound" | "bound_offline" | "unbound" | string;
   qr_status?: string | null;
   message?: string;
   account_id?: string | null;
