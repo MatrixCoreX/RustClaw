@@ -81,13 +81,15 @@ fn insert_due_job(state: &AppState, job_id: &str, task_id: &str, next_run_at: i6
     let db = state.core.db.get().expect("get db");
     db.execute(
         "INSERT INTO scheduled_jobs (
-            job_id, user_id, chat_id, user_key, channel, schedule_type,
+            job_id, user_id, chat_id, user_key, principal_id, channel, schedule_type,
             every_minutes, timezone, task_kind, task_payload_json, enabled,
             notify_on_success, notify_on_failure, next_run_at, isolation_profile,
             permission_policy_json, thread_resume_enabled, last_thread_task_id,
             created_at, updated_at
         ) VALUES (
-            ?1, 42, 7, 'test-key', 'ui', 'interval',
+            ?1, 42, 7, 'test-key',
+            (SELECT principal_id FROM auth_keys WHERE user_key = 'test-key'),
+            'ui', 'interval',
             5, 'UTC', 'ask', ?2, 1,
             1, 1, ?3, 'local_current_workspace',
             '{}', 1, ?4, '1', '1'
@@ -267,6 +269,7 @@ fn scheduled_wakeup_resumes_waiting_thread_without_enqueuing_duplicate_task() {
 #[test]
 fn scheduled_wakeup_enqueues_new_thread_after_previous_task_is_terminal() {
     let state = test_state();
+    state.seed_test_auth_identity("test-key", "user");
     let now = crate::now_ts_u64() as i64;
     let previous_task_id = Uuid::new_v4().to_string();
     let job_id = format!("job_{}", Uuid::new_v4().simple());
@@ -286,13 +289,20 @@ fn scheduled_wakeup_enqueues_new_thread_after_previous_task_is_terminal() {
             |row| row.get(0),
         )
         .expect("read next thread task");
-    let next_payload_raw: String = db
+    let (next_payload_raw, next_principal_id): (String, Option<String>) = db
         .query_row(
-            "SELECT payload_json FROM tasks WHERE task_id = ?1",
+            "SELECT payload_json, principal_id FROM tasks WHERE task_id = ?1",
             rusqlite::params![next_task_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .expect("read next task payload");
+    let scheduled_principal_id: Option<String> = db
+        .query_row(
+            "SELECT principal_id FROM scheduled_jobs WHERE job_id = ?1",
+            rusqlite::params![job_id],
+            |row| row.get(0),
+        )
+        .expect("read scheduled owner principal");
     let run_count: i64 = db
         .query_row("SELECT COUNT(*) FROM scheduled_job_runs", [], |row| {
             row.get(0)
@@ -303,6 +313,8 @@ fn scheduled_wakeup_enqueues_new_thread_after_previous_task_is_terminal() {
 
     assert_eq!(task_count, 2);
     assert_ne!(next_task_id, previous_task_id);
+    assert!(scheduled_principal_id.is_some());
+    assert_eq!(next_principal_id, scheduled_principal_id);
     assert_eq!(
         next_payload["thread_resume_task_id"],
         previous_task_id.as_str()

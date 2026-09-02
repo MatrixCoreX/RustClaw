@@ -14,6 +14,43 @@ use claw_core::skill_registry::{SkillKind, SkillsRegistry};
 const SCHEDULE_INTENT_MIN_CONFIDENCE: f64 = 0.5;
 pub(crate) const SCHEDULE_TASK_MODE_AGENT: &str = "agent";
 pub(crate) const SCHEDULE_TASK_MODE_DIRECT_TEXT: &str = "direct_text";
+const SCHEDULE_OWNER_PREDICATE: &str = "(
+    (?1 IS NOT NULL AND principal_id = ?1 AND channel = ?2)
+    OR (
+        (principal_id IS NULL OR TRIM(principal_id) = '')
+        AND user_id = ?3
+        AND chat_id = ?4
+    )
+)";
+
+#[derive(Debug, Clone)]
+struct ScheduleOwnerScope {
+    principal_id: Option<String>,
+    channel: String,
+    legacy_user_id: i64,
+    legacy_chat_id: i64,
+}
+
+fn schedule_owner_scope(
+    db: &rusqlite::Connection,
+    task: &ClaimedTask,
+) -> Result<ScheduleOwnerScope, String> {
+    let principal_id = task
+        .user_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|user_key| crate::repo::auth::principal_id_for_user_key(db, user_key))
+        .transpose()
+        .map_err(|error| format!("resolve schedule owner principal: {error}"))?
+        .flatten();
+    Ok(ScheduleOwnerScope {
+        principal_id,
+        channel: task.channel.trim().to_string(),
+        legacy_user_id: task.user_id,
+        legacy_chat_id: task.chat_id,
+    })
+}
 
 #[derive(Debug, Clone)]
 struct SkillContractHint {
@@ -965,30 +1002,38 @@ pub(crate) async fn try_handle_schedule_request(
     match kind.as_str() {
         "list" => {
             let db = state.core.db.get().map_err(|e| format!("db pool: {e}"))?;
-            let mut stmt = db
-                .prepare(
-                    "SELECT job_id, schedule_type, time_of_day, weekday, every_minutes, timezone, enabled, next_run_at, task_kind, task_payload_json
-                     FROM scheduled_jobs
-                     WHERE user_id = ?1 AND chat_id = ?2
-                     ORDER BY id DESC
-                     LIMIT 20",
-                )
-                .map_err(|e| e.to_string())?;
+            let owner = schedule_owner_scope(&db, task)?;
+            let query = format!(
+                "SELECT job_id, schedule_type, time_of_day, weekday, every_minutes, timezone, enabled, next_run_at, task_kind, task_payload_json
+                 FROM scheduled_jobs
+                 WHERE {SCHEDULE_OWNER_PREDICATE}
+                 ORDER BY id DESC
+                 LIMIT 20"
+            );
+            let mut stmt = db.prepare(&query).map_err(|e| e.to_string())?;
             let rows = stmt
-                .query_map(params![task.user_id, task.chat_id], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                        row.get::<_, Option<i64>>(3)?,
-                        row.get::<_, Option<i64>>(4)?,
-                        row.get::<_, String>(5)?,
-                        row.get::<_, i64>(6)?,
-                        row.get::<_, Option<i64>>(7)?,
-                        row.get::<_, String>(8)?,
-                        row.get::<_, String>(9)?,
-                    ))
-                })
+                .query_map(
+                    params![
+                        owner.principal_id.as_deref(),
+                        owner.channel.as_str(),
+                        owner.legacy_user_id,
+                        owner.legacy_chat_id
+                    ],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                            row.get::<_, Option<i64>>(3)?,
+                            row.get::<_, Option<i64>>(4)?,
+                            row.get::<_, String>(5)?,
+                            row.get::<_, i64>(6)?,
+                            row.get::<_, Option<i64>>(7)?,
+                            row.get::<_, String>(8)?,
+                            row.get::<_, String>(9)?,
+                        ))
+                    },
+                )
                 .map_err(|e| e.to_string())?;
 
             let mut lines = Vec::new();
@@ -1035,21 +1080,38 @@ pub(crate) async fn try_handle_schedule_request(
         }
         "delete" => {
             let db = state.core.db.get().map_err(|e| format!("db pool: {e}"))?;
+            let owner = schedule_owner_scope(&db, task)?;
             let target = intent.target_job_id.trim();
             let (affected, bulk_mode) = if target.is_empty() {
+                let query = format!("DELETE FROM scheduled_jobs WHERE {SCHEDULE_OWNER_PREDICATE}");
                 (
                     db.execute(
-                        "DELETE FROM scheduled_jobs WHERE user_id = ?1 AND chat_id = ?2",
-                        params![task.user_id, task.chat_id],
+                        &query,
+                        params![
+                            owner.principal_id.as_deref(),
+                            owner.channel.as_str(),
+                            owner.legacy_user_id,
+                            owner.legacy_chat_id
+                        ],
                     )
                     .map_err(|e| e.to_string())?,
                     true,
                 )
             } else {
+                let query = format!(
+                    "DELETE FROM scheduled_jobs
+                     WHERE {SCHEDULE_OWNER_PREDICATE} AND job_id = ?5"
+                );
                 (
                     db.execute(
-                        "DELETE FROM scheduled_jobs WHERE job_id = ?1 AND user_id = ?2 AND chat_id = ?3",
-                        params![target, task.user_id, task.chat_id],
+                        &query,
+                        params![
+                            owner.principal_id.as_deref(),
+                            owner.channel.as_str(),
+                            owner.legacy_user_id,
+                            owner.legacy_chat_id,
+                            target
+                        ],
                     )
                     .map_err(|e| e.to_string())?,
                     false,
@@ -1082,23 +1144,45 @@ pub(crate) async fn try_handle_schedule_request(
         "pause" | "resume" => {
             let enabled = if kind == "resume" { 1 } else { 0 };
             let db = state.core.db.get().map_err(|e| format!("db pool: {e}"))?;
+            let owner = schedule_owner_scope(&db, task)?;
             let target = intent.target_job_id.trim();
             let (affected, bulk_mode) = if target.is_empty() {
+                let query = format!(
+                    "UPDATE scheduled_jobs SET enabled = ?5, updated_at = ?6
+                     WHERE {SCHEDULE_OWNER_PREDICATE}"
+                );
                 (
                     db.execute(
-                        "UPDATE scheduled_jobs SET enabled = ?3, updated_at = ?4
-                         WHERE user_id = ?1 AND chat_id = ?2",
-                        params![task.user_id, task.chat_id, enabled, crate::now_ts()],
+                        &query,
+                        params![
+                            owner.principal_id.as_deref(),
+                            owner.channel.as_str(),
+                            owner.legacy_user_id,
+                            owner.legacy_chat_id,
+                            enabled,
+                            crate::now_ts()
+                        ],
                     )
                     .map_err(|e| e.to_string())?,
                     true,
                 )
             } else {
+                let query = format!(
+                    "UPDATE scheduled_jobs SET enabled = ?6, updated_at = ?7
+                     WHERE {SCHEDULE_OWNER_PREDICATE} AND job_id = ?5"
+                );
                 (
                     db.execute(
-                        "UPDATE scheduled_jobs SET enabled = ?4, updated_at = ?5
-                         WHERE job_id = ?1 AND user_id = ?2 AND chat_id = ?3",
-                        params![target, task.user_id, task.chat_id, enabled, crate::now_ts()],
+                        &query,
+                        params![
+                            owner.principal_id.as_deref(),
+                            owner.channel.as_str(),
+                            owner.legacy_user_id,
+                            owner.legacy_chat_id,
+                            target,
+                            enabled,
+                            crate::now_ts()
+                        ],
                     )
                     .map_err(|e| e.to_string())?,
                     false,
@@ -1366,21 +1450,31 @@ pub(crate) fn delete_matching_skill_schedules(
         .db
         .get()
         .map_err(|error| format!("db pool: {error}"))?;
+    let owner = schedule_owner_scope(&db, task)?;
+    let select_query = format!(
+        "SELECT job_id, task_kind, task_payload_json
+         FROM scheduled_jobs
+         WHERE {SCHEDULE_OWNER_PREDICATE}"
+    );
     let mut statement = db
-        .prepare(
-            "SELECT job_id, task_kind, task_payload_json
-             FROM scheduled_jobs
-             WHERE user_id = ?1 AND chat_id = ?2",
-        )
+        .prepare(&select_query)
         .map_err(|error| error.to_string())?;
     let rows = statement
-        .query_map(params![task.user_id, task.chat_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        })
+        .query_map(
+            params![
+                owner.principal_id.as_deref(),
+                owner.channel.as_str(),
+                owner.legacy_user_id,
+                owner.legacy_chat_id
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
         .map_err(|error| error.to_string())?;
 
     let mut matched_job_ids = Vec::new();
@@ -1442,11 +1536,21 @@ pub(crate) fn delete_matching_skill_schedules(
         .unchecked_transaction()
         .map_err(|error| error.to_string())?;
     let mut deleted_job_ids = Vec::new();
+    let delete_query = format!(
+        "DELETE FROM scheduled_jobs
+         WHERE {SCHEDULE_OWNER_PREDICATE} AND job_id = ?5"
+    );
     for job_id in &matched_job_ids {
         let affected = transaction
             .execute(
-                "DELETE FROM scheduled_jobs WHERE job_id = ?1 AND user_id = ?2 AND chat_id = ?3",
-                params![job_id, task.user_id, task.chat_id],
+                &delete_query,
+                params![
+                    owner.principal_id.as_deref(),
+                    owner.channel.as_str(),
+                    owner.legacy_user_id,
+                    owner.legacy_chat_id,
+                    job_id
+                ],
             )
             .map_err(|error| error.to_string())?;
         if affected == 1 {

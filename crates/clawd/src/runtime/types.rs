@@ -236,6 +236,7 @@ pub(crate) struct ScheduledJobDue {
     pub(crate) user_id: i64,
     pub(crate) chat_id: i64,
     pub(crate) user_key: Option<String>,
+    pub(crate) principal_id: Option<String>,
     pub(crate) channel: String,
     pub(crate) external_user_id: Option<String>,
     pub(crate) external_chat_id: Option<String>,

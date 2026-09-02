@@ -216,7 +216,7 @@ fn schedule_once(state: &AppState) -> anyhow::Result<()> {
     {
         let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
         let mut stmt = db.prepare(
-            "SELECT job_id, user_id, chat_id, user_key, channel, external_user_id, external_chat_id, task_kind, task_payload_json, next_run_at,
+            "SELECT job_id, user_id, chat_id, user_key, principal_id, channel, external_user_id, external_chat_id, task_kind, task_payload_json, next_run_at,
                     schedule_type, time_of_day, weekday, every_minutes, timezone, isolation_profile, permission_policy_json,
                     thread_resume_enabled, last_thread_task_id
              FROM scheduled_jobs
@@ -230,21 +230,22 @@ fn schedule_once(state: &AppState) -> anyhow::Result<()> {
                 user_id: row.get(1)?,
                 chat_id: row.get(2)?,
                 user_key: row.get(3)?,
-                channel: row.get(4)?,
-                external_user_id: row.get(5)?,
-                external_chat_id: row.get(6)?,
-                task_kind: row.get(7)?,
-                task_payload_json: row.get(8)?,
-                next_run_at: row.get(9)?,
-                schedule_type: row.get(10)?,
-                time_of_day: row.get(11)?,
-                weekday: row.get(12)?,
-                every_minutes: row.get(13)?,
-                timezone: row.get(14)?,
-                isolation_profile: row.get(15)?,
-                permission_policy_json: row.get(16)?,
-                thread_resume_enabled: row.get::<_, i64>(17)? != 0,
-                last_thread_task_id: row.get(18)?,
+                principal_id: row.get(4)?,
+                channel: row.get(5)?,
+                external_user_id: row.get(6)?,
+                external_chat_id: row.get(7)?,
+                task_kind: row.get(8)?,
+                task_payload_json: row.get(9)?,
+                next_run_at: row.get(10)?,
+                schedule_type: row.get(11)?,
+                time_of_day: row.get(12)?,
+                weekday: row.get(13)?,
+                every_minutes: row.get(14)?,
+                timezone: row.get(15)?,
+                isolation_profile: row.get(16)?,
+                permission_policy_json: row.get(17)?,
+                thread_resume_enabled: row.get::<_, i64>(18)? != 0,
+                last_thread_task_id: row.get(19)?,
             })
         })?;
         for row in rows {
@@ -322,13 +323,14 @@ fn schedule_once(state: &AppState) -> anyhow::Result<()> {
         let mut db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
         let tx = db.transaction()?;
         tx.execute(
-            "INSERT INTO tasks (task_id, user_id, chat_id, user_key, channel, external_user_id, external_chat_id, message_id, kind, payload_json, status, result_json, error_text, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8, ?9, 'queued', NULL, NULL, ?10, ?10)",
+            "INSERT INTO tasks (task_id, user_id, chat_id, user_key, principal_id, channel, external_user_id, external_chat_id, message_id, kind, payload_json, status, result_json, error_text, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9, ?10, 'queued', NULL, NULL, ?11, ?11)",
             rusqlite::params![
                 task_id,
                 job.user_id,
                 job.chat_id,
                 job.user_key,
+                job.principal_id,
                 job.channel,
                 job.external_user_id,
                 job.external_chat_id,

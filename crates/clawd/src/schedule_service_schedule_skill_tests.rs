@@ -141,6 +141,167 @@ fn structured_schedule_cleanup_deletes_owned_jobs_and_retains_shared_platform_jo
     assert_eq!(remaining, 0);
 }
 
+#[tokio::test]
+async fn schedule_management_uses_stable_principal_scope_after_chat_rotation() {
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let owner_key = "rk-schedule-stable-owner";
+    let other_key = "rk-schedule-other-owner";
+    state.seed_test_auth_identity(owner_key, "user");
+    state.seed_test_auth_identity(other_key, "user");
+    let (owner_principal, other_principal) = {
+        let db = state.core.db.get().expect("db");
+        (
+            crate::repo::auth::principal_id_for_user_key(&db, owner_key)
+                .expect("resolve owner principal")
+                .expect("owner principal"),
+            crate::repo::auth::principal_id_for_user_key(&db, other_key)
+                .expect("resolve other principal")
+                .expect("other principal"),
+        )
+    };
+    let mut current_task =
+        claimed_task_with_payload("wechat", json!({"text": "schedule management"}));
+    current_task.user_id = 100;
+    current_task.chat_id = 200;
+    current_task.user_key = Some(owner_key.to_string());
+    {
+        let db = state.core.db.get().expect("db");
+        for (job_id, user_id, chat_id, channel, principal_id, user_key) in [
+            (
+                "job-owned-old-chat",
+                10,
+                20,
+                "wechat",
+                owner_principal.as_str(),
+                owner_key,
+            ),
+            (
+                "job-owned-other-channel",
+                100,
+                200,
+                "ui",
+                owner_principal.as_str(),
+                owner_key,
+            ),
+            (
+                "job-other-principal",
+                100,
+                200,
+                "wechat",
+                other_principal.as_str(),
+                other_key,
+            ),
+        ] {
+            db.execute(
+                "INSERT INTO scheduled_jobs (
+                    job_id, user_id, chat_id, user_key, principal_id, channel,
+                    schedule_type, every_minutes, timezone, task_kind,
+                    task_payload_json, enabled, next_run_at, created_at, updated_at
+                 ) VALUES (
+                    ?1, ?2, ?3, ?4, ?5, ?6,
+                    'interval', 60, 'Asia/Shanghai', 'ask',
+                    ?7, 1, 4102444800, '1', '1'
+                 )",
+                params![
+                    job_id,
+                    user_id,
+                    chat_id,
+                    user_key,
+                    principal_id,
+                    channel,
+                    json!({"text": job_id}).to_string()
+                ],
+            )
+            .expect("insert scoped schedule");
+        }
+    }
+
+    let list_intent = ScheduleIntentOutput {
+        kind: "list".to_string(),
+        confidence: 0.99,
+        ..Default::default()
+    };
+    let list_reply = try_handle_schedule_request(
+        &state,
+        &current_task,
+        "schedule management",
+        Some(&list_intent),
+    )
+    .await
+    .expect("list schedules")
+    .expect("list reply");
+    assert_eq!(list_reply, "schedule.msg.list_header");
+
+    for (kind, expected_enabled) in [("pause", 0_i64), ("resume", 1_i64)] {
+        let intent = ScheduleIntentOutput {
+            kind: kind.to_string(),
+            target_job_id: "job-owned-old-chat".to_string(),
+            confidence: 0.99,
+            ..Default::default()
+        };
+        try_handle_schedule_request(&state, &current_task, "schedule management", Some(&intent))
+            .await
+            .expect("update schedule")
+            .expect("update reply");
+        let enabled: i64 = state
+            .core
+            .db
+            .get()
+            .expect("db")
+            .query_row(
+                "SELECT enabled FROM scheduled_jobs WHERE job_id = 'job-owned-old-chat'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read enabled state");
+        assert_eq!(enabled, expected_enabled);
+    }
+
+    let delete_intent = ScheduleIntentOutput {
+        kind: "delete".to_string(),
+        target_job_id: "job-owned-old-chat".to_string(),
+        confidence: 0.99,
+        ..Default::default()
+    };
+    try_handle_schedule_request(
+        &state,
+        &current_task,
+        "schedule management",
+        Some(&delete_intent),
+    )
+    .await
+    .expect("delete schedule")
+    .expect("delete reply");
+    let empty_reply = try_handle_schedule_request(
+        &state,
+        &current_task,
+        "schedule management",
+        Some(&list_intent),
+    )
+    .await
+    .expect("list after delete")
+    .expect("empty list reply");
+    assert_eq!(empty_reply, "schedule.msg.list_empty");
+    let db = state.core.db.get().expect("db");
+    let owned_count: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM scheduled_jobs WHERE job_id = 'job-owned-old-chat'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count deleted schedule");
+    let protected_count: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM scheduled_jobs
+             WHERE job_id IN ('job-owned-other-channel', 'job-other-principal')",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count protected schedules");
+    assert_eq!(owned_count, 0);
+    assert_eq!(protected_count, 2);
+}
+
 #[test]
 fn schedule_payload_inherits_wechat_context_token_from_source_task() {
     let task = claimed_task_with_payload(
