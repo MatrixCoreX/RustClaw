@@ -82,7 +82,7 @@ fn login_status_response_includes_session_key_for_active_qr() {
         message: "二维码已生成".to_string(),
     };
 
-    let response = build_login_status_response(&status, Some(&active));
+    let response = build_login_status_response(&status, Some(&active), None);
 
     assert_eq!(response.session_key.as_deref(), Some("primary"));
     assert_eq!(response.qr_status.as_deref(), Some("wait"));
@@ -103,11 +103,16 @@ fn login_status_response_omits_session_key_without_active_qr() {
         account_label: Some("bot-1".to_string()),
     };
 
-    let response = build_login_status_response(&status, None);
+    let session = super::PersistedSession {
+        user_id: Some("wx-user-1".to_string()),
+        ..Default::default()
+    };
+    let response = build_login_status_response(&status, None, Some(&session));
 
     assert!(response.session_key.is_none());
     assert_eq!(response.connected, true);
     assert_eq!(response.qr_ready, false);
+    assert_eq!(response.user_id.as_deref(), Some("wx-user-1"));
 }
 
 #[test]

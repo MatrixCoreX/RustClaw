@@ -3,10 +3,12 @@ use super::*;
 pub(super) fn build_login_status_response(
     status: &WechatRuntimeStatus,
     active_login: Option<&ActiveLogin>,
+    session: Option<&PersistedSession>,
 ) -> LoginStatusResponse {
     LoginStatusResponse {
         connected: runtime_status_is_connected(&status.status),
         qr_ready: active_login.is_some(),
+        user_id: session.and_then(|session| session.user_id.clone()),
         session_key: active_login.map(|login| login.session_key.clone()),
         qr_status: active_login.map(|login| login.status.clone()),
         qrcode_url: active_login.map(|login| login.qrcode_url.clone()),
@@ -20,6 +22,7 @@ pub(super) fn build_login_status_response(
 
 pub(super) async fn login_status(AxumState(state): AxumState<State>) -> Json<LoginStatusResponse> {
     let status = state.status.read().await.clone();
+    let session = state.session.read().await.clone();
     let active_login = {
         let logins = state.active_logins.read().await;
         logins
@@ -27,7 +30,11 @@ pub(super) async fn login_status(AxumState(state): AxumState<State>) -> Json<Log
             .find(|login| active_login_is_fresh(login))
             .cloned()
     };
-    Json(build_login_status_response(&status, active_login.as_ref()))
+    Json(build_login_status_response(
+        &status,
+        active_login.as_ref(),
+        session.as_ref(),
+    ))
 }
 
 pub(super) async fn login_qr_start(

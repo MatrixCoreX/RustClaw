@@ -146,6 +146,8 @@ struct LoginStatusResponse {
     connected: bool,
     qr_ready: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    user_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     session_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     qr_status: Option<String>,

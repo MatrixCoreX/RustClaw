@@ -175,11 +175,17 @@ export function useConsoleProjections({
           };
         }
         if (row.healthy === true) {
+          const connectedForAnotherUser = wechatLoginStatus?.provider_connected === true
+            && wechatLoginStatus?.current_user_bound !== true;
           return {
             ...row,
             category: "attention",
-            statusLabel: t("进程已起，待登录", "Running, login required"),
-            detail: wechatLoginStatus?.qr_status === "scaned"
+            statusLabel: connectedForAnotherUser
+              ? t("当前用户未绑定", "Not bound to this user")
+              : t("进程已起，待登录", "Running, login required"),
+            detail: connectedForAnotherUser
+              ? t("微信服务已有登录态，但当前网页登录用户尚未绑定。请为当前用户重新扫码。", "WeChat is signed in, but it is not bound to the current web user. Scan again for this user.")
+              : wechatLoginStatus?.qr_status === "scaned"
               ? t("二维码已被扫描，请在手机上完成确认。", "The QR code was scanned. Please confirm on the phone.")
               : wechatLoginStatus?.qr_ready
                 ? t("二维码已就绪，可以直接扫码登录微信。", "QR is ready and can be scanned to log in.")
@@ -359,10 +365,16 @@ export function useConsoleProjections({
       return t("设置和登录都已完成，现在可以直接通过微信发送消息。", "Setup and sign-in are complete. You can now send messages through WeChat.");
     }
     if (wechatStepStatus === "attention") {
+      if (wechatLoginStatus?.provider_connected === true && wechatLoginStatus?.current_user_bound !== true) {
+        return t(
+          "微信服务已有登录态，但当前用户尚未绑定。重新扫码后会自动绑定到当前用户。",
+          "WeChat is signed in, but it is not bound to the current user. Scan again to bind it automatically.",
+        );
+      }
       return t("微信已经接近可用。完成剩下的启动或扫码即可。", "WeChat is almost ready. Finish the remaining service start or QR sign-in steps.");
     }
     return t("还没有开始微信接入。按页面提示完成设置即可。", "WeChat setup has not started yet. Follow the prompts on the card to finish setup.");
-  }, [lang, t, wechatStatusLoading, wechatStepStatus]);
+  }, [lang, t, wechatLoginStatus?.current_user_bound, wechatLoginStatus?.provider_connected, wechatStatusLoading, wechatStepStatus]);
 
   const telegramStatusSummary = useMemo(() => {
     if (telegramStatusLoading) {

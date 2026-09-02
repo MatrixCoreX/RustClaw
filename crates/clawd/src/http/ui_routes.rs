@@ -571,3 +571,7 @@ mod workspace_webd_tests;
 #[cfg(test)]
 #[path = "ui_routes/auth_contract_tests.rs"]
 mod auth_contract_tests;
+
+#[cfg(test)]
+#[path = "ui_routes/messaging_login_tests.rs"]
+mod messaging_login_tests;

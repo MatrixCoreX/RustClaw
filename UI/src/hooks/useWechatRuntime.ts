@@ -11,6 +11,46 @@ import { formatUiError } from "../lib/ui-error";
 type Translate = (zh: string, en: string) => string;
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
 
+export function wechatLoginRequestError(
+  t: Translate,
+  code: string | null | undefined,
+  fallbackZh: string,
+  fallbackEn: string,
+): string {
+  switch (code) {
+    case "wechat.login_session_in_use":
+      return t(
+        "另一个用户正在完成微信扫码，请稍后再试。",
+        "Another user is completing WeChat QR sign-in. Try again shortly.",
+      );
+    case "wechat.login_session_expired":
+    case "wechat.login_session_not_ready":
+      return t(
+        "本次二维码会话已失效，请重新生成二维码。",
+        "This QR session is no longer valid. Generate a new QR code.",
+      );
+    case "wechat.login_session_owner_mismatch":
+      return t(
+        "本次二维码不属于当前登录用户，请重新生成。",
+        "This QR code belongs to another signed-in user. Generate a new one.",
+      );
+    case "wechat.confirmed_identity_missing":
+    case "wechat.auto_bind_failed":
+      return t(
+        "微信已确认登录，但自动绑定未完成，请重新扫码。",
+        "WeChat confirmed sign-in, but automatic binding did not finish. Scan again.",
+      );
+    default:
+      return t(fallbackZh, fallbackEn);
+  }
+}
+
+export function wechatLoginSessionRequiresRestart(code: string | null | undefined): boolean {
+  return code === "wechat.login_session_expired"
+    || code === "wechat.login_session_not_ready"
+    || code === "wechat.login_session_owner_mismatch";
+}
+
 export interface UseWechatRuntimeParams {
   apiFetch: ApiFetch;
   t: Translate;
@@ -91,7 +131,12 @@ export function useWechatRuntime({
       });
       const body = (await res.json()) as ApiResponse<WechatQrStartResponse>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `wechat_qr_start_http_${res.status}`);
+        throw new Error(wechatLoginRequestError(
+          t,
+          body.error,
+          "微信登录二维码生成失败，请稍后重试。",
+          "The WeChat sign-in QR code could not be generated. Try again shortly.",
+        ));
       }
       setWechatSessionKey(body.data.session_key);
       setWechatLoginStatus((prev) => ({
@@ -122,11 +167,32 @@ export function useWechatRuntime({
       });
       const body = (await res.json()) as ApiResponse<WechatQrWaitResponse>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `wechat_qr_wait_http_${res.status}`);
+        if (wechatLoginSessionRequiresRestart(body.error)) {
+          setWechatSessionKey(null);
+        }
+        throw new Error(wechatLoginRequestError(
+          t,
+          body.error,
+          "微信登录确认失败，请刷新二维码后重试。",
+          "WeChat sign-in confirmation failed. Refresh the QR code and try again.",
+        ));
       }
       if (body.data.connected) {
         setWechatSessionKey(null);
         await fetchWechatLoginStatus(true);
+        return;
+      }
+      if (body.data.qr_status === "expired") {
+        setWechatSessionKey(null);
+        setWechatLoginStatus((prev) => ({
+          ...(prev ?? {}),
+          connected: false,
+          qr_ready: false,
+          qrcode_url: null,
+          qr_status: "expired",
+          message: body.data?.message ?? prev?.message,
+          status: "qr_expired",
+        }));
         return;
       }
       if (body.data.qr_status || body.data.message) {
