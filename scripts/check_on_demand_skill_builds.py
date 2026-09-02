@@ -73,6 +73,8 @@ REQUIRED_SNIPPETS = {
     "start-all.sh": (
         "--scope proactive --target host --format specs",
         "configure_cargo_build_environment",
+        '[[ -f "$SCRIPT_DIR/Cargo.toml" && -f "$SCRIPT_DIR/Cargo.lock" ]]',
+        "receipt-verify",
     ),
     "scripts/skill_calls/_run_skill.sh": (
         "--scope selected --target host --skill \"$SKILL_NAME\" --format records",

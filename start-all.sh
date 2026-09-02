@@ -195,11 +195,32 @@ PY
 		echo "Skill receipt CLI missing: $receipt_cli"
 		exit 1
 	fi
-	python3 "$SCRIPT_DIR/scripts/project_skill_receipts.py" \
-		--target host \
-		--binary-dir "$SCRIPT_DIR/$target_dir" \
-		--sdk-cli "$receipt_cli" \
-		--package-root "$SCRIPT_DIR/data/skill-packages"
+	if [[ -f "$SCRIPT_DIR/Cargo.toml" && -f "$SCRIPT_DIR/Cargo.lock" ]]; then
+		python3 "$SCRIPT_DIR/scripts/project_skill_receipts.py" \
+			--target host \
+			--binary-dir "$SCRIPT_DIR/$target_dir" \
+			--sdk-cli "$receipt_cli" \
+			--package-root "$SCRIPT_DIR/data/skill-packages"
+	else
+		echo "Release package detected; verifying bundled skill receipts..."
+		while IFS=$'\t' read -r skill _package _runner install_mode _supported_os _adapter; do
+			[[ -n "$skill" && "$install_mode" != "on_demand" ]] || continue
+			local receipt_json=""
+			if ! receipt_json="$($receipt_cli receipt-verify "$SCRIPT_DIR/data/skill-packages" "$skill")"; then
+				echo "Verified skill receipt is unavailable: $skill" >&2
+				exit 1
+			fi
+			python3 - "$skill" "$receipt_json" <<'PY'
+import json
+import sys
+
+skill, raw = sys.argv[1:]
+payload = json.loads(raw)
+if payload.get("ok") is not True:
+    raise SystemExit(f"verified skill receipt is invalid: {skill}")
+PY
+		done <<<"$proactive_skill_specs"
+	fi
 
 	if [[ "${WA_WEB_ENABLED:-0}" == "1" ]]; then
 		echo "Checking WhatsApp Web bridge dependencies..."
