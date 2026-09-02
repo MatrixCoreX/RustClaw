@@ -866,6 +866,7 @@ export function BancorPage({
                   className="mt-0.5"
                   valueClassName="text-[10px] leading-4 text-white/45"
                   allowFormatSwitch={false}
+                  copyButton="compact"
                 />
               </label>
             ) : null}
