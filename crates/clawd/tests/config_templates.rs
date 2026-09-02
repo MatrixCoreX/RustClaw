@@ -1,6 +1,7 @@
 use claw_core::secrets::{provision_secret_envs, SecretValue, SecretsBroker, SecretsError};
 use claw_core::skill_registry::{
-    Capability, PlannerCapabilityKind, SkillsRegistry, HOST_TOOL_DESCRIPTORS,
+    Capability, CapabilityIsolationProfile, PlannerCapabilityKind, SkillsRegistry,
+    HOST_TOOL_DESCRIPTORS,
 };
 use std::collections::BTreeSet;
 use std::fs;
@@ -553,6 +554,49 @@ fn provider_backed_media_actions_keep_required_runtime_capabilities() {
             assert_eq!(mapping.network_access, Some(false));
             assert_eq!(mapping.credential_access, Some(false));
             assert_eq!(mapping.filesystem_write, Some(false));
+        }
+    }
+}
+
+#[test]
+fn rss_network_actions_keep_required_runtime_permissions() {
+    let network_actions = [
+        ("latest", true),
+        ("fetch", false),
+        ("preview_category", false),
+    ];
+
+    for path in [
+        workspace_root().join("configs/skills_registry.toml"),
+        workspace_root().join("docker/config/skills_registry.toml"),
+    ] {
+        let registry = SkillsRegistry::load_from_path(&path).expect("load registry");
+        for (action, writes_source_health) in network_actions {
+            let mapping = registry
+                .planner_capabilities("rss_fetch")
+                .iter()
+                .find(|mapping| mapping.action.as_deref() == Some(action))
+                .unwrap_or_else(|| panic!("{}: missing rss_fetch.{action}", path.display()));
+            assert_eq!(
+                mapping.isolation_profile,
+                Some(CapabilityIsolationProfile::LocalCurrentWorkspace),
+                "{}: rss_fetch.{action} needs a network-capable isolation profile",
+                path.display()
+            );
+            assert_eq!(
+                mapping.network_access,
+                Some(true),
+                "{}: rss_fetch.{action} must retain network access",
+                path.display()
+            );
+            assert_eq!(
+                mapping.filesystem_write,
+                Some(writes_source_health),
+                "{}: rss_fetch.{action} filesystem policy drift",
+                path.display()
+            );
+            assert_eq!(mapping.external_publish, Some(false));
+            assert_eq!(mapping.credential_access, Some(false));
         }
     }
 }
