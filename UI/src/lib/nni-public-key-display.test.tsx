@@ -32,3 +32,49 @@ test("labels public-key formats as raw and Base58 instead of compact", async () 
     await act(async () => renderer?.unmount());
   }
 });
+
+test("compact copy button copies the complete displayed public key", async () => {
+  const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  let copied = "";
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: {
+      clipboard: {
+        writeText: async (value: string) => {
+          copied = value;
+        },
+      },
+    },
+  });
+
+  let renderer: ReactTestRenderer | null = null;
+  try {
+    await act(async () => {
+      renderer = create(
+        <NniPublicKeyDisplay
+          value={rawPublicKey}
+          t={(zh) => zh}
+          allowFormatSwitch={false}
+          copyButton="compact"
+        />,
+      );
+    });
+
+    const copyButton = renderer!.root.findByType("button");
+    const displayedPublicKey = renderer!.root.findByType("code").children.join("");
+    assert.equal(copyButton.props["aria-label"], "复制完整公钥");
+    await act(async () => {
+      copyButton.props.onClick();
+      await Promise.resolve();
+    });
+    assert.equal(copied, displayedPublicKey);
+    assert.equal(renderer!.root.findByType("button").props.title, "已复制完整公钥");
+  } finally {
+    await act(async () => renderer?.unmount());
+    if (originalNavigator) {
+      Object.defineProperty(globalThis, "navigator", originalNavigator);
+    } else {
+      delete (globalThis as typeof globalThis & { navigator?: unknown }).navigator;
+    }
+  }
+});

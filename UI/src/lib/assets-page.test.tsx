@@ -196,6 +196,7 @@ test("asset wallet shows AIC, USD, account identity, and market estimate", () =>
   assert.match(markup, /data-assets-account-selector="true"/);
   assert.match(markup, /本机绑定账户/);
   assert.match(markup, /本机绑定账户 · asset-owner-public-key/);
+  assert.match(markup, /aria-label="复制完整公钥"/);
   assert.match(markup, /不代表实际成交金额/);
   assert.match(markup, /data-assets-overview-actions="true"/);
   assert.match(markup, /data-assets-full-value="100"[\s\S]*data-asset-transfer="AIC"/);

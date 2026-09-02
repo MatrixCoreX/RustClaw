@@ -463,6 +463,7 @@ export function AssetsPage({
                 className="mt-0.5"
                 valueClassName="text-[10px] leading-4 text-[var(--theme-text-muted)]"
                 allowFormatSwitch={false}
+                copyButton="compact"
               />
             </label>
           ) : (

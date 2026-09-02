@@ -289,6 +289,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /data-bancor-account-selector="true"/);
   assert.match(html, /交易账户/);
   assert.match(html, /本机绑定账户/);
+  assert.match(html, /aria-label="复制完整公钥"/);
   const tradingAccountIndex = html.indexOf("交易账户");
   const assetPublicKeyIndex = html.indexOf("5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M");
   const balancesIndex = html.indexOf("我的余额");
