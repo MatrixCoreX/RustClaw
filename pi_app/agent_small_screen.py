@@ -1450,6 +1450,8 @@ class SmallScreenApp:
         self._wifi_status_text = ""
         self._wifi_selected_ssid = ""
         self._wifi_selected_security = ""
+        self._wifi_selected_profile = ""
+        self._wifi_saved_connect_failed = False
         self._wifi_password_var = tk.StringVar(value="")
         self._wifi_password_visible = False
         self._wifi_keyboard_mode = "lower"
@@ -3266,6 +3268,26 @@ class SmallScreenApp:
             suffix += " " + self._t("wifi_connected_tag")
         return f"{ssid}  {signal_text}{suffix}"
 
+    def _wifi_error_text(self, error):
+        error_code = "operation_failed"
+        detail = ""
+        if isinstance(error, dict):
+            error_code = str(error.get("error_code") or error_code)
+            detail = str(error.get("detail") or "").strip()
+        elif error:
+            detail = str(error).strip()
+        if detail:
+            logger.warning("WiFi operation failed: code=%s detail=%s", error_code, detail)
+        key_by_code = {
+            "permission_required": "wifi_error_permission_required",
+            "nmcli_missing": "wifi_error_nmcli_missing",
+            "network_manager_unavailable": "wifi_error_service_unavailable",
+            "network_not_found": "wifi_error_network_not_found",
+            "connected_device_not_found": "wifi_error_not_connected",
+            "timeout": "wifi_error_timeout",
+        }
+        return self._t(key_by_code.get(error_code, "wifi_error_generic"))
+
     def _wifi_keyboard_rows(self):
         if self._wifi_keyboard_mode == "symbol":
             return [
@@ -3350,7 +3372,9 @@ class SmallScreenApp:
                         disabledforeground=self._c("fg_dim"),
                         takefocus=0,
                         state=tk.DISABLED if self._wifi_disconnect_in_progress else tk.NORMAL,
-                        command=lambda ssid=item.get("ssid") or "": self._disconnect_wifi(ssid),
+                        command=lambda data=item: self._disconnect_wifi(
+                            data.get("ssid") or "", data.get("profile_name") or ""
+                        ),
                     )
                     disconnect_btn.pack(side=tk.RIGHT)
         self._wifi_page_var.set(f"{self._wifi_page_index + 1}/{page_count}")
@@ -3358,7 +3382,9 @@ class SmallScreenApp:
         self._wifi_next_btn.config(state=tk.NORMAL if self._wifi_page_index < page_count - 1 else tk.DISABLED)
         selected_text = self._wifi_selected_ssid or "--"
         self._wifi_selected_var.set(f"{self._t('wifi_selected')}: {selected_text}")
-        if self._wifi_selected_security:
+        if self._wifi_selected_profile and not self._wifi_saved_connect_failed:
+            self._wifi_hint_var.set(self._t("wifi_saved_hint"))
+        elif self._wifi_selected_security:
             self._wifi_hint_var.set(self._t("wifi_secure_hint"))
         else:
             self._wifi_hint_var.set(self._t("wifi_open_hint") if self._wifi_selected_ssid else self._t("wifi_scan_hint"))
@@ -3389,8 +3415,13 @@ class SmallScreenApp:
     def _select_wifi_network(self, item):
         self._wifi_selected_ssid = str(item.get("ssid") or "").strip()
         self._wifi_selected_security = str(item.get("security") or "").strip()
+        self._wifi_selected_profile = str(item.get("profile_name") or "").strip()
+        self._wifi_saved_connect_failed = False
         self._wifi_password_var.set("")
-        self._wifi_status_text = self._t("wifi_secure_hint") if self._wifi_selected_security else self._t("wifi_open_hint")
+        if self._wifi_selected_profile:
+            self._wifi_status_text = self._t("wifi_saved_hint")
+        else:
+            self._wifi_status_text = self._t("wifi_secure_hint") if self._wifi_selected_security else self._t("wifi_open_hint")
         self._render_wifi_view()
 
     def _on_wifi_join_click(self):
@@ -3398,7 +3429,9 @@ class SmallScreenApp:
             self._wifi_status_text = self._t("wifi_no_selection")
             self._render_wifi_view()
             return
-        if self._wifi_selected_security:
+        if self._wifi_selected_security and (
+            not self._wifi_selected_profile or self._wifi_saved_connect_failed
+        ):
             self._open_wifi_keyboard()
             return
         self._connect_selected_wifi()
@@ -3594,7 +3627,7 @@ class SmallScreenApp:
 
             def finish():
                 self._wifi_scan_in_progress = False
-                self._wifi_scan_error = err
+                self._wifi_scan_error = self._wifi_error_text(err) if err else None
                 if isinstance(items, list):
                     self._wifi_networks = items
                     if self._wifi_selected_ssid and not any(
@@ -3602,11 +3635,13 @@ class SmallScreenApp:
                     ):
                         self._wifi_selected_ssid = ""
                         self._wifi_selected_security = ""
+                        self._wifi_selected_profile = ""
+                        self._wifi_saved_connect_failed = False
                         self._wifi_password_var.set("")
                     self._wifi_status_text = self._t("wifi_scan_hint") if items else self._t("wifi_empty")
                 else:
                     self._wifi_networks = []
-                    self._wifi_status_text = self._t("wifi_scan_failed").format(error=(err or "unknown error"))
+                    self._wifi_status_text = self._t("wifi_scan_failed").format(error=self._wifi_scan_error)
                 self._render_wifi_view()
 
             self._post_ui(finish)
@@ -3620,7 +3655,8 @@ class SmallScreenApp:
             self._render_wifi_view()
             return
         password = self._wifi_password_var.get()
-        if self._wifi_selected_security and not str(password).strip():
+        profile_name = self._wifi_selected_profile.strip()
+        if self._wifi_selected_security and not profile_name and not str(password).strip():
             self._wifi_status_text = self._t("wifi_password_required")
             self._render_wifi_view()
             try:
@@ -3635,13 +3671,15 @@ class SmallScreenApp:
         self._wifi_connect_in_progress = True
         self._wifi_status_text = self._t("wifi_connecting")
         self._render_wifi_view()
+        using_saved_credentials = bool(profile_name and not password)
 
         def worker():
-            ok, message = connect_wifi_network(ssid, password=password)
+            ok, message = connect_wifi_network(ssid, password=password, profile_name=profile_name)
 
             def finish():
                 self._wifi_connect_in_progress = False
                 if ok:
+                    self._wifi_saved_connect_failed = False
                     if close_keyboard_on_success:
                         self._close_wifi_keyboard()
                     self._wifi_status_text = self._t("wifi_connect_success").format(ssid=ssid)
@@ -3653,7 +3691,10 @@ class SmallScreenApp:
                         pass
                     self._refresh_wifi_networks()
                 else:
-                    self._wifi_status_text = self._t("wifi_connect_failed").format(error=(message or "unknown error"))
+                    if using_saved_credentials and self._wifi_selected_security:
+                        self._wifi_saved_connect_failed = True
+                    error_text = self._wifi_error_text(message)
+                    self._wifi_status_text = self._t("wifi_connect_failed").format(error=error_text)
                     try:
                         from tkinter import messagebox
 
@@ -3666,8 +3707,9 @@ class SmallScreenApp:
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _disconnect_wifi(self, ssid):
+    def _disconnect_wifi(self, ssid, profile_name=""):
         ssid = (ssid or "").strip()
+        profile_name = (profile_name or "").strip()
         if not ssid or self._wifi_disconnect_in_progress or self._wifi_connect_in_progress:
             return
         self._wifi_disconnect_in_progress = True
@@ -3675,7 +3717,7 @@ class SmallScreenApp:
         self._render_wifi_view()
 
         def worker():
-            ok, message = disconnect_wifi_network(ssid)
+            ok, message = disconnect_wifi_network(ssid, profile_name=profile_name)
 
             def finish():
                 self._wifi_disconnect_in_progress = False
@@ -3691,7 +3733,8 @@ class SmallScreenApp:
                         pass
                     self._refresh_wifi_networks()
                 else:
-                    self._wifi_status_text = self._t("wifi_disconnect_failed").format(error=(message or "unknown error"))
+                    error_text = self._wifi_error_text(message)
+                    self._wifi_status_text = self._t("wifi_disconnect_failed").format(error=error_text)
                     try:
                         from tkinter import messagebox
 

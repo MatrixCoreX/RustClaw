@@ -13,6 +13,7 @@ pi_app/
 ├── enable-autostart.sh            # 启用开机自启动
 ├── disable-autostart.sh           # 取消开机自启动
 ├── install-desktop.sh             # 在桌面创建「Agent Runtime」快捷方式
+├── install-network-permissions.sh # 安装小屏 Wi-Fi 控制所需的 NetworkManager 权限
 ├── assets/                        # 资源（如 lobster.gif 等）
 ├── image/                         # NNI 页图库图片
 ├── app-splash-480x320.png         # 默认启动闪屏图；实际文件名由产品身份配置选择
@@ -51,6 +52,7 @@ pi_app/
 
 - Python 3 + tkinter
 - 图形环境（DISPLAY，桌面或 `export DISPLAY=:0`）
+- Wi-Fi 设置依赖 NetworkManager / `nmcli`。`install-desktop.sh` 会为 `netdev` 组安装仅包含扫描、连接、断开和保存 Wi-Fi 配置的 Polkit 权限；可单独运行 `./install-network-permissions.sh check` 核验，或用 `remove` 撤销
 - 小屏程序请求 `http://127.0.0.1:8787/v1/health`，需先启动 clawd
 - Python 小程序优先直接读取运行库中已启用的 `admin` key，以本机管理界面的完整权限读取状态；不会把 admin key 复制到设置文件
 - 运行库中没有可用 admin key 时，才会生成并注册一把本机专用 `user` key，保存到权限为 `0600` 的 `pi_app/.agent_small_screen_config.json`
