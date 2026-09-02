@@ -7,11 +7,15 @@ APP_ROOT="$(cd "$PI_APP_DIR/.." && pwd)"
 # shellcheck source=/dev/null
 source "$APP_ROOT/scripts/product_identity.sh"
 REGISTER="${PI_APP_DIR}/register-launcher.sh"
+NETWORK_PERMISSIONS="${PI_APP_DIR}/install-network-permissions.sh"
 WRAPPER="${HOME}/.local/bin/agent-small-screen-launcher"
 ICON="${HOME}/.local/share/icons/agent-small-screen.png"
 PRODUCT_DISPLAY_NAME="$APP_DISPLAY_NAME"
 DESKTOP_FILE="${HOME}/Desktop/agent-small-screen.desktop"
 
+if [[ -x "$NETWORK_PERMISSIONS" ]]; then
+  "$NETWORK_PERMISSIONS" install
+fi
 "$REGISTER"
 mkdir -p "$(dirname "$DESKTOP_FILE")"
 cat > "$DESKTOP_FILE" << EOF
