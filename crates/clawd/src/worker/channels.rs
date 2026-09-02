@@ -35,6 +35,76 @@ fn ingress_context_token_from_payload(payload: &Value) -> Option<&str> {
         })
 }
 
+fn latest_wechat_inbound_context_token(
+    state: &AppState,
+    task: &crate::ClaimedTask,
+    to_user_id: &str,
+) -> Result<Option<String>, String> {
+    let db = state
+        .core
+        .db
+        .get()
+        .map_err(|error| format!("db pool: {error}"))?;
+    let principal_id = task
+        .user_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|user_key| crate::repo::auth::principal_id_for_user_key(&db, user_key))
+        .transpose()
+        .map_err(|error| format!("resolve wechat delivery principal: {error}"))?
+        .flatten();
+    let mut statement = db
+        .prepare(
+            "SELECT external_user_id, payload_json
+             FROM tasks
+             WHERE channel = 'wechat'
+               AND kind = 'ask'
+               AND (
+                    (?1 IS NOT NULL AND principal_id = ?1)
+                    OR (
+                        (principal_id IS NULL OR TRIM(principal_id) = '')
+                        AND user_id = ?2
+                    )
+               )
+             ORDER BY CAST(created_at AS INTEGER) DESC, rowid DESC
+             LIMIT 32",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(
+            rusqlite::params![principal_id.as_deref(), task.user_id],
+            |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?)),
+        )
+        .map_err(|error| error.to_string())?;
+    for row in rows {
+        let (external_user_id, payload_json) = row.map_err(|error| error.to_string())?;
+        let Ok(payload) = serde_json::from_str::<Value>(&payload_json) else {
+            continue;
+        };
+        if payload
+            .get("schedule_triggered")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        let reply_target = ingress_reply_target_from_payload(&payload);
+        let row_user_id = external_user_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .or(reply_target.as_deref());
+        if row_user_id != Some(to_user_id) {
+            continue;
+        }
+        if let Some(context_token) = ingress_context_token_from_payload(&payload) {
+            return Ok(Some(context_token.to_string()));
+        }
+    }
+    Ok(None)
+}
+
 pub(crate) fn runtime_channel_from_payload(
     state: &AppState,
     payload: &Value,
@@ -188,7 +258,16 @@ pub(crate) async fn send_task_channel_message(
                 .or_else(|| task_external_chat_id(task))
                 .or_else(|| external_chat_id_from_payload(payload))
                 .ok_or_else(|| "missing external_chat_id for wechat task".to_string())?;
-            let context_token = ingress_context_token_from_payload(payload);
+            let latest_context_token = if delivery_source
+                == claw_core::channel_delivery::ChannelDeliverySource::ScheduledTask
+            {
+                latest_wechat_inbound_context_token(state, task, &to_user_id)?
+            } else {
+                None
+            };
+            let context_token = latest_context_token
+                .as_deref()
+                .or_else(|| ingress_context_token_from_payload(payload));
             crate::channel_send::send_wechat_text_message(
                 state,
                 &to_user_id,
@@ -215,56 +294,5 @@ pub(crate) async fn send_task_channel_message(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn whatsapp_delivery_keeps_web_and_cloud_adapters_distinct() {
-        let mut state = crate::AppState::test_default_with_fixture_provider();
-        state.channels.whatsapp_web_enabled = true;
-        state.channels.whatsapp_cloud_enabled = true;
-
-        assert_eq!(
-            resolve_whatsapp_delivery_route(&state, &json!({"adapter": "whatsapp_web"})),
-            crate::WhatsappDeliveryRoute::WebBridge
-        );
-        assert_eq!(
-            resolve_whatsapp_delivery_route(&state, &json!({"adapter": "whatsapp_cloud"})),
-            crate::WhatsappDeliveryRoute::Cloud
-        );
-    }
-
-    #[test]
-    fn whatsapp_delivery_falls_back_to_the_only_enabled_adapter() {
-        let mut state = crate::AppState::test_default_with_fixture_provider();
-        state.channels.whatsapp_web_enabled = true;
-        state.channels.whatsapp_cloud_enabled = false;
-
-        assert_eq!(
-            resolve_whatsapp_delivery_route(&state, &json!({})),
-            crate::WhatsappDeliveryRoute::WebBridge
-        );
-    }
-
-    #[test]
-    fn wechat_delivery_uses_raw_reply_target_not_scoped_conversation_id() {
-        let payload = json!({
-            "context_token": "stale-token",
-            "external_chat_id": "wechat-scope-v1:opaque",
-            "channel_ingress": {
-                "context_token": "pinned-token",
-                "reply_target": {"kind": "user", "external_id": "raw-peer"}
-            }
-        });
-
-        assert_eq!(
-            ingress_reply_target_from_payload(&payload).as_deref(),
-            Some("raw-peer")
-        );
-        assert_eq!(
-            ingress_context_token_from_payload(&payload),
-            Some("pinned-token")
-        );
-    }
-}
+#[path = "channels_tests.rs"]
+mod tests;
