@@ -1678,6 +1678,9 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
                     loop_started_at,
                     soft_slice_exhausted,
                 );
+                if outcome.executed_actions > 0 {
+                    super::support::persist_agent_loop_recovery_snapshot(state, task, &loop_state);
+                }
                 match decision {
                     crate::task_budget_contract::BudgetDecision::Continue => {
                         round = round.saturating_add(1);

@@ -40,7 +40,7 @@ pub(crate) async fn maybe_recover_stale_running_tasks_runtime(
         let recovered = recover_stale_running_tasks_by_no_progress(state)?;
         if !recovered.is_empty() {
             warn!(
-                "runtime stale-running recovery applied: converted {} running tasks to timeout (no_progress_timeout={}s)",
+                "runtime stale-running recovery applied: recovered {} running tasks (no_progress_timeout={}s)",
                 recovered.len(),
                 state.worker.worker_running_no_progress_timeout_seconds
             );

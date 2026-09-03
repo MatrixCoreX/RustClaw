@@ -799,6 +799,95 @@ fn build_agent_loop_checkpoint_progress_payload_with_budget(
     })
 }
 
+#[cfg(test)]
+pub(super) fn build_agent_loop_recovery_snapshot_payload(
+    task: &ClaimedTask,
+    loop_state: &super::LoopState,
+    now_ts: i64,
+) -> Value {
+    build_agent_loop_recovery_snapshot_payload_with_budget(
+        task,
+        loop_state,
+        now_ts,
+        checkpoint_budget_counters(loop_state, 0, 0),
+    )
+}
+
+fn build_agent_loop_recovery_snapshot_payload_with_budget(
+    task: &ClaimedTask,
+    loop_state: &super::LoopState,
+    now_ts: i64,
+    budget: CheckpointBudgetCounters,
+) -> Value {
+    let mut payload = build_agent_loop_checkpoint_progress_payload_with_budget(
+        task,
+        loop_state,
+        "durable_action_boundary",
+        now_ts,
+        now_ts.saturating_add(1),
+        budget,
+    );
+    if let Some(lifecycle) = payload
+        .get_mut("task_lifecycle")
+        .and_then(Value::as_object_mut)
+    {
+        lifecycle.insert("state".to_string(), json!(TaskLifecycleState::Running));
+        lifecycle.insert("source".to_string(), json!("agent_loop_recovery_snapshot"));
+        lifecycle.insert("recoverable_after_lease_loss".to_string(), json!(true));
+        lifecycle.remove("next_check_after");
+        lifecycle.remove("message_key");
+    }
+    if let Some(boundary) = payload
+        .pointer_mut("/task_checkpoint/boundary_context")
+        .and_then(Value::as_object_mut)
+    {
+        boundary.insert("source".to_string(), json!("agent_loop_recovery_snapshot"));
+    }
+    payload
+}
+
+pub(super) fn persist_agent_loop_recovery_snapshot(
+    state: &AppState,
+    task: &ClaimedTask,
+    loop_state: &super::LoopState,
+) {
+    if loop_state.executed_step_results.is_empty()
+        || loop_state
+            .task_lifecycle
+            .as_ref()
+            .and_then(|lifecycle| lifecycle.get("state"))
+            .and_then(Value::as_str)
+            .is_some_and(|state| matches!(state, "waiting" | "background" | "needs_user"))
+    {
+        return;
+    }
+    let now_ts = crate::now_ts_u64() as i64;
+    let budget = checkpoint_budget_counters(
+        loop_state,
+        state.task_llm_call_count(&task.task_id),
+        state.task_llm_elapsed_ms(&task.task_id),
+    );
+    let mut payload =
+        build_agent_loop_recovery_snapshot_payload_with_budget(task, loop_state, now_ts, budget);
+    attach_task_llm_metrics_checkpoint(state, &task.task_id, &mut payload);
+    if let Err(error) = repo::update_task_progress_result(
+        state,
+        &task.task_id,
+        task.claim_attempt,
+        &payload.to_string(),
+    ) {
+        warn!(
+            "agent loop recovery snapshot persist failed task_id={} error={}",
+            task.task_id, error
+        );
+    } else {
+        debug!(
+            "agent loop recovery snapshot persisted task_id={} round={} step={}",
+            task.task_id, loop_state.round_no, loop_state.total_steps_executed
+        );
+    }
+}
+
 fn action_args_keys(args: &Value) -> Vec<String> {
     let Some(obj) = args.as_object() else {
         return Vec::new();

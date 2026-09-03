@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use rusqlite::Connection;
 use serde_json::{json, Value};
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::{now_ts, now_ts_u64, AppState};
 
@@ -26,6 +26,65 @@ struct StaleRunningTaskCandidate {
     reason: StaleRunningRecoveryReason,
     result_json: Option<String>,
     is_child_subagent: bool,
+    has_agent_loop_recovery_snapshot: bool,
+}
+
+fn is_agent_loop_recovery_snapshot(result_json: &Value) -> bool {
+    let lifecycle =
+        crate::task_lifecycle::task_query_lifecycle_projection("running", Some(result_json), None);
+    if lifecycle.get("state").and_then(Value::as_str) != Some("running")
+        || lifecycle.get("source").and_then(Value::as_str) != Some("agent_loop_recovery_snapshot")
+        || lifecycle
+            .get("recoverable_after_lease_loss")
+            .and_then(Value::as_bool)
+            != Some(true)
+    {
+        return false;
+    }
+    let Some(checkpoint_id) = lifecycle
+        .get("checkpoint_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return false;
+    };
+    crate::task_lifecycle::task_checkpoint_from_result_json(result_json).is_some_and(|checkpoint| {
+        checkpoint.checkpoint_id == checkpoint_id
+            && checkpoint.resume_entrypoint
+                == crate::task_lifecycle::ResumeEntrypoint::NextPlannerRound
+    })
+}
+
+fn promote_agent_loop_recovery_snapshot(
+    result_json: &mut Value,
+    recovered_at: i64,
+    recovery_reason: &str,
+) -> bool {
+    if !is_agent_loop_recovery_snapshot(result_json) {
+        return false;
+    }
+    let Some(lifecycle) = result_json
+        .get_mut("task_lifecycle")
+        .and_then(Value::as_object_mut)
+    else {
+        return false;
+    };
+    lifecycle.insert("state".to_string(), json!("waiting"));
+    lifecycle.insert("source".to_string(), json!("agent_loop_restart_recovery"));
+    lifecycle.insert(
+        "resume_reason".to_string(),
+        json!("durable_action_boundary_recovery"),
+    );
+    lifecycle.insert("next_check_after".to_string(), json!(recovered_at));
+    lifecycle.insert("resume_due".to_string(), json!(true));
+    lifecycle.insert("resume_wait_seconds".to_string(), json!(0));
+    lifecycle.insert("recovered_at".to_string(), json!(recovered_at));
+    lifecycle.insert("recovery_reason".to_string(), json!(recovery_reason));
+    lifecycle.insert("can_poll".to_string(), json!(true));
+    lifecycle.insert("can_cancel".to_string(), json!(true));
+    lifecycle.remove("recoverable_after_lease_loss");
+    true
 }
 
 fn recovery_should_preserve_recoverable_state(result_json: Option<&str>, now: i64) -> bool {
@@ -33,8 +92,9 @@ fn recovery_should_preserve_recoverable_state(result_json: Option<&str>, now: i6
     else {
         return false;
     };
-    crate::task_lifecycle::paused_checkpoint_recovery_status(&result_json, now)
-        .preserve_running_status_for_recovery()
+    is_agent_loop_recovery_snapshot(&result_json)
+        || crate::task_lifecycle::paused_checkpoint_recovery_status(&result_json, now)
+            .preserve_running_status_for_recovery()
         || crate::task_lifecycle::has_recoverable_resume_execution(&result_json)
         || result_projection_pending_recovery_state(&result_json)
 }
@@ -142,6 +202,7 @@ pub(crate) fn recover_stale_running_tasks_on_startup(
                 reason,
                 result_json,
                 is_child_subagent: child_subagent_payload(&payload_json),
+                has_agent_loop_recovery_snapshot: false,
             });
         }
     }
@@ -261,9 +322,14 @@ pub(crate) fn adopt_recoverable_resume_executions_on_startup(
     let mut adopted = Vec::new();
     for (task_id, raw_result, previous_owner, previous_claim_attempt) in candidates {
         let mut result = match serde_json::from_str::<Value>(&raw_result) {
-            Ok(value) if crate::task_lifecycle::has_recoverable_resume_execution(&value) => value,
-            _ => continue,
+            Ok(value) => value,
+            Err(_) => continue,
         };
+        let promoted_snapshot =
+            promote_agent_loop_recovery_snapshot(&mut result, now, "service_restart");
+        if !promoted_snapshot && !crate::task_lifecycle::has_recoverable_resume_execution(&result) {
+            continue;
+        }
         let lifecycle = result
             .get_mut("task_lifecycle")
             .and_then(Value::as_object_mut);
@@ -289,10 +355,17 @@ pub(crate) fn adopt_recoverable_resume_executions_on_startup(
             // will create the first resume claim when next_check_after is due.
             let changed = db.execute(
                 "UPDATE tasks
-                 SET updated_at = ?2, lease_owner = NULL, lease_expires_at = 0, claimed_at = 0
-                 WHERE task_id = ?1 AND status = 'running' AND result_json = ?3
-                   AND COALESCE(claim_attempt, 0) = ?4",
-                rusqlite::params![task_id, now.to_string(), raw_result, previous_claim_attempt,],
+                 SET result_json = ?2, updated_at = ?3, lease_owner = NULL,
+                     lease_expires_at = 0, claimed_at = 0
+                 WHERE task_id = ?1 AND status = 'running' AND result_json = ?4
+                   AND COALESCE(claim_attempt, 0) = ?5",
+                rusqlite::params![
+                    task_id,
+                    result.to_string(),
+                    now.to_string(),
+                    raw_result,
+                    previous_claim_attempt,
+                ],
             )?;
             if changed == 1 {
                 adopted.push(task_id);
@@ -446,7 +519,14 @@ pub(crate) fn recover_stale_running_tasks_by_no_progress(
         })?;
         for row in rows {
             let (task_id, result_json, lease_owner, payload_json, reason) = row?;
-            if recovery_should_preserve_recoverable_state(result_json.as_deref(), now) {
+            let has_agent_loop_recovery_snapshot = result_json
+                .as_deref()
+                .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+                .as_ref()
+                .is_some_and(is_agent_loop_recovery_snapshot);
+            if !has_agent_loop_recovery_snapshot
+                && recovery_should_preserve_recoverable_state(result_json.as_deref(), now)
+            {
                 continue;
             }
             if lease_owner.as_deref() == Some(state.worker.worker_id.as_str())
@@ -460,6 +540,7 @@ pub(crate) fn recover_stale_running_tasks_by_no_progress(
                 reason,
                 result_json,
                 is_child_subagent: child_subagent_payload(&payload_json),
+                has_agent_loop_recovery_snapshot,
             });
         }
     }
@@ -479,7 +560,48 @@ pub(crate) fn recover_stale_running_tasks_by_no_progress(
 
     let mut changed = 0;
     for candidate in &candidates {
-        changed += if candidate.is_child_subagent {
+        changed += if candidate.has_agent_loop_recovery_snapshot {
+            let mut result = candidate
+                .result_json
+                .as_deref()
+                .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+                .unwrap_or_else(|| json!({}));
+            if !promote_agent_loop_recovery_snapshot(
+                &mut result,
+                now,
+                candidate.reason.error_token(),
+            ) {
+                0
+            } else {
+                let updated = db.execute(
+                    "UPDATE tasks
+                     SET status = 'running', error_text = NULL, result_json = ?3,
+                         updated_at = ?4, lease_owner = NULL, lease_expires_at = 0,
+                         claimed_at = 0
+                     WHERE task_id = ?1
+                       AND status = 'running'
+                       AND (
+                            CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) <= ?2
+                            OR (lease_expires_at > 0 AND lease_expires_at <= ?5)
+                       )",
+                    rusqlite::params![
+                        candidate.task_id,
+                        stale_before.to_string(),
+                        result.to_string(),
+                        now_ts(),
+                        now,
+                    ],
+                )?;
+                if updated == 1 {
+                    info!(
+                        "runtime stale agent loop promoted to durable resume task_id={} reason={}",
+                        candidate.task_id,
+                        candidate.reason.error_token()
+                    );
+                }
+                updated
+            }
+        } else if candidate.is_child_subagent {
             db.execute(
                 "UPDATE tasks
                  SET status = 'queued',

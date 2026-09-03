@@ -1,6 +1,7 @@
 use super::{
     action_fingerprint, action_fingerprint_for_policy, append_delivery_message,
     attach_task_llm_metrics_checkpoint, build_agent_loop_checkpoint_progress_payload,
+    build_agent_loop_recovery_snapshot_payload,
     build_agent_loop_user_input_checkpoint_progress_payload, checkpoint_continuation_actions,
     collect_execution_recipe_progress_hints, execution_recipe_phase_progress_key,
     load_agent_loop_guard_policy, refresh_agent_loop_checkpoint_snapshot, AgentLoopGuardPolicy,
@@ -362,6 +363,55 @@ fn soft_budget_checkpoint_payload_records_machine_resume_state() {
     assert_eq!(
         payload["task_checkpoint"]["boundary_context"]["task_budget_slice"]["profile"],
         "multi_step_workspace"
+    );
+}
+
+#[test]
+fn action_boundary_snapshot_is_recoverable_without_pausing_live_loop() {
+    let task = support_test_task();
+    let mut loop_state = LoopState::new();
+    loop_state.round_no = 2;
+    loop_state.total_steps_executed = 2;
+    loop_state.tool_calls_total = 2;
+    loop_state
+        .successful_action_fingerprints
+        .insert("skill:schedule:action:delete:args:stable".to_string(), 1);
+    loop_state
+        .executed_step_results
+        .push(crate::executor::StepExecutionResult {
+            step_id: "step_2".to_string(),
+            skill: "schedule".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some("{\"status\":\"ok\"}".to_string()),
+            error: None,
+            started_at: 100,
+            finished_at: 101,
+        });
+
+    let payload = build_agent_loop_recovery_snapshot_payload(&task, &loop_state, 1_788_300_000);
+
+    assert_eq!(payload["task_lifecycle"]["state"], "running");
+    assert_eq!(
+        payload["task_lifecycle"]["source"],
+        "agent_loop_recovery_snapshot"
+    );
+    assert_eq!(
+        payload["task_lifecycle"]["recoverable_after_lease_loss"],
+        true
+    );
+    assert!(payload["task_lifecycle"].get("next_check_after").is_none());
+    assert_eq!(
+        payload["task_checkpoint"]["resume_entrypoint"],
+        "next_planner_round"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["completed_side_effect_refs"][0],
+        "skill:schedule:action:delete:args:stable"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["boundary_context"]["agent_loop_resume_state"]
+            ["executed_step_results"][0]["skill"],
+        "schedule"
     );
 }
 
