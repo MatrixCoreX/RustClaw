@@ -378,7 +378,7 @@ fn load_wechat_config_response(state: &AppState) -> anyhow::Result<WechatConfigR
             .get("text_chunk_chars")
             .and_then(|v| v.as_integer())
             .map(|v| v.max(1) as usize)
-            .unwrap_or(1200),
+            .unwrap_or(1800),
         bot_token_configured: !bot_token.is_empty() && bot_token != "REPLACE_ME",
         saved_session_present: session_path.exists(),
         restart_required: true,

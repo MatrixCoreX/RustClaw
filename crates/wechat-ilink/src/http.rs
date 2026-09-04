@@ -7,10 +7,16 @@ use base64::Engine;
 use reqwest::Client;
 use serde::Serialize;
 use serde_json::Value;
+use tracing::warn;
 
 use claw_core::channel_provider_error::{
     ChannelProviderError, ChannelProviderFailureClass, ChannelProviderTransportKind,
 };
+
+#[cfg(not(test))]
+const SENDMESSAGE_RETRY_DELAYS_MS: [u64; 2] = [1_000, 2_000];
+#[cfg(test)]
+const SENDMESSAGE_RETRY_DELAYS_MS: [u64; 2] = [1, 2];
 
 /// Per-request routing / UIN headers (from channel config).
 #[derive(Clone, Copy)]
@@ -46,6 +52,50 @@ pub fn base_info(channel_version: &str) -> BaseInfo {
 }
 
 pub async fn post_ilink_json<T: Serialize>(
+    client: &Client,
+    ilink_base_url: &str,
+    token: &str,
+    auth: IlinkAuth<'_>,
+    endpoint: &str,
+    body: &T,
+    timeout_ms: u64,
+) -> Result<Value, String> {
+    let operation = endpoint.rsplit('/').next().unwrap_or("request");
+    let mut retry_index = 0;
+    loop {
+        let result = post_ilink_json_once(
+            client,
+            ilink_base_url,
+            token,
+            auth,
+            endpoint,
+            body,
+            timeout_ms,
+        )
+        .await;
+        let Err(error) = &result else {
+            return result;
+        };
+        if operation != "sendmessage"
+            || !is_explicit_unaccepted_sendmessage(error)
+            || retry_index >= SENDMESSAGE_RETRY_DELAYS_MS.len()
+        {
+            return result;
+        }
+        let delay_ms = SENDMESSAGE_RETRY_DELAYS_MS[retry_index];
+        retry_index += 1;
+        warn!(
+            event = "wechat_sendmessage_retry",
+            attempt = retry_index + 1,
+            delay_ms,
+            provider_error_code = "-2",
+            "retrying an explicitly unaccepted WeChat message part"
+        );
+        tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+    }
+}
+
+async fn post_ilink_json_once<T: Serialize>(
     client: &Client,
     ilink_base_url: &str,
     token: &str,
@@ -116,6 +166,12 @@ pub async fn post_ilink_json<T: Serialize>(
         return Err(error.to_string());
     }
     Ok(value)
+}
+
+fn is_explicit_unaccepted_sendmessage(error: &str) -> bool {
+    ChannelProviderError::decode(error).is_some_and(|error| {
+        error.operation == "sendmessage" && error.provider_error_code.as_deref() == Some("-2")
+    })
 }
 
 pub fn decode_ilink_provider_failure(

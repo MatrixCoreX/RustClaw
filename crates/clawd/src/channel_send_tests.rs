@@ -18,6 +18,15 @@ fn wechat_delivery_part_ids_are_stable_and_part_scoped() {
 }
 
 #[test]
+fn wechat_default_chunk_size_avoids_an_extra_part_for_long_results() {
+    let max_chunk = WECHAT_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS);
+    let chunks = chunk_text_for_channel(&"x".repeat(2_500), max_chunk);
+
+    assert_eq!(WECHAT_TEXT_CHUNK_CHARS, 1_800);
+    assert_eq!(chunks.len(), 2);
+}
+
+#[test]
 fn wechat_part_failure_is_retained_without_suppressing_later_parts() {
     let mut first_error = None;
     let mut accepted = Vec::new();
