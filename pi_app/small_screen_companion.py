@@ -333,6 +333,7 @@ class RobotDuckView:
         head = "#f4d45b"
         beak = "#ffdc45"
         metal = "#aeb8c5"
+        foot = "#e5a62e"
 
         tail_base = x - (28 * direction)
         tail_tip = x - (43 * direction)
@@ -392,6 +393,26 @@ class RobotDuckView:
         canvas.create_line(head_x, y - 35, head_x, y - 44, fill=outline, width=2)
         canvas.create_oval(head_x - 3, y - 48, head_x + 3, y - 42, fill=led, outline=outline)
 
-        for wheel_x in (x - 18, x + 16):
-            canvas.create_oval(wheel_x - 8, y + 11, wheel_x + 8, y + 27, fill=metal, outline=outline, width=2)
-            canvas.create_oval(wheel_x - 2, y + 17, wheel_x + 2, y + 21, fill=panel, outline=panel)
+        for leg_x in (x - 18, x + 16):
+            canvas.create_line(
+                leg_x,
+                y + 14,
+                leg_x,
+                y + 22,
+                fill=metal,
+                width=4,
+            )
+            toe_x = leg_x + (5 * direction)
+            canvas.create_polygon(
+                leg_x - 5,
+                y + 20,
+                toe_x + (10 * direction),
+                y + 21,
+                toe_x + (13 * direction),
+                y + 26,
+                leg_x - (7 * direction),
+                y + 27,
+                fill=foot,
+                outline=outline,
+                width=2,
+            )
