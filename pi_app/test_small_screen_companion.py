@@ -7,7 +7,7 @@ import small_screen_config as config
 from small_screen_companion import (
     REPLY_PAUSE_SECONDS,
     CompanionMessageState,
-    compact_companion_text,
+    fit_companion_text,
     select_companion_message,
     update_reply_pause,
 )
@@ -61,9 +61,13 @@ class SmallScreenCompanionTests(unittest.TestCase):
         self.assertEqual(state.question, "第一行 第二行")
         self.assertTrue(state.is_waiting)
 
-    def test_compacts_long_text_for_the_small_screen(self):
-        self.assertEqual(compact_companion_text("abcdef", 5), "abcd…")
-        self.assertEqual(compact_companion_text("abc", 5), "abc")
+    def test_keeps_full_text_until_visual_lines_are_exhausted(self):
+        measure = len
+        self.assertEqual(fit_companion_text("abcdef", measure, 6, 1), "abcdef")
+        self.assertEqual(
+            fit_companion_text("abcdefghij", measure, 4, 2),
+            "abcd\nefg…",
+        )
 
     def test_companion_visibility_is_persisted_and_migrated(self):
         with tempfile.TemporaryDirectory() as temp_dir:
