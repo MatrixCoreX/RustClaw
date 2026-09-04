@@ -112,7 +112,7 @@ pub(crate) fn load_wechat_send_config(
         .get("text_chunk_chars")
         .and_then(|v| v.as_integer())
         .map(|v| v.max(1) as usize)
-        .unwrap_or(1200);
+        .unwrap_or(1800);
     let sk_route_tag = wechat
         .get("sk_route_tag")
         .and_then(|v| v.as_str())

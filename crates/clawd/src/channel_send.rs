@@ -949,7 +949,7 @@ async fn send_whatsapp_web_bridge_result(
 
 /// Max characters per Feishu/Lark text message (conservative; platform limit ~4096).
 const FEISHU_LARK_TEXT_CHUNK_CHARS: usize = 3500;
-const WECHAT_TEXT_CHUNK_CHARS: usize = 1200;
+const WECHAT_TEXT_CHUNK_CHARS: usize = 1800;
 
 fn record_wechat_part_result<T>(
     first_error: &mut Option<String>,
