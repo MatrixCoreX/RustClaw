@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import time
 import tkinter as tk
+import tkinter.font as tkfont
 
 from small_screen_messages import message_channel_display_name
 
@@ -8,6 +9,8 @@ from small_screen_messages import message_channel_display_name
 ANIMATION_INTERVAL_MS = 70
 ANIMATION_STEP_PX = 4
 REPLY_PAUSE_SECONDS = 5.0
+TEXT_WRAP_WIDTH = 420
+DIALOGUE_LINE_BUDGET = 5
 
 
 @dataclass(frozen=True)
@@ -31,11 +34,34 @@ def _single_line(value):
     return " ".join(str(value or "").replace("\r", "\n").split())
 
 
-def compact_companion_text(value, limit):
+def wrap_companion_text(value, measure, max_width):
     text = _single_line(value)
-    if limit <= 0 or len(text) <= limit:
-        return text
-    return text[: max(1, limit - 1)].rstrip() + "…"
+    if not text:
+        return []
+    lines = []
+    current = ""
+    for char in text:
+        candidate = current + char
+        if not current or measure(candidate) <= max_width:
+            current = candidate
+            continue
+        lines.append(current.rstrip())
+        current = char.lstrip()
+    if current:
+        lines.append(current.rstrip())
+    return lines
+
+
+def fit_companion_text(value, measure, max_width, max_lines):
+    lines = wrap_companion_text(value, measure, max_width)
+    if max_lines <= 0 or len(lines) <= max_lines:
+        return "\n".join(lines)
+    visible = lines[:max_lines]
+    tail = visible[-1].rstrip()
+    while tail and measure(tail + "…") > max_width:
+        tail = tail[:-1].rstrip()
+    visible[-1] = (tail + "…") if tail else "…"
+    return "\n".join(visible)
 
 
 def select_companion_message(messages):
@@ -106,6 +132,7 @@ class RobotDuckView:
             font=("", 10),
             anchor="w",
             justify=tk.LEFT,
+            wraplength=TEXT_WRAP_WIDTH,
         )
         self._question_label.pack(fill=tk.X, padx=12, pady=(0, 3))
         self._speech_label = tk.Label(
@@ -119,6 +146,8 @@ class RobotDuckView:
             pady=7,
         )
         self._speech_label.pack(fill=tk.X, padx=12)
+        self._question_font = tkfont.Font(root=parent, font=self._question_label.cget("font"))
+        self._speech_font = tkfont.Font(root=parent, font=self._speech_label.cget("font"))
         self._canvas = tk.Canvas(parent, height=108, highlightthickness=0, bd=0)
         self._canvas.pack(fill=tk.BOTH, expand=True, padx=8, pady=(2, 4))
         self.prepare([])
@@ -148,21 +177,24 @@ class RobotDuckView:
 
     def update_messages(self, messages):
         self._state = select_companion_message(messages)
-        self._reply_identity, self._reply_pause_until = update_reply_pause(
-            self._reply_identity,
-            self._reply_pause_until,
-            self._state,
-            time.monotonic(),
-        )
         lang = self._lang_getter()
         source = message_channel_display_name(self._state.channel, lang)
         if self._state.is_replying:
             status = self._translate("companion_replied")
-            question = compact_companion_text(self._state.question, 72)
-            speech = compact_companion_text(self._state.reply, 180)
+            question, speech = self._fit_reply_dialogue(
+                self._state.question,
+                self._state.reply,
+            )
         elif self._state.is_waiting:
             status = self._translate("companion_processing")
-            question = compact_companion_text(self._state.question, 72)
+            question = fit_companion_text(
+                self._translate("companion_user_message").format(
+                    message=self._state.question
+                ),
+                self._question_font.measure,
+                TEXT_WRAP_WIDTH,
+                DIALOGUE_LINE_BUDGET - 1,
+            )
             speech = self._translate("companion_waiting")
         else:
             source = ""
@@ -172,14 +204,59 @@ class RobotDuckView:
 
         meta_parts = [part for part in (source, self._state.time, status) if part]
         self._meta_var.set(" · ".join(meta_parts))
-        self._question_var.set(
+        self._question_var.set(question)
+        self._speech_var.set(speech)
+        self._draw_scene()
+        self._reply_identity, self._reply_pause_until = update_reply_pause(
+            self._reply_identity,
+            self._reply_pause_until,
+            self._state,
+            time.monotonic(),
+        )
+        self._sync_animation()
+
+    def _fit_reply_dialogue(self, question, reply):
+        question_text = (
             self._translate("companion_user_message").format(message=question)
             if question
             else ""
         )
-        self._speech_var.set(speech)
-        self._draw_scene()
-        self._sync_animation()
+        question_lines = wrap_companion_text(
+            question_text,
+            self._question_font.measure,
+            TEXT_WRAP_WIDTH,
+        )
+        reply_lines = wrap_companion_text(
+            reply,
+            self._speech_font.measure,
+            TEXT_WRAP_WIDTH,
+        )
+        question_budget = min(len(question_lines), 2)
+        reply_budget = min(
+            len(reply_lines),
+            DIALOGUE_LINE_BUDGET - question_budget,
+        )
+        remaining = DIALOGUE_LINE_BUDGET - question_budget - reply_budget
+        if remaining and len(question_lines) > question_budget:
+            added = min(remaining, len(question_lines) - question_budget)
+            question_budget += added
+            remaining -= added
+        if remaining and len(reply_lines) > reply_budget:
+            reply_budget += min(remaining, len(reply_lines) - reply_budget)
+        return (
+            fit_companion_text(
+                question_text,
+                self._question_font.measure,
+                TEXT_WRAP_WIDTH,
+                question_budget,
+            ),
+            fit_companion_text(
+                reply,
+                self._speech_font.measure,
+                TEXT_WRAP_WIDTH,
+                reply_budget,
+            ),
+        )
 
     def _cancel_animation(self):
         if self._animation_job is None:
