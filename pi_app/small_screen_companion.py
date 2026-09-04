@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import time
 import tkinter as tk
 
 from small_screen_messages import message_channel_display_name
@@ -6,6 +7,7 @@ from small_screen_messages import message_channel_display_name
 
 ANIMATION_INTERVAL_MS = 70
 ANIMATION_STEP_PX = 4
+REPLY_PAUSE_SECONDS = 5.0
 
 
 @dataclass(frozen=True)
@@ -54,6 +56,22 @@ def select_companion_message(messages):
     return CompanionMessageState()
 
 
+def companion_reply_identity(state):
+    if not state.reply:
+        return None
+    message_id = state.task_id or "|".join((state.time, state.channel, state.question))
+    return message_id, state.reply
+
+
+def update_reply_pause(previous_identity, previous_until, state, now):
+    reply_identity = companion_reply_identity(state)
+    if reply_identity and reply_identity != previous_identity:
+        return reply_identity, now + REPLY_PAUSE_SECONDS
+    if not reply_identity:
+        return None, 0.0
+    return reply_identity, previous_until
+
+
 class RobotDuckView:
     """Small, code-drawn companion view backed by the app's activity feed."""
 
@@ -67,6 +85,8 @@ class RobotDuckView:
         self._animation_job = None
         self._duck_x = 58
         self._direction = 1
+        self._reply_identity = None
+        self._reply_pause_until = 0.0
 
         self._meta_var = tk.StringVar(value="")
         self._question_var = tk.StringVar(value="")
@@ -128,6 +148,12 @@ class RobotDuckView:
 
     def update_messages(self, messages):
         self._state = select_companion_message(messages)
+        self._reply_identity, self._reply_pause_until = update_reply_pause(
+            self._reply_identity,
+            self._reply_pause_until,
+            self._state,
+            time.monotonic(),
+        )
         lang = self._lang_getter()
         source = message_channel_display_name(self._state.channel, lang)
         if self._state.is_replying:
@@ -165,8 +191,16 @@ class RobotDuckView:
         self._animation_job = None
 
     def _sync_animation(self):
-        if not self._visible or self._state.is_replying:
+        if not self._visible:
             self._cancel_animation()
+            return
+        pause_remaining = self._reply_pause_until - time.monotonic()
+        if pause_remaining > 0:
+            self._cancel_animation()
+            self._animation_job = self.parent.after(
+                max(1, int(pause_remaining * 1000) + 1),
+                self._animate,
+            )
             return
         if self._animation_job is None:
             self._animation_job = self.parent.after(
@@ -176,11 +210,14 @@ class RobotDuckView:
 
     def _animate(self):
         self._animation_job = None
-        if not self._visible or self._state.is_replying:
+        if not self._visible:
+            return
+        if self._reply_pause_until > time.monotonic():
+            self._sync_animation()
             return
         width = max(420, self._canvas.winfo_width())
-        left_bound = 54
-        right_bound = width - 58
+        left_bound = 68
+        right_bound = width - 68
         next_x = self._duck_x + (ANIMATION_STEP_PX * self._direction)
         if next_x >= right_bound:
             next_x = right_bound
@@ -215,34 +252,69 @@ class RobotDuckView:
         outline = self._color("fg")
         panel = self._color("box_bg")
         led = self._color("status_ok")
-        body = "#e2b13c"
-        beak = "#e87532"
+        body = "#efc84a"
+        head = "#f4d45b"
+        beak = "#ffdc45"
         metal = "#aeb8c5"
 
-        canvas.create_oval(x - 31, y - 19, x + 25, y + 19, fill=body, outline=outline, width=2)
-        canvas.create_rectangle(x - 18, y - 10, x + 8, y + 9, fill=panel, outline=outline, width=1)
-        canvas.create_line(x - 12, y - 4, x + 2, y - 4, fill=led, width=2)
-        canvas.create_line(x - 12, y + 2, x - 2, y + 2, fill=led, width=2)
-
-        head_x = x + (25 * direction)
-        canvas.create_oval(head_x - 17, y - 35, head_x + 17, y - 4, fill=metal, outline=outline, width=2)
-        eye_x = head_x + (7 * direction)
-        canvas.create_oval(eye_x - 3, y - 25, eye_x + 3, y - 19, fill=led, outline=outline)
-        beak_base = head_x + (15 * direction)
-        beak_tip = head_x + (30 * direction)
+        tail_base = x - (28 * direction)
+        tail_tip = x - (43 * direction)
         canvas.create_polygon(
-            beak_base,
-            y - 18,
-            beak_tip,
-            y - 13,
-            beak_base,
-            y - 9,
+            tail_base, y - 11,
+            tail_tip, y - 20,
+            tail_tip + (3 * direction), y - 5,
+            tail_base, y + 2,
+            fill=body,
+            outline=outline,
+        )
+        canvas.create_oval(x - 32, y - 21, x + 29, y + 19, fill=body, outline=outline, width=2)
+
+        wing_x = x - (5 * direction)
+        canvas.create_oval(
+            wing_x - 17,
+            y - 12,
+            wing_x + 14,
+            y + 10,
+            fill=head,
+            outline=outline,
+            width=1,
+        )
+        panel_x = x - (13 * direction)
+        canvas.create_rectangle(panel_x - 8, y - 5, panel_x + 8, y + 6, fill=panel, outline=outline, width=1)
+        canvas.create_line(panel_x - 4, y - 1, panel_x + 4, y - 1, fill=led, width=2)
+
+        head_x = x + (28 * direction)
+        canvas.create_oval(head_x - 18, y - 38, head_x + 18, y - 3, fill=head, outline=outline, width=2)
+        eye_x = head_x + (7 * direction)
+        canvas.create_oval(eye_x - 4, y - 28, eye_x + 4, y - 20, fill=panel, outline=outline)
+        canvas.create_oval(eye_x - 1, y - 26, eye_x + 2, y - 23, fill=led, outline=led)
+
+        beak_base = head_x + (15 * direction)
+        beak_tip = head_x + (39 * direction)
+        canvas.create_polygon(
+            beak_base, y - 21,
+            beak_tip, y - 19,
+            beak_tip, y - 12,
+            beak_base, y - 11,
             fill=beak,
             outline=outline,
+            width=2,
+        )
+        canvas.create_line(beak_base, y - 16, beak_tip, y - 15, fill=outline, width=1)
+        canvas.create_arc(
+            head_x - 14,
+            y - 34,
+            head_x + 14,
+            y - 7,
+            start=80 if direction > 0 else 190,
+            extent=100,
+            style=tk.ARC,
+            outline=metal,
+            width=2,
         )
         canvas.create_line(head_x, y - 35, head_x, y - 44, fill=outline, width=2)
         canvas.create_oval(head_x - 3, y - 48, head_x + 3, y - 42, fill=led, outline=outline)
 
-        for wheel_x in (x - 18, x + 13):
+        for wheel_x in (x - 18, x + 16):
             canvas.create_oval(wheel_x - 8, y + 11, wheel_x + 8, y + 27, fill=metal, outline=outline, width=2)
             canvas.create_oval(wheel_x - 2, y + 17, wheel_x + 2, y + 21, fill=panel, outline=panel)

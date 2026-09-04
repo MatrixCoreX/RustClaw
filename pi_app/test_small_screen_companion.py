@@ -4,7 +4,13 @@ from pathlib import Path
 from unittest import mock
 
 import small_screen_config as config
-from small_screen_companion import compact_companion_text, select_companion_message
+from small_screen_companion import (
+    REPLY_PAUSE_SECONDS,
+    CompanionMessageState,
+    compact_companion_text,
+    select_companion_message,
+    update_reply_pause,
+)
 
 
 class SmallScreenCompanionTests(unittest.TestCase):
@@ -68,6 +74,29 @@ class SmallScreenCompanionTests(unittest.TestCase):
                 self.assertFalse(config.load_companion_page_visible())
                 migrated = config.migrate_small_screen_settings()
                 self.assertFalse(migrated["show_companion"])
+
+    def test_reply_pause_lasts_five_seconds_and_is_not_reset_by_refresh(self):
+        state = CompanionMessageState(task_id="task-1", reply="完成")
+        identity, pause_until = update_reply_pause(None, 0.0, state, 10.0)
+        self.assertEqual(pause_until, 10.0 + REPLY_PAUSE_SECONDS)
+
+        same_identity, same_pause_until = update_reply_pause(
+            identity,
+            pause_until,
+            state,
+            12.0,
+        )
+        self.assertEqual(same_identity, identity)
+        self.assertEqual(same_pause_until, pause_until)
+
+        no_identity, cleared_pause = update_reply_pause(
+            identity,
+            pause_until,
+            CompanionMessageState(task_id="task-2", question="新问题"),
+            13.0,
+        )
+        self.assertIsNone(no_identity)
+        self.assertEqual(cleared_pause, 0.0)
 
 
 if __name__ == "__main__":
