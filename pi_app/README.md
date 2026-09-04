@@ -6,7 +6,7 @@
 
 ```
 pi_app/
-├── agent_small_screen.py          # 主程序（480×320 全屏，运行状态、消息、行情、Bancor、NNI 等）
+├── agent_small_screen.py          # 主程序（480×320 全屏，运行状态、消息、机器鸭子、行情、Bancor、NNI 等）
 ├── run-small-screen-launcher.sh   # 桌面/自启动用启动脚本（补全 DISPLAY/PATH）
 ├── run-small-screen.sh            # 终端前台启动（调试用）
 ├── open-small-screen.sh           # 用浏览器打开网页版小屏页（small-screen.html）
@@ -47,6 +47,8 @@ pi_app/
 
 4. **网页版小屏**（需先启动 clawd）  
    `./open-small-screen.sh` 会用 Chromium 全屏打开 `http://127.0.0.1:8787/small-screen.html`。
+
+“机器鸭子”页面默认开启，也可在“设置 → 页面显示”中关闭。它会在等待通信端或网页端回复时来回移动，并在回复产生后停下展示同一条结果。
 
 ## 依赖
 
