@@ -17,7 +17,7 @@ def prepare_settings_view(app):
     app._settings_menu_pages_btn.config(text="› " + app._t("page_visibility"), bg=app._c("bg"), fg=app._c("accent"), activebackground=app._c("bg"), activeforeground=app._c("fg"))
     app._settings_menu_system_btn.config(text="› " + app._t("settings_system"), bg=app._c("bg"), fg=app._c("accent"), activebackground=app._c("bg"), activeforeground=app._c("fg"))
     app._settings_language_frame.config(bg=app._c("bg"))
-    for btn in (app._settings_lang_en_btn, app._settings_lang_cn_btn, app._settings_theme_default_btn, app._settings_theme_matrix_btn, app._settings_show_messages_btn, app._settings_show_logs_btn, app._settings_show_gallery_btn, app._settings_show_weather_btn, app._settings_show_stock_btn, app._settings_show_us_stock_btn, app._settings_show_crypto_btn, app._settings_show_bancor_btn):
+    for btn in (app._settings_lang_en_btn, app._settings_lang_cn_btn, app._settings_theme_default_btn, app._settings_theme_matrix_btn, app._settings_show_messages_btn, app._settings_show_companion_btn, app._settings_show_logs_btn, app._settings_show_gallery_btn, app._settings_show_weather_btn, app._settings_show_stock_btn, app._settings_show_us_stock_btn, app._settings_show_crypto_btn, app._settings_show_bancor_btn):
         btn.config(
             bg=app._c("button_bg"),
             fg=app._c("button_fg"),
@@ -31,6 +31,7 @@ def prepare_settings_view(app):
     app._settings_pages_row2.config(bg=app._c("bg"))
     app._settings_pages_row3.config(bg=app._c("bg"))
     app._settings_pages_row4.config(bg=app._c("bg"))
+    app._settings_pages_row5.config(bg=app._c("bg"))
     app._settings_system_frame.config(bg=app._c("bg"))
     app._settings_wifi_btn.config(
         text=app._t("wifi_title"),
@@ -62,6 +63,7 @@ def prepare_settings_view(app):
     app._settings_lang_var.set(app._lang)
     app._settings_theme_var.set(app._theme)
     app._settings_show_messages_var.set(app._show_messages_page)
+    app._settings_show_companion_var.set(app._show_companion_page)
     app._settings_show_logs_var.set(app._show_logs_page)
     app._settings_show_gallery_var.set(app._show_gallery_page)
     app._settings_show_weather_var.set(app._show_weather_page)
@@ -75,6 +77,7 @@ def prepare_settings_view(app):
 
 def refresh_settings_choice_labels(app):
     messages_prefix = "● " if bool(app._settings_show_messages_var.get()) else "○ "
+    companion_prefix = "● " if bool(app._settings_show_companion_var.get()) else "○ "
     logs_prefix = "● " if bool(app._settings_show_logs_var.get()) else "○ "
     gallery_prefix = "● " if bool(app._settings_show_gallery_var.get()) else "○ "
     weather_prefix = "● " if bool(app._settings_show_weather_var.get()) else "○ "
@@ -85,6 +88,7 @@ def refresh_settings_choice_labels(app):
     app._settings_theme_default_btn.config(text=app._t("theme_default"))
     app._settings_theme_matrix_btn.config(text=app._t("theme_matrix"))
     app._settings_show_messages_btn.config(text=messages_prefix + app._t("show_messages_page"))
+    app._settings_show_companion_btn.config(text=companion_prefix + app._t("show_companion_page"))
     app._settings_show_logs_btn.config(text=logs_prefix + app._t("show_logs_page"))
     app._settings_show_gallery_btn.config(text=gallery_prefix + app._t("show_nni_page"))
     app._settings_show_weather_btn.config(text=weather_prefix + app._t("show_weather_page"))

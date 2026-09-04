@@ -39,6 +39,7 @@ def _default_settings():
         "show_stock": True,
         "show_us_stock": True,
         "show_messages": True,
+        "show_companion": True,
         "show_logs": True,
         "show_gallery": True,
         "show_weather": True,
@@ -149,6 +150,7 @@ def migrate_small_screen_settings(remove_legacy=False):
         "show_stock": bool(settings.get("show_stock", defaults["show_stock"])),
         "show_us_stock": bool(settings.get("show_us_stock", defaults["show_us_stock"])),
         "show_messages": bool(settings.get("show_messages", defaults["show_messages"])),
+        "show_companion": bool(settings.get("show_companion", defaults["show_companion"])),
         "show_logs": bool(settings.get("show_logs", defaults["show_logs"])),
         "show_gallery": bool(settings.get("show_gallery", defaults["show_gallery"])),
         "show_weather": bool(settings.get("show_weather", defaults["show_weather"])),
@@ -207,6 +209,17 @@ def load_messages_page_visible():
 
 def save_messages_page_visible(visible):
     _save_setting_value("show_messages", bool(visible))
+
+
+def load_companion_page_visible():
+    settings = _load_settings_dict()
+    if "show_companion" in settings:
+        return bool(settings.get("show_companion"))
+    return True
+
+
+def save_companion_page_visible(visible):
+    _save_setting_value("show_companion", bool(visible))
 
 
 def load_logs_page_visible():

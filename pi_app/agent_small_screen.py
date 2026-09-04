@@ -34,6 +34,7 @@ from small_screen_config import (
     _root_dir,
     _writable_pi_app_dir,
     load_bancor_page_visible,
+    load_companion_page_visible,
     load_crypto_page_visible,
     load_preferred_runtime_auth_key,
     load_gallery_page_visible,
@@ -46,6 +47,7 @@ from small_screen_config import (
     load_us_stock_page_visible,
     load_weather_page_visible,
     save_bancor_page_visible,
+    save_companion_page_visible,
     save_crypto_page_visible,
     save_gallery_page_visible,
     save_lang,
@@ -57,6 +59,7 @@ from small_screen_config import (
     save_weather_page_visible,
 )
 from small_screen_bancor import build_bancor_market_view
+from small_screen_companion import RobotDuckView
 from small_screen_cryptoauth_service import (
     read_slot0_pubkey_via_helper,
     sign_challenge_via_helper,
@@ -1405,6 +1408,7 @@ class SmallScreenApp:
         self._lang = load_lang()
         self._theme = load_theme()
         self._show_messages_page = load_messages_page_visible()
+        self._show_companion_page = load_companion_page_visible()
         self._show_logs_page = load_logs_page_visible()
         self._show_gallery_page = load_gallery_page_visible()
         self._show_weather_page = load_weather_page_visible()
@@ -1614,6 +1618,8 @@ class SmallScreenApp:
             self._teardown_gallery_view()
         elif mode == "bancor":
             self._cancel_job("_bancor_refresh_job")
+        elif mode == "companion":
+            self._companion_view.hide()
 
     def _prepare_for_ui_rebuild(self):
         self._teardown_current_view()
@@ -1769,6 +1775,7 @@ class SmallScreenApp:
         self.us_stock_frame = tk.Frame(self.switch_container, bg=self._c("bg"))
         self.wifi_frame = tk.Frame(self.switch_container, bg=self._c("bg"), padx=12, pady=8)
         self.users_frame = tk.Frame(self.switch_container, bg=self._c("bg"), padx=20, pady=18)
+        self.companion_frame = tk.Frame(self.switch_container, bg=self._c("bg"), padx=4, pady=2)
         self.logs_frame = tk.Frame(self.switch_container, bg=self._c("bg"), padx=10, pady=8)
         self.settings_frame = tk.Frame(self.switch_container, bg=self._c("bg"), padx=24, pady=20)
         # 顺序（左滑下一页）：首页 → 总览 → 用户 → 日志 → 天气 → A股 → 美股 → 加密货币 → Bancor → NNI → 设置；右滑=上一页
@@ -1781,6 +1788,12 @@ class SmallScreenApp:
         self._gallery_photos = []
         self._gallery_job = None
         self._llm_lobster_job = None
+        self._companion_view = RobotDuckView(
+            self.companion_frame,
+            translate=self._t,
+            color=self._c,
+            lang_getter=lambda: self._lang,
+        )
         content = self.dashboard_frame
         # 内容区：一行 2 个信息，每项固定大小方框
         box_bg = self._c("box_bg")
@@ -1882,6 +1895,7 @@ class SmallScreenApp:
         self._settings_lang_var = tk.StringVar(value=self._lang)
         self._settings_theme_var = tk.StringVar(value=self._theme)
         self._settings_show_messages_var = tk.BooleanVar(value=self._show_messages_page)
+        self._settings_show_companion_var = tk.BooleanVar(value=self._show_companion_page)
         self._settings_show_logs_var = tk.BooleanVar(value=self._show_logs_page)
         self._settings_show_gallery_var = tk.BooleanVar(value=self._show_gallery_page)
         self._settings_show_weather_var = tk.BooleanVar(value=self._show_weather_page)
@@ -2063,18 +2077,21 @@ class SmallScreenApp:
         self._settings_theme_matrix_btn.pack(anchor=tk.W, fill=tk.X)
         self._settings_pages_frame = tk.Frame(self._settings_content_frame, bg=self._c("bg"))
         self._settings_pages_row1 = tk.Frame(self._settings_pages_frame, bg=self._c("bg"))
-        self._settings_pages_row1.pack(fill=tk.X, pady=(4, 10))
+        self._settings_pages_row1.pack(fill=tk.X, pady=(2, 6))
         self._settings_pages_row2 = tk.Frame(self._settings_pages_frame, bg=self._c("bg"))
-        self._settings_pages_row2.pack(fill=tk.X, pady=(0, 10))
+        self._settings_pages_row2.pack(fill=tk.X, pady=(0, 6))
         self._settings_pages_row3 = tk.Frame(self._settings_pages_frame, bg=self._c("bg"))
-        self._settings_pages_row3.pack(fill=tk.X, pady=(0, 10))
+        self._settings_pages_row3.pack(fill=tk.X, pady=(0, 6))
         self._settings_pages_row4 = tk.Frame(self._settings_pages_frame, bg=self._c("bg"))
-        self._settings_pages_row4.pack(fill=tk.X)
+        self._settings_pages_row4.pack(fill=tk.X, pady=(0, 6))
+        self._settings_pages_row5 = tk.Frame(self._settings_pages_frame, bg=self._c("bg"))
+        self._settings_pages_row5.pack(fill=tk.X)
         for row in (
             self._settings_pages_row1,
             self._settings_pages_row2,
             self._settings_pages_row3,
             self._settings_pages_row4,
+            self._settings_pages_row5,
         ):
             row.grid_columnconfigure(0, weight=1, uniform="settings-pages")
             row.grid_columnconfigure(1, weight=1, uniform="settings-pages")
@@ -2100,6 +2117,28 @@ class SmallScreenApp:
             pady=6,
         )
         self._settings_show_messages_btn.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self._settings_show_companion_btn = tk.Checkbutton(
+            self._settings_pages_row5,
+            text=_t("show_companion_page"),
+            variable=self._settings_show_companion_var,
+            onvalue=True,
+            offvalue=False,
+            command=lambda: self._apply_settings_changes("pages"),
+            font=("", 12),
+            indicatoron=False,
+            relief=tk.FLAT,
+            borderwidth=0,
+            highlightthickness=0,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            selectcolor=self._c("button_bg"),
+            activebackground=self._c("button_active_bg"),
+            activeforeground=self._c("button_fg"),
+            anchor="w",
+            padx=10,
+            pady=6,
+        )
+        self._settings_show_companion_btn.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         self._settings_show_logs_btn = tk.Checkbutton(
             self._settings_pages_row1,
             text=_t("show_logs_page"),
@@ -2563,6 +2602,7 @@ class SmallScreenApp:
         except tk.TclError:
             pass
         self.foot_var.set(self._t("foot_prefix"))
+        self._companion_view.prepare(self.user_messages)
         self._refresh_topbar()
         self._refresh_dashboard_overview_if_needed()
 
@@ -2593,6 +2633,8 @@ class SmallScreenApp:
         self._refresh_weather_icon_display()
         if self._view_mode == "users":
             self._top_recent_message_var.set(self._t("recent_messages_title"))
+        elif self._view_mode == "companion":
+            self._top_recent_message_var.set(self._t("show_companion_page"))
         elif self._view_mode == "logs":
             self._top_recent_message_var.set("logs")
         elif self._view_mode == "weather":
@@ -3144,6 +3186,8 @@ class SmallScreenApp:
         modes = ["dashboard", "overview"]
         if self._show_messages_page:
             modes.append("users")
+        if self._show_companion_page:
+            modes.append("companion")
         if self._show_logs_page:
             modes.append("logs")
         if self._show_weather_page:
@@ -3162,7 +3206,7 @@ class SmallScreenApp:
         return modes
 
     def _switch_view(self, mode):
-        if mode not in {"dashboard", "overview", "users", "logs", "weather", "stock", "us_stock", "crypto", "bancor", "gallery", "settings", "wifi"}:
+        if mode not in {"dashboard", "overview", "users", "companion", "logs", "weather", "stock", "us_stock", "crypto", "bancor", "gallery", "settings", "wifi"}:
             mode = "dashboard"
         self._reset_overview_double_tap()
         self._teardown_current_view()
@@ -3170,6 +3214,7 @@ class SmallScreenApp:
             self.dashboard_frame,
             self.overview_frame,
             self.users_frame,
+            self.companion_frame,
             self.logs_frame,
             self.weather_frame,
             self.stock_frame,
@@ -3195,6 +3240,9 @@ class SmallScreenApp:
         elif mode == "users":
             self._prepare_users_view()
             self.users_frame.pack(fill=tk.BOTH, expand=True)
+        elif mode == "companion":
+            self.companion_frame.pack(fill=tk.BOTH, expand=True)
+            self._companion_view.show(self.user_messages)
         elif mode == "logs":
             self._prepare_logs_view()
             self.logs_frame.pack(fill=tk.BOTH, expand=True)
@@ -3755,7 +3803,7 @@ class SmallScreenApp:
         mode = getattr(self, "_view_mode", None)
         if mode == "logs":
             return {"lines": 300, "log_limit": 24, "message_limit": 5}
-        if mode == "users":
+        if mode in {"users", "companion"}:
             return {"lines": 220, "log_limit": 12, "message_limit": 5}
         if mode == "overview":
             return {"lines": 120, "log_limit": 10, "message_limit": 4}
@@ -4762,6 +4810,7 @@ class SmallScreenApp:
         old_lang = self._lang
         old_theme = self._theme
         old_show_messages = self._show_messages_page
+        old_show_companion = self._show_companion_page
         old_show_logs = self._show_logs_page
         old_show_gallery = self._show_gallery_page
         old_show_weather = self._show_weather_page
@@ -4772,6 +4821,7 @@ class SmallScreenApp:
         self._lang = self._settings_lang_var.get()
         new_theme = self._settings_theme_var.get()
         self._show_messages_page = bool(self._settings_show_messages_var.get())
+        self._show_companion_page = bool(self._settings_show_companion_var.get())
         self._show_logs_page = bool(self._settings_show_logs_var.get())
         self._show_gallery_page = bool(self._settings_show_gallery_var.get())
         self._show_weather_page = bool(self._settings_show_weather_var.get())
@@ -4781,6 +4831,7 @@ class SmallScreenApp:
         self._show_bancor_page = bool(self._settings_show_bancor_var.get())
         save_lang(self._lang)
         save_messages_page_visible(self._show_messages_page)
+        save_companion_page_visible(self._show_companion_page)
         save_logs_page_visible(self._show_logs_page)
         save_gallery_page_visible(self._show_gallery_page)
         save_weather_page_visible(self._show_weather_page)
@@ -4806,6 +4857,7 @@ class SmallScreenApp:
         self._refresh_settings_choice_labels()
         if (
             self._show_messages_page != old_show_messages
+            or self._show_companion_page != old_show_companion
             or self._show_logs_page != old_show_logs
             or self._show_gallery_page != old_show_gallery
             or self._show_weather_page != old_show_weather
@@ -6294,6 +6346,7 @@ class SmallScreenApp:
             self.log_summary = summary
         if user_messages is not None:
             self.user_messages = user_messages
+            self._companion_view.update_messages(self.user_messages)
             self._refresh_topbar()
         if err:
             self.health = None
@@ -6318,6 +6371,7 @@ class SmallScreenApp:
             self.users_count_var.set("--")
             self.bound_channels_var.set("--")
             self.user_messages = []
+            self._companion_view.update_messages(self.user_messages)
             self._refresh_topbar()
             if self._view_mode == "users":
                 self._render_user_messages()
