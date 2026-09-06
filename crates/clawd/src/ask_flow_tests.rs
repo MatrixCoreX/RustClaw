@@ -1,6 +1,6 @@
 use super::{
-    attached_image_analysis_context, attached_image_inputs, audio_failure_fields,
-    audio_failure_planner_text,
+    attached_image_analysis_context, attached_image_failure_context, attached_image_inputs,
+    audio_failure_fields, audio_failure_planner_text,
 };
 use serde_json::json;
 
@@ -72,6 +72,42 @@ fn attached_image_context_rejects_unstructured_analysis() {
     assert!(error
         .to_string()
         .contains("image_vision_describe_structured_output_missing"));
+}
+
+#[test]
+fn structured_image_timeout_becomes_model_owned_failure_context() {
+    let raw = concat!(
+        "__RC_SKILL_ERROR__:",
+        r#"{"skill":"image_vision","error_code":"provider_timeout","error_text":"private provider detail","extra":{"error_code":"provider_timeout","message_key":"skill.image_vision.provider_timeout","retryable":true,"failure_phase":"provider_request","timeout_seconds":90,"provider_failures":[{"provider":"minimax","error_code":"provider_timeout","retryable":true}]}}"#
+    );
+
+    let context = attached_image_failure_context(1, false, raw);
+    let parsed: serde_json::Value = serde_json::from_str(&context).expect("failure context json");
+
+    assert_eq!(parsed["status"], "error");
+    assert_eq!(parsed["analysis_available"], false);
+    assert_eq!(parsed["error_code"], "provider_timeout");
+    assert_eq!(parsed["message_key"], "skill.image_vision.provider_timeout");
+    assert_eq!(parsed["retryable"], true);
+    assert_eq!(parsed["failure_metadata"]["timeout_seconds"], 90);
+    assert_eq!(
+        parsed["required_decision"],
+        "respond_from_structured_failure"
+    );
+    assert!(!context.contains("__RC_SKILL_ERROR__"));
+    assert!(!context.contains("private provider detail"));
+}
+
+#[test]
+fn unstructured_image_failure_still_reaches_model_with_generic_machine_code() {
+    let context = attached_image_failure_context(2, true, "transport closed");
+    let parsed: serde_json::Value = serde_json::from_str(&context).expect("failure context json");
+
+    assert_eq!(parsed["image_count"], 2);
+    assert_eq!(parsed["typed_instruction_present"], true);
+    assert_eq!(parsed["error_code"], "image_analysis_unavailable");
+    assert_eq!(parsed["retryable"], true);
+    assert!(parsed["failure_metadata"].is_null());
 }
 
 #[test]

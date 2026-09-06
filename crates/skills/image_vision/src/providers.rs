@@ -1,124 +1,193 @@
 use super::*;
 
+pub(super) fn effective_provider_timeout_seconds(
+    remaining_budget_seconds: u64,
+    configured_timeout_seconds: Option<u64>,
+) -> u64 {
+    remaining_budget_seconds
+        .min(configured_timeout_seconds.unwrap_or(30))
+        .max(1)
+}
+
 pub(super) fn call_vendor_vision(
     vendor: VendorKind,
     cfg: &RootConfig,
     requested_model: Option<&str>,
     timeout_seconds: u64,
     request: VisionRequest<'_>,
-) -> Result<(String, String, &'static str), String> {
+) -> Result<(String, String, &'static str), ProviderFailure> {
     let mode = resolve_adapter_mode(&cfg.image_vision);
-    let (vendor_name, vcfg) = resolve_vendor_config(cfg, vendor)?;
-    check_api_key(vendor_name, &vcfg.api_key)?;
+    let (vendor_name, vcfg) = resolve_vendor_config(cfg, vendor).map_err(ProviderFailure::from)?;
+    check_api_key(vendor_name, &vcfg.api_key).map_err(ProviderFailure::from)?;
     match vendor {
         VendorKind::OpenAI => {
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
-                .timeout(Duration::from_secs(
-                    timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
-                ))
+                .timeout(Duration::from_secs(effective_provider_timeout_seconds(
+                    timeout_seconds,
+                    vcfg.timeout_seconds,
+                )))
                 .build()
-                .map_err(|err| format!("build openai client failed: {err}"))?;
-            let text = openai_vision(&client, &vcfg, &model, request)?;
+                .map_err(|err| {
+                    ProviderFailure::new(
+                        "provider_client_build_failed",
+                        false,
+                        format!("build openai client failed: {err}"),
+                    )
+                })?;
+            let text = openai_vision(&client, &vcfg, &model, request)
+                .map_err(|error| error.with_timeout(timeout_seconds))?;
             Ok((text, model, "native"))
         }
         VendorKind::Google => {
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
-                .timeout(Duration::from_secs(
-                    timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
-                ))
+                .timeout(Duration::from_secs(effective_provider_timeout_seconds(
+                    timeout_seconds,
+                    vcfg.timeout_seconds,
+                )))
                 .build()
-                .map_err(|err| format!("build google client failed: {err}"))?;
-            let text = google_vision(&client, &vcfg, &model, request)?;
+                .map_err(|err| {
+                    ProviderFailure::new(
+                        "provider_client_build_failed",
+                        false,
+                        format!("build google client failed: {err}"),
+                    )
+                })?;
+            let text = google_vision(&client, &vcfg, &model, request)
+                .map_err(|error| error.with_timeout(timeout_seconds))?;
             Ok((text, model, "native"))
         }
         VendorKind::Anthropic => {
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
-                .timeout(Duration::from_secs(
-                    timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
-                ))
+                .timeout(Duration::from_secs(effective_provider_timeout_seconds(
+                    timeout_seconds,
+                    vcfg.timeout_seconds,
+                )))
                 .build()
-                .map_err(|err| format!("build anthropic client failed: {err}"))?;
-            let text = anthropic_vision(&client, &vcfg, &model, request)?;
+                .map_err(|err| {
+                    ProviderFailure::new(
+                        "provider_client_build_failed",
+                        false,
+                        format!("build anthropic client failed: {err}"),
+                    )
+                })?;
+            let text = anthropic_vision(&client, &vcfg, &model, request)
+                .map_err(|error| error.with_timeout(timeout_seconds))?;
             Ok((text, model, "native"))
         }
         VendorKind::Grok | VendorKind::DeepSeek => {
             if mode == AdapterMode::Native {
-                return Err(format!(
-                    "{vendor_name} native vision adapter is not implemented; use image_vision.adapter_mode=compat"
+                return Err(ProviderFailure::new(
+                    "provider_adapter_unsupported",
+                    false,
+                    format!("{vendor_name} native vision adapter is not implemented; use image_vision.adapter_mode=compat"),
                 ));
             }
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
-                .timeout(Duration::from_secs(
-                    timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
-                ))
+                .timeout(Duration::from_secs(effective_provider_timeout_seconds(
+                    timeout_seconds,
+                    vcfg.timeout_seconds,
+                )))
                 .build()
-                .map_err(|err| format!("build {vendor_name} client failed: {err}"))?;
+                .map_err(|err| {
+                    ProviderFailure::new(
+                        "provider_client_build_failed",
+                        false,
+                        format!("build {vendor_name} client failed: {err}"),
+                    )
+                })?;
             let text = openai_compat_vision(
                 &client,
                 &vcfg,
                 &model,
                 request,
                 OpenAiCompatOptions::new(vendor_name),
-            )?;
+            )
+            .map_err(|error| error.with_timeout(timeout_seconds))?;
             Ok((text, model, "compat"))
         }
         VendorKind::Mimo => {
             if mode == AdapterMode::Native {
-                return Err(
-                    "mimo native vision adapter is not implemented; use image_vision.adapter_mode=compat"
-                        .to_string(),
-                );
+                return Err(ProviderFailure::new(
+                    "provider_adapter_unsupported",
+                    false,
+                    "mimo native vision adapter is not implemented; use image_vision.adapter_mode=compat",
+                ));
             }
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
-                .timeout(Duration::from_secs(
-                    timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
-                ))
+                .timeout(Duration::from_secs(effective_provider_timeout_seconds(
+                    timeout_seconds,
+                    vcfg.timeout_seconds,
+                )))
                 .build()
-                .map_err(|err| format!("build mimo client failed: {err}"))?;
-            let text = mimo_vision(&client, &vcfg, &model, request)?;
+                .map_err(|err| {
+                    ProviderFailure::new(
+                        "provider_client_build_failed",
+                        false,
+                        format!("build mimo client failed: {err}"),
+                    )
+                })?;
+            let text = mimo_vision(&client, &vcfg, &model, request)
+                .map_err(|error| error.with_timeout(timeout_seconds))?;
             Ok((text, model, "compat"))
         }
         VendorKind::MiniMax => {
             if mode == AdapterMode::Native {
-                return Err(
-                    "minimax native vision adapter is not implemented; use image_vision.adapter_mode=compat"
-                        .to_string(),
-                );
+                return Err(ProviderFailure::new(
+                    "provider_adapter_unsupported",
+                    false,
+                    "minimax native vision adapter is not implemented; use image_vision.adapter_mode=compat",
+                ));
             }
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
-                .timeout(Duration::from_secs(
-                    timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
-                ))
+                .timeout(Duration::from_secs(effective_provider_timeout_seconds(
+                    timeout_seconds,
+                    vcfg.timeout_seconds,
+                )))
                 .build()
-                .map_err(|err| format!("build minimax client failed: {err}"))?;
+                .map_err(|err| {
+                    ProviderFailure::new(
+                        "provider_client_build_failed",
+                        false,
+                        format!("build minimax client failed: {err}"),
+                    )
+                })?;
             let text = openai_compat_vision(
                 &client,
                 &vcfg,
                 &model,
                 request,
                 OpenAiCompatOptions::new(vendor_name),
-            )?;
+            )
+            .map_err(|error| error.with_timeout(timeout_seconds))?;
             Ok((text, model, "compat"))
         }
         VendorKind::Qwen => {
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
-                .timeout(Duration::from_secs(
-                    timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
-                ))
+                .timeout(Duration::from_secs(effective_provider_timeout_seconds(
+                    timeout_seconds,
+                    vcfg.timeout_seconds,
+                )))
                 .build()
-                .map_err(|err| format!("build qwen client failed: {err}"))?;
+                .map_err(|err| {
+                    ProviderFailure::new(
+                        "provider_client_build_failed",
+                        false,
+                        format!("build qwen client failed: {err}"),
+                    )
+                })?;
             if mode == AdapterMode::Native {
-                return Err(
-                    "qwen native vision adapter is not implemented; use image_vision.adapter_mode=compat"
-                        .to_string(),
-                );
+                return Err(ProviderFailure::new(
+                    "provider_adapter_unsupported",
+                    false,
+                    "qwen native vision adapter is not implemented; use image_vision.adapter_mode=compat",
+                ));
             }
             let text = openai_compat_vision(
                 &client,
@@ -126,7 +195,8 @@ pub(super) fn call_vendor_vision(
                 &model,
                 request,
                 OpenAiCompatOptions::new(vendor_name),
-            )?;
+            )
+            .map_err(|error| error.with_timeout(timeout_seconds))?;
             Ok((text, model, "compat"))
         }
     }
@@ -152,7 +222,7 @@ pub(super) fn openai_vision(
     cfg: &VendorConfig,
     model: &str,
     request: VisionRequest<'_>,
-) -> Result<String, String> {
+) -> Result<String, ProviderFailure> {
     openai_compat_vision(
         client,
         cfg,
@@ -171,7 +241,7 @@ pub(super) fn mimo_vision(
     cfg: &VendorConfig,
     model: &str,
     request: VisionRequest<'_>,
-) -> Result<String, String> {
+) -> Result<String, ProviderFailure> {
     openai_compat_vision(
         client,
         cfg,
@@ -208,15 +278,25 @@ fn openai_compat_vision(
     model: &str,
     request: VisionRequest<'_>,
     options: OpenAiCompatOptions<'_>,
-) -> Result<String, String> {
+) -> Result<String, ProviderFailure> {
     let mut content = vec![json!({"type":"text","text":request.prompt})];
     for image in request.images {
         let url = match image {
             ImageSource::Url(s) => s.to_string(),
             ImageSource::Path(p) => {
-                let bytes = std::fs::read(p).map_err(|err| format!("read image failed: {err}"))?;
+                let bytes = std::fs::read(p).map_err(|err| {
+                    ProviderFailure::new(
+                        "image_read_failed",
+                        false,
+                        format!("read image failed: {err}"),
+                    )
+                })?;
                 if bytes.len() > request.max_input_bytes {
-                    return Err(format!("image too large: {} bytes", bytes.len()));
+                    return Err(ProviderFailure::new(
+                        "image_too_large",
+                        false,
+                        format!("image too large: {} bytes", bytes.len()),
+                    ));
                 }
                 let mime = guess_mime_from_path(p);
                 format!("data:{mime};base64,{}", STANDARD.encode(bytes))
@@ -243,16 +323,20 @@ fn openai_compat_vision(
     let resp = http_request
         .json(&body)
         .send()
-        .map_err(|err| format!("{} request failed: {err}", options.error_label))?;
+        .map_err(|err| ProviderFailure::request(options.error_label, err))?;
     let status = resp.status().as_u16();
-    let v: Value = resp
-        .json()
-        .map_err(|err| format!("parse openai response failed: {err}"))?;
+    let v: Value = resp.json().map_err(|err| {
+        ProviderFailure::new(
+            "provider_response_invalid",
+            true,
+            format!("parse openai response failed: {err}"),
+        )
+    })?;
     if status >= 300 {
-        return Err(format!(
-            "{} error status={status}: {}",
+        return Err(ProviderFailure::http_status(
             options.error_label,
-            provider_error_excerpt(&v, 400)
+            status,
+            provider_error_excerpt(&v, 400),
         ));
     }
     if let Some(s) = v
@@ -264,10 +348,14 @@ fn openai_compat_vision(
     {
         return Ok(s.to_string());
     }
-    Err(format!(
-        "{} response missing text: {}",
-        options.error_label,
-        provider_error_excerpt(&v, 400)
+    Err(ProviderFailure::new(
+        "provider_response_missing_text",
+        true,
+        format!(
+            "{} response missing text: {}",
+            options.error_label,
+            provider_error_excerpt(&v, 400)
+        ),
     ))
 }
 
@@ -276,14 +364,24 @@ pub(super) fn google_vision(
     cfg: &VendorConfig,
     model: &str,
     request: VisionRequest<'_>,
-) -> Result<String, String> {
+) -> Result<String, ProviderFailure> {
     let mut parts = vec![json!({"text":request.prompt})];
     for image in request.images {
         match image {
             ImageSource::Path(p) => {
-                let bytes = std::fs::read(p).map_err(|err| format!("read image failed: {err}"))?;
+                let bytes = std::fs::read(p).map_err(|err| {
+                    ProviderFailure::new(
+                        "image_read_failed",
+                        false,
+                        format!("read image failed: {err}"),
+                    )
+                })?;
                 if bytes.len() > request.max_input_bytes {
-                    return Err(format!("image too large: {} bytes", bytes.len()));
+                    return Err(ProviderFailure::new(
+                        "image_too_large",
+                        false,
+                        format!("image too large: {} bytes", bytes.len()),
+                    ));
                 }
                 let mime = guess_mime_from_path(p);
                 parts.push(json!({"inline_data":{"mime_type":mime,"data":STANDARD.encode(bytes)}}));
@@ -313,15 +411,20 @@ pub(super) fn google_vision(
         .post(url)
         .json(&body)
         .send()
-        .map_err(|err| format!("google request failed: {err}"))?;
+        .map_err(|err| ProviderFailure::request("google", err))?;
     let status = resp.status().as_u16();
-    let v: Value = resp
-        .json()
-        .map_err(|err| format!("parse google response failed: {err}"))?;
+    let v: Value = resp.json().map_err(|err| {
+        ProviderFailure::new(
+            "provider_response_invalid",
+            true,
+            format!("parse google response failed: {err}"),
+        )
+    })?;
     if status >= 300 {
-        return Err(format!(
-            "google error status={status}: {}",
-            provider_error_excerpt(&v, 400)
+        return Err(ProviderFailure::http_status(
+            "google",
+            status,
+            provider_error_excerpt(&v, 400),
         ));
     }
     let mut out = String::new();
@@ -342,9 +445,13 @@ pub(super) fn google_vision(
         }
     }
     if out.is_empty() {
-        return Err(format!(
-            "google response missing text: {}",
-            provider_error_excerpt(&v, 400)
+        return Err(ProviderFailure::new(
+            "provider_response_missing_text",
+            true,
+            format!(
+                "google response missing text: {}",
+                provider_error_excerpt(&v, 400)
+            ),
         ));
     }
     Ok(out)
@@ -355,14 +462,24 @@ pub(super) fn anthropic_vision(
     cfg: &VendorConfig,
     model: &str,
     request: VisionRequest<'_>,
-) -> Result<String, String> {
+) -> Result<String, ProviderFailure> {
     let mut content = vec![json!({"type":"text","text":request.prompt})];
     for image in request.images {
         match image {
             ImageSource::Path(p) => {
-                let bytes = std::fs::read(p).map_err(|err| format!("read image failed: {err}"))?;
+                let bytes = std::fs::read(p).map_err(|err| {
+                    ProviderFailure::new(
+                        "image_read_failed",
+                        false,
+                        format!("read image failed: {err}"),
+                    )
+                })?;
                 if bytes.len() > request.max_input_bytes {
-                    return Err(format!("image too large: {} bytes", bytes.len()));
+                    return Err(ProviderFailure::new(
+                        "image_too_large",
+                        false,
+                        format!("image too large: {} bytes", bytes.len()),
+                    ));
                 }
                 let mime = guess_mime_from_path(p);
                 content.push(json!({
@@ -395,15 +512,20 @@ pub(super) fn anthropic_vision(
         .header("anthropic-version", "2023-06-01")
         .json(&body)
         .send()
-        .map_err(|err| format!("anthropic request failed: {err}"))?;
+        .map_err(|err| ProviderFailure::request("anthropic", err))?;
     let status = resp.status().as_u16();
-    let v: Value = resp
-        .json()
-        .map_err(|err| format!("parse anthropic response failed: {err}"))?;
+    let v: Value = resp.json().map_err(|err| {
+        ProviderFailure::new(
+            "provider_response_invalid",
+            true,
+            format!("parse anthropic response failed: {err}"),
+        )
+    })?;
     if status >= 300 {
-        return Err(format!(
-            "anthropic error status={status}: {}",
-            provider_error_excerpt(&v, 400)
+        return Err(ProviderFailure::http_status(
+            "anthropic",
+            status,
+            provider_error_excerpt(&v, 400),
         ));
     }
     let mut out = String::new();
@@ -418,9 +540,13 @@ pub(super) fn anthropic_vision(
         }
     }
     if out.is_empty() {
-        return Err(format!(
-            "anthropic response missing text: {}",
-            provider_error_excerpt(&v, 400)
+        return Err(ProviderFailure::new(
+            "provider_response_missing_text",
+            true,
+            format!(
+                "anthropic response missing text: {}",
+                provider_error_excerpt(&v, 400)
+            ),
         ));
     }
     Ok(out)

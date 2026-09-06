@@ -2,7 +2,7 @@ use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use claw_core::prompt_layers;
@@ -18,6 +18,144 @@ use prompting::*;
 use providers::*;
 
 const SKILL_NAME: &str = "image_vision";
+const RUNNER_RESPONSE_RESERVE_SECONDS: u64 = 10;
+
+#[derive(Debug, Clone)]
+struct ProviderFailure {
+    error_code: &'static str,
+    retryable: bool,
+    detail: String,
+    status_code: Option<u16>,
+    timeout_seconds: Option<u64>,
+}
+
+impl ProviderFailure {
+    fn new(error_code: &'static str, retryable: bool, detail: impl Into<String>) -> Self {
+        Self {
+            error_code,
+            retryable,
+            detail: detail.into(),
+            status_code: None,
+            timeout_seconds: None,
+        }
+    }
+
+    fn request(label: &str, error: reqwest::Error) -> Self {
+        if error.is_timeout() {
+            Self::new(
+                "provider_timeout",
+                true,
+                format!("{label} request timed out"),
+            )
+        } else if error.is_connect() {
+            Self::new(
+                "provider_connection_failed",
+                true,
+                format!("{label} connection failed"),
+            )
+        } else {
+            Self::new(
+                "provider_request_failed",
+                true,
+                format!("{label} request failed"),
+            )
+        }
+    }
+
+    fn http_status(label: &str, status_code: u16, detail: impl Into<String>) -> Self {
+        let error_code = if status_code == 429 {
+            "provider_rate_limited"
+        } else {
+            "provider_http_error"
+        };
+        let mut error = Self::new(
+            error_code,
+            status_code == 429 || status_code >= 500,
+            format!("{label} error status={status_code}: {}", detail.into()),
+        );
+        error.status_code = Some(status_code);
+        error
+    }
+
+    fn with_timeout(mut self, timeout_seconds: u64) -> Self {
+        if self.error_code == "provider_timeout" {
+            self.timeout_seconds = Some(timeout_seconds);
+        }
+        self
+    }
+}
+
+impl From<String> for ProviderFailure {
+    fn from(detail: String) -> Self {
+        Self::new("provider_execution_failed", false, detail)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SkillFailure {
+    error_code: String,
+    message_key: String,
+    retryable: bool,
+    detail: String,
+    metadata: Value,
+}
+
+impl SkillFailure {
+    fn provider_attempts(attempts: &[(String, ProviderFailure)]) -> Self {
+        let retryable = attempts.iter().any(|(_, failure)| failure.retryable);
+        let error_code = if attempts
+            .iter()
+            .any(|(_, failure)| failure.error_code == "provider_timeout")
+        {
+            "provider_timeout"
+        } else {
+            "provider_unavailable"
+        };
+        let provider_failures = attempts
+            .iter()
+            .map(|(provider, failure)| {
+                json!({
+                    "provider": provider,
+                    "error_code": failure.error_code,
+                    "retryable": failure.retryable,
+                    "status_code": failure.status_code,
+                    "timeout_seconds": failure.timeout_seconds,
+                })
+            })
+            .collect::<Vec<_>>();
+        let detail = attempts
+            .iter()
+            .map(|(provider, failure)| format!("{provider}: {}", truncate(&failure.detail, 240)))
+            .collect::<Vec<_>>()
+            .join("; ");
+        Self {
+            error_code: error_code.to_string(),
+            message_key: format!("skill.{SKILL_NAME}.{error_code}"),
+            retryable,
+            detail: if detail.is_empty() {
+                "image providers were unavailable".to_string()
+            } else {
+                detail
+            },
+            metadata: json!({
+                "failure_phase": "provider_request",
+                "provider_failures": provider_failures,
+            }),
+        }
+    }
+}
+
+impl From<String> for SkillFailure {
+    fn from(detail: String) -> Self {
+        Self {
+            error_code: "execution_failed".to_string(),
+            message_key: format!("skill.{SKILL_NAME}.execution_failed"),
+            retryable: false,
+            detail,
+            metadata: json!({"failure_phase": "skill_execution"}),
+        }
+    }
+}
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -259,17 +397,26 @@ fn main() -> anyhow::Result<()> {
                     request_id: req.request_id,
                     status: "error".to_string(),
                     text: String::new(),
-                    extra: Some(error_extra("execution_failed")),
-                    error_text: Some(err),
+                    extra: Some(error_extra(&err)),
+                    error_text: Some(err.detail),
                 },
             },
-            Err(err) => Resp {
-                request_id: "unknown".to_string(),
-                status: "error".to_string(),
-                text: String::new(),
-                extra: Some(error_extra("invalid_input")),
-                error_text: Some(format!("invalid input: {err}")),
-            },
+            Err(err) => {
+                let failure = SkillFailure {
+                    error_code: "invalid_input".to_string(),
+                    message_key: format!("skill.{SKILL_NAME}.invalid_input"),
+                    retryable: false,
+                    detail: format!("invalid input: {err}"),
+                    metadata: json!({"failure_phase": "input_decode"}),
+                };
+                Resp {
+                    request_id: "unknown".to_string(),
+                    status: "error".to_string(),
+                    text: String::new(),
+                    extra: Some(error_extra(&failure)),
+                    error_text: Some(failure.detail),
+                }
+            }
         };
         writeln!(stdout, "{}", serde_json::to_string(&resp)?)?;
         stdout.flush()?;
@@ -277,15 +424,19 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn error_extra(error_kind: &str) -> Value {
-    json!({
+fn error_extra(failure: &SkillFailure) -> Value {
+    let mut extra = json!({
         "schema_version": 1,
         "source_skill": SKILL_NAME,
         "status": "error",
-        "error_code": error_kind,
-        "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
-        "retryable": false,
-    })
+        "error_code": failure.error_code,
+        "message_key": failure.message_key,
+        "retryable": failure.retryable,
+    });
+    if let (Some(target), Some(metadata)) = (extra.as_object_mut(), failure.metadata.as_object()) {
+        target.extend(metadata.clone());
+    }
+    extra
 }
 
 fn execute(
@@ -293,7 +444,7 @@ fn execute(
     workspace_root: &Path,
     args: Value,
     runner_context: Option<&Value>,
-) -> Result<(String, Value), String> {
+) -> Result<(String, Value), SkillFailure> {
     let obj = args
         .as_object()
         .ok_or_else(|| "args must be object".to_string())?;
@@ -333,9 +484,10 @@ fn execute(
     let requested_model = obj.get("model").and_then(|v| v.as_str());
     let vendors = vendor_order(requested_vendor, cfg.image_vision.default_vendor.as_deref());
     if vendors.is_empty() {
-        return Err("no vendor configured".to_string());
+        return Err("no vendor configured".to_string().into());
     }
 
+    let provider_deadline = image_provider_deadline(timeout_seconds);
     let mut attempt_errors = Vec::new();
     for vendor in vendors {
         let prompt = build_prompt(
@@ -354,6 +506,7 @@ fn execute(
             cfg,
             config_default_model,
             timeout_seconds,
+            provider_deadline,
             &prompt,
             action.as_str(),
             &images,
@@ -388,9 +541,13 @@ fn execute(
                 if action == "extract_text"
                     && !image_text_output_has_visible_text(structured.as_ref(), &text)
                 {
-                    attempt_errors.push(format!(
-                        "{}: multimodal model returned no visible text",
-                        vendor_name(vendor)
+                    attempt_errors.push((
+                        vendor_name(vendor).to_string(),
+                        ProviderFailure::new(
+                            "provider_response_missing_text",
+                            true,
+                            "multimodal model returned no visible text",
+                        ),
                     ));
                     continue;
                 }
@@ -456,15 +613,40 @@ fn execute(
                 return Ok((text, extra));
             }
             Err(err) => {
-                attempt_errors.push(format!("{}: {}", vendor_name(vendor), truncate(&err, 300)));
+                attempt_errors.push((vendor_name(vendor).to_string(), err));
             }
         }
     }
 
-    Err(format!(
-        "all providers failed: {}",
-        attempt_errors.join("; ")
-    ))
+    Err(SkillFailure::provider_attempts(&attempt_errors))
+}
+
+fn image_provider_deadline(request_timeout_seconds: u64) -> Instant {
+    let runner_timeout_seconds = std::env::var("SKILL_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or_else(|| request_timeout_seconds.saturating_add(30));
+    let provider_budget_seconds = runner_timeout_seconds
+        .saturating_sub(RUNNER_RESPONSE_RESERVE_SECONDS)
+        .max(1);
+    Instant::now() + Duration::from_secs(provider_budget_seconds)
+}
+
+fn remaining_provider_timeout_seconds(
+    deadline: Instant,
+    requested_timeout_seconds: u64,
+) -> Result<u64, ProviderFailure> {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        return Err(ProviderFailure::new(
+            "provider_timeout",
+            true,
+            "image provider execution budget exhausted",
+        )
+        .with_timeout(requested_timeout_seconds));
+    }
+    Ok(requested_timeout_seconds.min(remaining.as_secs().max(1)))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -473,11 +655,12 @@ fn call_vendor_vision_for_action(
     cfg: &RootConfig,
     requested_model: Option<&str>,
     timeout_seconds: u64,
+    provider_deadline: Instant,
     prompt: &str,
     action: &str,
     images: &[ImageSource],
     max_input_bytes: usize,
-) -> Result<(String, String, &'static str, u8), String> {
+) -> Result<(String, String, &'static str, u8), ProviderFailure> {
     let request_options = VisionRequestOptions::for_action(action);
     let request = VisionRequest {
         prompt,
@@ -485,8 +668,9 @@ fn call_vendor_vision_for_action(
         max_input_bytes,
         options: request_options,
     };
+    let first_timeout = remaining_provider_timeout_seconds(provider_deadline, timeout_seconds)?;
     let (text, model, model_kind) =
-        call_vendor_vision(vendor, cfg, requested_model, timeout_seconds, request)?;
+        call_vendor_vision(vendor, cfg, requested_model, first_timeout, request)?;
     if structured_output_is_complete(action, &text, images.len()) {
         return Ok((text, model, model_kind, 1));
     }
@@ -496,11 +680,16 @@ fn call_vendor_vision_for_action(
         prompt: &retry_prompt,
         ..request
     };
+    let retry_timeout = remaining_provider_timeout_seconds(provider_deadline, timeout_seconds)?;
     let (text, model, model_kind) =
-        call_vendor_vision(vendor, cfg, requested_model, timeout_seconds, retry_request)?;
+        call_vendor_vision(vendor, cfg, requested_model, retry_timeout, retry_request)?;
     if !structured_output_is_complete(action, &text, images.len()) {
-        return Err(format!(
-            "image {action} output failed schema or image-count validation after 2 attempts"
+        return Err(ProviderFailure::new(
+            "provider_response_invalid",
+            true,
+            format!(
+                "image {action} output failed schema or image-count validation after 2 attempts"
+            ),
         ));
     }
     Ok((text, model, model_kind, 2))

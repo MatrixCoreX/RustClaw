@@ -73,7 +73,7 @@ fn verified_action_budget_uses_registry_timeout_and_execution_mode() {
                 args: json!({"action": "describe", "image": "fixture.jpg"}),
             },
         ),
-        (90, true)
+        (120, true)
     );
     assert_eq!(
         verified_action_budget_requirements(

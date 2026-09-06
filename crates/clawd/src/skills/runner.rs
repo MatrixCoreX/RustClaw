@@ -113,6 +113,22 @@ fn runner_host_pre_dispatch_error(
     )
 }
 
+fn runner_runtime_timeout_error(skill_name: &str, timeout_seconds: u64, retryable: bool) -> String {
+    super::structured_skill_error_from_parts(
+        skill_name,
+        "timeout",
+        "timeout",
+        Some(std::env::consts::OS),
+        Some(json!({
+            "message_key": "clawd.skill.runtime_timeout",
+            "retryable": retryable,
+            "failure_phase": "runtime_wait",
+            "completion_state": "unknown",
+            "timeout_seconds": timeout_seconds,
+        })),
+    )
+}
+
 #[derive(Debug, Clone)]
 struct DurableRunnerJobPlan {
     job_id: String,
@@ -1550,7 +1566,11 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
             Err(_) => {
                 let _ = terminate_subprocess_group(runner_process.id()).await;
                 runner_process.kill_and_wait().await;
-                return Err("skill-runner timeout".to_string());
+                return Err(runner_runtime_timeout_error(
+                    canonical_skill_name,
+                    skill_timeout_secs,
+                    state.skill_is_retryable(canonical_skill_name),
+                ));
             }
         };
         let progress_record = serde_json::from_str::<Value>(&record)
