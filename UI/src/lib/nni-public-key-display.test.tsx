@@ -69,6 +69,10 @@ test("compact copy button copies the complete displayed public key", async () =>
     });
     assert.equal(copied, displayedPublicKey);
     assert.equal(renderer!.root.findByType("button").props.title, "已复制完整公钥");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1700));
+    });
+    assert.equal(renderer!.root.findByType("button").props.title, "复制完整公钥");
   } finally {
     await act(async () => renderer?.unmount());
     if (originalNavigator) {

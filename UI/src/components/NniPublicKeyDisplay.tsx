@@ -1,5 +1,5 @@
 import { ArrowLeftRight, Check, Copy, TriangleAlert } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { writeTextToClipboard } from "../lib/clipboard";
 import { nniPublicKeyFormats, shortenHex } from "../lib/nni-display";
@@ -7,6 +7,7 @@ import { nniPublicKeyFormats, shortenHex } from "../lib/nni-display";
 type Translate = (zh: string, en: string) => string;
 type PublicKeyFormat = "compact" | "raw";
 type CopyState = "idle" | "copied" | "error";
+const COPY_FEEDBACK_DURATION_MS = 1600;
 
 export interface NniPublicKeyDisplayProps {
   value?: string | null;
@@ -34,10 +35,21 @@ export function NniPublicKeyDisplay({
   const formats = useMemo(() => nniPublicKeyFormats(value), [value]);
   const [format, setFormat] = useState<PublicKeyFormat>("compact");
   const [copyState, setCopyState] = useState<CopyState>("idle");
+  const copyFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    if (copyFeedbackTimer.current !== null) {
+      clearTimeout(copyFeedbackTimer.current);
+      copyFeedbackTimer.current = null;
+    }
     setFormat("compact");
     setCopyState("idle");
+    return () => {
+      if (copyFeedbackTimer.current !== null) {
+        clearTimeout(copyFeedbackTimer.current);
+        copyFeedbackTimer.current = null;
+      }
+    };
   }, [value]);
 
   const displayedValue = formats?.[format] ?? value?.trim() ?? "--";
@@ -62,6 +74,15 @@ export function NniPublicKeyDisplay({
       : t("复制完整公钥", "Copy full public key");
   const CopyIcon = copyState === "copied" ? Check : copyState === "error" ? TriangleAlert : Copy;
 
+  const showTemporaryCopyState = (state: Exclude<CopyState, "idle">) => {
+    setCopyState(state);
+    if (copyFeedbackTimer.current !== null) clearTimeout(copyFeedbackTimer.current);
+    copyFeedbackTimer.current = setTimeout(() => {
+      setCopyState("idle");
+      copyFeedbackTimer.current = null;
+    }, COPY_FEEDBACK_DURATION_MS);
+  };
+
   const copyPublicKey = async () => {
     if (onCopy) {
       onCopy(displayedValue);
@@ -69,9 +90,9 @@ export function NniPublicKeyDisplay({
     }
     try {
       await writeTextToClipboard(displayedValue);
-      setCopyState("copied");
+      showTemporaryCopyState("copied");
     } catch {
-      setCopyState("error");
+      showTemporaryCopyState("error");
     }
   };
 
