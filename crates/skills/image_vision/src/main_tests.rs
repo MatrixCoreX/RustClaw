@@ -2,7 +2,8 @@ use super::*;
 
 #[test]
 fn error_extra_exposes_machine_contract() {
-    let extra = error_extra("execution_failed");
+    let failure = SkillFailure::from("fixture failure".to_string());
+    let extra = error_extra(&failure);
 
     assert_eq!(extra["schema_version"], 1);
     assert_eq!(extra["source_skill"], SKILL_NAME);
@@ -10,6 +11,30 @@ fn error_extra_exposes_machine_contract() {
     assert_eq!(extra["error_code"], "execution_failed");
     assert_eq!(extra["message_key"], "skill.image_vision.execution_failed");
     assert_eq!(extra["retryable"], false);
+    assert_eq!(extra["failure_phase"], "skill_execution");
+}
+
+#[test]
+fn provider_timeout_is_structured_for_model_owned_failure_reply() {
+    let failure = SkillFailure::provider_attempts(&[(
+        "minimax".to_string(),
+        ProviderFailure::new("provider_timeout", true, "request timed out").with_timeout(90),
+    )]);
+    let extra = error_extra(&failure);
+
+    assert_eq!(extra["error_code"], "provider_timeout");
+    assert_eq!(extra["message_key"], "skill.image_vision.provider_timeout");
+    assert_eq!(extra["retryable"], true);
+    assert_eq!(extra["failure_phase"], "provider_request");
+    assert_eq!(extra["provider_failures"][0]["provider"], "minimax");
+    assert_eq!(extra["provider_failures"][0]["timeout_seconds"], 90);
+}
+
+#[test]
+fn provider_timeout_never_exceeds_remaining_runner_budget() {
+    assert_eq!(effective_provider_timeout_seconds(20, Some(90)), 20);
+    assert_eq!(effective_provider_timeout_seconds(120, Some(90)), 90);
+    assert_eq!(effective_provider_timeout_seconds(20, None), 20);
 }
 
 #[test]
@@ -368,6 +393,43 @@ fn minimax_compat_dispatches_multimodal_request() {
 }
 
 #[test]
+fn provider_request_timeout_returns_typed_failure_before_runner_deadline() {
+    use std::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind slow vision server");
+    let address = listener.local_addr().expect("slow server address");
+    let server = std::thread::spawn(move || {
+        let (_stream, _) = listener.accept().expect("accept slow vision request");
+        std::thread::sleep(Duration::from_millis(1_200));
+    });
+
+    let mut cfg = RootConfig::default();
+    cfg.image_vision.adapter_mode = Some("compat".to_string());
+    cfg.image_vision.providers.minimax = Some(vendor_cfg(
+        &format!("http://{address}"),
+        "test-minimax-key",
+        "MiniMax-M3",
+    ));
+    let images = vec![ImageSource::Base64(
+        "data:image/png;base64,YWJj".to_string(),
+    )];
+    let request = VisionRequest {
+        prompt: "describe",
+        images: &images,
+        max_input_bytes: 1024,
+        options: VisionRequestOptions::for_action("describe"),
+    };
+
+    let failure = call_vendor_vision(VendorKind::MiniMax, &cfg, None, 1, request)
+        .expect_err("slow provider should time out");
+    server.join().expect("slow vision server");
+
+    assert_eq!(failure.error_code, "provider_timeout");
+    assert!(failure.retryable);
+    assert_eq!(failure.timeout_seconds, Some(1));
+}
+
+#[test]
 fn extract_text_retries_once_when_provider_omits_an_input_page() {
     use std::io::{Read as _, Write as _};
     use std::net::{TcpListener, TcpStream};
@@ -444,6 +506,7 @@ fn extract_text_retries_once_when_provider_omits_an_input_page() {
         &cfg,
         Some("MiniMax-M3"),
         5,
+        Instant::now() + Duration::from_secs(15),
         "base prompt",
         "extract_text",
         &images,

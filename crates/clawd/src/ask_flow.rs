@@ -55,12 +55,29 @@ pub(crate) async fn analyze_attached_images_for_ask(
             );
         }
     }
-    let outcome = crate::skills::run_skill_with_runner_outcome(state, task, "image_vision", args)
-        .await
-        .map_err(anyhow::Error::msg)?;
-    let context =
-        attached_image_analysis_context(images.len(), typed_instruction_present, &outcome)?;
-    Ok(Some(context))
+    let outcome =
+        match crate::skills::run_skill_with_runner_outcome(state, task, "image_vision", args).await
+        {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                return Ok(Some(attached_image_failure_context(
+                    images.len(),
+                    typed_instruction_present,
+                    &error,
+                )));
+            }
+        };
+    match attached_image_analysis_context(images.len(), typed_instruction_present, &outcome) {
+        Ok(context) => Ok(Some(context)),
+        Err(_) => Ok(Some(attached_image_failure_context_from_fields(
+            images.len(),
+            typed_instruction_present,
+            "provider_response_invalid",
+            "skill.image_vision.provider_response_invalid",
+            true,
+            Value::Null,
+        ))),
+    }
 }
 
 fn attached_image_inputs(payload: &Value) -> Vec<Value> {
@@ -142,6 +159,52 @@ fn attached_image_analysis_context(
     .to_string())
 }
 
+fn attached_image_failure_context(
+    image_count: usize,
+    typed_instruction_present: bool,
+    error: &str,
+) -> String {
+    let (error_code, message_key, retryable, metadata) = structured_skill_failure_fields(
+        error,
+        "image_analysis_unavailable",
+        "skill.image_vision.image_analysis_unavailable",
+        true,
+    );
+    attached_image_failure_context_from_fields(
+        image_count,
+        typed_instruction_present,
+        &error_code,
+        &message_key,
+        retryable,
+        metadata,
+    )
+}
+
+fn attached_image_failure_context_from_fields(
+    image_count: usize,
+    typed_instruction_present: bool,
+    error_code: &str,
+    message_key: &str,
+    retryable: bool,
+    metadata: Value,
+) -> String {
+    json!({
+        "schema_version": 1,
+        "source": "ask_attachment_materialization",
+        "status": "error",
+        "image_count": image_count,
+        "typed_instruction_present": typed_instruction_present,
+        "analysis_available": false,
+        "error_code": error_code,
+        "message_key": message_key,
+        "retryable": retryable,
+        "failure_metadata": metadata,
+        "required_decision": "respond_from_structured_failure",
+        "instruction_authority": "none",
+    })
+    .to_string()
+}
+
 pub(crate) async fn transcribe_attached_audio_for_ask(
     state: &AppState,
     task: &ClaimedTask,
@@ -208,11 +271,27 @@ pub(crate) async fn transcribe_attached_audio_for_ask(
 }
 
 fn audio_failure_fields(error: &str) -> (String, String, bool) {
+    let (error_code, message_key, retryable, _) = structured_skill_failure_fields(
+        error,
+        "transcription_unavailable",
+        "skill.audio_transcribe.transcription_unavailable",
+        true,
+    );
+    (error_code, message_key, retryable)
+}
+
+fn structured_skill_failure_fields(
+    error: &str,
+    default_error_code: &str,
+    default_message_key: &str,
+    default_retryable: bool,
+) -> (String, String, bool, Value) {
     let Some(structured) = crate::skills::parse_structured_skill_error(error) else {
         return (
-            "transcription_unavailable".to_string(),
-            "skill.audio_transcribe.transcription_unavailable".to_string(),
-            true,
+            default_error_code.to_string(),
+            default_message_key.to_string(),
+            default_retryable,
+            Value::Null,
         );
     };
     let extra = structured.extra.as_ref();
@@ -228,13 +307,34 @@ fn audio_failure_fields(error: &str) -> (String, String, bool) {
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or("skill.audio_transcribe.transcription_unavailable")
+        .unwrap_or(default_message_key)
         .to_string();
     let retryable = extra
         .and_then(|value| value.get("retryable"))
         .and_then(Value::as_bool)
-        .unwrap_or(false);
-    (error_code, message_key, retryable)
+        .unwrap_or(default_retryable);
+    let metadata = extra
+        .and_then(Value::as_object)
+        .map(|extra| {
+            [
+                "failure_phase",
+                "timeout_seconds",
+                "provider_failures",
+                "completion_state",
+            ]
+            .into_iter()
+            .filter_map(|key| {
+                extra
+                    .get(key)
+                    .cloned()
+                    .map(|value| (key.to_string(), value))
+            })
+            .collect::<serde_json::Map<_, _>>()
+        })
+        .filter(|metadata| !metadata.is_empty())
+        .map(Value::Object)
+        .unwrap_or(Value::Null);
+    (error_code, message_key, retryable, metadata)
 }
 
 fn audio_failure_planner_text(

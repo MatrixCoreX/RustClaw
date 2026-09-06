@@ -1,6 +1,21 @@
 use super::*;
 
 #[test]
+fn runtime_timeout_is_machine_readable_for_model_recovery() {
+    let encoded = runner_runtime_timeout_error("image_vision", 120, true);
+    let parsed =
+        crate::skills::parse_structured_skill_error(&encoded).expect("structured runtime timeout");
+    let extra = parsed.extra.expect("canonical timeout extra");
+
+    assert_eq!(parsed.error_code, "timeout");
+    assert_eq!(extra["message_key"], "clawd.skill.runtime_timeout");
+    assert_eq!(extra["retryable"], true);
+    assert_eq!(extra["failure_phase"], "runtime_wait");
+    assert_eq!(extra["completion_state"], "unknown");
+    assert_eq!(extra["timeout_seconds"], 120);
+}
+
+#[test]
 fn internal_nni_access_is_capability_driven() {
     let nni_mapping: PlannerCapabilityMapping = toml::from_str(
         r#"

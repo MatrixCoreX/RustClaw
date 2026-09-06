@@ -16,6 +16,7 @@
 - MiniMax M3 image understanding uses its configured OpenAI-compatible chat endpoint with structured image content parts. The skill sends local image bytes as a typed data URL, never as an untyped text marker.
 - It supports Mimo image understanding through OpenAI-compatible chat completions (`mimo-v2.5` / `mimo-v2-omni`); this is image understanding, not image generation.
 - **Output language and review are owned by this skill end-to-end.** The host (`clawd`) does **not** add an image-specific rewrite or delivery branch.
+- Provider calls run inside a budget smaller than the pinned runner lifetime, including one shared budget for any structured-output retry. This leaves time for the skill to return a canonical machine-readable failure instead of being killed at the same deadline as its provider request.
 
 ## Config Entry Points (from interface)
 - Independent image-understanding provider/model: `configs/image.toml` -> `[image_vision].default_vendor` / `default_model`. This selection is independent from the main `[llm]` provider/model.
@@ -74,6 +75,8 @@
 - Missing runtime artifact directory or an invalid `output_name` for `extract_text`.
 - No configured image-understanding provider returned visible text. This is an execution failure and permits planner fallback to `media_download.ocr`; no empty text artifact is created.
 - A structured provider response omitted, merged, or duplicated one or more input-image page entries after the single retry.
+- Provider failures use canonical `extra.{schema_version,source_skill,status,error_code,message_key,retryable}` fields. Timeout, connection, HTTP-status, and invalid-response failures also expose only allowlisted machine metadata such as `failure_phase`, `timeout_seconds`, `status_code`, and ordered `provider_failures`.
+- When attachment-only preprocessing fails, the host preserves those machine fields in the turn context and continues into the normal Agent loop. The model decides how to explain the failure or request a retry; the channel and runtime must not select a fixed user-facing failure sentence.
 
 ## Request/Response Examples (from interface)
 ### Example 1
