@@ -182,6 +182,68 @@ fn media_page_uses_stable_cursor_pagination() {
 }
 
 #[test]
+fn media_page_supports_oldest_first_collection_time_pagination() {
+    let root = fixture_root();
+    for sequence in 1..=3 {
+        write_record(
+            &root,
+            sequence,
+            json!({
+                "global_sequence": sequence,
+                "sequence": sequence,
+                "kind": "video",
+                "platform": "douyin",
+                "title": format!("item {sequence}"),
+                "discovered_at": format!("2026-09-07T00:00:0{sequence}Z"),
+            }),
+        );
+    }
+    let first = read_aipp_media_page(
+        &root,
+        &AippMediaQuery {
+            limit: Some(2),
+            sort_order: Some("oldest".to_string()),
+            ..AippMediaQuery::default()
+        },
+    )
+    .expect("oldest first page");
+    assert_eq!(first["sort_order"], "oldest");
+    assert_eq!(first["items"][0]["global_sequence"], 1);
+    assert_eq!(first["items"][1]["global_sequence"], 2);
+    assert_eq!(first["next_cursor_sequence"], 2);
+
+    let second = read_aipp_media_page(
+        &root,
+        &AippMediaQuery {
+            limit: Some(2),
+            cursor_sequence: Some(2),
+            sort_order: Some("oldest".to_string()),
+            ..AippMediaQuery::default()
+        },
+    )
+    .expect("oldest second page");
+    assert_eq!(second["items"].as_array().map(Vec::len), Some(1));
+    assert_eq!(second["items"][0]["global_sequence"], 3);
+    assert_eq!(second["next_cursor_sequence"], Value::Null);
+    fs::remove_dir_all(root).expect("remove fixture");
+}
+
+#[test]
+fn media_page_rejects_unknown_sort_order() {
+    let root = fixture_root();
+    let error = read_aipp_media_page(
+        &root,
+        &AippMediaQuery {
+            sort_order: Some("random".to_string()),
+            ..AippMediaQuery::default()
+        },
+    )
+    .expect_err("unknown sort order must fail");
+    assert_eq!(error, "aipp_media_sort_order_invalid");
+    fs::remove_dir_all(root).expect("remove fixture");
+}
+
+#[test]
 fn preview_resolution_stays_inside_skill_exports() {
     let root = fixture_root();
     fs::write(root.join("exports/video_covers/safe.png"), b"png").expect("preview");

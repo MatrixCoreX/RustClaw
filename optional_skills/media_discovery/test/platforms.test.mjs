@@ -8,7 +8,12 @@ import {
   sourceUrls,
   validatePlatformUrl,
 } from "../src/platforms.mjs";
-import { detailNavigationError, renderedCardMediaKind } from "../src/browser.mjs";
+import {
+  detailNavigationError,
+  platformAccessError,
+  renderedCardMediaKind,
+  xiaohongshuFeedCardMediaKind,
+} from "../src/browser.mjs";
 
 test("platform URLs are validated structurally", () => {
   assert.equal(
@@ -73,6 +78,11 @@ test("rendered card classification distinguishes a video poster from an image ca
   assert.equal(renderedCardMediaKind({ visibleVideoCount: 0, visibleImageCount: 1, hasImageCarousel: true }), "image");
 });
 
+test("Xiaohongshu feed cards use the structural play control as their media kind", () => {
+  assert.equal(xiaohongshuFeedCardMediaKind(true), "video");
+  assert.equal(xiaohongshuFeedCardMediaKind(false), "image");
+});
+
 test("detail navigation rejects login redirects without inspecting page language", () => {
   const note = "https://www.xiaohongshu.com/explore/64a123456789012345678901";
   assert.equal(detailNavigationError("xiaohongshu", note, note, false), null);
@@ -88,4 +98,27 @@ test("detail navigation rejects login redirects without inspecting page language
     detailNavigationError("douyin", "https://www.douyin.com/video/123", "https://www.douyin.com/", false),
     "challenge_required",
   );
+});
+
+test("platform access checks classify machine challenge surfaces without page-language matching", () => {
+  assert.equal(
+    platformAccessError(
+      "xiaohongshu",
+      "https://www.xiaohongshu.com/website-login/error?error_code=300012",
+    ),
+    "challenge_required",
+  );
+  assert.equal(
+    platformAccessError("douyin", "https://www.douyin.com/", [
+      "https://rmc.bytedance.com/verifycenter/captcha/v2?scene_level=p2",
+    ]),
+    "challenge_required",
+  );
+  assert.equal(
+    platformAccessError("douyin", "https://www.douyin.com/jingxuan", [
+      "https://lf-zt.douyin.com/obj/static/player.html",
+    ]),
+    null,
+  );
+  assert.equal(platformAccessError("kuaishou", "https://www.kuaishou.com/brilliant"), null);
 });

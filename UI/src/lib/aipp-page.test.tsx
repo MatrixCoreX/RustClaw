@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -26,6 +27,17 @@ test("restores the selected AiAPP after a browser refresh", () => {
   };
   assert.equal(readSelectedAipp(storage), "media_discovery");
   assert.equal(readSelectedAipp(undefined), "");
+});
+
+test("keeps media collection automatically refreshed and sortable by collection time", () => {
+  const source = readFileSync(new URL("../components/AippPage.tsx", import.meta.url), "utf8");
+  assert.match(source, /const AIPP_AUTO_REFRESH_INTERVAL_MS = 10_000/);
+  assert.match(source, /document\.visibilityState !== "visible"/);
+  assert.match(source, /fetchPage\(true\)/);
+  assert.match(source, /params\.set\("cursor_sequence", String\(cursor\)\)/);
+  assert.match(source, /sort_order: sortOrder/);
+  assert.match(source, /采集时间：最新优先/);
+  assert.match(source, /采集时间：最早优先/);
 });
 
 test("renders an installed AiPP as an application launcher card", () => {

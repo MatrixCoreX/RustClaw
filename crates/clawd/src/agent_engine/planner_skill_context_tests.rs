@@ -263,6 +263,23 @@ fn first_round_media_capability_describes_app_and_web_share_default_download() {
             "media discovery must not claim single-share delivery tag `{forbidden}`"
         );
     }
+    for capability_name in [
+        "media_discovery.run_once",
+        "media_discovery.run_enabled_once",
+    ] {
+        let capability = discovery
+            .planner_capabilities
+            .iter()
+            .find(|capability| capability.name == capability_name)
+            .unwrap_or_else(|| panic!("missing {capability_name}"));
+        assert_eq!(capability.network_access, Some(true), "{capability_name}");
+        assert_eq!(capability.subprocess, Some(true), "{capability_name}");
+        assert_eq!(
+            capability.credential_access,
+            Some(false),
+            "the skill-owned browser profile is not host credential-broker access"
+        );
+    }
 
     let initial = crate::capability_map::planner_disclosed_native_capability_groups_for_task(
         &state,

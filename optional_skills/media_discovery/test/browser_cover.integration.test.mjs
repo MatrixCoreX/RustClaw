@@ -72,6 +72,19 @@ test("platform poster controls provide the cover when no video frame is availabl
   assert.equal(cover?.source, "rendered_poster_image");
 });
 
+test("Douyin discovery cards expose their rendered poster as the video cover", {
+  skip: !RUN_BROWSER_TEST,
+}, async (t) => {
+  const page = await withPage(t, `
+    <article data-aweme-id="123456789" style="position:relative;width:340px;height:280px">
+      <img class="discover-video-card-img" alt="caption" style="width:340px;height:190px" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='340' height='190'%3E%3Crect width='340' height='190' fill='navy'/%3E%3C/svg%3E">
+      <span data-play-control style="position:absolute;inset:0 0 90px;z-index:2"></span>
+    </article>
+  `);
+  const cover = await renderedVideoCover(page.locator("article"), "douyin");
+  assert.equal(cover?.source, "rendered_poster_image");
+});
+
 test("Kuaishou feed cards expose their rendered poster as the video cover", {
   skip: !RUN_BROWSER_TEST,
 }, async (t) => {
@@ -81,5 +94,20 @@ test("Kuaishou feed cards expose their rendered poster as the video cover", {
     </article>
   `);
   const cover = await renderedVideoCover(page.locator("article"), "kuaishou");
+  assert.equal(cover?.source, "rendered_poster_image");
+});
+
+test("Xiaohongshu feed cards allow their structural play control over the poster", {
+  skip: !RUN_BROWSER_TEST,
+}, async (t) => {
+  const page = await withPage(t, `
+    <section class="note-item" data-note-id="abc123" style="position:relative;width:227px;height:375px">
+      <a class="cover" style="display:block;width:227px;height:303px">
+        <img alt="" style="width:227px;height:303px" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='227' height='303'%3E%3Crect width='227' height='303' fill='red'/%3E%3C/svg%3E">
+        <span class="play-icon" style="position:absolute;inset:0 0 72px;z-index:2"></span>
+      </a>
+    </section>
+  `);
+  const cover = await renderedVideoCover(page.locator("section"), "xiaohongshu");
   assert.equal(cover?.source, "rendered_poster_image");
 });

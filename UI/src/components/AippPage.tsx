@@ -34,6 +34,7 @@ type Translate = (zh: string, en: string) => string;
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
 
 const SELECTED_AIPP_STORAGE_KEY = appStorageKey("monitor.aipp.selectedSkill");
+const AIPP_AUTO_REFRESH_INTERVAL_MS = 10_000;
 
 export function readSelectedAipp(storage: Pick<Storage, "getItem"> | undefined): string {
   return storage?.getItem(SELECTED_AIPP_STORAGE_KEY)?.trim() || "";
@@ -288,9 +289,11 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
   const [platform, setPlatform] = useState("all");
   const [searchDraft, setSearchDraft] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
   const [cursor, setCursor] = useState<number | null>(null);
   const [cursorHistory, setCursorHistory] = useState<Array<number | null>>([]);
   const requestSequence = useRef(0);
+  const autoRefreshInFlight = useRef(false);
   const apiFetchRef = useRef(apiFetch);
   const translateRef = useRef(t);
   apiFetchRef.current = apiFetch;
@@ -318,16 +321,18 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
     }
   }, []);
 
-  const fetchPage = useCallback(async () => {
+  const fetchPage = useCallback(async (silent = false) => {
     if (!selectedSkill) {
       setPage(null);
       return;
     }
     const currentRequest = ++requestSequence.current;
-    setLoading(true);
-    setError(null);
-    const params = new URLSearchParams({ limit: "20" });
-    if (cursor != null) params.set("before_sequence", String(cursor));
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
+    const params = new URLSearchParams({ limit: "20", sort_order: sortOrder });
+    if (cursor != null) params.set("cursor_sequence", String(cursor));
     if (kind !== "all") params.set("kind", kind);
     if (platform !== "all") params.set("platform", platform);
     if (searchQuery) params.set("query", searchQuery);
@@ -341,13 +346,13 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
       }
       if (currentRequest === requestSequence.current) setPage(body.data);
     } catch (cause) {
-      if (currentRequest === requestSequence.current) {
+      if (!silent && currentRequest === requestSequence.current) {
         setError(formatUiError(cause, translateRef.current, "采集内容读取失败。", "Could not load collected content."));
       }
     } finally {
-      if (currentRequest === requestSequence.current) setLoading(false);
+      if (!silent && currentRequest === requestSequence.current) setLoading(false);
     }
-  }, [cursor, kind, platform, searchQuery, selectedSkill]);
+  }, [cursor, kind, platform, searchQuery, selectedSkill, sortOrder]);
 
   useEffect(() => {
     void fetchCatalog();
@@ -366,11 +371,33 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
   useEffect(() => {
     setCursor(null);
     setCursorHistory([]);
-  }, [selectedSkill, kind, platform, searchQuery]);
+  }, [selectedSkill, kind, platform, searchQuery, sortOrder]);
 
   useEffect(() => {
     void fetchPage();
   }, [fetchPage]);
+
+  useEffect(() => {
+    if (!selectedSkill) return;
+    const refreshVisiblePage = async () => {
+      if (document.visibilityState !== "visible" || autoRefreshInFlight.current) return;
+      autoRefreshInFlight.current = true;
+      try {
+        await fetchPage(true);
+      } finally {
+        autoRefreshInFlight.current = false;
+      }
+    };
+    const timer = window.setInterval(() => void refreshVisiblePage(), AIPP_AUTO_REFRESH_INTERVAL_MS);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") void refreshVisiblePage();
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [fetchPage, selectedSkill]);
 
   const selectedApp = catalog.find((app) => app.skill_name === selectedSkill) || null;
   const platforms = useMemo(
@@ -379,7 +406,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
   );
 
   const openNext = () => {
-    const next = page?.next_before_sequence;
+    const next = page?.next_cursor_sequence;
     if (next == null) return;
     setCursorHistory((current) => [...current, cursor]);
     setCursor(next);
@@ -495,7 +522,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
         </div>
       </section>
 
-      <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(240px,1fr)_auto_auto] lg:items-center">
+      <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(240px,1fr)_auto_auto_auto] lg:items-center">
         <label className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
           <input
@@ -519,6 +546,15 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
             {platforms.map((name) => <option key={name} value={name}>{name}</option>)}
           </select>
         ) : null}
+        <select
+          className="theme-input w-full min-w-0 py-2 text-sm lg:w-auto lg:min-w-44"
+          value={sortOrder}
+          onChange={(event) => setSortOrder(event.target.value as "newest" | "oldest")}
+          aria-label={t("按采集时间排序", "Sort by collection time")}
+        >
+          <option value="newest">{t("采集时间：最新优先", "Collected: newest first")}</option>
+          <option value="oldest">{t("采集时间：最早优先", "Collected: oldest first")}</option>
+        </select>
       </div>
 
       {error ? <div className="rounded-lg border border-red-400/20 bg-red-500/8 px-4 py-3 text-sm text-red-100">{error}</div> : null}
@@ -538,7 +574,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
       <div className="flex items-center justify-between gap-3">
         <button type="button" className="theme-secondary-btn px-3 py-2 text-sm" disabled={cursorHistory.length === 0 || loading} onClick={openPrevious}>{t("上一页", "Previous")}</button>
         {loading ? <LoaderCircle className="h-5 w-5 animate-spin text-white/45" /> : <span className="text-xs text-white/40">{page?.items.length || 0}</span>}
-        <button type="button" className="theme-secondary-btn px-3 py-2 text-sm" disabled={page?.next_before_sequence == null || loading} onClick={openNext}>{t("下一页", "Next")}</button>
+        <button type="button" className="theme-secondary-btn px-3 py-2 text-sm" disabled={page?.next_cursor_sequence == null || loading} onClick={openNext}>{t("下一页", "Next")}</button>
       </div>
     </section>
   );

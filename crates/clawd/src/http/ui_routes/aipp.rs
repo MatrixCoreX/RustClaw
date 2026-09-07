@@ -8,6 +8,8 @@ const AIPP_PREVIEW_MAX_BYTES: u64 = 16 * 1024 * 1024;
 struct AippMediaQuery {
     limit: Option<usize>,
     before_sequence: Option<u64>,
+    cursor_sequence: Option<u64>,
+    sort_order: Option<String>,
     kind: Option<String>,
     platform: Option<String>,
     query: Option<String>,
@@ -265,6 +267,14 @@ fn record_matches_aipp_query(record: &Value, query: &AippMediaQuery) -> bool {
         .any(|value| value.to_lowercase().contains(&needle))
 }
 
+fn aipp_media_sort_order(query: &AippMediaQuery) -> Result<&'static str, String> {
+    match query.sort_order.as_deref().unwrap_or("newest") {
+        "newest" => Ok("newest"),
+        "oldest" => Ok("oldest"),
+        _ => Err("aipp_media_sort_order_invalid".to_string()),
+    }
+}
+
 fn read_aipp_media_page(root: &Path, query: &AippMediaQuery) -> Result<Value, String> {
     let records_root = root.join("records");
     let mut names = match fs::read_dir(&records_root) {
@@ -279,7 +289,12 @@ fn read_aipp_media_page(root: &Path, query: &AippMediaQuery) -> Result<Value, St
     if names.len() > AIPP_MEDIA_RECORD_SCAN_LIMIT {
         return Err("aipp_media_record_limit_exceeded".to_string());
     }
-    names.sort_unstable_by(|left, right| right.cmp(left));
+    let sort_order = aipp_media_sort_order(query)?;
+    if sort_order == "oldest" {
+        names.sort_unstable();
+    } else {
+        names.sort_unstable_by(|left, right| right.cmp(left));
+    }
     let limit = query.limit.unwrap_or(24).clamp(1, AIPP_MEDIA_RECORD_LIMIT);
     let has_filter = query.kind.is_some()
         || query.platform.is_some()
@@ -289,16 +304,23 @@ fn read_aipp_media_page(root: &Path, query: &AippMediaQuery) -> Result<Value, St
             .is_some_and(|value| !value.trim().is_empty());
     let mut items = Vec::with_capacity(limit + 1);
     let mut matching_total = if has_filter { 0 } else { names.len() };
+    let cursor_sequence = query.cursor_sequence.or_else(|| {
+        (sort_order == "newest")
+            .then_some(query.before_sequence)
+            .flatten()
+    });
     for name in names {
         let file_sequence = name
             .strip_suffix(".json")
             .and_then(|value| value.parse::<u64>().ok())
             .unwrap_or_default();
-        if !has_filter
-            && query
-                .before_sequence
-                .is_some_and(|before| file_sequence >= before)
-        {
+        if !has_filter && cursor_sequence.is_some_and(|cursor| {
+            if sort_order == "oldest" {
+                file_sequence <= cursor
+            } else {
+                file_sequence >= cursor
+            }
+        }) {
             continue;
         }
         let record_path = records_root.join(&name);
@@ -329,10 +351,13 @@ fn read_aipp_media_page(root: &Path, query: &AippMediaQuery) -> Result<Value, St
         if has_filter {
             matching_total = matching_total.saturating_add(1);
         }
-        if query
-            .before_sequence
-            .is_some_and(|before| sequence >= before)
-        {
+        if cursor_sequence.is_some_and(|cursor| {
+            if sort_order == "oldest" {
+                sequence <= cursor
+            } else {
+                sequence >= cursor
+            }
+        }) {
             continue;
         }
         if items.len() <= limit {
@@ -348,9 +373,11 @@ fn read_aipp_media_page(root: &Path, query: &AippMediaQuery) -> Result<Value, St
     if has_more {
         items.truncate(limit);
     }
-    let next_before_sequence = has_more
+    let next_cursor_sequence = has_more
         .then(|| items.last()?.get("global_sequence")?.as_u64())
         .flatten();
+    let next_before_sequence =
+        (sort_order == "newest").then_some(next_cursor_sequence).flatten();
     let state_path = root.join("state.json");
     let state = fs::metadata(&state_path)
         .ok()
@@ -418,6 +445,8 @@ fn read_aipp_media_page(root: &Path, query: &AippMediaQuery) -> Result<Value, St
         "schema_version": 1,
         "items": items,
         "matching_total": matching_total,
+        "sort_order": sort_order,
+        "next_cursor_sequence": next_cursor_sequence,
         "next_before_sequence": next_before_sequence,
         "platform_states": platform_states,
         "active_run": active_run,

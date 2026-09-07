@@ -255,11 +255,51 @@ export function renderedCardMediaKind({ visibleVideoCount, visibleImageCount, ha
   return visibleImageCount > 1 || hasImageCarousel ? "image" : "video";
 }
 
+export function xiaohongshuFeedCardMediaKind(hasPlayControl) {
+  return hasPlayControl ? "video" : "image";
+}
+
 export function detailNavigationError(platform, requestedUrl, currentUrl, loginFormPresent) {
   if (!isDetailUrl(platform, requestedUrl) || isDetailUrl(platform, currentUrl)) return null;
   const current = new URL(currentUrl);
   if (platform === "xiaohongshu" && current.pathname === "/explore") return "login_required";
   return loginFormPresent ? "login_required" : "challenge_required";
+}
+
+export function platformAccessError(platform, currentUrl, captchaFrameUrls = []) {
+  let current;
+  try {
+    current = new URL(currentUrl);
+  } catch {
+    return "challenge_required";
+  }
+  if (
+    platform === "xiaohongshu"
+    && current.pathname === "/website-login/error"
+    && current.searchParams.has("error_code")
+  ) {
+    return "challenge_required";
+  }
+  if (
+    platform === "douyin"
+    && captchaFrameUrls.some((value) => {
+      try {
+        return new URL(value).pathname.includes("/verifycenter/captcha/");
+      } catch {
+        return false;
+      }
+    })
+  ) {
+    return "challenge_required";
+  }
+  return null;
+}
+
+async function currentPlatformAccessError(page, platform) {
+  const captchaFrameUrls = await page.locator("iframe[src]").evaluateAll((frames) =>
+    frames.map((frame) => frame.getAttribute("src") || ""),
+  );
+  return platformAccessError(platform, page.url(), captchaFrameUrls);
 }
 
 export async function discoverCandidates(page, platform, sourceUrl, maxScrolls, limit, shouldStop, config) {
@@ -504,6 +544,7 @@ const VIDEO_COVER_SELECTORS = Object.freeze({
     rendered_poster_image: Object.freeze([
       '[data-e2e="video-poster"] img:visible',
       '[data-e2e="video-cover"] img:visible',
+      '.discover-video-card-img:visible',
     ]),
   }),
   xiaohongshu: Object.freeze({
@@ -515,6 +556,7 @@ const VIDEO_COVER_SELECTORS = Object.freeze({
       '.video-player img:visible',
       '.note-slider img:visible',
       '.swiper img:visible',
+      'a.cover img:visible',
     ]),
   }),
   kuaishou: Object.freeze({
@@ -536,7 +578,11 @@ async function locatorIsUsableCover(locator, minimumWidth = 180) {
     const x = Math.min(window.innerWidth - 1, Math.max(0, rect.left + rect.width / 2));
     const y = Math.min(window.innerHeight - 1, Math.max(0, rect.top + rect.height / 2));
     const topNode = document.elementFromPoint(x, y);
-    return topNode === node || node.contains(topNode);
+    if (topNode === node || node.contains(topNode)) return true;
+    const card = node.closest("[data-aweme-id], [data-note-id]");
+    return card
+      && topNode instanceof Element
+      && topNode.closest("[data-aweme-id], [data-note-id]") === card;
   }, minimumWidth).catch(() => false);
 }
 
@@ -818,6 +864,144 @@ async function collectKuaishouFeedCard(
   };
 }
 
+async function collectXiaohongshuFeedCard(
+  root,
+  runId,
+  locator,
+  itemId,
+  config,
+  discoverySource,
+) {
+  const card = await locator.evaluate((node) => ({
+    title: node.querySelector(".title")?.textContent || "",
+    hasPlayControl: Boolean(
+      node.querySelector('.play-icon, use[href="#play-s"], use[xlink\\:href="#play-s"]'),
+    ),
+  }));
+  const canonicalItemId = `xiaohongshu:${itemId}`;
+  const pageUrl = `https://www.xiaohongshu.com/explore/${itemId}`;
+  const title = normalizedPlatformText(card.title);
+  const platformText = await capturePlatformCaption(locator, "xiaohongshu", title);
+  const discoveredAt = new Date().toISOString();
+  const engagement = await captureEngagementMetrics(locator, "xiaohongshu", discoveredAt);
+  if (xiaohongshuFeedCardMediaKind(card.hasPlayControl) === "image") {
+    return collectRenderedImages({
+      scope: locator,
+      root,
+      runId,
+      platform: "xiaohongshu",
+      itemId: canonicalItemId,
+      title,
+      platformText,
+      sourcePageUrl: pageUrl,
+      discoverySource,
+      config,
+      discoveredAt,
+      engagement,
+    });
+  }
+  const screenshotPath = path.join(
+    root,
+    "tmp",
+    runId,
+    `${canonicalItemId.replaceAll(":", "_")}-video.png`,
+  );
+  const cover = await renderedVideoCover(locator, "xiaohongshu");
+  if (!cover) throw new Error("media_element_not_found");
+  await screenshotLocator(cover.locator, screenshotPath);
+  const recognition = await recognizeScreenshot(
+    screenshotPath,
+    config.recognition_mode || "ocr_reviewed",
+  );
+  const coverScreenshotPath = await persistVideoCover(
+    root,
+    "xiaohongshu",
+    canonicalItemId,
+    screenshotPath,
+  );
+  return {
+    records: [{
+      kind: "video",
+      dedup_key: `${canonicalItemId}:video`,
+      platform: "xiaohongshu",
+      browser_mode: config.browser_mode || "silent",
+      source_mode: discoverySource.source_mode,
+      search_keyword: discoverySource.search_keyword || "",
+      discovery_source_url: discoverySource.url,
+      item_id: canonicalItemId,
+      title,
+      platform_text: platformText,
+      recognized_text: recognition.text,
+      raw_recognized_text: recognition.raw_text,
+      recognition,
+      cover_screenshot_path: coverScreenshotPath,
+      cover_capture_source: cover.source,
+      video_page_url: pageUrl,
+      discovered_at: discoveredAt,
+      engagement,
+    }],
+    temporaryPaths: [screenshotPath],
+  };
+}
+
+async function collectXiaohongshuHomeFeed(
+  page,
+  root,
+  runId,
+  config,
+  discoverySource,
+  limit,
+  shouldStop,
+  onPage,
+  onFailure,
+) {
+  const seen = new Set();
+  let handled = 0;
+  let lastError = null;
+  const maxScrolls = config.max_scrolls_per_source || 10;
+  await page.waitForSelector("section.note-item[data-note-id]", {
+    state: "attached",
+    timeout: NAVIGATION_TIMEOUT_MS,
+  }).catch(() => {});
+  for (let scroll = 0; scroll <= maxScrolls && handled < limit; scroll += 1) {
+    const cards = await page.locator("section.note-item[data-note-id]").evaluateAll((nodes) =>
+      nodes.map((node, index) => {
+        const rect = node.getBoundingClientRect();
+        return {
+          index,
+          itemId: node.getAttribute("data-note-id") || "",
+          visible: rect.width >= 140 && rect.height >= 120 && rect.bottom > 0 && rect.top < window.innerHeight,
+        };
+      }),
+    );
+    for (const card of cards) {
+      if (handled >= limit || (await shouldStop())) break;
+      if (!/^[A-Za-z0-9_-]+$/u.test(card.itemId) || !card.visible || seen.has(card.itemId)) continue;
+      seen.add(card.itemId);
+      try {
+        await pacingWait(page, config, 0.5);
+        const result = await collectXiaohongshuFeedCard(
+          root,
+          runId,
+          page.locator("section.note-item[data-note-id]").nth(card.index),
+          card.itemId,
+          config,
+          discoverySource,
+        );
+        await onPage(result);
+        handled += 1;
+      } catch (error) {
+        lastError = error;
+        await onFailure?.(error);
+      }
+    }
+    if (handled >= limit || scroll === maxScrolls || (await shouldStop())) break;
+    await pacedScroll(page, config);
+  }
+  if (handled === 0 && !(await shouldStop())) throw lastError || new Error("selector_drift");
+  return handled;
+}
+
 async function collectKuaishouHomeFeed(
   page,
   root,
@@ -910,6 +1094,8 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
       if (handled >= limit || (await shouldStop())) break;
       await page.goto(sourceUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT_MS });
       await pacingWait(page, config, 1.25);
+      const accessError = await currentPlatformAccessError(page, platform);
+      if (accessError) throw new Error(accessError);
       if (platform === "douyin" && (config.source_mode || "home_feed") === "home_feed") {
         handled += await collectDouyinHomeFeed(
           page,
@@ -926,6 +1112,20 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
       }
       if (platform === "kuaishou" && (config.source_mode || "home_feed") === "home_feed") {
         handled += await collectKuaishouHomeFeed(
+          page,
+          root,
+          runId,
+          config,
+          discoverySource,
+          limit - handled,
+          shouldStop,
+          onPage,
+          onFailure,
+        );
+        continue;
+      }
+      if (platform === "xiaohongshu" && (config.source_mode || "home_feed") === "home_feed") {
+        handled += await collectXiaohongshuHomeFeed(
           page,
           root,
           runId,
