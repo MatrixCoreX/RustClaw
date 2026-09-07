@@ -31,7 +31,7 @@ test("restores the selected AiAPP after a browser refresh", () => {
 test("renders an installed AiPP as an application launcher card", () => {
   const app: AippCatalogItem = {
     skill_name: "media_discovery",
-    package_version: "0.1.25",
+    package_version: "0.1.26",
     renderer: "collection_feed_v1",
     data_contract: "media_collection_v1",
     icon: "gallery_vertical_end",
@@ -86,6 +86,9 @@ test("renders a media collection record without exposing undeclared fields", () 
     />,
   );
   assert.match(markup, /Collected title/);
+  assert.match(markup, /帖子文案/);
+  assert.match(markup, /Platform copy/);
+  assert.match(markup, /图片文字/);
   assert.match(markup, /Recognized copy/);
   assert.match(markup, /xiaohongshu/);
   assert.match(markup, /1\.2万/);

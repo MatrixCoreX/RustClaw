@@ -94,7 +94,7 @@ test("browser collector follows the rendered carousel and captures every image i
     platform: "xiaohongshu",
     itemId: "xiaohongshu:fixture",
     title: "fixture",
-    platformText: "",
+    platformText: "Author-provided carousel caption",
     sourcePageUrl: "https://www.xiaohongshu.com/explore/fixture",
     discoverySource: {
       source_mode: "topics",
@@ -123,6 +123,10 @@ test("browser collector follows the rendered carousel and captures every image i
     true,
   );
   assert.equal(new Set(result.records.map((record) => record.image_url)).size, 3);
+  assert.equal(
+    result.records.every((record) => record.platform_text === "Author-provided carousel caption"),
+    true,
+  );
   assert.equal(result.records.every((record) => record.engagement.metrics.likes.value === 27), true);
   assert.equal(result.records.some((record) => record.collection_truncated), false);
   for (const screenshotPath of result.temporaryPaths) {

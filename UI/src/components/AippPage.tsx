@@ -194,8 +194,19 @@ export function AippMediaItemCard({
   lang: "zh" | "en";
 }) {
   const [expanded, setExpanded] = useState(false);
-  const bodyText = item.recognized_text || item.platform_text;
-  const canCollapse = bodyText.length > 360 || bodyText.split("\n").length > 6;
+  const captionText = item.platform_text.trim();
+  const recognizedText = item.recognized_text.trim();
+  const textSections = [
+    { key: "caption", label: t("帖子文案", "Post caption"), text: captionText },
+    {
+      key: "recognized",
+      label: item.kind === "video" ? t("画面文字", "Visual text") : t("图片文字", "Image text"),
+      text: recognizedText,
+    },
+  ].filter((section) => section.text);
+  const canCollapse = textSections.some(
+    (section) => section.text.length > 360 || section.text.split("\n").length > 6,
+  );
   const hasPreview = item.kind === "image" ? Boolean(item.image_url) : item.preview_available;
   const metricPresentation = [
     { key: "views" as const, icon: Eye, label: t("播放", "Views") },
@@ -233,10 +244,17 @@ export function AippMediaItemCard({
               ))}
             </div>
           ) : null}
-          {bodyText ? (
-            <p className={`mt-2 whitespace-pre-wrap break-words text-sm leading-5 [overflow-wrap:anywhere] ${item.recognized_text ? "text-white/72" : "text-white/65"} ${canCollapse && !expanded ? "line-clamp-2" : ""}`}>
-              {bodyText}
-            </p>
+          {textSections.length > 0 ? (
+            <div className="mt-2 space-y-2">
+              {textSections.map((section) => (
+                <section key={section.key} className="min-w-0">
+                  <p className="text-xs font-medium text-white/45">{section.label}</p>
+                  <p className={`mt-0.5 whitespace-pre-wrap break-words text-sm leading-5 text-white/72 [overflow-wrap:anywhere] ${canCollapse && !expanded ? "line-clamp-2" : ""}`}>
+                    {section.text}
+                  </p>
+                </section>
+              ))}
+            </div>
           ) : null}
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {canCollapse ? (
@@ -484,7 +502,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
             className="theme-input w-full py-2 pl-9 pr-3 text-sm"
             value={searchDraft}
             onChange={(event) => setSearchDraft(event.target.value)}
-            placeholder={t("搜索标题或识别文字", "Search titles or recognized text")}
+            placeholder={t("搜索标题、帖子文案或识别文字", "Search titles, post captions, or recognized text")}
             maxLength={200}
           />
         </label>

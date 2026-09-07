@@ -206,6 +206,12 @@ CSV files use UTF-8 BOM, RFC 4180 quoting, stable order, and spreadsheet formula
 injection protection. The private immutable record ledger remains the recovery
 source of truth; CSV files can always be rebuilt.
 
+`platform_text` is the author-provided post caption extracted from reviewed
+platform DOM markers. A video record and every image belonging to one carousel
+retain that caption independently of `recognized_text`, which contains only
+text recognized from the rendered media screenshot. AiAPP presents the two
+fields separately instead of choosing one and hiding the other.
+
 ## Browser and Recognition Rules
 
 - Browser mode defaults to silent. `visible` is accepted only as an explicit
