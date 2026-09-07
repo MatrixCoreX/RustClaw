@@ -16,7 +16,7 @@ Agent Runtime 面向在消息应用或浏览器中完成日常使用和管理的
 - 共享技能调度层，支持进程内 builtin、external adapter，以及通过 `skill-runner` 拉起的 runner 子进程
 - 覆盖系统、文件、网络、图片、语音、视频、音乐、NNI、加密货币、知识库、自动化等场景的 builtin、external 与 runner 技能
 - 本地浏览器控制台位于 `UI/`，包含首页、Agent、模型、任务、通信设置、账号绑定、
-  工具/技能、AiPP、Skill Store、记忆、日志和学习/维护等页面
+  工具/技能、AiAPP、Skill Store、记忆、日志和学习/维护等页面
 - 树莓派/小屏桌面程序位于 `pi_app/`
 - Linux 与 macOS 共享同一套运行时合同；进程隔离由机器配置的后端选择
   fail-closed 的 Bubblewrap 或 Seatbelt 实现

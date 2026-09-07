@@ -450,7 +450,7 @@ export function useConsoleProjections({
       },
       {
         id: "aipps" as const,
-        label: "AiPP",
+        label: "AiAPP",
         icon: <PanelsTopLeft className="h-4 w-4" />,
       },
       {
