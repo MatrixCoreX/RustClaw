@@ -568,7 +568,8 @@ export function DashboardPage({
             <div
               role="group"
               aria-label={t("NNI 导航显示设置", "NNI navigation visibility")}
-              className="grid grid-cols-2 gap-2 sm:inline-grid"
+              data-nni-navigation-controls-layout="stacked"
+              className="grid w-full grid-cols-1 gap-2 sm:w-56"
             >
               <button
                 type="button"

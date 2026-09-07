@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   areRequiredDashboardStepsComplete,
@@ -24,6 +25,17 @@ test("groups only the three requested NNI navigation entries", () => {
   assert.equal(isNniNavigationPage("assets"), true);
   assert.equal(isNniNavigationPage("nni_apr"), false);
   assert.equal(isNniNavigationPage("dashboard"), false);
+});
+
+test("stacks the NNI navigation visibility controls on two rows", () => {
+  const source = readFileSync(new URL("../components/DashboardPage.tsx", import.meta.url), "utf8");
+  const controls = source.match(
+    /data-nni-navigation-controls-layout="stacked"[\s\S]*?className="([^"]+)"/,
+  );
+
+  assert.ok(controls);
+  assert.match(controls[1], /\bgrid-cols-1\b/);
+  assert.doesNotMatch(controls[1], /\bgrid-cols-2\b/);
 });
 
 test("opens quick setup until required setup is complete", () => {
