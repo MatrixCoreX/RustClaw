@@ -4,6 +4,7 @@
 //! and `FILE:` tokens. This module makes the structured task artifact manifest the
 //! primary source, while retaining those tokens as the adapter boundary.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -109,6 +110,11 @@ pub fn merge_task_artifact_delivery_messages(
     {
         return messages;
     }
+    let mut seen_digests = HashSet::new();
+    let selected_manifests = selected_manifests
+        .into_iter()
+        .filter(|manifest| seen_digests.insert(manifest.sha256.to_ascii_lowercase()))
+        .collect::<Vec<_>>();
     let tokens = selected_manifests
         .iter()
         .filter_map(|manifest| {

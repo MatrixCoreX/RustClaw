@@ -4979,6 +4979,14 @@ def download_image_candidate(
         raise DouyinDownloadError(f"Network error while downloading image {candidate.url}: {exc.reason}") from exc
 
 
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def download_image_candidates(
     candidates: list[ImageCandidate],
     output_dir: Path,
@@ -4992,6 +5000,7 @@ def download_image_candidates(
     output_dir.mkdir(parents=True, exist_ok=True)
     base_name = Path(output_name).stem if output_name else timestamp_output_stem()
     saved_paths: list[Path] = []
+    seen_content_digests: set[str] = set()
     multiple = len(candidates) > 1
     for index, candidate in enumerate(candidates, start=1):
         suffix = image_suffix_from_url(candidate.url)
@@ -5000,15 +5009,23 @@ def download_image_candidates(
         if output_path.exists() and not overwrite:
             output_path = unique_output_path(output_path)
         try:
-            saved_paths.append(
-                download_image_candidate(
-                    candidate,
-                    output_path,
-                    cookie=cookie,
-                    timeout=timeout,
-                    referer=referer,
-                )
+            saved_path = download_image_candidate(
+                candidate,
+                output_path,
+                cookie=cookie,
+                timeout=timeout,
+                referer=referer,
             )
+            content_digest = file_sha256(saved_path)
+            if content_digest in seen_content_digests:
+                saved_path.unlink()
+                print(
+                    f"component_deduplicated: component=image index={index} sha256={content_digest}",
+                    file=sys.stderr,
+                )
+                continue
+            seen_content_digests.add(content_digest)
+            saved_paths.append(saved_path)
         except OperationCancelled:
             raise
         except (DouyinDownloadError, OSError) as exc:
@@ -6957,14 +6974,6 @@ def save_profile_manifest(
     )
 
 
-def profile_file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def safe_profile_relative_path(value: str) -> Path:
     relative = Path(value)
     if relative.is_absolute() or not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
@@ -6988,10 +6997,10 @@ def cache_profile_item_files(
         if not source.is_file():
             raise DouyinDownloadError(f"Completed profile artifact is missing: {source}")
         size = source.stat().st_size
-        digest = profile_file_sha256(source)
+        digest = file_sha256(source)
         blob_path = blob_dir / digest
         if blob_path.exists():
-            if blob_path.stat().st_size != size or profile_file_sha256(blob_path) != digest:
+            if blob_path.stat().st_size != size or file_sha256(blob_path) != digest:
                 raise DouyinDownloadError(f"Profile checkpoint blob is corrupt: {blob_path}")
         else:
             descriptor, temporary_name = tempfile.mkstemp(
@@ -7003,7 +7012,7 @@ def cache_profile_item_files(
             temporary_path = Path(temporary_name)
             try:
                 shutil.copy2(source, temporary_path)
-                if profile_file_sha256(temporary_path) != digest:
+                if file_sha256(temporary_path) != digest:
                     raise DouyinDownloadError(
                         f"Profile checkpoint blob verification failed: {source}"
                     )
@@ -7052,7 +7061,7 @@ def restore_profile_item_files(
         if (
             not blob_path.is_file()
             or blob_path.stat().st_size != size
-            or profile_file_sha256(blob_path) != digest
+            or file_sha256(blob_path) != digest
         ):
             raise DouyinDownloadError(f"Profile checkpoint artifact is unavailable: {blob_path}")
         verified.append((blob_path, profile_output_dir / relative, size, digest))
@@ -7062,7 +7071,7 @@ def restore_profile_item_files(
             if (
                 not destination.is_file()
                 or destination.stat().st_size != size
-                or profile_file_sha256(destination) != digest
+                or file_sha256(destination) != digest
             ):
                 raise DouyinDownloadError(
                     f"Profile resume destination conflicts with cached artifact: {destination}"

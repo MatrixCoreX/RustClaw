@@ -76,6 +76,44 @@ fn materializes_structured_capability_output_into_task_delivery_storage() {
 }
 
 #[test]
+fn materialization_deduplicates_files_with_identical_content() {
+    let workspace = TempWorkspace::new();
+    let first = workspace.path().join("downloads").join("first.webp");
+    let second = workspace.path().join("downloads").join("second.webp");
+    fs::create_dir_all(first.parent().unwrap()).unwrap();
+    fs::write(&first, b"identical-image").unwrap();
+    fs::write(&second, b"identical-image").unwrap();
+    let result = json!({
+        "text": "done",
+        "task_journal": {"trace": {"capability_results": [{
+            "status": "ok",
+            "data": {"extra": {
+                "delivery": {"deliver_to_user": true},
+                "artifacts": [
+                    {"path": first.display().to_string(), "mime_type": "image/webp"},
+                    {"path": second.display().to_string(), "mime_type": "image/webp"}
+                ]
+            }}
+        }]}}
+    });
+
+    let materialized = materialize_task_result_artifacts(
+        workspace.path(),
+        "task-duplicate-content",
+        &result.to_string(),
+    )
+    .unwrap();
+    let value: Value = serde_json::from_str(&materialized).unwrap();
+    let manifests = manifests_from_result(Some(&value));
+
+    assert_eq!(manifests.len(), 1);
+    assert_eq!(manifests[0].filename, "first.webp");
+    assert_eq!(value["artifact_delivery"]["candidate_count"], 2);
+    assert_eq!(value["artifact_delivery"]["delivered_count"], 1);
+    assert_eq!(value["artifact_delivery"]["truncated"], false);
+}
+
+#[test]
 fn materializes_trusted_async_completion_artifact_without_model_file_token() {
     let workspace = TempWorkspace::new();
     let output = workspace.path().join("downloads").join("clip.mp4");

@@ -61,6 +61,7 @@ pub(crate) fn materialize_task_result_artifacts(
     let mut manifests = Vec::new();
     let mut seen_paths = HashSet::new();
     let mut seen_ids = HashSet::new();
+    let mut seen_digests = HashSet::new();
     let mut candidate_count = 0;
     for source in sources {
         if source
@@ -108,6 +109,13 @@ pub(crate) fn materialize_task_result_artifacts(
         let mime_type = normalized_mime_type(source.mime_type.as_deref(), &filename);
         let destination = delivery_artifact_path(&workspace, task_id, &artifact_id, &filename);
         let sha256 = publish_artifact_file(&source_path, &destination)?;
+        if !seen_digests.insert(sha256.clone()) {
+            if source_path != destination {
+                fs::remove_file(&destination)?;
+            }
+            seen_ids.remove(&artifact_id);
+            continue;
+        }
         let base_url = format!("/v1/tasks/{task_id}/artifacts/{artifact_id}/content");
         manifests.push(TaskArtifactManifest {
             schema_version: TASK_ARTIFACT_SCHEMA_VERSION,
