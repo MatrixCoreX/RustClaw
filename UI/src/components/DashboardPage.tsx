@@ -391,7 +391,8 @@ export function DashboardPage({
           ) : null}
         </div>
         <nav
-          className="dashboard-section-tabs mt-3 flex pb-1"
+          data-dashboard-section-layout="two-rows"
+          className="dashboard-section-tabs mt-3 grid grid-cols-2 gap-2 pb-1 sm:grid-cols-3 lg:grid-cols-6"
           aria-label={t("首页功能切换", "Home sections")}
         >
           {dashboardSections.map((item) => {
@@ -568,8 +569,7 @@ export function DashboardPage({
             <div
               role="group"
               aria-label={t("NNI 导航显示设置", "NNI navigation visibility")}
-              data-nni-navigation-controls-layout="stacked"
-              className="grid w-full grid-cols-1 gap-2 sm:w-56"
+              className="grid grid-cols-2 gap-2 sm:inline-grid"
             >
               <button
                 type="button"
