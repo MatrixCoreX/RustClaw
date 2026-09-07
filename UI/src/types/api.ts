@@ -2061,6 +2061,8 @@ export interface AippMediaPageResponse {
   schema_version: number;
   items: AippMediaItem[];
   matching_total: number;
+  sort_order: "newest" | "oldest";
+  next_cursor_sequence: number | null;
   next_before_sequence: number | null;
   platform_states: Record<string, { state: string; enabled: boolean; paused: boolean }>;
   active_run: {

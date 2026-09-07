@@ -1,0 +1,11 @@
+# Live media-discovery acceptance. These cases contact the selected platform.
+# Run in order so every continuous start is followed by a graceful stop and schedule cleanup.
+media_discovery_live|douyin_start_live|optional_skill:media_discovery,provider_mode:live,external_calls:1,execution_mode:real,capability:media_discovery.enable,requires_tool_call:true|请开始持续采集抖音推荐内容，默认静默运行，每轮最多采集 2 条，每 60 分钟执行一轮，并且现在先执行第一轮。|expect=confirm:确认执行
+media_discovery_live|douyin_stop_live|optional_skill:media_discovery,provider_mode:live,external_calls:1,execution_mode:real,capability:media_discovery.disable,requires_tool_call:true|请停止抖音的持续媒体采集，完成当前条目后正常收尾，并删除对应的定时任务。|
+media_discovery_live|xiaohongshu_start_live|optional_skill:media_discovery,provider_mode:live,external_calls:1,execution_mode:real,capability:media_discovery.enable,requires_tool_call:true|请开始持续采集小红书推荐内容，默认静默运行，每轮最多采集 2 条，每 60 分钟执行一轮，并且现在先执行第一轮。|expect=confirm:确认执行
+media_discovery_live|xiaohongshu_stop_live|optional_skill:media_discovery,provider_mode:live,external_calls:1,execution_mode:real,capability:media_discovery.disable,requires_tool_call:true|请停止小红书的持续媒体采集，完成当前条目后正常收尾，并删除对应的定时任务。|
+media_discovery_live|kuaishou_start_live|optional_skill:media_discovery,provider_mode:live,external_calls:1,execution_mode:real,capability:media_discovery.enable,requires_tool_call:true|请开始持续采集快手推荐内容，默认静默运行，每轮最多采集 2 条，每 60 分钟执行一轮，并且现在先执行第一轮。|expect=confirm:确认执行
+media_discovery_live|kuaishou_stop_live|optional_skill:media_discovery,provider_mode:live,external_calls:1,execution_mode:real,capability:media_discovery.disable,requires_tool_call:true|请停止快手的持续媒体采集，完成当前条目后正常收尾，并删除对应的定时任务。|
+media_discovery_live|douyin_visible_capture_live|optional_skill:media_discovery,provider_mode:live,external_calls:1,execution_mode:real,capability:media_discovery.run_once,requires_tool_call:true|请打开可见浏览器，单次采集抖音推荐内容，最多采集 2 条，不要创建持续任务。|
+media_discovery_live|xiaohongshu_visible_capture_live|optional_skill:media_discovery,provider_mode:live,external_calls:1,execution_mode:real,capability:media_discovery.run_once,requires_tool_call:true|请打开可见浏览器，单次采集小红书推荐内容，最多采集 2 条，不要创建持续任务。|
+media_discovery_live|kuaishou_visible_capture_live|optional_skill:media_discovery,provider_mode:live,external_calls:1,execution_mode:real,capability:media_discovery.run_once,requires_tool_call:true|请打开可见浏览器，单次采集快手推荐内容，最多采集 2 条，不要创建持续任务。|
