@@ -6,8 +6,10 @@ import test from "node:test";
 
 import {
   beginRun,
+  clearCollectedData,
   cleanupExpiredDiagnostics,
   commitPageRecords,
+  configurePlatforms,
   copyExportsTo,
   finishRun,
   readRecords,
@@ -137,4 +139,30 @@ test("diagnostic retention removes expired files and directories", async (t) => 
 
   await assert.rejects(fs.stat(oldDirectory), { code: "ENOENT" });
   await assert.rejects(fs.stat(oldFile), { code: "ENOENT" });
+});
+
+test("result cleanup preserves platform configuration and browser login state", async (t) => {
+  const root = await temporaryRoot(t);
+  await configurePlatforms(root, ["douyin"], { source_mode: "home_feed", browser_mode: "silent" });
+  await commitPageRecords(root, [{
+    kind: "video",
+    dedup_key: "cleanup:video",
+    platform: "douyin",
+    title: "cleanup fixture",
+    video_page_url: "https://www.douyin.com/video/1",
+    discovered_at: "2026-09-07T00:00:00Z",
+  }]);
+  const profileFile = path.join(root, "browser-profile", "douyin", "session-state");
+  await fs.mkdir(path.dirname(profileFile), { recursive: true });
+  await fs.writeFile(profileFile, "preserved");
+  await fs.writeFile(path.join(root, "diagnostics", "capture.txt"), "diagnostic");
+
+  const cleared = await clearCollectedData(root);
+
+  assert.equal(cleared.records, 1);
+  assert.equal(cleared.videos, 1);
+  assert.equal(cleared.bytes > 0, true);
+  assert.equal((await readRecords(root)).length, 0);
+  assert.equal((await readState(root)).platforms.douyin.enabled, true);
+  assert.equal(await fs.readFile(profileFile, "utf8"), "preserved");
 });

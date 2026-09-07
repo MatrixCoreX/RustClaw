@@ -18,12 +18,16 @@ Agent to start, stop, or change work, while AiPP presents the persisted results.
 The top-level UI entry is named AiAPP and appears for administrators. Its catalog contains only
 enabled packages whose exact admitted manifest declares a supported `[aipp]`
 contract. The first view arranges those packages as application launchers; a
-user selects one launcher before its task-oriented view opens. Media Discovery
-presents current collection state, image and video records, recognized text,
-source links, filters, and stable cursor pagination.
-Video covers are served from the skill's private export directory through an
-authenticated preview endpoint. Remote image URLs must use HTTPS and are loaded
-without a referrer.
+user selects one launcher before its task-oriented view opens. The browser
+persists that selection in the neutral product storage namespace, so a refresh
+returns to the same application. Media Discovery presents current collection
+state, image and video records, recognized text, capture-time platform
+engagement counters, source links, filters, and stable cursor pagination. Video
+covers are best-effort platform adapters: the collector uses an unobscured
+rendered video frame or a platform-specific rendered poster and never
+substitutes a page or login screenshot. Available covers are served from the
+skill's private export directory through an authenticated preview endpoint.
+Remote image URLs must use HTTPS and are loaded without a referrer.
 
 Starting, pausing, resuming, and stopping collection remain Agent actions. This
 keeps one natural-language capability path across the browser and communication
@@ -73,7 +77,15 @@ browser profiles, cookies, credentials, raw diagnostics, arbitrary record fields
 or unrestricted filesystem paths. Preview path resolution canonicalizes the
 requested file, requires it to remain under the skill's `exports` directory,
 allows only bounded image types and sizes, and sends private no-sniff responses.
-The record scan and page size are bounded.
+The Media Discovery collector keeps a private persistent browser profile per
+platform so later runs can reuse that platform's cookies, local storage, and
+cache. Clearing collected records leaves this private session profile intact;
+the profile itself is never exposed through the AiAPP API.
+The record scan and page size are bounded. An unfiltered first page seeks by the
+sequence encoded in immutable record filenames and parses only one page plus a
+lookahead record. Filtered views scan the bounded ledger to preserve exact
+matching totals. Video previews load only when their cards approach the
+viewport.
 
 Media Discovery currently uses one host-global private directory, so its AiPP is
 administrator-only. A future per-user AiPP must first declare and enforce an

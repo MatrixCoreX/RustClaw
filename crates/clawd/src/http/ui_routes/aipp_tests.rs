@@ -31,6 +31,16 @@ fn media_page_is_newest_first_filtered_and_field_bounded() {
             "recognized_text": "alpha",
             "image_url": "https://images.example.test/one.webp",
             "source_page_url": "https://source.example.test/one",
+            "engagement": {
+                "schema_version": 1,
+                "platform": "xiaohongshu",
+                "captured_at": "2026-09-07T00:00:00Z",
+                "metrics": {
+                    "likes": { "display": "1.2万" },
+                    "comments": { "display": "318", "value": 318 },
+                    "unknown": { "display": "must-not-leak" }
+                }
+            },
             "secret": "must-not-leak",
         }),
     );
@@ -64,6 +74,12 @@ fn media_page_is_newest_first_filtered_and_field_bounded() {
     assert_eq!(items[1]["global_sequence"], 1);
     assert!(items[0].get("secret").is_none());
     assert!(items[0]["source_url"].is_null());
+    assert_eq!(
+        items[1]["engagement"]["metrics"]["likes"]["display"],
+        "1.2万"
+    );
+    assert_eq!(items[1]["engagement"]["metrics"]["comments"]["value"], 318);
+    assert!(items[1]["engagement"]["metrics"].get("unknown").is_none());
     assert_eq!(page["matching_total"], 2);
     fs::remove_dir_all(root).expect("remove fixture");
 }

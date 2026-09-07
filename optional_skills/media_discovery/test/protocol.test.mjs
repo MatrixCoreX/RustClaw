@@ -174,6 +174,29 @@ test("export_results returns exactly two CSV artifacts", async (t) => {
   for (const artifact of result.extra.artifacts) assert.equal(await fs.stat(artifact.path).then((stat) => stat.isFile()), true);
 });
 
+test("clear_results requires confirmation and clears only collected output", async (t) => {
+  const context = await requestContext(t);
+  const storage = await import("../src/storage.mjs");
+  await storage.commitPageRecords(context.skill_storage.directory_path, [{
+    kind: "video",
+    dedup_key: "clear:video",
+    platform: "douyin",
+    title: "clear fixture",
+    video_page_url: "https://www.douyin.com/video/1",
+    discovered_at: "2026-09-07T00:00:00Z",
+  }]);
+
+  const rejected = await handleRequest({ args: { action: "clear_results" }, context });
+  assert.equal(rejected.status, "error");
+  assert.equal(rejected.extra.error_code, "confirmation_required");
+  assert.equal((await storage.readRecords(context.skill_storage.directory_path)).length, 1);
+
+  const cleared = await handleRequest({ args: { action: "clear_results", confirm: true }, context });
+  assert.equal(cleared.status, "ok");
+  assert.equal(cleared.extra.cleared.records, 1);
+  assert.equal((await storage.readRecords(context.skill_storage.directory_path)).length, 0);
+});
+
 test("asynchronous failures preserve their requested action", async () => {
   const result = await handleRequest({
     args: { action: "enable", platform: "douyin", confirm: true },

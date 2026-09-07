@@ -8,6 +8,7 @@ import { sourceUrls, SUPPORTED_PLATFORMS } from "./platforms.mjs";
 import { createBackgroundProgressReporter } from "./progress.mjs";
 import {
   beginRun,
+  clearCollectedData,
   cleanupExpiredDiagnostics,
   commitPageRecords,
   configurePlatforms,
@@ -62,6 +63,7 @@ const ACTIONS = new Set([
   "stop_current",
   "list_runs",
   "export_results",
+  "clear_results",
 ]);
 const RUN_CONFIG_FIELDS = Object.freeze([
   "source_mode",
@@ -404,6 +406,15 @@ async function exportResults(request) {
   });
 }
 
+async function clearResults(request, args) {
+  if (args.confirm !== true) throw new Error("confirmation_required");
+  const cleared = await clearCollectedData(storageRoot(request));
+  return success("clear_results", {
+    cleared,
+    side_effect_applied: cleared.records > 0 || cleared.bytes > 0,
+  });
+}
+
 export async function handleRequest(request, runtime = {}) {
   const args = request?.args;
   const action = typeof args?.action === "string" ? args.action : "";
@@ -437,6 +448,7 @@ export async function handleRequest(request, runtime = {}) {
     }
     if (action === "list_runs") return await listRuns(request, args);
     if (action === "export_results") return await exportResults(request);
+    if (action === "clear_results") return await clearResults(request, args);
     throw new Error("action_unsupported");
   } catch (error) {
     return errorResponse(action, error);
