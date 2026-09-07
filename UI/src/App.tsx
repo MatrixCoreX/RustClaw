@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AuthKeysPage } from "./components/AuthKeysPage";
 import { AssetsPage } from "./components/AssetsPage";
+import { AippPage } from "./components/AippPage";
 import { BANCOR_CANDLE_AUTO_REFRESH_SECONDS, BancorPage } from "./components/BancorPage";
 import { ChatPage } from "./components/ChatPage";
 import { CommunicationSetupPage } from "./components/CommunicationSetupPage";
@@ -107,8 +108,8 @@ const AiLearningPage = lazy(() =>
   })),
 );
 
-const CONSOLE_PAGES: ConsolePage[] = ["dashboard", "chat", "ai_learning", "nni", "nni_apr", "bancor", "assets", "services", "channels", "models", "skills", "skill_store", "memory", "logs", "tasks"];
-const ADMIN_ONLY_UI_PAGES = new Set<ConsolePage>(["nni", "nni_apr", "bancor", "assets"]);
+const CONSOLE_PAGES: ConsolePage[] = ["dashboard", "chat", "ai_learning", "nni", "nni_apr", "bancor", "assets", "services", "channels", "models", "skills", "aipps", "skill_store", "memory", "logs", "tasks"];
+const ADMIN_ONLY_UI_PAGES = new Set<ConsolePage>(["nni", "nni_apr", "bancor", "assets", "aipps"]);
 
 const STORAGE_KEYS = {
   baseUrl: appStorageKey("monitor.baseUrl"),
@@ -2403,6 +2404,16 @@ export default function App() {
               onLocalImportPickerOpenChange={setLocalImportPickerOpen}
               onUploadImportedSkillFiles={uploadImportedSkillFiles}
               onDismissSkillImportPreview={() => setSkillImportPreview(null)}
+            />
+          ) : null}
+
+          {currentPage === "aipps" ? (
+            <AippPage
+              lang={lang}
+              t={t}
+              apiFetch={apiFetch}
+              onOpenAgent={() => setCurrentPage("chat")}
+              onOpenSkillStore={() => setCurrentPage("skill_store")}
             />
           ) : null}
 

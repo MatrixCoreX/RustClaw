@@ -16,7 +16,7 @@ Current repository highlights:
 - shared skill dispatch with in-process builtins, external adapters, and runner subprocesses through `skill-runner`
 - built-in, external, and runner-based skills for system, files, web, image, audio, video, music, NNI, crypto, KB, and automation tasks
 - local browser UI in `UI/`, including Dashboard, Agent, Models, Tasks,
-  Communication Setup, Account Binding, Tools/Skills, Skill Store, Memory,
+  Communication Setup, Account Binding, Tools/Skills, AiPP, Skill Store, Memory,
   Logs, and Learning / Maintenance pages
 - Raspberry Pi / small-screen desktop app in `pi_app/`
 - shared Linux/macOS runtime contracts, with fail-closed Bubblewrap and
@@ -960,7 +960,7 @@ and the normal Tools/Skills inventory while keeping it discoverable in Skill Sto
 Bundled entries marked `install_mode="on_demand"` are excluded from the normal
 `build-all.sh` release build. The current on-demand set is `chinese_almanac`,
 `crypto`, `invest_copy`, `map_merchant`, `media_download`, `photo_organize`,
-`stock`, `weather`, and `x`; clicking Install
+`stock`, `weather`, `media_discovery`, and `x`; clicking Install
 reads that skill's `skill.toml`, runs only its declared adapter, performs a
 protocol smoke test, writes a verified receipt, and only then enables/reloads it.
 Normal source, cross-target, Docker, and release-package flows use the registry's
@@ -975,6 +975,16 @@ entries whose `planner_kind=tool` are always available and cannot be removed thr
 Skill Store. Third-party import requires `skill.toml` plus `INTERFACE.md`, installs
 through the same adapter/receipt boundary, clears stale uninstall state, and only
 then exposes the verified package in Skill Store and Tools/Skills.
+
+An enabled skill may also declare a versioned `[aipp]` companion in `skill.toml`.
+AiPP provides task-oriented views for results that are difficult to inspect in a
+chat stream. The host renders reviewed view contracts and reads only bounded,
+allowlisted fields from that skill's private storage; packages cannot inject
+JavaScript, HTML, remote modules, or same-origin frames into the console. AiPP
+availability follows the exact installed manifest, receipt, policy grant, enable
+state, and registry generation. `media_discovery` is the first AiPP: administrators
+can review collected image/video records, previews, source links, filters, and
+cursor-based pages while starting or stopping collection through Agent.
 
 The implementation flow is language-neutral:
 

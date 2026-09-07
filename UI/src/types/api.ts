@@ -2012,4 +2012,57 @@ export interface ServiceActionNotice {
 }
 
 export type ChannelName = "telegram" | "whatsapp" | "ui" | "wechat" | "feishu" | "lark";
-export type ConsolePage = "dashboard" | "chat" | "ai_learning" | "nni" | "nni_apr" | "bancor" | "assets" | "services" | "channels" | "models" | "skills" | "skill_store" | "memory" | "logs" | "tasks";
+export interface AippCatalogItem {
+  skill_name: string;
+  package_version: string;
+  renderer: "collection_feed_v1";
+  data_contract: "media_collection_v1";
+  icon: string;
+  default_locale: string;
+  titles: Record<string, string>;
+  descriptions: Record<string, string>;
+}
+
+export interface AippCatalogResponse {
+  schema_version: number;
+  apps: AippCatalogItem[];
+}
+
+export interface AippMediaItem {
+  schema_version: number;
+  global_sequence: number;
+  sequence: number | null;
+  post_sequence: number | null;
+  image_sequence: number | null;
+  kind: "video" | "image";
+  platform: string;
+  source_mode: string;
+  search_keyword: string;
+  title: string;
+  platform_text: string;
+  recognized_text: string;
+  recognition_source: string | null;
+  source_url: string | null;
+  image_url: string | null;
+  preview_available: boolean;
+  discovered_at: string | null;
+}
+
+export interface AippMediaPageResponse {
+  schema_version: number;
+  items: AippMediaItem[];
+  matching_total: number;
+  next_before_sequence: number | null;
+  platform_states: Record<string, { state: string; enabled: boolean; paused: boolean }>;
+  active_run: {
+    run_id: string | null;
+    platforms: string[] | null;
+    lifecycle_state: string | null;
+    started_at: string | null;
+    heartbeat_at: string | null;
+    counts: Record<string, number> | null;
+  } | null;
+  updated_at: string | null;
+}
+
+export type ConsolePage = "dashboard" | "chat" | "ai_learning" | "nni" | "nni_apr" | "bancor" | "assets" | "services" | "channels" | "models" | "skills" | "aipps" | "skill_store" | "memory" | "logs" | "tasks";

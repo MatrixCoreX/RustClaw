@@ -35,6 +35,8 @@
   如果匹配平台的批次仍在运行，技能会将其标记为 `draining`，完整保存当前帖子后正常退出。
 - `media_discovery.export_results` 从技能私有不可变账本重建并交付
   `videos.csv`、`images.csv`，同时复制 `video_covers/` 并把其中封面作为图片产物交付。
+- 管理员 AiPP 通过有界、只读的宿主 renderer 展示同一份私有账本；采集生命周期变更仍由
+  Agent 执行。
 
 ## 当前执行流程
 
@@ -61,6 +63,7 @@ flowchart TD
     D[任务产物交付]
     H[每 15 分钟机器状态心跳]
     N[UI 任务事件与统一通信端通知]
+    AP[AiPP 只读媒体视图]
 
     U --> A
     A -->|开始| E
@@ -76,6 +79,7 @@ flowchart TD
     L --> V --> D
     L --> I --> D
     L --> F --> D
+    L --> AP
 ```
 
 每个批次都有条数、滚动次数和运行时间上限。技能私有 lease 在定时任务和对话启动之间

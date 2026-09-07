@@ -41,9 +41,10 @@ pub use installer::{
     InstallRequest, PrecompiledInstallRequest, SkillInstaller,
 };
 pub use manifest::{
-    ArchiveFormat, BuildAdapter, BuildNetworkPolicy, ExecutionProfile, InstallResourceRequirements,
-    InstallSpec, LauncherKind, PackageManifest, SandboxProfile, AGENT_JSONL_PROTOCOL,
-    LEGACY_SKILL_MANIFEST_SCHEMA_VERSION, SKILL_MANIFEST_SCHEMA_VERSION,
+    AippSpec, ArchiveFormat, BuildAdapter, BuildNetworkPolicy, ExecutionProfile,
+    InstallResourceRequirements, InstallSpec, LauncherKind, PackageManifest, SandboxProfile,
+    AGENT_JSONL_PROTOCOL, AIPP_SCHEMA_VERSION, LEGACY_SKILL_MANIFEST_SCHEMA_VERSION,
+    SKILL_MANIFEST_SCHEMA_VERSION,
 };
 pub use operation::{
     OperationAction, OperationFailure, OperationStage, OperationStageRecord, OperationStatus,

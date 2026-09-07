@@ -45,6 +45,8 @@ language.
   and `images.csv` from the private immutable record ledger, copies the
   persisted `video_covers/` directory, and exposes each cover as an image
   artifact.
+- The administrator AiPP presents the same private ledger through a bounded,
+  read-only host renderer. Collection lifecycle changes still go through Agent.
 
 ## Current Execution Flow
 
@@ -71,6 +73,7 @@ flowchart TD
     D[Task artifact delivery]
     H[15-minute machine status heartbeat]
     N[UI task event and unified channel notice]
+    AP[AiPP read-only media view]
 
     U --> A
     A -->|start| E
@@ -86,6 +89,7 @@ flowchart TD
     L --> V --> D
     L --> I --> D
     L --> F --> D
+    L --> AP
 ```
 
 Each run is bounded by item, scroll, and elapsed-time limits. A private lease

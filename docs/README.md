@@ -8,10 +8,10 @@ Git 中明确跟踪的文档均维护英文和简体中文配对。机器 token�
 
 ## Architecture / 架构
 
-The seven detailed architecture chapters already provide English and Chinese
-pages with previous/next navigation:
+The detailed architecture chapters provide English and Chinese pages with
+previous/next navigation:
 
-七篇详细架构文档已经提供英文、中文及上一页/下一页导航：
+详细架构文档已经提供英文、中文及上一页/下一页导航：
 
 - [Architecture index / 架构索引](architecture/README.md)
 

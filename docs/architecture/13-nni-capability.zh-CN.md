@@ -5,7 +5,8 @@
 
 <!-- ai-learning-navigation:start -->
 上一页：[浏览器媒体发现](12-media-discovery.zh-CN.md) |
-[架构索引](README.md)
+[架构索引](README.md) |
+下一页：[AiPP 技能配套界面](14-aipp-skill-companions.zh-CN.md)
 <!-- ai-learning-navigation:end -->
 
 固定内置的 `nni` 技能允许 Agent 查询 NNI 状态、控制心跳参与、读取设备奖励和 Bancor

@@ -2,13 +2,22 @@ schema_version = 2
 
 [package]
 name = "media_discovery"
-version = "0.1.20"
+version = "0.1.21"
 description = "Run bounded home-feed, keyword-search, or seed-page browser discovery for Douyin and Xiaohongshu in silent-by-default or explicitly visible mode, preserve rendered video covers, and export ordered source-traceable results without downloading media originals."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
 supported_arch = ["x86_64", "aarch64"]
 license = "LicenseRef-Proprietary"
 source = "optional_skills/media_discovery"
+
+[aipp]
+schema_version = 1
+renderer = "collection_feed_v1"
+data_contract = "media_collection_v1"
+icon = "gallery_vertical_end"
+default_locale = "en"
+titles = { en = "Media Discovery", zh = "媒体发现" }
+descriptions = { en = "Review collected posts, recognized text, source pages, and run status.", zh = "逐条查看已采集内容、识别文字、来源页面和运行状态。" }
 
 [registry]
 name = "media_discovery"
