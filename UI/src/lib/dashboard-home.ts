@@ -5,6 +5,7 @@ export type DashboardSection =
   | "setup"
   | "persona"
   | "dependencies"
+  | "nni_navigation"
   | "web"
   | "updates"
   | "communications"
@@ -16,6 +17,12 @@ export type DashboardCategoryPage = (typeof DASHBOARD_CATEGORY_PAGES)[number];
 
 export function isDashboardCategoryPage(page: string): page is DashboardCategoryPage {
   return DASHBOARD_CATEGORY_PAGES.some((candidate) => candidate === page);
+}
+
+export const NNI_NAVIGATION_PAGES = ["nni", "bancor", "assets"] as const;
+
+export function isNniNavigationPage(page: string): boolean {
+  return NNI_NAVIGATION_PAGES.some((candidate) => candidate === page);
 }
 
 export type DashboardActionKind =

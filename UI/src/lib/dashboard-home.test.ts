@@ -8,6 +8,7 @@ import {
   getDashboardOverviewItems,
   getSuggestedDashboardAction,
   isDashboardCategoryPage,
+  isNniNavigationPage,
 } from "./dashboard-home.ts";
 
 test("keeps model, communication setup, and tools under home categories", () => {
@@ -15,6 +16,14 @@ test("keeps model, communication setup, and tools under home categories", () => 
   assert.equal(isDashboardCategoryPage("services"), true);
   assert.equal(isDashboardCategoryPage("skills"), true);
   assert.equal(isDashboardCategoryPage("skill_store"), false);
+});
+
+test("groups only the three requested NNI navigation entries", () => {
+  assert.equal(isNniNavigationPage("nni"), true);
+  assert.equal(isNniNavigationPage("bancor"), true);
+  assert.equal(isNniNavigationPage("assets"), true);
+  assert.equal(isNniNavigationPage("nni_apr"), false);
+  assert.equal(isNniNavigationPage("dashboard"), false);
 });
 
 test("opens quick setup until required setup is complete", () => {

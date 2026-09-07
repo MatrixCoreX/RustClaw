@@ -28,6 +28,7 @@ import {
   responseIndicatesExpiredAuthentication,
 } from "./lib/auth-keys";
 import { conversationHistoryScope } from "./lib/chat-history";
+import { isNniNavigationPage } from "./lib/dashboard-home";
 import { formatDuration, toLocalTime } from "./lib/display-format";
 import { runCoalescedResponseRead } from "./lib/resilient-read";
 import { formatUiError } from "./lib/ui-error";
@@ -119,6 +120,7 @@ const STORAGE_KEYS = {
   ageWarn: appStorageKey("monitor.ageWarnSeconds"),
   lang: appStorageKey("monitor.lang"),
   currentPage: appStorageKey("monitor.currentPage"),
+  nniNavigationVisible: appStorageKey("monitor.nniNavigationVisible"),
   themeMode: appStorageKey("monitor.themeMode"),
 } as const;
 
@@ -199,6 +201,9 @@ export default function App() {
     const saved = window.localStorage.getItem(STORAGE_KEYS.currentPage);
     return saved && CONSOLE_PAGES.includes(saved as ConsolePage) ? (saved as ConsolePage) : "dashboard";
   });
+  const [nniNavigationVisible, setNniNavigationVisible] = useState(
+    () => window.localStorage.getItem(STORAGE_KEYS.nniNavigationVisible) !== "false",
+  );
   const logContainerRef = useRef<HTMLPreElement | null>(null);
 
   const t = useCallback(
@@ -1313,10 +1318,11 @@ export default function App() {
     larkBindSession,
   });
   const visibleNavItems = useMemo(
-    () => isAdminIdentity
-      ? navItems
-      : navItems.filter((item) => !ADMIN_ONLY_UI_PAGES.has(item.id)),
-    [isAdminIdentity, navItems],
+    () => navItems.filter((item) => {
+      if (!isAdminIdentity && ADMIN_ONLY_UI_PAGES.has(item.id)) return false;
+      return nniNavigationVisible || !isNniNavigationPage(item.id);
+    }),
+    [isAdminIdentity, navItems, nniNavigationVisible],
   );
 
   useEffect(() => {
@@ -1525,6 +1531,13 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEYS.currentPage, currentPage);
   }, [currentPage]);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      STORAGE_KEYS.nniNavigationVisible,
+      String(nniNavigationVisible),
+    );
+  }, [nniNavigationVisible]);
 
   // 切换导航页时仅将主内容区滚动到顶部，不移动导航栏（不调用 scrollIntoView，避免小屏横向导航条滚动或整页抖动）
   useEffect(() => {
@@ -1796,6 +1809,7 @@ export default function App() {
               hostDependenciesErrorCode={hostDependenciesErrorCode}
               dependencyInstallingId={dependencyInstallingId}
               isAdminIdentity={isAdminIdentity}
+              nniNavigationVisible={nniNavigationVisible}
               workspaceUpdateLoading={workspaceUpdateLoading}
               workspaceUpdateRunning={workspaceUpdateRunning}
               workspaceUpdateHasRemoteDiff={workspaceUpdateHasRemoteDiff}
@@ -1849,6 +1863,7 @@ export default function App() {
               onFetchHostSystemSummary={fetchHostSystemSummary}
               onFetchHostDependencies={() => fetchHostDependencies(false)}
               onInstallHostDependency={installHostDependency}
+              onSetNniNavigationVisible={setNniNavigationVisible}
               onFetchAgentConfig={fetchAgentConfig}
               onSaveAgentPersona={saveAgentPersona}
               workspaceUpdateStepLabel={workspaceUpdateStepLabel}

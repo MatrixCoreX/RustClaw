@@ -6,10 +6,13 @@ import {
   ChevronDown,
   Cpu,
   Download,
+  Eye,
+  EyeOff,
   GitBranch,
   LayoutDashboard,
   Loader2,
   MessageCircle,
+  Network,
   PackageCheck,
   PowerOff,
   Radio,
@@ -64,6 +67,7 @@ interface DashboardNavigationItem {
   icon: ReactNode;
   section?: DashboardSection;
   page?: ConsolePage;
+  adminOnly?: boolean;
 }
 
 export const DASHBOARD_SECTION_STORAGE_KEY = appStorageKey("monitor.dashboardSection");
@@ -73,11 +77,13 @@ const DASHBOARD_SECTION_IDS = new Set<DashboardSection>([
   "setup",
   "persona",
   "dependencies",
+  "nni_navigation",
   "web",
   "updates",
   "communications",
   "git",
 ]);
+const ADMIN_DASHBOARD_SECTION_IDS = new Set<DashboardSection>(["nni_navigation", "web"]);
 
 export interface DashboardOnboardingStep {
   key: string;
@@ -102,6 +108,7 @@ export interface DashboardPageProps {
   hostDependenciesErrorCode: string | null;
   dependencyInstallingId: string | null;
   isAdminIdentity: boolean;
+  nniNavigationVisible: boolean;
   workspaceUpdateLoading: boolean;
   workspaceUpdateRunning: boolean;
   workspaceUpdateHasRemoteDiff: boolean;
@@ -158,6 +165,7 @@ export interface DashboardPageProps {
   onFetchHostSystemSummary: () => unknown | Promise<unknown>;
   onFetchHostDependencies: () => unknown | Promise<unknown>;
   onInstallHostDependency: (dependencyId: string) => unknown | Promise<unknown>;
+  onSetNniNavigationVisible: (visible: boolean) => void;
   onFetchAgentConfig: () => unknown | Promise<unknown>;
   onSaveAgentPersona: (agentId: string, profile: string, customPersona: string) => Promise<boolean>;
   workspaceUpdateStepLabel: (step?: string) => string;
@@ -178,6 +186,7 @@ export function DashboardPage({
   hostDependenciesErrorCode,
   dependencyInstallingId,
   isAdminIdentity,
+  nniNavigationVisible,
   workspaceUpdateLoading,
   workspaceUpdateRunning,
   workspaceUpdateHasRemoteDiff,
@@ -231,6 +240,7 @@ export function DashboardPage({
   onFetchHostSystemSummary,
   onFetchHostDependencies,
   onInstallHostDependency,
+  onSetNniNavigationVisible,
   onFetchAgentConfig,
   onSaveAgentPersona,
   workspaceUpdateStepLabel,
@@ -251,7 +261,8 @@ export function DashboardPage({
   const [activeDashboardSection, setActiveDashboardSection] = useState<DashboardSection>(() => {
     const saved = window.localStorage.getItem(DASHBOARD_SECTION_STORAGE_KEY);
     if (saved === "host") return "overview";
-    return DASHBOARD_SECTION_IDS.has(saved as DashboardSection) && (saved !== "web" || isAdminIdentity)
+    return DASHBOARD_SECTION_IDS.has(saved as DashboardSection)
+      && (isAdminIdentity || !ADMIN_DASHBOARD_SECTION_IDS.has(saved as DashboardSection))
       ? (saved as DashboardSection)
       : getDefaultDashboardSection(onboardingSteps);
   });
@@ -310,6 +321,17 @@ export function DashboardPage({
       icon: <ServerCog className="h-4 w-4" />,
     },
     {
+      key: "nni_navigation",
+      section: "nni_navigation",
+      label: "NNI",
+      description: t(
+        "选择是否在导航栏中展示 NNI、BANCOR 和资产入口。",
+        "Choose whether NNI, BANCOR, and Assets appear in the navigation.",
+      ),
+      icon: <Network className="h-4 w-4" />,
+      adminOnly: true,
+    },
+    {
       key: "web",
       section: "web",
       label: t("Web 访问", "Web Access"),
@@ -318,6 +340,7 @@ export function DashboardPage({
         "Manage external WEBD access, nginx, and optional LAN HTTPS.",
       ),
       icon: <ServerCog className="h-4 w-4" />,
+      adminOnly: true,
     },
     {
       key: "communications",
@@ -340,9 +363,7 @@ export function DashboardPage({
       description: t("检查版本、更新程序、编译源码或重启。", "Check versions, update the app, compile source, or restart."),
       icon: <Download className="h-4 w-4" />,
     },
-  ] satisfies DashboardNavigationItem[]).filter(
-    (item) => isAdminIdentity || item.section !== "web",
-  );
+  ] satisfies DashboardNavigationItem[]).filter((item) => isAdminIdentity || !item.adminOnly);
   const selectedDashboardSection =
     dashboardSections.find((item) => item.section === activeDashboardSection) ?? dashboardSections[0];
 
@@ -516,6 +537,60 @@ export function DashboardPage({
             onRefresh={onFetchHostSystemSummary}
           />
         </>
+      ) : null}
+
+      {activeDashboardSection === "nni_navigation" ? (
+        <section className="theme-panel p-5 sm:p-6">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="max-w-2xl">
+              <div className="flex items-center gap-3">
+                <span className="theme-panel-soft inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-white/10 text-white/80">
+                  <Network className="h-5 w-5" />
+                </span>
+                <div>
+                  <h3 className="text-base font-semibold text-white">
+                    {t("NNI 导航", "NNI navigation")}
+                  </h3>
+                  <p className="mt-1 text-sm text-white/55">
+                    {nniNavigationVisible
+                      ? t("当前已展示三个入口。", "The three entries are currently visible.")
+                      : t("当前已隐藏三个入口。", "The three entries are currently hidden.")}
+                  </p>
+                </div>
+              </div>
+              <p className="mt-4 text-sm leading-7 text-white/65">
+                {t(
+                  "此设置只控制导航栏入口，不会停止 NNI、关闭交易服务或清除资产数据。",
+                  "This setting only controls navigation entries. It does not stop NNI, disable trading, or clear asset data.",
+                )}
+              </p>
+            </div>
+            <div
+              role="group"
+              aria-label={t("NNI 导航显示设置", "NNI navigation visibility")}
+              className="grid grid-cols-2 gap-2 sm:inline-grid"
+            >
+              <button
+                type="button"
+                aria-pressed={nniNavigationVisible}
+                className={nniNavigationVisible ? "theme-accent-btn" : "theme-secondary-btn"}
+                onClick={() => onSetNniNavigationVisible(true)}
+              >
+                <Eye className="h-4 w-4" />
+                {t("展示", "Show")}
+              </button>
+              <button
+                type="button"
+                aria-pressed={!nniNavigationVisible}
+                className={!nniNavigationVisible ? "theme-accent-btn" : "theme-secondary-btn"}
+                onClick={() => onSetNniNavigationVisible(false)}
+              >
+                <EyeOff className="h-4 w-4" />
+                {t("隐藏", "Hide")}
+              </button>
+            </div>
+          </div>
+        </section>
       ) : null}
 
       {activeDashboardSection === "dependencies" ? (
