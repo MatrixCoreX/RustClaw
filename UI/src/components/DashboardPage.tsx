@@ -276,6 +276,20 @@ export function DashboardPage({
       return next;
     });
   };
+  const confirmEnableNniNavigation = async () => {
+    if (nniNavigationVisible) return;
+    const confirmed = await showConfirm({
+      title: t("启用 NNI 入口", "Enable NNI entries"),
+      message: t(
+        "参与限制：本功能不向中国或美国公民开放。继续前，请确认你不是中国或美国公民，并已自行确认所在地区允许参与。\n\n风险提示：NNI、BANCOR 和数字资产相关功能存在价格波动、技术、网络及政策风险，可能造成损失。页面入口仅提供功能访问，不构成投资、法律或税务建议。点击“确认并启用”表示你已阅读、理解并自愿承担相关风险。",
+        "Participation restriction: This feature is not available to citizens of China or the United States. Before continuing, confirm that you are not a citizen of either country and that participation is permitted where you are located.\n\nRisk notice: NNI, BANCOR, and digital-asset features involve price, technical, network, and regulatory risks and may result in loss. These navigation entries provide access only and are not investment, legal, or tax advice. By selecting Confirm and Enable, you acknowledge these risks and choose to proceed.",
+      ),
+      confirmLabel: t("确认并启用", "Confirm and Enable"),
+      cancelLabel: t("取消", "Cancel"),
+      tone: "danger",
+    });
+    if (confirmed) onSetNniNavigationVisible(true);
+  };
   const nginxReady = Boolean(nginxStatus?.running && nginxStatus.configured && nginxStatus.ui_deployed);
   const dashboardSections = ([
     {
@@ -325,8 +339,8 @@ export function DashboardPage({
       section: "nni_navigation",
       label: "NNI",
       description: t(
-        "选择是否在导航栏中展示 NNI、BANCOR 和资产入口。",
-        "Choose whether NNI, BANCOR, and Assets appear in the navigation.",
+        "选择是否启用导航栏中的 NNI、BANCOR 和资产入口。",
+        "Choose whether to enable the NNI, BANCOR, and Assets navigation entries.",
       ),
       icon: <Network className="h-4 w-4" />,
       adminOnly: true,
@@ -554,8 +568,8 @@ export function DashboardPage({
                   </h3>
                   <p className="mt-1 text-sm text-white/55">
                     {nniNavigationVisible
-                      ? t("当前已展示三个入口。", "The three entries are currently visible.")
-                      : t("当前已隐藏三个入口。", "The three entries are currently hidden.")}
+                      ? t("当前已启用三个入口。", "The three entries are currently enabled.")
+                      : t("当前已关闭三个入口。", "The three entries are currently disabled.")}
                   </p>
                 </div>
               </div>
@@ -568,17 +582,17 @@ export function DashboardPage({
             </div>
             <div
               role="group"
-              aria-label={t("NNI 导航显示设置", "NNI navigation visibility")}
+              aria-label={t("NNI 导航启用设置", "NNI navigation enablement")}
               className="grid grid-cols-2 gap-2 sm:inline-grid"
             >
               <button
                 type="button"
                 aria-pressed={nniNavigationVisible}
                 className={nniNavigationVisible ? "theme-accent-btn" : "theme-secondary-btn"}
-                onClick={() => onSetNniNavigationVisible(true)}
+                onClick={() => void confirmEnableNniNavigation()}
               >
                 <Eye className="h-4 w-4" />
-                {t("展示", "Show")}
+                {t("启用", "Enable")}
               </button>
               <button
                 type="button"
@@ -587,7 +601,7 @@ export function DashboardPage({
                 onClick={() => onSetNniNavigationVisible(false)}
               >
                 <EyeOff className="h-4 w-4" />
-                {t("隐藏", "Hide")}
+                {t("关闭", "Disable")}
               </button>
             </div>
           </div>

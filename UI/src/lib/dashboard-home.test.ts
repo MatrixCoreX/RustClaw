@@ -39,6 +39,22 @@ test("lays out dashboard section buttons in two desktop rows", () => {
   assert.doesNotMatch(navigation[1], /\bflex\b/);
 });
 
+test("requires a risk acknowledgement before enabling NNI navigation", () => {
+  const source = readFileSync(new URL("../components/DashboardPage.tsx", import.meta.url), "utf8");
+  const section = source.match(
+    /\{activeDashboardSection === "nni_navigation"[\s\S]*?\{activeDashboardSection === "dependencies"/,
+  );
+
+  assert.ok(section);
+  assert.match(source, /const confirmEnableNniNavigation = async \(\) =>/);
+  assert.match(source, /本功能不向中国或美国公民开放/);
+  assert.match(source, /if \(confirmed\) onSetNniNavigationVisible\(true\)/);
+  assert.match(section[0], /t\("启用", "Enable"\)/);
+  assert.match(section[0], /t\("关闭", "Disable"\)/);
+  assert.match(section[0], /onClick=\{\(\) => void confirmEnableNniNavigation\(\)\}/);
+  assert.match(section[0], /onClick=\{\(\) => onSetNniNavigationVisible\(false\)\}/);
+});
+
 test("opens quick setup until required setup is complete", () => {
   assert.equal(
     getDefaultDashboardSection([{ required: true, status: "attention" }]),
