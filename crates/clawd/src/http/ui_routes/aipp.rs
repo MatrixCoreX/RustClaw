@@ -43,7 +43,27 @@ fn active_aipp_package(
         .get(skill_name)
         .cloned();
     let manifest = if let Some(binding) = binding {
-        let verified = skill_sdk::InstallReceiptStore::new(skill_package_root(state))
+        let store = skill_sdk::InstallReceiptStore::new(skill_package_root(state));
+        let pointer = store
+            .current_pointer(skill_name)
+            .map_err(|_| "aipp_install_pointer_invalid".to_string())?;
+        if pointer.version != binding.version
+            || pointer.receipt_digest != binding.install_receipt_digest
+        {
+            return Err("aipp_generation_binding_mismatch".to_string());
+        }
+        let candidate_path = store
+            .skill_root(skill_name)
+            .map_err(|_| "aipp_install_path_invalid".to_string())?
+            .join("versions")
+            .join(pointer.install_dir)
+            .join("skill.toml");
+        let candidate = skill_sdk::PackageManifest::load(&candidate_path)
+            .map_err(|_| "aipp_manifest_invalid".to_string())?;
+        if candidate.aipp.is_none() {
+            return Ok(None);
+        }
+        let verified = store
             .verified_current_install(skill_name)
             .map_err(|_| "aipp_install_receipt_invalid".to_string())?;
         let manifest_digest = verified
@@ -157,6 +177,47 @@ fn aipp_media_item(record: &Value) -> Option<Value> {
         "image_url": image_url,
         "preview_available": kind == "video" && record.get("cover_screenshot_path").and_then(Value::as_str).is_some(),
         "discovered_at": bounded_aipp_optional_text(record.get("discovered_at"), 64),
+        "engagement": aipp_engagement(record),
+    }))
+}
+
+fn aipp_engagement(record: &Value) -> Option<Value> {
+    let engagement = record.get("engagement")?;
+    if engagement.get("schema_version").and_then(Value::as_u64) != Some(1)
+        || engagement.get("platform").and_then(Value::as_str)
+            != record.get("platform").and_then(Value::as_str)
+    {
+        return None;
+    }
+    let mut metrics = BTreeMap::new();
+    for name in ["views", "likes", "comments", "favorites", "shares"] {
+        let Some(metric) = engagement.pointer(&format!("/metrics/{name}")) else {
+            continue;
+        };
+        let Some(display) = metric
+            .get("display")
+            .and_then(Value::as_str)
+            .filter(|value| {
+                !value.is_empty()
+                    && value.chars().count() <= 32
+                    && !value.chars().any(char::is_control)
+            })
+        else {
+            continue;
+        };
+        metrics.insert(
+            name.to_string(),
+            json!({
+                "display": display,
+                "value": metric.get("value").and_then(Value::as_u64),
+            }),
+        );
+    }
+    Some(json!({
+        "schema_version": 1,
+        "platform": engagement.get("platform").and_then(Value::as_str),
+        "captured_at": bounded_aipp_optional_text(engagement.get("captured_at"), 64),
+        "metrics": metrics,
     }))
 }
 
@@ -220,9 +281,26 @@ fn read_aipp_media_page(root: &Path, query: &AippMediaQuery) -> Result<Value, St
     }
     names.sort_unstable_by(|left, right| right.cmp(left));
     let limit = query.limit.unwrap_or(24).clamp(1, AIPP_MEDIA_RECORD_LIMIT);
+    let has_filter = query.kind.is_some()
+        || query.platform.is_some()
+        || query
+            .query
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty());
     let mut items = Vec::with_capacity(limit + 1);
-    let mut matching_total = 0usize;
+    let mut matching_total = if has_filter { 0 } else { names.len() };
     for name in names {
+        let file_sequence = name
+            .strip_suffix(".json")
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or_default();
+        if !has_filter
+            && query
+                .before_sequence
+                .is_some_and(|before| file_sequence >= before)
+        {
+            continue;
+        }
         let record_path = records_root.join(&name);
         if fs::metadata(&record_path)
             .map(|metadata| metadata.len() > AIPP_MEDIA_RECORD_MAX_BYTES)
@@ -245,10 +323,12 @@ fn read_aipp_media_page(root: &Path, query: &AippMediaQuery) -> Result<Value, St
             .get("global_sequence")
             .and_then(Value::as_u64)
             .unwrap_or_default();
-        if sequence == 0 || !record_matches_aipp_query(&record, query) {
+        if sequence == 0 || (has_filter && !record_matches_aipp_query(&record, query)) {
             continue;
         }
-        matching_total = matching_total.saturating_add(1);
+        if has_filter {
+            matching_total = matching_total.saturating_add(1);
+        }
         if query
             .before_sequence
             .is_some_and(|before| sequence >= before)
@@ -259,6 +339,9 @@ fn read_aipp_media_page(root: &Path, query: &AippMediaQuery) -> Result<Value, St
             if let Some(item) = aipp_media_item(&record) {
                 items.push(item);
             }
+        }
+        if !has_filter && items.len() > limit {
+            break;
         }
     }
     let has_more = items.len() > limit;

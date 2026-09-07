@@ -2046,6 +2046,15 @@ export interface AippMediaItem {
   image_url: string | null;
   preview_available: boolean;
   discovered_at: string | null;
+  engagement: {
+    schema_version: number;
+    platform: string;
+    captured_at: string | null;
+    metrics: Partial<Record<
+      "views" | "likes" | "comments" | "favorites" | "shares",
+      { display: string; value: number | null }
+    >>;
+  } | null;
 }
 
 export interface AippMediaPageResponse {

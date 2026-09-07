@@ -17,9 +17,19 @@ this skill does not provide immediate single-post media delivery. The default
 opens one only when the user's request requires visible or non-silent browsing. The skill screenshots media
 elements already rendered in the browser, recognizes visible
 text, and exports exactly two user result files: `videos.csv` and `images.csv`.
-For each video it also preserves the first stable frame observed in the rendered
-browser element under `video_covers/` and records that relative path in the CSV.
-It does not download video binaries or original image files.
+It also records the engagement counters exposed by platform-owned machine DOM
+controls at collection time. Metrics are structured as views, likes, comments,
+favorites, and shares; only counters available on the current platform/page are
+present. A counter must contain at least one Unicode decimal digit. The
+platform-rendered display value is retained without matching localized units,
+and an exact numeric value is added only for plain integer forms.
+For each video it attempts to preserve the first stable frame from a visible,
+unobscured platform video element, then a platform-specific rendered poster.
+Successful covers are stored under `video_covers/` and referenced from the CSV.
+Platforms do not guarantee either element: login/challenge overlays, selector
+changes, and unavailable media may therefore leave a result without a cover.
+The skill never substitutes a whole-page or login-dialog screenshot. It does
+not download video binaries or original image files.
 
 Keyword discovery uses one canonical structured input:
 `source_mode=topics` with non-empty `topics[]`. The skill opens the selected
@@ -27,6 +37,8 @@ platform's search result for each keyword in input order, browses bounded
 result candidates in one browser session, and records the keyword and search
 page URL on every committed result. No localized search phrase is parsed by
 runtime or skill code.
+Explicit detail `seed_urls` are collected as the exact requested set and do not
+expand into unrelated recommendation links from those pages.
 
 A continuous start request is a structured workflow: call `enable`, copy its
 returned `schedule_spec.args.intent_json` into `schedule.create_structured` in
@@ -93,6 +105,10 @@ does not enable these periodic notices.
 - `export_results`: deliver rebuilt `videos.csv` and `images.csv` artifacts.
   Persisted browser video-cover screenshots are copied beside them under
   `video_covers/` and returned as image artifacts.
+- `clear_results`: after explicit confirmation, delete collected records,
+  exports, diagnostics, stale temporary files, and run history. It refuses to
+  run during a live batch and preserves platform configuration plus the private
+  browser profile/login state.
 
 ## Parameter Contract (from interface)
 | Param | Required | Description |
@@ -111,7 +127,7 @@ does not enable these periodic notices.
 | `browser_mode` | no | `silent` (default), or `visible` after an explicit visible/non-silent request. |
 | `pacing_min_delay_ms` | no | Lower interaction-delay bound, 200..5000, default 700. |
 | `pacing_max_delay_ms` | no | Upper interaction-delay bound, 200..8000, default 1800 and never below the minimum. |
-| `confirm` | enable | Must be true after runtime approval. |
+| `confirm` | enable/clear_results | Must be true after runtime approval. |
 
 `scheduled_run` is an internal scheduler marker emitted only inside
 `enable.extra.schedule_spec`; it is not a planner or user parameter.
@@ -143,6 +159,10 @@ Stable examples include `display_unavailable`, `browser_missing`,
 
 ```json
 {"action":"export_results"}
+```
+
+```json
+{"action":"clear_results","confirm":true}
 ```
 
 An exported video row may contain:

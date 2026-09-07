@@ -6,7 +6,11 @@ import test from "node:test";
 
 import { chromium } from "playwright";
 
-import { collectRenderedImages, discoverCandidates } from "../src/browser.mjs";
+import {
+  candidatesForDiscoverySource,
+  collectRenderedImages,
+  discoverCandidates,
+} from "../src/browser.mjs";
 
 const RUN_BROWSER_TEST = process.env.MEDIA_DISCOVERY_BROWSER_TEST === "1";
 
@@ -99,6 +103,12 @@ test("browser collector follows the rendered carousel and captures every image i
     },
     config: { max_images_per_post: 100, recognition_mode: "metadata_only" },
     discoveredAt: "2026-08-10T00:00:00.000Z",
+    engagement: {
+      schema_version: 1,
+      platform: "xiaohongshu",
+      captured_at: "2026-08-10T00:00:00.000Z",
+      metrics: { likes: { display: "27", value: 27 } },
+    },
   });
 
   assert.equal(result.records.length, 3);
@@ -113,6 +123,7 @@ test("browser collector follows the rendered carousel and captures every image i
     true,
   );
   assert.equal(new Set(result.records.map((record) => record.image_url)).size, 3);
+  assert.equal(result.records.every((record) => record.engagement.metrics.likes.value === 27), true);
   assert.equal(result.records.some((record) => record.collection_truncated), false);
   for (const screenshotPath of result.temporaryPaths) {
     assert.equal((await fs.stat(screenshotPath)).size > 512, true);
@@ -151,4 +162,17 @@ test("browser search results discover ordered platform detail candidates without
     "https://www.xiaohongshu.com/explore/first-item",
     "https://www.xiaohongshu.com/explore/second-item?source=fixture",
   ]);
+});
+
+test("explicit detail seeds do not expand into unrelated recommendations", async () => {
+  const seed = "https://www.douyin.com/video/123456";
+  const candidates = await candidatesForDiscoverySource(
+    null,
+    "douyin",
+    seed,
+    { source_mode: "seed_urls" },
+    30,
+    async () => false,
+  );
+  assert.deepEqual(candidates, [seed]);
 });

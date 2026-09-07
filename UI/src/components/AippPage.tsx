@@ -2,18 +2,26 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   Bot,
+  Bookmark,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
+  Eye,
   ExternalLink,
   GalleryVerticalEnd,
+  Heart,
   Image as ImageIcon,
   LoaderCircle,
+  MessageCircle,
   PanelsTopLeft,
   RefreshCw,
   Search,
+  Share2,
   Video,
 } from "lucide-react";
 
 import { formatUiError } from "../lib/ui-error";
+import { appStorageKey } from "../lib/product-identity";
 import type {
   AippCatalogItem,
   AippCatalogResponse,
@@ -24,6 +32,12 @@ import type {
 
 type Translate = (zh: string, en: string) => string;
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
+
+const SELECTED_AIPP_STORAGE_KEY = appStorageKey("monitor.aipp.selectedSkill");
+
+export function readSelectedAipp(storage: Pick<Storage, "getItem"> | undefined): string {
+  return storage?.getItem(SELECTED_AIPP_STORAGE_KEY)?.trim() || "";
+}
 
 export interface AippPageProps {
   lang: "zh" | "en";
@@ -60,19 +74,19 @@ export function AippCatalogCard({
   return (
     <button
       type="button"
-      className="theme-panel group flex min-h-44 w-full flex-col items-start p-5 text-left transition hover:-translate-y-0.5 hover:border-white/20"
+      className="theme-panel group flex min-h-40 w-full flex-col items-start p-4 text-left transition hover:-translate-y-0.5 hover:border-white/20"
       onClick={onOpen}
     >
       <span className="flex h-12 w-12 items-center justify-center rounded-lg border border-white/10 bg-white/6 text-white/80">
         <AippIcon icon={app.icon} className="h-6 w-6" />
       </span>
-      <span className="mt-4 flex w-full min-w-0 items-center gap-2">
-        <span className="min-w-0 flex-1 text-base font-semibold text-white/90">
+      <span className="mt-3 flex w-full min-w-0 items-center gap-2">
+        <span className="min-w-0 flex-1 break-words text-base font-semibold text-white/90">
           {localizedAippCopy(app.titles, lang, app.default_locale)}
         </span>
         <ChevronRight className="h-4 w-4 shrink-0 text-white/35 transition group-hover:translate-x-0.5 group-hover:text-white/65" />
       </span>
-      <span className="mt-2 line-clamp-3 text-sm leading-6 text-white/55">
+      <span className="mt-2 line-clamp-3 break-words text-sm leading-5 text-white/55">
         {localizedAippCopy(app.descriptions, lang, app.default_locale)}
       </span>
     </button>
@@ -101,11 +115,28 @@ function MediaPreview({
   t: Translate;
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [shouldLoad, setShouldLoad] = useState(item.kind !== "video");
+  const visibilityRef = useRef<HTMLDivElement | null>(null);
   const apiFetchRef = useRef(apiFetch);
   apiFetchRef.current = apiFetch;
 
   useEffect(() => {
-    if (item.kind !== "video" || !item.preview_available) return;
+    if (item.kind !== "video" || !item.preview_available || shouldLoad) return;
+    if (typeof IntersectionObserver === "undefined") {
+      setShouldLoad(true);
+      return;
+    }
+    const target = visibilityRef.current;
+    if (!target) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) setShouldLoad(true);
+    }, { rootMargin: "240px" });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [item.kind, item.preview_available, shouldLoad]);
+
+  useEffect(() => {
+    if (item.kind !== "video" || !item.preview_available || !shouldLoad) return;
     let disposed = false;
     let objectUrl: string | null = null;
     void apiFetchRef.current(
@@ -127,7 +158,7 @@ function MediaPreview({
       disposed = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [item.global_sequence, item.kind, item.preview_available, skillName]);
+  }, [item.global_sequence, item.kind, item.preview_available, shouldLoad, skillName]);
 
   const source = item.kind === "image" ? item.image_url : previewUrl;
   if (source) {
@@ -142,7 +173,7 @@ function MediaPreview({
     );
   }
   return (
-    <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-white/45">
+    <div ref={visibilityRef} className="flex h-full w-full flex-col items-center justify-center gap-2 text-white/45">
       {item.kind === "video" ? <Video className="h-8 w-8" /> : <ImageIcon className="h-8 w-8" />}
       <span className="text-xs">{t("暂无预览", "Preview unavailable")}</span>
     </div>
@@ -162,27 +193,64 @@ export function AippMediaItemCard({
   t: Translate;
   lang: "zh" | "en";
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const bodyText = item.recognized_text || item.platform_text;
+  const canCollapse = bodyText.length > 360 || bodyText.split("\n").length > 6;
+  const hasPreview = item.kind === "image" ? Boolean(item.image_url) : item.preview_available;
+  const metricPresentation = [
+    { key: "views" as const, icon: Eye, label: t("播放", "Views") },
+    { key: "likes" as const, icon: Heart, label: t("点赞", "Likes") },
+    { key: "comments" as const, icon: MessageCircle, label: t("评论", "Comments") },
+    { key: "favorites" as const, icon: Bookmark, label: t("收藏", "Favorites") },
+    { key: "shares" as const, icon: Share2, label: t("分享", "Shares") },
+  ].flatMap(({ key, icon: Icon, label }) => {
+    const metric = item.engagement?.metrics[key];
+    return metric ? [{ key, Icon, label, display: metric.display }] : [];
+  });
   return (
-    <article className="theme-panel overflow-hidden">
-      <div className="grid min-w-0 md:grid-cols-[minmax(240px,36%)_1fr]">
-        <div className="aspect-video min-h-44 bg-black/20 md:aspect-auto md:min-h-64">
-          <MediaPreview item={item} skillName={skillName} apiFetch={apiFetch} t={t} />
-        </div>
-        <div className="min-w-0 p-4 sm:p-5">
-          <div className="flex flex-wrap items-center gap-2 text-xs text-white/45">
+    <article className="theme-panel min-w-0 overflow-hidden">
+      <div className={hasPreview ? "grid min-w-0 md:grid-cols-[minmax(140px,22%)_minmax(0,1fr)] 2xl:grid-cols-[minmax(140px,30%)_minmax(0,1fr)]" : "min-w-0"}>
+        {hasPreview ? (
+          <div className="aspect-video max-h-44 min-h-32 overflow-hidden bg-black/20 md:aspect-auto md:min-h-36 md:max-h-48">
+            <MediaPreview item={item} skillName={skillName} apiFetch={apiFetch} t={t} />
+          </div>
+        ) : null}
+        <div className="min-w-0 p-3 sm:p-4">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-white/45">
             <span className="inline-flex items-center gap-1">{item.kind === "video" ? <Video className="h-3.5 w-3.5" /> : <ImageIcon className="h-3.5 w-3.5" />}{item.kind === "video" ? t("视频", "Video") : t("图片", "Image")}</span>
-            <span>{item.platform}</span>
+            <span className="break-all">{item.platform}</span>
             <span>#{item.global_sequence}</span>
             <span>{formatCollectedAt(item.discovered_at, lang)}</span>
           </div>
-          <h2 className="mt-2 text-base font-semibold leading-6 text-white/90">{item.title || t("未提供标题", "Untitled")}</h2>
-          {item.recognized_text ? <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-white/72">{item.recognized_text}</p> : null}
-          {!item.recognized_text && item.platform_text ? <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-white/65">{item.platform_text}</p> : null}
-          {item.source_url ? (
-            <a className="theme-secondary-btn mt-4 w-fit px-3 py-2 text-xs" href={item.source_url} target="_blank" rel="noreferrer noopener">
-              {t("查看来源", "Open source")}<ExternalLink className="h-3.5 w-3.5" />
-            </a>
+          <h2 className="mt-2 line-clamp-2 break-words text-sm font-semibold leading-5 text-white/90 [overflow-wrap:anywhere]">{item.title || t("未提供标题", "Untitled")}</h2>
+          {metricPresentation.length > 0 ? (
+            <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs text-white/58 sm:grid-cols-3">
+              {metricPresentation.map(({ key, Icon, label, display }) => (
+                <span key={key} className="inline-flex min-w-0 items-center gap-1" title={`${label}: ${display}`}>
+                  <Icon className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{display}</span>
+                </span>
+              ))}
+            </div>
           ) : null}
+          {bodyText ? (
+            <p className={`mt-2 whitespace-pre-wrap break-words text-sm leading-5 [overflow-wrap:anywhere] ${item.recognized_text ? "text-white/72" : "text-white/65"} ${canCollapse && !expanded ? "line-clamp-2" : ""}`}>
+              {bodyText}
+            </p>
+          ) : null}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            {canCollapse ? (
+              <button type="button" className="theme-secondary-btn px-3 py-1.5 text-xs" onClick={() => setExpanded((current) => !current)}>
+                {expanded ? t("收起", "Collapse") : t("展开全文", "Show all")}
+                {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              </button>
+            ) : null}
+            {item.source_url ? (
+              <a className="theme-secondary-btn px-3 py-1.5 text-xs" href={item.source_url} target="_blank" rel="noreferrer noopener">
+              {t("查看来源", "Open source")}<ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            ) : null}
+          </div>
         </div>
       </div>
     </article>
@@ -191,7 +259,9 @@ export function AippMediaItemCard({
 
 export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: AippPageProps) {
   const [catalog, setCatalog] = useState<AippCatalogItem[]>([]);
-  const [selectedSkill, setSelectedSkill] = useState("");
+  const [selectedSkill, setSelectedSkill] = useState(() =>
+    readSelectedAipp(typeof window === "undefined" ? undefined : window.localStorage),
+  );
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -264,6 +334,11 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
   useEffect(() => {
     void fetchCatalog();
   }, [fetchCatalog]);
+
+  useEffect(() => {
+    if (selectedSkill) window.localStorage.setItem(SELECTED_AIPP_STORAGE_KEY, selectedSkill);
+    else window.localStorage.removeItem(SELECTED_AIPP_STORAGE_KEY);
+  }, [selectedSkill]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setSearchQuery(searchDraft.trim()), 300);
@@ -394,15 +469,15 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
         </div>
       ) : null}
 
-      <section className="theme-panel-soft p-4 sm:p-5">
-        <div className="grid gap-3 sm:grid-cols-3">
+      <section className="theme-panel-soft p-3 sm:p-4">
+        <div className="grid gap-2 sm:grid-cols-3 sm:gap-3">
           <div><p className="text-xs text-white/45">{t("当前状态", "Current status")}</p><p className="mt-1 text-sm font-medium text-white/85">{page?.active_run ? t("正在采集", "Collecting") : t("空闲", "Idle")}</p></div>
           <div><p className="text-xs text-white/45">{t("当前结果", "Current results")}</p><p className="mt-1 text-sm font-medium text-white/85">{page?.matching_total ?? 0}</p></div>
-          <div><p className="text-xs text-white/45">{t("数据更新时间", "Data updated")}</p><p className="mt-1 text-sm font-medium text-white/85">{formatCollectedAt(page?.updated_at || null, lang)}</p></div>
+          <div className="min-w-0"><p className="text-xs text-white/45">{t("数据更新时间", "Data updated")}</p><p className="mt-1 truncate text-xs font-medium text-white/85" title={formatCollectedAt(page?.updated_at || null, lang)}>{formatCollectedAt(page?.updated_at || null, lang)}</p></div>
         </div>
       </section>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+      <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(240px,1fr)_auto_auto] lg:items-center">
         <label className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
           <input
@@ -413,7 +488,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
             maxLength={200}
           />
         </label>
-        <div className="flex gap-2 overflow-x-auto">
+        <div className="flex min-w-0 gap-2 overflow-x-auto pb-0.5 lg:pb-0">
           {(["all", "video", "image"] as const).map((value) => (
             <button key={value} type="button" className={kind === value ? "theme-accent-btn shrink-0 px-3 py-2 text-xs" : "theme-secondary-btn shrink-0 px-3 py-2 text-xs"} onClick={() => setKind(value)}>
               {value === "all" ? t("全部", "All") : value === "video" ? t("视频", "Videos") : t("图片", "Images")}
@@ -421,7 +496,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
           ))}
         </div>
         {platforms.length > 1 ? (
-          <select className="theme-input min-w-36 py-2 text-sm" value={platform} onChange={(event) => setPlatform(event.target.value)}>
+          <select className="theme-input w-full min-w-0 py-2 text-sm lg:w-auto lg:min-w-36" value={platform} onChange={(event) => setPlatform(event.target.value)}>
             <option value="all">{t("全部平台", "All platforms")}</option>
             {platforms.map((name) => <option key={name} value={name}>{name}</option>)}
           </select>
@@ -430,12 +505,12 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
 
       {error ? <div className="rounded-lg border border-red-400/20 bg-red-500/8 px-4 py-3 text-sm text-red-100">{error}</div> : null}
 
-      <div className="space-y-3" aria-busy={loading}>
+      <div className="grid min-w-0 gap-2 2xl:grid-cols-2" aria-busy={loading}>
         {(page?.items || []).map((item) => (
           <AippMediaItemCard key={item.global_sequence} item={item} skillName={selectedSkill} apiFetch={apiFetch} t={t} lang={lang} />
         ))}
         {!loading && page?.items.length === 0 ? (
-          <div className="theme-panel-soft flex min-h-40 flex-col items-center justify-center gap-2 p-5 text-center text-sm text-white/55">
+          <div className="theme-panel-soft flex min-h-40 flex-col items-center justify-center gap-2 p-5 text-center text-sm text-white/55 2xl:col-span-2">
             <GalleryVerticalEnd className="h-7 w-7" />
             <span>{t("还没有符合条件的采集内容。", "No collected content matches these filters.")}</span>
           </div>

@@ -17,6 +17,13 @@ test("CSV uses BOM, CRLF, RFC 4180 quoting, and preserves multilingual newlines"
     cover_screenshot_path: "video_covers/douyin_1.png",
     video_page_url: "https://www.douyin.com/video/1",
     discovered_at: "2026-08-10T00:00:00Z",
+    engagement: {
+      captured_at: "2026-08-10T00:00:00Z",
+      metrics: {
+        views: { display: "1.2万" },
+        likes: { display: "318", value: 318 },
+      },
+    },
   }]);
   assert.ok(rendered.startsWith("\uFEFF"));
   assert.ok(rendered.includes('"标题, ""quoted"""'));
@@ -24,6 +31,7 @@ test("CSV uses BOM, CRLF, RFC 4180 quoting, and preserves multilingual newlines"
   assert.ok(rendered.includes('"video_covers/douyin_1.png"'));
   assert.ok(rendered.includes('"AI agent"'));
   assert.ok(rendered.includes('"https://www.douyin.com/search/AI%20agent"'));
+  assert.ok(rendered.includes('"1.2万","318"'));
   assert.ok(rendered.endsWith("\r\n"));
 });
 

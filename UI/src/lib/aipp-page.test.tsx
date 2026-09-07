@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { AippCatalogCard, AippMediaItemCard, localizedAippCopy } from "../components/AippPage";
+import {
+  AippCatalogCard,
+  AippMediaItemCard,
+  localizedAippCopy,
+  readSelectedAipp,
+} from "../components/AippPage";
 import type { AippCatalogItem, AippMediaItem } from "../types/api";
 
 const t = (zh: string, _en: string) => zh;
@@ -13,10 +18,20 @@ test("selects AiPP presentation copy by locale with a declared fallback", () => 
   assert.equal(localizedAippCopy({ en: values.en }, "zh", "en"), "Media Discovery");
 });
 
+test("restores the selected AiAPP after a browser refresh", () => {
+  const storage = {
+    getItem(key: string) {
+      return key.endsWith("monitor.aipp.selectedSkill") ? " media_discovery " : null;
+    },
+  };
+  assert.equal(readSelectedAipp(storage), "media_discovery");
+  assert.equal(readSelectedAipp(undefined), "");
+});
+
 test("renders an installed AiPP as an application launcher card", () => {
   const app: AippCatalogItem = {
     skill_name: "media_discovery",
-    package_version: "0.1.21",
+    package_version: "0.1.25",
     renderer: "collection_feed_v1",
     data_contract: "media_collection_v1",
     icon: "gallery_vertical_end",
@@ -51,6 +66,15 @@ test("renders a media collection record without exposing undeclared fields", () 
     image_url: "https://example.test/image.webp",
     preview_available: false,
     discovered_at: "2026-09-07T00:00:00Z",
+    engagement: {
+      schema_version: 1,
+      platform: "xiaohongshu",
+      captured_at: "2026-09-07T00:00:00Z",
+      metrics: {
+        likes: { display: "1.2万", value: null },
+        comments: { display: "318", value: 318 },
+      },
+    },
   };
   const markup = renderToStaticMarkup(
     <AippMediaItemCard
@@ -64,6 +88,8 @@ test("renders a media collection record without exposing undeclared fields", () 
   assert.match(markup, /Collected title/);
   assert.match(markup, /Recognized copy/);
   assert.match(markup, /xiaohongshu/);
+  assert.match(markup, /1\.2万/);
+  assert.match(markup, /318/);
   assert.match(markup, /href="https:\/\/example\.test\/source"/);
   assert.match(markup, /referrerPolicy="no-referrer"/);
 });

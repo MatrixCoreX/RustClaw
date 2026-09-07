@@ -14,8 +14,15 @@ export const VIDEO_COLUMNS = [
   "platform_text",
   "recognized_text",
   "cover_screenshot_path",
+  "cover_capture_source",
   "video_page_url",
   "discovered_at",
+  "engagement_captured_at",
+  "views",
+  "likes",
+  "comments",
+  "favorites",
+  "shares",
 ];
 
 export const IMAGE_COLUMNS = [
@@ -34,7 +41,15 @@ export const IMAGE_COLUMNS = [
   "image_url",
   "source_page_url",
   "discovered_at",
+  "engagement_captured_at",
+  "views",
+  "likes",
+  "comments",
+  "favorites",
+  "shares",
 ];
+
+const ENGAGEMENT_COLUMNS = new Set(["views", "likes", "comments", "favorites", "shares"]);
 
 function spreadsheetSafe(value) {
   const text = value == null ? "" : String(value);
@@ -48,9 +63,15 @@ export function csvCell(value) {
 export function renderCsv(columns, records) {
   const lines = [columns.map(csvCell).join(",")];
   for (const record of records) {
-    lines.push(columns.map((column) => csvCell(record[column])).join(","));
+    lines.push(columns.map((column) => csvCell(recordColumnValue(record, column))).join(","));
   }
   return `\uFEFF${lines.join("\r\n")}\r\n`;
+}
+
+function recordColumnValue(record, column) {
+  if (column === "engagement_captured_at") return record.engagement?.captured_at;
+  if (ENGAGEMENT_COLUMNS.has(column)) return record.engagement?.metrics?.[column]?.display;
+  return record[column];
 }
 
 export async function writeAtomic(filePath, content) {

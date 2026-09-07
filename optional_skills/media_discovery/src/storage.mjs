@@ -267,6 +267,47 @@ export async function readRecords(root) {
   return records.filter(Boolean);
 }
 
+async function directoryBytes(directory) {
+  let total = 0;
+  const entries = await fs.readdir(directory, { withFileTypes: true }).catch((error) => {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  });
+  for (const entry of entries) {
+    const target = path.join(directory, entry.name);
+    if (entry.isDirectory()) total += await directoryBytes(target);
+    else if (entry.isFile()) total += (await fs.stat(target)).size;
+  }
+  return total;
+}
+
+export async function clearCollectedData(root) {
+  return withLock(root, async () => {
+    const state = await readStateUnlocked(root);
+    if (activeRunIsFresh(state.active_run)) throw new Error("run_already_active");
+    const records = await readRecords(root);
+    const removable = ["records", "exports", "tmp", "diagnostics"];
+    const removedBytes = (await Promise.all(
+      removable.map((name) => directoryBytes(path.join(root, name))),
+    )).reduce((total, value) => total + value, 0);
+    for (const name of removable) {
+      await fs.rm(path.join(root, name), { recursive: true, force: true });
+    }
+    await ensureLayout(root);
+    await exportRecordCsv(root, []);
+    state.active_run = null;
+    state.stop_after_item_run_id = null;
+    state.runs = [];
+    await writeStateUnlocked(root, state);
+    return {
+      records: records.length,
+      videos: records.filter((record) => record.kind === "video").length,
+      images: records.filter((record) => record.kind === "image").length,
+      bytes: removedBytes,
+    };
+  });
+}
+
 function recordMaxima(records) {
   return records.reduce(
     (maxima, record) => ({

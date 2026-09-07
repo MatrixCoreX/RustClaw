@@ -14,6 +14,103 @@ import { recognizeScreenshot } from "./recognition.mjs";
 const NAVIGATION_TIMEOUT_MS = 45_000;
 const SCREENSHOT_MIN_BYTES = 512;
 
+const ENGAGEMENT_SELECTORS = Object.freeze({
+  douyin: Object.freeze({
+    views: Object.freeze([
+      '[data-e2e="video-views"]',
+      '[data-e2e="video-play-count"]',
+      '[data-e2e="play-count"]',
+    ]),
+    likes: Object.freeze([
+      '[data-e2e="video-player-digg"]',
+      '[data-e2e="video-like-count"]',
+      '[data-e2e="like-count"]',
+      '[data-e2e="digg-count"]',
+    ]),
+    comments: Object.freeze([
+      '[data-e2e="feed-comment-icon"]',
+      '[data-e2e="video-comment-count"]',
+      '[data-e2e="comment-count"]',
+    ]),
+    favorites: Object.freeze([
+      '[data-e2e="video-player-collect"]',
+      '[data-e2e="video-collect-count"]',
+      '[data-e2e="collect-count"]',
+    ]),
+    shares: Object.freeze([
+      '[data-e2e="video-player-share"]',
+      '[data-e2e="video-share-icon-container"]',
+      '[data-e2e="video-share-count"]',
+      '[data-e2e="share-count"]',
+    ]),
+  }),
+  xiaohongshu: Object.freeze({
+    likes: Object.freeze([
+      '[data-testid="like-count"]',
+      '.like-wrapper .count',
+    ]),
+    comments: Object.freeze([
+      '[data-testid="comment-count"]',
+      '.comment-wrapper .count',
+    ]),
+    favorites: Object.freeze([
+      '[data-testid="collect-count"]',
+      '.collect-wrapper .count',
+    ]),
+    shares: Object.freeze([
+      '[data-testid="share-count"]',
+      '.share-wrapper .count',
+    ]),
+  }),
+});
+
+function normalizedMetricDisplay(value) {
+  const display = String(value || "").replaceAll(/\s+/gu, " ").trim();
+  if (
+    !display
+    || display.length > 32
+    || !/\p{Nd}/u.test(display)
+    || [...display].some((character) => /\p{Cc}/u.test(character))
+  ) {
+    return null;
+  }
+  return display;
+}
+
+function exactMetricValue(display) {
+  if (!/^(?:0|[1-9]\d*|[1-9]\d{0,2}(?:,\d{3})+)$/u.test(display)) return null;
+  const value = Number(display.replaceAll(",", ""));
+  return Number.isSafeInteger(value) ? value : null;
+}
+
+export async function captureEngagementMetrics(scope, platform, capturedAt) {
+  const metrics = {};
+  for (const [name, selectors] of Object.entries(ENGAGEMENT_SELECTORS[platform] || {})) {
+    let display = null;
+    for (const selector of selectors) {
+      const candidates = await scope.locator(selector).evaluateAll((nodes) => nodes.map((node) => ({
+        machineValue: node.getAttribute("data-count") || node.getAttribute("data-value") || "",
+        renderedValue: node.textContent || "",
+      })));
+      for (const candidate of candidates) {
+        display = normalizedMetricDisplay(candidate.machineValue)
+          || normalizedMetricDisplay(candidate.renderedValue);
+        if (display) break;
+      }
+      if (display) break;
+    }
+    if (!display) continue;
+    const value = exactMetricValue(display);
+    metrics[name] = value == null ? { display } : { display, value };
+  }
+  return {
+    schema_version: 1,
+    platform,
+    captured_at: capturedAt,
+    metrics,
+  };
+}
+
 export function guiAvailable(environment = process.env, platform = process.platform) {
   if (platform === "darwin") return true;
   if (platform !== "linux") return false;
@@ -103,6 +200,29 @@ export async function discoverCandidates(page, platform, sourceUrl, maxScrolls, 
     await pacedScroll(page, config);
   }
   return discovered.slice(0, limit);
+}
+
+export async function candidatesForDiscoverySource(
+  page,
+  platform,
+  sourceUrl,
+  config,
+  limit,
+  shouldStop,
+) {
+  if ((config.source_mode || "home_feed") === "seed_urls" && isDetailUrl(platform, sourceUrl)) {
+    return [validatePlatformUrl(platform, sourceUrl)];
+  }
+  const candidateBudget = Math.min(100, Math.max(limit * 3, limit + 5));
+  return discoverCandidates(
+    page,
+    platform,
+    sourceUrl,
+    config.max_scrolls_per_source || 10,
+    candidateBudget,
+    shouldStop,
+    config,
+  );
 }
 
 async function pageMetadata(page, platform, requestedUrl) {
@@ -205,6 +325,7 @@ export async function collectRenderedImages({
   discoverySource,
   config,
   discoveredAt,
+  engagement,
 }) {
   const maximum = Math.min(100, config.max_images_per_post || 100);
   const records = [];
@@ -248,6 +369,7 @@ export async function collectRenderedImages({
         image_url: candidate.source,
         source_page_url: sourcePageUrl,
         discovered_at: discoveredAt,
+        engagement,
       });
       added += 1;
       if (records.length >= maximum) break;
@@ -260,16 +382,6 @@ export async function collectRenderedImages({
     records.at(-1).collection_truncated = true;
   }
   return { records, temporaryPaths };
-}
-
-async function visibleVideoIndex(page) {
-  const candidates = await page.locator("video").evaluateAll((videos) =>
-    videos.map((video, index) => {
-      const rect = video.getBoundingClientRect();
-      return { index, area: rect.width * rect.height, visible: rect.width >= 180 && rect.height >= 120 };
-    }),
-  );
-  return candidates.filter((candidate) => candidate.visible).sort((left, right) => right.area - left.area)[0]?.index;
 }
 
 async function screenshotLocator(locator, targetPath) {
@@ -296,12 +408,53 @@ async function persistVideoCover(root, platform, itemId, temporaryPath) {
   return relativePath;
 }
 
-async function renderedVideoCover(scope) {
-  const visibleVideo = scope.locator("video:visible").first();
-  if ((await visibleVideo.count()) > 0) return visibleVideo;
-  const visibleImage = scope.locator("img:visible").first();
-  if ((await visibleImage.count()) > 0) return visibleImage;
-  return scope;
+const VIDEO_COVER_SELECTORS = Object.freeze({
+  douyin: Object.freeze({
+    rendered_video_frame: Object.freeze([
+      '[data-e2e="video-player"] video:visible',
+      'video:visible',
+    ]),
+    rendered_poster_image: Object.freeze([
+      '[data-e2e="video-poster"] img:visible',
+      '[data-e2e="video-cover"] img:visible',
+    ]),
+  }),
+  xiaohongshu: Object.freeze({
+    rendered_video_frame: Object.freeze([
+      '.video-player video:visible',
+      'video:visible',
+    ]),
+    rendered_poster_image: Object.freeze([
+      '.video-player img:visible',
+      '.note-slider img:visible',
+      '.swiper img:visible',
+    ]),
+  }),
+});
+
+async function locatorIsUsableCover(locator) {
+  return locator.evaluate((node) => {
+    const rect = node.getBoundingClientRect();
+    if (rect.width < 180 || rect.height < 120) return false;
+    const x = Math.min(window.innerWidth - 1, Math.max(0, rect.left + rect.width / 2));
+    const y = Math.min(window.innerHeight - 1, Math.max(0, rect.top + rect.height / 2));
+    const topNode = document.elementFromPoint(x, y);
+    return topNode === node || node.contains(topNode);
+  }).catch(() => false);
+}
+
+export async function renderedVideoCover(scope, platform) {
+  for (const [source, selectors] of Object.entries(VIDEO_COVER_SELECTORS[platform] || {})) {
+    for (const selector of selectors) {
+      const candidates = scope.locator(selector);
+      const count = Math.min(await candidates.count(), 8);
+      for (let index = 0; index < count; index += 1) {
+        const locator = candidates.nth(index);
+        if (await locatorIsUsableCover(locator)) return { locator, source };
+      }
+    }
+  }
+  return null;
 }
 
 async function freezeVideoIfPresent(locator) {
@@ -335,20 +488,15 @@ async function collectPage(page, root, runId, platform, itemUrl, config, discove
   const metadata = await pageMetadata(page, platform, itemUrl);
   const itemId = platformItemId(platform, metadata.canonical);
   const discoveredAt = new Date().toISOString();
+  const engagement = await captureEngagementMetrics(page, platform, discoveredAt);
   const temporaryRoot = path.join(root, "tmp", runId);
   const recognitionMode = config.recognition_mode || "ocr_reviewed";
   if (metadata.hasVideo) {
     const screenshotPath = path.join(temporaryRoot, `${itemId.replaceAll(":", "_")}-video.png`);
-    const videoIndex = await visibleVideoIndex(page);
-    if (Number.isInteger(videoIndex)) {
-      const video = page.locator("video").nth(videoIndex);
-      await freezeVideoIfPresent(video);
-      await screenshotLocator(video, screenshotPath);
-    } else {
-      const covers = await visibleImageCandidates(page, 1);
-      if (covers.length === 0) throw new Error("media_element_not_found");
-      await screenshotLocator(page.locator("img").nth(covers[0].index), screenshotPath);
-    }
+    const cover = await renderedVideoCover(page, platform);
+    if (!cover) throw new Error("media_element_not_found");
+    await freezeVideoIfPresent(cover.locator);
+    await screenshotLocator(cover.locator, screenshotPath);
     const recognition = await recognizeScreenshot(screenshotPath, recognitionMode);
     const coverScreenshotPath = await persistVideoCover(root, platform, itemId, screenshotPath);
     return {
@@ -367,8 +515,10 @@ async function collectPage(page, root, runId, platform, itemUrl, config, discove
         raw_recognized_text: recognition.raw_text,
         recognition,
         cover_screenshot_path: coverScreenshotPath,
+        cover_capture_source: cover.source,
         video_page_url: metadata.canonical,
         discovered_at: discoveredAt,
+        engagement,
       }],
       temporaryPaths: [screenshotPath],
     };
@@ -385,6 +535,7 @@ async function collectPage(page, root, runId, platform, itemUrl, config, discove
     discoverySource,
     config,
     discoveredAt,
+    engagement,
   });
 }
 
@@ -396,6 +547,8 @@ async function collectDouyinFeedCard(page, root, runId, locator, itemId, config,
       "",
     platformText: node.innerText || "",
   }));
+  const discoveredAt = new Date().toISOString();
+  const engagement = await captureEngagementMetrics(locator, "douyin", discoveredAt);
   const pageUrl = `https://www.douyin.com/video/${itemId}`;
   const visibleVideoCount = await locator.locator("video:visible").count();
   const visibleImages = await visibleImageCandidates(locator, 3);
@@ -416,13 +569,15 @@ async function collectDouyinFeedCard(page, root, runId, locator, itemId, config,
       sourcePageUrl: pageUrl,
       discoverySource,
       config,
-      discoveredAt: new Date().toISOString(),
+      discoveredAt,
+      engagement,
     });
   }
   const screenshotPath = path.join(root, "tmp", runId, `douyin_${itemId}-video.png`);
-  const cover = await renderedVideoCover(locator);
-  await freezeVideoIfPresent(cover);
-  await screenshotLocator(cover, screenshotPath);
+  const cover = await renderedVideoCover(locator, "douyin");
+  if (!cover) throw new Error("media_element_not_found");
+  await freezeVideoIfPresent(cover.locator);
+  await screenshotLocator(cover.locator, screenshotPath);
   const recognition = await recognizeScreenshot(
     screenshotPath,
     config.recognition_mode || "ocr_reviewed",
@@ -444,8 +599,10 @@ async function collectDouyinFeedCard(page, root, runId, locator, itemId, config,
       raw_recognized_text: recognition.raw_text,
       recognition,
       cover_screenshot_path: coverScreenshotPath,
+      cover_capture_source: cover.source,
       video_page_url: pageUrl,
-      discovered_at: new Date().toISOString(),
+      discovered_at: discoveredAt,
+      engagement,
     }],
     temporaryPaths: [screenshotPath],
   };
@@ -546,15 +703,13 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
         );
         continue;
       }
-      const candidateBudget = Math.min(100, Math.max(limit * 3, limit + 5));
-      const candidates = await discoverCandidates(
+      const candidates = await candidatesForDiscoverySource(
         page,
         platform,
         sourceUrl,
-        config.max_scrolls_per_source || 10,
-        candidateBudget,
-        shouldStop,
         config,
+        limit - handled,
+        shouldStop,
       );
       if (candidates.length === 0 && (await page.locator('input[type="password"]').count()) > 0) {
         throw new Error("login_required");
