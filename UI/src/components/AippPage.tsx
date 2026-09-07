@@ -224,7 +224,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
           : "",
       );
     } catch (cause) {
-      setError(formatUiError(cause, translateRef.current, "AiPP 列表读取失败。", "Could not load the AiPP catalog."));
+      setError(formatUiError(cause, translateRef.current, "AiAPP 列表读取失败。", "Could not load the AiAPP catalog."));
     } finally {
       setCatalogLoading(false);
     }
@@ -310,9 +310,9 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
         <div className="flex items-start gap-3">
           <GalleryVerticalEnd className="mt-0.5 h-6 w-6 text-white/65" />
           <div className="min-w-0">
-            <h1 className="text-lg font-semibold text-white">AiPP</h1>
+            <h1 className="text-lg font-semibold text-white">AiAPP</h1>
             <p className={`mt-2 text-sm leading-6 ${error ? "text-red-200" : "text-white/60"}`}>
-              {error || t("当前没有已启用技能提供 AiPP。", "No enabled skill currently provides an AiPP.")}
+              {error || t("当前没有已启用技能提供 AiAPP。", "No enabled skill currently provides an AiAPP.")}
             </p>
             <button type="button" className="theme-secondary-btn mt-4 px-3 py-2 text-sm" onClick={onOpenSkillStore}>
               {t("打开 Skill Store", "Open Skill Store")}
@@ -327,7 +327,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
     return (
       <section className="space-y-4">
         <header>
-          <p className="text-xs font-medium text-white/45">AiPP</p>
+          <p className="text-xs font-medium text-white/45">AiAPP</p>
           <h1 className="mt-1 text-xl font-semibold text-white">{t("应用", "Apps")}</h1>
         </header>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -357,7 +357,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
             <ArrowLeft className="h-4 w-4" />
           </button>
           <div className="min-w-0">
-            <p className="text-xs font-medium text-white/45">AiPP</p>
+            <p className="text-xs font-medium text-white/45">AiAPP</p>
             <h1 className="mt-1 text-xl font-semibold text-white">
               {localizedAippCopy(selectedApp.titles, lang, selectedApp.default_locale)}
             </h1>
@@ -378,7 +378,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
       </header>
 
       {catalog.length > 1 ? (
-        <div className="flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="AiPP">
+        <div className="flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="AiAPP">
           {catalog.map((app) => (
             <button
               key={app.skill_name}

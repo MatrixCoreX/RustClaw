@@ -16,7 +16,7 @@ Current repository highlights:
 - shared skill dispatch with in-process builtins, external adapters, and runner subprocesses through `skill-runner`
 - built-in, external, and runner-based skills for system, files, web, image, audio, video, music, NNI, crypto, KB, and automation tasks
 - local browser UI in `UI/`, including Dashboard, Agent, Models, Tasks,
-  Communication Setup, Account Binding, Tools/Skills, AiPP, Skill Store, Memory,
+  Communication Setup, Account Binding, Tools/Skills, AiAPP, Skill Store, Memory,
   Logs, and Learning / Maintenance pages
 - Raspberry Pi / small-screen desktop app in `pi_app/`
 - shared Linux/macOS runtime contracts, with fail-closed Bubblewrap and

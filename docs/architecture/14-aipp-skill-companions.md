@@ -15,7 +15,7 @@ Agent to start, stop, or change work, while AiPP presents the persisted results.
 
 ## Current User Flow
 
-The top-level AiPP page appears for administrators. Its catalog contains only
+The top-level UI entry is named AiAPP and appears for administrators. Its catalog contains only
 enabled packages whose exact admitted manifest declares a supported `[aipp]`
 contract. The first view arranges those packages as application launchers; a
 user selects one launcher before its task-oriented view opens. Media Discovery
