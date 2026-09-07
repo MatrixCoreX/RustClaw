@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowLeft,
   Bot,
+  ChevronRight,
   ExternalLink,
   GalleryVerticalEnd,
   Image as ImageIcon,
   LoaderCircle,
+  PanelsTopLeft,
   RefreshCw,
   Search,
   Video,
@@ -36,6 +39,44 @@ export function localizedAippCopy(
   fallbackLocale: string,
 ): string {
   return values[lang] || values[fallbackLocale] || Object.values(values)[0] || "";
+}
+
+function AippIcon({ icon, className }: { icon: string; className?: string }) {
+  if (icon === "gallery_vertical_end") {
+    return <GalleryVerticalEnd className={className} />;
+  }
+  return <PanelsTopLeft className={className} />;
+}
+
+export function AippCatalogCard({
+  app,
+  lang,
+  onOpen,
+}: {
+  app: AippCatalogItem;
+  lang: "zh" | "en";
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="theme-panel group flex min-h-44 w-full flex-col items-start p-5 text-left transition hover:-translate-y-0.5 hover:border-white/20"
+      onClick={onOpen}
+    >
+      <span className="flex h-12 w-12 items-center justify-center rounded-lg border border-white/10 bg-white/6 text-white/80">
+        <AippIcon icon={app.icon} className="h-6 w-6" />
+      </span>
+      <span className="mt-4 flex w-full min-w-0 items-center gap-2">
+        <span className="min-w-0 flex-1 text-base font-semibold text-white/90">
+          {localizedAippCopy(app.titles, lang, app.default_locale)}
+        </span>
+        <ChevronRight className="h-4 w-4 shrink-0 text-white/35 transition group-hover:translate-x-0.5 group-hover:text-white/65" />
+      </span>
+      <span className="mt-2 line-clamp-3 text-sm leading-6 text-white/55">
+        {localizedAippCopy(app.descriptions, lang, app.default_locale)}
+      </span>
+    </button>
+  );
 }
 
 function formatCollectedAt(value: string | null, lang: "zh" | "en"): string {
@@ -180,7 +221,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
       setSelectedSkill((current) =>
         body.data?.apps.some((app) => app.skill_name === current)
           ? current
-          : body.data?.apps[0]?.skill_name || "",
+          : "",
       );
     } catch (cause) {
       setError(formatUiError(cause, translateRef.current, "AiPP 列表读取失败。", "Could not load the AiPP catalog."));
@@ -282,19 +323,48 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
     );
   }
 
+  if (!selectedApp) {
+    return (
+      <section className="space-y-4">
+        <header>
+          <p className="text-xs font-medium text-white/45">AiPP</p>
+          <h1 className="mt-1 text-xl font-semibold text-white">{t("应用", "Apps")}</h1>
+        </header>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {catalog.map((app) => (
+            <AippCatalogCard
+              key={app.skill_name}
+              app={app}
+              lang={lang}
+              onOpen={() => setSelectedSkill(app.skill_name)}
+            />
+          ))}
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="space-y-4">
       <header className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
-        <div className="min-w-0">
-          <p className="text-xs font-medium text-white/45">AiPP</p>
-          <h1 className="mt-1 text-xl font-semibold text-white">
-            {selectedApp ? localizedAippCopy(selectedApp.titles, lang, selectedApp.default_locale) : "-"}
-          </h1>
-          {selectedApp ? (
+        <div className="flex min-w-0 items-start gap-3">
+          <button
+            type="button"
+            className="theme-icon-btn mt-0.5 h-9 w-9 shrink-0"
+            onClick={() => setSelectedSkill("")}
+            title={t("返回应用列表", "Back to apps")}
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </button>
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-white/45">AiPP</p>
+            <h1 className="mt-1 text-xl font-semibold text-white">
+              {localizedAippCopy(selectedApp.titles, lang, selectedApp.default_locale)}
+            </h1>
             <p className="mt-1 max-w-3xl text-sm leading-6 text-white/58">
               {localizedAippCopy(selectedApp.descriptions, lang, selectedApp.default_locale)}
             </p>
-          ) : null}
+          </div>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
           <button type="button" className="theme-secondary-btn px-3 py-2 text-sm" onClick={onOpenAgent}>
