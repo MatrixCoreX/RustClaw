@@ -584,3 +584,57 @@ fn ui_fallback_only_accepts_files_in_managed_delivery_tree() {
     ));
     fs::remove_dir_all(workspace).ok();
 }
+
+#[test]
+fn duplicate_content_manifests_produce_one_channel_attachment() {
+    let workspace = temp_workspace("task_delivery_duplicate_content");
+    let task_id = "task-duplicate-content";
+    let first_id = "artifact-first";
+    let second_id = "artifact-second";
+    let first_path =
+        write_delivery_artifact(&workspace, task_id, first_id, "first.webp", b"same-image");
+    write_delivery_artifact(&workspace, task_id, second_id, "second.webp", b"same-image");
+    let mut result = result_with_artifact(
+        task_id,
+        first_id,
+        "first.webp",
+        "image",
+        "image/webp",
+        10,
+        Some(true),
+    );
+    result["artifacts"]
+        .as_array_mut()
+        .expect("artifacts array")
+        .push(serde_json::json!({
+            "schema_version": 1,
+            "id": second_id,
+            "filename": "second.webp",
+            "kind": "image",
+            "mime_type": "image/webp",
+            "size_bytes": 10,
+            "sha256": "a".repeat(64),
+            "download_url": format!(
+                "/v1/tasks/{task_id}/artifacts/{second_id}/content"
+            )
+        }));
+
+    let messages = merge_task_artifact_delivery_messages(
+        task_id,
+        Some(&result),
+        &workspace,
+        vec!["done".to_string()],
+    );
+
+    assert_eq!(
+        messages,
+        vec![format!(
+            "done\nIMAGE_FILE:{}",
+            first_path
+                .canonicalize()
+                .expect("canonical first")
+                .display()
+        )]
+    );
+    fs::remove_dir_all(workspace).ok();
+}

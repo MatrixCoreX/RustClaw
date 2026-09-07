@@ -939,6 +939,60 @@ class ShareTextTest(unittest.TestCase):
             self.assertEqual((output_dir / "silent.mp4").read_bytes(), b"best")
             handled.assert_called_once_with(output_dir / "silent.mp4", args)
 
+    def test_download_image_candidates_deduplicates_identical_content(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+
+            def fake_download(_candidate, output_path, **_kwargs):
+                output_path.write_bytes(b"same-image")
+                return output_path
+
+            candidates = [
+                self.downloader.ImageCandidate("https://p.test/first.jpg", "test", 1),
+                self.downloader.ImageCandidate("https://p.test/second.jpg", "test", 2),
+            ]
+            with mock.patch.object(
+                self.downloader,
+                "download_image_candidate",
+                side_effect=fake_download,
+            ):
+                paths = self.downloader.download_image_candidates(
+                    candidates,
+                    output_dir,
+                    output_name="note",
+                )
+
+            self.assertEqual([path.name for path in paths], ["note_01.jpg"])
+            self.assertFalse((output_dir / "note_02.jpg").exists())
+
+    def test_download_image_candidates_preserves_distinct_content_order(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+
+            def fake_download(candidate, output_path, **_kwargs):
+                output_path.write_bytes(candidate.url.encode("utf-8"))
+                return output_path
+
+            candidates = [
+                self.downloader.ImageCandidate("https://p.test/first.jpg", "test", 1),
+                self.downloader.ImageCandidate("https://p.test/second.jpg", "test", 2),
+            ]
+            with mock.patch.object(
+                self.downloader,
+                "download_image_candidate",
+                side_effect=fake_download,
+            ):
+                paths = self.downloader.download_image_candidates(
+                    candidates,
+                    output_dir,
+                    output_name="note",
+                )
+
+            self.assertEqual(
+                [path.name for path in paths],
+                ["note_01.jpg", "note_02.jpg"],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
