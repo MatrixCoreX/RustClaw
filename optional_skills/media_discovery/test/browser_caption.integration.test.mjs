@@ -83,3 +83,17 @@ test("combines Xiaohongshu title and description as the author caption", {
   const caption = await capturePlatformCaption(page, "xiaohongshu", "metadata fallback");
   assert.equal(caption, "週末散歩\n静かな午後。\n#日記");
 });
+
+test("extracts a Kuaishou author caption from a rendered feed card", {
+  skip: !RUN_BROWSER_TEST,
+}, async (t) => {
+  const page = await withPage(t, `
+    <article class="video-card">
+      <h5 class="video-info-title">Una receta sencilla<br>#cocina</h5>
+      <div class="video-info-content"><i class="like-icon"></i><span class="info-text">318</span></div>
+    </article>
+  `);
+
+  const caption = await capturePlatformCaption(page.locator("article"), "kuaishou");
+  assert.equal(caption, "Una receta sencilla\n#cocina");
+});
