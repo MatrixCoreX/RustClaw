@@ -27,15 +27,16 @@ test("groups only the three requested NNI navigation entries", () => {
   assert.equal(isNniNavigationPage("dashboard"), false);
 });
 
-test("stacks the NNI navigation visibility controls on two rows", () => {
+test("lays out dashboard section buttons in two desktop rows", () => {
   const source = readFileSync(new URL("../components/DashboardPage.tsx", import.meta.url), "utf8");
-  const controls = source.match(
-    /data-nni-navigation-controls-layout="stacked"[\s\S]*?className="([^"]+)"/,
+  const navigation = source.match(
+    /data-dashboard-section-layout="two-rows"[\s\S]*?className="([^"]+)"/,
   );
 
-  assert.ok(controls);
-  assert.match(controls[1], /\bgrid-cols-1\b/);
-  assert.doesNotMatch(controls[1], /\bgrid-cols-2\b/);
+  assert.ok(navigation);
+  assert.match(navigation[1], /\bgrid\b/);
+  assert.match(navigation[1], /\blg:grid-cols-6\b/);
+  assert.doesNotMatch(navigation[1], /\bflex\b/);
 });
 
 test("opens quick setup until required setup is complete", () => {
