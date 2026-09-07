@@ -21,8 +21,9 @@ contract. The first view arranges those packages as application launchers; a
 user selects one launcher before its task-oriented view opens. The browser
 persists that selection in the neutral product storage namespace, so a refresh
 returns to the same application. Media Discovery presents current collection
-state, image and video records, recognized text, capture-time platform
-engagement counters, source links, filters, and stable cursor pagination. Video
+state, image and video records, author-provided post captions, separately
+recognized visual text, capture-time platform engagement counters, source links,
+filters, and stable cursor pagination. Video
 covers are best-effort platform adapters: the collector uses an unobscured
 rendered video frame or a platform-specific rendered poster and never
 substitutes a page or login screenshot. Available covers are served from the

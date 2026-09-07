@@ -64,6 +64,77 @@ const ENGAGEMENT_SELECTORS = Object.freeze({
   }),
 });
 
+const PLATFORM_CAPTION_SELECTOR_GROUPS = Object.freeze({
+  douyin: Object.freeze([
+    Object.freeze([
+      '[data-e2e="detail-video-info"] h1',
+      '[data-e2e="feed-video-desc"]',
+      '[data-e2e="video-desc"]',
+      '[data-e2e="video-title"]',
+      '[data-e2e="feed-video-title"]',
+    ]),
+  ]),
+  xiaohongshu: Object.freeze([
+    Object.freeze([
+      '[data-testid="note-title"]',
+      '#detail-title',
+      '.note-content .title',
+    ]),
+    Object.freeze([
+      '[data-testid="note-desc"]',
+      '#detail-desc',
+      '.note-content .desc',
+    ]),
+  ]),
+});
+
+function normalizedPlatformText(value) {
+  return String(value || "")
+    .replaceAll("\r\n", "\n")
+    .replaceAll("\r", "\n")
+    .split("\n")
+    .map((line) => line
+      .replaceAll(/[\t\p{Zs}]+/gu, " ")
+      .replaceAll(/\p{Cc}/gu, "")
+      .trim())
+    .filter(Boolean)
+    .join("\n")
+    .trim()
+    .slice(0, 32_768);
+}
+
+async function firstSelectorText(scope, selectors) {
+  for (const selector of selectors) {
+    const values = await scope.locator(selector).evaluateAll((nodes) =>
+      nodes.map((node) => node.innerText || node.textContent || ""),
+    ).catch(() => []);
+    for (const value of values) {
+      const normalized = normalizedPlatformText(value);
+      if (normalized) return normalized;
+    }
+  }
+  return "";
+}
+
+function appendDistinctText(parts, candidate) {
+  if (!candidate || parts.some((part) => part === candidate || part.includes(candidate))) return;
+  const containedIndex = parts.findIndex((part) => candidate.includes(part));
+  if (containedIndex >= 0) parts[containedIndex] = candidate;
+  else parts.push(candidate);
+}
+
+export async function capturePlatformCaption(scope, platform, fallback = "") {
+  const groups = PLATFORM_CAPTION_SELECTOR_GROUPS[platform] || [];
+  const parts = [];
+  for (const selectors of groups) {
+    appendDistinctText(parts, await firstSelectorText(scope, selectors));
+  }
+  const fallbackText = normalizedPlatformText(fallback);
+  if (parts.length === 0) return fallbackText;
+  if (parts.length < groups.length) appendDistinctText(parts, fallbackText);
+  return parts.join("\n");
+}
+
 function normalizedMetricDisplay(value) {
   const display = String(value || "").replaceAll(/\s+/gu, " ").trim();
   if (
@@ -243,7 +314,11 @@ async function pageMetadata(page, platform, requestedUrl) {
   } catch {
     // Keep the already validated requested URL when a page supplies an invalid canonical value.
   }
-  return { ...metadata, canonical: canonicalUrl };
+  return {
+    ...metadata,
+    canonical: canonicalUrl,
+    platformText: await capturePlatformCaption(page, platform, metadata.description),
+  };
 }
 
 async function visibleImageCandidates(page, maximum) {
@@ -510,7 +585,7 @@ async function collectPage(page, root, runId, platform, itemUrl, config, discove
         discovery_source_url: discoverySource.url,
         item_id: itemId,
         title: metadata.title,
-        platform_text: metadata.description,
+        platform_text: metadata.platformText,
         recognized_text: recognition.text,
         raw_recognized_text: recognition.raw_text,
         recognition,
@@ -530,7 +605,7 @@ async function collectPage(page, root, runId, platform, itemUrl, config, discove
     platform,
     itemId,
     title: metadata.title,
-    platformText: metadata.description,
+    platformText: metadata.platformText,
     sourcePageUrl: metadata.canonical,
     discoverySource,
     config,
@@ -545,8 +620,8 @@ async function collectDouyinFeedCard(page, root, runId, locator, itemId, config,
       node.getAttribute("aria-label") ||
       node.querySelector("img")?.getAttribute("alt") ||
       "",
-    platformText: node.innerText || "",
   }));
+  const platformText = await capturePlatformCaption(locator, "douyin", card.title);
   const discoveredAt = new Date().toISOString();
   const engagement = await captureEngagementMetrics(locator, "douyin", discoveredAt);
   const pageUrl = `https://www.douyin.com/video/${itemId}`;
@@ -565,7 +640,7 @@ async function collectDouyinFeedCard(page, root, runId, locator, itemId, config,
       platform: "douyin",
       itemId: `douyin:${itemId}`,
       title: card.title,
-      platformText: card.platformText,
+      platformText,
       sourcePageUrl: pageUrl,
       discoverySource,
       config,
@@ -594,7 +669,7 @@ async function collectDouyinFeedCard(page, root, runId, locator, itemId, config,
       discovery_source_url: discoverySource.url,
       item_id: `douyin:${itemId}`,
       title: card.title,
-      platform_text: card.platformText,
+      platform_text: platformText,
       recognized_text: recognition.text,
       raw_recognized_text: recognition.raw_text,
       recognition,
