@@ -86,3 +86,22 @@ test("captures only the engagement controls exposed by Xiaohongshu", {
   assert.equal(engagement.metrics.comments, undefined);
   assert.equal(engagement.metrics.views, undefined);
 });
+
+test("captures Kuaishou likes from the card's structural control", {
+  skip: !RUN_BROWSER_TEST,
+}, async (t) => {
+  const page = await withPage(t, `
+    <article class="video-card">
+      <div class="video-info-content"><i class="like-icon"></i><span class="info-text">12,004</span></div>
+      <p>shares 999999 is ordinary post text</p>
+    </article>
+  `);
+  const engagement = await captureEngagementMetrics(
+    page.locator("article"),
+    "kuaishou",
+    "2026-09-07T01:02:03.000Z",
+  );
+
+  assert.deepEqual(engagement.metrics.likes, { display: "12,004", value: 12004 });
+  assert.equal(engagement.metrics.shares, undefined);
+});

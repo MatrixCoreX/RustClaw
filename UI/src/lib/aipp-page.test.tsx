@@ -31,7 +31,7 @@ test("restores the selected AiAPP after a browser refresh", () => {
 test("renders an installed AiPP as an application launcher card", () => {
   const app: AippCatalogItem = {
     skill_name: "media_discovery",
-    package_version: "0.1.26",
+    package_version: "0.1.27",
     renderer: "collection_feed_v1",
     data_contract: "media_collection_v1",
     icon: "gallery_vertical_end",

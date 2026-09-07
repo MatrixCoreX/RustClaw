@@ -3,7 +3,7 @@
 ## Capability Summary
 
 Run explicitly requested batch, feed, keyword, scheduled, or continuous
-browser collection for Douyin and Xiaohongshu. A lone copied share payload or
+browser collection for Douyin, Xiaohongshu, and Kuaishou. A lone copied share payload or
 URL whose content should be downloaded and returned now belongs to
 `media_download.download`, even when it is used as a `seed_urls` input shape;
 this skill does not provide immediate single-post media delivery. The default
@@ -123,6 +123,8 @@ Examples of equivalent intent (documentation examples, not runtime matchers):
   the first batch.
 - `停止采集抖音` -> disable Douyin and remove its structured schedule jobs.
 - `Start collecting Xiaohongshu posts` -> the same workflow for Xiaohongshu.
+- `Collect a small Kuaishou recommendation batch` -> run one bounded Kuaishou
+  `home_feed` batch without enabling a schedule.
 - `搜索露营装备并采集小红书内容` -> use `source_mode=topics` and
   `topics=["露营装备"]` for Xiaohongshu.
 - `Arrête la collecte de Xiaohongshu` -> disable only Xiaohongshu.
@@ -132,7 +134,7 @@ Examples of equivalent intent (documentation examples, not runtime matchers):
 | Param | Required | Description |
 |---|---:|---|
 | `action` | yes | One action listed below. |
-| `platform` or `platforms` | enable/preview | `douyin` and/or `xiaohongshu`. |
+| `platform` or `platforms` | enable/preview | `douyin`, `xiaohongshu`, and/or `kuaishou`. |
 | `source_mode` | no | `home_feed` (default), `topics`, or `seed_urls`. |
 | `topics` | for topics | One or more exact search keywords, browsed in input order. |
 | `seed_urls` | for seed_urls | HTTPS URLs on the selected platform only. |

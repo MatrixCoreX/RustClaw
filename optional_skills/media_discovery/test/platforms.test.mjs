@@ -27,12 +27,20 @@ test("candidate discovery uses URL contracts rather than page language", () => {
   ]);
   assert.deepEqual(values, ["https://www.xiaohongshu.com/explore/abc"]);
   assert.equal(isDetailUrl("douyin", "https://www.douyin.com/video/123"), true);
+  assert.equal(isDetailUrl("kuaishou", "https://www.kuaishou.com/short-video/3xexample123"), true);
+  assert.equal(isDetailUrl("kuaishou", "https://www.kuaishou.com/short-video/%E7%83%AD%E6%90%9C%E8%AF%8D"), false);
 });
 
 test("home feed and topic sources are explicit schema modes", () => {
   assert.deepEqual(sourceUrls("douyin", { source_mode: "home_feed" }), ["https://www.douyin.com/"]);
   assert.deepEqual(sourceUrls("xiaohongshu", { source_mode: "topics", topics: ["AI agent"] }), [
     "https://www.xiaohongshu.com/search_result?keyword=AI%20agent",
+  ]);
+  assert.deepEqual(sourceUrls("kuaishou", { source_mode: "home_feed" }), [
+    "https://www.kuaishou.com/brilliant",
+  ]);
+  assert.deepEqual(sourceUrls("kuaishou", { source_mode: "topics", topics: ["AI agent"] }), [
+    "https://www.kuaishou.com/search/video?searchKey=AI%20agent",
   ]);
 });
 

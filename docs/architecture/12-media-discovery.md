@@ -10,10 +10,15 @@ Next: [NNI capability and heartbeat control](13-nni-capability.md)
 <!-- ai-learning-navigation:end -->
 
 `media_discovery` is an optional Skill Store capability for bounded discovery on
-Douyin and Xiaohongshu. It runs silently by default and opens a visible browser
+Douyin, Xiaohongshu, and Kuaishou. It runs silently by default and opens a visible browser
 only when the user explicitly requests visible or non-silent operation. Both modes recognize only
 content that the browser has already rendered and export ordered CSV records;
 neither downloads video binaries or original image files.
+
+Kuaishou recommendation collection reads the rendered public feed card itself:
+the stable work URL, author caption, visible poster, and structurally identified
+like counter. It rejects keyword-shaped hot-list pseudo-links at the URL-contract
+boundary and does not enter a challenged detail page merely to enrich a card.
 
 For keyword discovery, the agent emits `source_mode=topics` with `topics[]`.
 The skill visits each platform search result in that order and writes the exact

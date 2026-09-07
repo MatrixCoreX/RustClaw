@@ -62,6 +62,12 @@ const ENGAGEMENT_SELECTORS = Object.freeze({
       '.share-wrapper .count',
     ]),
   }),
+  kuaishou: Object.freeze({
+    likes: Object.freeze([
+      '.interactive-item.like-item .item-count',
+      '.video-info-content:has(.like-icon) .info-text',
+    ]),
+  }),
 });
 
 const PLATFORM_CAPTION_SELECTOR_GROUPS = Object.freeze({
@@ -84,6 +90,12 @@ const PLATFORM_CAPTION_SELECTOR_GROUPS = Object.freeze({
       '[data-testid="note-desc"]',
       '#detail-desc',
       '.note-content .desc',
+    ]),
+  ]),
+  kuaishou: Object.freeze([
+    Object.freeze([
+      '.short-video-info-container-detail .video-info-title',
+      '.video-info-title',
     ]),
   ]),
 });
@@ -505,17 +517,27 @@ const VIDEO_COVER_SELECTORS = Object.freeze({
       '.swiper img:visible',
     ]),
   }),
+  kuaishou: Object.freeze({
+    rendered_video_frame: Object.freeze([
+      '.player-video:visible',
+      'video:visible',
+    ]),
+    rendered_poster_image: Object.freeze([
+      '.video-card .poster-img:visible',
+      '.poster .poster-img:visible',
+    ]),
+  }),
 });
 
-async function locatorIsUsableCover(locator) {
-  return locator.evaluate((node) => {
+async function locatorIsUsableCover(locator, minimumWidth = 180) {
+  return locator.evaluate((node, widthFloor) => {
     const rect = node.getBoundingClientRect();
-    if (rect.width < 180 || rect.height < 120) return false;
+    if (rect.width < widthFloor || rect.height < 120) return false;
     const x = Math.min(window.innerWidth - 1, Math.max(0, rect.left + rect.width / 2));
     const y = Math.min(window.innerHeight - 1, Math.max(0, rect.top + rect.height / 2));
     const topNode = document.elementFromPoint(x, y);
     return topNode === node || node.contains(topNode);
-  }).catch(() => false);
+  }, minimumWidth).catch(() => false);
 }
 
 export async function renderedVideoCover(scope, platform) {
@@ -525,7 +547,8 @@ export async function renderedVideoCover(scope, platform) {
       const count = Math.min(await candidates.count(), 8);
       for (let index = 0; index < count; index += 1) {
         const locator = candidates.nth(index);
-        if (await locatorIsUsableCover(locator)) return { locator, source };
+        const minimumWidth = platform === "kuaishou" ? 140 : 180;
+        if (await locatorIsUsableCover(locator, minimumWidth)) return { locator, source };
       }
     }
   }
@@ -738,6 +761,129 @@ async function collectDouyinHomeFeed(
   return handled;
 }
 
+async function collectKuaishouFeedCard(
+  root,
+  runId,
+  locator,
+  itemUrl,
+  config,
+  discoverySource,
+) {
+  const card = await locator.evaluate((node) => ({
+    title:
+      node.querySelector(".video-info-title")?.textContent ||
+      node.querySelector("img")?.getAttribute("alt") ||
+      "",
+  }));
+  const itemId = platformItemId("kuaishou", itemUrl);
+  const platformText = await capturePlatformCaption(locator, "kuaishou", card.title);
+  const discoveredAt = new Date().toISOString();
+  const engagement = await captureEngagementMetrics(locator, "kuaishou", discoveredAt);
+  const screenshotPath = path.join(
+    root,
+    "tmp",
+    runId,
+    `${itemId.replaceAll(":", "_")}-video.png`,
+  );
+  const cover = await renderedVideoCover(locator, "kuaishou");
+  if (!cover) throw new Error("media_element_not_found");
+  await screenshotLocator(cover.locator, screenshotPath);
+  const recognition = await recognizeScreenshot(
+    screenshotPath,
+    config.recognition_mode || "ocr_reviewed",
+  );
+  const coverScreenshotPath = await persistVideoCover(root, "kuaishou", itemId, screenshotPath);
+  return {
+    records: [{
+      kind: "video",
+      dedup_key: `${itemId}:video`,
+      platform: "kuaishou",
+      browser_mode: config.browser_mode || "silent",
+      source_mode: discoverySource.source_mode,
+      search_keyword: discoverySource.search_keyword || "",
+      discovery_source_url: discoverySource.url,
+      item_id: itemId,
+      title: normalizedPlatformText(card.title),
+      platform_text: platformText,
+      recognized_text: recognition.text,
+      raw_recognized_text: recognition.raw_text,
+      recognition,
+      cover_screenshot_path: coverScreenshotPath,
+      cover_capture_source: cover.source,
+      video_page_url: itemUrl,
+      discovered_at: discoveredAt,
+      engagement,
+    }],
+    temporaryPaths: [screenshotPath],
+  };
+}
+
+async function collectKuaishouHomeFeed(
+  page,
+  root,
+  runId,
+  config,
+  discoverySource,
+  limit,
+  shouldStop,
+  onPage,
+  onFailure,
+) {
+  const seen = new Set();
+  let handled = 0;
+  let lastError = null;
+  const maxScrolls = config.max_scrolls_per_source || 10;
+  await page.waitForFunction(
+    () => [...document.querySelectorAll('.video-card a[href*="/short-video/"]')]
+      .some((anchor) => {
+        try {
+          return /^\/short-video\/[A-Za-z0-9_-]{8,}(?:\/|$)/u.test(new URL(anchor.href).pathname);
+        } catch {
+          return false;
+        }
+      }),
+    undefined,
+    { timeout: NAVIGATION_TIMEOUT_MS },
+  ).catch(() => {});
+  for (let scroll = 0; scroll <= maxScrolls && handled < limit; scroll += 1) {
+    const cards = await page.locator(".video-card").evaluateAll((nodes) =>
+      nodes.map((node, index) => {
+        const rect = node.getBoundingClientRect();
+        return {
+          index,
+          itemUrl: node.querySelector('a[href*="/short-video/"]')?.href || "",
+          visible: rect.width >= 140 && rect.height >= 120 && rect.bottom > 0 && rect.top < window.innerHeight,
+        };
+      }),
+    );
+    for (const card of cards) {
+      if (handled >= limit || (await shouldStop())) break;
+      if (!card.visible || !isDetailUrl("kuaishou", card.itemUrl) || seen.has(card.itemUrl)) continue;
+      seen.add(card.itemUrl);
+      try {
+        await pacingWait(page, config, 0.5);
+        const result = await collectKuaishouFeedCard(
+          root,
+          runId,
+          page.locator(".video-card").nth(card.index),
+          validatePlatformUrl("kuaishou", card.itemUrl),
+          config,
+          discoverySource,
+        );
+        await onPage(result);
+        handled += 1;
+      } catch (error) {
+        lastError = error;
+        await onFailure?.(error);
+      }
+    }
+    if (handled >= limit || scroll === maxScrolls || (await shouldStop())) break;
+    await pacedScroll(page, config);
+  }
+  if (handled === 0 && !(await shouldStop())) throw lastError || new Error("selector_drift");
+  return handled;
+}
+
 export async function collectPlatform({ root, runId, platform, config, limit, shouldStop, onPage, onFailure }) {
   const browserMode = config.browser_mode || "silent";
   if (browserMode === "visible" && !guiAvailable()) throw new Error("display_unavailable");
@@ -766,6 +912,20 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
       await pacingWait(page, config, 1.25);
       if (platform === "douyin" && (config.source_mode || "home_feed") === "home_feed") {
         handled += await collectDouyinHomeFeed(
+          page,
+          root,
+          runId,
+          config,
+          discoverySource,
+          limit - handled,
+          shouldStop,
+          onPage,
+          onFailure,
+        );
+        continue;
+      }
+      if (platform === "kuaishou" && (config.source_mode || "home_feed") === "home_feed") {
+        handled += await collectKuaishouHomeFeed(
           page,
           root,
           runId,

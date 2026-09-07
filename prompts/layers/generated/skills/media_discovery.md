@@ -9,7 +9,7 @@
 
 ## Capability Summary (from interface)
 Run explicitly requested batch, feed, keyword, scheduled, or continuous
-browser collection for Douyin and Xiaohongshu. A lone copied share payload or
+browser collection for Douyin, Xiaohongshu, and Kuaishou. A lone copied share payload or
 URL whose content should be downloaded and returned now belongs to
 `media_download.download`, even when it is used as a `seed_urls` input shape;
 this skill does not provide immediate single-post media delivery. The default
@@ -114,7 +114,7 @@ does not enable these periodic notices.
 | Param | Required | Description |
 |---|---:|---|
 | `action` | yes | One action listed below. |
-| `platform` or `platforms` | enable/preview | `douyin` and/or `xiaohongshu`. |
+| `platform` or `platforms` | enable/preview | `douyin`, `xiaohongshu`, and/or `kuaishou`. |
 | `source_mode` | no | `home_feed` (default), `topics`, or `seed_urls`. |
 | `topics` | for topics | One or more exact search keywords, browsed in input order. |
 | `seed_urls` | for seed_urls | HTTPS URLs on the selected platform only. |

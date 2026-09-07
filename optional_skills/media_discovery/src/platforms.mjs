@@ -14,6 +14,13 @@ const PLATFORM_SPECS = Object.freeze({
     topicUrl: (topic) =>
       `https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(topic)}`,
   },
+  kuaishou: {
+    homeUrl: "https://www.kuaishou.com/brilliant",
+    hosts: ["kuaishou.com"],
+    detailPath: /^\/short-video\/[A-Za-z0-9_-]{8,}(?:\/|$)/u,
+    topicUrl: (topic) =>
+      `https://www.kuaishou.com/search/video?searchKey=${encodeURIComponent(topic)}`,
+  },
 });
 
 export const SUPPORTED_PLATFORMS = Object.freeze(Object.keys(PLATFORM_SPECS));

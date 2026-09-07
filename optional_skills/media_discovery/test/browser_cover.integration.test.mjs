@@ -71,3 +71,15 @@ test("platform poster controls provide the cover when no video frame is availabl
   const cover = await renderedVideoCover(page, "douyin");
   assert.equal(cover?.source, "rendered_poster_image");
 });
+
+test("Kuaishou feed cards expose their rendered poster as the video cover", {
+  skip: !RUN_BROWSER_TEST,
+}, async (t) => {
+  const page = await withPage(t, `
+    <article class="video-card" style="width:160px;height:280px">
+      <div class="poster"><img class="poster-img" alt="" style="width:160px;height:240px" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='240'%3E%3Crect width='160' height='240' fill='green'/%3E%3C/svg%3E"></div>
+    </article>
+  `);
+  const cover = await renderedVideoCover(page.locator("article"), "kuaishou");
+  assert.equal(cover?.source, "rendered_poster_image");
+});
