@@ -17,8 +17,10 @@ Agent to start, stop, or change work, while AiPP presents the persisted results.
 
 The top-level AiPP page appears for administrators. Its catalog contains only
 enabled packages whose exact admitted manifest declares a supported `[aipp]`
-contract. Media Discovery presents current collection state, image and video
-records, recognized text, source links, filters, and stable cursor pagination.
+contract. The first view arranges those packages as application launchers; a
+user selects one launcher before its task-oriented view opens. Media Discovery
+presents current collection state, image and video records, recognized text,
+source links, filters, and stable cursor pagination.
 Video covers are served from the skill's private export directory through an
 authenticated preview endpoint. Remote image URLs must use HTTPS and are loaded
 without a referrer.
