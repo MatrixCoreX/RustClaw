@@ -16,7 +16,7 @@ Agent Runtime 面向在消息应用或浏览器中完成日常使用和管理的
 - 共享技能调度层，支持进程内 builtin、external adapter，以及通过 `skill-runner` 拉起的 runner 子进程
 - 覆盖系统、文件、网络、图片、语音、视频、音乐、NNI、加密货币、知识库、自动化等场景的 builtin、external 与 runner 技能
 - 本地浏览器控制台位于 `UI/`，包含首页、Agent、模型、任务、通信设置、账号绑定、
-  工具/技能、Skill Store、记忆、日志和 AI 学习等页面
+  工具/技能、AiPP、Skill Store、记忆、日志和学习/维护等页面
 - 树莓派/小屏桌面程序位于 `pi_app/`
 - Linux 与 macOS 共享同一套运行时合同；进程隔离由机器配置的后端选择
   fail-closed 的 Bubblewrap 或 Seatbelt 实现
@@ -811,8 +811,15 @@ Agent Runtime 当前内置的技能已经比较完整，按类别可大致分为
 不适用。安装仍由统一准入服务验证 manifest、协议、receipt 与宿主 policy；关闭技能只
 阻止新调用并保留配置，移除可选技能则让它退出运行时与 planner 可见范围，之后仍可重新安装。
 当前按需安装集合为 `chinese_almanac`、`crypto`、`invest_copy`、`map_merchant`、
-`media_download`、`photo_organize`、`stock`、`weather` 和 `x`；普通 `build-all.sh`
+`media_download`、`media_discovery`、`photo_organize`、`stock`、`weather` 和 `x`；普通 `build-all.sh`
 不会主动编译它们，正式发行包通过对应平台的显式 Skill Store 预编译流程提供兼容产物。
+
+已启用技能还可以在 `skill.toml` 声明版本化 `[aipp]` 配套界面。AiPP 用于展示不适合在
+聊天流中完整查看的任务结果。宿主只渲染经过审核的视图合同，并且只从该技能私有存储中读取
+有界、白名单字段；技能包不能向控制台注入 JavaScript、HTML、远程模块或同源 frame。
+AiPP 可用性与精确安装 manifest、receipt、policy grant、启用状态和 registry generation
+一致。`media_discovery` 是第一个 AiPP：管理员可以查看采集到的图片/视频记录、预览、来源
+链接、筛选和游标分页；开始或停止采集仍通过 Agent 完成。
 
 如果要回答“某个 skill 怎么配置、怎么绑定、缺什么前置条件”，优先看：`prompts/references/skill_setup_guide.zh-CN.md`。
 

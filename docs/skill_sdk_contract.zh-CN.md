@@ -36,6 +36,12 @@ CI 友好的清单、协议和回执检查。
 负责校验和收窄申请，并唯一拥有 risk、确认、自动调用、凭据解析、别名与 prompt
 准入。registry 使用 `package_manifest` 引用清单。
 
+技能包可以声明版本化 `[aipp]` 配套界面，用于展示不适合放进聊天流的结果。该声明只能
+选择宿主拥有的 renderer、类型化数据合同和本地化标签，不能携带可执行 UI 代码。只有精确
+manifest、receipt、grant、启用状态和当前 generation 全部一致时，宿主才展示 AiPP；数据
+必须通过技能私有存储或 artifact broker 读取，并进行有界字段投影。任意 JavaScript、HTML、
+远程模块和同源 frame 都不是合法 AiPP renderer。
+
 ```text
 my_skill/
 ├── skill.toml

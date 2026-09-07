@@ -78,6 +78,7 @@
     },
     "storage": { "$ref": "#/$defs/storage" },
     "lifecycle": { "$ref": "#/$defs/lifecycle" },
+    "aipp": { "$ref": "#/$defs/aipp" },
     "capability_request": { "$ref": "#/$defs/capabilityRequest" }
   },
   "$defs": {
@@ -129,6 +130,30 @@
         "update_strategy": { "const": "atomic_replace" }
       }
     },
+    "aipp": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "renderer", "data_contract", "icon", "default_locale", "titles"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "renderer": { "const": "collection_feed_v1" },
+        "data_contract": { "const": "media_collection_v1" },
+        "icon": { "$ref": "#/$defs/name" },
+        "default_locale": { "$ref": "#/$defs/locale" },
+        "titles": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "$ref": "#/$defs/locale" },
+          "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 80 }
+        },
+        "descriptions": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/locale" },
+          "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 320 }
+        }
+      }
+    },
+    "locale": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,34}$" },
     "permissions": {
       "type": "object",
       "additionalProperties": false,

@@ -115,6 +115,26 @@ fn manifest_is_strict_versioned_and_deterministic() {
 }
 
 #[test]
+fn aipp_manifest_accepts_only_host_rendered_versioned_contracts() {
+    let manifest = PackageManifest::from_toml_str(include_str!(
+        "../../../optional_skills/media_discovery/skill.toml"
+    ))
+    .expect("media discovery manifest");
+    let aipp = manifest.aipp.expect("AiPP declaration");
+    assert_eq!(aipp.renderer, "collection_feed_v1");
+    assert_eq!(aipp.data_contract, "media_collection_v1");
+    assert_eq!(aipp.titles.get("zh").map(String::as_str), Some("媒体发现"));
+
+    let unsupported = include_str!("../../../optional_skills/media_discovery/skill.toml").replace(
+        "renderer = \"collection_feed_v1\"",
+        "renderer = \"remote_script\"",
+    );
+    let error = PackageManifest::from_toml_str(&unsupported)
+        .expect_err("unreviewed renderer must be rejected");
+    assert_eq!(error.code, "manifest_aipp_contract_unsupported");
+}
+
+#[test]
 fn manifest_accepts_host_owned_install_requirements_and_rejects_unsafe_values() {
     let mut manifest = PackageManifest::from_toml_str(manifest_source())
         .expect("legacy manifest")

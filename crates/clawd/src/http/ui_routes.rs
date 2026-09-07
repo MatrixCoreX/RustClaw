@@ -213,6 +213,12 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             get(get_skills_config).post(update_skills_config),
         )
         .route("/skills/store", get(get_skill_store_catalog))
+        .route("/aipps", get(get_aipp_catalog))
+        .route("/aipps/:skill_name/items", get(get_aipp_media_items))
+        .route(
+            "/aipps/:skill_name/items/:sequence/preview",
+            get(get_aipp_media_preview),
+        )
         .route(
             "/skills/store/:skill_name/dependencies",
             get(get_skill_store_dependency_status),
@@ -513,6 +519,7 @@ include!("ui_routes/skill_import_config.rs");
 include!("ui_routes/skill_store_installation.rs");
 include!("ui_routes/skill_store.rs");
 include!("ui_routes/skill_store_operations.rs");
+include!("ui_routes/aipp.rs");
 include!("ui_routes/llm_skill_config.rs");
 include!("ui_routes/messaging_login.rs");
 
@@ -535,6 +542,10 @@ mod teaching_trace_security_tests;
 #[cfg(test)]
 #[path = "ui_routes/skill_store_tests.rs"]
 mod skill_store_tests;
+
+#[cfg(test)]
+#[path = "ui_routes/aipp_tests.rs"]
+mod aipp_tests;
 
 #[cfg(test)]
 #[path = "ui_routes/crypto_credentials_tests.rs"]

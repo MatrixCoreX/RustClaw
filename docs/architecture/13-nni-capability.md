@@ -5,7 +5,8 @@
 
 <!-- ai-learning-navigation:start -->
 Previous: [Browser media discovery](12-media-discovery.md) |
-[Architecture index](README.md)
+[Architecture index](README.md) |
+Next: [AiPP skill companion interfaces](14-aipp-skill-companions.md)
 <!-- ai-learning-navigation:end -->
 
 The fixed `nni` skill lets the agent inspect NNI state, control heartbeat participation, read

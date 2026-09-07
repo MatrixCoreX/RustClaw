@@ -44,6 +44,14 @@ closes the browser normally. It never kills the browser to implement this stop.
 This is an on-demand companion skill with private storage and its own dispatch
 queue. It must not block `media_download` manual downloads or OCR work.
 
+The package declares an `AiPP` companion using the host-owned
+`collection_feed_v1` renderer and `media_collection_v1` read contract. When the
+skill is installed, enabled, and bound to the current immutable registry
+generation, administrators can review its records and rendered video covers on
+the AiPP page. The companion is removed from the catalog when the skill is
+disabled or uninstalled; retained private data remains governed by this
+package's storage policy. The package supplies no browser-executable UI code.
+
 Continuous background batches emit one machine-only heartbeat every 15 minutes
 while they remain active. The frame uses
 `detail_key=media_discovery.background.status` with elapsed time and current

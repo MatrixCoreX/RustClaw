@@ -15,6 +15,7 @@ use crate::{SkillSdkError, SkillSdkResult};
 pub const LEGACY_SKILL_MANIFEST_SCHEMA_VERSION: u32 = 1;
 pub const SKILL_MANIFEST_SCHEMA_VERSION: u32 = 2;
 pub const AGENT_JSONL_PROTOCOL: &str = "agent-jsonl-v1";
+pub const AIPP_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -116,6 +117,24 @@ pub struct PackageManifest {
     pub lifecycle: LifecycleSpec,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capability_request: Option<CapabilityRequestSet>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aipp: Option<AippSpec>,
+}
+
+/// Optional host-rendered interface bundled with a skill package. AiPPs do not
+/// carry executable browser code: the host selects a reviewed renderer and
+/// exposes only the declared versioned data contract.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AippSpec {
+    pub schema_version: u32,
+    pub renderer: String,
+    pub data_contract: String,
+    pub icon: String,
+    pub default_locale: String,
+    pub titles: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub descriptions: BTreeMap<String, String>,
 }
 
 /// Host-owned installation prerequisites. Package authors may declare what is
@@ -311,6 +330,72 @@ fn replace_update_strategy() -> String {
     "atomic_replace".to_string()
 }
 
+impl AippSpec {
+    fn validate(&self) -> SkillSdkResult<()> {
+        if self.schema_version != AIPP_SCHEMA_VERSION {
+            return Err(SkillSdkError::new(
+                "manifest_aipp_schema_unsupported",
+                format!("schema_version={}", self.schema_version),
+            ));
+        }
+        if self.renderer != "collection_feed_v1" || self.data_contract != "media_collection_v1" {
+            return Err(SkillSdkError::new(
+                "manifest_aipp_contract_unsupported",
+                format!(
+                    "renderer={} data_contract={}",
+                    self.renderer, self.data_contract
+                ),
+            ));
+        }
+        validate_safe_name(&self.icon, "aipp.icon")?;
+        validate_locale_token(&self.default_locale, "aipp.default_locale")?;
+        if self.titles.is_empty() || !self.titles.contains_key(&self.default_locale) {
+            return Err(SkillSdkError::new(
+                "manifest_aipp_title_missing",
+                format!("default_locale={}", self.default_locale),
+            ));
+        }
+        for (locale, title) in &self.titles {
+            validate_locale_token(locale, "aipp.titles.locale")?;
+            validate_aipp_copy(title, 80, "aipp.titles")?;
+        }
+        for (locale, description) in &self.descriptions {
+            validate_locale_token(locale, "aipp.descriptions.locale")?;
+            validate_aipp_copy(description, 320, "aipp.descriptions")?;
+        }
+        Ok(())
+    }
+}
+
+fn validate_locale_token(value: &str, field: &str) -> SkillSdkResult<()> {
+    let valid = !value.is_empty()
+        && value.len() <= 35
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-');
+    if !valid {
+        return Err(SkillSdkError::new(
+            "manifest_aipp_locale_invalid",
+            format!("field={field} value={value:?}"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_aipp_copy(value: &str, maximum_chars: usize, field: &str) -> SkillSdkResult<()> {
+    let trimmed = value.trim();
+    if trimmed.is_empty()
+        || trimmed.chars().count() > maximum_chars
+        || trimmed.chars().any(char::is_control)
+    {
+        return Err(SkillSdkError::new(
+            "manifest_aipp_copy_invalid",
+            format!("field={field}"),
+        ));
+    }
+    Ok(())
+}
+
 impl PackageManifest {
     pub fn from_toml_str(raw: &str) -> SkillSdkResult<Self> {
         let manifest: Self = toml::from_str(raw).map_err(|error| {
@@ -411,6 +496,12 @@ impl PackageManifest {
                 "field=install required_schema_version=2",
             ));
         }
+        if self.schema_version == LEGACY_SKILL_MANIFEST_SCHEMA_VERSION && self.aipp.is_some() {
+            return Err(SkillSdkError::new(
+                "manifest_aipp_requires_schema_v2",
+                "field=aipp required_schema_version=2",
+            ));
+        }
         match self.schema_version {
             LEGACY_SKILL_MANIFEST_SCHEMA_VERSION if self.capability_request.is_some() => {
                 return Err(SkillSdkError::new(
@@ -502,6 +593,9 @@ impl PackageManifest {
                     self.package.name, self.storage.migration_owner
                 ),
             ));
+        }
+        if let Some(aipp) = &self.aipp {
+            aipp.validate()?;
         }
         for dependency in &self.install.host_dependencies {
             validate_safe_name(dependency, "install.host_dependencies")?;

@@ -151,7 +151,7 @@ test("asset account UI keeps recovery while adding custom bind, replacement, and
 
 test("non-admin console sessions cannot display NNI, Bancor, or asset pages", () => {
   const source = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
-  assert.match(source, /ADMIN_ONLY_UI_PAGES = new Set<ConsolePage>\(\["nni", "nni_apr", "bancor", "assets"\]\)/);
+  assert.match(source, /ADMIN_ONLY_UI_PAGES = new Set<ConsolePage>\(\["nni", "nni_apr", "bancor", "assets", "aipps"\]\)/);
   assert.match(source, /!isAdminIdentity && ADMIN_ONLY_UI_PAGES\.has\(item\.id\)/);
   assert.match(source, /nniNavigationVisible \|\| !isNniNavigationPage\(item\.id\)/);
   assert.match(source, /!isAdminIdentity && ADMIN_ONLY_UI_PAGES\.has\(currentPage\)/);

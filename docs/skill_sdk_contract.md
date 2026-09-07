@@ -74,6 +74,14 @@ host exclusively owns risk, confirmation, auto-invocation, credential
 resolution, aliases, and prompt admission. The registry references the
 manifest through `package_manifest`.
 
+A package may declare a versioned `[aipp]` companion for result views that do
+not fit well in chat. The declaration selects a host-owned renderer and typed
+data contract plus localized labels; it never carries executable UI code. The
+host exposes the AiPP only for the exact enabled manifest, receipt, grant, and
+current generation, and reads data through the skill storage or artifact broker
+with bounded field projection. Arbitrary JavaScript, HTML, remote modules, and
+same-origin frames are not valid AiPP renderers.
+
 ```text
 my_skill/
 ├── skill.toml
