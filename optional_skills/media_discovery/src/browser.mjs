@@ -418,6 +418,154 @@ export async function candidatesForDiscoverySource(
   );
 }
 
+export async function activeDouyinFeedEntry(page, excludedItemIds = []) {
+  const excluded = new Set(excludedItemIds);
+  const entries = await page.locator("[data-aweme-id]").evaluateAll((nodes) =>
+    nodes.map((node, index) => {
+      const rect = node.getBoundingClientRect();
+      const overlapWidth = Math.max(0, Math.min(rect.right, window.innerWidth) - Math.max(rect.left, 0));
+      const overlapHeight = Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0));
+      const visibleArea = overlapWidth * overlapHeight;
+      const centerDistance = Math.abs((rect.top + rect.bottom) / 2 - window.innerHeight / 2);
+      return {
+        index,
+        itemId: node.getAttribute("data-aweme-id") || "",
+        visibleArea,
+        centerDistance,
+      };
+    }),
+  ).catch(() => []);
+  entries.sort((left, right) =>
+    right.visibleArea - left.visibleArea || left.centerDistance - right.centerDistance);
+  const observed = new Set();
+  for (const entry of entries) {
+    if (
+      entry.visibleArea <= 0
+      || !/^\d+$/u.test(entry.itemId)
+      || excluded.has(entry.itemId)
+      || observed.has(entry.itemId)
+    ) {
+      continue;
+    }
+    observed.add(entry.itemId);
+    return entry;
+  }
+  try {
+    const itemId = platformItemId("douyin", validatePlatformUrl("douyin", page.url())).split(":").at(-1);
+    if (/^\d+$/u.test(itemId || "") && !excluded.has(itemId)) {
+      return { index: null, itemId, visibleArea: 0, centerDistance: 0 };
+    }
+  } catch {
+    // A recommendation page is not itself a detail item.
+  }
+  return null;
+}
+
+async function waitForDouyinFeedEntry(page, excludedItemIds = [], timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline && !page.isClosed()) {
+    const entry = await activeDouyinFeedEntry(page, excludedItemIds);
+    if (entry) return entry;
+    await page.waitForTimeout(200).catch(() => {});
+  }
+  return null;
+}
+
+async function douyinRecommendationClickTarget(page, entry) {
+  const card = page.locator("[data-aweme-id]").nth(entry.index);
+  const expectedPath = `/video/${entry.itemId}`;
+  const cardLinks = card.locator('a[href*="/video/"]');
+  const cardLinkCount = Math.min(await cardLinks.count(), 12);
+  for (let index = 0; index < cardLinkCount; index += 1) {
+    const link = cardLinks.nth(index);
+    const href = await link.getAttribute("href").catch(() => null);
+    if (!href) continue;
+    try {
+      const candidate = new URL(href, page.url());
+      if (candidate.pathname === expectedPath || candidate.pathname.startsWith(`${expectedPath}/`)) {
+        return link;
+      }
+    } catch {
+      // Ignore malformed page-owned links and continue with structural fallbacks.
+    }
+  }
+  const pageLink = page.locator(`a[href*="${expectedPath}"]`).first();
+  if ((await pageLink.count()) > 0) return pageLink;
+  return card;
+}
+
+export async function openDouyinRecommendationDetail(page, config = {}) {
+  if (isDetailUrl("douyin", page.url())) {
+    return {
+      page,
+      entry: await waitForDouyinFeedEntry(page) || await activeDouyinFeedEntry(page),
+    };
+  }
+  const recommendation = await waitForDouyinFeedEntry(page, [], NAVIGATION_TIMEOUT_MS);
+  if (!recommendation || recommendation.index == null) throw new Error("selector_drift");
+  const target = await douyinRecommendationClickTarget(page, recommendation);
+  const detailPath = `/video/${recommendation.itemId}`;
+  const destinationPromise = Promise.race([
+    page.waitForEvent("popup", { timeout: NAVIGATION_TIMEOUT_MS })
+      .then((popup) => popup)
+      .catch(() => null),
+    page.waitForURL((url) => url.hostname.endsWith("douyin.com") && url.pathname.startsWith(detailPath), {
+      timeout: NAVIGATION_TIMEOUT_MS,
+    }).then(() => page).catch(() => null),
+    page.waitForTimeout(NAVIGATION_TIMEOUT_MS).then(() => null).catch(() => null),
+  ]);
+  await target.click({ timeout: NAVIGATION_TIMEOUT_MS });
+  const destination = await destinationPromise;
+  if (!destination) throw new Error("selector_drift");
+  destination.setDefaultTimeout(NAVIGATION_TIMEOUT_MS);
+  await destination.waitForLoadState("domcontentloaded", { timeout: NAVIGATION_TIMEOUT_MS }).catch(() => {});
+  await pacingWait(destination, config, 1.25);
+  const accessError = await currentPlatformAccessError(destination, "douyin");
+  if (accessError) throw new Error(accessError);
+  let currentUrl;
+  try {
+    currentUrl = validatePlatformUrl("douyin", destination.url());
+  } catch {
+    throw new Error("challenge_required");
+  }
+  const navigationError = detailNavigationError(
+    "douyin",
+    `https://www.douyin.com${detailPath}`,
+    currentUrl,
+    (await destination.locator('input[type="password"], input[type="tel"]').count()) > 0,
+  );
+  if (navigationError) throw new Error(navigationError);
+  const entry = await waitForDouyinFeedEntry(destination);
+  return {
+    page: destination,
+    entry: entry || {
+      index: null,
+      itemId: recommendation.itemId,
+      visibleArea: 0,
+      centerDistance: 0,
+    },
+  };
+}
+
+export async function advanceDouyinDetailFeed(page, previousItemId, config = {}) {
+  const viewport = page.viewportSize() || { width: 1280, height: 900 };
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await page.mouse.move(
+      Math.round(viewport.width * (0.46 + Math.random() * 0.08)),
+      Math.round(viewport.height * (0.46 + Math.random() * 0.08)),
+    );
+    await page.mouse.wheel(0, Math.round(viewport.height * (0.82 + Math.random() * 0.18)));
+    await pacingWait(page, config, 0.75);
+    const next = await waitForDouyinFeedEntry(page, [previousItemId], 4_000);
+    if (next) return next;
+    await page.keyboard.press("ArrowDown").catch(() => {});
+    await pacingWait(page, config, 0.5);
+    const keyboardNext = await waitForDouyinFeedEntry(page, [previousItemId], 2_000);
+    if (keyboardNext) return keyboardNext;
+  }
+  return null;
+}
+
 async function pageMetadata(page, platform, requestedUrl) {
   const metadata = await page.evaluate(() => {
     const meta = (selector) => document.querySelector(selector)?.getAttribute("content")?.trim() || "";
@@ -824,7 +972,7 @@ async function collectDouyinFeedCard(page, root, runId, locator, itemId, config,
   };
 }
 
-async function collectDouyinHomeFeed(
+async function collectDouyinRecommendationFeed(
   page,
   root,
   runId,
@@ -839,29 +987,24 @@ async function collectDouyinHomeFeed(
   let handled = 0;
   let lastError = null;
   const maxScrolls = config.max_scrolls_per_source || 10;
-  for (let scroll = 0; scroll <= maxScrolls && handled < limit; scroll += 1) {
-    const cards = await page.locator("[data-aweme-id]").evaluateAll((nodes) =>
-      nodes.map((node, index) => {
-        const rect = node.getBoundingClientRect();
-        return {
-          index,
-          itemId: node.getAttribute("data-aweme-id") || "",
-          visible: rect.width >= 180 && rect.height >= 120 && rect.bottom > 0 && rect.top < window.innerHeight,
-        };
-      }),
-    );
-    for (const card of cards) {
-      if (handled >= limit || (await shouldStop())) break;
-      if (!card.visible || !/^\d+$/u.test(card.itemId) || seen.has(card.itemId)) continue;
-      seen.add(card.itemId);
+  const opened = await openDouyinRecommendationDetail(page, config);
+  const detailPage = opened.page;
+  let current = opened.entry;
+  for (let scroll = 0; scroll <= maxScrolls && handled < limit && current; scroll += 1) {
+    if (await shouldStop()) break;
+    if (!seen.has(current.itemId)) {
+      seen.add(current.itemId);
       try {
-        await pacingWait(page, config, 0.5);
+        await pacingWait(detailPage, config, 0.5);
+        const scope = current.index == null
+          ? detailPage.locator("body")
+          : detailPage.locator("[data-aweme-id]").nth(current.index);
         const result = await collectDouyinFeedCard(
-          page,
+          detailPage,
           root,
           runId,
-          page.locator("[data-aweme-id]").nth(card.index),
-          card.itemId,
+          scope,
+          current.itemId,
           config,
           discoverySource,
         );
@@ -873,7 +1016,7 @@ async function collectDouyinHomeFeed(
       }
     }
     if (handled >= limit || scroll === maxScrolls || (await shouldStop())) break;
-    await pacedScroll(page, config);
+    current = await advanceDouyinDetailFeed(detailPage, current.itemId, config);
   }
   if (handled === 0 && !(await shouldStop())) throw lastError || new Error("selector_drift");
   return handled;
@@ -1155,7 +1298,7 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
       const accessError = await currentPlatformAccessError(page, platform);
       if (accessError) throw new Error(accessError);
       if (platform === "douyin" && (config.source_mode || "home_feed") === "home_feed") {
-        handled += await collectDouyinHomeFeed(
+        handled += await collectDouyinRecommendationFeed(
           page,
           root,
           runId,
