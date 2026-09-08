@@ -101,7 +101,7 @@ test("browser collector follows the rendered carousel and captures every image i
       search_keyword: "fixture keyword",
       url: "https://www.xiaohongshu.com/search_result?keyword=fixture%20keyword",
     },
-    config: { max_images_per_post: 100, recognition_mode: "metadata_only" },
+    config: { max_images_per_post: 100 },
     discoveredAt: "2026-08-10T00:00:00.000Z",
     engagement: {
       schema_version: 1,

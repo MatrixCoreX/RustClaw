@@ -197,17 +197,11 @@ fn registry_resolution_observes_required_companion_capabilities() {
     );
     assert_eq!(
         record.required_companions,
-        vec![
-            "schedule.create_structured",
-            "media_discovery.run_enabled_once"
-        ]
+        vec!["media_discovery.run_enabled_once"]
     );
     assert_eq!(
         record.dispatch_observation(1, 1, 1)["required_companions"],
-        json!([
-            "schedule.create_structured",
-            "media_discovery.run_enabled_once"
-        ])
+        json!(["media_discovery.run_enabled_once"])
     );
 }
 

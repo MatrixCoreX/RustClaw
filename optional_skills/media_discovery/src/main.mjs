@@ -7,6 +7,7 @@ import { browserCapability, collectPlatform, waitForInteractiveLogin } from "./b
 import { sourceUrls, SUPPORTED_PLATFORMS } from "./platforms.mjs";
 import { createBackgroundProgressReporter } from "./progress.mjs";
 import {
+  beginBackgroundWorker,
   beginRun,
   clearCollectedData,
   cleanupExpiredDiagnostics,
@@ -14,7 +15,9 @@ import {
   configurePlatforms,
   copyExportsTo,
   finishRun,
+  finishBackgroundWorker,
   heartbeat,
+  heartbeatBackgroundWorker,
   readRecords,
   readState,
   requestStop,
@@ -27,6 +30,8 @@ const ERROR_CODES = new Set([
   "action_unsupported",
   "browser_missing",
   "browser_mode_invalid",
+  "background_collection_not_enabled",
+  "background_worker_already_active",
   "collection_already_enabled",
   "challenge_required",
   "confirmation_required",
@@ -39,7 +44,6 @@ const ERROR_CODES = new Set([
   "platform_not_configured",
   "platform_unsupported",
   "rate_limited",
-  "recognition_mode_invalid",
   "run_already_active",
   "screenshot_empty",
   "selector_drift",
@@ -66,6 +70,16 @@ const ACTIONS = new Set([
   "export_results",
   "clear_results",
 ]);
+
+const CONTINUOUS_RETRYABLE_ERROR_CODES = new Set([
+  "challenge_required",
+  "display_unavailable",
+  "login_required",
+  "media_element_not_found",
+  "no_items_collected",
+  "rate_limited",
+  "selector_drift",
+]);
 const RUN_CONFIG_FIELDS = Object.freeze([
   "source_mode",
   "topics",
@@ -74,9 +88,9 @@ const RUN_CONFIG_FIELDS = Object.freeze([
   "max_images_per_post",
   "max_run_minutes",
   "max_scrolls_per_source",
-  "interval_minutes",
+  "rest_min_seconds",
+  "rest_max_seconds",
   "retain_diagnostics_hours",
-  "recognition_mode",
   "browser_mode",
   "pacing_min_delay_ms",
   "pacing_max_delay_ms",
@@ -103,10 +117,6 @@ export function requestedPlatforms(args, allowEmpty = false) {
 export function normalizedConfig(args) {
   const sourceMode = String(args.source_mode || "home_feed");
   if (!new Set(["home_feed", "topics", "seed_urls"]).has(sourceMode)) throw new Error("source_mode_invalid");
-  const recognitionMode = String(args.recognition_mode || "ocr_reviewed");
-  if (!new Set(["ocr_reviewed", "local_ocr", "metadata_only"]).has(recognitionMode)) {
-    throw new Error("recognition_mode_invalid");
-  }
   const browserMode = String(args.browser_mode || "silent");
   if (!new Set(["visible", "silent"]).has(browserMode)) throw new Error("browser_mode_invalid");
   const pacingMinDelayMs = integer(args.pacing_min_delay_ms, 700, 200, 5000);
@@ -120,15 +130,28 @@ export function normalizedConfig(args) {
     max_images_per_post: integer(args.max_images_per_post, 100, 1, 100),
     max_run_minutes: integer(args.max_run_minutes, 30, 5, 180),
     max_scrolls_per_source: integer(args.max_scrolls_per_source, 10, 1, 100),
-    interval_minutes: integer(args.interval_minutes, 60, 10, 1440),
+    rest_min_seconds: integer(args.rest_min_seconds, 30, 5, 3600),
+    rest_max_seconds: integer(args.rest_max_seconds, 120, 5, 7200),
     retain_diagnostics_hours: integer(args.retain_diagnostics_hours, 24, 1, 168),
-    recognition_mode: recognitionMode,
     browser_mode: browserMode,
     pacing_min_delay_ms: pacingMinDelayMs,
     pacing_max_delay_ms: pacingMaxDelayMs,
     capture_mode: "browser_element_screenshot",
   };
+  if (config.rest_max_seconds < config.rest_min_seconds) throw new Error("invalid_args");
   return config;
+}
+
+export function backgroundRestDelayMs(configs, random = Math.random) {
+  const values = Object.values(configs || {});
+  const minimum = values.length > 0
+    ? Math.max(...values.map((config) => Number(config?.rest_min_seconds) || 30))
+    : 30;
+  const maximum = Math.max(minimum, values.length > 0
+    ? Math.min(...values.map((config) => Number(config?.rest_max_seconds) || 120))
+    : 120);
+  const sample = Math.min(0.999999, Math.max(0, Number(random()) || 0));
+  return Math.round((minimum + (maximum - minimum) * sample) * 1000);
 }
 
 function success(action, extra = {}) {
@@ -146,6 +169,7 @@ function errorResponse(action, error) {
   const retryable = new Set([
     "display_unavailable",
     "browser_missing",
+    "background_collection_not_enabled",
     "login_required",
     "no_items_collected",
     "challenge_required",
@@ -161,8 +185,8 @@ function errorResponse(action, error) {
     "platform_required",
     "platform_not_configured",
     "platform_unsupported",
-    "recognition_mode_invalid",
     "run_already_active",
+    "background_worker_already_active",
     "skill_storage_invalid",
     "skill_storage_required",
     "source_host_not_allowed",
@@ -188,17 +212,10 @@ function errorResponse(action, error) {
   };
 }
 
-function scheduleSpec(platforms, intervalMinutes) {
-  const schedule = { type: "interval", every_minutes: intervalMinutes };
-  const task = {
-    kind: "run_skill",
-    payload: { skill_name: SKILL_NAME, args: { action: "run_once", platforms, scheduled_run: true } },
-  };
-  const intentJson = JSON.stringify({ kind: "create", schedule, task });
+function backgroundStartSpec() {
   return {
-    capability: "schedule.create_structured",
-    args: { intent_json: intentJson },
-    owner: { skill: SKILL_NAME, platforms },
+    capability: "media_discovery.run_enabled_once",
+    args: {},
     completion_required: true,
   };
 }
@@ -211,7 +228,7 @@ async function preview(args) {
     platforms,
     config,
     browser: await browserCapability(),
-    schedule_spec: scheduleSpec(platforms, config.interval_minutes),
+    background_start_spec: backgroundStartSpec(),
     side_effect_applied: false,
   });
 }
@@ -226,8 +243,8 @@ async function enable(request, args) {
   return success("enable", {
     platforms,
     platform_states: state.platforms,
-    schedule_spec: scheduleSpec(platforms, config.interval_minutes),
-    next_capability: "schedule.create_structured",
+    background_start_spec: backgroundStartSpec(),
+    next_capability: "media_discovery.run_enabled_once",
     side_effect_applied: true,
   });
 }
@@ -243,17 +260,6 @@ async function control(request, args, action) {
     lifecycle_state: state.active_run?.lifecycle_state || "idle",
     drain_run_id: state.stop_after_item_run_id,
     stop_mode: state.stop_after_item_run_id ? "after_current_item" : null,
-    schedule_cleanup_required: action === "disable",
-    schedule_cleanup_spec: action === "disable" ? {
-      capability: "schedule.delete_matching",
-      args: {
-        match_task_kind: "run_skill",
-        match_skill_name: SKILL_NAME,
-        match_task_action: "run_once",
-        match_platforms: affectedPlatforms,
-      },
-      completion_required: true,
-    } : null,
     side_effect_applied: true,
   });
 }
@@ -261,28 +267,20 @@ async function control(request, args, action) {
 async function runOnce(request, args, runtime = {}) {
   const root = storageRoot(request);
   const requested = requestedPlatforms(args, true);
-  const scheduledRun = args.scheduled_run === true;
-  const directOneShot = !scheduledRun && requested.length > 0;
+  const directOneShot = requested.length > 0;
   const configExplicit = RUN_CONFIG_FIELDS.some((field) => Object.hasOwn(args, field));
   const oneShotConfig = directOneShot ? normalizedConfig(args) : null;
   if (oneShotConfig) {
     for (const platform of requested) sourceUrls(platform, oneShotConfig);
   }
   const { run } = await beginRun(root, requested, {
-    mode: directOneShot ? "one_shot" : scheduledRun ? "scheduled" : "enabled_manual",
+    mode: directOneShot ? "one_shot" : "enabled_background",
     config: oneShotConfig,
     config_explicit: configExplicit,
   });
   if (!run) return success("run_once", { state: "disabled_or_paused", side_effect_applied: false });
   const counts = { items: 0, videos: 0, images: 0, duplicates: 0, failures: 0 };
-  const progressReporter = scheduledRun
-    ? createBackgroundProgressReporter({
-        requestId: request?.request_id,
-        run,
-        counts,
-        writeFrame: runtime.writeProgress,
-      })
-    : { emitIfDue: () => false, stop: () => {} };
+  const progressReporter = { emitIfDue: () => false, stop: () => {} };
   let status = "completed_batch";
   let errorCode = null;
   const leaseHeartbeat = setInterval(() => {
@@ -395,12 +393,130 @@ async function runOnce(request, args, runtime = {}) {
   });
 }
 
+function addCounts(target, source = {}) {
+  for (const key of ["items", "videos", "images", "duplicates", "failures"]) {
+    target[key] += Number(source[key]) || 0;
+  }
+}
+
+async function sleepWithBackgroundControl(root, workerId, delayMs, sleep) {
+  let remaining = Math.max(0, delayMs);
+  while (remaining > 0) {
+    const state = await readState(root);
+    if (state.background_worker?.worker_id !== workerId) return "replaced";
+    if (!Object.values(state.platforms).some((platform) => platform?.enabled)) return "disabled";
+    const step = Math.min(1000, remaining);
+    await sleep(step);
+    remaining -= step;
+  }
+  return "ready";
+}
+
+async function runContinuous(request, runtime = {}) {
+  const root = storageRoot(request);
+  const worker = await beginBackgroundWorker(root);
+  const counts = { items: 0, videos: 0, images: 0, duplicates: 0, failures: 0 };
+  const sleep = runtime.sleep || ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
+  const reporter = createBackgroundProgressReporter({
+    requestId: request?.request_id,
+    run: { run_id: worker.worker_id, platforms: worker.platforms },
+    counts,
+    writeFrame: runtime.writeProgress,
+  });
+  let completedBatches = 0;
+  let attemptedBatches = 0;
+  let lastErrorCode = null;
+  const workerHeartbeat = setInterval(() => {
+    heartbeatBackgroundWorker(root, worker.worker_id, {
+      completed_batches: completedBatches,
+      counts,
+      last_error_code: lastErrorCode,
+    }).catch(() => {});
+  }, 30_000);
+  workerHeartbeat.unref?.();
+  try {
+    while (true) {
+      const state = await readState(root);
+      if (state.background_worker?.worker_id !== worker.worker_id) break;
+      const enabledEntries = Object.entries(state.platforms)
+        .filter(([, platform]) => platform?.enabled);
+      if (enabledEntries.length === 0) break;
+      const activeEntries = enabledEntries.filter(([, platform]) => !platform?.paused);
+      if (activeEntries.length === 0) {
+        await heartbeatBackgroundWorker(root, worker.worker_id, { lifecycle_state: "paused" });
+        const control = await sleepWithBackgroundControl(root, worker.worker_id, 1000, sleep);
+        if (control !== "ready") break;
+        continue;
+      }
+      await heartbeatBackgroundWorker(root, worker.worker_id, {
+        lifecycle_state: "running",
+        platforms: activeEntries.map(([platform]) => platform),
+      });
+      attemptedBatches += 1;
+      try {
+        const result = await runOnce(request, { action: "run_once", interactive_login: true }, {
+          ...runtime,
+          writeProgress: undefined,
+        });
+        addCounts(counts, result.extra?.run?.counts);
+        if (["completed_batch", "stopped_after_current_item"].includes(result.extra?.state)) {
+          completedBatches += 1;
+          lastErrorCode = null;
+        } else {
+          lastErrorCode = result.extra?.run?.error_code || result.extra?.state || "execution_failed";
+        }
+      } catch (error) {
+        lastErrorCode = String(error?.message || "execution_failed");
+        counts.failures += 1;
+        if (!CONTINUOUS_RETRYABLE_ERROR_CODES.has(lastErrorCode)) throw error;
+      }
+      await heartbeatBackgroundWorker(root, worker.worker_id, {
+        completed_batches: completedBatches,
+        counts,
+        last_error_code: lastErrorCode,
+      });
+      reporter.emitIfDue();
+      if (Number.isInteger(runtime.maxContinuousCycles) && attemptedBatches >= runtime.maxContinuousCycles) break;
+      const latest = await readState(root);
+      const delay = backgroundRestDelayMs(
+        Object.fromEntries(Object.entries(latest.platforms)
+          .filter(([, value]) => value?.enabled && !value?.paused)
+          .map(([platform, value]) => [platform, value?.config || {}])),
+        runtime.random || Math.random,
+      );
+      const control = await sleepWithBackgroundControl(root, worker.worker_id, delay, sleep);
+      if (control !== "ready") break;
+    }
+    const completed = await finishBackgroundWorker(root, worker.worker_id, "stopped", {
+      completed_batches: completedBatches,
+      counts,
+      last_error_code: lastErrorCode,
+    });
+    return success("run_enabled_once", {
+      state: "stopped",
+      background_worker: completed,
+      side_effect_applied: counts.items > 0,
+    });
+  } catch (error) {
+    await finishBackgroundWorker(root, worker.worker_id, "failed", {
+      completed_batches: completedBatches,
+      counts,
+      last_error_code: String(error?.message || "execution_failed"),
+    }).catch(() => {});
+    throw error;
+  } finally {
+    clearInterval(workerHeartbeat);
+    reporter.stop();
+  }
+}
+
 async function status(request) {
   const root = storageRoot(request);
   const state = await readState(root);
   const records = await readRecords(root);
   return success("status", {
     platforms: state.platforms,
+    background_worker: state.background_worker,
     active_run: state.active_run,
     counts: {
       videos: records.filter((record) => record.kind === "video").length,
@@ -468,7 +584,7 @@ export async function handleRequest(request, runtime = {}) {
     if (["disable", "pause", "resume"].includes(action)) return await control(request, args, action);
     if (action === "run_once") return await runOnce(request, args, runtime);
     if (action === "run_enabled_once") {
-      return await runOnce(request, { action: "run_once", interactive_login: true }, runtime);
+      return await runContinuous(request, runtime);
     }
     if (action === "status") return await status(request);
     if (action === "stop_current") {

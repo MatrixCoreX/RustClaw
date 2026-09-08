@@ -75,6 +75,8 @@ fn media_page_is_newest_first_filtered_and_field_bounded() {
     assert_eq!(items[0]["global_sequence"], 2);
     assert_eq!(items[1]["global_sequence"], 1);
     assert!(items[0].get("secret").is_none());
+    assert!(items[0].get("recognized_text").is_none());
+    assert!(items[1].get("recognized_text").is_none());
     assert!(items[0]["source_url"].is_null());
     assert_eq!(
         items[1]["engagement"]["metrics"]["likes"]["display"],
@@ -84,6 +86,16 @@ fn media_page_is_newest_first_filtered_and_field_bounded() {
     assert!(items[1]["engagement"]["metrics"].get("unknown").is_none());
     assert_eq!(items[1]["preview_available"], true);
     assert_eq!(page["matching_total"], 2);
+
+    let legacy_ocr_search = read_aipp_media_page(
+        &root,
+        &AippMediaQuery {
+            query: Some("alpha".to_string()),
+            ..AippMediaQuery::default()
+        },
+    )
+    .expect("legacy OCR search");
+    assert_eq!(legacy_ocr_search["matching_total"], 0);
     fs::remove_dir_all(root).expect("remove fixture");
 }
 
@@ -98,6 +110,7 @@ fn media_page_bounds_skill_owned_copy_and_ignores_oversized_records() {
             "kind": "image",
             "platform": "test",
             "title": "a".repeat(700),
+            "platform_text": "b".repeat(40_000),
             "recognized_text": "b".repeat(40_000),
         }),
     );
@@ -111,10 +124,8 @@ fn media_page_bounds_skill_owned_copy_and_ignores_oversized_records() {
     let items = page["items"].as_array().expect("items");
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["title"].as_str().map(str::len), Some(512));
-    assert_eq!(
-        items[0]["recognized_text"].as_str().map(str::len),
-        Some(32_768)
-    );
+    assert_eq!(items[0]["platform_text"].as_str().map(str::len), Some(32_768));
+    assert!(items[0].get("recognized_text").is_none());
     fs::remove_dir_all(root).expect("remove fixture");
 }
 

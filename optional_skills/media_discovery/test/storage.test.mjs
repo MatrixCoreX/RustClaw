@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  beginBackgroundWorker,
   beginRun,
   clearCollectedData,
   cleanupExpiredDiagnostics,
@@ -12,10 +13,50 @@ import {
   configurePlatforms,
   copyExportsTo,
   finishRun,
+  finishBackgroundWorker,
+  heartbeatBackgroundWorker,
   readRecords,
   readState,
   rebuildExports,
 } from "../src/storage.mjs";
+
+test("state reads retire legacy scheduler and OCR configuration fields", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "media-discovery-storage-migration-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.writeFile(path.join(root, "state.json"), `${JSON.stringify({
+    schema_version: 1,
+    platforms: {
+      douyin: {
+        enabled: false,
+        config: {
+          source_mode: "home_feed",
+          interval_minutes: 60,
+          recognition_mode: "ocr_reviewed",
+          browser_mode: "silent",
+        },
+      },
+    },
+    active_run: {
+      platform_configs: {
+        douyin: { source_mode: "home_feed", recognition_mode: "local_ocr" },
+      },
+    },
+    background_worker: null,
+    runs: [{
+      platform_configs: {
+        douyin: { source_mode: "topics", interval_minutes: 15 },
+      },
+    }],
+  }, null, 2)}\n`);
+
+  const state = await readState(root);
+  assert.deepEqual(state.platforms.douyin.config, {
+    source_mode: "home_feed",
+    browser_mode: "silent",
+  });
+  assert.deepEqual(state.active_run.platform_configs.douyin, { source_mode: "home_feed" });
+  assert.deepEqual(state.runs[0].platform_configs.douyin, { source_mode: "topics" });
+});
 
 async function temporaryRoot(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "media-discovery-test-"));
@@ -121,6 +162,26 @@ test("one-shot runs use an ephemeral config without enabling continuous collecti
   const completed = await finishRun(root, run, "completed_batch");
   assert.equal(completed.lifecycle_state, "completed_batch");
   assert.equal((await readState(root)).active_run, null);
+});
+
+test("background worker lease is exclusive, heartbeatable, and explicitly finished", async (t) => {
+  const root = await temporaryRoot(t);
+  await configurePlatforms(root, ["douyin"], { source_mode: "home_feed", browser_mode: "silent" });
+
+  const worker = await beginBackgroundWorker(root);
+  assert.deepEqual(worker.platforms, ["douyin"]);
+  await assert.rejects(() => beginBackgroundWorker(root), /background_worker_already_active/u);
+
+  const heartbeat = await heartbeatBackgroundWorker(root, worker.worker_id, {
+    completed_batches: 2,
+    counts: { items: 3, videos: 2, images: 1, duplicates: 0, failures: 0 },
+  });
+  assert.equal(heartbeat.completed_batches, 2);
+  assert.equal(heartbeat.counts.items, 3);
+
+  const completed = await finishBackgroundWorker(root, worker.worker_id, "stopped");
+  assert.equal(completed.lifecycle_state, "stopped");
+  assert.equal((await readState(root)).background_worker, null);
 });
 
 test("diagnostic retention removes expired files and directories", async (t) => {

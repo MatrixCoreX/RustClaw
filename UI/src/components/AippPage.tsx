@@ -398,14 +398,8 @@ export function AippMediaItemCard({
 }) {
   const [expanded, setExpanded] = useState(false);
   const captionText = item.platform_text.trim();
-  const recognizedText = item.recognized_text.trim();
   const textSections = [
     { key: "caption", label: t("帖子文案", "Post caption"), text: captionText },
-    {
-      key: "recognized",
-      label: item.kind === "video" ? t("画面文字", "Visual text") : t("图片文字", "Image text"),
-      text: recognizedText,
-    },
   ].filter((section) => section.text);
   const canCollapse = textSections.some(
     (section) => section.text.length > 360 || section.text.split("\n").length > 6,

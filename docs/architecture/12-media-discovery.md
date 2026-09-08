@@ -11,9 +11,10 @@ Next: [NNI capability and heartbeat control](13-nni-capability.md)
 
 `media_discovery` is an optional Skill Store capability for bounded discovery on
 Douyin, Xiaohongshu, and Kuaishou. It runs silently by default and opens a visible browser
-only when the user explicitly requests visible or non-silent operation. Both modes recognize only
-content that the browser has already rendered and export ordered CSV records;
-neither downloads video binaries or original image files.
+only when the user explicitly requests visible or non-silent operation, or when a persisted
+private profile needs an interactive login. It captures only content that the browser has
+already rendered and exports ordered CSV records; it does not run OCR or model text review,
+and it downloads neither video binaries nor original image files.
 
 Kuaishou recommendation collection reads the rendered public feed card itself:
 the stable work URL, author caption, visible poster, and structurally identified
@@ -31,21 +32,16 @@ A user controls the workflow through ordinary conversation. The model maps the
 request to machine arguments; runtime code does not match fixed phrases in any
 language.
 
-- Starting collection calls `media_discovery.enable`, copies the returned
-  `schedule_spec.args.intent_json` unchanged into `schedule.create_structured`,
-  and calls the no-argument `media_discovery.run_enabled_once` for the initial
-  bounded batch unless the user requested a later start.
+- Starting collection calls `media_discovery.enable`, then launches the returned
+  no-argument `media_discovery.run_enabled_once` companion as one runtime-owned
+  durable background job. No schedule job is created.
 - A one-shot request calls `media_discovery.run_once` with explicit platform
-  and source settings. Its ephemeral config is not persisted or scheduled.
-  Scheduler payloads carry the machine-only `scheduled_run=true` marker and
-  run only platforms that remain enabled and unpaused.
+  and source settings. Its ephemeral config is not persisted and does not start
+  background collection.
 - Pausing or resuming changes only the selected platform state.
-- Stopping calls `media_discovery.disable`; its required companion
-  `schedule.delete_matching` consumes the returned structured cleanup args.
-  Runtime rejects a terminal reply until that cleanup succeeds. Shared
-  multi-platform schedules remain while they still serve an enabled platform.
-  If a matching batch is active, the skill marks it `draining`, finishes and
-  commits the current complete post, then exits normally.
+- Stopping calls `media_discovery.disable`. The background worker observes the
+  persisted disabled state, and if a matching batch is active, marks it
+  `draining`, finishes and commits the current complete post, then exits normally.
 - `media_discovery.export_results` rebuilds and delivers exactly `videos.csv`
   and `images.csv` from the private immutable record ledger, copies the
   persisted `video_covers/` directory, and exposes each cover as an image
@@ -61,16 +57,16 @@ flowchart TD
     A[Agent loop]
     E[media_discovery.enable]
     X[media_discovery.disable]
-    S[schedule.create_structured with unchanged intent_json]
-    Q[schedule.delete_matching]
-    R[Bounded run_enabled_once]
+    R[Durable run_enabled_once worker]
+    RB[Bounded collection batch]
+    Z[Random inter-batch rest]
     W[Ephemeral one-shot config]
     T[Structured source targets<br/>home feed, keywords, or seed URLs]
     G[Mark active batch draining]
     P[Finish and commit the current complete post]
     B[Persistent browser profile<br/>silent default or explicit visible]
     C[Rendered card or media element screenshot]
-    O[Metadata and optional local OCR review]
+    O[Author caption and engagement metadata]
     L[Private immutable record ledger]
     V[videos.csv]
     I[images.csv]
@@ -82,14 +78,13 @@ flowchart TD
 
     U --> A
     A -->|start| E
-    E --> S
     E --> R
-    A -->|one shot| W --> R
-    S -->|next interval| R
-    R --> T --> B --> C --> O --> L
+    A -->|one shot| W --> RB
+    R --> RB
+    RB --> T --> B --> C --> O --> L
+    L --> Z -->|next enabled batch| R
     R -->|while active| H --> N
     A -->|stop| X
-    X --> Q
     X --> G --> P --> L
     L --> V --> D
     L --> I --> D
@@ -97,19 +92,18 @@ flowchart TD
     L --> AP
 ```
 
-Each run is bounded by item, scroll, and elapsed-time limits. A private lease
-admits only one live batch, including across scheduled and conversational
-starts. An already enabled continuous configuration also rejects another
+Each batch is bounded by item, scroll, and elapsed-time limits. A private worker
+lease admits only one continuous job, and a separate batch lease admits only one
+live browser batch. An already enabled continuous configuration also rejects another
 `enable`, covering requests that were queued while the prior batch was active.
 These rejections are structured pre-dispatch outcomes with no side effect. The
 run checkpoints after committed records, maintains a periodic heartbeat,
 and honors graceful stop only between complete posts. A multi-image post is
 therefore committed in full before the browser closes. The collector remains
-separate from the manual `media_download` queue. The
-scheduler starts later batches; the skill does not leave an unmanaged detached
-process behind.
+separate from the manual `media_download` queue. The durable runtime job starts
+later batches after bounded randomized rests and remains observable and cancellable.
 
-While a continuous initial or scheduler-started batch remains active, the skill
+While continuous collection remains active, the skill
 emits a structured status heartbeat every 15 minutes. It contains only machine
 fields for elapsed time and current counts. `clawd` persists it in the task
 event stream for the UI and, for non-UI origins, sends a localized proactive
@@ -117,7 +111,7 @@ notice through the same receipt-backed channel delivery service used by other
 background work. Host-side rate limiting and task/sequence idempotency prevent
 duplicate delivery. One-shot collection does not opt into this reporting path.
 
-## Screenshot and Recognition Boundary
+## Screenshot and Capture Boundary
 
 `browser_mode=silent` is the default and opens no window. The model may pass
 `browser_mode=visible` only for an explicit visible or non-silent request; runtime never
@@ -138,15 +132,11 @@ bypass access controls, or continue through rate-limit and login barriers.
 Missing desktop sessions and platform barriers produce structured machine
 states for the agent and UI.
 
-Recognition modes are:
-
-- `metadata_only`: keep page metadata and links without OCR.
-- `local_ocr`: run Tesseract over the temporary browser screenshot.
-- `ocr_reviewed`: preserve raw OCR and ask the host-scoped internal LLM gateway
-  only to restore layout, punctuation, and highly certain recognition errors.
-
-No provider API key is given to the skill. Page content and recognized text are
-untrusted data and can never become runtime instructions.
+Screenshots are preview artifacts only. The skill never sends video covers or
+image screenshots to OCR or model review. Text comes only from the platform's
+rendered title and author-caption fields. No provider API key is given to the
+skill, and page content remains untrusted data that can never become runtime
+instructions.
 
 ## Data and Recovery
 
@@ -156,10 +146,10 @@ inside that directory; the skill never reads or writes the main runtime
 database.
 
 `videos.csv` records stable page links, actual browser mode, source mode,
-search keyword and search-page URL, separate platform and recognized text,
-and a portable relative `cover_screenshot_path` such as
+search keyword and search-page URL, author caption, and a portable relative
+`cover_screenshot_path` such as
 `video_covers/douyin_123.png`. `images.csv` records the same search provenance,
-browser mode, post and image order plus the
+author caption, browser mode, post and image order plus the
 observed image URL and stable source-page link. Both files use UTF-8 BOM, RFC
 4180 quoting, stable sequence numbers, and spreadsheet formula-injection
 protection. CSV files are derived views and can be regenerated atomically from

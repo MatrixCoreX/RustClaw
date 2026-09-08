@@ -116,7 +116,7 @@ test("keeps Ai APP installation state separate from its skill", () => {
   assert.match(source, /安装 Ai APP/);
 });
 
-test("renders a media collection record without exposing undeclared fields", () => {
+test("renders a media collection record from the current no-OCR contract", () => {
   const item: AippMediaItem = {
     schema_version: 1,
     global_sequence: 42,
@@ -129,8 +129,6 @@ test("renders a media collection record without exposing undeclared fields", () 
     search_keyword: "example",
     title: "Collected title",
     platform_text: "Platform copy",
-    recognized_text: "Recognized copy",
-    recognition_source: "local_ocr",
     source_url: "https://example.test/source",
     image_url: "https://example.test/image.webp",
     preview_available: false,
@@ -157,8 +155,7 @@ test("renders a media collection record without exposing undeclared fields", () 
   assert.match(markup, /Collected title/);
   assert.match(markup, /帖子文案/);
   assert.match(markup, /Platform copy/);
-  assert.match(markup, /图片文字/);
-  assert.match(markup, /Recognized copy/);
+  assert.doesNotMatch(markup, /图片文字/);
   assert.match(markup, /xiaohongshu/);
   assert.match(markup, /1\.2万/);
   assert.match(markup, /318/);
@@ -179,8 +176,6 @@ test("renders an image card when only a retained local preview is available", ()
     search_keyword: "",
     title: "Local preview",
     platform_text: "",
-    recognized_text: "",
-    recognition_source: null,
     source_url: null,
     image_url: null,
     preview_available: true,
@@ -198,4 +193,37 @@ test("renders an image card when only a retained local preview is available", ()
   );
   assert.match(markup, /Local preview/);
   assert.match(markup, /暂无预览/);
+});
+
+test("renders a video cover record without a visual-text section", () => {
+  const item: AippMediaItem = {
+    schema_version: 1,
+    global_sequence: 44,
+    sequence: 9,
+    post_sequence: 5,
+    image_sequence: null,
+    kind: "video",
+    platform: "douyin",
+    source_mode: "home_feed",
+    search_keyword: "",
+    title: "Video title",
+    platform_text: "Author caption",
+    source_url: "https://example.test/video",
+    image_url: null,
+    preview_available: true,
+    discovered_at: "2026-09-08T00:00:00Z",
+    engagement: null,
+  };
+  const markup = renderToStaticMarkup(
+    <AippMediaItemCard
+      item={item}
+      skillName="media_discovery"
+      apiFetch={async () => new Response()}
+      t={t}
+      lang="zh"
+    />,
+  );
+  assert.match(markup, /帖子文案/);
+  assert.match(markup, /Author caption/);
+  assert.doesNotMatch(markup, /画面文字/);
 });

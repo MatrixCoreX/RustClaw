@@ -2,15 +2,16 @@
 
 ## Capability Summary
 
-Run explicitly requested batch, feed, keyword, scheduled, or continuous
+Run explicitly requested batch, feed, keyword, or continuous background
 browser collection for Douyin, Xiaohongshu, and Kuaishou. A lone copied share payload or
 URL whose content should be downloaded and returned now belongs to
 `media_download.download`, even when it is used as a `seed_urls` input shape;
 this skill does not provide immediate single-post media delivery. The default
 `browser_mode=silent` runs without a browser window; `browser_mode=visible`
 opens one only when the user's request requires visible or non-silent browsing. The skill screenshots media
-elements already rendered in the browser, recognizes visible
-text, and exports exactly two user result files: `videos.csv` and `images.csv`.
+elements already rendered in the browser and exports exactly two user result
+files: `videos.csv` and `images.csv`. It never runs OCR or model text review;
+author-provided captions remain available as `platform_text`.
 It also records the engagement counters exposed by platform-owned machine DOM
 controls at collection time. Metrics are structured as views, likes, comments,
 favorites, and shares; only counters available on the current platform/page are
@@ -34,15 +35,16 @@ runtime or skill code.
 Explicit detail `seed_urls` are collected as the exact requested set and do not
 expand into unrelated recommendation links from those pages.
 
-A continuous start request is a structured workflow: call `enable`, copy its
-returned `schedule_spec.args.intent_json` into `schedule.create_structured` in
-the parent loop, then call the no-argument `run_enabled_once` for the initial
-batch. A stop request calls
-`disable`, then passes the returned `schedule_cleanup_spec.args` to the required
-companion capability `schedule.delete_matching`. Runtime does not permit a
-terminal reply until that structured cleanup capability succeeds.
+A continuous start request is a two-step structured workflow: call `enable`,
+then call its no-argument companion `run_enabled_once`. The companion is a
+runtime-owned durable background job that repeatedly browses enabled sources,
+rests for a bounded random period, and continues until disabled or cancelled.
+It does not create or depend on a schedule job. A stop request calls `disable`;
+the worker observes the persisted control state and exits after the current
+complete post is committed.
 
-Only one collection batch may own the skill lease at a time. A second start or
+Only one background worker and one collection batch may own their respective
+skill leases at a time. A second start or
 `run_once` returns structured `run_already_active` instead of opening another
 browser. While any continuous platform remains enabled, another `enable`
 returns `collection_already_enabled`; this also rejects a duplicate start that
@@ -54,7 +56,8 @@ all of its rendered carousel images, commits its records and CSV rows, and then
 closes the browser normally. It never kills the browser to implement this stop.
 
 This is an on-demand companion skill with private storage and its own dispatch
-queue. It must not block `media_download` manual downloads or OCR work.
+queue. It must not block `media_download` manual downloads or explicit image
+recognition work handled by another skill.
 
 The package declares an `AiPP` companion using the host-owned
 `collection_feed_v1` renderer and `media_collection_v1` read contract. When the
@@ -64,7 +67,7 @@ the AiPP page. The companion is removed from the catalog when the skill is
 disabled or uninstalled; retained private data remains governed by this
 package's storage policy. The package supplies no browser-executable UI code.
 
-Continuous background batches emit one machine-only heartbeat every 15 minutes
+The continuous background worker emits one machine-only heartbeat every 15 minutes
 while they remain active. The frame uses
 `detail_key=media_discovery.background.status` with elapsed time and current
 item/video/image/duplicate/failure counts. Runtime persists the frame for UI
@@ -77,27 +80,22 @@ does not enable these periodic notices.
 
 - Select this skill only when the current request explicitly asks for a
   collection workflow: batch browsing, home-feed browsing, keyword discovery,
-  scheduling, continuous collection, collection lifecycle control, or CSV
+  continuous collection, collection lifecycle control, or CSV
   export. Do not select `run_once` for one copied share or URL that should be
   downloaded and returned to the user now; select `media_download.download`.
 - A user request to start continuous collection is a multi-capability workflow:
   1. call `media_discovery.enable` with the requested platform(s), bounded
      settings, and `confirm=true` after policy approval;
-  2. copy the returned `schedule_spec.args.intent_json` string unchanged into
-     `schedule.create_structured`; the runtime validates its nested schedule
-     and task types before creating the durable job;
-  3. call the no-argument `media_discovery.run_enabled_once` immediately. It
-     reads only enabled persisted platform configurations.
-- A request to stop one platform first calls `media_discovery.disable` for that
-  platform. Then call the required companion `schedule.delete_matching` with
-  the exact returned `schedule_cleanup_spec.args`. Matching uses task payload
-  fields, never a human-readable job description. A shared multi-platform job
-  is retained while it still serves a platform that was not disabled.
+  2. call the no-argument `media_discovery.run_enabled_once` immediately. It
+     reads only enabled persisted platform configurations and remains active as
+     a durable background job.
+- A request to stop one or all platforms calls `media_discovery.disable`. The
+  worker finishes the current post before exiting; no schedule cleanup is
+  involved.
 - A user request for one bounded batch without continuous collection calls
   `run_once` with explicit platform and source settings. The skill uses an
-  ephemeral config and does not enable or schedule the platform. The
-  `scheduled_run=true` marker is reserved for the returned `schedule_spec` and
-  must never be invented by the planner.
+  ephemeral config and does not enable the platform or start a background
+  worker.
 - `disable` also requests a graceful drain of a matching active batch. Report
   the returned `lifecycle_state`, `drain_run_id`, and `stop_mode` rather than
   claiming an immediate process termination.
@@ -110,7 +108,8 @@ does not enable these periodic notices.
 - Omit `browser_mode` or pass `silent` by default. Pass `visible` only when the
   user explicitly requests a browser window or non-silent operation. Runtime must consume this enum and must
   not match localized words to select a mode.
-- Browsing uses bounded randomized pauses and scroll distances to avoid bursty
+- Browsing uses bounded randomized pauses, scroll distances, and inter-batch
+  rests to avoid bursty
   traffic. This is cooperative pacing, not fingerprint spoofing, challenge
   bypass, or a guarantee against platform controls. Login, challenge, and rate
   limit states stop the current batch and remain machine-visible.
@@ -119,12 +118,12 @@ does not enable these periodic notices.
 
 Examples of equivalent intent (documentation examples, not runtime matchers):
 
-- `帮我开始采集抖音` -> enable Douyin home feed, schedule bounded batches, run
-  the first batch.
-- `停止采集抖音` -> disable Douyin and remove its structured schedule jobs.
+- `帮我开始采集抖音` -> enable Douyin home feed and start its durable
+  background worker.
+- `停止采集抖音` -> disable Douyin; the worker drains the current post and exits.
 - `Start collecting Xiaohongshu posts` -> the same workflow for Xiaohongshu.
 - `Collect a small Kuaishou recommendation batch` -> run one bounded Kuaishou
-  `home_feed` batch without enabling a schedule.
+  `home_feed` batch without enabling background collection.
 - `搜索露营装备并采集小红书内容` -> use `source_mode=topics` and
   `topics=["露营装备"]` for Xiaohongshu.
 - `Arrête la collecte de Xiaohongshu` -> disable only Xiaohongshu.
@@ -142,36 +141,32 @@ Examples of equivalent intent (documentation examples, not runtime matchers):
 | `max_images_per_post` | no | 1..100, default 100. The adapter follows rendered carousel controls and stops at the actual end or this safety ceiling. |
 | `max_run_minutes` | no | 5..180, default 30. |
 | `max_scrolls_per_source` | no | 1..100, default 10. |
-| `interval_minutes` | no | 10..1440, default 60. |
-| `recognition_mode` | no | `ocr_reviewed` (default), `local_ocr`, or `metadata_only`. |
+| `rest_min_seconds` | no | Minimum random rest between continuous batches, 5..3600, default 30. |
+| `rest_max_seconds` | no | Maximum random rest between continuous batches, 5..7200, default 120 and never below the minimum. |
 | `browser_mode` | no | `silent` (default), or `visible` after an explicit visible/non-silent request. Browser visibility is a user-selected execution constraint: every planner action that accepts this field must emit `visible` when visibility was requested, while omission is valid only when the user expressed no browser-mode preference. |
 | `pacing_min_delay_ms` | no | Lower interaction-delay bound, 200..5000, default 700. |
 | `pacing_max_delay_ms` | no | Upper interaction-delay bound, 200..8000, default 1800 and never below the minimum. |
 | `confirm` | enable/clear_results | Must be true after runtime approval. |
 
-`scheduled_run` is an internal scheduler marker emitted only inside
-`enable.extra.schedule_spec`; it is not a planner or user parameter.
-
 ## Actions
 
 - `capabilities`: report GUI, Chromium, capture mode, and supported platforms.
 - `preview_enable`: validate settings without changing state.
-- `enable`: persist per-platform enabled state and return a structured schedule
-  specification. It does not create a hidden child process.
+- `enable`: persist per-platform enabled state and return the exact durable
+  background companion capability.
 - `disable`: disable selected platforms, gracefully drain any matching active
-  batch after its current post, and return the exact required structured
-  schedule-cleanup call.
+  batch after its current post, and make the background worker exit before its
+  next batch.
 - `run_once`: with explicit platform/source settings, run one ephemeral bounded
-  batch without enabling continuous collection; scheduler calls marked with
-  `scheduled_run=true` run only enabled, non-paused platforms. A fresh active
-  lease rejects either form with `run_already_active`.
-- `run_enabled_once`: internal no-argument companion used after `enable`; run
-  one batch from enabled, non-paused persisted configurations without asking
-  the model to reproduce nested configuration values.
-- `status`: return platform state, active run, and result counts.
-- `pause` / `resume`: preserve configuration while controlling future batches.
+  batch without enabling continuous collection. A fresh active lease rejects
+  it with `run_already_active`.
+- `run_enabled_once`: no-argument durable companion used after `enable`; keep
+  running bounded collection batches with randomized rests until `disable` or
+  task cancellation.
+- `status`: return platform state, background worker, active batch, and result counts.
+- `pause` / `resume`: preserve configuration while pausing/resuming the worker.
 - `stop_current`: request a graceful stop after the current complete post,
-  optionally restricted to a platform, without disabling future schedules.
+  optionally restricted to a platform, without disabling the background worker.
 - `list_runs`: return paginated recent batch records.
 - `export_results`: deliver rebuilt `videos.csv` and `images.csv` artifacts.
   Persisted browser video-cover screenshots are copied beside them under
@@ -189,7 +184,7 @@ in the user's language. Errors additionally provide
 `extra.{error_code,message_key,retryable}`; runtime logic must not parse
 `error_text`.
 
-When `run_enabled_once` or a scheduler-marked `run_once` remains active for at
+When `run_enabled_once` remains active for at
 least 15 minutes, zero or more `skill_progress` JSONL records precede the final
 response. Their `params.notification_delivery=runtime` marker delegates UI and
 channel presentation to the host; it does not change success, retry, routing,
@@ -198,11 +193,11 @@ interval and deduplicates each delivery by task and frame sequence.
 
 `videos.csv` columns:
 
-`sequence,global_sequence,platform,browser_mode,source_mode,search_keyword,discovery_source_url,title,platform_text,recognized_text,cover_screenshot_path,cover_capture_source,video_page_url,discovered_at,engagement_captured_at,views,likes,comments,favorites,shares`
+`sequence,global_sequence,platform,browser_mode,source_mode,search_keyword,discovery_source_url,title,platform_text,cover_screenshot_path,cover_capture_source,video_page_url,discovered_at,engagement_captured_at,views,likes,comments,favorites,shares`
 
 `images.csv` columns:
 
-`sequence,global_sequence,post_sequence,image_sequence,platform,browser_mode,source_mode,search_keyword,discovery_source_url,title,platform_text,recognized_text,image_url,image_screenshot_path,source_page_url,discovered_at,engagement_captured_at,views,likes,comments,favorites,shares`
+`sequence,global_sequence,post_sequence,image_sequence,platform,browser_mode,source_mode,search_keyword,discovery_source_url,title,platform_text,image_url,image_screenshot_path,source_page_url,discovered_at,engagement_captured_at,views,likes,comments,favorites,shares`
 
 CSV files use UTF-8 BOM, RFC 4180 quoting, stable order, and spreadsheet formula
 injection protection. The private immutable record ledger remains the recovery
@@ -210,32 +205,30 @@ source of truth; CSV files can always be rebuilt.
 
 `platform_text` is the author-provided post caption extracted from reviewed
 platform DOM markers. A video record and every image belonging to one carousel
-retain that caption independently of `recognized_text`, which contains only
-text recognized from the rendered media screenshot. AiAPP presents the two
-fields separately instead of choosing one and hiding the other. Collected image
-screenshots are retained under the skill-owned export directory and referenced
-by `image_screenshot_path` so AiAPP can provide authenticated same-origin
-downloads without proxying arbitrary remote URLs.
+retain that caption. Media screenshots are never OCR inputs, and AiAPP exposes
+no visual-text field. Collected image screenshots are retained under the
+skill-owned export directory and referenced by `image_screenshot_path` so AiAPP
+can provide authenticated same-origin downloads without proxying arbitrary
+remote URLs.
 
-## Browser and Recognition Rules
+## Browser and Capture Rules
 
 - Browser mode defaults to silent. `visible` is accepted only as an explicit
   structured planner argument; when selected, a missing desktop session returns
   `display_unavailable` instead of changing the requested mode.
-- The first bounded run after enabling continuous collection may open the
+- A background run may open the
   skill-owned persistent browser profile when a silent attempt reports
   `login_required` or `challenge_required` and a desktop is available. The
   skill first retries the same bounded collection in visible mode. If platform
   access still requires authentication, it keeps that skill-owned profile open
   until the platform authentication state is present or the user closes the
-  window, then verifies access by retrying the collection. Later
-  scheduler-triggered runs stay silent; they report `waiting_for_login` instead
-  of repeatedly opening a window.
+  window, then verifies access by retrying the collection. The same private
+  profile is reused after login, so normal runs remain silent.
 - The skill uses one private persistent browser profile per platform. Later
   runs reuse that profile's cookies, local storage, and browser cache; clearing
   collected results preserves this login/session state. The skill does not read
   cookies from unrelated browser profiles or write them to logs/checkpoints.
-- Recognition uses screenshots of browser-rendered media elements. It does not
+- Capture uses screenshots of browser-rendered media elements. It does not
   issue additional requests for original images and does not present this as a
   mechanism for bypassing anti-automation controls.
 - A visible, unobscured platform video frame is the preferred cover; a
@@ -243,19 +236,9 @@ downloads without proxying arbitrary remote URLs.
   autoplayed, the captured frame is not represented as the encoded timeline's
   exact frame zero. If neither trusted element is available, the result has no
   preview rather than a whole-page fallback. Duplicate items never replace an
-  existing persisted cover.
-- Tesseract produces the raw text using all installed recognition language
-  data without preferring one writing system. In `ocr_reviewed` mode, the
-  complete text is split into Unicode-safe bounded chunks and sent through the
-  host-scoped internal LLM gateway to restore layout, punctuation, and highly
-  certain OCR errors without translation, summary, or invention. Visual soft
-  wraps caused only by image width are merged, while real paragraphs, headings,
-  lists, tables, code, verse, and other line-oriented structures retain their
-  boundaries. Every chunk
-  must succeed, and the reviewed result must preserve numeric tokens and a
-  bounded amount of source content; otherwise the complete raw OCR text is
-  retained. Immutable records keep both `raw_recognized_text` and the selected
-  `recognized_text`.
+  existing persisted cover. Covers and image screenshots are stored for preview
+  only and never sent through OCR or model text review. Text comes from the
+  platform's rendered title and author-caption fields.
 - Login challenges, access denial, and rate limiting produce structured waiting
   or failure states. The skill never bypasses them.
 
@@ -272,7 +255,7 @@ Stable examples include `display_unavailable`, `browser_missing`,
 ## Request/Response Examples
 
 ```json
-{"action":"enable","platform":"douyin","source_mode":"home_feed","interval_minutes":60,"confirm":true}
+{"action":"enable","platform":"douyin","source_mode":"home_feed","rest_min_seconds":30,"rest_max_seconds":120,"confirm":true}
 ```
 
 ```json

@@ -2043,8 +2043,6 @@ export interface AippMediaItem {
   search_keyword: string;
   title: string;
   platform_text: string;
-  recognized_text: string;
-  recognition_source: string | null;
   source_url: string | null;
   image_url: string | null;
   preview_available: boolean;
