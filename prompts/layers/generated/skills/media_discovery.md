@@ -41,6 +41,13 @@ runtime or skill code.
 Explicit detail `seed_urls` are collected as the exact requested set and do not
 expand into unrelated recommendation links from those pages.
 
+Douyin `home_feed` collection opens the first visible recommendation as one
+detail video before collecting anything. It then captures the current detail
+item, scrolls down inside that detail feed, waits for the active item identity
+to change, and repeats one item at a time. It does not scrape a batch of cards
+directly from the recommendation landing page. Image-carousel posts encountered
+in the detail feed are completed before advancing to the next item.
+
 A continuous start request is a two-step structured workflow: call `enable`,
 then call its no-argument companion `run_enabled_once`. The companion is a
 runtime-owned durable background job that repeatedly browses enabled sources,
