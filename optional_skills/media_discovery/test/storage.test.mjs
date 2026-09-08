@@ -54,7 +54,8 @@ test("state reads retire legacy scheduler and OCR configuration fields", async (
     source_mode: "home_feed",
     browser_mode: "silent",
   });
-  assert.deepEqual(state.active_run.platform_configs.douyin, { source_mode: "home_feed" });
+  assert.equal(state.active_run, null);
+  assert.deepEqual(state.active_runs, {});
   assert.deepEqual(state.runs[0].platform_configs.douyin, { source_mode: "topics" });
 });
 

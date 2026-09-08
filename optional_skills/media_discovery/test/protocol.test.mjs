@@ -337,7 +337,7 @@ test("status distinguishes live leases from expired records without rewriting st
 
   const state = await storage.readState(root);
   state.background_worker.heartbeat_at = "2000-01-01T00:00:00.000Z";
-  state.active_run.heartbeat_at = "invalid-timestamp";
+  state.active_runs[run.run_id].heartbeat_at = "invalid-timestamp";
   state.runs = [{ run_id: "previous", status: "completed_batch", counts: { items: 2 } }];
   const snapshot = JSON.stringify(state);
   await fs.writeFile(path.join(root, "state.json"), snapshot);
@@ -353,7 +353,7 @@ test("status distinguishes live leases from expired records without rewriting st
   assert.equal(await fs.readFile(path.join(root, "state.json"), "utf8"), snapshot);
 });
 
-test("a second start is rejected while the current run owns the lease and disable drains it", async (t) => {
+test("a duplicate platform start is rejected while its lease is active and disable drains it", async (t) => {
   const context = await requestContext(t);
   await handleRequest({
     args: { action: "enable", platform: "douyin", confirm: true },
@@ -364,7 +364,7 @@ test("a second start is rejected while the current run owns the lease and disabl
   const { run } = await storage.beginRun(root, ["douyin"]);
 
   const secondStart = await handleRequest({
-    args: { action: "enable", platform: "xiaohongshu", confirm: true },
+    args: { action: "enable", platform: "douyin", confirm: true },
     context,
   });
   assert.equal(secondStart.status, "error");
@@ -391,7 +391,7 @@ test("continuous enabled state rejects a queued duplicate start without mutation
     context,
   });
   const duplicate = await handleRequest({
-    args: { action: "enable", platform: "xiaohongshu", confirm: true },
+    args: { action: "enable", platform: "douyin", confirm: true },
     context,
   });
   assert.equal(duplicate.status, "error");

@@ -4,12 +4,12 @@ import { randomUUID } from "node:crypto";
 
 import { exportRecordCsv, writeAtomic } from "./csv.mjs";
 import { resolveBrowserMode } from "./platforms.mjs";
+import { activeRunIsFresh, activeRuns, drainRuns, parallelPlatformLimit, projectActiveRuns } from "./run_leases.mjs";
 
 const STATE_SCHEMA_VERSION = 1;
 const LOCK_RETRY_MS = 40;
 const LOCK_TIMEOUT_MS = 10_000;
 const STALE_LOCK_MS = 30 * 60 * 1000;
-const ACTIVE_RUN_STALE_MS = 10 * 60 * 1000;
 const BACKGROUND_WORKER_STALE_MS = 2 * 60 * 1000;
 const RETIRED_CONFIG_FIELDS = new Set(["interval_minutes", "recognition_mode"]);
 
@@ -18,6 +18,7 @@ function initialState() {
     schema_version: STATE_SCHEMA_VERSION,
     platforms: {},
     background_worker: null,
+    active_runs: {},
     active_run: null,
     stop_after_item_run_id: null,
     runs: [],
@@ -93,11 +94,20 @@ async function readStateUnlocked(root) {
   const state = await readJson(path.join(root, "state.json"), initialState());
   if (state?.schema_version !== STATE_SCHEMA_VERSION) return initialState();
   if (!Object.hasOwn(state, "background_worker")) state.background_worker = null;
+  if (!Object.hasOwn(state, "active_runs")) {
+    // An old binary must finish before adopting the new lease ownership model.
+    if (activeRunIsFresh(state.active_run) || backgroundWorkerIsFresh(state.background_worker)) {
+      throw new Error("storage_upgrade_requires_idle");
+    }
+    state.active_runs = {};
+    state.active_run = null;
+    state.stop_after_item_run_id = null;
+  }
   for (const platformState of Object.values(state.platforms || {})) {
     if (platformState?.config) platformState.config = currentConfig(platformState.config);
   }
-  if (state.active_run?.platform_configs) {
-    state.active_run.platform_configs = currentPlatformConfigs(state.active_run.platform_configs);
+  for (const run of Object.values(state.active_runs)) {
+    if (run?.platform_configs) run.platform_configs = currentPlatformConfigs(run.platform_configs);
   }
   for (const run of state.runs || []) {
     if (run?.platform_configs) run.platform_configs = currentPlatformConfigs(run.platform_configs);
@@ -118,6 +128,7 @@ function currentPlatformConfigs(configs) {
 }
 
 async function writeStateUnlocked(root, state) {
+  projectActiveRuns(state);
   delete state.cancel_run_id;
   state.updated_at = new Date().toISOString();
   await writeAtomic(path.join(root, "state.json"), `${JSON.stringify(state, null, 2)}\n`);
@@ -131,26 +142,25 @@ export async function readState(root) {
 export async function readStatusState(root) {
   const state = await readState(root);
   const expiredLeases = [];
-  for (const [kind, isFresh] of [
-    ["background_worker", backgroundWorkerIsFresh],
-    ["active_run", activeRunIsFresh],
-  ]) {
-    const lease = state[kind];
-    if (!lease || isFresh(lease)) continue;
-    expiredLeases.push({ kind, ...lease, lifecycle_state: "heartbeat_expired" });
-    state[kind] = null;
+  if (state.background_worker && !backgroundWorkerIsFresh(state.background_worker)) {
+    expiredLeases.push({ kind: "background_worker", ...state.background_worker, lifecycle_state: "heartbeat_expired" });
+    state.background_worker = null;
   }
-  return { ...state, expired_leases: expiredLeases };
+  for (const [id, lease] of Object.entries(state.active_runs)) {
+    if (activeRunIsFresh(lease)) continue;
+    expiredLeases.push({ kind: "active_run", ...lease, lifecycle_state: "heartbeat_expired" });
+    delete state.active_runs[id];
+  }
+  return { ...projectActiveRuns(state), expired_leases: expiredLeases };
 }
 
 export async function configurePlatforms(root, platforms, configs) {
   return withLock(root, async () => {
     const state = await readStateUnlocked(root);
-    if (backgroundWorkerIsFresh(state.background_worker)) {
-      throw new Error("background_worker_already_active");
+    if (activeRuns(state).some(run => run.platforms.some(platform => platforms.includes(platform)))) {
+      throw new Error("run_already_active");
     }
-    if (activeRunIsFresh(state.active_run)) throw new Error("run_already_active");
-    if (Object.values(state.platforms).some((platform) => platform?.enabled)) {
+    if (platforms.some(platform => state.platforms[platform]?.enabled)) {
       throw new Error("collection_already_enabled");
     }
     const now = new Date().toISOString();
@@ -171,7 +181,7 @@ export async function configurePlatforms(root, platforms, configs) {
   });
 }
 
-function backgroundWorkerIsFresh(worker) {
+export function backgroundWorkerIsFresh(worker) {
   if (!worker) return false;
   const heartbeatAt = Date.parse(worker.heartbeat_at || worker.started_at || "");
   return Number.isFinite(heartbeatAt) && Date.now() - heartbeatAt < BACKGROUND_WORKER_STALE_MS;
@@ -218,10 +228,11 @@ export async function heartbeatBackgroundWorker(root, workerId, update = {}) {
   });
 }
 
-export async function finishBackgroundWorker(root, workerId, lifecycleState, update = {}) {
+export async function finishBackgroundWorker(root, workerId, lifecycleState, update = {}, options = {}) {
   return withLock(root, async () => {
     const state = await readStateUnlocked(root);
     if (state.background_worker?.worker_id !== workerId) return null;
+    if (options.only_when_disabled && Object.values(state.platforms).some(platform => platform?.enabled)) return null;
     const completed = {
       ...state.background_worker,
       ...update,
@@ -262,36 +273,29 @@ export async function setPlatformControl(root, platforms, action) {
         };
       }
     }
-    if (
-      ["disable", "pause"].includes(action) &&
-      activeRunIsFresh(state.active_run) &&
-      state.active_run.platforms.some((platform) => targets.includes(platform))
-    ) {
-      state.stop_after_item_run_id = state.active_run.run_id;
-      state.active_run.lifecycle_state = "draining";
-      state.active_run.stop_requested_at = now;
-    }
+    if (["disable", "pause"].includes(action)) drainRuns(state, targets);
     await writeStateUnlocked(root, state);
     return state;
   });
 }
 
-function activeRunIsFresh(activeRun) {
-  if (!activeRun) return false;
-  const heartbeatAt = Date.parse(activeRun.heartbeat_at || activeRun.started_at || "");
-  return Number.isFinite(heartbeatAt) && Date.now() - heartbeatAt < ACTIVE_RUN_STALE_MS;
-}
-
 export async function beginRun(root, requestedPlatforms, options = {}) {
   return withLock(root, async () => {
     const state = await readStateUnlocked(root);
-    if (activeRunIsFresh(state.active_run)) throw new Error("run_already_active");
     const directOneShot = options.mode === "one_shot" && requestedPlatforms.length > 0;
     const platforms = directOneShot
       ? requestedPlatforms
       : (requestedPlatforms.length > 0 ? requestedPlatforms : Object.keys(state.platforms))
         .filter((platform) => state.platforms[platform]?.enabled && !state.platforms[platform]?.paused);
     if (platforms.length === 0) return { state, run: null };
+    if (options.worker_id && (state.background_worker?.worker_id !== options.worker_id
+      || !backgroundWorkerIsFresh(state.background_worker))) throw new Error("worker_lease_lost");
+    const current = activeRuns(state);
+    if (current.some(run => run.platforms.some(platform => platforms.includes(platform)))) throw new Error("run_already_active");
+    const limit = options.parallel_limit || parallelPlatformLimit();
+    if (current.reduce((sum, run) => sum + run.platforms.length, 0) + platforms.length > limit) {
+      throw new Error("collection_capacity_busy");
+    }
     const platformConfigs = Object.fromEntries(platforms.map((platform) => {
       const saved = state.platforms[platform]?.config;
       const config = directOneShot && (options.config_explicit || !saved)
@@ -303,6 +307,7 @@ export async function beginRun(root, requestedPlatforms, options = {}) {
     const run = {
       run_id: `run_${randomUUID()}`,
       platforms,
+      worker_id: options.worker_id || null,
       run_mode: directOneShot ? "one_shot" : options.mode || "enabled_manual",
       platform_configs: platformConfigs,
       browser_modes: Object.fromEntries(
@@ -313,38 +318,31 @@ export async function beginRun(root, requestedPlatforms, options = {}) {
       lifecycle_state: "running",
       counts: { items: 0, videos: 0, images: 0, duplicates: 0, failures: 0 },
     };
-    state.active_run = run;
-    state.stop_after_item_run_id = null;
+    state.active_runs = Object.fromEntries(current.map(run => [run.run_id, run]));
+    state.active_runs[run.run_id] = run;
     await writeStateUnlocked(root, state);
     return { state, run };
   });
 }
 
-export async function heartbeat(root, runId, counts) {
+export async function heartbeat(root, runId, counts, lifecycleState = null) {
   return withLock(root, async () => {
     const state = await readStateUnlocked(root);
-    if (state.active_run?.run_id === runId) {
-      state.active_run.heartbeat_at = new Date().toISOString();
-      state.active_run.counts = { ...state.active_run.counts, ...counts };
-      if (state.stop_after_item_run_id === runId) state.active_run.lifecycle_state = "draining";
-      await writeStateUnlocked(root, state);
-    }
-    return state.stop_after_item_run_id === runId;
+    const run = state.active_runs[runId];
+    if (!run || !activeRunIsFresh(run)) return true;
+    if (run.worker_id && state.background_worker?.worker_id !== run.worker_id) return true;
+    run.heartbeat_at = new Date().toISOString();
+    run.counts = { ...run.counts, ...counts };
+    if (lifecycleState && !run.stop_requested_at) run.lifecycle_state = lifecycleState;
+    await writeStateUnlocked(root, state);
+    return Boolean(run.stop_requested_at);
   });
 }
 
 export async function requestStop(root, platforms = []) {
   return withLock(root, async () => {
     const state = await readStateUnlocked(root);
-    const activeRun = activeRunIsFresh(state.active_run) ? state.active_run : null;
-    const matches = activeRun && (
-      platforms.length === 0 || activeRun.platforms.some((platform) => platforms.includes(platform))
-    );
-    state.stop_after_item_run_id = matches ? activeRun.run_id : null;
-    if (matches) {
-      state.active_run.lifecycle_state = "draining";
-      state.active_run.stop_requested_at = new Date().toISOString();
-    }
+    drainRuns(state, platforms);
     await writeStateUnlocked(root, state);
     return state;
   });
@@ -361,8 +359,7 @@ export async function finishRun(root, run, status, errorCode = null) {
       finished_at: new Date().toISOString(),
     };
     state.runs = [completed, ...(state.runs || []).filter((item) => item.run_id !== run.run_id)].slice(0, 100);
-    if (state.active_run?.run_id === run.run_id) state.active_run = null;
-    if (state.stop_after_item_run_id === run.run_id) state.stop_after_item_run_id = null;
+    delete state.active_runs[run.run_id];
     await writeStateUnlocked(root, state);
     return completed;
   });
@@ -397,7 +394,7 @@ export async function clearCollectedData(root) {
     if (backgroundWorkerIsFresh(state.background_worker)) {
       throw new Error("background_worker_already_active");
     }
-    if (activeRunIsFresh(state.active_run)) throw new Error("run_already_active");
+    if (activeRuns(state).length > 0) throw new Error("run_already_active");
     const records = await readRecords(root);
     const removable = ["records", "exports", "tmp", "diagnostics"];
     const removedBytes = (await Promise.all(
@@ -408,8 +405,7 @@ export async function clearCollectedData(root) {
     }
     await ensureLayout(root);
     await exportRecordCsv(root, []);
-    state.active_run = null;
-    state.stop_after_item_run_id = null;
+    state.active_runs = {};
     state.runs = [];
     await writeStateUnlocked(root, state);
     return {
@@ -433,8 +429,15 @@ function recordMaxima(records) {
   );
 }
 
-export async function commitPageRecords(root, proposedRecords) {
+export async function commitPageRecords(root, proposedRecords, runId = null) {
   return withLock(root, async () => {
+    if (runId) {
+      const state = await readStateUnlocked(root);
+      const run = state.active_runs[runId];
+      if (!activeRunIsFresh(run) || (run.worker_id && state.background_worker?.worker_id !== run.worker_id)) {
+        throw new Error("run_lease_lost");
+      }
+    }
     const existing = await readRecords(root);
     const dedup = new Set(existing.map((record) => record.dedup_key));
     const maxima = recordMaxima(existing);

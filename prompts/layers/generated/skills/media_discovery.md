@@ -60,23 +60,36 @@ rests for a bounded random period, and continues until disabled or cancelled.
 It does not create or depend on a schedule job. A stop request calls `disable`;
 the worker observes the persisted control state and exits after the current
 complete post is committed.
-Each enabled platform receives its own bounded batch and retry deadline. The
-worker visits due platforms sequentially; one platform filling its quota or
-waiting for access does not consume another platform's quota or cooldown.
-Only one browser batch runs at a time. Per-platform counters and retry state
-are available in `background_worker.platform_outcomes`.
+Each enabled platform receives its own bounded batch, quota, deadline, browser
+profile, and retry deadline. Due platforms run concurrently: login waiting,
+cooldown, pausing, or failure on one platform does not stop another. One
+background coordinator manages these platform jobs and adopts newly enabled
+platforms without restarting. Calling its companion again returns
+`state=already_running` and the current worker identity, without another worker.
+Per-platform counters and retry state are in `background_worker.platform_outcomes`.
+`active_runs` contains individual run leases; `active_run` is their aggregate
+summary for the existing AiAPP renderer, never an execution lock.
 
-Only one background worker and one collection batch may own their respective
-skill leases at a time. A second start or
-`run_once` returns structured `run_already_active` instead of opening another
-browser. While any continuous platform remains enabled, another `enable`
-returns `collection_already_enabled`; this also rejects a duplicate start that
-was submitted during a run but reached the skill after that batch finished.
-Both rejections are pre-dispatch failures with no side effect. Disabling a
+At most one batch owns a given platform. Overlapping `run_once` or `enable`
+requests return `run_already_active`; a queued duplicate `enable` for an already
+enabled platform returns `collection_already_enabled`. Starting a different
+platform is allowed. Browser concurrency is capped by detected system/container
+memory: below 4 GiB one platform, 4 to below 8 GiB two, otherwise three. A separate
+one-shot caller exceeding available capacity receives `collection_capacity_busy`;
+the background coordinator waits for capacity. Multi-platform one-shot requests
+queue within this limit, apply `max_items_per_run` separately to each platform,
+and return `runs` plus aggregate counts. `partial_collection_failed` retains
+all successful and failed platform results instead of hiding partial completion.
+
+Lease rejections are pre-dispatch failures with no side effect. Disabling a
 platform atomically prevents future batches and changes a
 matching active run to `draining`: the skill finishes the current post, captures
 all of its rendered carousel images, commits its records and CSV rows, and then
-closes the browser normally. It never kills the browser to implement this stop.
+closes that platform's browser normally; other enabled platforms continue. It
+never kills the browser to implement this stop. State, record numbering, dedup,
+and CSV commits remain serialized under a short skill-private write lock.
+Old single-batch storage is adopted only after old workers become idle;
+`storage_upgrade_requires_idle` leaves their state unchanged while they run.
 
 This is an on-demand companion skill with private storage and its own dispatch
 queue. It must not block `media_download` manual downloads or explicit image
@@ -110,21 +123,24 @@ does not enable these periodic notices.
      settings, and `confirm=true` after policy approval;
   2. call the no-argument `media_discovery.run_enabled_once` immediately. It
      reads only enabled persisted platform configurations and remains active as
-     a durable background job.
+     a durable background job, or returns `already_running` with the existing
+     coordinator identity when another platform is already collecting.
 - A request to stop one or all platforms calls `media_discovery.disable`. The
-  worker finishes the current post before exiting; no schedule cleanup is
-  involved.
+  selected platforms finish their current posts; other platforms continue.
+  The coordinator exits when all platforms are disabled. No schedule cleanup is involved.
 - A user request for one bounded batch without continuous collection calls
   `run_once` with explicit platform and source settings. The skill uses an
   ephemeral config and does not enable the platform or start a background
   worker.
-- Treat `state=completed_batch` and `run.counts` as the completed batch receipt.
+- Treat `state=completed_batch` and `run.counts` as the single-platform receipt;
+  multi-platform requests return one receipt per platform in `runs` plus `counts`.
+  Inspect every receipt's `status` and `error_code`, including partial failures.
   Do not start another batch to verify success or after exporting results.
   Use `status` or `list_runs` for verification. Call `export_results` only when
   the user requests exported files; saving content already makes it available
   in AiAPP. An async job must be polled through its returned runtime handle,
   not started again with altered pacing or other arguments.
-- Report saved fields from `run.capture_summary`: `records_saved`,
+- Report saved fields from each `run.capture_summary`: `records_saved`,
   `captions_saved`, `covers_saved`, and the exact `engagement_metrics` names.
   Missing metrics are unavailable, not zero and not collected. Never claim
   comments, shares, favorites, or views when only likes were recorded. Home-feed
@@ -172,7 +188,7 @@ Examples of equivalent intent (documentation examples, not runtime matchers):
 
 - `帮我开始采集抖音` -> enable Douyin home feed and start its durable
   background worker.
-- `停止采集抖音` -> disable Douyin; the worker drains the current post and exits.
+- `停止采集抖音` -> disable Douyin and drain its current post; other platforms continue.
 - `Start collecting Xiaohongshu posts` -> the same workflow for Xiaohongshu.
 - `Collect a small Kuaishou recommendation batch` -> run one bounded Kuaishou
   `home_feed` batch without enabling background collection.
@@ -190,11 +206,11 @@ Examples of equivalent intent (documentation examples, not runtime matchers):
 - `enable`: persist per-platform enabled state and return the exact durable
   background companion capability.
 - `disable`: disable selected platforms, gracefully drain any matching active
-  batch after its current post, and make the background worker exit before its
-  next batch.
+  batch after its current post, and leave other platforms running. The background
+  coordinator exits only when all platforms are disabled and their batches finish.
 - `run_once`: with explicit platform/source settings, run one ephemeral bounded
-  batch without enabling continuous collection. A fresh active lease rejects
-  it with `run_already_active`.
+  batch per platform without enabling continuous collection. A fresh lease for
+  the same platform rejects it with `run_already_active`.
 - `run_enabled_once`: no-argument durable companion used after `enable`; keep
   running bounded collection batches with randomized rests until `disable` or
   task cancellation.
@@ -239,7 +255,8 @@ Stable examples include `display_unavailable`, `browser_missing`,
 `login_required`, `challenge_required`, `network_access_restricted`, `rate_limited`, `selector_drift`,
 `no_items_collected`, `screenshot_obscured`, `media_not_ready`,
 `platform_unsupported`, `source_scope_empty`, `run_already_active`,
-`collection_already_enabled`, and `storage_lock_timeout`.
+`collection_already_enabled`, `collection_capacity_busy`, `partial_collection_failed`,
+`run_lease_lost`, `worker_lease_lost`, `storage_upgrade_requires_idle`, and `storage_lock_timeout`.
 `error_text` is a human fallback and must never drive routing or retry logic.
 
 ## Request/Response Examples (from interface)

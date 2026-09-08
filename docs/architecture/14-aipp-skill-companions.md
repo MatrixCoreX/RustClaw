@@ -143,6 +143,15 @@ The Media Discovery collector keeps a private persistent browser profile per
 platform so later runs can reuse that platform's cookies, local storage, and
 cache. Clearing collected records leaves this private session profile intact;
 the profile itself is never exposed through the AiAPP API.
+Different platforms collect concurrently under one background coordinator;
+each has its own batch lease, quota, deadline, login wait and cooldown. Starting
+the same platform twice is rejected, while newly enabled platforms join the
+current coordinator. Stop/pause drains only selected platforms after their
+current complete posts. Browser concurrency is bounded by detected system or
+container memory (under 4 GiB: one; under 8 GiB: two; otherwise: three).
+Record numbering, deduplication and CSV commits use a short shared write lock.
+The skill publishes an aggregate active-run summary for AiAPP without adding
+platform-specific runtime or UI routing.
 The record scan and page size are bounded. An unfiltered first page seeks by the
 sequence encoded in immutable record filenames and parses only one page plus a
 lookahead record. Filtered views scan the bounded ledger to preserve exact
