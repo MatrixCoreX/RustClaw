@@ -177,6 +177,8 @@ export async function beginBackgroundWorker(root) {
       completed_batches: 0,
       counts: { items: 0, videos: 0, images: 0, duplicates: 0, failures: 0 },
       last_error_code: null,
+      consecutive_failures: 0,
+      retry_not_before: null,
     };
     state.background_worker = worker;
     await writeStateUnlocked(root, state);

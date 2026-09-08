@@ -80,6 +80,11 @@ const CONTINUOUS_RETRYABLE_ERROR_CODES = new Set([
   "rate_limited",
   "selector_drift",
 ]);
+const RETRY_BACKOFF_MS = Object.freeze({
+  challenge_required: Object.freeze({ base: 15 * 60 * 1000, maximum: 6 * 60 * 60 * 1000 }),
+  login_required: Object.freeze({ base: 5 * 60 * 1000, maximum: 30 * 60 * 1000 }),
+  rate_limited: Object.freeze({ base: 10 * 60 * 1000, maximum: 2 * 60 * 60 * 1000 }),
+});
 const RUN_CONFIG_FIELDS = Object.freeze([
   "source_mode",
   "topics",
@@ -119,19 +124,19 @@ export function normalizedConfig(args) {
   if (!new Set(["home_feed", "topics", "seed_urls"]).has(sourceMode)) throw new Error("source_mode_invalid");
   const browserMode = String(args.browser_mode || "silent");
   if (!new Set(["visible", "silent"]).has(browserMode)) throw new Error("browser_mode_invalid");
-  const pacingMinDelayMs = integer(args.pacing_min_delay_ms, 700, 200, 5000);
-  const pacingMaxDelayMs = integer(args.pacing_max_delay_ms, 1800, 200, 8000);
+  const pacingMinDelayMs = integer(args.pacing_min_delay_ms, 1000, 200, 5000);
+  const pacingMaxDelayMs = integer(args.pacing_max_delay_ms, 2800, 200, 8000);
   if (pacingMaxDelayMs < pacingMinDelayMs) throw new Error("invalid_args");
   const config = {
     source_mode: sourceMode,
     topics: Array.isArray(args.topics) ? args.topics.map(String).map((value) => value.trim()).filter(Boolean) : [],
     seed_urls: Array.isArray(args.seed_urls) ? args.seed_urls.map(String) : [],
-    max_items_per_run: integer(args.max_items_per_run, 20, 1, 100),
+    max_items_per_run: integer(args.max_items_per_run, 5, 1, 100),
     max_images_per_post: integer(args.max_images_per_post, 100, 1, 100),
     max_run_minutes: integer(args.max_run_minutes, 30, 5, 180),
     max_scrolls_per_source: integer(args.max_scrolls_per_source, 10, 1, 100),
-    rest_min_seconds: integer(args.rest_min_seconds, 30, 5, 3600),
-    rest_max_seconds: integer(args.rest_max_seconds, 120, 5, 7200),
+    rest_min_seconds: integer(args.rest_min_seconds, 180, 5, 3600),
+    rest_max_seconds: integer(args.rest_max_seconds, 420, 5, 7200),
     retain_diagnostics_hours: integer(args.retain_diagnostics_hours, 24, 1, 168),
     browser_mode: browserMode,
     pacing_min_delay_ms: pacingMinDelayMs,
@@ -145,13 +150,37 @@ export function normalizedConfig(args) {
 export function backgroundRestDelayMs(configs, random = Math.random) {
   const values = Object.values(configs || {});
   const minimum = values.length > 0
-    ? Math.max(...values.map((config) => Number(config?.rest_min_seconds) || 30))
-    : 30;
+    ? Math.max(...values.map((config) => Number(config?.rest_min_seconds) || 180))
+    : 180;
   const maximum = Math.max(minimum, values.length > 0
-    ? Math.min(...values.map((config) => Number(config?.rest_max_seconds) || 120))
-    : 120);
+    ? Math.min(...values.map((config) => Number(config?.rest_max_seconds) || 420))
+    : 420);
   const sample = Math.min(0.999999, Math.max(0, Number(random()) || 0));
   return Math.round((minimum + (maximum - minimum) * sample) * 1000);
+}
+
+export function backgroundRetryDelayMs(
+  configs,
+  errorCode,
+  consecutiveFailures = 1,
+  random = Math.random,
+) {
+  const ordinaryRest = backgroundRestDelayMs(configs, random);
+  const policy = RETRY_BACKOFF_MS[errorCode];
+  if (!policy) return ordinaryRest;
+  const exponent = Math.max(0, Math.min(8, Number(consecutiveFailures) - 1));
+  const backoff = Math.min(policy.maximum, policy.base * (2 ** exponent));
+  const sample = Math.min(0.999999, Math.max(0, Number(random()) || 0));
+  const jittered = Math.round(backoff * (0.85 + sample * 0.3));
+  return Math.max(ordinaryRest, jittered);
+}
+
+function waitingLifecycleState(errorCode) {
+  return {
+    challenge_required: "waiting_for_challenge_resolution",
+    login_required: "waiting_for_login",
+    rate_limited: "rate_limited",
+  }[errorCode] || "resting";
 }
 
 function success(action, extra = {}) {
@@ -351,7 +380,7 @@ async function runOnce(request, args, runtime = {}) {
       display_unavailable: "waiting_for_display",
       login_required: "waiting_for_login",
       rate_limited: "rate_limited",
-      challenge_required: "waiting_for_login",
+      challenge_required: "waiting_for_challenge_resolution",
     };
     status = waitingStates[String(error?.message)] || "failed";
     errorCode = String(error?.message || "execution_failed");
@@ -418,6 +447,7 @@ async function runContinuous(request, runtime = {}) {
   let completedBatches = 0;
   let attemptedBatches = 0;
   let lastErrorCode = null;
+  let consecutiveFailures = 0;
   const workerHeartbeat = setInterval(() => {
     heartbeatBackgroundWorker(root, worker.worker_id, {
       completed_batches: completedBatches,
@@ -443,6 +473,7 @@ async function runContinuous(request, runtime = {}) {
       await heartbeatBackgroundWorker(root, worker.worker_id, {
         lifecycle_state: "running",
         platforms: activeEntries.map(([platform]) => platform),
+        retry_not_before: null,
       });
       attemptedBatches += 1;
       try {
@@ -454,28 +485,37 @@ async function runContinuous(request, runtime = {}) {
         if (["completed_batch", "stopped_after_current_item"].includes(result.extra?.state)) {
           completedBatches += 1;
           lastErrorCode = null;
+          consecutiveFailures = 0;
         } else {
           lastErrorCode = result.extra?.run?.error_code || result.extra?.state || "execution_failed";
+          consecutiveFailures += 1;
         }
       } catch (error) {
         lastErrorCode = String(error?.message || "execution_failed");
+        consecutiveFailures += 1;
         counts.failures += 1;
         if (!CONTINUOUS_RETRYABLE_ERROR_CODES.has(lastErrorCode)) throw error;
       }
+      if (Number.isInteger(runtime.maxContinuousCycles) && attemptedBatches >= runtime.maxContinuousCycles) break;
+      const latest = await readState(root);
+      const activeConfigs = Object.fromEntries(Object.entries(latest.platforms)
+        .filter(([, value]) => value?.enabled && !value?.paused)
+        .map(([platform, value]) => [platform, value?.config || {}]));
+      const delay = backgroundRetryDelayMs(
+        activeConfigs,
+        lastErrorCode,
+        consecutiveFailures,
+        runtime.random || Math.random,
+      );
       await heartbeatBackgroundWorker(root, worker.worker_id, {
         completed_batches: completedBatches,
         counts,
         last_error_code: lastErrorCode,
+        consecutive_failures: consecutiveFailures,
+        lifecycle_state: waitingLifecycleState(lastErrorCode),
+        retry_not_before: new Date(Date.now() + delay).toISOString(),
       });
       reporter.emitIfDue();
-      if (Number.isInteger(runtime.maxContinuousCycles) && attemptedBatches >= runtime.maxContinuousCycles) break;
-      const latest = await readState(root);
-      const delay = backgroundRestDelayMs(
-        Object.fromEntries(Object.entries(latest.platforms)
-          .filter(([, value]) => value?.enabled && !value?.paused)
-          .map(([platform, value]) => [platform, value?.config || {}])),
-        runtime.random || Math.random,
-      );
       const control = await sleepWithBackgroundControl(root, worker.worker_id, delay, sleep);
       if (control !== "ready") break;
     }
