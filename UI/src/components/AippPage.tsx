@@ -23,11 +23,13 @@ import {
   Share2,
   Trash2,
   Video,
+  ZoomIn,
 } from "lucide-react";
 
 import { formatUiError } from "../lib/ui-error";
 import { appStorageKey } from "../lib/product-identity";
 import { useUiDialog } from "./UiDialogProvider";
+import { AippImageViewer, type AippViewerImage } from "./AippImageViewer";
 import type {
   AippCatalogItem,
   AippCatalogResponse,
@@ -404,11 +406,17 @@ function ActivityArtifactIcon({ artifact }: { artifact: AippTaskActivityArtifact
   return <FileText className="h-4 w-4" />;
 }
 
-function ActivityImagePreview({ artifact, apiFetch }: { artifact: AippTaskActivityArtifact; apiFetch: ApiFetch }) {
+function ActivityImagePreview({ artifact, apiFetch, t, onOpen }: {
+  artifact: AippTaskActivityArtifact;
+  apiFetch: ApiFetch;
+  t: Translate;
+  onOpen: (source: string | null) => void;
+}) {
   const [source, setSource] = useState<string | null>(null);
   const apiFetchRef = useRef(apiFetch);
   apiFetchRef.current = apiFetch;
   useEffect(() => {
+    setSource(null);
     const endpoint = artifact.preview_url;
     if (!endpoint) return;
     let disposed = false;
@@ -431,10 +439,11 @@ function ActivityImagePreview({ artifact, apiFetch }: { artifact: AippTaskActivi
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [artifact.preview_url]);
-  return source ? (
-    <img src={source} alt={artifact.filename} className="h-full w-full object-contain" />
-  ) : (
-    <div className="flex h-full w-full items-center justify-center text-white/35"><ImageIcon className="h-8 w-8" /></div>
+  return (
+    <button type="button" className="group relative block h-full w-full cursor-zoom-in" onClick={() => onOpen(source)} title={t("放大图片", "Enlarge image")} aria-label={t("放大图片", "Enlarge image")}>
+      {source ? <img src={source} alt={artifact.filename} className="h-full w-full object-contain" /> : <span className="flex h-full w-full items-center justify-center text-white/35"><ImageIcon className="h-8 w-8" /></span>}
+      <span className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-md border border-white/20 bg-black/60 text-white/85"><ZoomIn className="h-4 w-4" /></span>
+    </button>
   );
 }
 
@@ -452,9 +461,23 @@ export function AippTaskActivityCard({
   const [expanded, setExpanded] = useState(false);
   const [artifactAction, setArtifactAction] = useState<string | null>(null);
   const [artifactError, setArtifactError] = useState<string | null>(null);
+  const [viewerImage, setViewerImage] = useState<AippViewerImage | null>(null);
+  const openImage = (artifact: AippTaskActivityArtifact, initialSource?: string | null) => {
+    setViewerImage({
+      title: artifact.filename,
+      filename: artifact.filename,
+      previewUrl: artifact.preview_url || artifact.download_url,
+      downloadUrl: artifact.download_url,
+      initialSource,
+    });
+  };
   const preview = item.artifacts.find((artifact) => artifact.kind === "image" && artifact.preview_url);
   const longContent = item.input_text.length > 320 || item.result_text.length > 720;
   const fetchArtifact = async (artifact: AippTaskActivityArtifact, open: boolean) => {
+    if (open && artifact.kind === "image") {
+      openImage(artifact);
+      return;
+    }
     if (artifactAction) return;
     setArtifactAction(`${open ? "open" : "download"}:${artifact.id}`);
     setArtifactError(null);
@@ -486,7 +509,7 @@ export function AippTaskActivityCard({
       <div className={preview ? "grid min-w-0 sm:grid-cols-[minmax(120px,22%)_minmax(0,1fr)]" : "min-w-0"}>
         {preview ? (
           <div className="aspect-video max-h-44 min-h-28 overflow-hidden bg-black/20 sm:aspect-auto">
-            <ActivityImagePreview artifact={preview} apiFetch={apiFetch} />
+            <ActivityImagePreview artifact={preview} apiFetch={apiFetch} t={t} onOpen={(source) => openImage(preview, source)} />
           </div>
         ) : null}
         <div className="min-w-0 p-3 sm:p-4">
@@ -561,6 +584,7 @@ export function AippTaskActivityCard({
           {artifactError ? <p className="pb-2 text-xs text-red-200">{artifactError}</p> : null}
         </div>
       ) : null}
+      {viewerImage ? <AippImageViewer image={viewerImage} apiFetch={apiFetch} t={t} onClose={() => setViewerImage(null)} /> : null}
     </article>
   );
 }
@@ -579,7 +603,7 @@ function MediaPreview({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const mayHaveLocalPreview = item.kind === "image" || item.preview_available;
   const [shouldLoad, setShouldLoad] = useState(!mayHaveLocalPreview);
-  const [downloadState, setDownloadState] = useState<"idle" | "working" | "failed">("idle");
+  const [viewerOpen, setViewerOpen] = useState(false);
   const visibilityRef = useRef<HTMLDivElement | null>(null);
   const apiFetchRef = useRef(apiFetch);
   apiFetchRef.current = apiFetch;
@@ -624,28 +648,6 @@ function MediaPreview({
     };
   }, [item.global_sequence, mayHaveLocalPreview, shouldLoad, skillName]);
 
-  const downloadImage = async () => {
-    if (item.kind !== "image" || downloadState === "working") return;
-    setDownloadState("working");
-    try {
-      const response = await apiFetchRef.current(
-        `/v1/aipps/${encodeURIComponent(skillName)}/items/${item.global_sequence}/preview`,
-      );
-      if (!response.ok) throw new Error(`aipp_download_http_${response.status}`);
-      const objectUrl = URL.createObjectURL(await response.blob());
-      const anchor = document.createElement("a");
-      anchor.href = objectUrl;
-      anchor.download = `media-${String(item.global_sequence).padStart(12, "0")}.png`;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
-      setDownloadState("idle");
-    } catch {
-      setDownloadState("failed");
-    }
-  };
-
   const source = previewUrl || (item.kind === "image" ? item.image_url : null);
   if (source) {
     const image = (
@@ -657,26 +659,28 @@ function MediaPreview({
         className="h-full w-full object-contain"
       />
     );
-    if (item.kind !== "image") return image;
     return (
-      <button
-        type="button"
-        className="group relative block h-full w-full cursor-pointer overflow-hidden"
-        onClick={() => void downloadImage()}
-        title={t("下载图片", "Download image")}
-        aria-label={t("下载图片", "Download image")}
-        disabled={downloadState === "working"}
-      >
-        {image}
-        <span className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-md border border-white/20 bg-black/60 text-white/85 opacity-80 transition group-hover:opacity-100">
-          {downloadState === "working" ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-        </span>
-        {downloadState === "failed" ? (
-          <span className="absolute inset-x-2 bottom-2 rounded bg-black/75 px-2 py-1 text-xs text-white">
-            {t("图片下载失败，请重试。", "Image download failed. Try again.")}
+      <>
+        <button
+          type="button"
+          className="group relative block h-full w-full cursor-zoom-in overflow-hidden"
+          onClick={() => setViewerOpen(true)}
+          title={t("放大图片", "Enlarge image")}
+          aria-label={t("放大图片", "Enlarge image")}
+        >
+          {image}
+          <span className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-md border border-white/20 bg-black/60 text-white/85 opacity-80 transition group-hover:opacity-100">
+            <ZoomIn className="h-4 w-4" />
           </span>
-        ) : null}
-      </button>
+        </button>
+        {viewerOpen ? <AippImageViewer image={{
+          title: item.title,
+          filename: `media-${String(item.global_sequence).padStart(12, "0")}.png`,
+          previewUrl: `/v1/aipps/${encodeURIComponent(skillName)}/items/${item.global_sequence}/preview`,
+          downloadUrl: `/v1/aipps/${encodeURIComponent(skillName)}/items/${item.global_sequence}/preview`,
+          initialSource: source,
+        }} apiFetch={apiFetch} t={t} onClose={() => setViewerOpen(false)} /> : null}
+      </>
     );
   }
   return (

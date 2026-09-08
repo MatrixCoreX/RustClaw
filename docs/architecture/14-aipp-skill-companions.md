@@ -36,6 +36,15 @@ skill's private export directory through an authenticated preview endpoint.
 Collected image screenshots use the same endpoint for preview and download.
 Remote HTTPS image URLs are loaded without a referrer only as a fallback.
 
+Clicking an image or a collected video cover opens a shared enlarged-image viewer,
+not an immediate download. Its bottom-right download button uses the existing
+authenticated collection-preview or task-artifact endpoint. The viewer fits the
+desktop or mobile viewport, supports light and dark themes, retries failed image
+loads/downloads, and closes through its close button, backdrop, or Escape. Text,
+audio, and video artifact actions retain their own preview/download behavior.
+This is reusable host presentation; it adds no skill-specific core route or
+changes to the AiAPP installation contract.
+
 Starting, pausing, resuming, and stopping collection remain Agent actions. This
 keeps one natural-language capability path across the browser and communication
 channels instead of adding a second control protocol to the UI.
