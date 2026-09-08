@@ -30,6 +30,8 @@ struct AippInstallState {
     schema_version: u32,
     #[serde(default)]
     removed: BTreeSet<String>,
+    #[serde(default, alias = "cleared_through_sequence")]
+    cleared_through_event_ms: BTreeMap<String, u64>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -105,22 +107,64 @@ impl SkillAdmissionService {
     }
 
     pub(crate) fn aipp_is_installed(&self, skill_name: &str) -> Result<bool> {
-        let path = self.root.join("aipp-install-state.json");
-        let Some(state) = read_optional_json::<AippInstallState>(&path)? else {
-            return Ok(true);
-        };
-        if state.schema_version != AIPP_INSTALL_STATE_SCHEMA_VERSION {
-            return Err(error(
-                "aipp_install_state_schema_unsupported",
-                format!("schema_version={}", state.schema_version),
-            ));
-        }
+        let state = self.read_aipp_install_state()?;
         Ok(!state.removed.contains(skill_name))
     }
 
     pub(crate) fn set_aipp_installed(&self, skill_name: &str, installed: bool) -> Result<()> {
         skill_sdk::validate_safe_name(skill_name, "aipp.skill_name")
             .map_err(|source| error("aipp_skill_name_invalid", source.to_string()))?;
+        self.update_aipp_install_state(|state| {
+            if installed {
+                state.removed.remove(skill_name);
+            } else {
+                state.removed.insert(skill_name.to_string());
+            }
+        })
+    }
+
+    pub(crate) fn aipp_cleared_through_event_ms(&self, skill_name: &str) -> Result<u64> {
+        skill_sdk::validate_safe_name(skill_name, "aipp.skill_name")
+            .map_err(|source| error("aipp_skill_name_invalid", source.to_string()))?;
+        Ok(self
+            .read_aipp_install_state()?
+            .cleared_through_event_ms
+            .get(skill_name)
+            .copied()
+            .unwrap_or_default())
+    }
+
+    pub(crate) fn set_aipp_cleared_through_event_ms(
+        &self,
+        skill_name: &str,
+        sequence: u64,
+    ) -> Result<()> {
+        skill_sdk::validate_safe_name(skill_name, "aipp.skill_name")
+            .map_err(|source| error("aipp_skill_name_invalid", source.to_string()))?;
+        self.update_aipp_install_state(|state| {
+            state
+                .cleared_through_event_ms
+                .insert(skill_name.to_string(), sequence);
+        })
+    }
+
+    fn read_aipp_install_state(&self) -> Result<AippInstallState> {
+        let path = self.root.join("aipp-install-state.json");
+        let state = read_optional_json::<AippInstallState>(&path)?.unwrap_or(AippInstallState {
+            schema_version: AIPP_INSTALL_STATE_SCHEMA_VERSION,
+            removed: BTreeSet::new(),
+            cleared_through_event_ms: BTreeMap::new(),
+        });
+        if state.schema_version != AIPP_INSTALL_STATE_SCHEMA_VERSION {
+            return Err(error(
+                "aipp_install_state_schema_unsupported",
+                format!("schema_version={}", state.schema_version),
+            ));
+        }
+        Ok(state)
+    }
+
+    fn update_aipp_install_state(&self, update: impl FnOnce(&mut AippInstallState)) -> Result<()> {
         fs::create_dir_all(&self.root).map_err(io_error("skill_admission_root_create_failed"))?;
         secure_directory(&self.root)?;
         let lock = OpenOptions::new()
@@ -132,22 +176,8 @@ impl SkillAdmissionService {
         FileExt::lock_exclusive(&lock).map_err(io_error("skill_admission_lock_failed"))?;
         let result = (|| {
             let path = self.root.join("aipp-install-state.json");
-            let mut state =
-                read_optional_json::<AippInstallState>(&path)?.unwrap_or(AippInstallState {
-                    schema_version: AIPP_INSTALL_STATE_SCHEMA_VERSION,
-                    removed: BTreeSet::new(),
-                });
-            if state.schema_version != AIPP_INSTALL_STATE_SCHEMA_VERSION {
-                return Err(error(
-                    "aipp_install_state_schema_unsupported",
-                    format!("schema_version={}", state.schema_version),
-                ));
-            }
-            if installed {
-                state.removed.remove(skill_name);
-            } else {
-                state.removed.insert(skill_name.to_string());
-            }
+            let mut state = self.read_aipp_install_state()?;
+            update(&mut state);
             atomic_write_json(&path, &state)
         })();
         let _ = FileExt::unlock(&lock);

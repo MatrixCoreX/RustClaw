@@ -114,6 +114,8 @@ bundle 在允许脚本和下载、但没有同源权限的 iframe 中运行。�
 - Collection renderer 只能读取声明它的技能经 `SkillStorageResolver` 解析出的私有存储。
 - Task activity renderer 只能读取存在当前技能结构化执行事件的任务；`task_channel_scope =
   "all"` 同时包含 UI 与外部通信端。
+- 清空 task activity 视图时只记录宿主拥有的结构化事件时间基线；AiAPP 隐藏该基线及以前的记录，
+  但保留规范任务、事件、对话和工件，新产生的匹配任务仍会正常展示。
 - 预览和工件路由必须认证，只返回有界且在允许列表内的文件，不能暴露私有存储路径。
 - 单独卸载 AiAPP 只写展示 tombstone，不卸载或禁用技能，也不删除配置和私有数据。
 - 卸载技能走正常准入生命周期；已运行调用使用固定版本 lease 收尾。

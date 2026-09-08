@@ -121,6 +121,9 @@ model prose to decide state, ownership, success, retry, or permission.
 - A collection renderer reads only the declaring skill's resolved private storage.
 - A task-activity renderer reads only tasks with a structured execution event for the declaring
   skill. `task_channel_scope = "all"` includes UI and external channels.
+- Clearing a task-activity view stores a host-owned structured-event-time baseline. It hides records at or
+  before that baseline from the AiAPP while preserving canonical tasks, events, conversations, and
+  artifacts. Newer matching tasks remain visible.
 - Preview and artifact routes return authenticated, bounded, allowlisted files. They never expose
   private storage paths.
 - AiAPP removal writes a presentation tombstone only. It does not uninstall or disable the skill

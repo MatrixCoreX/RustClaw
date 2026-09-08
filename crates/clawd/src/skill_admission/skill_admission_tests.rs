@@ -39,6 +39,21 @@ fn aipp_removal_is_independent_from_skill_admission_state() {
     assert!(service
         .aipp_is_installed("fixture_app")
         .expect("restored state"));
+    assert_eq!(
+        service
+            .aipp_cleared_through_event_ms("fixture_app")
+            .expect("default clear sequence"),
+        0
+    );
+    service
+        .set_aipp_cleared_through_event_ms("fixture_app", 42)
+        .expect("set clear sequence");
+    assert_eq!(
+        service
+            .aipp_cleared_through_event_ms("fixture_app")
+            .expect("stored clear sequence"),
+        42
+    );
 
     fs::remove_dir_all(root).expect("remove fixture");
 }

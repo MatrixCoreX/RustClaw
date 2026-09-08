@@ -488,6 +488,7 @@ fn read_aipp_task_activity_page(
     db: &rusqlite::Connection,
     skill_name: &str,
     task_channel_scope: &str,
+    cleared_through_event_ms: u64,
     query: &AippMediaQuery,
 ) -> Result<Value, String> {
     let communication_only = match task_channel_scope {
@@ -564,6 +565,7 @@ fn read_aipp_task_activity_page(
                          WHERE task_event_stream.task_id = tasks.task_id
                            AND json_extract(task_event_stream.event_json, '$.event_kind') = 'tool_finished'
                            AND json_extract(task_event_stream.event_json, '$.payload.skill') = :skill_name
+                           AND task_event_stream.created_at_ms > :cleared_through_event_ms
                     )
                     OR EXISTS (
                         SELECT 1
@@ -571,6 +573,7 @@ fn read_aipp_task_activity_page(
                          WHERE task_event_archive.task_id = tasks.task_id
                            AND json_extract(task_event_archive.event_json, '$.event_kind') = 'tool_finished'
                            AND json_extract(task_event_archive.event_json, '$.payload.skill') = :skill_name
+                           AND task_event_archive.created_at_ms > :cleared_through_event_ms
                     )
                )
                AND (:cursor IS NULL OR tasks.rowid {cursor_operator} :cursor)
@@ -584,6 +587,7 @@ fn read_aipp_task_activity_page(
               JOIN filtered ON filtered.task_id = task_event_stream.task_id
              WHERE json_extract(task_event_stream.event_json, '$.event_kind') = 'tool_finished'
                AND json_extract(task_event_stream.event_json, '$.payload.skill') = :skill_name
+               AND task_event_stream.created_at_ms > :cleared_through_event_ms
             UNION ALL
             SELECT task_event_archive.task_id,
                    task_event_archive.created_at_ms,
@@ -592,6 +596,7 @@ fn read_aipp_task_activity_page(
               JOIN filtered ON filtered.task_id = task_event_archive.task_id
              WHERE json_extract(task_event_archive.event_json, '$.event_kind') = 'tool_finished'
                AND json_extract(task_event_archive.event_json, '$.payload.skill') = :skill_name
+               AND task_event_archive.created_at_ms > :cleared_through_event_ms
         ), activity AS (
             SELECT task_id,
                    MAX(created_at_ms) AS event_at_ms,
@@ -622,6 +627,7 @@ fn read_aipp_task_activity_page(
     let mut rows = statement
         .query(rusqlite::named_params! {
             ":skill_name": skill_name,
+            ":cleared_through_event_ms": cleared_through_event_ms as i64,
             ":communication_only": i64::from(communication_only),
             ":channel": query.channel.as_deref(),
             ":status": query.status.as_deref(),
@@ -907,6 +913,21 @@ async fn get_aipp_items(
             .task_channel_scope
             .clone()
             .unwrap_or_else(|| "all".to_string());
+        let cleared_through_event_ms = match aipp_admission_service(&state)
+            .and_then(|service| {
+                service
+                    .aipp_cleared_through_event_ms(&skill_name)
+                    .map_err(|_| "aipp_view_state_unavailable".to_string())
+            })
+        {
+            Ok(sequence) => sequence,
+            Err(_) => {
+                return aipp_api_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "aipp_view_state_unavailable",
+                )
+            }
+        };
         let query_state = state.clone();
         let query_skill = skill_name.clone();
         let page = tokio::task::spawn_blocking(move || {
@@ -915,7 +936,13 @@ async fn get_aipp_items(
                 .db
                 .get()
                 .map_err(|_| "aipp_task_activity_database_unavailable".to_string())?;
-            read_aipp_task_activity_page(&db, &query_skill, &task_channel_scope, &query)
+            read_aipp_task_activity_page(
+                &db,
+                &query_skill,
+                &task_channel_scope,
+                cleared_through_event_ms,
+                &query,
+            )
         })
         .await;
         return match page {
@@ -961,6 +988,89 @@ async fn get_aipp_items(
         Ok(Err(error)) => aipp_api_error(StatusCode::INTERNAL_SERVER_ERROR, &error),
         Err(_) => aipp_api_error(StatusCode::INTERNAL_SERVER_ERROR, "aipp_read_task_failed"),
     }
+}
+
+async fn clear_aipp_items(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(skill_name): AxumPath<String>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if let Err(response) = require_ui_admin(&state, &headers) {
+        return response;
+    }
+    let active = match active_aipp_package(&state, &skill_name) {
+        Ok(Some(active)) if aipp_is_installed(&state, &skill_name) => active,
+        _ => return aipp_api_error(StatusCode::NOT_FOUND, "aipp_not_available"),
+    };
+    if active.aipp.data_contract != "skill_task_activity_v1" {
+        return aipp_api_error(StatusCode::BAD_REQUEST, "aipp_items_clear_unsupported");
+    }
+    let cleared_through_event_ms = {
+        let db = match state.core.db.get() {
+            Ok(db) => db,
+            Err(_) => {
+                return aipp_api_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "aipp_items_clear_database_unavailable",
+                )
+            }
+        };
+        match db.query_row(
+            "SELECT COALESCE(MAX(created_at_ms), 0)
+               FROM (
+                    SELECT created_at_ms
+                      FROM task_event_stream
+                     WHERE json_extract(event_json, '$.event_kind') = 'tool_finished'
+                       AND json_extract(event_json, '$.payload.skill') = ?1
+                    UNION ALL
+                    SELECT created_at_ms
+                      FROM task_event_archive
+                     WHERE json_extract(event_json, '$.event_kind') = 'tool_finished'
+                       AND json_extract(event_json, '$.payload.skill') = ?1
+               )",
+            rusqlite::params![skill_name],
+            |row| row.get::<_, u64>(0),
+        ) {
+            Ok(sequence) => sequence,
+            Err(_) => {
+                return aipp_api_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "aipp_items_clear_database_unavailable",
+                )
+            }
+        }
+    };
+    let service = match aipp_admission_service(&state) {
+        Ok(service) => service,
+        Err(_) => {
+            return aipp_api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "aipp_view_state_unavailable",
+            )
+        }
+    };
+    if service
+        .set_aipp_cleared_through_event_ms(&skill_name, cleared_through_event_ms)
+        .is_err()
+    {
+        return aipp_api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "aipp_items_clear_state_update_failed",
+        );
+    }
+    (
+        StatusCode::OK,
+        Json(ApiResponse {
+            ok: true,
+            data: Some(json!({
+                "schema_version": 1,
+                "skill_name": skill_name,
+                "cleared_through_event_ms": cleared_through_event_ms,
+                "source_records_preserved": true,
+            })),
+            error: None,
+        }),
+    )
 }
 
 fn resolve_aipp_preview(root: &Path, sequence: u64) -> Result<(PathBuf, &'static str), String> {

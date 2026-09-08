@@ -220,6 +220,7 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             get(get_aipp_bundle_asset),
         )
         .route("/aipps/:skill_name/items", get(get_aipp_items))
+        .route("/aipps/:skill_name/items/clear", post(clear_aipp_items))
         .route(
             "/aipps/:skill_name/items/:sequence/preview",
             get(get_aipp_media_preview),
