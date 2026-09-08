@@ -185,6 +185,9 @@ Login/verification and sampled element-occlusion checks run before and after
 capture. Rejected temporary screenshots are removed rather than published as
 previews. These checks reduce false captures but do not prove every transient
 overlay or future layout is supported.
+Browser-loaded images get a bounded readiness wait before capture; broken or
+unloaded images are rejected instead of saving placeholders. Manual verification
+must remain clear across two consecutive observations before browsing resumes.
 
 Screenshots are preview artifacts only. The skill never sends video covers or
 image screenshots to OCR or model review. Text comes only from the platform's
