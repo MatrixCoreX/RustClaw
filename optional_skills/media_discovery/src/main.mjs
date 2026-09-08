@@ -327,27 +327,19 @@ async function runOnce(request, args, runtime = {}) {
       } catch (error) {
         const errorCode = String(error?.message || "execution_failed");
         const interactiveLoginAllowed = args.interactive_login === true
-          && ["login_required", "challenge_required"].includes(errorCode);
+          && errorCode === "login_required";
         if (!interactiveLoginAllowed) throw error;
 
-        const visibleCollectionRequest = {
-          ...collectionRequest,
-          config: { ...config, browser_mode: "visible" },
-        };
-        try {
-          await collect(visibleCollectionRequest);
-        } catch (visibleError) {
-          const loginResult = await (runtime.waitForInteractiveLogin || waitForInteractiveLogin)({
-            root,
-            platform,
-            config: visibleCollectionRequest.config,
-            timeoutMs: Math.max(1000, Math.min(10 * 60 * 1000, deadline - Date.now())),
-          });
-          if (!loginResult?.ready) {
-            throw new Error(loginResult?.error_code || String(visibleError?.message || errorCode));
-          }
-          await collect(visibleCollectionRequest);
+        const loginResult = await (runtime.waitForInteractiveLogin || waitForInteractiveLogin)({
+          root,
+          platform,
+          config,
+          timeoutMs: Math.max(1000, Math.min(10 * 60 * 1000, deadline - Date.now())),
+        });
+        if (!loginResult?.ready) {
+          throw new Error(loginResult?.error_code || errorCode);
         }
+        await collect(collectionRequest);
       }
       if (await heartbeat(root, run.run_id, counts)) {
         status = "stopped_after_current_item";

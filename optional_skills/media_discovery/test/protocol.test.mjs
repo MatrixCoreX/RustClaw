@@ -79,38 +79,24 @@ test("a completed collection with no items returns a structured retryable error"
   assert.equal(result.extra.retryable, true);
 });
 
-test("the initial enabled run retries a silent challenge in visible mode", async (t) => {
+test("a silent challenge never opens an interactive browser", async (t) => {
   const context = await requestContext(t);
   await handleRequest({
     args: { action: "enable", platform: "douyin", confirm: true, browser_mode: "silent" },
     context,
   });
 
-  let collectionAttempts = 0;
   let loginSessions = 0;
   const result = await handleRequest({
-    request_id: "interactive-login-retry",
+    request_id: "silent-challenge",
     args: { action: "run_enabled_once" },
     context,
   }, {
     maxContinuousCycles: 1,
     sleep: async () => {},
-    collectPlatform: async ({ config, onPage }) => {
-      collectionAttempts += 1;
-      if (collectionAttempts === 1) throw new Error("challenge_required");
-      assert.equal(config.browser_mode, "visible");
-      await onPage({
-        records: [{
-          kind: "video",
-          dedup_key: "douyin:interactive-login:video",
-          platform: "douyin",
-          title: "fixture",
-          video_page_url: "https://www.douyin.com/video/1234567890",
-          discovered_at: "2026-09-08T00:00:00Z",
-        }],
-        temporaryPaths: [],
-      });
-      return { handled: 1 };
+    collectPlatform: async ({ config }) => {
+      assert.equal(config.browser_mode, "silent");
+      throw new Error("challenge_required");
     },
     waitForInteractiveLogin: async () => {
       loginSessions += 1;
@@ -120,12 +106,12 @@ test("the initial enabled run retries a silent challenge in visible mode", async
 
   assert.equal(result.status, "ok");
   assert.equal(result.extra.state, "stopped");
-  assert.equal(result.extra.background_worker.counts.items, 1);
-  assert.equal(collectionAttempts, 2);
+  assert.equal(result.extra.background_worker.counts.items, 0);
+  assert.equal(result.extra.background_worker.last_error_code, "challenge_required");
   assert.equal(loginSessions, 0);
 });
 
-test("a visible login barrier keeps an interactive session before the verified retry", async (t) => {
+test("a silent login barrier opens one login session and retries silently", async (t) => {
   const context = await requestContext(t);
   await handleRequest({
     args: { action: "enable", platform: "douyin", confirm: true, browser_mode: "silent" },
@@ -143,9 +129,8 @@ test("a visible login barrier keeps an interactive session before the verified r
     sleep: async () => {},
     collectPlatform: async ({ config, onPage }) => {
       collectionAttempts += 1;
-      if (collectionAttempts === 1) throw new Error("challenge_required");
-      assert.equal(config.browser_mode, "visible");
-      if (collectionAttempts === 2) throw new Error("login_required");
+      assert.equal(config.browser_mode, "silent");
+      if (collectionAttempts === 1) throw new Error("login_required");
       await onPage({
         records: [{
           kind: "video",
@@ -168,7 +153,7 @@ test("a visible login barrier keeps an interactive session before the verified r
   assert.equal(result.status, "ok");
   assert.equal(result.extra.state, "stopped");
   assert.equal(result.extra.background_worker.counts.items, 1);
-  assert.equal(collectionAttempts, 3);
+  assert.equal(collectionAttempts, 2);
   assert.equal(loginSessions, 1);
 });
 

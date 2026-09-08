@@ -223,14 +223,13 @@ remote URLs.
 - Browser mode defaults to silent. `visible` is accepted only as an explicit
   structured planner argument; when selected, a missing desktop session returns
   `display_unavailable` instead of changing the requested mode.
-- A background run may open the
-  skill-owned persistent browser profile when a silent attempt reports
-  `login_required` or `challenge_required` and a desktop is available. The
-  skill first retries the same bounded collection in visible mode. If platform
-  access still requires authentication, it keeps that skill-owned profile open
-  until the platform authentication state is present or the user closes the
-  window, then verifies access by retrying the collection. The same private
-  profile is reused after login, so normal runs remain silent.
+- A silent background run opens the skill-owned persistent browser profile only
+  when the platform reports the structured `login_required` state and a desktop
+  is available. This temporary window exists only for interactive sign-in. It
+  closes after authentication is present, then retries collection in the
+  originally requested silent mode. `challenge_required`, selector drift, rate
+  limits, and ordinary collection failures never promote a silent run to a
+  visible browser. The same private profile is reused after login.
 - The skill uses one private persistent browser profile per platform. Later
   runs reuse that profile's cookies, local storage, and browser cache; clearing
   collected results preserves this login/session state. The skill does not read
