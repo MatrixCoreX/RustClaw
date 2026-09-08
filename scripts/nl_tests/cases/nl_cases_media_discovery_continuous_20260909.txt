@@ -1,0 +1,5 @@
+# Start creates a durable job intentionally left running until explicitly stopped.
+# Validate its live worker heartbeat and runtime poll handle; do not use a runner
+# that requires task termination as the success condition for this start case.
+media_discovery_continuous|long_douyin_start|optional_skill:media_discovery,provider_mode:live,execution_mode:real,capability:media_discovery.enable,requires_tool_call:true|开始持续采集抖音推荐内容，在后台静默运行，每批最多5条，批次之间休息3到7分钟，保存文案、封面和页面提供的互动数据到媒体发现AiAPP。不要创建定时任务，不要导出文件；持续运行，直到我要求停止。我确认开启。
+media_discovery_continuous|long_douyin_status|optional_skill:media_discovery,provider_mode:live,execution_mode:real,capability:media_discovery.status,requires_tool_call:true|只查询抖音持续采集的当前状态、已经保存的数量和最近一批的结果，不要启动新的采集，不要停止已有任务，也不要导出文件。

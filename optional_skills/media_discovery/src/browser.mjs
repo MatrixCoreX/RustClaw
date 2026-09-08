@@ -287,6 +287,7 @@ export function platformAccessError(platform, currentUrl, captchaFrameUrls = [])
     && current.pathname === "/website-login/error"
     && current.searchParams.has("error_code")
   ) {
+    if (current.searchParams.get("error_code") === "300012") return "network_access_restricted";
     return "challenge_required";
   }
   if (
@@ -309,6 +310,25 @@ async function currentPlatformAccessError(page, platform) {
     frames.map((frame) => frame.src || ""),
   );
   return platformAccessError(platform, page.url(), captchaFrameUrls);
+}
+
+export async function waitForPlatformFeed(page, platform, config, shouldStop, timeoutMs = NAVIGATION_TIMEOUT_MS) {
+  const deadline = Date.now() + timeoutMs;
+  const selector = platform === "xiaohongshu"
+    ? "section.note-item[data-note-id]" : '.video-card a[href*="/short-video/"]';
+  while (Date.now() < deadline) {
+    if (await shouldStop()) throw browserStageError("collection_stopped", "feed_ready");
+    const accessError = await accessErrorAfterExplicitVisibleWait(page, platform, config, shouldStop);
+    if (accessError) throw browserStageError(accessError, "feed_ready");
+    const ready = await page.locator(selector).evaluateAll((nodes, platform) => nodes.some(node => {
+      if (platform === "xiaohongshu") return /^[A-Za-z0-9_-]+$/u.test(node.getAttribute("data-note-id") || "");
+      try { return /^\/short-video\/[A-Za-z0-9_-]{8,}(?:\/|$)/u.test(new URL(node.href).pathname); }
+      catch { return false; }
+    }), platform);
+    if (ready) return;
+    await page.waitForTimeout(250);
+  }
+  throw browserStageError("selector_drift", "feed_ready");
 }
 
 export async function accessErrorAfterExplicitVisibleWait(page, platform, config = {}, shouldStop = async () => false) {
@@ -872,6 +892,8 @@ async function collectPage(page, root, runId, platform, itemUrl, config, discove
     throw new Error(response.status() === 429 ? "rate_limited" : "challenge_required");
   }
   await pacingWait(page, config, 1.25);
+  const accessError = await currentPlatformAccessError(page, platform);
+  if (accessError) throw browserStageError(accessError, "detail_access");
   let currentUrl = "";
   try {
     currentUrl = validatePlatformUrl(platform, page.url());
@@ -1184,11 +1206,10 @@ async function collectXiaohongshuHomeFeed(
   let handled = 0;
   let lastError = null;
   const maxScrolls = config.max_scrolls_per_source || 10;
-  await page.waitForSelector("section.note-item[data-note-id]", {
-    state: "attached",
-    timeout: NAVIGATION_TIMEOUT_MS,
-  }).catch(() => {});
+  await waitForPlatformFeed(page, "xiaohongshu", config, shouldStop);
   for (let scroll = 0; scroll <= maxScrolls && handled < limit; scroll += 1) {
+    const accessError = await currentPlatformAccessError(page, "xiaohongshu");
+    if (accessError) throw browserStageError(accessError, "feed_scroll");
     const cards = await page.locator("section.note-item[data-note-id]").evaluateAll((nodes) =>
       nodes.map((node, index) => {
         const rect = node.getBoundingClientRect();
@@ -1242,18 +1263,7 @@ async function collectKuaishouHomeFeed(
   let handled = 0;
   let lastError = null;
   const maxScrolls = config.max_scrolls_per_source || 10;
-  await page.waitForFunction(
-    () => [...document.querySelectorAll('.video-card a[href*="/short-video/"]')]
-      .some((anchor) => {
-        try {
-          return /^\/short-video\/[A-Za-z0-9_-]{8,}(?:\/|$)/u.test(new URL(anchor.href).pathname);
-        } catch {
-          return false;
-        }
-      }),
-    undefined,
-    { timeout: NAVIGATION_TIMEOUT_MS },
-  ).catch(() => {});
+  await waitForPlatformFeed(page, "kuaishou", config, shouldStop);
   for (let scroll = 0; scroll <= maxScrolls && handled < limit; scroll += 1) {
     const cards = await page.locator(".video-card").evaluateAll((nodes) =>
       nodes.map((node, index) => {
@@ -1399,7 +1409,7 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
         } catch (error) {
           lastError = error;
           await onFailure?.(error);
-          if (["login_required", "challenge_required", "rate_limited"].includes(String(error?.message))) {
+          if (["login_required", "challenge_required", "network_access_restricted", "rate_limited"].includes(String(error?.message))) {
             throw error;
           }
         }
