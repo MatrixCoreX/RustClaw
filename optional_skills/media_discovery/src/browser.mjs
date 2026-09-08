@@ -307,12 +307,16 @@ export function platformAccessError(platform, currentUrl, captchaFrameUrls = [])
   return null;
 }
 
-async function currentPlatformAccessError(page, platform) {
+export async function currentPlatformAccessError(page, platform) {
   const captchaFrameUrls = await page.locator("iframe[src]").evaluateAll((frames) =>
     frames.map((frame) => frame.src || ""),
   );
   const accessError = platformAccessError(platform, page.url(), captchaFrameUrls);
   if (accessError) return accessError;
+  if (platform === "xiaohongshu"
+    && await page.locator('.login-modal.reds-modal-open .login-container:visible').count()) {
+    return "login_required";
+  }
   if (await page.locator('input[type="password"]:visible, input[type="tel"]:visible').count()) {
     return "login_required";
   }
@@ -353,6 +357,19 @@ export async function accessErrorAfterExplicitVisibleWait(page, platform, config
     if (!interactive(accessError)) return accessError;
   }
   return page.isClosed() ? "interactive_verification_cancelled" : "interactive_verification_timeout";
+}
+
+async function withVisibleAccess(page, platform, config, shouldStop, operation) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const accessError = await accessErrorAfterExplicitVisibleWait(page, platform, config, shouldStop);
+    if (accessError) throw new Error(accessError);
+    try {
+      return await operation();
+    } catch (error) {
+      if (attempt > 0 || config.browser_mode !== "visible"
+        || !["login_required", "challenge_required"].includes(error.message)) throw error;
+    }
+  }
 }
 
 async function platformAuthenticationPresent(context, platform) {
@@ -763,7 +780,7 @@ export async function collectRenderedImages({
         runId,
         `${itemId.replaceAll(":", "_")}-image-${String(position).padStart(3, "0")}.png`,
       );
-      await screenshotLocator(scope.locator("img").nth(candidate.index), screenshotPath);
+      await screenshotLocator(scope.locator("img").nth(candidate.index), screenshotPath, platform);
       temporaryPaths.push(screenshotPath);
       const imageScreenshotPath = await persistImageScreenshot(
         root,
@@ -805,10 +822,24 @@ export async function collectRenderedImages({
   return { records, temporaryPaths };
 }
 
-async function screenshotLocator(locator, targetPath) {
+export async function screenshotLocator(locator, targetPath, platform) {
+  const page = locator.page();
+  const assertCaptureReady = async () => {
+    const accessError = await currentPlatformAccessError(page, platform);
+    if (accessError) throw new Error(accessError);
+    if (!await locatorIsUsableCover(locator, 1)) throw new Error("screenshot_obscured");
+  };
+  await locator.scrollIntoViewIfNeeded();
+  await assertCaptureReady();
   await fs.mkdir(path.dirname(targetPath), { recursive: true });
   const temporary = `${targetPath}.tmp-${process.pid}`;
-  await locator.screenshot({ path: temporary, type: "png", timeout: NAVIGATION_TIMEOUT_MS });
+  try {
+    await locator.screenshot({ path: temporary, type: "png", timeout: NAVIGATION_TIMEOUT_MS });
+    await assertCaptureReady();
+  } catch (error) {
+    await fs.unlink(temporary).catch(() => {});
+    throw error;
+  }
   const stat = await fs.stat(temporary);
   if (stat.size < SCREENSHOT_MIN_BYTES) {
     await fs.unlink(temporary).catch(() => {});
@@ -881,14 +912,15 @@ async function locatorIsUsableCover(locator, minimumWidth = 180) {
   return locator.evaluate((node, widthFloor) => {
     const rect = node.getBoundingClientRect();
     if (rect.width < widthFloor || rect.height < 120) return false;
-    const x = Math.min(window.innerWidth - 1, Math.max(0, rect.left + rect.width / 2));
-    const y = Math.min(window.innerHeight - 1, Math.max(0, rect.top + rect.height / 2));
-    const topNode = document.elementFromPoint(x, y);
-    if (topNode === node || node.contains(topNode)) return true;
     const card = node.closest("[data-aweme-id], [data-note-id]");
-    return card
-      && topNode instanceof Element
-      && topNode.closest("[data-aweme-id], [data-note-id]") === card;
+    const left = Math.max(0, rect.left), top = Math.max(0, rect.top);
+    const right = Math.min(window.innerWidth, rect.right), bottom = Math.min(window.innerHeight, rect.bottom);
+    if (right <= left || bottom <= top) return false;
+    return [0.15, 0.5, 0.85].every(xRatio => [0.15, 0.5, 0.85].every(yRatio => {
+      const topNode = document.elementFromPoint(left + (right - left) * xRatio, top + (bottom - top) * yRatio);
+      return topNode === node || node.contains(topNode)
+        || (card && topNode instanceof Element && topNode.closest("[data-aweme-id], [data-note-id]") === card);
+    }));
   }, minimumWidth).catch(() => false);
 }
 
@@ -947,7 +979,7 @@ async function collectPage(page, root, runId, platform, itemUrl, config, discove
     const cover = await renderedVideoCover(page, platform);
     if (!cover) throw new Error("media_element_not_found");
     await freezeVideoIfPresent(cover.locator);
-    await screenshotLocator(cover.locator, screenshotPath);
+    await screenshotLocator(cover.locator, screenshotPath, platform);
     const coverScreenshotPath = await persistVideoCover(root, platform, itemId, screenshotPath);
     return {
       records: [{
@@ -1024,7 +1056,7 @@ async function collectDouyinFeedCard(page, root, runId, locator, itemId, config,
   const cover = await renderedVideoCover(locator, "douyin");
   if (!cover) throw new Error("media_element_not_found");
   await freezeVideoIfPresent(cover.locator);
-  await screenshotLocator(cover.locator, screenshotPath);
+  await screenshotLocator(cover.locator, screenshotPath, "douyin");
   const coverScreenshotPath = await persistVideoCover(root, "douyin", itemId, screenshotPath);
   return {
     records: [{
@@ -1124,7 +1156,7 @@ async function collectKuaishouFeedCard(
   );
   const cover = await renderedVideoCover(locator, "kuaishou");
   if (!cover) throw new Error("media_element_not_found");
-  await screenshotLocator(cover.locator, screenshotPath);
+  await screenshotLocator(cover.locator, screenshotPath, "kuaishou");
   const coverScreenshotPath = await persistVideoCover(root, "kuaishou", itemId, screenshotPath);
   return {
     records: [{
@@ -1192,7 +1224,7 @@ async function collectXiaohongshuFeedCard(
   );
   const cover = await renderedVideoCover(locator, "xiaohongshu");
   if (!cover) throw new Error("media_element_not_found");
-  await screenshotLocator(cover.locator, screenshotPath);
+  await screenshotLocator(cover.locator, screenshotPath, "xiaohongshu");
   const coverScreenshotPath = await persistVideoCover(
     root,
     "xiaohongshu",
@@ -1221,7 +1253,7 @@ async function collectXiaohongshuFeedCard(
   };
 }
 
-async function collectXiaohongshuHomeFeed(
+export async function collectXiaohongshuHomeFeed(
   page,
   root,
   runId,
@@ -1238,13 +1270,12 @@ async function collectXiaohongshuHomeFeed(
   const maxScrolls = config.max_scrolls_per_source || 10;
   await waitForPlatformFeed(page, "xiaohongshu", config, shouldStop);
   for (let scroll = 0; scroll <= maxScrolls && handled < limit; scroll += 1) {
-    const accessError = await currentPlatformAccessError(page, "xiaohongshu");
+    const accessError = await accessErrorAfterExplicitVisibleWait(page, "xiaohongshu", config, shouldStop);
     if (accessError) throw browserStageError(accessError, "feed_scroll");
     const cards = await page.locator("section.note-item[data-note-id]").evaluateAll((nodes) =>
-      nodes.map((node, index) => {
+      nodes.map((node) => {
         const rect = node.getBoundingClientRect();
         return {
-          index,
           itemId: node.getAttribute("data-note-id") || "",
           visible: rect.width >= 140 && rect.height >= 120 && rect.bottom > 0 && rect.top < window.innerHeight,
         };
@@ -1256,19 +1287,21 @@ async function collectXiaohongshuHomeFeed(
       seen.add(card.itemId);
       try {
         await pacingWait(page, config, 0.5);
-        const result = await collectXiaohongshuFeedCard(
+        const result = await withVisibleAccess(page, "xiaohongshu", config, shouldStop, () => collectXiaohongshuFeedCard(
           root,
           runId,
-          page.locator("section.note-item[data-note-id]").nth(card.index),
+          page.locator(`section.note-item[data-note-id="${card.itemId}"]`),
           card.itemId,
           config,
           discoverySource,
-        );
+        ));
         await onPage(result);
         handled += 1;
       } catch (error) {
         lastError = error;
         await onFailure?.(error);
+        if (["login_required", "challenge_required", "network_access_restricted", "collection_stopped",
+          "interactive_verification_cancelled", "interactive_verification_timeout"].includes(error.message)) throw error;
       }
     }
     if (handled >= limit || scroll === maxScrolls || (await shouldStop())) break;

@@ -175,10 +175,16 @@ manual window per batch. Closing or timing out that window pauses the platform
 rather than claiming success or reopening it. Feed-readiness and manual waits
 honor a stop request. A network restriction is not a login/slider request:
 Xiaohongshu code `300012` maps to `network_access_restricted` and a platform-only
-30-minute to 6-hour backoff, without a popup. Failure diagnostics retain the machine stage, page
+30-minute to 6-hour backoff, without a popup. This describes the rejected access
+attempt, not proof of an IP-wide block or a specific cause. Failure diagnostics retain the machine stage, page
 origin/path, readiness, and element counts under `diagnostics/<run_id>/` and in
 the run result; only bounded numeric platform error codes may be retained from
 a query. Full query strings, page text, credentials, and cookies are excluded.
+
+Login/verification and sampled element-occlusion checks run before and after
+capture. Rejected temporary screenshots are removed rather than published as
+previews. These checks reduce false captures but do not prove every transient
+overlay or future layout is supported.
 
 Screenshots are preview artifacts only. The skill never sends video covers or
 image screenshots to OCR or model review. Text comes only from the platform's
