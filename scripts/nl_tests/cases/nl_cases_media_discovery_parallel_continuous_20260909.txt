@@ -1,0 +1,6 @@
+# Live continuous collection. Leaves requested background jobs enabled for the user.
+# The start row requires background-lifecycle/worker/overlap assertions, not terminal success.
+# A terminal-only runner will keep waiting: end only its polling after verifying startup,
+# never cancel the requested background task. The status row can run independently.
+media_discovery_parallel_continuous|parallel_continuous_start|optional_skill:media_discovery,provider_mode:live,execution_mode:real,capability:media_discovery.enable,requires_tool_call:true|开始同时采集抖音、小红书和快手的推荐内容，三个平台并行在后台持续运行，每个平台每批采集3条、每批最多5分钟，批次之间休息3到5分钟。没有关键词就采集推荐流，保留素材供AiAPP查看。需要登录或验证码时让我手动处理，不要绕过。现在就启动。
+media_discovery_parallel_continuous|parallel_continuous_status|optional_skill:media_discovery,provider_mode:live,execution_mode:real,capability:media_discovery.status,requires_tool_call:true|查看刚启动的三个平台的采集状态，分别告诉我是否正在采集、等待验证、休息或失败，以及已经保存多少内容。只查询，不要再次启动，也不要停止已有采集。
