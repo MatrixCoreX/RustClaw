@@ -4,6 +4,7 @@ fn fixture_root() -> PathBuf {
     let root = std::env::temp_dir().join(format!("aipp-test-{}", uuid::Uuid::new_v4()));
     fs::create_dir_all(root.join("records")).expect("records directory");
     fs::create_dir_all(root.join("exports/video_covers")).expect("preview directory");
+    fs::create_dir_all(root.join("exports/images")).expect("image preview directory");
     root
 }
 
@@ -30,6 +31,7 @@ fn media_page_is_newest_first_filtered_and_field_bounded() {
             "platform_text": "visible copy",
             "recognized_text": "alpha",
             "image_url": "https://images.example.test/one.webp",
+            "image_screenshot_path": "images/one.png",
             "source_page_url": "https://source.example.test/one",
             "engagement": {
                 "schema_version": 1,
@@ -80,6 +82,7 @@ fn media_page_is_newest_first_filtered_and_field_bounded() {
     );
     assert_eq!(items[1]["engagement"]["metrics"]["comments"]["value"], 318);
     assert!(items[1]["engagement"]["metrics"].get("unknown").is_none());
+    assert_eq!(items[1]["preview_available"], true);
     assert_eq!(page["matching_total"], 2);
     fs::remove_dir_all(root).expect("remove fixture");
 }
@@ -260,6 +263,20 @@ fn preview_resolution_stays_inside_skill_exports() {
     assert!(path.ends_with("video_covers/safe.png"));
     assert_eq!(media_type, "image/png");
 
+    fs::write(root.join("exports/images/note.webp"), b"webp").expect("image preview");
+    write_record(
+        &root,
+        2,
+        json!({
+            "global_sequence": 2,
+            "kind": "image",
+            "image_screenshot_path": "images/note.webp",
+        }),
+    );
+    let (path, media_type) = resolve_aipp_preview(&root, 2).expect("image preview");
+    assert!(path.ends_with("images/note.webp"));
+    assert_eq!(media_type, "image/webp");
+
     write_record(
         &root,
         2,
@@ -274,4 +291,81 @@ fn preview_resolution_stays_inside_skill_exports() {
         "aipp_preview_path_invalid"
     );
     fs::remove_dir_all(root).expect("remove fixture");
+}
+
+#[test]
+fn sandbox_bundle_assets_are_confined_to_the_declared_package_root() {
+    let root = std::env::temp_dir().join(format!("aipp-bundle-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(root.join("aipp")).expect("bundle root");
+    fs::write(root.join("aipp/index.html"), b"<!doctype html>").expect("entrypoint");
+    fs::write(root.join("outside.txt"), b"private").expect("outside fixture");
+    let raw = include_str!("../../../../../optional_skills/media_discovery/skill.toml")
+        .replace("renderer = \"collection_feed_v1\"", "renderer = \"sandbox_bundle_v1\"")
+        .replace(
+            "data_contract = \"media_collection_v1\"",
+            "data_contract = \"capability_bridge_v1\"",
+        )
+        .replace(
+            "icon = \"gallery_vertical_end\"",
+            "asset_root = \"aipp\"\nentrypoint = \"aipp/index.html\"\nbridge_capabilities = [\"media_discovery.status\"]\nicon = \"gallery_vertical_end\"",
+        );
+    let manifest = skill_sdk::PackageManifest::from_toml_str(&raw).expect("sandbox manifest");
+    let active = ActiveAippPackage {
+        aipp: manifest.aipp.clone().expect("Ai APP declaration"),
+        manifest,
+        package_root: root.clone(),
+    };
+
+    let (path, content_type) =
+        resolve_aipp_bundle_asset(&active, "aipp/index.html").expect("safe asset");
+    assert!(path.ends_with("aipp/index.html"));
+    assert_eq!(content_type, "text/html; charset=utf-8");
+    assert_eq!(
+        resolve_aipp_bundle_asset(&active, "aipp/../outside.txt")
+            .expect_err("traversal must be rejected"),
+        "aipp_bundle_path_invalid"
+    );
+    assert_eq!(
+        resolve_aipp_bundle_asset(&active, "outside.txt")
+            .expect_err("paths outside asset_root must be rejected"),
+        "aipp_bundle_path_invalid"
+    );
+    fs::remove_dir_all(root).expect("remove fixture");
+}
+
+#[test]
+fn sandbox_bundle_headers_confine_code_and_browser_features() {
+    let mut html = axum::response::Response::new(axum::body::Body::empty());
+    apply_aipp_bundle_headers(&mut html, "text/html; charset=utf-8");
+    assert_eq!(
+        html.headers()
+            .get(axum::http::header::CONTENT_SECURITY_POLICY)
+            .and_then(|value| value.to_str().ok()),
+        Some(AIPP_BUNDLE_CSP)
+    );
+    assert_eq!(
+        html.headers()
+            .get(axum::http::header::REFERRER_POLICY)
+            .and_then(|value| value.to_str().ok()),
+        Some("no-referrer")
+    );
+    assert!(html
+        .headers()
+        .get(axum::http::HeaderName::from_static("permissions-policy"))
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.contains("microphone=()")));
+
+    let mut script = axum::response::Response::new(axum::body::Body::empty());
+    apply_aipp_bundle_headers(&mut script, "text/javascript; charset=utf-8");
+    assert!(script
+        .headers()
+        .get(axum::http::header::CONTENT_SECURITY_POLICY)
+        .is_none());
+    assert_eq!(
+        script
+            .headers()
+            .get(axum::http::header::X_CONTENT_TYPE_OPTIONS)
+            .and_then(|value| value.to_str().ok()),
+        Some("nosniff")
+    );
 }

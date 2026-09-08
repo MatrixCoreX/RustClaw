@@ -39,6 +39,7 @@ export const IMAGE_COLUMNS = [
   "platform_text",
   "recognized_text",
   "image_url",
+  "image_screenshot_path",
   "source_page_url",
   "discovered_at",
   "engagement_captured_at",

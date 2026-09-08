@@ -214,6 +214,11 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         )
         .route("/skills/store", get(get_skill_store_catalog))
         .route("/aipps", get(get_aipp_catalog))
+        .route("/aipps/:skill_name", post(install_aipp).delete(remove_aipp))
+        .route(
+            "/aipps/:skill_name/assets/*asset_path",
+            get(get_aipp_bundle_asset),
+        )
         .route("/aipps/:skill_name/items", get(get_aipp_media_items))
         .route(
             "/aipps/:skill_name/items/:sequence/preview",

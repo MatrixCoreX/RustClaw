@@ -9,6 +9,40 @@ use crate::installer::{
 use crate::runtime::SkillRuntimeResolver;
 
 #[test]
+fn sandboxed_aipp_bundle_is_copied_into_the_immutable_receipt_artifacts() {
+    let temp = tempdir().expect("tempdir");
+    let source = temp.path().join("source");
+    let staging = temp.path().join("staging");
+    fs::create_dir_all(source.join("aipp")).expect("bundle root");
+    fs::create_dir_all(&staging).expect("staging root");
+    fs::write(source.join("aipp/index.html"), "<!doctype html>").expect("html");
+    fs::write(source.join("aipp/app.js"), "window.appLoaded=true;").expect("script");
+    let raw = include_str!("../../../optional_skills/media_discovery/skill.toml")
+        .replace("renderer = \"collection_feed_v1\"", "renderer = \"sandbox_bundle_v1\"")
+        .replace(
+            "data_contract = \"media_collection_v1\"",
+            "data_contract = \"capability_bridge_v1\"",
+        )
+        .replace(
+            "icon = \"gallery_vertical_end\"",
+            "asset_root = \"aipp\"\nentrypoint = \"aipp/index.html\"\nbridge_capabilities = [\"media_discovery.status\"]\nicon = \"gallery_vertical_end\"",
+        );
+    let manifest = crate::PackageManifest::from_toml_str(&raw).expect("sandbox manifest");
+    let mut artifacts = Vec::new();
+
+    super::install_aipp_bundle(&manifest, &source, &staging, &mut artifacts)
+        .expect("install bundle");
+
+    assert!(staging.join("aipp/index.html").is_file());
+    assert!(staging.join("aipp/app.js").is_file());
+    assert_eq!(artifacts.len(), 2);
+    assert!(artifacts
+        .iter()
+        .all(|artifact| artifact.path.starts_with("aipp/")));
+    assert!(artifacts.iter().all(|artifact| !artifact.executable));
+}
+
+#[test]
 fn package_root_is_canonicalized_before_sandboxed_installation() {
     let current = std::env::current_dir().expect("current directory");
     let temp = tempfile::tempdir_in(&current).expect("workspace-local tempdir");

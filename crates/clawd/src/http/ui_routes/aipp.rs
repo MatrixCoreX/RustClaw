@@ -3,6 +3,8 @@ const AIPP_MEDIA_RECORD_SCAN_LIMIT: usize = 100_000;
 const AIPP_MEDIA_RECORD_MAX_BYTES: u64 = 1024 * 1024;
 const AIPP_MEDIA_STATE_MAX_BYTES: u64 = 1024 * 1024;
 const AIPP_PREVIEW_MAX_BYTES: u64 = 16 * 1024 * 1024;
+const AIPP_BUNDLE_ASSET_MAX_BYTES: u64 = 4 * 1024 * 1024;
+const AIPP_BUNDLE_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: https:; media-src 'self' blob:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'";
 
 #[derive(Debug, Deserialize, Default)]
 struct AippMediaQuery {
@@ -25,12 +27,21 @@ struct AippCatalogItem {
     default_locale: String,
     titles: BTreeMap<String, String>,
     descriptions: BTreeMap<String, String>,
+    installed: bool,
+    entrypoint: Option<String>,
+    bridge_capabilities: Vec<String>,
+}
+
+struct ActiveAippPackage {
+    manifest: skill_sdk::PackageManifest,
+    aipp: skill_sdk::AippSpec,
+    package_root: PathBuf,
 }
 
 fn active_aipp_package(
     state: &AppState,
     skill_name: &str,
-) -> Result<Option<(skill_sdk::PackageManifest, skill_sdk::AippSpec)>, String> {
+) -> Result<Option<ActiveAippPackage>, String> {
     let registry = state
         .get_skills_registry()
         .ok_or_else(|| "aipp_registry_unavailable".to_string())?;
@@ -44,7 +55,7 @@ fn active_aipp_package(
         .admission_bindings
         .get(skill_name)
         .cloned();
-    let manifest = if let Some(binding) = binding {
+    let (manifest, package_root) = if let Some(binding) = binding {
         let store = skill_sdk::InstallReceiptStore::new(skill_package_root(state));
         let pointer = store
             .current_pointer(skill_name)
@@ -82,19 +93,53 @@ fn active_aipp_package(
         {
             return Err("aipp_generation_binding_mismatch".to_string());
         }
-        verified.manifest
+        let package_root = verified.install_dir;
+        (verified.manifest, package_root)
     } else {
-        let Some(manifest) = registry.package_manifest_path(skill_name).and_then(|relative| {
-            skill_sdk::PackageManifest::load(&state.skill_rt.workspace_root.join(relative)).ok()
-        }) else {
+        let Some(manifest_path) = registry
+            .package_manifest_path(skill_name)
+            .map(|relative| state.skill_rt.workspace_root.join(relative))
+        else {
             return Ok(None);
         };
-        manifest
+        let manifest = skill_sdk::PackageManifest::load(&manifest_path)
+            .map_err(|_| "aipp_manifest_invalid".to_string())?;
+        let package_root = manifest_path
+            .parent()
+            .ok_or_else(|| "aipp_install_path_invalid".to_string())?
+            .to_path_buf();
+        (manifest, package_root)
     };
     let Some(aipp) = manifest.aipp.clone() else {
         return Ok(None);
     };
-    Ok(Some((manifest, aipp)))
+    Ok(Some(ActiveAippPackage {
+        manifest,
+        aipp,
+        package_root,
+    }))
+}
+
+fn aipp_admission_service(
+    state: &AppState,
+) -> Result<crate::skill_admission::SkillAdmissionService, String> {
+    let config = claw_core::config::AppConfig::load(&state.reload_ctx.config_path_for_reload)
+        .map_err(|_| "aipp_runtime_config_invalid".to_string())?;
+    crate::skill_admission::SkillAdmissionService::from_config(
+        &state.skill_rt.workspace_root,
+        &config,
+    )
+    .map_err(|_| "aipp_install_state_unavailable".to_string())
+}
+
+fn aipp_is_installed(state: &AppState, skill_name: &str) -> bool {
+    aipp_admission_service(state)
+        .and_then(|service| {
+            service
+                .aipp_is_installed(skill_name)
+                .map_err(|_| "aipp_install_state_unavailable".to_string())
+        })
+        .unwrap_or(false)
 }
 
 async fn get_aipp_catalog(
@@ -105,11 +150,19 @@ async fn get_aipp_catalog(
         return response;
     }
     let mut apps = Vec::new();
+    let admission = aipp_admission_service(&state).ok();
     let mut names = state.get_skills_list().iter().cloned().collect::<Vec<_>>();
     names.sort_unstable();
     for name in names {
         match active_aipp_package(&state, &name) {
-            Ok(Some((manifest, aipp))) => apps.push(AippCatalogItem {
+            Ok(Some(active)) => {
+                let installed = admission
+                    .as_ref()
+                    .and_then(|service| service.aipp_is_installed(&name).ok())
+                    .unwrap_or(false);
+                let manifest = active.manifest;
+                let aipp = active.aipp;
+                apps.push(AippCatalogItem {
                 skill_name: name,
                 package_version: manifest.package.version,
                 renderer: aipp.renderer,
@@ -118,7 +171,11 @@ async fn get_aipp_catalog(
                 default_locale: aipp.default_locale,
                 titles: aipp.titles,
                 descriptions: aipp.descriptions,
-            }),
+                installed,
+                entrypoint: aipp.entrypoint,
+                bridge_capabilities: aipp.bridge_capabilities,
+                })
+            }
             Ok(None) => {}
             Err(error) => {
                 tracing::warn!(skill = %name, error = %error, "AiPP catalog entry rejected");
@@ -133,6 +190,60 @@ async fn get_aipp_catalog(
             error: None,
         }),
     )
+}
+
+async fn set_aipp_install_state(
+    state: &AppState,
+    skill_name: &str,
+    installed: bool,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if !matches!(active_aipp_package(state, skill_name), Ok(Some(_))) {
+        return aipp_api_error(StatusCode::NOT_FOUND, "aipp_not_available");
+    }
+    let service = match aipp_admission_service(state) {
+        Ok(service) => service,
+        Err(error) => return aipp_api_error(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    };
+    match service.set_aipp_installed(skill_name, installed) {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(json!({
+                    "schema_version": 1,
+                    "skill_name": skill_name,
+                    "installed": installed,
+                })),
+                error: None,
+            }),
+        ),
+        Err(_) => aipp_api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "aipp_install_state_update_failed",
+        ),
+    }
+}
+
+async fn install_aipp(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(skill_name): AxumPath<String>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if let Err(response) = require_ui_admin(&state, &headers) {
+        return response;
+    }
+    set_aipp_install_state(&state, &skill_name, true).await
+}
+
+async fn remove_aipp(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(skill_name): AxumPath<String>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if let Err(response) = require_ui_admin(&state, &headers) {
+        return response;
+    }
+    set_aipp_install_state(&state, &skill_name, false).await
 }
 
 fn aipp_media_item(record: &Value) -> Option<Value> {
@@ -161,6 +272,14 @@ fn aipp_media_item(record: &Value) -> Option<Value> {
     } else {
         None
     };
+    let preview_available = ["cover_screenshot_path", "image_screenshot_path"]
+        .iter()
+        .any(|key| {
+            record
+                .get(key)
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.trim().is_empty())
+        });
     Some(json!({
         "schema_version": 1,
         "global_sequence": sequence,
@@ -177,7 +296,7 @@ fn aipp_media_item(record: &Value) -> Option<Value> {
         "recognition_source": bounded_aipp_optional_text(record.pointer("/recognition/source"), 64),
         "source_url": source_url,
         "image_url": image_url,
-        "preview_available": kind == "video" && record.get("cover_screenshot_path").and_then(Value::as_str).is_some(),
+        "preview_available": preview_available,
         "discovered_at": bounded_aipp_optional_text(record.get("discovered_at"), 64),
         "engagement": aipp_engagement(record),
     }))
@@ -464,7 +583,9 @@ async fn get_aipp_media_items(
         return response;
     }
     let active = active_aipp_package(&state, &skill_name);
-    if !matches!(active, Ok(Some((_, ref aipp))) if aipp.data_contract == "media_collection_v1") {
+    if !aipp_is_installed(&state, &skill_name)
+        || !matches!(active, Ok(Some(ref active)) if active.aipp.data_contract == "media_collection_v1")
+    {
         return aipp_api_error(StatusCode::NOT_FOUND, "aipp_not_available");
     }
     let root = match state.core.skill_storage.resolved_directory_path(&skill_name) {
@@ -497,9 +618,9 @@ fn resolve_aipp_preview(root: &Path, sequence: u64) -> Result<(PathBuf, &'static
         &fs::read(record_path).map_err(|_| "aipp_preview_not_found".to_string())?,
     )
     .map_err(|_| "aipp_preview_record_invalid".to_string())?;
-    let relative = record
-        .get("cover_screenshot_path")
-        .and_then(Value::as_str)
+    let relative = ["cover_screenshot_path", "image_screenshot_path"]
+        .iter()
+        .find_map(|key| record.get(key).and_then(Value::as_str))
         .ok_or_else(|| "aipp_preview_not_found".to_string())?;
     let relative_path = Path::new(relative);
     if relative_path.is_absolute()
@@ -548,7 +669,9 @@ async fn get_aipp_media_preview(
         return response.into_response();
     }
     let active = active_aipp_package(&state, &skill_name);
-    if !matches!(active, Ok(Some((_, ref aipp))) if aipp.data_contract == "media_collection_v1") {
+    if !aipp_is_installed(&state, &skill_name)
+        || !matches!(active, Ok(Some(ref active)) if active.aipp.data_contract == "media_collection_v1")
+    {
         return aipp_api_error(StatusCode::NOT_FOUND, "aipp_not_available").into_response();
     }
     let root = match state.core.skill_storage.resolved_directory_path(&skill_name) {
@@ -590,6 +713,136 @@ async fn get_aipp_media_preview(
         axum::http::header::X_CONTENT_TYPE_OPTIONS,
         axum::http::HeaderValue::from_static("nosniff"),
     );
+    response
+}
+
+fn aipp_bundle_content_type(path: &Path) -> Option<&'static str> {
+    match path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("html") => Some("text/html; charset=utf-8"),
+        Some("css") => Some("text/css; charset=utf-8"),
+        Some("js" | "mjs") => Some("text/javascript; charset=utf-8"),
+        Some("json") => Some("application/json; charset=utf-8"),
+        Some("png") => Some("image/png"),
+        Some("jpg" | "jpeg") => Some("image/jpeg"),
+        Some("webp") => Some("image/webp"),
+        Some("ico") => Some("image/x-icon"),
+        Some("woff") => Some("font/woff"),
+        Some("woff2") => Some("font/woff2"),
+        _ => None,
+    }
+}
+
+fn resolve_aipp_bundle_asset(
+    active: &ActiveAippPackage,
+    requested: &str,
+) -> Result<(PathBuf, &'static str), String> {
+    if active.aipp.renderer != "sandbox_bundle_v1"
+        || active.aipp.data_contract != "capability_bridge_v1"
+    {
+        return Err("aipp_bundle_not_available".to_string());
+    }
+    let asset_root = active
+        .aipp
+        .asset_root
+        .as_deref()
+        .ok_or_else(|| "aipp_bundle_root_invalid".to_string())?;
+    let requested = requested.trim_start_matches('/');
+    let requested = if requested.is_empty() {
+        active.aipp.entrypoint.as_deref().unwrap_or_default()
+    } else {
+        requested
+    };
+    let requested_path = Path::new(requested);
+    if requested_path.is_absolute()
+        || requested_path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+        || !requested_path.starts_with(asset_root)
+    {
+        return Err("aipp_bundle_path_invalid".to_string());
+    }
+    let canonical_root = fs::canonicalize(active.package_root.join(asset_root))
+        .map_err(|_| "aipp_bundle_not_available".to_string())?;
+    let asset = fs::canonicalize(active.package_root.join(requested_path))
+        .map_err(|_| "aipp_bundle_asset_not_found".to_string())?;
+    let metadata = fs::metadata(&asset).map_err(|_| "aipp_bundle_asset_not_found".to_string())?;
+    if !asset.starts_with(&canonical_root)
+        || !metadata.is_file()
+        || metadata.len() > AIPP_BUNDLE_ASSET_MAX_BYTES
+    {
+        return Err("aipp_bundle_path_invalid".to_string());
+    }
+    let content_type = aipp_bundle_content_type(&asset)
+        .ok_or_else(|| "aipp_bundle_type_unsupported".to_string())?;
+    Ok((asset, content_type))
+}
+
+fn apply_aipp_bundle_headers(response: &mut axum::response::Response, content_type: &'static str) {
+    response.headers_mut().insert(
+        axum::http::header::CONTENT_TYPE,
+        axum::http::HeaderValue::from_static(content_type),
+    );
+    response.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("private, max-age=300"),
+    );
+    response.headers_mut().insert(
+        axum::http::header::X_CONTENT_TYPE_OPTIONS,
+        axum::http::HeaderValue::from_static("nosniff"),
+    );
+    response.headers_mut().insert(
+        axum::http::header::REFERRER_POLICY,
+        axum::http::HeaderValue::from_static("no-referrer"),
+    );
+    response.headers_mut().insert(
+        axum::http::HeaderName::from_static("permissions-policy"),
+        axum::http::HeaderValue::from_static(
+            "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=()",
+        ),
+    );
+    if content_type.starts_with("text/html") {
+        response.headers_mut().insert(
+            axum::http::header::CONTENT_SECURITY_POLICY,
+            axum::http::HeaderValue::from_static(AIPP_BUNDLE_CSP),
+        );
+    }
+}
+
+async fn get_aipp_bundle_asset(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath((skill_name, asset_path)): AxumPath<(String, String)>,
+) -> axum::response::Response {
+    if let Err(response) = require_ui_admin(&state, &headers) {
+        return response.into_response();
+    }
+    let active = match active_aipp_package(&state, &skill_name) {
+        Ok(Some(active)) => active,
+        _ => return aipp_api_error(StatusCode::NOT_FOUND, "aipp_not_available").into_response(),
+    };
+    if !aipp_is_installed(&state, &skill_name) {
+        return aipp_api_error(StatusCode::NOT_FOUND, "aipp_not_installed").into_response();
+    }
+    let (path, content_type) = match resolve_aipp_bundle_asset(&active, &asset_path) {
+        Ok(value) => value,
+        Err(error) => return aipp_api_error(StatusCode::NOT_FOUND, &error).into_response(),
+    };
+    let bytes = match tokio::fs::read(path).await {
+        Ok(bytes) => bytes,
+        Err(_) => return aipp_api_error(StatusCode::NOT_FOUND, "aipp_bundle_asset_not_found").into_response(),
+    };
+    let mut response = axum::response::Response::new(axum::body::Body::from(bytes));
+    apply_aipp_bundle_headers(&mut response, content_type);
     response
 }
 

@@ -11,7 +11,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::adapter::{prepare_package, source_digest, AdapterContext, PreparedPackage};
+use crate::adapter::{
+    copy_source_tree, prepare_package, source_digest, AdapterContext, PreparedPackage,
+};
 use crate::manifest::{BuildAdapter, BuildNetworkPolicy, PackageManifest, AGENT_JSONL_PROTOCOL};
 use crate::process::run_command_controlled;
 use crate::protocol::{validate_response_line, ProtocolRequest};
@@ -200,7 +202,8 @@ impl SkillInstaller {
             allow_network,
             control: request.control.as_ref(),
         };
-        let prepared = prepare_package(&context)?;
+        let mut prepared = prepare_package(&context)?;
+        install_aipp_bundle(&manifest, manifest_dir, &staging, &mut prepared.artifacts)?;
         fs::write(staging.join("skill.toml"), manifest.to_toml_string()?)?;
         emit_phase(request.control.as_ref(), "protocol_smoke")?;
         let smoke = protocol_smoke(
@@ -326,7 +329,7 @@ impl SkillInstaller {
         fs::copy(&binary_path, &destination)?;
         set_executable(&destination)?;
         emit_phase(request.control.as_ref(), "artifact")?;
-        let prepared = PreparedPackage {
+        let mut prepared = PreparedPackage {
             adapter_version: "cargo-adopted-v1".to_string(),
             artifacts: vec![ArtifactReceipt {
                 path: manifest.run.entrypoint.clone(),
@@ -348,6 +351,7 @@ impl SkillInstaller {
             },
             phases: vec!["artifact".to_string()],
         };
+        install_aipp_bundle(&manifest, manifest_dir, &staging, &mut prepared.artifacts)?;
         fs::write(staging.join("skill.toml"), manifest.to_toml_string()?)?;
         emit_phase(request.control.as_ref(), "protocol_smoke")?;
         let smoke = protocol_smoke(
@@ -547,6 +551,155 @@ impl SkillInstaller {
             request.control.as_ref(),
         )
     }
+}
+
+const AIPP_BUNDLE_MAX_FILES: usize = 256;
+const AIPP_BUNDLE_MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
+const AIPP_BUNDLE_MAX_BYTES: u64 = 16 * 1024 * 1024;
+
+fn install_aipp_bundle(
+    manifest: &PackageManifest,
+    manifest_dir: &Path,
+    staging: &Path,
+    artifacts: &mut Vec<ArtifactReceipt>,
+) -> SkillSdkResult<()> {
+    let Some(aipp) = manifest
+        .aipp
+        .as_ref()
+        .filter(|aipp| aipp.renderer == "sandbox_bundle_v1")
+    else {
+        return Ok(());
+    };
+    let relative_root = aipp
+        .asset_root
+        .as_deref()
+        .ok_or_else(|| SkillSdkError::new("aipp_bundle_root_missing", "field=aipp.asset_root"))?;
+    let canonical_manifest = fs::canonicalize(manifest_dir)?;
+    let source_root =
+        fs::canonicalize(canonical_manifest.join(relative_root)).map_err(|error| {
+            SkillSdkError::new(
+                "aipp_bundle_unavailable",
+                format!("path={relative_root} error={error}"),
+            )
+            .phase("aipp_bundle")
+        })?;
+    if !source_root.starts_with(&canonical_manifest) || !source_root.is_dir() {
+        return Err(SkillSdkError::new(
+            "aipp_bundle_root_invalid",
+            format!("path={relative_root}"),
+        )
+        .phase("aipp_bundle"));
+    }
+    let destination_root = staging.join(relative_root);
+    copy_source_tree(&source_root, &destination_root)?;
+    let mut paths = Vec::new();
+    collect_aipp_bundle_files(&destination_root, &destination_root, &mut paths)?;
+    if paths.is_empty() || paths.len() > AIPP_BUNDLE_MAX_FILES {
+        return Err(SkillSdkError::new(
+            "aipp_bundle_file_count_invalid",
+            format!("files={}", paths.len()),
+        )
+        .phase("aipp_bundle"));
+    }
+    paths.sort();
+    let mut total = 0_u64;
+    for relative in paths {
+        let path = destination_root.join(&relative);
+        let size = fs::metadata(&path)?.len();
+        total = total.saturating_add(size);
+        if size > AIPP_BUNDLE_MAX_FILE_BYTES || total > AIPP_BUNDLE_MAX_BYTES {
+            return Err(SkillSdkError::new(
+                "aipp_bundle_size_invalid",
+                format!("path={} size={size} total={total}", relative.display()),
+            )
+            .phase("aipp_bundle"));
+        }
+        validate_aipp_bundle_extension(&relative)?;
+        let artifact_path = Path::new(relative_root).join(&relative);
+        let artifact_path = artifact_path.to_string_lossy().replace('\\', "/");
+        artifacts.push(ArtifactReceipt {
+            path: artifact_path,
+            sha256: digest_file(&path)?,
+            size_bytes: size,
+            executable: false,
+        });
+    }
+    let entrypoint = aipp.entrypoint.as_deref().unwrap_or_default();
+    if !staging.join(entrypoint).is_file() {
+        return Err(SkillSdkError::new(
+            "aipp_bundle_entrypoint_missing",
+            format!("path={entrypoint}"),
+        )
+        .phase("aipp_bundle"));
+    }
+    Ok(())
+}
+
+fn collect_aipp_bundle_files(
+    root: &Path,
+    current: &Path,
+    output: &mut Vec<PathBuf>,
+) -> SkillSdkResult<()> {
+    for entry in fs::read_dir(current)? {
+        let entry = entry?;
+        let metadata = fs::symlink_metadata(entry.path())?;
+        if metadata.file_type().is_symlink() {
+            return Err(SkillSdkError::new(
+                "aipp_bundle_symlink_forbidden",
+                entry.path().display().to_string(),
+            )
+            .phase("aipp_bundle"));
+        }
+        if metadata.is_dir() {
+            collect_aipp_bundle_files(root, &entry.path(), output)?;
+        } else if metadata.is_file() {
+            output.push(
+                entry
+                    .path()
+                    .strip_prefix(root)
+                    .map_err(|error| {
+                        SkillSdkError::new(
+                            "aipp_bundle_path_invalid",
+                            format!("path={} error={error}", entry.path().display()),
+                        )
+                        .phase("aipp_bundle")
+                    })?
+                    .to_path_buf(),
+            );
+        }
+    }
+    Ok(())
+}
+
+fn validate_aipp_bundle_extension(path: &Path) -> SkillSdkResult<()> {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(str::to_ascii_lowercase);
+    if matches!(
+        extension.as_deref(),
+        Some(
+            "html"
+                | "css"
+                | "js"
+                | "mjs"
+                | "json"
+                | "png"
+                | "jpg"
+                | "jpeg"
+                | "webp"
+                | "ico"
+                | "woff"
+                | "woff2"
+        )
+    ) {
+        return Ok(());
+    }
+    Err(SkillSdkError::new(
+        "aipp_bundle_file_type_unsupported",
+        format!("path={}", path.display()),
+    )
+    .phase("aipp_bundle"))
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -8,7 +8,7 @@ use claw_core::config::AppConfig;
 use claw_core::skill_registry::SkillsRegistry;
 use fs2::FileExt;
 use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use skill_sdk::{
     AdmissionReceipt, AdmissionState, HostPolicyGrant, InstallReceiptStore, PackageManifest,
@@ -22,6 +22,15 @@ use super::model::{
 use super::registry::render_registry_fragment;
 
 const OVERLAY_DIRECTORY: &str = ".runtime-admission";
+const AIPP_INSTALL_STATE_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct AippInstallState {
+    schema_version: u32,
+    #[serde(default)]
+    removed: BTreeSet<String>,
+}
 
 #[derive(Debug, thiserror::Error)]
 #[error("{code}: {detail}")]
@@ -93,6 +102,56 @@ impl SkillAdmissionService {
                 .join(format!("{skill_name}.json")),
         )?;
         Ok(Some(PathBuf::from(metadata.package_manifest_path)))
+    }
+
+    pub(crate) fn aipp_is_installed(&self, skill_name: &str) -> Result<bool> {
+        let path = self.root.join("aipp-install-state.json");
+        let Some(state) = read_optional_json::<AippInstallState>(&path)? else {
+            return Ok(true);
+        };
+        if state.schema_version != AIPP_INSTALL_STATE_SCHEMA_VERSION {
+            return Err(error(
+                "aipp_install_state_schema_unsupported",
+                format!("schema_version={}", state.schema_version),
+            ));
+        }
+        Ok(!state.removed.contains(skill_name))
+    }
+
+    pub(crate) fn set_aipp_installed(&self, skill_name: &str, installed: bool) -> Result<()> {
+        skill_sdk::validate_safe_name(skill_name, "aipp.skill_name")
+            .map_err(|source| error("aipp_skill_name_invalid", source.to_string()))?;
+        fs::create_dir_all(&self.root).map_err(io_error("skill_admission_root_create_failed"))?;
+        secure_directory(&self.root)?;
+        let lock = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(self.root.join("mutation.lock"))
+            .map_err(io_error("skill_admission_lock_open_failed"))?;
+        FileExt::lock_exclusive(&lock).map_err(io_error("skill_admission_lock_failed"))?;
+        let result = (|| {
+            let path = self.root.join("aipp-install-state.json");
+            let mut state =
+                read_optional_json::<AippInstallState>(&path)?.unwrap_or(AippInstallState {
+                    schema_version: AIPP_INSTALL_STATE_SCHEMA_VERSION,
+                    removed: BTreeSet::new(),
+                });
+            if state.schema_version != AIPP_INSTALL_STATE_SCHEMA_VERSION {
+                return Err(error(
+                    "aipp_install_state_schema_unsupported",
+                    format!("schema_version={}", state.schema_version),
+                ));
+            }
+            if installed {
+                state.removed.remove(skill_name);
+            } else {
+                state.removed.insert(skill_name.to_string());
+            }
+            atomic_write_json(&path, &state)
+        })();
+        let _ = FileExt::unlock(&lock);
+        result
     }
 
     pub(crate) fn is_bundled_skill(&self, skill_name: &str) -> Result<bool> {

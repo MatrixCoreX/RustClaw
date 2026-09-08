@@ -136,8 +136,8 @@
       "required": ["schema_version", "renderer", "data_contract", "icon", "default_locale", "titles"],
       "properties": {
         "schema_version": { "const": 1 },
-        "renderer": { "const": "collection_feed_v1" },
-        "data_contract": { "const": "media_collection_v1" },
+        "renderer": { "enum": ["collection_feed_v1", "sandbox_bundle_v1"] },
+        "data_contract": { "enum": ["media_collection_v1", "capability_bridge_v1"] },
         "icon": { "$ref": "#/$defs/name" },
         "default_locale": { "$ref": "#/$defs/locale" },
         "titles": {
@@ -150,8 +150,36 @@
           "type": "object",
           "propertyNames": { "$ref": "#/$defs/locale" },
           "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 320 }
+        },
+        "asset_root": { "$ref": "#/$defs/relativePath" },
+        "entrypoint": { "$ref": "#/$defs/relativePath" },
+        "bridge_capabilities": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/capabilityName" }
         }
-      }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "renderer": { "const": "collection_feed_v1" },
+            "data_contract": { "const": "media_collection_v1" }
+          },
+          "not": { "anyOf": [
+            { "required": ["asset_root"] },
+            { "required": ["entrypoint"] },
+            { "required": ["bridge_capabilities"] }
+          ] }
+        },
+        {
+          "required": ["asset_root", "entrypoint"],
+          "properties": {
+            "renderer": { "const": "sandbox_bundle_v1" },
+            "data_contract": { "const": "capability_bridge_v1" }
+          }
+        }
+      ]
     },
     "locale": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,34}$" },
     "permissions": {

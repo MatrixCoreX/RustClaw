@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { csvCell, renderCsv, VIDEO_COLUMNS } from "../src/csv.mjs";
+import { csvCell, IMAGE_COLUMNS, renderCsv, VIDEO_COLUMNS } from "../src/csv.mjs";
 
 test("CSV uses BOM, CRLF, RFC 4180 quoting, and preserves multilingual newlines", () => {
   const rendered = renderCsv(VIDEO_COLUMNS, [{
@@ -39,4 +39,16 @@ test("CSV protects spreadsheet formula prefixes without changing normal text", (
   assert.equal(csvCell("=1+1"), '"\'=1+1"');
   assert.equal(csvCell("  @command"), '"\'  @command"');
   assert.equal(csvCell("ordinary"), '"ordinary"');
+});
+
+test("image CSV retains the authenticated-download screenshot path", () => {
+  const rendered = renderCsv(IMAGE_COLUMNS, [{
+    sequence: 1,
+    global_sequence: 1,
+    kind: "image",
+    image_url: "https://images.example.test/source.webp",
+    image_screenshot_path: "images/xiaohongshu_fixture_001.png",
+  }]);
+  assert.ok(rendered.includes('"image_screenshot_path"'));
+  assert.ok(rendered.includes('"images/xiaohongshu_fixture_001.png"'));
 });

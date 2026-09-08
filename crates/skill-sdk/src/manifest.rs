@@ -121,9 +121,10 @@ pub struct PackageManifest {
     pub aipp: Option<AippSpec>,
 }
 
-/// Optional host-rendered interface bundled with a skill package. AiPPs do not
-/// carry executable browser code: the host selects a reviewed renderer and
-/// exposes only the declared versioned data contract.
+/// Optional visual companion bundled with a skill package. Reviewed host
+/// renderers remain available for common views. Sandboxed bundles are served
+/// from the exact admitted package and can only call explicitly declared
+/// capabilities through the host bridge.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AippSpec {
@@ -135,6 +136,12 @@ pub struct AippSpec {
     pub titles: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub descriptions: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_root: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entrypoint: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bridge_capabilities: Vec<String>,
 }
 
 /// Host-owned installation prerequisites. Package authors may declare what is
@@ -338,14 +345,73 @@ impl AippSpec {
                 format!("schema_version={}", self.schema_version),
             ));
         }
-        if self.renderer != "collection_feed_v1" || self.data_contract != "media_collection_v1" {
-            return Err(SkillSdkError::new(
-                "manifest_aipp_contract_unsupported",
-                format!(
-                    "renderer={} data_contract={}",
-                    self.renderer, self.data_contract
-                ),
-            ));
+        match (self.renderer.as_str(), self.data_contract.as_str()) {
+            ("collection_feed_v1", "media_collection_v1") => {
+                if self.asset_root.is_some()
+                    || self.entrypoint.is_some()
+                    || !self.bridge_capabilities.is_empty()
+                {
+                    return Err(SkillSdkError::new(
+                        "manifest_aipp_host_renderer_fields_invalid",
+                        "host renderer must not declare sandbox bundle fields",
+                    ));
+                }
+            }
+            ("sandbox_bundle_v1", "capability_bridge_v1") => {
+                let asset_root = self.asset_root.as_deref().ok_or_else(|| {
+                    SkillSdkError::new("manifest_aipp_asset_root_missing", "field=aipp.asset_root")
+                })?;
+                let entrypoint = self.entrypoint.as_deref().ok_or_else(|| {
+                    SkillSdkError::new("manifest_aipp_entrypoint_missing", "field=aipp.entrypoint")
+                })?;
+                validate_relative_path(asset_root, "aipp.asset_root", false)?;
+                validate_relative_path(entrypoint, "aipp.entrypoint", false)?;
+                if asset_root != "aipp" {
+                    return Err(SkillSdkError::new(
+                        "manifest_aipp_asset_root_invalid",
+                        format!("expected=aipp actual={asset_root}"),
+                    ));
+                }
+                let asset_root = Path::new(asset_root);
+                let entrypoint_path = Path::new(entrypoint);
+                if !entrypoint_path.starts_with(asset_root)
+                    || entrypoint_path.extension().and_then(|value| value.to_str()) != Some("html")
+                {
+                    return Err(SkillSdkError::new(
+                        "manifest_aipp_entrypoint_invalid",
+                        format!(
+                            "asset_root={} entrypoint={entrypoint}",
+                            asset_root.display()
+                        ),
+                    ));
+                }
+                if self.bridge_capabilities.len() > 64
+                    || self
+                        .bridge_capabilities
+                        .iter()
+                        .collect::<BTreeSet<_>>()
+                        .len()
+                        != self.bridge_capabilities.len()
+                    || self
+                        .bridge_capabilities
+                        .iter()
+                        .any(|value| !valid_aipp_capability_name(value))
+                {
+                    return Err(SkillSdkError::new(
+                        "manifest_aipp_bridge_capabilities_invalid",
+                        "bridge capabilities must be unique canonical capability names",
+                    ));
+                }
+            }
+            _ => {
+                return Err(SkillSdkError::new(
+                    "manifest_aipp_contract_unsupported",
+                    format!(
+                        "renderer={} data_contract={}",
+                        self.renderer, self.data_contract
+                    ),
+                ));
+            }
         }
         validate_safe_name(&self.icon, "aipp.icon")?;
         validate_locale_token(&self.default_locale, "aipp.default_locale")?;
@@ -365,6 +431,14 @@ impl AippSpec {
         }
         Ok(())
     }
+}
+
+fn valid_aipp_capability_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-' | b'.')
+        })
 }
 
 fn validate_locale_token(value: &str, field: &str) -> SkillSdkResult<()> {
@@ -596,6 +670,40 @@ impl PackageManifest {
         }
         if let Some(aipp) = &self.aipp {
             aipp.validate()?;
+            if aipp.renderer == "sandbox_bundle_v1" {
+                let requested = self
+                    .capability_request
+                    .as_ref()
+                    .map(|request| {
+                        request
+                            .capabilities
+                            .iter()
+                            .map(|capability| capability.name.as_str())
+                            .collect::<BTreeSet<_>>()
+                    })
+                    .unwrap_or_default();
+                if let Some(undeclared) = aipp
+                    .bridge_capabilities
+                    .iter()
+                    .find(|capability| !requested.contains(capability.as_str()))
+                {
+                    return Err(SkillSdkError::new(
+                        "manifest_aipp_bridge_capability_undeclared",
+                        format!("capability={undeclared}"),
+                    ));
+                }
+                let package_prefix = format!("{}.", self.package.name);
+                if let Some(foreign) = aipp
+                    .bridge_capabilities
+                    .iter()
+                    .find(|capability| !capability.starts_with(&package_prefix))
+                {
+                    return Err(SkillSdkError::new(
+                        "manifest_aipp_bridge_capability_foreign",
+                        format!("skill={} capability={foreign}", self.package.name),
+                    ));
+                }
+            }
         }
         for dependency in &self.install.host_dependencies {
             validate_safe_name(dependency, "install.host_dependencies")?;
