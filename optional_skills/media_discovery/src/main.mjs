@@ -4,7 +4,7 @@ import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 
 import { browserCapability, collectPlatform, waitForInteractiveLogin } from "./browser.mjs";
-import { sourceUrls, SUPPORTED_PLATFORMS } from "./platforms.mjs";
+import { resolveBrowserMode, sourceUrls, SUPPORTED_PLATFORMS } from "./platforms.mjs";
 import { createBackgroundProgressReporter } from "./progress.mjs";
 import {
   beginBackgroundWorker,
@@ -125,11 +125,10 @@ export function requestedPlatforms(args, allowEmpty = false) {
   return values;
 }
 
-export function normalizedConfig(args) {
+export function normalizedConfig(args, platform = args.platform) {
   const sourceMode = String(args.source_mode || "home_feed");
   if (!new Set(["home_feed", "topics", "seed_urls"]).has(sourceMode)) throw new Error("source_mode_invalid");
-  const browserMode = String(args.browser_mode || "silent");
-  if (!new Set(["visible", "silent"]).has(browserMode)) throw new Error("browser_mode_invalid");
+  const browserMode = resolveBrowserMode(platform, args.browser_mode);
   const pacingMinDelayMs = integer(args.pacing_min_delay_ms, 1000, 200, 5000);
   const pacingMaxDelayMs = integer(args.pacing_max_delay_ms, 2800, 200, 8000);
   if (pacingMaxDelayMs < pacingMinDelayMs) throw new Error("invalid_args");
@@ -258,24 +257,31 @@ function backgroundStartSpec() {
 
 async function preview(args) {
   const platforms = requestedPlatforms(args);
-  const config = normalizedConfig(args);
-  for (const platform of platforms) sourceUrls(platform, config);
+  const configs = platformConfigs(args, platforms);
   return success("preview_enable", {
     platforms,
-    config,
+    ...(platforms.length === 1 ? { config: configs[platforms[0]] } : {}),
+    platform_configs: configs,
     browser: await browserCapability(),
     background_start_spec: backgroundStartSpec(),
     side_effect_applied: false,
   });
 }
 
+function platformConfigs(args, platforms) {
+  return Object.fromEntries(platforms.map(platform => {
+    const config = normalizedConfig(args, platform);
+    sourceUrls(platform, config);
+    return [platform, config];
+  }));
+}
+
 async function enable(request, args) {
   if (args.confirm !== true) throw new Error("confirmation_required");
   const root = storageRoot(request);
   const platforms = requestedPlatforms(args);
-  const config = normalizedConfig(args);
-  for (const platform of platforms) sourceUrls(platform, config);
-  const state = await configurePlatforms(root, platforms, config);
+  const configs = platformConfigs(args, platforms);
+  const state = await configurePlatforms(root, platforms, configs);
   return success("enable", {
     platforms,
     platform_states: state.platforms,
@@ -305,13 +311,10 @@ async function runOnce(request, args, runtime = {}) {
   const requested = runtime.backgroundPlatform ? [runtime.backgroundPlatform] : requestedPlatforms(args, true);
   const directOneShot = requested.length > 0 && !runtime.backgroundPlatform;
   const configExplicit = RUN_CONFIG_FIELDS.some((field) => Object.hasOwn(args, field));
-  const oneShotConfig = directOneShot ? normalizedConfig(args) : null;
-  if (oneShotConfig) {
-    for (const platform of requested) sourceUrls(platform, oneShotConfig);
-  }
+  const oneShotConfigs = directOneShot ? platformConfigs(args, requested) : null;
   const { run } = await beginRun(root, requested, {
     mode: directOneShot ? "one_shot" : "enabled_background",
-    config: oneShotConfig,
+    platform_configs: oneShotConfigs,
     config_explicit: configExplicit,
   });
   if (!run) return success("run_once", { state: "disabled_or_paused", side_effect_applied: false });

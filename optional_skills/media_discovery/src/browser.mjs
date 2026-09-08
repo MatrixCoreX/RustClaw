@@ -6,6 +6,8 @@ import { browserStageError, recordBrowserFailure } from "./browser_diagnostics.m
 import {
   canonicalCandidateUrls,
   isDetailUrl,
+  resolveBrowserMode,
+  SUPPORTED_PLATFORMS,
   platformItemId,
   sourceTargets,
   validatePlatformUrl,
@@ -234,7 +236,7 @@ export async function browserCapability() {
   return {
     gui_available: guiAvailable(),
     chromium_executable: await existingExecutable(),
-    default_mode: "silent",
+    default_modes: Object.fromEntries(SUPPORTED_PLATFORMS.map(platform => [platform, resolveBrowserMode(platform)])),
     supported_modes: ["visible", "silent"],
     capture_mode: "browser_element_screenshot",
   };
@@ -1332,7 +1334,8 @@ async function collectKuaishouHomeFeed(
 }
 
 export async function collectPlatform({ root, runId, platform, config, limit, shouldStop, onPage, onFailure }) {
-  const browserMode = config.browser_mode || "silent";
+  const browserMode = resolveBrowserMode(platform, config.browser_mode);
+  config = { ...config, browser_mode: browserMode };
   if (browserMode === "visible" && !guiAvailable()) throw new Error("display_unavailable");
   const executablePath = await existingExecutable();
   if (!executablePath) throw new Error("browser_missing");

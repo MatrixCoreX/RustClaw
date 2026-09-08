@@ -1008,7 +1008,8 @@ executed that skill, including requests from Agent UI and external communication
 channels, validated source links, final processed text, failures, and authenticated
 output artifacts. It does not read the media-discovery collection. Both remain
 read-only views; users start, stop, or change work through Agent.
-Media discovery runs silently by default, with temporary manual login/verification
+Media discovery defaults to a visible browser for Xiaohongshu and silent browsers
+for Douyin/Kuaishou, with temporary manual login/verification
 windows when needed and independent per-platform cooldowns. See
 [Browser media discovery](docs/architecture/12-media-discovery.md).
 

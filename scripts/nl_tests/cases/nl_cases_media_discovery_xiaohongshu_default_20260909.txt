@@ -1,0 +1,2 @@
+# New bounded acceptance: browser_mode deliberately omitted from the NL request.
+media_discovery_xiaohongshu_default|xiaohongshu_default_batch|optional_skill:media_discovery,provider_mode:live,execution_mode:real,capability:media_discovery.run_once,requires_tool_call:true|请用媒体发现从小红书推荐页采集3条内容，保存自带文案、图片或视频封面，以及页面上实际可见的点赞数据，让我在AiAPP里查看。只运行这一批，不要开启持续任务，不要导出文件。请根据实际保存结果回复，遇到登录或人工验证时让我处理，不要把受限当作成功。

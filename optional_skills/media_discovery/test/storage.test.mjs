@@ -152,7 +152,7 @@ test("one-shot runs use an ephemeral config without enabling continuous collecti
   };
   const { run } = await beginRun(root, ["douyin"], {
     mode: "one_shot",
-    config,
+    platform_configs: { douyin: config },
     config_explicit: true,
   });
   assert.equal(run.run_mode, "one_shot");
@@ -166,7 +166,7 @@ test("one-shot runs use an ephemeral config without enabling continuous collecti
 
 test("background worker lease is exclusive, heartbeatable, and explicitly finished", async (t) => {
   const root = await temporaryRoot(t);
-  await configurePlatforms(root, ["douyin"], { source_mode: "home_feed", browser_mode: "silent" });
+  await configurePlatforms(root, ["douyin"], { douyin: { source_mode: "home_feed", browser_mode: "silent" } });
 
   const worker = await beginBackgroundWorker(root);
   assert.deepEqual(worker.platforms, ["douyin"]);
@@ -204,7 +204,7 @@ test("diagnostic retention removes expired files and directories", async (t) => 
 
 test("result cleanup preserves platform configuration and browser login state", async (t) => {
   const root = await temporaryRoot(t);
-  await configurePlatforms(root, ["douyin"], { source_mode: "home_feed", browser_mode: "silent" });
+  await configurePlatforms(root, ["douyin"], { douyin: { source_mode: "home_feed", browser_mode: "silent" } });
   await commitPageRecords(root, [{
     kind: "video",
     dedup_key: "cleanup:video",
