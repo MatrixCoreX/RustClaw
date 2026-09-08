@@ -38,6 +38,8 @@ const ERROR_CODES = new Set([
   "confirmation_required",
   "display_unavailable",
   "invalid_args",
+  "interactive_verification_cancelled",
+  "interactive_verification_timeout",
   "login_required",
   "network_access_restricted",
   "media_element_not_found",
@@ -370,14 +372,16 @@ async function runOnce(request, args, runtime = {}) {
         await collect(collectionRequest);
       } catch (error) {
         const errorCode = String(error?.message || "execution_failed");
-        const interactiveLoginAllowed = args.interactive_login === true
-          && errorCode === "login_required";
+        const interactiveLoginAllowed = config.browser_mode === "silent"
+          && ["login_required", "challenge_required"].includes(errorCode);
         if (!interactiveLoginAllowed) throw error;
 
         const loginResult = await (runtime.waitForInteractiveLogin || waitForInteractiveLogin)({
           root,
           platform,
           config,
+          errorCode,
+          shouldStop: collectionRequest.shouldStop,
           timeoutMs: Math.max(1000, Math.min(10 * 60 * 1000, deadline - Date.now())),
         });
         if (!loginResult?.ready) {
@@ -391,11 +395,16 @@ async function runOnce(request, args, runtime = {}) {
       }
     }
   } catch (error) {
+    if (["interactive_verification_cancelled", "interactive_verification_timeout"].includes(error?.message)) {
+      await setPlatformControl(root, run.platforms, "pause");
+    }
     const waitingStates = {
       collection_stopped: "stopped_after_current_item",
       display_unavailable: "waiting_for_display",
       login_required: "waiting_for_login",
       network_access_restricted: "waiting_for_network_access",
+      interactive_verification_cancelled: "waiting_for_manual_verification",
+      interactive_verification_timeout: "waiting_for_manual_verification",
       rate_limited: "rate_limited",
       challenge_required: "waiting_for_challenge_resolution",
     };
@@ -535,7 +544,7 @@ async function runContinuous(request, runtime = {}) {
       });
       attemptedBatches += 1;
       try {
-        const result = await runOnce(request, { action: "run_once", interactive_login: true }, {
+        const result = await runOnce(request, { action: "run_once" }, {
           ...runtime,
           backgroundPlatform: platform,
           writeProgress: undefined,

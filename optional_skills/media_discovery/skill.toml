@@ -2,7 +2,7 @@ schema_version = 2
 
 [package]
 name = "media_discovery"
-version = "0.1.45"
+version = "0.1.46"
 description = "Run bounded one-shot or continuous durable background browser discovery for Douyin, Xiaohongshu, and Kuaishou in silent-by-default or explicitly visible mode, preserve author captions and rendered previews without OCR, capture engagement metrics, and export ordered source-traceable results without downloading media originals."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]

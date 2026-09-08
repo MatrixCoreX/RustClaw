@@ -14,7 +14,11 @@ URL whose content should be downloaded and returned now belongs to
 `media_download.download`, even when it is used as a `seed_urls` input shape;
 this skill does not provide immediate single-post media delivery. The default
 `browser_mode=silent` runs without a browser window; `browser_mode=visible`
-opens one only when the user's request requires visible or non-silent browsing. The skill screenshots media
+opens one when the user's request requires visible or non-silent browsing.
+Login and human-verification barriers are the exception: silent runs may open
+one temporary browser for the user to complete those steps, then resume silently.
+It never solves a slider or bypasses a platform restriction automatically.
+The skill screenshots media
 elements already rendered in the browser and exports exactly two user result
 files: `videos.csv` and `images.csv`. It never runs OCR or model text review;
 author-provided captions remain available as `platform_text`.
@@ -134,8 +138,8 @@ does not enable these periodic notices.
   error code `300012` reports IP risk. Do not claim a slider or missing login
   caused this result, and do not start another batch to verify the restriction.
   A blocked receipt with zero saved records is not successful collection even
-  when the control invocation itself returned `status=ok`. Silent mode stays
-  silent; no login window is opened for a network restriction. Continuous
+  when the control invocation itself returned `status=ok`. No login window is
+  opened for a network restriction. Continuous
   workers back off from 30 minutes up to 6 hours for that platform.
 - `disable` also requests a graceful drain of a matching active batch. Report
   the returned `lifecycle_state`, `drain_run_id`, and `stop_mode` rather than
@@ -149,6 +153,11 @@ does not enable these periodic notices.
 - Omit `browser_mode` or pass `silent` by default. Pass `visible` only when the
   user explicitly requests a browser window or non-silent operation. Runtime must consume this enum and must
   not match localized words to select a mode.
+- Both bounded and continuous silent runs may temporarily open one browser
+  for manual login or human verification. Do not change `browser_mode` to
+  visible for this exception. Closing or timing out that window returns
+  `waiting_for_manual_verification` and pauses the enabled platform until the
+  user resumes it. A successful manual step retries collection silently once.
 - Browsing uses bounded randomized pauses, scroll distances, and inter-batch
   rests to avoid bursty
   traffic. This is cooperative pacing, not fingerprint spoofing, challenge

@@ -309,7 +309,12 @@ async function currentPlatformAccessError(page, platform) {
   const captchaFrameUrls = await page.locator("iframe[src]").evaluateAll((frames) =>
     frames.map((frame) => frame.src || ""),
   );
-  return platformAccessError(platform, page.url(), captchaFrameUrls);
+  const accessError = platformAccessError(platform, page.url(), captchaFrameUrls);
+  if (accessError) return accessError;
+  if (await page.locator('input[type="password"]:visible, input[type="tel"]:visible').count()) {
+    return "login_required";
+  }
+  return null;
 }
 
 export async function waitForPlatformFeed(page, platform, config, shouldStop, timeoutMs = NAVIGATION_TIMEOUT_MS) {
@@ -333,7 +338,8 @@ export async function waitForPlatformFeed(page, platform, config, shouldStop, ti
 
 export async function accessErrorAfterExplicitVisibleWait(page, platform, config = {}, shouldStop = async () => false) {
   let accessError = await currentPlatformAccessError(page, platform);
-  if (accessError !== "challenge_required" || config.browser_mode !== "visible") return accessError;
+  const interactive = code => ["challenge_required", "login_required"].includes(code);
+  if (!interactive(accessError) || config.browser_mode !== "visible") return accessError;
   const configuredMinutes = Math.max(1, Number(config.max_run_minutes) || 10);
   const deadline = Date.now() + Math.min(INTERACTIVE_LOGIN_TIMEOUT_MS, configuredMinutes * 60 * 1000);
   while (Date.now() < deadline && !page.isClosed()) {
@@ -342,9 +348,9 @@ export async function accessErrorAfterExplicitVisibleWait(page, platform, config
     if (page.isClosed()) break;
     accessError = await currentPlatformAccessError(page, platform);
     if (!accessError) return null;
-    if (accessError !== "challenge_required") return accessError;
+    if (!interactive(accessError)) return accessError;
   }
-  return "challenge_required";
+  return page.isClosed() ? "interactive_verification_cancelled" : "interactive_verification_timeout";
 }
 
 async function platformAuthenticationPresent(context, platform) {
@@ -354,12 +360,48 @@ async function platformAuthenticationPresent(context, platform) {
   return cookies.some((cookie) => expected.has(cookie.name) && Boolean(cookie.value));
 }
 
+export async function waitForManualAccess({ page, context, platform, errorCode, timeoutMs,
+  shouldStop = async () => false }) {
+  const deadline = Date.now() + Math.max(INTERACTIVE_LOGIN_POLL_MS, timeoutMs);
+  let readyPolls = 0;
+  while (Date.now() < deadline) {
+    if (await shouldStop()) return { ready: false, error_code: "collection_stopped" };
+    if (page.isClosed()) return { ready: false, error_code: "interactive_verification_cancelled" };
+    const accessError = await currentPlatformAccessError(page, platform).catch(error => {
+      if (page.isClosed()) return "interactive_verification_cancelled";
+      throw error;
+    });
+    if (accessError === "interactive_verification_cancelled") return { ready: false, error_code: accessError };
+    if (accessError === "network_access_restricted") return { ready: false, error_code: accessError };
+    let ready = false;
+    try {
+      validatePlatformUrl(platform, page.url());
+      const selector = {
+        douyin: '[data-aweme-id], [data-e2e="video-detail"], video',
+        xiaohongshu: 'section.note-item[data-note-id], #detail-title, #detail-desc',
+        kuaishou: '.video-card, .short-video-info-container-detail, video',
+      }[platform];
+      ready = !accessError && await page.locator(selector).count() > 0
+        && (errorCode !== "login_required" || await platformAuthenticationPresent(context, platform));
+    } catch {
+      // User navigation can be transient; only a verified platform document is ready.
+    }
+    readyPolls = ready ? readyPolls + 1 : 0;
+    if (readyPolls >= 2) return { ready: true, reason_code: "interactive_access_ready" };
+    await page.waitForTimeout(INTERACTIVE_LOGIN_POLL_MS).catch(() => {});
+  }
+  return { ready: false, error_code: "interactive_verification_timeout" };
+}
+
 export async function waitForInteractiveLogin({
   root,
   platform,
   config,
   timeoutMs = INTERACTIVE_LOGIN_TIMEOUT_MS,
+  errorCode = "login_required",
+  shouldStop = async () => false,
 }) {
+  if (await shouldStop()) return { ready: false, error_code: "collection_stopped" };
   if (!guiAvailable()) return { ready: false, error_code: "display_unavailable" };
   const executablePath = await existingExecutable();
   if (!executablePath) return { ready: false, error_code: "browser_missing" };
@@ -383,8 +425,6 @@ export async function waitForInteractiveLogin({
     topics: [],
     seed_urls: [],
   })[0]?.url;
-  const deadline = Date.now() + Math.max(INTERACTIVE_LOGIN_POLL_MS, timeoutMs);
-
   try {
     if (loginTarget) {
       await page.goto(loginTarget, {
@@ -392,19 +432,7 @@ export async function waitForInteractiveLogin({
         timeout: NAVIGATION_TIMEOUT_MS,
       }).catch(() => {});
     }
-    while (Date.now() < deadline) {
-      if (page.isClosed()) {
-        return { ready: true, reason_code: "interactive_browser_closed" };
-      }
-      if (await platformAuthenticationPresent(context, platform)) {
-        return { ready: true, reason_code: "interactive_authentication_ready" };
-      }
-      const waited = await page.waitForTimeout(INTERACTIVE_LOGIN_POLL_MS)
-        .then(() => true)
-        .catch(() => false);
-      if (!waited) return { ready: true, reason_code: "interactive_browser_closed" };
-    }
-    return { ready: false, error_code: "login_required" };
+    return await waitForManualAccess({ page, context, platform, errorCode, timeoutMs, shouldStop });
   } finally {
     await context.close().catch(() => {});
   }

@@ -145,6 +145,7 @@ test("only an explicitly visible run waits for a machine challenge to clear", as
     isClosed: () => false,
     locator: () => ({
       evaluateAll: async () => (scans++ === 0 ? [captcha] : []),
+      count: async () => 0,
     }),
     url: () => "https://www.douyin.com/",
     waitForTimeout: async () => { waits += 1; },
