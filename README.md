@@ -978,13 +978,39 @@ then exposes the verified package in Skill Store and Tools/Skills.
 
 An enabled skill may also declare a versioned `[aipp]` companion in `skill.toml`.
 AiPP provides task-oriented views for results that are difficult to inspect in a
-chat stream. The host renders reviewed view contracts and reads only bounded,
-allowlisted fields from that skill's private storage; packages cannot inject
-JavaScript, HTML, remote modules, or same-origin frames into the console. AiPP
-availability follows the exact installed manifest, receipt, policy grant, enable
-state, and registry generation. `media_discovery` is the first AiPP: administrators
-can review collected image/video records, previews, source links, filters, and
-cursor-based pages while starting or stopping collection through Agent.
+chat stream. A package may select a reviewed host renderer or carry a
+`sandbox_bundle_v1` static application. The generic sandbox host is implemented
+once: future Ai APPs add their manifest declaration and package assets without
+adding skill-specific branches to `clawd` or the main UI. Sandboxed applications
+receive no same-origin access, runtime key, cookie, host storage, or direct network
+access; they can request only manifest-declared capabilities through the parent
+bridge. Bundle files are copied into the immutable installation and verified as
+receipt artifacts before they can be served.
+
+Ai APP admission follows the skill's exact manifest, receipt, policy grant,
+enable state, and registry generation. Installing a skill can install its Ai APP,
+but the visual application can also be uninstalled independently. That operation
+writes a host overlay tombstone and leaves the skill, its configuration, and its
+private data untouched; reinstalling the Ai APP revalidates the current skill
+package and clears the tombstone. Uninstalling or disabling the skill still makes
+its Ai APP unavailable. `media_discovery` is the first Ai APP: administrators can
+review collected image/video records, locally retained image downloads, previews,
+source links, filters, and cursor-based pages while starting or stopping collection
+through Agent.
+
+```mermaid
+flowchart LR
+    P[Skill package] --> A[Admission and receipt]
+    A --> G[Enabled generation]
+    G --> C[Ai APP catalog]
+    C --> H{Renderer}
+    H -->|reviewed contract| R[Host renderer]
+    H -->|sandbox bundle| F[Opaque iframe]
+    F --> B[Allowlisted capability bridge]
+    B --> L[Agent capability loop]
+    C -->|uninstall app only| T[Overlay tombstone]
+    T -->|reinstall and revalidate| C
+```
 
 The implementation flow is language-neutral:
 

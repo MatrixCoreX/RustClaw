@@ -115,7 +115,7 @@ fn manifest_is_strict_versioned_and_deterministic() {
 }
 
 #[test]
-fn aipp_manifest_accepts_only_host_rendered_versioned_contracts() {
+fn aipp_manifest_accepts_reviewed_host_and_sandboxed_bundle_contracts() {
     let manifest = PackageManifest::from_toml_str(include_str!(
         "../../../optional_skills/media_discovery/skill.toml"
     ))
@@ -132,6 +132,37 @@ fn aipp_manifest_accepts_only_host_rendered_versioned_contracts() {
     let error = PackageManifest::from_toml_str(&unsupported)
         .expect_err("unreviewed renderer must be rejected");
     assert_eq!(error.code, "manifest_aipp_contract_unsupported");
+
+    let sandboxed = include_str!("../../../optional_skills/media_discovery/skill.toml")
+        .replace("renderer = \"collection_feed_v1\"", "renderer = \"sandbox_bundle_v1\"")
+        .replace("data_contract = \"media_collection_v1\"", "data_contract = \"capability_bridge_v1\"")
+        .replace(
+            "icon = \"gallery_vertical_end\"",
+            "asset_root = \"aipp\"\nentrypoint = \"aipp/index.html\"\nbridge_capabilities = [\"media_discovery.status\"]\nicon = \"gallery_vertical_end\"",
+        );
+    let manifest = PackageManifest::from_toml_str(&sandboxed).expect("sandboxed Ai APP manifest");
+    let aipp = manifest.aipp.expect("sandboxed declaration");
+    assert_eq!(aipp.entrypoint.as_deref(), Some("aipp/index.html"));
+    assert_eq!(aipp.bridge_capabilities, ["media_discovery.status"]);
+
+    let undeclared = sandboxed.replace(
+        "media_discovery.status\"]",
+        "media_discovery.not_declared\"]",
+    );
+    assert_eq!(
+        PackageManifest::from_toml_str(&undeclared)
+            .expect_err("bridge capability must be declared by the package")
+            .code,
+        "manifest_aipp_bridge_capability_undeclared"
+    );
+
+    let foreign = sandboxed.replace("media_discovery.status", "another_skill.status");
+    assert_eq!(
+        PackageManifest::from_toml_str(&foreign)
+            .expect_err("bridge capability must stay in the package namespace")
+            .code,
+        "manifest_aipp_bridge_capability_foreign"
+    );
 }
 
 #[test]

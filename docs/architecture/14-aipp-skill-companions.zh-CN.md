@@ -15,12 +15,13 @@ AiPP 为已启用技能提供面向任务的配套界面，用来展示不适合
 ## 当前用户流程
 
 顶层 UI 入口名为 AiAPP，只对管理员显示。目录中只包含当前已经启用、且精确准入 manifest 声明了
-受支持 `[aipp]` 合同的技能。第一页把这些技能排列成应用图标，用户点击应用后才进入对应的
+受支持 `[aipp]` 合同的技能。单独卸载的应用在技能仍启用时会保留为“可重新安装”的入口。
+第一页把这些技能排列成应用图标，用户点击应用后才进入对应的
 任务视图。浏览器会在中性产品存储命名空间中保留当前应用，刷新后仍回到该应用。媒体发现
 界面展示当前采集状态、图片和视频记录、作者自带文案、单独的画面识别文字、采集时平台互动指标、来源链接、筛选和
 稳定游标分页。视频封面按平台尽力获取：采集器只使用无遮挡的渲染视频帧或平台专属 poster，
 不会把整页或登录弹窗截图当作封面。可用封面通过需要认证的预览接口从技能私有导出目录读取；
-远程图片地址必须使用 HTTPS，并且浏览器请求不会携带 referrer。
+已采集图片截图通过同一接口预览和下载，远程 HTTPS 图片只作为不带 referrer 的兜底。
 
 开始、暂停、恢复和停止采集仍是 Agent action。这样浏览器与通信端继续共用同一条自然语言
 能力链路，不会在 UI 中新增第二套控制协议。
@@ -36,30 +37,47 @@ flowchart TD
     G[当前 registry generation 与 policy grant]
     C[AiPP 目录]
     U[管理员打开 AiPP]
-    H[宿主拥有的 renderer]
+    H{交付模式}
+    HR[受审核宿主 renderer]
+    SB[无同源权限 sandbox bundle]
+    CB[能力 allowlist bridge]
     S[SkillStorageResolver]
     D[技能私有媒体账本]
     F[有界字段投影与游标筛选]
     V[需要认证的预览接口]
+    T[独立 Ai APP tombstone]
 
     P --> M --> A --> R --> G
     G -->|精确绑定且已启用| C
     U --> C --> H
-    H --> S --> D --> F --> H
-    D --> V --> H
+    H --> HR --> S --> D --> F --> HR
+    D --> V --> HR
+    H --> SB --> CB --> G
+    C -->|只卸载 Ai APP| T
+    T -->|重新校验并安装| C
 ```
 
 对于已经准入的包，runtime 会在展示前验证当前 binding、包版本、manifest digest、安装
 receipt digest、policy grant、启用状态和 registry generation。没有运行时 binding 的仓库
 内包从 base registry 读取，同样受启用状态约束。禁用、撤销 grant、升级或卸载技能时，
-AiPP 可用性与同一事务一起变化，不存在 UI 自己维护的安装状态。
+AiPP 可用性与同一事务一起变化。管理员也可以只卸载 Ai APP：宿主写入一个 overlay tombstone，
+不改变技能执行、配置或私有数据。重新安装 Ai APP 时，只有当前技能包再次通过 manifest、
+receipt 和 generation 校验后才清除 tombstone。
 
 ## 安全与扩展边界
 
-AiPP 是宿主渲染合同，不是应用插件沙箱。schema version 1 只接受经过审核的 renderer 与
-数据合同标识。技能包可以提供本地化标签和图标 token，但不能提供 JavaScript、HTML、远程
-模块、样式表 URL 或同源 frame。增加新 renderer 或数据合同前，必须实现并审核对应的宿主
-代码和 manifest 校验。
+AiPP 提供两种受控交付模式。`collection_feed_v1` 是当前媒体合同使用的宿主 renderer；
+`sandbox_bundle_v1` 是通用扩展边界，技能包可以在一个声明过的目录中携带静态 HTML、CSS、
+JavaScript、JSON、图片和字体。安装器会把每个文件复制到不可变安装目录，并把大小与摘要写入
+receipt artifact。运行时只允许读取当前精确版本，把路径限制在声明目录内，检查文件类型与大小，
+并返回 private cache、no-sniff 和 CSP header。
+
+浏览器使用带 `allow-scripts allow-downloads`、但不带 `allow-same-origin` 的 iframe 运行应用。
+应用拿不到 API key、Cookie、父页面 DOM、本地存储、任意网络访问或原始文件路径。唯一执行出口
+是版本化 `postMessage` bridge：父页面先核对发送窗口、请求结构和 manifest 中的
+`bridge_capabilities` allowlist，再走普通 direct-capability task 链路。因此 resolver、verifier、
+policy、确认、task journal 和 artifact 控制继续与 Agent 共用。以后新增 sandbox Ai APP 不需要
+再给 `clawd` 增加技能专用路由，也不需要给主 UI 增加业务组件。
 
 媒体合同只暴露展示字段白名单，不返回浏览器 profile、cookie、凭据、原始诊断、任意记录
 字段或不受限制的文件路径。预览路径会规范化并确认仍位于技能自己的 `exports` 目录内，只
@@ -87,5 +105,38 @@ titles = { en = "Media Discovery", zh = "媒体发现" }
 descriptions = { en = "Review collected media.", zh = "查看已采集内容。" }
 ```
 
-manifest 会进入不可变包 digest 与 receipt。运行时导入技能因此通过与技能相同的 admission
-生命周期安装、更新、禁用和卸载 AiPP。
+通用 sandbox 应用使用同一段合同：
+
+```toml
+[aipp]
+schema_version = 1
+renderer = "sandbox_bundle_v1"
+data_contract = "capability_bridge_v1"
+asset_root = "aipp"
+entrypoint = "aipp/index.html"
+bridge_capabilities = ["example.status", "example.list"]
+icon = "panels_top_left"
+default_locale = "en"
+titles = { en = "Example", zh = "示例" }
+descriptions = { en = "Review example results.", zh = "查看示例结果。" }
+```
+
+bridge 中的每个 capability 也必须存在于包自己的 capability request 中，并继续受宿主 policy
+grant 约束。远程模块、宿主认证信息、未声明能力名、路径穿越、软链接和不支持的资源类型都会被拒绝。
+
+bundle 通过版本化消息报告就绪并调用能力：
+
+```json
+{"schema_version":1,"type":"aipp.ready"}
+{"schema_version":1,"type":"aipp.capability.invoke","request_id":"status-1","capability":"example.status","args":{}}
+```
+
+宿主返回 `aipp.host.context` 和 `aipp.capability.result`。每个 frame 同时最多发起四个请求，参数
+序列化大小也受限制。包内代码只能根据结构化结果生成自己的多语言界面，不得解析模型自然语言，
+也不得复制控制台认证逻辑。
+
+新增应用时，只需把静态文件放到 `<skill>/aipp`，声明通用 sandbox 合同和精确 bridge capability，
+再走现有技能准入流程。不得把应用名、路由、字段或 renderer 代码添加到 `clawd` 或主 UI。
+
+manifest 会进入不可变包 digest 与 receipt。运行时导入技能通过与技能相同的 admission 生命周期
+安装和升级 Ai APP；独立卸载状态只控制界面，不修改或卸载技能。

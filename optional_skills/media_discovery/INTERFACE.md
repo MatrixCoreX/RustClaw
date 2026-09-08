@@ -202,7 +202,7 @@ interval and deduplicates each delivery by task and frame sequence.
 
 `images.csv` columns:
 
-`sequence,global_sequence,post_sequence,image_sequence,platform,browser_mode,source_mode,search_keyword,discovery_source_url,title,platform_text,recognized_text,image_url,source_page_url,discovered_at,engagement_captured_at,views,likes,comments,favorites,shares`
+`sequence,global_sequence,post_sequence,image_sequence,platform,browser_mode,source_mode,search_keyword,discovery_source_url,title,platform_text,recognized_text,image_url,image_screenshot_path,source_page_url,discovered_at,engagement_captured_at,views,likes,comments,favorites,shares`
 
 CSV files use UTF-8 BOM, RFC 4180 quoting, stable order, and spreadsheet formula
 injection protection. The private immutable record ledger remains the recovery
@@ -212,7 +212,10 @@ source of truth; CSV files can always be rebuilt.
 platform DOM markers. A video record and every image belonging to one carousel
 retain that caption independently of `recognized_text`, which contains only
 text recognized from the rendered media screenshot. AiAPP presents the two
-fields separately instead of choosing one and hiding the other.
+fields separately instead of choosing one and hiding the other. Collected image
+screenshots are retained under the skill-owned export directory and referenced
+by `image_screenshot_path` so AiAPP can provide authenticated same-origin
+downloads without proxying arbitrary remote URLs.
 
 ## Browser and Recognition Rules
 

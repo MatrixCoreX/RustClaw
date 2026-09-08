@@ -473,6 +473,13 @@ export async function collectRenderedImages({
       );
       await screenshotLocator(scope.locator("img").nth(candidate.index), screenshotPath);
       temporaryPaths.push(screenshotPath);
+      const imageScreenshotPath = await persistImageScreenshot(
+        root,
+        platform,
+        itemId,
+        position,
+        screenshotPath,
+      );
       const recognition = await recognizeScreenshot(
         screenshotPath,
         config.recognition_mode || "ocr_reviewed",
@@ -494,6 +501,8 @@ export async function collectRenderedImages({
         raw_recognized_text: recognition.raw_text,
         recognition,
         image_url: candidate.source,
+        image_screenshot_path: imageScreenshotPath,
+        cover_screenshot_path: imageScreenshotPath,
         source_page_url: sourcePageUrl,
         discovered_at: discoveredAt,
         engagement,
@@ -527,6 +536,18 @@ async function screenshotLocator(locator, targetPath) {
 async function persistVideoCover(root, platform, itemId, temporaryPath) {
   const token = `${platform}_${itemId}`.replaceAll(/[^A-Za-z0-9._-]/gu, "_").slice(0, 180);
   const relativePath = path.posix.join("video_covers", `${token}.png`);
+  const targetPath = path.join(root, "exports", ...relativePath.split("/"));
+  await fs.mkdir(path.dirname(targetPath), { recursive: true });
+  await fs.copyFile(temporaryPath, targetPath, fsConstants.COPYFILE_EXCL).catch((error) => {
+    if (error?.code !== "EEXIST") throw error;
+  });
+  return relativePath;
+}
+
+async function persistImageScreenshot(root, platform, itemId, position, temporaryPath) {
+  const token = `${platform}_${itemId}`.replaceAll(/[^A-Za-z0-9._-]/gu, "_").slice(0, 170);
+  const suffix = String(position).padStart(3, "0");
+  const relativePath = path.posix.join("images", `${token}_${suffix}.png`);
   const targetPath = path.join(root, "exports", ...relativePath.split("/"));
   await fs.mkdir(path.dirname(targetPath), { recursive: true });
   await fs.copyFile(temporaryPath, targetPath, fsConstants.COPYFILE_EXCL).catch((error) => {

@@ -17,6 +17,33 @@ use super::{
 };
 
 #[test]
+fn aipp_removal_is_independent_from_skill_admission_state() {
+    let root = std::env::temp_dir().join(format!("aipp-state-{}", uuid::Uuid::new_v4()));
+    let registry = root.join("configs/skills_registry.toml");
+    fs::create_dir_all(registry.parent().expect("registry parent")).expect("create registry root");
+    fs::write(&registry, "").expect("write registry");
+    let service = SkillAdmissionService::for_test(&root, &registry);
+
+    assert!(service
+        .aipp_is_installed("fixture_app")
+        .expect("default state"));
+    service
+        .set_aipp_installed("fixture_app", false)
+        .expect("remove app only");
+    assert!(!service
+        .aipp_is_installed("fixture_app")
+        .expect("removed state"));
+    service
+        .set_aipp_installed("fixture_app", true)
+        .expect("restore app only");
+    assert!(service
+        .aipp_is_installed("fixture_app")
+        .expect("restored state"));
+
+    fs::remove_dir_all(root).expect("remove fixture");
+}
+
+#[test]
 fn generation_activation_is_atomic_restartable_and_tombstone_preserves_shared_tools() {
     let root = std::env::temp_dir().join(format!("skillctl-admission-{}", uuid::Uuid::new_v4()));
     let skill_name = format!("novel_{}", uuid::Uuid::new_v4().simple());

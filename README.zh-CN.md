@@ -815,11 +815,33 @@ Agent Runtime 当前内置的技能已经比较完整，按类别可大致分为
 不会主动编译它们，正式发行包通过对应平台的显式 Skill Store 预编译流程提供兼容产物。
 
 已启用技能还可以在 `skill.toml` 声明版本化 `[aipp]` 配套界面。AiPP 用于展示不适合在
-聊天流中完整查看的任务结果。宿主只渲染经过审核的视图合同，并且只从该技能私有存储中读取
-有界、白名单字段；技能包不能向控制台注入 JavaScript、HTML、远程模块或同源 frame。
-AiPP 可用性与精确安装 manifest、receipt、policy grant、启用状态和 registry generation
-一致。`media_discovery` 是第一个 AiPP：管理员可以查看采集到的图片/视频记录、预览、来源
-链接、筛选和游标分页；开始或停止采集仍通过 Agent 完成。
+聊天流中完整查看的任务结果。技能可以选择经过审核的宿主 renderer，也可以携带
+`sandbox_bundle_v1` 静态应用。通用 sandbox 宿主只实现一次，以后新增 Ai APP 只需增加
+manifest 声明和包内资源，不需要给 `clawd` 或主 UI 增加技能专用分支。sandbox 应用没有
+同源权限、runtime key、Cookie、宿主存储或直接网络访问，只能通过父页面请求 manifest
+明确声明的 capability。bundle 文件会进入不可变安装目录，并作为 receipt artifact 校验后
+才能提供给浏览器。
+
+Ai APP 可用性与精确安装 manifest、receipt、policy grant、启用状态和 registry generation
+一致。安装技能时可以同时安装其 Ai APP，但可视化应用也可以独立卸载。该操作只写入宿主
+overlay tombstone，不改变技能、技能配置或私有数据；重新安装 Ai APP 时会重新校验当前技能包
+并清除 tombstone。禁用或卸载技能仍会使其 Ai APP 不可用。`media_discovery` 是第一个 Ai APP：
+管理员可以查看采集到的图片/视频记录、本地保留的图片下载、预览、来源链接、筛选和游标分页；
+开始或停止采集仍通过 Agent 完成。
+
+```mermaid
+flowchart LR
+    P[技能包] --> A[准入与 receipt]
+    A --> G[已启用 generation]
+    G --> C[Ai APP 目录]
+    C --> H{渲染方式}
+    H -->|审核合同| R[宿主 renderer]
+    H -->|sandbox bundle| F[无同源权限 iframe]
+    F --> B[capability allowlist bridge]
+    B --> L[Agent capability loop]
+    C -->|只卸载应用| T[overlay tombstone]
+    T -->|重新安装并校验| C
+```
 
 如果要回答“某个 skill 怎么配置、怎么绑定、缺什么前置条件”，优先看：`prompts/references/skill_setup_guide.zh-CN.md`。
 

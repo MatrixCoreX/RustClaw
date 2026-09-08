@@ -2015,12 +2015,15 @@ export type ChannelName = "telegram" | "whatsapp" | "ui" | "wechat" | "feishu" |
 export interface AippCatalogItem {
   skill_name: string;
   package_version: string;
-  renderer: "collection_feed_v1";
-  data_contract: "media_collection_v1";
+  renderer: "collection_feed_v1" | "sandbox_bundle_v1";
+  data_contract: "media_collection_v1" | "capability_bridge_v1";
   icon: string;
   default_locale: string;
   titles: Record<string, string>;
   descriptions: Record<string, string>;
+  installed: boolean;
+  entrypoint: string | null;
+  bridge_capabilities: string[];
 }
 
 export interface AippCatalogResponse {

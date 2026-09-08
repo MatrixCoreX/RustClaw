@@ -40,6 +40,20 @@ test("keeps media collection automatically refreshed and sortable by collection 
   assert.match(source, /采集时间：最早优先/);
 });
 
+test("renders collected media in two compact desktop columns", () => {
+  const source = readFileSync(new URL("../components/AippPage.tsx", import.meta.url), "utf8");
+  assert.match(source, /grid min-w-0 gap-2 lg:grid-cols-2/);
+  assert.match(source, /sm:grid-cols-\[minmax\(104px,24%\)_minmax\(0,1fr\)\]/);
+  assert.match(source, /max-h-36 min-h-24/);
+});
+
+test("downloads collected images through the existing authenticated preview endpoint", () => {
+  const source = readFileSync(new URL("../components/AippPage.tsx", import.meta.url), "utf8");
+  assert.match(source, /items\/\$\{item\.global_sequence\}\/preview/);
+  assert.match(source, /anchor\.download = `media-/);
+  assert.match(source, /下载图片/);
+});
+
 test("renders an installed AiPP as an application launcher card", () => {
   const app: AippCatalogItem = {
     skill_name: "media_discovery",
@@ -50,13 +64,56 @@ test("renders an installed AiPP as an application launcher card", () => {
     default_locale: "en",
     titles: { en: "Media Discovery", zh: "媒体发现" },
     descriptions: { en: "Collected media", zh: "查看采集内容" },
+    installed: true,
+    entrypoint: null,
+    bridge_capabilities: [],
   };
   const markup = renderToStaticMarkup(
-    <AippCatalogCard app={app} lang="zh" onOpen={() => undefined} />,
+    <AippCatalogCard app={app} lang="zh" onOpen={() => undefined} onInstall={() => undefined} />,
   );
-  assert.match(markup, /^<button/);
+  assert.match(markup, /^<article/);
   assert.match(markup, /媒体发现/);
   assert.match(markup, /查看采集内容/);
+});
+
+test("offers Ai APP reinstallation without changing its skill", () => {
+  const app: AippCatalogItem = {
+    skill_name: "example",
+    package_version: "1.0.0",
+    renderer: "sandbox_bundle_v1",
+    data_contract: "capability_bridge_v1",
+    icon: "panels_top_left",
+    default_locale: "en",
+    titles: { en: "Example", zh: "示例" },
+    descriptions: { en: "Example app", zh: "示例应用" },
+    installed: false,
+    entrypoint: "aipp/index.html",
+    bridge_capabilities: [],
+  };
+  const markup = renderToStaticMarkup(
+    <AippCatalogCard app={app} lang="zh" onOpen={() => undefined} onInstall={() => undefined} />,
+  );
+  assert.match(markup, /安装 Ai APP/);
+  assert.doesNotMatch(markup, /chevron-right/);
+});
+
+test("loads sandbox bundles through an opaque iframe and a capability allowlist", () => {
+  const source = readFileSync(new URL("../components/AippPage.tsx", import.meta.url), "utf8");
+  assert.match(source, /sandbox="allow-scripts allow-downloads"/);
+  assert.doesNotMatch(source, /allow-same-origin/);
+  assert.match(source, /allowedCapabilities\.has\(request\.capability\)/);
+  assert.match(source, /event\.source !== frameRef\.current\?\.contentWindow/);
+  assert.match(source, /type === "aipp.ready"/);
+  assert.match(source, /entrypoint: "run_capability"/);
+  assert.match(source, /AIPP_BRIDGE_MAX_IN_FLIGHT = 4/);
+  assert.match(source, /AIPP_BRIDGE_MAX_ARGS_BYTES = 64 \* 1024/);
+});
+
+test("keeps Ai APP installation state separate from its skill", () => {
+  const source = readFileSync(new URL("../components/AippPage.tsx", import.meta.url), "utf8");
+  assert.match(source, /method: installed \? "POST" : "DELETE"/);
+  assert.match(source, /对应技能、配置和采集数据都会保留/);
+  assert.match(source, /安装 Ai APP/);
 });
 
 test("renders a media collection record without exposing undeclared fields", () => {
@@ -107,4 +164,38 @@ test("renders a media collection record without exposing undeclared fields", () 
   assert.match(markup, /318/);
   assert.match(markup, /href="https:\/\/example\.test\/source"/);
   assert.match(markup, /referrerPolicy="no-referrer"/);
+});
+
+test("renders an image card when only a retained local preview is available", () => {
+  const item: AippMediaItem = {
+    schema_version: 1,
+    global_sequence: 43,
+    sequence: 8,
+    post_sequence: 4,
+    image_sequence: 1,
+    kind: "image",
+    platform: "xiaohongshu",
+    source_mode: "home_feed",
+    search_keyword: "",
+    title: "Local preview",
+    platform_text: "",
+    recognized_text: "",
+    recognition_source: null,
+    source_url: null,
+    image_url: null,
+    preview_available: true,
+    discovered_at: "2026-09-08T00:00:00Z",
+    engagement: null,
+  };
+  const markup = renderToStaticMarkup(
+    <AippMediaItemCard
+      item={item}
+      skillName="media_discovery"
+      apiFetch={async () => new Response()}
+      t={t}
+      lang="en"
+    />,
+  );
+  assert.match(markup, /Local preview/);
+  assert.match(markup, /暂无预览/);
 });

@@ -129,6 +129,18 @@ test("browser collector follows the rendered carousel and captures every image i
   );
   assert.equal(result.records.every((record) => record.engagement.metrics.likes.value === 27), true);
   assert.equal(result.records.some((record) => record.collection_truncated), false);
+  assert.deepEqual(
+    result.records.map((record) => record.image_screenshot_path),
+    [
+      "images/xiaohongshu_xiaohongshu_fixture_001.png",
+      "images/xiaohongshu_xiaohongshu_fixture_002.png",
+      "images/xiaohongshu_xiaohongshu_fixture_003.png",
+    ],
+  );
+  for (const record of result.records) {
+    const persisted = path.join(root, "exports", ...record.image_screenshot_path.split("/"));
+    assert.equal((await fs.stat(persisted)).size > 512, true);
+  }
   for (const screenshotPath of result.temporaryPaths) {
     assert.equal((await fs.stat(screenshotPath)).size > 512, true);
   }
