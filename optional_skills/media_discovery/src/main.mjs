@@ -50,6 +50,7 @@ const ERROR_CODES = new Set([
   "rate_limited",
   "run_already_active",
   "screenshot_empty",
+  "screenshot_obscured",
   "selector_drift",
   "skill_storage_invalid",
   "skill_storage_required",

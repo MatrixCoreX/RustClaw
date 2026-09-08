@@ -134,9 +134,10 @@ does not enable these periodic notices.
   files; `delivery_requested=false` means no downloadable artifact was sent,
   not that the CSV files are absent or only in memory.
 - `waiting_for_network_access` / `network_access_restricted` means the
-  platform rejected the current network. For Xiaohongshu the observed machine
-  error code `300012` reports IP risk. Do not claim a slider or missing login
-  caused this result, and do not start another batch to verify the restriction.
+  platform rejected the current browser session/access attempt. For Xiaohongshu
+  the observed machine code is `300012`. It does not establish an IP-wide block:
+  headed and headless sessions can receive different results. Do not infer the
+  root cause from that code or start repeated batches to probe the restriction.
   A blocked receipt with zero saved records is not successful collection even
   when the control invocation itself returned `status=ok`. No login window is
   opened for a network restriction. Continuous
@@ -236,7 +237,7 @@ Examples of equivalent intent (documentation examples, not runtime matchers):
 Errors use `extra.{schema_version,source_skill,status,error_code,message_key,retryable}`.
 Stable examples include `display_unavailable`, `browser_missing`,
 `login_required`, `challenge_required`, `network_access_restricted`, `rate_limited`, `selector_drift`,
-`no_items_collected`,
+`no_items_collected`, `screenshot_obscured`,
 `platform_unsupported`, `source_scope_empty`, `run_already_active`,
 `collection_already_enabled`, and `storage_lock_timeout`.
 `error_text` is a human fallback and must never drive routing or retry logic.
