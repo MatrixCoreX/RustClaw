@@ -20,6 +20,7 @@ import {
   heartbeatBackgroundWorker,
   readRecords,
   readState,
+  readStatusState,
   requestStop,
   setPlatformControl,
   storageRoot,
@@ -312,6 +313,7 @@ async function runOnce(request, args, runtime = {}) {
   const progressReporter = { emitIfDue: () => false, stop: () => {} };
   let status = "completed_batch";
   let errorCode = null;
+  let failureDiagnostic = null;
   const leaseHeartbeat = setInterval(() => {
     heartbeat(root, run.run_id, counts).catch(() => {});
   }, 30_000);
@@ -377,14 +379,16 @@ async function runOnce(request, args, runtime = {}) {
     }
   } catch (error) {
     const waitingStates = {
+      collection_stopped: "stopped_after_current_item",
       display_unavailable: "waiting_for_display",
       login_required: "waiting_for_login",
       rate_limited: "rate_limited",
       challenge_required: "waiting_for_challenge_resolution",
     };
     status = waitingStates[String(error?.message)] || "failed";
-    errorCode = String(error?.message || "execution_failed");
-    if (counts.failures === 0) counts.failures = 1;
+    errorCode = status === "stopped_after_current_item" ? null : String(error?.message || "execution_failed");
+    failureDiagnostic = error?.discovery_diagnostic || null;
+    if (errorCode && counts.failures === 0) counts.failures = 1;
     const runTemporary = path.join(root, "tmp", run.run_id);
     const diagnostic = path.join(root, "diagnostics", `${Date.now()}-${run.run_id}`);
     await fs.rename(runTemporary, diagnostic).catch(() => {});
@@ -398,11 +402,16 @@ async function runOnce(request, args, runtime = {}) {
     if (counts.failures === 0) counts.failures = 1;
   }
   run.counts = counts;
+  if (failureDiagnostic) run.failure_diagnostic = failureDiagnostic;
   const completed = await finishRun(root, run, status, errorCode);
   if (status !== "failed") {
     await fs.rm(path.join(root, "tmp", run.run_id), { recursive: true, force: true }).catch(() => {});
   }
-  if (status === "failed") throw new Error(errorCode);
+  if (status === "failed") {
+    throw Object.assign(new Error(errorCode), {
+      extra: { run_id: run.run_id, ...(failureDiagnostic ? { failure_diagnostic: failureDiagnostic } : {}) },
+    });
+  }
   return success("run_once", {
     state: status,
     run: completed,
@@ -544,12 +553,14 @@ async function runContinuous(request, runtime = {}) {
 
 async function status(request) {
   const root = storageRoot(request);
-  const state = await readState(root);
+  const state = await readStatusState(root);
   const records = await readRecords(root);
   return success("status", {
     platforms: state.platforms,
     background_worker: state.background_worker,
     active_run: state.active_run,
+    expired_leases: state.expired_leases,
+    latest_run: state.runs?.[0] || null,
     counts: {
       videos: records.filter((record) => record.kind === "video").length,
       images: records.filter((record) => record.kind === "image").length,

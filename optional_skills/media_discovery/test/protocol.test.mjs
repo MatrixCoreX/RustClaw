@@ -224,6 +224,26 @@ test("enable, status, disable, and disabled run_once form a durable control loop
   assert.equal(enabledBatch.extra.error_code, "background_collection_not_enabled");
 });
 
+test("manual verification stop is a graceful result and diagnostics survive a failed run", async (t) => {
+  const context = await requestContext(t);
+  const request = { args: { action: "run_once", platform: "douyin", source_mode: "home_feed" }, context };
+  const stopped = await handleRequest(request, { collectPlatform: async () => { throw new Error("collection_stopped"); } });
+  assert.equal(stopped.status, "ok");
+  assert.equal(stopped.extra.state, "stopped_after_current_item");
+  assert.equal(stopped.extra.run.counts.failures, 0);
+  assert.equal(stopped.extra.run.error_code, null);
+
+  const diagnostic = { schema_version: 1, platform: "douyin", stage: "recommendation_ready", document: null };
+  const failed = await handleRequest(request, { collectPlatform: async () => {
+    throw Object.assign(new Error("selector_drift"), { discovery_diagnostic: diagnostic });
+  } });
+  assert.equal(failed.extra.error_code, "selector_drift");
+  assert.deepEqual(failed.extra.failure_diagnostic, diagnostic);
+  const state = JSON.parse(await fs.readFile(path.join(context.skill_storage.directory_path, "state.json"), "utf8"));
+  assert.deepEqual(state.runs[0].failure_diagnostic, diagnostic);
+  assert.equal(state.active_run, null);
+});
+
 test("continuous background collection stops gracefully through disable", async (t) => {
   const context = await requestContext(t);
   await handleRequest({
@@ -301,6 +321,36 @@ test("continuous background collection terminates on a non-retryable failure", a
   const current = await handleRequest({ args: { action: "status" }, context });
   assert.equal(current.extra.background_worker, null);
   assert.equal(current.extra.active_run, null);
+});
+
+test("status distinguishes live leases from expired records without rewriting state", async (t) => {
+  const context = await requestContext(t);
+  const storage = await import("../src/storage.mjs");
+  const root = context.skill_storage.directory_path;
+  await storage.configurePlatforms(root, ["douyin"], normalizedConfig({}));
+  const worker = await storage.beginBackgroundWorker(root);
+  const { run } = await storage.beginRun(root, ["douyin"]);
+  const live = await handleRequest({ args: { action: "status" }, context });
+  assert.equal(live.extra.background_worker.worker_id, worker.worker_id);
+  assert.equal(live.extra.active_run.run_id, run.run_id);
+  assert.deepEqual(live.extra.expired_leases, []);
+
+  const state = await storage.readState(root);
+  state.background_worker.heartbeat_at = "2000-01-01T00:00:00.000Z";
+  state.active_run.heartbeat_at = "invalid-timestamp";
+  state.runs = [{ run_id: "previous", status: "completed_batch", counts: { items: 2 } }];
+  const snapshot = JSON.stringify(state);
+  await fs.writeFile(path.join(root, "state.json"), snapshot);
+  const expired = await handleRequest({ args: { action: "status" }, context });
+  assert.equal(expired.status, "ok");
+  assert.equal(expired.extra.background_worker, null);
+  assert.equal(expired.extra.active_run, null);
+  assert.equal(expired.extra.latest_run.run_id, "previous");
+  assert.deepEqual(expired.extra.expired_leases.map(({ kind, lifecycle_state }) => ({ kind, lifecycle_state })), [
+    { kind: "background_worker", lifecycle_state: "heartbeat_expired" },
+    { kind: "active_run", lifecycle_state: "heartbeat_expired" },
+  ]);
+  assert.equal(await fs.readFile(path.join(root, "state.json"), "utf8"), snapshot);
 });
 
 test("a second start is rejected while the current run owns the lease and disable drains it", async (t) => {

@@ -36,9 +36,10 @@ Explicit detail `seed_urls` are collected as the exact requested set and do not
 expand into unrelated recommendation links from those pages.
 
 Douyin `home_feed` collection opens the first visible recommendation as one
-detail video before collecting anything. It then captures the current detail
-item, scrolls down inside that detail feed, waits for the active item identity
-to change, and repeats one item at a time. It does not scrape a batch of cards
+detail video through its HTTPS URL before collecting anything. Card-owned
+desktop-app launch handlers are never clicked. It captures the current detail
+item, uses the player's next-item control (or scrolls a rendered feed), waits for
+the active item identity to change, and repeats one item at a time. It does not scrape a batch of cards
 directly from the recommendation landing page. Image-carousel posts encountered
 in the detail feed are completed before advancing to the next item.
 
@@ -83,7 +84,7 @@ communication channel through the unified, idempotent delivery service. The
 skill never writes localized notification prose. Explicit one-shot collection
 does not enable these periodic notices.
 
-## Planner Workflow
+## Planner Selection Notes
 
 - Select this skill only when the current request explicitly asks for a
   collection workflow: batch browsing, home-feed browsing, keyword discovery,
@@ -103,6 +104,12 @@ does not enable these periodic notices.
   `run_once` with explicit platform and source settings. The skill uses an
   ephemeral config and does not enable the platform or start a background
   worker.
+- Treat `state=completed_batch` and `run.counts` as the completed batch receipt.
+  Do not start another batch to verify success or after exporting results.
+  Use `status` or `list_runs` for verification. Call `export_results` only when
+  the user requests exported files; saving content already makes it available
+  in AiAPP. An async job must be polled through its returned runtime handle,
+  not started again with altered pacing or other arguments.
 - `disable` also requests a graceful drain of a matching active batch. Report
   the returned `lifecycle_state`, `drain_run_id`, and `stop_mode` rather than
   claiming an immediate process termination.
@@ -170,7 +177,10 @@ Examples of equivalent intent (documentation examples, not runtime matchers):
 - `run_enabled_once`: no-argument durable companion used after `enable`; keep
   running bounded collection batches with randomized rests until `disable` or
   task cancellation.
-- `status`: return platform state, background worker, active batch, and result counts.
+- `status`: return platform state, live background worker, live active batch,
+  `latest_run`, and result counts. Expired heartbeat records appear only in
+  `expired_leases` with `lifecycle_state=heartbeat_expired`; they are not proof
+  of a running worker. This read does not erase or rewrite stored history.
 - `pause` / `resume`: preserve configuration while pausing/resuming the worker.
 - `stop_current`: request a graceful stop after the current complete post,
   optionally restricted to a platform, without disabling the background worker.
@@ -190,6 +200,11 @@ Every response has an empty `text` and structured
 in the user's language. Errors additionally provide
 `extra.{error_code,message_key,retryable}`; runtime logic must not parse
 `error_text`.
+
+Browser failures also retain `failure_diagnostic` in the run and response:
+the machine stage, sanitized page origin/path, document readiness, and element
+counts. The same JSON is kept under private `diagnostics/<run_id>/` with the
+configured expiry. It contains no cookies, URL query values, or page text.
 
 When `run_enabled_once` remains active for at
 least 15 minutes, zero or more `skill_progress` JSONL records precede the final
@@ -232,7 +247,8 @@ remote URLs.
   visible browser. A challenge enters an error-specific exponential cooldown
   instead of repeatedly reopening the site. An explicitly visible run keeps its
   window open while a user completes the platform challenge, then continues in
-  that same run. The same private profile is reused after login.
+  that same run. Verification and feed-readiness waits observe graceful stop.
+  The same private profile is reused after login.
 - The skill uses one private persistent browser profile per platform. Later
   runs reuse that profile's cookies, local storage, and browser cache; clearing
   collected results preserves this login/session state. The skill does not read

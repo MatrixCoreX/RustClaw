@@ -42,9 +42,10 @@ Explicit detail `seed_urls` are collected as the exact requested set and do not
 expand into unrelated recommendation links from those pages.
 
 Douyin `home_feed` collection opens the first visible recommendation as one
-detail video before collecting anything. It then captures the current detail
-item, scrolls down inside that detail feed, waits for the active item identity
-to change, and repeats one item at a time. It does not scrape a batch of cards
+detail video through its HTTPS URL before collecting anything. Card-owned
+desktop-app launch handlers are never clicked. It captures the current detail
+item, uses the player's next-item control (or scrolls a rendered feed), waits for
+the active item identity to change, and repeats one item at a time. It does not scrape a batch of cards
 directly from the recommendation landing page. Image-carousel posts encountered
 in the detail feed are completed before advancing to the next item.
 
@@ -89,6 +90,64 @@ communication channel through the unified, idempotent delivery service. The
 skill never writes localized notification prose. Explicit one-shot collection
 does not enable these periodic notices.
 
+## Planner Selection Notes (from interface)
+- Select this skill only when the current request explicitly asks for a
+  collection workflow: batch browsing, home-feed browsing, keyword discovery,
+  continuous collection, collection lifecycle control, or CSV
+  export. Do not select `run_once` for one copied share or URL that should be
+  downloaded and returned to the user now; select `media_download.download`.
+- A user request to start continuous collection is a multi-capability workflow:
+  1. call `media_discovery.enable` with the requested platform(s), bounded
+     settings, and `confirm=true` after policy approval;
+  2. call the no-argument `media_discovery.run_enabled_once` immediately. It
+     reads only enabled persisted platform configurations and remains active as
+     a durable background job.
+- A request to stop one or all platforms calls `media_discovery.disable`. The
+  worker finishes the current post before exiting; no schedule cleanup is
+  involved.
+- A user request for one bounded batch without continuous collection calls
+  `run_once` with explicit platform and source settings. The skill uses an
+  ephemeral config and does not enable the platform or start a background
+  worker.
+- Treat `state=completed_batch` and `run.counts` as the completed batch receipt.
+  Do not start another batch to verify success or after exporting results.
+  Use `status` or `list_runs` for verification. Call `export_results` only when
+  the user requests exported files; saving content already makes it available
+  in AiAPP. An async job must be polled through its returned runtime handle,
+  not started again with altered pacing or other arguments.
+- `disable` also requests a graceful drain of a matching active batch. Report
+  the returned `lifecycle_state`, `drain_run_id`, and `stop_mode` rather than
+  claiming an immediate process termination.
+- Do not ask for a topic or URL when the user clearly selected a platform but
+  supplied neither: use `source_mode=home_feed`. Never infer a different
+  platform.
+- When the user asks to search one or more keywords before collecting, pass
+  `source_mode=topics` and place those exact search terms in `topics[]`. Do not
+  invent a second keyword parameter or translate the terms unless requested.
+- Omit `browser_mode` or pass `silent` by default. Pass `visible` only when the
+  user explicitly requests a browser window or non-silent operation. Runtime must consume this enum and must
+  not match localized words to select a mode.
+- Browsing uses bounded randomized pauses, scroll distances, and inter-batch
+  rests to avoid bursty
+  traffic. This is cooperative pacing, not fingerprint spoofing, challenge
+  bypass, or a guarantee against platform controls. Login, challenge, and rate
+  limit states stop the current batch and remain machine-visible.
+- These rules are semantic model guidance. Production runtime and skill code
+  must not match fixed Chinese, English, or other-language phrases.
+
+Examples of equivalent intent (documentation examples, not runtime matchers):
+
+- `帮我开始采集抖音` -> enable Douyin home feed and start its durable
+  background worker.
+- `停止采集抖音` -> disable Douyin; the worker drains the current post and exits.
+- `Start collecting Xiaohongshu posts` -> the same workflow for Xiaohongshu.
+- `Collect a small Kuaishou recommendation batch` -> run one bounded Kuaishou
+  `home_feed` batch without enabling background collection.
+- `搜索露营装备并采集小红书内容` -> use `source_mode=topics` and
+  `topics=["露营装备"]` for Xiaohongshu.
+- `Arrête la collecte de Xiaohongshu` -> disable only Xiaohongshu.
+
+
 ## Config Entry Points (from interface)
 - No dedicated config entry points declared.
 
@@ -106,7 +165,10 @@ does not enable these periodic notices.
 - `run_enabled_once`: no-argument durable companion used after `enable`; keep
   running bounded collection batches with randomized rests until `disable` or
   task cancellation.
-- `status`: return platform state, background worker, active batch, and result counts.
+- `status`: return platform state, live background worker, live active batch,
+  `latest_run`, and result counts. Expired heartbeat records appear only in
+  `expired_leases` with `lifecycle_state=heartbeat_expired`; they are not proof
+  of a running worker. This read does not erase or rewrite stored history.
 - `pause` / `resume`: preserve configuration while pausing/resuming the worker.
 - `stop_current`: request a graceful stop after the current complete post,
   optionally restricted to a platform, without disabling the background worker.

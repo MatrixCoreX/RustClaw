@@ -127,6 +127,21 @@ export async function readState(root) {
   return readStateUnlocked(root);
 }
 
+export async function readStatusState(root) {
+  const state = await readState(root);
+  const expiredLeases = [];
+  for (const [kind, isFresh] of [
+    ["background_worker", backgroundWorkerIsFresh],
+    ["active_run", activeRunIsFresh],
+  ]) {
+    const lease = state[kind];
+    if (!lease || isFresh(lease)) continue;
+    expiredLeases.push({ kind, ...lease, lifecycle_state: "heartbeat_expired" });
+    state[kind] = null;
+  }
+  return { ...state, expired_leases: expiredLeases };
+}
+
 export async function configurePlatforms(root, platforms, config) {
   return withLock(root, async () => {
     const state = await readStateUnlocked(root);
