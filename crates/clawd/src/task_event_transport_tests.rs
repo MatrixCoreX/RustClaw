@@ -31,6 +31,32 @@ fn event_schema_is_ordered_deduplicated_and_replayable() {
 }
 
 #[test]
+fn event_schema_installs_skill_activity_indexes_for_aipp_queries() {
+    let state = state();
+    publish_event(
+        &state,
+        "task-indexes",
+        "tool_finished",
+        json!({"skill":"example"}),
+    )
+    .expect("publish event");
+    let db = state.core.db.get().expect("get db");
+    for name in [
+        "idx_task_event_stream_skill_activity",
+        "idx_task_event_archive_skill_activity",
+    ] {
+        let count: u64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?1",
+                rusqlite::params![name],
+                |row| row.get(0),
+            )
+            .expect("read index");
+        assert_eq!(count, 1, "missing {name}");
+    }
+}
+
+#[test]
 fn latest_skill_progress_projection_comes_from_the_validated_task_event() {
     let state = state();
     publish_event(

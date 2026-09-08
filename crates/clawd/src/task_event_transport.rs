@@ -28,6 +28,13 @@ CREATE TABLE IF NOT EXISTS task_event_stream (
 );
 CREATE INDEX IF NOT EXISTS idx_task_event_stream_task_seq
     ON task_event_stream(task_id, seq);
+CREATE INDEX IF NOT EXISTS idx_task_event_stream_skill_activity
+    ON task_event_stream(
+        json_extract(event_json, '$.payload.skill'),
+        task_id,
+        created_at_ms
+    )
+    WHERE json_extract(event_json, '$.event_kind') = 'tool_finished';
 CREATE TABLE IF NOT EXISTS task_event_archive (
     task_id                TEXT NOT NULL,
     seq                    INTEGER NOT NULL,
@@ -42,6 +49,13 @@ CREATE TABLE IF NOT EXISTS task_event_archive (
 );
 CREATE INDEX IF NOT EXISTS idx_task_event_archive_task_seq
     ON task_event_archive(task_id, seq);
+CREATE INDEX IF NOT EXISTS idx_task_event_archive_skill_activity
+    ON task_event_archive(
+        json_extract(event_json, '$.payload.skill'),
+        task_id,
+        created_at_ms
+    )
+    WHERE json_extract(event_json, '$.event_kind') = 'tool_finished';
 CREATE TABLE IF NOT EXISTS task_event_snapshots (
     task_id            TEXT NOT NULL,
     snapshot_seq       INTEGER NOT NULL,
