@@ -107,8 +107,10 @@ test("platform access checks classify machine challenge surfaces without page-la
       "xiaohongshu",
       "https://www.xiaohongshu.com/website-login/error?error_code=300012",
     ),
-    "challenge_required",
+    "network_access_restricted",
   );
+  assert.equal(platformAccessError("xiaohongshu",
+    "https://www.xiaohongshu.com/website-login/error?error_code=999999"), "challenge_required");
   assert.equal(
     platformAccessError("douyin", "https://www.douyin.com/", [
       "https://rmc.bytedance.com/verifycenter/captcha/v2?scene_level=p2",
@@ -122,6 +124,17 @@ test("platform access checks classify machine challenge surfaces without page-la
     null,
   );
   assert.equal(platformAccessError("kuaishou", "https://www.kuaishou.com/brilliant"), null);
+});
+
+test("network restrictions do not wait for a nonexistent manual captcha", async () => {
+  const page = {
+    locator: () => ({ evaluateAll: async () => [] }),
+    url: () => "https://www.xiaohongshu.com/website-login/error?error_code=300012",
+    waitForTimeout: () => { throw new Error("must not wait for manual verification"); },
+  };
+  assert.equal(await accessErrorAfterExplicitVisibleWait(page, "xiaohongshu", {
+    browser_mode: "visible",
+  }), "network_access_restricted");
 });
 
 test("only an explicitly visible run waits for a machine challenge to clear", async () => {

@@ -6,11 +6,16 @@ export function browserStageError(code, stage) {
 }
 
 export async function recordBrowserFailure(page, { root, runId, platform, stage, error }) {
-  const document = await page.evaluate(() => ({
+  const document = await page.evaluate((platform) => ({
     origin: location.origin,
     pathname: location.pathname.slice(0, 256),
     ready_state: document.readyState,
-    recommendation_cards: window.document.querySelectorAll("[data-aweme-id]").length,
+    platform_error_code: platform === "xiaohongshu" && location.pathname === "/website-login/error"
+      ? (/^\d{1,12}$/u.test(new URL(location.href).searchParams.get("error_code") || "")
+        ? new URL(location.href).searchParams.get("error_code") : null) : null,
+    recommendation_cards: window.document.querySelectorAll({
+      douyin: "[data-aweme-id]", xiaohongshu: "section.note-item[data-note-id]", kuaishou: ".video-card",
+    }[platform]).length,
     video_elements: window.document.querySelectorAll("video").length,
     visible_videos: Array.from(window.document.querySelectorAll("video")).filter((node) => {
       const rect = node.getBoundingClientRect();
@@ -20,7 +25,7 @@ export async function recordBrowserFailure(page, { root, runId, platform, stage,
     next_controls: window.document.querySelectorAll('[data-e2e="video-switch-next-arrow"]').length,
     login_inputs: window.document.querySelectorAll('input[type="password"],input[type="tel"]').length,
     iframe_count: window.document.querySelectorAll("iframe").length,
-  })).catch(() => null);
+  }), platform).catch(() => null);
   const diagnostic = {
     schema_version: 1,
     platform,

@@ -1,0 +1,3 @@
+# Independent bounded real-site tests. Preserve captured records and AiAPP previews.
+media_discovery_single_platforms|xiaohongshu_single_batch|optional_skill:media_discovery,provider_mode:live,execution_mode:real,capability:media_discovery.run_once,requires_tool_call:true|单独测试小红书媒体发现：静默采集推荐页2条，保存自带文案、封面或图片、可用的点赞等数据到AiAPP。只执行一批，不要启动持续任务，也不要导出文件。遇到登录或人机验证请明确报告，不能当作采集成功。
+media_discovery_single_platforms|kuaishou_single_batch|optional_skill:media_discovery,provider_mode:live,execution_mode:real,capability:media_discovery.run_once,requires_tool_call:true|单独测试快手媒体发现：静默采集推荐页2条，保存自带文案、封面或图片、可用的点赞等数据到AiAPP。只执行一批，不要启动持续任务，也不要导出文件。遇到登录或人机验证请明确报告，不能当作采集成功。

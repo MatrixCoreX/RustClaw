@@ -50,6 +50,11 @@ rests for a bounded random period, and continues until disabled or cancelled.
 It does not create or depend on a schedule job. A stop request calls `disable`;
 the worker observes the persisted control state and exits after the current
 complete post is committed.
+Each enabled platform receives its own bounded batch and retry deadline. The
+worker visits due platforms sequentially; one platform filling its quota or
+waiting for access does not consume another platform's quota or cooldown.
+Only one browser batch runs at a time. Per-platform counters and retry state
+are available in `background_worker.platform_outcomes`.
 
 Only one background worker and one collection batch may own their respective
 skill leases at a time. A second start or
@@ -110,6 +115,23 @@ does not enable these periodic notices.
   the user requests exported files; saving content already makes it available
   in AiAPP. An async job must be polled through its returned runtime handle,
   not started again with altered pacing or other arguments.
+- Report saved fields from `run.capture_summary`: `records_saved`,
+  `captions_saved`, `covers_saved`, and the exact `engagement_metrics` names.
+  Missing metrics are unavailable, not zero and not collected. Never claim
+  comments, shares, favorites, or views when only likes were recorded. Home-feed
+  cards expose only their rendered caption and media; do not claim unseen
+  detail-page text or a complete multi-image post from a card-only capture.
+  `exports.storage=local_persistent_csv` describes persistent local result
+  files; `delivery_requested=false` means no downloadable artifact was sent,
+  not that the CSV files are absent or only in memory.
+- `waiting_for_network_access` / `network_access_restricted` means the
+  platform rejected the current network. For Xiaohongshu the observed machine
+  error code `300012` reports IP risk. Do not claim a slider or missing login
+  caused this result, and do not start another batch to verify the restriction.
+  A blocked receipt with zero saved records is not successful collection even
+  when the control invocation itself returned `status=ok`. Silent mode stays
+  silent; no login window is opened for a network restriction. Continuous
+  workers back off from 30 minutes up to 6 hours for that platform.
 - `disable` also requests a graceful drain of a matching active batch. Report
   the returned `lifecycle_state`, `drain_run_id`, and `stop_mode` rather than
   claiming an immediate process termination.
@@ -271,7 +293,7 @@ remote URLs.
 
 Errors use `extra.{schema_version,source_skill,status,error_code,message_key,retryable}`.
 Stable examples include `display_unavailable`, `browser_missing`,
-`login_required`, `challenge_required`, `rate_limited`, `selector_drift`,
+`login_required`, `challenge_required`, `network_access_restricted`, `rate_limited`, `selector_drift`,
 `no_items_collected`,
 `platform_unsupported`, `source_scope_empty`, `run_already_active`,
 `collection_already_enabled`, and `storage_lock_timeout`.
