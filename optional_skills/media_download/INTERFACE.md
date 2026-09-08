@@ -7,7 +7,16 @@
 - Provide the local video/audio transcription fallback, OCR local images, and prepare local video for X. Configured remote STT is attempted first; this skill's Whisper/FunASR path is used when the configured STT target is local or the remote attempt fails. For a structured `zh-CN`, `zh-SG`, or `zh-Hans` target, both local ASR engines deterministically normalize traditional Chinese characters to simplified Chinese with the package-locked OpenCC dependency before model review; explicit traditional-Chinese and non-Chinese targets are preserved. Local image OCR runs Tesseract first and then uses the skill's granted internal LLM gateway for layout and typo review; unavailable review falls back to raw OCR text.
 - Write user-deliverable files to the runtime-provided task artifact directory. For Douyin/Xiaohongshu profile collection, the host also provides this skill's private storage for resumable, content-addressed checkpoints; the skill never reads the runtime database or another skill's storage.
 - Never read system-browser cookies. The skill supports public content only and does not bypass DRM, private-content access, paywalls, or platform authorization.
+- Provide an optional host-rendered AiAPP. The app reads the runtime task ledger through the generic `skill_task_activity_v1` contract and shows only tasks that actually executed `media_download`, whether submitted through Agent UI or an external communication channel. It includes source links, final processed text, failures, and authenticated task artifacts. It does not include `media_discovery` collection records, duplicate task history in skill storage, expose channel credentials or external identities, or alter skill execution.
 - This document teaches usage only. Host admission and policy grants remain authoritative.
+
+## AiAPP Contract
+
+- Renderer: `task_activity_v1`; data contract: `skill_task_activity_v1`; task channel scope: `all`.
+- The host selects tasks only from structured `tool_finished` events whose `payload.skill` is `media_download`; it never identifies media tasks by matching user or assistant prose.
+- The response projects only task ID, channel kind, terminal/running status, canonical action references, bounded original input, bounded final result/error text, validated public source URLs, timestamps, and task-scoped artifact URLs.
+- Task payload credentials, external channel identities, teaching traces, internal journal data, local artifact paths, and unreviewed result fields are excluded.
+- The endpoint is admin-only, cursor-paginated, searchable, and filterable by channel and task status. Current and archived structured task events are both eligible, so installing the AiAPP can display existing retained media-task history.
 
 ## Progress Contract
 

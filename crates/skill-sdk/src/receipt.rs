@@ -452,6 +452,16 @@ impl InstallReceiptStore {
         self.verify_pointer_install(skill_name, &pointer)
     }
 
+    /// Verify the active pointer, receipt, and manifest without hashing package artifacts.
+    ///
+    /// This is only for read-only control-plane metadata. It does not establish execution
+    /// authority; callers that execute or serve package artifacts must use
+    /// `verified_current_install`.
+    pub fn verified_current_metadata(&self, skill_name: &str) -> SkillSdkResult<VerifiedInstall> {
+        let pointer = self.current_pointer(skill_name)?;
+        self.verify_pointer_install_metadata(skill_name, &pointer)
+    }
+
     pub fn rollback(&self, skill_name: &str) -> SkillSdkResult<CurrentInstallPointer> {
         let skill_root = self.skill_root(skill_name)?;
         let current_path = self.active_install_path(skill_name)?;
@@ -688,6 +698,29 @@ impl InstallReceiptStore {
         skill_name: &str,
         pointer: &CurrentInstallPointer,
     ) -> SkillSdkResult<VerifiedInstall> {
+        let verified = self.verify_pointer_install_metadata(skill_name, pointer)?;
+        for artifact in &verified.receipt.artifacts {
+            let path = fs::canonicalize(verified.install_dir.join(&artifact.path))?;
+            let metadata = fs::metadata(&path)?;
+            if !path.starts_with(&verified.install_dir)
+                || !metadata.is_file()
+                || metadata.len() != artifact.size_bytes
+                || digest_file(&path)? != artifact.sha256
+            {
+                return Err(SkillSdkError::new(
+                    "rollback_artifact_mismatch",
+                    format!("path={}", artifact.path),
+                ));
+            }
+        }
+        Ok(verified)
+    }
+
+    fn verify_pointer_install_metadata(
+        &self,
+        skill_name: &str,
+        pointer: &CurrentInstallPointer,
+    ) -> SkillSdkResult<VerifiedInstall> {
         let versions_root = self.skill_root(skill_name)?.join("versions");
         let canonical_versions = fs::canonicalize(&versions_root)?;
         let install_root = fs::canonicalize(versions_root.join(&pointer.install_dir))?;
@@ -708,20 +741,6 @@ impl InstallReceiptStore {
         }
         let manifest = PackageManifest::load(&install_root.join("skill.toml"))?;
         receipt.verifies_manifest(&manifest)?;
-        for artifact in &receipt.artifacts {
-            let path = fs::canonicalize(install_root.join(&artifact.path))?;
-            let metadata = fs::metadata(&path)?;
-            if !path.starts_with(&install_root)
-                || !metadata.is_file()
-                || metadata.len() != artifact.size_bytes
-                || digest_file(&path)? != artifact.sha256
-            {
-                return Err(SkillSdkError::new(
-                    "rollback_artifact_mismatch",
-                    format!("path={}", artifact.path),
-                ));
-            }
-        }
         Ok(VerifiedInstall {
             install_dir: install_root,
             manifest,

@@ -142,6 +142,8 @@ pub struct AippSpec {
     pub entrypoint: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bridge_capabilities: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_channel_scope: Option<String>,
 }
 
 /// Host-owned installation prerequisites. Package authors may declare what is
@@ -350,6 +352,7 @@ impl AippSpec {
                 if self.asset_root.is_some()
                     || self.entrypoint.is_some()
                     || !self.bridge_capabilities.is_empty()
+                    || self.task_channel_scope.is_some()
                 {
                     return Err(SkillSdkError::new(
                         "manifest_aipp_host_renderer_fields_invalid",
@@ -357,7 +360,33 @@ impl AippSpec {
                     ));
                 }
             }
+            ("task_activity_v1", "skill_task_activity_v1") => {
+                if self.asset_root.is_some()
+                    || self.entrypoint.is_some()
+                    || !self.bridge_capabilities.is_empty()
+                {
+                    return Err(SkillSdkError::new(
+                        "manifest_aipp_host_renderer_fields_invalid",
+                        "host renderer must not declare sandbox bundle fields",
+                    ));
+                }
+                if !matches!(
+                    self.task_channel_scope.as_deref(),
+                    None | Some("all" | "communication")
+                ) {
+                    return Err(SkillSdkError::new(
+                        "manifest_aipp_task_channel_scope_invalid",
+                        "task activity renderer accepts all or communication channel scope",
+                    ));
+                }
+            }
             ("sandbox_bundle_v1", "capability_bridge_v1") => {
+                if self.task_channel_scope.is_some() {
+                    return Err(SkillSdkError::new(
+                        "manifest_aipp_task_channel_scope_invalid",
+                        "sandbox bundle must not declare a task channel scope",
+                    ));
+                }
                 let asset_root = self.asset_root.as_deref().ok_or_else(|| {
                     SkillSdkError::new("manifest_aipp_asset_root_missing", "field=aipp.asset_root")
                 })?;

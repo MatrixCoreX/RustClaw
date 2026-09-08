@@ -6,10 +6,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   AippCatalogCard,
   AippMediaItemCard,
+  AippTaskActivityCard,
   localizedAippCopy,
   readSelectedAipp,
 } from "../components/AippPage";
-import type { AippCatalogItem, AippMediaItem } from "../types/api";
+import type { AippCatalogItem, AippMediaItem, AippTaskActivityItem } from "../types/api";
 
 const t = (zh: string, _en: string) => zh;
 
@@ -67,6 +68,7 @@ test("renders an installed AiPP as an application launcher card", () => {
     installed: true,
     entrypoint: null,
     bridge_capabilities: [],
+    task_channel_scope: null,
   };
   const markup = renderToStaticMarkup(
     <AippCatalogCard app={app} lang="zh" onOpen={() => undefined} onInstall={() => undefined} />,
@@ -89,6 +91,7 @@ test("offers Ai APP reinstallation without changing its skill", () => {
     installed: false,
     entrypoint: "aipp/index.html",
     bridge_capabilities: [],
+    task_channel_scope: null,
   };
   const markup = renderToStaticMarkup(
     <AippCatalogCard app={app} lang="zh" onOpen={() => undefined} onInstall={() => undefined} />,
@@ -226,4 +229,58 @@ test("renders a video cover record without a visual-text section", () => {
   assert.match(markup, /帖子文案/);
   assert.match(markup, /Author caption/);
   assert.doesNotMatch(markup, /画面文字/);
+});
+
+test("renders cross-channel media task input, processed content, links, and safe artifacts", () => {
+  const item: AippTaskActivityItem = {
+    schema_version: 1,
+    sequence: 9,
+    task_id: "12345678-activity-task",
+    channel: "wechat",
+    status: "succeeded",
+    actions: ["media_download.download", "media_download.transcribe"],
+    input_text: "下载并转写 https://media.example.test/post/1",
+    result_text: "整理后的完整转写内容。",
+    error_text: null,
+    source_urls: ["https://media.example.test/post/1"],
+    artifacts: [{
+      schema_version: 1,
+      id: "artifact-1",
+      filename: "transcript.txt",
+      kind: "file",
+      mime_type: "text/plain",
+      size_bytes: 2048,
+      download_url: "/v1/tasks/12345678-activity-task/artifacts/artifact-1/content",
+      preview_url: null,
+    }],
+    created_at: "1788846460",
+    updated_at: "1788846461",
+    event_at_ms: 1788846461000,
+  };
+  const markup = renderToStaticMarkup(
+    <AippTaskActivityCard
+      item={item}
+      apiFetch={async () => new Response()}
+      t={t}
+      lang="zh"
+    />,
+  );
+  assert.match(markup, /微信/);
+  assert.match(markup, /原始请求/);
+  assert.match(markup, /处理结果/);
+  assert.match(markup, /整理后的完整转写内容/);
+  assert.match(markup, /媒体链接 1/);
+  assert.match(markup, /transcript\.txt/);
+  assert.match(markup, /2\.0 KB/);
+  assert.match(markup, />download</);
+  assert.match(markup, />transcribe</);
+});
+
+test("supports the generic task activity AiAPP renderer without skill-specific core UI branches", () => {
+  const source = readFileSync(new URL("../components/AippPage.tsx", import.meta.url), "utf8");
+  assert.match(source, /selectedApp\.renderer === "task_activity_v1"/);
+  assert.match(source, /params\.set\("channel", activityChannel\)/);
+  assert.match(source, /params\.set\("status", activityStatus\)/);
+  assert.match(source, /搜索原始请求或处理结果/);
+  assert.doesNotMatch(source, /selectedSkill === "media_download"/);
 });

@@ -15,7 +15,7 @@ use super::{
 use crate::repo;
 
 #[path = "child_task_execution_policy.rs"]
-mod child_task_execution_policy;
+pub(super) mod child_task_execution_policy;
 #[path = "skill_execution_auto_sudo.rs"]
 mod skill_execution_auto_sudo;
 #[path = "skill_execution_evidence.rs"]

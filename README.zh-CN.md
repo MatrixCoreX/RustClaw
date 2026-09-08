@@ -457,6 +457,8 @@ GitHub README 不支持真正的页内分页。详细流程图按顺序维护为
 11. [任务产物交付](docs/architecture/11-task-artifact-delivery.zh-CN.md)
 12. [浏览器媒体发现](docs/architecture/12-media-discovery.zh-CN.md)
 13. [NNI 能力与心跳控制](docs/architecture/13-nni-capability.zh-CN.md)
+14. [AiPP 技能配套界面](docs/architecture/14-aipp-skill-companions.zh-CN.md)
+15. [AiAPP 开发手册](docs/architecture/15-aipp-development-guide.zh-CN.md)
 
 可从[架构索引](docs/architecture/README.md)选择语言并使用上一页/下一页导航。
 完整的[文档索引](docs/README.md)提供全部工程文档的英文与简体中文入口。

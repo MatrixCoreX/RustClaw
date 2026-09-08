@@ -2015,8 +2015,8 @@ export type ChannelName = "telegram" | "whatsapp" | "ui" | "wechat" | "feishu" |
 export interface AippCatalogItem {
   skill_name: string;
   package_version: string;
-  renderer: "collection_feed_v1" | "sandbox_bundle_v1";
-  data_contract: "media_collection_v1" | "capability_bridge_v1";
+  renderer: "collection_feed_v1" | "task_activity_v1" | "sandbox_bundle_v1";
+  data_contract: "media_collection_v1" | "skill_task_activity_v1" | "capability_bridge_v1";
   icon: string;
   default_locale: string;
   titles: Record<string, string>;
@@ -2024,6 +2024,7 @@ export interface AippCatalogItem {
   installed: boolean;
   entrypoint: string | null;
   bridge_capabilities: string[];
+  task_channel_scope: "all" | "communication" | null;
 }
 
 export interface AippCatalogResponse {
@@ -2075,6 +2076,43 @@ export interface AippMediaPageResponse {
     counts: Record<string, number> | null;
   } | null;
   updated_at: string | null;
+}
+
+export interface AippTaskActivityArtifact {
+  schema_version: number;
+  id: string;
+  filename: string;
+  kind: string;
+  mime_type: string;
+  size_bytes: number | null;
+  download_url: string;
+  preview_url: string | null;
+}
+
+export interface AippTaskActivityItem {
+  schema_version: number;
+  sequence: number;
+  task_id: string;
+  channel: ChannelName;
+  status: "queued" | "running" | "succeeded" | "failed" | "canceled" | "timeout" | string;
+  actions: string[];
+  input_text: string;
+  result_text: string;
+  error_text: string | null;
+  source_urls: string[];
+  artifacts: AippTaskActivityArtifact[];
+  created_at: string;
+  updated_at: string;
+  event_at_ms: number;
+}
+
+export interface AippTaskActivityPageResponse {
+  schema_version: number;
+  page_item_count: number;
+  items: AippTaskActivityItem[];
+  sort_order: "newest" | "oldest";
+  next_cursor_sequence: number | null;
+  updated_at_ms: number | null;
 }
 
 export type ConsolePage = "dashboard" | "chat" | "ai_learning" | "nni" | "nni_apr" | "bancor" | "assets" | "services" | "channels" | "models" | "skills" | "aipps" | "skill_store" | "memory" | "logs" | "tasks";

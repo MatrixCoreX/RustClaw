@@ -16,6 +16,212 @@ fn write_record(root: &Path, sequence: u64, value: Value) {
     .expect("write record");
 }
 
+fn task_activity_db() -> rusqlite::Connection {
+    let db = rusqlite::Connection::open_in_memory().expect("activity database");
+    db.execute_batch(
+        r#"
+        CREATE TABLE tasks (
+            task_id TEXT PRIMARY KEY,
+            channel TEXT NOT NULL,
+            status TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            result_json TEXT,
+            error_text TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE task_event_stream (
+            task_id TEXT NOT NULL,
+            event_json TEXT NOT NULL,
+            created_at_ms INTEGER NOT NULL
+        );
+        CREATE TABLE task_event_archive (
+            task_id TEXT NOT NULL,
+            event_json TEXT NOT NULL,
+            created_at_ms INTEGER NOT NULL
+        );
+        "#,
+    )
+    .expect("activity schema");
+    db
+}
+
+fn insert_task_activity(
+    db: &rusqlite::Connection,
+    task_id: &str,
+    channel: &str,
+    status: &str,
+    skill: &str,
+    action_ref: &str,
+    archived: bool,
+) {
+    let payload = json!({
+        "text": format!("process https://media.example.test/{task_id}?v=1"),
+        "context_token": "must-not-leak",
+    });
+    let result = json!({
+        "text": format!("processed {task_id}"),
+        "task_journal": { "secret": "must-not-leak" },
+        "artifacts": [{
+            "id": "artifact-1",
+            "filename": "result.txt",
+            "kind": "file",
+            "mime_type": "text/plain",
+            "size_bytes": 12,
+            "download_url": format!("/v1/tasks/{task_id}/artifacts/artifact-1/content"),
+            "local_path": "/private/result.txt",
+        }],
+    });
+    db.execute(
+        "INSERT INTO tasks(task_id, channel, status, payload_json, result_json, error_text, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, NULL, '100', '101')",
+        rusqlite::params![task_id, channel, status, payload.to_string(), result.to_string()],
+    )
+    .expect("task row");
+    let event = json!({
+        "event_kind": "tool_finished",
+        "payload": {
+            "skill": skill,
+            "requested_action_ref": action_ref,
+        }
+    });
+    let table = if archived {
+        "task_event_archive"
+    } else {
+        "task_event_stream"
+    };
+    db.execute(
+        &format!("INSERT INTO {table}(task_id, event_json, created_at_ms) VALUES (?1, ?2, 1000)"),
+        rusqlite::params![task_id, event.to_string()],
+    )
+    .expect("activity event");
+}
+
+#[test]
+fn task_activity_page_projects_current_and_archived_skill_tasks_without_secrets() {
+    let db = task_activity_db();
+    insert_task_activity(
+        &db,
+        "task-current",
+        "wechat",
+        "succeeded",
+        "media_download",
+        "media_download.download",
+        false,
+    );
+    insert_task_activity(
+        &db,
+        "task-archived",
+        "ui",
+        "succeeded",
+        "media_download",
+        "media_download.transcribe",
+        true,
+    );
+    insert_task_activity(
+        &db,
+        "task-other",
+        "telegram",
+        "succeeded",
+        "another_skill",
+        "another_skill.run",
+        false,
+    );
+
+    let page =
+        read_aipp_task_activity_page(&db, "media_download", "all", &AippMediaQuery::default())
+            .expect("activity page");
+    let items = page["items"].as_array().expect("items");
+    assert_eq!(items.len(), 2);
+    assert_eq!(page["page_item_count"], 2);
+    assert_eq!(items[0]["task_id"], "task-archived");
+    assert_eq!(items[0]["channel"], "ui");
+    assert_eq!(items[1]["channel"], "wechat");
+    assert_eq!(
+        items[1]["source_urls"][0],
+        "https://media.example.test/task-current?v=1"
+    );
+    assert_eq!(items[1]["actions"][0], "media_download.download");
+    assert_eq!(
+        items[1]["artifacts"][0]["download_url"],
+        "/v1/tasks/task-current/artifacts/artifact-1/content"
+    );
+    let external_only = read_aipp_task_activity_page(
+        &db,
+        "media_download",
+        "communication",
+        &AippMediaQuery::default(),
+    )
+    .expect("communication-only activity page");
+    assert_eq!(external_only["page_item_count"], 1);
+    assert_eq!(external_only["items"][0]["channel"], "wechat");
+    let encoded = serde_json::to_string(&page).expect("page JSON");
+    assert!(!encoded.contains("context_token"));
+    assert!(!encoded.contains("must-not-leak"));
+    assert!(!encoded.contains("local_path"));
+    assert!(!encoded.contains("/private/result.txt"));
+}
+
+#[test]
+fn task_activity_page_filters_channels_search_and_uses_stable_cursors() {
+    let db = task_activity_db();
+    for (task_id, channel) in [
+        ("task-one", "wechat"),
+        ("task-two", "ui"),
+        ("task-three", "wechat"),
+    ] {
+        insert_task_activity(
+            &db,
+            task_id,
+            channel,
+            "succeeded",
+            "media_download",
+            "media_download.download",
+            false,
+        );
+    }
+    let first = read_aipp_task_activity_page(
+        &db,
+        "media_download",
+        "communication",
+        &AippMediaQuery {
+            limit: Some(1),
+            channel: Some("wechat".to_string()),
+            query: Some("PROCESSED".to_string()),
+            ..AippMediaQuery::default()
+        },
+    )
+    .expect("first activity page");
+    assert_eq!(first["page_item_count"], 1);
+    assert_eq!(first["items"][0]["task_id"], "task-three");
+    let cursor = first["next_cursor_sequence"].as_u64().expect("cursor");
+    let second = read_aipp_task_activity_page(
+        &db,
+        "media_download",
+        "communication",
+        &AippMediaQuery {
+            limit: Some(1),
+            channel: Some("wechat".to_string()),
+            cursor_sequence: Some(cursor),
+            ..AippMediaQuery::default()
+        },
+    )
+    .expect("second activity page");
+    assert_eq!(second["items"][0]["task_id"], "task-one");
+
+    let invalid = read_aipp_task_activity_page(
+        &db,
+        "media_download",
+        "communication",
+        &AippMediaQuery {
+            channel: Some("unknown".to_string()),
+            ..AippMediaQuery::default()
+        },
+    )
+    .expect_err("invalid channel");
+    assert_eq!(invalid, "aipp_task_activity_filter_invalid");
+}
+
 #[test]
 fn media_page_is_newest_first_filtered_and_field_bounded() {
     let root = fixture_root();
@@ -124,7 +330,10 @@ fn media_page_bounds_skill_owned_copy_and_ignores_oversized_records() {
     let items = page["items"].as_array().expect("items");
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["title"].as_str().map(str::len), Some(512));
-    assert_eq!(items[0]["platform_text"].as_str().map(str::len), Some(32_768));
+    assert_eq!(
+        items[0]["platform_text"].as_str().map(str::len),
+        Some(32_768)
+    );
     assert!(items[0].get("recognized_text").is_none());
     fs::remove_dir_all(root).expect("remove fixture");
 }

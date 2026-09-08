@@ -125,6 +125,46 @@ fn aipp_manifest_accepts_reviewed_host_and_sandboxed_bundle_contracts() {
     assert_eq!(aipp.data_contract, "media_collection_v1");
     assert_eq!(aipp.titles.get("zh").map(String::as_str), Some("媒体发现"));
 
+    let activity = include_str!("../../../optional_skills/media_discovery/skill.toml")
+        .replace(
+            "renderer = \"collection_feed_v1\"",
+            "renderer = \"task_activity_v1\"",
+        )
+        .replace(
+            "data_contract = \"media_collection_v1\"",
+            "data_contract = \"skill_task_activity_v1\"",
+        )
+        .replace(
+            "icon = \"gallery_vertical_end\"",
+            "task_channel_scope = \"communication\"\nicon = \"gallery_vertical_end\"",
+        );
+    let activity_manifest =
+        PackageManifest::from_toml_str(&activity).expect("task activity Ai APP manifest");
+    let activity_aipp = activity_manifest.aipp.expect("task activity declaration");
+    assert_eq!(activity_aipp.renderer, "task_activity_v1");
+    assert_eq!(activity_aipp.data_contract, "skill_task_activity_v1");
+    assert_eq!(
+        activity_aipp.task_channel_scope.as_deref(),
+        Some("communication")
+    );
+
+    let implicit_all = include_str!("../../../optional_skills/media_discovery/skill.toml")
+        .replace(
+            "renderer = \"collection_feed_v1\"",
+            "renderer = \"task_activity_v1\"",
+        )
+        .replace(
+            "data_contract = \"media_collection_v1\"",
+            "data_contract = \"skill_task_activity_v1\"",
+        );
+    let implicit_all =
+        PackageManifest::from_toml_str(&implicit_all).expect("missing scope defaults to all");
+    assert!(implicit_all
+        .aipp
+        .expect("task activity declaration")
+        .task_channel_scope
+        .is_none());
+
     let unsupported = include_str!("../../../optional_skills/media_discovery/skill.toml").replace(
         "renderer = \"collection_feed_v1\"",
         "renderer = \"remote_script\"",
@@ -709,6 +749,17 @@ fn receipt_activation_and_resolution_verify_every_digest() {
         "launch_artifact_metadata_mismatch"
     );
     fs::write(&launch.program, b"tampered-bytes").expect("tamper with unchanged size");
+    let metadata = store
+        .verified_current_metadata("sample_weather")
+        .expect("control-plane metadata does not hash package artifacts");
+    assert_eq!(metadata.receipt.manifest_digest, receipt.manifest_digest);
+    assert_eq!(
+        store
+            .verified_current_install("sample_weather")
+            .expect_err("full install verification rejects tampered artifacts")
+            .code,
+        "rollback_artifact_mismatch"
+    );
     SkillRuntimeResolver::new(store.root())
         .inspect_current("sample_weather")
         .expect("control-plane inspection intentionally skips full artifact hashing");

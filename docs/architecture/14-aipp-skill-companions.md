@@ -5,13 +5,14 @@
 
 <!-- ai-learning-navigation:start -->
 Previous: [NNI capability and heartbeat control](13-nni-capability.md) |
+Next: [AiAPP development guide](15-aipp-development-guide.md) |
 [Architecture index](README.md)
 <!-- ai-learning-navigation:end -->
 
 AiPP gives an enabled skill a task-oriented visual companion for results that are
 too rich or numerous for a chat stream. It does not replace Agent: users still ask
-Agent to start, stop, or change work, while AiPP presents the persisted results.
-`media_discovery` is the first implementation.
+Agent to start, stop, or change work, while AiPP presents retained results.
+`media_discovery` and `media_download` are the current host-rendered implementations.
 
 ## Current User Flow
 
@@ -22,9 +23,12 @@ launcher while its skill stays enabled. The first view arranges those packages a
 user selects one launcher before its task-oriented view opens. The browser
 persists that selection in the neutral product storage namespace, so a refresh
 returns to the same application. Media Discovery presents current collection
-state, image and video records, author-provided post captions, separately
-recognized visual text, capture-time platform engagement counters, source links,
-filters, and stable cursor pagination. Video
+state, image and video records, author-provided post captions, capture-time
+platform engagement counters, source links, filters, and stable cursor pagination.
+Media Download presents only retained tasks that actually executed the media-download
+skill, whether they entered through Agent UI or an external communication channel, and shows their
+original requests and public source links, final model-processed text, failures,
+and authenticated output artifacts. Video
 covers are best-effort platform adapters: the collector uses an unobscured
 rendered video frame or a platform-specific rendered poster and never
 substitutes a page or login screenshot. Available covers are served from the
@@ -53,6 +57,7 @@ flowchart TD
     CB[Allowlisted capability bridge]
     S[SkillStorageResolver]
     D[Skill-private media ledger]
+    TL[Runtime task and event ledgers]
     F[Bounded field projection and cursor filter]
     V[Authenticated preview endpoint]
     T[Independent app tombstone]
@@ -61,6 +66,7 @@ flowchart TD
     G -->|enabled exact binding| C
     U --> C --> H
     H --> HR --> S --> D --> F --> HR
+    H --> HR --> TL --> F
     D --> V --> HR
     H --> SB --> CB --> G
     C -->|uninstall app only| T
@@ -79,8 +85,13 @@ package has passed the same manifest, receipt, and generation checks.
 
 ## Security and Extension Boundary
 
-AiPP has two reviewed delivery modes. `collection_feed_v1` is a host renderer for
-the current media contract. `sandbox_bundle_v1` is the generic extension boundary:
+AiPP has two host-rendered read contracts and one sandboxed extension mode.
+`collection_feed_v1` reads a bounded skill-private collection ledger.
+`task_activity_v1` reads tasks selected only by structured skill execution events,
+then projects bounded input/result text, canonical action references, validated
+public links, and task-scoped artifact URLs. A manifest declares whether this view includes all task
+channels or external communication channels only. It never includes another skill's private records.
+`sandbox_bundle_v1` is the generic extension boundary:
 the package carries static HTML, CSS, JavaScript, JSON, image, and font assets
 under one declared root. The installer copies every bundle file into the immutable
 installation and adds its size and digest to the receipt artifact set. The runtime
@@ -97,9 +108,26 @@ policy, confirmation, task journal, and artifact controls therefore remain the
 same as Agent. A new sandboxed Ai APP does not require a skill-specific `clawd`
 route or a new main-UI component.
 
-The media contract exposes an allowlist of presentation fields. It never returns
-browser profiles, cookies, credentials, raw diagnostics, arbitrary record fields,
-or unrestricted filesystem paths. Preview path resolution canonicalizes the
+## Development Boundary
+
+An ordinary Ai APP integration changes only its skill package. It declares `[aipp]` in
+`skill.toml`, uses an existing reviewed host data contract, or ships an independently built static
+application under the package's `aipp/` directory. The main UI build never imports or compiles a
+skill's frontend source. Install, update, and removal mutate only the immutable package/receipt and
+the data-root Ai APP overlay state; they do not rebuild or restart `clawd`, rebuild the main UI, or
+change the skill's own enable/configuration/data state.
+
+Host code may implement versioned, reusable data/capability contracts, but it must not branch on a
+concrete skill name. Introducing a genuinely new host contract is a runtime platform change with
+schema and security review, not part of ordinary Ai APP installation. Run
+`python3 scripts/check_aipp_decoupling.py --self-test && python3 scripts/check_aipp_decoupling.py`
+after changing Ai APP manifests, host contracts, package assets, or the Ai APP catalog.
+
+The host contracts expose allowlists of presentation fields. They never return
+browser profiles, cookies, credentials, external channel identities, teaching
+traces, task journals, raw diagnostics, arbitrary record fields, or unrestricted
+filesystem paths. Task activity never identifies skills by matching user or model
+prose; current and archived `tool_finished` records are the authority. Preview path resolution canonicalizes the
 requested file, requires it to remain under the skill's `exports` directory,
 allows only bounded image types and sizes, and sends private no-sniff responses.
 The Media Discovery collector keeps a private persistent browser profile per
@@ -130,6 +158,22 @@ icon = "gallery_vertical_end"
 default_locale = "en"
 titles = { en = "Media Discovery", zh = "媒体发现" }
 descriptions = { en = "Review collected media.", zh = "查看已采集内容。" }
+```
+
+A skill whose retained task results already contain the required presentation
+data can reuse the task-activity contract without adding a skill-specific host
+route or private data copy:
+
+```toml
+[aipp]
+schema_version = 1
+renderer = "task_activity_v1"
+data_contract = "skill_task_activity_v1"
+task_channel_scope = "all"
+icon = "download"
+default_locale = "en"
+titles = { en = "Media Download", zh = "媒体下载" }
+descriptions = { en = "Review media processing history.", zh = "查看媒体处理记录。" }
 ```
 
 A sandboxed application uses the same section with the generic contract:
@@ -165,10 +209,11 @@ accepts at most four concurrent requests per frame and bounds serialized args.
 Package code renders its localized presentation from structured results; it must
 not parse model prose or reproduce the console authentication flow.
 
-To add an application, place its static files under `<skill>/aipp`, declare the
-generic sandbox contract and exact bridge capabilities, then install the skill
-through the existing admission path. Do not add its name, routes, fields, or
-renderer code to `clawd` or the main UI.
+To add an application, reuse a reviewed host contract when its existing schema
+fits. Otherwise place static files under `<skill>/aipp`, declare the generic
+sandbox contract and exact bridge capabilities, then install the skill through
+the existing admission path. Do not add its name, routes, fields, or renderer
+code to `clawd` or the main UI.
 
 The manifest is part of the immutable package digest and receipt. Runtime-imported
 skills therefore install and update their Ai APP through the same admission
