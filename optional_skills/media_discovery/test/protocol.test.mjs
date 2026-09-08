@@ -4,7 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { handleRequest, normalizedConfig, requestedPlatforms } from "../src/main.mjs";
+import {
+  backgroundRestDelayMs,
+  handleRequest,
+  normalizedConfig,
+  requestedPlatforms,
+} from "../src/main.mjs";
 
 async function requestContext(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "media-discovery-protocol-"));
@@ -22,7 +27,11 @@ test("schema normalization accepts singular platform without natural-language pa
   assert.equal(normalizedConfig({}).source_mode, "home_feed");
   assert.equal(normalizedConfig({}).max_images_per_post, 100);
   assert.equal(normalizedConfig({}).browser_mode, "silent");
+  assert.equal(normalizedConfig({}).rest_min_seconds, 30);
+  assert.equal(normalizedConfig({}).rest_max_seconds, 120);
+  assert.equal(backgroundRestDelayMs({ douyin: { rest_min_seconds: 10, rest_max_seconds: 20 } }, () => 0.5), 15_000);
   assert.equal(normalizedConfig({ browser_mode: "visible" }).browser_mode, "visible");
+  assert.throws(() => normalizedConfig({ rest_min_seconds: 30, rest_max_seconds: 20 }));
   assert.throws(() => normalizedConfig({ browser_mode: "hidden" }));
   assert.throws(() => requestedPlatforms({ platform: "unknown" }));
 });
@@ -84,6 +93,8 @@ test("the initial enabled run retries a silent challenge in visible mode", async
     args: { action: "run_enabled_once" },
     context,
   }, {
+    maxContinuousCycles: 1,
+    sleep: async () => {},
     collectPlatform: async ({ config, onPage }) => {
       collectionAttempts += 1;
       if (collectionAttempts === 1) throw new Error("challenge_required");
@@ -108,8 +119,8 @@ test("the initial enabled run retries a silent challenge in visible mode", async
   });
 
   assert.equal(result.status, "ok");
-  assert.equal(result.extra.state, "completed_batch");
-  assert.equal(result.extra.run.counts.items, 1);
+  assert.equal(result.extra.state, "stopped");
+  assert.equal(result.extra.background_worker.counts.items, 1);
   assert.equal(collectionAttempts, 2);
   assert.equal(loginSessions, 0);
 });
@@ -128,6 +139,8 @@ test("a visible login barrier keeps an interactive session before the verified r
     args: { action: "run_enabled_once" },
     context,
   }, {
+    maxContinuousCycles: 1,
+    sleep: async () => {},
     collectPlatform: async ({ config, onPage }) => {
       collectionAttempts += 1;
       if (collectionAttempts === 1) throw new Error("challenge_required");
@@ -153,13 +166,13 @@ test("a visible login barrier keeps an interactive session before the verified r
   });
 
   assert.equal(result.status, "ok");
-  assert.equal(result.extra.state, "completed_batch");
-  assert.equal(result.extra.run.counts.items, 1);
+  assert.equal(result.extra.state, "stopped");
+  assert.equal(result.extra.background_worker.counts.items, 1);
   assert.equal(collectionAttempts, 3);
   assert.equal(loginSessions, 1);
 });
 
-test("scheduled retries stay silent when platform access requires login", async (t) => {
+test("one-shot retries stay silent when platform access requires login", async (t) => {
   const context = await requestContext(t);
   await handleRequest({
     args: { action: "enable", platform: "douyin", confirm: true, browser_mode: "silent" },
@@ -168,8 +181,8 @@ test("scheduled retries stay silent when platform access requires login", async 
 
   let loginSessions = 0;
   const result = await handleRequest({
-    request_id: "scheduled-login-required",
-    args: { action: "run_once", platforms: ["douyin"], scheduled_run: true },
+    request_id: "one-shot-login-required",
+    args: { action: "run_once", platforms: ["douyin"] },
     context,
   }, {
     collectPlatform: async () => {
@@ -193,13 +206,10 @@ test("enable, status, disable, and disabled run_once form a durable control loop
     context,
   });
   assert.equal(enabled.status, "ok");
-  assert.equal(enabled.extra.schedule_spec.capability, "schedule.create_structured");
-  assert.equal(enabled.extra.schedule_spec.completion_required, true);
-  assert.equal(enabled.extra.next_capability, "schedule.create_structured");
-  const scheduleIntent = JSON.parse(enabled.extra.schedule_spec.args.intent_json);
-  assert.equal(scheduleIntent.task.payload.skill_name, "media_discovery");
-  assert.deepEqual(scheduleIntent.task.payload.args.platforms, ["douyin"]);
-  assert.equal(scheduleIntent.task.payload.args.scheduled_run, true);
+  assert.equal(enabled.extra.background_start_spec.capability, "media_discovery.run_enabled_once");
+  assert.equal(enabled.extra.background_start_spec.completion_required, true);
+  assert.equal(enabled.extra.next_capability, "media_discovery.run_enabled_once");
+  assert.equal(enabled.extra.schedule_spec, undefined);
 
   const current = await handleRequest({ args: { action: "status" }, context });
   assert.equal(current.extra.platforms.douyin.enabled, true);
@@ -207,31 +217,103 @@ test("enable, status, disable, and disabled run_once form a durable control loop
   const disabled = await handleRequest({ args: { action: "disable", platform: "douyin" }, context });
   assert.equal(disabled.extra.platform_states.douyin.enabled, false);
   assert.equal(disabled.extra.lifecycle_state, "idle");
-  assert.equal(disabled.extra.schedule_cleanup_required, true);
-  assert.equal(disabled.extra.schedule_cleanup_spec.capability, "schedule.delete_matching");
-  assert.deepEqual(disabled.extra.schedule_cleanup_spec.args, {
-    match_task_kind: "run_skill",
-    match_skill_name: "media_discovery",
-    match_task_action: "run_once",
-    match_platforms: ["douyin"],
-  });
+  assert.equal(disabled.extra.schedule_cleanup_required, undefined);
 
   const run = await handleRequest({
-    args: { action: "run_once", platform: "douyin", scheduled_run: true },
+    args: { action: "run_once" },
     context,
   });
   assert.equal(run.status, "ok");
   assert.equal(run.extra.state, "disabled_or_paused");
 
   const enabledBatch = await handleRequest({ args: { action: "run_enabled_once" }, context });
-  assert.equal(enabledBatch.status, "ok");
-  assert.equal(enabledBatch.extra.state, "disabled_or_paused");
+  assert.equal(enabledBatch.status, "error");
+  assert.equal(enabledBatch.extra.error_code, "background_collection_not_enabled");
+});
+
+test("continuous background collection stops gracefully through disable", async (t) => {
+  const context = await requestContext(t);
+  await handleRequest({
+    args: {
+      action: "enable",
+      platform: "douyin",
+      source_mode: "topics",
+      topics: ["market research"],
+      confirm: true,
+    },
+    context,
+  });
+
+  let collectionAttempts = 0;
+  const result = await handleRequest({
+    request_id: "background-graceful-stop",
+    args: { action: "run_enabled_once" },
+    context,
+  }, {
+    sleep: async () => {},
+    collectPlatform: async ({ config, onPage }) => {
+      collectionAttempts += 1;
+      assert.equal(config.source_mode, "topics");
+      assert.deepEqual(config.topics, ["market research"]);
+      await onPage({
+        records: [{
+          kind: "video",
+          dedup_key: "douyin:background-stop:video",
+          platform: "douyin",
+          title: "fixture",
+          video_page_url: "https://www.douyin.com/video/1234567892",
+          discovered_at: "2026-09-08T00:00:00Z",
+        }],
+        temporaryPaths: [],
+      });
+      const disabled = await handleRequest({
+        args: { action: "disable", platform: "douyin" },
+        context,
+      });
+      assert.equal(disabled.extra.lifecycle_state, "draining");
+      return { handled: 1 };
+    },
+  });
+
+  assert.equal(result.status, "ok");
+  assert.equal(result.extra.state, "stopped");
+  assert.equal(result.extra.background_worker.counts.items, 1);
+  assert.equal(collectionAttempts, 1);
+  const current = await handleRequest({ args: { action: "status" }, context });
+  assert.equal(current.extra.platforms.douyin.enabled, false);
+  assert.equal(current.extra.background_worker, null);
+  assert.equal(current.extra.active_run, null);
+});
+
+test("continuous background collection terminates on a non-retryable failure", async (t) => {
+  const context = await requestContext(t);
+  await handleRequest({
+    args: { action: "enable", platform: "douyin", confirm: true },
+    context,
+  });
+
+  const result = await handleRequest({
+    request_id: "background-fatal-error",
+    args: { action: "run_enabled_once" },
+    context,
+  }, {
+    sleep: async () => {},
+    collectPlatform: async () => {
+      throw new Error("source_url_invalid");
+    },
+  });
+
+  assert.equal(result.status, "error");
+  assert.equal(result.extra.error_code, "source_url_invalid");
+  const current = await handleRequest({ args: { action: "status" }, context });
+  assert.equal(current.extra.background_worker, null);
+  assert.equal(current.extra.active_run, null);
 });
 
 test("a second start is rejected while the current run owns the lease and disable drains it", async (t) => {
   const context = await requestContext(t);
   await handleRequest({
-    args: { action: "enable", platform: "douyin", confirm: true, recognition_mode: "metadata_only" },
+    args: { action: "enable", platform: "douyin", confirm: true },
     context,
   });
   const storage = await import("../src/storage.mjs");

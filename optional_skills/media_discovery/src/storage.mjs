@@ -9,11 +9,14 @@ const LOCK_RETRY_MS = 40;
 const LOCK_TIMEOUT_MS = 10_000;
 const STALE_LOCK_MS = 30 * 60 * 1000;
 const ACTIVE_RUN_STALE_MS = 10 * 60 * 1000;
+const BACKGROUND_WORKER_STALE_MS = 2 * 60 * 1000;
+const RETIRED_CONFIG_FIELDS = new Set(["interval_minutes", "recognition_mode"]);
 
 function initialState() {
   return {
     schema_version: STATE_SCHEMA_VERSION,
     platforms: {},
+    background_worker: null,
     active_run: null,
     stop_after_item_run_id: null,
     runs: [],
@@ -87,7 +90,30 @@ async function withLock(root, operation) {
 
 async function readStateUnlocked(root) {
   const state = await readJson(path.join(root, "state.json"), initialState());
-  return state?.schema_version === STATE_SCHEMA_VERSION ? state : initialState();
+  if (state?.schema_version !== STATE_SCHEMA_VERSION) return initialState();
+  if (!Object.hasOwn(state, "background_worker")) state.background_worker = null;
+  for (const platformState of Object.values(state.platforms || {})) {
+    if (platformState?.config) platformState.config = currentConfig(platformState.config);
+  }
+  if (state.active_run?.platform_configs) {
+    state.active_run.platform_configs = currentPlatformConfigs(state.active_run.platform_configs);
+  }
+  for (const run of state.runs || []) {
+    if (run?.platform_configs) run.platform_configs = currentPlatformConfigs(run.platform_configs);
+  }
+  return state;
+}
+
+function currentConfig(config) {
+  return Object.fromEntries(
+    Object.entries(config || {}).filter(([key]) => !RETIRED_CONFIG_FIELDS.has(key)),
+  );
+}
+
+function currentPlatformConfigs(configs) {
+  return Object.fromEntries(
+    Object.entries(configs || {}).map(([platform, config]) => [platform, currentConfig(config)]),
+  );
 }
 
 async function writeStateUnlocked(root, state) {
@@ -104,6 +130,9 @@ export async function readState(root) {
 export async function configurePlatforms(root, platforms, config) {
   return withLock(root, async () => {
     const state = await readStateUnlocked(root);
+    if (backgroundWorkerIsFresh(state.background_worker)) {
+      throw new Error("background_worker_already_active");
+    }
     if (activeRunIsFresh(state.active_run)) throw new Error("run_already_active");
     if (Object.values(state.platforms).some((platform) => platform?.enabled)) {
       throw new Error("collection_already_enabled");
@@ -121,6 +150,67 @@ export async function configurePlatforms(root, platforms, config) {
     }
     await writeStateUnlocked(root, state);
     return state;
+  });
+}
+
+function backgroundWorkerIsFresh(worker) {
+  if (!worker) return false;
+  const heartbeatAt = Date.parse(worker.heartbeat_at || worker.started_at || "");
+  return Number.isFinite(heartbeatAt) && Date.now() - heartbeatAt < BACKGROUND_WORKER_STALE_MS;
+}
+
+export async function beginBackgroundWorker(root) {
+  return withLock(root, async () => {
+    const state = await readStateUnlocked(root);
+    if (backgroundWorkerIsFresh(state.background_worker)) {
+      throw new Error("background_worker_already_active");
+    }
+    const platforms = Object.keys(state.platforms)
+      .filter((platform) => state.platforms[platform]?.enabled);
+    if (platforms.length === 0) throw new Error("background_collection_not_enabled");
+    const worker = {
+      worker_id: `worker_${randomUUID()}`,
+      platforms,
+      started_at: new Date().toISOString(),
+      heartbeat_at: new Date().toISOString(),
+      lifecycle_state: "running",
+      completed_batches: 0,
+      counts: { items: 0, videos: 0, images: 0, duplicates: 0, failures: 0 },
+      last_error_code: null,
+    };
+    state.background_worker = worker;
+    await writeStateUnlocked(root, state);
+    return worker;
+  });
+}
+
+export async function heartbeatBackgroundWorker(root, workerId, update = {}) {
+  return withLock(root, async () => {
+    const state = await readStateUnlocked(root);
+    if (state.background_worker?.worker_id !== workerId) return null;
+    state.background_worker = {
+      ...state.background_worker,
+      ...update,
+      heartbeat_at: new Date().toISOString(),
+    };
+    await writeStateUnlocked(root, state);
+    return state.background_worker;
+  });
+}
+
+export async function finishBackgroundWorker(root, workerId, lifecycleState, update = {}) {
+  return withLock(root, async () => {
+    const state = await readStateUnlocked(root);
+    if (state.background_worker?.worker_id !== workerId) return null;
+    const completed = {
+      ...state.background_worker,
+      ...update,
+      lifecycle_state: lifecycleState,
+      finished_at: new Date().toISOString(),
+    };
+    state.background_worker = null;
+    await writeStateUnlocked(root, state);
+    return completed;
   });
 }
 
@@ -284,6 +374,9 @@ async function directoryBytes(directory) {
 export async function clearCollectedData(root) {
   return withLock(root, async () => {
     const state = await readStateUnlocked(root);
+    if (backgroundWorkerIsFresh(state.background_worker)) {
+      throw new Error("background_worker_already_active");
+    }
     if (activeRunIsFresh(state.active_run)) throw new Error("run_already_active");
     const records = await readRecords(root);
     const removable = ["records", "exports", "tmp", "diagnostics"];

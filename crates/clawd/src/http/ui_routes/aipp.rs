@@ -292,8 +292,6 @@ fn aipp_media_item(record: &Value) -> Option<Value> {
         "search_keyword": bounded_aipp_text(record.get("search_keyword"), 512),
         "title": bounded_aipp_text(record.get("title"), 512),
         "platform_text": bounded_aipp_text(record.get("platform_text"), 32_768),
-        "recognized_text": bounded_aipp_text(record.get("recognized_text"), 32_768),
-        "recognition_source": bounded_aipp_optional_text(record.pointer("/recognition/source"), 64),
         "source_url": source_url,
         "image_url": image_url,
         "preview_available": preview_available,
@@ -380,7 +378,7 @@ fn record_matches_aipp_query(record: &Value, query: &AippMediaQuery) -> bool {
         return false;
     }
     let needle = needle.to_lowercase();
-    ["title", "platform_text", "recognized_text", "search_keyword"]
+    ["title", "platform_text", "search_keyword"]
         .iter()
         .filter_map(|key| record.get(key).and_then(Value::as_str))
         .any(|value| value.to_lowercase().contains(&needle))

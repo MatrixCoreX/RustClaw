@@ -77,7 +77,7 @@ fn claimed_task_with_payload(channel: &str, payload: serde_json::Value) -> Claim
     }
 }
 
-fn insert_test_skill_schedule(
+fn insert_test_collector_schedule(
     state: &AppState,
     job_id: &str,
     task: &ClaimedTask,
@@ -95,7 +95,7 @@ fn insert_test_skill_schedule(
             task.chat_id,
             task.channel,
             json!({
-                "skill_name": "media_discovery",
+                "skill_name": "fixture_collector",
                 "args": {"action": "run_once", "platforms": platforms},
             })
             .to_string(),
@@ -108,8 +108,8 @@ fn insert_test_skill_schedule(
 fn structured_schedule_cleanup_deletes_owned_jobs_and_retains_shared_platform_jobs() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = claimed_task_with_payload("ui", json!({"text": "structured cleanup"}));
-    insert_test_skill_schedule(&state, "job-douyin", &task, &["douyin"]);
-    insert_test_skill_schedule(&state, "job-shared", &task, &["douyin", "xiaohongshu"]);
+    insert_test_collector_schedule(&state, "job-douyin", &task, &["douyin"]);
+    insert_test_collector_schedule(&state, "job-shared", &task, &["douyin", "xiaohongshu"]);
 
     let first: serde_json::Value = serde_json::from_str(
         &delete_matching_skill_schedules(
@@ -117,7 +117,7 @@ fn structured_schedule_cleanup_deletes_owned_jobs_and_retains_shared_platform_jo
             &task,
             &json!({
                 "match_task_kind": "run_skill",
-                "match_skill_name": "media_discovery",
+                "match_skill_name": "fixture_collector",
                 "match_task_action": "run_once",
                 "match_platforms": ["douyin"],
             }),
@@ -134,7 +134,7 @@ fn structured_schedule_cleanup_deletes_owned_jobs_and_retains_shared_platform_jo
             &task,
             &json!({
                 "match_task_kind": "run_skill",
-                "match_skill_name": "media_discovery",
+                "match_skill_name": "fixture_collector",
                 "match_task_action": "run_once",
                 "match_platforms": ["douyin", "xiaohongshu"],
             }),

@@ -9,7 +9,6 @@ import {
   sourceTargets,
   validatePlatformUrl,
 } from "./platforms.mjs";
-import { recognizeScreenshot } from "./recognition.mjs";
 
 const NAVIGATION_TIMEOUT_MS = 45_000;
 const SCREENSHOT_MIN_BYTES = 512;
@@ -551,10 +550,6 @@ export async function collectRenderedImages({
         position,
         screenshotPath,
       );
-      const recognition = await recognizeScreenshot(
-        screenshotPath,
-        config.recognition_mode || "ocr_reviewed",
-      );
       observedSources.add(candidate.source);
       records.push({
         kind: "image",
@@ -568,9 +563,6 @@ export async function collectRenderedImages({
         image_sequence: position,
         title,
         platform_text: platformText,
-        recognized_text: recognition.text,
-        raw_recognized_text: recognition.raw_text,
-        recognition,
         image_url: candidate.source,
         image_screenshot_path: imageScreenshotPath,
         cover_screenshot_path: imageScreenshotPath,
@@ -726,14 +718,12 @@ async function collectPage(page, root, runId, platform, itemUrl, config, discove
   const discoveredAt = new Date().toISOString();
   const engagement = await captureEngagementMetrics(page, platform, discoveredAt);
   const temporaryRoot = path.join(root, "tmp", runId);
-  const recognitionMode = config.recognition_mode || "ocr_reviewed";
   if (metadata.hasVideo) {
     const screenshotPath = path.join(temporaryRoot, `${itemId.replaceAll(":", "_")}-video.png`);
     const cover = await renderedVideoCover(page, platform);
     if (!cover) throw new Error("media_element_not_found");
     await freezeVideoIfPresent(cover.locator);
     await screenshotLocator(cover.locator, screenshotPath);
-    const recognition = await recognizeScreenshot(screenshotPath, recognitionMode);
     const coverScreenshotPath = await persistVideoCover(root, platform, itemId, screenshotPath);
     return {
       records: [{
@@ -747,9 +737,6 @@ async function collectPage(page, root, runId, platform, itemUrl, config, discove
         item_id: itemId,
         title: metadata.title,
         platform_text: metadata.platformText,
-        recognized_text: recognition.text,
-        raw_recognized_text: recognition.raw_text,
-        recognition,
         cover_screenshot_path: coverScreenshotPath,
         cover_capture_source: cover.source,
         video_page_url: metadata.canonical,
@@ -814,10 +801,6 @@ async function collectDouyinFeedCard(page, root, runId, locator, itemId, config,
   if (!cover) throw new Error("media_element_not_found");
   await freezeVideoIfPresent(cover.locator);
   await screenshotLocator(cover.locator, screenshotPath);
-  const recognition = await recognizeScreenshot(
-    screenshotPath,
-    config.recognition_mode || "ocr_reviewed",
-  );
   const coverScreenshotPath = await persistVideoCover(root, "douyin", itemId, screenshotPath);
   return {
     records: [{
@@ -831,9 +814,6 @@ async function collectDouyinFeedCard(page, root, runId, locator, itemId, config,
       item_id: `douyin:${itemId}`,
       title: card.title,
       platform_text: platformText,
-      recognized_text: recognition.text,
-      raw_recognized_text: recognition.raw_text,
-      recognition,
       cover_screenshot_path: coverScreenshotPath,
       cover_capture_source: cover.source,
       video_page_url: pageUrl,
@@ -926,10 +906,6 @@ async function collectKuaishouFeedCard(
   const cover = await renderedVideoCover(locator, "kuaishou");
   if (!cover) throw new Error("media_element_not_found");
   await screenshotLocator(cover.locator, screenshotPath);
-  const recognition = await recognizeScreenshot(
-    screenshotPath,
-    config.recognition_mode || "ocr_reviewed",
-  );
   const coverScreenshotPath = await persistVideoCover(root, "kuaishou", itemId, screenshotPath);
   return {
     records: [{
@@ -943,9 +919,6 @@ async function collectKuaishouFeedCard(
       item_id: itemId,
       title: normalizedPlatformText(card.title),
       platform_text: platformText,
-      recognized_text: recognition.text,
-      raw_recognized_text: recognition.raw_text,
-      recognition,
       cover_screenshot_path: coverScreenshotPath,
       cover_capture_source: cover.source,
       video_page_url: itemUrl,
@@ -1001,10 +974,6 @@ async function collectXiaohongshuFeedCard(
   const cover = await renderedVideoCover(locator, "xiaohongshu");
   if (!cover) throw new Error("media_element_not_found");
   await screenshotLocator(cover.locator, screenshotPath);
-  const recognition = await recognizeScreenshot(
-    screenshotPath,
-    config.recognition_mode || "ocr_reviewed",
-  );
   const coverScreenshotPath = await persistVideoCover(
     root,
     "xiaohongshu",
@@ -1023,9 +992,6 @@ async function collectXiaohongshuFeedCard(
       item_id: canonicalItemId,
       title,
       platform_text: platformText,
-      recognized_text: recognition.text,
-      raw_recognized_text: recognition.raw_text,
-      recognition,
       cover_screenshot_path: coverScreenshotPath,
       cover_capture_source: cover.source,
       video_page_url: pageUrl,

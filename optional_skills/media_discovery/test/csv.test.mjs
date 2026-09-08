@@ -13,7 +13,6 @@ test("CSV uses BOM, CRLF, RFC 4180 quoting, and preserves multilingual newlines"
     discovery_source_url: "https://www.douyin.com/search/AI%20agent",
     title: '标题, "quoted"',
     platform_text: "第一行\n第二行",
-    recognized_text: "日本語 العربية",
     cover_screenshot_path: "video_covers/douyin_1.png",
     video_page_url: "https://www.douyin.com/video/1",
     discovered_at: "2026-08-10T00:00:00Z",
@@ -32,6 +31,7 @@ test("CSV uses BOM, CRLF, RFC 4180 quoting, and preserves multilingual newlines"
   assert.ok(rendered.includes('"AI agent"'));
   assert.ok(rendered.includes('"https://www.douyin.com/search/AI%20agent"'));
   assert.ok(rendered.includes('"1.2万","318"'));
+  assert.equal(VIDEO_COLUMNS.includes("recognized_text"), false);
   assert.ok(rendered.endsWith("\r\n"));
 });
 
@@ -51,4 +51,5 @@ test("image CSV retains the authenticated-download screenshot path", () => {
   }]);
   assert.ok(rendered.includes('"image_screenshot_path"'));
   assert.ok(rendered.includes('"images/xiaohongshu_fixture_001.png"'));
+  assert.equal(IMAGE_COLUMNS.includes("recognized_text"), false);
 });
