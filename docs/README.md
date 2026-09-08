@@ -25,6 +25,7 @@ previous/next navigation:
 | Child task graph | [Child Task Graph Contract](child_task_graph_contract.md) | [持久化子任务图合同](child_task_graph_contract.zh-CN.md) |
 | Task lifecycle and leases | [Task Lifecycle Lease Model](task_lifecycle_lease_model.md) | [任务生命周期 Lease 模型](task_lifecycle_lease_model.zh-CN.md) |
 | Event archive and replay | [Task Event Archive Contract](task_event_archive_contract.md) | [任务事件归档与回放合同](task_event_archive_contract.zh-CN.md) |
+| AiAPP development | [AiAPP Development Guide](architecture/15-aipp-development-guide.md) | [AiAPP 开发手册](architecture/15-aipp-development-guide.zh-CN.md) |
 
 ## CLI And Code Intelligence / CLI 与代码智能
 

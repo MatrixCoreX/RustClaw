@@ -9,11 +9,13 @@ import {
   Download,
   Eye,
   ExternalLink,
+  FileText,
   GalleryVerticalEnd,
   Heart,
   Image as ImageIcon,
   LoaderCircle,
   MessageCircle,
+  Music,
   PanelsTopLeft,
   PackagePlus,
   RefreshCw,
@@ -31,6 +33,9 @@ import type {
   AippCatalogResponse,
   AippMediaItem,
   AippMediaPageResponse,
+  AippTaskActivityArtifact,
+  AippTaskActivityItem,
+  AippTaskActivityPageResponse,
   ApiResponse,
 } from "../types/api";
 
@@ -65,6 +70,9 @@ export function localizedAippCopy(
 function AippIcon({ icon, className }: { icon: string; className?: string }) {
   if (icon === "gallery_vertical_end") {
     return <GalleryVerticalEnd className={className} />;
+  }
+  if (icon === "download") {
+    return <Download className={className} />;
   }
   return <PanelsTopLeft className={className} />;
 }
@@ -253,12 +261,216 @@ export function SandboxedAipp({
 
 function formatCollectedAt(value: string | null, lang: "zh" | "en"): string {
   if (!value) return "-";
-  const timestamp = Date.parse(value);
+  const numeric = /^\d+$/.test(value) ? Number(value) : Number.NaN;
+  const timestamp = Number.isFinite(numeric)
+    ? numeric * (numeric < 10_000_000_000 ? 1_000 : 1)
+    : Date.parse(value);
   if (!Number.isFinite(timestamp)) return value;
   return new Intl.DateTimeFormat(lang === "zh" ? "zh-CN" : "en", {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(timestamp));
+}
+
+function formatArtifactSize(value: number | null): string {
+  if (value == null || !Number.isFinite(value) || value < 0) return "-";
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function activityChannelLabel(channel: string, t: Translate): string {
+  const labels: Record<string, [string, string]> = {
+    ui: ["网页", "Web"],
+    wechat: ["微信", "WeChat"],
+    telegram: ["Telegram", "Telegram"],
+    whatsapp: ["WhatsApp", "WhatsApp"],
+    feishu: ["飞书", "Feishu"],
+    lark: ["Lark", "Lark"],
+  };
+  const label = labels[channel];
+  return label ? t(label[0], label[1]) : channel;
+}
+
+function activityStatusLabel(status: string, t: Translate): string {
+  const labels: Record<string, [string, string]> = {
+    queued: ["等待中", "Queued"],
+    running: ["处理中", "Running"],
+    succeeded: ["已完成", "Completed"],
+    failed: ["失败", "Failed"],
+    canceled: ["已取消", "Canceled"],
+    timeout: ["已超时", "Timed out"],
+  };
+  const label = labels[status];
+  return label ? t(label[0], label[1]) : status;
+}
+
+function ActivityArtifactIcon({ artifact }: { artifact: AippTaskActivityArtifact }) {
+  if (artifact.kind === "image") return <ImageIcon className="h-4 w-4" />;
+  if (artifact.kind === "video") return <Video className="h-4 w-4" />;
+  if (artifact.kind === "audio") return <Music className="h-4 w-4" />;
+  return <FileText className="h-4 w-4" />;
+}
+
+function ActivityImagePreview({ artifact, apiFetch }: { artifact: AippTaskActivityArtifact; apiFetch: ApiFetch }) {
+  const [source, setSource] = useState<string | null>(null);
+  const apiFetchRef = useRef(apiFetch);
+  apiFetchRef.current = apiFetch;
+  useEffect(() => {
+    const endpoint = artifact.preview_url;
+    if (!endpoint) return;
+    let disposed = false;
+    let objectUrl: string | null = null;
+    void apiFetchRef.current(endpoint)
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`aipp_activity_preview_http_${response.status}`);
+        return response.blob();
+      })
+      .then((blob) => {
+        if (disposed) return;
+        objectUrl = URL.createObjectURL(blob);
+        setSource(objectUrl);
+      })
+      .catch(() => {
+        if (!disposed) setSource(null);
+      });
+    return () => {
+      disposed = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [artifact.preview_url]);
+  return source ? (
+    <img src={source} alt={artifact.filename} className="h-full w-full object-contain" />
+  ) : (
+    <div className="flex h-full w-full items-center justify-center text-white/35"><ImageIcon className="h-8 w-8" /></div>
+  );
+}
+
+export function AippTaskActivityCard({
+  item,
+  apiFetch,
+  t,
+  lang,
+}: {
+  item: AippTaskActivityItem;
+  apiFetch: ApiFetch;
+  t: Translate;
+  lang: "zh" | "en";
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [artifactAction, setArtifactAction] = useState<string | null>(null);
+  const [artifactError, setArtifactError] = useState<string | null>(null);
+  const preview = item.artifacts.find((artifact) => artifact.kind === "image" && artifact.preview_url);
+  const longContent = item.input_text.length > 320 || item.result_text.length > 720;
+  const fetchArtifact = async (artifact: AippTaskActivityArtifact, open: boolean) => {
+    if (artifactAction) return;
+    setArtifactAction(`${open ? "open" : "download"}:${artifact.id}`);
+    setArtifactError(null);
+    try {
+      const endpoint = open && artifact.preview_url ? artifact.preview_url : artifact.download_url;
+      const response = await apiFetch(endpoint);
+      if (!response.ok) throw new Error(`aipp_activity_artifact_http_${response.status}`);
+      const objectUrl = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      if (open) {
+        anchor.target = "_blank";
+        anchor.rel = "noreferrer noopener";
+      } else {
+        anchor.download = artifact.filename;
+      }
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch {
+      setArtifactError(t("文件读取失败，请重试。", "Could not read the file. Try again."));
+    } finally {
+      setArtifactAction(null);
+    }
+  };
+  return (
+    <article className="theme-panel min-w-0 overflow-hidden">
+      <div className={preview ? "grid min-w-0 sm:grid-cols-[minmax(120px,22%)_minmax(0,1fr)]" : "min-w-0"}>
+        {preview ? (
+          <div className="aspect-video max-h-44 min-h-28 overflow-hidden bg-black/20 sm:aspect-auto">
+            <ActivityImagePreview artifact={preview} apiFetch={apiFetch} />
+          </div>
+        ) : null}
+        <div className="min-w-0 p-3 sm:p-4">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-white/48">
+            <span>{activityChannelLabel(item.channel, t)}</span>
+            <span className={item.status === "failed" || item.status === "timeout" ? "text-red-200" : "text-white/70"}>
+              {activityStatusLabel(item.status, t)}
+            </span>
+            <span>{formatCollectedAt(item.created_at, lang)}</span>
+            <span title={item.task_id}>#{item.task_id.slice(0, 8)}</span>
+          </div>
+          {item.actions.length > 0 ? (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {item.actions.map((action) => (
+                <span key={action} className="rounded border border-white/10 px-2 py-0.5 text-xs text-white/55">
+                  {action.split(".").pop() || action}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          <section className="mt-3 min-w-0">
+            <p className="text-xs font-medium text-white/45">{t("原始请求", "Original request")}</p>
+            <p className={`mt-1 whitespace-pre-wrap break-words text-sm leading-5 text-white/72 [overflow-wrap:anywhere] ${longContent && !expanded ? "line-clamp-3" : ""}`}>
+              {item.input_text || t("没有可展示的文本输入", "No text input is available")}
+            </p>
+          </section>
+          {item.source_urls.length > 0 ? (
+            <div className="mt-2 flex min-w-0 flex-wrap gap-2">
+              {item.source_urls.map((url, index) => (
+                <a key={url} className="theme-secondary-btn max-w-full px-2.5 py-1 text-xs" href={url} target="_blank" rel="noreferrer noopener" title={url}>
+                  <span className="max-w-64 truncate">{t("媒体链接", "Media link")} {index + 1}</span>
+                  <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                </a>
+              ))}
+            </div>
+          ) : null}
+          {item.result_text ? (
+            <section className="mt-3 min-w-0 border-t border-white/8 pt-3">
+              <p className="text-xs font-medium text-white/45">{t("处理结果", "Processed result")}</p>
+              <p className={`mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-white/80 [overflow-wrap:anywhere] ${longContent && !expanded ? "line-clamp-6" : ""}`}>
+                {item.result_text}
+              </p>
+            </section>
+          ) : null}
+          {item.error_text ? <p className="mt-3 break-words text-sm text-red-200">{item.error_text}</p> : null}
+          {longContent ? (
+            <button type="button" className="theme-secondary-btn mt-3 px-3 py-1.5 text-xs" onClick={() => setExpanded((current) => !current)}>
+              {expanded ? t("收起", "Collapse") : t("展开全文", "Show all")}
+              {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            </button>
+          ) : null}
+        </div>
+      </div>
+      {item.artifacts.length > 0 ? (
+        <div className="border-t border-white/8 px-3 py-2 sm:px-4">
+          <p className="mb-1 text-xs font-medium text-white/45">{t("生成文件", "Output files")}</p>
+          {item.artifacts.map((artifact) => (
+            <div key={artifact.id} className="flex min-w-0 items-center gap-2 border-t border-white/6 py-2 first:border-t-0">
+              <span className="shrink-0 text-white/50"><ActivityArtifactIcon artifact={artifact} /></span>
+              <span className="min-w-0 flex-1 truncate text-sm text-white/75" title={artifact.filename}>{artifact.filename}</span>
+              <span className="shrink-0 text-xs text-white/40">{formatArtifactSize(artifact.size_bytes)}</span>
+              {artifact.preview_url ? (
+                <button type="button" className="theme-icon-btn h-8 w-8 shrink-0" onClick={() => void fetchArtifact(artifact, true)} title={t("预览", "Preview")}>
+                  {artifactAction === `open:${artifact.id}` ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
+                </button>
+              ) : null}
+              <button type="button" className="theme-icon-btn h-8 w-8 shrink-0" onClick={() => void fetchArtifact(artifact, false)} title={t("下载", "Download")}>
+                {artifactAction === `download:${artifact.id}` ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              </button>
+            </div>
+          ))}
+          {artifactError ? <p className="pb-2 text-xs text-red-200">{artifactError}</p> : null}
+        </div>
+      ) : null}
+    </article>
+  );
 }
 
 function MediaPreview({
@@ -482,8 +694,11 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState<AippMediaPageResponse | null>(null);
+  const [activityPage, setActivityPage] = useState<AippTaskActivityPageResponse | null>(null);
   const [kind, setKind] = useState<"all" | "video" | "image">("all");
   const [platform, setPlatform] = useState("all");
+  const [activityChannel, setActivityChannel] = useState("all");
+  const [activityStatus, setActivityStatus] = useState("all");
   const [searchDraft, setSearchDraft] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
@@ -500,6 +715,9 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
     () => catalog.find((app) => app.skill_name === selectedSkill) || null,
     [catalog, selectedSkill],
   );
+  const activityChannels = selectedApp?.task_channel_scope === "communication"
+    ? (["wechat", "telegram", "whatsapp", "feishu", "lark"] as const)
+    : (["ui", "wechat", "telegram", "whatsapp", "feishu", "lark"] as const);
 
   const fetchCatalog = useCallback(async () => {
     setCatalogLoading(true);
@@ -556,8 +774,13 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
   }, [confirm, fetchCatalog, selectedSkill, t]);
 
   const fetchPage = useCallback(async (silent = false) => {
-    if (!selectedSkill || !selectedApp?.installed || selectedApp.renderer !== "collection_feed_v1") {
+    if (
+      !selectedSkill
+      || !selectedApp?.installed
+      || !["collection_feed_v1", "task_activity_v1"].includes(selectedApp.renderer)
+    ) {
       setPage(null);
+      setActivityPage(null);
       setLoading(false);
       return;
     }
@@ -568,26 +791,39 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
     }
     const params = new URLSearchParams({ limit: "20", sort_order: sortOrder });
     if (cursor != null) params.set("cursor_sequence", String(cursor));
-    if (kind !== "all") params.set("kind", kind);
-    if (platform !== "all") params.set("platform", platform);
+    if (selectedApp.renderer === "collection_feed_v1") {
+      if (kind !== "all") params.set("kind", kind);
+      if (platform !== "all") params.set("platform", platform);
+    } else {
+      if (activityChannel !== "all") params.set("channel", activityChannel);
+      if (activityStatus !== "all") params.set("status", activityStatus);
+    }
     if (searchQuery) params.set("query", searchQuery);
     try {
       const response = await apiFetchRef.current(
         `/v1/aipps/${encodeURIComponent(selectedSkill)}/items?${params.toString()}`,
       );
-      const body = (await response.json()) as ApiResponse<AippMediaPageResponse>;
+      const body = (await response.json()) as ApiResponse<AippMediaPageResponse | AippTaskActivityPageResponse>;
       if (!response.ok || !body.ok || !body.data) {
         throw new Error(body.error || `aipp_items_http_${response.status}`);
       }
-      if (currentRequest === requestSequence.current) setPage(body.data);
+      if (currentRequest === requestSequence.current) {
+        if (selectedApp.renderer === "collection_feed_v1") {
+          setPage(body.data as AippMediaPageResponse);
+          setActivityPage(null);
+        } else {
+          setActivityPage(body.data as AippTaskActivityPageResponse);
+          setPage(null);
+        }
+      }
     } catch (cause) {
       if (!silent && currentRequest === requestSequence.current) {
-        setError(formatUiError(cause, translateRef.current, "采集内容读取失败。", "Could not load collected content."));
+        setError(formatUiError(cause, translateRef.current, "Ai APP 内容读取失败。", "Could not load Ai APP content."));
       }
     } finally {
       if (!silent && currentRequest === requestSequence.current) setLoading(false);
     }
-  }, [cursor, kind, platform, searchQuery, selectedApp?.installed, selectedApp?.renderer, selectedSkill, sortOrder]);
+  }, [activityChannel, activityStatus, cursor, kind, platform, searchQuery, selectedApp?.installed, selectedApp?.renderer, selectedSkill, sortOrder]);
 
   useEffect(() => {
     void fetchCatalog();
@@ -606,14 +842,20 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
   useEffect(() => {
     setCursor(null);
     setCursorHistory([]);
-  }, [selectedSkill, kind, platform, searchQuery, sortOrder]);
+  }, [selectedSkill, kind, platform, activityChannel, activityStatus, searchQuery, sortOrder]);
+
+  useEffect(() => {
+    if (selectedApp?.task_channel_scope === "communication" && activityChannel === "ui") {
+      setActivityChannel("all");
+    }
+  }, [activityChannel, selectedApp?.task_channel_scope]);
 
   useEffect(() => {
     void fetchPage();
   }, [fetchPage]);
 
   useEffect(() => {
-    if (!selectedSkill || selectedApp?.renderer !== "collection_feed_v1") return;
+    if (!selectedSkill || !["collection_feed_v1", "task_activity_v1"].includes(selectedApp?.renderer || "")) return;
     const refreshVisiblePage = async () => {
       if (document.visibilityState !== "visible" || autoRefreshInFlight.current) return;
       autoRefreshInFlight.current = true;
@@ -639,7 +881,9 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
   );
 
   const openNext = () => {
-    const next = page?.next_cursor_sequence;
+    const next = selectedApp?.renderer === "task_activity_v1"
+      ? activityPage?.next_cursor_sequence
+      : page?.next_cursor_sequence;
     if (next == null) return;
     setCursorHistory((current) => [...current, cursor]);
     setCursor(next);
@@ -725,7 +969,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
             <Bot className="h-4 w-4" />
             Agent
           </button>
-          {selectedApp.renderer === "collection_feed_v1" ? (
+          {["collection_feed_v1", "task_activity_v1"].includes(selectedApp.renderer) ? (
             <button type="button" className="theme-icon-btn h-9 w-9" onClick={() => void fetchPage()} title={t("刷新内容", "Refresh content")}>
               <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             </button>
@@ -762,6 +1006,79 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
       {selectedApp.renderer === "sandbox_bundle_v1" ? (
         <SandboxedAipp app={selectedApp} lang={lang} apiFetch={apiFetch} />
       ) : null}
+
+      {selectedApp.renderer === "task_activity_v1" ? <>
+        <section className="theme-panel-soft p-3 sm:p-4">
+          <div className="grid gap-2 sm:grid-cols-2 sm:gap-3">
+            <div>
+              <p className="text-xs text-white/45">{t("当前页记录", "Records on this page")}</p>
+              <p className="mt-1 text-sm font-medium text-white/85">{activityPage?.page_item_count ?? 0}</p>
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs text-white/45">{t("最近更新", "Latest update")}</p>
+              <p className="mt-1 truncate text-xs font-medium text-white/85">
+                {activityPage?.updated_at_ms
+                  ? formatCollectedAt(String(activityPage.updated_at_ms), lang)
+                  : "-"}
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(240px,1fr)_auto_auto_auto] lg:items-center">
+          <label className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
+            <input
+              className="theme-input w-full py-2 pl-9 pr-3 text-sm"
+              value={searchDraft}
+              onChange={(event) => setSearchDraft(event.target.value)}
+              placeholder={t("搜索原始请求或处理结果", "Search requests or processed results")}
+              maxLength={200}
+            />
+          </label>
+          <select className="theme-input w-full min-w-0 py-2 text-sm lg:w-auto lg:min-w-32" value={activityChannel} onChange={(event) => setActivityChannel(event.target.value)}>
+            <option value="all">{t("全部通信端", "All channels")}</option>
+            {activityChannels.map((channel) => (
+              <option key={channel} value={channel}>{activityChannelLabel(channel, t)}</option>
+            ))}
+          </select>
+          <select className="theme-input w-full min-w-0 py-2 text-sm lg:w-auto lg:min-w-28" value={activityStatus} onChange={(event) => setActivityStatus(event.target.value)}>
+            <option value="all">{t("全部状态", "All statuses")}</option>
+            {(["succeeded", "running", "failed", "canceled", "timeout"] as const).map((status) => (
+              <option key={status} value={status}>{activityStatusLabel(status, t)}</option>
+            ))}
+          </select>
+          <select
+            className="theme-input w-full min-w-0 py-2 text-sm lg:w-auto lg:min-w-36"
+            value={sortOrder}
+            onChange={(event) => setSortOrder(event.target.value as "newest" | "oldest")}
+            aria-label={t("按处理时间排序", "Sort by processing time")}
+          >
+            <option value="newest">{t("最新优先", "Newest first")}</option>
+            <option value="oldest">{t("最早优先", "Oldest first")}</option>
+          </select>
+        </div>
+
+        {error ? <div className="rounded-lg border border-red-400/20 bg-red-500/8 px-4 py-3 text-sm text-red-100">{error}</div> : null}
+
+        <div className="grid min-w-0 gap-3" aria-busy={loading}>
+          {(activityPage?.items || []).map((item) => (
+            <AippTaskActivityCard key={item.task_id} item={item} apiFetch={apiFetch} t={t} lang={lang} />
+          ))}
+          {!loading && activityPage?.items.length === 0 ? (
+            <div className="theme-panel-soft flex min-h-40 flex-col items-center justify-center gap-2 p-5 text-center text-sm text-white/55">
+              <Download className="h-7 w-7" />
+              <span>{t("还没有符合条件的媒体处理记录。", "No media processing records match these filters.")}</span>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="flex items-center justify-between gap-3">
+          <button type="button" className="theme-secondary-btn px-3 py-2 text-sm" disabled={cursorHistory.length === 0 || loading} onClick={openPrevious}>{t("上一页", "Previous")}</button>
+          {loading ? <LoaderCircle className="h-5 w-5 animate-spin text-white/45" /> : <span className="text-xs text-white/40">{activityPage?.items.length || 0}</span>}
+          <button type="button" className="theme-secondary-btn px-3 py-2 text-sm" disabled={activityPage?.next_cursor_sequence == null || loading} onClick={openNext}>{t("下一页", "Next")}</button>
+        </div>
+      </> : null}
 
       {selectedApp.renderer !== "collection_feed_v1" ? null : <>
 

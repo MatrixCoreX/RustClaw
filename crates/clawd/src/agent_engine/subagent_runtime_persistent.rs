@@ -132,6 +132,24 @@ fn schedule_child_task_specs(
         }
         Err(signal) => return Err(signal),
     };
+    let policy_violations = super::super::skill_execution::child_task_execution_policy::
+        readonly_child_spec_policy_violations(
+            state, &specs,
+        );
+    if !policy_violations.is_empty() {
+        record_persistent_schedule_error(
+            loop_state,
+            global_step,
+            step_in_round,
+            "child_task_capability_policy_incompatible",
+            serde_json::to_string(&json!({
+                "owner_layer": "child_task_execution_policy",
+                "policy_violations": policy_violations,
+            }))
+            .ok(),
+        );
+        return Err(SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED);
+    }
     let allocation_ids = allocate_persistent_child_budgets(loop_state, &mut specs)?;
     let write_enabled = specs
         .iter()

@@ -540,6 +540,74 @@ fn persistent_writer_defaults_to_parent_reviewed_local_worktree() {
 }
 
 #[test]
+fn persistent_readonly_child_rejects_mutating_capability_before_enqueue() {
+    let state = persistent_test_state();
+    let task = crate::ClaimedTask {
+        claim_attempt: 0,
+        task_id: "task-persistent-readonly-policy".to_string(),
+        user_id: 42,
+        chat_id: 7,
+        user_key: Some("test-key".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: Some("ui-user".to_string()),
+        external_chat_id: Some("ui-chat".to_string()),
+        kind: "ask".to_string(),
+        payload_json: serde_json::json!({"text": "parent task"}).to_string(),
+    };
+    insert_running_parent_task(&state, &task);
+    let mut loop_state = LoopState::new();
+    install_test_task_budget(&mut loop_state);
+    let args = serde_json::json!({
+        "action": "persistent_child_task",
+        "role": "worker",
+        "objective": "machine_child_objective:download",
+        "context_refs": ["task-input"],
+        "allowed_capabilities": ["media_download.download"],
+        "required": true,
+        "result_contract": {
+            "output_format": "machine_json",
+            "required_keys": ["status"]
+        }
+    });
+
+    let result = record_persistent_child_task_from_args(
+        &state,
+        &task,
+        &mut loop_state,
+        1,
+        1,
+        &args,
+        &SubagentRuntimeConfig::default(),
+    );
+
+    assert_eq!(
+        result,
+        Err(subagent_runtime_persistent::SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED)
+    );
+    let observation = loop_state
+        .task_observations
+        .last()
+        .expect("structured rejection observation");
+    assert_eq!(observation["status"], "rejected");
+    assert_eq!(
+        observation["error_code"],
+        "child_task_capability_policy_incompatible"
+    );
+    let child_count: i64 = state
+        .core
+        .db
+        .get()
+        .expect("get db")
+        .query_row(
+            "SELECT COUNT(*) FROM tasks WHERE task_id LIKE ?1",
+            rusqlite::params![format!("{}:child:%", task.task_id)],
+            |row| row.get(0),
+        )
+        .expect("count child tasks");
+    assert_eq!(child_count, 0);
+}
+
+#[test]
 fn durable_subagent_rejects_unknown_role_with_replan_evidence() {
     let state = persistent_test_state();
     let task = crate::ClaimedTask {

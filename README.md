@@ -490,6 +490,8 @@ UI renders these same Markdown sources instead of maintaining a second copy:
 11. [Task artifact delivery](docs/architecture/11-task-artifact-delivery.md)
 12. [Browser media discovery](docs/architecture/12-media-discovery.md)
 13. [NNI capability and heartbeat control](docs/architecture/13-nni-capability.md)
+14. [AiPP skill companion interfaces](docs/architecture/14-aipp-skill-companions.md)
+15. [AiAPP development guide](docs/architecture/15-aipp-development-guide.md)
 
 Use the [architecture index](docs/architecture/README.md) for language selection and previous/next navigation.
 The [full documentation index](docs/README.md) links every engineering document in English and Simplified Chinese.
@@ -987,16 +989,25 @@ access; they can request only manifest-declared capabilities through the parent
 bridge. Bundle files are copied into the immutable installation and verified as
 receipt artifacts before they can be served.
 
+Ai APP installation never rebuilds or restarts `clawd` and never rebuilds the main
+UI. Reviewed host renderers are selected entirely by manifest contracts. A custom
+Ai APP is built independently inside its skill package and ships final static files
+under `aipp/`; the main UI only supplies the generic isolated host. The decoupling
+boundary is checked by `python3 scripts/check_aipp_decoupling.py`.
+
 Ai APP admission follows the skill's exact manifest, receipt, policy grant,
 enable state, and registry generation. Installing a skill can install its Ai APP,
 but the visual application can also be uninstalled independently. That operation
 writes a host overlay tombstone and leaves the skill, its configuration, and its
 private data untouched; reinstalling the Ai APP revalidates the current skill
 package and clears the tombstone. Uninstalling or disabling the skill still makes
-its Ai APP unavailable. `media_discovery` is the first Ai APP: administrators can
-review collected image/video records, locally retained image downloads, previews,
-source links, filters, and cursor-based pages while starting or stopping collection
-through Agent.
+its Ai APP unavailable. `media_discovery` presents its skill-private collection
+ledger, previews, source links, filters, and cursor-based pages. `media_download`
+uses the generic task-activity renderer to present only retained tasks that actually
+executed that skill, including requests from Agent UI and external communication
+channels, validated source links, final processed text, failures, and authenticated
+output artifacts. It does not read the media-discovery collection. Both remain
+read-only views; users start, stop, or change work through Agent.
 
 ```mermaid
 flowchart LR
@@ -1004,7 +1015,8 @@ flowchart LR
     A --> G[Enabled generation]
     G --> C[Ai APP catalog]
     C --> H{Renderer}
-    H -->|reviewed contract| R[Host renderer]
+    H -->|collection contract| R[Skill ledger renderer]
+    H -->|task activity contract| Q[Runtime task ledger renderer]
     H -->|sandbox bundle| F[Opaque iframe]
     F --> B[Allowlisted capability bridge]
     B --> L[Agent capability loop]

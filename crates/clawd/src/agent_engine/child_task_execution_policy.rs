@@ -2,6 +2,7 @@ use serde_json::{json, Value};
 use std::collections::BTreeSet;
 
 use super::{AppState, ClaimedTask};
+use crate::child_task_contract::{ChildTaskPermissionProfile, ChildTaskSpec};
 
 const MAX_CHILD_ALLOWED_CAPABILITIES: usize = 32;
 
@@ -215,6 +216,97 @@ fn selected_capability(
             "privilege_escalation": mapping.privilege_escalation,
         }),
     })
+}
+
+pub(in crate::agent_engine) fn readonly_child_spec_policy_violations(
+    state: &AppState,
+    specs: &[ChildTaskSpec],
+) -> Vec<Value> {
+    let mut rejected = Vec::new();
+    for spec in specs {
+        if spec.permission_profile != ChildTaskPermissionProfile::ReadOnly {
+            continue;
+        }
+        let Some(capabilities) = spec
+            .scope
+            .get("allowed_capabilities")
+            .and_then(Value::as_array)
+        else {
+            continue;
+        };
+        for capability in capabilities.iter().filter_map(Value::as_str) {
+            let registry = state.get_skills_registry();
+            let canonical = registry
+                .as_ref()
+                .and_then(|registry| registry.canonical_planner_capability_name(capability))
+                .unwrap_or(capability);
+            let selected = selected_capability_by_name(state, canonical);
+            let mut violations = Vec::new();
+            match selected.as_ref() {
+                Some(selected) => append_read_only_violations(selected, &mut violations),
+                None => violations.push("capability_unresolved"),
+            }
+            violations.sort_unstable();
+            violations.dedup();
+            if !violations.is_empty() {
+                rejected.push(json!({
+                    "capability": canonical,
+                    "permission_profile": "read_only",
+                    "violations": violations,
+                }));
+            }
+        }
+    }
+    rejected
+}
+
+fn selected_capability_by_name(
+    state: &AppState,
+    capability_name: &str,
+) -> Option<SelectedCapability> {
+    if let Some(tool) = state.mcp_tool(capability_name) {
+        return Some(SelectedCapability {
+            canonical_skill: tool.capability.clone(),
+            name: tool.capability,
+            action: None,
+            effect: tool.policy.effect.clone(),
+            policy: tool.policy.permission_policy_json(),
+        });
+    }
+    let registry = state.get_skills_registry()?;
+    for skill in registry.enabled_names() {
+        let Some(mapping) = registry
+            .planner_exposed_capabilities(&skill)
+            .into_iter()
+            .find(|mapping| mapping.name == capability_name)
+        else {
+            continue;
+        };
+        return Some(SelectedCapability {
+            canonical_skill: skill,
+            name: mapping.name.clone(),
+            action: mapping.action.clone(),
+            effect: mapping
+                .effect
+                .map(|effect| effect.as_token().to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+            policy: json!({
+                "source": "registry_capability_policy",
+                "effect": mapping.effect.map(|effect| effect.as_token()),
+                "isolation_profile": mapping
+                    .isolation_profile
+                    .map(|profile| profile.as_token()),
+                "network_access": mapping.network_access,
+                "filesystem_write": mapping.filesystem_write,
+                "external_publish": mapping.external_publish,
+                "credential_access": mapping.credential_access,
+                "subprocess": mapping.subprocess,
+                "package_install": mapping.package_install,
+                "privilege_escalation": mapping.privilege_escalation,
+            }),
+        });
+    }
+    None
 }
 
 fn normalized_action(args: &Value) -> Option<String> {
