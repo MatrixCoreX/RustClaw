@@ -78,6 +78,12 @@ test("renders an installed AiPP as an application launcher card", () => {
   assert.match(markup, /查看采集内容/);
 });
 
+test("keeps app switching in the launcher instead of duplicating apps inside a detail page", () => {
+  const source = readFileSync(new URL("../components/AippPage.tsx", import.meta.url), "utf8");
+  assert.match(source, /title=\{t\("返回应用列表", "Back to apps"\)\}/);
+  assert.doesNotMatch(source, /role="tablist" aria-label="AiAPP"/);
+});
+
 test("offers Ai APP reinstallation without changing its skill", () => {
   const app: AippCatalogItem = {
     skill_name: "example",
