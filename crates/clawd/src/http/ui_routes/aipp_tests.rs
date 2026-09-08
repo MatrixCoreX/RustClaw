@@ -129,7 +129,7 @@ fn task_activity_page_projects_current_and_archived_skill_tasks_without_secrets(
     );
 
     let page =
-        read_aipp_task_activity_page(&db, "media_download", "all", &AippMediaQuery::default())
+        read_aipp_task_activity_page(&db, "media_download", "all", 0, &AippMediaQuery::default())
             .expect("activity page");
     let items = page["items"].as_array().expect("items");
     assert_eq!(items.len(), 2);
@@ -150,6 +150,7 @@ fn task_activity_page_projects_current_and_archived_skill_tasks_without_secrets(
         &db,
         "media_download",
         "communication",
+        0,
         &AippMediaQuery::default(),
     )
     .expect("communication-only activity page");
@@ -184,6 +185,7 @@ fn task_activity_page_filters_channels_search_and_uses_stable_cursors() {
         &db,
         "media_download",
         "communication",
+        0,
         &AippMediaQuery {
             limit: Some(1),
             channel: Some("wechat".to_string()),
@@ -199,6 +201,7 @@ fn task_activity_page_filters_channels_search_and_uses_stable_cursors() {
         &db,
         "media_download",
         "communication",
+        0,
         &AippMediaQuery {
             limit: Some(1),
             channel: Some("wechat".to_string()),
@@ -213,6 +216,7 @@ fn task_activity_page_filters_channels_search_and_uses_stable_cursors() {
         &db,
         "media_download",
         "communication",
+        0,
         &AippMediaQuery {
             channel: Some("unknown".to_string()),
             ..AippMediaQuery::default()
@@ -220,6 +224,51 @@ fn task_activity_page_filters_channels_search_and_uses_stable_cursors() {
     )
     .expect_err("invalid channel");
     assert_eq!(invalid, "aipp_task_activity_filter_invalid");
+}
+
+#[test]
+fn task_activity_clear_event_time_hides_only_older_view_records() {
+    let db = task_activity_db();
+    insert_task_activity(
+        &db,
+        "task-before-clear",
+        "wechat",
+        "succeeded",
+        "media_download",
+        "media_download.download",
+        false,
+    );
+    let cleared_through_event_ms = 1000;
+    insert_task_activity(
+        &db,
+        "task-after-clear",
+        "ui",
+        "succeeded",
+        "media_download",
+        "media_download.capabilities",
+        false,
+    );
+    db.execute(
+        "UPDATE task_event_stream SET created_at_ms = 1001 WHERE task_id = 'task-after-clear'",
+        [],
+    )
+    .expect("advance activity event time");
+
+    let page = read_aipp_task_activity_page(
+        &db,
+        "media_download",
+        "all",
+        cleared_through_event_ms,
+        &AippMediaQuery::default(),
+    )
+    .expect("activity page after clear");
+
+    assert_eq!(page["page_item_count"], 1);
+    assert_eq!(page["items"][0]["task_id"], "task-after-clear");
+    let source_task_count = db
+        .query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get::<_, i64>(0))
+        .expect("source task count");
+    assert_eq!(source_task_count, 2);
 }
 
 #[test]
