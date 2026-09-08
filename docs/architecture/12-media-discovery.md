@@ -16,6 +16,12 @@ private profile needs an interactive login. It captures only content that the br
 already rendered and exports ordered CSV records; it does not run OCR or model text review,
 and it downloads neither video binaries nor original image files.
 
+Douyin recommendation collection reads a visible card's machine content ID and
+opens its HTTPS detail page in the same browser. This also works when the home
+page redirects to `/jingxuan` and its cards invoke a desktop client. Collection
+uses the detail player's next-item control, or scrolls an embedded feed, and
+waits for the active content ID to change before recording the next post.
+
 Kuaishou recommendation collection reads the rendered public feed card itself:
 the stable work URL, author caption, visible poster, and structurally identified
 like counter. It rejects keyword-shaped hot-list pseudo-links at the URL-contract
@@ -65,6 +71,9 @@ flowchart TD
     G[Mark active batch draining]
     P[Finish and commit the current complete post]
     B[Persistent browser profile<br/>silent default or explicit visible]
+    Q{Platform access}
+    M[Visible mode: manual verification]
+    K[Silent mode: structured wait and cooldown]
     C[Rendered card or media element screenshot]
     O[Author caption and engagement metadata]
     L[Private immutable record ledger]
@@ -81,7 +90,10 @@ flowchart TD
     E --> R
     A -->|one shot| W --> RB
     R --> RB
-    RB --> T --> B --> C --> O --> L
+    RB --> T --> B --> Q
+    Q -->|ready| C --> O --> L
+    Q -->|challenge, visible| M --> Q
+    Q -->|challenge, silent| K --> Z
     L --> Z -->|next enabled batch| R
     R -->|while active| H --> N
     A -->|stop| X
@@ -102,6 +114,13 @@ and honors graceful stop only between complete posts. A multi-image post is
 therefore committed in full before the browser closes. The collector remains
 separate from the manual `media_download` queue. The durable runtime job starts
 later batches after bounded randomized rests and remains observable and cancellable.
+
+Status queries distinguish live heartbeat leases from expired records. Expired
+records are returned in `expired_leases`, not as an active batch or worker;
+`latest_run` reports the most recently completed batch without starting another
+collection. The query preserves stored history. A completed one-shot receipt is
+the completion boundary: verification uses status/history reads, and CSV export
+does not require another browser run.
 
 While continuous collection remains active, the skill
 emits a structured status heartbeat every 15 minutes. It contains only machine
@@ -131,6 +150,12 @@ anti-automation bypass. The skill does not solve challenges, hide automation,
 bypass access controls, or continue through rate-limit and login barriers.
 Missing desktop sessions and platform barriers produce structured machine
 states for the agent and UI.
+
+An explicit visible run waits for the user to complete a challenge and then
+continues in the same browser. Feed-readiness and manual-verification waits
+honor a stop request. Failure diagnostics retain the machine stage, page
+origin/path, readiness, and element counts under `diagnostics/<run_id>/` and in
+the run result; they exclude URL queries, page text, credentials, and cookies.
 
 Screenshots are preview artifacts only. The skill never sends video covers or
 image screenshots to OCR or model review. Text comes only from the platform's

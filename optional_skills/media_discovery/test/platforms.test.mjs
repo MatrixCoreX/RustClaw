@@ -148,4 +148,8 @@ test("only an explicitly visible run waits for a machine challenge to clear", as
     browser_mode: "silent",
   }), "challenge_required");
   assert.equal(waits, 0);
+  scans = 0;
+  await assert.rejects(accessErrorAfterExplicitVisibleWait(page, "douyin", {
+    browser_mode: "visible",
+  }, async () => true), { message: "collection_stopped" });
 });

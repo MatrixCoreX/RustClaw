@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import path from "node:path";
+import { browserStageError, recordBrowserFailure } from "./browser_diagnostics.mjs";
 
 import {
   canonicalCandidateUrls,
@@ -305,18 +306,20 @@ export function platformAccessError(platform, currentUrl, captchaFrameUrls = [])
 
 async function currentPlatformAccessError(page, platform) {
   const captchaFrameUrls = await page.locator("iframe[src]").evaluateAll((frames) =>
-    frames.map((frame) => frame.getAttribute("src") || ""),
+    frames.map((frame) => frame.src || ""),
   );
   return platformAccessError(platform, page.url(), captchaFrameUrls);
 }
 
-export async function accessErrorAfterExplicitVisibleWait(page, platform, config = {}) {
+export async function accessErrorAfterExplicitVisibleWait(page, platform, config = {}, shouldStop = async () => false) {
   let accessError = await currentPlatformAccessError(page, platform);
   if (accessError !== "challenge_required" || config.browser_mode !== "visible") return accessError;
   const configuredMinutes = Math.max(1, Number(config.max_run_minutes) || 10);
   const deadline = Date.now() + Math.min(INTERACTIVE_LOGIN_TIMEOUT_MS, configuredMinutes * 60 * 1000);
   while (Date.now() < deadline && !page.isClosed()) {
+    if (await shouldStop()) throw browserStageError("collection_stopped", "manual_verification");
     await page.waitForTimeout(INTERACTIVE_CHALLENGE_POLL_MS).catch(() => {});
+    if (page.isClosed()) break;
     accessError = await currentPlatformAccessError(page, platform);
     if (!accessError) return null;
     if (accessError !== "challenge_required") return accessError;
@@ -476,9 +479,14 @@ export async function activeDouyinFeedEntry(page, excludedItemIds = []) {
   return null;
 }
 
-async function waitForDouyinFeedEntry(page, excludedItemIds = [], timeoutMs = 10_000) {
-  const deadline = Date.now() + timeoutMs;
+async function waitForDouyinFeedEntry(page, excludedItemIds = [], timeoutMs = 10_000, config = {}, shouldStop = async () => false) {
+  let deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline && !page.isClosed()) {
+    if (await shouldStop()) throw browserStageError("collection_stopped", "feed_ready");
+    const accessStarted = Date.now();
+    const accessError = await accessErrorAfterExplicitVisibleWait(page, "douyin", config, shouldStop);
+    deadline += Date.now() - accessStarted;
+    if (accessError) throw browserStageError(accessError, "feed_ready");
     const entry = await activeDouyinFeedEntry(page, excludedItemIds);
     if (entry) return entry;
     await page.waitForTimeout(200).catch(() => {});
@@ -486,7 +494,7 @@ async function waitForDouyinFeedEntry(page, excludedItemIds = [], timeoutMs = 10
   return null;
 }
 
-async function douyinRecommendationClickTarget(page, entry) {
+async function douyinRecommendationWebUrl(page, entry) {
   const card = page.locator("[data-aweme-id]").nth(entry.index);
   const expectedPath = `/video/${entry.itemId}`;
   const cardLinks = card.locator('a[href*="/video/"]');
@@ -496,46 +504,39 @@ async function douyinRecommendationClickTarget(page, entry) {
     const href = await link.getAttribute("href").catch(() => null);
     if (!href) continue;
     try {
-      const candidate = new URL(href, page.url());
+      const candidate = new URL(validatePlatformUrl("douyin", new URL(href, page.url()).href));
       if (candidate.pathname === expectedPath || candidate.pathname.startsWith(`${expectedPath}/`)) {
-        return link;
+        return `${candidate.origin}${candidate.pathname}`;
       }
     } catch {
       // Ignore malformed page-owned links and continue with structural fallbacks.
     }
   }
-  const pageLink = page.locator(`a[href*="${expectedPath}"]`).first();
-  if ((await pageLink.count()) > 0) return pageLink;
-  return card;
+  // A recommendation card may launch the desktop app. Its machine ID also
+  // identifies the platform's HTTPS detail page, without invoking that handler.
+  return `https://www.douyin.com${expectedPath}`;
 }
 
-export async function openDouyinRecommendationDetail(page, config = {}) {
+export async function openDouyinRecommendationDetail(page, config = {}, shouldStop = async () => false) {
   if (isDetailUrl("douyin", page.url())) {
     return {
       page,
-      entry: await waitForDouyinFeedEntry(page) || await activeDouyinFeedEntry(page),
+      entry: await waitForDouyinFeedEntry(page, [], 10_000, config, shouldStop),
     };
   }
-  const recommendation = await waitForDouyinFeedEntry(page, [], NAVIGATION_TIMEOUT_MS);
-  if (!recommendation || recommendation.index == null) throw new Error("selector_drift");
-  const target = await douyinRecommendationClickTarget(page, recommendation);
+  const recommendation = await waitForDouyinFeedEntry(page, [], NAVIGATION_TIMEOUT_MS, config, shouldStop);
+  if (!recommendation || recommendation.index == null) throw browserStageError("selector_drift", "recommendation_ready");
+  const targetUrl = await douyinRecommendationWebUrl(page, recommendation);
   const detailPath = `/video/${recommendation.itemId}`;
-  const destinationPromise = Promise.race([
-    page.waitForEvent("popup", { timeout: NAVIGATION_TIMEOUT_MS })
-      .then((popup) => popup)
-      .catch(() => null),
-    page.waitForURL((url) => url.hostname.endsWith("douyin.com") && url.pathname.startsWith(detailPath), {
-      timeout: NAVIGATION_TIMEOUT_MS,
-    }).then(() => page).catch(() => null),
-    page.waitForTimeout(NAVIGATION_TIMEOUT_MS).then(() => null).catch(() => null),
-  ]);
-  await target.click({ timeout: NAVIGATION_TIMEOUT_MS });
-  const destination = await destinationPromise;
-  if (!destination) throw new Error("selector_drift");
+  const destination = page;
+  const response = await destination.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT_MS });
+  if (response && [401, 403, 429].includes(response.status())) {
+    throw browserStageError(response.status() === 429 ? "rate_limited" : "challenge_required", "detail_navigation");
+  }
   destination.setDefaultTimeout(NAVIGATION_TIMEOUT_MS);
   await destination.waitForLoadState("domcontentloaded", { timeout: NAVIGATION_TIMEOUT_MS }).catch(() => {});
   await pacingWait(destination, config, 1.25);
-  const accessError = await accessErrorAfterExplicitVisibleWait(destination, "douyin", config);
+  const accessError = await accessErrorAfterExplicitVisibleWait(destination, "douyin", config, shouldStop);
   if (accessError) throw new Error(accessError);
   let currentUrl;
   try {
@@ -549,8 +550,8 @@ export async function openDouyinRecommendationDetail(page, config = {}) {
     currentUrl,
     (await destination.locator('input[type="password"], input[type="tel"]').count()) > 0,
   );
-  if (navigationError) throw new Error(navigationError);
-  const entry = await waitForDouyinFeedEntry(destination);
+  if (navigationError) throw browserStageError(navigationError, "detail_navigation");
+  const entry = await waitForDouyinFeedEntry(destination, [], 10_000, config, shouldStop);
   return {
     page: destination,
     entry: entry || {
@@ -562,7 +563,15 @@ export async function openDouyinRecommendationDetail(page, config = {}) {
   };
 }
 
-export async function advanceDouyinDetailFeed(page, previousItemId, config = {}) {
+export async function advanceDouyinDetailFeed(page, previousItemId, config = {}, shouldStop = async () => false) {
+  if (await shouldStop()) throw browserStageError("collection_stopped", "next_item");
+  const nextControl = page.locator('[data-e2e="video-switch-next-arrow"]').first();
+  if (await nextControl.isVisible() && await nextControl.isEnabled()) {
+    await nextControl.click({ timeout: NAVIGATION_TIMEOUT_MS });
+    const next = await waitForDouyinFeedEntry(page, [previousItemId], 10_000, config, shouldStop);
+    if (next) return next;
+    throw browserStageError("selector_drift", "next_item");
+  }
   const viewport = page.viewportSize() || { width: 1280, height: 900 };
   for (let attempt = 0; attempt < 3; attempt += 1) {
     await page.mouse.move(
@@ -571,11 +580,11 @@ export async function advanceDouyinDetailFeed(page, previousItemId, config = {})
     );
     await page.mouse.wheel(0, Math.round(viewport.height * (0.82 + Math.random() * 0.18)));
     await pacingWait(page, config, 0.75);
-    const next = await waitForDouyinFeedEntry(page, [previousItemId], 4_000);
+    const next = await waitForDouyinFeedEntry(page, [previousItemId], 4_000, config, shouldStop);
     if (next) return next;
     await page.keyboard.press("ArrowDown").catch(() => {});
     await pacingWait(page, config, 0.5);
-    const keyboardNext = await waitForDouyinFeedEntry(page, [previousItemId], 2_000);
+    const keyboardNext = await waitForDouyinFeedEntry(page, [previousItemId], 2_000, config, shouldStop);
     if (keyboardNext) return keyboardNext;
   }
   return null;
@@ -1002,7 +1011,7 @@ async function collectDouyinRecommendationFeed(
   let handled = 0;
   let lastError = null;
   const maxScrolls = config.max_scrolls_per_source || 10;
-  const opened = await openDouyinRecommendationDetail(page, config);
+  const opened = await openDouyinRecommendationDetail(page, config, shouldStop);
   const detailPage = opened.page;
   let current = opened.entry;
   for (let scroll = 0; scroll <= maxScrolls && handled < limit && current; scroll += 1) {
@@ -1031,7 +1040,7 @@ async function collectDouyinRecommendationFeed(
       }
     }
     if (handled >= limit || scroll === maxScrolls || (await shouldStop())) break;
-    current = await advanceDouyinDetailFeed(detailPage, current.itemId, config);
+    current = await advanceDouyinDetailFeed(detailPage, current.itemId, config, shouldStop);
   }
   if (handled === 0 && !(await shouldStop())) throw lastError || new Error("selector_drift");
   return handled;
@@ -1304,14 +1313,21 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
   page.setDefaultTimeout(NAVIGATION_TIMEOUT_MS);
   let handled = 0;
   let lastError = null;
+  let stage = "source_navigation";
   try {
     for (const discoverySource of sourceTargets(platform, config)) {
       const sourceUrl = discoverySource.url;
       if (handled >= limit || (await shouldStop())) break;
-      await page.goto(sourceUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT_MS });
+      stage = "source_navigation";
+      const response = await page.goto(sourceUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT_MS });
+      if (response && [401, 403, 429].includes(response.status())) {
+        throw browserStageError(response.status() === 429 ? "rate_limited" : "challenge_required", stage);
+      }
       await pacingWait(page, config, 1.25);
-      const accessError = await accessErrorAfterExplicitVisibleWait(page, platform, config);
+      stage = "source_access";
+      const accessError = await accessErrorAfterExplicitVisibleWait(page, platform, config, shouldStop);
       if (accessError) throw new Error(accessError);
+      stage = "collect_items";
       if (platform === "douyin" && (config.source_mode || "home_feed") === "home_feed") {
         handled += await collectDouyinRecommendationFeed(
           page,
@@ -1397,6 +1413,11 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
       throw lastError || new Error("selector_drift");
     }
     return { handled };
+  } catch (error) {
+    if (error.message !== "collection_stopped") {
+      await recordBrowserFailure(page, { root, runId, platform, stage, error }).catch(() => {});
+    }
+    throw error;
   } finally {
     await context.close().catch(() => {});
   }

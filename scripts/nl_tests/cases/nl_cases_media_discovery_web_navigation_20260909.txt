@@ -1,0 +1,4 @@
+# Live bounded acceptance; retain results in the skill ledger and AiAPP.
+media_discovery_web_navigation|douyin_https_detail_two_items|optional_skill:media_discovery,provider_mode:live,external_calls:1,execution_mode:real,capability:media_discovery.run_once,requires_tool_call:true|打开浏览器，从抖音推荐进入单条内容，依次采集2条，保留作者文案和封面，完成后停止，不启动持续任务；遇到滑块等待我手动处理。我确认执行。
+media_discovery_web_navigation|collection_status_after_batch|optional_skill:media_discovery,provider_mode:live,external_calls:0,execution_mode:real,capability:media_discovery.status,requires_tool_call:true|检查媒体发现当前是否还在采集，告诉我最近一轮抖音采集结果和已经保存的条数，只查询状态。
+media_discovery_web_navigation|default_silent_one_item|optional_skill:media_discovery,provider_mode:live,external_calls:1,execution_mode:real,capability:media_discovery.run_once,requires_tool_call:true|从抖音推荐采集1条内容，保存文案和封面，在AiAPP中保留。只运行这一批，不启动持续采集，也不需要导出文件。
