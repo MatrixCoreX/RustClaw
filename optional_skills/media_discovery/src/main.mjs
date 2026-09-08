@@ -3,7 +3,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 
-import { browserCapability, collectPlatform } from "./browser.mjs";
+import { browserCapability, collectPlatform, waitForInteractiveLogin } from "./browser.mjs";
 import { sourceUrls, SUPPORTED_PLATFORMS } from "./platforms.mjs";
 import { createBackgroundProgressReporter } from "./progress.mjs";
 import {
@@ -34,6 +34,7 @@ const ERROR_CODES = new Set([
   "invalid_args",
   "login_required",
   "media_element_not_found",
+  "no_items_collected",
   "platform_required",
   "platform_not_configured",
   "platform_unsupported",
@@ -146,6 +147,7 @@ function errorResponse(action, error) {
     "display_unavailable",
     "browser_missing",
     "login_required",
+    "no_items_collected",
     "challenge_required",
     "rate_limited",
     "storage_lock_timeout",
@@ -296,7 +298,7 @@ async function runOnce(request, args, runtime = {}) {
       await cleanupExpiredDiagnostics(root, config.retain_diagnostics_hours);
       const remaining = Math.max(0, config.max_items_per_run - counts.items);
       if (remaining === 0) break;
-      await collectPlatform({
+      const collectionRequest = {
         root,
         runId: run.run_id,
         platform,
@@ -320,7 +322,35 @@ async function runOnce(request, args, runtime = {}) {
           await heartbeat(root, run.run_id, counts);
           progressReporter.emitIfDue();
         },
-      });
+      };
+      const collect = runtime.collectPlatform || collectPlatform;
+      try {
+        await collect(collectionRequest);
+      } catch (error) {
+        const errorCode = String(error?.message || "execution_failed");
+        const interactiveLoginAllowed = args.interactive_login === true
+          && ["login_required", "challenge_required"].includes(errorCode);
+        if (!interactiveLoginAllowed) throw error;
+
+        const visibleCollectionRequest = {
+          ...collectionRequest,
+          config: { ...config, browser_mode: "visible" },
+        };
+        try {
+          await collect(visibleCollectionRequest);
+        } catch (visibleError) {
+          const loginResult = await (runtime.waitForInteractiveLogin || waitForInteractiveLogin)({
+            root,
+            platform,
+            config: visibleCollectionRequest.config,
+            timeoutMs: Math.max(1000, Math.min(10 * 60 * 1000, deadline - Date.now())),
+          });
+          if (!loginResult?.ready) {
+            throw new Error(loginResult?.error_code || String(visibleError?.message || errorCode));
+          }
+          await collect(visibleCollectionRequest);
+        }
+      }
       if (await heartbeat(root, run.run_id, counts)) {
         status = "stopped_after_current_item";
         break;
@@ -342,6 +372,11 @@ async function runOnce(request, args, runtime = {}) {
   } finally {
     clearInterval(leaseHeartbeat);
     progressReporter.stop();
+  }
+  if (status === "completed_batch" && counts.items === 0) {
+    status = "failed";
+    errorCode = "no_items_collected";
+    if (counts.failures === 0) counts.failures = 1;
   }
   run.counts = counts;
   const completed = await finishRun(root, run, status, errorCode);
@@ -433,7 +468,7 @@ export async function handleRequest(request, runtime = {}) {
     if (["disable", "pause", "resume"].includes(action)) return await control(request, args, action);
     if (action === "run_once") return await runOnce(request, args, runtime);
     if (action === "run_enabled_once") {
-      return await runOnce(request, { action: "run_once", scheduled_run: true }, runtime);
+      return await runOnce(request, { action: "run_once", interactive_login: true }, runtime);
     }
     if (action === "status") return await status(request);
     if (action === "stop_current") {

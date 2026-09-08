@@ -46,6 +46,146 @@ test("keyword search preview uses topics as the only structured search input", a
   assert.equal(result.extra.side_effect_applied, false);
 });
 
+test("a completed collection with no items returns a structured retryable error", async (t) => {
+  const context = await requestContext(t);
+  const result = await handleRequest({
+    request_id: "empty-topic-run",
+    args: {
+      action: "run_once",
+      platform: "douyin",
+      source_mode: "topics",
+      topics: ["finance"],
+      browser_mode: "silent",
+    },
+    context,
+  }, {
+    collectPlatform: async () => ({ handled: 0 }),
+  });
+
+  assert.equal(result.status, "error");
+  assert.equal(result.extra.status, "error");
+  assert.equal(result.extra.action, "run_once");
+  assert.equal(result.extra.error_code, "no_items_collected");
+  assert.equal(result.extra.message_key, "skill.media_discovery.no_items_collected");
+  assert.equal(result.extra.retryable, true);
+});
+
+test("the initial enabled run retries a silent challenge in visible mode", async (t) => {
+  const context = await requestContext(t);
+  await handleRequest({
+    args: { action: "enable", platform: "douyin", confirm: true, browser_mode: "silent" },
+    context,
+  });
+
+  let collectionAttempts = 0;
+  let loginSessions = 0;
+  const result = await handleRequest({
+    request_id: "interactive-login-retry",
+    args: { action: "run_enabled_once" },
+    context,
+  }, {
+    collectPlatform: async ({ config, onPage }) => {
+      collectionAttempts += 1;
+      if (collectionAttempts === 1) throw new Error("challenge_required");
+      assert.equal(config.browser_mode, "visible");
+      await onPage({
+        records: [{
+          kind: "video",
+          dedup_key: "douyin:interactive-login:video",
+          platform: "douyin",
+          title: "fixture",
+          video_page_url: "https://www.douyin.com/video/1234567890",
+          discovered_at: "2026-09-08T00:00:00Z",
+        }],
+        temporaryPaths: [],
+      });
+      return { handled: 1 };
+    },
+    waitForInteractiveLogin: async () => {
+      loginSessions += 1;
+      return { ready: true, reason_code: "interactive_access_ready" };
+    },
+  });
+
+  assert.equal(result.status, "ok");
+  assert.equal(result.extra.state, "completed_batch");
+  assert.equal(result.extra.run.counts.items, 1);
+  assert.equal(collectionAttempts, 2);
+  assert.equal(loginSessions, 0);
+});
+
+test("a visible login barrier keeps an interactive session before the verified retry", async (t) => {
+  const context = await requestContext(t);
+  await handleRequest({
+    args: { action: "enable", platform: "douyin", confirm: true, browser_mode: "silent" },
+    context,
+  });
+
+  let collectionAttempts = 0;
+  let loginSessions = 0;
+  const result = await handleRequest({
+    request_id: "interactive-login-wait",
+    args: { action: "run_enabled_once" },
+    context,
+  }, {
+    collectPlatform: async ({ config, onPage }) => {
+      collectionAttempts += 1;
+      if (collectionAttempts === 1) throw new Error("challenge_required");
+      assert.equal(config.browser_mode, "visible");
+      if (collectionAttempts === 2) throw new Error("login_required");
+      await onPage({
+        records: [{
+          kind: "video",
+          dedup_key: "douyin:interactive-login-wait:video",
+          platform: "douyin",
+          title: "fixture",
+          video_page_url: "https://www.douyin.com/video/1234567891",
+          discovered_at: "2026-09-08T00:00:00Z",
+        }],
+        temporaryPaths: [],
+      });
+      return { handled: 1 };
+    },
+    waitForInteractiveLogin: async () => {
+      loginSessions += 1;
+      return { ready: true, reason_code: "interactive_authentication_ready" };
+    },
+  });
+
+  assert.equal(result.status, "ok");
+  assert.equal(result.extra.state, "completed_batch");
+  assert.equal(result.extra.run.counts.items, 1);
+  assert.equal(collectionAttempts, 3);
+  assert.equal(loginSessions, 1);
+});
+
+test("scheduled retries stay silent when platform access requires login", async (t) => {
+  const context = await requestContext(t);
+  await handleRequest({
+    args: { action: "enable", platform: "douyin", confirm: true, browser_mode: "silent" },
+    context,
+  });
+
+  let loginSessions = 0;
+  const result = await handleRequest({
+    request_id: "scheduled-login-required",
+    args: { action: "run_once", platforms: ["douyin"], scheduled_run: true },
+    context,
+  }, {
+    collectPlatform: async () => {
+      throw new Error("challenge_required");
+    },
+    waitForInteractiveLogin: async () => {
+      loginSessions += 1;
+      return { ready: true };
+    },
+  });
+
+  assert.equal(result.status, "ok");
+  assert.equal(result.extra.state, "waiting_for_login");
+  assert.equal(loginSessions, 0);
+});
+
 test("enable, status, disable, and disabled run_once form a durable control loop", async (t) => {
   const context = await requestContext(t);
   const enabled = await handleRequest({
