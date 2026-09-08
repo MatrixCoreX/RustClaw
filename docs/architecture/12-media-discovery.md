@@ -12,7 +12,7 @@ Next: [NNI capability and heartbeat control](13-nni-capability.md)
 `media_discovery` is an optional Skill Store capability for bounded discovery on
 Douyin, Xiaohongshu, and Kuaishou. It runs silently by default and opens a visible browser
 only when the user explicitly requests visible or non-silent operation, or when a persisted
-private profile needs an interactive login. It captures only content that the browser has
+private profile needs manual login or human verification. It captures only content that the browser has
 already rendered and exports ordered CSV records; it does not run OCR or model text review,
 and it downloads neither video binaries nor original image files.
 
@@ -64,16 +64,19 @@ flowchart TD
     E[media_discovery.enable]
     X[media_discovery.disable]
     R[Durable run_enabled_once worker]
-    RB[Bounded collection batch]
-    Z[Random inter-batch rest]
+    RB[Bounded single-platform batch]
+    Z[Per-platform rest or access backoff]
     W[Ephemeral one-shot config]
     T[Structured source targets<br/>home feed, keywords, or seed URLs]
     G[Mark active batch draining]
     P[Finish and commit the current complete post]
     B[Persistent browser profile<br/>silent default or explicit visible]
     Q{Platform access}
-    M[Visible mode: manual verification]
-    K[Silent mode: structured wait and cooldown]
+    M[Temporary manual login or verification window]
+    K[Network restriction or rate limit]
+    PA[Pause platform until user resumes]
+    END[One-shot receipt]
+    MODE{Continuous run?}
     C[Rendered card or media element screenshot]
     O[Author caption and engagement metadata]
     L[Private immutable record ledger]
@@ -81,6 +84,7 @@ flowchart TD
     I[images.csv]
     F[video_covers]
     D[Task artifact delivery]
+    EX[Explicit export_results request]
     H[15-minute machine status heartbeat]
     N[UI task event and unified channel notice]
     AP[AiPP read-only media view]
@@ -92,15 +96,20 @@ flowchart TD
     R --> RB
     RB --> T --> B --> Q
     Q -->|ready| C --> O --> L
-    Q -->|challenge, visible| M --> Q
-    Q -->|challenge, silent| K --> Z
-    L --> Z -->|next enabled batch| R
+    Q -->|login or human verification| M
+    M -->|verified, resume requested mode| Q
+    M -->|closed or timed out| PA
+    Q -->|restricted| K --> MODE
+    L --> MODE
+    MODE -->|yes| Z -->|next due platform| R
+    MODE -->|no| END
     R -->|while active| H --> N
     A -->|stop| X
     X --> G --> P --> L
-    L --> V --> D
-    L --> I --> D
-    L --> F --> D
+    L --> V --> EX
+    L --> I --> EX
+    L --> F --> EX
+    EX --> D
     L --> AP
 ```
 
@@ -114,6 +123,10 @@ and honors graceful stop only between complete posts. A multi-image post is
 therefore committed in full before the browser closes. The collector remains
 separate from the manual `media_download` queue. The durable runtime job starts
 later batches after bounded randomized rests and remains observable and cancellable.
+Each platform has its own batch quota, cooldown, failure count and saved-item
+count in `platform_outcomes`. Due platforms run serially; a full or blocked
+batch on one platform cannot starve another. Feed-card capture only proves
+the card's visible fields, not unseen detail text or an entire gallery.
 
 Status queries distinguish live heartbeat leases from expired records. Expired
 records are returned in `expired_leases`, not as an active batch or worker;
@@ -121,6 +134,9 @@ records are returned in `expired_leases`, not as an active batch or worker;
 collection. The query preserves stored history. A completed one-shot receipt is
 the completion boundary: verification uses status/history reads, and CSV export
 does not require another browser run.
+`run.capture_summary` reports saved captions/covers and only the metric names
+actually observed. Missing counters are unavailable, not zero. CSV is persistent
+local storage; saving it and delivering an exported artifact are separate actions.
 
 While continuous collection remains active, the skill
 emits a structured status heartbeat every 15 minutes. It contains only machine
@@ -132,7 +148,8 @@ duplicate delivery. One-shot collection does not opt into this reporting path.
 
 ## Screenshot and Capture Boundary
 
-`browser_mode=silent` is the default and opens no window. The model may pass
+`browser_mode=silent` is the default for collection. Manual login/verification
+may temporarily open a window, then resume silently. The model may pass
 `browser_mode=visible` only for an explicit visible or non-silent request; runtime never
 matches localized words to choose the mode. The skill screenshots a rendered
 content card or media element already present in the page. It does not fetch the
@@ -151,11 +168,15 @@ bypass access controls, or continue through rate-limit and login barriers.
 Missing desktop sessions and platform barriers produce structured machine
 states for the agent and UI.
 
-An explicit visible run waits for the user to complete a challenge and then
-continues in the same browser. Feed-readiness and manual-verification waits
-honor a stop request. Failure diagnostics retain the machine stage, page
+An explicit visible run waits in its current browser; a silent run may open one
+manual window per batch. Closing or timing out that window pauses the platform
+rather than claiming success or reopening it. Feed-readiness and manual waits
+honor a stop request. A network restriction is not a login/slider request:
+Xiaohongshu code `300012` maps to `network_access_restricted` and a platform-only
+30-minute to 6-hour backoff, without a popup. Failure diagnostics retain the machine stage, page
 origin/path, readiness, and element counts under `diagnostics/<run_id>/` and in
-the run result; they exclude URL queries, page text, credentials, and cookies.
+the run result; only bounded numeric platform error codes may be retained from
+a query. Full query strings, page text, credentials, and cookies are excluded.
 
 Screenshots are preview artifacts only. The skill never sends video covers or
 image screenshots to OCR or model review. Text comes only from the platform's

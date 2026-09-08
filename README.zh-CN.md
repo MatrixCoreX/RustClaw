@@ -830,6 +830,8 @@ overlay tombstone，不改变技能、技能配置或私有数据；重新安装
 并清除 tombstone。禁用或卸载技能仍会使其 Ai APP 不可用。`media_discovery` 是第一个 Ai APP：
 管理员可以查看采集到的图片/视频记录、本地保留的图片下载、预览、来源链接、筛选和游标分页；
 开始或停止采集仍通过 Agent 完成。
+媒体发现默认静默运行，必要时临时弹窗供用户登录或人工验证，各平台独立退避。
+详见[浏览器媒体发现](docs/architecture/12-media-discovery.zh-CN.md)。
 
 ```mermaid
 flowchart LR
