@@ -82,11 +82,14 @@ test("renders collected media in two compact desktop columns", () => {
   assert.match(source, /max-h-36 min-h-24/);
 });
 
-test("downloads collected images through the existing authenticated preview endpoint", () => {
+test("opens both media renderers in a shared viewer before authenticated download", () => {
   const source = readFileSync(new URL("../components/AippPage.tsx", import.meta.url), "utf8");
   assert.match(source, /items\/\$\{item\.global_sequence\}\/preview/);
-  assert.match(source, /anchor\.download = `media-/);
-  assert.match(source, /下载图片/);
+  assert.match(source, /filename: `media-/);
+  assert.match(source, /放大图片/);
+  assert.match(source, /if \(open && artifact.kind === "image"\)/);
+  assert.equal((source.match(/<AippImageViewer/g) || []).length, 2);
+  assert.doesNotMatch(source, /onClick=\{\(\) => void downloadImage\(\)\}/);
 });
 
 test("renders an installed AiPP as an application launcher card", () => {
