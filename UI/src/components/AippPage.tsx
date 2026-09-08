@@ -43,12 +43,104 @@ type Translate = (zh: string, en: string) => string;
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
 
 const SELECTED_AIPP_STORAGE_KEY = appStorageKey("monitor.aipp.selectedSkill");
+const AIPP_CATALOG_CACHE_KEY = appStorageKey("monitor.aipp.catalog.v1");
+const AIPP_CATALOG_CACHE_TTL_MS = 5 * 60_000;
+const AIPP_CATALOG_CACHE_MAX_BYTES = 256 * 1024;
 const AIPP_AUTO_REFRESH_INTERVAL_MS = 10_000;
 const AIPP_BRIDGE_MAX_IN_FLIGHT = 4;
 const AIPP_BRIDGE_MAX_ARGS_BYTES = 64 * 1024;
 
 export function readSelectedAipp(storage: Pick<Storage, "getItem"> | undefined): string {
   return storage?.getItem(SELECTED_AIPP_STORAGE_KEY)?.trim() || "";
+}
+
+type AippCatalogStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+function isCachedAippCatalogItem(value: unknown): value is AippCatalogItem {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<AippCatalogItem>;
+  const localizedCopyIsValid = (copy: unknown) => (
+    Boolean(copy)
+    && typeof copy === "object"
+    && Object.entries(copy as Record<string, unknown>).every(([locale, text]) => (
+      locale.length > 0
+      && locale.length <= 32
+      && typeof text === "string"
+      && text.length <= 4_096
+    ))
+  );
+  return (
+    typeof item.skill_name === "string"
+    && item.skill_name.length > 0
+    && item.skill_name.length <= 128
+    && typeof item.package_version === "string"
+    && item.package_version.length <= 128
+    && typeof item.renderer === "string"
+    && item.renderer.length <= 128
+    && typeof item.data_contract === "string"
+    && item.data_contract.length <= 128
+    && typeof item.icon === "string"
+    && item.icon.length <= 128
+    && typeof item.default_locale === "string"
+    && item.default_locale.length <= 32
+    && localizedCopyIsValid(item.titles)
+    && localizedCopyIsValid(item.descriptions)
+    && typeof item.installed === "boolean"
+    && (item.entrypoint == null || (typeof item.entrypoint === "string" && item.entrypoint.length <= 1_024))
+    && Array.isArray(item.bridge_capabilities)
+    && item.bridge_capabilities.length <= 128
+    && item.bridge_capabilities.every((capability) => typeof capability === "string" && capability.length <= 256)
+    && (item.task_channel_scope == null || (typeof item.task_channel_scope === "string" && item.task_channel_scope.length <= 64))
+  );
+}
+
+export function readCachedAippCatalog(
+  storage: AippCatalogStorage | undefined,
+  nowMs = Date.now(),
+): AippCatalogItem[] {
+  if (!storage) return [];
+  try {
+    const raw = storage.getItem(AIPP_CATALOG_CACHE_KEY);
+    if (!raw || raw.length > AIPP_CATALOG_CACHE_MAX_BYTES) return [];
+    const cached = JSON.parse(raw) as {
+      schema_version?: unknown;
+      cached_at_ms?: unknown;
+      apps?: unknown;
+    };
+    if (
+      cached.schema_version !== 1
+      || typeof cached.cached_at_ms !== "number"
+      || cached.cached_at_ms > nowMs
+      || nowMs - cached.cached_at_ms > AIPP_CATALOG_CACHE_TTL_MS
+      || !Array.isArray(cached.apps)
+      || cached.apps.length > 256
+      || !cached.apps.every(isCachedAippCatalogItem)
+    ) {
+      storage.removeItem(AIPP_CATALOG_CACHE_KEY);
+      return [];
+    }
+    return cached.apps;
+  } catch {
+    storage.removeItem(AIPP_CATALOG_CACHE_KEY);
+    return [];
+  }
+}
+
+export function writeCachedAippCatalog(
+  storage: AippCatalogStorage | undefined,
+  apps: AippCatalogItem[],
+  nowMs = Date.now(),
+): void {
+  if (!storage || apps.length > 256 || !apps.every(isCachedAippCatalogItem)) return;
+  try {
+    storage.setItem(AIPP_CATALOG_CACHE_KEY, JSON.stringify({
+      schema_version: 1,
+      cached_at_ms: nowMs,
+      apps,
+    }));
+  } catch {
+    // Storage may be unavailable or full; the live catalog remains authoritative.
+  }
 }
 
 export interface AippPageProps {
@@ -686,11 +778,14 @@ export function AippMediaItemCard({
 
 export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: AippPageProps) {
   const { confirm } = useUiDialog();
-  const [catalog, setCatalog] = useState<AippCatalogItem[]>([]);
+  const initialCatalog = useRef(
+    readCachedAippCatalog(typeof window === "undefined" ? undefined : window.sessionStorage),
+  );
+  const [catalog, setCatalog] = useState<AippCatalogItem[]>(initialCatalog.current);
   const [selectedSkill, setSelectedSkill] = useState(() =>
     readSelectedAipp(typeof window === "undefined" ? undefined : window.localStorage),
   );
-  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [catalogLoading, setCatalogLoading] = useState(initialCatalog.current.length === 0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState<AippMediaPageResponse | null>(null);
@@ -719,9 +814,11 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
     ? (["wechat", "telegram", "whatsapp", "feishu", "lark"] as const)
     : (["ui", "wechat", "telegram", "whatsapp", "feishu", "lark"] as const);
 
-  const fetchCatalog = useCallback(async () => {
-    setCatalogLoading(true);
-    setError(null);
+  const fetchCatalog = useCallback(async (silent = false) => {
+    if (!silent) {
+      setCatalogLoading(true);
+      setError(null);
+    }
     try {
       const response = await apiFetchRef.current("/v1/aipps");
       const body = (await response.json()) as ApiResponse<AippCatalogResponse>;
@@ -729,15 +826,21 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
         throw new Error(body.error || `aipp_catalog_http_${response.status}`);
       }
       setCatalog(body.data.apps);
+      writeCachedAippCatalog(
+        typeof window === "undefined" ? undefined : window.sessionStorage,
+        body.data.apps,
+      );
       setSelectedSkill((current) =>
         body.data?.apps.some((app) => app.skill_name === current && app.installed)
           ? current
           : "",
       );
     } catch (cause) {
-      setError(formatUiError(cause, translateRef.current, "AiAPP 列表读取失败。", "Could not load the AiAPP catalog."));
+      if (!silent) {
+        setError(formatUiError(cause, translateRef.current, "AiAPP 列表读取失败。", "Could not load the AiAPP catalog."));
+      }
     } finally {
-      setCatalogLoading(false);
+      if (!silent) setCatalogLoading(false);
     }
   }, []);
 
@@ -826,7 +929,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
   }, [activityChannel, activityStatus, cursor, kind, platform, searchQuery, selectedApp?.installed, selectedApp?.renderer, selectedSkill, sortOrder]);
 
   useEffect(() => {
-    void fetchCatalog();
+    void fetchCatalog(initialCatalog.current.length > 0);
   }, [fetchCatalog]);
 
   useEffect(() => {

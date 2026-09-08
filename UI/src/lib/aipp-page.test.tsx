@@ -8,7 +8,9 @@ import {
   AippMediaItemCard,
   AippTaskActivityCard,
   localizedAippCopy,
+  readCachedAippCatalog,
   readSelectedAipp,
+  writeCachedAippCatalog,
 } from "../components/AippPage";
 import type { AippCatalogItem, AippMediaItem, AippTaskActivityItem } from "../types/api";
 
@@ -28,6 +30,38 @@ test("restores the selected AiAPP after a browser refresh", () => {
   };
   assert.equal(readSelectedAipp(storage), "media_discovery");
   assert.equal(readSelectedAipp(undefined), "");
+});
+
+test("reuses only a fresh validated AiAPP catalog while refreshing in the background", () => {
+  const values = new Map<string, string>();
+  const storage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
+  };
+  const app: AippCatalogItem = {
+    skill_name: "example",
+    package_version: "1.0.0",
+    renderer: "collection_feed_v1",
+    data_contract: "media_collection_v1",
+    icon: "gallery_vertical_end",
+    default_locale: "en",
+    titles: { en: "Example" },
+    descriptions: { en: "Example app" },
+    installed: true,
+    entrypoint: null,
+    bridge_capabilities: [],
+    task_channel_scope: null,
+  };
+
+  writeCachedAippCatalog(storage, [app], 1_000);
+  assert.deepEqual(readCachedAippCatalog(storage, 1_001), [app]);
+  assert.deepEqual(readCachedAippCatalog(storage, 1_000 + 5 * 60_000 + 1), []);
+
+  writeCachedAippCatalog(storage, [app], 2_000);
+  const key = [...values.keys()][0];
+  values.set(key, JSON.stringify({ schema_version: 1, cached_at_ms: 2_000, apps: [{ ...app, installed: "yes" }] }));
+  assert.deepEqual(readCachedAippCatalog(storage, 2_001), []);
 });
 
 test("keeps media collection automatically refreshed and sortable by collection time", () => {
