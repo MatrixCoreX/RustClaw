@@ -2,12 +2,14 @@ import { randomUUID } from "node:crypto";
 
 const PLATFORM_SPECS = Object.freeze({
   douyin: {
+    defaultBrowserMode: "silent",
     homeUrl: "https://www.douyin.com/",
     hosts: ["douyin.com"],
     detailPath: /^\/(?:video|note)\/[A-Za-z0-9_-]+(?:\/|$)/u,
     topicUrl: (topic) => `https://www.douyin.com/search/${encodeURIComponent(topic)}`,
   },
   xiaohongshu: {
+    defaultBrowserMode: "visible",
     homeUrl: "https://www.xiaohongshu.com/explore",
     hosts: ["xiaohongshu.com"],
     detailPath: /^\/(?:explore|discovery\/item)\/[A-Za-z0-9_-]+(?:\/|$)/u,
@@ -15,6 +17,7 @@ const PLATFORM_SPECS = Object.freeze({
       `https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(topic)}`,
   },
   kuaishou: {
+    defaultBrowserMode: "silent",
     homeUrl: "https://www.kuaishou.com/brilliant",
     hosts: ["kuaishou.com"],
     detailPath: /^\/short-video\/[A-Za-z0-9_-]{8,}(?:\/|$)/u,
@@ -24,6 +27,12 @@ const PLATFORM_SPECS = Object.freeze({
 });
 
 export const SUPPORTED_PLATFORMS = Object.freeze(Object.keys(PLATFORM_SPECS));
+
+export function resolveBrowserMode(platform, mode) {
+  const resolved = mode ?? (platform ? platformSpec(platform).defaultBrowserMode : "silent");
+  if (!["visible", "silent"].includes(resolved)) throw new Error("browser_mode_invalid");
+  return resolved;
+}
 
 export function platformSpec(platform) {
   const spec = PLATFORM_SPECS[platform];

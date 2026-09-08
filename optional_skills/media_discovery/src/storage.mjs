@@ -3,6 +3,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 
 import { exportRecordCsv, writeAtomic } from "./csv.mjs";
+import { resolveBrowserMode } from "./platforms.mjs";
 
 const STATE_SCHEMA_VERSION = 1;
 const LOCK_RETRY_MS = 40;
@@ -142,7 +143,7 @@ export async function readStatusState(root) {
   return { ...state, expired_leases: expiredLeases };
 }
 
-export async function configurePlatforms(root, platforms, config) {
+export async function configurePlatforms(root, platforms, configs) {
   return withLock(root, async () => {
     const state = await readStateUnlocked(root);
     if (backgroundWorkerIsFresh(state.background_worker)) {
@@ -154,6 +155,8 @@ export async function configurePlatforms(root, platforms, config) {
     }
     const now = new Date().toISOString();
     for (const platform of platforms) {
+      const config = configs[platform];
+      if (!config) throw new Error("platform_not_configured");
       state.platforms[platform] = {
         ...(state.platforms[platform] || {}),
         enabled: true,
@@ -292,10 +295,10 @@ export async function beginRun(root, requestedPlatforms, options = {}) {
     const platformConfigs = Object.fromEntries(platforms.map((platform) => {
       const saved = state.platforms[platform]?.config;
       const config = directOneShot && (options.config_explicit || !saved)
-        ? options.config
+        ? options.platform_configs?.[platform]
         : saved;
       if (!config) throw new Error("platform_not_configured");
-      return [platform, structuredClone(config)];
+      return [platform, { ...structuredClone(config), browser_mode: resolveBrowserMode(platform, config.browser_mode) }];
     }));
     const run = {
       run_id: `run_${randomUUID()}`,
@@ -303,7 +306,7 @@ export async function beginRun(root, requestedPlatforms, options = {}) {
       run_mode: directOneShot ? "one_shot" : options.mode || "enabled_manual",
       platform_configs: platformConfigs,
       browser_modes: Object.fromEntries(
-        platforms.map((platform) => [platform, platformConfigs[platform].browser_mode || "silent"]),
+        platforms.map((platform) => [platform, platformConfigs[platform].browser_mode]),
       ),
       started_at: new Date().toISOString(),
       heartbeat_at: new Date().toISOString(),

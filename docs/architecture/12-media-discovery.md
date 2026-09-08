@@ -10,9 +10,10 @@ Next: [NNI capability and heartbeat control](13-nni-capability.md)
 <!-- ai-learning-navigation:end -->
 
 `media_discovery` is an optional Skill Store capability for bounded discovery on
-Douyin, Xiaohongshu, and Kuaishou. It runs silently by default and opens a visible browser
-only when the user explicitly requests visible or non-silent operation, or when a persisted
-private profile needs manual login or human verification. It captures only content that the browser has
+Douyin, Xiaohongshu, and Kuaishou. Xiaohongshu defaults to a visible browser;
+Douyin and Kuaishou default to silent mode. Explicit mode preferences take precedence.
+Silent runs may open a window when the private profile needs manual login or human verification.
+It captures only content that the browser has
 already rendered and exports ordered CSV records; it does not run OCR or model text review,
 and it downloads neither video binaries nor original image files.
 
@@ -70,7 +71,7 @@ flowchart TD
     T[Structured source targets<br/>home feed, keywords, or seed URLs]
     G[Mark active batch draining]
     P[Finish and commit the current complete post]
-    B[Persistent browser profile<br/>silent default or explicit visible]
+    B[Persistent browser profile<br/>Xiaohongshu visible / others silent]
     Q{Platform access}
     M[Temporary manual login or verification window]
     K[Network restriction or rate limit]
@@ -148,10 +149,11 @@ duplicate delivery. One-shot collection does not opt into this reporting path.
 
 ## Screenshot and Capture Boundary
 
-`browser_mode=silent` is the default for collection. Manual login/verification
-may temporarily open a window, then resume silently. The model may pass
-`browser_mode=visible` only for an explicit visible or non-silent request; runtime never
-matches localized words to choose the mode. The skill screenshots a rendered
+When the user omits a mode preference, the model omits `browser_mode`: Xiaohongshu
+uses `visible`, while Douyin/Kuaishou use `silent`. Explicit mode overrides apply
+to all selected platforms; resume keeps saved settings. Manual login/verification
+may temporarily open a window for silent runs. Runtime never matches localized
+words to choose a mode. The skill screenshots a rendered
 content card or media element already present in the page. It does not fetch the
 element's CDN URL to obtain a higher-resolution copy. For video items, the first
 stable frame observed in the rendered video, poster, or card is copied to
@@ -168,7 +170,7 @@ bypass access controls, or continue through rate-limit and login barriers.
 Missing desktop sessions and platform barriers produce structured machine
 states for the agent and UI.
 
-An explicit visible run waits in its current browser; a silent run may open one
+A visible run waits in its current browser; a silent run may open one
 manual window per batch. Closing or timing out that window pauses the platform
 rather than claiming success or reopening it. Feed-readiness and manual waits
 honor a stop request. A network restriction is not a login/slider request:

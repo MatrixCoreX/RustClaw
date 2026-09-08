@@ -30,7 +30,7 @@ for (const barrier of [null, "challenge_required", "network_access_restricted", 
       collectPlatform: async ({ platform, limit, config, onPage }) => {
         visited.push(platform);
         assert.equal(limit, 1);
-        assert.equal(config.browser_mode, "silent");
+        assert.equal(config.browser_mode, platform === "xiaohongshu" ? "visible" : "silent");
         if (platform === "douyin" && barrier) throw new Error(barrier);
         await onPage({
           records: [{ kind: "video", dedup_key: `${platform}:fixture:video`, platform,

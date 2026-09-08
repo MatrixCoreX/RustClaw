@@ -327,7 +327,7 @@ test("status distinguishes live leases from expired records without rewriting st
   const context = await requestContext(t);
   const storage = await import("../src/storage.mjs");
   const root = context.skill_storage.directory_path;
-  await storage.configurePlatforms(root, ["douyin"], normalizedConfig({}));
+  await storage.configurePlatforms(root, ["douyin"], { douyin: normalizedConfig({}) });
   const worker = await storage.beginBackgroundWorker(root);
   const { run } = await storage.beginRun(root, ["douyin"]);
   const live = await handleRequest({ args: { action: "status" }, context });

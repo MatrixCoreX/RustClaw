@@ -6,9 +6,9 @@ Run explicitly requested batch, feed, keyword, or continuous background
 browser collection for Douyin, Xiaohongshu, and Kuaishou. A lone copied share payload or
 URL whose content should be downloaded and returned now belongs to
 `media_download.download`, even when it is used as a `seed_urls` input shape;
-this skill does not provide immediate single-post media delivery. The default
-`browser_mode=silent` runs without a browser window; `browser_mode=visible`
-opens one when the user's request requires visible or non-silent browsing.
+this skill does not provide immediate single-post media delivery. Xiaohongshu
+defaults to `browser_mode=visible`; Douyin and Kuaishou default to `silent`.
+An explicit browser mode overrides the platform default.
 Login and human-verification barriers are the exception: silent runs may open
 one temporary browser for the user to complete those steps, then resume silently.
 It never solves a slider or bypasses a platform restriction automatically.
@@ -145,9 +145,10 @@ does not enable these periodic notices.
 - When the user asks to search one or more keywords before collecting, pass
   `source_mode=topics` and place those exact search terms in `topics[]`. Do not
   invent a second keyword parameter or translate the terms unless requested.
-- Omit `browser_mode` or pass `silent` by default. Pass `visible` only when the
-  user explicitly requests a browser window or non-silent operation. Runtime must consume this enum and must
-  not match localized words to select a mode.
+- Omit `browser_mode` when unspecified: Xiaohongshu uses `visible`, Douyin and
+  Kuaishou use `silent`, including mixed-platform requests. Pass the matching
+  enum for an explicit user preference; never infer a global silent default.
+  Runtime consumes structured fields, not localized words, to select a mode.
 - Both bounded and continuous silent runs may temporarily open one browser
   for manual login or human verification. Do not change `browser_mode` to
   visible for this exception. Closing or timing out that window returns
@@ -188,7 +189,7 @@ Examples of equivalent intent (documentation examples, not runtime matchers):
 | `max_scrolls_per_source` | no | 1..100, default 10. |
 | `rest_min_seconds` | no | Minimum random rest between continuous batches, 5..3600, default 180. |
 | `rest_max_seconds` | no | Maximum random rest between continuous batches, 5..7200, default 420 and never below the minimum. |
-| `browser_mode` | no | `silent` (default), or `visible` after an explicit visible/non-silent request. Browser visibility is a user-selected execution constraint: every planner action that accepts this field must emit `visible` when visibility was requested, while omission is valid only when the user expressed no browser-mode preference. |
+| `browser_mode` | no | Omission uses per-platform defaults: Xiaohongshu `visible`, Douyin/Kuaishou `silent`. An explicit `visible` or `silent` overrides the default for all selected platforms. Preview returns `platform_configs`, plus `config` for a single platform. Resume retains the saved mode. |
 | `pacing_min_delay_ms` | no | Lower interaction-delay bound, 200..5000, default 1000. |
 | `pacing_max_delay_ms` | no | Upper interaction-delay bound, 200..8000, default 2800 and never below the minimum. |
 | `confirm` | enable/clear_results | Must be true after runtime approval. |
@@ -267,9 +268,9 @@ remote URLs.
 
 ## Browser and Capture Rules
 
-- Browser mode defaults to silent. `visible` is accepted only as an explicit
-  structured planner argument; when selected, a missing desktop session returns
-  `display_unavailable` instead of changing the requested mode.
+- Browser defaults are platform-specific; an explicit mode takes precedence.
+  A visible run without a desktop returns `display_unavailable`, never silently
+  switching modes. Existing saved modes are preserved when resuming.
 - A silent bounded or background run may open the skill-owned persistent browser
   profile when the platform reports `login_required` or `challenge_required`
   and a desktop is available. This window is for manual sign-in/verification
@@ -277,7 +278,7 @@ remote URLs.
   retries collection in the originally requested silent mode. Closing or
   timing out the window pauses that platform, preventing repeated popups.
   Network restrictions, selector drift, rate limits, and ordinary collection
-  failures never open an interactive browser. An explicitly visible run keeps its
+  failures never open an interactive browser. A visible run keeps its
   window open while a user completes the platform challenge, then continues in
   that same run. Verification and feed-readiness waits observe graceful stop.
   The same private profile is reused after login.
