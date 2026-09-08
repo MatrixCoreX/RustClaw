@@ -26,6 +26,7 @@ for (const barrier of [null, "challenge_required", "network_access_restricted", 
     }, {
       maxContinuousCycles: 3,
       sleep: async () => {},
+      waitForInteractiveLogin: async () => ({ ready: false, error_code: barrier }),
       collectPlatform: async ({ platform, limit, config, onPage }) => {
         visited.push(platform);
         assert.equal(limit, 1);

@@ -87,7 +87,7 @@ test("a completed collection with no items returns a structured retryable error"
   assert.equal(result.extra.retryable, true);
 });
 
-test("a silent challenge never opens an interactive browser", async (t) => {
+test("a silent challenge opens one manual verification session per batch", async (t) => {
   const context = await requestContext(t);
   await handleRequest({
     args: { action: "enable", platform: "douyin", confirm: true, browser_mode: "silent" },
@@ -116,7 +116,7 @@ test("a silent challenge never opens an interactive browser", async (t) => {
   assert.equal(result.extra.state, "stopped");
   assert.equal(result.extra.background_worker.counts.items, 0);
   assert.equal(result.extra.background_worker.last_error_code, "challenge_required");
-  assert.equal(loginSessions, 0);
+  assert.equal(loginSessions, 1);
 });
 
 test("a silent login barrier opens one login session and retries silently", async (t) => {
@@ -165,7 +165,7 @@ test("a silent login barrier opens one login session and retries silently", asyn
   assert.equal(loginSessions, 1);
 });
 
-test("one-shot retries stay silent when platform access requires login", async (t) => {
+test("one-shot challenge permits a manual popup and resumes the original silent mode", async (t) => {
   const context = await requestContext(t);
   await handleRequest({
     args: { action: "enable", platform: "douyin", confirm: true, browser_mode: "silent" },
@@ -189,7 +189,7 @@ test("one-shot retries stay silent when platform access requires login", async (
 
   assert.equal(result.status, "ok");
   assert.equal(result.extra.state, "waiting_for_challenge_resolution");
-  assert.equal(loginSessions, 0);
+  assert.equal(loginSessions, 1);
 });
 
 test("enable, status, disable, and disabled run_once form a durable control loop", async (t) => {
