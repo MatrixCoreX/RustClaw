@@ -986,23 +986,6 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
         </div>
       </header>
 
-      {catalog.filter((app) => app.installed).length > 1 ? (
-        <div className="flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="AiAPP">
-          {catalog.filter((app) => app.installed).map((app) => (
-            <button
-              key={app.skill_name}
-              type="button"
-              role="tab"
-              aria-selected={selectedSkill === app.skill_name}
-              className={selectedSkill === app.skill_name ? "theme-accent-btn shrink-0 px-3 py-2 text-sm" : "theme-secondary-btn shrink-0 px-3 py-2 text-sm"}
-              onClick={() => setSelectedSkill(app.skill_name)}
-            >
-              {localizedAippCopy(app.titles, lang, app.default_locale)}
-            </button>
-          ))}
-        </div>
-      ) : null}
-
       {selectedApp.renderer === "sandbox_bundle_v1" ? (
         <SandboxedAipp app={selectedApp} lang={lang} apiFetch={apiFetch} />
       ) : null}
