@@ -124,7 +124,7 @@ does not enable these periodic notices.
 | `max_scrolls_per_source` | no | 1..100, default 10. |
 | `interval_minutes` | no | 10..1440, default 60. |
 | `recognition_mode` | no | `ocr_reviewed` (default), `local_ocr`, or `metadata_only`. |
-| `browser_mode` | no | `silent` (default), or `visible` after an explicit visible/non-silent request. |
+| `browser_mode` | no | `silent` (default), or `visible` after an explicit visible/non-silent request. Browser visibility is a user-selected execution constraint: every planner action that accepts this field must emit `visible` when visibility was requested, while omission is valid only when the user expressed no browser-mode preference. |
 | `pacing_min_delay_ms` | no | Lower interaction-delay bound, 200..5000, default 700. |
 | `pacing_max_delay_ms` | no | Upper interaction-delay bound, 200..8000, default 1800 and never below the minimum. |
 | `confirm` | enable/clear_results | Must be true after runtime approval. |
@@ -136,6 +136,7 @@ does not enable these periodic notices.
 Errors use `extra.{schema_version,source_skill,status,error_code,message_key,retryable}`.
 Stable examples include `display_unavailable`, `browser_missing`,
 `login_required`, `challenge_required`, `rate_limited`, `selector_drift`,
+`no_items_collected`,
 `platform_unsupported`, `source_scope_empty`, `run_already_active`,
 `collection_already_enabled`, and `storage_lock_timeout`.
 `error_text` is a human fallback and must never drive routing or retry logic.
@@ -150,7 +151,7 @@ Stable examples include `display_unavailable`, `browser_missing`,
 ```
 
 ```json
-{"action":"run_once","platform":"douyin","source_mode":"topics","topics":["AI agent"],"max_items_per_run":5}
+{"action":"run_once","platform":"douyin","source_mode":"topics","topics":["AI agent"],"max_items_per_run":5,"browser_mode":"visible"}
 ```
 
 ```json

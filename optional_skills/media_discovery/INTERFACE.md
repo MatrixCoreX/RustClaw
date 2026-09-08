@@ -144,7 +144,7 @@ Examples of equivalent intent (documentation examples, not runtime matchers):
 | `max_scrolls_per_source` | no | 1..100, default 10. |
 | `interval_minutes` | no | 10..1440, default 60. |
 | `recognition_mode` | no | `ocr_reviewed` (default), `local_ocr`, or `metadata_only`. |
-| `browser_mode` | no | `silent` (default), or `visible` after an explicit visible/non-silent request. |
+| `browser_mode` | no | `silent` (default), or `visible` after an explicit visible/non-silent request. Browser visibility is a user-selected execution constraint: every planner action that accepts this field must emit `visible` when visibility was requested, while omission is valid only when the user expressed no browser-mode preference. |
 | `pacing_min_delay_ms` | no | Lower interaction-delay bound, 200..5000, default 700. |
 | `pacing_max_delay_ms` | no | Upper interaction-delay bound, 200..8000, default 1800 and never below the minimum. |
 | `confirm` | enable/clear_results | Must be true after runtime approval. |
@@ -222,6 +222,15 @@ downloads without proxying arbitrary remote URLs.
 - Browser mode defaults to silent. `visible` is accepted only as an explicit
   structured planner argument; when selected, a missing desktop session returns
   `display_unavailable` instead of changing the requested mode.
+- The first bounded run after enabling continuous collection may open the
+  skill-owned persistent browser profile when a silent attempt reports
+  `login_required` or `challenge_required` and a desktop is available. The
+  skill first retries the same bounded collection in visible mode. If platform
+  access still requires authentication, it keeps that skill-owned profile open
+  until the platform authentication state is present or the user closes the
+  window, then verifies access by retrying the collection. Later
+  scheduler-triggered runs stay silent; they report `waiting_for_login` instead
+  of repeatedly opening a window.
 - The skill uses one private persistent browser profile per platform. Later
   runs reuse that profile's cookies, local storage, and browser cache; clearing
   collected results preserves this login/session state. The skill does not read
@@ -255,6 +264,7 @@ downloads without proxying arbitrary remote URLs.
 Errors use `extra.{schema_version,source_skill,status,error_code,message_key,retryable}`.
 Stable examples include `display_unavailable`, `browser_missing`,
 `login_required`, `challenge_required`, `rate_limited`, `selector_drift`,
+`no_items_collected`,
 `platform_unsupported`, `source_scope_empty`, `run_already_active`,
 `collection_already_enabled`, and `storage_lock_timeout`.
 `error_text` is a human fallback and must never drive routing or retry logic.
@@ -270,7 +280,7 @@ Stable examples include `display_unavailable`, `browser_missing`,
 ```
 
 ```json
-{"action":"run_once","platform":"douyin","source_mode":"topics","topics":["AI agent"],"max_items_per_run":5}
+{"action":"run_once","platform":"douyin","source_mode":"topics","topics":["AI agent"],"max_items_per_run":5,"browser_mode":"visible"}
 ```
 
 ```json

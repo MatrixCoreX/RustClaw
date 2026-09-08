@@ -13,6 +13,14 @@ import { recognizeScreenshot } from "./recognition.mjs";
 
 const NAVIGATION_TIMEOUT_MS = 45_000;
 const SCREENSHOT_MIN_BYTES = 512;
+const INTERACTIVE_LOGIN_TIMEOUT_MS = 10 * 60 * 1000;
+const INTERACTIVE_LOGIN_POLL_MS = 1000;
+
+const PLATFORM_AUTH_COOKIE_NAMES = Object.freeze({
+  douyin: new Set(["sessionid", "sessionid_ss", "sid_guard", "uid_tt", "uid_tt_ss"]),
+  xiaohongshu: new Set(["web_session"]),
+  kuaishou: new Set(["kuaishou.server.web_st", "userId"]),
+});
 
 const ENGAGEMENT_SELECTORS = Object.freeze({
   douyin: Object.freeze({
@@ -300,6 +308,69 @@ async function currentPlatformAccessError(page, platform) {
     frames.map((frame) => frame.getAttribute("src") || ""),
   );
   return platformAccessError(platform, page.url(), captchaFrameUrls);
+}
+
+async function platformAuthenticationPresent(context, platform) {
+  const expected = PLATFORM_AUTH_COOKIE_NAMES[platform];
+  if (!expected) return false;
+  const cookies = await context.cookies().catch(() => []);
+  return cookies.some((cookie) => expected.has(cookie.name) && Boolean(cookie.value));
+}
+
+export async function waitForInteractiveLogin({
+  root,
+  platform,
+  config,
+  timeoutMs = INTERACTIVE_LOGIN_TIMEOUT_MS,
+}) {
+  if (!guiAvailable()) return { ready: false, error_code: "display_unavailable" };
+  const executablePath = await existingExecutable();
+  if (!executablePath) return { ready: false, error_code: "browser_missing" };
+
+  const { chromium } = await import("playwright");
+  const profile = path.join(root, "browser-profile", platform);
+  await fs.mkdir(profile, { recursive: true });
+  const context = await chromium.launchPersistentContext(profile, {
+    executablePath,
+    headless: false,
+    viewport: { width: 1280, height: 900 },
+    args: process.platform === "linux" && process.env.WAYLAND_DISPLAY
+      ? ["--ozone-platform=wayland"]
+      : [],
+  });
+  const page = context.pages()[0] || (await context.newPage());
+  page.setDefaultTimeout(NAVIGATION_TIMEOUT_MS);
+  const loginTarget = sourceTargets(platform, {
+    ...config,
+    source_mode: "home_feed",
+    topics: [],
+    seed_urls: [],
+  })[0]?.url;
+  const deadline = Date.now() + Math.max(INTERACTIVE_LOGIN_POLL_MS, timeoutMs);
+
+  try {
+    if (loginTarget) {
+      await page.goto(loginTarget, {
+        waitUntil: "domcontentloaded",
+        timeout: NAVIGATION_TIMEOUT_MS,
+      }).catch(() => {});
+    }
+    while (Date.now() < deadline) {
+      if (page.isClosed()) {
+        return { ready: true, reason_code: "interactive_browser_closed" };
+      }
+      if (await platformAuthenticationPresent(context, platform)) {
+        return { ready: true, reason_code: "interactive_authentication_ready" };
+      }
+      const waited = await page.waitForTimeout(INTERACTIVE_LOGIN_POLL_MS)
+        .then(() => true)
+        .catch(() => false);
+      if (!waited) return { ready: true, reason_code: "interactive_browser_closed" };
+    }
+    return { ready: false, error_code: "login_required" };
+  } finally {
+    await context.close().catch(() => {});
+  }
 }
 
 export async function discoverCandidates(page, platform, sourceUrl, maxScrolls, limit, shouldStop, config) {
