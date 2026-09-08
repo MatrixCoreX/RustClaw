@@ -296,6 +296,10 @@ remote URLs.
   if the login modal appears during collection; silent runs report the barrier
   through the existing handoff flow. Occlusion sampling is not a guarantee
   against every transient overlay or future platform layout change.
+- Image capture waits up to ten seconds for the browser-loaded image to finish,
+  without issuing its own image request. Broken or still-unloaded media returns
+  `media_not_ready`, not a placeholder preview. A visible manual verification
+  requires two consecutive clear observations before collection resumes.
 - A visible, unobscured platform video frame is the preferred cover; a
   platform-specific rendered poster is the fallback. If the page already
   autoplayed, the captured frame is not represented as the encoded timeline's
@@ -312,7 +316,7 @@ remote URLs.
 Errors use `extra.{schema_version,source_skill,status,error_code,message_key,retryable}`.
 Stable examples include `display_unavailable`, `browser_missing`,
 `login_required`, `challenge_required`, `network_access_restricted`, `rate_limited`, `selector_drift`,
-`no_items_collected`, `screenshot_obscured`,
+`no_items_collected`, `screenshot_obscured`, `media_not_ready`,
 `platform_unsupported`, `source_scope_empty`, `run_already_active`,
 `collection_already_enabled`, and `storage_lock_timeout`.
 `error_text` is a human fallback and must never drive routing or retry logic.

@@ -154,7 +154,7 @@ test("only an explicitly visible run waits for a machine challenge to clear", as
     browser_mode: "visible",
     max_run_minutes: 5,
   }), null);
-  assert.equal(waits, 1);
+  assert.equal(waits, 2);
 
   scans = 0;
   waits = 0;
@@ -166,4 +166,18 @@ test("only an explicitly visible run waits for a machine challenge to clear", as
   await assert.rejects(accessErrorAfterExplicitVisibleWait(page, "douyin", {
     browser_mode: "visible",
   }, async () => true), { message: "collection_stopped" });
+});
+
+test("visible verification requires consecutive clear observations", async () => {
+  const captcha = "https://rmc.bytedance.com/verifycenter/captcha/v2";
+  const frames = [[captcha], [], [captcha], [], []];
+  let waits = 0;
+  const page = {
+    isClosed: () => false,
+    locator: () => ({ evaluateAll: async () => frames.shift() || [], count: async () => 0 }),
+    url: () => "https://www.douyin.com/",
+    waitForTimeout: async () => { waits += 1; },
+  };
+  assert.equal(await accessErrorAfterExplicitVisibleWait(page, "douyin", { browser_mode: "visible" }), null);
+  assert.equal(waits, 4);
 });

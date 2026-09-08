@@ -117,6 +117,51 @@ test("unobscured media screenshots persist as a PNG", { skip: !enabled }, async 
   assert.deepEqual(await fs.readdir(root), ["image.png"]);
 });
 
+test("capture waits for a lazy image response without issuing a second request", { skip: !enabled }, async t => {
+  const page = await browserPage(t, '<div style="height:1400px"></div>', "https://www.xiaohongshu.com/explore");
+  let requests = 0;
+  await page.route("**/fixture-image.svg", async route => {
+    requests += 1;
+    await new Promise(resolve => setTimeout(resolve, 350));
+    await route.fulfill({ contentType: "image/svg+xml", body: '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300"><rect width="300" height="300" fill="#126dad"/></svg>' });
+  });
+  await page.evaluate(() => {
+    const image = document.createElement("img");
+    Object.assign(image, { id: "media", width: 300, height: 300, loading: "lazy", src: "/fixture-image.svg" });
+    document.body.append(image);
+  });
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "capture-lazy-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await screenshotLocator(page.locator("#media"), path.join(root, "image.png"), "xiaohongshu", 3000);
+  assert.equal(requests, 1);
+  assert.equal(await page.locator("#media").evaluate(node => node.complete && node.naturalWidth === 300), true);
+  assert.deepEqual(await fs.readdir(root), ["image.png"]);
+});
+
+test("broken media is rejected instead of saving a placeholder", { skip: !enabled }, async t => {
+  const page = await browserPage(t, '<img id="media" src="data:image/png;base64,invalid" width="300" height="300">',
+    "https://www.xiaohongshu.com/explore");
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "capture-broken-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await assert.rejects(screenshotLocator(page.locator("#media"), path.join(root, "image.png"), "xiaohongshu"),
+    { message: "media_not_ready" });
+  assert.deepEqual(await fs.readdir(root), []);
+});
+
+test("media readiness wait remains bounded", { skip: !enabled }, async t => {
+  const page = await browserPage(t, '<img id="media" width="300" height="300">',
+    "https://www.xiaohongshu.com/explore");
+  await page.locator("#media").evaluate(node => {
+    Object.defineProperty(node, "complete", { get: () => false });
+    Object.defineProperty(node, "naturalWidth", { get: () => 0 });
+  });
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "capture-timeout-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await assert.rejects(screenshotLocator(page.locator("#media"), path.join(root, "image.png"), "xiaohongshu", 100),
+    { message: "media_not_ready" });
+  assert.deepEqual(await fs.readdir(root), []);
+});
+
 test("Xiaohongshu capture retains item identity when feed cards reorder", { skip: !enabled }, async t => {
   const image = `data:image/svg+xml;base64,${Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300"><rect width="300" height="300" fill="#126dad"/></svg>').toString('base64')}`;
   const page = await browserPage(t, ["first", "second"].map(id =>

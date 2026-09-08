@@ -237,7 +237,7 @@ Examples of equivalent intent (documentation examples, not runtime matchers):
 Errors use `extra.{schema_version,source_skill,status,error_code,message_key,retryable}`.
 Stable examples include `display_unavailable`, `browser_missing`,
 `login_required`, `challenge_required`, `network_access_restricted`, `rate_limited`, `selector_drift`,
-`no_items_collected`, `screenshot_obscured`,
+`no_items_collected`, `screenshot_obscured`, `media_not_ready`,
 `platform_unsupported`, `source_scope_empty`, `run_already_active`,
 `collection_already_enabled`, and `storage_lock_timeout`.
 `error_text` is a human fallback and must never drive routing or retry logic.

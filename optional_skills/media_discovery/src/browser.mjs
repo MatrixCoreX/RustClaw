@@ -348,12 +348,18 @@ export async function accessErrorAfterExplicitVisibleWait(page, platform, config
   if (!interactive(accessError) || config.browser_mode !== "visible") return accessError;
   const configuredMinutes = Math.max(1, Number(config.max_run_minutes) || 10);
   const deadline = Date.now() + Math.min(INTERACTIVE_LOGIN_TIMEOUT_MS, configuredMinutes * 60 * 1000);
+  let readyPolls = 0;
   while (Date.now() < deadline && !page.isClosed()) {
     if (await shouldStop()) throw browserStageError("collection_stopped", "manual_verification");
     await page.waitForTimeout(INTERACTIVE_CHALLENGE_POLL_MS).catch(() => {});
     if (page.isClosed()) break;
     accessError = await currentPlatformAccessError(page, platform);
-    if (!accessError) return null;
+    if (!accessError) {
+      readyPolls += 1;
+      if (readyPolls >= 2) return null;
+      continue;
+    }
+    readyPolls = 0;
     if (!interactive(accessError)) return accessError;
   }
   return page.isClosed() ? "interactive_verification_cancelled" : "interactive_verification_timeout";
@@ -822,7 +828,7 @@ export async function collectRenderedImages({
   return { records, temporaryPaths };
 }
 
-export async function screenshotLocator(locator, targetPath, platform) {
+export async function screenshotLocator(locator, targetPath, platform, mediaReadyTimeoutMs = 10_000) {
   const page = locator.page();
   const assertCaptureReady = async () => {
     const accessError = await currentPlatformAccessError(page, platform);
@@ -830,6 +836,15 @@ export async function screenshotLocator(locator, targetPath, platform) {
     if (!await locatorIsUsableCover(locator, 1)) throw new Error("screenshot_obscured");
   };
   await locator.scrollIntoViewIfNeeded();
+  const mediaDeadline = Date.now() + mediaReadyTimeoutMs;
+  while (true) {
+    await assertCaptureReady();
+    const imageState = await locator.evaluate(node => node instanceof HTMLImageElement
+      ? { complete: node.complete, ready: node.naturalWidth > 0 && node.naturalHeight > 0 } : null);
+    if (!imageState || (imageState.complete && imageState.ready)) break;
+    if (imageState.complete || Date.now() >= mediaDeadline) throw new Error("media_not_ready");
+    await page.waitForTimeout(Math.min(200, Math.max(1, mediaDeadline - Date.now())));
+  }
   await assertCaptureReady();
   await fs.mkdir(path.dirname(targetPath), { recursive: true });
   const temporary = `${targetPath}.tmp-${process.pid}`;
