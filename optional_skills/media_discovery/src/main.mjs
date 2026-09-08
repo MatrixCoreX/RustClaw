@@ -6,8 +6,10 @@ import { fileURLToPath } from "node:url";
 import { browserCapability, collectPlatform, waitForInteractiveLogin } from "./browser.mjs";
 import { resolveBrowserMode, sourceUrls, SUPPORTED_PLATFORMS } from "./platforms.mjs";
 import { createBackgroundProgressReporter } from "./progress.mjs";
+import { activeRuns, mapBounded, parallelPlatformLimit } from "./run_leases.mjs";
 import {
   beginBackgroundWorker,
+  backgroundWorkerIsFresh,
   beginRun,
   clearCollectedData,
   cleanupExpiredDiagnostics,
@@ -34,6 +36,11 @@ const ERROR_CODES = new Set([
   "background_collection_not_enabled",
   "background_worker_already_active",
   "collection_already_enabled",
+  "collection_capacity_busy",
+  "partial_collection_failed",
+  "run_lease_lost",
+  "worker_lease_lost",
+  "storage_upgrade_requires_idle",
   "challenge_required",
   "confirmation_required",
   "display_unavailable",
@@ -213,11 +220,15 @@ function errorResponse(action, error) {
     "challenge_required",
     "rate_limited",
     "storage_lock_timeout",
+    "collection_capacity_busy",
   ]).has(errorCode);
   const preDispatch = new Set([
     "action_unsupported",
     "browser_mode_invalid",
     "collection_already_enabled",
+    "collection_capacity_busy",
+    "worker_lease_lost",
+    "storage_upgrade_requires_idle",
     "confirmation_required",
     "invalid_args",
     "platform_required",
@@ -285,11 +296,14 @@ async function enable(request, args) {
   const platforms = requestedPlatforms(args);
   const configs = platformConfigs(args, platforms);
   const state = await configurePlatforms(root, platforms, configs);
+  const workerActive = backgroundWorkerIsFresh(state.background_worker);
   return success("enable", {
     platforms,
     platform_states: state.platforms,
+    background_worker_active: workerActive,
     background_start_spec: backgroundStartSpec(),
     next_capability: "media_discovery.run_enabled_once",
+    ...(workerActive ? { background_worker: state.background_worker } : {}),
     side_effect_applied: true,
   });
 }
@@ -299,17 +313,45 @@ async function control(request, args, action) {
   const platforms = requestedPlatforms(args, true);
   const state = await setPlatformControl(root, platforms, action);
   const affectedPlatforms = platforms.length > 0 ? platforms : Object.keys(state.platforms);
+  const draining = activeRuns(state).filter(run => run.stop_requested_at
+    && run.platforms.some(platform => affectedPlatforms.includes(platform)));
   return success(action, {
     platforms: affectedPlatforms,
     platform_states: state.platforms,
-    lifecycle_state: state.active_run?.lifecycle_state || "idle",
-    drain_run_id: state.stop_after_item_run_id,
-    stop_mode: state.stop_after_item_run_id ? "after_current_item" : null,
+    lifecycle_state: draining.length ? "draining" : "idle",
+    drain_run_id: draining[0]?.run_id || null,
+    drain_run_ids: draining.map(run => run.run_id),
+    stop_mode: draining.length ? "after_current_item" : null,
     side_effect_applied: true,
   });
 }
 
 async function runOnce(request, args, runtime = {}) {
+  const state = await readState(storageRoot(request));
+  const requested = requestedPlatforms(args, true);
+  const platforms = requested.length ? requested : Object.keys(state.platforms)
+    .filter(platform => state.platforms[platform]?.enabled && !state.platforms[platform]?.paused);
+  if (platforms.length <= 1 || runtime.backgroundPlatform) return runPlatformBatch(request, args, runtime);
+  const results = await mapBounded(platforms, runtime.parallelLimit || parallelPlatformLimit(), platform => (
+    runPlatformBatch(request, { ...args, platforms: [platform] }, runtime)
+  ));
+  const counts = { items: 0, videos: 0, images: 0, duplicates: 0, failures: 0 };
+  const runs = results.map((result, index) => {
+    const run = result.value?.extra?.run || result.error?.extra?.run || {
+      platforms: [platforms[index]], status: "failed", error_code: result.error?.message || "execution_failed",
+    };
+    addCounts(counts, run.counts);
+    return run;
+  });
+  const extra = { platforms, runs, counts, side_effect_applied: counts.videos + counts.images > 0 };
+  if (runs.some(run => run.error_code)) {
+    throw Object.assign(new Error("partial_collection_failed"), { extra });
+  }
+  return success("run_once", { ...extra, state: runs.some(run => run.status === "stopped_after_current_item")
+    ? "stopped_after_current_item" : "completed_batch" });
+}
+
+async function runPlatformBatch(request, args, runtime = {}) {
   const root = storageRoot(request);
   const requested = runtime.backgroundPlatform ? [runtime.backgroundPlatform] : requestedPlatforms(args, true);
   const directOneShot = requested.length > 0 && !runtime.backgroundPlatform;
@@ -319,6 +361,8 @@ async function runOnce(request, args, runtime = {}) {
     mode: directOneShot ? "one_shot" : "enabled_background",
     platform_configs: oneShotConfigs,
     config_explicit: configExplicit,
+    worker_id: runtime.workerId,
+    parallel_limit: runtime.parallelLimit,
   });
   if (!run) return success("run_once", { state: "disabled_or_paused", side_effect_applied: false });
   const counts = { items: 0, videos: 0, images: 0, duplicates: 0, failures: 0 };
@@ -346,10 +390,10 @@ async function runOnce(request, args, runtime = {}) {
         platform,
         config,
         limit: remaining,
-        shouldStop: async () => Date.now() >= deadline || (await heartbeat(root, run.run_id, counts)),
+        shouldStop: async () => Boolean(runtime.shouldShutdown?.()) || Date.now() >= deadline || (await heartbeat(root, run.run_id, counts)),
         onPage: async ({ records, temporaryPaths }) => {
           try {
-            const result = await commitPageRecords(root, records);
+            const result = await commitPageRecords(root, records, run.run_id);
             counts.items += 1;
             for (const record of result.committed) counts[record.kind === "video" ? "videos" : "images"] += 1;
             for (const record of result.committed) {
@@ -382,6 +426,7 @@ async function runOnce(request, args, runtime = {}) {
           && ["login_required", "challenge_required"].includes(errorCode);
         if (!interactiveLoginAllowed) throw error;
 
+        await heartbeat(root, run.run_id, counts, waitingLifecycleState(errorCode));
         const loginResult = await (runtime.waitForInteractiveLogin || waitForInteractiveLogin)({
           root,
           platform,
@@ -393,7 +438,11 @@ async function runOnce(request, args, runtime = {}) {
         if (!loginResult?.ready) {
           throw new Error(loginResult?.error_code || errorCode);
         }
-        await collect(collectionRequest);
+        const remainingAfterLogin = Math.max(0, config.max_items_per_run - counts.items);
+        if (remainingAfterLogin > 0 && !(await collectionRequest.shouldStop())) {
+          await heartbeat(root, run.run_id, counts, "running");
+          await collect({ ...collectionRequest, limit: remainingAfterLogin });
+        }
       }
       if (await heartbeat(root, run.run_id, counts)) {
         status = "stopped_after_current_item";
@@ -462,161 +511,147 @@ function addCounts(target, source = {}) {
   }
 }
 
-async function sleepWithBackgroundControl(root, workerId, delayMs, sleep) {
-  let remaining = Math.max(0, delayMs);
-  while (remaining > 0) {
-    const state = await readState(root);
-    if (state.background_worker?.worker_id !== workerId) return "replaced";
-    if (!Object.values(state.platforms).some((platform) => platform?.enabled)) return "disabled";
-    const step = Math.min(1000, remaining);
-    await sleep(step);
-    remaining -= step;
-  }
-  return "ready";
-}
-
 async function runContinuous(request, runtime = {}) {
   const root = storageRoot(request);
-  const worker = await beginBackgroundWorker(root);
+  let worker;
+  try {
+    worker = await beginBackgroundWorker(root);
+  } catch (error) {
+    if (error?.message !== "background_worker_already_active") throw error;
+    return success("run_enabled_once", { state: "already_running",
+      background_worker: (await readStatusState(root)).background_worker, side_effect_applied: false });
+  }
   const counts = { items: 0, videos: 0, images: 0, duplicates: 0, failures: 0 };
   const sleep = runtime.sleep || ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
   const now = runtime.now || Date.now;
   const platformOutcomes = {};
+  const inFlight = new Map();
+  const fatalErrors = new Map();
+  const limit = runtime.parallelLimit || parallelPlatformLimit();
+  const progressRun = { run_id: worker.worker_id, platforms: worker.platforms };
+  let shutdown = false;
+  let coordinatorError = null;
   const reporter = createBackgroundProgressReporter({
     requestId: request?.request_id,
-    run: { run_id: worker.worker_id, platforms: worker.platforms },
+    run: progressRun,
     counts,
     writeFrame: runtime.writeProgress,
   });
   let completedBatches = 0;
   let attemptedBatches = 0;
   let lastErrorCode = null;
-  let consecutiveFailures = 0;
+  const snapshot = () => ({
+    completed_batches: completedBatches, counts: { ...counts }, last_error_code: lastErrorCode,
+    platform_outcomes: structuredClone(platformOutcomes), parallel_limit: limit,
+    current_platforms: [...inFlight.keys()],
+  });
   const workerHeartbeat = setInterval(() => {
-    heartbeatBackgroundWorker(root, worker.worker_id, {
-      completed_batches: completedBatches,
-      counts,
-      last_error_code: lastErrorCode,
-    }).catch(() => {});
+    heartbeatBackgroundWorker(root, worker.worker_id, snapshot()).catch(error => {
+      coordinatorError = error;
+      shutdown = true;
+    });
   }, 30_000);
   workerHeartbeat.unref?.();
+  const runPlatform = async (platform, platformState) => {
+    const outcome = platformOutcomes[platform] || {
+      completed_batches: 0, consecutive_failures: 0,
+      counts: { items: 0, videos: 0, images: 0, duplicates: 0, failures: 0 },
+    };
+    platformOutcomes[platform] = outcome;
+    outcome.lifecycle_state = "running";
+    let errorCode = null;
+    try {
+      const result = await runPlatformBatch(request, { action: "run_once" }, {
+        ...runtime, backgroundPlatform: platform, workerId: worker.worker_id,
+        shouldShutdown: () => shutdown, writeProgress: undefined,
+      });
+      addCounts(counts, result.extra?.run?.counts);
+      addCounts(outcome.counts, result.extra?.run?.counts);
+      if (["completed_batch", "stopped_after_current_item"].includes(result.extra?.state)) {
+        completedBatches += 1;
+        outcome.completed_batches += 1;
+        outcome.consecutive_failures = 0;
+        fatalErrors.delete(platform);
+      } else {
+        errorCode = result.extra?.run?.error_code || result.extra?.state || "execution_failed";
+        outcome.consecutive_failures += 1;
+      }
+    } catch (error) {
+      errorCode = String(error?.message || "execution_failed");
+      outcome.consecutive_failures += 1;
+      const partial = error.extra?.run?.counts || { failures: 1 };
+      addCounts(counts, partial);
+      addCounts(outcome.counts, partial);
+      if (!["collection_capacity_busy", "run_already_active"].includes(errorCode)
+        && !CONTINUOUS_RETRYABLE_ERROR_CODES.has(errorCode)) {
+        fatalErrors.set(platform, error);
+        await setPlatformControl(root, [platform], "pause");
+      }
+    }
+    lastErrorCode = errorCode;
+    const delay = backgroundRetryDelayMs({ [platform]: platformState.config || {} },
+      errorCode, outcome.consecutive_failures, runtime.random || Math.random);
+    Object.assign(outcome, {
+      lifecycle_state: fatalErrors.has(platform) ? "failed" : waitingLifecycleState(errorCode),
+      last_error_code: errorCode,
+      retry_not_before: new Date(now() + delay).toISOString(),
+    });
+    reporter.emitIfDue();
+  };
   try {
-    while (true) {
+    while (!shutdown) {
       const state = await readState(root);
-      if (state.background_worker?.worker_id !== worker.worker_id) break;
+      if (state.background_worker?.worker_id !== worker.worker_id) { shutdown = true; break; }
       const enabledEntries = Object.entries(state.platforms)
         .filter(([, platform]) => platform?.enabled);
-      if (enabledEntries.length === 0) break;
-      const activeEntries = enabledEntries.filter(([, platform]) => !platform?.paused);
-      if (activeEntries.length === 0) {
-        if (state.background_worker.lifecycle_state !== "paused") {
-          await heartbeatBackgroundWorker(root, worker.worker_id, { lifecycle_state: "paused" });
-        }
-        const control = await sleepWithBackgroundControl(root, worker.worker_id, 1000, sleep);
-        if (control !== "ready") break;
+      progressRun.platforms = enabledEntries.map(([platform]) => platform);
+      if (enabledEntries.length === 0 && inFlight.size === 0) {
+        if (fatalErrors.size) break;
+        const completed = await finishBackgroundWorker(root, worker.worker_id, "stopped", snapshot(), { only_when_disabled: true });
+        if (completed) return success("run_enabled_once", { state: "stopped",
+          background_worker: completed, side_effect_applied: counts.items > 0 });
         continue;
       }
+      const activeEntries = enabledEntries.filter(([, platform]) => !platform?.paused);
+      if (activeEntries.length === 0 && inFlight.size === 0 && fatalErrors.size) break;
       const dueAt = ([platform]) => platformOutcomes[platform]
         ? Date.parse(platformOutcomes[platform].retry_not_before) : -Infinity;
-      const readyEntry = activeEntries.filter(entry => dueAt(entry) <= now())
-        .sort((left, right) => dueAt(left) - dueAt(right))[0];
-      if (!readyEntry) {
-        const earliest = activeEntries.map(([platform]) => platformOutcomes[platform])
-          .sort((left, right) => Date.parse(left.retry_not_before) - Date.parse(right.retry_not_before))[0];
-        const waitingState = waitingLifecycleState(earliest.last_error_code);
-        if (state.background_worker.retry_not_before !== earliest.retry_not_before
-          || state.background_worker.lifecycle_state !== waitingState) {
-          await heartbeatBackgroundWorker(root, worker.worker_id, {
-            lifecycle_state: waitingState,
-            retry_not_before: earliest.retry_not_before,
-            platform_outcomes: platformOutcomes,
-          });
-        }
-        const delay = Math.max(1, Math.min(1000, Date.parse(earliest.retry_not_before) - now()));
-        if (await sleepWithBackgroundControl(root, worker.worker_id, delay, sleep) !== "ready") break;
-        continue;
+      const occupied = new Set(activeRuns(state).flatMap(run => run.platforms));
+      const readyEntries = activeEntries.filter(entry => !inFlight.has(entry[0])
+        && !occupied.has(entry[0]) && dueAt(entry) <= now())
+        .sort((left, right) => dueAt(left) - dueAt(right));
+      for (const [platform, platformState] of readyEntries) {
+        if (inFlight.size >= limit || occupied.size >= limit
+          || (Number.isInteger(runtime.maxContinuousCycles) && attemptedBatches >= runtime.maxContinuousCycles)) break;
+        attemptedBatches += 1;
+        occupied.add(platform);
+        const job = runPlatform(platform, platformState).catch(error => {
+          coordinatorError = error; shutdown = true;
+        }).finally(() => inFlight.delete(platform));
+        inFlight.set(platform, job);
       }
-      const [platform, platformState] = readyEntry;
-      const outcome = platformOutcomes[platform] || {
-        completed_batches: 0,
-        consecutive_failures: 0,
-        counts: { items: 0, videos: 0, images: 0, duplicates: 0, failures: 0 },
-      };
       await heartbeatBackgroundWorker(root, worker.worker_id, {
-        lifecycle_state: "running",
-        platforms: activeEntries.map(([platform]) => platform),
-        current_platform: platform,
-        retry_not_before: null,
+        ...snapshot(), platforms: progressRun.platforms,
+        lifecycle_state: inFlight.size ? "running" : activeEntries.length ? "resting" : "paused",
       });
-      attemptedBatches += 1;
-      try {
-        const result = await runOnce(request, { action: "run_once" }, {
-          ...runtime,
-          backgroundPlatform: platform,
-          writeProgress: undefined,
-        });
-        addCounts(counts, result.extra?.run?.counts);
-        addCounts(outcome.counts, result.extra?.run?.counts);
-        if (["completed_batch", "stopped_after_current_item"].includes(result.extra?.state)) {
-          completedBatches += 1;
-          outcome.completed_batches += 1;
-          lastErrorCode = null;
-          outcome.consecutive_failures = 0;
-        } else {
-          lastErrorCode = result.extra?.run?.error_code || result.extra?.state || "execution_failed";
-          outcome.consecutive_failures += 1;
-        }
-      } catch (error) {
-        lastErrorCode = String(error?.message || "execution_failed");
-        outcome.consecutive_failures += 1;
-        const partialCounts = error.extra?.run?.counts || { failures: 1 };
-        addCounts(counts, partialCounts);
-        addCounts(outcome.counts, partialCounts);
-        if (!CONTINUOUS_RETRYABLE_ERROR_CODES.has(lastErrorCode)) throw error;
-      }
-      consecutiveFailures = outcome.consecutive_failures;
-      const delay = backgroundRetryDelayMs(
-        { [platform]: platformState.config || {} },
-        lastErrorCode,
-        consecutiveFailures,
-        runtime.random || Math.random,
-      );
-      Object.assign(outcome, {
-        lifecycle_state: waitingLifecycleState(lastErrorCode),
-        last_error_code: lastErrorCode,
-        retry_not_before: new Date(now() + delay).toISOString(),
-      });
-      platformOutcomes[platform] = outcome;
-      await heartbeatBackgroundWorker(root, worker.worker_id, {
-        completed_batches: completedBatches,
-        counts,
-        last_error_code: lastErrorCode,
-        consecutive_failures: consecutiveFailures,
-        lifecycle_state: waitingLifecycleState(lastErrorCode),
-        current_platform: null,
-        retry_not_before: outcome.retry_not_before,
-        platform_outcomes: platformOutcomes,
-      });
-      reporter.emitIfDue();
-      if (Number.isInteger(runtime.maxContinuousCycles) && attemptedBatches >= runtime.maxContinuousCycles) break;
+      if (inFlight.size === 0 && Number.isInteger(runtime.maxContinuousCycles)
+        && attemptedBatches >= runtime.maxContinuousCycles) break;
+      await Promise.race([...inFlight.values(), sleep(1000)]);
     }
-    const completed = await finishBackgroundWorker(root, worker.worker_id, "stopped", {
-      completed_batches: completedBatches,
-      counts,
-      last_error_code: lastErrorCode,
-      platform_outcomes: platformOutcomes,
-    });
+    await Promise.all(inFlight.values());
+    if (coordinatorError) throw coordinatorError;
+    if (fatalErrors.size) throw fatalErrors.values().next().value;
+    const completed = await finishBackgroundWorker(root, worker.worker_id, "stopped", snapshot());
     return success("run_enabled_once", {
       state: "stopped",
       background_worker: completed,
       side_effect_applied: counts.items > 0,
     });
   } catch (error) {
-    await finishBackgroundWorker(root, worker.worker_id, "failed", {
-      completed_batches: completedBatches,
-      counts,
-      last_error_code: String(error?.message || "execution_failed"),
-    }).catch(() => {});
+    shutdown = true;
+    await Promise.all(inFlight.values());
+    await finishBackgroundWorker(root, worker.worker_id, "failed", snapshot()).catch(() => {});
+    error.extra = { ...error.extra, ...snapshot() };
     throw error;
   } finally {
     clearInterval(workerHeartbeat);
@@ -632,6 +667,8 @@ async function status(request) {
     platforms: state.platforms,
     background_worker: state.background_worker,
     active_run: state.active_run,
+    active_runs: state.active_runs,
+    parallel_limit: parallelPlatformLimit(),
     expired_leases: state.expired_leases,
     latest_run: state.runs?.[0] || null,
     counts: {
@@ -706,11 +743,14 @@ export async function handleRequest(request, runtime = {}) {
     if (action === "stop_current") {
       const platforms = requestedPlatforms(args, true);
       const state = await requestStop(storageRoot(request), platforms);
+      const draining = activeRuns(state).filter(run => run.stop_requested_at
+        && (platforms.length === 0 || run.platforms.some(platform => platforms.includes(platform))));
       return success(action, {
-        lifecycle_state: state.active_run?.lifecycle_state || "idle",
-        drain_run_id: state.stop_after_item_run_id,
-        stop_mode: state.stop_after_item_run_id ? "after_current_item" : null,
-        side_effect_applied: Boolean(state.stop_after_item_run_id),
+        lifecycle_state: draining.length ? "draining" : "idle",
+        drain_run_id: draining[0]?.run_id || null,
+        drain_run_ids: draining.map(run => run.run_id),
+        stop_mode: draining.length ? "after_current_item" : null,
+        side_effect_applied: draining.length > 0,
       });
     }
     if (action === "list_runs") return await listRuns(request, args);

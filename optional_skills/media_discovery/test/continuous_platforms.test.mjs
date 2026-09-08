@@ -25,6 +25,7 @@ for (const barrier of [null, "challenge_required", "network_access_restricted", 
       request_id: "multi-platform", args: { action: "run_enabled_once" }, context,
     }, {
       maxContinuousCycles: 3,
+      parallelLimit: 3,
       sleep: async () => {},
       waitForInteractiveLogin: async () => ({ ready: false, error_code: barrier }),
       collectPlatform: async ({ platform, limit, config, onPage }) => {
@@ -41,7 +42,7 @@ for (const barrier of [null, "challenge_required", "network_access_restricted", 
         return { handled: 1 };
       },
     });
-    assert.deepEqual(visited, platforms);
+    assert.deepEqual([...visited].sort(), [...platforms].sort());
     assert.equal(result.status, "ok");
     assert.equal(result.extra.background_worker.counts.items, barrier ? 2 : 3);
     const outcomes = result.extra.background_worker.platform_outcomes;
@@ -62,6 +63,7 @@ test("cooldowns, partial commits and platform disable are independent", async (t
   let attempts = 0;
   const visited = [];
   const result = await handleRequest({ args: { action: "run_enabled_once" }, context }, {
+    parallelLimit: 1,
     now: () => clock,
     random: () => 0.5,
     sleep: async (milliseconds) => { clock += milliseconds; },

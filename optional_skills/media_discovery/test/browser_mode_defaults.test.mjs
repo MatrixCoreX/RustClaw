@@ -54,7 +54,8 @@ for (const explicit of [undefined, "silent", "visible"]) {
     const expected = Object.fromEntries(Object.entries(defaults).map(([platform, mode]) => [platform, explicit || mode]));
     assert.equal(result.status, "ok");
     assert.deepEqual(seen, expected);
-    assert.deepEqual(result.extra.run.browser_modes, expected);
+    assert.equal(result.extra.runs.length, 3);
+    assert.deepEqual(Object.assign({}, ...result.extra.runs.map(run => run.browser_modes)), expected);
   });
 }
 

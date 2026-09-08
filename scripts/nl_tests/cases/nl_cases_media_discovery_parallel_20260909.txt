@@ -1,0 +1,2 @@
+# Bounded concurrent-platform acceptance. Keep all collected material; no ongoing task.
+media_discovery_parallel|parallel_batch|optional_skill:media_discovery,provider_mode:live,execution_mode:real,capability:media_discovery.run_once,requires_tool_call:true|用媒体发现技能并行采集抖音、小红书、快手的推荐内容，每个平台各采集1条，每个平台最多运行5分钟。这是一次性的采集，不要启用持续任务，不要委派子任务，不要导出文件。保留文案、图片或视频封面、实际可见的互动数据供AiAPP查看，结束后分别报告三个平台成功或失败的真实结果。如果需要人工验证，请让我处理，不要绕过验证。
