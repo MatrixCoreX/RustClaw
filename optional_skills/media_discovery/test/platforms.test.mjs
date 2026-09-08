@@ -9,6 +9,7 @@ import {
   validatePlatformUrl,
 } from "../src/platforms.mjs";
 import {
+  accessErrorAfterExplicitVisibleWait,
   detailNavigationError,
   platformAccessError,
   renderedCardMediaKind,
@@ -121,4 +122,30 @@ test("platform access checks classify machine challenge surfaces without page-la
     null,
   );
   assert.equal(platformAccessError("kuaishou", "https://www.kuaishou.com/brilliant"), null);
+});
+
+test("only an explicitly visible run waits for a machine challenge to clear", async () => {
+  const captcha = "https://rmc.bytedance.com/verifycenter/captcha/v2?scene_level=p2";
+  let scans = 0;
+  let waits = 0;
+  const page = {
+    isClosed: () => false,
+    locator: () => ({
+      evaluateAll: async () => (scans++ === 0 ? [captcha] : []),
+    }),
+    url: () => "https://www.douyin.com/",
+    waitForTimeout: async () => { waits += 1; },
+  };
+  assert.equal(await accessErrorAfterExplicitVisibleWait(page, "douyin", {
+    browser_mode: "visible",
+    max_run_minutes: 5,
+  }), null);
+  assert.equal(waits, 1);
+
+  scans = 0;
+  waits = 0;
+  assert.equal(await accessErrorAfterExplicitVisibleWait(page, "douyin", {
+    browser_mode: "silent",
+  }), "challenge_required");
+  assert.equal(waits, 0);
 });

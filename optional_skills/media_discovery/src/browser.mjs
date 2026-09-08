@@ -14,6 +14,7 @@ const NAVIGATION_TIMEOUT_MS = 45_000;
 const SCREENSHOT_MIN_BYTES = 512;
 const INTERACTIVE_LOGIN_TIMEOUT_MS = 10 * 60 * 1000;
 const INTERACTIVE_LOGIN_POLL_MS = 1000;
+const INTERACTIVE_CHALLENGE_POLL_MS = 1000;
 
 const PLATFORM_AUTH_COOKIE_NAMES = Object.freeze({
   douyin: new Set(["sessionid", "sessionid_ss", "sid_guard", "uid_tt", "uid_tt_ss"]),
@@ -309,6 +310,20 @@ async function currentPlatformAccessError(page, platform) {
   return platformAccessError(platform, page.url(), captchaFrameUrls);
 }
 
+export async function accessErrorAfterExplicitVisibleWait(page, platform, config = {}) {
+  let accessError = await currentPlatformAccessError(page, platform);
+  if (accessError !== "challenge_required" || config.browser_mode !== "visible") return accessError;
+  const configuredMinutes = Math.max(1, Number(config.max_run_minutes) || 10);
+  const deadline = Date.now() + Math.min(INTERACTIVE_LOGIN_TIMEOUT_MS, configuredMinutes * 60 * 1000);
+  while (Date.now() < deadline && !page.isClosed()) {
+    await page.waitForTimeout(INTERACTIVE_CHALLENGE_POLL_MS).catch(() => {});
+    accessError = await currentPlatformAccessError(page, platform);
+    if (!accessError) return null;
+    if (accessError !== "challenge_required") return accessError;
+  }
+  return "challenge_required";
+}
+
 async function platformAuthenticationPresent(context, platform) {
   const expected = PLATFORM_AUTH_COOKIE_NAMES[platform];
   if (!expected) return false;
@@ -520,7 +535,7 @@ export async function openDouyinRecommendationDetail(page, config = {}) {
   destination.setDefaultTimeout(NAVIGATION_TIMEOUT_MS);
   await destination.waitForLoadState("domcontentloaded", { timeout: NAVIGATION_TIMEOUT_MS }).catch(() => {});
   await pacingWait(destination, config, 1.25);
-  const accessError = await currentPlatformAccessError(destination, "douyin");
+  const accessError = await accessErrorAfterExplicitVisibleWait(destination, "douyin", config);
   if (accessError) throw new Error(accessError);
   let currentUrl;
   try {
@@ -1295,7 +1310,7 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
       if (handled >= limit || (await shouldStop())) break;
       await page.goto(sourceUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT_MS });
       await pacingWait(page, config, 1.25);
-      const accessError = await currentPlatformAccessError(page, platform);
+      const accessError = await accessErrorAfterExplicitVisibleWait(page, platform, config);
       if (accessError) throw new Error(accessError);
       if (platform === "douyin" && (config.source_mode || "home_feed") === "home_feed") {
         handled += await collectDouyinRecommendationFeed(

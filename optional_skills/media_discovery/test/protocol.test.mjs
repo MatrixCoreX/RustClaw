@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  backgroundRetryDelayMs,
   backgroundRestDelayMs,
   handleRequest,
   normalizedConfig,
@@ -25,11 +26,18 @@ async function requestContext(t) {
 test("schema normalization accepts singular platform without natural-language parsing", () => {
   assert.deepEqual(requestedPlatforms({ platform: "douyin" }), ["douyin"]);
   assert.equal(normalizedConfig({}).source_mode, "home_feed");
+  assert.equal(normalizedConfig({}).max_items_per_run, 5);
   assert.equal(normalizedConfig({}).max_images_per_post, 100);
   assert.equal(normalizedConfig({}).browser_mode, "silent");
-  assert.equal(normalizedConfig({}).rest_min_seconds, 30);
-  assert.equal(normalizedConfig({}).rest_max_seconds, 120);
+  assert.equal(normalizedConfig({}).rest_min_seconds, 180);
+  assert.equal(normalizedConfig({}).rest_max_seconds, 420);
+  assert.equal(normalizedConfig({}).pacing_min_delay_ms, 1000);
+  assert.equal(normalizedConfig({}).pacing_max_delay_ms, 2800);
   assert.equal(backgroundRestDelayMs({ douyin: { rest_min_seconds: 10, rest_max_seconds: 20 } }, () => 0.5), 15_000);
+  assert.equal(backgroundRetryDelayMs({}, "challenge_required", 1, () => 0.5), 15 * 60 * 1000);
+  assert.equal(backgroundRetryDelayMs({}, "challenge_required", 2, () => 0.5), 30 * 60 * 1000);
+  assert.equal(backgroundRetryDelayMs({}, "challenge_required", 20, () => 0.5), 6 * 60 * 60 * 1000);
+  assert.equal(backgroundRetryDelayMs({ douyin: { rest_min_seconds: 10, rest_max_seconds: 20 } }, "selector_drift", 2, () => 0.5), 15_000);
   assert.equal(normalizedConfig({ browser_mode: "visible" }).browser_mode, "visible");
   assert.throws(() => normalizedConfig({ rest_min_seconds: 30, rest_max_seconds: 20 }));
   assert.throws(() => normalizedConfig({ browser_mode: "hidden" }));
@@ -180,7 +188,7 @@ test("one-shot retries stay silent when platform access requires login", async (
   });
 
   assert.equal(result.status, "ok");
-  assert.equal(result.extra.state, "waiting_for_login");
+  assert.equal(result.extra.state, "waiting_for_challenge_resolution");
   assert.equal(loginSessions, 0);
 });
 

@@ -144,15 +144,15 @@ Examples of equivalent intent (documentation examples, not runtime matchers):
 | `source_mode` | no | `home_feed` (default), `topics`, or `seed_urls`. |
 | `topics` | for topics | One or more exact search keywords, browsed in input order. |
 | `seed_urls` | for seed_urls | HTTPS URLs on the selected platform only. |
-| `max_items_per_run` | no | 1..100, default 20. |
+| `max_items_per_run` | no | 1..100, default 5. |
 | `max_images_per_post` | no | 1..100, default 100. The adapter follows rendered carousel controls and stops at the actual end or this safety ceiling. |
 | `max_run_minutes` | no | 5..180, default 30. |
 | `max_scrolls_per_source` | no | 1..100, default 10. |
-| `rest_min_seconds` | no | Minimum random rest between continuous batches, 5..3600, default 30. |
-| `rest_max_seconds` | no | Maximum random rest between continuous batches, 5..7200, default 120 and never below the minimum. |
+| `rest_min_seconds` | no | Minimum random rest between continuous batches, 5..3600, default 180. |
+| `rest_max_seconds` | no | Maximum random rest between continuous batches, 5..7200, default 420 and never below the minimum. |
 | `browser_mode` | no | `silent` (default), or `visible` after an explicit visible/non-silent request. Browser visibility is a user-selected execution constraint: every planner action that accepts this field must emit `visible` when visibility was requested, while omission is valid only when the user expressed no browser-mode preference. |
-| `pacing_min_delay_ms` | no | Lower interaction-delay bound, 200..5000, default 700. |
-| `pacing_max_delay_ms` | no | Upper interaction-delay bound, 200..8000, default 1800 and never below the minimum. |
+| `pacing_min_delay_ms` | no | Lower interaction-delay bound, 200..5000, default 1000. |
+| `pacing_max_delay_ms` | no | Upper interaction-delay bound, 200..8000, default 2800 and never below the minimum. |
 | `confirm` | enable/clear_results | Must be true after runtime approval. |
 
 ## Actions
@@ -229,7 +229,10 @@ remote URLs.
   closes after authentication is present, then retries collection in the
   originally requested silent mode. `challenge_required`, selector drift, rate
   limits, and ordinary collection failures never promote a silent run to a
-  visible browser. The same private profile is reused after login.
+  visible browser. A challenge enters an error-specific exponential cooldown
+  instead of repeatedly reopening the site. An explicitly visible run keeps its
+  window open while a user completes the platform challenge, then continues in
+  that same run. The same private profile is reused after login.
 - The skill uses one private persistent browser profile per platform. Later
   runs reuse that profile's cookies, local storage, and browser cache; clearing
   collected results preserves this login/session state. The skill does not read
@@ -261,7 +264,7 @@ Stable examples include `display_unavailable`, `browser_missing`,
 ## Request/Response Examples
 
 ```json
-{"action":"enable","platform":"douyin","source_mode":"home_feed","rest_min_seconds":30,"rest_max_seconds":120,"confirm":true}
+{"action":"enable","platform":"douyin","source_mode":"home_feed","rest_min_seconds":180,"rest_max_seconds":420,"confirm":true}
 ```
 
 ```json
