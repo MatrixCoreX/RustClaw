@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 
 import { exportRecordCsv, writeAtomic } from "./csv.mjs";
 import { resolveBrowserMode } from "./platforms.mjs";
+import { recordIdentity, recordPostIdentity } from "./media_identity.mjs";
 import { activeRunIsFresh, activeRuns, drainRuns, parallelPlatformLimit, projectActiveRuns } from "./run_leases.mjs";
 
 const STATE_SCHEMA_VERSION = 1;
@@ -440,23 +441,32 @@ export async function commitPageRecords(root, proposedRecords, runId = null) {
       }
     }
     const existing = await readRecords(root);
-    const dedup = new Set(existing.map((record) => record.dedup_key));
+    const dedup = new Set(existing.map(recordIdentity));
+    const postSequences = new Map(existing.filter(record => record.kind === "image")
+      .map(record => [recordPostIdentity(record), record.post_sequence])
+      .filter(([post, sequence]) => post && Number.isSafeInteger(sequence) && sequence > 0));
     const maxima = recordMaxima(existing);
     const committed = [];
     let duplicateCount = 0;
-    let postSequence = null;
+    let anonymousPostSequence = null;
     for (const proposal of proposedRecords) {
-      if (dedup.has(proposal.dedup_key)) {
+      const identity = recordIdentity(proposal);
+      if (dedup.has(identity)) {
         duplicateCount += 1;
         continue;
       }
       maxima.global += 1;
+      let postSequence = null;
       if (proposal.kind === "video") maxima.video += 1;
       else {
         maxima.image += 1;
+        const post = recordPostIdentity(proposal);
+        postSequence = post ? postSequences.get(post) : anonymousPostSequence;
         if (postSequence == null) {
           maxima.post += 1;
           postSequence = maxima.post;
+          if (post) postSequences.set(post, postSequence);
+          else anonymousPostSequence = postSequence;
         }
       }
       const record = {
@@ -468,7 +478,7 @@ export async function commitPageRecords(root, proposedRecords, runId = null) {
       };
       const fileName = `${String(record.global_sequence).padStart(12, "0")}.json`;
       await writeAtomic(path.join(root, "records", fileName), `${JSON.stringify(record, null, 2)}\n`);
-      dedup.add(record.dedup_key);
+      dedup.add(identity);
       existing.push(record);
       committed.push(record);
     }

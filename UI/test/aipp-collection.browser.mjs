@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +16,7 @@ try {
   browser = await chromium.launch({ executablePath: process.env.BROWSER_EXECUTABLE || undefined, headless: true });
   const page = await browser.newPage();
   const errors = [];
+  let galleryMode = false;
   page.on("pageerror", e => errors.push(e.message));
   const items = Array.from({ length: 6 }, (_, i) => ({
     schema_version: 1, global_sequence: i + 1, sequence: i + 1, post_sequence: null,
@@ -41,12 +42,16 @@ try {
   await page.route("**/v1/aipps**", async route => {
     const url = new URL(route.request().url());
     if (url.pathname.endsWith("/preview")) return route.fulfill({ contentType: "image/png", body: preview });
+    const cursor = Number(url.searchParams.get("cursor_sequence")) || null;
+    const start = cursor == null ? 0 : items.findIndex(item => item.global_sequence === cursor) + 1;
+    const selected = galleryMode ? items.slice(start, start + 2) : items;
+    const nextCursor = galleryMode && start + 2 < items.length ? selected.at(-1).global_sequence : null;
     return route.fulfill({ json: { ok: true, data: url.pathname === "/v1/aipps" ? { apps: [{
       skill_name: "example_collection", package_version: "1.0.0", renderer: "collection_feed_v1",
       data_contract: "media_collection_v1", icon: "gallery_vertical_end", default_locale: "en",
       titles: { en: "Collection", zh: "采集内容" }, descriptions: {}, installed: true,
       entrypoint: null, bridge_capabilities: [], task_channel_scope: null,
-    }] } : { items, matching_total: 6, sort_order: "newest", next_cursor_sequence: null,
+    }] } : { items: selected, matching_total: items.length, sort_order: "newest", next_cursor_sequence: nextCursor,
       next_before_sequence: null, active_run: null, platform_states: {}, updated_at: "2026-09-09T00:00:00Z" } } });
   });
   for (const width of [1440, 1280, 900, 390]) for (const theme of ["light", "dark"]) {
@@ -76,6 +81,46 @@ try {
     await first.getByRole("button", { name: lang === "zh" ? "收起" : "Collapse", exact: true }).click();
     assert.ok(Math.abs((await first.boundingBox()).height - boxes[0].height) < 1);
     console.log(`PASS ${width} ${theme}: ${columns} columns, dates, metric omission, no overflow`);
+  }
+  galleryMode = true;
+  const template = { ...items[1], platform: "example", title: "Gallery / 图集", platform_text: "One post, five retained images" };
+  items.splice(0, items.length, ...Array.from({ length: 5 }, (_, i) => ({
+    ...template, global_sequence: 10 - i, image_sequence: 5 - i, post_sequence: 10,
+  })), { ...template, global_sequence: 5, kind: "video", post_sequence: null },
+  { ...template, global_sequence: 4, post_sequence: null });
+  for (const width of [1440, 390]) for (const theme of ["light", "dark"]) {
+    const lang = theme === "light" ? "zh" : "en";
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/test/fixtures/aipp-collection.html?lang=${lang}&theme=${theme}`);
+    const card = page.locator("article");
+    await card.getByText("1 / 5", { exact: true }).waitFor();
+    assert.equal(await card.count(), 1);
+    assert.equal(await card.locator("h2").count(), 1);
+    for (let i = 0; i < 2; i++) await card.getByTitle(lang === "zh" ? "下一张图片" : "Next image", { exact: true }).click();
+    await card.getByText("3 / 5", { exact: true }).waitFor();
+    await card.locator("img").waitFor();
+    await card.getByRole("button", { name: lang === "zh" ? "放大图片" : "Enlarge image", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.waitFor();
+    const downloadEvent = page.waitForEvent("download");
+    await dialog.locator("footer button").click();
+    const download = await downloadEvent;
+    assert.equal(download.suggestedFilename(), "media-000000000008.png");
+    assert.deepEqual(await readFile(await download.path()), preview);
+    await page.keyboard.press("Escape");
+    await page.getByTitle(lang === "zh" ? "刷新内容" : "Refresh content", { exact: true }).click();
+    await card.getByText("3 / 5", { exact: true }).waitFor();
+    assert.equal(await card.count(), 1);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.screenshot({ path: path.join(output, `gallery-${width}-${theme}.png`), fullPage: true });
+    await page.getByRole("button", { name: lang === "zh" ? "下一页" : "Next", exact: true }).click();
+    await card.nth(1).waitFor();
+    assert.equal(await page.getByText("#5", { exact: true }).count(), 1);
+    assert.equal(await page.getByText("#4", { exact: true }).count(), 1);
+    await page.getByRole("button", { name: lang === "zh" ? "上一页" : "Previous", exact: true }).click();
+    await card.getByText("1 / 5", { exact: true }).waitFor();
+    assert.equal(await card.count(), 1);
+    console.log(`PASS gallery ${width} ${theme}: complete pagination, one card, image switch, download, refresh`);
   }
   assert.deepEqual(errors, []);
   console.log(`PASS collection browser suite; screenshots: ${output}`);

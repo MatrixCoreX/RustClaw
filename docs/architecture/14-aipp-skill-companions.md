@@ -96,6 +96,12 @@ package has passed the same manifest, receipt, and generation checks.
 
 AiPP has two host-rendered read contracts and one sandboxed extension mode.
 `collection_feed_v1` reads a bounded skill-private collection ledger.
+Its UI groups images by platform and positive `post_sequence`, not by prose.
+Each card shows the caption once and retains ordered image navigation, preview
+and download. Cursor lookahead completes a contiguous gallery at a page boundary
+(bounded to 20 extra requests); it never consumes the next post's rows. The
+underlying image records and CSV rows remain individually addressable. This
+generic rendering applies to already collected data without recapture or migration.
 `task_activity_v1` reads tasks selected only by structured skill execution events,
 then projects bounded input/result text, canonical action references, validated
 public links, and task-scoped artifact URLs. A manifest declares whether this view includes all task

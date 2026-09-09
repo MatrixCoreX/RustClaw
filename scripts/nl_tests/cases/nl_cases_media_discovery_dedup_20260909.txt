@@ -1,0 +1,2 @@
+# Retain existing data; bounded repeated collection, not a continuous job.
+media_discovery_dedup|xiaohongshu_gallery_repeat|optional_skill:media_discovery,provider_mode:live,execution_mode:real,capability:media_discovery.run_once,requires_tool_call:true|请用媒体发现再搜索一次小红书“财经”，按结果顺序只处理1篇帖子，保留全部图片和作者文案，不做OCR，最多5分钟，不启动持续采集。已有素材不要重复保存，也不要删除旧图片；告诉我本轮处理帖子数、新增图片数和跳过重复图片数，让我在AiAPP里查看。

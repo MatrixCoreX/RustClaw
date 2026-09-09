@@ -141,8 +141,10 @@ export function canonicalCandidateUrls(platform, rawUrls) {
   for (const rawUrl of rawUrls) {
     try {
       const normalized = validatePlatformUrl(platform, rawUrl);
-      if (!isDetailUrl(platform, normalized) || seen.has(normalized)) continue;
-      seen.add(normalized);
+      if (!isDetailUrl(platform, normalized)) continue;
+      const identity = platformItemId(platform, normalized);
+      if (seen.has(identity)) continue;
+      seen.add(identity);
       result.push(normalized);
     } catch {
       // Invalid or off-platform links are ignored as untrusted page input.
