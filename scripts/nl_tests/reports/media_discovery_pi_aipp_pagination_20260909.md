@@ -191,3 +191,59 @@ AiAPP. This was a package-version gap, not a browser-cache problem.
 - No main-program/UI rebuild, service restart, or changes to other skill packages
   were required. Final available disk space was approximately 1958 MiB. This
   package update does not resolve the earlier live-collection acceptance gaps.
+
+## Follow-up: Collection After Core Memory Optimization
+
+The user requested another Pi collection test after the memory deployment.
+The running core was `f7397cac8`, SHA256
+`44006b99dbf56878bba67e01a2e755abe939b419680420cfda08323496ee4bf0`.
+The media-discovery package, configuration, browser admission floor, and
+platform limits were not changed for this test. Available memory before the
+case was approximately 409 MiB; there were no active tasks or collection runs.
+
+The existing `pi_douyin_single_post` NL case requested one silent Douyin
+recommendation post, at most two scrolls and five minutes, without continuous
+collection or a schedule. Only this platform was retested in this round.
+The committed fixture was synced to the release installation after a harness
+preflight reported it missing; that preflight submitted no model request.
+
+- Task: `00c49afc-6fcc-4e61-af32-a6db1ea8626a`.
+- Run: `run_1b85e9d6-6362-4d9d-8b19-8c2c9855bf81`.
+- Provider/model: existing `vendor-custom/minimax` configuration.
+- Task elapsed: 541 seconds; five model-return records, seven provider attempts
+  reported by task efficiency. The first model response was slow.
+- The real capability call passed admission and started ARM Chromium. The
+  earlier pre-dispatch `memory_unavailable` failure did not recur this time.
+- Batch started at `2026-09-09T12:34:58.941Z`, encountered
+  `challenge_required` at `12:35:11.401Z`, opened the manual verification
+  browser at `12:35:34.470Z`, and finished at `12:40:03.883Z`.
+- No manual verification completion was observed. The five-minute deadline
+  stopped the batch normally; final `browser_session_open=false` and
+  `status=stopped_after_current_item`.
+- `records_saved=0`, `captions_saved=0`, `covers_saved=0`, and all item/image/video
+  counts were zero. AiAPP returned HTTP success with zero items.
+- Task status and the existing harness assertions passed, but **live collection
+  acceptance did not pass**. An accepted invocation and an explained zero-result
+  task are not proof that a platform post was collected.
+- A snapshot during manual verification measured about 560 MiB PSS + SwapPss
+  for Node and Chromium combined. This was one snapshot, not a measured peak;
+  it does not justify reducing the browser admission floor or enabling parallel
+  platform browsers on this 1 GiB host.
+- Final health reported running=0 and queued=0; no nonterminal tasks, Chromium
+  processes, active collection leases, or background worker remained.
+
+Model reply quality also needs follow-up: the generated response claimed an
+immediate stop at the challenge, but the recorded behavior was a visible manual
+verification wait until the batch deadline. The first answer verification failed
+with `missing_evidence_fields=[output_format,field_value]`; the subsequent
+response passed verification. The final verifier pass does not establish that
+every narrative claim is accurate. Any fix must consume structured lifecycle
+evidence, not add a language-specific reply or skill-name routing branch.
+
+Evidence is retained locally and on the Pi under
+`scripts/nl_suite_logs/pi_collection_retest_20260909/20260909_203233/`.
+Additional local evidence is under `target/deploy/pi-collection-retest-20260909/`:
+`acceptance.json`, `verification-memory.txt`, `llm-public-responses.jsonl`, and
+`nl-output.log`. The numbered model-visible response fields were replayed in
+the development conversation. This test did not modify or redeploy production
+code, disable memory admission, bypass verification, or clear existing data.
