@@ -68,6 +68,8 @@ const ERROR_CODES = new Set([
   "source_mode_invalid",
   "source_scope_empty",
   "source_url_invalid",
+  "source_unavailable",
+  "unexpected_page_response",
   "storage_lock_timeout",
 ]);
 const ACTIONS = new Set([
@@ -438,6 +440,7 @@ async function runPlatformBatch(request, args, runtime = {}) {
           platform,
           config,
           errorCode,
+          targetUrl: error.discovery_target_url,
           shouldStop: collectionRequest.shouldStop,
           locale: request.context?.language_hint || request.context?.locale,
           onOpened: async () => {
@@ -510,6 +513,7 @@ async function runPlatformBatch(request, args, runtime = {}) {
   }
   run.counts = counts;
   run.capture_summary = captureSummary;
+  run.browser_session_open = false;
   if (failureDiagnostic) run.failure_diagnostic = failureDiagnostic;
   const completed = await finishRun(root, run, status, errorCode);
   if (status !== "failed") {

@@ -60,6 +60,36 @@ test("a ready visible page never resumes without explicit user confirmation", as
   assert.equal(polls, 6);
 });
 
+test("a confirmed home feed cannot satisfy a search-page verification", async () => {
+  const page = manualPage();
+  const targetUrl = "https://www.douyin.com/search/finance";
+  let polls = 0;
+  const options = { page, context: {}, platform: "douyin", errorCode: "challenge_required",
+    timeoutMs: 3000, confirmation: confirmed, targetUrl };
+  assert.equal((await waitForManualAccess({ ...options, shouldStop: async () => ++polls > 5 })).ready, false);
+  page.url = () => targetUrl;
+  assert.equal((await waitForManualAccess(options)).ready, true);
+});
+
+test("the rejected collection URL reaches the manual browser unchanged", async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "media-discovery-search-handoff-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const targetUrl = "https://www.douyin.com/search/finance";
+  let windows = 0;
+  const result = await handleRequest({ args: { action: "run_once", platform: "douyin",
+    source_mode: "topics", topics: ["finance"] },
+    context: { skill_storage: { storage_kind: "directory", directory_path: root } } }, {
+    collectPlatform: async () => { throw Object.assign(new Error("challenge_required"), { discovery_target_url: targetUrl }); },
+    waitForInteractiveLogin: async ({ targetUrl: actual }) => {
+      windows += 1;
+      assert.equal(actual, targetUrl);
+      return { ready: false, error_code: "interactive_verification_cancelled" };
+    },
+  });
+  assert.equal(windows, 1);
+  assert.equal(result.extra.run.capture_summary.records_saved, 0);
+});
+
 test("hidden readiness elements do not satisfy a confirmed manual handoff", async () => {
   const page = manualPage();
   const locate = page.locator;

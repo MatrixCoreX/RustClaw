@@ -22,7 +22,7 @@ const PLATFORM_SPECS = Object.freeze({
     hosts: ["kuaishou.com"],
     detailPath: /^\/short-video\/[A-Za-z0-9_-]{8,}(?:\/|$)/u,
     topicUrl: (topic) =>
-      `https://www.kuaishou.com/search/video?searchKey=${encodeURIComponent(topic)}`,
+      `https://www.kuaishou.com/search/${encodeURIComponent(topic)}`,
   },
 });
 
@@ -93,6 +93,22 @@ export function sourceTargets(platform, config) {
 
 export function sourceUrls(platform, config) {
   return sourceTargets(platform, config).map((target) => target.url);
+}
+
+export function manualVerificationTarget(platform, config, blockedUrl) {
+  return validatePlatformUrl(platform, blockedUrl || sourceTargets(platform, config)[0].url);
+}
+
+export function matchesVerificationTarget(platform, targetUrl, currentUrl) {
+  if (!targetUrl) return true;
+  try {
+    const target = new URL(validatePlatformUrl(platform, targetUrl));
+    const current = new URL(validatePlatformUrl(platform, currentUrl));
+    return target.origin === current.origin && target.pathname === current.pathname
+      && [...target.searchParams].every(([name, value]) => current.searchParams.get(name) === value);
+  } catch {
+    return false;
+  }
 }
 
 export function isDetailUrl(platform, rawUrl) {
