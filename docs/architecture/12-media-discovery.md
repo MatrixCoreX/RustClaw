@@ -74,12 +74,13 @@ flowchart TD
     B[Persistent browser profile<br/>Xiaohongshu visible / others silent]
     Q{Platform access}
     M[Temporary manual login or verification window]
+    MR{One retry in the requested silent mode}
     K[Network restriction or rate limit]
     PA[Pause platform until user resumes]
     END[One-shot receipt]
     MODE{Continuous run?}
     C[Rendered card or media element screenshot]
-    O[Author caption and engagement metadata]
+    O[Author caption, publication date and available engagement]
     L[Private immutable record ledger]
     V[videos.csv]
     I[images.csv]
@@ -98,7 +99,10 @@ flowchart TD
     RB --> T --> B --> Q
     Q -->|ready| C --> O --> L
     Q -->|login or human verification| M
-    M -->|verified, resume requested mode| Q
+    M -->|user confirms and visible feed is ready| MR
+    MR -->|ready| C
+    MR -->|still requires login or verification| PA
+    MR -->|restricted| K
     M -->|closed or timed out| PA
     Q -->|restricted| K --> MODE
     L --> MODE
@@ -115,8 +119,9 @@ flowchart TD
 ```
 
 Each batch is bounded by item, scroll, and elapsed-time limits. A private worker
-lease admits only one continuous job, and a separate batch lease admits only one
-live browser batch. An already enabled continuous configuration also rejects another
+lease admits only one continuous coordinator, and a per-platform batch lease
+admits only one live browser batch for that platform. Different platforms may
+run concurrently within the resource cap. An already enabled continuous configuration also rejects another
 `enable`, covering requests that were queued while the prior batch was active.
 These rejections are structured pre-dispatch outcomes with no side effect. The
 run checkpoints after committed records, maintains a periodic heartbeat,
