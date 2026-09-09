@@ -33,6 +33,23 @@ test("manual verification retains the selected keyword or blocked detail instead
   assert.equal(detailNavigationError("xiaohongshu", detail, "https://www.xiaohongshu.com/404", false), "source_unavailable");
 });
 
+test("Xiaohongshu search UI routes retain the exact keyword through their URL encoding", () => {
+  for (const keyword of ["财经", "AI agent", "%20", "a+b & c"]) {
+    const target = sourceTargets("xiaohongshu", { source_mode: "topics", topics: [keyword] })[0].url;
+    const current = `https://www.xiaohongshu.com/search_result_ai?keyword=${encodeURIComponent(encodeURIComponent(keyword))}&source=web_explore_feed`;
+    assert.equal(matchesVerificationTarget("xiaohongshu", target, current), true);
+    assert.equal(matchesVerificationTarget("xiaohongshu", current, current), true);
+    assert.equal(matchesVerificationTarget("xiaohongshu", target, current.replace("search_result_ai", "explore")), false);
+  }
+});
+
+test("Xiaohongshu search detail links preserve page-provided parameters", () => {
+  const url = "https://www.xiaohongshu.com/search_result/1234abcd?xsec_token=fixture&xsec_source=pc_search";
+  assert.equal(isDetailUrl("xiaohongshu", url), true);
+  assert.deepEqual(canonicalCandidateUrls("xiaohongshu", [url, url]), [url]);
+  assert.equal(isDetailUrl("xiaohongshu", "https://www.xiaohongshu.com/search_result?keyword=fixture"), false);
+});
+
 test("platform URLs are validated structurally", () => {
   assert.equal(
     validatePlatformUrl("douyin", "https://www.douyin.com/video/123#comment"),

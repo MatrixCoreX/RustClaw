@@ -72,6 +72,35 @@ test("platform poster controls provide the cover when no video frame is availabl
   assert.equal(cover?.source, "rendered_poster_image");
 });
 
+test("Kuaishou player controls do not mask the frame but unrelated overlays still do", {
+  skip: !RUN_BROWSER_TEST,
+}, async (t) => {
+  const page = await withPage(t, `
+    <main class="swiper-feed"><section class="swiper-slide-active">
+      <div class="video-container" style="position:relative;width:640px;height:360px">
+        <video class="kplayer-video" style="width:640px;height:360px;background:#222"></video>
+        <div class="video-interact-panel" style="position:absolute;inset:0"><div class="mask" style="height:100%"></div></div>
+        <div class="volume-control-wrapper" style="position:absolute;bottom:0;right:0;width:200px;height:90px">controls</div>
+      </div>
+    </section></main>
+  `);
+  assert.equal((await renderedVideoCover(page, "kuaishou"))?.source, "rendered_video_frame");
+  await page.locator(".video-container").evaluate(node => {
+    const overlay = document.createElement("div");
+    overlay.style.cssText = "position:absolute;inset:0;background:white";
+    node.append(overlay);
+  });
+  assert.equal(await renderedVideoCover(page, "kuaishou"), null);
+  await page.locator(".video-container > div:last-child").evaluate(node => node.remove());
+  await page.locator("body").evaluate(node => {
+    const overlay = document.createElement("div");
+    overlay.className = "video-interact-panel";
+    overlay.style.cssText = "position:fixed;inset:0;background:white";
+    node.append(overlay);
+  });
+  assert.equal(await renderedVideoCover(page, "kuaishou"), null);
+});
+
 test("Douyin discovery cards expose their rendered poster as the video cover", {
   skip: !RUN_BROWSER_TEST,
 }, async (t) => {

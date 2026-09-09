@@ -12,7 +12,7 @@ const PLATFORM_SPECS = Object.freeze({
     defaultBrowserMode: "visible",
     homeUrl: "https://www.xiaohongshu.com/explore",
     hosts: ["xiaohongshu.com"],
-    detailPath: /^\/(?:explore|discovery\/item)\/[A-Za-z0-9_-]+(?:\/|$)/u,
+    detailPath: /^\/(?:explore|search_result|discovery\/item)\/[A-Za-z0-9_-]+(?:\/|$)/u,
     topicUrl: (topic) =>
       `https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(topic)}`,
   },
@@ -104,11 +104,26 @@ export function matchesVerificationTarget(platform, targetUrl, currentUrl) {
   try {
     const target = new URL(validatePlatformUrl(platform, targetUrl));
     const current = new URL(validatePlatformUrl(platform, currentUrl));
+    if (platform === "xiaohongshu" && target.origin === current.origin
+      && ["/search_result", "/search_result_ai"].includes(target.pathname)
+      && ["/search_result", "/search_result_ai"].includes(current.pathname)) {
+      const keyword = urlSearchKeyword(target);
+      return keyword !== null && keyword === urlSearchKeyword(current);
+    }
     return target.origin === current.origin && target.pathname === current.pathname
       && [...target.searchParams].every(([name, value]) => current.searchParams.get(name) === value);
   } catch {
     return false;
   }
+}
+
+function urlSearchKeyword(url) {
+  const value = url.searchParams.get("keyword");
+  if (value === null) return null;
+  if (url.pathname === "/search_result_ai") {
+    try { return decodeURIComponent(value); } catch { return value; }
+  }
+  return value;
 }
 
 export function isDetailUrl(platform, rawUrl) {

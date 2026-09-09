@@ -6,7 +6,7 @@ import test from "node:test";
 import { chromium } from "playwright";
 import { collectPlatform } from "../src/browser.mjs";
 import { handleRequest } from "../src/main.mjs";
-import { sourceTargets } from "../src/platforms.mjs";
+import { platformSpec, sourceTargets } from "../src/platforms.mjs";
 import { readRecords } from "../src/storage.mjs";
 
 const enabled = process.env.MEDIA_DISCOVERY_BROWSER_TEST === "1";
@@ -15,22 +15,35 @@ const config = { source_mode: "topics", topics: ["财经"], browser_mode: "silen
 
 for (const [platform, prefix] of [
   ["douyin", "https://www.douyin.com/video/"],
-  ["xiaohongshu", "https://www.xiaohongshu.com/explore/"],
+  ["xiaohongshu", "https://www.xiaohongshu.com/search_result/"],
   ["kuaishou", "https://www.kuaishou.com/short-video/"],
 ]) {
   test(`${platform} search commits details in order with keyword provenance and skips a missing post`, { skip: !enabled }, async t => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "media-discovery-search-"));
     t.after(() => fs.rm(root, { recursive: true, force: true }));
     const source = sourceTargets(platform, config)[0].url;
+    const home = platformSpec(platform).homeUrl;
     const urls = ["73100000", "73100001", "73100002", "73100003"].map(id => `${prefix}${id}?source=fixture`);
     const navigations = [];
+    const submitted = [];
     const originalLaunch = chromium.launchPersistentContext.bind(chromium);
     t.mock.method(chromium, "launchPersistentContext", async (profile, options) => {
       const context = await originalLaunch(profile, options);
+      await context.exposeFunction("recordSearch", value => submitted.push(value));
       await context.route("**/*", async route => {
         const url = route.request().url();
         if (!route.request().isNavigationRequest()) return route.abort();
         navigations.push(url);
+        if (url === home) {
+          const controls = {
+            douyin: '<input data-e2e="searchbar-input"><button data-e2e="searchbar-button">search</button>',
+            xiaohongshu: '<div class="input-box"><input id="search-input"><button class="search-icon">search</button></div>',
+            kuaishou: '<input class="search-input"><button class="search-button">search</button>',
+          }[platform];
+          return route.fulfill({ contentType: "text/html", body: `${controls}<script>
+            document.querySelector('button').onclick=async()=>{await window.recordSearch(document.querySelector('input').value);location.href=${JSON.stringify(source)}};
+          </script>` });
+        }
         if (url === source) return route.fulfill({ contentType: "text/html", body: `<main>
           <a hidden href="${prefix}99999999">hidden</a>
           ${urls.map(href => `<a href="${href}">post</a>`).join("")}
@@ -39,10 +52,13 @@ for (const [platform, prefix] of [
         assert.ok(urls.includes(url), `unexpected navigation ${url}`);
         const caption = `Caption ${urls.indexOf(url)}`;
         const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500"><rect width="500" height="500" fill="#278b9a"/><text x="50" y="250" font-size="42">${caption}</text></svg>`;
+        const detail = `<div class="note-container"><h1 id="detail-title">${caption}</h1>
+          <time datetime="2026-09-09">2026-09-09</time>
+          <img width="500" height="500" src="data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}"></div>`;
         return route.fulfill({ contentType: "text/html", body: `<head><title>${caption}</title>
           <meta property="og:description" content="${caption}"></head><body>
-          <time datetime="2026-09-09">2026-09-09</time>
-          <img width="500" height="500" src="data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}"></body>` });
+          ${platform === "xiaohongshu" ? '<video width="300" height="300"></video><img width="300" height="300" src="data:,background"><p data-testid="like-count">999</p>' : ""}
+          ${detail}</body>` });
       });
       return context;
     });
@@ -57,7 +73,10 @@ for (const [platform, prefix] of [
     assert.equal(result.extra.run.counts.failures, 1);
     assert.equal(result.extra.run.capture_summary.records_saved, 3);
     assert.equal(result.extra.run.browser_session_open, false);
-    assert.deepEqual(navigations, [source, ...urls]);
+    assert.deepEqual(result.extra.run.searches, [{ platform, keyword: "财经", result_url: source,
+      method: "platform_search_form", result_ready: true }]);
+    assert.deepEqual(submitted, ["财经"]);
+    assert.deepEqual(navigations.filter(url => url !== source), [home, ...urls]);
     const records = await readRecords(root);
     assert.deepEqual(records.map(r => r.source_page_url), urls.slice(1));
     assert.deepEqual(records.map(r => r.global_sequence), [1, 2, 3]);
@@ -66,6 +85,8 @@ for (const [platform, prefix] of [
       assert.equal(record.discovery_source_url, source);
       assert.equal(record.published_at, "2026-09-09");
       assert.ok(record.platform_text.startsWith("Caption"));
+      assert.equal(record.kind, "image");
+      assert.equal(record.engagement.metrics.likes, undefined);
       assert.ok((await fs.stat(path.join(root, "exports", record.image_screenshot_path))).size > 512);
     }
   });

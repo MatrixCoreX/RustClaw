@@ -1,7 +1,7 @@
 const DATE_SELECTORS = {
   douyin: ['[data-e2e="video-create-time"]', '[data-e2e="video-publish-time"]'],
   xiaohongshu: [".bottom-container > .date", ".publish-date", '[data-testid="publish-time"]'],
-  kuaishou: [".video-info-time", ".publish-time"],
+  kuaishou: [".video-info-time", ".publish-time", ".timestamp"],
 };
 
 export function normalizePublication(value, now = Date.now()) {
@@ -42,11 +42,19 @@ export async function capturePublication(scope, platform, itemId) {
     return [{ value: machine || node.textContent?.trim(), source: machine ? "dom_attribute" : "dom_label" }];
   }), id);
   const structured = await page.evaluate(({ platform, id }) => {
-    const idKeys = { douyin: ["aweme_id", "awemeId"], xiaohongshu: ["noteId", "note_id"], kuaishou: ["photoId", "photo_id"] }[platform] || [];
+    // The detail owns this timestamp; page telemetry and comments can share its ID.
+    if (platform === "xiaohongshu") {
+      const note = window.__INITIAL_STATE__?.note?.noteDetailMap?.[id]?.note;
+      if (String(note?.noteId ?? "") === id && ["number", "string"].includes(typeof note?.time)) {
+        return { value: note.time, source: "post_state:noteDetailMap.note.time" };
+      }
+    }
+    const idKeys = { douyin: ["aweme_id", "awemeId"], xiaohongshu: ["noteId", "note_id"], kuaishou: ["photoId", "photo_id", "id"] }[platform] || [];
     const timeKeys = platform === "xiaohongshu"
-      ? ["publishTime", "publish_time", "createTime", "create_time", "time"]
+      ? ["publishTime", "publish_time", "createTime", "create_time"]
       : ["publishTime", "publish_time", "createTime", "create_time", "timestamp"];
     const roots = [window.__INITIAL_STATE__, window.__NEXT_DATA__, window._SSR_HYDRATED_DATA];
+    if (platform === "kuaishou") roots.push(window.INIT_STATE);
     for (const script of document.querySelectorAll('script[type="application/json"], script[type="application/ld+json"], script#RENDER_DATA')) {
       if (script.textContent.length > 5_000_000) continue;
       try { roots.push(JSON.parse(script.id === "RENDER_DATA" ? decodeURIComponent(script.textContent) : script.textContent)); } catch { /* Non-JSON scripts are not executed. */ }
@@ -57,12 +65,15 @@ export async function capturePublication(scope, platform, itemId) {
       const node = queue[cursor];
       if (!node || typeof node !== "object" || seen.has(node)) continue;
       seen.add(node);
+      if (platform === "xiaohongshu" && ["commentId", "comment_id", "subCommentCount", "targetComment"]
+        .some(key => Object.hasOwn(node, key))) continue;
       if (idKeys.some(key => String(node[key] ?? "") === id)) {
         for (const key of timeKeys) {
           if (typeof node[key] === "number" || typeof node[key] === "string") return { value: node[key], source: `post_state:${key}` };
         }
       }
-      if (node.datePublished && [node.url, node["@id"], node.mainEntityOfPage?.["@id"]].some(url => {
+      // Xiaohongshu's search overlay synthesizes JSON-LD dates on navigation.
+      if (platform !== "xiaohongshu" && node.datePublished && [node.url, node["@id"], node.mainEntityOfPage?.["@id"]].some(url => {
         try { return new URL(url, location.href).pathname.split("/").includes(id); } catch { return false; }
       })) return { value: node.datePublished, source: "json_ld:datePublished" };
       for (const value of Object.values(node).slice(0, 500)) {

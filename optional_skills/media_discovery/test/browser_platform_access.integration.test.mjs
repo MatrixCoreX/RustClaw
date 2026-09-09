@@ -47,6 +47,15 @@ test("missing feed DOM produces a bounded selector failure", { skip: !enabled },
   await assert.rejects(waitForPlatformFeed(page, "kuaishou", {}, async () => false, 100), { message: "selector_drift" });
 });
 
+test("Kuaishou QR-only modal is a login barrier but the sidebar login offer is not", { skip: !enabled }, async t => {
+  const page = await browserPage(t, `<div class="login"><span class="sidebar-login-button">login</span></div>
+    <div class="popup login-popup"><div class="login-modal login-modal-v2"><div class="qrcode" style="width:100px;height:100px"></div></div></div>`,
+  "https://www.kuaishou.com/search/finance");
+  assert.equal(await currentPlatformAccessError(page, "kuaishou"), "login_required");
+  await page.locator(".login-popup").evaluate(node => { node.style.display = "none"; });
+  assert.equal(await currentPlatformAccessError(page, "kuaishou"), null);
+});
+
 test("Xiaohongshu modal with text/number inputs is a login barrier, not a ready feed", { skip: !enabled }, async t => {
   const page = await browserPage(t, `<section class="note-item" data-note-id="fixture"></section>
     <div class="reds-modal reds-modal-open login-modal"><div class="login-container">

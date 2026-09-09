@@ -54,3 +54,22 @@ test("publication extraction is scoped to the current post across all platforms"
   assert.equal((await capturePublication(page, "douyin", "123")).published_at, "2026-09-07");
   assert.equal((await capturePublication(page, "douyin", "12")).published_at, null);
 });
+
+test("Xiaohongshu publication belongs to the detail, never telemetry or comment time", {
+  skip: process.env.MEDIA_DISCOVERY_BROWSER_TEST !== "1",
+}, async t => {
+  const browser = await chromium.launch({ executablePath: (await browserCapability()).chromium_executable, headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.setContent('<main></main><script type="application/ld+json">{"url":"https://www.xiaohongshu.com/explore/123","datePublished":"2026-09-09T00:00:00Z"}</script>');
+  await page.evaluate(() => { window.__INITIAL_STATE__ = {
+    telemetry: { noteId: "123", time: Date.now() },
+    comment: { noteId: "123", createTime: Date.now(), subCommentCount: 0 },
+    note: { noteDetailMap: { "123": { note: { noteId: "123", time: 1788739200000 } } } },
+  }; });
+  const result = await capturePublication(page, "xiaohongshu", "123");
+  assert.equal(result.published_at, "2026-09-07T00:00:00.000Z");
+  assert.equal(result.publication_source, "post_state:noteDetailMap.note.time");
+  await page.evaluate(() => { delete window.__INITIAL_STATE__.note; });
+  assert.equal((await capturePublication(page, "xiaohongshu", "123")).published_at, null);
+});
