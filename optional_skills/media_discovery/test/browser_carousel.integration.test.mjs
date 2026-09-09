@@ -66,7 +66,11 @@ test("browser collector follows the rendered carousel and captures every image i
   ];
   await page.setContent(`
     <main style="width:640px;margin:20px auto">
-      <img id="slide" width="640" height="480" alt="fixture carousel image">
+      <div style="width:640px;overflow:hidden;position:relative">
+        <img width="640" height="480" src="${images[1]}" style="position:absolute;left:-600px" alt="clipped previous">
+        <img id="slide" width="640" height="480" alt="fixture carousel image">
+        <img width="640" height="480" src="${images[2]}" style="position:absolute;left:640px;top:0" alt="clipped next">
+      </div>
       <button class="swiper-button-next" aria-label="next">next</button>
     </main>
     <script>

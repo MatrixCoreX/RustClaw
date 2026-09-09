@@ -4,6 +4,9 @@ import path from "node:path";
 import { assertDocumentResponse, browserStageError, recordBrowserFailure } from "./browser_diagnostics.mjs";
 import { createManualConfirmation } from "./manual_handoff.mjs";
 import { capturePublication } from "./publication.mjs";
+import { boundedBrowserOperation, normalizeBrowserError, openKeywordSearch } from "./browser_search.mjs";
+import { withSearchResult } from "./browser_search_results.mjs";
+import { collectKuaishouSearchResults } from "./browser_kuaishou_search.mjs";
 
 import {
   canonicalCandidateUrls,
@@ -26,7 +29,7 @@ const INTERACTIVE_CHALLENGE_POLL_MS = 1000;
 const PLATFORM_AUTH_COOKIE_NAMES = Object.freeze({
   douyin: new Set(["sessionid", "sessionid_ss", "sid_guard", "uid_tt", "uid_tt_ss"]),
   xiaohongshu: new Set(["web_session"]),
-  kuaishou: new Set(["kuaishou.server.web_st", "userId"]),
+  kuaishou: new Set(["kuaishou.server.web_st", "kuaishou.server.webday7_st", "userId"]),
 });
 
 const ENGAGEMENT_SELECTORS = Object.freeze({
@@ -81,9 +84,10 @@ const ENGAGEMENT_SELECTORS = Object.freeze({
     likes: Object.freeze([
       '.interactive-item.like-item .item-count',
       '.video-info-content:has(.like-icon) .info-text',
+      '.photo-btns .like-btn',
     ]),
-    comments: Object.freeze(['.interactive-item.comment-item .item-count', '[data-testid="comment-count"]']),
-    favorites: Object.freeze(['.interactive-item.collect-item .item-count', '[data-testid="collect-count"]']),
+    comments: Object.freeze(['.interactive-item.comment-item .item-count', '[data-testid="comment-count"]', '.photo-btns .commentPanel']),
+    favorites: Object.freeze(['.interactive-item.collect-item .item-count', '[data-testid="collect-count"]', '.photo-btns .favorite']),
     shares: Object.freeze(['.interactive-item.share-item .item-count', '[data-testid="share-count"]']),
     views: Object.freeze(['.video-info-content:has(.play-icon) .info-text', '[data-testid="play-count"]']),
   }),
@@ -115,6 +119,7 @@ const PLATFORM_CAPTION_SELECTOR_GROUPS = Object.freeze({
     Object.freeze([
       '.short-video-info-container-detail .video-info-title',
       '.video-info-title',
+      '.caption',
     ]),
   ]),
 });
@@ -197,7 +202,7 @@ export async function captureEngagementMetrics(scope, platform, capturedAt) {
           && !node.closest('[data-comment-id], .comments-container');
       }).map((node) => ({
         machineValue: node.getAttribute("data-count") || node.getAttribute("data-value") || "",
-        renderedValue: node.textContent || "",
+        renderedValue: node instanceof HTMLElement ? node.innerText : node.textContent || "",
       })));
       for (const candidate of candidates) {
         display = normalizedMetricDisplay(candidate.machineValue)
@@ -322,13 +327,17 @@ export function platformAccessError(platform, currentUrl, captchaFrameUrls = [])
 }
 
 export async function currentPlatformAccessError(page, platform) {
-  const captchaFrameUrls = await page.locator("iframe[src]").evaluateAll((frames) =>
+  const captchaFrameUrls = await boundedBrowserOperation(page.locator("iframe[src]").evaluateAll((frames) =>
     frames.map((frame) => frame.src || ""),
-  );
+  ), 10_000, "access_check");
   const accessError = platformAccessError(platform, page.url(), captchaFrameUrls);
   if (accessError) return accessError;
   if (platform === "xiaohongshu"
     && await page.locator('.login-modal.reds-modal-open .login-container:visible').count()) {
+    return "login_required";
+  }
+  if (platform === "kuaishou"
+    && await page.locator('.login-popup .login-modal:visible, .login-modal.login-modal-v2:visible').count()) {
     return "login_required";
   }
   if (await page.locator('input[type="password"]:visible, input[type="tel"]:visible').count()) {
@@ -421,7 +430,7 @@ export async function waitForManualAccess({ page, context, platform, errorCode, 
       const selector = {
         douyin: '[data-aweme-id], [data-e2e="video-detail"], video, a[href*="/video/"], a[href*="/note/"]',
         xiaohongshu: 'section.note-item[data-note-id], #detail-title, #detail-desc, a[href*="/explore/"]',
-        kuaishou: '.video-card, .short-video-info-container-detail, video, a[href*="/short-video/"]',
+        kuaishou: '.video-card, .video-list .photo-card, .short-video-info-container-detail, video, a[href*="/short-video/"]',
       }[platform];
       const visibleSelector = selector.split(",").map(part => `${part.trim()}:visible`).join(",");
       ready = action === "continue" && !accessError && await page.locator(visibleSelector).count() > 0
@@ -683,7 +692,7 @@ export async function advanceDouyinDetailFeed(page, previousItemId, config = {},
   return null;
 }
 
-async function pageMetadata(page, platform, requestedUrl) {
+async function pageMetadata(page, platform, requestedUrl, scope = page) {
   const metadata = await page.evaluate(() => {
     const meta = (selector) => document.querySelector(selector)?.getAttribute("content")?.trim() || "";
     const canonical = document.querySelector('link[rel="canonical"]')?.href || location.href;
@@ -703,8 +712,11 @@ async function pageMetadata(page, platform, requestedUrl) {
   }
   return {
     ...metadata,
-    canonical: canonicalUrl,
-    platformText: await capturePlatformCaption(page, platform, metadata.description),
+    canonical: isDetailUrl(platform, canonicalUrl)
+      && platformItemId(platform, canonicalUrl) === platformItemId(platform, requestedUrl) ? canonicalUrl : requestedUrl,
+    hasVideo: await scope.locator("video").count() > 0,
+    title: scope === page ? metadata.title : await firstSelectorText(scope, PLATFORM_CAPTION_SELECTOR_GROUPS[platform]?.[0] || []),
+    platformText: await capturePlatformCaption(scope, platform, scope === page ? metadata.description : ""),
   };
 }
 
@@ -713,6 +725,17 @@ async function visibleImageCandidates(page, maximum) {
     images.map((image, index) => {
       const rect = image.getBoundingClientRect();
       const style = window.getComputedStyle(image);
+      let left = Math.max(0, rect.left), right = Math.min(innerWidth, rect.right);
+      let top = Math.max(0, rect.top), bottom = Math.min(innerHeight, rect.bottom);
+      for (let parent = image.parentElement; parent; parent = parent.parentElement) {
+        const bounds = parent.getBoundingClientRect(), css = getComputedStyle(parent);
+        if (["hidden", "clip", "scroll", "auto"].includes(css.overflowX)) {
+          left = Math.max(left, bounds.left); right = Math.min(right, bounds.right);
+        }
+        if (["hidden", "clip", "scroll", "auto"].includes(css.overflowY)) {
+          top = Math.max(top, bounds.top); bottom = Math.min(bottom, bounds.bottom);
+        }
+      }
       return {
         index,
         width: rect.width,
@@ -724,10 +747,7 @@ async function visibleImageCandidates(page, maximum) {
           Number.parseFloat(style.opacity || "1") > 0.01 &&
           rect.width >= 180 &&
           rect.height >= 180 &&
-          rect.bottom > 0 &&
-          rect.right > 0 &&
-          rect.top < window.innerHeight &&
-          rect.left < window.innerWidth,
+          right - left >= 180 && bottom - top >= 180,
         source: image.currentSrc || image.src || "",
       };
     }),
@@ -950,13 +970,18 @@ async function locatorIsUsableCover(locator, minimumWidth = 180) {
     const rect = node.getBoundingClientRect();
     if (rect.width < widthFloor || rect.height < 120) return false;
     const card = node.closest("[data-aweme-id], [data-note-id]");
+    const player = node.matches("video.kplayer-video")
+      ? node.closest(".swiper-feed .swiper-slide-active .video-container") : null;
     const left = Math.max(0, rect.left), top = Math.max(0, rect.top);
     const right = Math.min(window.innerWidth, rect.right), bottom = Math.min(window.innerHeight, rect.bottom);
     if (right <= left || bottom <= top) return false;
     return [0.15, 0.5, 0.85].every(xRatio => [0.15, 0.5, 0.85].every(yRatio => {
       const topNode = document.elementFromPoint(left + (right - left) * xRatio, top + (bottom - top) * yRatio);
       return topNode === node || node.contains(topNode)
-        || (card && topNode instanceof Element && topNode.closest("[data-aweme-id], [data-note-id]") === card);
+        || (card && topNode instanceof Element && topNode.closest("[data-aweme-id], [data-note-id]") === card)
+        || (player && topNode instanceof Element
+          && topNode.closest(".video-container") === player
+          && topNode.closest(".video-interact-panel, .volume-control-wrapper"));
     }));
   }, minimumWidth).catch(() => false);
 }
@@ -992,6 +1017,10 @@ async function collectPage(page, root, runId, platform, itemUrl, config, discove
     throw new Error(response.status() === 429 ? "rate_limited" : "challenge_required");
   }
   assertDocumentResponse(response, "detail_navigation");
+  return collectOpenedPage(page, root, runId, platform, itemUrl, config, discoverySource);
+}
+
+async function collectOpenedPage(page, root, runId, platform, itemUrl, config, discoverySource, scopeOverride = null) {
   await pacingWait(page, config, 1.25);
   const accessError = await currentPlatformAccessError(page, platform);
   if (accessError) throw browserStageError(accessError, "detail_access");
@@ -1007,16 +1036,19 @@ async function collectPage(page, root, runId, platform, itemUrl, config, discove
     currentUrl,
     (await page.locator('input[type="password"], input[type="tel"]').count()) > 0,
   );
-  if (navigationError) throw new Error(navigationError);
-  const metadata = await pageMetadata(page, platform, itemUrl);
+  if (navigationError && !scopeOverride) throw new Error(navigationError);
+  const detail = scopeOverride || (platform === "xiaohongshu" ? page.locator(".note-container:visible").first() : null);
+  if (detail) await detail.waitFor({ state: "visible", timeout: NAVIGATION_TIMEOUT_MS });
+  const scope = detail || page;
+  const metadata = await pageMetadata(page, platform, itemUrl, scope);
   const itemId = platformItemId(platform, metadata.canonical);
   const discoveredAt = new Date().toISOString();
-  const engagement = await captureEngagementMetrics(page, platform, discoveredAt);
-  const publication = await capturePublication(page, platform, itemId);
+  const engagement = await captureEngagementMetrics(scope, platform, discoveredAt);
+  const publication = await capturePublication(scope, platform, itemId);
   const temporaryRoot = path.join(root, "tmp", runId);
   if (metadata.hasVideo) {
     const screenshotPath = path.join(temporaryRoot, `${itemId.replaceAll(":", "_")}-video.png`);
-    const cover = await renderedVideoCover(page, platform);
+    const cover = await renderedVideoCover(scope, platform);
     if (!cover) throw new Error("media_element_not_found");
     await freezeVideoIfPresent(cover.locator);
     await screenshotLocator(cover.locator, screenshotPath, platform);
@@ -1044,7 +1076,7 @@ async function collectPage(page, root, runId, platform, itemUrl, config, discove
     };
   }
   return collectRenderedImages({
-    scope: page,
+    scope,
     root,
     runId,
     platform,
@@ -1416,7 +1448,7 @@ async function collectKuaishouHomeFeed(
   return handled;
 }
 
-export async function collectPlatform({ root, runId, platform, config, limit, shouldStop, onPage, onFailure }) {
+export async function collectPlatform({ root, runId, platform, config, limit, shouldStop, onPage, onFailure, onSearch }) {
   const browserMode = resolveBrowserMode(platform, config.browser_mode);
   config = { ...config, browser_mode: browserMode };
   if (browserMode === "visible" && !guiAvailable()) throw new Error("display_unavailable");
@@ -1433,28 +1465,53 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
       ? ["--ozone-platform=wayland"]
       : [],
   });
-  const page = context.pages()[0] || (await context.newPage());
+  let page = context.pages()[0] || (await context.newPage());
   page.setDefaultTimeout(NAVIGATION_TIMEOUT_MS);
   let handled = 0;
   let lastError = null;
   let stage = "source_navigation";
   let verificationTarget;
   try {
-    for (const discoverySource of sourceTargets(platform, config)) {
+    for (let discoverySource of sourceTargets(platform, config)) {
       const sourceUrl = discoverySource.url;
       verificationTarget = sourceUrl;
       if (handled >= limit || (await shouldStop())) break;
       stage = "source_navigation";
-      const response = await page.goto(sourceUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT_MS });
-      if (response && [401, 403, 429].includes(response.status())) {
-        throw browserStageError(response.status() === 429 ? "rate_limited" : "challenge_required", stage);
+      if (discoverySource.source_mode === "topics") {
+        const opened = await openKeywordSearch(page, platform, discoverySource, {
+          shouldStop,
+          checkAccess: candidate => accessErrorAfterExplicitVisibleWait(candidate, platform, config, shouldStop),
+          settle: candidate => pacingWait(candidate, config),
+        });
+        page = opened.page;
+        discoverySource = opened.source;
+        verificationTarget = discoverySource.url;
+        page.setDefaultTimeout(NAVIGATION_TIMEOUT_MS);
+        await onSearch?.({ platform, keyword: discoverySource.search_keyword,
+          result_url: discoverySource.url, method: "platform_search_form", result_ready: true });
+      } else {
+        const response = await page.goto(sourceUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT_MS });
+        if (response && [401, 403, 429].includes(response.status())) {
+          throw browserStageError(response.status() === 429 ? "rate_limited" : "challenge_required", stage);
+        }
+        assertDocumentResponse(response, stage);
       }
-      assertDocumentResponse(response, stage);
       await pacingWait(page, config, 1.25);
       stage = "source_access";
       const accessError = await accessErrorAfterExplicitVisibleWait(page, platform, config, shouldStop);
       if (accessError) throw new Error(accessError);
       stage = "collect_items";
+      if (platform === "kuaishou" && discoverySource.source_mode === "topics"
+        && await page.locator(".video-list .photo-card").count()) {
+        handled += await collectKuaishouSearchResults({ page, config,
+          limit: limit - handled, shouldStop, onPage, onFailure,
+          checkAccess: candidate => accessErrorAfterExplicitVisibleWait(candidate, platform, config, shouldStop),
+          settle: candidate => pacingWait(candidate, config),
+          scrollPage: candidate => pacedScroll(candidate, config),
+          collect: (opened, url, scope) => collectOpenedPage(opened, root, runId, platform, url, config, discoverySource, scope),
+        });
+        continue;
+      }
       if (platform === "douyin" && (config.source_mode || "home_feed") === "home_feed") {
         handled += await collectDouyinRecommendationFeed(
           page,
@@ -1500,7 +1557,7 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
       const candidates = await candidatesForDiscoverySource(
         page,
         platform,
-        sourceUrl,
+        discoverySource.url,
         config,
         limit - handled,
         shouldStop,
@@ -1513,21 +1570,18 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
         try {
           verificationTarget = candidate;
           await pacingWait(page, config, 0.5);
-          const result = await collectPage(
-            page,
-            root,
-            runId,
-            platform,
-            candidate,
-            config,
-            discoverySource,
-          );
+          const result = discoverySource.source_mode === "topics"
+            ? await withSearchResult(page, platform, candidate, discoverySource,
+              opened => collectOpenedPage(opened, root, runId, platform, candidate, config, discoverySource),
+              { shouldStop, checkAccess: opened => currentPlatformAccessError(opened, platform) })
+            : await collectPage(page, root, runId, platform, candidate, config, discoverySource);
           await onPage(result);
           handled += 1;
         } catch (error) {
           lastError = error;
           await onFailure?.(error);
-          if (["login_required", "challenge_required", "network_access_restricted", "rate_limited"].includes(String(error?.message))) {
+          if (["login_required", "challenge_required", "network_access_restricted", "rate_limited",
+            "search_results_restore_failed", "collection_stopped"].includes(String(error?.message))) {
             throw error;
           }
         }
@@ -1540,8 +1594,9 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
       throw lastError || new Error("selector_drift");
     }
     return { handled };
-  } catch (error) {
-    error.discovery_target_url = verificationTarget;
+  } catch (cause) {
+    const error = normalizeBrowserError(cause, stage);
+    error.discovery_target_url ||= verificationTarget;
     if (error.message !== "collection_stopped") {
       await recordBrowserFailure(page, { root, runId, platform, stage, error }).catch(() => {});
     }

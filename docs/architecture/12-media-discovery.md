@@ -29,9 +29,41 @@ like counter. It rejects keyword-shaped hot-list pseudo-links at the URL-contrac
 boundary and does not enter a challenged detail page merely to enrich a card.
 
 For keyword discovery, the agent emits `source_mode=topics` with `topics[]`.
-The skill visits each platform search result in that order and writes the exact
-keyword and search-page URL into every committed record. The runtime and skill
-never match localized user phrases to select search behavior.
+The skill opens the platform homepage, fills its visible search input, clicks
+the site's search control, and verifies the keyword and rendered result page.
+It handles a new result tab and current/older search layouts without treating
+homepage recommendations as search results. Visible result links are opened
+in DOM order; each detail is captured before returning to the same query.
+Kuaishou's newer cards use an in-page player rather than links. The adapter
+uniquely associates rendered covers with public post IDs in already-loaded page
+state, captures the active slide, and closes the player before the next card.
+It does not read the system clipboard or fetch a private platform API.
+Xiaohongshu capture is scoped to the note container, excluding background cards.
+Its publication timestamp comes from the current note's detail state, not the
+search overlay's generated JSON-LD date, comment time, or browsing telemetry.
+Engagement labels use rendered text so hidden tooltips do not pollute counters.
+The exact keyword and actual search-page URL accompany every committed record.
+The runtime and skill never match localized user phrases to select search behavior.
+
+`run.searches` proves a search reached visible results, whereas `run.counts` and
+`run.capture_summary` prove saved content. Missing controls, incorrect query
+navigation, timeouts, JSON instead of a document, and failed return navigation
+produce separate machine errors. Platform login or verification remains manual;
+the collector does not disguise automation or bypass access restrictions.
+
+```mermaid
+flowchart LR
+    H[Platform homepage] --> Q[Fill visible search input]
+    Q --> S[Click platform search control]
+    S --> V{Matching query and visible results?}
+    V -->|yes| C[Click next result link or card]
+    C --> D[Capture current detail only]
+    D --> L[Commit caption, media and available metadata]
+    L --> B[Return to same query]
+    B --> C
+    V -->|login or verification| M[Manual user action]
+    V -->|missing or invalid document| E[Bounded structured failure]
+```
 
 ## User Workflow
 
@@ -130,8 +162,9 @@ therefore committed in full before the browser closes. The collector remains
 separate from the manual `media_download` queue. The durable runtime job starts
 later batches after bounded randomized rests and remains observable and cancellable.
 Each platform has its own batch quota, cooldown, failure count and saved-item
-count in `platform_outcomes`. Due platforms run serially; a full or blocked
-batch on one platform cannot starve another. Feed-card capture only proves
+count in `platform_outcomes`. Due platforms run concurrently within the resource
+cap; excess batches wait for capacity. A full or blocked batch does not consume
+another platform's quota. Feed-card capture only proves
 the card's visible fields, not unseen detail text or an entire gallery.
 
 Status queries distinguish live heartbeat leases from expired records. Expired

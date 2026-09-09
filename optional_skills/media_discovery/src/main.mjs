@@ -32,6 +32,7 @@ const SKILL_NAME = "media_discovery";
 const ERROR_CODES = new Set([
   "action_unsupported",
   "browser_missing",
+  "browser_timeout",
   "browser_mode_invalid",
   "background_collection_not_enabled",
   "background_worker_already_active",
@@ -62,6 +63,12 @@ const ERROR_CODES = new Set([
   "screenshot_empty",
   "screenshot_obscured",
   "selector_drift",
+  "search_control_unavailable",
+  "search_input_mismatch",
+  "search_not_submitted",
+  "search_results_unavailable",
+  "search_detail_unavailable",
+  "search_results_restore_failed",
   "skill_storage_invalid",
   "skill_storage_required",
   "source_host_not_allowed",
@@ -372,6 +379,7 @@ async function runPlatformBatch(request, args, runtime = {}) {
     parallel_limit: runtime.parallelLimit,
   });
   if (!run) return success("run_once", { state: "disabled_or_paused", side_effect_applied: false });
+  run.searches = [];
   const counts = { items: 0, videos: 0, images: 0, duplicates: 0, failures: 0 };
   const captureSummary = { records_saved: 0, captions_saved: 0, covers_saved: 0, engagement_metrics: [] };
   const progressReporter = { emitIfDue: () => false, stop: () => {} };
@@ -398,6 +406,7 @@ async function runPlatformBatch(request, args, runtime = {}) {
         config,
         limit: remaining,
         shouldStop: async () => Boolean(runtime.shouldShutdown?.()) || Date.now() >= deadline || (await heartbeat(root, run.run_id, counts)),
+        onSearch: async evidence => { run.searches.push(evidence); },
         onPage: async ({ records, temporaryPaths }) => {
           try {
             const result = await commitPageRecords(root, records, run.run_id);

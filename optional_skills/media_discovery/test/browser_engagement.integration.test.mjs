@@ -106,6 +106,16 @@ test("captures Kuaishou likes from the card's structural control", {
   assert.equal(engagement.metrics.shares, undefined);
 });
 
+test("Kuaishou counters omit hidden tooltips and SVG labels", { skip: !RUN_BROWSER_TEST }, async t => {
+  const page = await withPage(t, `<main class="photo-btns">
+    <div class="commentPanel"><svg><title>Comment X</title></svg><span style="display:none">tooltip 9999</span><span>4132</span></div>
+    <div class="like-btn"><span style="display:none">like</span><span>2.5万</span></div>
+  </main>`);
+  const result = await captureEngagementMetrics(page, "kuaishou", "2026-09-09T00:00:00Z");
+  assert.deepEqual(result.metrics.comments, { display: "4132", value: 4132 });
+  assert.deepEqual(result.metrics.likes, { display: "2.5万" });
+});
+
 test("keeps available comment, favorite and share counts, including zero, without hidden or comment controls", {
   skip: !RUN_BROWSER_TEST,
 }, async t => {

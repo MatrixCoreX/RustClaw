@@ -8,42 +8,30 @@ URL whose content should be downloaded and returned now belongs to
 `media_download.download`, even when it is used as a `seed_urls` input shape;
 this skill does not provide immediate single-post media delivery. Xiaohongshu
 defaults to `browser_mode=visible`; Douyin and Kuaishou default to `silent`.
-An explicit browser mode overrides the platform default.
-Login and human-verification barriers are the exception: silent runs may open
+An explicit mode overrides the platform default. Login/verification exceptions may open
 one temporary browser for the user to complete those steps, then resume silently.
 It never solves a slider or bypasses a platform restriction automatically.
-The skill screenshots media
-elements already rendered in the browser and exports exactly two user result
-files: `videos.csv` and `images.csv`. It never runs OCR or model text review;
-author-provided captions remain available as `platform_text`.
-It also records the engagement counters exposed by platform-owned machine DOM
-controls at collection time. Metrics are structured as views, likes, comments,
-favorites, and shares; only counters available on the current platform/page are
-present. A counter must contain at least one Unicode decimal digit. The
-platform-rendered display value is retained without matching localized units,
-and an exact numeric value is added only for plain integer forms.
-For each video it attempts to preserve the first stable frame from a visible,
-unobscured platform video element, then a platform-specific rendered poster.
-Successful covers are stored under `video_covers/` and referenced from the CSV.
-Platforms do not guarantee either element: login/challenge overlays, selector
-changes, and unavailable media may therefore leave a result without a cover.
-The skill never substitutes a whole-page or login-dialog screenshot. It does
-not download video binaries or original image files.
+Rendered media screenshots and author captions (`platform_text`) are stored in
+`videos.csv` / `images.csv`, without OCR, model review, original-image or video downloads.
+Available views/likes/comments/favorites/shares retain platform display precision;
+plain integer counters also receive exact numeric values. Unavailable fields remain absent.
+Video covers use an unobscured rendered frame or platform poster under `video_covers/`;
+whole-page and login-dialog screenshots never substitute for missing media.
 
-Keyword discovery uses one canonical structured input:
-`source_mode=topics` with non-empty `topics[]`. The skill opens the selected
-platform's search result for each keyword in input order, browses bounded
-result candidates in one browser session, and records the keyword and search
-page URL on every committed result. No localized search phrase is parsed by
-runtime or skill code.
-Hidden links are excluded, mixed card/link markers retain DOM order, and an
-unavailable detail (HTTP 404/410 or the platform's `/404` page) is skipped with
-failure evidence instead of being classified as a CAPTCHA. Kuaishou uses its
-web search path `/search/<encoded keyword>`, not a legacy JSON endpoint.
-If the platform responds with JSON instead of a web document, collection reports
-`unexpected_page_response`; it does not treat that response as an empty result
-or switch to unrelated recommendations. Failure diagnostics are independently
-time-bounded so an unresponsive renderer cannot prevent browser cleanup.
+Keyword discovery uses `source_mode=topics` with non-empty `topics[]` in input order.
+From the homepage, fill the visible search field and click the platform search control;
+search URLs are validation targets, not navigation shortcuts. Accept only matching-query
+rendered results, in the same tab or a popup, never unrelated homepage recommendations.
+Xiaohongshu supports its visible textarea, search icon, and encoded `search_result_ai` query;
+visible `/search_result/<id>` links retain the page's query parameters.
+Kuaishou supports new `.search-container` and older search controls and the `/search/` route.
+Its new result cards open an in-page player. Rendered covers must uniquely match public
+post IDs in the page's loaded state; capture is scoped to the active slide and returns to
+the same results. QR-only login modals are barriers; a sidebar sign-in offer alone is not.
+Visible candidates retain DOM order; every committed record keeps its keyword and actual search URL.
+HTTP 404/410 and platform `/404` pages are unavailable posts, not CAPTCHAs. JSON in place of HTML
+is `unexpected_page_response`, not an empty result. Diagnostics have independent deadlines.
+No localized search phrase is parsed by runtime or skill code.
 Explicit detail `seed_urls` are collected as the exact requested set and do not
 expand into unrelated recommendation links from those pages.
 
@@ -55,22 +43,13 @@ the active item identity to change, and repeats one item at a time. It does not 
 directly from the recommendation landing page. Image-carousel posts encountered
 in the detail feed are completed before advancing to the next item.
 
-A continuous start request is a two-step structured workflow: call `enable`,
-then call its no-argument companion `run_enabled_once`. The companion is a
-runtime-owned durable background job that repeatedly browses enabled sources,
-rests for a bounded random period, and continues until disabled or cancelled.
-It does not create or depend on a schedule job. A stop request calls `disable`;
-the worker observes the persisted control state and exits after the current
-complete post is committed.
-Each enabled platform receives its own bounded batch, quota, deadline, browser
-profile, and retry deadline. Due platforms run concurrently: login waiting,
-cooldown, pausing, or failure on one platform does not stop another. One
-background coordinator manages these platform jobs and adopts newly enabled
-platforms without restarting. Calling its companion again returns
-`state=already_running` and the current worker identity, without another worker.
-Per-platform counters and retry state are in `background_worker.platform_outcomes`.
-`active_runs` contains individual run leases; `active_run` is their aggregate
-summary for the existing AiAPP renderer, never an execution lock.
+Continuous collection calls `enable`, then its no-argument `run_enabled_once` companion:
+a runtime-owned durable job, not a schedule, with bounded batches and randomized rests.
+`disable` stops after the current complete post is committed. Each platform has its own
+quota, deadline, browser profile and backoff; one platform's waiting/failure does not stop others.
+One coordinator adopts newly enabled platforms; duplicate companion calls return `already_running`.
+Per-platform counters/retries are in `background_worker.platform_outcomes`; `active_runs` holds
+individual leases and `active_run` is an AiAPP aggregate, never an execution lock.
 
 At most one batch owns a given platform. Overlapping `run_once` or `enable`
 requests return `run_already_active`; a queued duplicate `enable` for an already
@@ -148,6 +127,18 @@ does not enable these periodic notices.
   window is still open or ask the user to use `resume` for a finished one-shot
   batch. A new explicitly requested one-shot is separate from continuous-worker
   pause/resume. Zero new records does not mean pre-existing CSV files are empty.
+- `run.searches` records each confirmed search with `platform`, `keyword`,
+  `result_url`, `method=platform_search_form`, and `result_ready=true`. This is
+  evidence of entering search results, not evidence of saved posts. Missing
+  search controls, an unsubmitted search, missing results, and typed browser
+  timeouts report `search_control_unavailable`, `search_not_submitted`,
+  `search_results_unavailable`, and `browser_timeout`, respectively.
+- Search-result posts are opened by clicking their visible links, then returning
+  to the same query. A detail popup is closed after capture. Xiaohongshu capture
+  is scoped to the active note container so background cards cannot supply
+  images, video type, captions, or counters. Failure to open a detail or restore
+  the query reports `search_detail_unavailable` or `search_results_restore_failed`.
+  Clipped off-slide images are excluded; refreshed link parameters do not change post identity.
 - Report saved fields from each `run.capture_summary`: `records_saved`,
   `captions_saved`, `covers_saved`, and the exact `engagement_metrics` names.
   Missing metrics are unavailable, not zero and not collected. Never claim
