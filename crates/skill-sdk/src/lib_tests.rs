@@ -715,6 +715,17 @@ fn receipt_activation_and_resolution_verify_every_digest() {
         .expect("write receipt");
     store.activate(&install_dir, &receipt).expect("activate");
 
+    assert_eq!(
+        receipt.digest().unwrap(),
+        hex::encode(sha2::Sha256::digest(serde_json::to_vec(&receipt).unwrap()))
+    );
+    assert_eq!(
+        receipt.artifact_set_digest().unwrap(),
+        hex::encode(sha2::Sha256::digest(
+            serde_json::to_vec(&receipt.artifacts).unwrap()
+        ))
+    );
+
     let launch = SkillRuntimeResolver::new(store.root())
         .resolve("sample_weather")
         .expect("resolve launch");
