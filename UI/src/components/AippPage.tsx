@@ -1246,7 +1246,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
           ))}
         </div>
         {platforms.length > 1 ? (
-          <select className="theme-input w-full min-w-0 py-2 text-sm lg:w-auto lg:min-w-36" value={platform} onChange={(event) => setPlatform(event.target.value)}>
+          <select aria-label={t("按平台筛选", "Filter by platform")} className="theme-input w-full min-w-0 py-2 text-sm lg:w-auto lg:min-w-36" value={platform} onChange={(event) => setPlatform(event.target.value)}>
             <option value="all">{t("全部平台", "All platforms")}</option>
             {platforms.map((name) => <option key={name} value={name}>{name}</option>)}
           </select>
@@ -1278,7 +1278,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
 
       <div className="flex items-center justify-between gap-3">
         <button type="button" className="theme-secondary-btn px-3 py-2 text-sm" disabled={cursorHistory.length === 0 || loading} onClick={openPrevious}>{t("上一页", "Previous")}</button>
-        {loading ? <LoaderCircle className="h-5 w-5 animate-spin text-white/45" /> : <span className="text-xs text-white/40">{groupCollectionItems(page?.items || []).length}</span>}
+        {loading ? <LoaderCircle className="h-5 w-5 animate-spin text-white/45" /> : <span className="text-xs text-white/40">{t(`第 ${cursorHistory.length + 1} 页 · ${groupCollectionItems(page?.items || []).length} 篇`, `Page ${cursorHistory.length + 1} · ${groupCollectionItems(page?.items || []).length} posts`)}</span>}
         <button type="button" className="theme-secondary-btn px-3 py-2 text-sm" disabled={page?.next_cursor_sequence == null || loading} onClick={openNext}>{t("下一页", "Next")}</button>
       </div>
       </>}

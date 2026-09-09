@@ -21,34 +21,40 @@ export function groupCollectionItems(items: AippMediaItem[]): AippMediaItem[][] 
     || a.global_sequence - b.global_sequence));
 }
 
-// Finish a contiguous gallery before advancing the row cursor. Lookahead rows belonging
-// to the next post are not consumed; the next page still requests them from the API.
+export const COLLECTION_PAGE_SIZE = 20;
+
+// Page by posts, not image rows. Finish the boundary gallery, but leave the next
+// post unconsumed so both time orders use the same stable server row cursor.
 export async function completeCollectionPage(
   initial: AippMediaPageResponse,
   loadNext: (cursor: number) => Promise<AippMediaPageResponse>,
   isCurrent: () => boolean = () => true,
+  cardLimit = COLLECTION_PAGE_SIZE,
 ): Promise<AippMediaPageResponse> {
-  const page = { ...initial, items: [...initial.items] };
-  const tail = page.items.at(-1);
-  if (!tail || tail.kind !== "image" || !tail.post_sequence) return page;
-  const key = collectionGroupKey(tail);
-  const seen = new Set(page.items.map(item => item.global_sequence));
-  // Normal skill galleries contain at most 100 images; bound malformed/remote feeds too.
-  for (let request = 0; request < 20 && page.next_cursor_sequence != null && isCurrent(); request++) {
-    const cursor = page.next_cursor_sequence;
-    const next = await loadNext(cursor);
-    let consumed = 0;
-    for (const item of next.items) {
-      if (collectionGroupKey(item) !== key) break;
-      if (seen.has(item.global_sequence)) break;
+  if (!isCurrent()) return initial;
+  const page = { ...initial, items: [] as AippMediaItem[] };
+  const groups = new Set<string>();
+  const seen = new Set<number>();
+  const cursors = new Set<number>();
+  const limit = Math.max(1, Math.min(COLLECTION_PAGE_SIZE, cardLimit));
+  let batch = initial;
+  // Bound remote/malformed feeds and the work of each automatic refresh.
+  batches: for (let request = 0; request <= 20 && isCurrent(); request++) {
+    for (const item of batch.items) {
+      const key = collectionGroupKey(item);
+      if ((!groups.has(key) && groups.size >= limit) || seen.has(item.global_sequence)) break batches;
+      groups.add(key);
       seen.add(item.global_sequence);
       page.items.push(item);
       page.next_cursor_sequence = item.global_sequence;
-      consumed++;
     }
-    if (consumed === next.items.length && next.next_cursor_sequence == null) page.next_cursor_sequence = null;
-    if (consumed !== next.items.length || consumed === 0) break;
-    if (page.next_cursor_sequence === cursor) break;
+    page.next_cursor_sequence = batch.next_cursor_sequence;
+    const tail = page.items.at(-1);
+    const cursor = batch.next_cursor_sequence;
+    if (cursor == null || !batch.items.length || cursors.has(cursor) || request === 20) break;
+    if (groups.size >= limit && (tail?.kind !== "image" || !tail.post_sequence)) break;
+    cursors.add(cursor);
+    batch = await loadNext(cursor);
   }
   page.next_before_sequence = page.sort_order === "newest" ? page.next_cursor_sequence : null;
   return page;

@@ -1,0 +1,3 @@
+pi_media_discovery|pi_discovery_readiness|requires_tool_call=true,no_external_side_effect,optional_skill:media_discovery,capability:media_discovery.capabilities|请检查这台设备的媒体发现能力和当前采集状态，列出支持的平台、浏览器是否可用。只检查，不启动采集。不要使用其他技能代替媒体发现。|expect=json_eq:/data/status=succeeded
+pi_media_discovery|pi_douyin_single_post|requires_tool_call=true,optional_skill:media_discovery,capability:media_discovery.run_once|请在这台树莓派上用媒体发现静默采集抖音推荐里的一个帖子，最多滚动两次，最多运行5分钟，保留文案和封面。只执行这一批，不要创建定时任务，不要持续采集。遇到登录或验证码就停止并如实告诉我。|expect=json_eq:/data/status=succeeded
+pi_media_discovery|pi_discovery_stop_status|requires_tool_call=true,optional_skill:media_discovery|请停止本机媒体发现的抖音采集，查询最近一次采集记录，说明实际成功条数和失败原因。不要删除已采集内容，也不要重新启动。|expect=json_eq:/data/status=succeeded

@@ -33,7 +33,7 @@ for (const order of ["newest", "oldest"] as const) {
       const from = rows.findIndex(i => i.global_sequence === cursor) + 1;
       const next = rows.slice(from, from + 20);
       return page(next, from + 20 < rows.length ? next.at(-1)!.global_sequence : null, order);
-    });
+    }, () => true, 1);
     assert.equal(result.items.length, 100);
     assert.equal(groupCollectionItems(result.items).length, 1);
     assert.equal(result.next_cursor_sequence, rows[99].global_sequence);
@@ -44,10 +44,10 @@ for (const order of ["newest", "oldest"] as const) {
 
 test("lookahead consumes only the tail post, leaves other posts for the next page, and detects EOF", async () => {
   const initial = page([image(10, 2), image(9, 1)], 9);
-  const result = await completeCollectionPage(initial, async () => page([image(8, 1), image(7, 3)], null));
+  const result = await completeCollectionPage(initial, async () => page([image(8, 1), image(7, 3)], null), () => true, 2);
   assert.deepEqual(result.items.map(i => i.global_sequence), [10, 9, 8]);
   assert.equal(result.next_cursor_sequence, 8);
-  const end = await completeCollectionPage(initial, async () => page([image(8, 1)], null));
+  const end = await completeCollectionPage(initial, async () => page([image(8, 1)], null), () => true, 2);
   assert.equal(end.next_cursor_sequence, null);
 });
 
@@ -58,5 +58,51 @@ test("refresh replacement, stale requests and nonadvancing cursors cannot append
   const stale = await completeCollectionPage(initial, async () => { throw new Error("unexpected request"); }, () => false);
   assert.deepEqual(stale, initial);
   const withoutPost = page([{ ...image(3), post_sequence: null }], 3);
-  assert.deepEqual(await completeCollectionPage(withoutPost, async () => { throw new Error("unexpected request"); }), withoutPost);
+  assert.deepEqual(await completeCollectionPage(withoutPost, async () => { throw new Error("unexpected request"); }, () => true, 1), withoutPost);
+});
+
+for (const order of ["newest", "oldest"] as const) {
+  test(`fills all-platform pages with posts after a gallery-only row page (${order})`, async () => {
+    const rows = [
+      ...Array.from({ length: 40 }, (_, i) => ({ ...image(i + 1, i < 20 ? 1 : 2), platform: "xiaohongshu" })),
+      ...Array.from({ length: 24 }, (_, i) => ({ ...image(i + 41, i + 3), platform: i % 2 ? "douyin" : "kuaishou" })),
+    ].map((item, i) => ({ ...item, global_sequence: order === "oldest" ? i + 1 : 100 - i }));
+    const load = async (cursor: number | null) => {
+      const start = cursor == null ? 0 : rows.findIndex(i => i.global_sequence === cursor) + 1;
+      const items = rows.slice(start, start + 20);
+      return page(items, start + 20 < rows.length ? items.at(-1)!.global_sequence : null, order);
+    };
+    const first = await completeCollectionPage(await load(null), load);
+    assert.equal(groupCollectionItems(first.items).length, 20);
+    assert.deepEqual(new Set(first.items.map(i => i.platform)), new Set(["xiaohongshu", "douyin", "kuaishou"]));
+    assert.equal(first.items.length, 58);
+    const second = await completeCollectionPage(await load(first.next_cursor_sequence), load);
+    assert.equal(groupCollectionItems(second.items).length, 6);
+    assert.equal(second.next_cursor_sequence, null);
+    assert.deepEqual([...first.items, ...second.items], rows);
+  });
+}
+
+test("all-platform completion also fills pages after a video followed by galleries", async () => {
+  const initial = page([{ ...image(30), kind: "video" }], 30);
+  let calls = 0;
+  const result = await completeCollectionPage(initial, async () => {
+    calls++;
+    return page([image(29), image(28)], null);
+  });
+  assert.equal(calls, 1);
+  assert.equal(groupCollectionItems(result.items).length, 2);
+  assert.equal(result.next_cursor_sequence, null);
+});
+
+test("completion bounds a malformed endless gallery without dropping the continuation cursor", async () => {
+  const initial = page([image(100)], 100);
+  let calls = 0;
+  const result = await completeCollectionPage(initial, async cursor => {
+    calls++;
+    return page([image(cursor - 1)], cursor - 1);
+  });
+  assert.equal(calls, 20);
+  assert.equal(result.items.length, 21);
+  assert.equal(result.next_cursor_sequence, 80);
 });

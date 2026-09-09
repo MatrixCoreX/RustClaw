@@ -17,6 +17,8 @@ try {
   const page = await browser.newPage();
   const errors = [];
   let galleryMode = false;
+  let filterMode = false;
+  const itemRequests = [];
   page.on("pageerror", e => errors.push(e.message));
   const items = Array.from({ length: 6 }, (_, i) => ({
     schema_version: 1, global_sequence: i + 1, sequence: i + 1, post_sequence: null,
@@ -43,16 +45,22 @@ try {
     const url = new URL(route.request().url());
     if (url.pathname.endsWith("/preview")) return route.fulfill({ contentType: "image/png", body: preview });
     const cursor = Number(url.searchParams.get("cursor_sequence")) || null;
-    const start = cursor == null ? 0 : items.findIndex(item => item.global_sequence === cursor) + 1;
-    const selected = galleryMode ? items.slice(start, start + 2) : items;
-    const nextCursor = galleryMode && start + 2 < items.length ? selected.at(-1).global_sequence : null;
+    const platform = url.searchParams.get("platform");
+    const filtered = filterMode ? items.filter(item => !platform || item.platform === platform)
+      .sort((a, b) => url.searchParams.get("sort_order") === "oldest"
+        ? a.global_sequence - b.global_sequence : b.global_sequence - a.global_sequence) : items;
+    const start = cursor == null ? 0 : filtered.findIndex(item => item.global_sequence === cursor) + 1;
+    const size = filterMode ? 20 : 2;
+    const selected = galleryMode ? filtered.slice(start, start + size) : filtered;
+    const nextCursor = galleryMode && start + size < filtered.length ? selected.at(-1).global_sequence : null;
+    if (url.pathname.endsWith("/items")) itemRequests.push(url);
     return route.fulfill({ json: { ok: true, data: url.pathname === "/v1/aipps" ? { apps: [{
       skill_name: "example_collection", package_version: "1.0.0", renderer: "collection_feed_v1",
       data_contract: "media_collection_v1", icon: "gallery_vertical_end", default_locale: "en",
       titles: { en: "Collection", zh: "采集内容" }, descriptions: {}, installed: true,
       entrypoint: null, bridge_capabilities: [], task_channel_scope: null,
-    }] } : { items: selected, matching_total: items.length, sort_order: "newest", next_cursor_sequence: nextCursor,
-      next_before_sequence: null, active_run: null, platform_states: {}, updated_at: "2026-09-09T00:00:00Z" } } });
+    }] } : { items: selected, matching_total: filtered.length, sort_order: url.searchParams.get("sort_order") || "newest", next_cursor_sequence: nextCursor,
+      next_before_sequence: null, active_run: null, platform_states: filterMode ? { douyin: {}, xiaohongshu: {}, kuaishou: {} } : {}, updated_at: "2026-09-09T00:00:00Z" } } });
   });
   for (const width of [1440, 1280, 900, 390]) for (const theme of ["light", "dark"]) {
     const lang = theme === "light" ? "zh" : "en";
@@ -92,9 +100,10 @@ try {
     const lang = theme === "light" ? "zh" : "en";
     await page.setViewportSize({ width, height: 900 });
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/test/fixtures/aipp-collection.html?lang=${lang}&theme=${theme}`);
-    const card = page.locator("article");
+    const cards = page.locator("article");
+    const card = cards.first();
     await card.getByText("1 / 5", { exact: true }).waitFor();
-    assert.equal(await card.count(), 1);
+    assert.equal(await cards.count(), 3);
     assert.equal(await card.locator("h2").count(), 1);
     for (let i = 0; i < 2; i++) await card.getByTitle(lang === "zh" ? "下一张图片" : "Next image", { exact: true }).click();
     await card.getByText("3 / 5", { exact: true }).waitFor();
@@ -110,17 +119,53 @@ try {
     await page.keyboard.press("Escape");
     await page.getByTitle(lang === "zh" ? "刷新内容" : "Refresh content", { exact: true }).click();
     await card.getByText("3 / 5", { exact: true }).waitFor();
-    assert.equal(await card.count(), 1);
+    assert.equal(await cards.count(), 3);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.screenshot({ path: path.join(output, `gallery-${width}-${theme}.png`), fullPage: true });
-    await page.getByRole("button", { name: lang === "zh" ? "下一页" : "Next", exact: true }).click();
-    await card.nth(1).waitFor();
+    assert.equal(await page.getByRole("button", { name: lang === "zh" ? "下一页" : "Next", exact: true }).isDisabled(), true);
     assert.equal(await page.getByText("#5", { exact: true }).count(), 1);
     assert.equal(await page.getByText("#4", { exact: true }).count(), 1);
-    await page.getByRole("button", { name: lang === "zh" ? "上一页" : "Previous", exact: true }).click();
-    await card.getByText("1 / 5", { exact: true }).waitFor();
-    assert.equal(await card.count(), 1);
     console.log(`PASS gallery ${width} ${theme}: complete pagination, one card, image switch, download, refresh`);
+  }
+  filterMode = true;
+  items.splice(0, items.length,
+    ...Array.from({ length: 40 }, (_, i) => ({ ...template, platform: "xiaohongshu", global_sequence: 100 - i, post_sequence: 50, image_sequence: 40 - i })),
+    ...Array.from({ length: 30 }, (_, i) => ({ ...template, platform: ["kuaishou", "douyin", "xiaohongshu"][Math.floor(i / 10)],
+      global_sequence: 60 - i, post_sequence: 49 - i, image_sequence: 1 })));
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/test/fixtures/aipp-collection.html?lang=zh&theme=light`);
+    const waitCards = count => page.waitForFunction(expected => document.querySelectorAll("article").length === expected
+      && document.querySelector('[aria-busy="false"]'), count);
+    await waitCards(20);
+    for (const name of ["xiaohongshu", "kuaishou", "douyin"]) assert.ok((await page.locator("article").allTextContents()).some(text => text.includes(name)));
+    const select = page.getByRole("combobox", { name: "按平台筛选" });
+    await select.selectOption("xiaohongshu");
+    await waitCards(11);
+    assert.ok((await page.locator("article").allTextContents()).every(text => text.includes("xiaohongshu")));
+    itemRequests.length = 0;
+    await select.selectOption("all");
+    await waitCards(20);
+    assert.ok(itemRequests.length >= 3);
+    assert.ok(itemRequests.every(url => !url.searchParams.has("platform")));
+    await page.getByRole("button", { name: "下一页", exact: true }).click();
+    await waitCards(11);
+    await page.getByText("第 2 页 · 11 篇", { exact: true }).waitFor();
+    await select.selectOption("kuaishou");
+    await waitCards(10);
+    await page.getByText("第 1 页 · 10 篇", { exact: true }).waitFor();
+    assert.ok((await page.locator("article").allTextContents()).every(text => text.includes("kuaishou")));
+    await select.selectOption("all");
+    await waitCards(20);
+    await page.getByRole("combobox", { name: "按采集时间排序" }).selectOption("oldest");
+    await page.getByText("#31", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "下一页", exact: true }).click();
+    await waitCards(11);
+    await page.getByText("1 / 40", { exact: true }).waitFor();
+    assert.equal(await page.getByRole("button", { name: "下一页", exact: true }).isDisabled(), true);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.screenshot({ path: path.join(output, `platform-pagination-${width}.png`), fullPage: true });
+    console.log(`PASS all-platform ${width}: post-based pages, all three platforms, filter reset, both time orders`);
   }
   assert.deepEqual(errors, []);
   console.log(`PASS collection browser suite; screenshots: ${output}`);
