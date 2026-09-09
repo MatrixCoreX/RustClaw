@@ -5,6 +5,8 @@ import path from "node:path";
 import test from "node:test";
 
 import { chromium } from "playwright";
+import { identityDigest } from "../src/media_identity.mjs";
+import { commitPageRecords } from "../src/storage.mjs";
 
 import {
   candidatesForDiscoverySource,
@@ -47,6 +49,48 @@ function fixtureImage(label, background, accent) {
   </svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
+
+test("signed carousel clones and repeat captures retain distinct images without duplicate rows or reused position files", {
+  skip: !RUN_BROWSER_TEST,
+}, async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "media-carousel-identity-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const browser = await chromium.launch({ executablePath: await browserExecutable(), headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
+  const object = "1040g3k0324olqe0u6u005oj552v41uohmijva6";
+  const url = (letter, variant = "first") => `https://${variant}.xhscdn.com/${variant}/${object}${letter}!${variant}?signature=${variant}`;
+  const svg = {
+    a: fixtureImage("A", "#146b5c", "#d89936"),
+    b: fixtureImage("B", "#1c517c", "#bc6b50"),
+    c: fixtureImage("C", "#893e59", "#4e8592"),
+  };
+  await page.route("https://*.xhscdn.com/**", route => {
+    const letter = new URL(route.request().url()).pathname.split("!")[0].at(-1);
+    return route.fulfill({ contentType: "image/svg+xml", body: decodeURIComponent(svg[letter].split(",")[1]) });
+  });
+  const collect = async sources => {
+    await page.setContent(`<img id="slide" width="640" height="480"><button class="swiper-button-next">Next</button>`);
+    await page.evaluate(sources => {
+      const slide = document.querySelector("#slide"), next = document.querySelector("button");
+      let i = 0; slide.src = sources[i];
+      next.onclick = () => { slide.src = sources[++i]; next.disabled = i === sources.length - 1; };
+    }, sources);
+    return collectRenderedImages({ scope: page, root, runId: "identity-fixture", platform: "xiaohongshu",
+      itemId: "xiaohongshu:fixture", title: "Same caption", platformText: "Same caption",
+      sourcePageUrl: "https://www.xiaohongshu.com/explore/fixture", config: {
+        max_images_per_post: 100, pacing_min_delay_ms: 1, pacing_max_delay_ms: 1,
+      }, discoveredAt: "2026-09-09T00:00:00Z" });
+  };
+  const first = await collect([url("a"), url("a", "second"), url("b"), url("c")]);
+  assert.equal(first.records.length, 3);
+  assert.equal((await commitPageRecords(root, first.records)).committed.length, 3);
+  const second = await collect([url("c", "second"), url("b", "second"), url("a", "second")]);
+  assert.deepEqual(second.records.map(r => r.image_screenshot_path), first.records.map(r => r.image_screenshot_path).reverse());
+  const replay = await commitPageRecords(root, second.records);
+  assert.equal(replay.committed.length, 0);
+  assert.equal(replay.duplicateCount, 3);
+});
 
 test("browser collector follows the rendered carousel and captures every image in order", {
   skip: !RUN_BROWSER_TEST,
@@ -138,11 +182,7 @@ test("browser collector follows the rendered carousel and captures every image i
   assert.equal(result.records.some((record) => record.collection_truncated), false);
   assert.deepEqual(
     result.records.map((record) => record.image_screenshot_path),
-    [
-      "images/xiaohongshu_xiaohongshu_fixture_001.png",
-      "images/xiaohongshu_xiaohongshu_fixture_002.png",
-      "images/xiaohongshu_xiaohongshu_fixture_003.png",
-    ],
+    images.map(source => `images/xiaohongshu_xiaohongshu_fixture_${identityDigest(new URL(source).href)}.png`),
   );
   for (const record of result.records) {
     const persisted = path.join(root, "exports", ...record.image_screenshot_path.split("/"));

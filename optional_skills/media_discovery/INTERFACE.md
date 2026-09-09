@@ -67,8 +67,8 @@ platform atomically prevents future batches and changes a
 matching active run to `draining`: the skill finishes the current post, captures
 all of its rendered carousel images, commits its records and CSV rows, and then
 closes that platform's browser normally; other enabled platforms continue. It
-never kills the browser to implement this stop. State, record numbering, dedup,
-and CSV commits remain serialized under a short skill-private write lock.
+never kills the browser to implement this stop. Locked commits deduplicate by post and image asset,
+not title or position; signed CDN variants share identity, distinct gallery images remain separate.
 Old single-batch storage is adopted only after old workers become idle;
 `storage_upgrade_requires_idle` leaves their state unchanged while they run.
 
@@ -79,8 +79,8 @@ recognition work handled by another skill.
 The package declares an `AiPP` companion using the host-owned
 `collection_feed_v1` renderer and `media_collection_v1` read contract. When the
 skill is installed, enabled, and bound to the current immutable registry
-generation, administrators can review its records and rendered video covers on
-the AiPP page. The companion is removed from the catalog when the skill is
+generation, administrators can review records and covers; each gallery shares one AiPP card,
+including retained data, with image switching and downloads. The companion is removed when the skill is
 disabled or uninstalled; retained private data remains governed by this
 package's storage policy. The package supplies no browser-executable UI code.
 

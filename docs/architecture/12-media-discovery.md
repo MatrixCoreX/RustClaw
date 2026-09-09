@@ -87,6 +87,14 @@ language.
   artifact.
 - The administrator AiPP presents the same private ledger through a bounded,
   read-only host renderer. Collection lifecycle changes still go through Agent.
+- Image identity combines the platform post with its image resource, not the
+  caption or carousel position. Reviewed Xiaohongshu CDN object IDs survive
+  signature/resize URL changes; other sources retain their full URL identity.
+  Repeated capture does not append matching records. Distinct images and posts
+  remain separate in the CSV, and screenshots use stable resource-based paths.
+- AiAPP groups retained and new images by platform and `post_sequence` into one
+  card, with ordered image navigation, enlargement and per-image download.
+  Original records and files remain unchanged by presentation grouping.
 
 ## Current Execution Flow
 

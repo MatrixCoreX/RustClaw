@@ -7,6 +7,7 @@ import { capturePublication } from "./publication.mjs";
 import { boundedBrowserOperation, normalizeBrowserError, openKeywordSearch } from "./browser_search.mjs";
 import { withSearchResult } from "./browser_search_results.mjs";
 import { collectKuaishouSearchResults } from "./browser_kuaishou_search.mjs";
+import { imageSourceIdentity, identityDigest } from "./media_identity.mjs";
 
 import {
   canonicalCandidateUrls,
@@ -819,7 +820,9 @@ export async function collectRenderedImages({
     const candidates = await visibleImageCandidates(scope, maximum - records.length);
     let added = 0;
     for (const candidate of candidates) {
-      if (observedSources.has(candidate.source)) continue;
+      const identity = imageSourceIdentity(platform, candidate.source);
+      if (observedSources.has(identity)) continue;
+      const imageDigest = identityDigest(identity);
       const position = records.length + 1;
       const screenshotPath = path.join(
         root,
@@ -833,13 +836,13 @@ export async function collectRenderedImages({
         root,
         platform,
         itemId,
-        position,
+        imageDigest,
         screenshotPath,
       );
-      observedSources.add(candidate.source);
+      observedSources.add(identity);
       records.push({
         kind: "image",
-        dedup_key: `${itemId}:image:${position}`,
+        dedup_key: `${itemId}:image:${imageDigest}`,
         platform,
         browser_mode: config.browser_mode || "silent",
         source_mode: discoverySource?.source_mode || config.source_mode || "home_feed",
@@ -917,10 +920,9 @@ async function persistVideoCover(root, platform, itemId, temporaryPath) {
   return relativePath;
 }
 
-async function persistImageScreenshot(root, platform, itemId, position, temporaryPath) {
+async function persistImageScreenshot(root, platform, itemId, imageDigest, temporaryPath) {
   const token = `${platform}_${itemId}`.replaceAll(/[^A-Za-z0-9._-]/gu, "_").slice(0, 170);
-  const suffix = String(position).padStart(3, "0");
-  const relativePath = path.posix.join("images", `${token}_${suffix}.png`);
+  const relativePath = path.posix.join("images", `${token}_${imageDigest}.png`);
   const targetPath = path.join(root, "exports", ...relativePath.split("/"));
   await fs.mkdir(path.dirname(targetPath), { recursive: true });
   await fs.copyFile(temporaryPath, targetPath, fsConstants.COPYFILE_EXCL).catch((error) => {

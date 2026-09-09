@@ -4,6 +4,7 @@ import {
   Bot,
   Bookmark,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   ChevronUp,
   Download,
@@ -27,6 +28,7 @@ import {
 } from "lucide-react";
 
 import { formatUiError } from "../lib/ui-error";
+import { collectionGroupKey, completeCollectionPage, groupCollectionItems } from "../lib/aipp-collection";
 import { appStorageKey } from "../lib/product-identity";
 import { useUiDialog } from "./UiDialogProvider";
 import { AippImageViewer, type AippViewerImage } from "./AippImageViewer";
@@ -704,18 +706,24 @@ function MediaPreview({
 
 export function AippMediaItemCard({
   item,
+  images,
   skillName,
   apiFetch,
   t,
   lang,
 }: {
   item: AippMediaItem;
+  images?: AippMediaItem[];
   skillName: string;
   apiFetch: ApiFetch;
   t: Translate;
   lang: "zh" | "en";
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [selectedImageId, setSelectedImageId] = useState(item.global_sequence);
+  const gallery = images?.length ? images : [item];
+  const selectedIndex = Math.max(0, gallery.findIndex(image => image.global_sequence === selectedImageId));
+  const selectedImage = gallery[selectedIndex];
   const captionText = item.platform_text.trim();
   const publishedAt = formatPublishedAt(item.published_at, lang);
   const captionRef = useRef<HTMLParagraphElement>(null);
@@ -733,7 +741,7 @@ export function AippMediaItemCard({
   const textSections = [
     { key: "caption", label: t("帖子文案", "Post caption"), text: captionText },
   ].filter((section) => section.text);
-  const hasPreview = item.preview_available || (item.kind === "image" && Boolean(item.image_url));
+  const hasPreview = gallery.length > 1 || selectedImage.preview_available || (selectedImage.kind === "image" && Boolean(selectedImage.image_url));
   const metricPresentation = [
     { key: "views" as const, icon: Eye, label: t("播放", "Views") },
     { key: "likes" as const, icon: Heart, label: t("点赞", "Likes") },
@@ -748,8 +756,13 @@ export function AippMediaItemCard({
     <article className="theme-panel min-w-0 overflow-hidden">
       <div className={hasPreview ? "grid min-w-0 sm:grid-cols-[minmax(104px,24%)_minmax(0,1fr)]" : "min-w-0"}>
         {hasPreview ? (
-          <div className="aspect-video max-h-36 min-h-24 overflow-hidden bg-black/20 sm:aspect-auto sm:min-h-28 sm:max-h-36">
-            <MediaPreview item={item} skillName={skillName} apiFetch={apiFetch} t={t} />
+          <div className="relative aspect-video max-h-36 min-h-24 overflow-hidden bg-black/20 sm:aspect-auto sm:min-h-28 sm:max-h-36">
+            <MediaPreview key={selectedImage.global_sequence} item={selectedImage} skillName={skillName} apiFetch={apiFetch} t={t} />
+            {gallery.length > 1 ? <div className="absolute inset-x-0 bottom-0 flex h-8 items-center justify-between border-t border-[var(--theme-border)] bg-[var(--theme-dialog-bg)] px-1 text-xs text-[var(--theme-text-strong)]">
+              <button type="button" className="flex h-7 w-7 items-center justify-center disabled:opacity-30" title={t("上一张图片", "Previous image")} disabled={selectedIndex === 0} onClick={() => setSelectedImageId(gallery[selectedIndex - 1].global_sequence)}><ChevronLeft className="h-4 w-4" /></button>
+              <span aria-live="polite">{selectedIndex + 1} / {gallery.length}</span>
+              <button type="button" className="flex h-7 w-7 items-center justify-center disabled:opacity-30" title={t("下一张图片", "Next image")} disabled={selectedIndex === gallery.length - 1} onClick={() => setSelectedImageId(gallery[selectedIndex + 1].global_sequence)}><ChevronRight className="h-4 w-4" /></button>
+            </div> : null}
           </div>
         ) : null}
         <div className="min-w-0 p-3 sm:p-4">
@@ -757,6 +770,7 @@ export function AippMediaItemCard({
             <span className="inline-flex items-center gap-1">{item.kind === "video" ? <Video className="h-3.5 w-3.5" /> : <ImageIcon className="h-3.5 w-3.5" />}{item.kind === "video" ? t("视频", "Video") : t("图片", "Image")}</span>
             <span className="break-all">{item.platform}</span>
             <span>#{item.global_sequence}</span>
+            {gallery.length > 1 ? <span>{gallery.length} {t("张图片", "images")}</span> : null}
           </div>
           <h2 className="mt-2 line-clamp-2 break-words text-sm font-semibold leading-5 text-white/90 [overflow-wrap:anywhere]">{item.title || t("未提供标题", "Untitled")}</h2>
           <div className="mt-1.5 space-y-1 break-words text-xs leading-4 text-white/45 [overflow-wrap:anywhere]">
@@ -905,6 +919,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
   }, [confirm, fetchCatalog, selectedSkill, t]);
 
   const fetchPage = useCallback(async (silent = false) => {
+    const currentRequest = ++requestSequence.current;
     if (
       !selectedSkill
       || !selectedApp?.installed
@@ -915,7 +930,6 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
       setLoading(false);
       return;
     }
-    const currentRequest = ++requestSequence.current;
     if (!silent) {
       setLoading(true);
       setError(null);
@@ -940,7 +954,16 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
       }
       if (currentRequest === requestSequence.current) {
         if (selectedApp.renderer === "collection_feed_v1") {
-          setPage(body.data as AippMediaPageResponse);
+          const complete = await completeCollectionPage(body.data as AippMediaPageResponse, async nextCursor => {
+            const nextParams = new URLSearchParams(params);
+            nextParams.set("cursor_sequence", String(nextCursor));
+            const nextResponse = await apiFetchRef.current(`/v1/aipps/${encodeURIComponent(selectedSkill)}/items?${nextParams}`);
+            const nextBody = await nextResponse.json() as ApiResponse<AippMediaPageResponse>;
+            if (!nextResponse.ok || !nextBody.ok || !nextBody.data) throw new Error(nextBody.error || `aipp_items_http_${nextResponse.status}`);
+            return nextBody.data;
+          }, () => currentRequest === requestSequence.current);
+          if (currentRequest !== requestSequence.current) return;
+          setPage(complete);
           setActivityPage(null);
         } else {
           setActivityPage(body.data as AippTaskActivityPageResponse);
@@ -1242,8 +1265,8 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
       {error ? <div className="rounded-lg border border-red-400/20 bg-red-500/8 px-4 py-3 text-sm text-red-100">{error}</div> : null}
 
       <div className="grid min-w-0 gap-2 md:grid-cols-2 xl:grid-cols-3" aria-busy={loading}>
-        {(page?.items || []).map((item) => (
-          <AippMediaItemCard key={item.global_sequence} item={item} skillName={selectedSkill} apiFetch={apiFetch} t={t} lang={lang} />
+        {groupCollectionItems(page?.items || []).map((images) => (
+          <AippMediaItemCard key={collectionGroupKey(images[0])} item={images[0]} images={images} skillName={selectedSkill} apiFetch={apiFetch} t={t} lang={lang} />
         ))}
         {!loading && page?.items.length === 0 ? (
           <div className="theme-panel-soft col-span-full flex min-h-40 flex-col items-center justify-center gap-2 p-5 text-center text-sm text-white/55">
@@ -1255,7 +1278,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
 
       <div className="flex items-center justify-between gap-3">
         <button type="button" className="theme-secondary-btn px-3 py-2 text-sm" disabled={cursorHistory.length === 0 || loading} onClick={openPrevious}>{t("上一页", "Previous")}</button>
-        {loading ? <LoaderCircle className="h-5 w-5 animate-spin text-white/45" /> : <span className="text-xs text-white/40">{page?.items.length || 0}</span>}
+        {loading ? <LoaderCircle className="h-5 w-5 animate-spin text-white/45" /> : <span className="text-xs text-white/40">{groupCollectionItems(page?.items || []).length}</span>}
         <button type="button" className="theme-secondary-btn px-3 py-2 text-sm" disabled={page?.next_cursor_sequence == null || loading} onClick={openNext}>{t("下一页", "Next")}</button>
       </div>
       </>}
