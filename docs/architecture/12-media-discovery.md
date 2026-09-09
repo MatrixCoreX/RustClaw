@@ -171,7 +171,11 @@ Missing desktop sessions and platform barriers produce structured machine
 states for the agent and UI.
 
 A visible run waits in its current browser; a silent run may open one
-manual window per batch. Closing or timing out that window pauses the platform
+manual window per batch. A separate local control tab waits for the user's
+explicit confirmation and visible feed readiness before the window closes.
+The skill then retries the original silent mode once. If still challenged,
+`manual_verification_not_restored` pauses that platform without reopening a
+window or stopping other platforms. Closing or timing out the window also pauses the platform
 rather than claiming success or reopening it. Feed-readiness and manual waits
 honor a stop request. A network restriction is not a login/slider request:
 Xiaohongshu code `300012` maps to `network_access_restricted` and a platform-only
@@ -215,3 +219,13 @@ the ledger after a crash.
 Installation, update, enablement, policy grants, and removal use the normal
 Skill Store admission path with an immutable receipt and registry generation.
 Uninstall preserves private data by default.
+
+The collection view shows three columns on wide desktops, two on tablets and
+one on phones. Publication and collection times are distinct: `published_at`
+comes from the current post's date DOM or ID-matched structured page data. A
+relative label is retained as `publication_text`, explicitly shown as it was
+at capture time. Missing dates and older records are not assigned invented dates.
+Views, likes, comments, favorites and shares are captured when the platform
+exposes them. Missing metrics are omitted, explicit zero is retained, and
+abbreviated displays preserve platform precision. These are capture-time
+snapshots, not live counters, and are also retained in CSV exports.

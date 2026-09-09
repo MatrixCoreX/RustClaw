@@ -298,6 +298,8 @@ fn aipp_media_item(record: &Value) -> Option<Value> {
         "image_url": image_url,
         "preview_available": preview_available,
         "discovered_at": bounded_aipp_optional_text(record.get("discovered_at"), 64),
+        "published_at": bounded_aipp_optional_text(record.get("published_at"), 64),
+        "publication_text": bounded_aipp_optional_text(record.get("publication_text"), 128),
         "engagement": aipp_engagement(record),
     }))
 }

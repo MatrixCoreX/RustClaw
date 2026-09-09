@@ -105,3 +105,25 @@ test("captures Kuaishou likes from the card's structural control", {
   assert.deepEqual(engagement.metrics.likes, { display: "12,004", value: 12004 });
   assert.equal(engagement.metrics.shares, undefined);
 });
+
+test("keeps available comment, favorite and share counts, including zero, without hidden or comment controls", {
+  skip: !RUN_BROWSER_TEST,
+}, async t => {
+  const page = await withPage(t, `<article>
+    <span data-testid="comment-count" style="display:none">9999</span>
+    <div data-comment-id="123"><span data-testid="comment-count">9998</span></div>
+    <div class="interactive-item comment-item"><span class="item-count">24</span></div>
+    <div class="interactive-item collect-item"><span class="item-count">0</span></div>
+    <div class="interactive-item share-item"><span class="item-count">17</span></div>
+    <div data-testid="play-count">--</div>
+  </article>`);
+  const result = await captureEngagementMetrics(page, "kuaishou", "2026-09-09T00:00:00Z");
+  assert.deepEqual(result.metrics, {
+    comments: { display: "24", value: 24 },
+    favorites: { display: "0", value: 0 },
+    shares: { display: "17", value: 17 },
+  });
+  await page.setContent('<span data-testid="comment-count">24</span><span data-testid="collect-count">0</span><span data-testid="share-count">17</span>');
+  const xhs = await captureEngagementMetrics(page, "xiaohongshu", "2026-09-09T00:00:00Z");
+  assert.deepEqual(xhs.metrics, result.metrics);
+});

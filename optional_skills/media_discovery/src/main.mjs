@@ -47,6 +47,8 @@ const ERROR_CODES = new Set([
   "invalid_args",
   "interactive_verification_cancelled",
   "interactive_verification_timeout",
+  "manual_confirmation_required",
+  "manual_verification_not_restored",
   "login_required",
   "network_access_restricted",
   "media_element_not_found",
@@ -195,6 +197,9 @@ function waitingLifecycleState(errorCode) {
     network_access_restricted: "waiting_for_network_access",
     challenge_required: "waiting_for_challenge_resolution",
     login_required: "waiting_for_login",
+    interactive_verification_cancelled: "waiting_for_manual_verification",
+    interactive_verification_timeout: "waiting_for_manual_verification",
+    manual_verification_not_restored: "waiting_for_manual_verification",
     rate_limited: "rate_limited",
   }[errorCode] || "resting";
 }
@@ -427,21 +432,43 @@ async function runPlatformBatch(request, args, runtime = {}) {
         if (!interactiveLoginAllowed) throw error;
 
         await heartbeat(root, run.run_id, counts, waitingLifecycleState(errorCode));
+        run.manual_verification = { error_code: errorCode, requested_at: new Date().toISOString(), state: "opening" };
         const loginResult = await (runtime.waitForInteractiveLogin || waitForInteractiveLogin)({
           root,
           platform,
           config,
           errorCode,
           shouldStop: collectionRequest.shouldStop,
+          locale: request.context?.language_hint || request.context?.locale,
+          onOpened: async () => {
+            run.manual_verification.state = "awaiting_user_confirmation";
+            run.manual_verification.opened_at = new Date().toISOString();
+            await heartbeat(root, run.run_id, counts, "waiting_for_manual_verification", {
+              manual_verification: run.manual_verification,
+            });
+          },
           timeoutMs: Math.max(1000, Math.min(10 * 60 * 1000, deadline - Date.now())),
         });
         if (!loginResult?.ready) {
+          run.manual_verification.state = loginResult?.error_code || errorCode;
           throw new Error(loginResult?.error_code || errorCode);
         }
+        run.manual_verification.state = "retrying_silent";
+        run.manual_verification.confirmed_at = new Date().toISOString();
         const remainingAfterLogin = Math.max(0, config.max_items_per_run - counts.items);
         if (remainingAfterLogin > 0 && !(await collectionRequest.shouldStop())) {
-          await heartbeat(root, run.run_id, counts, "running");
-          await collect({ ...collectionRequest, limit: remainingAfterLogin });
+          await heartbeat(root, run.run_id, counts, "running", { manual_verification: run.manual_verification });
+          try {
+            await collect({ ...collectionRequest, limit: remainingAfterLogin });
+            run.manual_verification.state = "silent_access_restored";
+          } catch (retryError) {
+            if (!["login_required", "challenge_required"].includes(retryError?.message)) throw retryError;
+            run.manual_verification.state = "silent_access_not_restored";
+            run.manual_verification.retry_error_code = retryError.message;
+            throw Object.assign(new Error("manual_verification_not_restored"), {
+              discovery_diagnostic: retryError.discovery_diagnostic,
+            });
+          }
         }
       }
       if (await heartbeat(root, run.run_id, counts)) {
@@ -450,7 +477,8 @@ async function runPlatformBatch(request, args, runtime = {}) {
       }
     }
   } catch (error) {
-    if (["interactive_verification_cancelled", "interactive_verification_timeout"].includes(error?.message)) {
+    if (["interactive_verification_cancelled", "interactive_verification_timeout",
+      "manual_verification_not_restored"].includes(error?.message)) {
       await setPlatformControl(root, run.platforms, "pause");
     }
     const waitingStates = {
@@ -460,6 +488,7 @@ async function runPlatformBatch(request, args, runtime = {}) {
       network_access_restricted: "waiting_for_network_access",
       interactive_verification_cancelled: "waiting_for_manual_verification",
       interactive_verification_timeout: "waiting_for_manual_verification",
+      manual_verification_not_restored: "waiting_for_manual_verification",
       rate_limited: "rate_limited",
       challenge_required: "waiting_for_challenge_resolution",
     };

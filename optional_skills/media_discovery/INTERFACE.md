@@ -170,7 +170,10 @@ does not enable these periodic notices.
   for manual login or human verification. Do not change `browser_mode` to
   visible for this exception. Closing or timing out that window returns
   `waiting_for_manual_verification` and pauses the enabled platform until the
-  user resumes it. A successful manual step retries collection silently once.
+  user resumes it. The local control tab requires explicit user confirmation;
+  hidden feed elements never complete verification. A confirmed manual step
+  retries collection silently once. If still blocked, `manual_verification_not_restored`
+  pauses only that platform; other platforms continue independently.
 - Browsing uses bounded randomized pauses, scroll distances, and inter-batch
   rests to avoid bursty
   traffic. This is cooperative pacing, not fingerprint spoofing, challenge
@@ -265,11 +268,11 @@ interval and deduplicates each delivery by task and frame sequence.
 
 `videos.csv` columns:
 
-`sequence,global_sequence,platform,browser_mode,source_mode,search_keyword,discovery_source_url,title,platform_text,cover_screenshot_path,cover_capture_source,video_page_url,discovered_at,engagement_captured_at,views,likes,comments,favorites,shares`
+`sequence,global_sequence,platform,browser_mode,source_mode,search_keyword,discovery_source_url,title,platform_text,cover_screenshot_path,cover_capture_source,video_page_url,discovered_at,published_at,publication_text,publication_source,engagement_captured_at,views,likes,comments,favorites,shares`
 
 `images.csv` columns:
 
-`sequence,global_sequence,post_sequence,image_sequence,platform,browser_mode,source_mode,search_keyword,discovery_source_url,title,platform_text,image_url,image_screenshot_path,source_page_url,discovered_at,engagement_captured_at,views,likes,comments,favorites,shares`
+`sequence,global_sequence,post_sequence,image_sequence,platform,browser_mode,source_mode,search_keyword,discovery_source_url,title,platform_text,image_url,image_screenshot_path,source_page_url,discovered_at,published_at,publication_text,publication_source,engagement_captured_at,views,likes,comments,favorites,shares`
 
 CSV files use UTF-8 BOM, RFC 4180 quoting, stable order, and spreadsheet formula
 injection protection. The private immutable record ledger remains the recovery
@@ -283,6 +286,19 @@ skill-owned export directory and referenced by `image_screenshot_path` so AiAPP
 can provide authenticated same-origin downloads without proxying arbitrary
 remote URLs.
 
+`published_at` is the platform publication date (ISO date or timestamp), obtained
+from the current post's date DOM or ID-matched page state/JSON-LD. When only a
+relative date label is available, `publication_text` preserves that label as
+seen at capture time; `publication_source` records its structural provenance.
+Unavailable publication dates remain null, including older records; collection
+time, modification time, comments, and dates belonging to other posts are not
+substitutes. AiAPP renders three desktop columns, two tablet columns and one
+mobile column, and labels publication and collection dates separately.
+Engagement includes available views, likes, comments, favorites and shares from
+each platform's post controls. Unknown counters are omitted, not zero-filled;
+zero is retained when explicitly provided, and abbreviated counts keep the
+platform's display precision. Each metric snapshot carries `captured_at`.
+
 ## Browser and Capture Rules
 
 - Browser defaults are platform-specific; an explicit mode takes precedence.
@@ -291,9 +307,12 @@ remote URLs.
 - A silent bounded or background run may open the skill-owned persistent browser
   profile when the platform reports `login_required` or `challenge_required`
   and a desktop is available. This window is for manual sign-in/verification
-  only. It closes after the barrier clears on a ready platform page, then
+  only. It stays open until the user confirms in the local control tab and the
+  barrier clears on a visibly ready platform page, then
   retries collection in the originally requested silent mode. Closing or
   timing out the window pauses that platform, preventing repeated popups.
+  If the single silent retry is blocked again, that platform also pauses with
+  `manual_verification_not_restored`; it does not reopen another browser.
   Network restrictions, selector drift, rate limits, and ordinary collection
   failures never open an interactive browser. A visible run keeps its
   window open while a user completes the platform challenge, then continues in

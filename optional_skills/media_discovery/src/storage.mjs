@@ -325,7 +325,7 @@ export async function beginRun(root, requestedPlatforms, options = {}) {
   });
 }
 
-export async function heartbeat(root, runId, counts, lifecycleState = null) {
+export async function heartbeat(root, runId, counts, lifecycleState = null, evidence = {}) {
   return withLock(root, async () => {
     const state = await readStateUnlocked(root);
     const run = state.active_runs[runId];
@@ -333,6 +333,7 @@ export async function heartbeat(root, runId, counts, lifecycleState = null) {
     if (run.worker_id && state.background_worker?.worker_id !== run.worker_id) return true;
     run.heartbeat_at = new Date().toISOString();
     run.counts = { ...run.counts, ...counts };
+    if (evidence.manual_verification) run.manual_verification = { ...evidence.manual_verification };
     if (lifecycleState && !run.stop_requested_at) run.lifecycle_state = lifecycleState;
     await writeStateUnlocked(root, state);
     return Boolean(run.stop_requested_at);

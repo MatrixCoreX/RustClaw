@@ -501,6 +501,25 @@ fn media_page_supports_oldest_first_collection_time_pagination() {
 }
 
 #[test]
+fn media_publication_is_optional_bounded_and_separate_from_collection_time() {
+    let record = json!({"kind": "video", "global_sequence": 1,
+        "discovered_at": "2026-09-09T00:00:00Z", "published_at": "2026-09-07",
+        "publication_text": "2 days ago"});
+    let item = aipp_media_item(&record).expect("valid record");
+    assert_eq!(item["published_at"], "2026-09-07");
+    assert_eq!(item["publication_text"], "2 days ago");
+    assert_eq!(item["discovered_at"], "2026-09-09T00:00:00Z");
+    let old = aipp_media_item(&json!({"kind": "image", "global_sequence": 2,
+        "discovered_at": "2026-09-09T00:00:00Z"})).expect("old record");
+    assert_eq!(old["published_at"], Value::Null);
+    assert_eq!(old["publication_text"], Value::Null);
+    let bounded = aipp_media_item(&json!({"kind": "video", "global_sequence": 3,
+        "published_at": 123, "publication_text": "x".repeat(1000)})).expect("bounded record");
+    assert_eq!(bounded["published_at"], Value::Null);
+    assert!(bounded["publication_text"].as_str().unwrap_or("").len() <= 128);
+}
+
+#[test]
 fn media_page_rejects_unknown_sort_order() {
     let root = fixture_root();
     let error = read_aipp_media_page(

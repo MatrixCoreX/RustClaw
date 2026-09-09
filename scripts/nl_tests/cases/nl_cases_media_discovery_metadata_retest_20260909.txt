@@ -1,0 +1,2 @@
+# Bounded live retry after updating the skill. Preserve results and never bypass verification.
+media_discovery_update|metadata_parallel_once|optional_skill:media_discovery,provider_mode:live,execution_mode:real,capability:media_discovery.run_once,requires_tool_call:true|用媒体发现做一次采集测试：抖音、小红书和快手同时各采集1条推荐内容，每个平台最多运行5分钟，完成就结束，不要开启持续采集。使用各平台默认浏览模式，遇到登录或验证码时弹出窗口让我手动处理，不能绕过；保存素材、作者文案、可读的发布日期和点赞、评论、收藏、转发等数据供AiAPP查看。读不到的字段不要补造。

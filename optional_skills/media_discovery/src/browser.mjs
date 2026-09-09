@@ -2,6 +2,8 @@ import fs from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import path from "node:path";
 import { browserStageError, recordBrowserFailure } from "./browser_diagnostics.mjs";
+import { createManualConfirmation } from "./manual_handoff.mjs";
+import { capturePublication } from "./publication.mjs";
 
 import {
   canonicalCandidateUrls,
@@ -78,6 +80,10 @@ const ENGAGEMENT_SELECTORS = Object.freeze({
       '.interactive-item.like-item .item-count',
       '.video-info-content:has(.like-icon) .info-text',
     ]),
+    comments: Object.freeze(['.interactive-item.comment-item .item-count', '[data-testid="comment-count"]']),
+    favorites: Object.freeze(['.interactive-item.collect-item .item-count', '[data-testid="collect-count"]']),
+    shares: Object.freeze(['.interactive-item.share-item .item-count', '[data-testid="share-count"]']),
+    views: Object.freeze(['.video-info-content:has(.play-icon) .info-text', '[data-testid="play-count"]']),
   }),
 });
 
@@ -182,7 +188,12 @@ export async function captureEngagementMetrics(scope, platform, capturedAt) {
   for (const [name, selectors] of Object.entries(ENGAGEMENT_SELECTORS[platform] || {})) {
     let display = null;
     for (const selector of selectors) {
-      const candidates = await scope.locator(selector).evaluateAll((nodes) => nodes.map((node) => ({
+      const candidates = await scope.locator(selector).evaluateAll((nodes) => nodes.filter(node => {
+        const rect = node.getBoundingClientRect();
+        const style = getComputedStyle(node);
+        return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden"
+          && !node.closest('[data-comment-id], .comments-container');
+      }).map((node) => ({
         machineValue: node.getAttribute("data-count") || node.getAttribute("data-value") || "",
         renderedValue: node.textContent || "",
       })));
@@ -386,12 +397,15 @@ async function platformAuthenticationPresent(context, platform) {
 }
 
 export async function waitForManualAccess({ page, context, platform, errorCode, timeoutMs,
-  shouldStop = async () => false }) {
+  confirmation, shouldStop = async () => false }) {
+  if (!confirmation?.readAction) throw new Error("manual_confirmation_required");
   const deadline = Date.now() + Math.max(INTERACTIVE_LOGIN_POLL_MS, timeoutMs);
   let readyPolls = 0;
   while (Date.now() < deadline) {
     if (await shouldStop()) return { ready: false, error_code: "collection_stopped" };
     if (page.isClosed()) return { ready: false, error_code: "interactive_verification_cancelled" };
+    const action = await confirmation.readAction();
+    if (action === "pause") return { ready: false, error_code: "interactive_verification_cancelled" };
     const accessError = await currentPlatformAccessError(page, platform).catch(error => {
       if (page.isClosed()) return "interactive_verification_cancelled";
       throw error;
@@ -406,13 +420,14 @@ export async function waitForManualAccess({ page, context, platform, errorCode, 
         xiaohongshu: 'section.note-item[data-note-id], #detail-title, #detail-desc',
         kuaishou: '.video-card, .short-video-info-container-detail, video',
       }[platform];
-      ready = !accessError && await page.locator(selector).count() > 0
+      const visibleSelector = selector.split(",").map(part => `${part.trim()}:visible`).join(",");
+      ready = action === "continue" && !accessError && await page.locator(visibleSelector).count() > 0
         && (errorCode !== "login_required" || await platformAuthenticationPresent(context, platform));
     } catch {
       // User navigation can be transient; only a verified platform document is ready.
     }
     readyPolls = ready ? readyPolls + 1 : 0;
-    if (readyPolls >= 2) return { ready: true, reason_code: "interactive_access_ready" };
+    if (readyPolls >= 2) return { ready: true, reason_code: "interactive_access_ready", user_confirmed: true };
     await page.waitForTimeout(INTERACTIVE_LOGIN_POLL_MS).catch(() => {});
   }
   return { ready: false, error_code: "interactive_verification_timeout" };
@@ -425,6 +440,8 @@ export async function waitForInteractiveLogin({
   timeoutMs = INTERACTIVE_LOGIN_TIMEOUT_MS,
   errorCode = "login_required",
   shouldStop = async () => false,
+  locale = process.env.LC_MESSAGES || process.env.LANG || "en",
+  onOpened = async () => {},
 }) {
   if (await shouldStop()) return { ready: false, error_code: "collection_stopped" };
   if (!guiAvailable()) return { ready: false, error_code: "display_unavailable" };
@@ -442,22 +459,21 @@ export async function waitForInteractiveLogin({
       ? ["--ozone-platform=wayland"]
       : [],
   });
-  const page = context.pages()[0] || (await context.newPage());
-  page.setDefaultTimeout(NAVIGATION_TIMEOUT_MS);
-  const loginTarget = sourceTargets(platform, {
-    ...config,
-    source_mode: "home_feed",
-    topics: [],
-    seed_urls: [],
-  })[0]?.url;
   try {
+    const page = context.pages()[0] || (await context.newPage());
+    page.setDefaultTimeout(NAVIGATION_TIMEOUT_MS);
+    const loginTarget = sourceTargets(platform, {
+      ...config, source_mode: "home_feed", topics: [], seed_urls: [],
+    })[0]?.url;
     if (loginTarget) {
       await page.goto(loginTarget, {
         waitUntil: "domcontentloaded",
         timeout: NAVIGATION_TIMEOUT_MS,
       }).catch(() => {});
     }
-    return await waitForManualAccess({ page, context, platform, errorCode, timeoutMs, shouldStop });
+    const confirmation = await createManualConfirmation(context, page, { platform, locale });
+    await onOpened();
+    return await waitForManualAccess({ page, context, platform, errorCode, timeoutMs, confirmation, shouldStop });
   } finally {
     await context.close().catch(() => {});
   }
@@ -768,6 +784,7 @@ export async function collectRenderedImages({
   config,
   discoveredAt,
   engagement,
+  publication = {},
 }) {
   const maximum = Math.min(100, config.max_images_per_post || 100);
   const records = [];
@@ -813,6 +830,7 @@ export async function collectRenderedImages({
         cover_screenshot_path: imageScreenshotPath,
         source_page_url: sourcePageUrl,
         discovered_at: discoveredAt,
+        ...publication,
         engagement,
       });
       added += 1;
@@ -988,6 +1006,7 @@ async function collectPage(page, root, runId, platform, itemUrl, config, discove
   const itemId = platformItemId(platform, metadata.canonical);
   const discoveredAt = new Date().toISOString();
   const engagement = await captureEngagementMetrics(page, platform, discoveredAt);
+  const publication = await capturePublication(page, platform, itemId);
   const temporaryRoot = path.join(root, "tmp", runId);
   if (metadata.hasVideo) {
     const screenshotPath = path.join(temporaryRoot, `${itemId.replaceAll(":", "_")}-video.png`);
@@ -1012,6 +1031,7 @@ async function collectPage(page, root, runId, platform, itemUrl, config, discove
         cover_capture_source: cover.source,
         video_page_url: metadata.canonical,
         discovered_at: discoveredAt,
+        ...publication,
         engagement,
       }],
       temporaryPaths: [screenshotPath],
@@ -1030,6 +1050,7 @@ async function collectPage(page, root, runId, platform, itemUrl, config, discove
     config,
     discoveredAt,
     engagement,
+    publication,
   });
 }
 
@@ -1043,6 +1064,7 @@ async function collectDouyinFeedCard(page, root, runId, locator, itemId, config,
   const platformText = await capturePlatformCaption(locator, "douyin", card.title);
   const discoveredAt = new Date().toISOString();
   const engagement = await captureEngagementMetrics(locator, "douyin", discoveredAt);
+  const publication = await capturePublication(locator, "douyin", itemId);
   const pageUrl = `https://www.douyin.com/video/${itemId}`;
   const visibleVideoCount = await locator.locator("video:visible").count();
   const visibleImages = await visibleImageCandidates(locator, 3);
@@ -1065,6 +1087,7 @@ async function collectDouyinFeedCard(page, root, runId, locator, itemId, config,
       config,
       discoveredAt,
       engagement,
+      publication,
     });
   }
   const screenshotPath = path.join(root, "tmp", runId, `douyin_${itemId}-video.png`);
@@ -1089,6 +1112,7 @@ async function collectDouyinFeedCard(page, root, runId, locator, itemId, config,
       cover_capture_source: cover.source,
       video_page_url: pageUrl,
       discovered_at: discoveredAt,
+      ...publication,
       engagement,
     }],
     temporaryPaths: [screenshotPath],
@@ -1163,6 +1187,7 @@ async function collectKuaishouFeedCard(
   const platformText = await capturePlatformCaption(locator, "kuaishou", card.title);
   const discoveredAt = new Date().toISOString();
   const engagement = await captureEngagementMetrics(locator, "kuaishou", discoveredAt);
+  const publication = await capturePublication(locator, "kuaishou", itemId);
   const screenshotPath = path.join(
     root,
     "tmp",
@@ -1189,6 +1214,7 @@ async function collectKuaishouFeedCard(
       cover_capture_source: cover.source,
       video_page_url: itemUrl,
       discovered_at: discoveredAt,
+      ...publication,
       engagement,
     }],
     temporaryPaths: [screenshotPath],
@@ -1215,6 +1241,7 @@ async function collectXiaohongshuFeedCard(
   const platformText = await capturePlatformCaption(locator, "xiaohongshu", title);
   const discoveredAt = new Date().toISOString();
   const engagement = await captureEngagementMetrics(locator, "xiaohongshu", discoveredAt);
+  const publication = await capturePublication(locator, "xiaohongshu", itemId);
   if (xiaohongshuFeedCardMediaKind(card.hasPlayControl) === "image") {
     return collectRenderedImages({
       scope: locator,
@@ -1229,6 +1256,7 @@ async function collectXiaohongshuFeedCard(
       config,
       discoveredAt,
       engagement,
+      publication,
     });
   }
   const screenshotPath = path.join(
@@ -1262,6 +1290,7 @@ async function collectXiaohongshuFeedCard(
       cover_capture_source: cover.source,
       video_page_url: pageUrl,
       discovered_at: discoveredAt,
+      ...publication,
       engagement,
     }],
     temporaryPaths: [screenshotPath],
