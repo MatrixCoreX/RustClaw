@@ -75,6 +75,31 @@ fn allocator_tuning_enabled(memory_mib: Option<u64>, overridden: bool) -> bool {
     low_memory_host(memory_mib) && !overridden
 }
 
+pub(crate) fn spawn_allocator_reclaimer(tuning: &AllocatorTuning) {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    if tuning.applied {
+        tokio::spawn(async {
+            loop {
+                tokio::time::sleep(Duration::from_secs(60)).await;
+                // Trimming can scan arenas; keep it off the asynchronous reactor threads.
+                match tokio::task::spawn_blocking(reclaim_free_pages).await {
+                    Ok(released) => tracing::debug!(released, "runtime_allocator_reclaim"),
+                    Err(error) => tracing::warn!(%error, "runtime_allocator_reclaim_failed"),
+                }
+            }
+        });
+    }
+    #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+    let _ = tuning;
+}
+
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn reclaim_free_pages() -> bool {
+    // Unlike mallopt, malloc_trim is thread-safe; it releases only allocator-free pages,
+    // including holes between live allocations, and never invalidates application data.
+    unsafe { libc::malloc_trim(0) != 0 }
+}
+
 #[cfg(test)]
 #[path = "runtime_memory_tests.rs"]
 mod tests;
