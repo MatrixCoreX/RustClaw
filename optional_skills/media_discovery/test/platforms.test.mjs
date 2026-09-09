@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   canonicalCandidateUrls,
   isDetailUrl,
+  manualVerificationTarget,
+  matchesVerificationTarget,
   sourceTargets,
   sourceUrls,
   validatePlatformUrl,
@@ -15,6 +17,21 @@ import {
   renderedCardMediaKind,
   xiaohongshuFeedCardMediaKind,
 } from "../src/browser.mjs";
+
+test("manual verification retains the selected keyword or blocked detail instead of the home feed", () => {
+  const config = { source_mode: "topics", topics: ["财经"] };
+  for (const platform of ["douyin", "xiaohongshu", "kuaishou"]) {
+    const target = sourceTargets(platform, config)[0].url;
+    assert.equal(manualVerificationTarget(platform, config), target);
+    assert.equal(matchesVerificationTarget(platform, target, target), true);
+    assert.equal(matchesVerificationTarget(platform, target, sourceTargets(platform, { source_mode: "home_feed" })[0].url), false);
+    assert.equal(matchesVerificationTarget(platform, target, sourceTargets(platform, { ...config, topics: ["other"] })[0].url), false);
+    assert.throws(() => manualVerificationTarget(platform, config, "https://example.com/"));
+  }
+  const detail = "https://www.xiaohongshu.com/explore/fixture?xsec_token=fixture-token";
+  assert.equal(manualVerificationTarget("xiaohongshu", config, detail), detail);
+  assert.equal(detailNavigationError("xiaohongshu", detail, "https://www.xiaohongshu.com/404", false), "source_unavailable");
+});
 
 test("platform URLs are validated structurally", () => {
   assert.equal(
@@ -46,7 +63,7 @@ test("home feed and topic sources are explicit schema modes", () => {
     "https://www.kuaishou.com/brilliant",
   ]);
   assert.deepEqual(sourceUrls("kuaishou", { source_mode: "topics", topics: ["AI agent"] }), [
-    "https://www.kuaishou.com/search/video?searchKey=AI%20agent",
+    "https://www.kuaishou.com/search/AI%20agent",
   ]);
 });
 

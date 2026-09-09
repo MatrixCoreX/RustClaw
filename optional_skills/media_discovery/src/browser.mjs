@@ -1,13 +1,15 @@
 import fs from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import path from "node:path";
-import { browserStageError, recordBrowserFailure } from "./browser_diagnostics.mjs";
+import { assertDocumentResponse, browserStageError, recordBrowserFailure } from "./browser_diagnostics.mjs";
 import { createManualConfirmation } from "./manual_handoff.mjs";
 import { capturePublication } from "./publication.mjs";
 
 import {
   canonicalCandidateUrls,
   isDetailUrl,
+  manualVerificationTarget,
+  matchesVerificationTarget,
   resolveBrowserMode,
   SUPPORTED_PLATFORMS,
   platformItemId,
@@ -284,6 +286,7 @@ export function xiaohongshuFeedCardMediaKind(hasPlayControl) {
 export function detailNavigationError(platform, requestedUrl, currentUrl, loginFormPresent) {
   if (!isDetailUrl(platform, requestedUrl) || isDetailUrl(platform, currentUrl)) return null;
   const current = new URL(currentUrl);
+  if (/^\/404\/?$/u.test(current.pathname)) return "source_unavailable";
   if (platform === "xiaohongshu" && current.pathname === "/explore") return "login_required";
   return loginFormPresent ? "login_required" : "challenge_required";
 }
@@ -397,7 +400,7 @@ async function platformAuthenticationPresent(context, platform) {
 }
 
 export async function waitForManualAccess({ page, context, platform, errorCode, timeoutMs,
-  confirmation, shouldStop = async () => false }) {
+  confirmation, targetUrl, shouldStop = async () => false }) {
   if (!confirmation?.readAction) throw new Error("manual_confirmation_required");
   const deadline = Date.now() + Math.max(INTERACTIVE_LOGIN_POLL_MS, timeoutMs);
   let readyPolls = 0;
@@ -416,12 +419,13 @@ export async function waitForManualAccess({ page, context, platform, errorCode, 
     try {
       validatePlatformUrl(platform, page.url());
       const selector = {
-        douyin: '[data-aweme-id], [data-e2e="video-detail"], video',
-        xiaohongshu: 'section.note-item[data-note-id], #detail-title, #detail-desc',
-        kuaishou: '.video-card, .short-video-info-container-detail, video',
+        douyin: '[data-aweme-id], [data-e2e="video-detail"], video, a[href*="/video/"], a[href*="/note/"]',
+        xiaohongshu: 'section.note-item[data-note-id], #detail-title, #detail-desc, a[href*="/explore/"]',
+        kuaishou: '.video-card, .short-video-info-container-detail, video, a[href*="/short-video/"]',
       }[platform];
       const visibleSelector = selector.split(",").map(part => `${part.trim()}:visible`).join(",");
       ready = action === "continue" && !accessError && await page.locator(visibleSelector).count() > 0
+        && matchesVerificationTarget(platform, targetUrl, page.url())
         && (errorCode !== "login_required" || await platformAuthenticationPresent(context, platform));
     } catch {
       // User navigation can be transient; only a verified platform document is ready.
@@ -439,6 +443,7 @@ export async function waitForInteractiveLogin({
   config,
   timeoutMs = INTERACTIVE_LOGIN_TIMEOUT_MS,
   errorCode = "login_required",
+  targetUrl,
   shouldStop = async () => false,
   locale = process.env.LC_MESSAGES || process.env.LANG || "en",
   onOpened = async () => {},
@@ -462,9 +467,7 @@ export async function waitForInteractiveLogin({
   try {
     const page = context.pages()[0] || (await context.newPage());
     page.setDefaultTimeout(NAVIGATION_TIMEOUT_MS);
-    const loginTarget = sourceTargets(platform, {
-      ...config, source_mode: "home_feed", topics: [], seed_urls: [],
-    })[0]?.url;
+    const loginTarget = manualVerificationTarget(platform, config, targetUrl);
     if (loginTarget) {
       await page.goto(loginTarget, {
         waitUntil: "domcontentloaded",
@@ -473,7 +476,8 @@ export async function waitForInteractiveLogin({
     }
     const confirmation = await createManualConfirmation(context, page, { platform, locale });
     await onOpened();
-    return await waitForManualAccess({ page, context, platform, errorCode, timeoutMs, confirmation, shouldStop });
+    return await waitForManualAccess({ page, context, platform, errorCode, timeoutMs,
+      confirmation, shouldStop, targetUrl: loginTarget });
   } finally {
     await context.close().catch(() => {});
   }
@@ -483,16 +487,16 @@ export async function discoverCandidates(page, platform, sourceUrl, maxScrolls, 
   const discovered = [];
   if (isDetailUrl(platform, sourceUrl)) discovered.push(validatePlatformUrl(platform, sourceUrl));
   for (let scroll = 0; scroll <= maxScrolls && discovered.length < limit; scroll += 1) {
-    const links = await page.locator("a[href]").evaluateAll((anchors) =>
-      anchors.map((anchor) => anchor.href).filter((href) => typeof href === "string"),
-    );
+    const selector = platform === "douyin" ? "a[href], [data-aweme-id]" : "a[href]";
+    const links = await page.locator(selector).evaluateAll((nodes) => nodes.flatMap(node => {
+      const rect = node.getBoundingClientRect(), style = getComputedStyle(node);
+      if (rect.width <= 0 || rect.height <= 0 || style.visibility === "hidden"
+        || style.display === "none" || Number(style.opacity) === 0) return [];
+      const itemId = node.getAttribute("data-aweme-id");
+      return [node.href, /^\d+$/u.test(itemId || "") ? `https://www.douyin.com/video/${itemId}` : null]
+        .filter(value => typeof value === "string");
+    }));
     discovered.push(...canonicalCandidateUrls(platform, links));
-    if (platform === "douyin") {
-      const itemIds = await page.locator("[data-aweme-id]").evaluateAll((nodes) =>
-        nodes.map((node) => node.getAttribute("data-aweme-id")).filter((value) => /^\d+$/u.test(value || "")),
-      );
-      discovered.push(...itemIds.map((itemId) => `https://www.douyin.com/video/${itemId}`));
-    }
     const unique = canonicalCandidateUrls(platform, discovered);
     discovered.length = 0;
     discovered.push(...unique);
@@ -983,9 +987,11 @@ async function collectPage(page, root, runId, platform, itemUrl, config, discove
     waitUntil: "domcontentloaded",
     timeout: NAVIGATION_TIMEOUT_MS,
   });
+  if (response && [404, 410].includes(response.status())) throw new Error("source_unavailable");
   if (response && [401, 403, 429].includes(response.status())) {
     throw new Error(response.status() === 429 ? "rate_limited" : "challenge_required");
   }
+  assertDocumentResponse(response, "detail_navigation");
   await pacingWait(page, config, 1.25);
   const accessError = await currentPlatformAccessError(page, platform);
   if (accessError) throw browserStageError(accessError, "detail_access");
@@ -1432,15 +1438,18 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
   let handled = 0;
   let lastError = null;
   let stage = "source_navigation";
+  let verificationTarget;
   try {
     for (const discoverySource of sourceTargets(platform, config)) {
       const sourceUrl = discoverySource.url;
+      verificationTarget = sourceUrl;
       if (handled >= limit || (await shouldStop())) break;
       stage = "source_navigation";
       const response = await page.goto(sourceUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT_MS });
       if (response && [401, 403, 429].includes(response.status())) {
         throw browserStageError(response.status() === 429 ? "rate_limited" : "challenge_required", stage);
       }
+      assertDocumentResponse(response, stage);
       await pacingWait(page, config, 1.25);
       stage = "source_access";
       const accessError = await accessErrorAfterExplicitVisibleWait(page, platform, config, shouldStop);
@@ -1502,6 +1511,7 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
       for (const candidate of candidates) {
         if (handled >= limit || (await shouldStop())) break;
         try {
+          verificationTarget = candidate;
           await pacingWait(page, config, 0.5);
           const result = await collectPage(
             page,
@@ -1525,13 +1535,13 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
     }
     if (
       handled === 0 &&
-      (config.source_mode || "home_feed") === "home_feed" &&
       !(await shouldStop())
     ) {
       throw lastError || new Error("selector_drift");
     }
     return { handled };
   } catch (error) {
+    error.discovery_target_url = verificationTarget;
     if (error.message !== "collection_stopped") {
       await recordBrowserFailure(page, { root, runId, platform, stage, error }).catch(() => {});
     }

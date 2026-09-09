@@ -5,8 +5,16 @@ export function browserStageError(code, stage) {
   return Object.assign(new Error(code), { discovery_stage: stage });
 }
 
-export async function recordBrowserFailure(page, { root, runId, platform, stage, error }) {
-  const document = await page.evaluate((platform) => ({
+export function assertDocumentResponse(response, stage) {
+  const contentType = response?.headers?.()["content-type"]?.split(";")[0].trim().toLowerCase();
+  if (contentType === "application/json" || contentType?.endsWith("+json")) {
+    throw browserStageError("unexpected_page_response", stage);
+  }
+}
+
+export async function recordBrowserFailure(page, { root, runId, platform, stage, error, timeoutMs = 5000 }) {
+  let timer;
+  const capture = page.evaluate((platform) => ({
     origin: location.origin,
     pathname: location.pathname.slice(0, 256),
     ready_state: document.readyState,
@@ -26,6 +34,12 @@ export async function recordBrowserFailure(page, { root, runId, platform, stage,
     login_inputs: window.document.querySelectorAll('input[type="password"],input[type="tel"]').length,
     iframe_count: window.document.querySelectorAll("iframe").length,
   }), platform).catch(() => null);
+  let document;
+  try {
+    document = await Promise.race([capture, new Promise(resolve => { timer = setTimeout(() => resolve(null), timeoutMs); })]);
+  } finally {
+    clearTimeout(timer);
+  }
   const diagnostic = {
     schema_version: 1,
     platform,

@@ -195,3 +195,40 @@ test("explicit detail seeds do not expand into unrelated recommendations", async
   );
   assert.deepEqual(candidates, [seed]);
 });
+
+for (const [platform, prefix, ids] of [
+  ["douyin", "https://www.douyin.com/video/", ["731000001", "731000002", "731000003"]],
+  ["xiaohongshu", "https://www.xiaohongshu.com/explore/", ["first-note", "second-note", "third-note"]],
+  ["kuaishou", "https://www.kuaishou.com/short-video/", ["firstvideo", "secondvideo", "thirdvideo"]],
+]) {
+  test(`${platform} keyword candidates retain first-seen order and bounded unique detail URLs`, {
+    skip: !RUN_BROWSER_TEST,
+  }, async (t) => {
+    const browser = await chromium.launch({ executablePath: await browserExecutable(), headless: true });
+    t.after(() => browser.close());
+    const page = await browser.newPage();
+    const urls = ids.map(id => `${prefix}${id}`);
+    await page.setContent(`<main>
+      <a hidden href="${prefix}hidden000">hidden detail</a>
+      <a href="${urls[0]}">1</a><a href="${urls[0]}">1 duplicate</a>
+      <a href="https://example.com/video/external">external</a>
+      <a href="${urls[1]}">2</a><a href="${urls[2]}">3</a>
+    </main>`);
+    const candidates = await discoverCandidates(page, platform, prefix, 0, 2,
+      async () => false, { pacing_min_delay_ms: 1, pacing_max_delay_ms: 1 });
+    assert.deepEqual(candidates, urls.slice(0, 2));
+  });
+}
+
+test("Douyin mixed card IDs and links preserve DOM order", { skip: !RUN_BROWSER_TEST }, async t => {
+  const browser = await chromium.launch({ executablePath: await browserExecutable(), headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.setContent(`<main>
+    <div data-aweme-id="12345678">first</div>
+    <a href="https://www.douyin.com/video/23456789">second</a>
+    <div hidden data-aweme-id="34567890">hidden</div>
+  </main>`);
+  assert.deepEqual(await discoverCandidates(page, "douyin", "https://www.douyin.com/search/finance",
+    0, 3, async () => false, {}), ["https://www.douyin.com/video/12345678", "https://www.douyin.com/video/23456789"]);
+});

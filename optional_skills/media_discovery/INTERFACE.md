@@ -36,6 +36,14 @@ platform's search result for each keyword in input order, browses bounded
 result candidates in one browser session, and records the keyword and search
 page URL on every committed result. No localized search phrase is parsed by
 runtime or skill code.
+Hidden links are excluded, mixed card/link markers retain DOM order, and an
+unavailable detail (HTTP 404/410 or the platform's `/404` page) is skipped with
+failure evidence instead of being classified as a CAPTCHA. Kuaishou uses its
+web search path `/search/<encoded keyword>`, not a legacy JSON endpoint.
+If the platform responds with JSON instead of a web document, collection reports
+`unexpected_page_response`; it does not treat that response as an empty result
+or switch to unrelated recommendations. Failure diagnostics are independently
+time-bounded so an unresponsive renderer cannot prevent browser cleanup.
 Explicit detail `seed_urls` are collected as the exact requested set and do not
 expand into unrelated recommendation links from those pages.
 
@@ -135,6 +143,11 @@ does not enable these periodic notices.
   the user requests exported files; saving content already makes it available
   in AiAPP. An async job must be polled through its returned runtime handle,
   not started again with altered pacing or other arguments.
+- A terminal batch receipt has `run.browser_session_open=false`: its browser is
+  closed even when the recorded outcome names a waiting state. Do not claim a
+  window is still open or ask the user to use `resume` for a finished one-shot
+  batch. A new explicitly requested one-shot is separate from continuous-worker
+  pause/resume. Zero new records does not mean pre-existing CSV files are empty.
 - Report saved fields from each `run.capture_summary`: `records_saved`,
   `captions_saved`, `covers_saved`, and the exact `engagement_metrics` names.
   Missing metrics are unavailable, not zero and not collected. Never claim
@@ -308,11 +321,13 @@ platform's display precision. Each metric snapshot carries `captured_at`.
   profile when the platform reports `login_required` or `challenge_required`
   and a desktop is available. This window is for manual sign-in/verification
   only. It stays open until the user confirms in the local control tab and the
-  barrier clears on a visibly ready platform page, then
+  barrier clears on the actual blocked search/detail page, then
   retries collection in the originally requested silent mode. Closing or
   timing out the window pauses that platform, preventing repeated popups.
   If the single silent retry is blocked again, that platform also pauses with
   `manual_verification_not_restored`; it does not reopen another browser.
+  Verification retains the requested search keyword or blocked detail URL;
+  a ready recommendation homepage is not proof that a search page is accessible.
   Network restrictions, selector drift, rate limits, and ordinary collection
   failures never open an interactive browser. A visible run keeps its
   window open while a user completes the platform challenge, then continues in
