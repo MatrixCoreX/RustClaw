@@ -71,8 +71,7 @@ pub(crate) fn init_db(config: &AppConfig) -> anyhow::Result<DbPool> {
     );
 
     let max_size = config.database.pool_max_size.max(2);
-    let pool = Pool::builder()
-        .max_size(max_size)
+    let pool = crate::runtime_memory::sqlite_pool_builder(max_size)
         .build(manager)
         .map_err(|e| anyhow::anyhow!("init db pool: {e}"))?;
 
@@ -107,8 +106,7 @@ pub(crate) fn init_audit_db(config: &AppConfig) -> anyhow::Result<DbPool> {
     );
 
     let max_size = config.database.audit_pool_max_size.max(2);
-    let pool = Pool::builder()
-        .max_size(max_size)
+    let pool = crate::runtime_memory::sqlite_pool_builder(max_size)
         .build(manager)
         .map_err(|e| anyhow::anyhow!("init audit db pool: {e}"))?;
 

@@ -90,6 +90,7 @@ mod repair_boundary_inventory;
 mod repair_signal;
 mod repo;
 mod resource_scheduler;
+mod runtime_memory;
 mod routing_context;
 mod runtime;
 mod schedule_service;
@@ -530,6 +531,8 @@ fn tokio_worker_stack_bytes(raw: Option<&str>) -> usize {
 }
 
 fn main() -> anyhow::Result<()> {
+    // No threads have been created yet; glibc allocator settings are process-global.
+    let allocator_tuning = unsafe { runtime_memory::configure_allocator_at_startup() };
     let worker_stack_bytes = tokio_worker_stack_bytes(
         claw_core::product_identity::env_string("TOKIO_WORKER_STACK_BYTES")
             .ok()
@@ -539,10 +542,10 @@ fn main() -> anyhow::Result<()> {
         .enable_all()
         .thread_stack_size(worker_stack_bytes)
         .build()?
-        .block_on(run())
+        .block_on(run(allocator_tuning))
 }
 
-async fn run() -> anyhow::Result<()> {
+async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         // 默认用 info 级别，若设置 RUST_LOG 则以环境变量为准。
         .with_env_filter(std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()))
@@ -551,6 +554,11 @@ async fn run() -> anyhow::Result<()> {
         .compact()
         .init();
 
+    info!(
+        attempted = allocator_tuning.attempted,
+        applied = allocator_tuning.applied,
+        "runtime_allocator_tuning"
+    );
     let config_path = resolve_startup_config_path()?;
     let config = AppConfig::load(&config_path)?;
     let runtime_concurrency = resource_scheduler::runtime_concurrency_plan(

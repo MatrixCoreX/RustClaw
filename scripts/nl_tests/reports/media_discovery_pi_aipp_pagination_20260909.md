@@ -163,7 +163,7 @@ Case source: `scripts/nl_tests/cases/nl_cases_media_discovery_pi_20260909.txt`.
 Local visual evidence: `target/deploy/pi-media-20260909/ui-tests/`.
 Raw suite artifacts on both hosts:
 `scripts/nl_suite_logs/media_discovery_pi_20260909/`.
-Authoritative Pi model trace: `/home/pi/RustClaw/logs/model_io.log`.
+Authoritative Pi model trace: `$PI_WORKSPACE_ROOT/logs/model_io.log`.
 
 ## Follow-up: Missing Media Download AiAPP
 

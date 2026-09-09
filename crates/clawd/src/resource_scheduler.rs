@@ -161,7 +161,7 @@ fn available_memory_mb() -> Option<u64> {
     None
 }
 
-fn total_memory_mib() -> Option<u64> {
+pub(crate) fn total_memory_mib() -> Option<u64> {
     #[cfg(target_os = "linux")]
     {
         let raw = std::fs::read_to_string("/proc/meminfo").ok()?;

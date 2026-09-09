@@ -521,6 +521,7 @@ agentctl -logs clawd 200 --follow
 - 云服务器使用域名/TLS 时，再显式部署 UI 到 nginx。
 - Linux systemd unit 由 `scripts/install-systemd-service.sh` 根据实际用户和路径生成；仓库不保存写死主机路径的 unit。
 - 树莓派优先使用预编译 aarch64 Release 包，避免低内存设备重复完整编译。
+- 不超过 2 GiB 内存的设备使用按需数据库连接池，Linux/glibc 还启用小内存分配策略，详见[内存策略与测量](docs/architecture/runtime_memory_profile.md)。
 - 密钥放在仓库外的环境文件中，不提交到 Git。
 
 ## 身份与访问控制

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::Read;
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -20,6 +20,31 @@ pub const LEGACY_INSTALL_RECEIPT_SCHEMA_VERSION: u32 = 1;
 pub const INSTALL_RECEIPT_SCHEMA_VERSION: u32 = 2;
 pub const CURRENT_INSTALL_POINTER_SCHEMA_VERSION: u32 = 1;
 const BACKGROUND_VERSION_LEASE_SCHEMA_VERSION: u32 = 1;
+
+fn digest_json(value: &impl Serialize) -> SkillSdkResult<String> {
+    struct DigestWriter(Sha256);
+    impl Write for DigestWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.update(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut digest = DigestWriter(Sha256::new());
+    {
+        // Preserve serde's exact canonical bytes without a receipt-sized JSON copy.
+        let mut writer = BufWriter::with_capacity(64 * 1024, &mut digest);
+        serde_json::to_writer(&mut writer, value)?;
+        writer.flush()?;
+    }
+    Ok(hex::encode(digest.0.finalize()))
+}
+
+#[cfg(test)]
+#[path = "receipt_streaming_tests.rs"]
+mod streaming_tests;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -254,14 +279,12 @@ impl InstallReceipt {
 
     pub fn digest(&self) -> SkillSdkResult<String> {
         self.validate()?;
-        Ok(hex::encode(Sha256::digest(serde_json::to_vec(self)?)))
+        digest_json(self)
     }
 
     pub fn artifact_set_digest(&self) -> SkillSdkResult<String> {
         self.validate()?;
-        Ok(hex::encode(Sha256::digest(serde_json::to_vec(
-            &self.artifacts,
-        )?)))
+        digest_json(&self.artifacts)
     }
 
     pub fn verifies_manifest(&self, manifest: &PackageManifest) -> SkillSdkResult<()> {
@@ -730,8 +753,9 @@ impl InstallReceiptStore {
                 format!("install_dir={}", pointer.install_dir),
             ));
         }
-        let receipt: InstallReceipt =
-            serde_json::from_slice(&fs::read(install_root.join("install-receipt.json"))?)?;
+        let receipt: InstallReceipt = serde_json::from_reader(BufReader::new(File::open(
+            install_root.join("install-receipt.json"),
+        )?))?;
         receipt.validate()?;
         if receipt.skill_name != skill_name || receipt.digest()? != pointer.receipt_digest {
             return Err(SkillSdkError::new(

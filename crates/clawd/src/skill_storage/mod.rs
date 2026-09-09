@@ -6,6 +6,7 @@ mod schema;
 
 use crate::db_init::DbPool;
 use claw_core::config::DatabaseConfig;
+#[cfg(test)]
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::Connection;
@@ -262,8 +263,7 @@ fn open_pool(
         conn.pragma_update(None, "foreign_keys", "ON")?;
         Ok(())
     });
-    let pool = Pool::builder()
-        .max_size(max_size.max(2))
+    let pool = crate::runtime_memory::sqlite_pool_builder(max_size)
         .build(manager)
         .map_err(|error| anyhow::anyhow!("init skill storage pool: {error}"))?;
     let db = pool

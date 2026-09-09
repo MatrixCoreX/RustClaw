@@ -538,6 +538,7 @@ Operational rules:
 - Cloud deployments opt in to nginx only when a domain or TLS reverse proxy is needed.
 - Linux systemd units are generated for the detected user and workspace by `scripts/install-systemd-service.sh`; the repository does not keep a host-specific unit.
 - Raspberry Pi users should prefer the prebuilt aarch64 Release package to avoid repeated full builds on low-memory hardware.
+- Hosts with at most 2 GiB RAM use on-demand database pools and, on Linux/glibc, a small-host allocator profile. See [runtime memory policy and measurement](docs/architecture/runtime_memory_profile.md).
 - Keep credentials in an environment file outside the repository and never commit them.
 
 ## Identity and Access
