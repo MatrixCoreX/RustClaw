@@ -115,7 +115,7 @@ test("a silent challenge opens one manual verification session per batch", async
   assert.equal(result.status, "ok");
   assert.equal(result.extra.state, "stopped");
   assert.equal(result.extra.background_worker.counts.items, 0);
-  assert.equal(result.extra.background_worker.last_error_code, "challenge_required");
+  assert.equal(result.extra.background_worker.last_error_code, "manual_verification_not_restored");
   assert.equal(loginSessions, 1);
 });
 
@@ -188,7 +188,7 @@ test("one-shot challenge permits a manual popup and resumes the original silent 
   });
 
   assert.equal(result.status, "ok");
-  assert.equal(result.extra.state, "waiting_for_challenge_resolution");
+  assert.equal(result.extra.state, "waiting_for_manual_verification");
   assert.equal(loginSessions, 1);
 });
 

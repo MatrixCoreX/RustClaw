@@ -103,6 +103,7 @@ test("browser collector follows the rendered carousel and captures every image i
     },
     config: { max_images_per_post: 100 },
     discoveredAt: "2026-08-10T00:00:00.000Z",
+    publication: { published_at: "2026-08-01", publication_text: null, publication_source: "dom_attribute" },
     engagement: {
       schema_version: 1,
       platform: "xiaohongshu",
@@ -128,6 +129,8 @@ test("browser collector follows the rendered carousel and captures every image i
     true,
   );
   assert.equal(result.records.every((record) => record.engagement.metrics.likes.value === 27), true);
+  assert.equal(result.records.every((record) => record.published_at === "2026-08-01"), true);
+  assert.equal(result.records.every((record) => record.discovered_at === "2026-08-10T00:00:00.000Z"), true);
   assert.equal(result.records.some((record) => record.collection_truncated), false);
   assert.deepEqual(
     result.records.map((record) => record.image_screenshot_path),

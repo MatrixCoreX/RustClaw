@@ -2048,6 +2048,8 @@ export interface AippMediaItem {
   image_url: string | null;
   preview_available: boolean;
   discovered_at: string | null;
+  published_at?: string | null;
+  publication_text?: string | null;
   engagement: {
     schema_version: number;
     platform: string;

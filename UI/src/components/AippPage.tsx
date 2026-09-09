@@ -366,6 +366,17 @@ function formatCollectedAt(value: string | null, lang: "zh" | "en"): string {
   }).format(new Date(timestamp));
 }
 
+export function formatPublishedAt(value: string | null | undefined, lang: "zh" | "en"): string | null {
+  if (!value) return null;
+  // Preserve date-only precision and avoid shifting it across browser timezones.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const date = new Date(`${value}T00:00:00Z`);
+    return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value ? value : null;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}T.+(?:Z|[+-]\d{2}:\d{2})$/.test(value) || !Number.isFinite(Date.parse(value))) return null;
+  return formatCollectedAt(value, lang);
+}
+
 function formatArtifactSize(value: number | null): string {
   if (value == null || !Number.isFinite(value) || value < 0) return "-";
   if (value < 1024) return `${value} B`;
@@ -706,12 +717,22 @@ export function AippMediaItemCard({
 }) {
   const [expanded, setExpanded] = useState(false);
   const captionText = item.platform_text.trim();
+  const publishedAt = formatPublishedAt(item.published_at, lang);
+  const captionRef = useRef<HTMLParagraphElement>(null);
+  const [canCollapse, setCanCollapse] = useState(false);
+  useEffect(() => {
+    if (expanded) return;
+    const node = captionRef.current;
+    if (!node) { setCanCollapse(false); return; }
+    const measure = () => setCanCollapse(node.scrollHeight > node.clientHeight + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [captionText, expanded]);
   const textSections = [
     { key: "caption", label: t("帖子文案", "Post caption"), text: captionText },
   ].filter((section) => section.text);
-  const canCollapse = textSections.some(
-    (section) => section.text.length > 360 || section.text.split("\n").length > 6,
-  );
   const hasPreview = item.preview_available || (item.kind === "image" && Boolean(item.image_url));
   const metricPresentation = [
     { key: "views" as const, icon: Eye, label: t("播放", "Views") },
@@ -736,13 +757,16 @@ export function AippMediaItemCard({
             <span className="inline-flex items-center gap-1">{item.kind === "video" ? <Video className="h-3.5 w-3.5" /> : <ImageIcon className="h-3.5 w-3.5" />}{item.kind === "video" ? t("视频", "Video") : t("图片", "Image")}</span>
             <span className="break-all">{item.platform}</span>
             <span>#{item.global_sequence}</span>
-            <span>{formatCollectedAt(item.discovered_at, lang)}</span>
           </div>
           <h2 className="mt-2 line-clamp-2 break-words text-sm font-semibold leading-5 text-white/90 [overflow-wrap:anywhere]">{item.title || t("未提供标题", "Untitled")}</h2>
+          <div className="mt-1.5 space-y-1 break-words text-xs leading-4 text-white/45 [overflow-wrap:anywhere]">
+            <p>{publishedAt ? t("发布：", "Published: ") : item.publication_text ? t("发布（采集时显示）：", "Published (as captured): ") : t("发布：", "Published: ")}{publishedAt || item.publication_text || t("未提供", "Unavailable")}</p>
+            <p>{t("采集：", "Collected: ")}{formatCollectedAt(item.discovered_at, lang)}</p>
+          </div>
           {metricPresentation.length > 0 ? (
-            <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs text-white/58 sm:grid-cols-3">
+            <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs text-white/58 sm:grid-cols-3" aria-label={t("采集时互动数据", "Engagement at capture")}>
               {metricPresentation.map(({ key, Icon, label, display }) => (
-                <span key={key} className="inline-flex min-w-0 items-center gap-1" title={`${label}: ${display}`}>
+                <span key={key} className="inline-flex min-w-0 items-center gap-1" title={`${label}: ${display} · ${t("采集：", "Captured: ")}${formatCollectedAt(item.engagement?.captured_at || item.discovered_at, lang)}`}>
                   <Icon className="h-3.5 w-3.5 shrink-0" />
                   <span className="truncate">{display}</span>
                 </span>
@@ -754,7 +778,7 @@ export function AippMediaItemCard({
               {textSections.map((section) => (
                 <section key={section.key} className="min-w-0">
                   <p className="text-xs font-medium text-white/45">{section.label}</p>
-                  <p className={`mt-0.5 whitespace-pre-wrap break-words text-sm leading-5 text-white/72 [overflow-wrap:anywhere] ${canCollapse && !expanded ? "line-clamp-2" : ""}`}>
+                  <p ref={captionRef} className={`mt-0.5 whitespace-pre-wrap break-words text-sm leading-5 text-white/72 [overflow-wrap:anywhere] ${!expanded ? "line-clamp-2" : ""}`}>
                     {section.text}
                   </p>
                 </section>
@@ -1187,7 +1211,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
             className="theme-input w-full py-2 pl-9 pr-3 text-sm"
             value={searchDraft}
             onChange={(event) => setSearchDraft(event.target.value)}
-            placeholder={t("搜索标题、帖子文案或识别文字", "Search titles, post captions, or recognized text")}
+            placeholder={t("搜索标题或帖子文案", "Search titles or post captions")}
             maxLength={200}
           />
         </label>
@@ -1217,12 +1241,12 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
 
       {error ? <div className="rounded-lg border border-red-400/20 bg-red-500/8 px-4 py-3 text-sm text-red-100">{error}</div> : null}
 
-      <div className="grid min-w-0 gap-2 lg:grid-cols-2" aria-busy={loading}>
+      <div className="grid min-w-0 gap-2 md:grid-cols-2 xl:grid-cols-3" aria-busy={loading}>
         {(page?.items || []).map((item) => (
           <AippMediaItemCard key={item.global_sequence} item={item} skillName={selectedSkill} apiFetch={apiFetch} t={t} lang={lang} />
         ))}
         {!loading && page?.items.length === 0 ? (
-          <div className="theme-panel-soft flex min-h-40 flex-col items-center justify-center gap-2 p-5 text-center text-sm text-white/55 lg:col-span-2">
+          <div className="theme-panel-soft col-span-full flex min-h-40 flex-col items-center justify-center gap-2 p-5 text-center text-sm text-white/55">
             <GalleryVerticalEnd className="h-7 w-7" />
             <span>{t("还没有符合条件的采集内容。", "No collected content matches these filters.")}</span>
           </div>

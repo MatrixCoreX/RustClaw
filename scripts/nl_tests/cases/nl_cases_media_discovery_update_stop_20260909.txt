@@ -1,0 +1,2 @@
+# Maintenance stop before updating the pinned collection package; retain every record/profile/config.
+media_discovery_update|stop_before_update|optional_skill:media_discovery,provider_mode:live,execution_mode:real,capability:media_discovery.disable,requires_tool_call:true|停止抖音、小红书和快手的持续采集，完成当前帖子后让后台采集进程正常退出，不再启动新的批次。保留全部素材、CSV、登录状态和采集参数，方便更新技能后测试；不要删除任何内容。

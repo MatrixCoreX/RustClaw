@@ -175,7 +175,10 @@ does not enable these periodic notices.
   for manual login or human verification. Do not change `browser_mode` to
   visible for this exception. Closing or timing out that window returns
   `waiting_for_manual_verification` and pauses the enabled platform until the
-  user resumes it. A successful manual step retries collection silently once.
+  user resumes it. The local control tab requires explicit user confirmation;
+  hidden feed elements never complete verification. A confirmed manual step
+  retries collection silently once. If still blocked, `manual_verification_not_restored`
+  pauses only that platform; other platforms continue independently.
 - Browsing uses bounded randomized pauses, scroll distances, and inter-batch
   rests to avoid bursty
   traffic. This is cooperative pacing, not fingerprint spoofing, challenge

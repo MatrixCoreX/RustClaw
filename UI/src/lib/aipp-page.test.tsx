@@ -7,6 +7,7 @@ import {
   AippCatalogCard,
   AippMediaItemCard,
   AippTaskActivityCard,
+  formatPublishedAt,
   localizedAippCopy,
   readCachedAippCatalog,
   readSelectedAipp,
@@ -75,9 +76,9 @@ test("keeps media collection automatically refreshed and sortable by collection 
   assert.match(source, /采集时间：最早优先/);
 });
 
-test("renders collected media in two compact desktop columns", () => {
+test("renders collected media in three responsive desktop columns", () => {
   const source = readFileSync(new URL("../components/AippPage.tsx", import.meta.url), "utf8");
-  assert.match(source, /grid min-w-0 gap-2 lg:grid-cols-2/);
+  assert.match(source, /grid min-w-0 gap-2 md:grid-cols-2 xl:grid-cols-3/);
   assert.match(source, /sm:grid-cols-\[minmax\(104px,24%\)_minmax\(0,1fr\)\]/);
   assert.match(source, /max-h-36 min-h-24/);
 });
@@ -179,6 +180,7 @@ test("renders a media collection record from the current no-OCR contract", () =>
     image_url: "https://example.test/image.webp",
     preview_available: false,
     discovered_at: "2026-09-07T00:00:00Z",
+    published_at: "2026-09-01",
     engagement: {
       schema_version: 1,
       platform: "xiaohongshu",
@@ -186,6 +188,8 @@ test("renders a media collection record from the current no-OCR contract", () =>
       metrics: {
         likes: { display: "1.2万", value: null },
         comments: { display: "318", value: 318 },
+        favorites: { display: "0", value: 0 },
+        shares: { display: "12", value: 12 },
       },
     },
   };
@@ -205,8 +209,22 @@ test("renders a media collection record from the current no-OCR contract", () =>
   assert.match(markup, /xiaohongshu/);
   assert.match(markup, /1\.2万/);
   assert.match(markup, /318/);
+  assert.match(markup, /发布：2026-09-01/);
+  assert.match(markup, /采集：/);
+  assert.match(markup, /评论: 318/);
+  assert.match(markup, /收藏: 0/);
+  assert.match(markup, /分享: 12/);
+  assert.doesNotMatch(markup, /播放:/);
   assert.match(markup, /href="https:\/\/example\.test\/source"/);
   assert.match(markup, /referrerPolicy="no-referrer"/);
+});
+
+test("publication dates keep date-only precision and reject invalid values", () => {
+  assert.equal(formatPublishedAt("2026-09-01", "en"), "2026-09-01");
+  assert.equal(formatPublishedAt("2026-02-30", "zh"), null);
+  assert.equal(formatPublishedAt(undefined, "zh"), null);
+  assert.equal(formatPublishedAt("2 days ago", "en"), null);
+  assert.equal(formatPublishedAt("not-a-date", "zh"), null);
 });
 
 test("renders an image card when only a retained local preview is available", () => {
