@@ -27,6 +27,18 @@ Linux/glibc 小内存主机在线程创建前设置最多两个内存分配区�
 配置优先，自动策略不覆盖。macOS 和非 glibc 平台不调用此接口。
 启动日志可查看是否尝试设置以及是否成功。
 
+When the automatic glibc profile is active, a serialized background operation
+also attempts `malloc_trim(0)` once per 60 seconds on a blocking worker. It only
+returns allocator-free pages, including whole-page holes between live objects;
+it does not clear application caches, task history, live buffers, or databases.
+It does not block the async reactor or run on macOS/non-glibc hosts. Explicit
+allocator overrides disable this automatic maintenance too. See
+[malloc_trim semantics and thread safety](https://man7.org/linux/man-pages/man3/malloc_trim.3.html).
+
+自动 glibc 策略生效时，每 60 秒通过阻塞工作线程串行尝试归还空闲堆页，包括仍然存活的
+对象之间已经释放的整页。这不是删除应用缓存、任务历史或数据库，也不改变仍被使用的内存。
+该操作不在异步执行线程上运行；macOS、非 glibc 平台或手动覆盖分配器配置时不启用。
+
 Skill receipt JSON is read incrementally and its canonical digest is computed
 with a bounded 64 KiB serialization buffer. Receipt schemas, digest bytes,
 manifest matching, pinned versions, and artifact integrity checks are unchanged.

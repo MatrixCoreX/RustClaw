@@ -62,3 +62,32 @@ fn malformed_pool_size_keeps_existing_two_connection_floor() {
         assert_eq!(pool.max_size(), 2);
     }
 }
+
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+#[test]
+fn reclaiming_fragmented_pages_preserves_live_buffers_and_database() {
+    let mut buffers: Vec<_> = (0..128)
+        .map(|index| Some(vec![index as u8; 64 * 1024]))
+        .collect();
+    let db = rusqlite::Connection::open_in_memory().unwrap();
+    db.execute_batch("CREATE TABLE retained (value TEXT); INSERT INTO retained VALUES ('saved');")
+        .unwrap();
+    for index in (1..buffers.len()).step_by(2) {
+        buffers[index] = None;
+    }
+    reclaim_free_pages();
+    for (index, buffer) in buffers.iter().enumerate() {
+        if let Some(buffer) = buffer {
+            assert!(buffer.iter().all(|byte| *byte == index as u8));
+        }
+    }
+    let value: String = db
+        .query_row("SELECT value FROM retained", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(value, "saved");
+}
+
+#[test]
+fn allocator_override_does_not_start_maintenance_or_require_a_runtime() {
+    spawn_allocator_reclaimer(&AllocatorTuning::default());
+}
