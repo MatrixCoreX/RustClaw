@@ -164,3 +164,30 @@ Local visual evidence: `target/deploy/pi-media-20260909/ui-tests/`.
 Raw suite artifacts on both hosts:
 `scripts/nl_suite_logs/media_discovery_pi_20260909/`.
 Authoritative Pi model trace: `/home/pi/RustClaw/logs/model_io.log`.
+
+## Follow-up: Missing Media Download AiAPP
+
+The user subsequently requested installation of the missing Pi AiAPP. The
+installed media-download package was 0.3.27, whose immutable manifest contained
+no AiAPP declaration; the synced 0.3.29 source contained the new task-activity
+AiAPP. This was a package-version gap, not a browser-cache problem.
+
+- Updated through `/v1/skills/store/update`, preserving configuration and data.
+- Operation `2341c0f5-5be7-4fe7-8918-af45fe31de24` succeeded in 503 seconds.
+- Final media-download version: 0.3.29, enabled, registry generation 16.
+- Receipt: `6d7fb31f07c6bee004f91aba65faee77b68f1932472c52f9c83ee723136e69c7`.
+- Previous pointer, manifest, receipt, and operation evidence retained under
+  `.deploy-backups/media-download-aipp-20260909-1788950627362` on the Pi.
+- The installed package's 55 protocol tests passed on the Pi; the same 55 tests
+  also passed locally. Installation protocol smoke passed separately.
+- Direct task `a961bcec-81a3-4340-8be1-a557b96c3d4b` succeeded and reported
+  media_download version 0.3.29. It used zero LLM calls and made no live download.
+- Catalog API now returns both enabled AiAPPs: media_discovery 0.1.59 and
+  media_download 0.3.29. Download history initially returned five existing
+  records, then six including the readiness task. Discovery data remained empty.
+- Browser checks against the Pi's real read-only API passed at widths 1440 and
+  390: both app entries, download history, no page errors or horizontal overflow.
+  Authentication bootstrap was isolated for UI testing, not a password-login test.
+- No main-program/UI rebuild, service restart, or changes to other skill packages
+  were required. Final available disk space was approximately 1958 MiB. This
+  package update does not resolve the earlier live-collection acceptance gaps.
