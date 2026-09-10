@@ -200,7 +200,10 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       onOpenApr={() => undefined}
     />,
   );
-  assert.match(html, /data-bancor-activation-fund="true"/);
+  assert.match(html, /class="mt-1 flex items-baseline gap-2 text-xs sm:text-sm" data-bancor-activation-fund="true"/);
+  const fundRow = html.match(/<div[^>]*data-bancor-activation-fund="true">([\s\S]*?)<\/div>/)?.[0] ?? "";
+  assert.doesNotMatch(fundRow, /border-t|pt-2|break-all|mt-1 block/);
+  assert.match(fundRow, /class="whitespace-nowrap font-semibold text-white"/);
   assert.match(html, /资金池余额/);
   assert.match(html, /data-nni-decimal-amount="867\.64255082 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
   for (const [activationFund, expected] of [
