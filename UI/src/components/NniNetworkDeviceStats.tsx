@@ -37,6 +37,9 @@ export function NniNetworkDeviceStats({
 }: NniNetworkDeviceStatsProps) {
   const unavailableLabel = t("暂不可用", "Unavailable");
   const registeredValue = stats?.registered_device_count ?? unavailableLabel;
+  const activatedCount = stats?.activated_device_count;
+  const activatedValue = typeof activatedCount === "number" && Number.isSafeInteger(activatedCount) && activatedCount >= 0
+    ? activatedCount : unavailableLabel;
   const activeValue = stats?.active_device_count ?? unavailableLabel;
   const networkOutputValue = networkRewards?.total_distributed_reward_aic
     ? formatNniRewardMetric(networkRewards.total_distributed_reward_aic)
@@ -70,6 +73,14 @@ export function NniNetworkDeviceStats({
           </div>
           <p className={stats ? "shrink-0 text-xl font-semibold text-white/90" : "text-sm font-semibold text-white/75"}>
             {loading && !stats ? <Loader2 className="h-5 w-5 animate-spin" /> : registeredValue}
+          </p>
+        </div>
+        <div className="mt-2 flex items-center justify-between gap-2 border-t border-white/10 pt-2" data-nni-activated-devices>
+          <span className="text-xs font-semibold text-white/55" title={t("已绑定资产账户的设备", "Devices bound to an asset account")}>
+            {t("激活设备", "Activated devices")}
+          </span>
+          <p className="shrink-0 text-sm font-semibold text-white/90">
+            {loading && !stats ? <Loader2 className="h-4 w-4 animate-spin" /> : activatedValue}
           </p>
         </div>
       </div>

@@ -23,6 +23,9 @@ function candle(bucketStart: number, close: string): NniBancorCandle {
     usd_volume: "0.00000000",
     trade_count: 0,
     has_trades: false,
+    liquidity_event_count: 0,
+    liquidity_usd_units: "0",
+    liquidity_usd: "0.00000000",
   };
 }
 
@@ -38,7 +41,7 @@ function response(candles: NniBancorCandle[], overrides: Partial<NniBancorCandle
     price_decimal_places: 12,
     market_version: 10,
     market_created_at_unix: 1_800_000_000,
-    price_kind: "execution_average_usd_per_aic",
+    price_kind: "pool_marginal_usd_per_aic",
     candles,
     ...overrides,
   };
@@ -66,6 +69,13 @@ test("BANCOR merged history is not truncated to one server page", () => {
 test("BANCOR candle responses require a stable price kind and market series identity", () => {
   const valid = response([candle(1_800_000_000, "0.000100000000")]);
   assert.equal(isBancorCandleResponse(valid, 300), true);
+  assert.equal(isBancorCandleResponse({ ...valid, price_kind: "execution_average_usd_per_aic" }, 300), false);
+  const funding = response([{ ...candle(1_800_000_000, "0.000100100000"),
+    open: "0.000100000000", liquidity_event_count: 1, liquidity_usd_units: "100000000", liquidity_usd: "1.00000000" }]);
+  assert.equal(isBancorCandleResponse(funding, 300), true);
+  const mergedFunding = mergeBancorCandleResponses(valid, { ...funding, market_version: valid.market_version + 1 });
+  assert.equal(mergedFunding.candles[0].liquidity_usd, "1.00000000");
+  assert.equal(mergedFunding.candles[0].trade_count, 0);
   for (const field of ["market_version", "market_created_at_unix", "price_kind"] as const) {
     const invalid = { ...valid } as Record<string, unknown>;
     delete invalid[field];

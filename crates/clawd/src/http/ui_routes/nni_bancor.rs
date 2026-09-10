@@ -5,7 +5,7 @@ const NNI_BANCOR_CANDLE_INTERVALS: [u64; 8] =
 const NNI_BANCOR_DEFAULT_SLIPPAGE_BPS: u16 = 300;
 const NNI_BANCOR_MAX_SLIPPAGE_BPS: u16 = 5_000;
 const NNI_BANCOR_MARKET_TRADE_LIMIT: usize = 100;
-const NNI_BANCOR_CANDLE_PRICE_KIND: &str = "execution_average_usd_per_aic";
+const NNI_BANCOR_CANDLE_PRICE_KIND: &str = "pool_marginal_usd_per_aic";
 const NNI_BANCOR_DAILY_PRICE_KIND: &str = "pool_marginal_usd_per_aic";
 
 #[derive(Debug, Deserialize)]
@@ -96,128 +96,6 @@ fn finite_decimal(
         .ok_or("nni_bancor_market_contract_invalid")
 }
 
-fn validate_bancor_candles_response(
-    data: &Value,
-    expected_interval_seconds: u64,
-    expected_limit: usize,
-) -> Result<(), &'static str> {
-    let object = data
-        .as_object()
-        .ok_or("nni_bancor_candles_contract_invalid")?;
-    if object.get("schema_version").and_then(Value::as_u64) != Some(1)
-        || object.get("status").and_then(Value::as_str) != Some("bancor_candles")
-        || object
-            .get("market_id")
-            .and_then(Value::as_str)
-            .is_none_or(str::is_empty)
-        || object
-            .get("market_version")
-            .and_then(Value::as_u64)
-            .is_none()
-        || object
-            .get("market_created_at_unix")
-            .and_then(Value::as_i64)
-            .is_none_or(|value| value < 0)
-        || object.get("price_kind").and_then(Value::as_str) != Some(NNI_BANCOR_CANDLE_PRICE_KIND)
-        || object.get("interval_seconds").and_then(Value::as_u64) != Some(expected_interval_seconds)
-        || object.get("price_scale").and_then(Value::as_u64) != Some(1_000_000_000_000)
-        || object.get("price_decimal_places").and_then(Value::as_u64) != Some(12)
-    {
-        return Err("nni_bancor_candles_contract_invalid");
-    }
-    let range_start = object
-        .get("start_time_unix")
-        .and_then(Value::as_i64)
-        .filter(|value| *value >= 0)
-        .ok_or("nni_bancor_candles_contract_invalid")?;
-    let range_end = object
-        .get("end_time_unix")
-        .and_then(Value::as_i64)
-        .filter(|value| *value >= range_start)
-        .ok_or("nni_bancor_candles_contract_invalid")?;
-    let candles = object
-        .get("candles")
-        .and_then(Value::as_array)
-        .ok_or("nni_bancor_candles_contract_invalid")?;
-    if candles.len() > expected_limit {
-        return Err("nni_bancor_candles_contract_invalid");
-    }
-    let interval_seconds = i64::try_from(expected_interval_seconds)
-        .map_err(|_| "nni_bancor_candles_contract_invalid")?;
-    let mut previous_end = None;
-    for candle in candles {
-        let candle = candle
-            .as_object()
-            .ok_or("nni_bancor_candles_contract_invalid")?;
-        let bucket_start = candle
-            .get("bucket_start_unix")
-            .and_then(Value::as_i64)
-            .filter(|value| *value >= range_start)
-            .ok_or("nni_bancor_candles_contract_invalid")?;
-        let bucket_end = candle
-            .get("bucket_end_unix")
-            .and_then(Value::as_i64)
-            .filter(|value| *value > bucket_start && *value <= range_end)
-            .ok_or("nni_bancor_candles_contract_invalid")?;
-        let bucket_span = bucket_end - bucket_start;
-        let span_is_valid = if expected_interval_seconds == 31_536_000 {
-            (31_536_000..=31_622_400).contains(&bucket_span)
-        } else {
-            bucket_span == interval_seconds
-        };
-        if !span_is_valid || previous_end.is_some_and(|value| bucket_start < value) {
-            return Err("nni_bancor_candles_contract_invalid");
-        }
-        previous_end = Some(bucket_end);
-
-        let mut prices = [0.0_f64; 4];
-        for (index, field) in ["open", "high", "low", "close"].iter().enumerate() {
-            prices[index] = candle
-                .get(*field)
-                .and_then(Value::as_str)
-                .and_then(|value| value.parse::<f64>().ok())
-                .filter(|value| value.is_finite() && *value > 0.0)
-                .ok_or("nni_bancor_candles_contract_invalid")?;
-        }
-        let [open, high, low, close] = prices;
-        if high < open.max(close) || low > open.min(close) || low > high {
-            return Err("nni_bancor_candles_contract_invalid");
-        }
-        for field in ["aic_volume_units", "usd_volume_units"] {
-            if candle
-                .get(field)
-                .and_then(Value::as_str)
-                .is_none_or(|value| {
-                    value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit())
-                })
-            {
-                return Err("nni_bancor_candles_contract_invalid");
-            }
-        }
-        for field in ["aic_volume", "usd_volume"] {
-            if candle
-                .get(field)
-                .and_then(Value::as_str)
-                .and_then(|value| value.parse::<f64>().ok())
-                .is_none_or(|value| !value.is_finite() || value < 0.0)
-            {
-                return Err("nni_bancor_candles_contract_invalid");
-            }
-        }
-        let trade_count = candle
-            .get("trade_count")
-            .and_then(Value::as_u64)
-            .ok_or("nni_bancor_candles_contract_invalid")?;
-        let has_trades = candle
-            .get("has_trades")
-            .and_then(Value::as_bool)
-            .ok_or("nni_bancor_candles_contract_invalid")?;
-        if has_trades != (trade_count > 0) {
-            return Err("nni_bancor_candles_contract_invalid");
-        }
-    }
-    Ok(())
-}
 
 fn normalize_bancor_market_trades(data: &mut Value) {
     let Some(object) = data.as_object_mut() else {
@@ -483,7 +361,7 @@ async fn nni_bancor_candles(
     for node_url in nni_bancor_service_remote_nodes(&config) {
         let mut endpoint = nni_remote_api_endpoint(
             node_url,
-            &format!("bancor/candles?interval_seconds={interval_seconds}&limit={limit}"),
+            &format!("bancor/candles?interval_seconds={interval_seconds}&limit={limit}&price_kind={NNI_BANCOR_CANDLE_PRICE_KIND}"),
         );
         if let Some(end_time_unix) = end_time_unix {
             endpoint.push_str(&format!("&end_time_unix={end_time_unix}"));
@@ -1728,7 +1606,7 @@ mod nni_bancor_unit_tests {
             "market_id": "aic-usd-v1",
             "market_version": 7,
             "market_created_at_unix": 1_800_000_000,
-            "price_kind": "execution_average_usd_per_aic",
+            "price_kind": "pool_marginal_usd_per_aic",
             "interval_seconds": 300,
             "start_time_unix": 1_800_000_000,
             "end_time_unix": 1_800_000_300,
@@ -1797,6 +1675,9 @@ mod nni_bancor_unit_tests {
             "usd_volume": "0.00010000",
             "trade_count": 1,
             "has_trades": true,
+            "liquidity_event_count": 0,
+            "liquidity_usd_units": "0",
+            "liquidity_usd": "0.00000000",
         });
         let envelope = |candles: Value| {
             json!({
@@ -1805,7 +1686,7 @@ mod nni_bancor_unit_tests {
                 "market_id": "aic-usd-v1",
                 "market_version": 7,
                 "market_created_at_unix": 1_800_000_000,
-                "price_kind": "execution_average_usd_per_aic",
+                "price_kind": "pool_marginal_usd_per_aic",
                 "interval_seconds": 300,
                 "start_time_unix": 1_800_000_000,
                 "end_time_unix": 1_800_000_600,

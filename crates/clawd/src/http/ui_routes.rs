@@ -505,6 +505,7 @@ include!("ui_routes/nni_owner_identity.rs");
 include!("ui_routes/nni_remote_join.rs");
 include!("ui_routes/nni_rewards.rs");
 include!("ui_routes/nni_bancor.rs");
+include!("ui_routes/nni_bancor_candles.rs");
 include!("ui_routes/nni_asset_transfer.rs");
 include!("ui_routes/nni_skill_gateway.rs");
 include!("ui_routes/auth_feishu_bind.rs");

@@ -22,6 +22,7 @@ test("shows registered allowlist devices and active devices from the previous he
     <NniNetworkDeviceStats
       stats={{
         registered_device_count: 12,
+        activated_device_count: 10,
         active_device_count: 8,
         active_period_start_unix: 1_800_000_000,
         active_period_end_unix: 1_800_000_600,
@@ -57,6 +58,9 @@ test("shows registered allowlist devices and active devices from the previous he
   assert.match(markup, /网络概览/);
   assert.match(markup, /注册设备/);
   assert.match(markup, />12</);
+  assert.match(markup, /激活设备/);
+  assert.match(markup, />10</);
+  assert.match(markup, /data-nni-activated-devices/);
   assert.doesNotMatch(markup, /服务端白名单中的设备/);
   assert.match(markup, /活跃设备/);
   assert.match(markup, />8</);
@@ -86,6 +90,18 @@ test("shows registered allowlist devices and active devices from the previous he
   assert.match(markup, /sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6/);
   assert.equal((markup.match(/whitespace-nowrap text-xs font-medium/g) ?? []).length, 2);
   assert.equal((markup.match(/rounded-lg border border-white\/10/g) ?? []).length, 6);
+});
+
+test("activated count renders zero and never invents counts for older or malformed node responses", () => {
+  for (const [count, expected] of [[0, "0"], [undefined, "Unavailable"], [-1, "Unavailable"], [1.5, "Unavailable"]] as const) {
+    const markup = renderToStaticMarkup(<NniNetworkDeviceStats stats={{
+      registered_device_count: 12, activated_device_count: count, active_device_count: 8,
+      active_period_start_unix: null, active_period_end_unix: null, first_heartbeat_unix: null, window_seconds: 600,
+    }} loading={false} t={(_zh, en) => en} formatUnixDateTime={() => "--"} />);
+    assert.match(markup, /Activated devices/);
+    assert.ok(markup.includes(`>${expected}</p>`));
+    assert.match(markup, /Devices bound to an asset account/);
+  }
 });
 
 test("network reward metrics hide an all-zero fraction and retain real decimals", () => {
@@ -172,7 +188,7 @@ test("network counters never imply that public aggregate data requires joining",
 
   assert.match(markup, /注册设备/);
   assert.match(markup, /活跃设备/);
-  assert.equal((markup.match(/暂不可用/g) ?? []).length, 7);
+  assert.equal((markup.match(/暂不可用/g) ?? []).length, 8);
   assert.doesNotMatch(markup, /未加入/);
   assert.doesNotMatch(markup, />--</);
 });
