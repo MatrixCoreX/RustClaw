@@ -194,8 +194,8 @@ test("asset wallet shows AIC, USD, account identity, and market estimate", () =>
   assert.match(markup, />USD</);
   assert.match(markup, /asset-owner-public-key/);
   assert.match(markup, /data-assets-account-selector="true"/);
-  assert.match(markup, /本机绑定账户/);
-  assert.match(markup, /本机绑定账户 · asset-owner-public-key/);
+  assert.match(markup, /硬件设备绑定账号/);
+  assert.match(markup, /硬件设备绑定账号 · asset-owner-public-key/);
   assert.match(markup, /aria-label="复制完整公钥"/);
   assert.match(markup, /不代表实际成交金额/);
   assert.match(markup, /data-assets-overview-actions="true"/);
@@ -246,7 +246,7 @@ test("asset account selector reserves additional wallet options", () => {
     />,
   );
 
-  assert.match(markup, /本机绑定账户/);
+  assert.match(markup, /硬件设备绑定账号/);
   assert.match(markup, /冷钱包/);
   assert.match(markup, /value="cold-wallet"/);
   assert.match(markup, /冷钱包 · external-asset-public-key/);
