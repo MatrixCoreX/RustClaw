@@ -1809,7 +1809,7 @@ export function CandleChart({
                 data-bancor-candle-direction={visualState}
                 data-bancor-candle-state={candleOpen ? "open" : "closed"}
               >
-                <title>{`${formatUnixDateTime(value.candle.bucket_start_unix)} · O ${value.candle.open} · H ${value.candle.high} · L ${value.candle.low} · C ${value.candle.close} · ${value.candle.aic_volume} AIC · ${value.candle.trade_count} ${t("笔", "trades")} · ${t("注入", "Funding")} ${value.candle.liquidity_usd ?? "0"} USD`}</title>
+                <title>{`${formatUnixDateTime(value.candle.bucket_start_unix)} · O ${value.candle.open} · H ${value.candle.high} · L ${value.candle.low} · C ${value.candle.close} · ${value.candle.aic_volume} AIC · ${value.candle.trade_count} ${t("笔", "trades")} · ${(value.candle.liquidity_event_count ?? 0) > 0 ? "◆ " : ""}${t("注入", "Funding")} ${value.candle.liquidity_usd ?? "0"} USD`}</title>
                 <g clipPath={`url(#${priceClipId})`}>
                   {hasPriceEvents && highY < bodyTop ? <line x1={x} y1={highY} x2={x} y2={bodyTop} stroke={color.stroke} strokeWidth="1.5" /> : null}
                   {hasPriceEvents && bodyBottom < lowY ? <line x1={x} y1={bodyBottom} x2={x} y2={lowY} stroke={color.stroke} strokeWidth="1.5" /> : null}
@@ -1826,20 +1826,16 @@ export function CandleChart({
                       strokeWidth="1.2"
                     />
                   ) : (
-                    <circle
+                    <line
                       data-bancor-candle-gap="true"
-                      cx={x}
-                      cy={closeY}
-                      r={Math.max(2.5, Math.min(4, bodyWidth / 2))}
-                      fill={color.fill}
+                      x1={x - bodyWidth / 2}
+                      y1={closeY}
+                      x2={x + bodyWidth / 2}
+                      y2={closeY}
                       stroke={color.stroke}
                       strokeWidth="1.4"
                     />
                   )}
-                  {(value.candle.liquidity_event_count ?? 0) > 0 ? (
-                    <text data-bancor-liquidity-marker="true" x={x} y={Math.max(priceTop + 14, highY - 7)}
-                      textAnchor="middle" fill="var(--theme-chart-label)" fontSize="13">◆</text>
-                  ) : null}
                   {candleOpen ? (
                     <>
                       <line
@@ -1853,7 +1849,6 @@ export function CandleChart({
                         strokeDasharray="2 5"
                         strokeOpacity="0.72"
                       />
-                      <circle cx={x} cy={priceTop + 5} r="3" fill="var(--theme-chart-open)" />
                     </>
                   ) : null}
                 </g>
@@ -1922,8 +1917,10 @@ export function CandleChart({
         </svg>
       </div>
       <div className="bancor-chart-controls mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-white/45">
-        <span>{t("买卖与注资均影响价格；◆ 表示注资，成交量只统计买卖。", "Trades and funding both move the price. ◆ marks funding; volume counts trades only.")}</span>
-        {(focused.candle.liquidity_event_count ?? 0) > 0 ? <span data-bancor-liquidity-detail="true">{t("注入", "Funding")} +{focused.candle.liquidity_usd} USD · {focused.candle.liquidity_event_count} {t("次", "events")}</span> : null}
+        <span>{t("买卖与注资均影响价格；成交量只统计买卖。", "Trades and funding both move the price; volume counts trades only.")}</span>
+        {hoveredIndex !== null && (focused.candle.liquidity_event_count ?? 0) > 0 ? (
+          <span data-bancor-liquidity-detail="true"><span aria-hidden="true">◆ </span>{t("注入", "Funding")} +{focused.candle.liquidity_usd} USD · {focused.candle.liquidity_event_count} {t("次", "events")}</span>
+        ) : null}
         <span>
           {t("当前显示", "Showing")} {visibleWindow.start + 1}–{visibleWindow.end} / {allValues.length}
         </span>
