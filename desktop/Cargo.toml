@@ -3,7 +3,7 @@ resolver = "2"
 
 [package]
 name = "agent-desktop"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 license = "MIT"
 description = "Secure desktop client for an existing agent device"

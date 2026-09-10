@@ -25,6 +25,7 @@ pub struct WireResponse {
     pub body: ByteStream,
 }
 pub enum Wire {
+    Local(reqwest::Client),
     Https(reqwest::Client),
     Ssh(Mutex<client::Handle<PinnedHost>>),
 }
@@ -60,6 +61,15 @@ impl Transport {
         let origin = connection.origin()?;
         let jar = Arc::new(Jar::default());
         let wire = match connection {
+            Connection::Local { .. } => Wire::Local(
+                reqwest::Client::builder()
+                    .no_proxy()
+                    .redirect(reqwest::redirect::Policy::none())
+                    .connect_timeout(Duration::from_secs(5))
+                    .cookie_provider(jar.clone())
+                    .build()
+                    .map_err(|_| "local_connection_failed")?,
+            ),
             Connection::Https { ca_pem, .. } => {
                 let mut builder = reqwest::Client::builder()
                     .https_only(true)
@@ -145,7 +155,7 @@ impl Transport {
             }
         };
         let transport = Self { origin, jar, wire };
-        // No API credentials are sent until the authenticated transport succeeds.
+        // No API credentials are sent until the selected transport succeeds.
         let probe = transport
             .send(Method::GET, "/webd/session", HeaderMap::new(), None)
             .await?;
@@ -185,7 +195,7 @@ impl Transport {
             })) as ByteStream
         });
         match &self.wire {
-            Wire::Https(client) => {
+            Wire::Https(client) | Wire::Local(client) => {
                 let mut request = client.request(method, target).headers(headers);
                 if let Some(body) = body {
                     request = request.body(reqwest::Body::wrap_stream(
@@ -194,7 +204,13 @@ impl Transport {
                 }
                 let response = await_headers(request.send(), last_activity)
                     .await?
-                    .map_err(classify_http_error)?;
+                    .map_err(|error| {
+                        if matches!(self.wire, Wire::Local(_)) {
+                            "local_connection_failed".into()
+                        } else {
+                            classify_http_error(error)
+                        }
+                    })?;
                 reject_redirect(response.status().as_u16())?;
                 Ok(WireResponse {
                     status: response.status().as_u16(),

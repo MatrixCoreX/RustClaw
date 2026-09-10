@@ -5,4 +5,5 @@
 /.build/
 /test-results/
 /releases/
+/installers/
 __pycache__/

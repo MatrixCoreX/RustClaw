@@ -86,11 +86,11 @@ class Fixture:
                 cookie_ok = "session=" + fixture.session_cookie in self.headers.get("Cookie", "")
                 identity = {"user_id": 7, "chat_id": 9, "role": "admin", "user_key": "fixture-key"}
                 if path == "/webd/session":
-                    return self.send_data({"ok": True, "data": {"logged_in": cookie_ok}})
+                    return self.send_data({"ok": True, "data": {"logged_in": cookie_ok, "csrf_token": None, "username": None, "role": None}})
                 if path == "/webd/login":
-                    if payload != {"username": "tester", "password": "fixture-password"} or self.headers.get("Origin") != f"https://{self.headers.get('Host')}":
+                    if payload != {"username": "tester", "password": "fixture-password"} or self.headers.get("Origin") != f"{'https' if self.server is fixture.server else 'http'}://{self.headers.get('Host')}":
                         return self.send_data({"ok": False}, 403)
-                    return self.send_data({"ok": True, "data": {"csrf_token": fixture.csrf_token}}, headers={"Set-Cookie": "session=" + fixture.session_cookie + "; Path=/; HttpOnly; Secure; SameSite=Lax"})
+                    return self.send_data({"ok": True, "data": {"csrf_token": fixture.csrf_token}}, headers={"Set-Cookie": "session=" + fixture.session_cookie + "; Path=/; HttpOnly; SameSite=Lax" + ("; Secure" if self.server is fixture.server else "")})
                 if path == "/v1/auth/ui-key/verify":
                     return self.send_data({"ok": payload.get("user_key") == "fixture-key", "data": identity}, 200 if payload.get("user_key") == "fixture-key" else 401)
                 if not (key_ok or cookie_ok):
@@ -153,7 +153,13 @@ class Fixture:
         self.origin = f"https://localhost:{self.server.server_port}"
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
+        self.local_server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.local_origin = f"http://127.0.0.1:{self.local_server.server_port}"
+        self.local_thread = threading.Thread(target=self.local_server.serve_forever, daemon=True)
+        self.local_thread.start()
 
     def close(self):
         self.server.shutdown()
         self.server.server_close()
+        self.local_server.shutdown()
+        self.local_server.server_close()
