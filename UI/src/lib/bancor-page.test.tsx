@@ -631,7 +631,7 @@ test("BANCOR candle visual state never reports a flat or empty interval as up", 
   assert.equal(resolveBancorCandleVisualState({ ...base, open: "1", close: "1.002", trade_count: 0, has_trades: false, liquidity_event_count: 1 }), "up");
 });
 
-test("BANCOR funding-only candle has a body, a funding marker and no fake volume", () => {
+test("BANCOR funding-only candle keeps its price body and describes funding only in hover details", () => {
   const row = {
     bucket_start_unix: 1800000000, bucket_end_unix: 1800000060,
     open: "0.000020000000", high: "0.000020040000", low: "0.000020000000", close: "0.000020040000",
@@ -641,9 +641,9 @@ test("BANCOR funding-only candle has a body, a funding marker and no fake volume
   const html = renderToStaticMarkup(<CandleChart t={(zh) => zh} candles={[row]} intervalSeconds={60} priceDecimalPlaces={12} formatUnixDateTime={(v) => String(v)}
     maximized={false} onMaximizedChange={() => {}} />);
   assert.match(html, /data-bancor-candle-body="true"/);
-  assert.match(html, /data-bancor-liquidity-marker="true"/);
-  assert.match(html, /data-bancor-liquidity-detail="true"/);
-  assert.match(html, /2\.00000000/);
+  assert.doesNotMatch(html, /data-bancor-liquidity-marker|data-bancor-liquidity-detail/);
+  assert.match(html, /<title>[^<]*◆ 注入 2\.00000000 USD<\/title>/);
+  assert.doesNotMatch(html, /data-bancor-volume-direction|<circle/);
   assert.doesNotMatch(html, /data-bancor-candle-gap="true"/);
 });
 
@@ -795,9 +795,13 @@ test("BANCOR candlesticks distinguish traded flat bars from neutral empty interv
   assert.match(bancorMarketWorkspaceClass(false), /lg:grid-cols-/);
   assert.equal((minuteHtml.match(/data-bancor-candle-body="true"/g) ?? []).length, 1);
   assert.equal((minuteHtml.match(/data-bancor-candle-gap="true"/g) ?? []).length, 1);
+  assert.match(minuteHtml, /<line data-bancor-candle-gap="true"[^>]+stroke="var\(--theme-chart-gap\)"/);
+  assert.doesNotMatch(minuteHtml, /<circle/);
   assert.doesNotMatch(longerHtml, /one-minute-close-line/);
   assert.equal((longerHtml.match(/data-bancor-candle-body="true"/g) ?? []).length, 1);
   assert.equal((longerHtml.match(/data-bancor-candle-gap="true"/g) ?? []).length, 1);
+  assert.match(longerHtml, /<line data-bancor-candle-gap="true"/);
+  assert.doesNotMatch(longerHtml, /<circle/);
   assert.match(longerHtml, /data-bancor-candle-direction="gap"/);
   assert.match(longerHtml, /data-bancor-tap-details="enabled"/);
   assert.match(longerHtml, /clip-path="url\(#bancor-price-plot-/);
