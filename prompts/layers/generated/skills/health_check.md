@@ -15,6 +15,10 @@
 - For agent-runtime or `clawd` self-checks, prefer this capability as the first observation. It exposes `clawd_process_count` and `clawd_health_port_open` without requiring planners to infer daemon state from generic HTTP or process text.
 - If an HTTP endpoint observation is also requested, the agent API health endpoint is `/v1/health` and may require `X-Agent-Key`; a plain `/health` response is not sufficient daemon health evidence by itself.
 - Combine this with `task_control.list` only when the user also asks for task queue or task history status.
+- Process/port probes return `null` when inaccessible, including sandbox denial;
+  unavailable observations do not mean stopped services. The runtime-owned
+  `runtime_probe.clawd.source=executing_runtime` confirms core liveness separately,
+  not channel-provider connectivity. Assess host warnings separately as well.
 
 ## Config Entry Points (from interface)
 - No dedicated config entry points declared.
@@ -39,12 +43,12 @@
 - Success `extra` fields:
   - `workspace_root`: string path; evidence role `path`.
   - `log_dir`: string path; evidence role `path`.
-  - `clawd_process_count`, `telegramd_process_count`: integer counts; evidence role `count`.
+  - `clawd_process_count`, `telegramd_process_count`: nullable integer counts; evidence role `count`.
   - `clawd_health_port_open`, `clawd_visible`, `db_available`, `overall_status`, and `runtime_probe`: runtime/health machine evidence; evidence roles `status` and `field_value`.
   - `clawd_log`, `nni_log`, `telegramd_log`: object or scalar log observations; evidence role `field_value`.
   - `system_health`: object containing OS, CPU, uptime, load, memory, disk, and warning fields; evidence roles `field_value`, `count`, and `status`.
 - Sensitive fields: log observations can include user data. Provider-facing traces should prefer warnings, counts, selected keys, excerpts, or hashes.
-- Error responses include readable `error_text`; `extra.error_kind` should be used when implementation-specific context is available.
+- Error responses include readable `error_text` and structured `extra.error_code`.
 
 ## Request/Response Examples (from interface)
 ### Example 1
