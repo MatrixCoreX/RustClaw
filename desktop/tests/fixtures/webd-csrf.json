@@ -1,0 +1,13 @@
+[
+  {"token":"0123456789abcdef0123456789abcdef","valid":true},
+  {"token":"00000000000040008000000000000000","valid":true},
+  {"token":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","valid":false},
+  {"token":"0123456789ABCDEF0123456789ABCDEF","valid":false},
+  {"token":"01234567-89ab-4def-8123-456789abcdef","valid":false},
+  {"token":"0123456789abcdef0123456789abcdeg","valid":false},
+  {"token":" 0123456789abcdef0123456789abcdef","valid":false},
+  {"token":"0123456789abcdef0123456789abcdef\r\n","valid":false},
+  {"token":"","valid":false},
+  {"token":null,"valid":false},
+  {"token":32,"valid":false}
+]

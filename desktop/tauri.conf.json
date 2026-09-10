@@ -1,0 +1,43 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "agent-desktop",
+  "version": "0.2.0",
+  "identifier": "org.agent-runtime.desktop",
+  "build": {
+    "frontendDist": "dist",
+    "beforeBuildCommand": "npm run build:ui"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: device:; media-src 'self' blob: http://127.0.0.1:*; connect-src ipc: http://ipc.localhost 'self'; frame-src device: http://device.localhost blob:; object-src 'none'; base-uri 'none'; form-action 'none'",
+      "capabilities": [
+        "main",
+        "aipp"
+      ]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "deb"
+    ],
+    "category": "Utility",
+    "shortDescription": "Secure client for your agent devices",
+    "icon": [
+      "icons/128x128.png"
+    ],
+    "linux": {
+      "deb": {
+        "depends": [
+          "libc6 (>= 2.39)",
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0t64 | libgtk-3-0",
+          "gstreamer1.0-plugins-base",
+          "gstreamer1.0-plugins-good",
+          "gstreamer1.0-libav"
+        ]
+      }
+    }
+  }
+}

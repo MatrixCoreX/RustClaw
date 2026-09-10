@@ -1,0 +1,35 @@
+const messages: Record<string, string> = {
+  discovery_running: '上一次查找正在结束，请稍后重试。',
+  https_origin_required: '请输入 HTTPS 地址（只填写域名或 IP 和端口，不包含路径）。',
+  address_invalid: '地址格式不正确，请检查设备地址与端口。',
+  certificate_fingerprint_mismatch: '证书指纹不匹配。请从设备本地或已可信控制台重新核对完整指纹。',
+  certificate_fingerprint_required: '请选择公开 CA 证书，并填写从可信入口取得的 SHA-256 指纹。',
+  public_certificate_required: '这里只接受公开证书，不能导入任何私钥。',
+  single_ca_certificate_required: '请选择一个公开 CA 证书文件。',
+  tls_or_connection_failed: '安全连接未建立。请检查设备在线状态、地址与端口，以及证书的主机名、有效期和信任来源。',
+  connection_timeout: '连接超时。请确认设备已启动，且电脑能够访问设备所在网络。',
+  redirect_denied: '设备返回了地址跳转。为保护凭据，请核对并手工添加正确的 HTTPS 入口。',
+  ssh_identity_changed: 'SSH 主机身份与已核对的指纹不同，连接已停止。请从设备端核验身份。',
+  ssh_connection_failed: 'SSH 连接未建立。请检查地址、端口、主机指纹以及 SSH 服务。',
+  ssh_auth_failed: 'SSH 登录失败。请检查用户名、密码或私钥是否有权登录这台设备。',
+  ssh_private_key_invalid: '无法读取 SSH 私钥。请选择正确的私钥文件，并检查私钥口令。',
+  media_limit: '打开的媒体预览过多，请关闭一些预览后再试。',
+  media_listener_unavailable: '无法建立本机媒体通道，请重新启动客户端。',
+  aipp_window_limit: '已打开 8 个应用窗口，请关闭一些窗口后再打开。',
+  ssh_profile_invalid: '请检查 SSH 地址、端口、用户名与完整 SHA256 主机指纹。',
+  ssh_tunnel_failed: 'SSH 已连接，但无法访问设备上的 WEBD。请检查 WEBD 端口与 SSH 转发权限。',
+  login_rejected: '登录未通过。请检查设备账户、密码或用户 Key，以及该账户是否已被停用。',
+  csrf_missing: '设备已响应，但缺少登录安全令牌。请重新连接；如果仍失败，请检查客户端与设备版本。',
+  csrf_invalid: '设备返回的登录安全令牌格式不匹配。请更新客户端后重新连接。',
+  login_temporarily_locked: '登录尝试过多，请稍后再试。',
+  credential_store_unavailable: '系统凭据库不可用。可输入凭据，仅在当前会话登录。',
+  credential_store_locked: '系统凭据库已锁定或拒绝保存。本次登录仍可使用；解锁后可重新选择保存。',
+  stale_connection: '连接已变更，请回到设备列表重新连接。',
+  webd_unavailable: '未找到可用的网页管理服务，请核对 HTTPS 入口或 WEBD 端口。',
+  response_headers_timeout: '设备暂未响应。写操作可能已经提交，请回到原设备查询结果，不要重复提交。',
+  download_disk_full_or_unavailable: '无法写入文件。请检查磁盘剩余空间与保存位置权限。',
+};
+export function friendlyError(error: unknown) {
+  const code = error instanceof Error ? error.message : String(error);
+  return messages[code] ?? `操作未完成（${code.replace(/[^a-zA-Z0-9_.:-]/g, '').slice(0, 100)}）。请回到当前设备查看状态，确认操作结果后再继续。`;
+}

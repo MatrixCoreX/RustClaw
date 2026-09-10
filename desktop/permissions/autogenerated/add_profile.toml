@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-add-profile"
+description = "Enables the add_profile command without any pre-configured scope."
+commands.allow = ["add_profile"]
+
+[[permission]]
+identifier = "deny-add-profile"
+description = "Denies the add_profile command without any pre-configured scope."
+commands.deny = ["add_profile"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-disconnect-device"
+description = "Enables the disconnect_device command without any pre-configured scope."
+commands.allow = ["disconnect_device"]
+
+[[permission]]
+identifier = "deny-disconnect-device"
+description = "Denies the disconnect_device command without any pre-configured scope."
+commands.deny = ["disconnect_device"]

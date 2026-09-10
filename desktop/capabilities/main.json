@@ -1,0 +1,31 @@
+{
+  "identifier": "main",
+  "description": "Bundled control console only; no shell, filesystem or general HTTP plugin",
+  "windows": [
+    "main"
+  ],
+  "local": true,
+  "permissions": [
+    "allow-profiles",
+    "allow-media-open",
+    "allow-media-close",
+    "allow-add-profile",
+    "allow-forget-profile",
+    "allow-connect-device",
+    "allow-current-session",
+    "allow-login",
+    "allow-disconnect-device",
+    "allow-request-start",
+    "allow-request-headers",
+    "allow-request-read",
+    "allow-request-cancel",
+    "allow-upload-chunk",
+    "allow-upload-finish",
+    "allow-download",
+    "allow-open-external",
+    "allow-aipp-open",
+    "allow-discover-devices",
+    "allow-cancel-discovery",
+    "allow-download-cancel"
+  ]
+}

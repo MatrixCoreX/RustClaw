@@ -1,0 +1,13 @@
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <name replace-wildcards="yes">%h</name>
+  <service>
+    <type>_agent-runtime._tcp</type>
+    <port>443</port>
+    <txt-record>txtvers=1</txt-record>
+    <txt-record>scheme=https</txt-record>
+    <txt-record>api=webd-v1</txt-record>
+    <txt-record>tls=private_ca</txt-record>
+  </service>
+</service-group>

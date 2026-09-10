@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-aipp-open"
+description = "Enables the aipp_open command without any pre-configured scope."
+commands.allow = ["aipp_open"]
+
+[[permission]]
+identifier = "deny-aipp-open"
+description = "Denies the aipp_open command without any pre-configured scope."
+commands.deny = ["aipp_open"]

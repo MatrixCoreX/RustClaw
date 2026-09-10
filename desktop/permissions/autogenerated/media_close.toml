@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-media-close"
+description = "Enables the media_close command without any pre-configured scope."
+commands.allow = ["media_close"]
+
+[[permission]]
+identifier = "deny-media-close"
+description = "Denies the media_close command without any pre-configured scope."
+commands.deny = ["media_close"]
