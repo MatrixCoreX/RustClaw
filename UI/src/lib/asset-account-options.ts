@@ -44,7 +44,7 @@ export function formatAssetAccountOption(
   options: { fullPublicKey?: boolean } = {},
 ): string {
   const defaultLabel = account.source === "local_binding"
-    ? t("本机绑定账户", "Local bound account")
+    ? t("硬件设备绑定账号", "Account bound to hardware device")
     : t("其他资产账户", "Other asset account");
   const compactPublicKey = nniPublicKeyFormats(account.publicKey)?.compact ?? account.publicKey;
   const visiblePublicKey = options.fullPublicKey
