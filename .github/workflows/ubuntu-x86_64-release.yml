@@ -130,6 +130,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python3 -m unittest discover -s scripts/security -p test_release_config_guard.py
+          python3 -m unittest discover -s scripts/tests -p test_release_skill_sources.py
           python3 scripts/check_polyglot_skill_contracts.py --self-test
           python3 scripts/check_polyglot_skill_contracts.py --require-all
           python3 scripts/check_on_demand_skill_builds.py

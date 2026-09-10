@@ -39,7 +39,7 @@ resolve_release_bin() {
   printf '%s\n' "$BUILD_RELEASE_DIR/$name"
 }
 
-# 优先使用已脱敏的发布配置；若无则用 config.toml，打包时步骤 5.3 会再脱敏
+# Prefer a prepared release config; step 5.3 rejects embedded credentials.
 if [[ -f "$SCRIPT_DIR/configs/config.release.sanitized.toml" ]]; then
   SANITIZED_CONFIG="$SCRIPT_DIR/configs/config.release.sanitized.toml"
 elif [[ -f "$SCRIPT_DIR/configs/config.toml" ]]; then
@@ -224,6 +224,8 @@ done < <(
   python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" \
     --scope all-runners --target "$APP_PACKAGE_TARGET" --format manifests
 )
+python3 "$SCRIPT_DIR/scripts/stage_release_skill_sources.py" \
+  --target "$APP_PACKAGE_TARGET" --destination "$STAGE_PROJECT_DIR"
 PACKAGE_VERSION="$(app_version_from_root "$SCRIPT_DIR")"
 if [[ "$PACKAGE_VERSION" == "unknown" ]]; then
   echo "Unable to resolve agent-runtime package version."
@@ -295,47 +297,12 @@ for required_dir in \
   fi
 done
 
-echo "[5.3/6] Sanitize sensitive fields in packaged configs (all configs/*.toml)..."
-export STAGE_PROJECT_DIR
-python3 - <<'PY'
-from pathlib import Path
-import re
-import os
-
-stage = Path(os.environ["STAGE_PROJECT_DIR"])
-configs_dir = stage / "configs"
-targets = list(configs_dir.rglob("*.toml")) if configs_dir.exists() else []
-
-rules = [
-    # Telegram bot token
-    (re.compile(r'^(\s*bot_token\s*=\s*).*$'), r'\1"REDACTED_TELEGRAM_BOT_TOKEN"'),
-    # fields containing bot
-    (re.compile(r'^(\s*[A-Za-z0-9_.-]*bot[A-Za-z0-9_.-]*\s*=\s*).*$',
-                flags=re.IGNORECASE), r'\1"REDACTED_BOT"'),
-    # fields containing id (numeric replacement to keep type)
-    (re.compile(r'^(\s*[A-Za-z0-9_.-]*id[A-Za-z0-9_.-]*\s*=\s*).*$',
-                flags=re.IGNORECASE), r'\g<1>0'),
-    # admins list
-    (re.compile(r'^(\s*admins\s*=\s*).*$'), r'\1[]'),
-    # exchange/API secrets
-    (re.compile(r'^(\s*api_key\s*=\s*).*$'), r'\1"REDACTED_API_KEY"'),
-    (re.compile(r'^(\s*api_secret\s*=\s*).*$'), r'\1"REDACTED_API_SECRET"'),
-    (re.compile(r'^(\s*passphrase\s*=\s*).*$'), r'\1"REDACTED_PASSPHRASE"'),
-]
-
-for fp in targets:
-    if not fp.exists():
-        continue
-    lines = fp.read_text(encoding="utf-8").splitlines()
-    out = []
-    for line in lines:
-        replaced = line
-        for pat, repl in rules:
-            if pat.match(replaced):
-                replaced = pat.sub(repl, replaced)
-        out.append(replaced)
-    fp.write_text("\n".join(out) + "\n", encoding="utf-8")
-PY
+echo "[5.3/6] Verify packaged configs without changing their types or values..."
+python3 "$SCRIPT_DIR/scripts/security/release_config_guard.py" \
+  "$STAGE_PROJECT_DIR/configs"
+# Validate the actual packaged identity, not just the source projection.
+APP_PRODUCT_IDENTITY_CONFIG="$STAGE_PROJECT_DIR/configs/product_identity.toml" \
+  bash "$SCRIPT_DIR/scripts/product_identity.sh"
 
 echo "[5.5/6] Packaged scripts already use release defaults."
 
