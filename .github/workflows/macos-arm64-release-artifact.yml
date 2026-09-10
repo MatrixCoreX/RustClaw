@@ -1,4 +1,4 @@
-name: Build macOS arm64 Release Artifact
+name: Build macOS Release Artifact
 
 "on":
   workflow_dispatch:
@@ -11,6 +11,14 @@ name: Build macOS arm64 Release Artifact
         description: "Release version used in the package filename."
         required: true
         type: string
+      architecture:
+        description: "Native Mac architecture to build."
+        required: true
+        default: aarch64
+        type: choice
+        options:
+          - aarch64
+          - x86_64
 
 permissions:
   contents: read
@@ -18,11 +26,13 @@ permissions:
   attestations: write
 
 jobs:
-  build-macos-arm64:
-    name: Build verified macOS arm64 package
-    runs-on: macos-14
+  build-macos:
+    name: Build verified macOS ${{ inputs.architecture }} package
+    runs-on: ${{ inputs.architecture == 'x86_64' && 'macos-15-intel' || 'macos-14' }}
     env:
-      RUST_TARGET: aarch64-apple-darwin
+      PACKAGE_ARCH: ${{ inputs.architecture }}
+      RUST_TARGET: ${{ inputs.architecture }}-apple-darwin
+      NATIVE_ARCH: ${{ inputs.architecture == 'aarch64' && 'arm64' || 'x86_64' }}
       MACOSX_DEPLOYMENT_TARGET: "13.0"
       CARGO_BUILD_JOBS: "4"
       CARGO_TERM_COLOR: always
@@ -51,8 +61,8 @@ jobs:
           set -euo pipefail
           source scripts/product_identity.sh
           host_target="$(rustc -vV | sed -n 's/^host: //p')"
-          if [[ "${host_target}" != "${RUST_TARGET}" || "$(uname -m)" != "arm64" ]]; then
-            echo "native macOS arm64 runner required: host_target=${host_target} uname=$(uname -m)" >&2
+          if [[ "${host_target}" != "${RUST_TARGET}" || "$(uname -m)" != "${NATIVE_ARCH}" ]]; then
+            echo "native macOS ${NATIVE_ARCH} runner required: host_target=${host_target} uname=$(uname -m)" >&2
             exit 1
           fi
           if [[ ! "${RELEASE_VERSION}" =~ ^[A-Za-z0-9._-]+$ ]]; then
@@ -65,7 +75,7 @@ jobs:
             echo "checked out commit does not match requested source ref" >&2
             exit 1
           fi
-          package_name="${APP_RELEASE_ARTIFACT_ID}-macos-aarch64-${RELEASE_VERSION}.tar.gz"
+          package_name="${APP_RELEASE_ARTIFACT_ID}-macos-${PACKAGE_ARCH}-${RELEASE_VERSION}.tar.gz"
           {
             echo "commit=${resolved_commit}"
             echo "package_name=${package_name}"
@@ -155,6 +165,7 @@ jobs:
         shell: bash
         env:
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+          RELEASE_COMMIT: ${{ steps.meta.outputs.commit }}
         run: |
           set -euo pipefail
           [[ -n "${RELEASE_SIGNING_KEY}" ]] || { echo "RELEASE_SIGNING_KEY is required" >&2; exit 1; }
@@ -164,7 +175,7 @@ jobs:
           mkdir -p dist-release
           APP_RELEASE_BIN_DIR="$PWD/target/release" \
             APP_PACKAGE_TARGET="${RUST_TARGET}" \
-            APP_RELEASE_COMMIT="${GITHUB_SHA}" \
+            APP_RELEASE_COMMIT="${RELEASE_COMMIT}" \
             APP_RELEASE_SIGNING_KEY="${signing_key}" \
             APP_BUNDLE_DIR="$PWD/dist-release" \
             APP_PACKAGE_BASENAME="${{ steps.meta.outputs.package_name }}" \
@@ -184,7 +195,7 @@ jobs:
       - name: Upload verified release artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: agent-runtime-macos-aarch64-${{ inputs.release_version }}
+          name: agent-runtime-macos-${{ inputs.architecture }}-${{ inputs.release_version }}
           path: |
             dist-release/${{ steps.meta.outputs.package_name }}
             dist-release/${{ steps.meta.outputs.package_name }}.sha256
