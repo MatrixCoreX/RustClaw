@@ -668,7 +668,18 @@ export function BancorPage({
             secondaryValue={market ? `${market.usd_reserve} USD` : undefined}
             shrinkFraction={false}
             detail={market ? undefined : t("等待读取", "Waiting to load")}
-          />
+          >
+            <div className="mt-2 border-t border-white/8 pt-2" data-bancor-activation-fund="true">
+              <p className="text-[11px] text-white/40">{t("资金池余额", "Funding account balance")}</p>
+              <NniDecimalAmount
+                className="mt-1 block break-all text-sm font-semibold text-white sm:text-base"
+                value={market?.activation_fund?.usd_balance != null
+                  ? `${market.activation_fund.usd_balance} USD`
+                  : t("暂不可用", "Unavailable")}
+                shrinkFraction={false}
+              />
+            </div>
+          </MetricCard>
           <MetricCard
             label={t("当前边际价格", "Current marginal price")}
             value={market ? `${market.marginal_price_usd_per_aic} USD` : "—"}
