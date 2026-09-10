@@ -1,0 +1,8 @@
+/node_modules/
+/target/
+/dist/
+/gen/
+/.build/
+/test-results/
+/releases/
+__pycache__/

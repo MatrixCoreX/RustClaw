@@ -1,0 +1,60 @@
+/* These overrides apply only inside the native desktop console. */
+.desktop-console {
+  --desktop-device-bar-height: 42px;
+  --desktop-console-header-height: 65px;
+  min-height: calc(100dvh - var(--desktop-device-bar-height));
+  color-scheme: dark;
+}
+
+[data-theme='light'] .desktop-console { color-scheme: light; }
+
+.desktop-console [data-desktop-layout] {
+  min-height: calc(100dvh - var(--desktop-device-bar-height));
+}
+
+.desktop-console .theme-header { top: var(--desktop-device-bar-height); }
+
+.desktop-console [data-desktop-sidebar] {
+  top: calc(var(--desktop-device-bar-height) + var(--desktop-console-header-height));
+  height: calc(100dvh - var(--desktop-device-bar-height) - var(--desktop-console-header-height));
+}
+
+@media (min-width: 768px) {
+  .desktop-console [data-desktop-layout='chat'] {
+    height: calc(100dvh - var(--desktop-device-bar-height));
+  }
+  .desktop-console [data-desktop-layout='chat'] > .theme-header {
+    top: 0;
+  }
+  .desktop-console [data-desktop-layout='chat'] > [data-desktop-content] {
+    height: calc(100dvh - var(--desktop-device-bar-height) - var(--desktop-console-header-height));
+  }
+}
+
+/* GTK's native closed select can paint a light surface over dark theme colors.
+   Keep the native keyboard/menu behavior, but paint the closed control ourselves. */
+.desktop-console select {
+  appearance: none;
+  -webkit-appearance: none;
+  color: var(--theme-text-strong);
+  -webkit-text-fill-color: var(--theme-text-strong);
+  background-color: var(--theme-dialog-bg);
+  border-color: var(--theme-border-strong);
+}
+
+.desktop-console select:not([multiple]):not([size]),
+.desktop-console select:not([multiple])[size='1'] {
+  padding-right: 2.25rem;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--theme-text-muted) 50%),
+    linear-gradient(135deg, var(--theme-text-muted) 50%, transparent 50%);
+  background-position: calc(100% - 16px) 50%, calc(100% - 11px) 50%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
+
+.desktop-console select option,
+.desktop-console select optgroup {
+  color: var(--theme-text-strong);
+  background-color: var(--theme-dialog-bg);
+}

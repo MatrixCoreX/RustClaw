@@ -1,0 +1,129 @@
+name: Build Desktop Native Test Packages
+
+"on":
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Exact 40-character source commit to build and test
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    name: Desktop ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x64
+            runner: windows-2022
+            target: x86_64-pc-windows-msvc
+          - platform: macos-arm64
+            runner: macos-14
+            target: aarch64-apple-darwin
+          - platform: macos-x64
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_BUILD_JOBS: "4"
+      CARGO_TERM_COLOR: always
+      PYTHONUTF8: "1"
+      MACOSX_DEPLOYMENT_TARGET: "13.0"
+      SOURCE_COMMIT: ${{ inputs.source_commit }}
+      DESKTOP_NATIVE_TARGET: ${{ matrix.target }}
+      DESKTOP_PACKAGE_PLATFORM: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.source_commit }}
+      - name: Require exact committed source and native host
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_COMMIT" ]]
+          rustup toolchain install 1.97.1 --profile minimal
+          rustup default 1.97.1
+          [[ "$(rustc -vV | tr -d '\r' | sed -n 's/^host: //p')" == "$DESKTOP_NATIVE_TARGET" ]]
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            UI/package-lock.json
+            desktop/package-lock.json
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktop/target
+          key: desktop-${{ matrix.platform }}-${{ hashFiles('desktop/Cargo.lock', 'desktop/scripts/identity/Cargo.lock') }}
+          restore-keys: desktop-${{ matrix.platform }}-
+      - name: Frontend and identity validation
+        working-directory: desktop
+        run: |
+          set -euo pipefail
+          npm ci --prefix ../UI
+          npm ci
+          npm run lint
+          npm test
+          npm run build:ui
+      - name: Native protocol and security tests
+        working-directory: desktop
+        run: |
+          set -euo pipefail
+          mkdir -p test-results/native-platform
+          cargo test --locked --no-default-features 2>&1 | tee test-results/native-platform/rust-tests.log
+          cargo test --locked --tests 2>&1 | tee test-results/native-platform/gui-contract-tests.log
+          cargo test --locked --no-default-features --test native_vault -- --ignored 2>&1 | tee test-results/native-platform/vault-tests.log
+      - name: Build native installers
+        working-directory: desktop
+        run: |
+          set -euo pipefail
+          npm run build -- --target "$DESKTOP_NATIVE_TARGET" 2>&1 | tee test-results/native-platform/build.log
+      - name: Inspect and smoke-test native packages
+        working-directory: desktop
+        run: python scripts/verify-native-package.py
+      - name: Prepare WebView2 native UI tests
+        if: runner.os == 'Windows'
+        working-directory: desktop
+        run: |
+          set -euo pipefail
+          cargo install tauri-driver --locked --root .build/tools
+          pwsh -NoProfile -File scripts/setup-windows-e2e.ps1
+      - name: Native Windows login, media, AiAPP and layout regressions
+        if: runner.os == 'Windows'
+        working-directory: desktop
+        run: python tests/native_e2e.py "test-results/native-platform/Installed app 测试/agent-desktop.exe"
+      - name: Upload installation packages and checksums
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: desktop-${{ matrix.platform }}-${{ inputs.source_commit }}
+          path: desktop/releases/native/*
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: desktop-evidence-${{ matrix.platform }}-${{ inputs.source_commit }}
+          path: |
+            desktop/test-results/native-platform/*.log
+            desktop/test-results/native-platform/*.json
+            desktop/test-results/native-platform/*.png
+            desktop/test-results/native-platform/e2e/*.log
+            desktop/test-results/native-platform/e2e/*.json
+            desktop/test-results/native-platform/e2e/*.png
+          if-no-files-found: warn
+          retention-days: 30

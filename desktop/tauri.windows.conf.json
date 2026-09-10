@@ -1,0 +1,15 @@
+{
+  "bundle": {
+    "targets": ["nsis", "msi"],
+    "icon": ["icons/icon.ico"],
+    "windows": {
+      "webviewInstallMode": {"type": "embedBootstrapper", "silent": true},
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": true
+      },
+      "wix": {"language": ["zh-CN", "en-US"]}
+    }
+  }
+}

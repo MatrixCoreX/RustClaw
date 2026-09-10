@@ -1,0 +1,21 @@
+{
+  "dependencies": {
+    "@tauri-apps/api": "2.11.1",
+    "@tauri-apps/cli": "2.11.4"
+  },
+  "name": "agent-desktop",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:ui": "node ../UI/node_modules/vite/bin/vite.js build --config vite.config.ts",
+    "build": "node scripts/build.mjs",
+    "test": "node --import ../UI/node_modules/tsx/dist/loader.mjs --test tests/*.test.ts",
+    "lint": "node ../UI/node_modules/typescript/bin/tsc --noEmit -p tsconfig.json",
+    "dev": "node scripts/build.mjs --dev"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0"
+  }
+}

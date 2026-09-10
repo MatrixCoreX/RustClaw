@@ -1,0 +1,7 @@
+{
+  "identifier": "aipp",
+  "description": "Separate skill window; only the manifest-bound bridge is permitted",
+  "windows": ["aipp-*"],
+  "local": true,
+  "permissions": ["allow-aipp-context", "allow-aipp-bridge"]
+}
