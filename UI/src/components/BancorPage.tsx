@@ -1809,7 +1809,7 @@ export function CandleChart({
                 data-bancor-candle-direction={visualState}
                 data-bancor-candle-state={candleOpen ? "open" : "closed"}
               >
-                <title>{`${formatUnixDateTime(value.candle.bucket_start_unix)} · O ${value.candle.open} · H ${value.candle.high} · L ${value.candle.low} · C ${value.candle.close} · ${value.candle.aic_volume} AIC · ${value.candle.trade_count} ${t("笔", "trades")} · ${(value.candle.liquidity_event_count ?? 0) > 0 ? "◆ " : ""}${t("注入", "Funding")} ${value.candle.liquidity_usd ?? "0"} USD`}</title>
+                <title>{`${formatUnixDateTime(value.candle.bucket_start_unix)} · O ${value.candle.open} · H ${value.candle.high} · L ${value.candle.low} · C ${value.candle.close} · ${value.candle.aic_volume} AIC · ${value.candle.trade_count} ${t("笔", "trades")} · ${(value.candle.liquidity_event_count ?? 0) > 0 ? "◆ " : ""}${t("资金池注入", "Funding account injection")} ${value.candle.liquidity_usd ?? "0"} USD`}</title>
                 <g clipPath={`url(#${priceClipId})`}>
                   {hasPriceEvents && highY < bodyTop ? <line x1={x} y1={highY} x2={x} y2={bodyTop} stroke={color.stroke} strokeWidth="1.5" /> : null}
                   {hasPriceEvents && bodyBottom < lowY ? <line x1={x} y1={bodyBottom} x2={x} y2={lowY} stroke={color.stroke} strokeWidth="1.5" /> : null}
@@ -1919,7 +1919,7 @@ export function CandleChart({
       <div className="bancor-chart-controls mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-white/45">
         <span>{t("买卖与注资均影响价格；成交量只统计买卖。", "Trades and funding both move the price; volume counts trades only.")}</span>
         {hoveredIndex !== null && (focused.candle.liquidity_event_count ?? 0) > 0 ? (
-          <span data-bancor-liquidity-detail="true"><span aria-hidden="true">◆ </span>{t("注入", "Funding")} +{focused.candle.liquidity_usd} USD · {focused.candle.liquidity_event_count} {t("次", "events")}</span>
+          <span data-bancor-liquidity-detail="true"><span aria-hidden="true">◆ </span>{t("资金池注入", "Funding account injection")} +{focused.candle.liquidity_usd} USD · {focused.candle.liquidity_event_count} {t("次", "events")}</span>
         ) : null}
         <span>
           {t("当前显示", "Showing")} {visibleWindow.start + 1}–{visibleWindow.end} / {allValues.length}

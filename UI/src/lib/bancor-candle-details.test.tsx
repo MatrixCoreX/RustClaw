@@ -37,7 +37,7 @@ for (const language of ["zh", "en"]) {
       assert.equal(root.findByProps({ "data-bancor-candle-gap": "true" }).type, "line");
       await act(async () => surface.props.onPointerMove(event(0.25)));
       assert.equal(detail().length, 1);
-      assert.equal(detail()[0].children[1], language === "zh" ? "注入" : "Funding");
+      assert.equal(detail()[0].children[1], language === "zh" ? "资金池注入" : "Funding account injection");
       assert.equal(detail()[0].findByProps({ "aria-hidden": "true" }).children.join(""), "◆ ");
       await act(async () => surface.props.onPointerMove(event(0.75)));
       assert.equal(detail().length, 0);

@@ -645,7 +645,7 @@ test("BANCOR funding-only candle keeps its price body and describes funding only
     maximized={false} onMaximizedChange={() => {}} />);
   assert.match(html, /data-bancor-candle-body="true"/);
   assert.doesNotMatch(html, /data-bancor-liquidity-marker|data-bancor-liquidity-detail/);
-  assert.match(html, /<title>[^<]*◆ 注入 2\.00000000 USD<\/title>/);
+  assert.match(html, /<title>[^<]*◆ 资金池注入 2\.00000000 USD<\/title>/);
   assert.doesNotMatch(html, /data-bancor-volume-direction|<circle/);
   assert.doesNotMatch(html, /data-bancor-candle-gap="true"/);
 });
