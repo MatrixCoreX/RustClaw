@@ -1,6 +1,29 @@
 use super::*;
 
 #[test]
+fn sandbox_observations_cannot_hide_the_executing_runtime() {
+    for observation in [json!(null), json!(false)] {
+        let enriched =
+            enrich_health_check_extra(Some(json!({"clawd_health_port_open": observation})), true);
+        assert_eq!(enriched["clawd_visible"], true);
+        assert_eq!(enriched["overall_status"], "healthy");
+        assert_eq!(
+            enriched["runtime_probe"]["clawd"]["source"],
+            "executing_runtime"
+        );
+        assert_eq!(
+            enriched["runtime_probe"]["clawd"]["process_id"],
+            std::process::id()
+        );
+        assert!(enriched["runtime_probe"]["clawd"]["process_visible"].is_null());
+        assert_eq!(
+            enriched["runtime_probe"]["clawd"]["health_port_open"],
+            observation
+        );
+    }
+}
+
+#[test]
 fn health_check_extra_exposes_runtime_owned_database_probe() {
     let enriched = enrich_health_check_extra(
         Some(json!({

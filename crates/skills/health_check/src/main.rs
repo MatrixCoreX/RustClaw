@@ -183,26 +183,45 @@ fn resolve_path(workspace_root: &Path, input: &str) -> Result<PathBuf, String> {
     Ok(workspace_root.join(normalized))
 }
 
-fn process_count(keyword: &str) -> usize {
-    let pgrep_out = Command::new("pgrep").args(["-fc", keyword]).output().ok();
-    if let Some(count) = pgrep_out
-        .and_then(|v| String::from_utf8(v.stdout).ok())
-        .and_then(|s| s.trim().parse::<usize>().ok())
-    {
-        return count;
-    }
-
-    Command::new("ps")
-        .args(["-ax", "-o", "command="])
-        .output()
-        .ok()
-        .and_then(|out| String::from_utf8(out.stdout).ok())
-        .map(|text| text.lines().filter(|line| line.contains(keyword)).count())
-        .unwrap_or(0)
+fn process_count(name: &str) -> Option<usize> {
+    let output = Command::new("pgrep").args(["-x", name]).output().ok()?;
+    parse_process_count(output.status.code(), &output.stdout, &output.stderr)
 }
 
-fn is_port_open(host: &str, port: u16) -> bool {
-    std::net::TcpStream::connect((host, port)).is_ok()
+fn parse_process_count(status: Option<i32>, stdout: &[u8], stderr: &[u8]) -> Option<usize> {
+    // Both BSD and procps pgrep distinguish no match (1) from probe failure.
+    if !stderr.is_empty() {
+        return None;
+    }
+    let text = std::str::from_utf8(stdout).ok()?;
+    match status {
+        Some(1) if text.trim().is_empty() => Some(0),
+        Some(0) => {
+            let pids = text
+                .lines()
+                .map(|line| line.trim().parse::<u32>())
+                .collect::<Result<Vec<_>, _>>()
+                .ok()?;
+            (!pids.is_empty() && pids.iter().all(|pid| *pid > 0)).then_some(pids.len())
+        }
+        _ => None,
+    }
+}
+
+fn is_port_open(host: &str, port: u16) -> Option<bool> {
+    let address = std::net::SocketAddr::new(host.parse().ok()?, port);
+    port_probe_result(
+        std::net::TcpStream::connect_timeout(&address, std::time::Duration::from_secs(1))
+            .map(|_| ()),
+    )
+}
+
+fn port_probe_result(result: io::Result<()>) -> Option<bool> {
+    match result {
+        Ok(()) => Some(true),
+        Err(err) if err.kind() == io::ErrorKind::ConnectionRefused => Some(false),
+        Err(_) => None,
+    }
 }
 
 fn collect_system_health() -> SystemHealthSnapshot {

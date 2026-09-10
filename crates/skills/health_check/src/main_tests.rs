@@ -5,6 +5,38 @@ use super::{
 };
 
 #[test]
+fn process_probe_distinguishes_missing_from_inaccessible() {
+    use super::parse_process_count;
+    assert_eq!(parse_process_count(Some(0), b"123\n456\n", b""), Some(2));
+    assert_eq!(parse_process_count(Some(1), b"", b""), Some(0));
+    assert_eq!(parse_process_count(Some(1), b"", b"denied"), None);
+    assert_eq!(parse_process_count(Some(2), b"", b""), None);
+    assert_eq!(parse_process_count(None, b"", b""), None);
+    assert_eq!(parse_process_count(Some(0), b"not-a-pid\n", b""), None);
+    assert_eq!(parse_process_count(Some(0), b"", b""), None);
+    assert_eq!(parse_process_count(Some(0), b"0\n", b""), None);
+}
+
+#[test]
+fn port_probe_does_not_report_sandbox_denial_as_closed_port() {
+    use super::port_probe_result;
+    use std::io::{Error, ErrorKind};
+    assert_eq!(port_probe_result(Ok(())), Some(true));
+    assert_eq!(
+        port_probe_result(Err(Error::from(ErrorKind::ConnectionRefused))),
+        Some(false)
+    );
+    assert_eq!(
+        port_probe_result(Err(Error::from(ErrorKind::PermissionDenied))),
+        None
+    );
+    assert_eq!(
+        port_probe_result(Err(Error::from(ErrorKind::TimedOut))),
+        None
+    );
+}
+
+#[test]
 fn error_extra_exposes_machine_contract() {
     let extra = error_extra("execution_failed");
 
