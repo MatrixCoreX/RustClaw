@@ -1403,6 +1403,7 @@ export interface NniRewardWindowSummary {
 
 export interface NniNetworkDeviceStats {
   registered_device_count: number;
+  activated_device_count?: number;
   active_device_count: number;
   active_period_start_unix: number | null;
   active_period_end_unix: number | null;
@@ -1520,6 +1521,9 @@ export interface NniBancorCandle {
   usd_volume: string;
   trade_count: number;
   has_trades: boolean;
+  liquidity_event_count?: number;
+  liquidity_usd_units?: string;
+  liquidity_usd?: string;
 }
 
 export interface NniBancorCandlesResponse {
@@ -1528,7 +1532,7 @@ export interface NniBancorCandlesResponse {
   market_id: string;
   market_version: number;
   market_created_at_unix: number;
-  price_kind: "execution_average_usd_per_aic";
+  price_kind: "pool_marginal_usd_per_aic";
   interval_seconds: number;
   start_time_unix: number;
   end_time_unix: number;

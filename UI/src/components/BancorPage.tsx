@@ -202,7 +202,7 @@ export function resolveBancorCandlePalette(t: Translate): {
 }
 
 export function resolveBancorCandleVisualState(candle: NniBancorCandle): BancorCandleVisualState {
-  if (!candle.has_trades) return "gap";
+  if (!candle.has_trades && (candle.liquidity_event_count ?? 0) === 0) return "gap";
   const open = Number(candle.open);
   const close = Number(candle.close);
   if (!Number.isFinite(open) || !Number.isFinite(close) || close === open) return "flat";
@@ -744,7 +744,7 @@ export function BancorPage({
           <div className="bancor-market-chart-header flex flex-wrap items-center justify-between gap-3">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
               <BarChart3 className="h-5 w-5 text-sky-300" />
-              <h2 className="text-lg font-semibold text-white">{t("实际成交均价 K 线", "Average execution-price candlesticks")}</h2>
+              <h2 className="text-lg font-semibold text-white">{t("池子价格 K 线", "Pool price candlesticks")}</h2>
               <div
                 className="flex min-w-0 items-baseline gap-1.5 rounded-md border border-sky-300/15 bg-sky-400/[0.06] px-2 py-1"
                 aria-label={t("池内即时边际价", "Live pool marginal price")}
@@ -818,7 +818,7 @@ export function BancorPage({
           ) : (
             <div className="flex min-h-64 flex-col items-center justify-center rounded-xl border border-dashed border-white/10 px-5 text-center">
               <BarChart3 className="h-8 w-8 text-white/35" />
-              <p className="mt-3 text-sm text-white/55">{t("暂无成交，首笔成交后显示 K 线。", "No trades yet. Candlesticks will appear after the first trade.")}</p>
+              <p className="mt-3 text-sm text-white/55">{t("暂无池子价格记录。", "No pool price history yet.")}</p>
             </div>
           )}
         </div>
@@ -1711,7 +1711,7 @@ export function CandleChart({
         data-bancor-tap-details="enabled"
         role="group"
         tabIndex={0}
-        aria-label={t("可拖动、缩放并点按查看的 AIC 对 USD 实际成交均价 K 线图", "Draggable, zoomable average execution-price AIC to USD candlestick chart with tap details")}
+        aria-label={t("可拖动、缩放并点按查看的 AIC 对 USD 池子价格 K 线图", "Draggable, zoomable AIC to USD pool price candlestick chart with tap details")}
         onKeyDown={handleKeyDown}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -1725,7 +1725,7 @@ export function CandleChart({
           viewBox={`0 0 ${width} ${height}`}
           className="block h-auto min-h-72 w-full select-none"
           role="img"
-          aria-label={t("AIC 对 USD 的实际成交均价 K 线图", "Average execution-price AIC to USD candlestick chart")}
+          aria-label={t("AIC 对 USD 的池子价格 K 线图", "AIC to USD pool price candlestick chart")}
         >
           <defs>
             <clipPath id={priceClipId}>
@@ -1782,7 +1782,7 @@ export function CandleChart({
             const x = plotLeft + step * (index + 0.5);
             const visualState = resolveBancorCandleVisualState(value.candle);
             const color = palette[visualState];
-            const hasTrades = visualState !== "gap";
+            const hasPriceEvents = visualState !== "gap";
             const candleOpen = isBancorCandleOpen(value.candle, nowUnix);
             const openY = yForPrice(value.open);
             const closeY = yForPrice(value.close);
@@ -1798,11 +1798,11 @@ export function CandleChart({
                 data-bancor-candle-direction={visualState}
                 data-bancor-candle-state={candleOpen ? "open" : "closed"}
               >
-                <title>{`${formatUnixDateTime(value.candle.bucket_start_unix)} · O ${value.candle.open} · H ${value.candle.high} · L ${value.candle.low} · C ${value.candle.close} · ${value.candle.aic_volume} AIC · ${value.candle.trade_count} ${t("笔", "trades")}`}</title>
+                <title>{`${formatUnixDateTime(value.candle.bucket_start_unix)} · O ${value.candle.open} · H ${value.candle.high} · L ${value.candle.low} · C ${value.candle.close} · ${value.candle.aic_volume} AIC · ${value.candle.trade_count} ${t("笔", "trades")} · ${t("注入", "Funding")} ${value.candle.liquidity_usd ?? "0"} USD`}</title>
                 <g clipPath={`url(#${priceClipId})`}>
-                  {hasTrades && highY < bodyTop ? <line x1={x} y1={highY} x2={x} y2={bodyTop} stroke={color.stroke} strokeWidth="1.5" /> : null}
-                  {hasTrades && bodyBottom < lowY ? <line x1={x} y1={bodyBottom} x2={x} y2={lowY} stroke={color.stroke} strokeWidth="1.5" /> : null}
-                  {hasTrades ? (
+                  {hasPriceEvents && highY < bodyTop ? <line x1={x} y1={highY} x2={x} y2={bodyTop} stroke={color.stroke} strokeWidth="1.5" /> : null}
+                  {hasPriceEvents && bodyBottom < lowY ? <line x1={x} y1={bodyBottom} x2={x} y2={lowY} stroke={color.stroke} strokeWidth="1.5" /> : null}
+                  {hasPriceEvents ? (
                     <rect
                       data-bancor-candle-body="true"
                       x={x - bodyWidth / 2}
@@ -1825,6 +1825,10 @@ export function CandleChart({
                       strokeWidth="1.4"
                     />
                   )}
+                  {(value.candle.liquidity_event_count ?? 0) > 0 ? (
+                    <text data-bancor-liquidity-marker="true" x={x} y={Math.max(priceTop + 14, highY - 7)}
+                      textAnchor="middle" fill="var(--theme-chart-label)" fontSize="13">◆</text>
+                  ) : null}
                   {candleOpen ? (
                     <>
                       <line
@@ -1842,7 +1846,7 @@ export function CandleChart({
                     </>
                   ) : null}
                 </g>
-                {hasTrades && volumeHeight > 0 ? (
+                {value.candle.has_trades && volumeHeight > 0 ? (
                   <rect
                     data-bancor-volume-direction={visualState}
                     clipPath={`url(#${volumeClipId})`}
@@ -1907,6 +1911,8 @@ export function CandleChart({
         </svg>
       </div>
       <div className="bancor-chart-controls mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-white/45">
+        <span>{t("买卖与注资均影响价格；◆ 表示注资，成交量只统计买卖。", "Trades and funding both move the price. ◆ marks funding; volume counts trades only.")}</span>
+        {(focused.candle.liquidity_event_count ?? 0) > 0 ? <span data-bancor-liquidity-detail="true">{t("注入", "Funding")} +{focused.candle.liquidity_usd} USD · {focused.candle.liquidity_event_count} {t("次", "events")}</span> : null}
         <span>
           {t("当前显示", "Showing")} {visibleWindow.start + 1}–{visibleWindow.end} / {allValues.length}
         </span>

@@ -357,13 +357,13 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /data-nni-decimal-amount="0\.50%"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.doesNotMatch(html, /累计手续费|Cumulative fees|按支付资产分别累计/);
   assert.doesNotMatch(html, /1\.2500 AIC|0\.5000 USD/);
-  assert.match(html, /实际成交均价 K 线/);
+  assert.match(html, /池子价格 K 线/);
   assert.match(html, /池内即时边际价/);
   assert.doesNotMatch(html, /当前 K 线价格摘要/);
   assert.match(html, /aria-label="池内即时边际价"/);
   const livePriceIndex = html.indexOf("池内即时边际价");
   const headerPriceIndex = html.indexOf("0.00010000 USD", livePriceIndex);
-  assert.ok(livePriceIndex > html.indexOf("实际成交均价 K 线"));
+  assert.ok(livePriceIndex > html.indexOf("池子价格 K 线"));
   assert.ok(headerPriceIndex > livePriceIndex);
   assert.ok(html.indexOf("每 15 秒自动刷新") > headerPriceIndex);
   assert.doesNotMatch(html, /可见最高价/);
@@ -395,10 +395,10 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /grid gap-5 lg:grid-cols-\[minmax\(0,2fr\)_minmax\(20rem,1fr\)\] lg:items-stretch/);
   assert.match(html, /bancor-market-trade-panel theme-shadow-card scroll-mt-4 p-3 sm:p-4/);
   assert.ok(
-    html.indexOf("<h2 class=\"text-lg font-semibold text-white\">实际成交均价 K 线</h2>")
+    html.indexOf("<h2 class=\"text-lg font-semibold text-white\">池子价格 K 线</h2>")
       < html.indexOf("<h2 class=\"text-lg font-semibold text-white\">交易</h2>"),
   );
-  assert.match(html, /实际成交均价 K 线.*每 15 秒自动刷新/);
+  assert.match(html, /池子价格 K 线.*每 15 秒自动刷新/);
   assert.doesNotMatch(html, /价格来自真实成交/);
   assert.match(html, /立即刷新 K 线/);
   assert.match(html, /aria-label="交易模式"/);
@@ -426,7 +426,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(latestTradeHtml, /data-nni-decimal-amount="99\.99999800 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.match(latestTradeHtml, /data-nni-decimal-amount="149930\.26917640 AIC"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.doesNotMatch(html, /红色表示上涨，绿色表示下跌/);
-  assert.doesNotMatch(html, /左右拖动查看历史|点按查看详情|滚轮缩放|全部实际成交均价 K 线已显示/);
+  assert.doesNotMatch(html, /左右拖动查看历史|点按查看详情|滚轮缩放|全部池子价格 K 线已显示/);
   assert.match(html, /回到最新/);
   assert.doesNotMatch(html, /MACD|RSI|均线/);
   assert.match(html, /#f87171/);
@@ -434,7 +434,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /<rect[^>]+fill="#f87171"/);
   assert.match(html, /<rect[^>]+fill="#34d399"/);
   assert.match(html, /0\.00010005/);
-  assert.match(html, /实际成交均价 K 线/);
+  assert.match(html, /池子价格 K 线/);
   assert.doesNotMatch(html, /加载更早 K 线|加载后可用左移按钮查看|data-bancor-history-loader/);
   assert.doesNotMatch(html, /先查看报价|读取私人余额|设备：/);
   assert.match(html, /市场成交记录/);
@@ -608,6 +608,23 @@ test("BANCOR candle visual state never reports a flat or empty interval as up", 
   assert.equal(resolveBancorCandleVisualState({ ...base, open: "2", close: "1", trade_count: 2, has_trades: true }), "down");
   assert.equal(resolveBancorCandleVisualState({ ...base, open: "1", close: "1", trade_count: 1, has_trades: true }), "flat");
   assert.equal(resolveBancorCandleVisualState({ ...base, open: "1", close: "1", trade_count: 0, has_trades: false }), "gap");
+  assert.equal(resolveBancorCandleVisualState({ ...base, open: "1", close: "1.002", trade_count: 0, has_trades: false, liquidity_event_count: 1 }), "up");
+});
+
+test("BANCOR funding-only candle has a body, a funding marker and no fake volume", () => {
+  const row = {
+    bucket_start_unix: 1800000000, bucket_end_unix: 1800000060,
+    open: "0.000020000000", high: "0.000020040000", low: "0.000020000000", close: "0.000020040000",
+    aic_volume_units: "0", usd_volume_units: "0", aic_volume: "0.00000000", usd_volume: "0.00000000",
+    trade_count: 0, has_trades: false, liquidity_event_count: 1, liquidity_usd_units: "200000000", liquidity_usd: "2.00000000",
+  };
+  const html = renderToStaticMarkup(<CandleChart t={(zh) => zh} candles={[row]} intervalSeconds={60} priceDecimalPlaces={12} formatUnixDateTime={(v) => String(v)}
+    maximized={false} onMaximizedChange={() => {}} />);
+  assert.match(html, /data-bancor-candle-body="true"/);
+  assert.match(html, /data-bancor-liquidity-marker="true"/);
+  assert.match(html, /data-bancor-liquidity-detail="true"/);
+  assert.match(html, /2\.00000000/);
+  assert.doesNotMatch(html, /data-bancor-candle-gap="true"/);
 });
 
 test("BANCOR current candle marker follows bucket end time", () => {

@@ -254,6 +254,7 @@ test("public NNI network stats load without joining or invoking the device signe
         status: "heartbeat_network_stats",
         network_devices: {
           registered_device_count: 153,
+          activated_device_count: 23,
           active_device_count: 0,
           active_period_start_unix: null,
           active_period_end_unix: null,
@@ -296,6 +297,7 @@ test("public NNI network stats load without joining or invoking the device signe
 
   assert.equal(mounted.runtime().nniJoined, false);
   assert.equal(mounted.runtime().nniNetworkStats?.network_devices.registered_device_count, 153);
+  assert.equal(mounted.runtime().nniNetworkStats?.network_devices.activated_device_count, 23);
   assert.deepEqual(requests, ["/v1/nni/network-stats"]);
   await mounted.unmount();
 });

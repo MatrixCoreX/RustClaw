@@ -29,7 +29,7 @@ function candles(intervalSeconds: number, bucketStartUnix = 1_800_000_000): NniB
     market_id: "aic-usd-v1",
     market_version: 7,
     market_created_at_unix: 1_800_000_000,
-    price_kind: "execution_average_usd_per_aic",
+    price_kind: "pool_marginal_usd_per_aic",
     interval_seconds: intervalSeconds,
     start_time_unix: bucketStartUnix,
     end_time_unix: bucketStartUnix + intervalSeconds,
@@ -48,6 +48,9 @@ function candles(intervalSeconds: number, bucketStartUnix = 1_800_000_000): NniB
       usd_volume: "0.00010000",
       trade_count: 1,
       has_trades: true,
+      liquidity_event_count: 0,
+      liquidity_usd_units: "0",
+      liquidity_usd: "0.00000000",
     }],
   };
 }
