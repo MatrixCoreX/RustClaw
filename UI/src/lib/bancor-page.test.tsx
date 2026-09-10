@@ -51,6 +51,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       aic_reserve: "100000000.00000000",
       usd_reserve_units: "1000000000000",
       usd_reserve: "10000.00000000",
+      activation_fund: { usd_balance_units: "86764255082", usd_balance: "867.64255082" },
       marginal_price_usd_per_aic: "0.00010000",
       daily_marginal_price: {
         price_kind: "pool_marginal_usd_per_aic" as const,
@@ -199,6 +200,25 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       onOpenApr={() => undefined}
     />,
   );
+  assert.match(html, /data-bancor-activation-fund="true"/);
+  assert.match(html, /资金池余额/);
+  assert.match(html, /data-nni-decimal-amount="867\.64255082 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
+  for (const [activationFund, expected] of [
+    [undefined, "Unavailable"],
+    [null, "Unavailable"],
+    [{ usd_balance_units: "0", usd_balance: "0.00000000" }, "0.00000000 USD"],
+  ] as const) {
+    const variant = renderToStaticMarkup(<BancorPage
+      t={(_zh, en) => en}
+      runtime={{ ...runtime, market: { ...runtime.market!, activation_fund: activationFund } }}
+      formatUnixDateTime={String} signingDeviceReady assetOwnerReady assetOwnerPubkey={null}
+      onOpenNni={() => undefined} onOpenApr={() => undefined}
+    />);
+    const fundHtml = variant.match(/data-bancor-activation-fund="true">([\s\S]*?)<\/div>/)?.[1] ?? "";
+    assert.match(fundHtml, /Funding account balance/);
+    assert.ok(fundHtml.includes(expected));
+    assert.match(variant, /10000\.00000000 USD/);
+  }
   const latestTradeHtml = renderToStaticMarkup(
     <BancorPage
       t={(zh) => zh}

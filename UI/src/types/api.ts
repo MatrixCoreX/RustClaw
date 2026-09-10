@@ -1484,6 +1484,10 @@ export interface NniBancorMarketResponse {
   aic_reserve: string;
   usd_reserve_units: string;
   usd_reserve: string;
+  activation_fund?: {
+    usd_balance_units: string;
+    usd_balance: string;
+  } | null;
   marginal_price_usd_per_aic: string;
   daily_marginal_price: {
     price_kind: "pool_marginal_usd_per_aic";
