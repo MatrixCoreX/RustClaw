@@ -1,6 +1,6 @@
 # Windows 与 macOS 桌面版
 
-版本：0.2.0，内部测试。原生平台的实际验收状态见 [cross-platform-validation.md](cross-platform-validation.md)。
+版本：0.2.1，内部测试。原生平台的实际验收状态见 [cross-platform-validation.md](cross-platform-validation.md)。
 
 ## 安装包和使用
 
@@ -44,7 +44,7 @@ npm run build
 
 `ci/native-build.yml` 定义 Windows x64、Mac arm64、Mac x64 三个作业，只接受完整提交 SHA。每个作业验证宿主架构，运行原生 TLS / SSH / CSRF / 下载 / 扫描 / 凭据库测试，构建安装包，再安装并检查实际窗口；输出 SHA-256、来源提交、签名状态和截图。
 
-GitHub 仅运行 `.github/workflows/` 中的流程。模板保留在 `desktop/ci/`；在用户允许桌面专用入口的目录例外后，复制到 `.github/workflows/desktop-native.yml`，提交并推送，再执行：
+GitHub 仅运行 `.github/workflows/` 中的流程。模板保留在 `desktop/ci/`；桌面专用入口位于 `.github/workflows/desktop-native.yml`。提交并推送后执行：
 
 ```text
 gh workflow run desktop-native.yml -f source_commit=<完整提交SHA>

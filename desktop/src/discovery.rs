@@ -1,6 +1,7 @@
 //! Discovery returns untrusted hints only. It never accesses profiles or credentials.
 #[cfg(feature = "gui")]
 pub mod commands;
+mod local;
 mod mdns;
 mod subnet;
 #[cfg(feature = "gui")]
@@ -29,6 +30,7 @@ pub struct Candidate {
 
 #[derive(Default, Serialize)]
 pub struct DiscoveryReport {
+    pub local: local::LocalReport,
     pub candidates: Vec<Candidate>,
     pub mdns_available: bool,
     pub subnet_available: bool,
@@ -47,7 +49,9 @@ pub async fn discover(scan_subnet: bool, cancel: CancellationToken) -> Discovery
             DiscoveryReport::default()
         }
     };
-    let (mdns, mut report) = tokio::join!(mdns, subnet);
+    let (mdns, mut report, (local, local_candidates)) =
+        tokio::join!(mdns, subnet, local::scan(cancel.clone()));
+    report.local = local;
     if let Ok(Ok(candidates)) = mdns {
         report.mdns_available = true;
         // Prefer the advertised hostname, allowing certificates bound to a stable name.
@@ -55,6 +59,9 @@ pub async fn discover(scan_subnet: bool, cancel: CancellationToken) -> Discovery
         for candidate in scanned {
             merge(&mut report.candidates, candidate);
         }
+    }
+    for candidate in local_candidates {
+        merge(&mut report.candidates, candidate);
     }
     report.candidates.sort_by(|a, b| a.address.cmp(&b.address));
     report.cancelled = cancel.is_cancelled();

@@ -259,6 +259,8 @@ try:
     native("disconnect_device")
     native("forget_profile", {"profileId": form_profile["id"]})
     checks.append("visible password login form enters shared console with real 32-character CSRF contract")
+    from local_e2e import run as local_acceptance
+    local_acceptance(execute, native, screenshot, checks, wait_text, FIXTURE.local_origin)
     (OUT / "report.json").write_text(json.dumps({"ok": True, "binary":binary, "checks": checks, "measurements":measurements, "requests": FIXTURE.requests}, ensure_ascii=False, indent=2))
     print(json.dumps({"ok": True, "checks": checks}, ensure_ascii=False, indent=2))
 finally:

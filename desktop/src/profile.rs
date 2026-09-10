@@ -8,6 +8,9 @@ use uuid::Uuid;
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Connection {
+    Local {
+        origin: String,
+    },
     Https {
         origin: String,
         ca_pem: Option<String>,
@@ -35,6 +38,7 @@ pub struct Profile {
 impl Connection {
     pub fn origin(&self) -> Result<Url> {
         match self {
+            Self::Local { origin } => loopback_origin(origin),
             Self::Https { origin, .. } => https_origin(origin),
             Self::Ssh { webd_port, .. } => Url::parse(&format!("http://127.0.0.1:{webd_port}"))
                 .map_err(|_| "address_invalid".into()),
@@ -42,6 +46,9 @@ impl Connection {
     }
     pub fn validate(&self) -> Result<()> {
         match self {
+            Self::Local { origin } => {
+                loopback_origin(origin)?;
+            }
             Self::Https {
                 origin,
                 ca_pem,
@@ -107,6 +114,26 @@ pub fn https_origin(raw: &str) -> Result<Url> {
         || raw.contains('\\')
     {
         return Err("https_origin_required".into());
+    }
+    Ok(url)
+}
+
+/// Local HTTP never resolves a hostname or admits a LAN address.
+pub fn loopback_origin(raw: &str) -> Result<Url> {
+    let url = Url::parse(raw).map_err(|_| "local_address_required")?;
+    let local = matches!(url.host_str(), Some("127.0.0.1" | "[::1]"));
+    if !local
+        || url.scheme() != "http"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.path() != "/"
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || url.port() == Some(0)
+        || raw.contains('\\')
+        || raw.chars().any(char::is_whitespace)
+    {
+        return Err("local_address_required".into());
     }
     Ok(url)
 }

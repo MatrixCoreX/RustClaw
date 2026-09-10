@@ -1,3 +1,4 @@
+import { connectionLabel } from './connection-label';
 import { Channel, invoke } from '@tauri-apps/api/core';
 import type { AuthIdentityResponse } from '../../UI/src/types/api';
 import { scopedStorage } from './storage';
@@ -47,10 +48,10 @@ export async function desktopOpenAipp(skillName: string, locale: string) {
   return invoke('aipp_open', {sessionId: session.id, skillName, locale});
 }
 export function desktopSigningLocation() {
-  // Only invoked in the packaged, native-authenticated client. Neither an insecure HTTP
-  // page nor an unverified device can initialize this runtime.
+  // Only the packaged renderer with a native authenticated session reaches this path.
+  // Local HTTP is restricted to literal loopback addresses by the native transport.
   return session?.identity ? {protocol: 'https:', hostname: 'desktop.localhost'} : {protocol: 'blocked:', hostname: ''};
 }
 export function desktopTargetLabel() {
-  return session ? `${session.profile.alias} · ${session.profile.connection.kind.toUpperCase()} · ${session.profile.connection.kind === 'ssh' ? session.profile.connection.host : session.origin}` : '';
+  return session ? `${session.profile.alias} · ${connectionLabel(session.profile.connection.kind)} · ${session.profile.connection.kind === 'ssh' ? session.profile.connection.host : session.origin}` : '';
 }

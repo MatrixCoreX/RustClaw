@@ -1,4 +1,6 @@
 const messages: Record<string, string> = {
+  local_address_required: '本机 HTTP 只允许 http://127.0.0.1:端口 或 http://[::1]:端口，不包含路径。局域网地址请使用 HTTPS 或 SSH。',
+  local_connection_failed: '未能连接本机服务。请先启动本机服务，并检查本机地址与端口。',
   discovery_running: '上一次查找正在结束，请稍后重试。',
   https_origin_required: '请输入 HTTPS 地址（只填写域名或 IP 和端口，不包含路径）。',
   address_invalid: '地址格式不正确，请检查设备地址与端口。',
