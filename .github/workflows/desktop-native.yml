@@ -8,6 +8,13 @@ name: Build Desktop Native Test Packages
         required: true
         type: string
 
+      platform:
+        description: Native platforms to build
+        required: true
+        default: all
+        type: choice
+        options: [all, windows, macos]
+
 permissions:
   contents: read
 
@@ -17,17 +24,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - platform: windows-x64
-            runner: windows-2022
-            target: x86_64-pc-windows-msvc
-          - platform: macos-arm64
-            runner: macos-14
-            target: aarch64-apple-darwin
-          - platform: macos-x64
-            runner: macos-15-intel
-            target: x86_64-apple-darwin
-    runs-on: ${{ matrix.runner }}
+        platform: ${{ fromJSON(inputs.platform == 'macos' && '["macos-arm64","macos-x64"]' || inputs.platform == 'windows' && '["windows-x64"]' || '["windows-x64","macos-arm64","macos-x64"]') }}
+    runs-on: ${{ matrix.platform == 'windows-x64' && 'windows-2022' || matrix.platform == 'macos-arm64' && 'macos-14' || 'macos-15-intel' }}
     timeout-minutes: 90
     defaults:
       run:
@@ -38,7 +36,7 @@ jobs:
       PYTHONUTF8: "1"
       MACOSX_DEPLOYMENT_TARGET: "13.0"
       SOURCE_COMMIT: ${{ inputs.source_commit }}
-      DESKTOP_NATIVE_TARGET: ${{ matrix.target }}
+      DESKTOP_NATIVE_TARGET: ${{ matrix.platform == 'windows-x64' && 'x86_64-pc-windows-msvc' || matrix.platform == 'macos-arm64' && 'aarch64-apple-darwin' || 'x86_64-apple-darwin' }}
       DESKTOP_PACKAGE_PLATFORM: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -63,6 +61,7 @@ jobs:
         with:
           python-version: "3.11"
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        id: cargo-cache
         with:
           path: |
             ~/.cargo/registry
@@ -130,3 +129,12 @@ jobs:
             desktop/test-results/native-platform/e2e/*.png
           if-no-files-found: warn
           retention-days: 30
+      - name: Preserve Cargo cache when a native check fails
+        if: failure() && steps.cargo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktop/target
+          key: desktop-${{ matrix.platform }}-${{ hashFiles('desktop/Cargo.lock', 'desktop/scripts/identity/Cargo.lock') }}
