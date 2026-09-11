@@ -52,6 +52,6 @@ export function DeviceForm({onAdded, onCancel}: {onAdded: (p: Profile) => void; 
       <label className="desktop-check"><input type="checkbox" required checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />我已通过可信入口核对设备指纹</label>
     </>}
     {error && <p role="alert" className="desktop-error">{error}</p>}
-    <div className="desktop-actions"><button type="button" onClick={onCancel} disabled={busy}>返回</button><button className="primary" disabled={busy}>{busy ? '正在保存…' : '保存设备'}</button></div>
+    <div className="desktop-actions"><button type="button" onClick={onCancel} disabled={busy}>返回</button><button className="primary" disabled={busy}>{busy ? '正在保存…' : kind === 'ssh' ? '下一步' : '保存并连接'}</button></div>
   </form>;
 }

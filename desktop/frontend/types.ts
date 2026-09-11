@@ -3,5 +3,7 @@ export type Connection = {kind: 'https'; origin: string; ca_pem: string | null; 
   | {kind: 'local'; origin: string}
   | {kind: 'ssh'; host: string; port: number; username: string; host_key_sha256: string; webd_port: number};
 export interface Profile {id: string; alias: string; connection: Connection; saved_login: boolean}
+export interface LoginInput {mode: 'password' | 'key'; username: string; secret: string}
+export type LoginPrefill = Pick<LoginInput, 'mode' | 'username'>;
 export interface SessionInfo {id: string; profile: Profile; origin: string; identity: AuthIdentityResponse | null}
 export interface LoginResult {session: SessionInfo; remembered: boolean; warning: string | null}

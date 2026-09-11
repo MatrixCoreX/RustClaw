@@ -30,6 +30,7 @@ fn main() {
                 "forget_profile",
                 "connect_device",
                 "login",
+                "login_prefill",
                 "disconnect_device",
                 "request_start",
                 "request_headers",

@@ -86,6 +86,8 @@ class Fixture:
                 cookie_ok = "session=" + fixture.session_cookie in self.headers.get("Cookie", "")
                 identity = {"user_id": 7, "chat_id": 9, "role": "admin", "user_key": "fixture-key"}
                 if path == "/webd/session":
+                    if gate := getattr(fixture, "bootstrap_gate", None):
+                        gate.wait(timeout=10)
                     return self.send_data({"ok": True, "data": {"logged_in": cookie_ok, "csrf_token": None, "username": None, "role": None}})
                 if path == "/webd/login":
                     if payload != {"username": "tester", "password": "fixture-password"} or self.headers.get("Origin") != f"{'https' if self.server is fixture.server else 'http'}://{self.headers.get('Host')}":

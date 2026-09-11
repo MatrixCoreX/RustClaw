@@ -19,16 +19,14 @@ def run(execute, native, screenshot, checks, wait_text, origin):
     execute("""const field=document.querySelector('input[placeholder="http://127.0.0.1:8788"]');
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(field,arguments[0]);
       field.dispatchEvent(new Event('input',{bubbles:true}));return true;""", [origin])
-    execute("[...document.querySelectorAll('button')].find(b=>b.textContent==='保存设备').click();return true;")
-    wait_text("连接本机服务")
-    execute("[...document.querySelectorAll('button')].find(b=>b.textContent==='连接本机服务').click();return true;")
+    execute("[...document.querySelectorAll('button')].find(b=>b.textContent==='保存并连接').click();return true;")
     wait_text("本机连接已建立")
     assert '加密连接已建立' not in execute("return document.body.innerText")
     for selector, value in [('input[autocomplete=username]', 'tester'), ('input[type=password]', 'fixture-password')]:
         execute("""const field=document.querySelector(arguments[0]);
           Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(field,arguments[1]);
           field.dispatchEvent(new Event('input',{bubbles:true}));return true;""", [selector, value])
-    execute("[...document.querySelectorAll('button')].find(b=>b.textContent==='登录设备').click();return true;")
+    execute("[...document.querySelectorAll('button')].find(b=>b.textContent==='登录').click();return true;")
     for _ in range(100):
         if execute("return !!document.querySelector('.desktop-console')"):
             break
@@ -42,4 +40,4 @@ def run(execute, native, screenshot, checks, wait_text, origin):
     screenshot('15-local-http-console')
     native('disconnect_device')
     native('forget_profile', {'profileId': session['profile']['id']})
-    checks.append('visible local HTTP setup, password login, local connection label and disconnect')
+    checks.append('saving a local HTTP device connects directly to login; password login, local label and disconnect')

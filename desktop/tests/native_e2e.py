@@ -248,13 +248,12 @@ try:
     execute("location.reload();return true;")
     wait_text("Login form regression")
     execute("[...document.querySelectorAll('button')].find(b=>b.textContent==='连接').click();return true;")
-    execute("[...document.querySelectorAll('button')].find(b=>b.textContent==='建立安全连接').click();return true;")
     wait_text("加密连接已建立")
     for selector, value in [("input[autocomplete=username]", "tester"), ("input[type=password]", "fixture-password")]:
         element = rpc("POST", f"/session/{session_id}/element", {"using": "css selector", "value": selector})
         element_id = element["element-6066-11e4-a52e-4f735466cecf"]
         rpc("POST", f"/session/{session_id}/element/{element_id}/value", {"text": value})
-    execute("[...document.querySelectorAll('button')].find(b=>b.textContent==='登录设备').click();return true;")
+    execute("[...document.querySelectorAll('button')].find(b=>b.textContent==='登录').click();return true;")
     for _ in range(100):
         if execute("return !!document.querySelector('.desktop-console')"):
             break
