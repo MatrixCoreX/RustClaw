@@ -25,6 +25,7 @@ const messages: Record<string, string> = {
   csrf_invalid: '设备返回的登录安全令牌格式不匹配。请更新客户端后重新连接。',
   login_temporarily_locked: '登录尝试过多，请稍后再试。',
   credential_store_unavailable: '系统凭据库不可用。可输入凭据，仅在当前会话登录。',
+  credential_invalid: '保存的登录信息不可用，请重新输入用户名和密码或用户 Key。',
   credential_store_locked: '系统凭据库已锁定或拒绝保存。本次登录仍可使用；解锁后可重新选择保存。',
   stale_connection: '连接已变更，请回到设备列表重新连接。',
   webd_unavailable: '未找到可用的网页管理服务，请核对 HTTPS 入口或 WEBD 端口。',

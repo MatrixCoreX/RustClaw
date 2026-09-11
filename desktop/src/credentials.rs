@@ -10,6 +10,30 @@ pub struct LoginSecret {
     pub username: String,
     pub secret: String,
 }
+/// Only display metadata crosses IPC; saved passwords and keys stay native.
+#[derive(Serialize)]
+pub struct LoginPrefill {
+    pub mode: String,
+    pub username: String,
+}
+impl LoginSecret {
+    fn prefill(&self) -> Result<LoginPrefill> {
+        if self.secret.is_empty()
+            || !matches!(self.mode.as_str(), "password" | "key")
+            || (self.mode == "password" && self.username.is_empty())
+        {
+            return Err("credential_invalid".into());
+        }
+        Ok(LoginPrefill {
+            mode: self.mode.clone(),
+            username: if self.mode == "password" {
+                self.username.clone()
+            } else {
+                String::new()
+            },
+        })
+    }
+}
 // The reference is bound to an immutable profile (address + trust + transport).
 fn entry(profile: Uuid) -> Result<keyring::Entry> {
     keyring::Entry::new("agent-runtime.desktop.v1", &profile.to_string())
@@ -24,13 +48,27 @@ pub fn save(profile: Uuid, secret: &LoginSecret) -> Result<()> {
     result
 }
 pub fn load(profile: Uuid) -> Result<LoginSecret> {
-    let mut value = entry(profile)?
-        .get_password()
-        .map_err(|_| "credential_store_unavailable")?;
+    load_optional(profile)?.ok_or("credential_store_unavailable".into())
+}
+pub fn prefill(profile: Uuid) -> Result<Option<LoginPrefill>> {
+    load_optional(profile)?
+        .map(|input| input.prefill())
+        .transpose()
+}
+fn load_optional(profile: Uuid) -> Result<Option<LoginSecret>> {
+    let mut value = match entry(profile)?.get_password() {
+        Ok(value) => value,
+        Err(keyring::Error::NoEntry) => return Ok(None),
+        Err(_) => return Err("credential_store_unavailable".into()),
+    };
     let result = serde_json::from_str(&value).map_err(|_| "credential_invalid".into());
     value.zeroize();
-    result
+    result.map(Some)
 }
+
+#[cfg(test)]
+#[path = "credentials_tests.rs"]
+mod tests;
 pub fn forget(profile: Uuid) -> Result<()> {
     match entry(profile)?.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),

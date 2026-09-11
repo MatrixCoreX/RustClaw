@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-login-prefill"
+description = "Enables the login_prefill command without any pre-configured scope."
+commands.allow = ["login_prefill"]
+
+[[permission]]
+identifier = "deny-login-prefill"
+description = "Denies the login_prefill command without any pre-configured scope."
+commands.deny = ["login_prefill"]

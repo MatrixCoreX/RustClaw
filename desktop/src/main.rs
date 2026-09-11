@@ -102,6 +102,7 @@ fn main() {
             connect_device,
             current_session,
             login,
+            login_prefill,
             disconnect_device,
             request_start,
             request_headers,

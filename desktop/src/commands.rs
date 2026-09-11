@@ -147,6 +147,30 @@ pub async fn current_session(
     }
 }
 #[tauri::command]
+pub async fn login_prefill(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    session_id: Uuid,
+) -> Result<Option<credentials::LoginPrefill>> {
+    main_only(&window)?;
+    let _transition = state.transition.lock().await;
+    let session = state.session(session_id).await?;
+    if session.info().await.identity.is_some() {
+        return Err("login_prefill_unavailable".into());
+    }
+    if !session.profile.saved_login {
+        return Ok(None);
+    }
+    let id = session.profile.id;
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        tokio::task::spawn_blocking(move || credentials::prefill(id)),
+    )
+    .await
+    .map_err(|_| "credential_store_unavailable")?
+    .map_err(|_| "credential_store_unavailable")?
+}
+#[tauri::command]
 pub async fn login(
     window: WebviewWindow,
     wallet: State<'_, crate::wallet::commands::WalletState>,
