@@ -1,6 +1,6 @@
 {
   "bundle": {
-    "targets": ["nsis", "msi"],
+    "targets": ["msi", "nsis"],
     "icon": ["icons/icon.ico"],
     "windows": {
       "webviewInstallMode": {"type": "embedBootstrapper", "silent": true},
