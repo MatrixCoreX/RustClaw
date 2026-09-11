@@ -52,8 +52,17 @@ pub(super) async fn finalize_unresolved_machine_failure(
         crate::fallback::ClarifyFallbackSource::ExecutionFailedPartial,
     )
     .await;
-    loop_state.delivery_messages = vec![message.clone()];
-    loop_state.last_user_visible_respond = Some(message.clone());
+    loop_state
+        .delivery_messages
+        .retain(|existing| raw_machine_envelope_payload(existing).is_none());
+    crate::agent_engine::append_delivery_message(
+        &task.task_id,
+        &mut loop_state.delivery_messages,
+        message.clone(),
+    );
+    let delivery = loop_state.delivery_messages.clone();
+    let text = super::final_answer_text_from_delivery(&delivery);
+    loop_state.last_user_visible_respond = Some(text.clone());
     let summary = crate::task_journal::TaskJournalFinalizerSummary {
         stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
         disposition: Some(crate::finalize::FinalizerDisposition::AllowFallback),
@@ -70,14 +79,14 @@ pub(super) async fn finalize_unresolved_machine_failure(
         loop_state,
         agent_run_context,
         Some(summary),
-        true,
-        &message,
+        crate::task_journal::delivery_payload_consistent(&text, &delivery),
+        &text,
         crate::task_journal::TaskJournalFinalStatus::Failure,
     )
     .await;
     Some(
-        AskReply::non_llm(message.clone())
-            .with_messages(vec![message.clone()])
+        AskReply::non_llm(text)
+            .with_messages(delivery)
             .with_task_journal(journal)
             .with_failure(message),
     )

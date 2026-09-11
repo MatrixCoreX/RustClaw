@@ -68,6 +68,33 @@ fn machine_failure_cannot_mark_completion_even_with_stale_delivery() {
 }
 
 #[tokio::test]
+async fn unresolved_machine_failure_preserves_prior_partial_delivery() {
+    let state = test_state();
+    let task = claimed_task("task-partial-before-machine-failure");
+    let mut loop_state = crate::agent_engine::LoopState::new();
+    let partial = "Partial result\nFILE:artifacts/first.txt";
+    loop_state.delivery_messages.push(partial.to_string());
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "respond", partial));
+    let envelope = serde_json::json!({
+        "output_format": "machine_json", "owner_layer": "subagent_runtime", "status": "rejected",
+        "error_code": "child_task_capability_policy_incompatible"
+    })
+    .to_string();
+    let mut failed = ok_step_result("step_2", "subagent", &envelope);
+    failed.status = StepExecutionStatus::Error;
+    loop_state.executed_step_results.push(failed);
+    let reply = finalize_loop_reply(&state, &task, "finish both parts", loop_state, None)
+        .await
+        .unwrap();
+    assert!(reply.should_fail_task);
+    assert_eq!(reply.messages.first().map(String::as_str), Some(partial));
+    assert_eq!(reply.messages.len(), 2);
+    assert!(!reply.text.contains("output_format"));
+}
+
+#[tokio::test]
 async fn finalize_loop_reply_accepts_terminal_machine_json_envelope() {
     let state = test_state();
     let task = claimed_task("task-machine-envelope-terminal");
