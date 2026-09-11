@@ -1194,14 +1194,16 @@ def _split_revision_chunks(text: str) -> list[str]:
 def _revision_numeric_tokens(text: str) -> list[str]:
     tokens: list[str] = []
     current: list[str] = []
-    for character in text:
-        if character.isnumeric():
+    # Keep decimal runs intact; numeric symbols remain independent of spacing.
+    for character in text + "\0":
+        if character.isdecimal():
             current.append(character)
-        elif current:
-            tokens.append("".join(current))
-            current = []
-    if current:
-        tokens.append("".join(current))
+        else:
+            if current:
+                tokens.append("".join(current))
+                current = []
+            if character.isnumeric():
+                tokens.append(character)
     return tokens
 
 

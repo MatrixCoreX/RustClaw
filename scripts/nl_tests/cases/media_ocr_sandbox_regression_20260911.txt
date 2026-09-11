@@ -1,0 +1,4 @@
+# Local acceptance: the first case uses the retained image from the incident.
+# Run after updating the admitted media_download package and the host runtime.
+media_ocr_sandbox|local_ocr_gateway|en,requires_tool_call=true|Use local Tesseract OCR on this existing image: scripts/nl_suite_logs/media_ocr_sandbox_20260911/input/first_frame.png. Review paragraph layout without changing meaning or translating the Chinese source text. Return the complete extracted text and a TXT file. Do not download again, process audio, or change sandbox permissions. Keep any explanation in English.
+media_ocr_sandbox|share_image_text_fallback|cn,requires_tool_call=true|请把 https://v.douyin.com/yaSmldtm9IQ/ 这个作品的画面文字提取出来。如果是视频只识别第一帧，不转写音频。识别服务失败时用本地 OCR 兜底。给我完整文字和 TXT 文件，不能为了完成任务修改沙箱或权限。
