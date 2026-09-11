@@ -1,0 +1,76 @@
+{
+  "test_secret_hex": "0101010101010101010101010101010101010101010101010101010101010101",
+  "vectors": [
+    {
+      "description": "PUBLIC TEST KEY ONLY — never fund this account",
+      "capabilities": {
+        "schema_version": 1,
+        "protocol": "asset_owner_v1",
+        "ledger_id": "ledger-fixture-v1",
+        "node_url": "https://ledger.example.test",
+        "service": "assets",
+        "actions": [
+          "balances",
+          "history",
+          "operation_status",
+          "transfer"
+        ]
+      },
+      "intent": {
+        "kind": "balances"
+      },
+      "now_unix": 1700000000,
+      "signing_payload": "{\"schema_version\":1,\"protocol\":\"asset_owner_v1\",\"ledger_id\":\"ledger-fixture-v1\",\"node_url\":\"https://ledger.example.test\",\"service\":\"assets\",\"account\":\"73MTSWz2Nks4Eaf8G8F7Nr6jbHorZSM774HFmtrdEuahUsc7To\",\"operation_id\":\"00000000-0000-4000-8000-000000000001\",\"challenge_id\":\"00000000-0000-4000-8000-000000000011\",\"nonce\":\"abababababababababababababababababababababababababababababababab\",\"expires_at_unix\":1700000120,\"terms\":{\"kind\":\"balances\"}}",
+      "signature_hex": "5162a07d6f39f4623ed1f15391e58c097c6ffb9ad9b625a07d1af124b5b9fc8b115c44915ff0eb14a22906331659a86d245b0c27fed2abd4c87d738ff8040ca7"
+    },
+    {
+      "description": "PUBLIC TEST KEY ONLY — never fund this account",
+      "capabilities": {
+        "schema_version": 1,
+        "protocol": "asset_owner_v1",
+        "ledger_id": "ledger-fixture-v1",
+        "node_url": "https://ledger.example.test",
+        "service": "assets",
+        "actions": [
+          "balances",
+          "transfer"
+        ]
+      },
+      "intent": {
+        "kind": "transfer",
+        "asset": "AIC",
+        "amount_units": "100000000",
+        "recipient": "5UXjwf1qXw1cAF6GLT4w5RjH48Rn8Y6xLPZwwVDWh3D3cavEav",
+        "memo": "测试 memo",
+        "max_fee_bps": 100
+      },
+      "now_unix": 1700000000,
+      "signing_payload": "{\"schema_version\":1,\"protocol\":\"asset_owner_v1\",\"ledger_id\":\"ledger-fixture-v1\",\"node_url\":\"https://ledger.example.test\",\"service\":\"assets\",\"account\":\"73MTSWz2Nks4Eaf8G8F7Nr6jbHorZSM774HFmtrdEuahUsc7To\",\"operation_id\":\"00000000-0000-4000-8000-000000000002\",\"challenge_id\":\"00000000-0000-4000-8000-000000000012\",\"nonce\":\"abababababababababababababababababababababababababababababababab\",\"expires_at_unix\":1700000120,\"terms\":{\"kind\":\"transfer\",\"asset\":\"AIC\",\"amount_units\":\"100000000\",\"recipient\":\"5UXjwf1qXw1cAF6GLT4w5RjH48Rn8Y6xLPZwwVDWh3D3cavEav\",\"memo\":\"测试 memo\",\"max_fee_bps\":100,\"fee_units\":\"1000000\"}}",
+      "signature_hex": "834533c51c945f56214941695150b7f0a6c81a14dc539209887a7b4e83bc03da70191ff7fee9059c443dceec4a72caf2dff2200897aa7598e8ef80f594f70c17"
+    },
+    {
+      "description": "PUBLIC TEST KEY ONLY — never fund this account",
+      "capabilities": {
+        "schema_version": 1,
+        "protocol": "asset_owner_v1",
+        "ledger_id": "ledger-fixture-v1",
+        "node_url": "https://ledger.example.test",
+        "service": "bancor",
+        "actions": [
+          "balances",
+          "bancor_trade"
+        ]
+      },
+      "intent": {
+        "kind": "bancor_trade",
+        "side": "buy",
+        "input_units": "100000000",
+        "slippage_bps": 300,
+        "max_fee_bps": 100
+      },
+      "now_unix": 1700000000,
+      "signing_payload": "{\"schema_version\":1,\"protocol\":\"asset_owner_v1\",\"ledger_id\":\"ledger-fixture-v1\",\"node_url\":\"https://ledger.example.test\",\"service\":\"bancor\",\"account\":\"73MTSWz2Nks4Eaf8G8F7Nr6jbHorZSM774HFmtrdEuahUsc7To\",\"operation_id\":\"00000000-0000-4000-8000-000000000003\",\"challenge_id\":\"00000000-0000-4000-8000-000000000013\",\"nonce\":\"abababababababababababababababababababababababababababababababab\",\"expires_at_unix\":1700000120,\"terms\":{\"kind\":\"bancor_trade\",\"side\":\"buy\",\"input_units\":\"100000000\",\"slippage_bps\":300,\"max_fee_bps\":100,\"fee_units\":\"1000000\",\"quoted_output_units\":\"200000000\",\"min_output_units\":\"194000000\"}}",
+      "signature_hex": "8e1bd36643519b1aa142ad42aac245b79c589c3aba30db8a6b1ddd4e6855dce06450d8f75fa605bf6381fa7cff83475aad52472976f9f9732ee227db93da0ed2"
+    }
+  ]
+}

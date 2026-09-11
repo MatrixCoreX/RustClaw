@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-wallet-capabilities"
+description = "Enables the wallet_capabilities command without any pre-configured scope."
+commands.allow = ["wallet_capabilities"]
+
+[[permission]]
+identifier = "deny-wallet-capabilities"
+description = "Denies the wallet_capabilities command without any pre-configured scope."
+commands.deny = ["wallet_capabilities"]

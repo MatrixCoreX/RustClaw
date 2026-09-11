@@ -1272,7 +1272,7 @@ async fn proxy_inner(state: AppState, client_addr: SocketAddr, req: Request) -> 
         }
     };
 
-    let out_headers = build_outgoing_headers(
+    let mut out_headers = build_outgoing_headers(
         incoming_headers,
         &upstream_host,
         client_addr,
@@ -1280,6 +1280,7 @@ async fn proxy_inner(state: AppState, client_addr: SocketAddr, req: Request) -> 
         session.as_ref().map(|session| session.user_key.as_str()),
     );
 
+    let owner_path = path_and_query.to_owned();
     let body_in = req.into_body();
     let body_limit = state.request_limits.body_limit(request_class);
     let body_timeout = state.request_limits.body_read_timeout(request_class);
@@ -1302,6 +1303,18 @@ async fn proxy_inner(state: AppState, client_addr: SocketAddr, req: Request) -> 
         }
     };
 
+    if owner_path.starts_with(claw_core::owner_gateway_context::PREFIX) {
+        if let Some(session) = &session {
+            let assertion = claw_core::owner_gateway_context::sign(
+                &session.user_key, &session.session_handle, method.as_str(), &owner_path,
+                &bytes, now_unix_secs(),
+            );
+            let Some(value) = assertion.and_then(|s| reqwest::header::HeaderValue::from_str(&s).ok()) else {
+                return webd_error_response(StatusCode::FORBIDDEN, "asset_owner_context_invalid", origin.as_ref());
+            };
+            out_headers.insert(claw_core::owner_gateway_context::HEADER, value);
+        }
+    }
     let client = if use_long_running_client {
         &state.long_running_client
     } else {
@@ -1663,7 +1676,9 @@ fn build_outgoing_headers(
         if session_user_key.is_some() && k.as_str().eq_ignore_ascii_case(AUTH_KEY_HEADER) {
             continue;
         }
-        if k.as_str().eq_ignore_ascii_case(WEBD_CSRF_HEADER) {
+        if k.as_str().eq_ignore_ascii_case(WEBD_CSRF_HEADER)
+            || k.as_str().eq_ignore_ascii_case(claw_core::owner_gateway_context::HEADER)
+            || k.as_str().eq_ignore_ascii_case("x-agent-owner-context") {
             continue;
         }
         if k.as_str().eq_ignore_ascii_case("x-forwarded-for") && forward_x {

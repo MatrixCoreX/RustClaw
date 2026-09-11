@@ -4,7 +4,8 @@
 )]
 
 use agent_desktop::{
-    aipp, commands::*, discovery, downloads, media, profile::ProfileStore, transfers::Transfers,
+    aipp, asset_operations, commands::*, discovery, downloads, media, profile::ProfileStore,
+    transfers::Transfers, wallet,
 };
 use std::collections::HashMap;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
@@ -12,6 +13,13 @@ use tokio::sync::Mutex;
 
 fn main() {
     tauri::Builder::default()
+        .on_window_event(|window, event| {
+            if matches!(window.label(), "main" | "wallet") {
+                if let tauri::WindowEvent::Focused(focused) = event {
+                    wallet::lifecycle::focus_changed(window.app_handle().clone(), *focused);
+                }
+            }
+        })
         .register_asynchronous_uri_scheme_protocol("device", |context, request, responder| {
             let app = context.app_handle().clone();
             let label = context.webview_label().to_owned();
@@ -35,6 +43,11 @@ fn main() {
         .setup(|app| {
             app.manage(discovery::DiscoveryState::default());
             let directory = app.path().app_data_dir()?;
+            app.manage(
+                wallet::commands::WalletState::new(directory.join("asset-wallet"))
+                    .map_err(std::io::Error::other)?,
+            );
+            wallet::lifecycle::start(app.handle().clone());
             app.manage(DesktopState {
                 profiles: Mutex::new(ProfileStore::new(directory).map_err(std::io::Error::other)?),
                 session: Mutex::new(None),
@@ -104,6 +117,23 @@ fn main() {
             aipp::aipp_bridge,
             discovery::commands::discover_devices,
             discovery::commands::cancel_discovery,
+            wallet::commands::wallet_open,
+            wallet::commands::wallet_status,
+            wallet::commands::wallet_lock,
+            wallet::commands::wallet_select,
+            wallet::commands::wallet_initialize,
+            wallet::commands::wallet_unlock,
+            wallet::commands::wallet_create,
+            wallet::commands::wallet_backup,
+            wallet::commands::wallet_restore,
+            asset_operations::commands::wallet_pending,
+            asset_operations::commands::wallet_cancel_operation,
+            asset_operations::commands::wallet_capabilities,
+            asset_operations::commands::wallet_read,
+            asset_operations::commands::wallet_prepare,
+            asset_operations::commands::wallet_confirm,
+            asset_operations::commands::wallet_operations,
+            asset_operations::commands::wallet_check_operation,
         ])
         .run(tauri::generate_context!())
         .expect("desktop_runtime_failed");

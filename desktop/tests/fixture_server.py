@@ -97,6 +97,10 @@ class Fixture:
                     return self.send_data({"ok": False, "error": "auth_required"}, 401)
                 if self.command not in ("GET", "HEAD") and not key_ok and self.headers.get("X-Agent-Csrf-Token") != fixture.csrf_token:
                     return self.send_data({"ok": False, "error": "csrf_required"}, 403)
+                if path.startswith("/v1/nni/assets/owner/") and hasattr(fixture, "owner_api"):
+                    return fixture.owner_api.handle(self, payload)
+                if hasattr(fixture, "owner_api") and path in ("/v1/nni/bancor/market", "/v1/nni/assets/market", "/v1/nni/bancor/candles", "/v1/nni/bancor/trades"):
+                    return self.send_data({"ok": True, "data": fixture.owner_api.market_data(self.path)})
                 if path == "/v1/auth/me" or path == "/v1/local/interaction-context":
                     return self.send_data({"ok": True, "data": identity})
                 if path == "/v1/aipps":

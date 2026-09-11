@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-wallet-check-operation"
+description = "Enables the wallet_check_operation command without any pre-configured scope."
+commands.allow = ["wallet_check_operation"]
+
+[[permission]]
+identifier = "deny-wallet-check-operation"
+description = "Denies the wallet_check_operation command without any pre-configured scope."
+commands.deny = ["wallet_check_operation"]

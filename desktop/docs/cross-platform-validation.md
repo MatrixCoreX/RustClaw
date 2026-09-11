@@ -36,7 +36,7 @@
 
 Mac 使用 ad-hoc 签名且未经 Apple 公证；完整业务界面回归、系统隐私授权和真实家庭局域网配对仍需用户机器验证，不能将窗口启动检查当作完整验收。
 
-现有 Ubuntu 0.1.4 安装与 Pi UI 部署保持不变，本次没有覆盖本机已安装客户端。三平台共 8 个安装文件已通过根目录 `SHA256SUMS` 校验；Mac 原生流程见 [构建记录](https://github.com/MatrixCoreX/RustClaw/actions/runs/34544675891)，Windows 见 [构建记录](https://github.com/MatrixCoreX/RustClaw/actions/runs/34547369270)。
+现有 Ubuntu 0.1.4 安装与 Pi UI 部署保持不变，本次没有覆盖本机已安装客户端。三平台共 8 个安装文件已通过根目录 `SHA256SUMS` 校验；Mac 原生流程见 仓库 Actions 运行编号 `34544675891`，Windows 见 仓库 Actions 运行编号 `34547369270`。
 
 
 ## Windows 内嵌页面权限测试
@@ -44,3 +44,20 @@ Mac 使用 ad-hoc 签名且未经 Apple 公证；完整业务界面回归、系�
 原测试要求 iframe 的原生调用必须收到拒绝回调。Wry 0.55 的 WebView2 实现注册顶层消息处理器，iframe 消息需要单独的 frame 处理器，因此 Windows 上可能没有回调；参见 [Microsoft 的 frame 消息说明](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/frames)。
 
 测试仅针对 Windows 的 WebView2 子框架允许记录“无回调”状态，并设置 1.5 秒观察时限；任何成功返回都判为失败。它同时尝试读取和新增设备，随后再次完成合法的 AiAPP bridge 请求、重新核对回调状态，并从真实主窗口确认设备列表与测试前完全一致。AiAPP 顶层调用主窗口命令与未声明能力仍必须明确拒绝。Ubuntu 和 Windows 修改后的 19 项原生回归均通过。Windows 实测 iframe 读写探测均无回调，合法 bridge 两次成功，主窗口设备列表保持不变。
+
+
+## 0.3.0：桌面本地资产账户（2026-09-11）
+
+本轮仅在 `desktop/` 实现本地密钥库、加密备份恢复、资产/Bancor 选择本地账户、原生确认签名与结果核实。后端仍待实现，交接合同见 [后端 agent 计划](asset-owner-backend-handoff-20260911.md)。
+
+- Ubuntu 26.04 x64 发布构建、`.deb` 打包、从 0.2.1 升级到 0.3.0 和实际启动已完成，启动前后设备 profile 文件摘要相同。
+- 安装包位于 `desktop/installers/0.3.0/linux/agent-desktop_0.3.0_amd64.deb`；SHA-256 为 `2a8ca3745d1853246e169ccec10261b317631919c9fb108b00bf768c9f2b48b1`。
+- 已安装二进制 SHA-256 为 `e74b9fd27834e82a4cb03e7d33c44f8908bae0dd1db1a3c06c07cb642af14a77`，与包内文件一致。与打包前程序只差 bundle 类型标记的 3 字节（UNK→DEB），两个程序均完成原生新功能测试。
+- 原生新增功能 5 组通过：系统凭据库、双账户/备份、IPC 隔离、查询/分页/切换、收款方篡改拒绝、转账/买入/卖出、实际确认按钮、重复提交、断开响应后的状态查询、跨页保留账户、应用失焦锁定。已安装二进制运行中验证了 9 次真实 secp256k1 签名；所有资产服务为隔离协议夹具，没有真实资产操作。
+- 19 项既有桌面原生回归（debug）、9 项前端测试、lint、桌面 UI 构建通过。截图与新功能验收保存在 `desktop/test-results/wallet-release/`，安装证据在 `desktop/test-results/wallet-installation.json`。
+- 产品身份自检/inventory、双品牌 UI、跨平台静态、MCP 与存储归属检查通过。长文件门禁仍有 12 个既有后端文件超限；本轮未修改它们。
+- 本地 Apple 交叉检查仍缺 Apple C 编译工具链，ring 不接受主机编译器的 `-arch` / `-mmacosx-version-min`。本版 Windows/Mac 原生测试、跨 OS 恢复以及 Ubuntu 22.04/24.04 验证未完成；不能沿用 0.2.1 的记录宣称新版本已通过。
+- 工作分区曾耗尽空间；原始 Cargo 缓存与历史安装文件保留。复制 release 缓存后在 `/var/tmp/agent-desktop-wallet-20260911.SofISt` 完成构建，日志与额外缓存继续保留。只移除了本次两个失败测试的临时目录；成功测试证据已完整保留。
+
+- 最终原生密钥库 5 项聚焦测试通过，覆盖备份恢复、目录别名防覆盖、锁定、凭据库失败、元数据篡改与交接签名向量。测试输出在 `desktop/test-results/wallet-release/wallet-tests.log`。
+- 安装后启动曾遇到临时文件 `No space left on device`，同阶段默认临时目录下的 Rust 文件写入也失败。最终使用独立 `TMPDIR=/var/tmp/agent-desktop-wallet-20260911.SofISt/tmp` 通过测试并启动客户端，持续运行检查通过且启动日志无错误；未清理系统临时目录。后续检查默认 `/tmp` 已有可用空间。

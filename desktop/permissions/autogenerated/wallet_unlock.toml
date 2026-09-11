@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-wallet-unlock"
+description = "Enables the wallet_unlock command without any pre-configured scope."
+commands.allow = ["wallet_unlock"]
+
+[[permission]]
+identifier = "deny-wallet-unlock"
+description = "Denies the wallet_unlock command without any pre-configured scope."
+commands.deny = ["wallet_unlock"]

@@ -37,11 +37,13 @@ def run(execute, resize, click, keys, screenshot, out, checks):
     screenshot('07-navigation-top')
     page('bancor')
     for _ in range(50):
-        if execute("return !!document.querySelector('[data-bancor-account-selector] select')"):
+        if execute("return !!document.querySelector('select[aria-label=\"桌面资产账户\"]')"):
             break
         time.sleep(.1)
     else:
         raise AssertionError('Fixture trading account selector did not mount')
+    assert execute("return !!document.querySelector('#bancor-trade-panel .bancor-trade-account [data-bancor-account-selector] select')")
+    assert execute("return !!document.querySelector('[data-bancor-account-selector] button[aria-label=\"复制完整公钥\"]')")
     styles = {}
     for mode in ['dark', 'light']:
         theme(mode)
@@ -58,6 +60,11 @@ def run(execute, resize, click, keys, screenshot, out, checks):
     for mode in styles:
         assert all(s['color'] != s['background'] and s['selected'] for s in styles[mode]), styles
     checks.append('actual trading account and other selects remain readable before focus in both themes')
+
+    page('assets')
+    assert execute("return !!document.querySelector('section[aria-labelledby=asset-overview-title] [data-assets-account-selector] select')")
+    assert execute("return !!document.querySelector('[data-assets-account-selector] button[aria-label=\"复制完整公钥\"]')")
+    checks.append('hardware account selectors and copy controls remain inside original web overview/trading slots')
 
     page('logs')
     for mode in ['dark', 'light']:

@@ -21,6 +21,7 @@ pub mod git_remote_config;
 pub mod hard_rules;
 pub mod model_catalog;
 pub mod model_turn;
+pub mod owner_gateway_context;
 pub mod product_identity;
 pub mod prompt_layers;
 pub mod provider_failure_policy;
