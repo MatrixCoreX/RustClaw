@@ -54,6 +54,8 @@ use claw_core::{
 };
 
 mod workspace_update_config_snapshot;
+#[path = "ui_routes/nni_owner_financial.rs"]
+mod nni_owner_financial;
 use workspace_update_config_snapshot::*;
 
 const TELEGRAM_BOT_HEARTBEAT_STALE_SECONDS: i64 = 45;
@@ -290,6 +292,7 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         .route("/nni/assets/account", get(nni_assets_account))
         .route("/nni/assets/transfer", post(nni_asset_transfer))
         .route("/nni/assets/transfers", get(nni_asset_transfer_history))
+        .merge(nni_owner_financial::routes())
         .route(
             "/nni/heartbeat/errors/clear",
             post(nni_clear_heartbeat_errors),

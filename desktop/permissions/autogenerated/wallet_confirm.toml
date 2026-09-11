@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-wallet-confirm"
+description = "Enables the wallet_confirm command without any pre-configured scope."
+commands.allow = ["wallet_confirm"]
+
+[[permission]]
+identifier = "deny-wallet-confirm"
+description = "Denies the wallet_confirm command without any pre-configured scope."
+commands.deny = ["wallet_confirm"]

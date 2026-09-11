@@ -1,5 +1,6 @@
 #[cfg(feature = "gui")]
 pub mod aipp;
+pub mod asset_operations;
 #[cfg(feature = "gui")]
 pub mod commands;
 pub mod credentials;
@@ -14,6 +15,7 @@ pub mod profile;
 pub mod session;
 pub mod transfers;
 pub mod transport;
+pub mod wallet;
 pub mod webview_origin;
 
 pub type Result<T> = std::result::Result<T, String>;

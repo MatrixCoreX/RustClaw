@@ -1,3 +1,4 @@
+import { adaptWalletUi } from "./wallet-ui-adapter";
 import path from 'node:path';
 import { normalizePath, type Plugin } from '../../UI/node_modules/vite/dist/node/index.js';
 
@@ -25,6 +26,10 @@ export function sharedUiAdapter(root: string): Plugin {
         if (text.includes(original)) { text = text.replaceAll(original, replacement); imports.add(replacement); }
       }
       if (id === uiRoot + 'App.tsx') {
+        const walletPages = normalizePath(path.resolve(root, 'frontend/wallet/pages.tsx'));
+        text = once(text, 'from "./components/AssetsPage"', `from ${JSON.stringify(walletPages)}`, id);
+        text = once(text, 'from "./components/BancorPage"', `from ${JSON.stringify(walletPages)}`, id);
+        text = once(text, 'onRefresh={() => Promise.allSettled([\n                assetOverviewRuntime.fetchMarket(),', 'onRefreshMarket={() => assetOverviewRuntime.fetchMarket()}\n              onRefresh={() => Promise.allSettled([\n                assetOverviewRuntime.fetchMarket(),', id);
         if ((text.match(/\bfetch\(/g) ?? []).length !== 6) throw new Error('Shared UI fetch inventory changed');
         imports.add('desktopFetch as fetch'); imports.add('desktopOrigin'); imports.add('desktopIdentity'); imports.add('desktopLogout');
         text = once(text, 'preferredBrowserApiBaseUrl(saved, window.location)', 'desktopOrigin', id);
@@ -39,6 +44,7 @@ export function sharedUiAdapter(root: string): Plugin {
         // Expired sessions return to native login rather than the browser's direct-key form.
         text = once(text, 'setUiAuthError(\n          t("登录状态已失效，请重新登录。"', 'void desktopLogout();\n        setUiAuthError(\n          t("登录状态已失效，请重新登录。"', id);
       }
+      text = adaptWalletUi(text, id, root, uiRoot);
       if (id === uiRoot + 'lib/nni-owner-public-key.ts') {
         imports.add('desktopSigningLocation');
         text = once(text, '{ protocol: window.location.protocol, hostname: window.location.hostname }', 'desktopSigningLocation()', id);

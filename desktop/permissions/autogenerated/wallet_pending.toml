@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-wallet-pending"
+description = "Enables the wallet_pending command without any pre-configured scope."
+commands.allow = ["wallet_pending"]
+
+[[permission]]
+identifier = "deny-wallet-pending"
+description = "Denies the wallet_pending command without any pre-configured scope."
+commands.deny = ["wallet_pending"]

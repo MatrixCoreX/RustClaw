@@ -16,6 +16,7 @@ export default defineConfig((env) => {
     }},
     build: {outDir: 'dist', emptyOutDir: true, rollupOptions: {input: {
       index: path.resolve(__dirname, 'index.html'), aipp: path.resolve(__dirname, 'aipp.html'),
+      wallet: path.resolve(__dirname, 'wallet.html'),
     }}},
   });
 });

@@ -55,3 +55,4 @@ export function desktopSigningLocation() {
 export function desktopTargetLabel() {
   return session ? `${session.profile.alias} · ${connectionLabel(session.profile.connection.kind)} · ${session.profile.connection.kind === 'ssh' ? session.profile.connection.host : session.origin}` : '';
 }
+export function desktopSessionId() {return session.id;}

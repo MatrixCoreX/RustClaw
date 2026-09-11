@@ -396,6 +396,7 @@ fn is_high_cost_path(path: &str) -> bool {
         || path == "/v1/memory/vector/reindex"
         || path == "/v1/nni/bancor/trade"
         || path == "/v1/nni/assets/transfer"
+        || path.starts_with("/v1/nni/assets/owner/")
         || path == "/v1/nni/device/action"
         || path.starts_with("/v1/nni/join/")
         || path.starts_with("/v1/nni/owner/")

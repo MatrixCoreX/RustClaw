@@ -227,6 +227,8 @@ fn web_session_key_overrides_client_key_and_preserves_ui_origin() {
     let mut incoming = HeaderMap::new();
     incoming.insert("x-agent-key", HeaderValue::from_static("client-key"));
     incoming.insert("x-agent-runtime-client", HeaderValue::from_static("ui"));
+    incoming.insert(claw_core::owner_gateway_context::HEADER, HeaderValue::from_static("forged"));
+    incoming.insert("x-agent-owner-context", HeaderValue::from_static("forged"));
 
     let outgoing = build_outgoing_headers(
         &incoming,
@@ -236,6 +238,8 @@ fn web_session_key_overrides_client_key_and_preserves_ui_origin() {
         Some("session-admin-key"),
     );
 
+    assert!(!outgoing.contains_key(claw_core::owner_gateway_context::HEADER));
+    assert!(!outgoing.contains_key("x-agent-owner-context"));
     assert_eq!(
         outgoing
             .get("x-agent-key")

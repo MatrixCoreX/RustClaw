@@ -10,6 +10,7 @@ import { initializeRuntime, desktopLogout } from './runtime';
 import type { LoginResult, Profile, SessionInfo } from './types';
 import { PRODUCT_DISPLAY_NAME } from '../../UI/src/lib/product-identity';
 import { version as desktopVersion } from '../package.json';
+import { openWallet } from './wallet/store';
 import './desktop.css';
 
 document.title = PRODUCT_DISPLAY_NAME;
@@ -87,7 +88,7 @@ function DeviceHome() {
           <label>{sshKeyMode ? '私钥口令（没有可留空）' : 'SSH 密码'}<input type="password" required={!sshKeyMode} autoComplete="off" value={sshSecret} onChange={e => setSshSecret(e.target.value)} /></label><small>用于建立加密隧道。之后还需登录设备账户。</small></> : selected.connection.kind === 'local' ? <p className="desktop-note">连接当前电脑上的服务，仍需登录设备账户。HTTP 仅限本机回环地址。</p> : <p className="desktop-note">先验证证书，再进入登录。连接失败时不会切换到 HTTP。</p>}
         <div className="desktop-actions"><button type="button" disabled={busy} onClick={() => {setSelected(null);setError('');}}>返回</button><button className="primary" disabled={busy}>{busy ? '正在连接…' : selected.connection.kind === 'local' ? '连接本机服务' : '建立安全连接'}</button></div>
       </form> : <>
-        <div className="desktop-list-head"><h2>设备列表 <span>{profiles.length}</span></h2><button className="primary" onClick={() => {setAdding(true);setError('');}}>＋ 添加设备</button></div>
+        <div className="desktop-list-head"><h2>设备列表 <span>{profiles.length}</span></h2><div className="wallet-actions"><button onClick={() => void run(async()=>{await openWallet();})}>本地资产账号</button><button className="primary" onClick={() => {setAdding(true);setError('');}}>＋ 添加设备</button></div></div>
         {profiles.length === 0 ? <div className="desktop-card desktop-empty"><div className="desktop-empty-icon">⌘</div><h2>连接第一台设备</h2><p>可以自动查找本机服务，也可以添加局域网设备的 HTTPS 或 SSH 地址。</p><button className="primary" onClick={() => setAdding(true)}>添加设备</button></div> : <div className="desktop-device-list">{profiles.map(profile => <article className="desktop-card device-row" key={profile.id}><div><h2>{profile.alias}</h2><p>{profile.connection.kind === 'ssh' ? profile.connection.host : profile.connection.origin}</p><span className="desktop-badge">{connectionLabel(profile.connection.kind)} · 待连接</span></div><div className="desktop-actions"><button className="subtle" disabled={busy} onClick={() => {
           if (!window.confirm(`忘记“${profile.alias}”并删除本机登录资料？设备上的账户、任务和数据会保留。`)) return;
           void run(async () => {await invoke('forget_profile', {profileId:profile.id, deleteSavedLogin:savedProfiles.includes(profile.id)});forgetDeviceStorage(localStorage, profile.id);forgetDeviceStorage(sessionStorage, profile.id);const next = savedProfiles.filter(id => id !== profile.id);setSavedProfiles(next);localStorage.setItem('agent-runtime.desktop.saved-profile-ids', JSON.stringify(next));await refresh();});

@@ -26,6 +26,15 @@
     "allow-aipp-open",
     "allow-discover-devices",
     "allow-cancel-discovery",
-    "allow-download-cancel"
+    "allow-download-cancel",
+    "allow-wallet-open",
+    "allow-wallet-status",
+    "allow-wallet-lock",
+    "allow-wallet-select",
+    "allow-wallet-capabilities",
+    "allow-wallet-read",
+    "allow-wallet-prepare",
+    "allow-wallet-operations",
+    "allow-wallet-check-operation"
   ]
 }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-wallet-backup"
+description = "Enables the wallet_backup command without any pre-configured scope."
+commands.allow = ["wallet_backup"]
+
+[[permission]]
+identifier = "deny-wallet-backup"
+description = "Denies the wallet_backup command without any pre-configured scope."
+commands.deny = ["wallet_backup"]

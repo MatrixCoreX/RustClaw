@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-wallet-initialize"
+description = "Enables the wallet_initialize command without any pre-configured scope."
+commands.allow = ["wallet_initialize"]
+
+[[permission]]
+identifier = "deny-wallet-initialize"
+description = "Denies the wallet_initialize command without any pre-configured scope."
+commands.deny = ["wallet_initialize"]

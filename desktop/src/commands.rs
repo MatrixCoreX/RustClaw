@@ -149,12 +149,14 @@ pub async fn current_session(
 #[tauri::command]
 pub async fn login(
     window: WebviewWindow,
+    wallet: State<'_, crate::wallet::commands::WalletState>,
     state: State<'_, DesktopState>,
     session_id: Uuid,
     input: Option<LoginSecret>,
     remember: bool,
 ) -> Result<LoginResult> {
     main_only(&window)?;
+    wallet.lock().await;
     let _transition = state.transition.lock().await;
     let session = state.session(session_id).await?;
     let input = if let Some(input) = input {
@@ -178,10 +180,12 @@ pub async fn login(
 #[tauri::command]
 pub async fn disconnect_device(
     window: WebviewWindow,
+    wallet: State<'_, crate::wallet::commands::WalletState>,
     app: tauri::AppHandle,
     state: State<'_, DesktopState>,
 ) -> Result<()> {
     main_only(&window)?;
+    wallet.lock().await;
     let _transition = state.transition.lock().await;
     let session = state.session.lock().await.take();
     if let Some(session) = session {

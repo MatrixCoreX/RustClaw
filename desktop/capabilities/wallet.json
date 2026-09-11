@@ -1,0 +1,20 @@
+{
+  "identifier": "wallet",
+  "description": "Bundled asset vault and transaction confirmation; no network, shell, file or main console commands",
+  "windows": [
+    "wallet"
+  ],
+  "local": true,
+  "permissions": [
+    "allow-wallet-status",
+    "allow-wallet-lock",
+    "allow-wallet-initialize",
+    "allow-wallet-unlock",
+    "allow-wallet-create",
+    "allow-wallet-backup",
+    "allow-wallet-restore",
+    "allow-wallet-pending",
+    "allow-wallet-cancel-operation",
+    "allow-wallet-confirm"
+  ]
+}

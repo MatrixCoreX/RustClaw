@@ -65,6 +65,28 @@ async fn tls_server() -> (Connection, support::Evidence, tokio::task::JoinHandle
 }
 
 #[tokio::test]
+async fn https_profile_never_downgrades_to_a_plain_http_listener() {
+    let (connection, _, tls) = tls_server().await;
+    let evidence = support::Evidence::default();
+    let (port, plain) = support::http_server(evidence.clone()).await;
+    let mut target = connection;
+    if let Connection::Https { origin, .. } = &mut target {
+        *origin = format!("https://localhost:{port}");
+    }
+    assert!(Transport::connect(&target, "").await.is_err());
+    assert_eq!(
+        evidence.requests.load(std::sync::atomic::Ordering::SeqCst),
+        0
+    );
+    assert_eq!(
+        evidence.secrets.load(std::sync::atomic::Ordering::SeqCst),
+        0
+    );
+    plain.abort();
+    tls.abort();
+}
+
+#[tokio::test]
 async fn tls_pin_hostname_redirect_and_device_cookie_isolation() {
     let (connection, evidence, server) = tls_server().await;
     let mut wrong = connection.clone();
