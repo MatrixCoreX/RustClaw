@@ -753,7 +753,7 @@ class AdapterTest(unittest.TestCase):
         self.assertNotIn("--extract-only", command)
         self.assertIn("--simplify-chinese", command)
         self.assertNotIn("--no-simplify-chinese", command)
-        self.assertEqual(command[-1], str(input_path))
+        self.assertEqual(command[-1], str(input_path.resolve()))
 
     def test_download_command_preserves_complete_share_text(self) -> None:
         share_text = "复制这条消息，打开快手看看 https://v.kuaishou.com/example/ 更多内容"
@@ -1450,13 +1450,13 @@ class AdapterTest(unittest.TestCase):
         )
         self.assertEqual(
             response["extra"]["processing_inputs"]["background_audio"]["path"],
-            str(artifacts / "note_background_audio.mp3"),
+            str((artifacts / "note_background_audio.mp3").resolve()),
         )
         audio_step = bundle["followup_policy"]["steps"][1]
         self.assertEqual(audio_step["fallback_input_field"], "input_path")
         self.assertEqual(
             audio_step["fallback_input_value"],
-            str(artifacts / "note_background_audio.mp3"),
+            str((artifacts / "note_background_audio.mp3").resolve()),
         )
         self.assertEqual(
             audio_step["completion_capabilities"],
