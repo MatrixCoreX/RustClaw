@@ -8,6 +8,8 @@ use super::{AppState, LoopState};
 use crate::agent_runtime_contract::SubagentRoleDefinition;
 
 pub(super) const SUBAGENT_STOP_SIGNAL_INVALID_ROLE: &str = "subagent_invalid_role";
+pub(super) const SUBAGENT_STOP_SIGNAL_CAPABILITY_POLICY_REJECTED: &str =
+    "subagent_capability_policy_rejected";
 pub(super) const SUBAGENT_STOP_SIGNAL_REQUIRED_CHILD_FAILED: &str =
     "subagent_required_child_failed";
 const MAX_SUBAGENT_CONTEXT_REFS: usize = 16;

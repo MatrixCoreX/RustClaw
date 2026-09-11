@@ -2,6 +2,27 @@ use serde_json::{json, Value};
 
 use super::{log_step_journal_summary, register_step_output, AppState, ClaimedTask, LoopState};
 
+#[cfg(test)]
+#[path = "skill_execution_subagent_recovery_tests.rs"]
+mod recovery_tests;
+
+pub(super) fn normalize_subagent_stop_signal(
+    stop_signal: Option<String>,
+) -> (Option<String>, bool) {
+    let recoverable = matches!(
+        stop_signal.as_deref(),
+        Some(
+            crate::agent_engine::subagent_runtime::SUBAGENT_STOP_SIGNAL_INVALID_ROLE
+                | crate::agent_engine::subagent_runtime::SUBAGENT_STOP_SIGNAL_CAPABILITY_POLICY_REJECTED
+        )
+    );
+    if recoverable {
+        (Some("recoverable_failure_continue_round".to_string()), true)
+    } else {
+        (stop_signal, false)
+    }
+}
+
 pub(super) async fn record_subagent_hook_stage(
     state: &AppState,
     task: &ClaimedTask,
@@ -121,6 +142,19 @@ pub(super) fn record_subagent_step_execution(
     } else {
         crate::executor::StepExecutionStatus::Ok
     };
+    if normalize_subagent_stop_signal(stop_signal.map(str::to_string)).1 {
+        loop_state.has_recoverable_failure_context = true;
+        crate::agent_engine::attempt_ledger::record_attempt_with_retry_instruction(
+            loop_state,
+            "subagent",
+            &args.to_string(),
+            status,
+            &output,
+            stop_signal,
+            &output,
+            Some("recovery_action=replan;repeat_identical_request=false;permission_escalation=false;capability_source=current_runtime_catalog"),
+        );
+    }
     register_step_output(
         loop_state,
         global_step,

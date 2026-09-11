@@ -184,7 +184,7 @@ pub(super) fn enable_test_skills(state: &AppState, skills: &[&str]) {
     });
 }
 
-pub(super) fn install_test_registry(state: &AppState, raw: &str, skills: &[&str]) {
+pub(in crate::agent_engine) fn install_test_registry(state: &AppState, raw: &str, skills: &[&str]) {
     let path = std::env::temp_dir().join(format!(
         "skillctl-execution-test-{}-{}-{}.toml",
         std::process::id(),

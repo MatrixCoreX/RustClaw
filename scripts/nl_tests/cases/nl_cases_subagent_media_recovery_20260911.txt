@@ -1,0 +1,2 @@
+subagent_media_recovery|readonly_optional_inspection|requires_tool_call=true,no_external_side_effect|请委派一个只读子任务，实际查询已安装的媒体下载技能支持哪些操作，再由你汇总结果。不要下载，不要访问视频平台，不要修改文件。
+subagent_media_recovery|wechat_transcription_replay|requires_tool_call=true,media_download,live_network|4.64 复制打开抖音，看看【中产财富说的作品】康波还在萧条期，而不是回升 # 财经 # 宏观经济... https://v.douyin.com/fmM-5xtIrjo/ 11/01 :9pm Q@x.se uSy:/ 音转文
