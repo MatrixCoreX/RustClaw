@@ -1470,7 +1470,7 @@ class AdapterTest(unittest.TestCase):
             response["extra"]["processing_inputs"]["images"],
             [
                 {
-                    "path": str(artifacts / "note.webp"),
+                    "path": str((artifacts / "note.webp").resolve()),
                     "filename": "note.webp",
                     "mime_type": "image/webp",
                     "size_bytes": 5,
