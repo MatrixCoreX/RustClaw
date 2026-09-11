@@ -199,6 +199,7 @@ try:
     checks.append("authenticated loopback MP4 preview, seeking, origin/host checks and token revocation")
     # WebKit may change its current browsing context while an async script opens a window.
     # Initiate as a real click would, then select the new context explicitly.
+    baseline_profiles = native("profiles")
     main_handle = rpc("GET", f"/session/{session_id}/window")
     execute("window.__TAURI_INTERNALS__.invoke('aipp_open', arguments[0]).catch(e=>{window.aippOpenError=String(e)});return true;", [{"sessionId": info["id"], "skillName": "protocol_fixture", "locale": "zh"}])
     time.sleep(2)
@@ -218,12 +219,20 @@ try:
     wait_text("Isolated skill fixture")
     bridge = execute("const done=arguments[arguments.length-1];const id='fixture-roundtrip';window.addEventListener('message',function reply(e){if(e.data?.type==='aipp.capability.result'&&e.data?.request_id===id){window.removeEventListener('message',reply);done(e.data);}});window.parent.postMessage({schema_version:1,type:'aipp.capability.invoke',request_id:id,capability:'fixture.read',args:{}},'*');", asynchronous=True)
     assert bridge["ok"] and bridge["data"]["status"] == "succeeded", bridge
-    blocked = execute("const done=arguments[arguments.length-1]; if (!window.__TAURI_INTERNALS__) {done(true); return;} window.__TAURI_INTERNALS__.invoke('profiles').then(()=>done(false)).catch(()=>done(true));", asynchronous=True)
-    assert blocked
+    from iframe_ipc_probe import SCRIPT as iframe_ipc_script, validate as validate_iframe_ipc
+    iframe_probe = execute(iframe_ipc_script, asynchronous=True)
+    validate_iframe_ipc(iframe_probe, WINDOWS)
+    # Verify the approved bridge still completes after the forbidden calls.
+    bridge_after_probe = execute("const done=arguments[arguments.length-1];const id='fixture-after-probe';window.addEventListener('message',function reply(e){if(e.data?.type==='aipp.capability.result'&&e.data?.request_id===id){window.removeEventListener('message',reply);done(e.data);}});window.parent.postMessage({schema_version:1,type:'aipp.capability.invoke',request_id:id,capability:'fixture.read',args:{}},'*');", asynchronous=True)
+    assert bridge_after_probe["ok"] and bridge_after_probe["data"]["status"] == "succeeded"
+    iframe_probe = execute("return window.__desktopIframeProbe")
+    validate_iframe_ipc(iframe_probe, WINDOWS)
+    measurements["aipp_iframe_ipc"] = iframe_probe
     rpc("POST", f"/session/{session_id}/frame", {"id": None})
     screenshot("03-isolated-aipp")
     checks.append("isolated AiAPP bridge round trip succeeds; main IPC and undeclared capabilities denied")
     rpc("POST", f"/session/{session_id}/window", {"handle": main_handle})
+    assert native("profiles") == baseline_profiles, "iframe_modified_profile_store"
     native("disconnect_device")
     native("request_start", {"sessionId": info["id"], "spec": {"path": "/v1/health", "method": "GET", "headers": {}, "has_body": False}}, True)
     info2 = native("connect_device", {"profileId": profile["id"], "sshSecret": ""})
