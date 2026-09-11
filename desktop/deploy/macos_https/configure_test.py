@@ -11,6 +11,7 @@ class HttpsConfigurationTest(unittest.TestCase):
         self.assertNotIn('Strict-Transport-Security', config)
         self.assertNotIn('return 301', config)
         self.assertIn('proxy_set_header X-Forwarded-For $remote_addr;', config)
+        self.assertIn('proxy_set_header Host $http_host;', config)
         self.assertIn('deny all;', config)
         self.assertIn('ssl_protocols TLSv1.2 TLSv1.3;', config)
 
