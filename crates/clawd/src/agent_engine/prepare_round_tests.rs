@@ -6,6 +6,64 @@ use super::{
 };
 
 #[test]
+fn verifier_failure_evidence_preserves_completed_steps_without_payloads() {
+    let mut result = verify_result_with_issue(
+        crate::verifier::VerifyMode::Enforce,
+        crate::verifier::VerifyIssueKind::SandboxPolicyDenied,
+    );
+    result.blocked_reason = Some("sandbox_workspace_credential_denied".to_string());
+    let plan = crate::PlanResult {
+        goal: "extract text".into(),
+        missing_slots: Vec::new(),
+        needs_confirmation: false,
+        output_contract: None,
+        planner_notes: String::new(),
+        plan_kind: crate::PlanKind::Native,
+        raw_plan_text: String::new(),
+        steps: vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "call_skill".to_string(),
+            skill: "fixture_reader".to_string(),
+            args: serde_json::json!({"action": "review", "token": "must-not-disclose"}),
+            depends_on: Vec::new(),
+            why: String::new(),
+        }],
+    };
+    let executed = vec![
+        crate::executor::StepExecutionResult {
+            step_id: "download".into(),
+            skill: "fixture_download".into(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some("must-not-disclose".into()),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        },
+        crate::executor::StepExecutionResult {
+            step_id: "recognize".into(),
+            skill: "fixture_recognize".into(),
+            status: crate::executor::StepExecutionStatus::Error,
+            output: None,
+            error: Some("must-not-disclose".into()),
+            started_at: 2,
+            finished_at: 3,
+        },
+    ];
+    let value = super::verifier_gate_execution_evidence(&result, &plan, &executed);
+    let evidence = &value["verification_evidence"];
+    assert_eq!(evidence["successful_step_count"], 1);
+    assert_eq!(evidence["executed_step_count"], 2);
+    assert_eq!(evidence["recent_executed_steps"][0]["status"], "ok");
+    assert_eq!(evidence["recent_executed_steps"][1]["status"], "error");
+    assert_eq!(evidence["affected_steps"][0]["action"], "review");
+    assert_eq!(
+        evidence["blocked_reason"],
+        "sandbox_workspace_credential_denied"
+    );
+    assert!(!value.to_string().contains("must-not-disclose"));
+}
+
+#[test]
 fn planner_prefers_raw_current_request_over_pre_route_rewrite() {
     let context = crate::agent_engine::AgentRunContext {
         original_user_request: Some("raw current request".to_string()),

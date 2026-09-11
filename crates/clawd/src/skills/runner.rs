@@ -9,10 +9,8 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio_util::codec::LinesCodecError;
 
-use claw_core::config::ToolSandboxMode;
 use claw_core::skill_registry::{
-    Capability, CapabilityExecutionMode, CapabilityIsolationProfile, PlannerCapabilityEffect,
-    PlannerCapabilityMapping,
+    Capability, CapabilityExecutionMode, CapabilityIsolationProfile, PlannerCapabilityMapping,
 };
 
 use crate::{AppState, ClaimedTask};
@@ -31,9 +29,11 @@ use super::{
     task_allows_path_outside_workspace, task_allows_sudo, terminate_subprocess_group,
 };
 use runner_support::{
-    cancelled_capture_projection, inherited_sandbox_backend, invocation_artifact_output_directory,
+    action_allows_provider_credentials, action_scoped_runner_capabilities,
+    action_scoped_runner_sandbox_mode, add_runner_dispatch_metadata, cancelled_capture_projection,
+    has_planner_capability_prefix, inherited_sandbox_backend, invocation_artifact_output_directory,
     local_clawd_base_url_from_internal_listen, runner_additional_writable_paths,
-    selected_provider_api_key_env_names,
+    selected_provider_api_key_env_names, stateless_readonly_reuse_allowed,
 };
 
 #[cfg(test)]
@@ -64,12 +64,6 @@ pub(super) fn extract_skill_provider_model(value: &Value) -> Option<(String, Str
         model.to_string(),
         model_kind.to_string(),
     ))
-}
-
-fn has_planner_capability_prefix(capabilities: &[PlannerCapabilityMapping], prefix: &str) -> bool {
-    capabilities
-        .iter()
-        .any(|capability| capability.name.starts_with(prefix))
 }
 
 fn runner_pre_dispatch_error(
@@ -901,9 +895,11 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
     let skill_uses_llm = caps
         .iter()
         .any(|cap| matches!(cap, claw_core::skill_registry::Capability::Llm));
-    let selected_llm_connection = skill_uses_llm
-        .then(|| crate::llm_gateway::selected_llm_connection(state, Some(task)))
-        .flatten();
+    // Gateway-only actions receive a task-scoped handle, never provider keys.
+    let selected_llm_connection = (skill_uses_llm
+        && action_allows_provider_credentials(action_mapping.as_ref()))
+    .then(|| crate::llm_gateway::selected_llm_connection(state, Some(task)))
+    .flatten();
     let secret_envs = {
         let broker = claw_core::secrets::global_or_default();
         match provision_skill_secret_envs(broker.as_ref(), &caps, selected_llm_connection.as_ref())
@@ -1830,108 +1826,6 @@ pub(crate) fn validate_runner_execution_binding_snapshot(
         return Err("skill runner execution binding snapshot mismatch".to_string());
     }
     Ok(())
-}
-
-fn action_scoped_runner_capabilities(
-    mut capabilities: Vec<Capability>,
-    mapping: Option<&PlannerCapabilityMapping>,
-) -> Vec<Capability> {
-    let Some(mapping) = mapping else {
-        return capabilities;
-    };
-    capabilities.retain(|capability| match capability {
-        Capability::Llm => {
-            mapping.network_access != Some(false) && mapping.credential_access != Some(false)
-        }
-        Capability::LlmCredentialFallback(_) => {
-            mapping.network_access != Some(false) && mapping.credential_access != Some(false)
-        }
-        Capability::Net => mapping.network_access != Some(false),
-        Capability::FsWrite => mapping.filesystem_write != Some(false),
-        Capability::Exec | Capability::ExecSudo => mapping.subprocess != Some(false),
-        Capability::Secrets(_) | Capability::OptionalSecrets(_) => {
-            mapping.credential_access != Some(false)
-        }
-        Capability::FsRead => true,
-    });
-    capabilities
-}
-
-fn action_scoped_runner_sandbox_mode(
-    default_mode: ToolSandboxMode,
-    mapping: Option<&PlannerCapabilityMapping>,
-) -> ToolSandboxMode {
-    if default_mode == ToolSandboxMode::DangerFull {
-        ToolSandboxMode::DangerFull
-    } else if mapping.is_some_and(|mapping| {
-        matches!(
-            mapping.isolation_profile,
-            Some(CapabilityIsolationProfile::ReadOnly | CapabilityIsolationProfile::HostProcess)
-        ) || mapping.filesystem_write == Some(false)
-    }) {
-        ToolSandboxMode::ReadOnly
-    } else {
-        default_mode
-    }
-}
-
-fn stateless_readonly_reuse_allowed(
-    execution_profile: skill_sdk::ExecutionProfile,
-    sandbox_profile: skill_sdk::SandboxProfile,
-    capabilities: &[Capability],
-    mapping: Option<&PlannerCapabilityMapping>,
-    has_storage: bool,
-    has_secrets: bool,
-    admission_capable: bool,
-) -> bool {
-    let Some(mapping) = mapping else {
-        return false;
-    };
-    execution_profile == skill_sdk::ExecutionProfile::StatelessReadonly
-        && matches!(
-            mapping.effect,
-            Some(PlannerCapabilityEffect::Observe | PlannerCapabilityEffect::Validate)
-        )
-        && mapping.once_per_task != Some(true)
-        && mapping.idempotent != Some(false)
-        && mapping.network_access != Some(true)
-        && mapping.filesystem_write != Some(true)
-        && mapping.external_publish != Some(true)
-        && mapping.credential_access != Some(true)
-        && mapping.subprocess != Some(true)
-        && mapping.package_install != Some(true)
-        && mapping.privilege_escalation != Some(true)
-        && sandbox_profile == skill_sdk::SandboxProfile::ReadOnly
-        && capabilities
-            .iter()
-            .all(|capability| matches!(capability, Capability::FsRead))
-        && !has_storage
-        && !has_secrets
-        && !admission_capable
-}
-
-fn add_runner_dispatch_metadata(
-    response: &mut Value,
-    mode: &'static str,
-    fallback_reason: Option<&'static str>,
-) {
-    let Some(response) = response.as_object_mut() else {
-        return;
-    };
-    let extra = response
-        .entry("extra")
-        .or_insert_with(|| Value::Object(serde_json::Map::new()));
-    let Some(extra) = extra.as_object_mut() else {
-        return;
-    };
-    extra.insert(
-        "runner_dispatch".to_string(),
-        json!({
-            "schema_version": 1,
-            "mode": mode,
-            "fallback_reason": fallback_reason,
-        }),
-    );
 }
 
 pub(crate) fn build_runner_skill_context(

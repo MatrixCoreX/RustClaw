@@ -43,6 +43,8 @@ async fn build_verifier_gate_response(
     user_text: &str,
     resolved_user_intent: &str,
     verify_result: &crate::verifier::VerifyResult,
+    plan_result: &PlanResult,
+    executed_steps: &[crate::executor::StepExecutionResult],
 ) -> String {
     let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
     let first_issue_kind = verify_result
@@ -79,6 +81,7 @@ async fn build_verifier_gate_response(
         format!("verification_issue_count: {}", verify_result.issues.len()),
         format!("needs_confirmation: {needs_confirmation}"),
         format!("needs_clarification: {needs_clarify}"),
+        verifier_gate_execution_evidence(verify_result, plan_result, executed_steps).to_string(),
     ];
     if verify_result
         .blocked_reason
@@ -98,6 +101,54 @@ async fn build_verifier_gate_response(
     );
     crate::fallback::compose_user_response_from_contract(state, task, &contract, fallback_source)
         .await
+}
+
+fn verifier_gate_execution_evidence(
+    verify_result: &crate::verifier::VerifyResult,
+    plan_result: &PlanResult,
+    executed_steps: &[crate::executor::StepExecutionResult],
+) -> serde_json::Value {
+    // Keep action identities and statuses, not raw arguments, outputs or secrets.
+    let affected_steps: Vec<_> = verify_result
+        .issues
+        .iter()
+        .take(16)
+        .map(|issue| {
+            let step = plan_result
+                .steps
+                .iter()
+                .find(|step| step.step_id == issue.step_id);
+            serde_json::json!({
+                "step_id": issue.step_id,
+                "issue_kind": issue.kind.as_str(),
+                "subject": step.map(|step| step.skill.as_str()),
+                "action": step.and_then(|step| step.args.get("action")).and_then(|v| v.as_str()),
+            })
+        })
+        .collect();
+    let recent_executed_steps: Vec<_> = executed_steps
+        .iter()
+        .rev()
+        .take(16)
+        .rev()
+        .map(|step| {
+            serde_json::json!({
+                "step_id": step.step_id,
+                "subject": step.skill,
+                "status": step.status.as_str(),
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "verification_evidence": {
+            "schema_version": 1,
+            "blocked_reason": verify_result.blocked_reason,
+            "affected_steps": affected_steps,
+            "executed_step_count": executed_steps.len(),
+            "successful_step_count": executed_steps.iter().filter(|step| step.is_ok()).count(),
+            "recent_executed_steps": recent_executed_steps,
+        }
+    })
 }
 
 fn verifier_gate_needs_confirmation(verify_result: &crate::verifier::VerifyResult) -> bool {
@@ -325,6 +376,8 @@ pub(super) async fn prepare_round_actions(
             planner_user_text,
             &plan_result.goal,
             &verify_result,
+            &plan_result,
+            &loop_state.executed_step_results,
         )
         .await;
         vec![AgentAction::Respond { content }]

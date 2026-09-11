@@ -1,4 +1,45 @@
 use super::*;
+use claw_core::config::ToolSandboxMode;
+
+#[test]
+fn media_ocr_workspace_policy_uses_gateway_without_provider_credentials() {
+    let registry = claw_core::skill_registry::SkillsRegistry::load_from_path(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml"),
+    )
+    .expect("workspace registry");
+    let mapping = registry
+        .planner_capabilities("media_download")
+        .iter()
+        .find(|mapping| mapping.name == "media_download.ocr")
+        .expect("OCR capability");
+    assert_eq!(mapping.credential_access, Some(false));
+    assert_eq!(mapping.network_access, Some(true));
+    assert_eq!(mapping.subprocess, Some(true));
+    assert!(registry
+        .capabilities("media_download")
+        .contains(&claw_core::skill_registry::Capability::Llm));
+    let policy = crate::runtime::policy::ToolsPolicy::from_config(
+        &claw_core::config::ToolsConfig::default(),
+    )
+    .expect("workspace policy");
+    let requirements = crate::runtime::policy::SandboxRequirements {
+        mutates: true,
+        network_access: mapping.network_access.unwrap_or_default(),
+        filesystem_write: mapping.filesystem_write.unwrap_or_default(),
+        credential_access: mapping.credential_access.unwrap_or_default(),
+        subprocess: mapping.subprocess.unwrap_or_default(),
+        isolation_profile: Some("local_current_workspace"),
+        ..Default::default()
+    };
+    assert_eq!(policy.sandbox_denial(requirements), None);
+    assert_eq!(
+        policy.sandbox_denial(crate::runtime::policy::SandboxRequirements {
+            credential_access: true,
+            ..requirements
+        }),
+        Some("sandbox_workspace_credential_denied")
+    );
+}
 
 #[test]
 fn runtime_timeout_is_machine_readable_for_model_recovery() {
@@ -434,6 +475,44 @@ fn read_only_preview_removes_network_write_execution_and_credentials() {
     let effective = action_scoped_runner_capabilities(capabilities, Some(&preview_mapping()));
 
     assert_eq!(effective, vec![Capability::FsRead]);
+}
+
+#[test]
+fn granted_gateway_access_does_not_grant_provider_credentials() {
+    let mapping = local_api_mapping();
+    let effective = action_scoped_runner_capabilities(
+        vec![
+            Capability::Llm,
+            Capability::Net,
+            Capability::FsRead,
+            Capability::Secrets("provider_api_key".to_string()),
+            Capability::OptionalSecrets("optional_api_key".to_string()),
+            Capability::LlmCredentialFallback("provider_api_key".to_string()),
+        ],
+        Some(&mapping),
+    );
+    assert_eq!(
+        effective,
+        vec![Capability::Llm, Capability::Net, Capability::FsRead]
+    );
+    assert!(!action_allows_provider_credentials(Some(&mapping)));
+    let mut direct = mapping.clone();
+    direct.credential_access = Some(true);
+    assert!(action_allows_provider_credentials(Some(&direct)));
+    assert!(action_allows_provider_credentials(None));
+}
+
+#[test]
+fn gateway_access_requires_declared_llm_and_action_network_access() {
+    assert_eq!(
+        action_scoped_runner_capabilities(vec![Capability::Net], Some(&local_api_mapping())),
+        vec![Capability::Net]
+    );
+    assert!(action_scoped_runner_capabilities(
+        vec![Capability::Llm, Capability::Net],
+        Some(&preview_mapping())
+    )
+    .is_empty());
 }
 
 #[test]
