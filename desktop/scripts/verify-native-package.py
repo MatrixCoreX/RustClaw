@@ -8,6 +8,7 @@ import plistlib
 import shutil
 import subprocess
 import time
+from windows_package_payload import expected_payload
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "releases/native"
@@ -36,16 +37,13 @@ def main():
     EVIDENCE.mkdir(parents=True, exist_ok=True)
     checks = []
     if platform.system() == "Windows":
-        # Tauri stamps each bundle type into the executable in build order.
-        # NSIS must be last so the raw binary matches the installed NSIS payload.
-        config = json.loads((ROOT / "tauri.windows.conf.json").read_text())
-        assert config["bundle"]["targets"][-1] == "nsis", "nsis_must_be_final_bundle"
         installers = list(bundle.glob("nsis/*-setup.exe"))
         msi = list(bundle.glob("msi/*.msi"))
         assert len(installers) == 1 and msi, "native_installers_missing"
         run(["pwsh", "-NoProfile", "-File", ROOT / "scripts/windows-package-smoke.ps1",
              "-Installer", installers[0], "-Evidence", EVIDENCE,
-             "-ExpectedBinary", ROOT / "target" / target / "release/agent-desktop.exe"])
+             "-ExpectedBinary", expected_payload(
+                 ROOT / "target" / target / "release/agent-desktop.exe", EVIDENCE)])
         for package in installers + msi:
             shutil.copy2(package, OUT / package.name)
         signing = "unsigned-internal-test"

@@ -5,6 +5,8 @@ $installDir = Join-Path $Evidence 'Installed app 测试'
 $install = Start-Process -FilePath $Installer -ArgumentList @('/S', "/D=$installDir") -PassThru -Wait
 if ($install.ExitCode -ne 0) { throw "installer_failed_$($install.ExitCode)" }
 $binary = Join-Path $installDir 'agent-desktop.exe'
+@{ installed = (Get-FileHash $binary).Hash; expected = (Get-FileHash $ExpectedBinary).Hash } |
+  ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $Evidence 'installed-payload.json')
 if ((Get-FileHash $binary).Hash -ne (Get-FileHash $ExpectedBinary).Hash) { throw 'installed_binary_mismatch' }
 $app = Start-Process -FilePath $binary -PassThru
 try {
