@@ -53,7 +53,12 @@ def run(execute, rpc, sid, account, second, screenshot, page):
             # Never repeat the click: verify completion and the actual clipboard below.
             pass
         for _ in range(30):
-            if execute("return !!document.querySelector(arguments[0]+' button[aria-label=\"已复制完整公钥\"]')", [selector]):
+            try:
+                copied_state = execute("return !!document.querySelector(arguments[0]+' button[aria-label=\"已复制完整公钥\"]')", [selector])
+            except RemoteDisconnected:
+                # Retry only this read-only observation after the focus change.
+                copied_state = False
+            if copied_state:
                 break
             time.sleep(.1)
         else:

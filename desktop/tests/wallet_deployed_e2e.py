@@ -15,6 +15,7 @@ def run(native, account, recipient, output):
     assert key
     connection = ({'kind': 'local', 'origin': origin} if origin.startswith('http:')
                   else {'kind': 'https', 'origin': origin})
+    native('disconnect_device')
     profile = native('add_profile', {'alias': 'Deployed owner acceptance', 'connection': connection})
     session = native('connect_device', {'profileId': profile['id'], 'sshSecret': ''})['id']
     native('login', {'sessionId': session, 'input': {'mode': 'key', 'username': '', 'secret': key}, 'remember': False})
@@ -38,7 +39,7 @@ def run(native, account, recipient, output):
         # No signature or real balance: Core must reject before confirmation.
         native('wallet_prepare', {**base, 'intent': intent}, 'wallet_insufficient_balance')
         assert not native('wallet_operations', {'sessionId': session, 'accountId': account['id']})
-        evidence.append({'service': service, 'node_url': cap['node_url'], 'ledger_id': cap['ledger_id'],
+        evidence.append({'service': service, 'account': account['public_key'], 'node_url': cap['node_url'], 'ledger_id': cap['ledger_id'],
                          'zero_reads': True, 'unfunded_write_rejected': True})
     assert evidence[0]['ledger_id'] == evidence[1]['ledger_id']
     (output / 'deployed-acceptance.json').write_text(json.dumps(evidence, indent=2))

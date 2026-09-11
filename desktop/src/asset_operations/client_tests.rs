@@ -110,11 +110,15 @@ async fn native_client_zero_balance_path_requires_login_and_does_not_register_an
     assert_eq!(result.aic_balance_units, "0");
     assert_eq!(result.total_pages, 1);
     let intent = Intent::Transfer {
-        asset: "USD".into(), amount_units: "100000000".into(),
+        asset: "USD".into(),
+        amount_units: "100000000".into(),
         recipient: crate::wallet::keys::public(&[2; 32]).unwrap(),
-        memo: String::new(), max_fee_bps: 0,
+        memo: String::new(),
+        max_fee_bps: 0,
     };
-    let (payload, raw) = client::challenge(&session, &cap, &owner, Uuid::new_v4(), &intent).await.unwrap();
+    let (payload, raw) = client::challenge(&session, &cap, &owner, Uuid::new_v4(), &intent)
+        .await
+        .unwrap();
     assert!(!raw.contains("password"));
     let signature = "a".repeat(128);
     let proof = client::verify_body(&payload, &signature);

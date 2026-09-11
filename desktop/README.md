@@ -10,7 +10,7 @@
 
 ## 安装和使用
 
-双击 [Ubuntu 安装包](installers/0.2.1/linux/agent-desktop_0.2.1_amd64.deb)，使用 Ubuntu 软件安装器安装。各平台安装包集中存放于 `installers/0.2.1/`。安装后从应用菜单打开所选产品名称对应的桌面控制台。日常使用不需要 Rust、Node 或终端。
+本次 Ubuntu 安装包为 [0.3.2](installers/0.3.2/linux/agent-desktop_0.3.2_amd64.deb)，已在本机安装并通过独立资产账户联合验收。安装包属于本地构建产物，不提交 Git；Windows/Mac 本轮未发布。双击安装包，使用 Ubuntu 软件安装器安装，然后从应用菜单打开所选产品名称对应的桌面控制台。日常使用不需要 Rust、Node 或终端。
 
 1. 选择“添加设备”，给设备取一个易懂的名称。
 2. 本机选择“本机 HTTP”；其他设备选择 HTTPS 或 SSH。它们通向相同的管理页面。
