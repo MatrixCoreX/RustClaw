@@ -47,8 +47,10 @@ npm run build
 GitHub 仅运行 `.github/workflows/` 中的流程。模板保留在 `desktop/ci/`；桌面专用入口位于 `.github/workflows/desktop-native.yml`。提交并推送后执行：
 
 ```text
-gh workflow run desktop-native.yml -f source_commit=<完整提交SHA>
+gh workflow run desktop-native.yml -f source_commit=<完整提交SHA> -f platform=all
 ```
+
+`platform` 可选 `all`、`windows`、`macos`。
 
 流程只读仓库、不读取签名 secrets、不发布 GitHub Release、不访问实际设备。`scripts/verify-native-package.py` 只允许在一次性的 GitHub runner 上安装和启动测试包，避免覆盖日常开发机上的现有客户端。原生测试记录不等于实际家庭 LAN 配对验收；云端无法连接用户的 Pi。
 
