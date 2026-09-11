@@ -2,11 +2,11 @@
 
 独立的 Tauri 2 桌面工程，用于连接已经运行服务的设备。客户端复用 `../UI/src` 的页面，不运行远端服务、模型或技能。
 
-已验证的安装版本为 **Ubuntu 26.04 x86_64 0.1.4 内部测试版**。0.2.1 增加本机 HTTP 连接，以及 Windows x64、macOS Apple 芯片与 Intel 的原生构建和打包支持；对应原生构建、安装与测试的完成状态以 [跨平台验收记录](docs/cross-platform-validation.md) 为准。Ubuntu 包声明 GLIBC 2.39+、GTK 3、WebKitGTK 4.1 和音视频依赖，Ubuntu 22.04/24.04 尚未验证。
+**0.2.1 内部测试包**已生成 Linux x64、Windows x64、Mac Apple 芯片与 Intel 版本。Linux / Windows 通过 19 项原生界面回归，Mac 通过原生安全、凭据库、安装与启动检查。0.2.1 增加本机发现和 HTTP 连接，以及 Windows x64、macOS Apple 芯片与 Intel 的原生构建和打包支持；对应原生构建、安装与测试的完成状态以 [跨平台验收记录](docs/cross-platform-validation.md) 为准。Ubuntu 包声明 GLIBC 2.39+、GTK 3、WebKitGTK 4.1 和音视频依赖，Ubuntu 22.04/24.04 尚未验证。
 
 ## 安装和使用
 
-双击 [Ubuntu 安装包](releases/agent-desktop_0.1.4_amd64.deb)，使用 Ubuntu 软件安装器安装。安装后从应用菜单打开所选产品名称对应的桌面控制台。日常使用不需要 Rust、Node 或终端。
+双击 [Ubuntu 安装包](installers/0.2.1/linux/agent-desktop_0.2.1_amd64.deb)，使用 Ubuntu 软件安装器安装。各平台安装包集中存放于 `installers/0.2.1/`。安装后从应用菜单打开所选产品名称对应的桌面控制台。日常使用不需要 Rust、Node 或终端。
 
 1. 选择“添加设备”，给设备取一个易懂的名称。
 2. 本机选择“本机 HTTP”；其他设备选择 HTTPS 或 SSH。它们通向相同的管理页面。
@@ -24,9 +24,9 @@
 
 打开“添加设备”会自动查找 `_agent-runtime._tcp.local.` DNS-SD 广播，约 4 秒。点击“扫描局域网”会同时进行有界 IPv4 查找；可随时停止。它仅扫描物理有线 / Wi-Fi 接口当前所在的至多 /24 范围，最多 508 个地址、24 个并发、20 秒；不会扫描公网、VPN 或所有端口。匿名读取 80 端口的 `/webd/session` 合同，匹配后才检查 443 或 22 端口，分别提供 HTTPS 或 SSH 候选。没有广播的 HTTP 设备也可能被找到；自定义端口、仅 HTTPS、IPv6-only、跨 VLAN 或隔离网络请使用 DNS-SD / 手工地址。没有 HTTP 探测匹配时，不把普通 SSH 主机列为设备。
 
-广播和扫描结果始终是待验证地址。不会自动接受证书、导入系统根 CA、保存登录或发送账号。选择结果后，仍需通过设备本地或已核验 SSH 获取公开 CA / 主机指纹。广播里的私有 CA 字段只用于显示配对表单，不能建立信任。
+广播和扫描结果始终是待验证地址。不会自动接受证书、导入系统根 CA、保存登录或发送账号。选择局域网结果后，仍需通过设备本地或已核验 SSH 获取公开 CA / 主机指纹。广播里的私有 CA 字段只用于显示配对表单，不能建立信任。
 
-设备端 Avahi 声明示例在 `deploy/agent-desktop-https.service`，端口须对应已验证可用的 HTTPS 服务。安装声明仅发布主机名、端口和协议类型，不发布账号、指纹、证书或私钥。桌面安装器不自动修改设备端服务。HTTPS 与原有 HTTP 并存的部署和验收说明见 [LAN 验证记录](docs/lan-discovery-validation.md)。
+设备端 Avahi 声明示例在 `deploy/agent-desktop-https.service`，端口须对应已验证可用的 HTTPS 服务。安装声明仅发布主机名、端口和协议类型，不发布账号、指纹、证书或私钥。桌面安装器不自动修改设备端服务。HTTPS 与原有 HTTP 并存的部署和验收说明见 [LAN 验证记录](docs/lan-discovery-validation.md)。 Mac 设备的独立 HTTPS 8443 入口及 HTTP 保留验证见 [162 部署记录](docs/host-162-https-validation.md)。
 
 文件上传使用系统选择器与分块传输。保存附件时选择电脑上的目标位置，下载使用临时文件、长度校验和原子完成，支持进度与取消。音视频通过仅监听本机回环地址、带独立临时授权的媒体通道播放，远端流量继续加密。不会自动打开下载文件。动态 AiAPP 在独立受限窗口中打开，其 bridge 由设备的 manifest 合同和服务端权限继续约束。
 
@@ -40,7 +40,7 @@
 
 Windows / macOS 的依赖、构建、安装、权限与签名说明见 [平台指南](docs/windows-macos.md)。
 
-所有桌面源码、配置、测试和构建输出入口在本目录，Cargo workspace、锁文件与服务端独立。共享页面由 `scripts/shared-ui-adapter.ts` 在桌面构建时适配；它不改写、不复制 UI 业务源码，已知入口发生变化时构建会明确失败。
+桌面源码、配置、测试和构建输出入口在本目录，GitHub 原生构建另有桌面专用 workflow 入口；Cargo workspace、锁文件与服务端独立。共享页面由 `scripts/shared-ui-adapter.ts` 在桌面构建时适配；它不改写、不复制 UI 业务源码，已知入口发生变化时构建会明确失败。
 
 ```bash
 cd desktop
@@ -70,7 +70,7 @@ python3 scripts/inventory.py
 python3 tests/native_e2e.py
 ```
 
-原生测试需 `WebKitWebDriver`、`xvfb-run`、Python、OpenSSL、ffmpeg 和位于 `.build/tools/bin/tauri-driver` 的测试驱动；可使用 `cargo install tauri-driver --locked --root .build/tools` 安装。测试只连接自建 loopback TLS/SSH 协议夹具，使用隔离数据目录，不操作真实设备或资产。测试驱动不进入发行安装包。
+原生测试需 `WebKitWebDriver`、`xvfb-run`、Python、OpenSSL、ffmpeg 和位于 `.build/tools/bin/tauri-driver` 的测试驱动；可使用 `cargo install tauri-driver --locked --root .build/tools` 安装。测试只连接自建 loopback HTTP/TLS/SSH 协议夹具，使用隔离数据目录，不操作真实设备或资产。测试驱动不进入发行安装包。
 
 功能来源清单见 [docs/feature-inventory.md](docs/feature-inventory.md)，安全合同见 [docs/security.md](docs/security.md)，本机验证与限制见 [docs/ubuntu-validation.md](docs/ubuntu-validation.md)。
 
