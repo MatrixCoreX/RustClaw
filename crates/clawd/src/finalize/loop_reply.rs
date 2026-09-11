@@ -170,6 +170,9 @@ use machine_envelope::{
     attach_machine_envelope_delivery_from_loop, mark_machine_envelope_delivery_complete,
 };
 
+#[path = "loop_reply_machine_failure.rs"]
+mod machine_failure;
+
 #[path = "loop_reply_machine_payload.rs"]
 mod machine_payload;
 use machine_payload::render_machine_payload_delivery_if_needed;
@@ -402,6 +405,18 @@ pub(crate) async fn finalize_loop_reply(
             .with_messages(delivery_messages)
             .with_task_journal(journal)
             .with_failure(message));
+    }
+
+    if let Some(reply) = machine_failure::finalize_unresolved_machine_failure(
+        state,
+        task,
+        user_text,
+        &mut loop_state,
+        agent_run_context,
+    )
+    .await
+    {
+        return Ok(reply);
     }
 
     if !machine_envelope::loop_has_machine_envelope(&loop_state) {

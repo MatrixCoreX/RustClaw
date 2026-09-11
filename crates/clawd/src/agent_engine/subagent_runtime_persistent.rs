@@ -145,10 +145,13 @@ fn schedule_child_task_specs(
             serde_json::to_string(&json!({
                 "owner_layer": "child_task_execution_policy",
                 "policy_violations": policy_violations,
+                "failure_phase": "pre_dispatch",
+                "side_effect_applied": false,
+                "recovery_action": "replan_with_compatible_capabilities",
             }))
             .ok(),
         );
-        return Err(SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED);
+        return Err(super::SUBAGENT_STOP_SIGNAL_CAPABILITY_POLICY_REJECTED);
     }
     let allocation_ids = allocate_persistent_child_budgets(loop_state, &mut specs)?;
     let write_enabled = specs

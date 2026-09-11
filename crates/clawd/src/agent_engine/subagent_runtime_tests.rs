@@ -2,6 +2,9 @@ use super::*;
 use crate::agent_engine::LoopState;
 use std::path::{Path, PathBuf};
 
+#[path = "subagent_runtime_policy_fixture.rs"]
+mod policy_fixture;
+
 struct TempDirGuard {
     path: PathBuf,
 }
@@ -68,6 +71,7 @@ fn child_task_row(state: &crate::AppState, task_id: &str) -> (String, serde_json
 
 fn persistent_test_state() -> crate::AppState {
     let mut state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    policy_fixture::install(&state);
     state.reload_ctx.config_path_for_reload = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../configs/config.toml")
         .display()
@@ -582,7 +586,7 @@ fn persistent_readonly_child_rejects_mutating_capability_before_enqueue() {
 
     assert_eq!(
         result,
-        Err(subagent_runtime_persistent::SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED)
+        Err(SUBAGENT_STOP_SIGNAL_CAPABILITY_POLICY_REJECTED)
     );
     let observation = loop_state
         .task_observations

@@ -33,6 +33,7 @@ pub(super) fn loop_has_subagent_machine_envelope(loop_state: &LoopState) -> bool
         || loop_state
             .executed_step_results
             .iter()
+            .filter(|step| step.is_ok())
             .filter_map(|step| step.output.as_deref())
             .any(|message| subagent_machine_envelope_payload(message).is_some())
 }
@@ -108,6 +109,7 @@ fn latest_machine_envelope_message(loop_state: &LoopState) -> Option<String> {
                 .executed_step_results
                 .iter()
                 .rev()
+                .filter(|step| step.is_ok())
                 .filter_map(|step| step.output.as_deref())
                 .find_map(machine_envelope_delivery_message)
         })
@@ -151,6 +153,11 @@ fn child_model_result_projection(payload: &serde_json::Value) -> Option<serde_js
 }
 
 fn machine_envelope_payload(message: &str) -> Option<serde_json::Value> {
+    let payload = raw_machine_envelope_payload(message)?;
+    (!machine_envelope_reports_failure(&payload)).then_some(payload)
+}
+
+pub(super) fn raw_machine_envelope_payload(message: &str) -> Option<serde_json::Value> {
     let payload: serde_json::Value = serde_json::from_str(message.trim()).ok()?;
     if !payload.is_object() {
         return None;
@@ -170,6 +177,15 @@ fn machine_envelope_payload(message: &str) -> Option<serde_json::Value> {
         return None;
     }
     Some(payload)
+}
+
+pub(super) fn machine_envelope_reports_failure(payload: &serde_json::Value) -> bool {
+    matches!(
+        payload.get("status").and_then(serde_json::Value::as_str),
+        Some("error" | "failed" | "rejected" | "cancelled")
+    ) || payload
+        .get("child_model_result")
+        .is_some_and(machine_envelope_reports_failure)
 }
 
 fn subagent_machine_envelope_payload(message: &str) -> Option<serde_json::Value> {

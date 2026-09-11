@@ -6,6 +6,10 @@ use crate::child_task_contract::{ChildTaskPermissionProfile, ChildTaskSpec};
 
 const MAX_CHILD_ALLOWED_CAPABILITIES: usize = 32;
 
+#[cfg(test)]
+#[path = "child_task_capability_lookup_tests.rs"]
+mod capability_lookup_tests;
+
 struct SelectedCapability {
     canonical_skill: String,
     name: String,
@@ -273,17 +277,19 @@ fn selected_capability_by_name(
             policy: tool.policy.permission_policy_json(),
         });
     }
-    let registry = state.get_skills_registry()?;
-    for skill in registry.enabled_names() {
+    let snapshot = state.get_skill_views_snapshot();
+    let registry = snapshot.registry.as_ref()?;
+    // Admission and switches, not release defaults, own the effective allow-set.
+    for skill in snapshot.skills_list.iter() {
         let Some(mapping) = registry
-            .planner_exposed_capabilities(&skill)
+            .planner_exposed_capabilities(skill)
             .into_iter()
             .find(|mapping| mapping.name == capability_name)
         else {
             continue;
         };
         return Some(SelectedCapability {
-            canonical_skill: skill,
+            canonical_skill: skill.clone(),
             name: mapping.name.clone(),
             action: mapping.action.clone(),
             effect: mapping

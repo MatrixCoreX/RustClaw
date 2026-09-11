@@ -1,6 +1,73 @@
 use super::*;
 
 #[tokio::test]
+async fn rejected_subagent_envelope_fails_without_raw_json_delivery() {
+    for status in ["rejected", "failed", "error"] {
+        let state = test_state();
+        let task = claimed_task("task-rejected-subagent-envelope");
+        let mut loop_state = crate::agent_engine::LoopState::new();
+        let envelope = serde_json::json!({
+            "schema_version": 1,
+            "output_format": "machine_json",
+            "owner_layer": "subagent_runtime",
+            "status": status,
+            "error_code": "child_task_capability_policy_incompatible",
+            "error_excerpt": "capability_unresolved",
+        })
+        .to_string();
+        let mut step = ok_step_result("step_1", "subagent", &envelope);
+        step.status = StepExecutionStatus::Error;
+        step.error = Some("subagent_capability_policy_rejected".into());
+        loop_state.executed_step_results.push(step);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.delivery_messages.push(envelope.clone());
+        loop_state.last_user_visible_respond = Some(envelope.clone());
+        let reply = finalize_loop_reply(&state, &task, "transcribe the media", loop_state, None)
+            .await
+            .unwrap();
+        assert!(reply.should_fail_task, "{}", reply.text);
+        assert_ne!(reply.text, envelope);
+        assert!(!reply.text.contains("error_excerpt"));
+        assert_eq!(
+            reply
+                .task_journal
+                .as_ref()
+                .unwrap()
+                .finalizer_summary
+                .as_ref()
+                .unwrap()
+                .completion_ok,
+            Some(false)
+        );
+    }
+}
+
+#[test]
+fn machine_failure_cannot_mark_completion_even_with_stale_delivery() {
+    let task = claimed_task("task-machine-rejection-stale-delivery");
+    let mut loop_state = crate::agent_engine::LoopState::new();
+    let envelope = serde_json::json!({
+        "output_format": "machine_json", "owner_layer": "subagent_runtime", "status": "rejected"
+    })
+    .to_string();
+    loop_state.delivery_messages.push(envelope.clone());
+    loop_state.last_user_visible_respond = Some(envelope.clone());
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "subagent", &envelope));
+    let mut summary = None;
+    assert!(
+        !super::super::machine_envelope::attach_machine_envelope_delivery_from_loop(
+            &task,
+            &mut loop_state,
+            &mut summary,
+            None
+        )
+    );
+    assert!(summary.is_none());
+}
+
+#[tokio::test]
 async fn finalize_loop_reply_accepts_terminal_machine_json_envelope() {
     let state = test_state();
     let task = claimed_task("task-machine-envelope-terminal");

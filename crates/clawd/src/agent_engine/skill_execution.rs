@@ -56,7 +56,9 @@ use skill_execution_preflight::{
     handle_preflight_argument_failure, structured_observation_path_argument_error,
     unresolved_runtime_template_argument_error,
 };
-use skill_execution_subagent::{record_subagent_hook_stage, record_subagent_step_execution};
+use skill_execution_subagent::{
+    normalize_subagent_stop_signal, record_subagent_hook_stage, record_subagent_step_execution,
+};
 #[cfg(test)]
 use skill_output_contract::validate_skill_output_contract;
 use skill_output_contract::{enforce_skill_output_contract, skill_input_contract_error};
@@ -817,16 +819,6 @@ async fn compose_policy_block_delivery(
         &default_text,
     )
     .await
-}
-
-fn normalize_subagent_stop_signal(stop_signal: Option<String>) -> (Option<String>, bool) {
-    let recoverable_invalid_role =
-        stop_signal.as_deref() == Some(super::subagent_runtime::SUBAGENT_STOP_SIGNAL_INVALID_ROLE);
-    if recoverable_invalid_role {
-        (Some("recoverable_failure_continue_round".to_string()), true)
-    } else {
-        (stop_signal, false)
-    }
 }
 
 pub(super) async fn execute_prepared_skill_action(

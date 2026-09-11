@@ -81,3 +81,11 @@ the result.
 and arguments, so the direct path bypasses planner selection and agent-loop
 round decisions while retaining authentication, permission and mutation
 checks, task persistence, lifecycle controls, and the shared skill protocol.
+
+Child-task capability checks use the effective runtime skill snapshot, including
+admission and enable state, rather than release defaults. Read-only delegation
+cannot gain write or network permissions. A capability-policy rejection before
+enqueue returns structured evidence to the parent for bounded replanning;
+scheduler failures and required-child execution failures are not blindly retried.
+An unresolved failed machine result is finalized as a failed task with a
+language-aware explanation, never promoted to success merely because it is JSON.
