@@ -245,6 +245,18 @@ pub(crate) fn prepare_durable_process_command(
     )
 }
 
+pub(crate) fn prepare_durable_host_process_command(
+    program: impl AsRef<OsStr>,
+    request: ProcessSandboxRequest<'_>,
+) -> Result<PreparedProcessCommand, &'static str> {
+    prepare_process_command_for_lifetime(
+        program,
+        request,
+        ProcessLifetime::DurableAsync,
+        ProcessNamespacePolicy::HostVisible,
+    )
+}
+
 fn prepare_process_command_for_lifetime(
     program: impl AsRef<OsStr>,
     request: ProcessSandboxRequest<'_>,

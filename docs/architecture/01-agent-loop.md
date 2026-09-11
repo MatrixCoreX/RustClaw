@@ -89,3 +89,10 @@ enqueue returns structured evidence to the parent for bounded replanning;
 scheduler failures and required-child execution failures are not blindly retried.
 An unresolved failed machine result is finalized as a failed task with a
 language-aware explanation, never promoted to success merely because it is JSON.
+
+Durable local skill jobs use a process lifetime independent of the core process.
+PID visibility, filesystem isolation, network policy, and explicit cancellation
+remain separate controls. A core restart adopts the persisted checkpoint and
+polls the existing job instead of repeating completed steps. A machine reboot
+or a service manager that kills the entire process group/cgroup can still end
+the job; the resulting process-loss observation goes through loop recovery.

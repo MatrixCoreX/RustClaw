@@ -22,6 +22,8 @@ use super::progress_delivery;
 use super::runner_pool::{WarmPoolCheckout, WarmRunnerKey, WarmRunnerProcess};
 #[path = "runner_support.rs"]
 mod runner_support;
+#[path = "runner_sandbox.rs"]
+mod sandbox;
 use super::{
     action_scoped_planner_mapping, apply_skill_runner_env_isolation,
     collect_declared_skill_env_pairs, current_task_auth_role,
@@ -1178,19 +1180,14 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
             network,
             additional_writable_paths: &additional_writable_paths,
         };
-        if action_mapping.as_ref().is_some_and(|mapping| {
-            mapping.isolation_profile == Some(CapabilityIsolationProfile::HostProcess)
-        }) {
-            crate::process_sandbox::prepare_host_process_command(
-                &state.skill_rt.skill_runner_path,
-                request,
-            )
-        } else {
-            crate::process_sandbox::prepare_process_command(
-                &state.skill_rt.skill_runner_path,
-                request,
-            )
-        }
+        sandbox::prepare_runner_command(
+            &state.skill_rt.skill_runner_path,
+            request,
+            durable_background,
+            action_mapping.as_ref().is_some_and(|mapping| {
+                mapping.isolation_profile == Some(CapabilityIsolationProfile::HostProcess)
+            }),
+        )
         .map_err(|reason_code| {
             format!(
                 "skill-runner sandbox unavailable: reason_code={reason_code} sandbox_mode={} sandbox_backend={}",
