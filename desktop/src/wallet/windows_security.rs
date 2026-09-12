@@ -12,6 +12,13 @@ use windows_sys::Win32::{
     System::Threading::*,
 };
 
+fn storage_error(stage: &str, code: u32) -> String {
+    #[cfg(test)]
+    eprintln!("wallet_windows_storage stage={stage} code={code}");
+    #[cfg(not(test))]
+    let _ = (stage, code);
+    "wallet_storage_unavailable".into()
+}
 pub struct Descriptor(pub PSECURITY_DESCRIPTOR);
 impl Drop for Descriptor {
     fn drop(&mut self) {
@@ -67,7 +74,7 @@ pub fn descriptor(sddl: &str) -> Result<Descriptor> {
         )
     } == 0
     {
-        return Err("wallet_storage_unavailable".into());
+        return Err(storage_error("descriptor", unsafe { GetLastError() }));
     }
     Ok(Descriptor(out))
 }
@@ -89,7 +96,7 @@ pub fn apply(handle: HANDLE, kind: SE_OBJECT_TYPE, descriptor: &Descriptor) -> R
         {
             return Err("wallet_storage_unavailable".into());
         }
-        if SetSecurityInfo(
+        let status = SetSecurityInfo(
             handle,
             kind,
             DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
@@ -97,9 +104,9 @@ pub fn apply(handle: HANDLE, kind: SE_OBJECT_TYPE, descriptor: &Descriptor) -> R
             null_mut(),
             acl,
             null(),
-        ) != ERROR_SUCCESS
-        {
-            return Err("wallet_storage_unavailable".into());
+        );
+        if status != ERROR_SUCCESS {
+            return Err(storage_error("set_dacl", status));
         }
         Ok(())
     }
@@ -120,7 +127,7 @@ pub fn private_handle(file: &std::fs::File, directory: bool) -> Result<()> {
             },
         );
         if handle == INVALID_HANDLE_VALUE {
-            return Err("wallet_storage_unavailable".into());
+            return Err(storage_error("reopen", GetLastError()));
         }
         let _reopened = std::fs::File::from_raw_handle(handle);
         let mut info: windows_sys::Win32::Storage::FileSystem::BY_HANDLE_FILE_INFORMATION =
@@ -133,7 +140,7 @@ pub fn private_handle(file: &std::fs::File, directory: bool) -> Result<()> {
         }
         let mut owner = null_mut();
         let mut raw: *mut c_void = null_mut();
-        if GetSecurityInfo(
+        let status = GetSecurityInfo(
             handle,
             SE_FILE_OBJECT,
             OWNER_SECURITY_INFORMATION,
@@ -142,9 +149,9 @@ pub fn private_handle(file: &std::fs::File, directory: bool) -> Result<()> {
             null_mut(),
             null_mut(),
             &mut raw,
-        ) != ERROR_SUCCESS
-        {
-            return Err("wallet_storage_unavailable".into());
+        );
+        if status != ERROR_SUCCESS {
+            return Err(storage_error("get_owner", status));
         }
         let _actual = Descriptor(raw);
         let expected = private_descriptor(directory)?;
