@@ -75,6 +75,18 @@ def main():
             run(["ditto", mounted, installed])
         finally:
             run(["hdiutil", "detach", mount])
+        # Probe the installed signer before any credential is loaded. Preserve
+        # its static protection diagnostics rather than guessing at OS failures.
+        probe_dir = EVIDENCE / "protection-probe-vault"
+        request = json.dumps({"version": 1, "id": 1, "request": {
+            "operation": "open", "directory": str(probe_dir.resolve())}}).encode()
+        probe = subprocess.run([str(installed / "Contents/MacOS/agent-desktop"),
+                                "--asset-vault-worker"],
+                               input=len(request).to_bytes(4, "big") + request,
+                               capture_output=True, timeout=20)
+        (EVIDENCE / "worker-protection.log").write_bytes(probe.stderr)
+        if probe.stderr:
+            print(probe.stderr.decode("utf-8", errors="replace"), flush=True)
         with (EVIDENCE / "application.log").open("w") as log:
             process = subprocess.Popen([str(installed / "Contents/MacOS/agent-desktop")], stdout=log, stderr=log)
             try:
