@@ -14,12 +14,20 @@ unsafe extern "C" {
     fn sandbox_free_error(error: *mut c_char);
     fn sandbox_check(pid: libc::pid_t, operation: *const c_char, filter: c_int, ...) -> c_int;
 }
+fn protection_error(stage: &str) -> String {
+    // Only static stage and errno, before any vault credentials are opened.
+    eprintln!(
+        "wallet_macos_protection stage={stage} errno={:?}",
+        std::io::Error::last_os_error().raw_os_error()
+    );
+    "wallet_process_protection_unavailable".into()
+}
 pub fn enter() -> Result<()> {
     unsafe {
-        close_inherited()?;
+        close_inherited().map_err(|_| protection_error("close_inherited"))?;
         let parent = libc::getppid();
         if parent <= 1 {
-            return Err("wallet_process_protection_unavailable".into());
+            return Err(protection_error("parent"));
         }
         let limit = libc::rlimit {
             rlim_cur: 0,
@@ -28,13 +36,13 @@ pub fn enter() -> Result<()> {
         if libc::setrlimit(libc::RLIMIT_CORE, &limit) != 0
             || libc::ptrace(libc::PT_DENY_ATTACH, 0, null_mut(), 0) != 0
         {
-            return Err("wallet_process_protection_unavailable".into());
+            return Err(protection_error("core_or_ptrace"));
         }
         // Register before applying process-info restrictions, then check for the
         // parent-exit race. A dedicated kernel event kills even a busy KDF worker.
         let queue = libc::kqueue();
         if queue < 0 {
-            return Err("wallet_process_protection_unavailable".into());
+            return Err(protection_error("kqueue"));
         }
         let event = libc::kevent {
             ident: parent as usize,
@@ -46,7 +54,7 @@ pub fn enter() -> Result<()> {
         };
         if libc::kevent(queue, &event, 1, null_mut(), 0, null()) != 0 || libc::getppid() != parent {
             libc::close(queue);
-            return Err("wallet_process_protection_unavailable".into());
+            return Err(protection_error("parent_watch"));
         }
         // Keychain uses Mach IPC. No network socket or executable child is needed.
         // This is not a filesystem sandbox: selected backup paths remain allowed.
@@ -58,12 +66,12 @@ pub fn enter() -> Result<()> {
                 sandbox_free_error(error);
             }
             libc::close(queue);
-            return Err("wallet_process_protection_unavailable".into());
+            return Err(protection_error("sandbox_init"));
         }
         for op in [c"network-outbound", c"process-exec", c"process-fork"] {
             if sandbox_check(libc::getpid(), op.as_ptr(), 0) <= 0 {
                 libc::close(queue);
-                return Err("wallet_process_protection_unavailable".into());
+                return Err(protection_error(op.to_str().unwrap_or("sandbox_check")));
             }
         }
         std::thread::Builder::new()
