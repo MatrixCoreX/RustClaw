@@ -36,6 +36,12 @@
     "allow-wallet-read",
     "allow-wallet-prepare",
     "allow-wallet-operations",
-    "allow-wallet-check-operation"
+    "allow-wallet-check-operation",
+    "allow-wallet-nodes",
+    "allow-wallet-add-node",
+    "allow-wallet-connect-node",
+    "allow-wallet-prefer-node",
+    "allow-wallet-disconnect-node",
+    "allow-wallet-market-read"
   ]
 }

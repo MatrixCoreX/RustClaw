@@ -76,6 +76,9 @@ body.wallet-window {
 .wallet-bar-head p {
   margin: 5px 0;
 }
+.wallet-manager > .wallet-bar-head > [data-desktop-language-toggle] {
+  margin-left: auto;
+}
 .wallet-eyebrow,
 .wallet-footnote {
   color: var(--w-muted);

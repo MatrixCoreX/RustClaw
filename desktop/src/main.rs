@@ -12,8 +12,26 @@ use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use tokio::sync::Mutex;
 
 fn main() {
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|arg| arg == "--asset-vault-worker")
+    {
+        let code = if wallet::worker::run().is_ok() { 0 } else { 1 };
+        std::process::exit(code);
+    }
     tauri::Builder::default()
         .on_window_event(|window, event| {
+            if window.label() == "wallet"
+                && matches!(
+                    event,
+                    tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed
+                )
+            {
+                let app = window.app_handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    app.state::<wallet::commands::WalletState>().lock().await;
+                });
+            }
             if matches!(window.label(), "main" | "wallet") {
                 if let tauri::WindowEvent::Focused(focused) = event {
                     wallet::lifecycle::focus_changed(window.app_handle().clone(), *focused);
@@ -46,6 +64,12 @@ fn main() {
             app.manage(
                 wallet::commands::WalletState::new(directory.join("asset-wallet"))
                     .map_err(std::io::Error::other)?,
+            );
+            app.manage(
+                asset_operations::standalone::StandaloneState::new(
+                    directory.join("asset-wallet/nodes-v1.json"),
+                )
+                .map_err(std::io::Error::other)?,
             );
             wallet::lifecycle::start(app.handle().clone());
             app.manage(DesktopState {
@@ -127,6 +151,12 @@ fn main() {
             wallet::commands::wallet_create,
             wallet::commands::wallet_backup,
             wallet::commands::wallet_restore,
+            asset_operations::standalone::wallet_nodes,
+            asset_operations::standalone::wallet_add_node,
+            asset_operations::standalone::wallet_connect_node,
+            asset_operations::standalone::wallet_prefer_node,
+            asset_operations::standalone::wallet_disconnect_node,
+            asset_operations::standalone::wallet_market_read,
             asset_operations::commands::wallet_pending,
             asset_operations::commands::wallet_cancel_operation,
             asset_operations::commands::wallet_capabilities,

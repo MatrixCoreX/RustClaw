@@ -1,4 +1,9 @@
-use super::{client, protocol::*, Pending, Record};
+use super::{
+    client,
+    protocol::*,
+    standalone::{self, StandaloneState},
+    Pending, Record,
+};
 use crate::{
     commands::{main_only, DesktopState},
     wallet::commands::{open_window, wallet_only, WalletState},
@@ -53,17 +58,19 @@ pub async fn wallet_cancel_operation(
 pub async fn wallet_capabilities(
     window: WebviewWindow,
     state: State<'_, DesktopState>,
+    standalone: State<'_, StandaloneState>,
     session_id: Uuid,
     service: Service,
 ) -> Result<Capabilities> {
     main_only(&window)?;
-    let session = state.session(session_id).await?;
+    let session = standalone::resolve(&state, &standalone, session_id).await?;
     client::capabilities(&session, service, "balances").await
 }
 #[tauri::command]
 pub async fn wallet_read(
     window: WebviewWindow,
     desktop: State<'_, DesktopState>,
+    standalone: State<'_, StandaloneState>,
     state: State<'_, WalletState>,
     session_id: Uuid,
     account_id: Uuid,
@@ -78,7 +85,7 @@ pub async fn wallet_read(
     let intent = page
         .map(|page| Intent::History { page })
         .unwrap_or(Intent::Balances);
-    let session = desktop.session(session_id).await?;
+    let session = standalone::resolve(&desktop, &standalone, session_id).await?;
     let cap = client::capabilities(&session, service, intent.action()).await?;
     let result: ReadResult =
         client::public_read(&session, &cap, &account.public_key, &intent).await?;
@@ -91,6 +98,7 @@ pub async fn wallet_prepare(
     window: WebviewWindow,
     app: tauri::AppHandle,
     desktop: State<'_, DesktopState>,
+    standalone: State<'_, StandaloneState>,
     state: State<'_, WalletState>,
     session_id: Uuid,
     account_id: Uuid,
@@ -112,11 +120,11 @@ pub async fn wallet_prepare(
         return Err("wallet_backup_required".into());
     }
     intent.validate(service, &account.public_key)?;
-    let session = desktop.session(session_id).await?;
+    let session = standalone::resolve(&desktop, &standalone, session_id).await?;
     let cap = client::capabilities(&session, service, intent.action()).await?;
     let id = Uuid::new_v4();
     if state.operations.lock().await.records.iter().any(|r| {
-        r.profile_id == session.profile.id
+        r.profile_id == session.profile_id()
             && r.account_id == account_id
             && r.ledger_id == cap.ledger_id
             && r.status == "pending"
@@ -126,18 +134,18 @@ pub async fn wallet_prepare(
     let (payload, bytes) =
         client::challenge(&session, &cap, &account.public_key, id, &intent).await?;
     state.check(account_id, generation)?;
-    let info = session.info().await;
+    let (device_label, origin) = session.label().await;
     state.operations.lock().await.pending = Some(Pending {
         generation,
         session_id,
-        profile_id: session.profile.id,
+        profile_id: session.profile_id(),
         account,
         cap,
         intent,
         payload,
         bytes,
-        device_label: info.profile.alias,
-        origin: info.origin,
+        device_label,
+        origin,
     });
     if let Err(e) = open_window(&app) {
         state.operations.lock().await.pending = None;
@@ -149,6 +157,7 @@ pub async fn wallet_prepare(
 pub async fn wallet_confirm(
     window: WebviewWindow,
     desktop: State<'_, DesktopState>,
+    standalone: State<'_, StandaloneState>,
     state: State<'_, WalletState>,
     operation_id: Uuid,
     password: String,
@@ -169,7 +178,7 @@ pub async fn wallet_confirm(
     }
     let generation = p.generation;
     state.check(p.account.id, generation)?;
-    let session = desktop.session(p.session_id).await?;
+    let session = standalone::resolve(&desktop, &standalone, p.session_id).await?;
     let cap = client::capabilities(&session, p.cap.service, p.intent.action()).await?;
     validate_challenge(
         &p.bytes,
@@ -183,12 +192,17 @@ pub async fn wallet_confirm(
     let vault = state.vault.clone();
     let id = p.account.id;
     let bytes = p.bytes.clone();
+    let worker_cap = cap.clone();
+    let worker_intent = p.intent.clone();
     let signature = Zeroizing::new(
         tokio::task::spawn_blocking(move || {
-            vault
-                .lock()
-                .unwrap()
-                .sign_with_password(id, bytes.as_bytes(), &password)
+            vault.lock().unwrap().sign_with_password(
+                id,
+                bytes.as_bytes(),
+                &password,
+                worker_cap,
+                worker_intent,
+            )
         })
         .await
         .map_err(|_| "wallet_storage_unavailable")??,
@@ -233,12 +247,13 @@ pub async fn wallet_confirm(
 pub async fn wallet_operations(
     window: WebviewWindow,
     desktop: State<'_, DesktopState>,
+    standalone: State<'_, StandaloneState>,
     state: State<'_, WalletState>,
     session_id: Uuid,
     account_id: Uuid,
 ) -> Result<Vec<Record>> {
     main_only(&window)?;
-    let session = desktop.session(session_id).await?;
+    let session = standalone::resolve(&desktop, &standalone, session_id).await?;
     let selected = state.selection.lock().unwrap().account_id;
     if selected != Some(account_id) {
         return Err("wallet_selection_changed".into());
@@ -249,7 +264,7 @@ pub async fn wallet_operations(
         .await
         .records
         .iter()
-        .filter(|r| r.profile_id == session.profile.id && r.account_id == account_id)
+        .filter(|r| r.profile_id == session.profile_id() && r.account_id == account_id)
         .cloned()
         .collect())
 }
@@ -257,6 +272,7 @@ pub async fn wallet_operations(
 pub async fn wallet_check_operation(
     window: WebviewWindow,
     desktop: State<'_, DesktopState>,
+    standalone: State<'_, StandaloneState>,
     state: State<'_, WalletState>,
     session_id: Uuid,
     account_id: Uuid,
@@ -266,7 +282,7 @@ pub async fn wallet_check_operation(
     let _gate = state.operation_gate.lock().await;
     let generation = state.selection.lock().unwrap().generation;
     state.check(account_id, generation)?;
-    let session = desktop.session(session_id).await?;
+    let session = standalone::resolve(&desktop, &standalone, session_id).await?;
     let record = state
         .operations
         .lock()
@@ -274,7 +290,7 @@ pub async fn wallet_check_operation(
         .records
         .iter()
         .find(|r| {
-            r.profile_id == session.profile.id
+            r.profile_id == session.profile_id()
                 && r.account_id == account_id
                 && r.operation_id == operation_id
         })

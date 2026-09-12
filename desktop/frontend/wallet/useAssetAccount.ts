@@ -1,3 +1,4 @@
+import { copy } from "../i18n";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { desktopSessionId } from "../runtime";
@@ -122,7 +123,7 @@ export function useAssetAccount(
         intent,
       });
       if (current.current === expected)
-        setMessage("已打开本地安全窗口，请核对实际交易内容并确认。");
+        setMessage(copy("已打开本地安全窗口，请核对实际交易内容并确认。"));
       return current.current === expected ? operationId : null;
     } catch (e) {
       if (current.current === expected) setError(walletError(e));
@@ -137,7 +138,7 @@ export function useAssetAccount(
     try {
       await invoke("wallet_check_operation", { ...base, operationId });
       if (current.current === expected) {
-        setMessage("已核实操作状态。");
+        setMessage(copy("已核实操作状态。"));
         await refresh();
       }
     } catch (e) {
@@ -151,8 +152,8 @@ export function useAssetAccount(
     cap: enabled ? cap : null,
     records,
     busy,
-    error,
-    message,
+    error: error ? copy(error) : error,
+    message: message ? copy(message) : message,
     refresh,
     prepare,
     check,

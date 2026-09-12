@@ -32,6 +32,12 @@ def run(execute, rpc, sid, account, second, screenshot, page):
             structure:arguments[1]==='assets' ? [...document.querySelectorAll('[data-assets-page] > section[aria-labelledby]')].map(e=>[e.getAttribute('aria-labelledby'),e.className]) : [...document.querySelectorAll('#bancor-market-workspace,.bancor-market-chart-panel,#bancor-trade-panel,[role=group][aria-label=交易模式]')].map(e=>[e.id,e.className]),
             copy:!!s.querySelector('button[aria-label="复制完整公钥"]')};""", [selector, page])
         assert observation['count'] == 1 and observation['inside'] and observation['copy'], observation
+        if page == 'assets':
+            assert execute("return [...document.querySelectorAll('[data-assets-page] header button')].some(b=>b.textContent.trim()==='交易')")
+            assert not execute("return [...document.querySelectorAll('[data-assets-page] header button')].some(b=>b.textContent.trim()==='Bancor')")
+        else:
+            assert execute("return !!document.querySelector('[data-bancor-open-apr]')")
+            assert execute("return [...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='获得奖励')")
         if account_id:
             expected = account if account_id == account['id'] else second
             assert observation['key'] == expected['public_key'], 'displayed key must follow the selected local account'

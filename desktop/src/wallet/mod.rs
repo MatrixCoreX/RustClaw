@@ -1,19 +1,28 @@
 mod backup;
+mod backup_crypto;
 #[cfg(feature = "gui")]
 pub mod commands;
 pub(crate) mod crypto;
+mod document;
 pub(crate) mod files;
 pub(crate) mod keys;
 mod keystore;
 #[cfg(feature = "gui")]
 pub mod lifecycle;
 #[cfg(test)]
+mod protection_tests;
+pub(crate) mod secure_memory;
+#[cfg(test)]
+mod security_tests;
+#[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
+pub mod worker;
 
 use crate::Result;
-use crypto::Sealed;
+use document::{Document, Stored};
 use keystore::{KeyStore, NativeKeyStore};
+use secure_memory::LockedKey;
 use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
@@ -21,7 +30,7 @@ use std::{
     time::{Duration, Instant},
 };
 use uuid::Uuid;
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroize;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -31,7 +40,6 @@ pub struct Account {
     pub public_key: String,
     pub backed_up: bool,
 }
-
 #[derive(Serialize, Deserialize, Zeroize)]
 #[zeroize(drop)]
 struct SecretAccount {
@@ -39,87 +47,47 @@ struct SecretAccount {
     account: Account,
     secret: [u8; 32],
 }
-
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Document {
-    version: u32,
-    id: Uuid,
-    accounts: Vec<Account>,
-    sealed: Sealed,
-}
-impl Document {
-    fn aad(&self) -> Result<Vec<u8>> {
-        serde_json::to_vec(&("asset-vault-v1", self.id, &self.accounts))
-            .map_err(|_| "wallet_data_invalid".into())
-    }
-}
-
-#[derive(Serialize)]
 pub struct Status {
     pub initialized: bool,
     pub unlocked: bool,
     pub accounts: Vec<Account>,
+    pub retry_after_seconds: u64,
+    pub storage_version: u32,
+    pub backup_upgrade_accounts: Vec<Uuid>,
 }
-
 pub struct Vault {
     path: PathBuf,
-    document: Option<Document>,
-    key: Option<Zeroizing<[u8; 32]>>,
-    last_used: Instant,
+    document: Option<Stored>,
+    key: Option<LockedKey>,
+    unlocked_at: Instant,
     unlock_after: Instant,
+    failed_attempts: u32,
     store: Box<dyn KeyStore>,
     _file_lock: File,
 }
-
 impl Vault {
     pub fn new(directory: PathBuf) -> Result<Self> {
         Self::with_store(directory, Box::new(NativeKeyStore))
     }
     fn with_store(directory: PathBuf, store: Box<dyn KeyStore>) -> Result<Self> {
         files::private_directory(&directory)?;
-        let lock = File::options()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(directory.join("vault.lock"))
-            .map_err(|_| "wallet_storage_unavailable")?;
-        lock.try_lock().map_err(|_| "wallet_already_open")?;
+        let lock = files::private_lock(&directory.join("vault.lock"))?;
+        // Keep the canonical storage location. The authenticated version controls decoding.
         let path = directory.join("vault-v1.json");
-        let document: Option<Document> = if path.exists() {
-            Some(serde_json::from_slice(&files::read(&path)?).map_err(|_| "wallet_data_invalid")?)
+        let document = if std::fs::symlink_metadata(&path).is_ok() {
+            Some(Stored::read(&files::read_private(&path)?)?)
         } else {
             None
         };
-        if document
-            .as_ref()
-            .is_some_and(|d| d.version != 1 || d.accounts.len() > 100)
-        {
-            return Err("wallet_data_invalid".into());
-        }
-        if let Some(doc) = &document {
-            let mut ids = std::collections::HashSet::new();
-            let mut public_keys = std::collections::HashSet::new();
-            for account in &doc.accounts {
-                keys::validate_public(&account.public_key)?;
-                if account.id.is_nil()
-                    || !ids.insert(account.id)
-                    || !public_keys.insert(&account.public_key)
-                    || account.name.is_empty()
-                    || account.name.chars().count() > 50
-                    || account.name.chars().any(char::is_control)
-                {
-                    return Err("wallet_data_invalid".into());
-                }
-            }
-        }
         Ok(Self {
             path,
             document,
             key: None,
-            last_used: Instant::now(),
+            unlocked_at: Instant::now(),
             unlock_after: Instant::now(),
+            failed_attempts: 0,
             store,
             _file_lock: lock,
         })
@@ -128,52 +96,67 @@ impl Vault {
         self.key = None;
     }
     pub fn expire(&mut self) -> bool {
-        let was_unlocked = self.key.is_some();
-        if self.last_used.elapsed() >= Duration::from_secs(300) {
+        let was = self.key.is_some();
+        if self.unlocked_at.elapsed() >= Duration::from_secs(300) {
             self.lock();
         }
-        was_unlocked && self.key.is_none()
+        was && self.key.is_none()
     }
     pub fn status(&mut self) -> Status {
         self.expire();
+        let accounts = self
+            .document
+            .as_ref()
+            .map(|d| d.accounts().to_vec())
+            .unwrap_or_default();
+        let backup_upgrade_accounts = match self.document.as_ref() {
+            Some(Stored::Legacy(d)) => d
+                .accounts
+                .iter()
+                .filter(|a| a.backed_up)
+                .map(|a| a.id)
+                .collect(),
+            Some(Stored::Current(d)) => d
+                .entries
+                .iter()
+                .filter(|e| e.backup_version == 1)
+                .map(|e| e.account_id)
+                .collect(),
+            _ => vec![],
+        };
         Status {
             initialized: self.document.is_some(),
             unlocked: self.key.is_some(),
-            accounts: self
-                .document
-                .as_ref()
-                .map(|d| d.accounts.clone())
-                .unwrap_or_default(),
+            accounts,
+            retry_after_seconds: self
+                .unlock_after
+                .saturating_duration_since(Instant::now())
+                .as_secs_f64()
+                .ceil() as u64,
+            storage_version: self.document.as_ref().map(Stored::version).unwrap_or(2),
+            backup_upgrade_accounts,
         }
     }
     pub fn initialize(&mut self, password: &str) -> Result<()> {
         if self.document.is_some() {
             return Err("wallet_already_initialized".into());
         }
-        let key = Zeroizing::new(crypto::random::<32>()?);
+        let key = LockedKey::random()?;
         let id = Uuid::new_v4();
         let wrapper = crypto::wrap(password, id.as_bytes(), key.as_ref())?;
         self.store.save(
             id,
             &serde_json::to_string(&wrapper).map_err(|_| "wallet_data_invalid")?,
         )?;
-        let mut doc = Document {
-            version: 1,
-            id,
-            accounts: vec![],
-            sealed: Sealed {
-                nonce: String::new(),
-                ciphertext: String::new(),
-            },
-        };
-        doc.sealed = crypto::seal(&key, &doc.aad()?, b"[]")?;
+        let mut doc = Document::empty(id);
+        doc.authenticate(&key)?;
         files::write(
             &self.path,
             &serde_json::to_vec(&doc).map_err(|_| "wallet_data_invalid")?,
         )?;
-        self.document = Some(doc);
+        self.document = Some(Stored::Current(doc));
         self.key = Some(key);
-        self.last_used = Instant::now();
+        self.unlocked_at = Instant::now();
         Ok(())
     }
     pub fn unlock(&mut self, password: &str) -> Result<()> {
@@ -182,73 +165,87 @@ impl Vault {
             return Err("wallet_unlock_rate_limited".into());
         }
         let result = self.unlock_inner(password);
-        self.unlock_after = Instant::now() + Duration::from_secs(2);
+        if result.is_ok() {
+            self.failed_attempts = 0;
+            self.unlock_after = Instant::now();
+        } else if result.as_ref().err().is_some_and(|e| {
+            matches!(
+                e.as_str(),
+                "wallet_unlock_failed" | "wallet_password_length"
+            )
+        }) {
+            self.failed_attempts = self.failed_attempts.saturating_add(1).min(6);
+            self.unlock_after =
+                Instant::now() + Duration::from_secs((1u64 << self.failed_attempts).min(60));
+        }
         result
     }
     fn unlock_inner(&mut self, password: &str) -> Result<()> {
         let doc = self.document.as_ref().ok_or("wallet_not_initialized")?;
         let wrapper: crypto::Wrapped =
-            serde_json::from_str(&self.store.load(doc.id)?).map_err(|_| "wallet_data_invalid")?;
-        let bytes = crypto::unwrap(password, doc.id.as_bytes(), &wrapper)?;
-        let mut key = Zeroizing::new([0; 32]);
-        if bytes.len() != 32 {
-            return Err("wallet_data_invalid".into());
-        }
-        key.copy_from_slice(&bytes);
-        let clear = crypto::open(&key, &doc.aad()?, &doc.sealed)?;
-        Self::decode(&clear, doc)?;
-        self.key = Some(key);
-        self.last_used = Instant::now();
-        Ok(())
-    }
-    fn decode(clear: &[u8], doc: &Document) -> Result<Vec<SecretAccount>> {
-        let entries: Vec<SecretAccount> =
-            serde_json::from_slice(clear).map_err(|_| "wallet_data_invalid")?;
-        if entries.len() != doc.accounts.len() {
-            return Err("wallet_data_invalid".into());
-        }
-        for (entry, meta) in entries.iter().zip(&doc.accounts) {
-            if &entry.account != meta || keys::public(&entry.secret)? != meta.public_key {
-                return Err("wallet_data_invalid".into());
+            serde_json::from_str(&self.store.load(doc.id())?).map_err(|_| "wallet_data_invalid")?;
+        let key = LockedKey::from_slice(&crypto::unwrap(password, doc.id().as_bytes(), &wrapper)?)?;
+        match doc {
+            Stored::Current(d) => d.verify(&key)?,
+            Stored::Legacy(d) => {
+                let next = d.migrate(&key)?;
+                let bytes = serde_json::to_vec(&next).map_err(|_| "wallet_data_invalid")?;
+                Stored::read(&bytes)?.current()?.verify(&key)?;
+                files::write(&self.path, &bytes)?;
+                self.document = Some(Stored::Current(next));
             }
         }
-        Ok(entries)
+        self.key = Some(key);
+        self.unlocked_at = Instant::now();
+        Ok(())
     }
-    fn entries(&mut self) -> Result<Vec<SecretAccount>> {
+    fn current(&mut self) -> Result<&Document> {
         self.expire();
-        let key = self.key.as_ref().ok_or("wallet_locked")?;
-        let doc = self.document.as_ref().ok_or("wallet_not_initialized")?;
-        let clear = crypto::open(key, &doc.aad()?, &doc.sealed)?;
-        Self::decode(&clear, doc)
+        self.key.as_ref().ok_or("wallet_locked")?;
+        self.document
+            .as_ref()
+            .ok_or("wallet_not_initialized")?
+            .current()
     }
-    fn save(&mut self, entries: &[SecretAccount]) -> Result<()> {
+    fn selected_secret(&mut self, id: Uuid) -> Result<LockedKey> {
+        self.current()?;
+        self.document
+            .as_ref()
+            .unwrap()
+            .current()?
+            .secret(self.key.as_ref().unwrap(), id)
+    }
+    fn save_document(&mut self, mut doc: Document) -> Result<()> {
         let key = self.key.as_ref().ok_or("wallet_locked")?;
-        let old = self.document.as_ref().ok_or("wallet_not_initialized")?;
-        let mut doc = Document {
-            version: 1,
-            id: old.id,
-            accounts: entries.iter().map(|e| e.account.clone()).collect(),
-            sealed: old.sealed.clone(),
-        };
-        let clear = Zeroizing::new(serde_json::to_vec(entries).map_err(|_| "wallet_data_invalid")?);
-        doc.sealed = crypto::seal(key, &doc.aad()?, &clear)?;
+        doc.authenticate(key)?;
+        doc.verify(key)?;
         files::write(
             &self.path,
             &serde_json::to_vec(&doc).map_err(|_| "wallet_data_invalid")?,
         )?;
-        self.document = Some(doc);
-        self.last_used = Instant::now();
+        self.document = Some(Stored::Current(doc));
         Ok(())
+    }
+    fn insert_account(
+        &mut self,
+        account: Account,
+        secret: &LockedKey,
+        backup_version: u32,
+    ) -> Result<Account> {
+        let mut next = self.current()?.clone();
+        next.insert(
+            self.key.as_ref().unwrap(),
+            account.clone(),
+            secret,
+            backup_version,
+        )?;
+        self.save_document(next)?;
+        Ok(account)
     }
     pub fn create(&mut self, name: &str) -> Result<Account> {
         let name = name.trim();
-        if name.is_empty() || name.chars().count() > 50 || name.chars().any(char::is_control) {
-            return Err("wallet_name_invalid".into());
-        }
-        let mut entries = self.entries()?;
-        if entries.len() >= 100 {
-            return Err("wallet_account_limit".into());
-        }
+        validate_name(name)?;
+        self.current()?;
         let secret = keys::generate()?;
         let account = Account {
             id: Uuid::new_v4(),
@@ -256,22 +253,15 @@ impl Vault {
             public_key: keys::public(&secret)?,
             backed_up: false,
         };
-        entries.push(SecretAccount {
-            account: account.clone(),
-            secret: *secret,
-        });
-        self.save(&entries)?;
-        Ok(account)
+        self.insert_account(account, &secret, 0)
     }
     pub fn account(&self, id: Uuid) -> Result<Account> {
         self.document
             .as_ref()
-            .and_then(|d| d.accounts.iter().find(|a| a.id == id))
+            .and_then(|d| d.accounts().iter().find(|a| a.id == id))
             .cloned()
             .ok_or("wallet_account_missing".into())
     }
-    // Only the validated operation module gets signing access. Never registered as IPC.
-    #[cfg(any(feature = "gui", test))]
     pub(crate) fn sign_with_password(
         &mut self,
         id: Uuid,
@@ -286,17 +276,37 @@ impl Vault {
         self.lock();
         result
     }
-    #[cfg(any(feature = "gui", test))]
     fn sign_unlocked(&mut self, id: Uuid, bytes: &[u8]) -> Result<String> {
-        let entries = self.entries()?;
-        let entry = entries
-            .iter()
-            .find(|e| e.account.id == id)
-            .ok_or("wallet_account_missing")?;
-        if !entry.account.backed_up {
+        self.current()?;
+        if !self.account(id)?.backed_up {
             return Err("wallet_backup_required".into());
         }
-        // Background balance/status requests must never prolong an unlocked vault.
-        keys::sign(&entry.secret, bytes)
+        keys::sign(&*self.selected_secret(id)?, bytes)
+    }
+    #[cfg(test)]
+    fn entries(&mut self) -> Result<Vec<SecretAccount>> {
+        let accounts = self.current()?.accounts.clone();
+        accounts
+            .into_iter()
+            .map(|account| {
+                Ok(SecretAccount {
+                    secret: *self.selected_secret(account.id)?,
+                    account,
+                })
+            })
+            .collect()
     }
 }
+fn validate_name(name: &str) -> Result<()> {
+    if name.is_empty() || name.chars().count() > 50 || name.chars().any(char::is_control) {
+        Err("wallet_name_invalid".into())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+mod windows_security;
+
+#[cfg(all(test, windows))]
+mod windows_tests;

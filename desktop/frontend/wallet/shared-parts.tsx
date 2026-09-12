@@ -1,6 +1,7 @@
 import { displayUnits, shortPublic, movementSign } from "./amounts";
 import { useDesktopAssetAccount } from "./context";
-export { useDesktopAssetAccount } from "./context";
+import { getLanguage } from "../i18n";
+export { useDesktopAssetAccount, useStandaloneAssetView } from "./context";
 type Translate = (zh: string, en: string) => string;
 
 export function NativeTransferAuthorization({ t }: { t: Translate }) {
@@ -137,7 +138,7 @@ export function LocalAccountHistory({
                   {label(record.kind)}
                 </span>
                 <p className="mt-1 text-xs text-[var(--theme-text-muted)]">
-                  {new Date(record.created_at_unix * 1000).toLocaleString()}
+                  {new Date(record.created_at_unix * 1000).toLocaleString(getLanguage() === "zh" ? "zh-CN" : "en-US")}
                   {record.counterparty &&
                     ` · ${shortPublic(record.counterparty)}`}
                 </p>

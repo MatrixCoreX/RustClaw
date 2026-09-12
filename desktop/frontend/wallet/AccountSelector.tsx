@@ -4,6 +4,8 @@ import { lockWallet, openWallet, selectAccount, useWallet } from "./store";
 import { shortPublic } from "./amounts";
 import { walletError } from "./errors";
 import { useDesktopAssetAccount } from "./context";
+import { standaloneActive } from "../runtime";
+import { copy } from "../i18n";
 
 export function AccountSelector({
   hardwarePublicKey,
@@ -53,16 +55,16 @@ export function AccountSelector({
       <select
         id={id}
         className="theme-input w-full font-mono text-xs"
-        aria-label="桌面资产账户"
+        aria-label={t("桌面资产账户", "Desktop asset account")}
         value={wallet.selectedId}
         onChange={(e) => run(() => selectAccount(e.target.value))}
       >
-        <option value="">
+        {!standaloneActive() && <option value="">
           {t("硬件设备绑定账号", "Hardware-bound account")} ·{" "}
           {hardwarePublicKey
             ? shortPublic(hardwarePublicKey)
             : t("未绑定", "Not bound")}
-        </option>
+        </option>}
         {wallet.accounts.map((a) => (
           <option key={a.id} value={a.id}>
             {t("桌面本地账号", "Local account")} · {a.name} ·{" "}
@@ -98,7 +100,7 @@ export function AccountSelector({
       )}
       {(error || wallet.error) && (
         <p role="alert" className="wallet-error">
-          {error || wallet.error}
+          {copy(error || wallet.error)}
         </p>
       )}
     </div>
