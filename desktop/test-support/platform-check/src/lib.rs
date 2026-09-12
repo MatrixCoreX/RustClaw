@@ -37,3 +37,7 @@ pub mod worker {
     pub use crate::transport;
     #[cfg(windows)] pub use crate::windows_pipe;
 }
+
+#[cfg(windows)]
+#[path="../../../src/wallet/worker/peer_memory_windows.rs"]
+mod peer_memory_windows;

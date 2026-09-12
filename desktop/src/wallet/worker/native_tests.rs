@@ -1,4 +1,7 @@
-//! Run against the installed executable, with disposable native credentials.
+#[cfg(windows)]
+#[path = "peer_memory_windows.rs"]
+mod peer_memory_windows;
+// Run against the installed executable, with disposable native credentials.
 use super::*;
 use crate::wallet::{backup_crypto, tests::PASSWORD};
 use serde_json::{json, Value};
@@ -183,18 +186,7 @@ fn installed_worker_native_vault_backups_and_signatures() {
 
 fn peer_memory_denied(pid: u32) {
     #[cfg(windows)]
-    unsafe {
-        use windows_sys::Win32::{Foundation::CloseHandle, System::Threading::*};
-        let read = OpenProcess(
-            PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_VM_OPERATION,
-            0,
-            pid,
-        );
-        if !read.is_null() {
-            CloseHandle(read);
-            panic!("peer memory handle must be denied");
-        }
-    }
+    peer_memory_windows::check(pid);
     #[cfg(target_os = "linux")]
     assert!(fs::File::open(format!("/proc/{pid}/mem")).is_err());
     #[cfg(target_os = "macos")]
