@@ -6,8 +6,6 @@ use std::{
 #[link(name = "CoreGraphics", kind = "framework")]
 unsafe extern "C" {
     fn CGSessionCopyCurrentDictionary() -> *const c_void;
-    static kCGSessionOnConsoleKey: *const c_void;
-    static kCGSessionLoginDoneKey: *const c_void;
 }
 #[link(name = "CoreFoundation", kind = "framework")]
 unsafe extern "C" {
@@ -31,25 +29,25 @@ pub fn locked() -> bool {
         let mut locked = false;
         // OnConsole is public. ScreenIsLocked is an additional OS observation;
         // focus loss and wall-clock suspension checks remain independent layers.
-        let lock_key =
-            CFStringCreateWithCString(null(), c"CGSSessionScreenIsLocked".as_ptr(), 0x08000100);
-        if lock_key.is_null() {
-            CFRelease(session);
-            return true;
-        }
-        for (name, expected) in [
-            (kCGSessionOnConsoleKey, true),
-            (kCGSessionLoginDoneKey, true),
-            (lock_key, false),
+        // CGSession.h defines these as CFSTR macros, not exported symbols.
+        for (key, expected) in [
+            (c"kCGSSessionOnConsoleKey", true),
+            (c"kCGSessionLoginDoneKey", true),
+            (c"CGSSessionScreenIsLocked", false),
         ] {
+            let name = CFStringCreateWithCString(null(), key.as_ptr(), 0x08000100);
+            if name.is_null() {
+                locked = true;
+                break;
+            }
             let value = CFDictionaryGetValue(session, name);
             if !value.is_null() && CFGetTypeID(value) == CFBooleanGetTypeID() {
                 locked |= (CFBooleanGetValue(value) != 0) != expected;
             } else if expected {
                 locked = true;
             }
+            CFRelease(name);
         }
-        CFRelease(lock_key);
         CFRelease(session);
         locked
     }

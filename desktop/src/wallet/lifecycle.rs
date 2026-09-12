@@ -63,15 +63,9 @@ async fn system_locked() -> bool {
     .flatten()
     .unwrap_or(false)
 }
-#[cfg(target_os = "windows")]
-#[path = "session_windows.rs"]
-mod native_session;
-#[cfg(target_os = "macos")]
-#[path = "session_macos.rs"]
-mod native_session;
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 async fn system_locked() -> bool {
-    native_session::locked()
+    super::native_session::locked()
 }
 
 pub fn focus_changed(app: tauri::AppHandle, focused: bool) {
