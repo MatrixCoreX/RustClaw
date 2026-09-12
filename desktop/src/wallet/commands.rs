@@ -24,6 +24,7 @@ pub struct WalletState {
 }
 impl WalletState {
     pub fn new(directory: PathBuf) -> Result<Self> {
+        super::files::private_directory(&directory)?;
         let vault = VaultClient::new(directory.clone())?;
         Ok(Self {
             vault: Arc::new(Mutex::new(vault)),
