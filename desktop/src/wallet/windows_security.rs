@@ -116,20 +116,24 @@ pub fn private_handle(file: &std::fs::File, directory: bool) -> Result<()> {
         use windows_sys::Win32::Storage::FileSystem::*;
         // A tempfile may not have WRITE_DAC. Reopen the same object, never a path,
         // to obtain exactly the metadata/ACL rights required for hardening.
-        let handle = ReOpenFile(
-            file.as_raw_handle(),
-            FILE_READ_ATTRIBUTES | READ_CONTROL | WRITE_DAC,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            if directory {
-                FILE_FLAG_BACKUP_SEMANTICS
-            } else {
-                0
-            },
-        );
-        if handle == INVALID_HANDLE_VALUE {
-            return Err(storage_error("reopen", GetLastError()));
-        }
-        let _reopened = std::fs::File::from_raw_handle(handle);
+        // Directory handles are opened with READ_CONTROL | WRITE_DAC by files.rs.
+        // ReOpenFile fails with ACCESS_DENIED for these reparse-safe directory
+        // handles on Windows; retain the already verified original object.
+        let reopened = if directory {
+            None
+        } else {
+            let handle = ReOpenFile(
+                file.as_raw_handle(),
+                FILE_READ_ATTRIBUTES | READ_CONTROL | WRITE_DAC,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                0,
+            );
+            if handle == INVALID_HANDLE_VALUE {
+                return Err(storage_error("reopen_file", GetLastError()));
+            }
+            Some(std::fs::File::from_raw_handle(handle))
+        };
+        let handle = reopened.as_ref().unwrap_or(file).as_raw_handle();
         let mut info: windows_sys::Win32::Storage::FileSystem::BY_HANDLE_FILE_INFORMATION =
             zeroed();
         if windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandle(handle, &mut info)
