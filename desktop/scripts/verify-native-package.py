@@ -37,8 +37,10 @@ def main():
     EVIDENCE.mkdir(parents=True, exist_ok=True)
     checks = []
     if platform.system() == "Windows":
-        installers = list(bundle.glob("nsis/*-setup.exe"))
-        msi = list(bundle.glob("msi/*.msi"))
+        # Build caches intentionally retain older releases. Select this version
+        # without deleting previous installers or treating them as new output.
+        installers = list(bundle.glob(f"nsis/agent-desktop_{version}_*-setup.exe"))
+        msi = list(bundle.glob(f"msi/agent-desktop_{version}_*.msi"))
         assert len(installers) == 1 and msi, "native_installers_missing"
         run(["pwsh", "-NoProfile", "-File", ROOT / "scripts/windows-package-smoke.ps1",
              "-Installer", installers[0], "-Evidence", EVIDENCE,
@@ -50,7 +52,7 @@ def main():
         checks += ["nsis_per_user_install", "installed_binary_sha256", "native_window_open"]
     elif platform.system() == "Darwin":
         app = bundle / "macos/agent-desktop.app"
-        dmg = list(bundle.glob("dmg/*.dmg"))
+        dmg = list(bundle.glob(f"dmg/agent-desktop_{version}_*.dmg"))
         assert app.is_dir() and len(dmg) == 1, "native_bundle_missing"
         info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
         assert info["CFBundleIdentifier"] == "org.agent-runtime.desktop"
