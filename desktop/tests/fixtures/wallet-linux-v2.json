@@ -1,0 +1,18 @@
+{
+  "format": "asset-account-backup-v2",
+  "public_key": "6aJfLFWqXd4eJZbqnizfaiFY8hfShUTzmSicbMF2sqmN6xif8A",
+  "cipher": "xchacha20-poly1305",
+  "kdf": {
+    "algorithm": "argon2id",
+    "version": 19,
+    "memory_kib": 262144,
+    "iterations": 3,
+    "parallelism": 4,
+    "output_bytes": 32,
+    "salt": "bd8baeb441c7e8ade9f361759fdf37be"
+  },
+  "encrypted": {
+    "nonce": "8b81d091ed481a4efd2d155459199ac1753e04865fe934c4",
+    "ciphertext": "e6d83308449cc84ea213d5d6efa81e0478788e3d6dbb36720b095c61460edc80f6f2b0ac614143928fb90037c490e610"
+  }
+}

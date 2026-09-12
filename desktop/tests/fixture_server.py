@@ -95,6 +95,8 @@ class Fixture:
                     return self.send_data({"ok": True, "data": {"csrf_token": fixture.csrf_token}}, headers={"Set-Cookie": "session=" + fixture.session_cookie + "; Path=/; HttpOnly; SameSite=Lax" + ("; Secure" if self.server is fixture.server else "")})
                 if path == "/v1/auth/ui-key/verify":
                     return self.send_data({"ok": payload.get("user_key") == "fixture-key", "data": identity}, 200 if payload.get("user_key") == "fixture-key" else 401)
+                if hasattr(fixture, "standalone_api") and fixture.standalone_api.serve(self, payload):
+                    return
                 if not (key_ok or cookie_ok):
                     return self.send_data({"ok": False, "error": "auth_required"}, 401)
                 if self.command not in ("GET", "HEAD") and not key_ok and self.headers.get("X-Agent-Csrf-Token") != fixture.csrf_token:

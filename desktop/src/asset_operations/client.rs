@@ -1,7 +1,8 @@
+use super::owner_transport::OwnerTransport;
 use super::protocol::*;
-use crate::{session::Session, transport::bytes_body, Result};
+use crate::Result;
 use futures_util::StreamExt;
-use http::{HeaderMap, Method};
+use http::Method;
 use serde::{de::DeserializeOwned, Deserialize};
 use serde_json::{json, Value};
 use std::time::Duration;
@@ -59,34 +60,13 @@ pub(crate) fn submission_error(error: &str) -> &'static str {
 }
 
 pub async fn request<T: DeserializeOwned>(
-    session: &Session,
+    session: &impl OwnerTransport,
     method: Method,
     path: &str,
     body: Option<Value>,
 ) -> Result<T> {
-    let info = session.info().await;
-    if info
-        .identity
-        .as_ref()
-        .and_then(|v| v.get("role"))
-        .and_then(Value::as_str)
-        != Some("admin")
-    {
-        return Err("wallet_admin_required".into());
-    }
-    let headers = HeaderMap::from_iter([(
-        http::header::CONTENT_TYPE,
-        http::HeaderValue::from_static("application/json"),
-    )]);
     let response = tokio::time::timeout(Duration::from_secs(15), async {
-        let mut response = session
-            .request(
-                method,
-                path,
-                headers,
-                body.map(|b| bytes_body(b.to_string())),
-            )
-            .await?;
+        let mut response = session.owner_request(method, path, body).await?;
         let mut bytes = Vec::new();
         while let Some(chunk) = response.body.next().await {
             let chunk = chunk.map_err(|_| "wallet_network_failed")?;
@@ -110,14 +90,14 @@ pub async fn request<T: DeserializeOwned>(
     })
     .await
     .map_err(|_| "wallet_network_failed")??;
-    if session.cancelled.is_cancelled() {
+    if session.cancelled() {
         return Err("stale_connection".into());
     }
     Ok(response)
 }
 
 pub async fn capabilities(
-    session: &Session,
+    session: &impl OwnerTransport,
     service: Service,
     action: &str,
 ) -> Result<Capabilities> {
@@ -129,10 +109,15 @@ pub async fn capabilities(
     )
     .await?;
     cap.validate(service, action)?;
+    if session.expected_node().is_some_and(|(origin, ledger)| {
+        cap.node_url != origin || ledger.is_some_and(|id| cap.ledger_id != id)
+    }) {
+        return Err("wallet_node_changed".into());
+    }
     Ok(cap)
 }
 pub async fn challenge(
-    session: &Session,
+    session: &impl OwnerTransport,
     cap: &Capabilities,
     account: &str,
     id: Uuid,
@@ -153,7 +138,7 @@ pub fn verify_body(payload: &Payload, signature: &str) -> Value {
 }
 
 pub async fn public_read<T: DeserializeOwned>(
-    session: &Session,
+    session: &impl OwnerTransport,
     cap: &Capabilities,
     account: &str,
     intent: &Intent,

@@ -93,6 +93,18 @@ def main():
                    "dmg_integrity", "installed_binary_sha256", "native_window_open"]
     else:
         raise SystemExit("native_package_platform_unsupported")
+    installed_binary = (EVIDENCE / "Installed app 测试/agent-desktop.exe" if platform.system() == "Windows"
+                        else installed / "Contents/MacOS/agent-desktop")
+    test_env = {**os.environ, "DESKTOP_WALLET_TEST_EXE": str(installed_binary),
+                "DESKTOP_WALLET_TEST_OUTPUT": str(EVIDENCE)}
+    with (EVIDENCE / "wallet-security.log").open("w", encoding="utf-8") as log:
+        run(["cargo", "test", "--locked", "--no-default-features", "--lib",
+             "wallet::worker::client::native_tests", "--", "--ignored", "--test-threads=1"],
+            env=test_env, stdout=log, stderr=subprocess.STDOUT)
+    for name in ["wallet-native-security.json", "wallet-native-ipc.json", "wallet-native-parent.json"]:
+        report = json.loads((EVIDENCE / name).read_text())
+        assert report["ok"]
+        checks.extend(report["checks"])
     packages = [{"file": p.name, "sha256": digest(p), "bytes": p.stat().st_size}
                 for p in sorted(OUT.iterdir()) if p.suffix in {".exe", ".msi", ".dmg", ".zip"}]
     manifest = {"schema_version": 1, "version": version, "source_commit": commit,

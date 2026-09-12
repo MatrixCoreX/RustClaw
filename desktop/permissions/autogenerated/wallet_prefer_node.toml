@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-wallet-prefer-node"
+description = "Enables the wallet_prefer_node command without any pre-configured scope."
+commands.allow = ["wallet_prefer_node"]
+
+[[permission]]
+identifier = "deny-wallet-prefer-node"
+description = "Denies the wallet_prefer_node command without any pre-configured scope."
+commands.deny = ["wallet_prefer_node"]

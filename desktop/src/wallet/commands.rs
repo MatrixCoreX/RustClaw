@@ -1,4 +1,4 @@
-use super::{Account, Status, Vault};
+use super::{worker::VaultClient, Account, Status};
 use crate::{asset_operations::Operations, commands::main_only, Result};
 use std::{
     path::PathBuf,
@@ -16,7 +16,7 @@ pub struct Selection {
     pub generation: u64,
 }
 pub struct WalletState {
-    pub vault: Arc<Mutex<Vault>>,
+    pub vault: Arc<Mutex<VaultClient>>,
     pub operations: tokio::sync::Mutex<Operations>,
     pub selection: Mutex<Selection>,
     pub operation_gate: tokio::sync::Mutex<()>,
@@ -24,7 +24,7 @@ pub struct WalletState {
 }
 impl WalletState {
     pub fn new(directory: PathBuf) -> Result<Self> {
-        let vault = Vault::new(directory.clone())?;
+        let vault = VaultClient::new(directory.clone())?;
         Ok(Self {
             vault: Arc::new(Mutex::new(vault)),
             operations: tokio::sync::Mutex::new(Operations::new(
@@ -95,7 +95,7 @@ pub async fn wallet_status(window: WebviewWindow, state: State<'_, WalletState>)
     let vault = state.vault.clone();
     tokio::task::spawn_blocking(move || vault.lock().unwrap().status())
         .await
-        .map_err(|_| "wallet_storage_unavailable".into())
+        .map_err(|_| "wallet_storage_unavailable")?
 }
 #[tauri::command]
 pub async fn wallet_lock(window: WebviewWindow, state: State<'_, WalletState>) -> Result<()> {
@@ -165,8 +165,10 @@ pub async fn wallet_backup(
     state: State<'_, WalletState>,
     account_id: Uuid,
     password: String,
+    vault_password: String,
 ) -> Result<bool> {
     let password = Zeroizing::new(password);
+    let vault_password = Zeroizing::new(vault_password);
     wallet_only(&window)?;
     let public = state.vault.lock().unwrap().account(account_id)?.public_key;
     let guard = DialogGuard::new(&state.native_dialogs);
@@ -183,7 +185,7 @@ pub async fn wallet_backup(
         vault
             .lock()
             .unwrap()
-            .backup(account_id, &password, file.path())
+            .backup(account_id, &vault_password, &password, file.path())
     })
     .await
     .map_err(|_| "wallet_storage_unavailable")??;

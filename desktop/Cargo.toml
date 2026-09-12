@@ -3,7 +3,7 @@ resolver = "2"
 
 [package]
 name = "agent-desktop"
-version = "0.3.4"
+version = "0.4.1"
 edition = "2021"
 license = "MIT"
 description = "Secure desktop client for an existing agent device"
@@ -41,6 +41,7 @@ tokio-util = { version = "0.7", features = ["rt", "io"] }
 tokio-stream = "0.1"
 uuid = { version = "1", features = ["v4", "serde"] }
 zeroize = { version = "1", features = ["derive"] }
+zxcvbn = "=3.1.1"
 tauri = { version = "=2.11.5", optional = true , features = [] }
 rfd = { version = "0.17", optional = true }
 open = { version = "5", optional = true }
@@ -50,8 +51,19 @@ serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 tauri-build = { version = "2", features = [] }
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis"] }
+windows-sys = { version = "0.61", features = [
+    "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis",
+    "Win32_Storage_FileSystem", "Win32_Security_Authorization",
+    "Win32_System_Memory", "Win32_System_SystemInformation",
+    "Win32_System_Threading", "Win32_System_JobObjects",
+    "Win32_System_Pipes", "Win32_System_Console", "Win32_System_IO",
+    "Win32_System_ErrorReporting", "Win32_UI_WindowsAndMessaging",
+    "Win32_System_RemoteDesktop",
+] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 system-configuration = "=0.5.1"
