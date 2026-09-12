@@ -109,6 +109,13 @@ def main():
         raise SystemExit("native_package_platform_unsupported")
     installed_binary = (EVIDENCE / "Installed app 测试/agent-desktop.exe" if platform.system() == "Windows"
                         else installed / "Contents/MacOS/agent-desktop")
+    if platform.system() == "Windows":
+        signer = installed_binary.with_name("agent-vault.exe")
+        expected_signer = ROOT / ".build" / f"agent-vault-{target}.exe"
+        assert signer.is_file() and digest(signer) == digest(expected_signer), "installed_signer_mismatch"
+        image = signer.read_bytes().lower()
+        assert b"user32.dll" not in image and b"gdi32.dll" not in image, "signer_gui_dependency"
+        checks += ["installed_signer_sha256", "signer_without_user32_gdi32"]
     test_env = {**os.environ, "DESKTOP_WALLET_TEST_EXE": str(installed_binary),
                 "DESKTOP_WALLET_TEST_OUTPUT": str(EVIDENCE)}
     with (EVIDENCE / "wallet-security.log").open("w", encoding="utf-8") as log:
