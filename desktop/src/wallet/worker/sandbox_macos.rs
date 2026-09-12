@@ -12,7 +12,6 @@ use std::{
 unsafe extern "C" {
     fn sandbox_init(profile: *const c_char, flags: u64, error: *mut *mut c_char) -> c_int;
     fn sandbox_free_error(error: *mut c_char);
-    fn sandbox_check(pid: libc::pid_t, operation: *const c_char, filter: c_int, ...) -> c_int;
 }
 fn protection_error(stage: &str) -> String {
     // Only static stage and errno, before any vault credentials are opened.
@@ -68,12 +67,9 @@ pub fn enter() -> Result<()> {
             libc::close(queue);
             return Err(protection_error("sandbox_init"));
         }
-        for op in [c"network-outbound", c"process-exec", c"process-fork"] {
-            if sandbox_check(libc::getpid(), op.as_ptr(), 0) <= 0 {
-                libc::close(queue);
-                return Err(protection_error(op.to_str().unwrap_or("sandbox_check")));
-            }
-        }
+        verify_restrictions().inspect_err(|_| {
+            libc::close(queue);
+        })?;
         std::thread::Builder::new()
             .name("wallet-parent-watch".into())
             .spawn(move || loop {
@@ -88,6 +84,80 @@ pub fn enter() -> Result<()> {
                 libc::close(queue);
                 "wallet_process_protection_unavailable"
             })?;
+    }
+    Ok(())
+}
+
+fn verify_restrictions() -> Result<()> {
+    // Probe real system calls before any key is opened. The operation-query SPI
+    // rejects process-exec with EINVAL on current macOS, which is not evidence
+    // that exec is allowed or denied. An unexpected successful exec runs only
+    // this fixed OS no-op and exits without replying to the parent's Open frame.
+    fn denied() -> bool {
+        matches!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::EPERM | libc::EACCES)
+        )
+    }
+    unsafe {
+        let argv = [c"/usr/bin/true".as_ptr(), null()];
+        let env = [null()];
+        libc::execve(argv[0], argv.as_ptr(), env.as_ptr());
+        if !denied() {
+            return Err(protection_error("exec_probe"));
+        }
+        let child = libc::fork();
+        if child == 0 {
+            libc::_exit(0);
+        }
+        if child > 0 {
+            libc::waitpid(child, null_mut(), 0);
+            return Err(protection_error("fork_allowed"));
+        }
+        if !denied() {
+            return Err(protection_error("fork_probe"));
+        }
+        for family in [libc::AF_INET, libc::AF_INET6] {
+            let socket = libc::socket(family, libc::SOCK_STREAM, 0);
+            if socket < 0 {
+                if denied() {
+                    continue;
+                }
+                return Err(protection_error("socket_probe"));
+            }
+            let result = if family == libc::AF_INET {
+                let address = libc::sockaddr_in {
+                    sin_len: std::mem::size_of::<libc::sockaddr_in>() as u8,
+                    sin_family: libc::AF_INET as u8,
+                    sin_port: 9u16.to_be(),
+                    sin_addr: libc::in_addr {
+                        s_addr: u32::from_ne_bytes([127, 0, 0, 1]),
+                    },
+                    sin_zero: [0; 8],
+                };
+                libc::connect(
+                    socket,
+                    (&address as *const libc::sockaddr_in).cast(),
+                    std::mem::size_of_val(&address) as u32,
+                )
+            } else {
+                let mut address: libc::sockaddr_in6 = zeroed();
+                address.sin6_len = std::mem::size_of_val(&address) as u8;
+                address.sin6_family = libc::AF_INET6 as u8;
+                address.sin6_port = 9u16.to_be();
+                address.sin6_addr.s6_addr[15] = 1;
+                libc::connect(
+                    socket,
+                    (&address as *const libc::sockaddr_in6).cast(),
+                    std::mem::size_of_val(&address) as u32,
+                )
+            };
+            let blocked = result < 0 && denied();
+            libc::close(socket);
+            if !blocked {
+                return Err(protection_error("network_probe"));
+            }
+        }
     }
     Ok(())
 }
