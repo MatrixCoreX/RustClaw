@@ -20,6 +20,8 @@ pub fn spawn(exe: &Path) -> Result<Worker> {
         .arg("--asset-vault-worker")
         .env_clear()
         .stderr(Stdio::null());
+    #[cfg(windows)]
+    command.stderr(Stdio::inherit());
     for name in [
         "HOME",
         "XDG_CONFIG_HOME",
