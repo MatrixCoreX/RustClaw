@@ -33,17 +33,17 @@ pub fn enter() -> Result<()> {
             break;
         }
         if Instant::now() >= deadline {
-            return Err("wallet_process_protection_unavailable".into());
+            return Err(protection_error("job_limits"));
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    remove_privileges()?;
-    for (policy, flags) in [
-        (ProcessChildProcessPolicy, 1u32),
-        (ProcessDynamicCodePolicy, 1),
-        (ProcessExtensionPointDisablePolicy, 1),
-        (ProcessImageLoadPolicy, 7),
-        (ProcessSystemCallDisablePolicy, 1),
+    remove_privileges().map_err(|_| protection_error("privileges"))?;
+    for (policy, flags, stage) in [
+        (ProcessChildProcessPolicy, 1u32, "child_policy"),
+        (ProcessDynamicCodePolicy, 1, "dynamic_code_policy"),
+        (ProcessExtensionPointDisablePolicy, 1, "extension_policy"),
+        (ProcessImageLoadPolicy, 7, "image_policy"),
+        (ProcessSystemCallDisablePolicy, 1, "win32k_policy"),
     ] {
         let mut observed = 0u32;
         unsafe {
@@ -57,23 +57,32 @@ pub fn enter() -> Result<()> {
                 ) == 0
                 || observed & flags != flags
             {
-                return Err("wallet_process_protection_unavailable".into());
+                return Err(protection_error(stage));
             }
         }
     }
     // Exclude heap from ordinary WER reports. This is not a guarantee against
     // administrator-created dumps or a compromised process owner changing ACLs.
     if unsafe { WerSetFlags(WER_FAULT_REPORTING_FLAG_NOHEAP) } < 0 {
-        return Err("wallet_process_protection_unavailable".into());
+        return Err(protection_error("wer_policy"));
     }
-    let user = windows_security::user_sid()?;
+    let user = windows_security::user_sid().map_err(|_| protection_error("user_sid"))?;
     // New peer handles cannot read/write memory, inject threads or duplicate
     // handles. Keep parent termination, synchronization and limited status query.
     let acl = windows_security::descriptor(&format!(
         "D:P(D;;0x0000087A;;;WD)(A;;0x00101001;;;{user})(A;;GA;;;SY)"
-    ))?;
+    ))
+    .map_err(|_| protection_error("process_descriptor"))?;
     windows_security::apply(unsafe { GetCurrentProcess() }, SE_KERNEL_OBJECT, &acl)
-        .map_err(|_| "wallet_process_protection_unavailable".into())
+        .map_err(|_| protection_error("process_dacl"))
+}
+
+fn protection_error(stage: &str) -> String {
+    // Static stage and OS status only; this runs before any wallet is opened.
+    eprintln!("wallet_windows_protection stage={stage} code={}", unsafe {
+        GetLastError()
+    });
+    "wallet_process_protection_unavailable".into()
 }
 
 fn remove_privileges() -> Result<()> {

@@ -32,9 +32,10 @@ pub fn spawn(mut command: Command) -> Result<Worker> {
     // The worker waits for these exact job limits before accepting Open. No
     // secrets have crossed the pipe when it is assigned to the non-inherited job.
     if unsafe { AssignProcessToJobObject(guard.0.as_raw_handle(), child.as_raw_handle()) } == 0 {
+        let error = protection_error("assign_job");
         let _ = child.kill();
         let _ = child.wait();
-        return Err("wallet_process_protection_unavailable".into());
+        return Err(error);
     }
     Ok(Worker {
         child,
@@ -47,7 +48,7 @@ fn create() -> Result<Job> {
     unsafe {
         let handle = CreateJobObjectW(null(), null());
         if handle.is_null() {
-            return Err("wallet_process_protection_unavailable".into());
+            return Err(protection_error("create_job"));
         }
         let job = Job(OwnedHandle::from_raw_handle(handle));
         let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = zeroed();
@@ -61,8 +62,15 @@ fn create() -> Result<Job> {
             size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
         ) == 0
         {
-            return Err("wallet_process_protection_unavailable".into());
+            return Err(protection_error("set_job"));
         }
         Ok(job)
     }
+}
+
+fn protection_error(stage: &str) -> String {
+    eprintln!("wallet_windows_protection stage={stage} code={}", unsafe {
+        GetLastError()
+    });
+    "wallet_process_protection_unavailable".into()
 }
