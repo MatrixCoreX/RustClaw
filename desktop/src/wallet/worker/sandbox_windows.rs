@@ -114,8 +114,18 @@ fn remove_privileges() -> Result<()> {
             let count = (*privileges).PrivilegeCount as usize;
             let values =
                 std::slice::from_raw_parts_mut((*privileges).Privileges.as_mut_ptr(), count);
+            // Normal user tokens retain directory traversal. Removing it breaks
+            // canonical path checks through ancestors whose contents cannot be
+            // listed, even when the selected file/directory grants access.
+            // This privilege grants neither file reads nor directory listing.
+            let mut traverse: LUID = zeroed();
+            if LookupPrivilegeValueW(std::ptr::null(), SE_CHANGE_NOTIFY_NAME, &mut traverse) == 0 {
+                return Err("wallet_process_protection_unavailable".into());
+            }
             for value in values {
-                value.Attributes = SE_PRIVILEGE_REMOVED;
+                if value.Luid.LowPart != traverse.LowPart || value.Luid.HighPart != traverse.HighPart {
+                    value.Attributes = SE_PRIVILEGE_REMOVED;
+                }
             }
             if AdjustTokenPrivileges(token, 0, privileges, 0, null_mut(), null_mut()) == 0
                 || GetLastError() == ERROR_NOT_ALL_ASSIGNED
