@@ -75,6 +75,11 @@ fn verify(account: &Account, payload: &str, signature: &str) {
 #[test]
 #[ignore = "Requires packaged binary and disposable unlocked OS credential store"]
 fn installed_worker_native_vault_backups_and_signatures() {
+    #[cfg(any(windows, target_os = "macos"))]
+    assert!(
+        !crate::wallet::native_session::locked(),
+        "native CI session must permit wallet interaction"
+    );
     let root = tempfile::tempdir().unwrap();
     let directory = root.path().join("vault 测试");
     let mut worker = client(&directory);
@@ -234,5 +239,5 @@ fn installed_worker_rejects_unframed_unknown_replayed_and_oversized_input() {
     );
 }
 
-#[path="parent_tests.rs"]
+#[path = "parent_tests.rs"]
 mod parent_tests;

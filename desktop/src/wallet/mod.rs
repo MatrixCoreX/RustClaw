@@ -310,3 +310,10 @@ mod windows_security;
 
 #[cfg(all(test, windows))]
 mod windows_tests;
+
+#[cfg(target_os="macos")]
+#[path="session_macos.rs"]
+mod native_session;
+#[cfg(target_os="windows")]
+#[path="session_windows.rs"]
+mod native_session;
