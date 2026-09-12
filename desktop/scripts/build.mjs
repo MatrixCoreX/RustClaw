@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
+import {buildWindowsWorker} from './windows-worker.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const identityPath = process.env.APP_PRODUCT_IDENTITY_CONFIG
@@ -30,6 +31,11 @@ fs.writeFileSync(configPath, JSON.stringify({productName: 'agent-desktop', bundl
 }}));
 if (process.argv.includes('--prepare-only')) process.exit(0);
 const dev = process.argv.includes('--dev');
+if(process.platform==='win32') {
+  const config=JSON.parse(fs.readFileSync(configPath,'utf8'));
+  config.bundle.externalBin=buildWindowsWorker(root,process.argv.slice(2));
+  fs.writeFileSync(configPath,JSON.stringify(config));
+}
 const result = spawnSync(process.execPath, [path.resolve(root, 'node_modules/@tauri-apps/cli/tauri.js'), 'build', '--config', configPath, ...(dev ? ['--debug', '--no-bundle'] : []), ...process.argv.slice(2).filter(a => a !== '--dev')], {
   cwd: root, stdio: 'inherit', env: {...process.env, APP_PRODUCT_IDENTITY_CONFIG: identityPath},
 });

@@ -15,7 +15,16 @@ use windows_sys::Win32::{
 };
 
 pub struct Job(OwnedHandle);
-pub fn spawn(mut command: Command) -> Result<Worker> {
+pub fn spawn(parent_command: Command) -> Result<Worker> {
+    // A GUI-linked executable initializes User32 before main(), making Win32k
+    // lockdown too late. The installed companion shares only the native core.
+    let executable = std::path::Path::new(parent_command.get_program())
+        .with_file_name("agent-vault.exe");
+    let mut command = Command::new(executable);
+    command.args(parent_command.get_args()).env_clear().stderr(Stdio::inherit());
+    for (key, value) in parent_command.get_envs() {
+        if let Some(value) = value { command.env(key, value); }
+    }
     let (parent, child_pipe) = windows_pipe::pair()?;
     let input = parent
         .try_clone()
