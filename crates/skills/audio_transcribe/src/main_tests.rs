@@ -340,3 +340,56 @@ fn shared_input_path_preserves_the_source_for_either_configured_backend() {
         AudioInput::Url(_) => panic!("local source must remain a path"),
     }
 }
+
+#[test]
+fn dedicated_stt_credentials_are_optional_declared_and_action_scoped() {
+    let manifest: toml::Value = toml::from_str(include_str!("../skill.toml")).unwrap();
+    let registry: toml::Value =
+        toml::from_str(include_str!("../../../../configs/skills_registry.toml")).unwrap();
+    let skill = registry["skills"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|skill| skill["name"].as_str() == Some("audio_transcribe"))
+        .unwrap();
+    let capabilities = skill["capabilities"].as_array().unwrap();
+    let environment = manifest["run"]["environment_allowlist"].as_array().unwrap();
+    let references = manifest["capability_request"]["permissions"]["credential_refs"]
+        .as_array()
+        .unwrap();
+    for vendor in [
+        "openai",
+        "google",
+        "anthropic",
+        "grok",
+        "deepseek",
+        "qwen",
+        "minimax",
+        "custom",
+    ] {
+        let name = format!("audio_transcribe_{vendor}_api_key");
+        assert!(references
+            .iter()
+            .any(|value| value.as_str() == Some(name.as_str())));
+        assert!(environment
+            .iter()
+            .any(|value| value.as_str() == Some(name.to_ascii_uppercase().as_str())));
+        assert!(capabilities
+            .iter()
+            .any(|value| value.as_str() == Some(format!("secrets.optional.{name}").as_str())));
+        assert!(!capabilities
+            .iter()
+            .any(|value| value.as_str() == Some(format!("secrets.{name}").as_str())));
+    }
+    let actions = skill["planner_capabilities"].as_array().unwrap();
+    let preview = actions
+        .iter()
+        .find(|action| action["name"].as_str() == Some("audio.preview_transcribe"))
+        .unwrap();
+    let transcribe = actions
+        .iter()
+        .find(|action| action["name"].as_str() == Some("audio.transcribe"))
+        .unwrap();
+    assert_eq!(preview["credential_access"].as_bool(), Some(false));
+    assert_eq!(transcribe["credential_access"].as_bool(), Some(true));
+}
