@@ -9,8 +9,7 @@ use futures_util::StreamExt;
 use serde_json::{json, Map, Value};
 
 use super::client::{
-    is_context_length_exceeded_response, is_quota_exhausted_response, ChatRequestHints,
-    ModelTurnEventSink, ModelTurnProviderResponse, ProviderError,
+    ChatRequestHints, ModelTurnEventSink, ModelTurnProviderResponse, ProviderError,
 };
 use super::openai_usage_snapshot;
 use crate::LlmProviderRuntime;
@@ -71,52 +70,17 @@ pub(super) async fn call_openai_model_turn(
             })?;
     }
     let status = response.status();
+    let headers = response.headers().clone();
     if status.is_success() && request.stream {
-        return read_openai_stream(response, req_body, event_sink).await;
+        return read_openai_stream(&provider, response, req_body, event_sink).await;
     }
     let body_text = response.text().await.map_err(|err| {
         ProviderError::retryable(format!("read response failed: {err}"), req_body.clone())
     })?;
-    if status.as_u16() == 429 {
-        return Err(if is_quota_exhausted_response(&body_text) {
-            ProviderError::quota_exhausted_with_response(
-                format!("http {}: {}", status.as_u16(), body_text),
-                req_body,
-                body_text,
-                None,
-            )
-        } else {
-            ProviderError::rate_limited_with_response(
-                format!("http {}: {}", status.as_u16(), body_text),
-                req_body,
-                body_text,
-                None,
-            )
-        });
-    }
-    if status.is_server_error() {
-        return Err(ProviderError::retryable_with_response(
-            format!("http {}: {}", status.as_u16(), body_text),
-            req_body,
-            body_text,
-            None,
-        ));
-    }
-    if is_context_length_exceeded_response(&body_text) {
-        return Err(ProviderError::context_length_exceeded_with_response(
-            format!("provider_context_length_exceeded:http_{}", status.as_u16()),
-            req_body.clone(),
-            body_text,
-            None,
-        ));
-    }
-    if !status.is_success() {
-        return Err(ProviderError::non_retryable_with_response(
-            format!("http {}: {}", status.as_u16(), body_text),
-            req_body,
-            body_text,
-            None,
-        ));
+    if let Some(error) =
+        super::error_response::response_error(&provider, status, &headers, &body_text, &req_body)
+    {
+        return Err(error);
     }
 
     let value: Value = serde_json::from_str(&body_text).map_err(|err| {
@@ -330,6 +294,49 @@ struct OpenAiStreamAccumulator {
 }
 
 impl OpenAiStreamAccumulator {
+    fn apply_checked(
+        &mut self,
+        frame: SseFrame,
+        provider: &LlmProviderRuntime,
+        headers: &reqwest::header::HeaderMap,
+        request: &Value,
+        sink: Option<&ModelTurnEventSink>,
+    ) -> Result<(), ProviderError> {
+        if let SseFrame::Data(value) = &frame {
+            self.check_error_frame(value, provider, headers, request)?;
+        }
+        self.apply(frame, sink).map_err(|code| {
+            ProviderError::non_retryable_with_response(
+                code,
+                request.clone(),
+                self.safe_raw_response(),
+                self.usage.clone(),
+            )
+        })
+    }
+
+    fn check_error_frame(
+        &mut self,
+        value: &Value,
+        provider: &LlmProviderRuntime,
+        headers: &reqwest::header::HeaderMap,
+        request: &Value,
+    ) -> Result<(), ProviderError> {
+        if let Some(mut error) = super::error_response::response_error(
+            provider,
+            reqwest::StatusCode::OK,
+            headers,
+            &value.to_string(),
+            request,
+        ) {
+            self.record_raw_response(value);
+            error.raw_response = Some(self.safe_raw_response());
+            error.usage = error.usage.or_else(|| self.usage.clone());
+            return Err(error);
+        }
+        Ok(())
+    }
+
     fn apply(&mut self, frame: SseFrame, sink: Option<&ModelTurnEventSink>) -> Result<(), String> {
         match frame {
             SseFrame::Done => {
@@ -507,11 +514,13 @@ impl OpenAiStreamAccumulator {
 }
 
 async fn read_openai_stream(
+    provider: &LlmProviderRuntime,
     response: reqwest::Response,
     request_payload: Value,
     event_sink: Option<ModelTurnEventSink>,
 ) -> Result<ModelTurnProviderResponse, ProviderError> {
     let mut decoder = SseDecoder::default();
+    let headers = response.headers().clone();
     let mut accumulator = OpenAiStreamAccumulator {
         finish_reason: ModelFinishReason::Unknown,
         ..OpenAiStreamAccumulator::default()
@@ -535,16 +544,13 @@ async fn read_openai_stream(
             )
         })?;
         for frame in frames {
-            accumulator
-                .apply(frame, event_sink.as_ref())
-                .map_err(|code| {
-                    ProviderError::non_retryable_with_response(
-                        code,
-                        request_payload.clone(),
-                        accumulator.safe_raw_response(),
-                        accumulator.usage.clone(),
-                    )
-                })?;
+            accumulator.apply_checked(
+                frame,
+                provider,
+                &headers,
+                &request_payload,
+                event_sink.as_ref(),
+            )?;
         }
     }
     let tail_frames = decoder.finish().map_err(|code| {
@@ -556,16 +562,21 @@ async fn read_openai_stream(
         )
     })?;
     for frame in tail_frames {
-        accumulator
-            .apply(frame, event_sink.as_ref())
-            .map_err(|code| {
-                ProviderError::non_retryable_with_response(
-                    code,
-                    request_payload.clone(),
-                    accumulator.safe_raw_response(),
-                    accumulator.usage.clone(),
-                )
-            })?;
+        accumulator.apply_checked(
+            frame,
+            provider,
+            &headers,
+            &request_payload,
+            event_sink.as_ref(),
+        )?;
+    }
+    // An abruptly closed SSE error may contain complete JSON but lack the final
+    // blank line. Inspect it for failure only; never accept unfinished success
+    // content/tool arguments or a truncated JSON value as a complete model turn.
+    if decoder.mode == StreamWireMode::Sse {
+        if let Ok(Some(SseFrame::Data(value))) = decode_sse_record(&decoder.buffer) {
+            accumulator.check_error_frame(&value, provider, &headers, &request_payload)?;
+        }
     }
     accumulator.complete_terminal_eof();
     if !accumulator.done {

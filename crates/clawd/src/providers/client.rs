@@ -76,6 +76,8 @@ pub(crate) type ModelTurnEventSink = Arc<dyn Fn(ModelTurnEvent) + Send + Sync>;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ProviderError {
+    /// Server not-before hint; yielded to the existing background checkpoint path.
+    pub(super) retry_after_seconds: Option<u64>,
     pub(crate) retryable: bool,
     pub(crate) kind: ProviderErrorKind,
     pub(crate) message: String,
@@ -110,7 +112,9 @@ impl ProviderError {
     }
 
     pub(crate) fn background_wait_seconds(&self) -> Option<u64> {
-        self.kind.background_wait_seconds()
+        self.kind
+            .background_wait_seconds()
+            .map(|default| self.retry_after_seconds.unwrap_or(default).max(1))
     }
 
     pub(super) fn timeout(message: String, request_payload: Value) -> Self {
@@ -124,6 +128,7 @@ impl ProviderError {
             attempts: 1,
             retryable_error_count: 0,
             breaker_impact: BreakerImpact::Failure,
+            retry_after_seconds: None,
         }
     }
 
@@ -138,6 +143,7 @@ impl ProviderError {
             attempts: 1,
             retryable_error_count: 0,
             breaker_impact: BreakerImpact::Failure,
+            retry_after_seconds: None,
         }
     }
 
@@ -157,6 +163,7 @@ impl ProviderError {
             attempts: 1,
             retryable_error_count: 0,
             breaker_impact: BreakerImpact::Failure,
+            retry_after_seconds: None,
         }
     }
 
@@ -177,6 +184,7 @@ impl ProviderError {
             retryable_error_count: 0,
             // The provider answered successfully; only this model turn was malformed.
             breaker_impact: BreakerImpact::Healthy,
+            retry_after_seconds: None,
         }
     }
 
@@ -191,6 +199,7 @@ impl ProviderError {
             attempts: 1,
             retryable_error_count: 0,
             breaker_impact: BreakerImpact::Neutral,
+            retry_after_seconds: None,
         }
     }
 
@@ -210,6 +219,7 @@ impl ProviderError {
             attempts: 1,
             retryable_error_count: 0,
             breaker_impact: BreakerImpact::Healthy,
+            retry_after_seconds: None,
         }
     }
 
@@ -229,6 +239,7 @@ impl ProviderError {
             attempts: 1,
             retryable_error_count: 0,
             breaker_impact: BreakerImpact::Healthy,
+            retry_after_seconds: None,
         }
     }
 
@@ -248,6 +259,7 @@ impl ProviderError {
             attempts: 1,
             retryable_error_count: 0,
             breaker_impact: BreakerImpact::Healthy,
+            retry_after_seconds: None,
         }
     }
 
@@ -267,6 +279,7 @@ impl ProviderError {
             attempts: 1,
             retryable_error_count: 0,
             breaker_impact: BreakerImpact::Healthy,
+            retry_after_seconds: None,
         }
     }
 
@@ -319,63 +332,6 @@ impl ModelTurnProviderResponse {
         self.last_retry_error_kind = last_retry_error_kind;
         self
     }
-}
-
-pub(crate) fn is_quota_exhausted_response(body_text: &str) -> bool {
-    let Ok(value) = serde_json::from_str::<Value>(body_text) else {
-        return false;
-    };
-    const QUOTA_CODES: &[&str] = &[
-        "account_quota_exhausted",
-        "billing_hard_limit_reached",
-        "credit_balance_exhausted",
-        "insufficient_quota",
-        "quota_exceeded",
-        "quota_exhausted",
-        "usage_limit_exceeded",
-    ];
-    [
-        "/error/code",
-        "/error/type",
-        "/code",
-        "/type",
-        "/status_code",
-        "/base_resp/status_code",
-    ]
-    .iter()
-    .filter_map(|pointer| value.pointer(pointer))
-    .filter_map(Value::as_str)
-    .map(str::trim)
-    .any(|code| QUOTA_CODES.contains(&code))
-}
-
-pub(crate) fn is_context_length_exceeded_response(body_text: &str) -> bool {
-    let Ok(value) = serde_json::from_str::<Value>(body_text) else {
-        return false;
-    };
-    const CONTEXT_CODES: &[&str] = &[
-        "context_length_exceeded",
-        "context_window_exceeded",
-        "input_too_long",
-        "max_context_length_exceeded",
-        "prompt_too_long",
-        "token_limit_exceeded",
-    ];
-    [
-        "/error/code",
-        "/error/type",
-        "/error/status",
-        "/code",
-        "/type",
-        "/status",
-        "/status_code",
-        "/base_resp/status_code",
-    ]
-    .iter()
-    .filter_map(|pointer| value.pointer(pointer))
-    .filter_map(Value::as_str)
-    .map(str::trim)
-    .any(|code| CONTEXT_CODES.contains(&code))
 }
 
 /// Optional per-call generation hints (`temperature` / `max_tokens`).
@@ -521,6 +477,11 @@ fn retry_limit_for_provider_error_with_rate_limit_retries(
     err: &ProviderError,
     rate_limit_retries: usize,
 ) -> usize {
+    // Do not occupy a worker (or retry early) when the provider specifies a wait.
+    // The gateway persists this hint in TaskProviderBlocker for background resume.
+    if err.retry_after_seconds.is_some_and(|seconds| seconds > 0) {
+        return 0;
+    }
     if err.is_rate_limited() {
         rate_limit_retries.min(MAX_LLM_RATE_LIMIT_RETRY_TIMES)
     } else {

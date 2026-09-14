@@ -1,0 +1,224 @@
+# Reviewed against official API documentation on 2026-09-14.
+# This is the sole built-in rule source; also embedded for standalone distributions.
+# Rules are provider-scoped. See configs/llm_provider_errors.md for precedence.
+schema_version = 1
+revision = "2026-09-14.1"
+code_paths = ["/error/code", "/code", "/base_resp/status_code", "/status_code", "/error/status", "/status", "/error/type", "/type"]
+success_codes = ["0", "200", "OK", "Success"]
+
+# Explicit relay binding example (never infer an upstream from model names):
+# [[bindings]]
+# provider_name = "my-relay"
+# profile = "minimax"
+
+[[profiles]]
+id = "minimax"
+hosts = ["minimaxi.com", "minimaxi.chat", "minimax.io", "minimax.chat", "minimax.cn"]
+provider_names = ["vendor-minimax", "minimax"]
+sources = ["https://platform.minimax.cn/docs/api-reference/errorcode"]
+failure_code_paths = ["/base_resp/status_code"]
+# Observed Anthropic-compatible wrapper carries the numeric code as a suffix.
+# Only extract a final ASCII '(digits)', never match translated error prose.
+message_code_paths = ["/error/message"]
+message_code_http_statuses = [429]
+[[profiles.rules]]
+id = "balance_or_token_plan"
+class = "quota_exhausted"
+codes = ["1008", "2056"]
+[[profiles.rules]]
+id = "rate"
+class = "rate_limited"
+codes = ["1002", "2045"]
+[[profiles.rules]]
+id = "timeout"
+class = "timeout"
+codes = ["1001"]
+[[profiles.rules]]
+id = "service"
+class = "provider_retryable_response"
+codes = ["1000", "1024", "1033"]
+[[profiles.rules]]
+id = "authentication"
+class = "provider_non_retryable_business"
+codes = ["1004", "2049"]
+[[profiles.rules]]
+id = "safety"
+class = "provider_non_retryable_business"
+codes = ["1026", "1027"]
+[[profiles.rules]]
+id = "parameters_or_permission"
+class = "provider_non_retryable_business"
+codes = ["1039", "1041", "1042", "1043", "1044", "2013", "20132", "2037", "2038", "2039", "2042", "2048"]
+
+[[profiles]]
+id = "qwen"
+hosts = ["dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com", "coding.dashscope.aliyuncs.com"]
+provider_names = ["vendor-qwen", "qwen", "dashscope"]
+sources = ["https://help.aliyun.com/zh/model-studio/error-code"]
+failure_code_paths = ["/code"]
+[[profiles.rules]]
+id = "account_quota"
+class = "quota_exhausted"
+codes = ["Arrearage", "AllocationQuota.FreeTierOnly", "PrepaidBillOverdue"]
+[[profiles.rules]]
+id = "rate_or_ambiguous_allocation"
+class = "rate_limited"
+# Unlike OpenAI, insufficient_quota can mean TPM here. Ambiguous allocation
+# errors remain rate-limited unless a more specific account code is supplied.
+codes = ["Throttling", "Throttling.RateQuota", "LimitRequests", "limit_requests", "ResourceExhausted", "Throttling.BurstRate", "limit_burst_rate", "Throttling.AllocationQuota", "insufficient_quota", "Throttling.Concurrency"]
+[[profiles.rules]]
+id = "account_or_request"
+class = "provider_non_retryable_business"
+codes = ["CommodityNotPurchased", "InvalidApiKey", "invalid_api_key", "AccessDenied", "InvalidParameter", "invalid_parameter_error", "InternalError.Algo.InvalidParameter", "DataInspectionFailed", "model_not_found", "model_not_supported"]
+
+[[profiles]]
+id = "zhipu"
+hosts = ["open.bigmodel.cn"]
+provider_names = ["vendor-zhipu", "zhipu", "bigmodel"]
+sources = ["https://docs.bigmodel.cn/cn/api/api-code"]
+[[profiles.rules]]
+id = "balance_or_plan"
+class = "quota_exhausted"
+codes = ["1113", "1308", "1309", "1310", "1314", "1316", "1317", "1318", "1319", "1320", "1321"]
+[[profiles.rules]]
+id = "rate"
+class = "rate_limited"
+codes = ["1302"]
+[[profiles.rules]]
+id = "service"
+class = "provider_retryable_response"
+codes = ["1200", "1230", "1234", "1305"]
+[[profiles.rules]]
+id = "context"
+class = "context_length_exceeded"
+codes = ["1261"]
+[[profiles.rules]]
+id = "authentication"
+class = "provider_non_retryable_business"
+codes = ["1000", "1001", "1003", "1005"]
+[[profiles.rules]]
+id = "request_or_access"
+class = "provider_non_retryable_business"
+codes = ["1210", "1211", "1212", "1213", "1214", "1215", "1220", "1221", "1222", "1301", "1311", "1313", "1315"]
+
+[[profiles]]
+id = "openai"
+hosts = ["api.openai.com"]
+provider_names = ["vendor-openai", "openai"]
+sources = ["https://developers.openai.com/api/docs/guides/error-codes"]
+# OpenAI uses the common structured-code rules below.
+
+[[profiles]]
+id = "anthropic"
+hosts = ["api.anthropic.com"]
+provider_names = ["vendor-anthropic", "anthropic"]
+sources = ["https://platform.claude.com/docs/en/api/errors"]
+# Spend caps can share rate_limit_error; absence of Retry-After is NOT proof
+# of a billing problem. Do not inspect translated messages to guess.
+
+[[profiles]]
+id = "google"
+hosts = ["generativelanguage.googleapis.com", "aiplatform.googleapis.com"]
+provider_names = ["vendor-google", "google", "gemini"]
+sources = ["https://ai.google.dev/gemini-api/docs/troubleshooting", "https://ai.google.dev/gemini-api/docs/api-errors"]
+[[profiles.rules]]
+id = "daily_quota"
+class = "quota_exhausted"
+codes = ["quota_exceeded"]
+[[profiles.rules]]
+id = "rate_or_resource"
+class = "rate_limited"
+codes = ["RESOURCE_EXHAUSTED", "too_many_requests"]
+[[profiles.rules]]
+id = "timeout"
+class = "timeout"
+codes = ["DEADLINE_EXCEEDED", "deadline_exceeded"]
+[[profiles.rules]]
+id = "service"
+class = "provider_retryable_response"
+codes = ["UNAVAILABLE", "INTERNAL", "service_unavailable", "api_error"]
+[[profiles.rules]]
+id = "request_or_access"
+class = "provider_non_retryable_business"
+codes = ["INVALID_ARGUMENT", "FAILED_PRECONDITION", "PERMISSION_DENIED", "UNAUTHENTICATED", "NOT_FOUND", "OUT_OF_RANGE", "UNIMPLEMENTED", "invalid_request", "failed_precondition", "parameter_unknown", "out_of_range", "unimplemented"]
+
+[[profiles]]
+id = "deepseek"
+hosts = ["api.deepseek.com"]
+provider_names = ["vendor-deepseek", "deepseek"]
+sources = ["https://api-docs.deepseek.com/quick_start/error_codes/"]
+# HTTP 402 = balance; 429 = rate; 500/503 = service. Common fallback handles it.
+
+[[profiles]]
+id = "mimo"
+hosts = ["xiaomimimo.com"]
+provider_names = ["vendor-mimo", "mimo"]
+sources = ["https://mimo.mi.com/docs/zh-CN/api/guidance/error-codes"]
+# 421 = content filter; 429 can mean rate OR plan quota (ambiguous).
+
+[[profiles]]
+id = "xai"
+hosts = ["api.x.ai"]
+provider_names = ["vendor-grok", "grok", "xai"]
+sources = ["https://docs.x.ai/developers/debugging"]
+
+[[profiles]]
+id = "siliconflow"
+hosts = ["api.siliconflow.cn", "api.siliconflow.com"]
+provider_names = ["siliconflow", "vendor-siliconflow"]
+sources = ["https://docs.siliconflow.cn/en/faqs/error-code", "https://docs.siliconflow.cn/docs/userguide/capabilities/text-generation"]
+failure_code_paths = ["/code"]
+[[profiles.rules]]
+id = "model_not_found"
+class = "provider_non_retryable_business"
+codes = ["20012"]
+
+[[profiles]]
+id = "openrouter"
+hosts = ["openrouter.ai"]
+provider_names = ["openrouter", "vendor-openrouter"]
+sources = ["https://openrouter.ai/docs/client-sdks/typescript/api-reference/responses"]
+# OpenRouter wraps HTTP error codes as numeric /error/code, including in streams.
+http_status_paths = ["/error/code"]
+
+[[profiles]]
+id = "groq"
+hosts = ["api.groq.com"]
+provider_names = ["groq", "vendor-groq"]
+sources = ["https://console.groq.com/docs/errors"]
+[[profiles.rules]]
+id = "flex_capacity"
+class = "provider_retryable_response"
+http_statuses = [498]
+
+[[profiles]]
+id = "default"
+sources = ["https://developers.openai.com/api/docs/guides/error-codes", "https://platform.claude.com/docs/en/api/errors"]
+[[profiles.rules]]
+id = "quota"
+class = "quota_exhausted"
+codes = ["account_quota_exhausted", "billing_hard_limit_reached", "credit_balance_exhausted", "insufficient_quota", "quota_exceeded", "quota_exhausted", "usage_limit_exceeded", "organization_spend_limit_exceeded", "project_spend_limit_exceeded", "organization_usage_limit_exceeded", "billing_error"]
+[[profiles.rules]]
+id = "context"
+class = "context_length_exceeded"
+codes = ["context_length_exceeded", "context_window_exceeded", "input_too_long", "max_context_length_exceeded", "prompt_too_long", "token_limit_exceeded"]
+[[profiles.rules]]
+id = "rate"
+class = "rate_limited"
+codes = ["rate_limit_error", "rate_limit_exceeded", "slow_down"]
+[[profiles.rules]]
+id = "timeout"
+class = "timeout"
+codes = ["timeout_error"]
+[[profiles.rules]]
+id = "service"
+class = "provider_retryable_response"
+codes = ["api_error", "server_error", "overloaded_error", "service_unavailable_error", "server_is_overloaded"]
+[[profiles.rules]]
+id = "authentication"
+class = "provider_non_retryable_business"
+codes = ["authentication_error", "invalid_api_key"]
+[[profiles.rules]]
+id = "request_or_access"
+class = "provider_non_retryable_business"
+codes = ["permission_error", "not_found_error", "invalid_request_error", "request_too_large", "conflict_error", "content_filter", "content_policy_violation"]

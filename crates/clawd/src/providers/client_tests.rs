@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use super::{is_quota_exhausted_response, BreakerImpact, ProviderError, PROVIDER_IMPLS};
+use super::{BreakerImpact, ProviderError, PROVIDER_IMPLS};
 use serde_json::Value;
 use std::future::pending;
 
@@ -96,6 +96,18 @@ fn provider_error_marks_breaker_impact_by_failure_class() {
 
 #[test]
 fn quota_exhausted_detector_uses_machine_fields_only() {
+    let is_quota_exhausted_response = |body: &str| {
+        super::super::error_classification::classify(
+            super::super::error_rules::active(),
+            "unknown",
+            "https://example.invalid",
+            429,
+            &serde_json::from_str(body).unwrap(),
+        )
+        .unwrap()
+        .kind
+            == super::ProviderErrorKind::QuotaExhausted
+    };
     assert!(is_quota_exhausted_response(
         "{\"error\":{\"code\":\"insufficient_quota\"}}"
     ));
@@ -120,10 +132,22 @@ fn provider_error_kind_does_not_parse_misleading_message_text() {
 
 #[test]
 fn context_length_detector_uses_machine_fields_only() {
-    assert!(super::is_context_length_exceeded_response(
+    let is_context_length_exceeded_response = |body: &str| {
+        super::super::error_classification::classify(
+            super::super::error_rules::active(),
+            "unknown",
+            "https://example.invalid",
+            400,
+            &serde_json::from_str(body).unwrap(),
+        )
+        .unwrap()
+        .kind
+            == super::ProviderErrorKind::ContextLengthExceeded
+    };
+    assert!(is_context_length_exceeded_response(
         "{\"error\":{\"code\":\"context_length_exceeded\",\"message\":\"opaque\"}}"
     ));
-    assert!(!super::is_context_length_exceeded_response(
+    assert!(!is_context_length_exceeded_response(
         "{\"error\":{\"message\":\"context_length_exceeded\"}}"
     ));
 }
