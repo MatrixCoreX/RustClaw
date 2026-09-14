@@ -25,6 +25,10 @@ export function isNniNavigationPage(page: string): boolean {
   return NNI_NAVIGATION_PAGES.some((candidate) => candidate === page);
 }
 
+export function restoreNniNavigationVisible(saved: string | null): boolean {
+  return saved === "true";
+}
+
 export type DashboardActionKind =
   | "offline"
   | "llm_setup"

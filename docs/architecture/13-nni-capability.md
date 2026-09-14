@@ -106,6 +106,11 @@ that controls the signer can unbind that device and redirect its future rewards 
 that party can prove, but cannot bind an unrelated third-party public key without that target key's
 signature. Existing balances and other devices remain under their current asset authorization.
 
+On first use, the shared console hides the NNI, Bancor, and Assets navigation entries on every
+platform. An administrator can enable them in Home > NNI after acknowledging the notice. An
+explicitly saved choice is retained across refreshes; this navigation preference does not join
+or leave the network, stop trading services, or delete data.
+
 The visual console exposes NNI, APR, Bancor, and Assets pages only to an authenticated administrator.
 The local `clawd` asset-transfer endpoint independently enforces the administrator role instead of
 treating a hidden UI page as authorization. Public NNI node APIs and their cryptographic contracts

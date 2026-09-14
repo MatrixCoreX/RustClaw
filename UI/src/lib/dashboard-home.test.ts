@@ -10,6 +10,7 @@ import {
   getSuggestedDashboardAction,
   isDashboardCategoryPage,
   isNniNavigationPage,
+  restoreNniNavigationVisible,
 } from "./dashboard-home.ts";
 
 test("keeps model, communication setup, and tools under home categories", () => {
@@ -25,6 +26,25 @@ test("groups only the three requested NNI navigation entries", () => {
   assert.equal(isNniNavigationPage("assets"), true);
   assert.equal(isNniNavigationPage("nni_apr"), false);
   assert.equal(isNniNavigationPage("dashboard"), false);
+});
+
+test("starts NNI navigation disabled in a fresh browser or platform webview", () => {
+  assert.equal(restoreNniNavigationVisible(null), false);
+  for (const saved of ["", "1", "TRUE", " true ", "invalid"]) {
+    assert.equal(restoreNniNavigationVisible(saved), false);
+  }
+});
+
+test("preserves explicit NNI navigation choices after refresh", () => {
+  for (const enabled of [true, false]) {
+    assert.equal(restoreNniNavigationVisible(String(enabled)), enabled);
+  }
+});
+
+test("the shared console uses the same NNI navigation default on every platform", () => {
+  const source = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
+  assert.match(source, /restoreNniNavigationVisible\(window\.localStorage\.getItem\(STORAGE_KEYS\.nniNavigationVisible\)\)/);
+  assert.doesNotMatch(source, /getItem\(STORAGE_KEYS\.nniNavigationVisible\)\s*!==\s*"false"/);
 });
 
 test("lays out dashboard section buttons in two desktop rows", () => {

@@ -29,7 +29,7 @@ import {
   responseIndicatesExpiredAuthentication,
 } from "./lib/auth-keys";
 import { conversationHistoryScope } from "./lib/chat-history";
-import { isNniNavigationPage } from "./lib/dashboard-home";
+import { isNniNavigationPage, restoreNniNavigationVisible } from "./lib/dashboard-home";
 import { formatDuration, toLocalTime } from "./lib/display-format";
 import { runCoalescedResponseRead } from "./lib/resilient-read";
 import { formatUiError } from "./lib/ui-error";
@@ -203,7 +203,7 @@ export default function App() {
     return saved && CONSOLE_PAGES.includes(saved as ConsolePage) ? (saved as ConsolePage) : "dashboard";
   });
   const [nniNavigationVisible, setNniNavigationVisible] = useState(
-    () => window.localStorage.getItem(STORAGE_KEYS.nniNavigationVisible) !== "false",
+    () => restoreNniNavigationVisible(window.localStorage.getItem(STORAGE_KEYS.nniNavigationVisible)),
   );
   const logContainerRef = useRef<HTMLPreElement | null>(null);
 
