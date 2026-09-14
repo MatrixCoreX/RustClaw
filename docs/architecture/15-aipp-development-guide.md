@@ -126,6 +126,17 @@ model prose to decide state, ownership, success, retry, or permission.
   artifacts. Newer matching tasks remain visible.
 - Preview and artifact routes return authenticated, bounded, allowlisted files. They never expose
   private storage paths.
+- Collection thumbnails keep their visibility observer mounted and prefer the authenticated local
+  preview even when a platform image URL exists. A missing local image may fall back to the remote
+  URL, but transient/authentication errors do not bypass the host. Failed images offer retry.
+- The generic gallery supports arrows, keyboard navigation and horizontal swipes. Individual
+  downloads use the response image type; download-all creates an ordered ZIP without recompressing
+  images. Requests are sequential, cancelable and bounded to 25 MiB per image and 128 MiB per gallery.
+  A missing image fails the archive instead of silently producing a partial download.
+- The host provides a read-only Usage guide from the declared application title/description
+  and reviewed renderer contract. It offers editable NL examples and a link to Agent, never
+  direct task submission. Collection, task-activity and generic guides stay separate without
+  skill-name branches. Viewing the guide pauses item polling and preserves result filters.
 - AiAPP removal writes a presentation tombstone only. It does not uninstall or disable the skill
   and does not delete configuration or private data.
 - Skill removal follows the ordinary admission lifecycle; in-flight calls finish against their

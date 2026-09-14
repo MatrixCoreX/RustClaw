@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { unzipSync } from "fflate";
 import { mkdir, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -96,9 +97,9 @@ try {
     ...template, global_sequence: 10 - i, image_sequence: 5 - i, post_sequence: 10,
   })), { ...template, global_sequence: 5, kind: "video", post_sequence: null },
   { ...template, global_sequence: 4, post_sequence: null });
-  for (const width of [1440, 390]) for (const theme of ["light", "dark"]) {
+  for (const width of [1440, 390, 480]) for (const theme of ["light", "dark"]) {
     const lang = theme === "light" ? "zh" : "en";
-    await page.setViewportSize({ width, height: 900 });
+    await page.setViewportSize({ width, height: width === 480 ? 320 : 900 });
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/test/fixtures/aipp-collection.html?lang=${lang}&theme=${theme}`);
     const cards = page.locator("article");
     const card = cards.first();
@@ -112,10 +113,38 @@ try {
     const dialog = page.getByRole("dialog");
     await dialog.waitFor();
     const downloadEvent = page.waitForEvent("download");
-    await dialog.locator("footer button").click();
+    await dialog.getByRole("button", { name: lang === "zh" ? "下载图片" : "Download image", exact: true }).click();
     const download = await downloadEvent;
     assert.equal(download.suggestedFilename(), "media-000000000008.png");
     assert.deepEqual(await readFile(await download.path()), preview);
+    await dialog.getByText("3 / 5", { exact: true }).waitFor();
+    const box = await dialog.boundingBox();
+    const imageBox = await dialog.locator("img").boundingBox();
+    const footerBox = await dialog.locator("footer").boundingBox();
+    assert.ok(imageBox.height > 80 && imageBox.y + imageBox.height <= footerBox.y + 1);
+    assert.ok(box.x >= 0 && box.y >= 0 && box.y + box.height <= page.viewportSize().height + 1);
+    assert.equal(await dialog.evaluate(el => el.scrollHeight > el.clientHeight), false);
+    await page.keyboard.press("ArrowRight");
+    await dialog.getByText("4 / 5", { exact: true }).waitFor();
+    await dialog.getByRole("button", { name: lang === "zh" ? "上一张图片" : "Previous image" }).click();
+    await dialog.getByText("3 / 5", { exact: true }).waitFor();
+    await dialog.locator("img").evaluate((element) => {
+      const surface = element.parentElement;
+      const touch = (clientX, clientY) => new Touch({ identifier: 1, target: surface, clientX, clientY });
+      surface.dispatchEvent(new TouchEvent("touchstart", { bubbles: true, touches: [touch(250, 100)] }));
+      surface.dispatchEvent(new TouchEvent("touchend", { bubbles: true, changedTouches: [touch(120, 105)] }));
+    });
+    await dialog.getByText("4 / 5", { exact: true }).waitFor();
+    await page.keyboard.press("ArrowLeft");
+    await dialog.getByText("3 / 5", { exact: true }).waitFor();
+    const zipEvent = page.waitForEvent("download");
+    await dialog.getByRole("button", { name: lang === "zh" ? "下载全部" : "Download all", exact: true }).click();
+    const archive = await zipEvent;
+    assert.ok(archive.suggestedFilename().endsWith("-all.zip"));
+    const files = unzipSync(await readFile(await archive.path()));
+    assert.equal(Object.keys(files).length, 5);
+    for (const bytes of Object.values(files)) assert.deepEqual(Buffer.from(bytes), preview);
+    await page.screenshot({ path: path.join(output, `viewer-${width}-${theme}.png`) });
     await page.keyboard.press("Escape");
     await page.getByTitle(lang === "zh" ? "刷新内容" : "Refresh content", { exact: true }).click();
     await card.getByText("3 / 5", { exact: true }).waitFor();
@@ -167,8 +196,27 @@ try {
     await page.screenshot({ path: path.join(output, `platform-pagination-${width}.png`), fullPage: true });
     console.log(`PASS all-platform ${width}: post-based pages, all three platforms, filter reset, both time orders`);
   }
+  const beforeGuideCards = await page.locator("article h2").allTextContents();
+  await page.getByRole("tab", { name: "使用说明", exact: true }).click();
+  await page.getByTestId("aipp-usage-guide").waitFor();
+  assert.equal(await page.locator("article").count(), 0);
+  await page.waitForTimeout(500);
+  const readsBefore = itemRequests.length;
+  await page.waitForTimeout(10_500);
+  assert.equal(itemRequests.length, readsBefore, "guide must pause result polling");
+  await page.getByRole("tab", { name: "查看结果", exact: true }).click();
+  await page.getByText("1 / 40", { exact: true }).waitFor();
+  assert.deepEqual(await page.locator("article h2").allTextContents(), beforeGuideCards);
+  assert.equal(await page.getByRole("combobox", { name: "按采集时间排序" }).inputValue(), "oldest");
+  console.log("PASS integrated guide: no result polling, return preserves filters and page");
   assert.deepEqual(errors, []);
   console.log(`PASS collection browser suite; screenshots: ${output}`);
+} catch (error) {
+  for (const context of browser?.contexts() || []) for (const page of context.pages()) {
+    console.error((await page.locator("body").innerText()).slice(-5000));
+    await page.screenshot({ path: path.join(output, "failure.png") });
+  }
+  throw error;
 } finally {
   await browser?.close();
   await server.close();

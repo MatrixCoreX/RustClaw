@@ -38,11 +38,14 @@ try {
   const portrait = Buffer.from(await makePng(600, 900), "base64");
   const landscape = Buffer.from(await makePng(1600, 700), "base64");
   let failPreview = false, failDownload = false, corruptPreview = false, delayPreview = false;
+  let collectionFailures = 0, corruptCollection = false, remoteRequests = 0;
   const requests = [];
   await page.route("**/v1/aipps/**/preview", async (route) => {
     requests.push(new URL(route.request().url()).pathname);
-    await route.fulfill({ contentType: "image/png", body: portrait });
+    if (collectionFailures > 0) { collectionFailures--; await route.fulfill({ status: 503, body: "busy" }); return; }
+    await route.fulfill({ contentType: "image/png", body: corruptCollection ? "corrupt" : portrait });
   });
+  await page.route("https://expired.example.test/**", (route) => { remoteRequests++; return route.fulfill({ status: 403 }); });
   await page.route("**/fixture/**", async (route) => {
     const url = new URL(route.request().url()).pathname;
     requests.push(url);
@@ -96,6 +99,18 @@ try {
     }
   }
   await page.goto(`${base}/test/fixtures/aipp-image-viewer.html?lang=en`);
+  assert.equal(remoteRequests, 0, "retained preview must win over an expired platform URL");
+  collectionFailures = 1;
+  await page.reload();
+  await page.getByTestId("collection").locator("img").waitFor();
+  assert.equal(collectionFailures, 0);
+  corruptCollection = true;
+  await page.reload();
+  await page.getByTestId("collection").getByRole("button", { name: "Retry", exact: true }).waitFor();
+  corruptCollection = false;
+  await page.getByTestId("collection").getByRole("button", { name: "Retry", exact: true }).click();
+  await page.getByTestId("collection").locator("img").waitFor();
+  console.log("PASS expired remote link, transient local failure, corrupt thumbnail and retry");
   const openLandscape = () => page.getByTestId("activity").getByTitle("Preview", { exact: true }).nth(1).click();
   failPreview = true;
   await openLandscape();
