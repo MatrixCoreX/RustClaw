@@ -1009,6 +1009,14 @@ executed that skill, including requests from Agent UI and external communication
 channels, validated source links, final processed text, failures, and authenticated
 output artifacts. It does not read the media-discovery collection. Both remain
 read-only views; users start, stop, or change work through Agent.
+Collection thumbnails load authenticated retained images before remote fallbacks.
+Open a multi-image post to browse with arrows or a swipe, download the current
+image, or save all its images in one ordered ZIP. Failed downloads can be retried;
+a partially downloaded gallery is never presented as a complete archive.
+Each AiAPP has Results and Usage guide pages. The guide uses its declared title,
+description and reviewed renderer contract, with editable natural-language examples
+for starting work in Agent, inspecting progress and stopping safely. It never
+submits tasks automatically; result polling pauses while the guide is open.
 Media discovery defaults to a visible browser for Xiaohongshu and silent browsers
 for Douyin/Kuaishou, with temporary manual login/verification
 windows when needed and independent per-platform cooldowns. See

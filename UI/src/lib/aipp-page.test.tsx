@@ -216,7 +216,8 @@ test("renders a media collection record from the current no-OCR contract", () =>
   assert.match(markup, /分享: 12/);
   assert.doesNotMatch(markup, /播放:/);
   assert.match(markup, /href="https:\/\/example\.test\/source"/);
-  assert.match(markup, /referrerPolicy="no-referrer"/);
+  // Pre-render must not bypass the authenticated local-preview fetch with a CDN URL.
+  assert.doesNotMatch(markup, /<img/);
 });
 
 test("publication dates keep date-only precision and reject invalid values", () => {

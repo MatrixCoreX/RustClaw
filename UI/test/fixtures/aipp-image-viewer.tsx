@@ -15,7 +15,7 @@ const media: AippMediaItem = {
   image_sequence: 1, kind: "image", platform: "example", source_mode: "home_feed",
   search_keyword: "", title: t("采集的图片与帖子文案", "Collected image and post caption"),
   platform_text: t("保留帖子原有文案。", "The original post caption is retained."),
-  source_url: null, image_url: null, preview_available: true,
+  source_url: null, image_url: "https://expired.example.test/image.jpg", preview_available: true,
   discovered_at: "2026-09-09T00:00:00Z", engagement: null,
 };
 const task: AippTaskActivityItem = {

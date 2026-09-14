@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   Bot,
+  BookOpen,
   Bookmark,
   ChevronDown,
   ChevronLeft,
@@ -32,6 +33,8 @@ import { collectionGroupKey, completeCollectionPage, groupCollectionItems } from
 import { appStorageKey } from "../lib/product-identity";
 import { useUiDialog } from "./UiDialogProvider";
 import { AippImageViewer, type AippViewerImage } from "./AippImageViewer";
+import { fetchAippImage } from "../lib/aipp-image-download";
+import { AippUsageGuide } from "./AippUsageGuide";
 import type {
   AippCatalogItem,
   AippCatalogResponse,
@@ -604,11 +607,13 @@ export function AippTaskActivityCard({
 
 function MediaPreview({
   item,
+  images,
   skillName,
   apiFetch,
   t,
 }: {
   item: AippMediaItem;
+  images: AippMediaItem[];
   skillName: string;
   apiFetch: ApiFetch;
   t: Translate;
@@ -617,6 +622,9 @@ function MediaPreview({
   const mayHaveLocalPreview = item.kind === "image" || item.preview_available;
   const [shouldLoad, setShouldLoad] = useState(!mayHaveLocalPreview);
   const [viewerOpen, setViewerOpen] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [retry, setRetry] = useState(0);
+  const [remoteFallback, setRemoteFallback] = useState(false);
   const visibilityRef = useRef<HTMLDivElement | null>(null);
   const apiFetchRef = useRef(apiFetch);
   apiFetchRef.current = apiFetch;
@@ -638,42 +646,42 @@ function MediaPreview({
 
   useEffect(() => {
     if (!mayHaveLocalPreview || !shouldLoad) return;
-    let disposed = false;
+    const controller = new AbortController();
     let objectUrl: string | null = null;
-    void apiFetchRef.current(
+    setPreviewUrl(null);
+    setFailed(false);
+    setRemoteFallback(false);
+    void fetchAippImage(apiFetchRef.current,
       `/v1/aipps/${encodeURIComponent(skillName)}/items/${item.global_sequence}/preview`,
+      controller.signal,
     )
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`aipp_preview_http_${response.status}`);
-        return response.blob();
-      })
       .then((blob) => {
-        if (disposed) return;
+        if (controller.signal.aborted) return;
         objectUrl = URL.createObjectURL(blob);
         setPreviewUrl(objectUrl);
       })
-      .catch(() => {
-        if (!disposed) setPreviewUrl(null);
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        if (error instanceof Error && error.message === "aipp_image_http_404" && item.kind === "image" && item.image_url) setRemoteFallback(true);
+        else setFailed(true);
       });
     return () => {
-      disposed = true;
+      controller.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [item.global_sequence, mayHaveLocalPreview, shouldLoad, skillName]);
+  }, [item.global_sequence, item.image_url, item.kind, mayHaveLocalPreview, shouldLoad, skillName, retry]);
 
-  const source = previewUrl || (item.kind === "image" ? item.image_url : null);
-  if (source) {
-    const image = (
-      <img
-        src={source}
-        alt={item.title}
-        loading="lazy"
-        referrerPolicy="no-referrer"
-        className="h-full w-full object-contain"
-      />
-    );
-    return (
-      <>
+  const source = previewUrl || (remoteFallback ? item.image_url : null);
+  const viewerImages = images.map((entry): AippViewerImage => ({
+    title: entry.title,
+    filename: `media-${String(entry.global_sequence).padStart(12, "0")}.png`,
+    previewUrl: `/v1/aipps/${encodeURIComponent(skillName)}/items/${entry.global_sequence}/preview`,
+    downloadUrl: `/v1/aipps/${encodeURIComponent(skillName)}/items/${entry.global_sequence}/preview`,
+    initialSource: entry.global_sequence === item.global_sequence && !failed ? source : null,
+  }));
+  return (
+    <div ref={visibilityRef} className="h-full w-full">
+      {source && !failed ? <>
         <button
           type="button"
           className="group relative block h-full w-full cursor-zoom-in overflow-hidden"
@@ -681,25 +689,20 @@ function MediaPreview({
           title={t("放大图片", "Enlarge image")}
           aria-label={t("放大图片", "Enlarge image")}
         >
-          {image}
+          <img src={source} alt={item.title} loading="lazy" decoding="async" referrerPolicy="no-referrer" className="h-full w-full object-contain" onError={() => setFailed(true)} />
           <span className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-md border border-white/20 bg-black/60 text-white/85 opacity-80 transition group-hover:opacity-100">
             <ZoomIn className="h-4 w-4" />
           </span>
         </button>
-        {viewerOpen ? <AippImageViewer image={{
-          title: item.title,
-          filename: `media-${String(item.global_sequence).padStart(12, "0")}.png`,
-          previewUrl: `/v1/aipps/${encodeURIComponent(skillName)}/items/${item.global_sequence}/preview`,
-          downloadUrl: `/v1/aipps/${encodeURIComponent(skillName)}/items/${item.global_sequence}/preview`,
-          initialSource: source,
-        }} apiFetch={apiFetch} t={t} onClose={() => setViewerOpen(false)} /> : null}
-      </>
-    );
-  }
-  return (
-    <div ref={visibilityRef} className="flex h-full w-full flex-col items-center justify-center gap-2 text-white/45">
-      {item.kind === "video" ? <Video className="h-8 w-8" /> : <ImageIcon className="h-8 w-8" />}
-      <span className="text-xs">{t("暂无预览", "Preview unavailable")}</span>
+      </> : <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-[var(--theme-text-muted)]">
+        {shouldLoad && !failed && mayHaveLocalPreview ? <LoaderCircle role="status" aria-label={t("正在加载图片", "Loading image")} className="h-6 w-6 animate-spin" /> : <>
+          {!failed ? item.kind === "video" ? <Video className="h-6 w-6" /> : <ImageIcon className="h-6 w-6" /> : null}
+          <span className="text-xs">{t("暂无预览", "Preview unavailable")}</span>
+        </>}
+        {failed ? <button type="button" className="theme-secondary-btn px-2 py-1 text-xs" onClick={() => { setShouldLoad(true); setRetry((value) => value + 1); }}><RefreshCw className="h-3 w-3" />{t("重试", "Retry")}</button> : null}
+        {failed && images.length > 1 ? <button type="button" className="theme-secondary-btn px-2 py-1 text-xs" onClick={() => setViewerOpen(true)}>{t("查看图片组", "Open gallery")}</button> : null}
+      </div>}
+      {viewerOpen ? <AippImageViewer image={viewerImages.find((entry) => entry.previewUrl.endsWith(`/${item.global_sequence}/preview`)) || viewerImages[0]} images={viewerImages} apiFetch={apiFetch} t={t} onClose={() => setViewerOpen(false)} /> : null}
     </div>
   );
 }
@@ -757,7 +760,9 @@ export function AippMediaItemCard({
       <div className={hasPreview ? "grid min-w-0 sm:grid-cols-[minmax(104px,24%)_minmax(0,1fr)]" : "min-w-0"}>
         {hasPreview ? (
           <div className="relative aspect-video max-h-36 min-h-24 overflow-hidden bg-black/20 sm:aspect-auto sm:min-h-28 sm:max-h-36">
-            <MediaPreview key={selectedImage.global_sequence} item={selectedImage} skillName={skillName} apiFetch={apiFetch} t={t} />
+            <div className={gallery.length > 1 ? "h-[calc(100%-2rem)]" : "h-full"}>
+              <MediaPreview key={selectedImage.global_sequence} item={selectedImage} images={gallery} skillName={skillName} apiFetch={apiFetch} t={t} />
+            </div>
             {gallery.length > 1 ? <div className="absolute inset-x-0 bottom-0 flex h-8 items-center justify-between border-t border-[var(--theme-border)] bg-[var(--theme-dialog-bg)] px-1 text-xs text-[var(--theme-text-strong)]">
               <button type="button" className="flex h-7 w-7 items-center justify-center disabled:opacity-30" title={t("上一张图片", "Previous image")} disabled={selectedIndex === 0} onClick={() => setSelectedImageId(gallery[selectedIndex - 1].global_sequence)}><ChevronLeft className="h-4 w-4" /></button>
               <span aria-live="polite">{selectedIndex + 1} / {gallery.length}</span>
@@ -828,6 +833,8 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
     readSelectedAipp(typeof window === "undefined" ? undefined : window.localStorage),
   );
   const [catalogLoading, setCatalogLoading] = useState(initialCatalog.current.length === 0);
+  const [guideSkill, setGuideSkill] = useState<string | null>(null);
+  const showGuide = guideSkill === selectedSkill;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState<AippMediaPageResponse | null>(null);
@@ -920,6 +927,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
 
   const fetchPage = useCallback(async (silent = false) => {
     const currentRequest = ++requestSequence.current;
+    if (showGuide) { setLoading(false); return; }
     if (
       !selectedSkill
       || !selectedApp?.installed
@@ -977,7 +985,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
     } finally {
       if (!silent && currentRequest === requestSequence.current) setLoading(false);
     }
-  }, [activityChannel, activityStatus, cursor, kind, platform, searchQuery, selectedApp?.installed, selectedApp?.renderer, selectedSkill, sortOrder]);
+  }, [activityChannel, activityStatus, cursor, kind, platform, searchQuery, selectedApp?.installed, selectedApp?.renderer, selectedSkill, sortOrder, showGuide]);
 
   useEffect(() => {
     void fetchCatalog(initialCatalog.current.length > 0);
@@ -1009,7 +1017,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
   }, [fetchPage]);
 
   useEffect(() => {
-    if (!selectedSkill || !["collection_feed_v1", "task_activity_v1"].includes(selectedApp?.renderer || "")) return;
+    if (showGuide || !selectedSkill || !["collection_feed_v1", "task_activity_v1"].includes(selectedApp?.renderer || "")) return;
     const refreshVisiblePage = async () => {
       if (document.visibilityState !== "visible" || autoRefreshInFlight.current) return;
       autoRefreshInFlight.current = true;
@@ -1028,7 +1036,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [fetchPage, selectedApp?.renderer, selectedSkill]);
+  }, [fetchPage, selectedApp?.renderer, selectedSkill, showGuide]);
   const platforms = useMemo(
     () => Object.keys(page?.platform_states || {}).sort(),
     [page?.platform_states],
@@ -1123,7 +1131,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
             <Bot className="h-4 w-4" />
             Agent
           </button>
-          {["collection_feed_v1", "task_activity_v1"].includes(selectedApp.renderer) ? (
+          {!showGuide && ["collection_feed_v1", "task_activity_v1"].includes(selectedApp.renderer) ? (
             <button type="button" className="theme-icon-btn h-9 w-9" onClick={() => void fetchPage()} title={t("刷新内容", "Refresh content")}>
               <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             </button>
@@ -1140,6 +1148,14 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
         </div>
       </header>
 
+      <div role="tablist" aria-label={t("应用页面", "App pages")} className="flex gap-2 border-b border-[var(--theme-border)] pb-3">
+        <button type="button" role="tab" aria-selected={!showGuide} className={`${!showGuide ? "theme-accent-btn" : "theme-secondary-btn"} px-3 py-2 text-sm`} onClick={() => setGuideSkill(null)}><GalleryVerticalEnd className="h-4 w-4" />{t("查看结果", "Results")}</button>
+        <button type="button" role="tab" aria-selected={showGuide} className={`${showGuide ? "theme-accent-btn" : "theme-secondary-btn"} px-3 py-2 text-sm`} onClick={() => setGuideSkill(selectedSkill)}><BookOpen className="h-4 w-4" />{t("使用说明", "Usage guide")}</button>
+      </div>
+      {showGuide ? <AippUsageGuide key={selectedSkill} app={selectedApp}
+        title={localizedAippCopy(selectedApp.titles, lang, selectedApp.default_locale)}
+        description={localizedAippCopy(selectedApp.descriptions, lang, selectedApp.default_locale)}
+        platforms={platforms} t={t} onOpenAgent={onOpenAgent} /> : <>
       {selectedApp.renderer === "sandbox_bundle_v1" ? (
         <SandboxedAipp app={selectedApp} lang={lang} apiFetch={apiFetch} />
       ) : null}
@@ -1281,6 +1297,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
         {loading ? <LoaderCircle className="h-5 w-5 animate-spin text-white/45" /> : <span className="text-xs text-white/40">{t(`第 ${cursorHistory.length + 1} 页 · ${groupCollectionItems(page?.items || []).length} 篇`, `Page ${cursorHistory.length + 1} · ${groupCollectionItems(page?.items || []).length} posts`)}</span>}
         <button type="button" className="theme-secondary-btn px-3 py-2 text-sm" disabled={page?.next_cursor_sequence == null || loading} onClick={openNext}>{t("下一页", "Next")}</button>
       </div>
+      </>}
       </>}
     </section>
   );
