@@ -357,6 +357,12 @@ fn dedicated_stt_credentials_are_optional_declared_and_action_scoped() {
     let references = manifest["capability_request"]["permissions"]["credential_refs"]
         .as_array()
         .unwrap();
+    // Keep generated fields in the manifest synchronizer's canonical order.
+    for values in [environment, references] {
+        assert!(values
+            .windows(2)
+            .all(|pair| pair[0].as_str() < pair[1].as_str()));
+    }
     for vendor in [
         "openai",
         "google",
