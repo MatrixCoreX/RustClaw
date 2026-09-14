@@ -63,7 +63,7 @@ base_url = "https://api.minimaxi.com/v1"
 model = "speech-2.8-hd"
 
 [audio_transcribe]
-adapter_mode = "compat"
+adapter_mode = "auto"
 allow_compat_adapters = true
 anthropic_models = []
 custom_models = [
@@ -83,8 +83,9 @@ local_server_port = 8178
 local_server_threads = 4
 max_concurrency = 1
 max_input_bytes = 26214400
-minimax_models = []
+minimax_models = ["asr-1.0"]
 models = [
+    "asr-1.0",
     "local-whisper",
     "whisper-1",
     "qwen3-asr-flash",
@@ -122,3 +123,8 @@ api_key = ""
 base_url = "http://127.0.0.1:8178/v1"
 model = "local-whisper"
 timeout_seconds = 120
+
+[audio_transcribe.providers.minimax]
+api_key = ""
+base_url = "https://api.minimaxi.com/v1"
+model = "asr-1.0"

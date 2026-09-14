@@ -11,6 +11,8 @@ use serde_json::{json, Map, Value};
 use sha1::Sha1;
 use toml::Value as TomlValue;
 
+mod minimax;
+
 #[derive(Debug, Deserialize)]
 struct Req {
     request_id: String,
@@ -208,29 +210,22 @@ fn main() -> anyhow::Result<()> {
         let line = line?;
         let parsed: Result<Req, _> = serde_json::from_str(&line);
         let resp = match parsed {
-            Ok(req) => {
-                let fallback_input = requested_audio_source(&req.args);
-                match execute(&cfg, &workspace_root, req.args, req.context.as_ref()) {
-                    Ok((text, extra)) => Resp {
-                        request_id: req.request_id,
-                        status: "ok".to_string(),
-                        text,
-                        extra: Some(extra),
-                        error_text: None,
-                    },
-                    Err(err) => Resp {
-                        request_id: req.request_id,
-                        status: "error".to_string(),
-                        text: String::new(),
-                        extra: Some(error_extra_with_input(
-                            err.code,
-                            err.retryable,
-                            fallback_input.as_deref(),
-                        )),
-                        error_text: Some(err.message),
-                    },
-                }
-            }
+            Ok(req) => match execute(&cfg, &workspace_root, req.args, req.context.as_ref()) {
+                Ok((text, extra)) => Resp {
+                    request_id: req.request_id,
+                    status: "ok".to_string(),
+                    text,
+                    extra: Some(extra),
+                    error_text: None,
+                },
+                Err(err) => Resp {
+                    request_id: req.request_id,
+                    status: "error".to_string(),
+                    text: String::new(),
+                    extra: Some(error_extra(err.code, err.retryable)),
+                    error_text: Some(err.message),
+                },
+            },
             Err(err) => Resp {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
@@ -246,41 +241,15 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn error_extra(error_code: &str, retryable: bool) -> Value {
-    error_extra_with_input(error_code, retryable, None)
-}
-
-fn error_extra_with_input(
-    error_code: &str,
-    retryable: bool,
-    fallback_input: Option<&str>,
-) -> Value {
-    let mut extra = json!({
+    json!({
         "schema_version": 1,
         "source_skill": SKILL_NAME,
         "status": "error",
         "error_code": error_code,
         "message_key": format!("skill.{}.{}", SKILL_NAME, error_code),
         "retryable": retryable,
-    });
-    if matches!(
-        error_code,
-        "provider_not_configured"
-            | "provider_client_failed"
-            | "provider_request_failed"
-            | "provider_rejected"
-            | "input_too_large"
-    ) {
-        extra["fallback_capability"] = Value::String("media_download.transcribe".to_string());
-        extra["fallback_recommended"] = Value::Bool(true);
-        if let Some(input) = fallback_input
-            .map(str::trim)
-            .filter(|input| !input.is_empty())
-        {
-            extra["fallback_input_field"] = Value::String("input_path".to_string());
-            extra["fallback_input_value"] = Value::String(input.to_string());
-        }
-    }
-    extra
+        "fallback_recommended": false,
+    })
 }
 
 fn execute(
@@ -501,7 +470,7 @@ fn preview_transcription(
             "provider": vendor_name,
             "provider_location": provider_location,
             "recommended_capability": recommended_capability,
-            "fallback_capability": "media_download.transcribe",
+            "fallback_recommended": false,
             "model": model,
             "model_kind": model_kind,
             "input_kind": input_kind,
@@ -521,6 +490,7 @@ fn planned_model_kind(
     match vendor {
         VendorKind::Google => "native",
         VendorKind::OpenAI => "compat",
+        VendorKind::MiniMax if resolve_adapter_mode(cfg, vendor) != AdapterMode::Compat => "native",
         VendorKind::Qwen if qwen_uses_chat_asr_model(cfg, model) => "chat_audio",
         VendorKind::Qwen
             if should_use_qwen_native_asr(
@@ -576,6 +546,17 @@ fn transcribe_by_vendor(
                 "compat",
             ))
         }
+        VendorKind::MiniMax if mode != AdapterMode::Compat => Ok((
+            minimax::transcribe(
+                client,
+                cfg,
+                model,
+                require_local_audio(audio_input)?,
+                source_language,
+                auth_token,
+            )?,
+            "native",
+        )),
         VendorKind::Anthropic
         | VendorKind::Grok
         | VendorKind::DeepSeek
@@ -816,6 +797,7 @@ fn parse_audio_input(args: &Value, workspace_root: &Path) -> Result<AudioInput, 
             .and_then(|v| v.get("path"))
             .and_then(|v| v.as_str())
             .or_else(|| obj.get("audio_path").and_then(|v| v.as_str()))
+            .or_else(|| obj.get("input_path").and_then(|v| v.as_str()))
             .or_else(|| obj.get("path").and_then(|v| v.as_str()))
             .or_else(|| obj.get("file").and_then(|v| v.as_str()))
             .or_else(|| obj.get("audio").and_then(|v| v.as_str()))
@@ -851,6 +833,7 @@ fn requested_audio_source(args: &Value) -> Option<String> {
             .or_else(|| obj.get("audio_url").and_then(Value::as_str))
             .or_else(|| obj.get("url").and_then(Value::as_str))
             .or_else(|| obj.get("audio_path").and_then(Value::as_str))
+            .or_else(|| obj.get("input_path").and_then(Value::as_str))
             .or_else(|| obj.get("path").and_then(Value::as_str))
             .or_else(|| obj.get("file").and_then(Value::as_str))
             .map(str::trim)

@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import wave
 import zipfile
 from unittest import mock
 
@@ -503,9 +504,10 @@ class AdapterTest(unittest.TestCase):
             {"intent": "save_only", "deliver_to_user": False},
         )
         self.assertEqual(followup["capability"], "audio.preview_transcribe")
-        self.assertEqual(followup["input_field"], "audio_path")
+        self.assertEqual(followup["input_field"], "input_path")
         self.assertEqual(followup["input_value"], audio_path)
-        self.assertEqual(followup["fallback_input_value"], audio_path)
+        self.assertNotIn("fallback_capability", followup)
+        self.assertNotIn("fallback_input_value", followup)
 
     def test_download_routes_profile_checkpoints_to_private_skill_storage(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1223,7 +1225,15 @@ class AdapterTest(unittest.TestCase):
 
             def fake_run(command, **kwargs):
                 if command[0] == "ffmpeg":
-                    Path(command[-1]).write_bytes(b"frame")
+                    output = Path(command[-1])
+                    if output.suffix == ".wav":
+                        with wave.open(str(output), "wb") as audio:
+                            audio.setnchannels(1)
+                            audio.setsampwidth(2)
+                            audio.setframerate(16000)
+                            audio.writeframes(b"\x00\x00" * 160)
+                    else:
+                        output.write_bytes(b"frame")
                     return subprocess.CompletedProcess(command, 0, "", "")
                 output_dir = Path(command[command.index("--output-dir") + 1])
                 output_dir.mkdir(parents=True, exist_ok=True)
@@ -1256,6 +1266,10 @@ class AdapterTest(unittest.TestCase):
         self.assertEqual(first_frame["status"], "available")
         self.assertEqual(first_frame["source"], "video_first_frame")
         self.assertFalse(first_frame["deliver_to_user"])
+        video_audio = response["extra"]["processing_inputs"]["video_audio"]
+        self.assertEqual(video_audio["status"], "available")
+        self.assertEqual(video_audio["engine"], "ffmpeg")
+        self.assertFalse(video_audio["deliver_to_user"])
         policy = response["extra"]["content_bundle"]["followup_policy"]
         self.assertEqual(policy["activation_requirement"], "required")
         self.assertEqual(policy["completion_requirement"], "all_components")
@@ -1275,6 +1289,7 @@ class AdapterTest(unittest.TestCase):
             "label_each_result_in_request_language",
         )
         self.assertEqual(policy["steps"][1]["result_label_kind"], "audio_transcript")
+        self.assertEqual(policy["steps"][1]["input_value"], video_audio["path"])
 
     def test_video_audio_only_scope_enforces_only_audio_transcription(self) -> None:
         artifacts = [
@@ -1289,7 +1304,7 @@ class AdapterTest(unittest.TestCase):
 
         bundle = self.skill._content_bundle(
             artifacts,
-            processing_inputs=None,
+            processing_inputs={"video_audio": {"status": "available", "path": "/workspace/video_audio.wav"}},
             text_conversion_scope="audio_only",
         )
 
@@ -1302,6 +1317,15 @@ class AdapterTest(unittest.TestCase):
             ["video_audio"],
         )
         self.assertEqual(policy["steps"][0]["result_label_kind"], "audio_transcript")
+        step = policy["steps"][0]
+        self.assertEqual(step["input_field"], "input_path")
+        self.assertEqual(step["input_value"], "/workspace/video_audio.wav")
+        self.assertEqual(
+            step["completion_capabilities"],
+            ["audio.transcribe", "media_download.transcribe"],
+        )
+        for field in ("fallback_capability", "fallback_input_field", "fallback_input_value"):
+            self.assertNotIn(field, step)
 
     def test_download_classifies_image_article_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1453,9 +1477,11 @@ class AdapterTest(unittest.TestCase):
             str((artifacts / "note_background_audio.mp3").resolve()),
         )
         audio_step = bundle["followup_policy"]["steps"][1]
-        self.assertEqual(audio_step["fallback_input_field"], "input_path")
+        self.assertEqual(audio_step["input_field"], "input_path")
+        self.assertNotIn("fallback_capability", audio_step)
+        self.assertNotIn("fallback_input_value", audio_step)
         self.assertEqual(
-            audio_step["fallback_input_value"],
+            audio_step["input_value"],
             str((artifacts / "note_background_audio.mp3").resolve()),
         )
         self.assertEqual(

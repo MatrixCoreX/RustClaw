@@ -29,16 +29,26 @@ fn error_extra_exposes_machine_contract() {
 }
 
 #[test]
-fn provider_failure_preserves_exact_audio_input_for_local_fallback() {
-    let extra = error_extra_with_input(
+fn failures_do_not_authorize_another_transcription_backend() {
+    for code in [
+        "provider_not_configured",
+        "provider_client_failed",
         "provider_request_failed",
-        true,
-        Some("/workspace/extracted.wav"),
-    );
-
-    assert_eq!(extra["fallback_capability"], "media_download.transcribe");
-    assert_eq!(extra["fallback_input_field"], "input_path");
-    assert_eq!(extra["fallback_input_value"], "/workspace/extracted.wav");
+        "provider_rejected",
+        "input_too_large",
+        "invalid_input",
+    ] {
+        let extra = error_extra(code, false);
+        assert_eq!(extra["error_code"], code);
+        assert_eq!(extra["fallback_recommended"], false);
+        for field in [
+            "fallback_capability",
+            "fallback_input_field",
+            "fallback_input_value",
+        ] {
+            assert!(extra.get(field).is_none());
+        }
+    }
 }
 
 #[test]
@@ -260,7 +270,8 @@ fn preview_transcribe_returns_plan_without_file_or_provider_credentials() {
     assert_eq!(extra["provider"], "qwen");
     assert_eq!(extra["provider_location"], "remote");
     assert_eq!(extra["recommended_capability"], "audio.transcribe");
-    assert_eq!(extra["fallback_capability"], "media_download.transcribe");
+    assert_eq!(extra["fallback_recommended"], false);
+    assert!(extra.get("fallback_capability").is_none());
     assert_eq!(extra["model"], "qwen3-asr-flash");
     assert_eq!(extra["model_kind"], "chat_audio");
     assert_eq!(
@@ -271,7 +282,7 @@ fn preview_transcribe_returns_plan_without_file_or_provider_credentials() {
 }
 
 #[test]
-fn preview_local_provider_selects_media_local_fallback() {
+fn preview_local_provider_selects_local_recognition_without_fallback() {
     let root = std::env::temp_dir().join(format!(
         "agent-runtime-audio-transcribe-local-preview-{}",
         unix_ts()
@@ -292,13 +303,16 @@ fn preview_local_provider_selects_media_local_fallback() {
     let (_, extra) = execute(
         &cfg,
         &root,
-        json!({"action": "preview_transcribe", "file": "recordings/local.wav"}),
+        json!({"action": "preview_transcribe", "input_path": "recordings/local.wav"}),
         None,
     )
     .expect("local preview");
 
     assert_eq!(extra["provider_location"], "local");
     assert_eq!(extra["recommended_capability"], "media_download.transcribe");
+    assert_eq!(extra["input_path"], "recordings/local.wav");
+    assert_eq!(extra["fallback_recommended"], false);
+    assert!(extra.get("fallback_capability").is_none());
 }
 
 #[test]
@@ -314,9 +328,15 @@ fn response_language_prefers_explicit_then_request_context() {
 }
 
 #[test]
-fn provider_failure_recommends_local_media_fallback() {
-    let extra = error_extra("provider_request_failed", true);
-
-    assert_eq!(extra["fallback_recommended"], true);
-    assert_eq!(extra["fallback_capability"], "media_download.transcribe");
+fn shared_input_path_preserves_the_source_for_either_configured_backend() {
+    let root = std::env::temp_dir();
+    let args = json!({"input_path": "configured-source.wav"});
+    assert_eq!(
+        requested_audio_source(&args).as_deref(),
+        Some("configured-source.wav")
+    );
+    match parse_audio_input(&args, &root).unwrap() {
+        AudioInput::LocalPath(path) => assert_eq!(path, root.join("configured-source.wav")),
+        AudioInput::Url(_) => panic!("local source must remain a path"),
+    }
 }
