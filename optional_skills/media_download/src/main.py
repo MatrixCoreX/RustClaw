@@ -22,6 +22,9 @@ from urllib.parse import urlsplit
 SKILL_NAME = "media_download"
 SCHEMA_VERSION = 1
 TOOL_DIR = Path(__file__).resolve().parent / "tool"
+sys.path.insert(0, str(TOOL_DIR))
+from video_inputs import prepare_video_inputs
+
 PRIVATE_BIN_DIR = Path(sys.executable).resolve().parent
 os.environ["PATH"] = os.pathsep.join(
     [str(PRIVATE_BIN_DIR), os.environ.get("PATH", "")]
@@ -489,7 +492,7 @@ def _build_download_command(
 def _build_transcribe_command(request: dict[str, Any], args: dict[str, Any], output_dir: Path) -> list[str]:
     engine = _choice(args, "engine", ("whisper", "funasr"), "whisper")
     available_engines = _available_transcription_engines()
-    if engine not in available_engines:
+    if not _bool(args, "extract_audio_only", False) and engine not in available_engines:
         raise SkillFailure(
             f"transcription engine is unavailable on this platform: {engine}",
             error_code="dependency_unavailable",
@@ -794,58 +797,6 @@ def _profile_collection_summary(
     }
 
 
-def _video_first_frame_processing_input(
-    artifacts: list[dict[str, Any]],
-    existing: dict[str, Any] | None,
-    output_dir: Path,
-    text_conversion_scope: str,
-) -> dict[str, Any] | None:
-    if text_conversion_scope not in {"images_and_audio", "images_only"}:
-        return existing
-    video = next(
-        (item for item in artifacts if item.get("artifact_role") == "original_video"),
-        None,
-    )
-    if video is None or not video.get("path"):
-        return existing
-    frame_path = output_dir / f"{Path(str(video['path'])).stem}_first_frame.png"
-    completed = subprocess.run(
-        [
-            "ffmpeg",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-nostdin",
-            "-i",
-            str(video["path"]),
-            "-frames:v",
-            "1",
-            "-y",
-            str(frame_path),
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    inputs = dict(existing or {})
-    if completed.returncode != 0 or not frame_path.is_file():
-        inputs["video_first_frame"] = {
-            "status": "unavailable",
-            "error_code": "video_first_frame_extraction_failed",
-        }
-        return inputs
-    descriptor = _artifact(frame_path)
-    descriptor.update(
-        {
-            "status": "available",
-            "source": "video_first_frame",
-            "deliver_to_user": False,
-        }
-    )
-    inputs["video_first_frame"] = descriptor
-    return inputs
-
-
 def _content_bundle(
     artifacts: list[dict[str, Any]],
     inline_article: dict[str, Any] | None = None,
@@ -915,21 +866,22 @@ def _content_bundle(
     if image_delivery is not None:
         bundle["image_delivery"] = image_delivery
     if kind == "video":
-        original_video = next(
-            (
-                artifact
-                for artifact in artifacts
-                if artifact.get("artifact_role") == "original_video"
-            ),
-            None,
-        )
         scope = text_conversion_scope or "auto"
         first_frame = (processing_inputs or {}).get("video_first_frame")
-        video_path = (
-            original_video.get("path")
-            if isinstance(original_video, dict) and original_video.get("path")
+        video_audio = (processing_inputs or {}).get("video_audio")
+        audio_path = (
+            video_audio.get("path")
+            if isinstance(video_audio, dict) and video_audio.get("status") == "available"
             else None
         )
+        failures = [
+            {"component_kind": name, **descriptor}
+            for name, descriptor in (processing_inputs or {}).items()
+            if name in {"video_audio", "video_first_frame"}
+            and isinstance(descriptor, dict) and descriptor.get("status") == "unavailable"
+        ]
+        if failures:
+            bundle["conversion_failures"] = failures
         image_step = None
         if isinstance(first_frame, dict) and first_frame.get("status") == "available":
             image_step = {
@@ -940,15 +892,12 @@ def _content_bundle(
                 "result_label_kind": "video_first_frame_text",
             }
         audio_step = None
-        if video_path:
+        if audio_path:
             audio_step = {
                 "component_kind": "video_audio",
                 "capability": "audio.preview_transcribe",
-                "input_field": "audio_path",
-                "input_value": video_path,
-                "fallback_capability": "media_download.transcribe",
-                "fallback_input_field": "input_path",
-                "fallback_input_value": video_path,
+                "input_field": "input_path",
+                "input_value": audio_path,
                 "completion_capabilities": [
                     "audio.transcribe",
                     "media_download.transcribe",
@@ -998,11 +947,8 @@ def _content_bundle(
             audio_step = {
                 "component_kind": "background_audio",
                 "capability": "audio.preview_transcribe",
-                "input_field": "audio_path",
+                "input_field": "input_path",
                 "input_value": background_audio.get("path"),
-                "fallback_capability": "media_download.transcribe",
-                "fallback_input_field": "input_path",
-                "fallback_input_value": background_audio.get("path"),
                 "completion_capabilities": [
                     "audio.transcribe",
                     "media_download.transcribe",
@@ -2099,11 +2045,13 @@ def respond(
         inline_recognition = _ocr_text_delivery(artifacts)
     if action == "download":
         processing_inputs = _composite_processing_inputs(artifacts, processing_inputs)
-        processing_inputs = _video_first_frame_processing_input(
+        processing_inputs = prepare_video_inputs(
             artifacts,
             processing_inputs,
             output_dir,
             str(args.get("text_conversion_scope") or "auto"),
+            _artifact,
+            progress,
         )
     count = len(urls) if action == "resolve" else len(artifacts)
     noun = "URL" if action == "resolve" else "file"
@@ -2195,11 +2143,8 @@ def respond(
                 extra["followup_policy"] = {
                     "next_action": "preview_transcription",
                     "capability": "audio.preview_transcribe",
-                    "input_field": "audio_path",
+                    "input_field": "input_path",
                     "input_value": audio_path,
-                    "fallback_capability": "media_download.transcribe",
-                    "fallback_input_field": "input_path",
-                    "fallback_input_value": audio_path,
                     "deliver_intermediate": False,
                 }
     if delivery is not None:

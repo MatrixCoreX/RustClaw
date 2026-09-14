@@ -8,14 +8,14 @@
 - If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
 ## Capability Summary (from interface)
-- `audio_transcribe` previews or converts audio input through the configured STT provider. A configured remote provider is the preferred transcription route; local configuration is delegated to the media skill's private local ASR fallback.
+- `audio_transcribe` previews or converts audio input through the configured STT provider. Use only the configured transcription backend; local configuration is delegated to the media skill's private local ASR. Remote failure never authorizes automatic local recognition.
 - It supports local file path input or public audio URL input, plus optional hints and backend model/vendor selection.
-- Successful responses include machine-readable `extra` metadata such as `provider`, `provider_location`, `recommended_capability`, `fallback_capability`, `model`, `model_kind`, `audio_path`, and `transcription_review`.
+- Successful responses include machine-readable `extra` metadata such as `provider`, `provider_location`, `recommended_capability`, `fallback_recommended`, `model`, `model_kind`, `audio_path`, and `transcription_review`.
 
 ## Planner Selection Notes (from interface)
 - For ordinary audio/video transcription, always use `audio.preview_transcribe` before the actual STT call. It reads configuration without reading the source file or contacting a provider.
 - If preview returns `provider_location=remote`, use `audio.transcribe`. If it returns `provider_location=local`, use `media_download.transcribe` instead so local recognition stays inside that skill's private environment.
-- If the configured remote `audio.transcribe` call fails, continue with `media_download.transcribe` on the same local audio source. Do not report final failure until the local fallback also fails.
+- If the configured remote `audio.transcribe` call fails, use its structured error evidence to explain the failure in the user's language. Do not call local Whisper/FunASR or change provider/model to recover automatically. Local recognition is available when the user selects a local STT configuration.
 - For video input, first call `media_download.transcribe` with `extract_audio_only=true` and `deliver_to_user=false`, then preview/transcribe the returned WAV path.
 - Successful remote and local results both declare `transcription_review`; the shared main-model finalizer corrects recognition errors and broken sentences, uses the user's response language, and always delivers the complete reviewed text inline and as a UTF-8 text artifact.
 - Keep the user-provided source in a structured audio field. Do not infer paths or URLs from unrelated prose.
@@ -23,7 +23,11 @@
 
 ## Config Entry Points (from interface)
 - Main STT config: `configs/audio.toml` -> `[audio_transcribe]`.
-- Default STT is the managed local whisper.cpp server; Qwen `qwen3-asr-flash` is available via `/chat/completions` `input_audio` with `QWEN_API_KEY` or `[llm.qwen].api_key`.
+- Select the default STT provider/model in `configs/audio.toml`; retain the local Whisper provider as an explicitly selectable option. Automatic local fallback is disabled.
+- MiniMax `asr-1.0` uses its native `/speech_to_text` multipart endpoint with `adapter_mode=auto` or `native`. Configure `[audio_transcribe.providers.minimax]` and use `MINIMAX_API_KEY`; missing provider connection/key fields inherit the main MiniMax configuration. `adapter_mode=compat` remains available for explicitly configured OpenAI-compatible proxies.
+- The MiniMax adapter uploads local audio, requests JSON text, and passes the primary `language` tag as an HTTP header; omitted or `auto` language enables mixed-language recognition. The endpoint does not accept `transcribe_hint`, so that hint is not sent as an unsupported parameter. Main-model transcript review still applies after recognition.
+- MiniMax's current upstream limit is 500 seconds / 50 MB per audio file. Oversize, rejected, or malformed responses return a structured failure without local fallback; the adapter does not silently truncate audio or repeatedly submit a failed request. See the [official STT API](https://platform.minimax.cn/docs/api-reference/speech-to-text).
+- Qwen `qwen3-asr-flash` is available via `/chat/completions` `input_audio` with `QWEN_API_KEY` or `[llm.qwen].api_key`.
 - `qwen_chat_models` selects this structured adapter; never infer it from user-language phrases.
 - Local whisper.cpp uses the OpenAI-compatible custom provider:
   - set `default_vendor = "custom"`
@@ -35,16 +39,16 @@
 - For multilingual agents, start whisper.cpp with `--language auto`; the server default may otherwise bias recognition toward English.
 
 ## Actions (from interface)
-- `preview_transcribe`: resolve the input, provider, provider location, model, adapter plan, recommended execution capability, and local fallback without reading the source file or calling a provider.
+- `preview_transcribe`: resolve the input, provider, provider location, model, adapter plan, recommended execution capability, and disabled fallback policy without reading the source file or calling a provider.
 - `transcribe`: perform actual configured-provider transcription. Use it after preview selects the remote path. This remains the default when `action` is omitted for protocol compatibility.
 - Actual transcription is admitted as a durable long operation instead of the old 120-second whole-process window. Provider request bounds and explicit user cancellation remain active.
 
 ## Parameter Contract (from interface)
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
-| preview_transcribe | `audio.path`, `audio_path`, `path`, `file`, `audio.url`, `audio_url`, or `url` | yes | string | - | Source to validate. Missing local files are reported in structured evidence and do not fail preview. |
+| preview_transcribe | `audio.path`, `audio_path`, `input_path`, `path`, `file`, `audio.url`, `audio_url`, or `url` | yes | string | - | Source to validate. Missing local files are reported in structured evidence and do not fail preview. |
 | preview_transcribe | `vendor`, `model` | no | string | impl default | Provider/model to resolve without credential access or a provider call. |
-| transcribe | `audio.path` or `audio_path` or `path` | conditional | string(path) | - | Local audio file path (`audio.path` preferred). |
+| transcribe | `audio.path` or `audio_path` or `input_path` or `path` | conditional | string(path) | - | Local audio file path (`audio.path` preferred). |
 | transcribe | `audio.url` or `audio_url` | conditional | string(url) | - | Public audio URL. Some native adapters prefer or require URL input. |
 | transcribe | `transcribe_hint` | no | string | - | Prompt/hint to improve recognition quality. |
 | transcribe | `vendor` | no | string | impl default | Backend vendor selector. |
@@ -58,7 +62,7 @@ Provide one audio source: local path or URL.
 - Invalid/unreadable local audio path or invalid URL input.
 - Compatible adapters that require local file upload return clear path-related errors.
 - Native adapters that require public URL input return clear URL/configuration errors.
-- Provider/runtime transcription failures return clear error text plus `fallback_recommended=true`, `fallback_capability=media_download.transcribe`, `fallback_input_field=input_path`, and the exact `fallback_input_value` where local fallback applies.
+- Provider/runtime transcription failures return structured error evidence and `fallback_recommended=false`. Explain the actual failure using the model; do not automatically invoke local recognition.
 - Machine-readable failures use `error_code`, `message_key`, and `retryable` (including invalid input/size/configuration/client/request failures); runtime and UI must not parse `error_text` or expose internal transport markers.
 
 ## Request/Response Examples (from interface)
@@ -69,7 +73,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"AUDIO_TRANSCRIBE_PREVIEW","extra":{"action":"preview_transcribe","status":"dry_run","dry_run":true,"provider_call":false,"provider":"qwen","provider_location":"remote","recommended_capability":"audio.transcribe","fallback_capability":"media_download.transcribe","model":"qwen3-asr-flash","model_kind":"chat_audio","input_path":"recordings/meeting.wav","input_exists":false},"error_text":null}
+{"request_id":"demo-1","status":"ok","text":"AUDIO_TRANSCRIBE_PREVIEW","extra":{"action":"preview_transcribe","status":"dry_run","dry_run":true,"provider_call":false,"provider":"qwen","provider_location":"remote","recommended_capability":"audio.transcribe","fallback_recommended":false,"model":"qwen3-asr-flash","model_kind":"chat_audio","input_path":"recordings/meeting.wav","input_exists":false},"error_text":null}
 ```
 
 ### Example 2
@@ -82,14 +86,14 @@ Response:
 {"request_id":"demo-2","status":"ok","text":"AUDIO_TRANSCRIPTION_READY","extra":{"provider":"openai","provider_location":"remote","model":"gpt-4o-mini-transcribe","model_kind":"compat","audio_path":"recordings/meeting.wav","outputs":[{"type":"text","preview":"Transcription: ..."}],"transcription_review":{"required":true,"source":"configured_stt","raw_text":"Transcription: ...","response_language":"request-language","delivery":{"mode":"inline_and_artifact","text_format":"text/plain; charset=utf-8","text_filename":"transcript.txt"}},"latency_ms":0},"error_text":null}
 ```
 
-### Example 3: preview a local configuration and select the fallback
+### Example 3: preview a local configuration and select local recognition
 Request:
 ```json
 {"request_id":"demo-3","args":{"action":"preview_transcribe","audio":{"path":"recordings/chinese.wav"},"vendor":"custom","model":"local-whisper"}}
 ```
 Response:
 ```json
-{"request_id":"demo-3","status":"ok","text":"AUDIO_TRANSCRIBE_PREVIEW","extra":{"provider":"custom","provider_location":"local","recommended_capability":"media_download.transcribe","fallback_capability":"media_download.transcribe","model":"local-whisper","model_kind":"compat","input_path":"recordings/chinese.wav"},"error_text":null}
+{"request_id":"demo-3","status":"ok","text":"AUDIO_TRANSCRIBE_PREVIEW","extra":{"provider":"custom","provider_location":"local","recommended_capability":"media_download.transcribe","fallback_recommended":false,"model":"local-whisper","model_kind":"compat","input_path":"recordings/chinese.wav"},"error_text":null}
 ```
 
 ## Output Contract
