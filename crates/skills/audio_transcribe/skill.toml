@@ -29,7 +29,7 @@ launcher = "native"
 entrypoint = "runtime/bin/audio-transcribe-skill"
 working_directory = "."
 timeout_seconds = 86400
-environment_allowlist = ["AGENT_INTERNAL_LLM_TOKEN", "AGENT_INTERNAL_LLM_URL", "ANTHROPIC_API_KEY", "APP_ALLOW_PATH_OUTSIDE_WORKSPACE", "APP_SELECTED_LLM_PROVIDER_TYPE", "APP_SELECTED_LLM_VENDOR", "CLAWD_BASE_URL", "DEEPSEEK_API_KEY", "GOOGLE_API_KEY", "GROK_API_KEY", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "MIMO_API_KEY", "MINIMAX_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL", "PATH", "QWEN_API_KEY", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
+environment_allowlist = ["AUDIO_TRANSCRIBE_OPENAI_API_KEY", "AUDIO_TRANSCRIBE_GOOGLE_API_KEY", "AUDIO_TRANSCRIBE_ANTHROPIC_API_KEY", "AUDIO_TRANSCRIBE_GROK_API_KEY", "AUDIO_TRANSCRIBE_DEEPSEEK_API_KEY", "AUDIO_TRANSCRIBE_QWEN_API_KEY", "AUDIO_TRANSCRIBE_MINIMAX_API_KEY", "AUDIO_TRANSCRIBE_CUSTOM_API_KEY", "AGENT_INTERNAL_LLM_TOKEN", "AGENT_INTERNAL_LLM_URL", "ANTHROPIC_API_KEY", "APP_ALLOW_PATH_OUTSIDE_WORKSPACE", "APP_SELECTED_LLM_PROVIDER_TYPE", "APP_SELECTED_LLM_VENDOR", "CLAWD_BASE_URL", "DEEPSEEK_API_KEY", "GOOGLE_API_KEY", "GROK_API_KEY", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "MIMO_API_KEY", "MINIMAX_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL", "PATH", "QWEN_API_KEY", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
 smoke_args = {}
 
 [security]
@@ -64,7 +64,7 @@ subprocess = false
 package_install = false
 privilege_escalation = false
 external_publish = false
-credential_refs = []
+credential_refs = ["audio_transcribe_openai_api_key", "audio_transcribe_google_api_key", "audio_transcribe_anthropic_api_key", "audio_transcribe_grok_api_key", "audio_transcribe_deepseek_api_key", "audio_transcribe_qwen_api_key", "audio_transcribe_minimax_api_key", "audio_transcribe_custom_api_key"]
 
 [capability_request.artifact_contract]
 kinds = []
