@@ -16,10 +16,7 @@ use serde_json::{json, Value};
 use tracing::warn;
 
 use super::anthropic_usage_snapshot;
-use super::client::{
-    is_context_length_exceeded_response, is_quota_exhausted_response, ChatRequestHints,
-    LlmProviderResponse, ProviderError,
-};
+use super::client::{ChatRequestHints, LlmProviderResponse, ProviderError};
 use crate::LlmProviderRuntime;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,53 +118,15 @@ pub(super) async fn call_anthropic_claude(
     })?;
 
     let status = resp.status();
+    let headers = resp.headers().clone();
     let body_text = resp.text().await.map_err(|err| {
         ProviderError::retryable(format!("read response failed: {err}"), req_body.clone())
     })?;
 
-    if status.as_u16() == 429 {
-        let err = if is_quota_exhausted_response(&body_text) {
-            ProviderError::quota_exhausted_with_response(
-                format!("http {}: {}", status.as_u16(), body_text),
-                req_body.clone(),
-                body_text,
-                None,
-            )
-        } else {
-            ProviderError::rate_limited_with_response(
-                format!("http {}: {}", status.as_u16(), body_text),
-                req_body.clone(),
-                body_text,
-                None,
-            )
-        };
-        return Err(err);
-    }
-
-    if status.is_server_error() {
-        return Err(ProviderError::retryable_with_response(
-            format!("http {}: {}", status.as_u16(), body_text),
-            req_body.clone(),
-            body_text,
-            None,
-        ));
-    }
-
-    if is_context_length_exceeded_response(&body_text) {
-        return Err(ProviderError::context_length_exceeded_with_response(
-            format!("provider_context_length_exceeded:http_{}", status.as_u16()),
-            req_body.clone(),
-            body_text,
-            None,
-        ));
-    }
-    if !status.is_success() {
-        return Err(ProviderError::non_retryable_with_response(
-            format!("http {}: {}", status.as_u16(), body_text),
-            req_body.clone(),
-            body_text,
-            None,
-        ));
+    if let Some(error) =
+        super::error_response::response_error(&provider, status, &headers, &body_text, &req_body)
+    {
+        return Err(error);
     }
 
     let value: Value = serde_json::from_str(&body_text).map_err(|err| {

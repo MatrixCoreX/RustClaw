@@ -8,8 +8,7 @@ use claw_core::model_turn::{
 use serde_json::{json, Map, Value};
 
 use super::client::{
-    is_context_length_exceeded_response, is_quota_exhausted_response, ChatRequestHints,
-    ModelTurnEventSink, ModelTurnProviderResponse, ProviderError,
+    ChatRequestHints, ModelTurnEventSink, ModelTurnProviderResponse, ProviderError,
 };
 use crate::LlmProviderRuntime;
 
@@ -50,49 +49,14 @@ pub(super) async fn call_anthropic_model_turn(
         }
     })?;
     let status = response.status();
+    let headers = response.headers().clone();
     let body_text = response.text().await.map_err(|error| {
         ProviderError::retryable(format!("read response failed: {error}"), req_body.clone())
     })?;
-    if status.as_u16() == 429 {
-        return Err(if is_quota_exhausted_response(&body_text) {
-            ProviderError::quota_exhausted_with_response(
-                format!("http {}: {}", status.as_u16(), body_text),
-                req_body,
-                body_text,
-                None,
-            )
-        } else {
-            ProviderError::rate_limited_with_response(
-                format!("http {}: {}", status.as_u16(), body_text),
-                req_body,
-                body_text,
-                None,
-            )
-        });
-    }
-    if status.is_server_error() {
-        return Err(ProviderError::retryable_with_response(
-            format!("http {}: {}", status.as_u16(), body_text),
-            req_body,
-            body_text,
-            None,
-        ));
-    }
-    if is_context_length_exceeded_response(&body_text) {
-        return Err(ProviderError::context_length_exceeded_with_response(
-            format!("provider_context_length_exceeded:http_{}", status.as_u16()),
-            req_body.clone(),
-            body_text,
-            None,
-        ));
-    }
-    if !status.is_success() {
-        return Err(ProviderError::non_retryable_with_response(
-            format!("http {}: {}", status.as_u16(), body_text),
-            req_body,
-            body_text,
-            None,
-        ));
+    if let Some(error) =
+        super::error_response::response_error(&provider, status, &headers, &body_text, &req_body)
+    {
+        return Err(error);
     }
     let value: Value = serde_json::from_str(&body_text).map_err(|error| {
         ProviderError::non_retryable_with_response(

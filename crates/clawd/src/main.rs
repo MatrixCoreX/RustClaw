@@ -562,6 +562,7 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
     runtime_memory::spawn_allocator_reclaimer(&allocator_tuning);
     let config_path = resolve_startup_config_path()?;
     let config = AppConfig::load(&config_path)?;
+    providers::error_rules::initialize(&config_path)?;
     let runtime_concurrency = resource_scheduler::runtime_concurrency_plan(
         config.worker.concurrency,
         config.skills.skill_max_concurrency,
