@@ -159,6 +159,32 @@ Retry-After 后不额外请求、正常文本/native/stream 回归。测试结�
   在 ring/aws-lc-sys 的 C 编译阶段失败：当前 GNU cc 不支持 `-arch` /
   `-mmacosx-version-min` 等 Apple 参数。缺少可用 Apple C 交叉工具链，本轮不能声称 macOS
   编译或实机测试通过；未去远端修改源码、安装工具链或部署。
-- 本轮只改本机源码与规则/说明，没有提交、推送、重启生产服务，也没有恢复已取消任务。
+- 以上为首次实现的离线验收记录；当时尚未提交、部署或恢复已取消任务。
 
 通用规则中的部分 context/quota token 沿用仓库原有合同；服务商专用新增项按上述官方资料维护。
+
+### 本机部署与真实模型验收（2026-09-14 18:41 +08:00）
+
+- 功能提交：`301f6d888`，仅包含本轮 18 个错误兼容相关文件；其他工作区修改未混入提交。
+- 本机按当前工作区增量构建 `cargo build -p clawd --bin clawd --release -j 8`，
+  用时 5 分 10 秒；二次构建 0.62 秒确认缓存已最新。部署保留此前工作区的其他改动，
+  不将当前二进制冒充为该提交的纯净源码构建。
+- 只重启本机 `clawd`，未重编 UI/技能、未操作远端。启动日志确认
+  `provider_error_rules_loaded revision=2026-09-14.1 profiles=13`。
+  运行二进制 SHA-256：`49d245e080c1a6a164cfe7e626a8e7d9c2310768ed4ecdac90507e4b1e169dd9`。
+- 再次执行既有最新测试产物的 provider 测试：93 passed / 0 failed；重启脚本自测、
+  LLM trace helper/runner 合同自测与主检查通过。
+- 真实 NL：要求只回复“模型连接正常”，不使用工具；当前配置为
+  `vendor-minimax / MiniMax-M3 / openai_compat`。任务 ID：
+  `6a3d8298-a973-4fd3-b0fb-0abf719b4f99`。
+- 供应商返回 HTTP 429，`error.type=rate_limit_error`，`error.message` 尾码 `(2056)`，
+  内容为 Token Plan 用量上限。新规则命中 `minimax/balance_or_token_plan`，
+  分类为 `quota_exhausted`：任务指标为 1 次模型调用、0 次重试、0 次 fallback，
+  用量未返回，不能当成零消耗。**错误分类验收通过，但模型可用性未通过。**
+- 遇到额度错误立即停止测试，并通过按 ID 取消接口取消该测试任务，防止留下后台重试；
+  未恢复此前取消的用户任务。最终队列/运行任务均为 0，主服务、微信、Telegram、webd
+  健康检查正常，`http://127.0.0.1/` 返回 200。
+- 本机原始证据与临时回滚副本：`/tmp/provider-errors-deploy-20260914-O6QWda/`，
+  包含 `build.log`、`provider-tests.log`、`model-smoke.log`、`llm_returns.json`、
+  `result_before_cleanup.json`、`final.json`、`clawd.previous` 和旧日志。
+  `/tmp` 不是永久归档；本段保留可追溯的提交、摘要、测试 ID 和验收结论。
