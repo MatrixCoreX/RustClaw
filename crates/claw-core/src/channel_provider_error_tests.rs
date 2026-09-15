@@ -40,6 +40,28 @@ fn status_classification_has_stable_retry_semantics() {
 }
 
 #[test]
+fn whatsapp_web_local_media_rejection_is_terminal_and_preserves_the_reason() {
+    for reason in ["too_large", "empty", "unreadable", "not_regular_file"] {
+        let provider_code = format!("channel_media_{reason}");
+        let body = serde_json::json!({
+            "ok": false,
+            "error_code": provider_code,
+            "retryable": false,
+        });
+        let error = ChannelProviderError::from_http_response(
+            "whatsapp_web",
+            "send_result",
+            422,
+            &body.to_string(),
+        );
+        assert_eq!(error.failure_class, ChannelProviderFailureClass::PayloadRejected);
+        assert_eq!(error.provider_error_code.as_deref(), Some(provider_code.as_str()));
+        assert!(!error.retryable);
+        assert_eq!(ChannelProviderError::decode(&error.to_string()), Some(error));
+    }
+}
+
+#[test]
 fn prose_provider_codes_and_unstructured_bodies_are_discarded() {
     for body in [
         r#"{"code":"please retry with secret abc"}"#,

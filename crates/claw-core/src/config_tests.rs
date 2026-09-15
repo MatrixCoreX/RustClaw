@@ -107,9 +107,9 @@ fn whatsapp_web_defaults_keep_proactive_delivery_off_and_local_limits_explicit()
     let config = super::WhatsappWebConfig::default();
     assert!(!config.enabled);
     assert!(!config.allow_proactive_send);
-    assert_eq!(config.max_outbound_image_bytes, 100 * 1024 * 1024);
+    assert_eq!(config.max_outbound_image_bytes, 0);
     assert_eq!(config.max_outbound_video_bytes, 100 * 1024 * 1024);
-    assert_eq!(config.max_outbound_audio_bytes, 100 * 1024 * 1024);
+    assert_eq!(config.max_outbound_audio_bytes, 0);
     assert_eq!(config.max_outbound_file_bytes, 2 * 1024 * 1024 * 1024);
 }
 

@@ -30,12 +30,59 @@ fn catalog_keys_and_machine_metadata_are_complete_and_unique() {
         }
         if record.capability != ChannelCapabilityKind::SendText
             && record.adapter != ChannelAdapterKind::WebUi
+            && record.adapter != ChannelAdapterKind::WechatIlink
+            && !(record.adapter == ChannelAdapterKind::WhatsappWeb
+                && matches!(
+                    record.capability,
+                    ChannelCapabilityKind::SendImage | ChannelCapabilityKind::SendAudio
+                ))
         {
             assert!(record.max_payload_bytes.is_some());
         }
     }
 
     assert_eq!(source_kinds.len(), 3);
+}
+
+#[test]
+fn wechat_media_have_no_undocumented_local_byte_ceiling() {
+    for capability in [
+        ChannelCapabilityKind::SendImage,
+        ChannelCapabilityKind::SendVideo,
+        ChannelCapabilityKind::SendFile,
+    ] {
+        let record = channel_capability(ChannelAdapterKind::WechatIlink, capability)
+            .expect("wechat outbound media contract");
+        assert!(record.supported);
+        assert_eq!(record.max_payload_bytes, None);
+        assert_eq!(
+            channel_media_max_bytes(ChannelAdapterKind::WechatIlink, capability),
+            None
+        );
+        assert_eq!(
+            record.source_kind,
+            ChannelCapabilitySourceKind::LocalSafetyPolicy
+        );
+    }
+    assert_eq!(crate::channel_media_limits::wechat_video_max_bytes(), None);
+    assert_eq!(crate::channel_media_limits::wechat_file_max_bytes(), None);
+    assert_eq!(crate::channel_media_limits::wechat_image_max_bytes(), None);
+}
+
+#[test]
+fn whatsapp_web_media_defaults_match_catalog() {
+    let config = crate::config::WhatsappWebConfig::default();
+    for (kind, configured) in [
+        (ChannelCapabilityKind::SendImage, config.max_outbound_image_bytes),
+        (ChannelCapabilityKind::SendAudio, config.max_outbound_audio_bytes),
+        (ChannelCapabilityKind::SendVideo, config.max_outbound_video_bytes),
+        (ChannelCapabilityKind::SendFile, config.max_outbound_file_bytes),
+    ] {
+        assert_eq!(
+            channel_media_max_bytes(ChannelAdapterKind::WhatsappWeb, kind),
+            (configured > 0).then_some(configured)
+        );
+    }
 }
 
 #[test]
@@ -64,12 +111,6 @@ fn official_and_local_media_limits_are_read_only_catalog_values() {
             ChannelCapabilityKind::SendFile,
             100 * MIB,
             ChannelCapabilitySourceKind::OfficialContract,
-        ),
-        (
-            ChannelAdapterKind::WechatIlink,
-            ChannelCapabilityKind::SendImage,
-            25 * MIB,
-            ChannelCapabilitySourceKind::LocalSafetyPolicy,
         ),
         (
             ChannelAdapterKind::FeishuOpenPlatform,
@@ -173,14 +214,14 @@ fn whatsapp_upload_specs_are_constrained_by_the_catalog_contract() {
 #[test]
 fn whatsapp_web_media_limits_are_local_policy_not_cloud_contracts() {
     for (capability, expected_bytes) in [
-        (ChannelCapabilityKind::SendImage, 100 * MIB),
-        (ChannelCapabilityKind::SendVideo, 100 * MIB),
-        (ChannelCapabilityKind::SendAudio, 100 * MIB),
-        (ChannelCapabilityKind::SendFile, 2 * 1024 * MIB),
+        (ChannelCapabilityKind::SendImage, None),
+        (ChannelCapabilityKind::SendVideo, Some(100 * MIB)),
+        (ChannelCapabilityKind::SendAudio, None),
+        (ChannelCapabilityKind::SendFile, Some(2 * 1024 * MIB)),
     ] {
         let record = channel_capability(ChannelAdapterKind::WhatsappWeb, capability)
             .expect("WhatsApp Web local policy record");
-        assert_eq!(record.max_payload_bytes, Some(expected_bytes));
+        assert_eq!(record.max_payload_bytes, expected_bytes);
         assert_eq!(
             record.source_kind,
             ChannelCapabilitySourceKind::LocalSafetyPolicy

@@ -24,9 +24,12 @@ quick_result_wait_seconds = 3
 allow_proactive_send = false
 # WhatsApp Web 没有稳定的机器人上传上限合同；以下是本地内存/上传安全阈值，
 # 平台仍可能因账号、客户端版本、媒体编码等因素拒绝更小的文件。
-max_outbound_image_bytes = 104857600
+# 0 表示不设本地字节上限；图片、音频没有已确认的 Web 发送大小合同，默认不设限。
+# 视频/文件默认参考官方 Web 帮助的 100 MB / 2 GB，不代表非官方适配器的服务端保证。
+# https://faq.whatsapp.com/453914586839706/?cms_platform=web
+max_outbound_image_bytes = 0
 max_outbound_video_bytes = 104857600
-max_outbound_audio_bytes = 104857600
+max_outbound_audio_bytes = 0
 max_outbound_file_bytes = 2147483648
 # Legacy bootstrap admin list.
 # Kept for compatibility only; runtime access now depends on key binding.

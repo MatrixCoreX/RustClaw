@@ -247,7 +247,7 @@ pub(crate) fn renew_channel_delivery_dispatch(
     )
 }
 
-fn load_channel_delivery_receipt_from_db(
+pub(crate) fn load_channel_delivery_receipt_from_db(
     db: &Connection,
     idempotency_key: &str,
 ) -> anyhow::Result<Option<ChannelDeliveryReceipt>> {

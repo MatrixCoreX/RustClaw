@@ -568,7 +568,7 @@ pub fn preflight_open_platform_media(
             &format!(
                 "{}:{}",
                 error.actual_bytes.unwrap_or_default(),
-                error.max_bytes
+                max_bytes
             ),
         )
     })

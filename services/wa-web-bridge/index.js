@@ -6,6 +6,7 @@ const TOML = require("toml");
 const qrcode = require("qrcode-terminal");
 const QRCode = require("qrcode");
 const pino = require("pino");
+const { MediaPreflightError, resolveOutboundLimit, validateOutboundFile } = require("./media-preflight.js");
 const {
   default: makeWASocket,
   DisconnectReason,
@@ -79,10 +80,10 @@ function loadConfig() {
       workspaceRoot,
       String(ww.artifact_outbox_dir || ".agent-runtime/artifacts/channel-outbox/whatsapp-web")
     ),
-    maxOutboundImageBytes: Number(ww.max_outbound_image_bytes || 100 * 1024 * 1024),
-    maxOutboundVideoBytes: Number(ww.max_outbound_video_bytes || 100 * 1024 * 1024),
-    maxOutboundAudioBytes: Number(ww.max_outbound_audio_bytes || 100 * 1024 * 1024),
-    maxOutboundFileBytes: Number(ww.max_outbound_file_bytes || 2 * 1024 * 1024 * 1024),
+    maxOutboundImageBytes: resolveOutboundLimit(ww.max_outbound_image_bytes, 0),
+    maxOutboundVideoBytes: resolveOutboundLimit(ww.max_outbound_video_bytes, 100 * 1024 * 1024),
+    maxOutboundAudioBytes: resolveOutboundLimit(ww.max_outbound_audio_bytes, 0),
+    maxOutboundFileBytes: resolveOutboundLimit(ww.max_outbound_file_bytes, 2 * 1024 * 1024 * 1024),
   };
 }
 
@@ -154,6 +155,24 @@ function adapterError(errorCode, operation, material, retryable = false) {
     error_code: String(errorCode || "adapter_error"),
     diagnostic_id: adapterDiagnosticId(operation, material),
     retryable: Boolean(retryable),
+  };
+}
+
+function outboundFailureResponse(err) {
+  if (err instanceof MediaPreflightError) {
+    return {
+      status: 422,
+      body: {
+        ...adapterError(err.error_code, "send_result", err.message, false),
+        message_key: err.message_key,
+        actual_bytes: err.actual_bytes,
+        max_bytes: err.max_bytes,
+      },
+    };
+  }
+  return {
+    status: 500,
+    body: adapterError("adapter_send_failed", "send_result", String(err?.message || err), true),
   };
 }
 
@@ -697,29 +716,6 @@ async function requestTaskDeliveryUntilSettled(taskId, identity, background) {
   }
 }
 
-function validateOutboundFile(filePath, mediaLabel, maxBytes) {
-  let stat;
-  try {
-    stat = fs.statSync(filePath);
-  } catch (err) {
-    throw new Error(`WhatsApp Web ${mediaLabel}文件无法读取：${filePath}（${err.message || err}）`);
-  }
-  if (!stat.isFile()) {
-    throw new Error(`WhatsApp Web ${mediaLabel}投送失败：${filePath} 不是普通文件`);
-  }
-  if (stat.size === 0) {
-    throw new Error(`WhatsApp Web ${mediaLabel}投送失败：${filePath} 是空文件`);
-  }
-  if (Number.isFinite(maxBytes) && maxBytes > 0 && stat.size > maxBytes) {
-    const actualMiB = (stat.size / 1024 / 1024).toFixed(2);
-    const maxMiB = (maxBytes / 1024 / 1024).toFixed(0);
-    throw new Error(
-      `WhatsApp Web ${mediaLabel}过大：${actualMiB} MiB，本地安全上限为 ${maxMiB} MiB。请压缩后重试，或改为在 UI 中下载原文件。`
-    );
-  }
-  return stat.size;
-}
-
 async function sendStructuredResult(jid, text, media) {
   const messageIds = [];
   const recordMessage = (sent) => {
@@ -1170,7 +1166,8 @@ function startHttpServer() {
     } catch (err) {
       const material = String(err?.message || err);
       log.error({ diagnostic_id: adapterDiagnosticId("send_result", material) }, "wa-web result send failed");
-      return res.status(500).json(adapterError("adapter_send_failed", "send_result", material, true));
+      const failure = outboundFailureResponse(err);
+      return res.status(failure.status).json(failure.body);
     }
   });
 
@@ -1236,6 +1233,8 @@ if (require.main === module) {
 }
 
 module.exports = {
+  outboundFailureResponse,
+  resolveOutboundLimit,
   adapterDiagnosticId,
   adapterError,
   bindIdentity,

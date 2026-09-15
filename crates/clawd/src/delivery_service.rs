@@ -20,6 +20,8 @@ use uuid::Uuid;
 use crate::repo::ClaimChannelDeliveryDispatchOutcome;
 use crate::{AppState, ClaimedTask, RuntimeChannel};
 
+mod failure_notice;
+
 const DELIVERY_DISPATCH_LEASE_SECONDS: u64 = 120;
 const DELIVERY_DISPATCH_HEARTBEAT_SECONDS: u64 = 30;
 
@@ -291,6 +293,17 @@ pub(crate) async fn deliver_task_envelope(
     payload: &Value,
     envelope: &ChannelDeliveryEnvelope,
 ) -> anyhow::Result<ChannelDeliveryServiceResult> {
+    let result = deliver_task_envelope_once(state, task, payload, envelope).await?;
+    failure_notice::deliver(state, task, payload, envelope, &result).await?;
+    Ok(result)
+}
+
+async fn deliver_task_envelope_once(
+    state: &AppState,
+    task: &ClaimedTask,
+    payload: &Value,
+    envelope: &ChannelDeliveryEnvelope,
+) -> anyhow::Result<ChannelDeliveryServiceResult> {
     envelope
         .validate()
         .map_err(|err| anyhow!(err.to_string()))?;
@@ -523,7 +536,8 @@ fn accepted_delivery_receipt(
 }
 
 fn delivery_failure_fields(error_text: &str) -> (String, String, String, Option<String>, bool) {
-    let provider_error = ChannelProviderError::decode(error_text);
+    let provider_error = ChannelProviderError::decode(error_text)
+        .or_else(|| failure_notice::decode_local_media_error(error_text));
     let error_code = provider_error
         .as_ref()
         .map(|error| error.error_code.clone())

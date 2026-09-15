@@ -117,6 +117,93 @@ fn unique_temp_file(label: &str, extension: &str) -> PathBuf {
 }
 
 #[tokio::test]
+async fn media_over_old_ceilings_reach_provider_without_local_size_rejection() {
+    let state = TestState::default();
+    let app = Router::new()
+        .route(
+            "/ilink/bot/getuploadurl",
+            post(|State(state): State<TestState>, body: Bytes| async move {
+                *state.getuploadurl_body.lock().unwrap() =
+                    Some(serde_json::from_slice(&body).unwrap());
+                // Stop before encryption/upload; this test verifies the production
+                // send entry points reach the provider for the original file size.
+                Json(json!({"errcode": -999}))
+            }),
+        )
+        .with_state(state.clone());
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let path = unique_temp_file("no-byte-ceiling", "mp4");
+    let file = std::fs::File::create(&path).unwrap();
+    file.set_len(127_140_539).unwrap();
+    drop(file);
+    let client = Client::new();
+    let auth = IlinkAuth {
+        sk_route_tag: "",
+        wechat_uin_base64: "",
+    };
+    for media_type in [1, 2, 3] {
+        let result = if media_type == 1 {
+            send_weixin_image_from_file(
+                &client,
+                &base,
+                "test-token",
+                auth,
+                &base,
+                "peer",
+                Some("context"),
+                None,
+                &path,
+                "test-version",
+                1000,
+            )
+            .await
+        } else if media_type == 2 {
+            send_weixin_video_from_file(
+                &client,
+                &base,
+                "test-token",
+                auth,
+                &base,
+                "peer",
+                Some("context"),
+                None,
+                &path,
+                "test-version",
+                1000,
+            )
+            .await
+        } else {
+            send_weixin_file_from_file(
+                &client,
+                &base,
+                "test-token",
+                auth,
+                &base,
+                "peer",
+                Some("context"),
+                None,
+                &path,
+                "video.mp4",
+                "test-version",
+                1000,
+            )
+            .await
+        };
+        let error = result.unwrap_err();
+        let provider = claw_core::channel_provider_error::ChannelProviderError::decode(&error)
+            .expect("provider rejection, not local preflight rejection");
+        assert_eq!(provider.provider_error_code.as_deref(), Some("-999"));
+        let request = state.getuploadurl_body.lock().unwrap().take().unwrap();
+        assert_eq!(request["rawsize"], 127_140_539);
+        assert_eq!(request["media_type"], media_type);
+    }
+    server.abort();
+    std::fs::remove_file(path).unwrap();
+}
+
+#[tokio::test]
 async fn send_weixin_image_matches_openclaw_weixin_message_shape() {
     let (addr, state) = spawn_test_server().await;
     let file_path = unique_temp_file("image", "png");

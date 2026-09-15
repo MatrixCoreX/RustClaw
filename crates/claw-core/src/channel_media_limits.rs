@@ -1,7 +1,7 @@
 //! Shared outbound channel media limits and local-file preflight checks.
 //!
-//! These limits are intentionally checked before a channel adapter reads an
-//! entire file into memory or starts a remote upload.
+//! Configured limits are checked before reading or uploading. An absent limit
+//! disables only the byte ceiling, not readability or regular/nonempty checks.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -77,7 +77,7 @@ pub enum LocalMediaPreflightFailure {
 pub struct LocalMediaPreflightError {
     pub failure: LocalMediaPreflightFailure,
     pub actual_bytes: Option<u64>,
-    pub max_bytes: u64,
+    pub max_bytes: Option<u64>,
 }
 
 impl LocalMediaPreflightError {
@@ -104,8 +104,9 @@ impl LocalMediaPreflightError {
 
 pub fn preflight_local_media_file(
     path: &Path,
-    max_bytes: u64,
+    max_bytes: impl Into<Option<u64>>,
 ) -> Result<u64, LocalMediaPreflightError> {
+    let max_bytes = max_bytes.into();
     let metadata = std::fs::metadata(path).map_err(|_| LocalMediaPreflightError {
         failure: LocalMediaPreflightFailure::Unreadable,
         actual_bytes: None,
@@ -126,7 +127,7 @@ pub fn preflight_local_media_file(
             max_bytes,
         });
     }
-    if actual_bytes > max_bytes {
+    if max_bytes.is_some_and(|limit| actual_bytes > limit) {
         return Err(LocalMediaPreflightError {
             failure: LocalMediaPreflightFailure::TooLarge,
             actual_bytes: Some(actual_bytes),
@@ -136,22 +137,22 @@ pub fn preflight_local_media_file(
     Ok(actual_bytes)
 }
 
-pub fn wechat_image_max_bytes() -> u64 {
-    required_channel_media_max_bytes(
+pub fn wechat_image_max_bytes() -> Option<u64> {
+    channel_media_max_bytes(
         ChannelAdapterKind::WechatIlink,
         ChannelCapabilityKind::SendImage,
     )
 }
 
-pub fn wechat_file_max_bytes() -> u64 {
-    required_channel_media_max_bytes(
+pub fn wechat_file_max_bytes() -> Option<u64> {
+    channel_media_max_bytes(
         ChannelAdapterKind::WechatIlink,
         ChannelCapabilityKind::SendFile,
     )
 }
 
-pub fn wechat_video_max_bytes() -> u64 {
-    required_channel_media_max_bytes(
+pub fn wechat_video_max_bytes() -> Option<u64> {
+    channel_media_max_bytes(
         ChannelAdapterKind::WechatIlink,
         ChannelCapabilityKind::SendVideo,
     )
@@ -206,7 +207,7 @@ pub async fn prepare_whatsapp_cloud_media(
             "whatsapp_cloud_media_preflight_failed:{}:{}:{}",
             error.error_code(),
             error.actual_bytes.unwrap_or_default(),
-            error.max_bytes
+            input_max_bytes
         )
     })?;
     let extension = original_path
@@ -264,7 +265,7 @@ pub async fn prepare_whatsapp_cloud_media(
             "whatsapp_cloud_media_preflight_failed:{}:{}:{}",
             error.error_code(),
             error.actual_bytes.unwrap_or_default(),
-            error.max_bytes
+            max_bytes
         ));
     }
     let video_compatible = if kind == WhatsappCloudMediaKind::Video {
@@ -492,14 +493,16 @@ pub fn validate_local_media_file(
     path: &Path,
     _channel: &str,
     _media_kind: &str,
-    max_bytes: u64,
+    max_bytes: impl Into<Option<u64>>,
 ) -> Result<u64, String> {
     preflight_local_media_file(path, max_bytes).map_err(|error| {
         format!(
             "channel_media_preflight_failed:{}:{}:{}",
             error.error_code(),
             error.actual_bytes.unwrap_or_default(),
-            error.max_bytes
+            error
+                .max_bytes
+                .map_or_else(|| "none".to_string(), |limit| limit.to_string())
         )
     })
 }

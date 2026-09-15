@@ -10,6 +10,13 @@ export function formatBytes(value?: number | null): string {
   return `${size.toFixed(idx === 0 ? 0 : 2)} ${units[idx]}`;
 }
 
+export function formatOptionalByteLimit(
+  value: number | null | undefined,
+  unlimitedLabel: string,
+): string {
+  return value === 0 ? unlimitedLabel : formatBytes(value);
+}
+
 export function formatDuration(totalSeconds?: number): string {
   if (typeof totalSeconds !== "number" || Number.isNaN(totalSeconds)) return "--";
   const days = Math.floor(totalSeconds / 86400);
