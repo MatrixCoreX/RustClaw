@@ -16,7 +16,7 @@ import {
   serviceControlActions,
   type CommunicationServiceAction,
 } from "../lib/communication-service-controls";
-import { formatBytes } from "../lib/display-format";
+import { formatOptionalByteLimit } from "../lib/display-format";
 import { formatUiError } from "../lib/ui-error";
 
 type UiLanguage = "zh" | "en";
@@ -589,7 +589,7 @@ export function CommunicationSetupPage({
               {whatsappWebLoginStatus?.local_safety_limits ? (
                 <p>
                   {t("本地保护上限（不是 WhatsApp 官方上限）", "Local safety limits (not official WhatsApp limits)")}：
-                  {t("图片", "image")} {formatBytes(whatsappWebLoginStatus.local_safety_limits.image_bytes)} · {t("视频", "video")} {formatBytes(whatsappWebLoginStatus.local_safety_limits.video_bytes)} · {t("音频", "audio")} {formatBytes(whatsappWebLoginStatus.local_safety_limits.audio_bytes)} · {t("文件", "file")} {formatBytes(whatsappWebLoginStatus.local_safety_limits.file_bytes)}
+                  {t("图片", "image")} {formatOptionalByteLimit(whatsappWebLoginStatus.local_safety_limits.image_bytes, t("未设本地上限", "No local limit"))} · {t("视频", "video")} {formatOptionalByteLimit(whatsappWebLoginStatus.local_safety_limits.video_bytes, t("未设本地上限", "No local limit"))} · {t("音频", "audio")} {formatOptionalByteLimit(whatsappWebLoginStatus.local_safety_limits.audio_bytes, t("未设本地上限", "No local limit"))} · {t("文件", "file")} {formatOptionalByteLimit(whatsappWebLoginStatus.local_safety_limits.file_bytes, t("未设本地上限", "No local limit"))}
                 </p>
               ) : null}
             </div>

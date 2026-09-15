@@ -6,6 +6,8 @@ const path = require("path");
 const {
   adapterDiagnosticId,
   adapterError,
+  outboundFailureResponse,
+  resolveOutboundLimit,
   bindIdentity,
   buildSubmitTaskBody,
   canonicalUserJid,
@@ -65,7 +67,10 @@ assert.strictEqual(adapterStatus.adapter_mode, "experimental_unofficial");
 assert.strictEqual(adapterStatus.official_bot_api, false);
 assert.strictEqual(adapterStatus.transport, "baileys");
 assert.strictEqual(adapterStatus.proactive_send_enabled, false);
-assert.strictEqual(adapterStatus.local_safety_limits.image_bytes, 100 * 1024 * 1024);
+assert.strictEqual(adapterStatus.local_safety_limits.image_bytes, 0);
+assert.strictEqual(adapterStatus.local_safety_limits.audio_bytes, 0);
+assert.strictEqual(adapterStatus.local_safety_limits.video_bytes, 100 * 1024 * 1024);
+assert.strictEqual(adapterStatus.local_safety_limits.file_bytes, 2 * 1024 * 1024 * 1024);
 assert.strictEqual(adapterStatus.last_error, undefined);
 updateLoginState("reconnecting", {
   errorCode: "connection_closed",
@@ -90,8 +95,41 @@ fs.writeFileSync(videoFixture, "video");
 assert.strictEqual(validateOutboundFile(videoFixture, "视频", 100), 5);
 assert.throws(
   () => validateOutboundFile(videoFixture, "视频", 4),
-  /本地安全上限/
+  /channel_media_too_large/
 );
+assert.strictEqual(resolveOutboundLimit(0, 100), 0);
+assert.strictEqual(resolveOutboundLimit(undefined, 100), 100);
+assert.strictEqual(resolveOutboundLimit(25, 100), 25);
+for (const invalid of [-1, 1.5, NaN, Infinity, "0", false, Number.MAX_SAFE_INTEGER + 1]) {
+  assert.throws(() => resolveOutboundLimit(invalid, 100), /channel_media_limit_invalid/);
+}
+const sparseFd = fs.openSync(videoFixture, "r+");
+fs.ftruncateSync(sparseFd, 127140539);
+fs.closeSync(sparseFd);
+assert.strictEqual(validateOutboundFile(videoFixture, "video", resolveOutboundLimit(0, 100)), 127140539);
+for (const [fixture, limit, code] of [
+  [videoFixture, 100, "too_large"],
+  [mediaFixtureDir, 0, "not_regular_file"],
+  [path.join(mediaFixtureDir, "missing"), 0, "unreadable"],
+]) {
+  assert.throws(() => validateOutboundFile(fixture, "file", limit), (error) => {
+    const failure = outboundFailureResponse(error);
+    assert.strictEqual(failure.status, 422);
+    assert.strictEqual(failure.body.error_code, `channel_media_${code}`);
+    assert.strictEqual(failure.body.retryable, false);
+    assert.strictEqual(JSON.stringify(failure.body).includes(mediaFixtureDir), false);
+    return true;
+  });
+}
+fs.truncateSync(videoFixture, 0);
+assert.throws(() => validateOutboundFile(videoFixture, "file", 0), (error) => {
+  const failure = outboundFailureResponse(error);
+  assert.strictEqual(failure.body.error_code, "channel_media_empty");
+  assert.strictEqual(failure.body.max_bytes, null);
+  assert.strictEqual(failure.body.retryable, false);
+  return true;
+});
+assert.strictEqual(outboundFailureResponse(new Error("transport")).status, 500);
 fs.rmSync(mediaFixtureDir, { recursive: true, force: true });
 
 assert.strictEqual(extractBindKeyCandidate("/key rk-admin", false), "rk-admin");

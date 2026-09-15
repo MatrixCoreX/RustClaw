@@ -1,7 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { formatBytes, formatDuration, sleep, toLocalTime } from "./display-format.ts";
+import { formatBytes, formatOptionalByteLimit, formatDuration, sleep, toLocalTime } from "./display-format.ts";
+
+test("zero byte limit means no local ceiling, not zero-byte capacity", () => {
+  assert.equal(formatOptionalByteLimit(0, "未设本地上限"), "未设本地上限");
+  assert.equal(formatOptionalByteLimit(0, "No local limit"), "No local limit");
+  assert.equal(formatOptionalByteLimit(undefined, "No local limit"), "--");
+  assert.equal(formatOptionalByteLimit(100 * 1024 * 1024, "No local limit"), "100.00 MB");
+  assert.equal(formatBytes(0), "0 B");
+});
 
 test("formats byte counts for compact dashboard cards", () => {
   assert.equal(formatBytes(null), "--");
