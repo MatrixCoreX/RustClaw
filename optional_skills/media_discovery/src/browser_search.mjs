@@ -128,19 +128,22 @@ export async function openKeywordSearch(page, platform, source, {
       const observedUrl = destination.url();
       try {
         validatePlatformUrl(platform, observedUrl);
-        assertNavigationResponse(responses.get(destination), stage);
-        const loaded = await destination.waitForLoadState("domcontentloaded", {
-          timeout: Math.max(1, Math.min(2000, resultDeadline - Date.now())),
-        }).then(() => true, error => {
-          if (error.name === "TimeoutError") return false;
-          throw error;
-        });
-        if (!loaded) continue;
-        const contentType = await boundedBrowserOperation(destination.evaluate(() => document.contentType),
-          resultDeadline - Date.now(), stage);
-        assertDocumentResponse({ headers: () => ({ "content-type": contentType }) }, stage);
+        const onSearchTarget = matchesVerificationTarget(platform, source.url, observedUrl);
+        if (onSearchTarget) {
+          assertNavigationResponse(responses.get(destination), stage);
+          const loaded = await destination.waitForLoadState("domcontentloaded", {
+            timeout: Math.max(1, Math.min(2000, resultDeadline - Date.now())),
+          }).then(() => true, error => {
+            if (error.name === "TimeoutError") return false;
+            throw error;
+          });
+          if (!loaded) continue;
+          const contentType = await boundedBrowserOperation(destination.evaluate(() => document.contentType),
+            resultDeadline - Date.now(), stage);
+          assertDocumentResponse({ headers: () => ({ "content-type": contentType }) }, stage);
+        }
         await check(destination);
-        if (matchesVerificationTarget(platform, source.url, destination.url())) {
+        if (onSearchTarget) {
           matched = true;
           const count = await boundedBrowserOperation(destination.locator(RESULT_SELECTORS[platform]).count(),
             resultDeadline - Date.now(), stage);
@@ -154,6 +157,7 @@ export async function openKeywordSearch(page, platform, source, {
       }
       await page.waitForTimeout(200);
     }
+    await check(destination);
     throw browserStageError(matched ? "search_results_unavailable" : "search_not_submitted", stage);
   } catch (cause) {
     const error = normalizeBrowserError(cause, stage);
