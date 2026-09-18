@@ -56,6 +56,36 @@ test("Kuaishou QR-only modal is a login barrier but the sidebar login offer is n
   assert.equal(await currentPlatformAccessError(page, "kuaishou"), null);
 });
 
+test("Kuaishou load-more login without cards is a barrier; leftover cards are still collectable", { skip: !enabled }, async t => {
+  const { kuaishouAccessError, revealKuaishouLoginSurface } = await import("../src/browser_kuaishou_search.mjs");
+  const page = await browserPage(t, `<div class="video-list">
+    <div class="loading-more"><span class="login-link" style="display:inline-block;width:80px;height:20px">login</span></div>
+    </div>
+    <script>document.querySelector(".login-link").onclick=()=>{
+      const popup=document.createElement("div");
+      popup.className="popup login-popup";
+      popup.innerHTML='<div class="login-modal login-modal-v2" style="width:120px;height:120px"><div class="qrcode"></div></div>';
+      document.body.append(popup);
+    }</script>`, "https://www.kuaishou.com/search/finance");
+  assert.equal(await currentPlatformAccessError(page, "kuaishou"), "login_required");
+  assert.equal(await kuaishouAccessError(page), "login_required");
+  assert.equal(await revealKuaishouLoginSurface(page), true);
+  assert.equal(await currentPlatformAccessError(page, "kuaishou"), "login_required");
+  await page.evaluate(() => {
+    document.querySelector(".login-popup").remove();
+    document.querySelector(".login-link").remove();
+    const card = document.createElement("div");
+    card.className = "photo-card";
+    card.style.cssText = "width:300px;height:240px";
+    document.querySelector(".video-list").prepend(card);
+    const more = document.createElement("div");
+    more.className = "loading-more";
+    more.innerHTML = '<span class="login-link" style="display:inline-block;width:80px;height:20px">login</span>';
+    document.querySelector(".video-list").append(more);
+  });
+  assert.equal(await currentPlatformAccessError(page, "kuaishou"), null);
+});
+
 test("Xiaohongshu modal with text/number inputs is a login barrier, not a ready feed", { skip: !enabled }, async t => {
   const page = await browserPage(t, `<section class="note-item" data-note-id="fixture"></section>
     <div class="reds-modal reds-modal-open login-modal"><div class="login-container">

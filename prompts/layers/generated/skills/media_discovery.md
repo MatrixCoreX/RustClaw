@@ -21,7 +21,7 @@ Rendered media screenshots, author titles (`title`), and captions (`platform_tex
 empty without a distinct caption) are stored in `videos.csv` / `images.csv`, without OCR, model review, original-image or video downloads.
 Available views/likes/comments/favorites/shares retain platform display precision;
 plain integer counters also receive exact numeric values. Unavailable fields remain absent.
-Video covers use an unobscured rendered frame, platform poster, or Douyin search tile under `video_covers/`;
+Video covers use an unobscured rendered frame, platform poster, or a Douyin/Kuaishou search tile under `video_covers/`;
 blank overlay player shots are discarded. Whole-page and login-dialog screenshots never substitute for missing media.
 
 Keyword discovery uses `source_mode=topics` with non-empty `topics[]` in input order.
@@ -31,13 +31,10 @@ rendered results, in the same tab or a popup, never unrelated homepage recommend
 Xiaohongshu supports its visible textarea, search icon, and encoded `search_result_ai` query;
 visible `/search_result/<id>` links retain the page's query parameters.
 Kuaishou supports new `.search-container` and older search controls and the `/search/` route.
-Its new result cards open an in-page player. Rendered covers must uniquely match public
-post IDs in the page's loaded state; capture is scoped to the active slide and returns to
-the same results. Douyin jingxuan `.search-result-card` `.videoImage` tiles open `modal_id`
-overlays, not `/video/{id}` hrefs; title, cover, and `/video/{id}` source bind to that overlay, then close. A blank overlay player is not stored as the cover; the visible search tile is. QR-only login modals are barriers; a sidebar sign-in offer alone is not.
-Visible candidates retain DOM order; every committed record keeps its keyword and actual search URL.
-HTTP 404/410 and platform `/404` pages are unavailable posts, not CAPTCHAs. JSON in place of HTML
-is `unexpected_page_response`, not an empty result. Diagnostics have independent deadlines.
+Its new result cards open an in-page player by clicking the visible cover or cover image.
+Rendered covers must uniquely match public post IDs in the page's loaded state; capture is scoped to the active slide and returns to the same results. A blank player uses the rendered search tile as cover. Douyin jingxuan `.search-result-card` `.videoImage` tiles open `modal_id`
+overlays, not `/video/{id}` hrefs; title, cover, and `/video/{id}` source bind to that overlay, then close. A blank overlay player is not stored as the cover; the visible search tile is. QR-only login modals are barriers; a sidebar sign-in offer alone is not. A Kuaishou search load-more login control is a login barrier when no remaining identifiable cards exist; collection clicks it to open the QR modal, then waits or hands off to the silent manual window. Incidental JSON on the still-unmatched homepage is not the search document. Visible candidates retain DOM order; every committed record keeps its keyword and actual search URL.
+HTTP 404/410 and platform `/404` pages are unavailable posts, not CAPTCHAs. JSON in place of HTML on the matched search document is `unexpected_page_response`, not an empty result. Diagnostics have independent deadlines.
 No localized search phrase is parsed by runtime or skill code.
 Explicit detail `seed_urls` are collected as the exact requested set and do not
 expand into unrelated recommendation links from those pages.

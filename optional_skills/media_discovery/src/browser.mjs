@@ -9,7 +9,12 @@ import { assertNavigationResponse, boundedBrowserOperation, normalizeBrowserErro
 import { assertBrowserFlow, observePlatformBackpressure, pacingDelayMs, stopsCollection } from "./browser_flow_control.mjs";
 export { pacingDelayMs } from "./browser_flow_control.mjs";
 import { withSearchResult } from "./browser_search_results.mjs";
-import { collectKuaishouSearchResults } from "./browser_kuaishou_search.mjs";
+import {
+  collectKuaishouSearchResults,
+  kuaishouAccessError,
+  kuaishouLoadMoreLoginVisible,
+  revealKuaishouLoginSurface,
+} from "./browser_kuaishou_search.mjs";
 import { collectDouyinSearchResults } from "./browser_douyin_search.mjs";
 import { imageSourceIdentity, identityDigest } from "./media_identity.mjs";
 import { collectOrderedPages, optionalLimit, pageProgress } from "./collection_progress.mjs";
@@ -412,9 +417,9 @@ export async function currentPlatformAccessError(page, platform) {
     && await page.locator('.login-modal.reds-modal-open .login-container:visible').count()) {
     return "login_required";
   }
-  if (platform === "kuaishou"
-    && await page.locator('.login-popup .login-modal:visible, .login-modal.login-modal-v2:visible').count()) {
-    return "login_required";
+  if (platform === "kuaishou") {
+    const kuaishouError = await kuaishouAccessError(page);
+    if (kuaishouError) return kuaishouError;
   }
   if (await page.locator('input[type="password"]:visible, input[type="tel"]:visible').count()) {
     return "login_required";
@@ -442,6 +447,11 @@ export async function waitForPlatformFeed(page, platform, config, shouldStop, ti
 }
 
 export async function accessErrorAfterExplicitVisibleWait(page, platform, config = {}, shouldStop = async () => false) {
+  if (platform === "kuaishou"
+    && await kuaishouLoadMoreLoginVisible(page)
+    && await page.locator(".video-list .photo-card:visible").count() === 0) {
+    await revealKuaishouLoginSurface(page).catch(() => {});
+  }
   let accessError = await currentPlatformAccessError(page, platform);
   const interactive = code => ["challenge_required", "login_required"].includes(code);
   if (!interactive(accessError) || config.browser_mode !== "visible") return accessError;
@@ -550,6 +560,7 @@ export async function waitForInteractiveLogin({
         timeout: NAVIGATION_TIMEOUT_MS,
       }).catch(() => {});
     }
+    if (platform === "kuaishou") await revealKuaishouLoginSurface(page).catch(() => {});
     const confirmation = await createManualConfirmation(context, page, { platform, locale });
     await onOpened();
     return await waitForManualAccess({ page, context, platform, errorCode, timeoutMs,
@@ -1693,7 +1704,8 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
         continue;
       }
       if (platform === "kuaishou" && discoverySource.source_mode === "topics"
-        && await page.locator(".video-list .photo-card").count()) {
+        && (await page.locator(".video-list .photo-card").count()
+          || await kuaishouLoadMoreLoginVisible(page))) {
         const outcome = await collectKuaishouSearchResults({ page, config,
           limit: limit - handled, shouldStop, onPage, onFailure,
           completed: completedPosts, detailed: true,

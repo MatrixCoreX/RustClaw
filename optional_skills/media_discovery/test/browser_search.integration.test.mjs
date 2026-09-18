@@ -76,6 +76,27 @@ test("a new search tab returning JSON fails structurally", { skip: !enabled }, a
   await assert.rejects(openKeywordSearch(f.page, "kuaishou", f.source, { timeoutMs: 3000 }), { message: "unexpected_page_response" });
 });
 
+test("incidental JSON on the unmatched Kuaishou homepage is not the search document", { skip: !enabled }, async t => {
+  const browser = await chromium.launch({ executablePath: (await browserCapability()).chromium_executable, headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  const source = sourceTargets("kuaishou", { source_mode: "topics", topics: [keyword] })[0];
+  let homes = 0;
+  await page.route("**/*", async route => {
+    const url = route.request().url();
+    if (url === platformSpec("kuaishou").homeUrl) {
+      homes += 1;
+      if (homes === 1) {
+        return route.fulfill({ contentType: "text/html", body: `${controls.kuaishou}
+          <script>document.querySelector('button').onclick=()=>{location.href=${JSON.stringify(platformSpec("kuaishou").homeUrl)}}</script>` });
+      }
+      return route.fulfill({ contentType: "application/json", body: '{"blocked":true}' });
+    }
+    return route.fulfill({ contentType: "text/html", body: "<body></body>" });
+  });
+  await assert.rejects(openKeywordSearch(page, "kuaishou", source, { timeoutMs: 3000 }), { message: "search_not_submitted" });
+});
+
 test("results for a different keyword are never accepted", { skip: !enabled }, async t => {
   const f = await pageFixture(t, "xiaohongshu", { wrongKeyword: true });
   await assert.rejects(openKeywordSearch(f.page, "xiaohongshu", f.source, { timeoutMs: 10_000 }), { message: "search_not_submitted" });
