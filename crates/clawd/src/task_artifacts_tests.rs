@@ -658,6 +658,70 @@ fn materializes_published_transcript_txt_even_when_journal_omits_transcribe() {
 }
 
 #[test]
+fn materializes_image_text_ai_from_skill_invocation_when_journal_omits_extract_text() {
+    let workspace = TempWorkspace::new();
+    let task_id = "task-ocr-omitted-journal";
+    let invocation = workspace
+        .path()
+        .join(".agent-runtime/artifacts/skill-invocations")
+        .join(task_id)
+        .join("image_vision")
+        .join("39b145a9-91da-4aea-a9c3-f67fb464b567");
+    fs::create_dir_all(&invocation).unwrap();
+    let reviewed = invocation.join("image_text_ai.txt");
+    let raw = invocation.join("image_text_ai_raw.txt");
+    fs::write(&reviewed, "家庭如何养出优秀孩子\n").unwrap();
+    fs::write(&raw, "raw-unreviewed\n").unwrap();
+    let image = workspace.path().join("downloads").join("post.webp");
+    fs::create_dir_all(image.parent().unwrap()).unwrap();
+    fs::write(&image, b"image-bytes").unwrap();
+    let result = json!({
+        "text": "done",
+        "task_journal": {"trace": {"capability_results": [
+            {"status":"error","capability":"agent.subagent"},
+            {"status":"ok","capability":"task.plan_set"},
+            {"status":"ok","capability":"task.plan_update"},
+            {
+                "status":"ok",
+                "capability":"media_download.download",
+                "data":{"extra":{
+                    "delivery":{"deliver_to_user":true},
+                    "artifacts":[{
+                        "path": image.display().to_string(),
+                        "filename": "post.webp",
+                        "mime_type": "image/webp"
+                    }]
+                }}
+            }
+        ]}}
+    });
+
+    let materialized =
+        materialize_task_result_artifacts(workspace.path(), task_id, &result.to_string()).unwrap();
+    let value: Value = serde_json::from_str(&materialized).unwrap();
+    let manifests = manifests_from_result(Some(&value));
+    assert!(
+        manifests
+            .iter()
+            .any(|manifest| manifest.filename == "post.webp"),
+        "download image should still materialize"
+    );
+    let ocr = manifests
+        .iter()
+        .find(|manifest| manifest.filename == "image_text_ai.txt")
+        .expect("image_text_ai.txt");
+    assert_eq!(ocr.kind, "file");
+    assert!(!manifests
+        .iter()
+        .any(|manifest| manifest.filename == "image_text_ai_raw.txt"));
+    let delivered = delivery_artifact_path(workspace.path(), task_id, &ocr.id, &ocr.filename);
+    assert_eq!(
+        fs::read(delivered).unwrap(),
+        "家庭如何养出优秀孩子\n".as_bytes()
+    );
+}
+
+#[test]
 fn svg_and_html_are_never_inline_previewed() {
     assert!(!inline_preview_allowed("image/svg+xml"));
     assert!(!inline_preview_allowed("text/html"));
