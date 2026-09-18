@@ -10,6 +10,7 @@ export let desktopOrigin = '';
 export let desktopStorage: Storage;
 export let desktopSessionStorage: Storage;
 let session: SessionInfo;
+let assetConnection: { id: string; node: { id: string; origin: string } } | null = null;
 export let desktopFetch: (input: string, init?: RequestInit) => Promise<Response>;
 
 export function initializeRuntime(info: SessionInfo) {
@@ -23,6 +24,15 @@ export function initializeRuntime(info: SessionInfo) {
   desktopSessionStorage = scopedStorage(window.sessionStorage, scope);
   desktopFetch = createTransport(invoke, info.id, info.origin, desktopLogout);
 }
+
+export function initializeStandaloneRuntime(info: { id: string; node: { id: string; origin: string } }) {
+  assetConnection = info;
+  desktopOrigin = info.node.origin;
+  desktopStorage = scopedStorage(window.localStorage, `agent-runtime.desktop.asset-owner.${info.node.id}.`);
+  desktopSessionStorage = scopedStorage(window.sessionStorage, `agent-runtime.desktop.asset-owner.${info.node.id}.`);
+}
+export function standaloneActive() { return assetConnection !== null; }
+export function clearStandaloneRuntime() { assetConnection = null; }
 
 export async function desktopLogout() {
   await invoke('disconnect_device');
@@ -53,6 +63,11 @@ export function desktopSigningLocation() {
   return session?.identity ? {protocol: 'https:', hostname: 'desktop.localhost'} : {protocol: 'blocked:', hostname: ''};
 }
 export function desktopTargetLabel() {
+  if (assetConnection) return `资产服务 · ${assetConnection.node.origin}`;
   return session ? `${session.profile.alias} · ${connectionLabel(session.profile.connection.kind)} · ${session.profile.connection.kind === 'ssh' ? session.profile.connection.host : session.origin}` : '';
 }
-export function desktopSessionId() {return session.id;}
+export function desktopSessionId() {
+  const id = assetConnection?.id ?? session?.id;
+  if (!id) throw new Error('wallet_node_missing');
+  return id;
+}

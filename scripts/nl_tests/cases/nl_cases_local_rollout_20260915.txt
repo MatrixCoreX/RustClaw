@@ -1,0 +1,2 @@
+local_rollout|local_runtime_json_zh|requires_tool_call=false;local_readonly|计算 17 乘以 8，不调用工具，只返回 JSON 对象，字段 value 为计算结果。|expect=result_text_json_eq:/value=136
+local_rollout|local_system_inventory_en|covers:system_basic;capability:system.info;requires_tool_call=true;local_readonly|Inspect this machine's current system information through system.info. Do not install, modify, or restart anything. Return a JSON object containing os and arch from the actual tool result.|expect=result_text_json_eq:/os=linux;result_text_json_eq:/arch=x86_64

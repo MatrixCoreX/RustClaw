@@ -326,6 +326,40 @@ fn content_digest_not_mtime_and_size_controls_incremental_identity() {
 }
 
 #[test]
+fn ingest_registry_actions_remain_local_mutations_in_all_distributions() {
+    use claw_core::skill_registry::{
+        CapabilityIsolationProfile, PlannerCapabilityEffect, SkillsRegistry,
+    };
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    for relative in [
+        "configs/skills_registry.toml",
+        "docker/config/skills_registry.toml",
+    ] {
+        let registry = SkillsRegistry::load_from_path(&root.join(relative)).expect("registry");
+        for action in ["ingest", "reindex", "resume_ingest"] {
+            let mapping = registry
+                .planner_capabilities("kb")
+                .iter()
+                .find(|mapping| mapping.action.as_deref() == Some(action))
+                .expect("KB action mapping");
+            assert_eq!(
+                mapping.effect,
+                Some(PlannerCapabilityEffect::Mutate),
+                "{relative}: {action}"
+            );
+            assert_eq!(
+                mapping.isolation_profile,
+                Some(CapabilityIsolationProfile::LocalCurrentWorkspace)
+            );
+            assert_eq!(mapping.network_access, Some(false));
+            assert_eq!(mapping.filesystem_write, Some(true));
+        }
+        assert!(registry.resolved_once_per_task("kb", Some("resume_ingest")));
+        assert!(!registry.resolved_idempotent("kb", Some("resume_ingest")));
+    }
+}
+
+#[test]
 fn ingest_job_resumes_from_persisted_checkpoint() {
     let root = std::env::temp_dir().join(format!(
         "agent-runtime-kb-resumable-ingest-{}",
@@ -335,13 +369,14 @@ fn ingest_job_resumes_from_persisted_checkpoint() {
     fs::create_dir_all(&root).expect("workspace");
     fs::write(root.join("a.md"), "alpha resumable document").expect("a fixture");
     fs::write(root.join("b.md"), "beta resumable document").expect("b fixture");
+    fs::write(root.join("c.md"), "gamma resumable document").expect("c fixture");
     let runtime = runtime(&root, "user:resume");
 
     let first = do_ingest(
         &runtime,
         &json!({
             "namespace": "docs",
-            "paths": ["a.md", "b.md"],
+            "paths": ["a.md", "b.md", "c.md"],
             "max_files_per_run": 1
         }),
     )
@@ -350,18 +385,48 @@ fn ingest_job_resumes_from_persisted_checkpoint() {
     assert_eq!(first["job_status"], "waiting");
     assert_eq!(first["stats"]["job_processed_files"], 1);
     let job_id = first["job_id"].as_str().expect("job id").to_string();
+    let checkpoint = super::storage::load_ingest_job(&runtime, &job_id).expect("checkpoint");
+    assert!(super::do_resume_ingest(&runtime, &json!({"job_id": job_id})).is_err());
 
-    let resumed = super::do_resume_ingest(&runtime, &json!({"job_id": job_id}))
-        .expect("resume persisted ingest");
-    assert_eq!(resumed["complete"], true);
-    assert_eq!(resumed["job_status"], "completed");
+    let resumed =
+        super::do_resume_ingest(&runtime, &first["continuation"]).expect("resume persisted ingest");
+    assert_eq!(resumed["complete"], false);
+    assert_eq!(resumed["job_status"], "waiting");
     assert_eq!(resumed["stats"]["job_processed_files"], 2);
     assert_eq!(resumed["stats"]["total_docs"], 2);
+
+    let index = super::storage::load_namespace(&runtime, "docs").expect("index");
+    let stale_commit = super::storage::save_namespace_and_job(
+        &runtime, &index, &checkpoint, &checkpoint,
+    ).expect_err("an in-flight duplicate cannot overwrite a committed batch");
+    assert!(stale_commit.is::<super::ingest::CheckpointConflict>());
+
+    let stale = super::do_resume_ingest(&runtime, &first["continuation"])
+        .expect_err("a repeated cursor must not advance another batch");
+    let conflict = stale
+        .downcast_ref::<super::ingest::CheckpointConflict>()
+        .expect("typed checkpoint conflict");
+    assert_eq!(conflict.extra()["error_code"], "checkpoint_conflict");
+    assert_eq!(conflict.extra()["job"]["progress"]["processed_files"], 2);
+    assert_eq!(
+        conflict.extra()["job"]["continuation"],
+        resumed["continuation"]
+    );
+
+    let completed = super::do_resume_ingest(&runtime, &resumed["continuation"])
+        .expect("resume next persisted chunk");
+    assert_eq!(completed["complete"], true);
+    assert_eq!(completed["job_status"], "completed");
+    assert_eq!(completed["stats"]["job_processed_files"], 3);
+    assert_eq!(completed["stats"]["total_docs"], 3);
 
     let status = super::do_ingest_job_status(&runtime, &json!({"job_id": job_id}))
         .expect("load persisted job status");
     assert_eq!(status["job_status"], "completed");
-    assert_eq!(status["progress"]["processed_files"], 2);
+    assert_eq!(status["progress"]["processed_files"], 3);
+    let repeated = super::do_resume_ingest(&runtime, &json!({"job_id": job_id}))
+        .expect("completed job is a safe no-op");
+    assert_eq!(repeated, status);
     let _ = fs::remove_dir_all(root);
 }
 
@@ -388,9 +453,16 @@ fn ingest_job_cancel_is_owner_scoped() {
     .expect("start ingest");
     let job_id = first["job_id"].as_str().expect("job id");
     assert!(super::do_ingest_job_status(&other, &json!({"job_id": job_id})).is_err());
+    let checkpoint = super::storage::load_ingest_job(&owner, job_id).expect("checkpoint");
+    let index = super::storage::load_namespace(&owner, "docs").expect("index");
     let cancelled =
         super::do_cancel_ingest(&owner, &json!({"job_id": job_id})).expect("cancel owned job");
     assert_eq!(cancelled["job_status"], "cancelled");
+    let stale = super::storage::save_namespace_and_job(
+        &owner, &index, &checkpoint, &checkpoint,
+    ).expect_err("an in-flight batch cannot revive a cancelled job");
+    assert!(stale.is::<super::ingest::CheckpointConflict>());
+    assert_eq!(super::do_ingest_job_status(&owner, &json!({"job_id": job_id})).unwrap(), cancelled);
     let _ = fs::remove_dir_all(root);
 }
 

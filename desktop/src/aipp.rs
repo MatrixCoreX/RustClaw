@@ -110,7 +110,10 @@ pub async fn aipp_open(
             .as_str()
             .ok_or("aipp_contract_invalid")?
     );
-    let result = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App("aipp.html".into()))
+    let builder = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App("aipp.html".into()));
+    #[cfg(target_os="android")]
+    let builder = builder.activity_name("CompanionActivity");
+    let result = builder
         .title(entry["titles"][&locale].as_str().unwrap_or("AiAPP"))
         .inner_size(1080.0, 760.0)
         .on_navigation(move |url| {

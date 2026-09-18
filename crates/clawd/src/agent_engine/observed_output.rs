@@ -69,6 +69,7 @@ use output_path_facts::*;
 mod output_entries;
 pub(crate) use output_entries::has_observed_answer_candidates;
 pub(super) use output_entries::latest_structured_capability_observation;
+pub(super) use output_entries::structured_capability_observation;
 use output_entries::{
     compound_listing_content_delivery_guard_entry, cross_turn_observed_output_entries,
     observed_output_entries,

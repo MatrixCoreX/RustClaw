@@ -70,8 +70,8 @@ custom_models = [
     "local-whisper",
     "whisper-1",
 ]
-default_model = "local-whisper"
-default_vendor = "custom"
+default_model = "asr-1.0"
+default_vendor = "minimax"
 google_models = ["gemini-2.5-flash"]
 grok_models = []
 local_auto_upload_enabled = false

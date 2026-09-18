@@ -6,7 +6,14 @@
 
 Planner selection guidance:
 - Use `transform` when the request supplies or points to structured records and asks to sort, filter, deduplicate, rename keys, project fields, group, aggregate, or render the result as JSON, markdown table, or CSV.
-- Inline JSON arrays/objects are valid input; pass them directly as `data` instead of answering from chat when this skill is enabled.
+- For inline JSON arrays/objects, prefer `json_text`: copy the user's JSON document into that string unchanged, instead of reconstructing arbitrary records in tool arguments. Native `data` arrays/objects remain supported. Use exactly one input source, not both. Do not answer from chat when this skill is requested.
+- Preserve input value shapes: scalar arrays remain scalar arrays. An object is one record; do not invent an `item`/`v` wrapper around the input array.
+- Preserve original JSON types in `data`, `records`, and operation operands. Copy numbers as numbers, booleans as booleans, null as null, and strings as strings; do not quote numeric values or parse numeric-looking strings unless the user explicitly requests conversion. Filtering, sorting, renaming and projection do not request a type conversion.
+- For example, numeric `{"score":2}` with a numeric threshold uses `{"op":"filter","field":"score","cmp":"gte","value":2}` and retains numeric `score` in the result. An original string `{"score":"02"}` remains a string. Type-normalized comparisons do not change stored or returned values.
+- Return the actual transformed output with its JSON types intact. If you accidentally changed the supplied values while preparing arguments, correct the arguments and rerun the read-only transformation before claiming completion; do not repair only the final text.
+- When JSON output is requested, preserve JSON syntax in the final answer. A JSON array is not a numbered prose list of JSON objects. Do not add bullets, numbering, or Markdown fences to a JSON-only response.
+- Whole-value deduplication needs only `ops=[{"op":"dedup"}]`; omit `field`/`fields` and do not add a projection. For example, `data=["first","second","first"]` returns `["first","second"]` with `result_shape="array"`.
+- For record projection use `fields=["name","score"]` or `mappings=[{"from":"name","to":"label"}]`, never an object in `fields`. Grouping uses `by=["category"]` and `aggregations=[{"op":"sum","field":"amount","name":"total"}]`.
 - Inline CSV is valid input; pass it as `csv_text` and set `output_format` for the requested rendering.
 - Preserve requested output formats such as markdown table by setting `output_format="md_table"`.
 
@@ -24,8 +31,10 @@ Core capabilities:
 ## Parameter Contract
 
 - `action` (required, string): `transform_data`
-- `data` (required unless `csv_text` is used, array or object): input records; an object is treated as one record
-- `csv_text` (required unless `data` is used, string): CSV text with a header row
+- `json_text` (string, preferred for inline JSON): a valid JSON document with an array or object root. A standard JSON parser preserves value types. Reject malformed JSON, scalar roots, or combination with `data`, `records`, `csv_text`, `csv`, `text`, or `input`, including null placeholders. Do not wrap the document in an `item` object or convert numeric-looking strings.
+- `data` (array or object): native input records; an object is treated as one record
+- `csv_text` (string): CSV text with a header row
+- Exactly one of these input sources is required.
 - `ops` (optional, array): ordered operations
 - `output_format` (optional, string, default `json`): `json|md_table|csv`
 - `result_shape` (optional, string, default `array`; object input defaults to `single_object`): `array|single_object|scalar`
@@ -93,8 +102,17 @@ Aggregation item fields:
 - `INVALID_ACTION`: unsupported `action` value.
 - `TRANSFORM_FAILED`: invalid input data or unsupported/malformed operations in strict mode.
 - In non-strict mode, unsupported ops should be skipped with warnings instead of hard failure where possible.
+- Error envelopes include `extra.schema_version=1`, `source_skill=transform`, `status=error`, `error_code`, `message_key`, and `retryable=false`. Correct invalid input before a new invocation; do not blindly replay it.
 
 ## Request/Response Examples
+
+### JSON Text Input
+
+```json
+{"request_id":"tf-json","args":{"action":"transform_data","json_text":"[{\"label\":\"first\",\"score\":4,\"code\":\"04\"},{\"label\":\"second\",\"score\":11,\"code\":\"11\"}]","ops":[{"op":"filter","field":"score","cmp":"gte","value":4},{"op":"sort","by":"score","order":"desc"}],"output_format":"json","result_shape":"array"}}
+```
+
+The resulting `extra.output` is `[{"label":"second","score":11,"code":"11"},{"label":"first","score":4,"code":"04"}]`. JSON numbers stay numbers, and original string codes stay strings.
 
 ### Example 1
 
@@ -108,8 +126,8 @@ Request:
     "null_policy": "keep",
     "output_format": "json",
     "data": [
-      {"user":{"name":"A"},"score":"10"},
-      {"user":{"name":"B"},"score":"20"}
+      {"user":{"name":"A"},"score":10},
+      {"user":{"name":"B"},"score":20}
     ],
     "ops": [
       {"op":"filter","field":"score","cmp":"gte","value":15},
@@ -124,10 +142,28 @@ Response:
 {
   "request_id": "tf-1",
   "status": "ok",
-  "text": "{\"status\":\"ok\",\"result\":[{\"name\":\"B\",\"score\":\"20\"}],\"formatted\":null,\"stats\":{\"input_count\":2,\"output_count\":1,\"skipped_records\":0,\"warnings\":[]},\"error_code\":null,\"error\":null}",
+  "text": "{\"status\":\"ok\",\"result\":[{\"name\":\"B\",\"score\":20}],\"formatted\":null,\"stats\":{\"input_count\":2,\"output_count\":1,\"skipped_records\":0,\"warnings\":[]},\"error_code\":null,\"error\":null}",
   "error_text": null
 }
 ```
+
+### Example 2: Preserve Mixed JSON Types
+
+Request `args`:
+```json
+{
+  "action": "transform_data",
+  "data": [{"code":"02","count":2,"enabled":true,"note":null}],
+  "ops": [{"op":"project","fields":["code","count","enabled","note"]}],
+  "output_format": "json",
+  "result_shape": "array"
+}
+```
+
+The response `extra.output` is exactly
+`[{"code":"02","count":2,"enabled":true,"note":null}]`: projection does not
+quote `count`, parse `code`, or replace boolean/null values. This rule applies
+equally to filtering, sorting and renaming.
 
 Returned JSON inside `text` contains:
 

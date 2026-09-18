@@ -1,5 +1,8 @@
 use serde_json::json;
 
+#[path = "answer_verifier_tests/executed_operations.rs"]
+mod executed_operations;
+
 use super::{
     collect_single_path_values_from_json, local_missing_evidence_verifier_gap,
     local_missing_evidence_verifier_gap_for_answer, observed_scalar_values_from_evidence_map,
@@ -833,6 +836,9 @@ mod local_status_evidence;
 
 #[path = "answer_verifier_tests/prompt_schema_and_evidence.rs"]
 mod prompt_schema_and_evidence;
+
+#[path = "answer_verifier_tests/planner_repair_evidence.rs"]
+mod planner_repair_evidence;
 
 #[path = "answer_verifier_tests/control_envelope_projection_skip.rs"]
 mod control_envelope_projection_skip;

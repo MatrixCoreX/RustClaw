@@ -686,12 +686,21 @@ pub(crate) fn seeded_agent_loop_terminal_dispatch_result_payload(
     }
     match result {
         Ok(answer) => {
+            if let Some((phase, record)) = seeded_terminal_journal_record(&claimed.task_id, &answer)
+            {
+                tracing::info!(
+                    "task_journal_summary task_id={} kind=ask phase={} {}",
+                    claimed.task_id,
+                    phase,
+                    record
+                );
+            }
             let deferred = answer
                 .task_journal
                 .as_ref()
                 .is_some_and(journal_has_matching_nonterminal_checkpoint);
             if !deferred && answer.should_fail_task {
-                return Some(seeded_agent_loop_failure_payload(
+                let mut payload = seeded_agent_loop_failure_payload(
                     claimed,
                     "seeded_loop_answer_marked_failed",
                     "clawd.task.seeded_loop_answer_marked_failed",
@@ -699,7 +708,12 @@ pub(crate) fn seeded_agent_loop_terminal_dispatch_result_payload(
                         .error_text
                         .as_deref()
                         .is_some_and(|value| !value.trim().is_empty()),
-                ));
+                );
+                payload.as_object_mut()?.insert(
+                    "failure_result_json".to_string(),
+                    ask_reply_final_result_json(answer),
+                );
+                return Some(payload);
             }
             let final_result_json = ask_reply_final_result_json(answer);
             let result_status = if deferred {
@@ -742,6 +756,26 @@ pub(crate) fn seeded_agent_loop_terminal_dispatch_result_payload(
             true,
         )),
     }
+}
+
+pub(super) fn seeded_terminal_journal_record(
+    task_id: &str,
+    answer: &crate::AskReply,
+) -> Option<(&'static str, Value)> {
+    let journal = answer.task_journal.as_ref()?;
+    if journal.task_id.as_deref() != Some(task_id)
+        || journal.kind.as_deref() != Some("ask")
+        || journal_has_matching_nonterminal_checkpoint(journal)
+    {
+        return None;
+    }
+    let phase = if answer.should_fail_task {
+        "failure"
+    } else {
+        "finalize"
+    };
+    // Preserve execution evidence before the API/storage projection truncates it.
+    Some((phase, journal.to_log_json()))
 }
 
 pub(crate) fn seeded_agent_loop_provider_wait_dispatch_result_payload(

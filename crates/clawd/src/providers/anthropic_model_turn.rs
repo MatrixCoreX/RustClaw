@@ -172,13 +172,17 @@ pub(super) fn build_anthropic_request(
                     .collect(),
             ),
         );
-        body.insert(
-            "tool_choice".to_string(),
-            match request.tool_choice {
-                ModelToolChoice::Auto => json!({"type": "auto"}),
-                ModelToolChoice::Required => json!({"type": "any"}),
-            },
-        );
+        // Manual extended thinking rejects forced tool use; runtime still validates the turn.
+        let manual_thinking = body
+            .get("thinking")
+            .and_then(|value| value.get("type"))
+            .and_then(Value::as_str)
+            == Some("enabled");
+        let tool_choice = match request.tool_choice {
+            ModelToolChoice::Required if !manual_thinking => "any",
+            ModelToolChoice::Auto | ModelToolChoice::Required => "auto",
+        };
+        body.insert("tool_choice".to_string(), json!({"type": tool_choice}));
     }
     Ok(Value::Object(body))
 }

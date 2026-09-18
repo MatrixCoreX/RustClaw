@@ -139,6 +139,17 @@ fn native_repair_progress_digest(error_code: &str, turn: &ModelTurnResponse) -> 
 }
 
 fn planner_last_observation(loop_state: &LoopState) -> String {
+    if let Some(observation) = loop_state.task_observations.last().filter(|observation| {
+        observation.get("owner_layer").and_then(Value::as_str) == Some("agent_loop")
+            && observation.get("schema_version").and_then(Value::as_u64) == Some(1)
+    }) {
+        let serialized = observation.to_string();
+        if loop_state.last_output.as_deref() == Some(serialized.as_str()) {
+            return crate::truncate_for_log(&crate::visible_text::sanitize_user_visible_text(
+                &serialized,
+            ));
+        }
+    }
     super::observed_output::latest_structured_capability_observation(loop_state)
         .or_else(|| {
             loop_state
@@ -1052,7 +1063,7 @@ fn native_planner_request(
             ModelMessage::text(ModelRole::User, user_prompt),
         ],
         tools,
-        tool_choice: ModelToolChoice::Auto,
+        tool_choice: ModelToolChoice::Required,
         response_schema: None,
         stream: true,
         metadata,
@@ -1459,7 +1470,13 @@ fn native_contract_retry_request(
             .retain(|tool| available_tool_names.contains(tool.name.as_str()));
     } else if let Some(repair_tool_name) = repair_tool_name {
         if exact_failed_tool {
-            request.tools.retain(|tool| tool.name == repair_tool_name);
+            // Invalid arguments do not establish that the selected action was
+            // appropriate. Keep the original catalog available for replanning.
+            if repair_tool_name == NATIVE_RESPOND_TOOL
+                || repair_tool_name == super::capability_discovery::RUNTIME_CAPABILITY_LOADER_TOOL
+            {
+                request.tools.retain(|tool| tool.name == repair_tool_name);
+            }
         } else if repair_tool_name == NATIVE_CALL_CAPABILITY_TOOL {
             request
                 .tools
@@ -1772,25 +1789,13 @@ fn schema_has_missing_required_fields(schema: &Value, arguments: &Value) -> bool
         .is_some_and(|required| {
             required.iter().filter_map(Value::as_str).any(|field| {
                 arguments.get(field).is_none_or(|value| {
-                    !native_required_value_is_present(
+                    !crate::schema_contract::required_value_is_present(
                         properties.and_then(|properties| properties.get(field)),
                         value,
                     )
                 })
             })
         })
-}
-
-fn native_required_value_is_present(schema: Option<&Value>, value: &Value) -> bool {
-    match value {
-        Value::Null => schema.is_some_and(crate::schema_contract::schema_accepts_null),
-        Value::String(value) => !value.trim().is_empty(),
-        Value::Array(values) => values
-            .iter()
-            .any(|value| native_required_value_is_present(None, value)),
-        Value::Object(values) => !values.is_empty(),
-        Value::Bool(_) | Value::Number(_) => true,
-    }
 }
 
 fn log_plan_split(task: &ClaimedTask, loop_state: &LoopState, plan_result: &PlanResult) {
@@ -1813,3 +1818,11 @@ mod native_artifact_tests;
 #[cfg(test)]
 #[path = "planning_native_tests.rs"]
 mod native_tests;
+
+#[cfg(test)]
+#[path = "planning/repair_catalog_tests.rs"]
+mod repair_catalog_tests;
+
+#[cfg(test)]
+#[path = "planning/required_literal_args_tests.rs"]
+mod required_literal_args_tests;

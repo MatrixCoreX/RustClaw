@@ -31,6 +31,10 @@ max_outbound_image_bytes = 0
 max_outbound_video_bytes = 104857600
 max_outbound_audio_bytes = 0
 max_outbound_file_bytes = 2147483648
+# i18n 语言（优先尝试 configs/i18n/whatsapp-webd.<language>.toml）
+language = "en-US"
+# i18n 文件路径（当 language 对应文件不存在时回退到此路径）
+i18n_path = "configs/i18n/whatsapp-webd.en-US.toml"
 # Legacy bootstrap admin list.
 # Kept for compatibility only; runtime access now depends on key binding.
 admins = []
@@ -39,5 +43,5 @@ admins = []
 allowlist = []
 # Optional static bindings loaded into channel_bindings on clawd startup.
 # Example:
-# bindings = [{ external_user_id = "8613800138000", external_chat_id = "8613800138000", user_key = "" }]
+# bindings = [{ external_user_id = "8613800138000", external_chat_id = "8613800138000", user_key = "rk-REPLACE_ME" }]
 bindings = []

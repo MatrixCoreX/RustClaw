@@ -6,6 +6,28 @@ use super::{
 };
 
 #[test]
+fn required_literal_args_do_not_bypass_other_schema_constraints() {
+    let field = json!({"type": "string", "minLength": 0, "enum": ["accepted"]});
+    assert!(super::required_value_is_present(Some(&field), &json!("\n")));
+    let schema = json!({"type": "object", "properties": {"payload": field}});
+    assert_eq!(
+        enum_constraint_violations(&schema, &json!({"payload": "\n"})).len(),
+        1
+    );
+    assert_eq!(
+        type_constraint_violations(&schema, &json!({"payload": false})).len(),
+        1
+    );
+    for value in [json!([]), json!({}), json!(null)] {
+        assert!(!super::required_value_is_present(None, &value));
+    }
+    assert!(super::required_value_is_present(
+        Some(&json!({"type": "null"})),
+        &json!(null)
+    ));
+}
+
+#[test]
 fn enum_constraints_accept_exact_machine_values() {
     let schema = json!({
         "properties": {

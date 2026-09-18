@@ -1,11 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-runtime.invalid/prompts/schemas/answer_verifier.schema.json",
-  "title": "AnswerVerifierOut",
-  "description": "Schema for the JSON object returned by prompts/answer_verifier_prompt.md. Mirrors AnswerVerifierOut in crates/clawd/src/answer_verifier.rs.",
+  "title": "ModelVerifierOut",
+  "description": "Model verification contract: operation evidence audit plus the compact AnswerVerifierOut verdict retained in the task journal.",
   "type": "object",
   "additionalProperties": false,
   "required": [
+    "operation_checks",
     "pass",
     "missing_evidence_fields",
     "answer_incomplete_reason",
@@ -14,6 +15,36 @@
     "confidence"
   ],
   "properties": {
+    "operation_checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["requested_operation", "required_dispatches", "evidence_step_ids", "method_observed", "result_observed"],
+        "properties": {
+          "requested_operation": {"type": "string", "minLength": 1},
+          "required_dispatches": {
+            "type": "array",
+            "maxItems": 16,
+            "uniqueItems": true,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["action_type", "action_ref"],
+              "properties": {
+                "action_type": {"enum": ["call_capability", "call_tool", "call_skill"]},
+                "action_ref": {"type": "string", "minLength": 1, "maxLength": 160}
+              }
+            }
+          },
+          "evidence_step_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+          "method_observed": {"type": "boolean"},
+          "result_observed": {"type": "boolean"},
+          "applicable": {"type": "boolean", "default": true},
+          "blocked": {"type": "boolean"}
+        }
+      }
+    },
     "pass": {
       "type": "boolean",
       "description": "True when the final answer satisfies the task contract and observed evidence."

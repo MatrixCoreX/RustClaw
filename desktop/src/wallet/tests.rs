@@ -2,7 +2,7 @@ use super::*;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Default)]
-struct MemoryStore(Arc<Mutex<std::collections::HashMap<Uuid, String>>>);
+pub(super) struct MemoryStore(Arc<Mutex<std::collections::HashMap<Uuid, String>>>);
 impl KeyStore for MemoryStore {
     fn load(&self, id: Uuid) -> Result<String> {
         self.0
@@ -17,7 +17,8 @@ impl KeyStore for MemoryStore {
         Ok(())
     }
 }
-const PASSWORD: &str = "test-only-vault-password";
+pub(super) const BACKUP_PASSWORD: &str = "Jasper!flume7-Pebble4-Orbit9-velvet";
+pub(super) const PASSWORD: &str = "test-only-vault-password";
 
 #[test]
 fn backend_handoff_vectors_match_native_signatures_and_payload_validation() {
@@ -73,11 +74,17 @@ fn vault_encrypted_backup_restore_lock_and_metadata_authentication() {
         std::os::unix::fs::symlink(&directory, &alias).unwrap();
         assert_eq!(
             vault
-                .backup(account.id, PASSWORD, &alias.join("export.json"))
+                .backup(
+                    account.id,
+                    PASSWORD,
+                    BACKUP_PASSWORD,
+                    &alias.join("export.json")
+                )
                 .unwrap_err(),
             "wallet_backup_path_invalid"
         );
     }
+    vault.unlock(PASSWORD).unwrap();
     assert_eq!(
         vault.sign_unlocked(account.id, b"test").unwrap_err(),
         "wallet_backup_required"
@@ -88,11 +95,17 @@ fn vault_encrypted_backup_restore_lock_and_metadata_authentication() {
     assert!(!disk.contains(&serde_json::to_string(&secret).unwrap()));
     assert!(!disk.contains(PASSWORD));
     let backup = root.path().join("account.backup.json");
-    vault.backup(account.id, PASSWORD, &backup).unwrap();
+    vault
+        .backup(account.id, PASSWORD, BACKUP_PASSWORD, &backup)
+        .unwrap();
+    assert!(!vault.status().unlocked);
+    vault.unlock(PASSWORD).unwrap();
     let signature = vault.sign_unlocked(account.id, b"test").unwrap();
     assert!(vault.account(account.id).unwrap().backed_up);
     assert_eq!(
-        vault.restore(PASSWORD, &backup, "duplicate").unwrap_err(),
+        vault
+            .restore(BACKUP_PASSWORD, &backup, "duplicate")
+            .unwrap_err(),
         "wallet_account_duplicate"
     );
     vault.lock();
@@ -110,7 +123,7 @@ fn vault_encrypted_backup_restore_lock_and_metadata_authentication() {
     );
     vault.unlock_after = Instant::now();
     vault.unlock(PASSWORD).unwrap();
-    vault.last_used = Instant::now() - Duration::from_secs(301);
+    vault.unlocked_at = Instant::now() - Duration::from_secs(301);
     assert_eq!(
         vault.sign_unlocked(account.id, b"test").unwrap_err(),
         "wallet_locked"
@@ -125,7 +138,9 @@ fn vault_encrypted_backup_restore_lock_and_metadata_authentication() {
     assert!(replacement
         .restore("wrong-test-password", &backup, "restored")
         .is_err());
-    let restored = replacement.restore(PASSWORD, &backup, "restored").unwrap();
+    let restored = replacement
+        .restore(BACKUP_PASSWORD, &backup, "restored")
+        .unwrap();
     assert_eq!(restored.public_key, account.public_key);
     assert_eq!(
         replacement.sign_unlocked(restored.id, b"test").unwrap(),
@@ -164,8 +179,14 @@ fn every_signature_requires_a_fresh_password_even_when_management_is_unlocked() 
     vault.initialize(PASSWORD).unwrap();
     let account = vault.create("test account").unwrap();
     vault
-        .backup(account.id, PASSWORD, &root.path().join("backup.json"))
+        .backup(
+            account.id,
+            PASSWORD,
+            BACKUP_PASSWORD,
+            &root.path().join("backup.json"),
+        )
         .unwrap();
+    vault.unlock(PASSWORD).unwrap();
     assert!(vault.status().unlocked);
     assert!(vault
         .sign_with_password(account.id, b"first", "wrong-password")

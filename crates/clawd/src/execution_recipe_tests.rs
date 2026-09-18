@@ -81,6 +81,43 @@ fn goal_overlay_includes_code_change_guidance_for_current_repo() {
 }
 
 #[test]
+fn task_plan_metadata_cannot_satisfy_or_invalidate_business_validation() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    for relative in [
+        "configs/skills_registry.toml",
+        "docker/config/skills_registry.toml",
+    ] {
+        let registry = Arc::new(SkillsRegistry::load_from_path(&root.join(relative)).unwrap());
+        let mut state = test_state();
+        state.core.skill_views_snapshot = Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+            binding: Default::default(),
+            registry: Some(registry),
+            skills_list: Arc::new(HashSet::from(["task_plan".to_string()])),
+        })));
+        for action in ["set_plan", "update_steps", "read_plan"] {
+            let effect =
+                classify_skill_action_effect(&state, "task_plan", &json!({"action": action}));
+            assert!(effect.observes, "{relative}:{action}");
+            assert!(!effect.validates && !effect.mutates, "{relative}:{action}");
+            for already_verified in [false, true] {
+                let mut recipe = ExecutionRecipeRuntimeState::from_spec(ExecutionRecipeSpec {
+                    kind: ExecutionRecipeKind::OpsClosedLoop,
+                    profile: ExecutionRecipeProfile::CodeChange,
+                    target_scope: ExecutionRecipeTargetScope::CurrentRepo,
+                    inspect_first: true,
+                    validation_required: true,
+                    max_repairs: 2,
+                });
+                recipe.saw_mutation = true;
+                recipe.saw_validation = already_verified;
+                apply_action_effect_success(&mut recipe, effect);
+                assert_eq!(recipe.saw_validation, already_verified);
+            }
+        }
+    }
+}
+
+#[test]
 fn non_x_dry_run_does_not_downgrade_mutation_effect() {
     let state = test_state();
     let dry_run = classify_skill_action_effect(

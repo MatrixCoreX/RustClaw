@@ -1,0 +1,2 @@
+button[data-desktop-theme-toggle][aria-label] { display: inline-flex; align-items: center; justify-content: center; width: 42px; height: 42px; padding: 9px; flex: 0 0 42px; }
+button[data-desktop-theme-toggle]:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }

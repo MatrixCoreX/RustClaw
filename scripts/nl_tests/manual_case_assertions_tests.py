@@ -2,10 +2,11 @@
 """Tests for structured assertions used by the manual NL runner."""
 from __future__ import annotations
 
+import json
 import tempfile
 from pathlib import Path
 
-from manual_case_assertions import build_summary_row
+from manual_case_assertions import build_summary_row, successful_call_step, step_matches_capability
 
 
 def result_with_steps(
@@ -188,6 +189,22 @@ def main() -> int:
         )
         assert direct_row["assertion"] == "fail"
         assert direct_row["efficiency"]["llm_call_count"] == 2
+        alias_step = capability_step(capability="health_check")
+        assert step_matches_capability(alias_step, "system.health_check")
+        assert not step_matches_capability(alias_step, "system.info")
+        alias_path = write_result(root, "declared-alias.json", result_with_steps([alias_step]))
+        assert row_for(alias_path, "capability:system.health_check;min_successful_capability_calls:system.health_check=1")["assertion"] == "pass"
+        assert row_for(alias_path, "forbid_capability:system.health_check")["assertion"] == "fail"
+
+        blocked = capability_step(capability="fixture.protected")
+        blocked["executed_skill"] = "respond"
+        blocked["resolved_tool_or_skill"] = "respond"
+        blocked_path = write_result(root, "blocked-respond.json", result_with_steps([blocked]))
+        assert row_for(blocked_path, "requires_tool_call=true")["assertion"] == "fail"
+        discovery = dict(blocked, executed_skill="load_capability_groups",
+                         resolved_tool_or_skill="load_capability_groups")
+        discovery_path = write_result(root, "discovery-only.json", result_with_steps([discovery]))
+        assert row_for(discovery_path, "requires_tool_call=true")["assertion"] == "fail"
 
         capability = write_result(
             root,
@@ -226,6 +243,25 @@ def main() -> int:
             "min_successful_capability_calls:system.terminal_terminate=3",
         )
         assert insufficient_calls_row["assertion"] == "fail"
+
+        alternatives = "any_successful_capability:system.terminal_poll;any_successful_capability:fixture.other"
+        assert row_for(repeated_calls, alternatives)["assertion"] == "pass"
+        assert row_for(repeated_calls, "any_successful_capability:fixture.other")["assertion"] == "fail"
+
+        for field in ("status", "extra.status", "data.extra.status"):
+            failed = capability_step(capability="memory.save")
+            failed["observed_evidence"]["items"].append({"field": field, "excerpt": "error"})
+            failed_path = write_result(root, "domain-error.json", result_with_steps([failed]))
+            failed_row = row_for(failed_path, "min_successful_capability_calls:memory.save=1")
+            assert failed_row["assertion"] == "fail"
+        successful = capability_step(capability="database.query")
+        successful["observed_evidence"]["items"].append({"field": "extra.rows[0].status", "excerpt": "error"})
+        successful["output_excerpt"] = "The returned record has status error."
+        assert successful_call_step(successful)
+        successful["error_code"] = "execution_failed"
+        assert not successful_call_step(successful)
+        assert not successful_call_step(failed)
+        assert row_for(failed_path, "any_successful_capability:memory.save")["assertion"] == "fail"
 
         wrong_capability_row = row_for(
             capability,
@@ -394,6 +430,65 @@ def main() -> int:
             "result_text_json_eq:/final_result_json/exit_code=0",
         )
         assert nested_machine_row["assertion"] == "pass"
+
+        stdout_step = capability_step(dry_run=False, observed_fields={"stdout": "/workspace"})
+        stdout_step["output_excerpt"] = json.dumps({"extra": {"stdout": "/workspace\n"}})
+        for index, (stdout, assertion) in enumerate([
+            ("/workspace\n", "pass"), ("/workspace", "fail"),
+            ("/workspace\n\n", "fail"), ("/different\n", "fail"),
+        ]):
+            path = write_result(root, f"stdout-whitespace-{index}.json",
+                result_with_steps([stdout_step], text=json.dumps({"stdout": stdout})))
+            checked = row_for(path, "requires_tool_call=true;final_observed_field:stdout", "")
+            assert checked["assertion"] == assertion, (stdout, checked)
+
+        for index, (text, expected, assertion) in enumerate([
+            ('["a", "b", "c"]', '["a","b","c"]', 'pass'),
+            ('["a", "c", "b"]', '["a","b","c"]', 'fail'),
+            ('{"result":["a","b","c"]}', '["a","b","c"]', 'fail'),
+            ('not json', '{}', 'fail'),
+            ('{}', '{}', 'pass'),
+            ('null', 'null', 'pass'),
+            ('[{"score":2}]', '[{"score":2}]', 'pass'),
+            ('[{"score":"2"}]', '[{"score":2}]', 'fail'),
+            ('[{"score":true}]', '[{"score":1}]', 'fail'),
+            ('[{"score":2}]', '[{"score":"2"}]', 'fail'),
+            ('{"count":3,"ready":true}', '{"ready":true,"count":3}', 'pass'),
+            ('{"nested":{"b":2,"a":1}}', '{ "nested": {"a":1,"b":2} }', 'pass'),
+            ('[{"b":2,"a":1}]', '[{"a":1,"b":2}]', 'pass'),
+            ('{"count":3,"ready":true,"extra":0}', '{"ready":true,"count":3}', 'fail'),
+            ('{"count":"3","ready":true}', '{"ready":true,"count":3}', 'fail'),
+            ('"3"', '3', 'fail'),
+            ('true', '1', 'fail'),
+            ('"3"', '"3"', 'pass'),
+            ('"literal text"', 'literal text', 'pass'),
+            ('NaN', 'NaN', 'fail'),
+        ]):
+            path = write_result(root, f"root-json-{index}.json",
+                result_with_steps([capability_step()], text=text))
+            checked = row_for(path, "requires_tool_call=true",
+                f"result_text_json_eq:={expected}")
+            assert checked["assertion"] == assertion, (text, checked)
+
+        records = [{"score": 2}]
+        for index, (text, assertion) in enumerate([
+            (json.dumps(records), "pass"),
+            (json.dumps({"result": records, "stats": {"output_count": 1}}), "pass"),
+            (json.dumps({"output": records}), "pass"),
+            (json.dumps({"output": records, "result": records}), "pass"),
+            ('[{"score":"2"}]', "fail"),
+            ('{"result":[{"score":"2"}]}', "fail"),
+            ('{"result":[{"score":2}],"output":[{"score":"2"}]}', "fail"),
+            ('{"result":[{"score":true}]}', "fail"),
+            ('{"other":[{"score":2}]}', "fail"),
+            ('{"result":null}', "fail"),
+            ('not json', "fail"),
+        ]):
+            path = write_result(root, f"records-json-{index}.json",
+                result_with_steps([capability_step()], text=text))
+            checked = row_for(path, "requires_tool_call=true",
+                'result_text_json_records_eq:[{"score":2}]')
+            assert checked["assertion"] == assertion, (text, checked)
 
         allowed_success = row_for_status(
             direct,
@@ -820,6 +915,14 @@ def main() -> int:
             )["assertion"]
             == "fail"
         )
+        observed_line = write_result(root, "observed-line.json", result_with_steps(
+            [capability_step(observed_fields={"line": 7})],
+            text='{"matches":[{"line_number":7}]}',
+        ))
+        assert row_for(observed_line, "requires_tool_call=true", expect="observed_eq:line=7")["assertion"] == "pass"
+        assert row_for(observed_line, "requires_tool_call=true", expect="observed_eq:line=8")["assertion"] == "fail"
+        assert row_for(observed_line, "requires_tool_call=true", expect="observed_eq:line_number=7")["assertion"] == "fail"
+        assert row_for(observed_line, "requires_tool_call=true", expect="observed_eq:line")["assertion"] == "fail"
 
     print("MANUAL_CASE_ASSERTIONS_TESTS ok")
     return 0

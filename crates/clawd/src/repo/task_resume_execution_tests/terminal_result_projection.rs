@@ -395,6 +395,99 @@ fn async_poll_retry_plan_clears_stale_projection_before_terminal_poll() {
 }
 
 #[test]
+fn failed_seeded_loop_projection_keeps_latest_journal_instead_of_checkpoint() {
+    let state = state_with_tasks_table();
+    let now = 9_000;
+    let task_id = "terminal-seeded-failure";
+    let checkpoint_id = "ckpt-terminal-seeded-failure";
+    let executor_state = "executing_planner_resume";
+    let executor_action = "run_seeded_agent_loop";
+    let executor_status = "seeded_loop_requires_provider_window";
+    let dispatch_state = "ready_to_run_seeded_agent_loop";
+    let result_status = "seeded_loop_failed";
+    let mut seed = terminal_projection_seed(
+        task_id,
+        checkpoint_id,
+        executor_state,
+        executor_action,
+        executor_status,
+        dispatch_state,
+        result_status,
+        now,
+    );
+    seed["task_journal"] = json!({"summary": {"task_metrics": {"llm_calls_per_task": 3}}});
+    insert_task(&state, task_id, "running", Some(&seed), now);
+    activate_resume_owner(&state, task_id, checkpoint_id, now, now + 30);
+    claim_recorded_paused_checkpoint_resume_dispatch_result_internal(
+        &state,
+        task_id,
+        checkpoint_id,
+        executor_state,
+        executor_action,
+        executor_status,
+        dispatch_state,
+        result_status,
+        now + 1,
+        10,
+    )
+    .unwrap()
+    .expect("failed seeded loop projection claimed");
+    let trace = json!({
+        "summary": {
+            "final_status": "failure", "answer_verifier_summary": {"pass": false},
+            "task_metrics": {"llm_calls_per_task": 12}
+        },
+        "trace": {"step_results": [{"step_id": "step_3", "skill": "read_text_range", "status": "ok"}]}
+    });
+    let payload = json!({
+        "schema_version": 1, "task_id": task_id, "checkpoint_id": checkpoint_id,
+        "executor_state": executor_state, "executor_action": executor_action,
+        "executor_status": executor_status, "dispatch_state": dispatch_state,
+        "executor_result_status": result_status,
+        "result_projection_state": "project_seeded_loop_failed",
+        "error_code": "seeded_loop_answer_marked_failed",
+        "message_key": "clawd.task.seeded_loop_answer_marked_failed",
+        "failure_result_json": {
+            "text": "partial result", "task_journal": trace
+        }
+    });
+    assert!(
+        record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal(
+            &state,
+            CLAIM_ATTEMPT,
+            task_id,
+            checkpoint_id,
+            executor_state,
+            executor_action,
+            executor_status,
+            dispatch_state,
+            result_status,
+            &payload,
+            now + 2,
+        )
+        .unwrap()
+    );
+    let (status, error, result) = stored_task_status_error_result(&state, task_id);
+    assert_eq!(status, "failed");
+    assert_eq!(error.as_deref(), Some("seeded_loop_answer_marked_failed"));
+    assert_eq!(result["status"], "error");
+    assert_eq!(result["text"], "partial result");
+    assert_eq!(
+        result["task_journal"]["summary"]["task_metrics"]["llm_calls_per_task"],
+        12
+    );
+    assert_eq!(
+        result["task_journal"]["trace"]["step_results"],
+        trace["trace"]["step_results"]
+    );
+    assert_eq!(
+        result["task_journal"]["summary"]["answer_verifier_summary"]["pass"],
+        false
+    );
+    assert_eq!(result["task_lifecycle"]["state"], "failed");
+}
+
+#[test]
 fn terminal_dispatch_result_projection_updates_task_status_with_machine_payload() {
     let state = state_with_tasks_table();
     let now = 9_000;

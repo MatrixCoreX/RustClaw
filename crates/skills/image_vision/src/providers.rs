@@ -267,7 +267,7 @@ impl<'a> OpenAiCompatOptions<'a> {
         Self {
             error_label,
             include_api_key_header: false,
-            supports_image_detail: false,
+            supports_image_detail: true,
         }
     }
 }
@@ -310,11 +310,14 @@ fn openai_compat_vision(
         };
         content.push(json!({"type":"image_url","image_url":image_url}));
     }
-    let body = json!({
+    let mut body = json!({
         "model": model,
         "messages": [{"role":"user","content":content}],
         "temperature": if request.options.exact_text { 0.0 } else { 0.2 }
     });
+    if request.options.exact_text {
+        body["max_tokens"] = json!(8192);
+    }
     let url = format!("{}/chat/completions", trim_trailing_slash(&cfg.base_url));
     let mut http_request = client.post(url).bearer_auth(&cfg.api_key);
     if options.include_api_key_header {
@@ -398,7 +401,8 @@ pub(super) fn google_vision(
     let body = json!({
         "contents":[{"parts":parts}],
         "generationConfig": {
-            "temperature": if request.options.exact_text { 0.0 } else { 0.2 }
+            "temperature": if request.options.exact_text { 0.0 } else { 0.2 },
+            "maxOutputTokens": if request.options.exact_text { 8192 } else { 2048 }
         }
     });
     let url = format!(

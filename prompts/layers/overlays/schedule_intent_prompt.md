@@ -4,7 +4,7 @@ Component: clawd (crates/clawd/src/main.rs) ScheduleRuntime
 Placeholders: __NOW__, __TIMEZONE__, __RULES__, __SKILL_CATALOG__, __SKILLS_CATALOG__ (same content), __MEMORY_CONTEXT__, __REQUEST_LANGUAGE_HINT__, __CONFIG_RESPONSE_LANGUAGE__, __REQUEST__
 -->
 
-You are a schedule intent parser for a Telegram assistant.
+You parse scheduling requests after the agent has selected a schedule capability.
 
 Current time:
 __NOW__
@@ -14,6 +14,8 @@ __TIMEZONE__
 
 Task:
 - Parse the user request into a scheduling intent.
+- Return the schedule object below at the JSON root. This is a schedule parser,
+  not an ingress normalizer; do not wrap its fields in a boundary envelope.
 - If the request is not about scheduling, return `kind = "none"`.
 - Resolve relative expressions like "tomorrow", "the day after tomorrow", and "next Monday" using current time and timezone.
 - Use memory context (recent snippets + stable preferences + long-term summary) only to resolve references like "these", "those tasks", "the ones from earlier", or "disable all of them".

@@ -1,0 +1,53 @@
+/* Android viewport changes must not alter any desktop or web UI layout. */
+html[data-platform='android'] { min-width:0; -webkit-text-size-adjust:100%; text-size-adjust:100%; }
+html[data-platform='android'] body { min-width:0; margin:0; overflow-wrap:anywhere; }
+html[data-platform='android'] button,html[data-platform='android'] select,html[data-platform='android'] input:not([type='checkbox']):not([type='radio']) { min-height:48px; touch-action:manipulation; }
+html[data-platform='android'] [data-desktop-theme-toggle] { min-width:48px; }
+html[data-platform='android'] .desktop-check { min-height:48px; align-items:center; }
+html[data-platform='android'] input[type='checkbox'],html[data-platform='android'] input[type='radio'] { min-height:22px; min-width:22px; }
+html[data-platform='android'] input,html[data-platform='android'] textarea { font-size:16px; }
+html[data-platform='android'] .desktop-home { min-height:100dvh; }
+html[data-platform='android'] .desktop-header { height:auto; min-height:76px; padding:12px 20px; gap:10px; flex-wrap:wrap; }
+html[data-platform='android'] .desktop-home-content { padding:28px 20px; }
+html[data-platform='android'] .desktop-downloads { max-width:calc(100vw - 24px); right:12px; bottom:12px; }
+html[data-platform='android'] .wallet-manager { min-height:100dvh; padding:20px; }
+html[data-platform='android'] .wallet-ui pre,html[data-platform='android'] .wallet-ui code { white-space:pre-wrap; overflow-wrap:anywhere; }
+@media(max-width:599px) {
+ html[data-platform='android'] .desktop-header strong { font-size:17px; }
+ html[data-platform='android'] .desktop-header>div { min-width:0; flex:1; }
+ html[data-platform='android'] .desktop-mark { display:none; }
+ html[data-platform='android'] .desktop-home-content { padding:22px 14px; }
+ html[data-platform='android'] .desktop-intro { margin-bottom:22px; }
+ html[data-platform='android'] .desktop-intro h1 { font-size:26px; }
+ html[data-platform='android'] .desktop-card { padding:18px; }
+ html[data-platform='android'] .desktop-columns { grid-template-columns:1fr; }
+ html[data-platform='android'] .device-row,html[data-platform='android'] .desktop-discovery-head,html[data-platform='android'] .desktop-discovered { align-items:stretch; flex-direction:column; gap:10px; }
+ html[data-platform='android'] .desktop-actions { flex-wrap:wrap; }
+ html[data-platform='android'] .desktop-actions button { flex:1; }
+ html[data-platform='android'] .desktop-tabs { flex-wrap:wrap; }
+ html[data-platform='android'] .desktop-tabs button { min-width:92px; }
+ html[data-platform='android'] .desktop-device-bar { padding:0 10px; gap:8px; }
+ html[data-platform='android'] .desktop-device-bar button { min-height:36px; }
+ html[data-platform='android'] .desktop-device-bar .desktop-role { display:none; }
+ html[data-platform='android'] .desktop-empty { padding:28px 8px; }
+ html[data-platform='android'] .wallet-manager { padding:16px; }
+ html[data-platform='android'] .wallet-ui h1 { font-size:23px; }
+ html[data-platform='android'] .wallet-actions { flex-wrap:wrap; }
+}
+@media(min-width:840px) { html[data-platform='android'] .desktop-home-content { max-width:1100px; padding:36px; } }
+@media(max-height:480px) and (orientation:landscape) {
+ html[data-platform='android'] .desktop-header { min-height:56px; padding:6px 16px; }
+ html[data-platform='android'] .desktop-home-content { padding-top:16px; }
+}
+
+@media(max-width:599px) {
+ html[data-platform='android'] .desktop-home-wallet .desktop-list-head { flex-wrap:wrap; gap:12px; }
+ html[data-platform='android'] .desktop-home-wallet .desktop-list-head>div { flex-basis:100%; }
+ html[data-platform='android'] .desktop-home-account { padding:18px; }
+ html[data-platform='android'] .desktop-asset-header>div { min-width:0; flex-basis:calc(100% - 100px); }
+ html[data-platform='android'] .desktop-asset-header nav { flex:1 0 100%; }
+ html[data-platform='android'] .desktop-asset-header nav button { flex:1; white-space:nowrap; }
+ html[data-platform='android'] .desktop-asset-header>button { flex-shrink:0; }
+ html[data-platform='android'] .desktop-node-connect { margin:20px 12px; padding:18px; }
+ html[data-platform='android'] .desktop-home .desktop-home-public-key>button { min-width:44px; min-height:44px; }
+}

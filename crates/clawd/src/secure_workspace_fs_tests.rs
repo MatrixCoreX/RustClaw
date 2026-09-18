@@ -15,6 +15,18 @@ impl TestWorkspace {
         Self(path)
     }
 
+    #[cfg(unix)]
+    fn new_for_unix_socket() -> Self {
+        // AF_UNIX paths are limited to roughly 104-108 bytes. Test runners may
+        // provide a deeply nested TMPDIR, so keep this fixture path bounded.
+        let path = PathBuf::from("/tmp").join(format!(
+            "ar-secure-socket-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&path).expect("create socket test workspace");
+        Self(path)
+    }
+
     fn path(&self) -> &Path {
         &self.0
     }
@@ -74,7 +86,7 @@ fn descriptor_relative_access_rejects_parent_and_target_symlinks() {
 #[cfg(unix)]
 #[test]
 fn descriptor_relative_read_rejects_special_files() {
-    let workspace = TestWorkspace::new("special-file");
+    let workspace = TestWorkspace::new_for_unix_socket();
     let socket_path = workspace.path().join("agent.sock");
     let _listener = std::os::unix::net::UnixListener::bind(&socket_path).expect("socket");
     assert!(open_workspace_file(workspace.path(), &socket_path).is_err());

@@ -21,7 +21,7 @@ pub fn device_asset(url: &Url, prefix: &str) -> bool {
 // WebView2 maps the registered custom protocol to this exact HTTP origin.
 // Other platforms use device://localhost. Neither permits arbitrary network origins.
 pub fn asset_csp() -> String {
-    let origin = if cfg!(target_os = "windows") {
+    let origin = if cfg!(any(target_os = "windows", target_os = "android")) {
         "http://device.localhost"
     } else {
         "device:"

@@ -87,6 +87,7 @@ fn terminal_async_job_continuation_result(
     successor.pending_async_job = None;
     successor.resume_entrypoint = ResumeEntrypoint::NextPlannerRound;
     let mut settled_capability_result = false;
+    let mut completed_step_id = checkpoint.last_successful_step.clone();
     for result in successor.capability_results.iter_mut().rev() {
         if crate::capability_result::settle_waiting_async_result(
             result,
@@ -95,6 +96,16 @@ fn terminal_async_job_continuation_result(
             task_id,
             retention_deadline_at,
         ) {
+            completed_step_id = result
+                .provenance
+                .get("step_id")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            super::attempt_ledger::settle_async_attempt(
+                &mut successor.attempt_ledger,
+                job_id,
+                result,
+            );
             settled_capability_result = true;
             break;
         }
@@ -147,7 +158,13 @@ fn terminal_async_job_continuation_result(
         if let Some(last_step) = resume_state
             .get_mut("executed_step_results")
             .and_then(Value::as_array_mut)
-            .and_then(|steps| steps.last_mut())
+            .and_then(|steps| {
+                steps.iter_mut().rev().find(|step| {
+                    completed_step_id.as_deref().is_some_and(|step_id| {
+                        step.get("step_id").and_then(Value::as_str) == Some(step_id)
+                    })
+                })
+            })
             .and_then(Value::as_object_mut)
         {
             last_step.insert(

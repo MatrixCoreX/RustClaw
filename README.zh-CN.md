@@ -108,7 +108,7 @@ flowchart TD
     MU --> ASP
     S --> V
     V --> W[证据覆盖 + 答案形状检查]
-    W -->|修复 / 缺证据| WR[RepairEnvelope<br/>issue codes + attempt ledger]
+    W -->|修复 / 缺证据| WR[RepairEnvelope<br/>issue codes + attempt ledger<br/>有界诊断反馈]
     WR --> J
     W -->|本轮已观测| BD{BudgetDecision<br/>progress + deadline + policy + hard ceilings}
     BD -->|continue| J
@@ -165,8 +165,11 @@ flowchart TD
 - `Async job start`：长尾工具可以先发布包含 `checkpoint_id`、`poll_ref`、`next_check_after`、`can_poll`、`can_cancel` 的机器回复，同时任务仍可通过 checkpoint 轮询恢复。媒体技能通过 registry capability 暴露这类形状，例如 `image.generate` / `image.poll` / `image.cancel`、`audio.synthesize` / `audio.poll` / `audio.cancel`、`video.generate` / `video.poll` / `video.cancel` 和 `music.generate` / `music.poll` / `music.cancel`。
 - `Capability result observation`：每个成功的 `CapabilityResultEnvelope` 都会投影成一条有界、脱敏的通用机器 observation，返回下一轮 planner。领域专用投影可以压缩常用证据，但未知能力或新安装能力无需新增 runtime 分支，也能保留 provider、artifact、异步任务、effect 和 verification 等结构化字段。
 - `Evidence coverage`：工具、技能和合成输出都会成为循环内观测；缺证据或可恢复失败会带着压缩的已尝试方法历史回到循环。
+- `Task plan 收尾`：最终回答前，由 planner 按实际执行证据核对未完成步骤。Runtime 提供最新 revision 和回答已准备好的状态；实际投送由 runtime 负责。只有未完成步骤减少时才允许第二次核对，跨 checkpoint 最多两次。真实阻塞仍保留未完成状态，未收尾状态可被观测，不为关闭计划而重放已完成的副作用。
+- `异步执行证据`：尝试记录绑定执行步骤和 job ID。完成时只将该次等待态观测替换为实际回执或结构化错误；恢复时保留此前步骤和已完成副作用。条件操作依据实际条件和保留状态验收，不把被排除的操作记为已经执行。前台与恢复后的终态路径均在生成有大小限制的 API 投影前记录完整 journal；恢复证据时必须匹配任务身份和持久化执行流摘要。
 - `TaskBudgetSlice / BudgetDecision`：交互任务使用可恢复的软墙钟切片和结构化进度，不再把普通 `max_rounds` 或 `max_tool_calls` 当完成阈值。每次模型/工具结果被观测后，runtime 根据 verifier 通过的计划事实、evidence/artifact 进度、continuation、policy、取消、deadline 和管理员硬上限，选择 `continue`、`finish`、`checkpoint_requeue`、`waiting`、`needs_user` 或 `terminal`。Profile timeout class 会在软切片边界前约束 planner provider 调用和 agent-loop tool/MCP 调用；变更动作超时后进入 reconciliation，而不是盲目重放。模型可以请求续跑，但不能提高成本、权限、时间或资源上限。
 - `RepairEnvelope`：repair 是有边界的循环内恢复。运行时提供 `repair_source`、`issue_codes`、`missing_evidence`、`permission_decision`、`provider_status`、`attempt_fingerprint`、`side_effect_fingerprint`、`checkpoint_id`、`next_recovery_kind` 等机器字段；planner/finalizer 可以据此重新规划、澄清、转后台等待或结构化失败，而不是解析本地化 prose。
+- 答案验证后的恢复会把有长度限制、带来源的 `model_feedback` 交给下一轮 planner。这些诊断建议是不可信的模型输出，不是权限授予或可执行指令；运行时仍根据机器字段做控制判断。当前恢复观察不会被更早的成功能力结果遮住。缺少 `requested_result` 时交回有界 planner 恢复，不能靠只改最终文案补足实际执行；纯格式问题仍可进行文案修正。
 - `Observed-output finalizer`：只有答案形状与证据契约满足后，才发布有观测依据的结果。
 - `Output-contract guard`：保存结果前规范最终文本、`messages` 数组、文件 token、标量/严格输出形状和通道交付一致性。
 - `Journal + session update`：任务状态、观测事实和活跃会话锚点在收尾后持久化；后台记忆任务是可选、非阻塞的。
@@ -179,6 +182,7 @@ flowchart TD
 - `TurnBoundaryEnvelope`：根据已认证 task/session 状态、附件、显式 API 字段、locator 和 policy profile 确定性构建。它只是 planner 上下文，不是语义 route 结果。
 - `Planner prompt`：是普通 `ask` 的第一次语义 LLM 调用。resume 和 async-poll executor 可以恢复已经准入的机器 checkpoint，但不能引入新的 planner 前语义决策路径。
 - `call_capability`：推荐的 planner action，把 tool/skill 选择放到 registry metadata 与 resolver policy 后面。
+- `Native tool choice`：请求要求返回协议动作，其中包括模型生成的 `respond` 回答或澄清，并不强制调用有副作用的工具。Anthropic 手动 extended thinking 使用其支持的 `auto` 传输设置，运行时仍保留协议校验与有界恢复。
 - `CapabilityResultEnvelope`：通过有界、脱敏的通用投影返回下一轮 planner。Skill 专用投影只是可选优化，新能力无需专用 Rust 分支也能让结构化结果继续进入循环。
 - `respond`：是原生终止格式化 action，不是能力模拟器。普通回答使用模型生成的 `free_text`；严格列表使用 item 数组和精确计数。模型自行生成的命名字段或 JSON 使用 `object`，其中每个 `value_json` 都是一份完整序列化 JSON 值；畸形值只进入有界结构化 repair，不会被静默强制转换。当请求值已经存在于成功的 `CapabilityResultEnvelope` observation 中时，使用 `observed_object`，模型只提交输出字段名、精确 capability token 和语言无关的点路径，runtime 直接复制原始 JSON 值，不再要求模型转录大型嵌套机器数据；缺失、失败或非法引用都会被拒绝。Provider 省略当前 shape 不使用的 payload 时，只规范化为空值/零；冗余的模型生成 object content 只有在解析后的 JSON 与命名字段完全一致时才接受。Runtime 拥有的 provider/config/permission、领域解析/归一化/校验/预演、dry-run、artifact/job、checkpoint、diff、verification、repair 和 rewind 字段必须先有对应 capability observation。低层环境事实只能辅助这次调用，不能替代拥有结果的已披露领域能力。Runtime 只物化终态机器 payload，不解析多语言用户文本，也不追加固定 prose；单个标量、标识符、标题、token 或路径仍使用 `free_text`。
 - `Generated INTERFACE prompts`：来自 `crates/skills/*/INTERFACE.md`、`optional_skills/*/INTERFACE.md`、`external_skills/*/INTERFACE.md` 和 `prompts/layers/generated/skills/*`；新增技能应改这些契约，不改 `clawd` 主流程分支。
@@ -192,6 +196,8 @@ flowchart TD
 - `Skill process protocol`：runner 技能收到一行请求 JSON，并以一行最终响应 JSON 结束。显式声明 `run.progress_frames=true` 的技能可以先输出有界、带版本的机器进度记录；稳定的决策字段仍必须放在最终 `extra` 中。
 - `synthesize_answer`：在循环内需要自然语言合成时调度，不是每个任务固定最后再调用一次 LLM。
 - `RepairEnvelope`：verifier、executor、permission、provider 和 checkpoint recovery 路径会把结构化 repair context 暴露给下一轮循环；用户可见 fallback prose 应来自 i18n、finalizer、UI 或模型，不应来自 runtime 模板。
+- 宿主工作区文件操作会区分原动作重试与同一路径被再次成功修改后的新操作，依据是运行时记录的变更摘要和步骤 ID；外部副作用仍保留任务级防重放保护。受限体积的任务轨迹携带执行流摘要，供本地 NL 验收核对日志中的完整证据，不扩大 API 响应体积。
+- 持久化轨迹投影包含存储元数据在内不超过 128 KiB。超限时分级压缩；异常宽的对象使用明确标记的最小投影。独立任务摘要和完整 journal 日志保持不变，验收读取完整日志证据前必须核对执行流摘要。
 - `Output-contract finalization`：只保留精确机器字段与 artifact 传输的确定性边界，其余回答发布模型基于证据的合成结果；它不选择技能，也不渲染领域专属 prose。
 
 ### 权限平面与命令策略
@@ -210,6 +216,8 @@ flowchart TD
 ### 沙箱与跨平台执行
 
 `sandbox_mode` 定义权限范围，`sandbox_backend` 定义实现该范围的平台后端；两者互不替代。默认 `sandbox_backend = "auto"` 在 Linux 选择 Bubblewrap，在 macOS 选择 Seatbelt。受限模式下后端缺失、平台不匹配或远程执行器未配置时一律结构化拒绝，不会静默降级为无沙箱执行。只有管理员明确配置 `sandbox_mode = "danger_full"`，或由后端认证通过的任务级 YOLO 策略时，才直接启动进程。
+
+已安装技能的子进程继承宿主明确选定的执行后端；`direct` 只用于已授权的 `danger_full` 执行。宿主会覆盖继承环境或技能包提供的后端标记。标记缺失、未知或使用可复用 runner 时，子进程仍受 receipt 声明的沙箱约束；启动前照常验证权限、固定版本收据和能力合同。
 
 
 详细流程见：[安全与执行](docs/architecture/02-security-execution.zh-CN.md)。

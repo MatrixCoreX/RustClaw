@@ -76,6 +76,14 @@
 - Unsupported vendor, invalid output path, or path outside workspace.
 - Missing API key for live generation.
 - Provider generation/download/write failures.
+- Provider HTTP errors retain `extra.status_code` and numeric `extra.provider_status_code`.
+  A MiniMax HTTP 410 / status code 2153 response with no audio or job identifier
+  proves rejection before generation: `failure_phase=provider_rejected` and
+  `side_effect_applied=false`. Transport failures, other errors, or responses
+  containing a possible result do not claim this proof.
+- This explicit API-unavailable rejection uses `error_code=provider_capability_unavailable`;
+  it is not a prompt, duration or filename error. Generation request errors also
+  retain the selected `extra.provider` and `extra.model` for an accurate explanation.
 - Live provider poll/cancel without a native adapter returns structured adapter-missing metadata instead of a natural-language decision.
 
 ## Request/Response Examples

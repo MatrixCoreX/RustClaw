@@ -344,6 +344,34 @@ function ensureWithinRoot(root, target, allowOutside = false) {
     return absTarget;
 }
 
+function canonicalExistingAncestor(target) {
+    try {
+        return fsSync.realpathSync(target);
+    } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+        const parent = path.dirname(target);
+        if (parent === target) throw error;
+        return path.join(canonicalExistingAncestor(parent), path.basename(target));
+    }
+}
+
+function resolveOutputPath(workspaceRoot, target, options = {}) {
+    const absolute = path.resolve(target);
+    if (options.allowPathOutsideWorkspace === true) return absolute;
+    const roots = [path.resolve(workspaceRoot)];
+    // The Rust adapter supplies this grant from runner context, never skill args.
+    if (typeof options.artifactOutputDirectory === 'string'
+        && path.isAbsolute(options.artifactOutputDirectory)) {
+        roots.push(path.resolve(options.artifactOutputDirectory));
+    }
+    for (const root of roots) {
+        if (absolute !== root && !absolute.startsWith(`${root}${path.sep}`)) continue;
+        ensureWithinRoot(canonicalExistingAncestor(root), canonicalExistingAncestor(absolute));
+        return absolute;
+    }
+    throw new SkillError('WORKSPACE_PATH_OUTSIDE', 'workspace_path_outside');
+}
+
 function toPosixRel(base, target) {
     return path.relative(base, target).split(path.sep).join('/');
 }
@@ -483,10 +511,10 @@ async function initCaptureStorage(options = {}) {
     const date = toIsoDate(now);
     const runId = sanitizeForFilename(options.runId || createRunId(now));
     const workspaceRoot = path.resolve(options.workspaceRoot || process.cwd());
-    const root = ensureWithinRoot(
+    const root = resolveOutputPath(
         workspaceRoot,
         path.resolve(options.captureRoot || DEFAULT_CAPTURE_ROOT),
-        options.allowPathOutsideWorkspace === true
+        options
     );
     const runRoot = ensureWithinRoot(root, path.join(root, source, date, runId));
 
@@ -1064,12 +1092,21 @@ async function extractPage(page, url, waitUntil, options = {}) {
         const challengeSelectors = [
             'iframe[src*="captcha"]',
             'iframe[src*="challenges.cloudflare.com"]',
-            '[id*="captcha"]',
-            '[class*="captcha"]',
-            'input[name*="captcha"]',
+            'input[name*="captcha"]:not([type="hidden"]):not([disabled]):not([readonly])',
         ];
+        // Documentation anchors/classes are not challenge controls. Hidden
+        // widgets and response-token inputs cannot block reading a document.
+        const visibleControl = (node) => {
+            const style = window.getComputedStyle(node);
+            return node.getClientRects().length > 0
+                && style.visibility !== 'hidden'
+                && style.visibility !== 'collapse';
+        };
         const challengeSignals = challengeSelectors
-            .map((selector) => ({ selector, count: document.querySelectorAll(selector).length }))
+            .map((selector) => ({
+                selector,
+                count: Array.from(document.querySelectorAll(selector)).filter(visibleControl).length,
+            }))
             .filter((entry) => entry.count > 0);
 
         const absoluteUrl = (value) => {
@@ -1310,6 +1347,7 @@ async function openExtract(input) {
         domainsDeny = [],
         allowProxySyntheticDns = false,
         allowPathOutsideWorkspace = false,
+        artifactOutputDirectory = null,
         workspaceRoot = process.cwd(),
     } = input;
     const executionBudget = deriveExecutionBudget(process.env.SKILL_TIMEOUT_SECONDS);
@@ -1340,13 +1378,14 @@ async function openExtract(input) {
         source: 'browser_web',
         workspaceRoot: resolvedWorkspaceRoot,
         allowPathOutsideWorkspace,
+        artifactOutputDirectory,
     });
-    const effectiveScreenshotDir = ensureWithinRoot(
+    const effectiveScreenshotDir = resolveOutputPath(
         resolvedWorkspaceRoot,
         screenshotDir
         ? (path.isAbsolute(screenshotDir) ? screenshotDir : path.join(resolvedWorkspaceRoot, screenshotDir))
         : (capture.enabled ? capture.dirs.images : DEFAULT_SCREENSHOT_ROOT),
-        allowPathOutsideWorkspace
+        { allowPathOutsideWorkspace, artifactOutputDirectory }
     );
     const {
         browser,
@@ -1852,12 +1891,15 @@ module.exports = {
     deriveExecutionBudget,
     detectPageConcurrency,
     ensureWithinRoot,
+    extractPage,
+    initCaptureStorage,
     isReadableDocumentContentType,
     isRetryableFailure,
     isPrivateIp,
     navigateWithFallback,
     partialExtractionItem,
     resolvedAddressAllowed,
+    resolveOutputPath,
     sha256Hex,
     sanitizeExtractedText,
     validateNetworkUrl,

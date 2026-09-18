@@ -99,7 +99,9 @@ Representative codes:
   `ALL_PAGES_FAILED`
 
 HTTP failures are classified from response status; challenge detection uses
-DOM structure. Binary document media types are rejected with a structured
+visible verification inputs/iframes, not document anchor IDs, CSS class names,
+hidden response-token inputs or prose discussing verification. Binary document
+media types are rejected with a structured
 handoff hint for download/document parsing. Error classification never matches
 natural-language exception or page text. Failed pages are not emitted as
 citations or source references.

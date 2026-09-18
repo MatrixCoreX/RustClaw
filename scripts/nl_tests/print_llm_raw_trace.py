@@ -130,15 +130,29 @@ def parsed_json_fields(value: Any) -> str:
 
 def raw_response_metadata(raw_response: Any) -> tuple[Any, Any]:
     parsed = parse_json_text(raw_response)
-    if not isinstance(parsed, dict):
-        return None, None
-    finish_reason = None
-    choices = parsed.get("choices")
-    if isinstance(choices, list) and choices:
-        first = choices[0]
-        if isinstance(first, dict):
-            finish_reason = first.get("finish_reason")
-    return finish_reason, parsed.get("usage")
+    records = [parsed] if isinstance(parsed, dict) else []
+    if not records and isinstance(raw_response, str):
+        # Native turns retain JSONL chunks; some providers retain SSE data lines.
+        for line in raw_response.splitlines():
+            line = line.strip()
+            if line.startswith("data:"):
+                line = line[5:].strip()
+            record = parse_json_text(line)
+            if isinstance(record, dict):
+                records.append(record)
+    finish_reason, usage = None, None
+    for record in records:
+        if (record.get("record_type") == "public_stream_evidence"
+                and record.get("schema_version") == 1):
+            record = record.get("terminal") or {}
+        choices = record.get("choices")
+        if isinstance(choices, list) and choices:
+            first = choices[0]
+            if isinstance(first, dict) and first.get("finish_reason") is not None:
+                finish_reason = first["finish_reason"]
+        if isinstance(record.get("usage"), dict):
+            usage = record["usage"]
+    return finish_reason, usage
 
 
 def task_matches(row: dict[str, Any], task_id: str | None) -> bool:

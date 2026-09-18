@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import tempfile
 import tomllib
 from pathlib import Path
@@ -114,11 +115,18 @@ def check_registries(root: Path, findings: list[str]) -> None:
 
 
 def production_rust_files(root: Path) -> list[Path]:
-    return sorted(
-        path
-        for path in root.rglob("*.rs")
-        if "target" not in path.parts and not is_test_path(path.relative_to(root))
-    )
+    files = []
+    for current, directories, names in os.walk(root):
+        current = Path(current)
+        directories[:] = [
+            name for name in directories
+            if name != "target" and not (current == root and name == "tmp")
+        ]
+        for name in names:
+            path = current / name
+            if path.suffix == ".rs" and not is_test_path(path.relative_to(root)):
+                files.append(path)
+    return sorted(files)
 
 
 def check_runtime_boundaries(root: Path, findings: list[str]) -> None:

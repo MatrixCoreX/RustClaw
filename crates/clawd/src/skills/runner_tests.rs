@@ -183,13 +183,38 @@ fn local_clawd_base_url_rejects_non_loopback_override() {
 }
 
 #[test]
-fn only_an_active_runtime_sandbox_is_inherited_by_the_skill_child() {
+fn only_an_explicit_runtime_execution_backend_is_inherited_by_the_skill_child() {
     assert_eq!(inherited_sandbox_backend("bubblewrap"), Some("bubblewrap"));
     assert_eq!(
         inherited_sandbox_backend("macos_seatbelt"),
         Some("macos_seatbelt")
     );
-    assert_eq!(inherited_sandbox_backend("direct"), None);
+    assert_eq!(inherited_sandbox_backend("direct"), Some("direct"));
+    assert_eq!(inherited_sandbox_backend("child_sandbox"), None);
+    assert_eq!(inherited_sandbox_backend("unknown"), None);
+}
+
+#[test]
+fn package_environment_cannot_override_parent_execution_backend() {
+    for (backend, expected) in [
+        (None, None),
+        (Some("unknown"), None),
+        (Some("child_sandbox"), None),
+        (Some("bubblewrap"), Some("bubblewrap")),
+        (Some("macos_seatbelt"), Some("macos_seatbelt")),
+        (Some("direct"), Some("direct")),
+    ] {
+        let mut command = tokio::process::Command::new("unused-test-program");
+        command.env(skill_sdk::PARENT_SANDBOX_BACKEND_ENV, "direct");
+        apply_parent_execution_backend(&mut command, backend);
+        let observed = command
+            .as_std()
+            .get_envs()
+            .find(|(key, _)| *key == std::ffi::OsStr::new(skill_sdk::PARENT_SANDBOX_BACKEND_ENV))
+            .expect("host must explicitly set or remove the inherited field")
+            .1;
+        assert_eq!(observed.and_then(|value| value.to_str()), expected);
+    }
 }
 
 #[test]

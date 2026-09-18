@@ -320,5 +320,8 @@ pub async fn open_external(window: WebviewWindow, url: String) -> Result<()> {
     {
         return Err("external_url_denied".into());
     }
-    open::that_detached(url).map_err(|_| "external_open_failed".into())
+    #[cfg(not(target_os="android"))]
+    { open::that_detached(url).map_err(|_| "external_open_failed".into()) }
+    #[cfg(target_os="android")]
+    { crate::android::bridge::string("openExternal", &[&url]).map(|_| ()) }
 }

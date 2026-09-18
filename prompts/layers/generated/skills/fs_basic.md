@@ -12,6 +12,15 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 - Search text content under a bounded root.
 - Compare explicit paths.
 - Write or append text, create directories, or remove files/directories when confirmation permits.
+- Literal writes/appends preserve all requested whitespace and the final newline.
+  A successful write is not content verification: compare read-back evidence with
+  the requested content, repair an authorized mismatch before cleanup, and report
+  unresolved mismatches without claiming completion.
+  A line-numbered excerpt or line count cannot prove that the last line ends in
+  a newline. `read_text_range` returns `line_endings` for the complete file
+  snapshot: bare `lf_count`, `crlf_count`, and `ends_with_newline`. Compare these
+  fields, the byte count and content with the request before cleanup; do not
+  substitute the line-numbered excerpt's formatting for source bytes.
 - Preview/apply unique, replace-all, or single-file atomic batch edits, and apply structured patches with hash, context, checkpoint, diff, and rewind protection.
 - Review and decide isolated child-task patches through parent-owned machine actions.
 
@@ -81,8 +90,8 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 | `grep_text` | `max_file_bytes` / `max_scan_bytes` | no | integer | bounded defaults | Per-file and aggregate content-read budgets. |
 | `find_images` | `root`, `exts`, `max_results`, `cursor`, `max_dirs` | no | bounded fields | workspace/defaults | Return paged image paths plus MIME, size, mtime, and dimensions where available. |
 | `compare_paths` | `left_path`, `right_path` | yes | string(path) | - | Two explicit paths to compare. |
-| `write_text` | `path`, `content` | yes | string(path), string | - | Replace/write text content. Requires confirmation. |
-| `append_text` | `path`, `content` | yes | string(path), string | - | Append text content to an existing or new file. Include the requested newline in `content` when the user asks for a line append. Requires confirmation. |
+| `write_text` | `path`, `content` | yes | string(path), string | - | Replace/write text content. An explicit empty or whitespace-only content string is valid (`minLength=0`); missing/null content is invalid. Requires confirmation. |
+| `append_text` | `path`, `content` | yes | string(path), string | - | Append text content to an existing or new file. A content string containing only a newline is valid. Include the requested newline in `content` when the user asks for a line append. Requires confirmation. |
 | `make_dir` | `path` | yes | string(path) | - | Create directory. Requires confirmation. |
 | `make_dir` | `parents` / `recursive` | no | bool | `true` | Create missing parent directories for mkdir-p style operations. |
 | `remove_path` | `path` | yes | string(path) | - | Remove one file. Directory removal requires `target_kind="directory"` and `recursive=true`. Requires confirmation. |

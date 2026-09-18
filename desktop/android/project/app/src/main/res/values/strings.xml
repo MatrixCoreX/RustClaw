@@ -1,0 +1,7 @@
+<resources>
+    <!-- Product display strings are projected from ProductIdentity. -->
+    <string name="webview_update_title">Update the web component</string>
+    <string name="webview_update_message">This phone needs Android System WebView 111 or later to display the app. Update Android System WebView or Chrome in your app store, then reopen the app. Your accounts stay on this device.</string>
+    <string name="webview_update_action">Open update page</string>
+    <string name="close_app">Close</string>
+</resources>

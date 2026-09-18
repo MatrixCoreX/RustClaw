@@ -1528,6 +1528,8 @@ fn read_range(
     })?;
     let lines: Vec<&str> = text.lines().collect();
     let total_lines = lines.len();
+    let crlf_count = text.matches("\r\n").count();
+    let lf_count = text.bytes().filter(|byte| *byte == b'\n').count() - crlf_count;
     let start = obj
         .get("start_line")
         .and_then(Value::as_u64)
@@ -1650,6 +1652,10 @@ fn read_range(
         "end_line": to,
         "total_lines": total_lines,
         "line_count": total_lines,
+        "line_endings": {
+            "scope": "file", "lf_count": lf_count, "crlf_count": crlf_count,
+            "ends_with_newline": text.ends_with('\n'),
+        },
         "returned_line_count": excerpt_lines.len(),
         "excerpt": excerpt,
         "excerpt_bytes": excerpt.len(),

@@ -12,10 +12,12 @@ import { amountUnits, displayUnits } from "./amounts";
 import { openWallet, useAccountContext } from "./store";
 import { useAssetAccount } from "./useAssetAccount";
 import type { ReadResult, WalletAccount } from "./types";
+import { PendingOperations } from "./PendingOperations";
 import "./wallet.css";
 export { BANCOR_CANDLE_AUTO_REFRESH_SECONDS };
 type AssetProps = ComponentProps<typeof SharedAssetsPage> & {
   onRefreshMarket?: () => Promise<unknown>;
+  fullHistory?: boolean;
 };
 type BancorProps = ComponentProps<typeof SharedBancorPage>;
 
@@ -154,8 +156,10 @@ function LocalAssets(
         statusMessage,
         transferFeeLimit: feeLimit,
         setTransferFeeLimit: setFeeLimit,
+        fullHistory: props.fullHistory,
       }}
     >
+      {props.fullHistory && <PendingOperations />}
       <SharedAssetsPage
         {...props}
         account={balanceView(runtime.data)}
@@ -173,11 +177,11 @@ function LocalAssets(
         transferLoading={runtime.busy}
         transferError={draftError || runtime.error}
         transferMessage={runtime.message}
-        transferHistory={null}
-        transferHistoryLoading={runtime.busy}
-        transferHistoryError={runtime.error}
+        transferHistory={props.fullHistory ? props.transferHistory : null}
+        transferHistoryLoading={props.fullHistory ? props.transferHistoryLoading : runtime.busy}
+        transferHistoryError={props.fullHistory ? props.transferHistoryError : runtime.error}
         onTransfer={transfer}
-        onLoadTransferHistory={refreshHistory}
+        onLoadTransferHistory={props.fullHistory ? props.onLoadTransferHistory : refreshHistory}
         onClearTransferFeedback={() => {
           setDraftError(null);
           runtime.clearFeedback();

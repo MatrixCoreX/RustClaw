@@ -1,10 +1,18 @@
-#[cfg(any(feature = "gui", test))]
 pub(crate) mod client;
 #[cfg(test)]
 mod client_tests;
 #[cfg(feature = "gui")]
 pub mod commands;
+pub(crate) mod direct;
+#[cfg(test)]
+mod direct_tests;
+pub(crate) mod history;
+pub(crate) mod node_selection;
+pub(crate) mod nodes;
+pub(crate) mod owner_transport;
 pub mod protocol;
+#[cfg(feature = "gui")]
+pub mod standalone;
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
@@ -60,7 +68,8 @@ pub struct Operations {
 impl Operations {
     pub fn new(path: PathBuf) -> Result<Self> {
         let records: Vec<Record> = if path.exists() {
-            serde_json::from_slice(&files::read(&path)?).map_err(|_| "wallet_history_invalid")?
+            serde_json::from_slice(&files::read_private(&path)?)
+                .map_err(|_| "wallet_history_invalid")?
         } else {
             vec![]
         };

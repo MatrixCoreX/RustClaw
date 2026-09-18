@@ -20,7 +20,8 @@ REQUIRED_FILE_TOKENS = {
         '"transport-child-process"',
         '"transport-streamable-http-client-reqwest"',
     ),
-    "crates/claw-core/src/config.rs": (
+    "crates/claw-core/src/config.rs": ('include!("config/mcp.rs")',),
+    "crates/claw-core/src/config/mcp.rs": (
         "pub struct McpConfig",
         "planner_visible_tools",
         "catalog_search_max_results",

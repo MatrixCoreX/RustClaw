@@ -28,6 +28,33 @@ pub async fn download_cancel(
     Ok(())
 }
 
+/// Small UI-generated exports use a user-selected document, never a JS path.
+#[tauri::command]
+pub async fn save_export(window: WebviewWindow, filename: String, bytes: Vec<u8>) -> Result<bool> {
+    main_only(&window)?;
+    if bytes.len() > 16 * 1024 * 1024 {
+        return Err("download_limit".into());
+    }
+    #[cfg(target_os = "android")]
+    {
+        let name: String = filename.chars()
+            .filter(|c| !c.is_control() && !matches!(c, '/' | '\\' | ':'))
+            .take(180).collect();
+        let name = if name.trim_matches('.').is_empty() { "export" } else { &name };
+        let Some(file) = crate::file_dialog::save("Save file", name).await? else { return Ok(false); };
+        tokio::fs::write(file.path(), bytes).await.map_err(|_| "download_write_failed")?;
+        let path = file.path().to_str().ok_or("download_path_invalid")?.to_owned();
+        tokio::task::spawn_blocking(move || crate::android::bridge::string("finishDocument", &[&path]))
+            .await.map_err(|_| "download_write_failed")??;
+        Ok(true)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = filename;
+        Err("native_command_denied".into())
+    }
+}
+
 #[tauri::command]
 pub async fn download(
     window: WebviewWindow,
@@ -51,11 +78,7 @@ pub async fn download(
     } else {
         &name
     };
-    let selected = rfd::AsyncFileDialog::new()
-        .set_title("Save to this computer")
-        .set_file_name(name)
-        .save_file()
-        .await;
+    let selected = crate::file_dialog::save("Save file", name).await?;
     let Some(selected) = selected else {
         return Ok(false);
     };
@@ -86,5 +109,8 @@ pub async fn download(
     )
     .await;
     state.downloads.lock().await.remove(&(session_id, id));
-    outcome.map(|_| true)
+    outcome?;
+    #[cfg(target_os="android")]
+    crate::android::bridge::string("finishDocument", &[target.to_str().ok_or("download_path_invalid")?])?;
+    Ok(true)
 }

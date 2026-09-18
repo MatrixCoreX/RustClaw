@@ -59,11 +59,15 @@ pub(super) fn answer_contract_for_reply(
     user_text: &str,
     reply: &AskReply,
 ) -> Option<crate::answer_verifier::AnswerContract> {
-    reply
-        .task_journal
-        .as_ref()
-        .and_then(|journal| journal.output_contract.clone())
-        .map(|output_contract| {
-            crate::answer_verifier::AnswerContract::new(user_text, output_contract)
-        })
+    // Planner-owned turns still need in-loop verification without a format contract.
+    reply.task_journal.as_ref().map(|journal| {
+        crate::answer_verifier::AnswerContract::new(
+            user_text,
+            journal.output_contract.clone().unwrap_or_default(),
+        )
+    })
 }
+
+#[cfg(test)]
+#[path = "loop_control_finalization_gate_tests.rs"]
+mod tests;

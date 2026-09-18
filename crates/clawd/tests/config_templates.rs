@@ -612,6 +612,19 @@ fn rss_network_actions_keep_required_runtime_permissions() {
 fn registry_capabilities_declared_match_expected_demo_skill() {
     // (canonical, sorted-tokens) — sorted 顺序与 SkillsRegistry::load_from_path
     // 内部 dedup+sort 后的结果一致。
+    const AUDIO_TRANSCRIBE_CAPABILITIES: &[&str] = &[
+        "fs.read",
+        "llm",
+        "net",
+        "secrets.optional.audio_transcribe_anthropic_api_key",
+        "secrets.optional.audio_transcribe_custom_api_key",
+        "secrets.optional.audio_transcribe_deepseek_api_key",
+        "secrets.optional.audio_transcribe_google_api_key",
+        "secrets.optional.audio_transcribe_grok_api_key",
+        "secrets.optional.audio_transcribe_minimax_api_key",
+        "secrets.optional.audio_transcribe_openai_api_key",
+        "secrets.optional.audio_transcribe_qwen_api_key",
+    ];
     const WEB_SEARCH_CAPABILITIES: &[&str] = &[
         "net",
         "secrets.optional.baidu_ai_search_api_key",
@@ -629,7 +642,7 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
         // 主配置中 image_edit / image_vision 可复用同厂商全局 key，不声明专用
         // secrets capability；image_generate 仍显式要求专用生成 key。
         ("audio_synthesize", &["fs.write", "llm", "net"]),
-        ("audio_transcribe", &["fs.read", "llm", "net"]),
+        ("audio_transcribe", AUDIO_TRANSCRIBE_CAPABILITIES),
         ("browser_session", &["exec", "fs.write", "net"]),
         ("browser_web", &["fs.write", "net"]),
         ("code_index", &["fs.read"]),
@@ -690,7 +703,7 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
             "media_download",
             &["exec", "fs.read", "fs.write", "llm", "net"],
         ),
-        ("media_discovery", &["exec", "fs.write", "llm", "net"]),
+        ("media_discovery", &["exec", "fs.write", "net"]),
         ("music_generate", &["fs.write", "llm", "net"]),
         ("nni", &["net"]),
         ("office_workspace", &["fs.read", "fs.write"]),
@@ -724,7 +737,7 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
         // Docker 与主配置都通过 provider-neutral 主模型桥注入 image_edit /
         // image_vision 凭据；只有 image_generate 保留独立生成凭据。
         ("audio_synthesize", &["fs.write", "llm", "net"]),
-        ("audio_transcribe", &["fs.read", "llm", "net"]),
+        ("audio_transcribe", AUDIO_TRANSCRIBE_CAPABILITIES),
         ("browser_session", &["exec", "fs.write", "net"]),
         ("browser_web", &["fs.write", "net"]),
         ("code_index", &["fs.read"]),
@@ -798,7 +811,7 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
             "media_download",
             &["exec", "fs.read", "fs.write", "llm", "net"],
         ),
-        ("media_discovery", &["exec", "fs.write", "llm", "net"]),
+        ("media_discovery", &["exec", "fs.write", "net"]),
         ("music_generate", &["fs.write", "llm", "net"]),
         ("nni", &["net"]),
         ("office_workspace", &["fs.read", "fs.write"]),
@@ -1165,6 +1178,16 @@ fn provision_secret_envs_matches_manifest_expectation() {
     // 期望：skill canonical name -> 子进程应当看到的 ENV_VAR_NAME 集合（已排序）。
     // image_edit / image_vision 通过 provider-neutral 主模型桥获取短期凭据，
     // 因此两份 manifest 都不再声明 vendor 专属 secret。
+    const AUDIO_TRANSCRIBE_SECRET_ENVS: &[&str] = &[
+        "AUDIO_TRANSCRIBE_ANTHROPIC_API_KEY",
+        "AUDIO_TRANSCRIBE_CUSTOM_API_KEY",
+        "AUDIO_TRANSCRIBE_DEEPSEEK_API_KEY",
+        "AUDIO_TRANSCRIBE_GOOGLE_API_KEY",
+        "AUDIO_TRANSCRIBE_GROK_API_KEY",
+        "AUDIO_TRANSCRIBE_MINIMAX_API_KEY",
+        "AUDIO_TRANSCRIBE_OPENAI_API_KEY",
+        "AUDIO_TRANSCRIBE_QWEN_API_KEY",
+    ];
     const WEB_SEARCH_SECRET_ENVS: &[&str] = &[
         "BAIDU_AI_SEARCH_API_KEY",
         "BRAVE_SEARCH_API_KEY",
@@ -1178,6 +1201,7 @@ fn provision_secret_envs_matches_manifest_expectation() {
         "YOU_SEARCH_API_KEY",
     ];
     let main_expected_secrets_envs: HashMap<&str, Vec<&str>> = HashMap::from([
+        ("audio_transcribe", AUDIO_TRANSCRIBE_SECRET_ENVS.to_vec()),
         // §E1.c：image_generate 当前默认 default_vendor=minimax（见 configs/image.toml）。
         ("image_generate", vec!["IMAGE_GENERATION_MINIMAX_API_KEY"]),
         ("git_forge", vec!["GITHUB_API_TOKEN", "GITHUB_GIT_TOKEN"]),
@@ -1194,6 +1218,7 @@ fn provision_secret_envs_matches_manifest_expectation() {
         ("web_search_extract", WEB_SEARCH_SECRET_ENVS.to_vec()),
     ]);
     let docker_expected_secrets_envs: HashMap<&str, Vec<&str>> = HashMap::from([
+        ("audio_transcribe", AUDIO_TRANSCRIBE_SECRET_ENVS.to_vec()),
         ("image_generate", vec!["IMAGE_GENERATION_MINIMAX_API_KEY"]),
         ("git_forge", vec!["GITHUB_API_TOKEN", "GITHUB_GIT_TOKEN"]),
         ("git_remote_publish", vec!["GITHUB_GIT_TOKEN"]),

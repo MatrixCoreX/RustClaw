@@ -17,13 +17,16 @@ import uuid
 ROOT = Path(__file__).resolve().parents[1]
 OUT = Path(os.environ.get('DESKTOP_TEST_OUTPUT_DIR', str(ROOT / 'test-results'))) / ('wallet-native-' + uuid.uuid4().hex[:8])
 OUT.mkdir(parents=True)
+(OUT / 'runtime').mkdir(mode=0o700)
+os.environ['XDG_RUNTIME_DIR'] = str(OUT / 'runtime')
+os.environ.pop('GNOME_KEYRING_CONTROL', None)
 os.environ.update(XDG_DATA_HOME=str(OUT / 'data'), XDG_CONFIG_HOME=str(OUT / 'config'),
     XDG_CACHE_HOME=str(OUT / 'cache'), GDK_BACKEND='x11', LIBGL_ALWAYS_SOFTWARE='1',
     WEBKIT_DISABLE_DMABUF_RENDERER='1', TAURI_WEBVIEW_AUTOMATION='true')
 assert os.environ.get('DBUS_SESSION_BUS_ADDRESS'), 'disposable D-Bus session required'
 xvfb = subprocess.Popen(['Xvfb', '-displayfd', '1', '-screen', '0', '1280x900x24'], stdout=subprocess.PIPE, stderr=(OUT / 'xvfb.log').open('w'))
 os.environ['DISPLAY'] = ':' + xvfb.stdout.readline().decode().strip()
-subprocess.run(['dbus-update-activation-environment', 'DISPLAY', 'XDG_DATA_HOME', 'XDG_CONFIG_HOME'], check=True)
+subprocess.run(['dbus-update-activation-environment', 'DISPLAY', 'XDG_DATA_HOME', 'XDG_CONFIG_HOME', 'XDG_RUNTIME_DIR'], check=True)
 subprocess.run(['gnome-keyring-daemon', '--unlock', '--components=secrets'], input=b'fixture-keyring-password', check=True, stdout=subprocess.DEVNULL)
 from fixture_server import Fixture
 from wallet_fixture import OwnerApi
@@ -96,6 +99,8 @@ try:
     binary = str(Path(sys.argv[1]).resolve()) if len(sys.argv) > 1 else str(ROOT / 'target/debug/agent-desktop')
     sid = rpc('POST', '/session', {'capabilities': {'alwaysMatch': {'tauri:options': {'application': binary}}}})['sessionId']
     wait_text('管理你的设备')
+    assert execute('return document.documentElement.dataset.theme') == 'dark'
+    assert execute('return !!document.querySelector("[data-desktop-theme-toggle] svg")')
     main = rpc('GET', f'/session/{sid}/window')
     native('wallet_initialize', {'password': 'fixture-vault-password'}, 'not allowed')
     profile = native('add_profile', {'alias': '本地资产协议测试', 'connection': {'kind': 'https', 'origin': fixture.origin, 'ca_pem': fixture.pem, 'ca_sha256': fixture.fingerprint}})
@@ -112,16 +117,59 @@ try:
     second = native('wallet_create', {'name': '桌面测试账户 B'})
     assert account['public_key'] != second['public_key']
     assert set(account) == {'id', 'name', 'public_key', 'backed_up'}
-    assert native('wallet_backup', {'accountId': account['id'], 'password': 'fixture-backup-password'})
-    assert portal.calls == ['SaveFile'] and portal.path.exists()
-    native('wallet_restore', {'password': 'fixture-backup-password', 'name': 'duplicate'}, 'wallet_account_duplicate')
+    # An already unlocked wallet cannot be exported with only a new backup password.
+    native('wallet_backup', {'accountId': account['id'], 'password': 'Jasper!flume7-Pebble4-Orbit9-velvet', 'vaultPassword': 'wrong-vault-password'}, 'wallet_unlock_failed')
+    assert not portal.path.exists() and not native('wallet_status')['unlocked']
+    time.sleep(2.1)
+    native('wallet_unlock', {'password': 'fixture-vault-password'})
+    wait_text('保存加密备份')
+    execute("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='保存加密备份').click();return true;")
+    from wallet_shared_ui_e2e import keys
+    keys(rpc, sid, 'input[aria-label="备份确认密码"]', 'fixture-vault-password')
+    keys(rpc, sid, '.wallet-account form label:nth-of-type(2) input', 'Jasper!flume7-Pebble4-Orbit9-velvet')
+    keys(rpc, sid, '.wallet-account form label:nth-of-type(3) input', 'Jasper!flume7-Pebble4-Orbit9-velvet')
+    screenshot('00-backup-reauthentication')
+    execute("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='选择保存位置并验证备份').click();return true;")
+    wait_text('加密备份已保存')
+    assert portal.calls == ['SaveFile', 'SaveFile'] and portal.path.exists()
+    assert not native('wallet_status')['unlocked']
+    native('wallet_unlock', {'password': 'fixture-vault-password'})
+    native('wallet_restore', {'password': 'Jasper!flume7-Pebble4-Orbit9-velvet', 'name': 'duplicate'}, 'wallet_account_duplicate')
     native('profiles', error='not allowed')
-    time.sleep(1); screenshot('01-wallet-light')
-    execute("document.querySelector('header button').click();return true;")
-    time.sleep(.2); screenshot('02-wallet-dark')
+    time.sleep(1); screenshot('01-wallet-' + execute('return document.documentElement.dataset.theme'))
+    execute("document.querySelector('[data-desktop-theme-toggle]').click();return true;")
+    time.sleep(.2); screenshot('02-wallet-' + execute('return document.documentElement.dataset.theme'))
     native('wallet_lock')
     passed('native OS keyring, unique key generation, encrypted backup and duplicate restore; main/wallet IPC isolation')
+    native('wallet_unlock', {'password': 'fixture-vault-password'})
+    assert native('wallet_status')['unlocked']
+    from native_window_close import close_security_window
+    close_security_window()
+    for _ in range(50):
+        if wallet not in rpc('GET', f'/session/{sid}/window/handles'): break
+        time.sleep(.1)
+    else: raise AssertionError('native security window must close')
     switch(main)
+    for _ in range(50):
+        if not native('wallet_status')['unlocked']: break
+        time.sleep(.1)
+    else: raise AssertionError('closing security window must revoke the unlock')
+    native('wallet_open')
+    for _ in range(50):
+        handles = rpc('GET', f'/session/{sid}/window/handles')
+        if len(handles) > 1: break
+        time.sleep(.1)
+    wallet = next(h for h in handles if h != main)
+    switch(wallet)
+    wait_text('解锁密钥库')
+    passed('backup requires a fresh vault password, wrong password writes no file, UI export succeeds then locks, closing security window revokes cached unlock')
+    switch(main)
+    if os.environ.get('DESKTOP_TEST_STANDALONE_ONLY') == '1':
+        from standalone_native_acceptance import run as standalone_acceptance
+        standalone_acceptance(native, execute, rpc, sid, switch, main, wallet, account, second, fixture, screenshot, OUT, passed)
+        (OUT / 'acceptance.json').write_text(json.dumps({'mode':'standalone-only','checks':checks,'simulated_file_picker':True},ensure_ascii=False,indent=2))
+        print('PASS ' + str(OUT), flush=True)
+        raise SystemExit(0)
     native('wallet_select', {'accountId': account['id']})
     base = {'sessionId': session, 'accountId': account['id'], 'service': 'assets'}
     data = native('wallet_read', {**base, 'page': None})
@@ -144,12 +192,15 @@ try:
         wait_text('确认并签名提交'); screenshot('03-confirm-' + service + '-' + intent.get('side', 'transfer'))
         count = len(api.outcomes)
         if service == 'assets':
-            native('wallet_confirm', {'operationId': pending['payload']['operation_id'], 'password': 'wrong-password'}, 'wallet_')
+            native('wallet_confirm', {'operationId': pending['payload']['operation_id'], 'password': 'wrong-password'}, 'wallet_unlock_failed')
             assert len(api.outcomes) == count and native('wallet_pending') is not None
             assert not native('wallet_status')['unlocked']
-            time.sleep(2.1)
-            from wallet_shared_ui_e2e import keys
+            from wallet_shared_ui_e2e import keys, wait
+            wait(execute, "return document.querySelector('[data-wallet-confirm]').textContent.includes('秒后重试')")
+            assert execute("return document.querySelector('[data-wallet-confirm]').disabled")
+            screenshot('03-password-retry-countdown')
             keys(rpc, sid, 'input[aria-label="交易确认密码"]', 'fixture-vault-password')
+            wait(execute, "return !document.querySelector('[data-wallet-confirm]').disabled")
             element = rpc('POST', f'/session/{sid}/element', {'using': 'css selector', 'value': '[data-wallet-confirm]'})
             rpc('POST', f"/session/{sid}/element/{element['element-6066-11e4-a52e-4f735466cecf']}/click", {})
             wait_text('操作已确认完成')
@@ -193,6 +244,13 @@ try:
     wait_text('BANCOR储备曲线市场')
     assert execute("return document.querySelector('select[aria-label=\"桌面资产账户\"]').value") == account['id']
     layout_acceptance(execute, rpc, sid, account, second, screenshot, 'bancor')
+    execute("document.querySelector('[data-bancor-open-apr]').click();return true;")
+    wait_text('NNI 奖励 APR')
+    screenshot('device-console-apr')
+    execute("document.querySelector('[data-nni-apr-back-to-bancor]').click();return true;")
+    wait_text('BANCOR储备曲线市场')
+    assert execute("return !!document.querySelector('[data-bancor-open-apr]')")
+    passed('device console keeps web Trade, rewards and working APR navigation for hardware and local accounts; standalone presentation does not leak across entry points')
     bancor_form(execute, rpc, sid, native, switch, main, wallet, fixture, screenshot)
     screenshot('05-local-bancor')
     passed('account selectors stay in web overview/trading slots; hardware/local switching and full public-key clipboard copy in both themes and widths')
@@ -225,6 +283,8 @@ try:
     from wallet_deployed_e2e import run as deployed_acceptance
     if deployed_acceptance(native, account, second, OUT):
         passed('native desktop to deployed webd/gateway/Edge/Core: locked public reads and unfunded write rejection; no real funds touched')
+    from standalone_native_acceptance import run as standalone_acceptance
+    standalone_acceptance(native, execute, rpc, sid, switch, main, wallet, account, second, fixture, screenshot, OUT, passed)
     (OUT / 'acceptance.json').write_text(json.dumps({'checks': checks, 'signature_verifications': len(api.verified), 'public_reads': len(api.public_reads), 'simulated_file_picker': True}, ensure_ascii=False, indent=2))
     print('PASS ' + str(OUT), flush=True)
 finally:

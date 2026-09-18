@@ -162,6 +162,7 @@ pub(crate) use error_contract::{
 use execution_isolation::prepare_skill_execution_isolation;
 pub(crate) use memory_context::inject_skill_memory_context;
 use result_enrichment::enrich_runtime_owned_skill_extra;
+pub(crate) use result_enrichment::validate_and_spill_output;
 pub(crate) use runner::{run_skill_with_runner, run_skill_with_runner_once};
 
 use crate::worker::task_runtime_channel;
@@ -557,6 +558,8 @@ pub(crate) struct SkillRunOutcome {
     pub(crate) text: String,
     pub(crate) notify: Option<bool>,
     pub(crate) validation: Option<Value>,
+    // Host-computed against the original output, never decoded from skill fields.
+    pub(crate) output_contract_validation: Option<Result<(), String>>,
     pub(crate) extra: Option<Value>,
 }
 
@@ -754,8 +757,8 @@ fn builtin_success_extra(workspace_root: &Path, skill_name: &str, args: &Value) 
                 "action": "remove_path",
                 "path": path,
                 "resolved_path": workspace_resolved_path(workspace_root, path),
-                "target_kind": obj.get("target_kind").cloned().unwrap_or(Value::Null),
-                "recursive": obj.get("recursive").and_then(Value::as_bool).unwrap_or(false),
+                "requested_target_kind": obj.get("target_kind").cloned().unwrap_or(Value::Null),
+                "requested_recursive": obj.get("recursive").and_then(Value::as_bool).unwrap_or(false),
             }))
         }
         "schedule" => {
@@ -1835,24 +1838,18 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
                     isolation_artifact_refs,
                 );
             }
-            if let Err(err) = crate::skill_output_artifact::spill_skill_text_if_needed(
-                &execution_state.skill_rt.workspace_root,
+            let output_contract_validation = Some(validate_and_spill_output(
+                execution_state,
                 &task.task_id,
                 &skill_name,
                 &mut text,
                 &mut extra,
-            ) {
-                tracing::warn!(
-                    event = "skill_output_artifact_spill_failed",
-                    task_id = %task.task_id,
-                    skill = %skill_name,
-                    error = %err
-                );
-            }
+            ));
             return Ok(SkillRunOutcome {
                 text,
                 notify: None,
                 validation: None,
+                output_contract_validation,
                 extra,
             });
         }
@@ -2083,24 +2080,18 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
         .and_then(|v| v.as_str())
         .unwrap_or_default()
         .to_string();
-    if let Err(err) = crate::skill_output_artifact::spill_skill_text_if_needed(
-        &execution_state.skill_rt.workspace_root,
+    let output_contract_validation = Some(validate_and_spill_output(
+        execution_state,
         &task.task_id,
         &skill_name,
         &mut text,
         &mut extra,
-    ) {
-        tracing::warn!(
-            event = "skill_output_artifact_spill_failed",
-            task_id = %task.task_id,
-            skill = %skill_name,
-            error = %err
-        );
-    }
+    ));
     Ok(SkillRunOutcome {
         text,
         notify,
         validation,
+        output_contract_validation,
         extra,
     })
 }

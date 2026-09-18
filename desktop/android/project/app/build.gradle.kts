@@ -1,0 +1,96 @@
+import java.util.Properties
+
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("rust")
+}
+
+val selectedIdentity = groovy.json.JsonSlurper().parse(file("../../.tools/product-identity.json")) as Map<*, *>
+val displayName = selectedIdentity["display_name"] as String
+require(displayName.isNotBlank()) { "product_identity_display_name_missing" }
+
+val tauriProperties = Properties().apply {
+    val propFile = file("tauri.properties")
+    if (propFile.exists()) {
+        propFile.inputStream().use { load(it) }
+    }
+}
+
+android {
+    compileSdk = 36
+    namespace = "org.agent_runtime.mobile"
+    defaultConfig {
+        manifestPlaceholders["usesCleartextTraffic"] = "false"
+        applicationId = "org.agent_runtime.mobile"
+        resValue("string", "app_name", displayName)
+        resValue("string", "main_activity_title", displayName)
+        minSdk = 26
+        targetSdk = 36
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
+        versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+    }
+    testBuildType = "release"
+    signingConfigs {
+        create("localRelease") {
+            val keyPath = System.getenv("ANDROID_SIGNING_KEYSTORE")
+            val passwordPath = System.getenv("ANDROID_SIGNING_PASSWORD_FILE")
+            if (keyPath != null && passwordPath != null) {
+                storeFile = file(keyPath)
+                storePassword = file(passwordPath).readText().trim()
+                keyAlias = "mobile-release"
+                keyPassword = storePassword
+            }
+        }
+    }
+    buildTypes {
+        getByName("debug") {
+            manifestPlaceholders["usesCleartextTraffic"] = "true"
+            isDebuggable = true
+            isJniDebuggable = true
+            isMinifyEnabled = false
+            packaging {                jniLibs.keepDebugSymbols.add("*/arm64-v8a/*.so")
+                jniLibs.keepDebugSymbols.add("*/armeabi-v7a/*.so")
+                jniLibs.keepDebugSymbols.add("*/x86/*.so")
+                jniLibs.keepDebugSymbols.add("*/x86_64/*.so")
+            }
+        }
+        getByName("release") {
+            signingConfig = signingConfigs.getByName("localRelease")
+            // Keep the release JNI/AndroidX surface intact for instrumentation
+            // of the identical installed APK. Debugging remains disabled.
+            isMinifyEnabled = false
+            proguardFiles(
+                *fileTree(".") { include("**/*.pro") }
+                    .plus(getDefaultProguardFile("proguard-android-optimize.txt"))
+                    .toList().toTypedArray()
+            )
+        }
+    }
+    kotlinOptions {
+        jvmTarget = "1.8"
+    }
+    buildFeatures {
+        buildConfig = true
+    }
+}
+
+rust {
+    rootDirRel = "../../../"
+}
+
+dependencies {
+    implementation("androidx.webkit:webkit:1.14.0")
+    implementation("androidx.appcompat:appcompat:1.7.1")
+    implementation("androidx.activity:activity-ktx:1.10.1")
+    implementation("com.google.android.material:material:1.12.0")
+    implementation("androidx.lifecycle:lifecycle-process:2.10.0")
+    testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.test:rules:1.7.0")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
+}
+
+apply(from = "tauri.build.gradle.kts")

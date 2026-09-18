@@ -1,0 +1,19 @@
+{
+  "identifier": "org.agent-runtime.mobile",
+  "app": {
+    "security": {
+      "capabilities": ["main", "aipp", "wallet", "mobile-export"],
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: device:; media-src 'self' blob: http://127.0.0.1:*; connect-src ipc: http://ipc.localhost 'self' blob:; frame-src device: http://device.localhost blob:; object-src 'none'; base-uri 'none'; form-action 'none'"
+    }
+  },
+  "bundle": {
+    "targets": [],
+    "android": {
+      "minSdkVersion": 26
+    }
+  },
+  "build": {
+    "frontendDist": "android/dist",
+    "beforeBuildCommand": "node ../UI/node_modules/vite/bin/vite.js build --config android/vite.config.ts"
+  }
+}

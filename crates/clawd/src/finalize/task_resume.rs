@@ -226,6 +226,110 @@ pub(crate) fn answer_verifier_retry_answer_has_required_machine_evidence(
         || journal.step_results.iter().any(step_has_validation_signal)
 }
 
+pub(crate) fn preserve_verified_delivery_tokens_after_retry(
+    journal: &crate::task_journal::TaskJournal,
+    rejected_answer: &str,
+    mut retried_answer: String,
+) -> String {
+    let Some(task_id) = journal
+        .task_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    else {
+        return retried_answer;
+    };
+    let mut preserved = Vec::new();
+    let mut seen_references = std::collections::HashSet::new();
+    for result in &journal.capability_results {
+        for artifact in &result.artifacts {
+            if artifact.visibility
+                != Some(claw_core::capability_result::ArtifactVisibility::UserDelivery)
+                || artifact.owner_task_id.as_deref() != Some(task_id)
+            {
+                continue;
+            }
+            let Some(artifact_id) = artifact.id.as_deref() else {
+                continue;
+            };
+            let Some(reference) = claw_core::task_delivery_artifacts::canonical_task_artifact_ref(
+                task_id,
+                artifact_id,
+            ) else {
+                continue;
+            };
+            if artifact.artifact_ref.as_deref() != Some(reference.as_str()) {
+                continue;
+            }
+            if !seen_references.insert(reference.clone()) {
+                continue;
+            }
+            let referenced_token = [
+                "IMAGE_FILE:",
+                "VIDEO_FILE:",
+                "VOICE_FILE:",
+                "MUSIC_FILE:",
+                "FILE:",
+            ]
+            .into_iter()
+            .map(|prefix| format!("{prefix}{reference}"))
+            .find(|candidate| rejected_answer.contains(candidate));
+            if let Some(detail_line) = referenced_token.as_ref().and_then(|token| {
+                rejected_answer
+                    .lines()
+                    .find(|line| line.contains(token))
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+            }) {
+                let detail_present = retried_answer
+                    .lines()
+                    .any(|line| line.trim() == detail_line);
+                if !detail_present && !preserved.iter().any(|line| line == detail_line) {
+                    preserved.push(detail_line.to_string());
+                }
+            }
+            let token = referenced_token.unwrap_or_else(|| {
+                format!("{}{reference}", delivery_prefix_for_artifact(artifact))
+            });
+            let standalone_present = retried_answer.lines().any(|line| {
+                claw_core::channel_delivery_tokens::parse_legacy_delivery_line_ref(line)
+                    .is_some_and(|parsed| parsed.reference.trim() == reference)
+            });
+            if !standalone_present && !preserved.contains(&token) {
+                preserved.push(token);
+            }
+        }
+    }
+    if preserved.is_empty() {
+        return retried_answer;
+    }
+    if !retried_answer.ends_with('\n') {
+        retried_answer.push('\n');
+    }
+    retried_answer.push_str(&preserved.join("\n"));
+    retried_answer
+}
+
+fn delivery_prefix_for_artifact(
+    artifact: &claw_core::capability_result::ArtifactRef,
+) -> &'static str {
+    let media_type = artifact.media_type.as_deref().unwrap_or_default();
+    if media_type.starts_with("image/") {
+        return "IMAGE_FILE:";
+    }
+    if media_type.starts_with("video/") {
+        return "VIDEO_FILE:";
+    }
+    if media_type.starts_with("audio/") {
+        return match artifact.artifact_role.as_deref() {
+            Some("voice" | "voice_message") => "VOICE_FILE:",
+            Some("music" | "music_track") => "MUSIC_FILE:",
+            _ => "FILE:",
+        };
+    }
+    "FILE:"
+}
+
 #[derive(Debug, Clone, Copy)]
 struct LocalCodeAnswerEvidenceRequirement {
     requires_validation_signal: bool,

@@ -1,6 +1,159 @@
 use super::*;
 
 #[test]
+fn required_literal_args_preserve_registry_content_without_weakening_paths() {
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+    for skill in ["fs_basic", "write_file"] {
+        for content in ["", "\n", "\r\n", " \t"] {
+            let args = json!({"path": "tmp/literal.txt", "content": content});
+            assert!(
+                super::super::required_arg_satisfied(
+                    &state,
+                    skill,
+                    args.as_object().unwrap(),
+                    "content"
+                ),
+                "skill={skill} content={content:?}"
+            );
+            assert!(super::super::required_arg_satisfied(
+                &state,
+                skill,
+                args.as_object().unwrap(),
+                "path"
+            ));
+        }
+        for args in [json!({"path": "\n"}), json!({"path": " ", "content": null})] {
+            for required in ["content", "path"] {
+                assert!(!super::super::required_arg_satisfied(
+                    &state,
+                    skill,
+                    args.as_object().unwrap(),
+                    required
+                ));
+            }
+        }
+    }
+}
+
+#[test]
+fn namespaced_actions_keep_registry_policy_required_args_and_effects() {
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+    let manifest = state.skill_manifest("office_workspace").expect("manifest");
+    for mapping in &manifest.planner_capabilities {
+        let action = mapping.action.as_deref().expect("explicit action");
+        let args = json!({"action": action});
+        assert!(
+            super::super::planner_step_has_structured_policy(&state, "office_workspace", &args),
+            "action={action}"
+        );
+        assert_eq!(
+            super::super::planner_mapping_required_args(&state, "office_workspace", &args),
+            Some(mapping.required.clone()),
+            "action={action}"
+        );
+        assert_eq!(
+            super::super::action_scoped_risk_level(&state, "office_workspace", &args),
+            mapping.risk_level,
+            "action={action}"
+        );
+        assert_eq!(
+            super::super::registry_declares_non_mutating_planner_action(
+                &state,
+                "office_workspace",
+                &args
+            ),
+            matches!(
+                mapping.effect,
+                Some(
+                    claw_core::skill_registry::PlannerCapabilityEffect::Observe
+                        | claw_core::skill_registry::PlannerCapabilityEffect::Validate
+                )
+            ),
+            "action={action}"
+        );
+        let plan = crate::PlanResult {
+            goal: "inspect action policy".to_string(),
+            missing_slots: Vec::new(),
+            needs_confirmation: false,
+            output_contract: None,
+            steps: vec![crate::PlanStep {
+                step_id: "step_1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "office_workspace".to_string(),
+                args: args.clone(),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }],
+            planner_notes: String::new(),
+            plan_kind: crate::PlanKind::Single,
+            raw_plan_text: String::new(),
+        };
+        let policy = crate::task_execution_policy::configured_policy(&state);
+        let decision = super::super::verify_permission_decision_json(
+            &state,
+            policy,
+            &plan,
+            VerifyMode::Enforce,
+            true,
+            false,
+            None,
+            None,
+            &[],
+        );
+        assert_eq!(
+            decision["steps"][0]["registry_policy"]["capability"],
+            mapping.name
+        );
+        assert_eq!(
+            super::super::step_sandbox_denial_reason(&state, policy, "office_workspace", &args),
+            policy.sandbox_denial(crate::runtime::policy::SandboxRequirements {
+                mutates: crate::execution_recipe::classify_skill_action_effect(
+                    &state,
+                    "office_workspace",
+                    &args
+                )
+                .mutates,
+                network_access: mapping.network_access.unwrap_or(false),
+                filesystem_write: mapping.filesystem_write.unwrap_or(false),
+                external_publish: mapping.external_publish.unwrap_or(false),
+                credential_access: mapping.credential_access.unwrap_or(false),
+                subprocess: mapping.subprocess.unwrap_or(false),
+                package_install: mapping.package_install.unwrap_or(false),
+                privilege_escalation: mapping.privilege_escalation.unwrap_or(false),
+                isolation_profile: mapping.isolation_profile.map(|profile| profile.as_token()),
+            }),
+            "action={action}"
+        );
+    }
+    for action in ["spreadsheet_create", "spreadsheet.unknown"] {
+        let args = json!({"action": action});
+        assert!(!super::super::planner_step_has_structured_policy(
+            &state,
+            "office_workspace",
+            &args
+        ));
+        assert!(
+            super::super::planner_mapping_required_args(&state, "office_workspace", &args)
+                .is_none()
+        );
+        assert!(
+            super::super::action_scoped_risk_level(&state, "office_workspace", &args).is_none()
+        );
+        assert!(
+            !super::super::registry_declares_non_mutating_planner_action(
+                &state,
+                "office_workspace",
+                &args
+            )
+        );
+    }
+}
+
+#[test]
 fn direct_workspace_diff_resolves_and_remains_confirmation_exempt() {
     let state = registry_confirmation::workspace_registry_state();
     let task = test_task();
@@ -219,7 +372,7 @@ fn task_plan_update_verifies_without_user_confirmation() {
         .expect("task plan update mapping");
     assert_eq!(
         task_plan_mapping.effect.map(|effect| effect.as_token()),
-        Some("validate")
+        Some("observe")
     );
     assert_eq!(
         result.capability_resolutions[0]

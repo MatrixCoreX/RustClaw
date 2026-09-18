@@ -247,8 +247,11 @@ pub(super) fn answer_verifier_failure_needs_user_message(
     answer_text: &str,
     err_text: &str,
 ) -> bool {
+    // Replace only when the user-visible answer itself is a machine control
+    // payload. Grounded prose must stay visible even if error_text is JSON.
     answer_text_is_machine_json_payload(answer_text)
-        || answer_text_is_machine_json_payload(err_text)
         || answer_text_is_answer_verifier_machine_line(answer_text)
-        || answer_text_is_answer_verifier_machine_line(err_text)
+        || (answer_text.trim().is_empty()
+            && (answer_text_is_machine_json_payload(err_text)
+                || answer_text_is_answer_verifier_machine_line(err_text)))
 }

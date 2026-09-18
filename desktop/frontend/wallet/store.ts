@@ -10,7 +10,10 @@ interface Snapshot extends WalletStatus {
 let snapshot: Snapshot = {
   initialized: false,
   unlocked: false,
+  retry_after_seconds: 0,
   accounts: [],
+  storage_version: 2,
+  backup_upgrade_accounts: [],
   selectedId: "",
   error: "",
 };

@@ -316,10 +316,31 @@ fn fs_basic_stat_paths_rewrites_to_system_basic_path_batch_facts() {
         rewrite.runtime_args.get("action").and_then(|v| v.as_str()),
         Some("path_batch_facts")
     );
-    assert_eq!(
-        rewrite.runtime_args.get("paths").and_then(|v| v.as_str()),
-        Some("README.md")
-    );
+    assert_eq!(rewrite.runtime_args["paths"], json!(["README.md"]));
+}
+
+#[test]
+fn fs_basic_stat_paths_normalizes_scalar_paths_without_splitting_filenames() {
+    for args in [
+        json!({"action":"stat_paths", "path":"folder with spaces/a,b.txt"}),
+        json!({"action":"stat_paths", "paths":"folder with spaces/a,b.txt"}),
+        json!({"action":"stat_paths", "paths":["folder with spaces/a,b.txt"]}),
+    ] {
+        let rewritten = rewrite_virtual_tool_call("fs_basic", args)
+            .expect("valid call")
+            .expect("virtual rewrite");
+        assert_eq!(
+            rewritten.runtime_args["paths"],
+            json!(["folder with spaces/a,b.txt"])
+        );
+    }
+    let rewritten = rewrite_virtual_tool_call(
+        "fs_basic",
+        json!({"action":"stat_paths", "paths":["a.txt", "b.txt"]}),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(rewritten.runtime_args["paths"], json!(["a.txt", "b.txt"]));
 }
 
 #[test]

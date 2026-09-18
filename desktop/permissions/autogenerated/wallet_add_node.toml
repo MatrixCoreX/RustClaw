@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-wallet-add-node"
+description = "Enables the wallet_add_node command without any pre-configured scope."
+commands.allow = ["wallet_add_node"]
+
+[[permission]]
+identifier = "deny-wallet-add-node"
+description = "Denies the wallet_add_node command without any pre-configured scope."
+commands.deny = ["wallet_add_node"]

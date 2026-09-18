@@ -337,6 +337,7 @@ output_schema = { type = "object", required = ["text", "extra"], properties = { 
         "output_fixture",
         &mut step,
         Some(&json!({ "count": 0 })),
+        None,
     )
     .expect("mismatch");
 
@@ -385,9 +386,73 @@ output_schema = { type = "object", required = ["text", "extra"], properties = { 
         "pending_async_job": { "job_id": "local_process:test", "status": "accepted" }
     });
 
-    assert!(
-        enforce_skill_output_contract(&state, "output_fixture", &mut step, Some(&handoff),)
-            .is_none()
-    );
+    assert!(enforce_skill_output_contract(
+        &state,
+        "output_fixture",
+        &mut step,
+        Some(&handoff),
+        None
+    )
+    .is_none());
     assert_eq!(step.status, crate::executor::StepExecutionStatus::Ok);
+}
+
+#[test]
+fn spooled_outputs_use_host_validation_of_original_not_preview_or_skill_claims() {
+    let mut state = test_state();
+    install_test_registry(
+        &state,
+        r#"
+[[skills]]
+name = "output_fixture"
+enabled = true
+kind = "builtin"
+output_schema = { type = "object", required = ["session_id", "result"], properties = { session_id = { type = "string" }, result = { type = "object" } } }
+"#,
+        &["output_fixture"],
+    );
+    let dir = std::env::temp_dir().join(format!("output-contract-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).expect("workspace");
+    state.skill_rt.workspace_root = dir.clone();
+    for valid in [true, false] {
+        let mut original = json!({"result": {"text": "x".repeat(1024 * 1024 + 1)}});
+        if valid {
+            original["session_id"] = json!("session-fixture");
+        }
+        let mut text = original.to_string();
+        let mut extra = Some(json!({"output_contract_validation": "ok"}));
+        let validation = crate::skills::validate_and_spill_output(
+            &state,
+            "task-fixture",
+            "output_fixture",
+            &mut text,
+            &mut extra,
+        );
+        assert_eq!(validation.is_ok(), valid);
+        assert_eq!(extra.as_ref().unwrap()["output_truncated"], true);
+        let preview: serde_json::Value = serde_json::from_str(&text).expect("preview");
+        assert!(preview.get("session_id").is_none());
+        let mut step = crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "output_fixture".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(text),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        };
+        let error = enforce_skill_output_contract(
+            &state,
+            "output_fixture",
+            &mut step,
+            extra.as_ref(),
+            Some(&validation),
+        );
+        assert_eq!(error.is_none(), valid);
+        assert_eq!(
+            step.status == crate::executor::StepExecutionStatus::Ok,
+            valid
+        );
+    }
+    std::fs::remove_dir_all(dir).expect("cleanup");
 }

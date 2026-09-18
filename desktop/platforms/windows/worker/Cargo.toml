@@ -1,0 +1,15 @@
+[workspace]
+
+[package]
+name = "agent-vault"
+version = "0.4.1"
+edition = "2021"
+publish = false
+
+[dependencies]
+agent-desktop = { path = "../../..", default-features = false }
+
+[profile.release]
+strip = true
+panic = "abort"
+

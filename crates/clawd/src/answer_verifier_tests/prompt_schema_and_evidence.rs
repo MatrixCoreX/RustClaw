@@ -41,6 +41,7 @@ fn answer_verifier_prompt_request_preserves_original_language_over_resolved_inte
 #[test]
 fn answer_verifier_schema_accepts_typed_output() {
     let raw = json!({
+        "operation_checks": [],
         "pass": false,
         "missing_evidence_fields": ["size_bytes"],
         "answer_incomplete_reason": "missing requested size evidence",
@@ -75,6 +76,7 @@ fn answer_verifier_schema_drift() {
     );
 
     let expected = [
+        "operation_checks",
         "pass",
         "missing_evidence_fields",
         "answer_incomplete_reason",
@@ -94,7 +96,7 @@ fn answer_verifier_schema_drift() {
         .collect::<BTreeSet<_>>();
     assert_eq!(
         actual, expected,
-        "answer_verifier.schema.json properties drifted from AnswerVerifierOut"
+        "answer_verifier.schema.json properties drifted from model verification contract"
     );
 
     let required = schema
@@ -106,10 +108,11 @@ fn answer_verifier_schema_drift() {
         .collect::<BTreeSet<_>>();
     assert_eq!(
         required, expected,
-        "answer_verifier.schema.json required set drifted from AnswerVerifierOut"
+        "answer_verifier.schema.json required set drifted from model verification contract"
     );
 
     let raw = json!({
+        "operation_checks": [],
         "pass": true,
         "missing_evidence_fields": [],
         "answer_incomplete_reason": "",
@@ -217,6 +220,47 @@ fn answer_verifier_prompts_scope_constraints_to_compound_deliverables() {
 }
 
 #[test]
+fn answer_verifier_prompts_require_content_postconditions_before_cleanup() {
+    const VERIFIER: &str =
+        include_str!("../../../../prompts/layers/overlays/answer_verifier_prompt.md");
+    const RETRY: &str =
+        include_str!("../../../../prompts/layers/overlays/answer_verifier_retry_prompt.md");
+    assert!(VERIFIER.contains("decoded content and byte evidence"));
+    assert!(VERIFIER.contains("execution postcondition before cleanup"));
+    assert!(VERIFIER.contains("a proposed or rejected correction is not an executed correction"));
+    assert!(VERIFIER.contains("explicitly requested operation or verification method"));
+    assert!(VERIFIER.contains("equivalent or inferable end state"));
+    assert!(VERIFIER.contains("Do not invent extra procedures"));
+    const NATIVE: &str =
+        include_str!("../../../../prompts/layers/overlays/native_action_protocol.md");
+    assert!(NATIVE.contains("explicitly requested operation or verification method"));
+    assert!(RETRY.contains("missing execution postcondition"));
+}
+
+#[test]
+fn answer_verifier_prompts_reject_conflicting_numeric_explanations() {
+    const VERIFIER: &str =
+        include_str!("../../../../prompts/layers/overlays/answer_verifier_prompt.md");
+    const RETRY: &str =
+        include_str!("../../../../prompts/layers/overlays/answer_verifier_retry_prompt.md");
+    assert!(VERIFIER.contains("explanatory arithmetic"));
+    assert!(VERIFIER.contains("unsupported_claims"));
+    assert!(VERIFIER.contains("without re-executing completed actions"));
+    assert!(RETRY.contains("unsupported recalculations"));
+}
+
+#[test]
+fn answer_verifier_prompts_bind_opaque_references_to_their_owning_operation() {
+    const VERIFIER: &str =
+        include_str!("../../../../prompts/layers/overlays/answer_verifier_prompt.md");
+    const RETRY: &str =
+        include_str!("../../../../prompts/layers/overlays/answer_verifier_retry_prompt.md");
+    assert!(VERIFIER.contains("owning operation"));
+    assert!(VERIFIER.contains("unrequested diagnostic details"));
+    assert!(RETRY.contains("owning operation"));
+}
+
+#[test]
 fn answer_verifier_gap_is_high_confidence_only() {
     let low = AnswerVerifierOut {
         pass: false,
@@ -293,9 +337,21 @@ fn execution_evidence_prompt_uses_provider_safe_redacted_view() {
     assert!(!block.contains("sk-test-secret-token-that-should-not-leak"));
     assert!(!block.contains("password=secret-value-that-should-not-leak"));
     assert!(block.contains("provider:image_generate:minimax:dry_run"));
-    assert!(block.contains("\"redacted\": true"));
-    assert!(block.contains("\"provider_evidence_view\": \"provider_safe_redacted\""));
-    assert!(block.contains("\"raw_excerpt_policy\": \"no_full_raw_excerpt\""));
+    let evidence: serde_json::Value = serde_json::from_str(&block).unwrap();
+    let observed = &evidence["step_evidence"][0]["observed_evidence"];
+    assert!(observed["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["redacted"] == true));
+    assert_eq!(
+        observed["extractor"]["provider_safety"]["provider_evidence_view"],
+        "provider_safe_redacted"
+    );
+    assert_eq!(
+        observed["extractor"]["provider_safety"]["raw_excerpt_policy"],
+        "no_full_raw_excerpt"
+    );
 }
 
 #[test]
@@ -328,8 +384,11 @@ fn execution_evidence_prompt_includes_structured_plan_verifier_rejections() {
 
     assert!(block.contains("plan_verifier_rejection_evidence"));
     assert!(block.contains("invalid_argument_value"));
-    assert!(block.contains("\"minimum\": -90"));
-    assert!(block.contains("\"maximum\": 90"));
+    let evidence: serde_json::Value = serde_json::from_str(&block).unwrap();
+    let constraint = &evidence["plan_verifier_rejection_evidence"][0]["issues"][0]
+        ["argument_constraints"][0]["schema"];
+    assert_eq!(constraint["minimum"], -90);
+    assert_eq!(constraint["maximum"], 90);
 }
 
 #[test]
@@ -425,10 +484,21 @@ fn execution_evidence_prompt_includes_error_step_observed_evidence() {
 
     let block = execution_evidence_prompt_block(&journal);
 
-    assert!(block.contains(r#""step_id": "step_2""#), "block: {block}");
-    assert!(block.contains(r#""status": "error""#), "block: {block}");
+    let evidence: serde_json::Value = serde_json::from_str(&block).unwrap();
+    let step = evidence["step_evidence"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|step| step["step_id"] == "step_2")
+        .expect("failed step evidence");
+    assert_eq!(step["step_id"], "step_2");
+    assert_eq!(step["status"], "error");
     assert!(block.contains(r#""command_output""#), "block: {block}");
-    assert!(block.contains(r#""field": "exit_code""#), "block: {block}");
+    assert!(step["observed_evidence"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["field"] == "exit_code"));
     assert!(
         !block.contains("definitely_missing_command_agent_english_67890"),
         "block: {block}"
@@ -594,9 +664,10 @@ fn execution_evidence_keeps_large_explicit_model_observation_inline() {
     let block = execution_evidence_prompt_block(&journal);
 
     assert!(block.contains("observed-page-tail"), "block: {block}");
-    assert!(
-        block.contains("\"projection\": \"structured_result\""),
-        "block: {block}"
+    let evidence: serde_json::Value = serde_json::from_str(&block).unwrap();
+    assert_eq!(
+        evidence["capability_result_evidence"][0]["projection"],
+        "structured_result"
     );
     assert!(
         !block.contains("bulk-value-that-must-not-replace-model-observation"),
@@ -629,9 +700,10 @@ fn execution_evidence_recovers_content_fields_from_large_generic_result() {
 
     let block = execution_evidence_prompt_block(&journal);
 
-    assert!(
-        block.contains("\"projection\": \"canonical_evidence_reference\""),
-        "block: {block}"
+    let evidence: serde_json::Value = serde_json::from_str(&block).unwrap();
+    assert_eq!(
+        evidence["capability_result_evidence"][0]["projection"],
+        "canonical_evidence_reference"
     );
     assert!(
         block.contains("deep-observed-content-marker"),

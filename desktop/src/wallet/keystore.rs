@@ -1,3 +1,5 @@
+#[cfg(target_os = "android")]
+use crate::android::credentials as keyring;
 use crate::Result;
 use uuid::Uuid;
 

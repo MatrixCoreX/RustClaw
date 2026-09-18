@@ -565,11 +565,7 @@ pub fn preflight_open_platform_media(
             None,
             Some(error.error_code()),
             None,
-            &format!(
-                "{}:{}",
-                error.actual_bytes.unwrap_or_default(),
-                max_bytes
-            ),
+            &format!("{}:{}", error.actual_bytes.unwrap_or_default(), max_bytes),
         )
     })
 }

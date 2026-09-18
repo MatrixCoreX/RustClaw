@@ -36,6 +36,7 @@ pub(super) async fn execute_async_poll_dispatch_result_with_state(
     if let Some(mut payload) =
         execute_async_poll_dispatch_result(claimed, now_ts, default_retry_after_seconds)
     {
+        preserve_completed_async_delivery_artifacts(state, claimed, &payload);
         project_local_process_progress(state, claimed, &payload).await;
         update_provider_job_version_lease(state, claimed, &mut payload, now_ts);
         return Some(payload);
@@ -52,8 +53,27 @@ pub(super) async fn execute_async_poll_dispatch_result_with_state(
         now_ts,
         default_retry_after_seconds,
     )?;
+    preserve_completed_async_delivery_artifacts(state, claimed, &payload);
     update_provider_job_version_lease(state, claimed, &mut payload, now_ts);
     Some(payload)
+}
+
+fn preserve_completed_async_delivery_artifacts(
+    state: &AppState,
+    claimed: &repo::ClaimedDispatchedPausedCheckpointResumeExecution,
+    payload: &Value,
+) {
+    if let Err(error) = crate::task_artifacts::preserve_async_completion_artifacts(
+        &state.skill_rt.workspace_root,
+        &claimed.task_id,
+        payload,
+    ) {
+        tracing::warn!(
+            task_id = %claimed.task_id,
+            error = %error,
+            "async completion artifact preservation failed"
+        );
+    }
 }
 
 async fn project_local_process_progress(

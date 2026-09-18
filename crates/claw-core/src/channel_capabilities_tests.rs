@@ -73,10 +73,22 @@ fn wechat_media_have_no_undocumented_local_byte_ceiling() {
 fn whatsapp_web_media_defaults_match_catalog() {
     let config = crate::config::WhatsappWebConfig::default();
     for (kind, configured) in [
-        (ChannelCapabilityKind::SendImage, config.max_outbound_image_bytes),
-        (ChannelCapabilityKind::SendAudio, config.max_outbound_audio_bytes),
-        (ChannelCapabilityKind::SendVideo, config.max_outbound_video_bytes),
-        (ChannelCapabilityKind::SendFile, config.max_outbound_file_bytes),
+        (
+            ChannelCapabilityKind::SendImage,
+            config.max_outbound_image_bytes,
+        ),
+        (
+            ChannelCapabilityKind::SendAudio,
+            config.max_outbound_audio_bytes,
+        ),
+        (
+            ChannelCapabilityKind::SendVideo,
+            config.max_outbound_video_bytes,
+        ),
+        (
+            ChannelCapabilityKind::SendFile,
+            config.max_outbound_file_bytes,
+        ),
     ] {
         assert_eq!(
             channel_media_max_bytes(ChannelAdapterKind::WhatsappWeb, kind),

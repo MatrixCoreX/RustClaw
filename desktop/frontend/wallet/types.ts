@@ -5,6 +5,9 @@ export interface WalletAccount {
   backed_up: boolean;
 }
 export interface WalletStatus {
+  storage_version: number;
+  backup_upgrade_accounts: string[];
+  retry_after_seconds: number;
   initialized: boolean;
   unlocked: boolean;
   accounts: WalletAccount[];

@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WINDOWS = sys.platform == "win32"
 if WINDOWS and os.environ.get("GITHUB_ACTIONS") != "true":
     raise SystemExit("windows_native_e2e_requires_disposable_ci_runner")
-OUT = ROOT / "test-results" / ("native-platform/e2e" if WINDOWS else "native")
+OUT = Path(os.environ.get("DESKTOP_TEST_OUTPUT_DIR", ROOT / "test-results")) / ("native-platform/e2e" if WINDOWS else "native")
 OUT.mkdir(parents=True, exist_ok=True)
 FIXTURE = Fixture(OUT / "tls")
 BASE = "http://127.0.0.1:4447"
@@ -80,11 +80,11 @@ try:
     measurements["startup_seconds"] = round(time.monotonic() - started, 3)
     measurements["home"] = sample_processes()
     initial_theme = execute("return document.documentElement.dataset.theme")
-    execute("document.querySelector('.desktop-header button').click();return true;")
+    execute("document.querySelector('[data-desktop-theme-toggle]').click();return true;")
     time.sleep(.1)
     assert execute("return document.documentElement.dataset.theme") != initial_theme
     screenshot("00-alternate-theme")
-    execute("document.querySelector('.desktop-header button').click();return true;")
+    execute("document.querySelector('[data-desktop-theme-toggle]').click();return true;")
     for previous in native("profiles"):
         native("forget_profile", {"profileId": previous["id"]})
     execute("location.reload();return true;")

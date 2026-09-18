@@ -110,6 +110,7 @@ pub(crate) fn seed_loop_state_from_task_checkpoint(
         .as_ref()
         .filter(|value| value.is_array() || value.is_object())
     {
+        super::attempt_ledger::restore_attempt_ledger_snapshot(loop_state, attempt_ledger);
         loop_state.output_vars.insert(
             "agent_loop.resume_attempt_ledger_present".to_string(),
             "true".to_string(),

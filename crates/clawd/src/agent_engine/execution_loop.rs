@@ -763,7 +763,11 @@ async fn try_execute_independent_read_batch(
 
     let fingerprints = actions[..batch_len]
         .iter()
-        .map(|action| super::action_fingerprint_for_policy(state, policy, action))
+        .map(|action| {
+            super::workspace_action_revision::execution_fingerprint(
+                state, task, policy, loop_state, action,
+            )
+        })
         .collect::<Vec<_>>();
     for (idx, (action, fingerprint)) in actions[..batch_len].iter().zip(&fingerprints).enumerate() {
         if let Some(reason) = check_repeat_action_guard(
@@ -971,7 +975,9 @@ pub(super) async fn execute_actions_once(
         }
         let step_in_round = idx + 1;
         let global_step = loop_state.total_steps_executed + 1;
-        let fingerprint = super::action_fingerprint_for_policy(state, policy, action);
+        let fingerprint = super::workspace_action_revision::execution_fingerprint(
+            state, task, policy, loop_state, action,
+        );
         if action_counts_as_tool_call(action)
             && loop_state.task_budget_slice.as_ref().is_some_and(|slice| {
                 loop_state.tool_calls_total as u64 >= slice.hard_ceilings.tool_calls

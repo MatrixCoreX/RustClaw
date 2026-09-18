@@ -1224,6 +1224,13 @@ async fn read_framed_child_output(
 }
 
 fn child_process_command(launch: &ChildLaunch) -> Result<Command, String> {
+    child_process_command_for_parent(launch, inherited_parent_sandbox_backend())
+}
+
+fn child_process_command_for_parent(
+    launch: &ChildLaunch,
+    parent_backend: Option<&str>,
+) -> Result<Command, String> {
     if !launch.installed {
         let mut command = Command::new(&launch.program);
         command.args(&launch.args).envs(&launch.environment);
@@ -1236,7 +1243,10 @@ fn child_process_command(launch: &ChildLaunch) -> Result<Command, String> {
         .working_directory
         .as_deref()
         .ok_or_else(|| "installed launch working directory is missing".to_string())?;
-    let std_command = if inherited_parent_sandbox_backend().is_some() {
+    let std_command = if parent_backend
+        .and_then(inherited_parent_sandbox_backend_token)
+        .is_some()
+    {
         let mut command = std::process::Command::new(&launch.program);
         command.current_dir(working_directory);
         command
@@ -1295,6 +1305,9 @@ fn inherited_parent_sandbox_backend() -> Option<&'static str> {
 
 fn inherited_parent_sandbox_backend_token(value: &str) -> Option<&'static str> {
     match value {
+        // The host emits this only after DangerFull authorization. A missing
+        // or unknown value still requires the installed package sandbox.
+        "direct" => Some("direct"),
         "bubblewrap" => Some("bubblewrap"),
         "macos_seatbelt" => Some("macos_seatbelt"),
         _ => None,

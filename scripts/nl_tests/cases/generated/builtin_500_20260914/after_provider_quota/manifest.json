@@ -1,0 +1,929 @@
+{
+  "schema_version": 1,
+  "evidence_path_base": "workspace_root",
+  "suite_sha256": "d12520a5d298222d60ea1d7a7eb99494ebed9c15a81d073c9f55f35a303c48cd",
+  "total_cases": 500,
+  "accepted_prior": {
+    "fresh_config_edit_locale_fixture_en": {
+      "task_id": "fa04c3db-5225-4fa7-8b7f-4b6907ceb663",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/config_focus/cases/20260914_150222/case_013_line_017_fresh_config_edit_locale_fixture_en/final.json"
+    },
+    "fresh_run_cmd_cli_help_en": {
+      "task_id": "2fb53b43-6cbe-48c7-a3c8-aec109229d84",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/full/cases/20260914_143504/case_001_line_005_fresh_run_cmd_cli_help_en/final.json"
+    },
+    "fresh_read_file_contract_heading_zh": {
+      "task_id": "ab5abfb3-b624-4cfe-9593-5dfc15cc4584",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/full/cases/20260914_143504/case_002_line_006_fresh_read_file_contract_heading_zh/final.json"
+    },
+    "fresh_task_plan_revision_zh": {
+      "task_id": "b04fce34-19b5-4f82-8409-cdd236e078a4",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/full/cases/20260914_143504/case_006_line_010_fresh_task_plan_revision_zh/final.json"
+    },
+    "fresh_list_dir_config_copies_en": {
+      "task_id": "1cdb9149-10b0-4495-a684-628392bda19c",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/full/cases/20260914_143504/case_007_line_011_fresh_list_dir_config_copies_en/final.json"
+    },
+    "fresh_memory_lifecycle_en": {
+      "task_id": "fc83ec02-62b2-4453-8ded-3c49d8cc5703",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/memory_fact/cases/20260914_145248/case_005_line_009_fresh_memory_lifecycle_en/final.json"
+    },
+    "fresh_system_info_machine_fields_zh": {
+      "task_id": "c2278602-affd-498d-8e1e-e3925611e70e",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_3/cases/20260914_145105/case_003_line_004_fresh_system_info_machine_fields_zh/final.json"
+    },
+    "fresh_git_remote_read_missing_en": {
+      "task_id": "f97af839-6802-4e0f-875e-62821d4ff670",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/prompt_focus/cases/20260914_153726/case_001_line_002_fresh_git_remote_read_missing_en/final.json"
+    },
+    "fresh_fs_search_recovery_line_en": {
+      "task_id": "dc83c96f-7a06-410d-82b1-ce7145b70e1e",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/prompt_focus/cases/20260914_153726/case_002_line_003_fresh_fs_search_recovery_line_en/final.json"
+    },
+    "fresh_doc_parse_agents_section_en": {
+      "task_id": "b1e23a16-5ae9-4353-ad6c-70f3555cc4e0",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/prompt_focus/cases/20260914_153726/case_003_line_004_fresh_doc_parse_agents_section_en/final.json"
+    },
+    "b100_003_fs_count_logs_zh": {
+      "task_id": "3b2b9108-94e8-4bd3-88a9-5e272fd1cec1",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_1/cases/20260914_151852/case_004_line_005_b100_003_fs_count_logs_zh/final.json"
+    },
+    "b100_007_fs_compare_paths_en": {
+      "task_id": "72cfc1ea-a8ac-4fca-a0e5-b935f6fbe9c3",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_1/cases/20260914_151852/case_005_line_006_b100_007_fs_compare_paths_en/final.json"
+    },
+    "b100_011_fs_missing_file_graceful_en": {
+      "task_id": "f4cb9a1e-3361-4428-96bb-1d34d88af093",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_1/cases/20260914_151852/case_006_line_007_b100_011_fs_missing_file_graceful_en/final.json"
+    },
+    "b100_015_fs_content_excerpt_boundary_zh": {
+      "task_id": "5df4bb95-cbec-4a62-9148-3c1f3c68a7ea",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_1/cases/20260914_151852/case_007_line_008_b100_015_fs_content_excerpt_boundary_zh/final.json"
+    },
+    "b100_019_config_validate_fixture_en": {
+      "task_id": "739c1b52-0bf2-4c4d-981d-924f3c4f722a",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_1/cases/20260914_151852/case_008_line_009_b100_019_config_validate_fixture_en/final.json"
+    },
+    "b100_023_config_no_secret_leak_zh": {
+      "task_id": "28a5bdec-4a93-43d2-aaf3-271c6f220604",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_1/cases/20260914_151852/case_009_line_010_b100_023_config_no_secret_leak_zh/final.json"
+    },
+    "b100_027_system_extract_package_name_en": {
+      "task_id": "366fe251-4e5b-49dc-80df-b4b3d80b0432",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_1/cases/20260914_151852/case_010_line_011_b100_027_system_extract_package_name_en/final.json"
+    },
+    "b100_031_process_ps_clawd_zh": {
+      "task_id": "e68b41e4-d75e-471f-b8da-92f3913c3429",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_1/cases/20260914_151852/case_011_line_012_b100_031_process_ps_clawd_zh/final.json"
+    },
+    "b100_035_git_branch_remote_en": {
+      "task_id": "d34b2c12-5361-4264-915d-359dbbc4096b",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_1/cases/20260914_151852/case_012_line_013_b100_035_git_branch_remote_en/final.json"
+    },
+    "b100_git_remote_read_missing_connection_zh": {
+      "task_id": "491dccde-f0a6-4f81-b537-1b5a7922a036",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_1/cases/20260914_151852/case_013_line_014_b100_git_remote_read_missing_connection_zh/final.json"
+    },
+    "b100_046_task_list_zh": {
+      "task_id": "f3ec21c1-1283-4d2c-9c50-358c078a4ce3",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_1/cases/20260914_151852/case_016_line_017_b100_046_task_list_zh/final.json"
+    },
+    "b100_050_archive_read_member_en": {
+      "task_id": "72811a4c-58e9-4c2e-a906-9bc2bd530d21",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_1/cases/20260914_151852/case_017_line_018_b100_050_archive_read_member_en/final.json"
+    },
+    "b100_054_db_select_limit_zh": {
+      "task_id": "44f9cb64-6070-4355-9cfc-22f1495391af",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_1/cases/20260914_151852/case_018_line_019_b100_054_db_select_limit_zh/final.json"
+    },
+    "b100_058_log_analyze_app_zh": {
+      "task_id": "79d2ec7e-b56b-423e-aa54-e29061391197",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_1/cases/20260914_151852/case_019_line_020_b100_058_log_analyze_app_zh/final.json"
+    },
+    "b100_062_transform_sort_json_zh": {
+      "task_id": "b49518a5-bdb0-4e6d-a018-8611eb65aed1",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_1/cases/20260914_151852/case_020_line_021_b100_062_transform_sort_json_zh/final.json"
+    },
+    "b100_072_local_health_zh": {
+      "task_id": "d94e1d25-138d-4eb5-b1e3-565485bbbdd4",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_1/cases/20260914_151852/case_022_line_023_b100_072_local_health_zh/final.json"
+    },
+    "b100_076_web_search_domain_allow_zh": {
+      "task_id": "f93bc850-4e3b-4fb7-b5dc-55ed6af52b7e",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_1/cases/20260914_151852/case_023_line_024_b100_076_web_search_domain_allow_zh/final.json"
+    },
+    "b100_104_subagent_readonly_review_en": {
+      "task_id": "4db162cd-5717-42d0-bc0a-b3fe1b12d7d4",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_1/cases/20260914_151852/case_025_line_026_b100_104_subagent_readonly_review_en/final.json"
+    },
+    "b100_108_nni_status_zh": {
+      "task_id": "5425591a-09dc-4eb1-8b06-465912c4e0f9",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_1/cases/20260914_151852/case_026_line_027_b100_108_nni_status_zh/final.json"
+    },
+    "new_schedule_001": {
+      "task_id": "b94771b1-5bd5-4920-9db2-49b4f0252f5d",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_1/cases/20260914_151852/case_027_line_028_new_schedule_001/final.json"
+    },
+    "new_multi_001": {
+      "task_id": "d4a305f9-5699-4319-b862-a0cc96bb60cd",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_1/cases/20260914_151852/case_028_line_029_new_multi_001/final.json"
+    },
+    "new_schedule_002": {
+      "task_id": "ae09e82d-fc85-44b5-9d7c-f1369928b79c",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_1/cases/20260914_151852/case_029_line_030_new_schedule_002/final.json"
+    },
+    "b100_001_fs_stat_readme_zh": {
+      "task_id": "0c07c8d4-ea55-47cb-ad3b-809a4f1a19ae",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_3/cases/20260914_151854/case_003_line_004_b100_001_fs_stat_readme_zh/final.json"
+    },
+    "b100_005_fs_grep_keyword_en": {
+      "task_id": "03a6710f-64b1-44c8-9589-eafdd05ab7a7",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_3/cases/20260914_151854/case_004_line_005_b100_005_fs_grep_keyword_en/final.json"
+    },
+    "b100_009_system_tree_summary_zh": {
+      "task_id": "427338b6-fd5d-45b8-9d37-95000e64175c",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_3/cases/20260914_151854/case_005_line_006_b100_009_system_tree_summary_zh/final.json"
+    },
+    "b100_013_fs_file_names_only_zh": {
+      "task_id": "6ccc7201-a5f0-4d67-b4c3-73ee9322d16c",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_3/cases/20260914_151854/case_006_line_007_b100_013_fs_file_names_only_zh/final.json"
+    },
+    "b100_017_config_read_registry_prompt_en": {
+      "task_id": "3ee70a34-8fcc-4897-a33d-1ebf2cc9dab7",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_3/cases/20260914_151854/case_007_line_008_b100_017_config_read_registry_prompt_en/final.json"
+    },
+    "b100_021_config_edit_apply_fixture_zh": {
+      "task_id": "4fceb760-d2b5-40d7-871f-b0baf88b0985",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_3/cases/20260914_151854/case_008_line_009_b100_021_config_edit_apply_fixture_zh/final.json"
+    },
+    "b100_025_system_runtime_status_en": {
+      "task_id": "eaff323a-cdd9-4cf2-a1aa-4e29c3e25bc7",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_3/cases/20260914_151854/case_009_line_010_b100_025_system_runtime_status_en/final.json"
+    },
+    "b100_029_run_cmd_echo_zh": {
+      "task_id": "b7a94ce1-25bd-46b6-afcd-442802473e2d",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_3/cases/20260914_151854/case_010_line_011_b100_029_run_cmd_echo_zh/final.json"
+    },
+    "b100_033_process_tail_log_zh": {
+      "task_id": "9e9a454e-76af-4fa5-9025-07df4116c510",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_3/cases/20260914_151854/case_011_line_012_b100_033_process_tail_log_zh/final.json"
+    },
+    "b100_037_git_log_one_en": {
+      "task_id": "244f56f6-cfe7-4b47-bafb-4374422b9be8",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_3/cases/20260914_151854/case_012_line_013_b100_037_git_log_one_en/final.json"
+    },
+    "b100_task_plan_read_en": {
+      "task_id": "8242212a-0f8a-4bb1-ba3c-973530bb806d",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_3/cases/20260914_151854/case_013_line_014_b100_task_plan_read_en/final.json"
+    },
+    "b100_044_service_status_clawd_en": {
+      "task_id": "6e86c1a9-6397-42b3-9c43-95bf1fcefd54",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_3/cases/20260914_151854/case_015_line_016_b100_044_service_status_clawd_en/final.json"
+    },
+    "b100_048_task_resume_live_en": {
+      "task_id": "72a83291-1fd9-4d3d-b93c-81598d702659",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_3/cases/20260914_151854/case_016_line_017_b100_048_task_resume_live_en/final.json"
+    },
+    "b100_052_db_list_tables_zh": {
+      "task_id": "eb34144b-7806-4ff6-b5fe-cf961805ca8d",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_3/cases/20260914_151854/case_017_line_018_b100_052_db_list_tables_zh/final.json"
+    },
+    "b100_056_docker_version_en": {
+      "task_id": "39722f35-ff4a-4696-b3b2-d566b08838cc",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_3/cases/20260914_151854/case_018_line_019_b100_056_docker_version_en/final.json"
+    },
+    "b100_060_doc_parse_release_checklist_en": {
+      "task_id": "8cadef50-c2c3-4193-80b8-ac7795f76834",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_3/cases/20260914_151854/case_019_line_020_b100_060_doc_parse_release_checklist_en/final.json"
+    },
+    "b100_074_web_search_extract_en": {
+      "task_id": "7ce4362a-89af-4ca9-afb8-7ea3b02b5aaf",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_3/cases/20260914_151854/case_022_line_023_b100_074_web_search_extract_en/final.json"
+    },
+    "b100_079_extension_assess_gap_zh": {
+      "task_id": "79fd9fdf-9654-403e-b8a0-d814176b7717",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_3/cases/20260914_151854/case_023_line_024_b100_079_extension_assess_gap_zh/final.json"
+    },
+    "b100_102_rss_source_health_zh": {
+      "task_id": "311a602c-b5e3-4c30-8a6c-b02f1eb39263",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/resume_worker_3/cases/20260914_151854/case_024_line_025_b100_102_rss_source_health_zh/final.json"
+    },
+    "fresh_write_file_atomic_cleanup_en": {
+      "task_id": "ccff5119-f065-44b9-8491-a6cbe44b2640",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_1/cases/20260914_145101/case_001_line_002_fresh_write_file_atomic_cleanup_en/final.json"
+    },
+    "fresh_fs_compare_docs_zh": {
+      "task_id": "9adf4863-7425-4922-a7ee-5679e7a43528",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_1/cases/20260914_145101/case_002_line_003_fresh_fs_compare_docs_zh/final.json"
+    },
+    "fresh_schedule_preview_tokyo_zh": {
+      "task_id": "9a810313-f422-4400-9a23-da2d55bada1a",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_1/cases/20260914_145101/case_003_line_004_fresh_schedule_preview_tokyo_zh/final.json"
+    },
+    "fresh_git_recent_subjects_zh": {
+      "task_id": "10488e49-d185-4539-b615-703f4925c715",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_1/cases/20260914_145101/case_004_line_005_fresh_git_recent_subjects_zh/final.json"
+    },
+    "fresh_process_clawd_observation_zh": {
+      "task_id": "4c5f99ff-a45c-42b2-80f2-f7e6726a0ccd",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_1/cases/20260914_145101/case_005_line_006_fresh_process_clawd_observation_zh/final.json"
+    },
+    "fresh_docker_images_observe_zh": {
+      "task_id": "a81d9d8c-8cbf-4b10-9a3d-34148a91b871",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_1/cases/20260914_145101/case_006_line_007_fresh_docker_images_observe_zh/final.json"
+    },
+    "fresh_image_generate_live_zh": {
+      "task_id": "99e7effc-12da-41e3-9467-74b67b79e7eb",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_1/cases/20260914_145101/case_007_line_008_fresh_image_generate_live_zh/final.json"
+    },
+    "fresh_workspace_patch_preview_zh": {
+      "task_id": "a36d1cdd-bbc3-4614-84bf-22598d268bf1",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_2/cases/20260914_145103/case_001_line_002_fresh_workspace_patch_preview_zh/final.json"
+    },
+    "fresh_code_index_test_inventory_en": {
+      "task_id": "85f7202f-f75e-446f-8310-be816c13cb9f",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_2/cases/20260914_145103/case_002_line_003_fresh_code_index_test_inventory_en/final.json"
+    },
+    "fresh_subagent_readonly_sections_en": {
+      "task_id": "4acc8766-6a6a-443b-90b8-beee5e464f3a",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_2/cases/20260914_145103/case_003_line_004_fresh_subagent_readonly_sections_en/final.json"
+    },
+    "fresh_package_manager_detect_ui_en": {
+      "task_id": "01904797-bdea-4c30-a531-f5581bfe8dc3",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_2/cases/20260914_145103/case_005_line_006_fresh_package_manager_detect_ui_en/final.json"
+    },
+    "fresh_image_edit_live_en": {
+      "task_id": "542c058a-3e4f-4f2a-b1a5-fded73a31465",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_2/cases/20260914_145103/case_007_line_008_fresh_image_edit_live_en/final.json"
+    },
+    "fresh_task_control_active_zh": {
+      "task_id": "b89c122f-1fbc-46de-a543-adac8eca72e1",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_2/cases/20260914_145103/case_009_line_010_fresh_task_control_active_zh/final.json"
+    },
+    "b100_002_fs_list_docs_en": {
+      "task_id": "8c6aaa31-1111-4690-b855-84b5a9a71b75",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_2/cases/20260914_145103/case_012_line_013_b100_002_fs_list_docs_en/final.json"
+    },
+    "b100_006_fs_find_markdown_zh": {
+      "task_id": "9c84edf7-cd3e-4ba8-a76e-ee1978ed527f",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_2/cases/20260914_145103/case_013_line_014_b100_006_fs_find_markdown_zh/final.json"
+    },
+    "b100_010_fs_write_append_cleanup_zh": {
+      "task_id": "0928f2ce-4db2-4ca7-b0c2-e66317c21bc4",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_2/cases/20260914_145103/case_014_line_015_b100_010_fs_write_append_cleanup_zh/final.json"
+    },
+    "b100_014_fs_batch_facts_en": {
+      "task_id": "4d340f0d-571a-4fa0-bd4b-cc75bc09987b",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_2/cases/20260914_145103/case_015_line_016_b100_014_fs_batch_facts_en/final.json"
+    },
+    "b100_018_config_list_top_keys_zh": {
+      "task_id": "ea1967b4-1c7d-419f-a7ca-661b66eb012b",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_2/cases/20260914_145103/case_016_line_017_b100_018_config_list_top_keys_zh/final.json"
+    },
+    "b100_022_config_edit_restore_fixture_zh": {
+      "task_id": "6e389485-d25a-4172-ac69-3e8eced5e427",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_2/cases/20260914_145103/case_017_line_018_b100_022_config_edit_restore_fixture_zh/final.json"
+    },
+    "b100_026_system_workspace_glance_zh": {
+      "task_id": "bc15d5af-f66d-485e-9dd5-881e02d3ecf7",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_2/cases/20260914_145103/case_018_line_019_b100_026_system_workspace_glance_zh/final.json"
+    },
+    "b100_030_run_cmd_async_live_en": {
+      "task_id": "03a2e509-b100-457b-b345-68de35736962",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_2/cases/20260914_145103/case_019_line_020_b100_030_run_cmd_async_live_en/final.json"
+    },
+    "b100_034_git_status_zh": {
+      "task_id": "6ed0d5f4-61f7-4eb3-9fbb-91b29728c84f",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_2/cases/20260914_145103/case_020_line_021_b100_034_git_status_zh/final.json"
+    },
+    "b100_038_git_show_readme_head_en": {
+      "task_id": "f5bd4884-703d-4ecb-9be3-08934649cd59",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_2/cases/20260914_145103/case_021_line_022_b100_038_git_show_readme_head_en/final.json"
+    },
+    "b100_memory_recent_zh": {
+      "task_id": "69156fcf-7620-49b9-9d7e-0fdfeb43f9d1",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_2/cases/20260914_145103/case_022_line_023_b100_memory_recent_zh/final.json"
+    },
+    "b100_041_package_remove_restore_zh": {
+      "task_id": "53c9d777-0d31-4027-896e-55c3aac17884",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_2/cases/20260914_145103/case_023_line_024_b100_041_package_remove_restore_zh/final.json"
+    },
+    "b100_045_service_verify_no_restart_en": {
+      "task_id": "a24a3732-800a-4769-879e-8e01a984c0f5",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_2/cases/20260914_145103/case_024_line_025_b100_045_service_verify_no_restart_en/final.json"
+    },
+    "b100_049_archive_list_zip_zh": {
+      "task_id": "609f59ea-59fa-4629-9a4a-7370af78d349",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_2/cases/20260914_145103/case_025_line_026_b100_049_archive_list_zip_zh/final.json"
+    },
+    "b100_053_db_schema_version_en": {
+      "task_id": "3d85f57f-4ec1-4154-9723-f87601101fdc",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_2/cases/20260914_145103/case_026_line_027_b100_053_db_schema_version_en/final.json"
+    },
+    "b100_057_docker_ps_zh": {
+      "task_id": "d148be91-b919-4cc3-8310-115193f8c06a",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_2/cases/20260914_145103/case_027_line_028_b100_057_docker_ps_zh/final.json"
+    },
+    "b100_061_doc_parse_archive_readme_zh": {
+      "task_id": "a9f70b77-e096-4afc-a8cb-074d1071c398",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_2/cases/20260914_145103/case_028_line_029_b100_061_doc_parse_archive_readme_zh/final.json"
+    },
+    "b100_071_http_get_example_en": {
+      "task_id": "e4ea02ad-1536-469c-9246-307f5ce6720a",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_2/cases/20260914_145103/case_030_line_031_b100_071_http_get_example_en/final.json"
+    },
+    "b100_075_web_search_rust_async_en": {
+      "task_id": "b80410dd-7d8c-42fe-9ab3-adde18cf1a9b",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_2/cases/20260914_145103/case_031_line_032_b100_075_web_search_rust_async_en/final.json"
+    },
+    "b100_080_extension_plan_temp_en": {
+      "task_id": "8602833f-2f80-416f-90cd-aa96f0d1b029",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_2/cases/20260914_145103/case_032_line_033_b100_080_extension_plan_temp_en/final.json"
+    },
+    "b100_107_archive_safe_roundtrip_zh": {
+      "task_id": "050e21fa-6075-482a-9cf7-1d48cfce5497",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_2/cases/20260914_145103/case_034_line_035_b100_107_archive_safe_roundtrip_zh/final.json"
+    },
+    "fresh_make_dir_nested_cleanup_zh": {
+      "task_id": "193220d2-aaf4-41b9-91ba-db056cca6cd3",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_3/cases/20260914_145105/case_001_line_002_fresh_make_dir_nested_cleanup_zh/final.json"
+    },
+    "fresh_config_basic_audio_keys_zh": {
+      "task_id": "5c39bc6e-f754-47d2-8cb0-ec1a527770d7",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_3/cases/20260914_145105/case_002_line_003_fresh_config_basic_audio_keys_zh/final.json"
+    },
+    "fresh_archive_tgz_roundtrip_zh": {
+      "task_id": "351f06c7-14dc-4b06-a69e-b4b5cc2c08cb",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_3/cases/20260914_145105/case_005_line_006_fresh_archive_tgz_roundtrip_zh/final.json"
+    },
+    "fresh_rss_categories_zh": {
+      "task_id": "66a6b352-e265-4d60-84bc-06aff50cc8a9",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_3/cases/20260914_145105/case_006_line_007_fresh_rss_categories_zh/final.json"
+    },
+    "fresh_audio_transcribe_pipeline_zh": {
+      "task_id": "d16347e5-3460-4e01-b3eb-b2077d8caf93",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_3/cases/20260914_145105/case_007_line_008_fresh_audio_transcribe_pipeline_zh/final.json"
+    },
+    "fresh_health_check_paths_en": {
+      "task_id": "ce5a05b8-ec3b-4cfe-86db-aa458524f4f1",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_3/cases/20260914_145105/case_008_line_009_fresh_health_check_paths_en/final.json"
+    },
+    "fresh_nni_public_market_en": {
+      "task_id": "185d708a-50b4-4ebf-991e-558054efe59c",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_3/cases/20260914_145105/case_009_line_010_fresh_nni_public_market_en/final.json"
+    },
+    "fresh_transform_filter_csv_en": {
+      "task_id": "763de95c-7c52-4f1d-acc9-69357f5a04ce",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_3/cases/20260914_145105/case_010_line_011_fresh_transform_filter_csv_en/final.json"
+    },
+    "fresh_remove_file_exact_target_en": {
+      "task_id": "fe0763f2-40b6-4f0a-a470-ebc7ac5ac3f8",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_001_line_002_fresh_remove_file_exact_target_en/final.json"
+    },
+    "fresh_http_iana_reserved_en": {
+      "task_id": "10115747-7029-4a5c-b36b-21e2c531d4ef",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_003_line_004_fresh_http_iana_reserved_en/final.json"
+    },
+    "fresh_install_module_preview_en": {
+      "task_id": "6ff364a5-b953-4061-8c95-95d0c5e99bce",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_004_line_005_fresh_install_module_preview_en/final.json"
+    },
+    "fresh_database_order_aggregate_en": {
+      "task_id": "fc53301a-d0b1-44c1-b6a4-d5d5468240e7",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_005_line_006_fresh_database_order_aggregate_en/final.json"
+    },
+    "fresh_audio_synthesize_live_en": {
+      "task_id": "ac7635c4-1fe9-4b2d-8579-738fa45f370a",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_007_line_008_fresh_audio_synthesize_live_en/final.json"
+    },
+    "fresh_log_analyze_recovery_zh": {
+      "task_id": "98d21c03-1611-4de1-bb9f-25eb2a80fe76",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_008_line_009_fresh_log_analyze_recovery_zh/final.json"
+    },
+    "fresh_config_guard_validate_zh": {
+      "task_id": "0b5d56d1-90b7-4978-8ed1-af5abdb8e1bb",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_009_line_010_fresh_config_guard_validate_zh/final.json"
+    },
+    "fresh_web_search_sqlite_wal_zh": {
+      "task_id": "86b8c996-b417-4471-bcba-865e709f0ce7",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_010_line_011_fresh_web_search_sqlite_wal_zh/final.json"
+    },
+    "fresh_extension_gap_pdf_annotations_en": {
+      "task_id": "7f71b8e3-3e34-4317-b5a3-6f0c576c18a1",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_011_line_012_fresh_extension_gap_pdf_annotations_en/final.json"
+    },
+    "b100_004_fs_read_range_zh": {
+      "task_id": "fe21556a-d411-40f6-a979-ce85b3946e2e",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_012_line_013_b100_004_fs_read_range_zh/final.json"
+    },
+    "b100_008_fs_hidden_entries_zh": {
+      "task_id": "9ada0f4a-94d8-43f0-abf0-3be7da443aba",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_013_line_014_b100_008_fs_hidden_entries_zh/final.json"
+    },
+    "b100_012_fs_fuzzy_candidates_zh": {
+      "task_id": "6ded0505-4f88-4793-b7eb-4338d8f27109",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_014_line_015_b100_012_fs_fuzzy_candidates_zh/final.json"
+    },
+    "b100_016_config_read_vendor_zh": {
+      "task_id": "14d1f665-018c-42f7-af18-97645b6baced",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_015_line_016_b100_016_config_read_vendor_zh/final.json"
+    },
+    "b100_020_config_guard_host_zh": {
+      "task_id": "52b48b3e-44fa-4ba0-bece-5ea35db4d878",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_016_line_017_b100_020_config_guard_host_zh/final.json"
+    },
+    "b100_024_system_info_zh": {
+      "task_id": "ea2f359d-bc35-476a-955f-e358fb6457e9",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_017_line_018_b100_024_system_info_zh/final.json"
+    },
+    "b100_032_process_ports_en": {
+      "task_id": "56e19373-eb32-4b1c-ae03-ed0a732b864c",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_019_line_020_b100_032_process_ports_en/final.json"
+    },
+    "b100_036_git_changed_files_zh": {
+      "task_id": "5926197b-2dc8-4bca-8917-48b665f18dcb",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_020_line_021_b100_036_git_changed_files_zh/final.json"
+    },
+    "b100_039_package_detect_zh": {
+      "task_id": "952702c1-6442-4f06-ae87-aba662b9e424",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_022_line_023_b100_039_package_detect_zh/final.json"
+    },
+    "b100_043_health_check_zh": {
+      "task_id": "1c5ecda1-c0f4-4a50-b24d-270b484c08cc",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_023_line_024_b100_043_health_check_zh/final.json"
+    },
+    "b100_047_task_list_detail_en": {
+      "task_id": "09eebf03-f4a4-4aad-9f46-6fa5d31497ab",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_024_line_025_b100_047_task_list_detail_en/final.json"
+    },
+    "b100_051_archive_pack_sandbox_zh": {
+      "task_id": "074f4637-4b30-4f6f-aa12-d14a6821fa63",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_025_line_026_b100_051_archive_pack_sandbox_zh/final.json"
+    },
+    "b100_055_db_sqlite_query_en": {
+      "task_id": "9a601220-7ac6-4d77-a56f-c52c9ec2d705",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_026_line_027_b100_055_db_sqlite_query_en/final.json"
+    },
+    "b100_059_doc_parse_service_notes_zh": {
+      "task_id": "93286a5c-60a3-4aaa-b383-c424f044fe82",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_027_line_028_b100_059_doc_parse_service_notes_zh/final.json"
+    },
+    "b100_063_transform_filter_json_en": {
+      "task_id": "97923b76-9c6a-4955-b61b-0d5f843690df",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_028_line_029_b100_063_transform_filter_json_en/final.json"
+    },
+    "b100_067_kb_list_namespaces_zh": {
+      "task_id": "b1971e35-2ce2-49b6-82dd-cba820a67332",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_029_line_030_b100_067_kb_list_namespaces_zh/final.json"
+    },
+    "b100_078_schedule_live_cleanup_en": {
+      "task_id": "f3eff672-7920-4ab4-8890-d282615862cd",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_031_line_032_b100_078_schedule_live_cleanup_en/final.json"
+    },
+    "b100_101_code_index_definition_en": {
+      "task_id": "a6abb388-72b4-480e-9ec0-bec6837a85db",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_032_line_033_b100_101_code_index_definition_en/final.json"
+    },
+    "b100_105_workspace_patch_live_zh": {
+      "task_id": "50131930-229f-4c0a-a7ea-be55eefe7bb2",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_033_line_034_b100_105_workspace_patch_live_zh/final.json"
+    },
+    "new_read_001": {
+      "task_id": "5f46bde0-4014-463e-9f88-d6bfabd60c27",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_034_line_035_new_read_001/final.json"
+    },
+    "new_read_002": {
+      "task_id": "086ffe83-354b-4e14-9f56-df71a851a213",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_036_line_037_new_read_002/final.json"
+    },
+    "new_file_cycle_002": {
+      "task_id": "6cdb12a6-9bad-4797-91f0-f79e9da2940d",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_037_line_038_new_file_cycle_002/final.json"
+    },
+    "new_read_003": {
+      "task_id": "6f65bfcd-cb96-46b6-9fc7-3653e1bca8d7",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_038_line_039_new_read_003/final.json"
+    },
+    "new_file_cycle_003": {
+      "task_id": "749c80e3-da1c-48e7-9b4a-b555bd4a4955",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_039_line_040_new_file_cycle_003/final.json"
+    },
+    "new_read_004": {
+      "task_id": "b73d09a4-92b5-49cb-9001-a09c8ff228a1",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_040_line_041_new_read_004/final.json"
+    },
+    "new_read_005": {
+      "task_id": "43e92e03-c005-492b-a4f4-4a42f65f5319",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_042_line_043_new_read_005/final.json"
+    },
+    "new_file_cycle_005": {
+      "task_id": "efbe2fae-a51d-4dc6-80e6-27bafbd3b31e",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_043_line_044_new_file_cycle_005/final.json"
+    },
+    "new_read_006": {
+      "task_id": "1c8d8bb1-0618-4b31-8e2d-d2297b9f595a",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_044_line_045_new_read_006/final.json"
+    },
+    "new_read_007": {
+      "task_id": "4344929c-2dde-4c83-84c2-f5a981668a4a",
+      "final_json": "scripts/nl_suite_logs/builtin_500_20260914/worker_4/cases/20260914_145107/case_046_line_047_new_read_007/final.json"
+    }
+  },
+  "deferred_cases": [
+    "fresh_video_generate_live_zh"
+  ],
+  "partitions": {
+    "worker_1.txt": {
+      "count": 92,
+      "enable_test_memory": false,
+      "names": [
+        "fresh_git_remote_publish_reconcile_zh",
+        "fresh_office_spreadsheet_roundtrip_zh",
+        "b100_028_run_cmd_pwd_en",
+        "b100_042_install_module_live_zh",
+        "b100_068_kb_resumable_ingest_cycle_zh",
+        "b100_106_kb_cancel_cleanup_en",
+        "new_document_001",
+        "new_document_002",
+        "new_transform_003",
+        "new_multi_003",
+        "new_file_cycle_004",
+        "new_database_005",
+        "new_missing_005",
+        "new_schedule_006",
+        "new_multi_006",
+        "new_file_cycle_007",
+        "new_read_008",
+        "new_file_cycle_008",
+        "new_read_009",
+        "new_file_cycle_009",
+        "new_read_010",
+        "new_file_cycle_010",
+        "new_read_011",
+        "new_file_cycle_011",
+        "new_read_012",
+        "new_file_cycle_012",
+        "new_read_013",
+        "new_file_cycle_013",
+        "new_read_014",
+        "new_file_cycle_014",
+        "new_read_015",
+        "new_file_cycle_015",
+        "new_read_016",
+        "new_file_cycle_016",
+        "new_read_017",
+        "new_file_cycle_017",
+        "new_read_018",
+        "new_file_cycle_018",
+        "new_read_019",
+        "new_file_cycle_019",
+        "new_read_020",
+        "new_file_cycle_020",
+        "new_read_021",
+        "new_file_cycle_021",
+        "new_read_022",
+        "new_file_cycle_022",
+        "new_read_023",
+        "new_file_cycle_023",
+        "new_read_024",
+        "new_file_cycle_024",
+        "new_read_025",
+        "new_file_cycle_025",
+        "new_read_026",
+        "new_file_cycle_026",
+        "new_read_027",
+        "new_file_cycle_027",
+        "new_read_028",
+        "new_file_cycle_028",
+        "new_read_029",
+        "new_file_cycle_029",
+        "new_read_030",
+        "new_file_cycle_030",
+        "new_read_031",
+        "new_file_cycle_031",
+        "new_read_032",
+        "new_file_cycle_032",
+        "new_read_033",
+        "new_file_cycle_033",
+        "new_read_034",
+        "new_file_cycle_034",
+        "new_read_035",
+        "new_file_cycle_035",
+        "new_read_036",
+        "new_file_cycle_036",
+        "new_read_037",
+        "new_file_cycle_037",
+        "new_read_038",
+        "new_file_cycle_038",
+        "new_read_039",
+        "new_file_cycle_039",
+        "new_read_040",
+        "new_file_cycle_040",
+        "new_read_041",
+        "new_file_cycle_041",
+        "new_read_042",
+        "new_file_cycle_042",
+        "new_read_043",
+        "new_file_cycle_043",
+        "new_read_044",
+        "new_file_cycle_044",
+        "new_read_045",
+        "new_file_cycle_045"
+      ]
+    },
+    "worker_2.txt": {
+      "count": 92,
+      "enable_test_memory": false,
+      "names": [
+        "fresh_image_vision_structured_extract_en",
+        "fresh_kb_ingest_search_cleanup_en",
+        "b100_git_remote_publish_missing_connection_en",
+        "b100_064_transform_group_sum_zh",
+        "b100_073_browser_open_example_en",
+        "new_database_001",
+        "new_missing_001",
+        "new_missing_002",
+        "new_schedule_003",
+        "new_database_004",
+        "new_document_004",
+        "new_transform_005",
+        "new_multi_005",
+        "new_file_cycle_006",
+        "new_database_007",
+        "new_document_007",
+        "new_database_008",
+        "new_document_008",
+        "new_database_009",
+        "new_document_009",
+        "new_database_010",
+        "new_document_010",
+        "new_database_011",
+        "new_document_011",
+        "new_database_012",
+        "new_document_012",
+        "new_database_013",
+        "new_document_013",
+        "new_database_014",
+        "new_document_014",
+        "new_database_015",
+        "new_document_015",
+        "new_database_016",
+        "new_document_016",
+        "new_database_017",
+        "new_document_017",
+        "new_database_018",
+        "new_document_018",
+        "new_database_019",
+        "new_document_019",
+        "new_database_020",
+        "new_document_020",
+        "new_database_021",
+        "new_document_021",
+        "new_database_022",
+        "new_document_022",
+        "new_database_023",
+        "new_document_023",
+        "new_database_024",
+        "new_document_024",
+        "new_database_025",
+        "new_document_025",
+        "new_database_026",
+        "new_document_026",
+        "new_database_027",
+        "new_document_027",
+        "new_database_028",
+        "new_document_028",
+        "new_database_029",
+        "new_document_029",
+        "new_database_030",
+        "new_document_030",
+        "new_database_031",
+        "new_document_031",
+        "new_database_032",
+        "new_document_032",
+        "new_database_033",
+        "new_document_033",
+        "new_database_034",
+        "new_document_034",
+        "new_database_035",
+        "new_document_035",
+        "new_database_036",
+        "new_document_036",
+        "new_database_037",
+        "new_document_037",
+        "new_database_038",
+        "new_document_038",
+        "new_database_039",
+        "new_document_039",
+        "new_database_040",
+        "new_document_040",
+        "new_database_041",
+        "new_document_041",
+        "new_database_042",
+        "new_document_042",
+        "new_database_043",
+        "new_document_043",
+        "new_database_044",
+        "new_document_044",
+        "new_database_045",
+        "new_document_045"
+      ]
+    },
+    "worker_3.txt": {
+      "count": 92,
+      "enable_test_memory": false,
+      "names": [
+        "fresh_music_generate_live_en",
+        "fresh_browser_session_rfc_snapshot_en",
+        "b100_browser_session_snapshot_en",
+        "b100_065_transform_csv_project_en",
+        "b100_089_image_vision_local_zh",
+        "new_transform_001",
+        "new_database_002",
+        "new_multi_002",
+        "new_document_003",
+        "new_transform_004",
+        "new_missing_004",
+        "new_schedule_005",
+        "new_database_006",
+        "new_document_006",
+        "new_transform_007",
+        "new_missing_007",
+        "new_transform_008",
+        "new_missing_008",
+        "new_transform_009",
+        "new_missing_009",
+        "new_transform_010",
+        "new_missing_010",
+        "new_transform_011",
+        "new_missing_011",
+        "new_transform_012",
+        "new_missing_012",
+        "new_transform_013",
+        "new_missing_013",
+        "new_transform_014",
+        "new_missing_014",
+        "new_transform_015",
+        "new_missing_015",
+        "new_transform_016",
+        "new_missing_016",
+        "new_transform_017",
+        "new_missing_017",
+        "new_transform_018",
+        "new_missing_018",
+        "new_transform_019",
+        "new_missing_019",
+        "new_transform_020",
+        "new_missing_020",
+        "new_transform_021",
+        "new_missing_021",
+        "new_transform_022",
+        "new_missing_022",
+        "new_transform_023",
+        "new_missing_023",
+        "new_transform_024",
+        "new_missing_024",
+        "new_transform_025",
+        "new_missing_025",
+        "new_transform_026",
+        "new_missing_026",
+        "new_transform_027",
+        "new_missing_027",
+        "new_transform_028",
+        "new_missing_028",
+        "new_transform_029",
+        "new_missing_029",
+        "new_transform_030",
+        "new_missing_030",
+        "new_transform_031",
+        "new_missing_031",
+        "new_transform_032",
+        "new_missing_032",
+        "new_transform_033",
+        "new_missing_033",
+        "new_transform_034",
+        "new_missing_034",
+        "new_transform_035",
+        "new_missing_035",
+        "new_transform_036",
+        "new_missing_036",
+        "new_transform_037",
+        "new_missing_037",
+        "new_transform_038",
+        "new_missing_038",
+        "new_transform_039",
+        "new_missing_039",
+        "new_transform_040",
+        "new_missing_040",
+        "new_transform_041",
+        "new_missing_041",
+        "new_transform_042",
+        "new_missing_042",
+        "new_transform_043",
+        "new_missing_043",
+        "new_transform_044",
+        "new_missing_044",
+        "new_transform_045",
+        "new_missing_045"
+      ]
+    },
+    "worker_4.txt": {
+      "count": 92,
+      "enable_test_memory": false,
+      "names": [
+        "fresh_service_clawd_status_en",
+        "fresh_browser_web_w3c_extract_zh",
+        "b100_040_package_install_restore_en",
+        "b100_066_transform_dedupe_zh",
+        "b100_103_office_word_live_zh",
+        "new_file_cycle_001",
+        "new_transform_002",
+        "new_database_003",
+        "new_missing_003",
+        "new_schedule_004",
+        "new_multi_004",
+        "new_document_005",
+        "new_transform_006",
+        "new_missing_006",
+        "new_schedule_007",
+        "new_multi_007",
+        "new_schedule_008",
+        "new_multi_008",
+        "new_schedule_009",
+        "new_multi_009",
+        "new_schedule_010",
+        "new_multi_010",
+        "new_schedule_011",
+        "new_multi_011",
+        "new_schedule_012",
+        "new_multi_012",
+        "new_schedule_013",
+        "new_multi_013",
+        "new_schedule_014",
+        "new_multi_014",
+        "new_schedule_015",
+        "new_multi_015",
+        "new_schedule_016",
+        "new_multi_016",
+        "new_schedule_017",
+        "new_multi_017",
+        "new_schedule_018",
+        "new_multi_018",
+        "new_schedule_019",
+        "new_multi_019",
+        "new_schedule_020",
+        "new_multi_020",
+        "new_schedule_021",
+        "new_multi_021",
+        "new_schedule_022",
+        "new_multi_022",
+        "new_schedule_023",
+        "new_multi_023",
+        "new_schedule_024",
+        "new_multi_024",
+        "new_schedule_025",
+        "new_multi_025",
+        "new_schedule_026",
+        "new_multi_026",
+        "new_schedule_027",
+        "new_multi_027",
+        "new_schedule_028",
+        "new_multi_028",
+        "new_schedule_029",
+        "new_multi_029",
+        "new_schedule_030",
+        "new_multi_030",
+        "new_schedule_031",
+        "new_multi_031",
+        "new_schedule_032",
+        "new_multi_032",
+        "new_schedule_033",
+        "new_multi_033",
+        "new_schedule_034",
+        "new_multi_034",
+        "new_schedule_035",
+        "new_multi_035",
+        "new_schedule_036",
+        "new_multi_036",
+        "new_schedule_037",
+        "new_multi_037",
+        "new_schedule_038",
+        "new_multi_038",
+        "new_schedule_039",
+        "new_multi_039",
+        "new_schedule_040",
+        "new_multi_040",
+        "new_schedule_041",
+        "new_multi_041",
+        "new_schedule_042",
+        "new_multi_042",
+        "new_schedule_043",
+        "new_multi_043",
+        "new_schedule_044",
+        "new_multi_044",
+        "new_schedule_045",
+        "new_multi_045"
+      ]
+    }
+  }
+}

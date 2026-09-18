@@ -63,9 +63,9 @@ async fn system_locked() -> bool {
     .flatten()
     .unwrap_or(false)
 }
-#[cfg(not(target_os = "linux"))]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 async fn system_locked() -> bool {
-    false
+    super::native_session::locked()
 }
 
 pub fn focus_changed(app: tauri::AppHandle, focused: bool) {
@@ -82,11 +82,22 @@ pub fn focus_changed(app: tauri::AppHandle, focused: bool) {
         {
             return;
         }
-        if !["main", "wallet"].iter().any(|name| {
+        // Tao's Android is_focused() is a stub that always returns false.
+        // Activity transitions within the app must use Android lifecycle state.
+        #[cfg(target_os = "android")]
+        let inactive = system_locked().await;
+        #[cfg(not(target_os = "android"))]
+        let inactive = !["main", "wallet"].iter().any(|name| {
             app.get_webview_window(name)
                 .is_some_and(|w| w.is_focused().unwrap_or(false))
-        }) {
+        });
+        if inactive {
             app.state::<WalletState>().lock().await;
         }
     });
+}
+
+#[cfg(target_os = "android")]
+async fn system_locked() -> bool {
+    crate::android::bridge::locked().unwrap_or(true)
 }

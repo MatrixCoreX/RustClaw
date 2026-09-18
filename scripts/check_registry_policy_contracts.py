@@ -36,6 +36,7 @@ ALLOWED_ISOLATION_PROFILES = {
     "local_worktree",
     "local_temp_workspace",
     "remote_executor",
+    "host_process",
 }
 PERMISSION_BOOL_FIELDS = (
     "network_access",
@@ -519,6 +520,15 @@ def run_self_test() -> int:
     }
     if check_capability(registry_path, good_skill, 0, good_skill["planner_capabilities"][0]):
         print("SELF_TEST_FAIL good_policy_metadata_false_positive", file=sys.stderr)
+        return 1
+    host_policy = dict(good_skill["planner_capabilities"][0], isolation_profile="host_process")
+    if check_capability(registry_path, good_skill, 0, host_policy):
+        print("SELF_TEST_FAIL host_process_false_positive", file=sys.stderr)
+        return 1
+    invalid_profile = dict(host_policy, isolation_profile="unrestricted_fixture")
+    if not any("isolation_profile" in finding for finding in
+               check_capability(registry_path, good_skill, 0, invalid_profile)):
+        print("SELF_TEST_FAIL unknown_isolation_profile_not_rejected", file=sys.stderr)
         return 1
     bad_findings = check_capability(registry_path, {"name": "bad_skill"}, 0, bad_capability)
     expected_tokens = {

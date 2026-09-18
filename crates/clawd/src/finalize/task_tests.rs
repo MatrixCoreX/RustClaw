@@ -584,8 +584,8 @@ fn answer_verifier_failure_fallback_line_is_not_json() {
 }
 
 #[test]
-fn answer_verifier_failure_err_json_triggers_user_message_path() {
-    assert!(super::answer_verifier_failure_needs_user_message(
+fn answer_verifier_failure_keeps_grounded_answer_when_err_is_json() {
+    assert!(!super::answer_verifier_failure_needs_user_message(
         "Host ThinkPad-X1 is observable.",
         r#"{"message_key":"answer_verifier_required_evidence_block","answer_incomplete_reason":"shape"}"#,
     ));

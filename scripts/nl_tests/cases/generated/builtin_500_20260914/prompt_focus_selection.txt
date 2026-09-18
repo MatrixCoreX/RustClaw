@@ -1,0 +1,5 @@
+# Selection only; current master supplies the executable prompts and assertions.
+builtin_500_20260914|b100_028_run_cmd_pwd_en|selection|selection
+builtin_500_20260914|fresh_git_remote_read_missing_en|selection|selection
+builtin_500_20260914|fresh_doc_parse_agents_section_en|selection|selection
+builtin_500_20260914|fresh_fs_search_recovery_line_en|selection|selection

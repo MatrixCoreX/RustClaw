@@ -16,7 +16,7 @@ pub(super) fn answer_verifier_gap_requires_planner_observation(
         && summary
             .missing_evidence_fields
             .iter()
-            .any(|field| field.trim() != "output_format")
+            .any(|field| !matches!(field.trim(), "output_format" | "verification_audit"))
 }
 
 pub(super) fn answer_verifier_evidence_replan_summary(
@@ -51,6 +51,14 @@ pub(super) fn prepare_answer_verifier_evidence_replan(
         "missing_evidence_fields": summary.missing_evidence_fields,
         "next_action": "collect_missing_evidence",
         "terminal_response_allowed": false,
+        "model_feedback": {
+            "source": "answer_verifier",
+            "trust": "untrusted_model_output",
+            "answer_incomplete_reason": crate::truncate_for_agent_trace(
+                &summary.answer_incomplete_reason,
+            ),
+            "retry_instruction": crate::truncate_for_agent_trace(&summary.retry_instruction),
+        },
     });
     let observation_text = observation.to_string();
     loop_state.task_observations.push(observation);
@@ -164,6 +172,13 @@ fn answer_verifier_gap_is_structurally_satisfied(
     if !summary.high_confidence_retry_gap() {
         return false;
     }
+    if summary
+        .missing_evidence_fields
+        .iter()
+        .any(|field| matches!(field.as_str(), "verification_audit" | "requested_result"))
+    {
+        return false;
+    }
     let Some(route) = route_result else {
         return false;
     };
@@ -209,20 +224,49 @@ pub(super) fn mark_reply_failed_after_answer_verifier_exhausted(
     verifier: &crate::task_journal::TaskJournalAnswerVerifierSummary,
 ) {
     let control_payload = verifier.required_evidence_failure_payload_text();
+    let candidate = final_user_answer_candidate(reply)
+        .filter(|text| !user_visible_answer_is_machine_control_payload(text))
+        .map(str::to_string);
+    let visible = candidate.clone().unwrap_or_else(|| control_payload.clone());
     let mut messages = reply
         .messages
         .iter()
-        .filter(|message| crate::finalize::is_execution_summary_message(message))
+        .filter(|message| {
+            crate::finalize::is_execution_summary_message(message)
+                || candidate.as_deref() == Some(message.as_str())
+        })
         .cloned()
         .collect::<Vec<_>>();
-    messages.push(control_payload.clone());
+    if !messages.iter().any(|message| message == &visible) {
+        messages.push(visible.clone());
+    }
     if let Some(journal) = reply.task_journal.as_mut() {
-        journal.record_final_answer(&control_payload);
+        journal.record_final_answer(&visible);
         journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Failure);
         journal.record_final_failure_attribution_from_error(&control_payload);
     }
-    reply.text = control_payload.clone();
+    reply.text = visible;
     reply.messages = messages;
     reply.should_fail_task = true;
     reply.error_text = Some(control_payload);
+}
+
+fn user_visible_answer_is_machine_control_payload(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if let Ok(serde_json::Value::Object(obj)) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        return [
+            "message_key",
+            "reason_code",
+            "error_code",
+            "missing_evidence_fields",
+            "answer_incomplete_reason",
+        ]
+        .iter()
+        .any(|key| obj.contains_key(*key));
+    }
+    trimmed.contains("message_key=answer_verifier_required_evidence_block")
+        || trimmed.contains("reason_code=answer_verifier_required_evidence_block")
 }

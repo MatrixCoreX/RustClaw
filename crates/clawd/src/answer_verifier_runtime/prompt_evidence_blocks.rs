@@ -188,7 +188,7 @@ fn provider_safe_capability_result_evidence(
                 "model_observation": observation,
             })
         })
-        .unwrap_or_else(|| serde_json::to_value(result).unwrap_or(serde_json::Value::Null));
+        .unwrap_or_else(|| deduplicated_capability_evidence(result));
     let Ok(serialized) = serde_json::to_string(&evidence_value) else {
         return json!({
             "projection": "unavailable",
@@ -206,6 +206,7 @@ fn provider_safe_capability_result_evidence(
     if sanitized_chars <= MAX_STRUCTURED_RESULT_CHARS {
         return json!({
             "projection": "structured_result",
+            "step_id": result.provenance.get("step_id"),
             "evidence_id": identity.evidence_id,
             "sha256": identity.sha256,
             "size_bytes": identity.size_bytes,
@@ -217,6 +218,7 @@ fn provider_safe_capability_result_evidence(
     let content_evidence_projection = provider_safe_content_evidence_projection(&value);
     json!({
         "projection": "canonical_evidence_reference",
+        "step_id": result.provenance.get("step_id"),
         "truncated": true,
         "original_chars": sanitized_chars,
         "evidence_id": identity.evidence_id,
@@ -226,6 +228,25 @@ fn provider_safe_capability_result_evidence(
         "content_evidence_projection": content_evidence_projection,
         "recovery": "canonical_evidence_catalog.artifact_range",
     })
+}
+
+fn deduplicated_capability_evidence(
+    result: &claw_core::capability_result::CapabilityResultEnvelope,
+) -> serde_json::Value {
+    let mut value = serde_json::to_value(result).unwrap_or(serde_json::Value::Null);
+    let duplicate_extra = value.pointer("/data/extra").is_some_and(|extra| {
+        !extra.is_null() && Some(extra) == value.pointer("/data/output/extra")
+    });
+    if duplicate_extra {
+        if let Some(output) = value
+            .pointer_mut("/data/output")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            output.remove("extra");
+            output.insert("extra_reference".to_string(), json!("data.extra"));
+        }
+    }
+    value
 }
 
 fn provider_safe_content_evidence_projection(value: &serde_json::Value) -> Vec<serde_json::Value> {
@@ -463,14 +484,63 @@ pub(in crate::answer_verifier) fn execution_evidence_prompt_block(
                     == Some("plan_verifier_rejection")
         })
         .collect::<Vec<_>>();
-    serde_json::to_string_pretty(&json!({
+    let planner_repairs = journal
+        .task_observations
+        .iter()
+        .filter(|observation| {
+            observation
+                .get("owner_layer")
+                .and_then(serde_json::Value::as_str)
+                == Some("planner")
+                && matches!(
+                    observation
+                        .get("reason_code")
+                        .and_then(serde_json::Value::as_str),
+                    Some(
+                        "native_plan_contract_repair_progress"
+                            | "native_plan_contract_repair_stagnated"
+                            | "native_plan_contract_repair_budget_exhausted"
+                    )
+                )
+        })
+        .collect::<Vec<_>>();
+    let repair_events = planner_repairs
+        .iter()
+        .skip(planner_repairs.len().saturating_sub(32))
+        .map(|observation| json!({
+            "reason_code": observation.get("reason_code"),
+            "source_error_code": observation.get("source_error_code"),
+            "repair_attempt": observation.get("repair_attempt").and_then(serde_json::Value::as_u64),
+            "repair_attempts": observation.get("repair_attempts").and_then(serde_json::Value::as_u64),
+        }))
+        .collect::<Vec<_>>();
+    serde_json::to_string(&json!({
+        "executed_operations": {
+            "source": "runtime_step_results",
+            "ordered": true,
+            "truncated": false,
+            "operations": journal.step_results.iter()
+                .zip(journal.executed_operation_evidence())
+                .filter(|(step, _)| is_external_execution_step(step))
+                .map(|(_, operation)| operation)
+                .collect::<Vec<_>>(),
+        },
         "step_evidence": steps,
         "capability_result_evidence": capability_results,
         "canonical_evidence_catalogs": canonical_evidence_catalogs,
         "plan_verifier_rejection_evidence": plan_verifier_rejections,
+        "planner_repair_evidence": {
+            "observed_events": planner_repairs.len(),
+            "events": repair_events,
+            "truncated": planner_repairs.len() > 32,
+        },
     }))
     .unwrap_or_else(|_| "{}".to_string())
 }
+
+#[cfg(test)]
+#[path = "prompt_evidence_projection_tests.rs"]
+mod projection_tests;
 
 pub(in crate::answer_verifier) fn current_context_prompt_block(
     journal: &crate::task_journal::TaskJournal,

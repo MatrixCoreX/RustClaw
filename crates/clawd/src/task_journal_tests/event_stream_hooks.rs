@@ -30,7 +30,16 @@ fn trace_json_includes_pollable_machine_event_stream() {
         "fs_basic",
         r#"{"status":"ok","output_path":"reports/out.txt"}"#,
     ));
-    journal.push_task_observation(json!({"source": "fs_basic", "status": "ok"}));
+    journal.push_task_observation(json!({
+        "observation_kind": "capability_resolution",
+        "outcome": "resolved",
+        "requested_capability": "filesystem.list_entries",
+        "resolved_capability": "filesystem.list_entries",
+        "resolved_tool_or_skill": "skill:fs_basic",
+        "round_no": 1,
+        "step_in_round": 1,
+        "global_step": 1
+    }));
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
 
     let trace = journal.to_trace_json();

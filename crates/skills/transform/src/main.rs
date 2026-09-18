@@ -116,6 +116,7 @@ fn main() -> Result<()> {
 fn transform_response_extra(payload: &Value) -> Value {
     let mut extra = payload.clone();
     if let Some(object) = extra.as_object_mut() {
+        object.insert("schema_version".to_string(), json!(1));
         object
             .entry("action".to_string())
             .or_insert_with(|| json!("transform_data"));
@@ -123,6 +124,7 @@ fn transform_response_extra(payload: &Value) -> Value {
             .entry("source_skill".to_string())
             .or_insert_with(|| json!("transform"));
         if object.get("status").and_then(Value::as_str) == Some("error") {
+            object.insert("retryable".to_string(), json!(false));
             let code = object
                 .get("error_code")
                 .and_then(Value::as_str)
@@ -207,6 +209,26 @@ fn handle_transform(req: &Value) -> Result<Value> {
 }
 
 fn input_records_from_args(args: &Value) -> Result<(Vec<Value>, InputShape)> {
+    if let Some(encoded) = args.get("json_text") {
+        if ["data", "records", "csv_text", "csv", "text", "input"]
+            .iter()
+            .any(|key| args.get(*key).is_some())
+        {
+            return Err(anyhow!(
+                "json_text cannot be combined with another input source"
+            ));
+        }
+        let text = encoded
+            .as_str()
+            .ok_or_else(|| anyhow!("json_text must be a JSON document string"))?;
+        let decoded: Value =
+            serde_json::from_str(text).map_err(|error| anyhow!("invalid json_text: {error}"))?;
+        return match decoded {
+            Value::Array(items) => Ok((items, InputShape::Array)),
+            Value::Object(_) => Ok((vec![decoded], InputShape::SingleObject)),
+            _ => Err(anyhow!("json_text must contain an array or object")),
+        };
+    }
     if let Some(data) = args.get("data").or_else(|| args.get("records")) {
         match data {
             Value::Array(items) => return Ok((items.clone(), InputShape::Array)),
@@ -226,7 +248,7 @@ fn input_records_from_args(args: &Value) -> Result<(Vec<Value>, InputShape)> {
         return Ok((parse_csv_records(text)?, InputShape::Csv));
     }
     Err(anyhow!(
-        "missing required structured input: args.data array/object or args.csv_text"
+        "missing required structured input: args.json_text, args.data array/object or args.csv_text"
     ))
 }
 

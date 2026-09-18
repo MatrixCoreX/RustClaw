@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-wallet-connect-node"
+description = "Enables the wallet_connect_node command without any pre-configured scope."
+commands.allow = ["wallet_connect_node"]
+
+[[permission]]
+identifier = "deny-wallet-connect-node"
+description = "Denies the wallet_connect_node command without any pre-configured scope."
+commands.deny = ["wallet_connect_node"]

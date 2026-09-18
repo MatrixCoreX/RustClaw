@@ -129,21 +129,13 @@ overlay = ["prompts/layers/overlays/context_workspace_instructions.md"]
 
 [[prompts]]
 logical_path = "prompts/schedule_intent_prompt.md"
-base = [
-  "prompts/layers/base/system_truth.md",
-  "prompts/layers/base/routing/common_rules.md",
-]
+base = ["prompts/layers/base/system_truth.md"]
 overlay = ["prompts/layers/overlays/schedule_intent_prompt.md"]
-vendor_patch = "routing/common.md"
 
 [[prompts]]
 logical_path = "prompts/schedule_intent_rules.md"
-base = [
-  "prompts/layers/base/system_truth.md",
-  "prompts/layers/base/routing/common_rules.md",
-]
+base = ["prompts/layers/base/system_truth.md"]
 overlay = ["prompts/layers/overlays/schedule_intent_rules.md"]
-vendor_patch = "routing/common.md"
 
 [[prompts]]
 logical_path = "prompts/voice_chat_prompt.md"
@@ -210,6 +202,30 @@ logical_path = "prompts/image_vision_action_screenshot_summary.md"
 base = ["prompts/layers/base/system_truth.md"]
 overlay = ["prompts/layers/overlays/image_vision_action_screenshot_summary.md"]
 vendor_patch = "vision/common.md"
+
+[[prompts]]
+logical_path = "prompts/image_vision_language_hint_extract_text_with_target.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/image_vision_language_hint_extract_text_with_target.md"]
+vendor_patch = "vision/extract_text.md"
+
+[[prompts]]
+logical_path = "prompts/image_vision_language_hint_extract_text_default.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/image_vision_language_hint_extract_text_default.md"]
+vendor_patch = "vision/extract_text.md"
+
+[[prompts]]
+logical_path = "prompts/image_vision_action_extract_text.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/image_vision_action_extract_text.md"]
+vendor_patch = "vision/extract_text.md"
+
+[[prompts]]
+logical_path = "prompts/image_text_revision_prompt.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/image_text_revision_prompt.md"]
+vendor_patch = "vision/extract_text_revision.md"
 
 [[prompts]]
 logical_path = "prompts/image_vision_action_extract_with_schema.md"

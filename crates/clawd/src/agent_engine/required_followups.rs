@@ -33,6 +33,7 @@ struct FollowupStep {
     fallback_capability: Option<String>,
     fallback_input_field: Option<String>,
     fallback_input_value: Option<Value>,
+    fallback_args: Map<String, Value>,
     completion_capabilities: Vec<String>,
     recommended_capability_pointer: Option<String>,
 }
@@ -99,6 +100,14 @@ fn parse_steps(policy: &Value) -> Vec<FollowupStep> {
                 .and_then(Value::as_str)
                 .and_then(machine_ref);
             let fallback_input_value = object.get("fallback_input_value").cloned();
+            let fallback_args = object
+                .get("fallback_args")
+                .and_then(Value::as_object)
+                .into_iter()
+                .flatten()
+                .filter(|(key, _)| machine_ref(key).is_some())
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect();
             let completion_capabilities = object
                 .get("completion_capabilities")
                 .and_then(Value::as_array)
@@ -122,6 +131,7 @@ fn parse_steps(policy: &Value) -> Vec<FollowupStep> {
                 fallback_capability,
                 fallback_input_field,
                 fallback_input_value,
+                fallback_args,
                 completion_capabilities,
                 recommended_capability_pointer,
             })
@@ -158,7 +168,8 @@ fn latest_result<'a>(
 }
 
 fn args_for_capability(step: &FollowupStep, capability: &str) -> Option<Value> {
-    let (input_field, input_value) = if step.fallback_capability.as_deref() == Some(capability) {
+    let using_fallback = step.fallback_capability.as_deref() == Some(capability);
+    let (input_field, input_value) = if using_fallback {
         (
             step.fallback_input_field.clone()?,
             step.fallback_input_value.clone()?,
@@ -167,6 +178,11 @@ fn args_for_capability(step: &FollowupStep, capability: &str) -> Option<Value> {
         (step.input_field.clone(), step.input_value.clone())
     };
     let mut args = step.args.clone();
+    if using_fallback {
+        for (key, value) in &step.fallback_args {
+            args.insert(key.clone(), value.clone());
+        }
+    }
     args.insert(input_field, input_value);
     Some(Value::Object(args))
 }
@@ -267,37 +283,24 @@ fn action_for_step(
     }
 
     let primary = attempt_state(later_results, &step.capability);
-    if matches!(primary, AttemptState::Succeeded | AttemptState::InFlight) {
-        return None;
-    }
-
-    let (capability, input_field, input_value) = if primary == AttemptState::Failed {
-        let fallback = step.fallback_capability.as_deref()?;
-        match attempt_state(later_results, fallback) {
-            AttemptState::Succeeded | AttemptState::InFlight | AttemptState::Failed => return None,
-            AttemptState::NotStarted => (
-                fallback.to_string(),
-                step.fallback_input_field.clone()?,
-                step.fallback_input_value.clone()?,
-            ),
-        }
-    } else {
-        (
+    match primary {
+        AttemptState::Succeeded | AttemptState::InFlight => None,
+        AttemptState::NotStarted => required_action(
+            source_capability,
+            completion_requirement,
+            step,
             step.capability.clone(),
-            step.input_field.clone(),
-            step.input_value.clone(),
-        )
-    };
-
-    let mut args = step.args.clone();
-    args.insert(input_field, input_value);
-    Some(RequiredFollowup {
-        component_kind: step.component_kind.clone(),
-        capability,
-        args: Value::Object(args),
-        source_capability: source_capability.to_string(),
-        completion_requirement: completion_requirement.to_string(),
-    })
+        ),
+        AttemptState::Failed => {
+            let fallback = step.fallback_capability.clone()?;
+            match attempt_state(later_results, &fallback) {
+                AttemptState::NotStarted => {
+                    required_action(source_capability, completion_requirement, step, fallback)
+                }
+                AttemptState::Succeeded | AttemptState::InFlight | AttemptState::Failed => None,
+            }
+        }
+    }
 }
 
 /// Return the next required continuation after a structured component bundle

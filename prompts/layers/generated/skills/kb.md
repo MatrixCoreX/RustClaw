@@ -112,6 +112,7 @@ Natural-language intent mapping:
 | `delete_namespace` | `namespace` | yes | string | - | Namespace to delete. |
 | `reindex` | `namespace` | yes | string | - | Existing namespace to rebuild from source paths. |
 | `resume_ingest` | `job_id` | yes | string | - | Persisted job returned by `ingest` or `reindex`. |
+| `resume_ingest` | `next_file_index` | yes | nonnegative integer | - | Copy the cursor from the latest continuation; each cursor identifies one bounded batch. |
 | `ingest_job_status` | `job_id` | yes | string | - | Job to inspect. |
 | `cancel_ingest` | `job_id` | yes | string | - | Job to cancel. |
 | `stats` | `action` | yes | string | - | Must be `stats`. |
@@ -125,7 +126,8 @@ Natural-language intent mapping:
 - `ingest` prefers Markdown heading / paragraph boundaries when chunking, then falls back to bounded overlapping windows.
 - KB-owned manifests/checkpoints atomically commit each bounded batch with its next-file cursor, making restart/resume safe.
 - UTF-8 text/Markdown, normalized JSON, row-preserving CSV/TSV, and visible HTML text are supported; binary or invalid UTF-8 input is skipped with structured warnings.
-- Incomplete work returns `complete=false`, `job_status=waiting`, and a `resume_ingest` continuation with `job_id`.
+- Incomplete work returns `complete=false`, `job_status=waiting`, and a `resume_ingest` continuation with `job_id` and `next_file_index`. Copy both fields for each next batch; do not repeat the previous cursor.
+- A stale cursor or concurrent checkpoint change returns structured `error_code=checkpoint_conflict` with the current `job` status and continuation, without committing that batch. Inspect this evidence before retrying. Completed/cancelled jobs remain no-ops.
 - `search` accepts filter fields either nested under `filters` or as top-level aliases; the nested value is checked first.
 - Successful `ingest` responses expose `stats.retrieval_index_synced` and
   `stats.retrieval_index_rows`; they never expose or mutate the main runtime

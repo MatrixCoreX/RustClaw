@@ -54,10 +54,19 @@ fn whatsapp_web_local_media_rejection_is_terminal_and_preserves_the_reason() {
             422,
             &body.to_string(),
         );
-        assert_eq!(error.failure_class, ChannelProviderFailureClass::PayloadRejected);
-        assert_eq!(error.provider_error_code.as_deref(), Some(provider_code.as_str()));
+        assert_eq!(
+            error.failure_class,
+            ChannelProviderFailureClass::PayloadRejected
+        );
+        assert_eq!(
+            error.provider_error_code.as_deref(),
+            Some(provider_code.as_str())
+        );
         assert!(!error.retryable);
-        assert_eq!(ChannelProviderError::decode(&error.to_string()), Some(error));
+        assert_eq!(
+            ChannelProviderError::decode(&error.to_string()),
+            Some(error)
+        );
     }
 }
 

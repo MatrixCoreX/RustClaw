@@ -1,0 +1,6 @@
+<resources>
+    <string name="webview_update_title">请更新网页组件</string>
+    <string name="webview_update_message">本设备需要 Android System WebView 111 或更新版本才能显示应用。请在应用商店更新 Android System WebView 或 Chrome，再重新打开。账号仍保存在本设备上。</string>
+    <string name="webview_update_action">打开更新页面</string>
+    <string name="close_app">关闭</string>
+</resources>

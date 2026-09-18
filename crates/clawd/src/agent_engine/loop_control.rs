@@ -160,6 +160,17 @@ fn answer_verifier_summary_to_out(
 }
 
 fn commit_answer_verifier_retry_answer(reply: &mut AskReply, retried_answer: String) -> bool {
+    let retried_answer = reply
+        .task_journal
+        .as_ref()
+        .map(|journal| {
+            crate::finalize::preserve_verified_delivery_tokens_after_retry(
+                journal,
+                &reply.text,
+                retried_answer.clone(),
+            )
+        })
+        .unwrap_or(retried_answer);
     if !verifier_retry_answer_has_required_machine_evidence(reply, &retried_answer) {
         info!("answer_verifier_retry_commit_rejected_missing_machine_validation_evidence");
         return false;
@@ -195,6 +206,13 @@ async fn try_bounded_answer_verifier_synthesis_retry(
     verifier: &crate::task_journal::TaskJournalAnswerVerifierSummary,
     reply: &mut AskReply,
 ) -> bool {
+    if verifier
+        .missing_evidence_fields
+        .iter()
+        .any(|field| field == "requested_result")
+    {
+        return false;
+    }
     let Some(journal_snapshot) = reply.task_journal.clone() else {
         return false;
     };
@@ -232,6 +250,11 @@ async fn try_bounded_answer_verifier_synthesis_retry(
         &retried_answer,
     )
     .await;
+    if state.task_provider_blocker(&task.task_id).is_some()
+        || state.task_cost_blocker(&task.task_id).is_some()
+    {
+        return false;
+    }
     if let Some(retry_verifier) = retry_verifier {
         if !retry_verifier_accepts_rewritten_answer(&retry_verifier, &retried_answer) {
             if let Some(journal) = reply.task_journal.as_mut() {
@@ -1660,7 +1683,19 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
                         },
                     );
                 }
-                let outcome = outcome?;
+                let outcome = match outcome {
+                    Ok(outcome) => outcome,
+                    Err(error) => {
+                        if super::model_blocker_checkpoint::checkpoint_blocked_model_error(
+                            state,
+                            task,
+                            &mut loop_state,
+                        )? {
+                            break;
+                        }
+                        return Err(error);
+                    }
+                };
                 loop_state.last_stop_signal = outcome.stop_signal.clone();
                 if outcome.no_progress {
                     loop_state.consecutive_no_progress =
@@ -1723,24 +1758,65 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
                 agent_run_context,
             ));
         }
+        if super::task_plan_reconciliation::prepare_task_plan_reconciliation(
+            state,
+            task,
+            &mut loop_state,
+        )? {
+            round = round.saturating_add(1);
+            skip_planner_rounds = false;
+            continue;
+        }
         let pre_finalize_loop_state = loop_state.clone();
-        let mut reply = crate::finalize::finalize_loop_reply(
+        let finalization = crate::finalize::finalize_loop_reply(
             state,
             task,
             &effective_user_text,
             loop_state,
             agent_run_context,
         )
-        .await?;
+        .await;
+        let mut reply = match finalization {
+            Ok(reply) => reply,
+            Err(error) => {
+                loop_state = pre_finalize_loop_state;
+                if super::model_blocker_checkpoint::checkpoint_blocked_model_error(
+                    state,
+                    task,
+                    &mut loop_state,
+                )? {
+                    return Ok(checkpoint_handoff_reply(
+                        task,
+                        &effective_user_text,
+                        &loop_state,
+                        agent_run_context,
+                    ));
+                }
+                return Err(error);
+            }
+        };
         if loop_state_has_checkpoint_handoff(&pre_finalize_loop_state) {
             return Ok(reply);
+        }
+        let mut blocked_loop_state = pre_finalize_loop_state.clone();
+        if super::model_blocker_checkpoint::checkpoint_blocked_model_error(
+            state,
+            task,
+            &mut blocked_loop_state,
+        )? {
+            return Ok(checkpoint_handoff_reply(
+                task,
+                &effective_user_text,
+                &blocked_loop_state,
+                agent_run_context,
+            ));
         }
         let answer_contract = answer_contract_for_reply(&effective_user_text, &reply);
         prefer_terminal_model_answer_for_verifier_candidate(&mut reply, answer_contract.as_ref());
         enforce_post_write_content_evidence_guard(&mut reply);
         enforce_workspace_mutation_validation_success_guard(&mut reply);
         let mut pre_verifier_recovery_loop_state = pre_finalize_loop_state.clone();
-        if try_run_post_write_validation_reserve_recovery(
+        let reserve_recovery = try_run_post_write_validation_reserve_recovery(
             state,
             task,
             goal,
@@ -1750,8 +1826,20 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
             &reply,
             agent_run_context,
         )
-        .await?
-        {
+        .await;
+        if super::model_blocker_checkpoint::checkpoint_blocked_model_error(
+            state,
+            task,
+            &mut pre_verifier_recovery_loop_state,
+        )? {
+            return Ok(checkpoint_handoff_reply(
+                task,
+                &effective_user_text,
+                &pre_verifier_recovery_loop_state,
+                agent_run_context,
+            ));
+        }
+        if reserve_recovery? {
             loop_state = pre_verifier_recovery_loop_state;
             skip_planner_rounds = true;
             continue;
@@ -1764,6 +1852,19 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
             &mut reply,
         )
         .await;
+        let mut blocked_loop_state = pre_finalize_loop_state.clone();
+        if super::model_blocker_checkpoint::checkpoint_blocked_model_error(
+            state,
+            task,
+            &mut blocked_loop_state,
+        )? {
+            return Ok(checkpoint_handoff_reply(
+                task,
+                &effective_user_text,
+                &blocked_loop_state,
+                agent_run_context,
+            ));
+        }
         enforce_post_write_content_evidence_guard(&mut reply);
         enforce_workspace_mutation_validation_success_guard(&mut reply);
         let route_result = answer_contract.as_ref();
@@ -1803,6 +1904,19 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
                 missing_evidence_fields = ?verifier.missing_evidence_fields,
                 "answer_verifier_bounded_synthesis_retry_exhausted"
             );
+            let mut blocked_loop_state = pre_finalize_loop_state.clone();
+            if super::model_blocker_checkpoint::checkpoint_blocked_model_error(
+                state,
+                task,
+                &mut blocked_loop_state,
+            )? {
+                return Ok(checkpoint_handoff_reply(
+                    task,
+                    &effective_user_text,
+                    &blocked_loop_state,
+                    agent_run_context,
+                ));
+            }
             mark_reply_failed_after_answer_verifier_exhausted(
                 &effective_user_text,
                 &mut reply,

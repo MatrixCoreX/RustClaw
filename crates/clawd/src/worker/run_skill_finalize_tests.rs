@@ -270,6 +270,7 @@ async fn direct_run_skill_async_start_publishes_waiting_checkpoint() {
         .to_string(),
         notify: Some(false),
         validation: None,
+        output_contract_validation: None,
         extra: Some(json!({
             "schema_version": 1,
             "source": "builtin_success_extra",

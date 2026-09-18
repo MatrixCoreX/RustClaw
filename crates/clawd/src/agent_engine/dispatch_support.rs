@@ -1200,6 +1200,25 @@ pub(super) async fn dispatch_round_action(
         if !super::capability_result_synthesis::pending_transcript_review(
             &loop_state.capability_results,
         ) {
+            let complete_bundle = loop_state
+                .last_publishable_synthesis_output
+                .as_deref()
+                .is_some_and(|answer| {
+                    super::capability_result_synthesis::transcript_bundle_delivery_is_complete(
+                        answer,
+                        &loop_state.capability_results,
+                        &task.task_id,
+                    )
+                });
+            if complete_bundle {
+                info!(
+                    "transcript_review_completed_deliver_bundle task_id={} round={} step={}",
+                    task.task_id, loop_state.round_no, step_in_round
+                );
+                return Ok(ActionLoopDecision::StopRound(
+                    "terminal_synthesis_ready".to_string(),
+                ));
+            }
             preserve_transcript_review_as_intermediate_evidence(
                 loop_state,
                 ended_with_user_visible_output,

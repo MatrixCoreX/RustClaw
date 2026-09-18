@@ -174,6 +174,63 @@ fn structured_image_is_added_when_model_only_returns_prose() {
 }
 
 #[test]
+fn embedded_artifact_detail_is_preserved_while_all_manifests_are_delivered() {
+    let workspace = temp_workspace("task_delivery_detail_and_all_files");
+    let task_id = "task-detail";
+    let image_id = "image-1";
+    let text_id = "text-1";
+    let image_path = write_delivery_artifact(&workspace, task_id, image_id, "photo.webp", b"image");
+    let text_path =
+        write_delivery_artifact(&workspace, task_id, text_id, "transcript.txt", b"text");
+    let mut result = result_with_artifact(
+        task_id,
+        image_id,
+        "photo.webp",
+        "image",
+        "image/webp",
+        5,
+        None,
+    );
+    append_artifact(
+        &mut result,
+        task_id,
+        text_id,
+        "transcript.txt",
+        "file",
+        "text/plain",
+        4,
+    );
+    let detail = format!(
+        "- photo.webp · image/webp · 5 bytes: IMAGE_FILE:artifact:task/{task_id}/{image_id}"
+    );
+
+    let messages = merge_task_artifact_delivery_messages(
+        task_id,
+        Some(&result),
+        &workspace,
+        vec![format!("completed\n{detail}")],
+    );
+
+    assert_eq!(messages.len(), 1);
+    let image_canonical = image_path
+        .canonicalize()
+        .expect("canonical image")
+        .display()
+        .to_string();
+    let text_canonical = text_path
+        .canonicalize()
+        .expect("canonical text")
+        .display()
+        .to_string();
+    assert!(messages[0].contains("- photo.webp · image/webp · 5 bytes: "));
+    assert!(messages[0].contains(&image_canonical));
+    assert!(!messages[0].contains(&format!("artifact:task/{task_id}/{image_id}")));
+    assert!(messages[0].contains(&format!("IMAGE_FILE:{image_canonical}")));
+    assert!(messages[0].contains(&format!("FILE:{text_canonical}")));
+    fs::remove_dir_all(workspace).ok();
+}
+
+#[test]
 fn async_completion_delivery_flag_controls_model_independent_video_delivery() {
     let workspace = temp_workspace("task_delivery_async_video");
     let task_id = "task-async-video";
@@ -226,6 +283,125 @@ fn async_completion_delivery_flag_controls_model_independent_video_delivery() {
         vec!["download complete\nVIDEO_FILE:/old/clip.mp4".to_string()],
     );
     assert_eq!(messages, vec!["download complete"]);
+    fs::remove_dir_all(workspace).ok();
+}
+
+#[test]
+fn video_only_answer_still_delivers_companion_audio_and_transcript() {
+    let workspace = temp_workspace("task_delivery_companion_bundle");
+    let task_id = "task-companion-bundle";
+    let video_id = "a_video";
+    let audio_id = "artifact-audio";
+    let transcript_id = "transcript-review:fixture";
+    let video_path = write_delivery_artifact(&workspace, task_id, video_id, "clip.mp4", b"video");
+    let audio_path =
+        write_delivery_artifact(&workspace, task_id, audio_id, "clip.wav", b"wav-bytes");
+    let transcript_path = write_delivery_artifact(
+        &workspace,
+        task_id,
+        transcript_id,
+        "transcript.txt",
+        b"transcript",
+    );
+    let mut result = result_with_artifact(
+        task_id,
+        video_id,
+        "clip.mp4",
+        "video",
+        "video/mp4",
+        5,
+        Some(true),
+    );
+    result["artifacts"]
+        .as_array_mut()
+        .expect("artifacts array")
+        .extend([
+            serde_json::json!({
+                "schema_version": 1,
+                "id": audio_id,
+                "filename": "clip.wav",
+                "kind": "audio",
+                "mime_type": "audio/x-wav",
+                "size_bytes": 9,
+                "sha256": "c".repeat(64),
+                "download_url": format!("/v1/tasks/{task_id}/artifacts/{audio_id}/content")
+            }),
+            serde_json::json!({
+                "schema_version": 1,
+                "id": transcript_id,
+                "filename": "transcript.txt",
+                "kind": "file",
+                "mime_type": "text/plain; charset=utf-8",
+                "size_bytes": 10,
+                "sha256": "d".repeat(64),
+                "download_url": format!("/v1/tasks/{task_id}/artifacts/{transcript_id}/content")
+            }),
+        ]);
+
+    let messages = merge_task_artifact_delivery_messages(
+        task_id,
+        Some(&result),
+        &workspace,
+        vec![format!(
+            "已完成音转文\nVIDEO_FILE:artifact:task/{task_id}/{video_id}"
+        )],
+    );
+
+    assert_eq!(messages.len(), 1);
+    let video_canonical = video_path
+        .canonicalize()
+        .expect("canonical video")
+        .display()
+        .to_string();
+    assert!(messages[0].starts_with("已完成音转文\n"));
+    assert!(messages[0].contains(&video_canonical));
+    assert!(!messages[0].contains(&format!("artifact:task/{task_id}/{video_id}")));
+    assert!(messages[0].contains(&format!("VIDEO_FILE:{video_canonical}")));
+    assert!(messages[0].contains(&format!(
+        "FILE:{}",
+        audio_path
+            .canonicalize()
+            .expect("canonical audio")
+            .display()
+    )));
+    assert!(messages[0].contains(&format!(
+        "FILE:{}",
+        transcript_path
+            .canonicalize()
+            .expect("canonical transcript")
+            .display()
+    )));
+    fs::remove_dir_all(workspace).ok();
+}
+
+#[test]
+fn labeled_artifact_handle_is_rewritten_to_delivery_path() {
+    let workspace = temp_workspace("task_delivery_labeled_path");
+    let task_id = "task-labeled-path";
+    let artifact_id = "a_video";
+    let path = write_delivery_artifact(&workspace, task_id, artifact_id, "clip.mp4", b"video");
+    let result = result_with_artifact(
+        task_id,
+        artifact_id,
+        "clip.mp4",
+        "video",
+        "video/mp4",
+        5,
+        Some(true),
+    );
+    let messages = merge_task_artifact_delivery_messages(
+        task_id,
+        Some(&result),
+        &workspace,
+        vec![format!(
+            "已下载完成。\n- 视频（mp4，5 B）：VIDEO_FILE:artifact:task/{task_id}/{artifact_id}"
+        )],
+    );
+    let canonical = path.canonicalize().expect("canonical video");
+    assert_eq!(messages.len(), 1);
+    assert!(messages[0].contains(&format!("- 视频（mp4，5 B）：{}", canonical.display())));
+    assert!(!messages[0].contains("artifact:task/"));
+    assert!(messages[0].contains(&format!("VIDEO_FILE:{}", canonical.display())));
     fs::remove_dir_all(workspace).ok();
 }
 
@@ -556,13 +732,16 @@ fn valid_task_artifact_is_delivered_when_another_handle_is_stale() {
         )],
     );
 
+    let canonical = path
+        .canonicalize()
+        .expect("canonical transcript")
+        .display()
+        .to_string();
     assert_eq!(
         messages,
-        vec![format!(
-            "转写完成\nFILE:{}",
-            path.canonicalize().expect("canonical transcript").display()
-        )]
+        vec![format!("转写完成\n{canonical}\nFILE:{canonical}")]
     );
+    assert!(!messages[0].contains("artifact:task/"));
     fs::remove_dir_all(workspace).ok();
 }
 

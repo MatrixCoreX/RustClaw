@@ -1,3 +1,4 @@
+import { copy } from "./i18n";
 const messages: Record<string, string> = {
   local_address_required: '本机 HTTP 只允许 http://127.0.0.1:端口 或 http://[::1]:端口，不包含路径。局域网地址请使用 HTTPS 或 SSH。',
   local_connection_failed: '未能连接本机服务。请先启动本机服务，并检查本机地址与端口。',
@@ -34,5 +35,5 @@ const messages: Record<string, string> = {
 };
 export function friendlyError(error: unknown) {
   const code = error instanceof Error ? error.message : String(error);
-  return messages[code] ?? `操作未完成（${code.replace(/[^a-zA-Z0-9_.:-]/g, '').slice(0, 100)}）。请回到当前设备查看状态，确认操作结果后再继续。`;
+  return copy(messages[code] ?? "操作未完成。请检查连接和密钥库状态后重试。");
 }

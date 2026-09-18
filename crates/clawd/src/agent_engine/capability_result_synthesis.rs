@@ -95,6 +95,43 @@ pub(super) fn pending_transcript_review(results: &[CapabilityResultEnvelope]) ->
     transcript_review_contract(results).is_some()
 }
 
+pub(super) fn transcript_bundle_delivery_is_complete(
+    answer: &str,
+    results: &[CapabilityResultEnvelope],
+    task_id: &str,
+) -> bool {
+    let tokens = user_delivery_artifact_tokens(results, task_id);
+    let Some(transcript_token) = transcript_delivery_token(results, task_id) else {
+        return false;
+    };
+    answer_contains_delivery_token(answer, &transcript_token)
+        && tokens
+            .iter()
+            .all(|token| answer_contains_delivery_token(answer, token))
+}
+
+fn transcript_delivery_token(
+    results: &[CapabilityResultEnvelope],
+    task_id: &str,
+) -> Option<String> {
+    results.iter().rev().find_map(|result| {
+        result.artifacts.iter().rev().find_map(|artifact| {
+            (artifact.visibility == Some(ArtifactVisibility::UserDelivery)
+                && artifact.artifact_role.as_deref() == Some("transcript_text"))
+            .then(|| delivery_token_for_artifact(artifact, task_id))
+            .flatten()
+        })
+    })
+}
+
+fn answer_contains_delivery_token(answer: &str, token: &str) -> bool {
+    let reference = token
+        .split_once(':')
+        .map(|(_, reference)| reference)
+        .unwrap_or(token);
+    answer.contains(token) || (!reference.is_empty() && answer.contains(reference))
+}
+
 fn terminal_model_synthesis_results(results: &[CapabilityResultEnvelope]) -> bool {
     !results.is_empty()
         && results.iter().all(|result| {
@@ -186,9 +223,9 @@ async fn synthesize_from_capability_results_with_policy(
             evidence_count,
         )
         .await;
-        return match synthesis {
-            Ok(synthesis) => Ok(Some(synthesis)),
-            Err(error_code) => Ok(Some(synthesize_unreviewed_transcript_fallback(
+        let mut synthesis = match synthesis {
+            Ok(synthesis) => synthesis,
+            Err(error_code) => synthesize_unreviewed_transcript_fallback(
                 state,
                 task,
                 loop_state,
@@ -196,9 +233,59 @@ async fn synthesize_from_capability_results_with_policy(
                 evidence_count,
                 &error_code,
                 &target_language,
-            ))),
+            ),
         };
+        if has_companion_user_delivery_artifacts(&loop_state.capability_results) {
+            if let Ok(Some(detailed)) = synthesize_model_capability_answer(
+                state,
+                task,
+                user_text,
+                loop_state,
+                agent_run_context,
+                execution_context,
+            )
+            .await
+            {
+                synthesis.answer = detailed.answer;
+                synthesis.confidence = detailed.confidence;
+                synthesis.evidence_count = detailed.evidence_count;
+            }
+        }
+        synthesis.answer = append_user_delivery_artifact_tokens(
+            synthesis.answer,
+            &loop_state.capability_results,
+            &task.task_id,
+        );
+        return Ok(Some(synthesis));
     }
+    let mut synthesis = synthesize_model_capability_answer(
+        state,
+        task,
+        user_text,
+        loop_state,
+        agent_run_context,
+        execution_context,
+    )
+    .await?;
+    if let Some(synthesis) = synthesis.as_mut() {
+        synthesis.answer = append_user_delivery_artifact_tokens(
+            std::mem::take(&mut synthesis.answer),
+            &loop_state.capability_results,
+            &task.task_id,
+        );
+    }
+    Ok(synthesis)
+}
+
+async fn synthesize_model_capability_answer(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    execution_context: &str,
+) -> Result<Option<CapabilitySynthesis>, String> {
+    let results = synthesis_evidence_catalog(state, task, &loop_state.capability_results)?;
     let result_json = serde_json::to_string(&results)
         .map_err(|_| "capability_result_synthesis_input_serialize_failed".to_string())?;
     let constraints = delivery_constraints(agent_run_context);
@@ -551,6 +638,182 @@ fn format_labeled_audio_transcript(
         || format!("{label}:\n{text}"),
         |path| format!("{label}:\n{text}\nFILE:{path}"),
     )
+}
+
+fn has_companion_user_delivery_artifacts(results: &[CapabilityResultEnvelope]) -> bool {
+    results.iter().any(|result| {
+        result.artifacts.iter().any(|artifact| {
+            artifact.visibility == Some(ArtifactVisibility::UserDelivery)
+                && artifact.artifact_role.as_deref() != Some("transcript_text")
+        }) || result
+            .data
+            .pointer("/extra/processing_inputs/video_audio/status")
+            .and_then(Value::as_str)
+            == Some("available")
+    })
+}
+
+fn append_user_delivery_artifact_tokens(
+    mut answer: String,
+    results: &[CapabilityResultEnvelope],
+    task_id: &str,
+) -> String {
+    for token in user_delivery_artifact_tokens(results, task_id) {
+        let already_present = answer.lines().any(|line| {
+            let Some(parsed) =
+                claw_core::channel_delivery_tokens::parse_legacy_delivery_line_ref(line.trim())
+            else {
+                return false;
+            };
+            let reference = token
+                .split_once(':')
+                .map(|(_, reference)| reference)
+                .unwrap_or(token.as_str());
+            parsed.reference == reference || line.contains(token.as_str())
+        });
+        if already_present {
+            continue;
+        }
+        if !answer.ends_with('\n') {
+            answer.push('\n');
+        }
+        answer.push_str(&token);
+    }
+    answer
+}
+
+fn user_delivery_artifact_tokens(
+    results: &[CapabilityResultEnvelope],
+    task_id: &str,
+) -> Vec<String> {
+    let mut ranked = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for result in results {
+        for artifact in &result.artifacts {
+            if artifact.visibility != Some(ArtifactVisibility::UserDelivery) {
+                continue;
+            }
+            if let Some(token) = delivery_token_for_artifact(artifact, task_id) {
+                if seen.insert(token.clone()) {
+                    ranked.push((
+                        delivery_token_rank(artifact.artifact_role.as_deref()),
+                        token,
+                    ));
+                }
+            }
+        }
+        if let Some(token) = processing_audio_delivery_token(result, task_id) {
+            if seen.insert(token.clone()) {
+                ranked.push((1, token));
+            }
+        }
+    }
+    ranked.sort_by_key(|(rank, token)| (*rank, token.clone()));
+    ranked.into_iter().map(|(_, token)| token).collect()
+}
+
+fn processing_audio_delivery_token(
+    result: &CapabilityResultEnvelope,
+    task_id: &str,
+) -> Option<String> {
+    let audio = result
+        .data
+        .pointer("/extra/processing_inputs/video_audio")?;
+    if audio.get("status").and_then(Value::as_str) != Some("available") {
+        return None;
+    }
+    if result
+        .artifacts
+        .iter()
+        .any(|artifact| artifact.artifact_role.as_deref() == Some("extracted_audio"))
+    {
+        return None;
+    }
+    let artifact = ArtifactRef {
+        artifact_ref: audio
+            .get("artifact_ref")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        id: audio
+            .get("id")
+            .or_else(|| audio.get("artifact_id"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        path: audio
+            .get("path")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        uri: None,
+        media_type: audio
+            .get("mime_type")
+            .or_else(|| audio.get("media_type"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        filename: audio
+            .get("filename")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        artifact_role: Some("extracted_audio".to_string()),
+        size_bytes: audio.get("size_bytes").and_then(Value::as_u64),
+        sha256: audio
+            .get("sha256")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        visibility: Some(ArtifactVisibility::UserDelivery),
+        owner_task_id: Some(task_id.to_string()),
+        producer: None,
+        lease: None,
+        metadata: json!({}),
+    };
+    delivery_token_for_artifact(&artifact, task_id)
+}
+
+fn delivery_token_for_artifact(artifact: &ArtifactRef, task_id: &str) -> Option<String> {
+    let reference = artifact
+        .artifact_ref
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            artifact.id.as_deref().and_then(|id| {
+                claw_core::task_delivery_artifacts::canonical_task_artifact_ref(task_id, id)
+            })
+        })
+        .or_else(|| {
+            artifact
+                .path
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        })?;
+    Some(format!(
+        "{}{reference}",
+        delivery_prefix_for_artifact(artifact)
+    ))
+}
+
+fn delivery_prefix_for_artifact(artifact: &ArtifactRef) -> &'static str {
+    let media_type = artifact.media_type.as_deref().unwrap_or_default();
+    if media_type.starts_with("image/") {
+        return "IMAGE_FILE:";
+    }
+    if media_type.starts_with("video/")
+        || artifact.artifact_role.as_deref() == Some("original_video")
+    {
+        return "VIDEO_FILE:";
+    }
+    "FILE:"
+}
+
+fn delivery_token_rank(role: Option<&str>) -> u8 {
+    match role {
+        Some("original_video") => 0,
+        Some("extracted_audio" | "background_audio") => 1,
+        Some("transcript_text") => 2,
+        _ => 3,
+    }
 }
 
 fn synthesize_unreviewed_transcript_fallback(

@@ -501,6 +501,34 @@ async fn read_file_returns_verified_byte_pages_without_silent_truncation() {
 }
 
 #[tokio::test]
+async fn required_literal_args_write_and_append_exact_whitespace_bytes() {
+    let root = TempDirGuard::new("literal_content_bytes");
+    let state = test_state(root.path.clone());
+    for (index, content) in ["", "\n", "\r\n", " \t", "text"].iter().enumerate() {
+        let path = format!("notes/literal-{index}.txt");
+        execute_builtin_skill(
+            &state,
+            "write_file",
+            &json!({"path": path, "content": content}),
+        )
+        .await
+        .expect("write exact string");
+        assert_eq!(fs::read(root.path.join(&path)).unwrap(), content.as_bytes());
+        execute_builtin_skill(
+            &state,
+            "write_file",
+            &json!({"path": path, "content": "\n", "append": true}),
+        )
+        .await
+        .expect("append exactly one LF");
+        assert_eq!(
+            fs::read(root.path.join(&path)).unwrap(),
+            format!("{content}\n").as_bytes()
+        );
+    }
+}
+
+#[tokio::test]
 async fn write_file_append_preserves_existing_content() {
     let root = TempDirGuard::new("write_file_append");
     let path = root.path.join("notes/memo.txt");

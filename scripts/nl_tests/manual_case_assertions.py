@@ -5,8 +5,14 @@ from __future__ import annotations
 import json
 import re
 import sys
+import tomllib
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
+
+from manual_workspace_assertions import workspace_file_cycle_assertion
+from manual_execution_assertions import step_contract_assertion
+from manual_trace_evidence import restore_execution_streams
 
 try:
     import yaml
@@ -21,7 +27,38 @@ _CALL_ACTION_TYPES = {"call_capability", "call_tool", "call_skill"}
 _PLANNER_INTERNAL_DISCOVERY_CALLS = {"load_capability_groups"}
 
 
+@lru_cache(maxsize=1)
+def registry_capability_aliases() -> dict[str, str]:
+    path = Path(__file__).resolve().parents[2] / "configs/skills_registry.toml"
+    aliases = {}
+    for skill in tomllib.loads(path.read_text())["skills"]:
+        for alias, target in skill.get("planner_capability_aliases", {}).items():
+            if alias in aliases and aliases[alias] != target:
+                raise ValueError("conflicting registry capability alias")
+            aliases[alias] = target
+    return aliases
+
+
+def canonical_capability(name: str) -> str:
+    aliases = registry_capability_aliases()
+    seen = set()
+    while name in aliases:
+        if name in seen:
+            raise ValueError("cyclic registry capability alias")
+        seen.add(name)
+        name = aliases[name]
+    return name
+
+
+def step_matches_capability(step: dict[str, Any], name: str) -> bool:
+    expected = canonical_capability(name)
+    return any(canonical_capability(str(step.get(field) or "")) == expected
+               for field in ("requested_capability", "resolved_capability"))
+
+
 def json_pointer_get(root: Any, pointer: str) -> Any:
+    if pointer == "":
+        return root
     if not pointer.startswith("/"):
         return _MISSING
     value = root
@@ -54,6 +91,22 @@ def value_to_compare_text(value: Any) -> str | None:
     if isinstance(value, (int, float, str)):
         return str(value)
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def json_value_matches_expected(actual: Any, expected: str) -> bool:
+    if actual is _MISSING:
+        return False
+    try:
+        expected_value = json.loads(expected)
+    except json.JSONDecodeError:
+        return isinstance(actual, str) and actual == expected
+    try:
+        # JSON object order is insignificant; array order and value types are not.
+        options = {"ensure_ascii": False, "sort_keys": True,
+                   "separators": (",", ":"), "allow_nan": False}
+        return json.dumps(actual, **options) == json.dumps(expected_value, **options)
+    except (TypeError, ValueError):
+        return False
 
 
 def boolean_tag(tags: str, name: str) -> bool | None:
@@ -133,7 +186,11 @@ def actual_call_steps(result: dict[str, Any]) -> list[dict[str, Any]]:
             or step.get("skill")
             or ""
         )
-        if action_type in _CALL_ACTION_TYPES and subject not in _PLANNER_INTERNAL_DISCOVERY_CALLS:
+        executed = step.get("executed_skill") or step.get("resolved_tool_or_skill")
+        if (action_type in _CALL_ACTION_TYPES
+                and subject not in _PLANNER_INTERNAL_DISCOVERY_CALLS
+                and executed not in _PLANNER_INTERNAL_DISCOVERY_CALLS
+                and executed not in {"respond", "synthesize_answer"}):
             calls.append(step)
     return calls
 
@@ -425,6 +482,10 @@ def observed_machine_field_values(
     accepted_fields = field_aliases.get(field, {field})
     values: list[str] = []
     for step in actual_call_steps(result):
+        try:
+            complete_output = json.loads(step.get("output_excerpt") or "")
+        except (json.JSONDecodeError, TypeError):
+            complete_output = _MISSING
         observed = step.get("observed_evidence")
         items = observed.get("items") if isinstance(observed, dict) else None
         if not isinstance(items, list):
@@ -436,7 +497,14 @@ def observed_machine_field_values(
             observed_leaf = observed_field.rsplit(".", maxsplit=1)[-1]
             if observed_leaf not in accepted_fields:
                 continue
-            value = value_to_compare_text(item.get("excerpt", _MISSING))
+            # Human-readable evidence excerpts trim whitespace. Prefer the exact
+            # JSON value when a complete structured output is available.
+            parts = re.sub(r"\[(\d+)\]", r".\1", observed_field).split(".")
+            pointer = "/" + "/".join(part.replace("~", "~0").replace("/", "~1") for part in parts)
+            exact = json_pointer_get(complete_output, pointer)
+            value = value_to_compare_text(
+                item.get("excerpt", _MISSING) if exact is _MISSING else exact
+            )
             if value is not None and value not in values:
                 values.append(value)
     return values
@@ -457,6 +525,23 @@ def observed_machine_field_exists(result: dict[str, Any], field: str) -> bool:
     return False
 
 
+def successful_call_step(step: dict[str, Any]) -> bool:
+    if step.get("status") != "ok" or step.get("error_code"):
+        return False
+    # Transport completion is not domain success. Inspect only envelope fields,
+    # never status columns inside returned records or user-visible error prose.
+    observed = step.get("observed_evidence")
+    items = observed.get("items", []) if isinstance(observed, dict) else []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if item.get("field") in {"status", "extra.status", "data.extra.status"}:
+            value = item.get("excerpt")
+            if isinstance(value, str) and value in {"error", "failed", "canceled"}:
+                return False
+    return True
+
+
 def structural_assertions(
     tags: str,
     text: str,
@@ -465,7 +550,13 @@ def structural_assertions(
 ) -> list[dict[str, Any]]:
     details: list[dict[str, Any]] = []
     calls = actual_call_steps(result)
-    successful_calls = [step for step in calls if step.get("status") == "ok"]
+    successful_calls = [step for step in calls if successful_call_step(step)]
+    alternatives = token_tags(tags, "any_successful_capability")
+    if alternatives:
+        matches = [step for step in successful_calls if
+                   any(step_matches_capability(step, name) for name in alternatives)]
+        details.append({"kind": "tag", "tag": "any_successful_capability",
+                        "expected": alternatives, "matched_call_count": len(matches), "ok": bool(matches)})
     requires_tool_call = boolean_tag(tags, "requires_tool_call")
 
     if requires_tool_call is not None:
@@ -486,11 +577,7 @@ def structural_assertions(
         matched_steps = [
             step
             for step in calls
-            if required_capability
-            in {
-                str(step.get("requested_capability") or ""),
-                str(step.get("resolved_capability") or ""),
-            }
+            if step_matches_capability(step, required_capability)
         ]
         matched_resolutions = []
         if requires_tool_call is False:
@@ -499,11 +586,7 @@ def structural_assertions(
                 for observation in task_observations(result)
                 if observation.get("observation_kind") == "capability_resolution"
                 and observation.get("outcome") == "resolved"
-                and required_capability
-                in {
-                    str(observation.get("requested_capability") or ""),
-                    str(observation.get("resolved_capability") or ""),
-                }
+                and step_matches_capability(observation, required_capability)
             ]
         details.append(
             {
@@ -521,11 +604,7 @@ def structural_assertions(
         matched_steps = [
             step
             for step in calls
-            if forbidden_capability
-            in {
-                str(step.get("requested_capability") or ""),
-                str(step.get("resolved_capability") or ""),
-            }
+            if step_matches_capability(step, forbidden_capability)
         ]
         details.append(
             {
@@ -544,11 +623,7 @@ def structural_assertions(
         matched_steps = [
             step
             for step in successful_calls
-            if required_capability
-            in {
-                str(step.get("requested_capability") or ""),
-                str(step.get("resolved_capability") or ""),
-            }
+            if step_matches_capability(step, required_capability)
         ]
         details.append(
             {
@@ -658,6 +733,52 @@ def structural_assertions(
     return details
 
 
+def skill_outcome_json_assertion(spec: str, text: str, result: dict[str, Any]) -> dict[str, Any]:
+    detail: dict[str, Any] = {"kind": "skill_outcome_json", "ok": False}
+    try:
+        contract = json.loads(spec)
+        final = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return detail
+    if not isinstance(contract, dict) or not isinstance(final, dict):
+        return detail
+    if set(contract) != {"skill", "success_fields"}:
+        return detail
+    skill = contract["skill"]
+    fields = contract["success_fields"]
+    if not isinstance(skill, str) or not skill or not isinstance(fields, list) or not fields:
+        return detail
+    if not all(isinstance(field, str) and field for field in fields):
+        return detail
+    calls = [step for step in actual_call_steps(result)
+             if (step.get("executed_skill") or step.get("resolved_tool_or_skill")) == skill]
+    detail["skill"] = skill
+    if final.get("status") != "error":
+        detail["acceptance_path"] = "successful_execution"
+        detail["ok"] = (all(field in final and final[field] is not None for field in fields)
+                        and any(successful_call_step(step) for step in calls))
+        return detail
+
+    detail["acceptance_path"] = "provider_error"
+    if not isinstance(final.get("error_code"), str) or not final["error_code"]:
+        return detail
+    if final.get("failure_phase") not in {"provider_request", "provider_rejected"}:
+        return detail
+    # Match every error field to one actual failed invocation, never to a
+    # response-only step or fields assembled from unrelated observations.
+    required = {"error_code", "failure_phase"}
+    required.update(field for field in ("provider", "status_code") if field in final)
+    for step in calls:
+        if successful_call_step(step):
+            continue
+        single = {"task_journal": {"trace": {"step_results": [step]}}}
+        if all(observed_machine_field_matches(single, field, value_to_compare_text(final[field]))
+               for field in required):
+            detail["ok"] = True
+            break
+    return detail
+
+
 def evaluate_expectations(
     spec_text: str,
     tags: str,
@@ -690,10 +811,29 @@ def evaluate_expectations(
         )
 
     for raw in [part.strip() for part in spec_text.split(";") if part.strip()]:
-        if raw.startswith("contains:"):
+        if raw.startswith("step_contract_json:"):
+            detail = step_contract_assertion(raw[len("step_contract_json:"):], actual_call_steps(result))
+            details.append(detail)
+            ok = detail["ok"]
+        elif raw.startswith("workspace_file_cycle:"):
+            successful = [step for step in actual_call_steps(result) if successful_call_step(step)]
+            detail = workspace_file_cycle_assertion(raw[len("workspace_file_cycle:"):], result, successful)
+            details.append(detail)
+            ok = detail["ok"]
+        elif raw.startswith("skill_outcome_json:"):
+            detail = skill_outcome_json_assertion(raw[len("skill_outcome_json:"):], text, result)
+            details.append(detail)
+            ok = detail["ok"]
+        elif raw.startswith("contains:"):
             needle = raw[len("contains:") :]
             ok = needle in text
             details.append({"kind": "contains", "value": needle, "ok": ok})
+        elif raw.startswith("observed_eq:"):
+            field, sep, expected = raw[len("observed_eq:"):].partition("=")
+            values = observed_machine_field_values(result, field)
+            ok = bool(field and sep) and expected in values
+            details.append({"kind": "observed_eq", "field": field,
+                            "expected": expected, "observed_values": values, "ok": ok})
         elif raw.startswith("json_exists:"):
             pointer = raw[len("json_exists:") :]
             ok = json_pointer_get(obj, pointer) is not _MISSING
@@ -713,16 +853,35 @@ def evaluate_expectations(
                     "ok": ok,
                 }
             )
+        elif raw.startswith("result_text_json_records_eq:"):
+            expected = raw[len("result_text_json_records_eq:"):]
+            try:
+                decoded = json.loads(str(result.get("text") or ""))
+                expected_records = json.loads(expected)
+            except json.JSONDecodeError:
+                decoded = expected_records = _MISSING
+            candidates = [decoded] if isinstance(decoded, list) else [
+                decoded[key] for key in ("result", "output")
+                if isinstance(decoded, dict) and key in decoded
+            ]
+            expected_text = value_to_compare_text(expected_records)
+            actual_values = [value_to_compare_text(value) for value in candidates]
+            ok = isinstance(expected_records, list) and bool(candidates) and all(
+                isinstance(value, list) and value_to_compare_text(value) == expected_text
+                for value in candidates
+            )
+            details.append({"kind": "result_text_json_records_eq", "expected": expected_text,
+                            "actual_values": actual_values, "ok": ok})
         elif raw.startswith("result_text_json_eq:"):
             expr = raw[len("result_text_json_eq:") :]
             pointer, sep, expected = expr.partition("=")
             try:
                 decoded_result_text = json.loads(str(result.get("text") or ""))
             except json.JSONDecodeError:
-                decoded_result_text = {}
+                decoded_result_text = _MISSING
             actual = json_pointer_get(decoded_result_text, pointer)
             actual_text = value_to_compare_text(actual)
-            ok = bool(sep) and actual_text == expected
+            ok = bool(sep) and json_value_matches_expected(actual, expected)
             details.append(
                 {
                     "kind": "result_text_json_eq",
@@ -793,6 +952,7 @@ def build_summary_row(
         obj = json.loads(path.read_text(encoding="utf-8"))
     else:
         obj = {}
+    obj, trace_evidence = restore_execution_streams(obj, path, task_id) if path else (obj, None)
     data = obj.get("data") or {}
     result = data.get("result_json") or {}
     text = str(result.get("text") or "")
@@ -821,6 +981,10 @@ def build_summary_row(
         result,
         harness_evidence,
     )
+    if trace_evidence is not None:
+        assertion_details.append(trace_evidence)
+        if not trace_evidence["ok"]:
+            assertion = "fail"
 
     return {
         "source_line": source_line,
