@@ -8,15 +8,15 @@ URL whose content should be downloaded and returned now belongs to
 `media_download.download`, even when it is used as a `seed_urls` input shape;
 this skill does not provide immediate single-post media delivery. Xiaohongshu
 defaults to `browser_mode=visible`; Douyin and Kuaishou default to `silent`.
-An explicit mode overrides the platform default. Login/verification exceptions may open
-one temporary browser for the user to complete those steps, then resume silently.
-It never solves a slider or bypasses a platform restriction automatically.
-Rendered media screenshots and author captions (`platform_text`) are stored in
-`videos.csv` / `images.csv`, without OCR, model review, original-image or video downloads.
+An explicit mode overrides the platform default. Login/verification may open one
+temporary browser; Douyin sliders are silent-only, and `/` or `/jingxuan` plus the
+local confirm tab resume that batch in a visible browser without solving the slider.
+Rendered media screenshots, author titles (`title`), and captions (`platform_text`,
+empty without a distinct caption) are stored in `videos.csv` / `images.csv`, without OCR, model review, original-image or video downloads.
 Available views/likes/comments/favorites/shares retain platform display precision;
 plain integer counters also receive exact numeric values. Unavailable fields remain absent.
-Video covers use an unobscured rendered frame or platform poster under `video_covers/`;
-whole-page and login-dialog screenshots never substitute for missing media.
+Video covers use an unobscured rendered frame, platform poster, or Douyin search tile under `video_covers/`;
+blank overlay player shots are discarded. Whole-page and login-dialog screenshots never substitute for missing media.
 
 Keyword discovery uses `source_mode=topics` with non-empty `topics[]` in input order.
 From the homepage, fill the visible search field and click the platform search control;
@@ -27,7 +27,8 @@ visible `/search_result/<id>` links retain the page's query parameters.
 Kuaishou supports new `.search-container` and older search controls and the `/search/` route.
 Its new result cards open an in-page player. Rendered covers must uniquely match public
 post IDs in the page's loaded state; capture is scoped to the active slide and returns to
-the same results. QR-only login modals are barriers; a sidebar sign-in offer alone is not.
+the same results. Douyin jingxuan `.search-result-card` `.videoImage` tiles open `modal_id`
+overlays, not `/video/{id}` hrefs; title, cover, and `/video/{id}` source bind to that overlay, then close. A blank overlay player is not stored as the cover; the visible search tile is. QR-only login modals are barriers; a sidebar sign-in offer alone is not.
 Visible candidates retain DOM order; every committed record keeps its keyword and actual search URL.
 HTTP 404/410 and platform `/404` pages are unavailable posts, not CAPTCHAs. JSON in place of HTML
 is `unexpected_page_response`, not an empty result. Diagnostics have independent deadlines.
@@ -90,8 +91,8 @@ while they remain active. The frame uses
 item/video/image/duplicate/failure counts. Runtime persists the frame for UI
 task events and projects the same structured snapshot to the originating
 communication channel through the unified, idempotent delivery service. The
-skill never writes localized notification prose. Explicit one-shot collection
-does not enable these periodic notices.
+skill never writes localized notification prose. Explicit one-shot collection does not enable periodic notices.
+Finite and continuous starts emit one machine `media_discovery.collection.started` event after lease acquisition. The shared runtime generates the start notice with the model, including actual count/time targets and a natural-language way to stop. Continuous batches never repeat it. The final response uses normal model result delivery, not a second progress notice; failed or partial results must remain visible. Model-unavailable start notices are logged without a canned fallback.
 
 ## Planner Selection Notes
 
@@ -107,13 +108,12 @@ does not enable these periodic notices.
      reads only enabled persisted platform configurations and remains active as
      a durable background job, or returns `already_running` with the existing
      coordinator identity when another platform is already collecting.
-- A request to stop one or all platforms calls `media_discovery.disable`. The
-  selected platforms finish their current posts; other platforms continue.
-  The coordinator exits when all platforms are disabled. No schedule cleanup is involved.
-- A user request for one bounded batch without continuous collection calls
-  `run_once` with explicit platform and source settings. The skill uses an
-  ephemeral config and does not enable the platform or start a background
-  worker.
+- A request to stop continuous collection calls `media_discovery.disable`; selected platforms finish current posts, other platforms continue. All disabled means the coordinator exits. A finite run uses `media_discovery.stop_current`.
+- Startup notification is model-generated from the skill's started event, once per request, including for endless collection; do not add a second start acknowledgment. Translate the stop capability into a short natural-language request in the user's language. Completion, graceful stop and failure each use the normal final model reply, accurately summarizing saved counts, unmet targets and the actual stop/error reason. Never present a draining request as already stopped.
+- One finite batch uses `run_once` with explicit platform/source and ephemeral config;
+  it does not enable a platform or start continuous collection.
+- Use the requested count directly (including 300), without asking to split it or enabling endless collection. No 100-post ceiling; omit time/scroll/image ceilings unless requested. A time-only request uses `max_items_per_run=0` (also the default when a duration alone is supplied). Inspect `run.collection_outcome.stop_reason` and actual counts, not just batch completion.
+  Continuous batches replay visible search results, skip saved complete posts and browse onward in observed DOM order (platform rankings can change). Exhausted/stalled pages preserve partial data; continuous mode rests before checking again.
 - Treat `state=completed_batch` and `run.counts` as the single-platform receipt;
   multi-platform requests return one receipt per platform in `runs` plus `counts`.
   Inspect every receipt's `status` and `error_code`, including partial failures.
@@ -172,17 +172,17 @@ does not enable these periodic notices.
   Runtime consumes structured fields, not localized words, to select a mode.
 - Both bounded and continuous silent runs may temporarily open one browser
   for manual login or human verification. Do not change `browser_mode` to
-  visible for this exception. Closing or timing out that window returns
-  `waiting_for_manual_verification` and pauses the enabled platform until the
-  user resumes it. The local control tab requires explicit user confirmation;
-  hidden feed elements never complete verification. A confirmed manual step
-  retries collection silently once. If still blocked, `manual_verification_not_restored`
-  pauses only that platform; other platforms continue independently.
-- Browsing uses bounded randomized pauses, scroll distances, and inter-batch
-  rests to avoid bursty
-  traffic. This is cooperative pacing, not fingerprint spoofing, challenge
-  bypass, or a guarantee against platform controls. Login, challenge, and rate
-  limit states stop the current batch and remain machine-visible.
+  visible for this exception. Closing, pausing, or waiting past 10 minutes
+  (or remaining `max_run_minutes`) pauses that platform. Bounded `run_once`
+  returns `status=error` (`interactive_verification_cancelled`,
+  `interactive_verification_timeout`, `manual_verification_not_restored`).
+  Tell the user to complete verification; after timeout they waited too long
+  and can retry. Continuous workers keep `waiting_for_manual_verification`.
+- Randomized pauses, scrolling and rests respect configured interaction bounds.
+  First-party document/fetch/XHR 429 stops the batch, retaining results and HTTP
+  `Retry-After` as `run.retry_after_at`; continuous `retry_not_before` respects it
+  and local backoff. Platforms stay isolated; per-profile locale/timezone/window stay fixed.
+  Browser/OS/graphics stay native; no challenge bypass or detection guarantees.
 - These rules are semantic model guidance. Production runtime and skill code
   must not match fixed Chinese, English, or other-language phrases.
 
@@ -207,10 +207,10 @@ Examples of equivalent intent (documentation examples, not runtime matchers):
 | `source_mode` | no | `home_feed` (default), `topics`, or `seed_urls`. |
 | `topics` | for topics | One or more exact search keywords, browsed in input order. |
 | `seed_urls` | for seed_urls | HTTPS URLs on the selected platform only. |
-| `max_items_per_run` | no | 1..100, default 5. |
-| `max_images_per_post` | no | 1..100, default 100. The adapter follows rendered carousel controls and stops at the actual end or this safety ceiling. |
-| `max_run_minutes` | no | 5..180, default 30. |
-| `max_scrolls_per_source` | no | 1..100, default 10. |
+| `max_items_per_run` | no | Nonnegative safe integer; 0 means no count limit. Default batch size 5, or 0 for a time-only request. No fixed business maximum; use the requested count directly. |
+| `max_images_per_post` | no | Optional user limit; omitted/0 captures the full gallery, stopping at its actual end or repeated unchanged slides. |
+| `max_run_minutes` | no | Optional user deadline in minutes; omitted/0 means no whole-batch deadline. |
+| `max_scrolls_per_source` | no | Optional user scroll limit; omitted/0 traverses until target, cancellation, access barrier, or three observations without new results. |
 | `rest_min_seconds` | no | Minimum random rest between continuous batches, 5..3600, default 180. |
 | `rest_max_seconds` | no | Maximum random rest between continuous batches, 5..7200, default 420 and never below the minimum. |
 | `browser_mode` | no | Omission uses per-platform defaults: Xiaohongshu `visible`, Douyin/Kuaishou `silent`. An explicit `visible` or `silent` overrides the default for all selected platforms. Preview returns `platform_configs`, plus `config` for a single platform. Resume retains the saved mode. |
@@ -282,13 +282,15 @@ CSV files use UTF-8 BOM, RFC 4180 quoting, stable order, and spreadsheet formula
 injection protection. The private immutable record ledger remains the recovery
 source of truth; CSV files can always be rebuilt.
 
-`platform_text` is the author-provided post caption extracted from reviewed
-platform DOM markers. A video record and every image belonging to one carousel
-retain that caption. Media screenshots are never OCR inputs, and AiAPP exposes
-no visual-text field. Collected image screenshots are retained under the
-skill-owned export directory and referenced by `image_screenshot_path` so AiAPP
-can provide authenticated same-origin downloads without proxying arbitrary
-remote URLs.
+`title` is the author title from the open post. Douyin search-page document
+titles are discarded. `platform_text` is a distinct caption when one exists,
+otherwise empty; search-result cards and leftover feed text behind a Douyin
+overlay are not used. The stored source URL is that overlay post.
+A video record and every image belonging to one carousel retain that caption.
+Media screenshots are never OCR inputs, and AiAPP exposes no visual-text field.
+Collected image screenshots are retained under the skill-owned export directory
+and referenced by `image_screenshot_path` so AiAPP can provide authenticated
+same-origin downloads without proxying arbitrary remote URLs.
 
 `published_at` is the platform publication date (ISO date or timestamp), obtained
 from the current post's date DOM or ID-matched page state/JSON-LD. When only a
@@ -305,6 +307,11 @@ platform's display precision. Each metric snapshot carries `captured_at`.
 
 ## Browser and Capture Rules
 
+- Each platform pins host locale/timezone and the existing 1280×900 collection window
+  in private `browser-profile/<platform>/browser-environment.json`, shared by collection
+  and manual verification. OS/architecture changes reinitialize these settings; native
+  UA/client hints track browser updates. This is not full fingerprint spoofing.
+  Invalid/unreadable state fails with `browser_environment_invalid`/`browser_environment_unavailable`.
 - Browser defaults are platform-specific; an explicit mode takes precedence.
   A visible run without a desktop returns `display_unavailable`, never silently
   switching modes. Existing saved modes are preserved when resuming.
@@ -314,9 +321,10 @@ platform's display precision. Each metric snapshot carries `captured_at`.
   only. It stays open until the user confirms in the local control tab and the
   barrier clears on the actual blocked search/detail page, then
   retries collection in the originally requested silent mode. Closing or
-  timing out the window pauses that platform, preventing repeated popups.
-  If the single silent retry is blocked again, that platform also pauses with
-  `manual_verification_not_restored`; it does not reopen another browser.
+  timing out pauses that platform; bounded `run_once` then returns `status=error`
+  with `interactive_verification_cancelled` or `interactive_verification_timeout`.
+  A second silent block is `manual_verification_not_restored` and does not reopen
+  a browser.
   Verification retains the requested search keyword or blocked detail URL;
   a ready recommendation homepage is not proof that a search page is accessible.
   Network restrictions, selector drift, rate limits, and ordinary collection
@@ -356,7 +364,7 @@ platform's display precision. Each metric snapshot carries `captured_at`.
 
 Errors use `extra.{schema_version,source_skill,status,error_code,message_key,retryable}`.
 Stable examples include `display_unavailable`, `browser_missing`,
-`login_required`, `challenge_required`, `network_access_restricted`, `rate_limited`, `selector_drift`,
+`login_required`, `challenge_required`, `interactive_verification_cancelled`, `interactive_verification_timeout`, `manual_verification_not_restored`, `network_access_restricted`, `rate_limited`, `selector_drift`,
 `no_items_collected`, `screenshot_obscured`, `media_not_ready`,
 `platform_unsupported`, `source_scope_empty`, `run_already_active`,
 `collection_already_enabled`, `collection_capacity_busy`, `partial_collection_failed`,

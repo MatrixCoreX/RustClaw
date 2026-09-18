@@ -50,6 +50,27 @@ function fixtureImage(label, background, accent) {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
+test("an unlimited gallery captures more than 100 images without truncation", { skip: !RUN_BROWSER_TEST }, async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "media-carousel-large-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const browser = await chromium.launch({ executablePath: await browserExecutable(), headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
+  const sources = Array.from({ length: 105 }, (_, i) => fixtureImage(`SLIDE ${i + 1}`, "#278b9a", "#a56138"));
+  await page.setContent('<img id="slide" width="640" height="480"><button class="swiper-button-next">Next</button>');
+  await page.evaluate(sources => {
+    const slide = document.querySelector('img'), next = document.querySelector('button');
+    let index = 0; slide.src = sources[index];
+    next.onclick = () => { slide.src = sources[++index]; next.disabled = index === sources.length - 1; };
+  }, sources);
+  const result = await collectRenderedImages({ scope: page, root, runId: "large-gallery", platform: "xiaohongshu",
+    itemId: "xiaohongshu:fixture", title: "gallery", platformText: "caption", sourcePageUrl: "https://www.xiaohongshu.com/explore/fixture",
+    config: { max_images_per_post: 0, pacing_min_delay_ms: 1, pacing_max_delay_ms: 1 }, discoveredAt: new Date().toISOString() });
+  assert.equal(result.records.length, 105);
+  assert.deepEqual(result.records.map(r => r.image_sequence), Array.from({ length: 105 }, (_, i) => i + 1));
+  assert.equal(result.records.some(r => r.collection_truncated), false);
+});
+
 test("signed carousel clones and repeat captures retain distinct images without duplicate rows or reused position files", {
   skip: !RUN_BROWSER_TEST,
 }, async t => {

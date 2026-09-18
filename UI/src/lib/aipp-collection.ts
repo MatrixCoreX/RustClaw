@@ -21,7 +21,8 @@ export function groupCollectionItems(items: AippMediaItem[]): AippMediaItem[][] 
     || a.global_sequence - b.global_sequence));
 }
 
-export const COLLECTION_PAGE_SIZE = 20;
+export const AIPP_PAGE_SIZE = 30;
+export const COLLECTION_PAGE_SIZE = AIPP_PAGE_SIZE;
 
 // Page by posts, not image rows. Finish the boundary gallery, but leave the next
 // post unconsumed so both time orders use the same stable server row cursor.

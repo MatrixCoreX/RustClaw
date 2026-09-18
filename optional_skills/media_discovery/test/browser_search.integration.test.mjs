@@ -66,7 +66,8 @@ for (const platform of Object.keys(controls)) {
 
 test("an unsubmitted search never qualifies on recommendation cards", { skip: !enabled }, async t => {
   const f = await pageFixture(t, "douyin", { noSubmit: true });
-  await assert.rejects(openKeywordSearch(f.page, "douyin", f.source, { timeoutMs: 600 }), { message: "search_not_submitted" });
+  // Allow browser IPC under concurrent build load; this case tests rejection, not speed.
+  await assert.rejects(openKeywordSearch(f.page, "douyin", f.source, { timeoutMs: 10_000 }), { message: "search_not_submitted" });
   assert.deepEqual(f.submitted, [keyword]);
 });
 
@@ -77,7 +78,8 @@ test("a new search tab returning JSON fails structurally", { skip: !enabled }, a
 
 test("results for a different keyword are never accepted", { skip: !enabled }, async t => {
   const f = await pageFixture(t, "xiaohongshu", { wrongKeyword: true });
-  await assert.rejects(openKeywordSearch(f.page, "xiaohongshu", f.source, { timeoutMs: 600 }), { message: "search_not_submitted" });
+  await assert.rejects(openKeywordSearch(f.page, "xiaohongshu", f.source, { timeoutMs: 10_000 }), { message: "search_not_submitted" });
+  assert.deepEqual(f.submitted, [keyword]);
 });
 
 test("manual barriers and cancellation stop before entering a query", { skip: !enabled }, async t => {

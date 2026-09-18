@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { completeCollectionPage, groupCollectionItems } from "./aipp-collection";
+import { AIPP_PAGE_SIZE, COLLECTION_PAGE_SIZE, completeCollectionPage, groupCollectionItems } from "./aipp-collection";
 import type { AippMediaItem, AippMediaPageResponse } from "../types/api";
+
+test("pages collection feeds by thirty posts", () => {
+  assert.equal(AIPP_PAGE_SIZE, 30);
+  assert.equal(COLLECTION_PAGE_SIZE, 30);
+});
 
 const image = (id: number, post = 1, position = id): AippMediaItem => ({
   schema_version: 1, global_sequence: id, sequence: id, post_sequence: post,
@@ -65,7 +70,7 @@ for (const order of ["newest", "oldest"] as const) {
   test(`fills all-platform pages with posts after a gallery-only row page (${order})`, async () => {
     const rows = [
       ...Array.from({ length: 40 }, (_, i) => ({ ...image(i + 1, i < 20 ? 1 : 2), platform: "xiaohongshu" })),
-      ...Array.from({ length: 24 }, (_, i) => ({ ...image(i + 41, i + 3), platform: i % 2 ? "douyin" : "kuaishou" })),
+      ...Array.from({ length: 40 }, (_, i) => ({ ...image(i + 41, i + 3), platform: i % 2 ? "douyin" : "kuaishou" })),
     ].map((item, i) => ({ ...item, global_sequence: order === "oldest" ? i + 1 : 100 - i }));
     const load = async (cursor: number | null) => {
       const start = cursor == null ? 0 : rows.findIndex(i => i.global_sequence === cursor) + 1;
@@ -73,11 +78,11 @@ for (const order of ["newest", "oldest"] as const) {
       return page(items, start + 20 < rows.length ? items.at(-1)!.global_sequence : null, order);
     };
     const first = await completeCollectionPage(await load(null), load);
-    assert.equal(groupCollectionItems(first.items).length, 20);
+    assert.equal(groupCollectionItems(first.items).length, 30);
     assert.deepEqual(new Set(first.items.map(i => i.platform)), new Set(["xiaohongshu", "douyin", "kuaishou"]));
-    assert.equal(first.items.length, 58);
+    assert.equal(first.items.length, 68);
     const second = await completeCollectionPage(await load(first.next_cursor_sequence), load);
-    assert.equal(groupCollectionItems(second.items).length, 6);
+    assert.equal(groupCollectionItems(second.items).length, 12);
     assert.equal(second.next_cursor_sequence, null);
     assert.deepEqual([...first.items, ...second.items], rows);
   });

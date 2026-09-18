@@ -5,12 +5,41 @@ import path from "node:path";
 import test from "node:test";
 
 import { handleRequest } from "../src/main.mjs";
+import { readState } from "../src/storage.mjs";
 
 async function requestContext(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "media-discovery-platforms-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   return { skill_storage: { storage_kind: "directory", directory_path: root } };
 }
+
+test("continuous scheduling preserves Retry-After and successful partial records without blocking other platforms", async t => {
+  const context = await requestContext(t);
+  const clock = Date.now();
+  const retryAt = new Date(clock + 86_400_000).toISOString();
+  await handleRequest({ args: { action: "enable", platforms: ["douyin", "kuaishou"],
+    max_items_per_run: 2, confirm: true }, context });
+  const visited = [];
+  const result = await handleRequest({ args: { action: "run_enabled_once" }, context }, {
+    maxContinuousCycles: 2, parallelLimit: 2, now: () => clock, random: () => 0.5,
+    collectPlatform: async ({ platform, onPage }) => {
+      visited.push(platform);
+      await onPage({ records: [{ kind: "video", platform, dedup_key: `${platform}:limited`, title: "fixture" }], temporaryPaths: [] });
+      if (platform === "douyin") throw Object.assign(new Error("rate_limited"), { retry_after_at: retryAt });
+    },
+  });
+  assert.equal(result.status, "ok");
+  assert.deepEqual(visited.sort(), ["douyin", "kuaishou"]);
+  const outcomes = result.extra.background_worker.platform_outcomes;
+  assert.equal(outcomes.douyin.retry_not_before, retryAt);
+  assert.equal(outcomes.douyin.last_error_code, "rate_limited");
+  assert.equal(outcomes.douyin.counts.videos, 1);
+  assert.equal(outcomes.kuaishou.completed_batches, 1);
+  assert.ok(Date.parse(outcomes.kuaishou.retry_not_before) < Date.parse(retryAt));
+  const state = await readState(context.skill_storage.directory_path);
+  const run = state.runs.find(run => run.platforms.includes("douyin"));
+  assert.equal(run.retry_after_at, retryAt);
+});
 
 for (const barrier of [null, "challenge_required", "network_access_restricted", "rate_limited", "selector_drift"]) {
   test(`continuous platforms receive independent batches after ${barrier || "a full batch"}`, async (t) => {

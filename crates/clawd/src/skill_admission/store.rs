@@ -23,6 +23,8 @@ use super::registry::render_registry_fragment;
 
 const OVERLAY_DIRECTORY: &str = ".runtime-admission";
 const AIPP_INSTALL_STATE_SCHEMA_VERSION: u32 = 1;
+const AIPP_HIDDEN_TASK_IDS_LIMIT: usize = 10_000;
+const AIPP_HIDDEN_RECORD_SEQUENCES_LIMIT: usize = 10_000;
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -32,6 +34,10 @@ struct AippInstallState {
     removed: BTreeSet<String>,
     #[serde(default, alias = "cleared_through_sequence")]
     cleared_through_event_ms: BTreeMap<String, u64>,
+    #[serde(default)]
+    hidden_task_ids: BTreeMap<String, BTreeSet<String>>,
+    #[serde(default)]
+    hidden_record_sequences: BTreeMap<String, BTreeSet<u64>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -148,13 +154,102 @@ impl SkillAdmissionService {
         })
     }
 
-    fn read_aipp_install_state(&self) -> Result<AippInstallState> {
-        let path = self.root.join("aipp-install-state.json");
-        let state = read_optional_json::<AippInstallState>(&path)?.unwrap_or(AippInstallState {
+    pub(crate) fn aipp_hidden_task_ids(&self, skill_name: &str) -> Result<BTreeSet<String>> {
+        skill_sdk::validate_safe_name(skill_name, "aipp.skill_name")
+            .map_err(|source| error("aipp_skill_name_invalid", source.to_string()))?;
+        Ok(self
+            .read_aipp_install_state()?
+            .hidden_task_ids
+            .get(skill_name)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    pub(crate) fn hide_aipp_task_ids(
+        &self,
+        skill_name: &str,
+        task_ids: &[String],
+    ) -> Result<usize> {
+        skill_sdk::validate_safe_name(skill_name, "aipp.skill_name")
+            .map_err(|source| error("aipp_skill_name_invalid", source.to_string()))?;
+        self.try_update_aipp_install_state(|state| {
+            let hidden = state
+                .hidden_task_ids
+                .entry(skill_name.to_string())
+                .or_default();
+            let mut added = 0;
+            for task_id in task_ids {
+                if hidden.contains(task_id) {
+                    continue;
+                }
+                if hidden.len() >= AIPP_HIDDEN_TASK_IDS_LIMIT {
+                    return Err(error(
+                        "aipp_task_activity_hidden_limit",
+                        format!("hidden_task_ids={}", hidden.len().saturating_add(1)),
+                    ));
+                }
+                hidden.insert(task_id.clone());
+                added += 1;
+            }
+            Ok(added)
+        })
+    }
+
+    pub(crate) fn aipp_hidden_record_sequences(&self, skill_name: &str) -> Result<BTreeSet<u64>> {
+        skill_sdk::validate_safe_name(skill_name, "aipp.skill_name")
+            .map_err(|source| error("aipp_skill_name_invalid", source.to_string()))?;
+        Ok(self
+            .read_aipp_install_state()?
+            .hidden_record_sequences
+            .get(skill_name)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    pub(crate) fn hide_aipp_record_sequences(
+        &self,
+        skill_name: &str,
+        sequences: &[u64],
+    ) -> Result<usize> {
+        skill_sdk::validate_safe_name(skill_name, "aipp.skill_name")
+            .map_err(|source| error("aipp_skill_name_invalid", source.to_string()))?;
+        self.try_update_aipp_install_state(|state| {
+            let hidden = state
+                .hidden_record_sequences
+                .entry(skill_name.to_string())
+                .or_default();
+            let mut added = 0;
+            for sequence in sequences {
+                if *sequence == 0 || hidden.contains(sequence) {
+                    continue;
+                }
+                if hidden.len() >= AIPP_HIDDEN_RECORD_SEQUENCES_LIMIT {
+                    return Err(error(
+                        "aipp_media_hidden_limit",
+                        format!("hidden_record_sequences={}", hidden.len().saturating_add(1)),
+                    ));
+                }
+                hidden.insert(*sequence);
+                added += 1;
+            }
+            Ok(added)
+        })
+    }
+
+    fn empty_aipp_install_state() -> AippInstallState {
+        AippInstallState {
             schema_version: AIPP_INSTALL_STATE_SCHEMA_VERSION,
             removed: BTreeSet::new(),
             cleared_through_event_ms: BTreeMap::new(),
-        });
+            hidden_task_ids: BTreeMap::new(),
+            hidden_record_sequences: BTreeMap::new(),
+        }
+    }
+
+    fn read_aipp_install_state(&self) -> Result<AippInstallState> {
+        let path = self.root.join("aipp-install-state.json");
+        let state = read_optional_json::<AippInstallState>(&path)?
+            .unwrap_or_else(Self::empty_aipp_install_state);
         if state.schema_version != AIPP_INSTALL_STATE_SCHEMA_VERSION {
             return Err(error(
                 "aipp_install_state_schema_unsupported",
@@ -165,6 +260,16 @@ impl SkillAdmissionService {
     }
 
     fn update_aipp_install_state(&self, update: impl FnOnce(&mut AippInstallState)) -> Result<()> {
+        self.try_update_aipp_install_state(|state| {
+            update(state);
+            Ok(())
+        })
+    }
+
+    fn try_update_aipp_install_state<T>(
+        &self,
+        update: impl FnOnce(&mut AippInstallState) -> Result<T>,
+    ) -> Result<T> {
         fs::create_dir_all(&self.root).map_err(io_error("skill_admission_root_create_failed"))?;
         secure_directory(&self.root)?;
         let lock = OpenOptions::new()
@@ -177,8 +282,9 @@ impl SkillAdmissionService {
         let result = (|| {
             let path = self.root.join("aipp-install-state.json");
             let mut state = self.read_aipp_install_state()?;
-            update(&mut state);
-            atomic_write_json(&path, &state)
+            let value = update(&mut state)?;
+            atomic_write_json(&path, &state)?;
+            Ok(value)
         })();
         let _ = FileExt::unlock(&lock);
         result

@@ -3,9 +3,13 @@ import test from "node:test";
 
 import {
   canonicalCandidateUrls,
+  douyinModalItemId,
+  douyinSearchGridItemUrls,
   isDetailUrl,
   manualVerificationTarget,
+  matchesManualAccessTarget,
   matchesVerificationTarget,
+  platformItemId,
   sourceTargets,
   sourceUrls,
   validatePlatformUrl,
@@ -22,12 +26,20 @@ test("manual verification retains the selected keyword or blocked detail instead
   const config = { source_mode: "topics", topics: ["财经"] };
   for (const platform of ["douyin", "xiaohongshu", "kuaishou"]) {
     const target = sourceTargets(platform, config)[0].url;
+    const home = sourceTargets(platform, { source_mode: "home_feed" })[0].url;
     assert.equal(manualVerificationTarget(platform, config), target);
     assert.equal(matchesVerificationTarget(platform, target, target), true);
-    assert.equal(matchesVerificationTarget(platform, target, sourceTargets(platform, { source_mode: "home_feed" })[0].url), false);
+    assert.equal(matchesVerificationTarget(platform, target, home), false);
     assert.equal(matchesVerificationTarget(platform, target, sourceTargets(platform, { ...config, topics: ["other"] })[0].url), false);
     assert.throws(() => manualVerificationTarget(platform, config, "https://example.com/"));
   }
+  assert.equal(matchesVerificationTarget("douyin", "https://www.douyin.com/", "https://www.douyin.com/jingxuan"), true);
+  assert.equal(matchesVerificationTarget("douyin", "https://www.douyin.com/search/finance", "https://www.douyin.com/jingxuan/search/finance"), true);
+  assert.equal(matchesVerificationTarget("douyin", "https://www.douyin.com/search/%E8%B4%A2%E7%BB%8F", "https://www.douyin.com/jingxuan/search/%E8%B4%A2%E7%BB%8F"), true);
+  assert.equal(matchesVerificationTarget("douyin", "https://www.douyin.com/search/finance", "https://www.douyin.com/jingxuan"), false);
+  assert.equal(matchesManualAccessTarget("douyin", "https://www.douyin.com/search/finance", "https://www.douyin.com/jingxuan"), true);
+  assert.equal(matchesManualAccessTarget("douyin", "https://www.douyin.com/", "https://www.douyin.com/jingxuan"), true);
+  assert.equal(matchesManualAccessTarget("douyin", "https://www.douyin.com/search/finance", "https://www.douyin.com/video/1234"), false);
   const detail = "https://www.xiaohongshu.com/explore/fixture?xsec_token=fixture-token";
   assert.equal(manualVerificationTarget("xiaohongshu", config, detail), detail);
   assert.equal(detailNavigationError("xiaohongshu", detail, "https://www.xiaohongshu.com/404", false), "source_unavailable");
@@ -57,6 +69,26 @@ test("platform URLs are validated structurally", () => {
   );
   assert.throws(() => validatePlatformUrl("douyin", "http://127.0.0.1/video/123"));
   assert.throws(() => validatePlatformUrl("xiaohongshu", "https://example.com/explore/1"));
+});
+
+test("Douyin jingxuan search cards expose numeric item IDs as video URLs", () => {
+  assert.deepEqual(douyinSearchGridItemUrls(["7684941496998743331", "bad", "7684941496998743331", ""]), [
+    "https://www.douyin.com/video/7684941496998743331",
+  ]);
+});
+
+test("Douyin search overlays identify the open post through modal_id", () => {
+  const search = "https://www.douyin.com/jingxuan/search/%E8%B4%A2%E7%BB%8F?aid=123&type=general";
+  const overlay = `${search}&modal_id=7685283494558209137`;
+  const video = "https://www.douyin.com/video/7685283494558209137";
+  assert.equal(douyinModalItemId(overlay), "7685283494558209137");
+  assert.equal(douyinModalItemId(search), null);
+  assert.equal(isDetailUrl("douyin", overlay), true);
+  assert.equal(isDetailUrl("douyin", search), false);
+  assert.equal(platformItemId("douyin", overlay), "douyin:7685283494558209137");
+  assert.equal(platformItemId("douyin", video), "douyin:7685283494558209137");
+  assert.equal(matchesVerificationTarget("douyin", search, overlay), true);
+  assert.deepEqual(canonicalCandidateUrls("douyin", [overlay, video, search]), [overlay]);
 });
 
 test("candidate discovery uses URL contracts rather than page language", () => {

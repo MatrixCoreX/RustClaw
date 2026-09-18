@@ -23,7 +23,7 @@ SKILL_NAME = "media_download"
 SCHEMA_VERSION = 1
 TOOL_DIR = Path(__file__).resolve().parent / "tool"
 sys.path.insert(0, str(TOOL_DIR))
-from video_inputs import prepare_video_inputs
+from video_inputs import prepare_video_inputs, promote_video_audio_delivery
 
 PRIVATE_BIN_DIR = Path(sys.executable).resolve().parent
 os.environ["PATH"] = os.pathsep.join(
@@ -571,7 +571,7 @@ def _build_ocr_command(request: dict[str, Any], args: dict[str, Any], output_dir
     min_confidence = _number(
         args,
         "min_line_confidence",
-        default=30.0,
+        default=10.0,
         minimum=-1.0,
         maximum=100.0,
     )
@@ -797,6 +797,49 @@ def _profile_collection_summary(
     }
 
 
+def _image_descriptors(
+    artifacts: list[dict[str, Any]],
+    processing_inputs: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    images = (processing_inputs or {}).get("images")
+    if isinstance(images, list) and images:
+        return [
+            item
+            for item in images
+            if isinstance(item, dict) and item.get("path")
+        ]
+    return [
+        {
+            "path": item["path"],
+            "filename": item.get("filename"),
+            "mime_type": item.get("mime_type"),
+            "size_bytes": item.get("size_bytes"),
+        }
+        for item in artifacts
+        if item.get("artifact_role") == "original_image" and item.get("path")
+    ]
+
+
+def _image_vision_extract_text_step(
+    images: list[dict[str, Any]],
+    *,
+    component_kind: str,
+    result_label_kind: str,
+) -> dict[str, Any]:
+    paths = [str(item["path"]) for item in images if item.get("path")]
+    return {
+        "component_kind": component_kind,
+        "capability": "image_vision.extract_text",
+        "input_field": "images",
+        "input_value": [{"path": path} for path in paths],
+        "fallback_capability": "media_download.ocr",
+        "fallback_input_field": "input_paths",
+        "fallback_input_value": paths,
+        "fallback_args": {"fallback_from": "image_vision.extract_text"},
+        "result_label_kind": result_label_kind,
+    }
+
+
 def _content_bundle(
     artifacts: list[dict[str, Any]],
     inline_article: dict[str, Any] | None = None,
@@ -884,13 +927,11 @@ def _content_bundle(
             bundle["conversion_failures"] = failures
         image_step = None
         if isinstance(first_frame, dict) and first_frame.get("status") == "available":
-            image_step = {
-                "component_kind": "video_first_frame",
-                "capability": "image_vision.extract_text",
-                "input_field": "images",
-                "input_value": [{"path": first_frame["path"]}],
-                "result_label_kind": "video_first_frame_text",
-            }
+            image_step = _image_vision_extract_text_step(
+                [{"path": first_frame["path"]}],
+                component_kind="video_first_frame",
+                result_label_kind="video_first_frame_text",
+            )
         audio_step = None
         if audio_path:
             audio_step = {
@@ -930,20 +971,14 @@ def _content_bundle(
                 "source_label_requirement": "label_each_result_in_request_language",
             }
     elif kind in {"image_audio", "image_audio_article"}:
-        images = (processing_inputs or {}).get("images")
+        images = _image_descriptors(artifacts, processing_inputs)
         background_audio = (processing_inputs or {}).get("background_audio")
-        if isinstance(images, list) and isinstance(background_audio, dict):
-            image_step = {
-                "component_kind": "images",
-                "capability": "image_vision.extract_text",
-                "input_field": "images",
-                "input_value": [
-                    {"path": item["path"]}
-                    for item in images
-                    if isinstance(item, dict) and item.get("path")
-                ],
-                "result_label_kind": "image_text",
-            }
+        if images and isinstance(background_audio, dict):
+            image_step = _image_vision_extract_text_step(
+                images,
+                component_kind="images",
+                result_label_kind="image_text",
+            )
             audio_step = {
                 "component_kind": "background_audio",
                 "capability": "audio.preview_transcribe",
@@ -996,6 +1031,32 @@ def _content_bundle(
             }
             policy["activation_requirement"] = "required"
             bundle["followup_policy"] = policy
+    elif kind in {"images", "image_article"}:
+        images = _image_descriptors(artifacts, processing_inputs)
+        scope = text_conversion_scope or "auto"
+        if images and scope in {"images_only", "images_and_audio"}:
+            image_step = _image_vision_extract_text_step(
+                images,
+                component_kind="images",
+                result_label_kind="image_text",
+            )
+            synthesis_sources = [
+                *(["platform_article"] if kind == "image_article" else []),
+                "image_text",
+            ]
+            bundle["followup_policy"] = {
+                "text_conversion_action": "extract_image_text",
+                "requested_scope": scope,
+                "activation_requirement": "required",
+                "completion_requirement": "selected_components",
+                "steps": [image_step],
+                "synthesis_sources": synthesis_sources,
+                "result_label_kinds": {
+                    "image_text": "image_text",
+                    "platform_article": "platform_article",
+                },
+                "source_label_requirement": "label_each_result_in_request_language",
+            }
     return bundle
 
 
@@ -1003,15 +1064,15 @@ def _composite_processing_inputs(
     artifacts: list[dict[str, Any]],
     existing: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
+    images = [item for item in artifacts if item.get("artifact_role") == "original_image"]
     background_audio = next(
         (item for item in artifacts if item.get("artifact_role") == "background_audio"),
         None,
     )
-    if background_audio is None:
+    if not images and background_audio is None:
         return existing
     inputs = dict(existing or {})
-    if "images" not in inputs:
-        images = [item for item in artifacts if item.get("artifact_role") == "original_image"]
+    if images and "images" not in inputs:
         inputs.update(
             {
                 "images": [
@@ -1027,13 +1088,14 @@ def _composite_processing_inputs(
                 "ordered": True,
             }
         )
-    inputs["background_audio"] = {
-        "path": background_audio["path"],
-        "filename": background_audio["filename"],
-        "mime_type": background_audio["mime_type"],
-        "size_bytes": background_audio["size_bytes"],
-    }
-    inputs["audio_count"] = 1
+    if background_audio is not None:
+        inputs["background_audio"] = {
+            "path": background_audio["path"],
+            "filename": background_audio["filename"],
+            "mime_type": background_audio["mime_type"],
+            "size_bytes": background_audio["size_bytes"],
+        }
+        inputs["audio_count"] = 1
     return inputs
 
 
@@ -1083,6 +1145,8 @@ def _article_text_delivery(
 
 def _ocr_text_delivery(
     artifacts: list[dict[str, Any]],
+    *,
+    fallback_from: str | None = None,
 ) -> dict[str, Any] | None:
     ocr_artifact = next(
         (item for item in artifacts if item.get("recognition_source") == "local_ocr"),
@@ -1092,7 +1156,7 @@ def _ocr_text_delivery(
     if text is None:
         return None
     assert ocr_artifact is not None
-    return {
+    payload = {
         "mode": "inline_and_artifact",
         "source": "local_ocr",
         "engine": "tesseract",
@@ -1101,6 +1165,11 @@ def _ocr_text_delivery(
         "artifact_path": ocr_artifact["path"],
         "artifact_filename": ocr_artifact["filename"],
     }
+    if fallback_from == "image_vision.extract_text":
+        payload["fallback_from"] = fallback_from
+        payload["fallback_reason"] = "vision_unavailable"
+        payload["notice_key"] = "media_download.notice.vision_unavailable_ocr_fallback"
+    return payload
 
 
 def _image_text_revision_prompt() -> str | None:
@@ -1832,6 +1901,7 @@ def _capabilities_extra() -> dict[str, Any]:
             "individual_delivery_max_images": IMAGE_ARCHIVE_THRESHOLD,
             "large_set_delivery": "ordered_zip",
             "article_included_in_large_set_archive": True,
+            "background_audio_independent_of_caption": True,
             "ocr_is_separate": True,
         },
         "installed_dependencies": {
@@ -2042,7 +2112,10 @@ def respond(
         )
         inline_article = _article_text_delivery(artifacts)
     elif action == "ocr" and deliver_to_user:
-        inline_recognition = _ocr_text_delivery(artifacts)
+        inline_recognition = _ocr_text_delivery(
+            artifacts,
+            fallback_from=_string(args, "fallback_from", max_length=64),
+        )
     if action == "download":
         processing_inputs = _composite_processing_inputs(artifacts, processing_inputs)
         processing_inputs = prepare_video_inputs(
@@ -2053,6 +2126,8 @@ def respond(
             _artifact,
             progress,
         )
+        if deliver_to_user:
+            promote_video_audio_delivery(artifacts, processing_inputs, _artifact)
     count = len(urls) if action == "resolve" else len(artifacts)
     noun = "URL" if action == "resolve" else "file"
     text = f"{action} completed with {count} {noun}{'' if count == 1 else 's'}."
@@ -2152,6 +2227,7 @@ def respond(
     if saved_files is not None:
         extra["saved_files"] = saved_files
     if action == "ocr":
+        fallback_from = _string(args, "fallback_from", max_length=64)
         extra["recognition"] = {
             "source": "local_ocr",
             "engine": "tesseract",
@@ -2160,6 +2236,12 @@ def respond(
                 and recognition_review.get("reviewed_by_model") is True
             ),
         }
+        if fallback_from == "image_vision.extract_text":
+            extra["recognition"]["fallback_from"] = fallback_from
+            extra["recognition"]["fallback_reason"] = "vision_unavailable"
+            extra["recognition"]["notice_key"] = (
+                "media_download.notice.vision_unavailable_ocr_fallback"
+            )
         if recognition_review is not None:
             extra["recognition_review"] = recognition_review
         if inline_recognition is not None:

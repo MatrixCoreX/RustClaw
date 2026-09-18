@@ -27,7 +27,7 @@ test("schema normalization accepts singular platform without natural-language pa
   assert.deepEqual(requestedPlatforms({ platform: "douyin" }), ["douyin"]);
   assert.equal(normalizedConfig({}).source_mode, "home_feed");
   assert.equal(normalizedConfig({}).max_items_per_run, 5);
-  assert.equal(normalizedConfig({}).max_images_per_post, 100);
+  assert.equal(normalizedConfig({}).max_images_per_post, 0);
   assert.equal(normalizedConfig({}).browser_mode, "silent");
   assert.equal(normalizedConfig({}).rest_min_seconds, 180);
   assert.equal(normalizedConfig({}).rest_max_seconds, 420);
@@ -95,6 +95,7 @@ test("a silent challenge opens one manual verification session per batch", async
   });
 
   let loginSessions = 0;
+  let collectionAttempts = 0;
   const result = await handleRequest({
     request_id: "silent-challenge",
     args: { action: "run_enabled_once" },
@@ -103,7 +104,8 @@ test("a silent challenge opens one manual verification session per batch", async
     maxContinuousCycles: 1,
     sleep: async () => {},
     collectPlatform: async ({ config }) => {
-      assert.equal(config.browser_mode, "silent");
+      collectionAttempts += 1;
+      assert.equal(config.browser_mode, collectionAttempts === 1 ? "silent" : "visible");
       throw new Error("challenge_required");
     },
     waitForInteractiveLogin: async () => {
@@ -119,7 +121,7 @@ test("a silent challenge opens one manual verification session per batch", async
   assert.equal(loginSessions, 1);
 });
 
-test("a silent login barrier opens one login session and retries silently", async (t) => {
+test("a silent login barrier opens one login session and retries visibly", async (t) => {
   const context = await requestContext(t);
   await handleRequest({
     args: { action: "enable", platform: "douyin", confirm: true, browser_mode: "silent" },
@@ -137,8 +139,11 @@ test("a silent login barrier opens one login session and retries silently", asyn
     sleep: async () => {},
     collectPlatform: async ({ config, onPage }) => {
       collectionAttempts += 1;
-      assert.equal(config.browser_mode, "silent");
-      if (collectionAttempts === 1) throw new Error("login_required");
+      if (collectionAttempts === 1) {
+        assert.equal(config.browser_mode, "silent");
+        throw new Error("login_required");
+      }
+      assert.equal(config.browser_mode, "visible");
       await onPage({
         records: [{
           kind: "video",
@@ -165,7 +170,7 @@ test("a silent login barrier opens one login session and retries silently", asyn
   assert.equal(loginSessions, 1);
 });
 
-test("one-shot challenge permits a manual popup and resumes the original silent mode", async (t) => {
+test("one-shot challenge permits a manual popup and retries in a visible browser", async (t) => {
   const context = await requestContext(t);
   await handleRequest({
     args: { action: "enable", platform: "douyin", confirm: true, browser_mode: "silent" },
@@ -187,7 +192,10 @@ test("one-shot challenge permits a manual popup and resumes the original silent 
     },
   });
 
-  assert.equal(result.status, "ok");
+  assert.equal(result.status, "error");
+  assert.equal(result.extra.error_code, "manual_verification_not_restored");
+  assert.equal(result.extra.message_key, "skill.media_discovery.manual_verification_not_restored");
+  assert.equal(result.extra.retryable, true);
   assert.equal(result.extra.state, "waiting_for_manual_verification");
   assert.equal(loginSessions, 1);
 });
@@ -375,7 +383,10 @@ test("a duplicate platform start is rejected while its lease is active and disab
   assert.equal(disabled.extra.lifecycle_state, "draining");
   assert.equal(disabled.extra.drain_run_id, run.run_id);
   assert.equal(disabled.extra.stop_mode, "after_current_item");
-  assert.equal(await storage.heartbeat(root, run.run_id, { items: 1 }), true);
+  assert.equal(await storage.heartbeat(root, run.run_id, { items: 1 }, null, {
+    last_item_error: "screenshot_obscured",
+  }), true);
+  assert.equal((await storage.readState(root)).active_runs[run.run_id].last_item_error, "screenshot_obscured");
 
   const completed = await storage.finishRun(root, run, "stopped_after_current_item");
   assert.equal(completed.status, "stopped_after_current_item");

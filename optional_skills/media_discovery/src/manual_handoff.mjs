@@ -2,13 +2,13 @@
 const LABELS = {
   en: {
     title: "Manual verification", open: "Open verification page",
-    help: "Complete sign-in or verification in the platform tab, then return here. Collection will not resume until you confirm.",
+    help: "Complete sign-in or verification in the platform tab, then return here. If that tab already shows a normal feed and no slider, confirm from this page. Collection will not resume until you confirm.",
     proceed: "Verification complete, resume", pause: "Pause this platform",
     checking: "Checking the platform page. Complete any remaining verification there.",
   },
   zh: {
     title: "人工验证", open: "打开验证网页",
-    help: "请在平台标签页完成登录或验证，再回到这里。点击继续之前，不会自动关闭窗口或恢复采集。",
+    help: "请在平台标签页完成登录或验证，再回到这里。如果那边已经是正常内容、没有滑块，也可以直接点继续。点击继续之前，不会自动关闭窗口或恢复采集。",
     proceed: "验证完成，继续采集", pause: "暂停此平台",
     checking: "正在检查平台页面，请先完成平台页面上剩余的验证。",
   },

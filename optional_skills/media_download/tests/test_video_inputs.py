@@ -65,6 +65,18 @@ class VideoInputsTests(unittest.TestCase):
         self.assertEqual(self.source.read_bytes(), b"original video")
         self.assertEqual(progress.emit.call_count, 2)
 
+    def test_promote_video_audio_appends_delivery_artifact(self):
+        with mock.patch.object(video_inputs.subprocess, "run", side_effect=self.fake_ffmpeg):
+            inputs = self.prepare("audio_only")
+        before = len(self.artifacts)
+        video_inputs.promote_video_audio_delivery(self.artifacts, inputs, self.skill._artifact)
+        self.assertEqual(len(self.artifacts), before + 1)
+        self.assertEqual(self.artifacts[-1]["artifact_role"], "extracted_audio")
+        self.assertTrue(inputs["video_audio"]["deliver_to_user"])
+        video_inputs.promote_video_audio_delivery(self.artifacts, inputs, self.skill._artifact)
+        self.assertEqual(len(self.artifacts), before + 1)
+        self.assertTrue(inputs["video_audio"]["deliver_to_user"])
+
     def test_scopes_only_prepare_requested_components(self):
         for scope, names in [
             ("images_only", {"video_first_frame"}),

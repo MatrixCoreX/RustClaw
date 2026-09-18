@@ -54,6 +54,59 @@ fn aipp_removal_is_independent_from_skill_admission_state() {
             .expect("stored clear sequence"),
         42
     );
+    assert!(service
+        .aipp_hidden_task_ids("fixture_app")
+        .expect("default hidden ids")
+        .is_empty());
+    assert_eq!(
+        service
+            .hide_aipp_task_ids(
+                "fixture_app",
+                &[
+                    "task-one".to_string(),
+                    "task-two".to_string(),
+                    "task-one".to_string()
+                ],
+            )
+            .expect("hide activity ids"),
+        2
+    );
+    assert_eq!(
+        service
+            .hide_aipp_task_ids("fixture_app", &["task-two".to_string()])
+            .expect("hide duplicate activity id"),
+        0
+    );
+    assert_eq!(
+        service
+            .aipp_hidden_task_ids("fixture_app")
+            .expect("stored hidden ids"),
+        ["task-one".to_string(), "task-two".to_string()]
+            .into_iter()
+            .collect(),
+    );
+    assert!(service
+        .aipp_hidden_record_sequences("fixture_app")
+        .expect("default hidden sequences")
+        .is_empty());
+    assert_eq!(
+        service
+            .hide_aipp_record_sequences("fixture_app", &[7, 8, 7])
+            .expect("hide collection sequences"),
+        2
+    );
+    assert_eq!(
+        service
+            .hide_aipp_record_sequences("fixture_app", &[8])
+            .expect("hide duplicate collection sequence"),
+        0
+    );
+    assert_eq!(
+        service
+            .aipp_hidden_record_sequences("fixture_app")
+            .expect("stored hidden sequences"),
+        [7, 8].into_iter().collect(),
+    );
 
     fs::remove_dir_all(root).expect("remove fixture");
 }

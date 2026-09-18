@@ -1253,6 +1253,12 @@ def article_content(
     return ArticleContent(title, body, article_author(payload), source)
 
 
+def article_has_platform_text(article: ArticleContent | None) -> bool:
+    return bool(
+        article is not None and (article.title.strip() or article.body.strip())
+    )
+
+
 def article_from_douyin_payload(
     payload: dict[str, Any],
     *,
@@ -1264,9 +1270,24 @@ def article_from_douyin_payload(
         title_keys=("title",),
         body_keys=("desc", "description", "content", "caption"),
     )
-    if article is None or not isinstance(payload.get("images"), list):
+    images = payload.get("images")
+    has_images = isinstance(images, list) and bool(images)
+    audio_url, audio_duration = (
+        douyin_background_audio(payload) if has_images else (None, None)
+    )
+    if article is None:
+        if not has_images or not audio_url:
+            return None
+        return ArticleContent(
+            "",
+            "",
+            article_author(payload),
+            source,
+            audio_url,
+            audio_duration,
+        )
+    if not audio_url:
         return article
-    audio_url, audio_duration = douyin_background_audio(payload)
     return replace(
         article,
         background_audio_url=audio_url,
@@ -1490,31 +1511,61 @@ def first_http_url_from_address(value: Any) -> str | None:
     return None
 
 
-def douyin_background_audio(payload: dict[str, Any]) -> tuple[str | None, float | None]:
-    music = payload.get("music")
-    if not isinstance(music, dict):
-        return None, None
-    audio_url = first_http_url_from_address(music.get("play_url") or music.get("playUrl"))
+def music_duration_seconds(music: dict[str, Any]) -> float | None:
     try:
         duration = float(music.get("duration") or 0)
     except (TypeError, ValueError):
         duration = 0
-    return audio_url, duration if duration > 0 else None
+    return duration if duration > 0 else None
+
+
+def http_url_from_music_field(value: Any) -> str | None:
+    if isinstance(value, str):
+        normalized = unwrap_url(value)
+        if normalized.startswith(("http://", "https://")):
+            return normalized
+        return None
+    return first_http_url_from_address(value)
+
+
+def douyin_music_play_url(music: Any) -> tuple[str | None, float | None]:
+    if not isinstance(music, dict):
+        return http_url_from_music_field(music), None
+    for key in ("play_url", "playUrl", "play_addr", "playAddr"):
+        url = http_url_from_music_field(music.get(key))
+        if url:
+            return url, music_duration_seconds(music)
+    nested = music.get("music")
+    if nested is not None and nested is not music:
+        return douyin_music_play_url(nested)
+    return None, None
+
+
+def douyin_album_clip_duration(payload: dict[str, Any]) -> float | None:
+    album_music = payload.get("image_album_music_info")
+    if not isinstance(album_music, dict):
+        return None
+    try:
+        begin_time = float(album_music.get("begin_time") or 0)
+        end_time = float(album_music.get("end_time") or 0)
+    except (TypeError, ValueError):
+        return None
+    if end_time > begin_time:
+        return (end_time - begin_time) / 1000.0
+    return None
+
+
+def douyin_background_audio(payload: dict[str, Any]) -> tuple[str | None, float | None]:
+    album_duration = douyin_album_clip_duration(payload)
+    for key in ("music", "music_info", "image_album_music_info"):
+        url, duration = douyin_music_play_url(payload.get(key))
+        if url:
+            return url, album_duration or duration
+    return None, None
 
 
 def douyin_live_photo_composition(payload: dict[str, Any]) -> tuple[str | None, float | None]:
-    album_music = payload.get("image_album_music_info")
-    duration: float | None = None
-    if isinstance(album_music, dict):
-        try:
-            begin_time = float(album_music.get("begin_time") or 0)
-            end_time = float(album_music.get("end_time") or 0)
-        except (TypeError, ValueError):
-            begin_time = 0
-            end_time = 0
-        if end_time > begin_time:
-            duration = (end_time - begin_time) / 1000.0
-
+    duration = douyin_album_clip_duration(payload)
     audio_url, music_duration = douyin_background_audio(payload)
     if duration is None:
         duration = music_duration
@@ -5036,6 +5087,64 @@ def download_image_candidates(
     return saved_paths
 
 
+_COPY_BREAK_CHARS = frozenset("，,。．")
+_ASCII_PERIOD_KEEP_FOLLOWERS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789./:@-_?&=#%"
+)
+
+
+def _append_copy_line_break(text: str, index: int, pieces: list[str]) -> int:
+    length = len(text)
+    while index < length and text[index] in " \t":
+        index += 1
+    if index < length and text[index] != "\n":
+        pieces.append("\n")
+    return index
+
+
+def format_article_copy_line_breaks(text: str) -> str:
+    if not text:
+        return text
+    pieces: list[str] = []
+    index = 0
+    length = len(text)
+    while index < length:
+        char = text[index]
+        previous = text[index - 1] if index else ""
+        following = text[index + 1] if index + 1 < length else ""
+        if char == ".":
+            if previous.isdigit() and following.isdigit():
+                pieces.append(char)
+                index += 1
+                continue
+            if following == ".":
+                while index < length and text[index] == ".":
+                    pieces.append(".")
+                    index += 1
+                index = _append_copy_line_break(text, index, pieces)
+                continue
+            if following in _ASCII_PERIOD_KEEP_FOLLOWERS:
+                pieces.append(char)
+                index += 1
+                continue
+            pieces.append(char)
+            index += 1
+            index = _append_copy_line_break(text, index, pieces)
+            continue
+        if char in _COPY_BREAK_CHARS:
+            if char == "," and previous.isdigit() and following.isdigit():
+                pieces.append(char)
+                index += 1
+                continue
+            pieces.append(char)
+            index += 1
+            index = _append_copy_line_break(text, index, pieces)
+            continue
+        pieces.append(char)
+        index += 1
+    return "".join(pieces)
+
+
 def article_document(
     article: ArticleContent,
     *,
@@ -5057,7 +5166,7 @@ def article_document(
         header.append(f"作品 ID：{item_id}")
     if source_urls:
         header.append(f"来源链接：{source_urls[0]}")
-    body = article.body or article.title
+    body = format_article_copy_line_breaks(article.body or article.title)
     return "\n".join([*header, "", "正文：", body, ""])
 
 
@@ -5544,7 +5653,7 @@ def image_post_article_is_missing(
         not getattr(args, "print_url", False)
         and normalize_platform(platform) in {"douyin", "xiaohongshu"}
         and bool(image_candidates)
-        and article is None
+        and not article_has_platform_text(article)
     )
 
 
@@ -8009,7 +8118,10 @@ def handle_resolved_media(
             referer=platform_referer(platform),
         )
         saved_paths = list(image_paths)
-        if article is not None and normalize_platform(platform) in {"douyin", "xiaohongshu"}:
+        if article_has_platform_text(article) and normalize_platform(platform) in {
+            "douyin",
+            "xiaohongshu",
+        }:
             try:
                 saved_paths.append(
                     save_article_content(

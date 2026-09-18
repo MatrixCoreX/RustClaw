@@ -99,19 +99,52 @@ export function manualVerificationTarget(platform, config, blockedUrl) {
   return validatePlatformUrl(platform, blockedUrl || sourceTargets(platform, config)[0].url);
 }
 
+function douyinHomePath(pathname) {
+  return pathname === "/" || pathname === "/jingxuan";
+}
+
+function decodePathKeyword(value) {
+  try { return decodeURIComponent(value); } catch { return value; }
+}
+
+function douyinSearchKeyword(pathname) {
+  const match = pathname.match(/^(?:\/jingxuan)?\/search\/([^/]+)\/?$/u);
+  return match ? decodePathKeyword(match[1]) : null;
+}
+
 export function matchesVerificationTarget(platform, targetUrl, currentUrl) {
   if (!targetUrl) return true;
   try {
     const target = new URL(validatePlatformUrl(platform, targetUrl));
     const current = new URL(validatePlatformUrl(platform, currentUrl));
-    if (platform === "xiaohongshu" && target.origin === current.origin
+    if (target.origin !== current.origin) return false;
+    if (platform === "xiaohongshu"
       && ["/search_result", "/search_result_ai"].includes(target.pathname)
       && ["/search_result", "/search_result_ai"].includes(current.pathname)) {
       const keyword = urlSearchKeyword(target);
       return keyword !== null && keyword === urlSearchKeyword(current);
     }
-    return target.origin === current.origin && target.pathname === current.pathname
+    if (platform === "douyin") {
+      if (douyinHomePath(target.pathname) && douyinHomePath(current.pathname)) return true;
+      const targetKeyword = douyinSearchKeyword(target.pathname);
+      const currentKeyword = douyinSearchKeyword(current.pathname);
+      if (targetKeyword !== null && targetKeyword === currentKeyword) return true;
+    }
+    return target.pathname === current.pathname
       && [...target.searchParams].every(([name, value]) => current.searchParams.get(name) === value);
+  } catch {
+    return false;
+  }
+}
+
+export function matchesManualAccessTarget(platform, targetUrl, currentUrl) {
+  if (matchesVerificationTarget(platform, targetUrl, currentUrl)) return true;
+  if (!targetUrl) return true;
+  try {
+    const target = new URL(validatePlatformUrl(platform, targetUrl));
+    const current = new URL(validatePlatformUrl(platform, currentUrl));
+    return platform === "douyin" && target.origin === current.origin && douyinHomePath(current.pathname)
+      && (douyinHomePath(target.pathname) || douyinSearchKeyword(target.pathname) !== null);
   } catch {
     return false;
   }
@@ -126,13 +159,30 @@ function urlSearchKeyword(url) {
   return value;
 }
 
+export function douyinModalItemId(rawUrl) {
+  try {
+    const value = new URL(validatePlatformUrl("douyin", rawUrl)).searchParams.get("modal_id");
+    return /^\d+$/u.test(value || "") ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 export function isDetailUrl(platform, rawUrl) {
   try {
     const normalized = validatePlatformUrl(platform, rawUrl);
+    if (platform === "douyin" && douyinModalItemId(normalized)) return true;
     return platformSpec(platform).detailPath.test(new URL(normalized).pathname);
   } catch {
     return false;
   }
+}
+
+export function douyinSearchGridItemUrls(itemIds) {
+  return canonicalCandidateUrls("douyin", (itemIds || [])
+    .map((itemId) => String(itemId || ""))
+    .filter((itemId) => /^\d+$/u.test(itemId))
+    .map((itemId) => `https://www.douyin.com/video/${itemId}`));
 }
 
 export function canonicalCandidateUrls(platform, rawUrls) {
@@ -155,6 +205,10 @@ export function canonicalCandidateUrls(platform, rawUrls) {
 
 export function platformItemId(platform, rawUrl) {
   const normalized = validatePlatformUrl(platform, rawUrl);
+  if (platform === "douyin") {
+    const modal = douyinModalItemId(normalized);
+    if (modal) return `douyin:${modal}`;
+  }
   const segments = new URL(normalized).pathname.split("/").filter(Boolean);
   return `${platform}:${segments.at(-1) || randomUUID()}`;
 }

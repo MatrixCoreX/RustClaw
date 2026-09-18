@@ -5,12 +5,10 @@ import { randomUUID } from "node:crypto";
 import { exportRecordCsv, writeAtomic } from "./csv.mjs";
 import { resolveBrowserMode } from "./platforms.mjs";
 import { recordIdentity, recordPostIdentity } from "./media_identity.mjs";
+import { acquireStateLock } from "./storage_lock.mjs";
 import { activeRunIsFresh, activeRuns, drainRuns, parallelPlatformLimit, projectActiveRuns } from "./run_leases.mjs";
 
 const STATE_SCHEMA_VERSION = 1;
-const LOCK_RETRY_MS = 40;
-const LOCK_TIMEOUT_MS = 10_000;
-const STALE_LOCK_MS = 30 * 60 * 1000;
 const BACKGROUND_WORKER_STALE_MS = 2 * 60 * 1000;
 const RETIRED_CONFIG_FIELDS = new Set(["interval_minutes", "recognition_mode"]);
 
@@ -55,34 +53,9 @@ async function readJson(filePath, fallback) {
   }
 }
 
-async function acquireLock(root) {
-  const lockPath = path.join(root, ".state.lock");
-  const deadline = Date.now() + LOCK_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    try {
-      const handle = await fs.open(lockPath, "wx", 0o600);
-      await handle.writeFile(JSON.stringify({ pid: process.pid, created_at: Date.now() }));
-      return { handle, lockPath };
-    } catch (error) {
-      if (error?.code !== "EEXIST") throw error;
-      try {
-        const stat = await fs.stat(lockPath);
-        if (Date.now() - stat.mtimeMs > STALE_LOCK_MS) {
-          await fs.unlink(lockPath);
-          continue;
-        }
-      } catch (statError) {
-        if (statError?.code !== "ENOENT") throw statError;
-      }
-      await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
-    }
-  }
-  throw new Error("storage_lock_timeout");
-}
-
 async function withLock(root, operation) {
   await ensureLayout(root);
-  const lock = await acquireLock(root);
+  const lock = await acquireStateLock(root);
   try {
     return await operation();
   } finally {
@@ -335,6 +308,7 @@ export async function heartbeat(root, runId, counts, lifecycleState = null, evid
     run.heartbeat_at = new Date().toISOString();
     run.counts = { ...run.counts, ...counts };
     if (evidence.manual_verification) run.manual_verification = { ...evidence.manual_verification };
+    if (evidence.last_item_error) run.last_item_error = String(evidence.last_item_error).slice(0, 200);
     if (lifecycleState && !run.stop_requested_at) run.lifecycle_state = lifecycleState;
     await writeStateUnlocked(root, state);
     return Boolean(run.stop_requested_at);
@@ -360,7 +334,7 @@ export async function finishRun(root, run, status, errorCode = null) {
       error_code: errorCode,
       finished_at: new Date().toISOString(),
     };
-    state.runs = [completed, ...(state.runs || []).filter((item) => item.run_id !== run.run_id)].slice(0, 100);
+    state.runs = [completed, ...(state.runs || []).filter((item) => item.run_id !== run.run_id)];
     delete state.active_runs[run.run_id];
     await writeStateUnlocked(root, state);
     return completed;

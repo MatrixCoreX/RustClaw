@@ -71,6 +71,7 @@ test("keeps media collection automatically refreshed and sortable by collection 
   assert.match(source, /document\.visibilityState !== "visible"/);
   assert.match(source, /fetchPage\(true\)/);
   assert.match(source, /params\.set\("cursor_sequence", String\(cursor\)\)/);
+  assert.match(source, /limit: String\(AIPP_PAGE_SIZE\)/);
   assert.match(source, /sort_order: sortOrder/);
   assert.match(source, /采集时间：最新优先/);
   assert.match(source, /采集时间：最早优先/);
@@ -78,8 +79,10 @@ test("keeps media collection automatically refreshed and sortable by collection 
 
 test("renders collected media in three responsive desktop columns", () => {
   const source = readFileSync(new URL("../components/AippPage.tsx", import.meta.url), "utf8");
-  assert.match(source, /grid min-w-0 gap-2 md:grid-cols-2 xl:grid-cols-3/);
+  assert.match(source, /const AIPP_RESULT_GRID_CLASS = "grid min-w-0 gap-2 md:grid-cols-2 xl:grid-cols-3"/);
+  assert.equal((source.match(/className=\{AIPP_RESULT_GRID_CLASS\}/g) || []).length, 2);
   assert.match(source, /sm:grid-cols-\[minmax\(104px,24%\)_minmax\(0,1fr\)\]/);
+  assert.match(source, /sm:grid-cols-\[minmax\(104px,24%\)_minmax\(0,1fr\)_auto\]/);
   assert.match(source, /max-h-36 min-h-24/);
 });
 
@@ -220,6 +223,43 @@ test("renders a media collection record from the current no-OCR contract", () =>
   assert.doesNotMatch(markup, /<img/);
 });
 
+test("collection cards expose the same select and delete controls as task activity", () => {
+  const item: AippMediaItem = {
+    schema_version: 1,
+    global_sequence: 42,
+    sequence: 7,
+    post_sequence: 3,
+    image_sequence: 2,
+    kind: "image",
+    platform: "xiaohongshu",
+    source_mode: "topics",
+    search_keyword: "example",
+    title: "Collected title",
+    platform_text: "Platform copy",
+    source_url: "https://example.test/source",
+    image_url: "https://example.test/image.webp",
+    preview_available: false,
+    discovered_at: "2026-09-07T00:00:00Z",
+    published_at: "2026-09-01",
+    engagement: null,
+  };
+  const markup = renderToStaticMarkup(
+    <AippMediaItemCard
+      item={item}
+      skillName="example_collection"
+      apiFetch={async () => new Response()}
+      t={t}
+      lang="zh"
+      selected
+      onToggleSelected={() => undefined}
+      onDelete={() => undefined}
+    />,
+  );
+  assert.match(markup, /选择这条记录/);
+  assert.match(markup, /删除这条记录/);
+  assert.ok(markup.indexOf("选择这条记录") > markup.indexOf("查看来源"));
+});
+
 test("publication dates keep date-only precision and reject invalid values", () => {
   assert.equal(formatPublishedAt("2026-09-01", "en"), "2026-09-01");
   assert.equal(formatPublishedAt("2026-02-30", "zh"), null);
@@ -336,6 +376,142 @@ test("renders cross-channel media task input, processed content, links, and safe
   assert.match(markup, /2\.0 KB/);
   assert.match(markup, />download</);
   assert.match(markup, />transcribe</);
+  assert.doesNotMatch(markup, /选择这条记录/);
+  assert.doesNotMatch(markup, /删除这条记录/);
+});
+
+test("lets the generic task activity renderer select and delete records without skill-specific branches", () => {
+  const item: AippTaskActivityItem = {
+    schema_version: 1,
+    sequence: 9,
+    task_id: "12345678-activity-task",
+    channel: "wechat",
+    status: "succeeded",
+    actions: ["download"],
+    input_text: "https://media.example.test/post/1",
+    result_text: "ok",
+    error_text: null,
+    source_urls: [],
+    artifacts: [],
+    created_at: "1788846460",
+    updated_at: "1788846461",
+    event_at_ms: 1788846461000,
+  };
+  const markup = renderToStaticMarkup(
+    <AippTaskActivityCard
+      item={item}
+      apiFetch={async () => new Response()}
+      t={t}
+      lang="zh"
+      selected
+      onToggleSelected={() => undefined}
+      onDelete={() => undefined}
+    />,
+  );
+  assert.match(markup, /选择这条记录/);
+  assert.match(markup, /删除这条记录/);
+  assert.match(markup, /type="checkbox"/);
+  assert.ok(markup.indexOf("选择这条记录") > markup.indexOf("微信"));
+});
+
+test("previews every image artifact and keeps the select control to the right of image-bearing rows", () => {
+  const item: AippTaskActivityItem = {
+    schema_version: 1,
+    sequence: 9,
+    task_id: "12345678-activity-task",
+    channel: "wechat",
+    status: "succeeded",
+    actions: ["download"],
+    input_text: "https://media.example.test/post/1",
+    result_text: "ok",
+    error_text: null,
+    source_urls: [],
+    artifacts: [
+      {
+        schema_version: 1,
+        id: "image-1",
+        filename: "note_01.webp",
+        kind: "image",
+        mime_type: "image/webp",
+        size_bytes: 12345,
+        download_url: "/v1/tasks/12345678-activity-task/artifacts/image-1/content",
+        preview_url: "/v1/tasks/12345678-activity-task/artifacts/image-1/content?disposition=inline",
+      },
+      {
+        schema_version: 1,
+        id: "image-2",
+        filename: "note_02.webp",
+        kind: "image",
+        mime_type: "image/webp",
+        size_bytes: 23456,
+        download_url: "/v1/tasks/12345678-activity-task/artifacts/image-2/content",
+        preview_url: "/v1/tasks/12345678-activity-task/artifacts/image-2/content?disposition=inline",
+      },
+    ],
+    created_at: "1788846460",
+    updated_at: "1788846461",
+    event_at_ms: 1788846461000,
+  };
+  const markup = renderToStaticMarkup(
+    <AippTaskActivityCard
+      item={item}
+      apiFetch={async () => new Response()}
+      t={t}
+      lang="zh"
+      selected
+      onToggleSelected={() => undefined}
+      onDelete={() => undefined}
+    />,
+  );
+  assert.match(markup, /上一张图片/);
+  assert.match(markup, /下一张图片/);
+  assert.match(markup, /1 \/ 2/);
+  assert.match(markup, /note_01\.webp/);
+  assert.match(markup, /note_02\.webp/);
+  assert.ok(markup.indexOf("选择这条记录") > markup.indexOf("放大图片"));
+});
+
+test("lets the generic task activity renderer preview and download video artifacts", () => {
+  const item: AippTaskActivityItem = {
+    schema_version: 1,
+    sequence: 9,
+    task_id: "12345678-activity-task",
+    channel: "wechat",
+    status: "succeeded",
+    actions: ["download"],
+    input_text: "https://media.example.test/video/1",
+    result_text: "ok",
+    error_text: null,
+    source_urls: [],
+    artifacts: [{
+      schema_version: 1,
+      id: "video-1",
+      filename: "clip.mp4",
+      kind: "video",
+      mime_type: "video/mp4",
+      size_bytes: 6_315_211,
+      download_url: "/v1/tasks/12345678-activity-task/artifacts/video-1/content",
+      preview_url: "/v1/tasks/12345678-activity-task/artifacts/video-1/content?disposition=inline",
+    }],
+    created_at: "1788846460",
+    updated_at: "1788846461",
+    event_at_ms: 1788846461000,
+  };
+  const markup = renderToStaticMarkup(
+    <AippTaskActivityCard
+      item={item}
+      apiFetch={async () => new Response()}
+      t={t}
+      lang="zh"
+      selected
+      onToggleSelected={() => undefined}
+      onDelete={() => undefined}
+    />,
+  );
+  assert.match(markup, /正在准备可播放预览/);
+  assert.match(markup, /下载视频/);
+  assert.match(markup, /clip\.mp4/);
+  assert.ok(markup.indexOf("选择这条记录") > markup.indexOf("下载视频"));
 });
 
 test("supports the generic task activity AiAPP renderer without skill-specific core UI branches", () => {
@@ -344,5 +520,16 @@ test("supports the generic task activity AiAPP renderer without skill-specific c
   assert.match(source, /params\.set\("channel", activityChannel\)/);
   assert.match(source, /params\.set\("status", activityStatus\)/);
   assert.match(source, /搜索原始请求或处理结果/);
+  assert.match(source, /全部记录/);
+  assert.match(source, /activityPage\?\.total_item_count/);
+  assert.match(source, /\/items\/remove/);
+  assert.match(source, /本页全选/);
+  assert.match(source, /删除已选/);
+  assert.match(source, /global_sequences/);
+  assert.match(source, /activityImageArtifacts/);
+  assert.match(source, /activityVideoArtifacts/);
+  assert.match(source, /images=\{viewerImages\}/);
+  assert.match(source, /className=\{AIPP_RESULT_GRID_CLASS\}/);
   assert.doesNotMatch(source, /selectedSkill === "media_download"/);
+  assert.doesNotMatch(source, /selectedSkill === "media_discovery"/);
 });

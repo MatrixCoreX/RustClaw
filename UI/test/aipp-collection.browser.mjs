@@ -10,7 +10,7 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || "playwright")
 const root = fileURLToPath(new URL("../", import.meta.url));
 const output = process.env.UI_BROWSER_ARTIFACTS || path.join(os.tmpdir(), "aipp-collection-tests");
 await mkdir(output, { recursive: true });
-const server = await createServer({ root, server: { host: "127.0.0.1", port: 0, strictPort: true } });
+const server = await createServer({ root, server: { host: "127.0.0.1", port: 0, strictPort: true, watch: { ignored: ["**"] } } });
 let browser;
 try {
   await server.listen();
@@ -45,6 +45,9 @@ try {
   await page.route("**/v1/aipps**", async route => {
     const url = new URL(route.request().url());
     if (url.pathname.endsWith("/preview")) return route.fulfill({ contentType: "image/png", body: preview });
+    if (route.request().method() === "POST" && url.pathname.endsWith("/items/remove")) {
+      return route.fulfill({ json: { ok: true, data: { schema_version: 1, removed_count: 1, newly_hidden_count: 1, source_records_preserved: true } } });
+    }
     const cursor = Number(url.searchParams.get("cursor_sequence")) || null;
     const platform = url.searchParams.get("platform");
     const filtered = filterMode ? items.filter(item => !platform || item.platform === platform)
@@ -83,6 +86,9 @@ try {
     assert.ok((await page.locator("article").nth(1).innerText()).includes("2 days ago"));
     assert.ok((await page.locator("article").nth(2).innerText()).includes(lang === "zh" ? "未提供" : "Unavailable"));
     assert.equal(await page.locator('article').nth(3).locator('[aria-label="Engagement at capture"], [aria-label="采集时互动数据"]').count(), 0);
+    await page.getByRole("checkbox", { name: lang === "zh" ? "本页全选" : "Select this page" }).click();
+    assert.equal(await page.getByRole("checkbox", { name: lang === "zh" ? "选择这条记录" : "Select this record" }).count(), 6);
+    assert.ok(await page.getByRole("button", { name: lang === "zh" ? /删除已选 6 条/ : /Delete 6 selected/ }).isVisible());
     await page.screenshot({ path: path.join(output, `${width}-${theme}.png`), fullPage: true });
     const first = page.locator("article").first();
     await first.getByRole("button", { name: lang === "zh" ? "展开全文" : "Show all", exact: true }).click();
@@ -159,14 +165,14 @@ try {
   filterMode = true;
   items.splice(0, items.length,
     ...Array.from({ length: 40 }, (_, i) => ({ ...template, platform: "xiaohongshu", global_sequence: 100 - i, post_sequence: 50, image_sequence: 40 - i })),
-    ...Array.from({ length: 30 }, (_, i) => ({ ...template, platform: ["kuaishou", "douyin", "xiaohongshu"][Math.floor(i / 10)],
+    ...Array.from({ length: 40 }, (_, i) => ({ ...template, platform: ["kuaishou", "douyin", "xiaohongshu", "douyin"][Math.floor(i / 10)],
       global_sequence: 60 - i, post_sequence: 49 - i, image_sequence: 1 })));
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/test/fixtures/aipp-collection.html?lang=zh&theme=light`);
     const waitCards = count => page.waitForFunction(expected => document.querySelectorAll("article").length === expected
       && document.querySelector('[aria-busy="false"]'), count);
-    await waitCards(20);
+    await waitCards(30);
     for (const name of ["xiaohongshu", "kuaishou", "douyin"]) assert.ok((await page.locator("article").allTextContents()).some(text => text.includes(name)));
     const select = page.getByRole("combobox", { name: "按平台筛选" });
     await select.selectOption("xiaohongshu");
@@ -174,7 +180,7 @@ try {
     assert.ok((await page.locator("article").allTextContents()).every(text => text.includes("xiaohongshu")));
     itemRequests.length = 0;
     await select.selectOption("all");
-    await waitCards(20);
+    await waitCards(30);
     assert.ok(itemRequests.length >= 3);
     assert.ok(itemRequests.every(url => !url.searchParams.has("platform")));
     await page.getByRole("button", { name: "下一页", exact: true }).click();
@@ -185,9 +191,9 @@ try {
     await page.getByText("第 1 页 · 10 篇", { exact: true }).waitFor();
     assert.ok((await page.locator("article").allTextContents()).every(text => text.includes("kuaishou")));
     await select.selectOption("all");
-    await waitCards(20);
+    await waitCards(30);
     await page.getByRole("combobox", { name: "按采集时间排序" }).selectOption("oldest");
-    await page.getByText("#31", { exact: true }).waitFor();
+    await page.getByText("#21", { exact: true }).waitFor();
     await page.getByRole("button", { name: "下一页", exact: true }).click();
     await waitCards(11);
     await page.getByText("1 / 40", { exact: true }).waitFor();

@@ -61,6 +61,9 @@ class AdapterTest(unittest.TestCase):
             response["extra"]["image_article_posts"]["delivery_policy"],
             "best_effort_components",
         )
+        self.assertTrue(
+            response["extra"]["image_article_posts"]["background_audio_independent_of_caption"]
+        )
         self.assertTrue(response["extra"]["transcription_engines"]["whisper"]["default"])
 
     def test_progress_reporter_emits_ordered_machine_frames(self) -> None:
@@ -911,6 +914,58 @@ class AdapterTest(unittest.TestCase):
             "image_text_ocr.txt",
         )
         self.assertEqual(command[command.index("--language") + 1], "auto")
+        self.assertEqual(command[command.index("--min-line-confidence") + 1], "10")
+
+    def test_ocr_fallback_from_vision_marks_recognition_notice(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            artifacts = workspace / "artifacts"
+            workspace.mkdir()
+            image = workspace / "page.jpg"
+            image.write_bytes(b"image")
+
+            def fake_run(command, **kwargs):
+                output = Path(command[command.index("--output") + 1])
+                output.parent.mkdir(parents=True, exist_ok=True)
+                output.write_text("local ocr text\n", encoding="utf-8")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            request = {
+                "request_id": "ocr-fallback-1",
+                "args": {
+                    "action": "ocr",
+                    "input_paths": [str(image)],
+                    "fallback_from": "image_vision.extract_text",
+                },
+                "context": {
+                    "artifact_output_directory": str(artifacts),
+                    "workspace_root": str(workspace),
+                    "permissions": {"allow_path_outside_workspace": False},
+                },
+                "user_id": 1,
+                "chat_id": 1,
+            }
+            with mock.patch.object(self.skill.subprocess, "run", side_effect=fake_run):
+                response = self.skill.respond(request)
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual(
+            response["extra"]["recognition"]["fallback_from"],
+            "image_vision.extract_text",
+        )
+        self.assertEqual(
+            response["extra"]["recognition"]["fallback_reason"],
+            "vision_unavailable",
+        )
+        self.assertEqual(
+            response["extra"]["recognition"]["notice_key"],
+            "media_download.notice.vision_unavailable_ocr_fallback",
+        )
+        self.assertEqual(
+            response["extra"]["recognition_delivery"]["notice_key"],
+            "media_download.notice.vision_unavailable_ocr_fallback",
+        )
 
     def test_ocr_rejects_video_input_before_process_dispatch(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1259,9 +1314,10 @@ class AdapterTest(unittest.TestCase):
                 response = self.skill.respond(request)
 
         self.assertEqual(
-            [artifact["filename"] for artifact in response["extra"]["artifacts"]],
-            ["public-video.mp4"],
+            [artifact["artifact_role"] for artifact in response["extra"]["artifacts"]],
+            ["original_video", "extracted_audio"],
         )
+        self.assertEqual(response["extra"]["artifacts"][1]["mime_type"], "audio/x-wav")
         first_frame = response["extra"]["processing_inputs"]["video_first_frame"]
         self.assertEqual(first_frame["status"], "available")
         self.assertEqual(first_frame["source"], "video_first_frame")
@@ -1269,7 +1325,8 @@ class AdapterTest(unittest.TestCase):
         video_audio = response["extra"]["processing_inputs"]["video_audio"]
         self.assertEqual(video_audio["status"], "available")
         self.assertEqual(video_audio["engine"], "ffmpeg")
-        self.assertFalse(video_audio["deliver_to_user"])
+        self.assertTrue(video_audio["deliver_to_user"])
+        self.assertEqual(video_audio["artifact_role"], "extracted_audio")
         policy = response["extra"]["content_bundle"]["followup_policy"]
         self.assertEqual(policy["activation_requirement"], "required")
         self.assertEqual(policy["completion_requirement"], "all_components")
@@ -1290,6 +1347,63 @@ class AdapterTest(unittest.TestCase):
         )
         self.assertEqual(policy["steps"][1]["result_label_kind"], "audio_transcript")
         self.assertEqual(policy["steps"][1]["input_value"], video_audio["path"])
+        self.assertEqual(
+            policy["steps"][0]["fallback_capability"],
+            "media_download.ocr",
+        )
+        self.assertEqual(
+            policy["steps"][0]["fallback_args"]["fallback_from"],
+            "image_vision.extract_text",
+        )
+
+    def test_audio_only_download_delivers_extracted_wav(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            artifacts = workspace / "artifacts"
+            workspace.mkdir()
+
+            def fake_run(command, **kwargs):
+                if command[0] == "ffmpeg":
+                    output = Path(command[-1])
+                    with wave.open(str(output), "wb") as audio:
+                        audio.setnchannels(1)
+                        audio.setsampwidth(2)
+                        audio.setframerate(16000)
+                        audio.writeframes(b"\x00\x00" * 160)
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                output_dir = Path(command[command.index("--output-dir") + 1])
+                output_dir.mkdir(parents=True, exist_ok=True)
+                (output_dir / "public-video.mp4").write_bytes(b"video")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            request = {
+                "request_id": "download-audio-only-1",
+                "args": {
+                    "action": "download",
+                    "share": "https://example.test/public-video",
+                    "text_conversion_scope": "audio_only",
+                },
+                "context": {
+                    "artifact_output_directory": str(artifacts),
+                    "workspace_root": str(workspace),
+                    "permissions": {"allow_path_outside_workspace": False},
+                },
+                "user_id": 1,
+                "chat_id": 1,
+            }
+            with mock.patch.object(self.skill.subprocess, "run", side_effect=fake_run):
+                response = self.skill.respond(request)
+
+        self.assertEqual(
+            [artifact["artifact_role"] for artifact in response["extra"]["artifacts"]],
+            ["original_video", "extracted_audio"],
+        )
+        self.assertTrue(response["extra"]["processing_inputs"]["video_audio"]["deliver_to_user"])
+        self.assertEqual(
+            response["extra"]["processing_inputs"]["video_audio"]["artifact_role"],
+            "extracted_audio",
+        )
 
     def test_video_audio_only_scope_enforces_only_audio_transcription(self) -> None:
         artifacts = [
@@ -1572,6 +1686,53 @@ class AdapterTest(unittest.TestCase):
             ["images"],
         )
         self.assertEqual(policy["synthesis_sources"], ["image_text"])
+        image_step = policy["steps"][0]
+        self.assertEqual(image_step["capability"], "image_vision.extract_text")
+        self.assertEqual(image_step["fallback_capability"], "media_download.ocr")
+        self.assertEqual(image_step["fallback_input_field"], "input_paths")
+        self.assertEqual(image_step["fallback_input_value"], ["/workspace/note.webp"])
+        self.assertEqual(
+            image_step["fallback_args"],
+            {"fallback_from": "image_vision.extract_text"},
+        )
+
+    def test_images_only_image_article_declares_vision_then_ocr_fallback(self) -> None:
+        artifacts = [
+            {
+                "artifact_role": "original_image",
+                "path": "/workspace/note.webp",
+                "filename": "note.webp",
+                "mime_type": "image/webp",
+                "size_bytes": 5,
+            },
+            {
+                "artifact_role": "article_text",
+                "path": "/workspace/note_article.txt",
+                "filename": "note_article.txt",
+                "mime_type": "text/plain",
+                "size_bytes": 12,
+            },
+        ]
+        processing_inputs = self.skill._composite_processing_inputs(artifacts, None)
+
+        bundle = self.skill._content_bundle(
+            artifacts,
+            processing_inputs=processing_inputs,
+            text_conversion_scope="images_only",
+        )
+
+        self.assertEqual(bundle["kind"], "image_article")
+        policy = bundle["followup_policy"]
+        self.assertEqual(policy["activation_requirement"], "required")
+        self.assertEqual(policy["completion_requirement"], "selected_components")
+        self.assertEqual(policy["synthesis_sources"], ["platform_article", "image_text"])
+        step = policy["steps"][0]
+        self.assertEqual(step["capability"], "image_vision.extract_text")
+        self.assertEqual(step["fallback_capability"], "media_download.ocr")
+        self.assertEqual(
+            step["fallback_args"]["fallback_from"],
+            "image_vision.extract_text",
+        )
 
     def test_omitted_scope_does_not_schedule_composite_text_conversion(self) -> None:
         artifacts = [
@@ -1649,7 +1810,11 @@ class AdapterTest(unittest.TestCase):
             ["original_image"] * 9,
         )
         self.assertNotIn("image_delivery", response["extra"]["content_bundle"])
-        self.assertNotIn("processing_inputs", response["extra"])
+        self.assertNotIn("followup_policy", response["extra"]["content_bundle"])
+        self.assertEqual(
+            response["extra"]["processing_inputs"]["image_count"],
+            9,
+        )
         self.assertEqual(
             response["extra"]["content_bundle"]["delivery_policy"],
             "best_effort_components",

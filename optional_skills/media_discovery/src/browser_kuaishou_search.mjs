@@ -1,5 +1,7 @@
 import { browserStageError } from "./browser_diagnostics.mjs";
+import { stopsCollection } from "./browser_flow_control.mjs";
 import { boundedBrowserOperation } from "./browser_search.mjs";
+import { collectOrderedPages } from "./collection_progress.mjs";
 
 export async function kuaishouSearchCards(page) {
   return boundedBrowserOperation(page.evaluate(() => {
@@ -9,10 +11,10 @@ export async function kuaishouSearchCards(page) {
     };
     // Only associate already-rendered covers with the page's loaded public posts.
     // No cache-key decoding, private API calls, or credential fields are needed.
-    const photos = Object.values(window.INIT_STATE || {}).slice(0, 200)
-      .flatMap(entry => Array.isArray(entry?.feeds) ? entry.feeds.slice(0, 1000) : [])
+    const photos = Object.values(window.INIT_STATE || {})
+      .flatMap(entry => Array.isArray(entry?.feeds) ? entry.feeds : [])
       .map(entry => entry?.photo).filter(photo => /^[A-Za-z0-9_-]{8,64}$/.test(photo?.id || ""));
-    return [...document.querySelectorAll(".video-list .photo-card")].slice(0, 500).flatMap((card, index) => {
+    return [...document.querySelectorAll(".video-list .photo-card")].flatMap((card, index) => {
       const rect = card.getBoundingClientRect(), css = getComputedStyle(card);
       if (rect.width < 140 || rect.height < 120 || rect.bottom <= 0 || rect.top >= innerHeight
         || css.visibility === "hidden" || css.display === "none") return [];
@@ -27,16 +29,19 @@ export async function kuaishouSearchCards(page) {
 }
 
 export async function collectKuaishouSearchResults({ page, config, limit, shouldStop,
-  checkAccess, settle, scrollPage, collect, onPage, onFailure }) {
+  checkAccess, settle, scrollPage, collect, onPage, onFailure,
+  completed = new Set(), detailed = false }) {
   const seen = new Set();
-  let handled = 0;
   let lastError;
-  for (let scroll = 0; scroll <= (config.max_scrolls_per_source || 10) && handled < limit; scroll += 1) {
-    const access = await checkAccess(page);
-    if (access) throw browserStageError(access, "search_results_access");
-    for (const candidate of await kuaishouSearchCards(page)) {
-      if (handled >= limit || await shouldStop()) break;
-      if (seen.has(candidate.itemId)) continue;
+  const outcome = await collectOrderedPages({
+    readCandidates: async () => {
+      const access = await checkAccess(page);
+      if (access) throw browserStageError(access, "search_results_access");
+      return kuaishouSearchCards(page);
+    },
+    identity: candidate => `kuaishou:${candidate.itemId}`,
+    completed, limit, shouldStop, maxScrolls: config.max_scrolls_per_source,
+    collect: async candidate => {
       seen.add(candidate.itemId);
       let scope;
       try {
@@ -51,11 +56,9 @@ export async function collectKuaishouSearchResults({ page, config, limit, should
         const url = `https://www.kuaishou.com/short-video/${candidate.itemId}`;
         const result = await collect(page, url, scope);
         await onPage(result);
-        handled += 1;
       } catch (error) {
         lastError = error;
-        await onFailure?.(error);
-        if (["login_required", "challenge_required", "network_access_restricted", "rate_limited", "collection_stopped"].includes(error.message)) throw error;
+        throw error;
       } finally {
         const blocked = await checkAccess(page);
         if (!blocked && scope && await scope.isVisible()) {
@@ -63,14 +66,19 @@ export async function collectKuaishouSearchResults({ page, config, limit, should
           await page.locator(".swiper-feed:visible").waitFor({ state: "hidden", timeout: 5000 });
         }
       }
-    }
-    if (handled >= limit || await shouldStop() || scroll === (config.max_scrolls_per_source || 10)) break;
-    await scrollPage(page);
-    const login = page.locator(".video-list .loading-more .login-link:visible").first();
-    if (await login.isVisible() && !(await kuaishouSearchCards(page)).some(card => !seen.has(card.itemId))) {
-      throw browserStageError("login_required", "search_more_results");
-    }
+    },
+    scroll: async () => {
+      await scrollPage(page);
+      const login = page.locator(".video-list .loading-more .login-link:visible").first();
+      if (await login.isVisible() && !(await kuaishouSearchCards(page)).some(card => !seen.has(card.itemId)
+        && !completed.has(`kuaishou:${card.itemId}`))) {
+        throw browserStageError("login_required", "search_more_results");
+      }
+    },
+    onFailure, stopsCollection,
+  });
+  if (!detailed && outcome.handled === 0 && !await shouldStop()) {
+    throw lastError || browserStageError("selector_drift", "search_result_identity");
   }
-  if (handled === 0 && !await shouldStop()) throw lastError || browserStageError("selector_drift", "search_result_identity");
-  return handled;
+  return detailed ? outcome : outcome.handled;
 }
