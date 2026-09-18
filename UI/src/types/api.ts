@@ -2119,6 +2119,7 @@ export interface AippTaskActivityItem {
 export interface AippTaskActivityPageResponse {
   schema_version: number;
   page_item_count: number;
+  total_item_count: number;
   items: AippTaskActivityItem[];
   sort_order: "newest" | "oldest";
   next_cursor_sequence: number | null;

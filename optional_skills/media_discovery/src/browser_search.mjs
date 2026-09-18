@@ -1,4 +1,5 @@
 import { assertDocumentResponse, browserStageError } from "./browser_diagnostics.mjs";
+import { navigationAccessError } from "./browser_flow_control.mjs";
 import { matchesVerificationTarget, platformSpec, validatePlatformUrl } from "./platforms.mjs";
 
 const SEARCH_CONTROLS = Object.freeze({
@@ -18,7 +19,7 @@ const SEARCH_CONTROLS = Object.freeze({
 });
 
 const RESULT_SELECTORS = Object.freeze({
-  douyin: '[data-aweme-id]:visible, a[href*="/video/"]:visible, a[href*="/note/"]:visible',
+  douyin: '[data-aweme-id]:visible, a[href*="/video/"]:visible, a[href*="/note/"]:visible, .search-result-card:visible',
   xiaohongshu: 'section.note-item:visible, a[href*="/explore/"]:visible, a[href*="/search_result/"]:visible',
   kuaishou: '.video-card:visible, .video-list .photo-card:visible, a[href*="/short-video/"]:visible',
 });
@@ -44,9 +45,8 @@ export async function boundedBrowserOperation(operation, timeoutMs, stage) {
 
 export function assertNavigationResponse(response, stage) {
   if (response && [404, 410].includes(response.status())) throw browserStageError("source_unavailable", stage);
-  if (response && [401, 403, 429].includes(response.status())) {
-    throw browserStageError(response.status() === 429 ? "rate_limited" : "challenge_required", stage);
-  }
+  const accessError = navigationAccessError(response, stage);
+  if (accessError) throw accessError;
   assertDocumentResponse(response, stage);
 }
 

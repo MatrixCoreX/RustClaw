@@ -29,11 +29,19 @@ import {
 } from "lucide-react";
 
 import { formatUiError } from "../lib/ui-error";
-import { collectionGroupKey, completeCollectionPage, groupCollectionItems } from "../lib/aipp-collection";
+import { AIPP_PAGE_SIZE, collectionGroupKey, completeCollectionPage, groupCollectionItems } from "../lib/aipp-collection";
 import { appStorageKey } from "../lib/product-identity";
 import { useUiDialog } from "./UiDialogProvider";
 import { AippImageViewer, type AippViewerImage } from "./AippImageViewer";
+import {
+  ActivityImagePreview,
+  ActivityVideoPreview,
+  activityImageArtifacts,
+  activityVideoArtifacts,
+  activityViewerImage,
+} from "./AippTaskActivityMedia";
 import { fetchAippImage } from "../lib/aipp-image-download";
+import { fetchTaskArtifactBlob, saveTaskArtifactBlob } from "../lib/task-artifact-content";
 import { AippUsageGuide } from "./AippUsageGuide";
 import type {
   AippCatalogItem,
@@ -56,6 +64,7 @@ const AIPP_CATALOG_CACHE_MAX_BYTES = 256 * 1024;
 const AIPP_AUTO_REFRESH_INTERVAL_MS = 10_000;
 const AIPP_BRIDGE_MAX_IN_FLIGHT = 4;
 const AIPP_BRIDGE_MAX_ARGS_BYTES = 64 * 1024;
+const AIPP_RESULT_GRID_CLASS = "grid min-w-0 gap-2 md:grid-cols-2 xl:grid-cols-3";
 
 export function readSelectedAipp(storage: Pick<Storage, "getItem"> | undefined): string {
   return storage?.getItem(SELECTED_AIPP_STORAGE_KEY)?.trim() || "";
@@ -422,120 +431,190 @@ function ActivityArtifactIcon({ artifact }: { artifact: AippTaskActivityArtifact
   return <FileText className="h-4 w-4" />;
 }
 
-function ActivityImagePreview({ artifact, apiFetch, t, onOpen }: {
-  artifact: AippTaskActivityArtifact;
-  apiFetch: ApiFetch;
-  t: Translate;
-  onOpen: (source: string | null) => void;
-}) {
-  const [source, setSource] = useState<string | null>(null);
-  const apiFetchRef = useRef(apiFetch);
-  apiFetchRef.current = apiFetch;
-  useEffect(() => {
-    setSource(null);
-    const endpoint = artifact.preview_url;
-    if (!endpoint) return;
-    let disposed = false;
-    let objectUrl: string | null = null;
-    void apiFetchRef.current(endpoint)
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`aipp_activity_preview_http_${response.status}`);
-        return response.blob();
-      })
-      .then((blob) => {
-        if (disposed) return;
-        objectUrl = URL.createObjectURL(blob);
-        setSource(objectUrl);
-      })
-      .catch(() => {
-        if (!disposed) setSource(null);
-      });
-    return () => {
-      disposed = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [artifact.preview_url]);
-  return (
-    <button type="button" className="group relative block h-full w-full cursor-zoom-in" onClick={() => onOpen(source)} title={t("放大图片", "Enlarge image")} aria-label={t("放大图片", "Enlarge image")}>
-      {source ? <img src={source} alt={artifact.filename} className="h-full w-full object-contain" /> : <span className="flex h-full w-full items-center justify-center text-white/35"><ImageIcon className="h-8 w-8" /></span>}
-      <span className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-md border border-white/20 bg-black/60 text-white/85"><ZoomIn className="h-4 w-4" /></span>
-    </button>
-  );
-}
-
 export function AippTaskActivityCard({
   item,
   apiFetch,
   t,
   lang,
+  selected = false,
+  deleting = false,
+  onToggleSelected,
+  onDelete,
 }: {
   item: AippTaskActivityItem;
   apiFetch: ApiFetch;
   t: Translate;
   lang: "zh" | "en";
+  selected?: boolean;
+  deleting?: boolean;
+  onToggleSelected?: (taskId: string) => void;
+  onDelete?: (taskId: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [artifactAction, setArtifactAction] = useState<string | null>(null);
   const [artifactError, setArtifactError] = useState<string | null>(null);
+  const [previewIndex, setPreviewIndex] = useState(0);
+  const [videoIndex, setVideoIndex] = useState(0);
   const [viewerImage, setViewerImage] = useState<AippViewerImage | null>(null);
+  const previewImages = activityImageArtifacts(item);
+  const previewVideos = activityVideoArtifacts(item);
+  const selectedPreviewIndex = previewImages.length === 0 ? 0 : Math.min(previewIndex, previewImages.length - 1);
+  const selectedVideoIndex = previewVideos.length === 0 ? 0 : Math.min(videoIndex, previewVideos.length - 1);
+  const preview = previewImages[selectedPreviewIndex];
+  const video = previewVideos[selectedVideoIndex];
+  const hasVisualMedia = Boolean(preview || video);
+  const viewerImages = previewImages.map((artifact) => activityViewerImage(artifact));
   const openImage = (artifact: AippTaskActivityArtifact, initialSource?: string | null) => {
-    setViewerImage({
-      title: artifact.filename,
-      filename: artifact.filename,
-      previewUrl: artifact.preview_url || artifact.download_url,
-      downloadUrl: artifact.download_url,
-      initialSource,
-    });
+    setViewerImage(activityViewerImage(artifact, initialSource));
   };
-  const preview = item.artifacts.find((artifact) => artifact.kind === "image" && artifact.preview_url);
   const longContent = item.input_text.length > 320 || item.result_text.length > 720;
   const fetchArtifact = async (artifact: AippTaskActivityArtifact, open: boolean) => {
     if (open && artifact.kind === "image") {
       openImage(artifact);
       return;
     }
+    if (open && artifact.kind === "video") {
+      const index = previewVideos.findIndex((entry) => entry.id === artifact.id);
+      if (index >= 0) setVideoIndex(index);
+      return;
+    }
     if (artifactAction) return;
     setArtifactAction(`${open ? "open" : "download"}:${artifact.id}`);
     setArtifactError(null);
     try {
-      const endpoint = open && artifact.preview_url ? artifact.preview_url : artifact.download_url;
-      const response = await apiFetch(endpoint);
-      if (!response.ok) throw new Error(`aipp_activity_artifact_http_${response.status}`);
-      const objectUrl = URL.createObjectURL(await response.blob());
-      const anchor = document.createElement("a");
-      anchor.href = objectUrl;
+      const blob = await fetchTaskArtifactBlob(apiFetch, open && artifact.preview_url ? artifact.preview_url : artifact.download_url);
       if (open) {
+        const objectUrl = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = objectUrl;
         anchor.target = "_blank";
         anchor.rel = "noreferrer noopener";
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
       } else {
-        anchor.download = artifact.filename;
+        saveTaskArtifactBlob(blob, artifact.filename);
       }
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
     } catch {
       setArtifactError(t("文件读取失败，请重试。", "Could not read the file. Try again."));
     } finally {
       setArtifactAction(null);
     }
   };
+  const selectControl = onToggleSelected ? (
+    <label className="inline-flex h-8 w-8 shrink-0 items-center justify-center">
+      <input
+        type="checkbox"
+        className="h-4 w-4"
+        checked={selected}
+        onChange={() => onToggleSelected(item.task_id)}
+        aria-label={t("选择这条记录", "Select this record")}
+      />
+    </label>
+  ) : null;
+  const deleteControl = onDelete ? (
+    <button
+      type="button"
+      className="theme-icon-btn h-8 w-8 shrink-0 text-red-200"
+      disabled={deleting}
+      onClick={() => onDelete(item.task_id)}
+      title={t("删除这条记录", "Delete this record")}
+    >
+      {deleting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+    </button>
+  ) : null;
   return (
     <article className="theme-panel min-w-0 overflow-hidden">
-      <div className={preview ? "grid min-w-0 sm:grid-cols-[minmax(120px,22%)_minmax(0,1fr)]" : "min-w-0"}>
-        {preview ? (
-          <div className="aspect-video max-h-44 min-h-28 overflow-hidden bg-black/20 sm:aspect-auto">
-            <ActivityImagePreview artifact={preview} apiFetch={apiFetch} t={t} onOpen={(source) => openImage(preview, source)} />
+      <div className={hasVisualMedia
+        ? "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(104px,24%)_minmax(0,1fr)_auto]"
+        : "flex min-w-0"}>
+        {hasVisualMedia ? (
+          <div className="relative col-start-1 row-start-1 flex min-h-24 flex-col overflow-hidden bg-black/20 sm:min-h-28">
+            {preview ? (
+              <div className={`relative aspect-video max-h-36 min-h-24 overflow-hidden ${video ? "" : "sm:aspect-auto sm:min-h-28 sm:max-h-36"}`}>
+                <div className={previewImages.length > 1 ? "h-[calc(100%-2rem)]" : "h-full"}>
+                  <ActivityImagePreview
+                    key={preview.id}
+                    artifact={preview}
+                    apiFetch={apiFetch}
+                    t={t}
+                    onOpen={(source) => openImage(preview, source)}
+                  />
+                </div>
+                {previewImages.length > 1 ? (
+                  <div className="absolute inset-x-0 bottom-0 flex h-8 items-center justify-between border-t border-[var(--theme-border)] bg-[var(--theme-dialog-bg)] px-1 text-xs text-[var(--theme-text-strong)]">
+                    <button
+                      type="button"
+                      className="flex h-7 w-7 items-center justify-center disabled:opacity-30"
+                      title={t("上一张图片", "Previous image")}
+                      disabled={selectedPreviewIndex <= 0}
+                      onClick={() => setPreviewIndex((index) => Math.max(0, index - 1))}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+                    <span className="tabular-nums" aria-live="polite">{selectedPreviewIndex + 1} / {previewImages.length}</span>
+                    <button
+                      type="button"
+                      className="flex h-7 w-7 items-center justify-center disabled:opacity-30"
+                      title={t("下一张图片", "Next image")}
+                      disabled={selectedPreviewIndex >= previewImages.length - 1}
+                      onClick={() => setPreviewIndex((index) => Math.min(previewImages.length - 1, index + 1))}
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+            {video ? (
+              <div className={`relative ${preview ? "border-t border-white/10" : "aspect-video min-h-24 max-h-36 flex-1 sm:aspect-auto sm:min-h-28"}`}>
+                <div className={previewVideos.length > 1 ? "h-[calc(100%-2rem)]" : "h-full"}>
+                  <ActivityVideoPreview key={video.id} artifact={video} apiFetch={apiFetch} t={t} />
+                </div>
+                {previewVideos.length > 1 ? (
+                  <div className="absolute inset-x-0 bottom-0 flex h-8 items-center justify-between border-t border-[var(--theme-border)] bg-[var(--theme-dialog-bg)] px-1 text-xs text-[var(--theme-text-strong)]">
+                    <button
+                      type="button"
+                      className="flex h-7 w-7 items-center justify-center disabled:opacity-30"
+                      title={t("上一个视频", "Previous video")}
+                      disabled={selectedVideoIndex <= 0}
+                      onClick={() => setVideoIndex((index) => Math.max(0, index - 1))}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+                    <span className="tabular-nums" aria-live="polite">{selectedVideoIndex + 1} / {previewVideos.length}</span>
+                    <button
+                      type="button"
+                      className="flex h-7 w-7 items-center justify-center disabled:opacity-30"
+                      title={t("下一个视频", "Next video")}
+                      disabled={selectedVideoIndex >= previewVideos.length - 1}
+                      onClick={() => setVideoIndex((index) => Math.min(previewVideos.length - 1, index + 1))}
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         ) : null}
-        <div className="min-w-0 p-3 sm:p-4">
-          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-white/48">
-            <span>{activityChannelLabel(item.channel, t)}</span>
-            <span className={item.status === "failed" || item.status === "timeout" ? "text-red-200" : "text-white/70"}>
-              {activityStatusLabel(item.status, t)}
-            </span>
-            <span>{formatCollectedAt(item.created_at, lang)}</span>
-            <span title={item.task_id}>#{item.task_id.slice(0, 8)}</span>
+        <div className={`min-w-0 flex-1 p-3 sm:p-4 ${hasVisualMedia ? "col-span-2 row-start-2 sm:col-span-1 sm:col-start-2 sm:row-start-1" : ""}`}>
+          <div className="flex min-w-0 items-start justify-between gap-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-white/48">
+              <span>{activityChannelLabel(item.channel, t)}</span>
+              <span className={item.status === "failed" || item.status === "timeout" ? "text-red-200" : "text-white/70"}>
+                {activityStatusLabel(item.status, t)}
+              </span>
+              <span>{formatCollectedAt(item.created_at, lang)}</span>
+              <span title={item.task_id}>#{item.task_id.slice(0, 8)}</span>
+            </div>
+            {hasVisualMedia ? null : (
+              <div className="flex shrink-0 items-start gap-1">
+                {selectControl}
+                {deleteControl}
+              </div>
+            )}
           </div>
           {item.actions.length > 0 ? (
             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -578,6 +657,12 @@ export function AippTaskActivityCard({
             </button>
           ) : null}
         </div>
+        {hasVisualMedia && (selectControl || deleteControl) ? (
+          <div className="col-start-2 row-start-1 flex shrink-0 flex-col items-center gap-1 p-2 sm:col-start-3 sm:p-3">
+            {selectControl}
+            {deleteControl}
+          </div>
+        ) : null}
       </div>
       {item.artifacts.length > 0 ? (
         <div className="border-t border-white/8 px-3 py-2 sm:px-4">
@@ -587,7 +672,7 @@ export function AippTaskActivityCard({
               <span className="shrink-0 text-white/50"><ActivityArtifactIcon artifact={artifact} /></span>
               <span className="min-w-0 flex-1 truncate text-sm text-white/75" title={artifact.filename}>{artifact.filename}</span>
               <span className="shrink-0 text-xs text-white/40">{formatArtifactSize(artifact.size_bytes)}</span>
-              {artifact.preview_url ? (
+              {artifact.kind === "image" || artifact.kind === "video" || artifact.preview_url ? (
                 <button type="button" className="theme-icon-btn h-8 w-8 shrink-0" onClick={() => void fetchArtifact(artifact, true)} title={t("预览", "Preview")}>
                   {artifactAction === `open:${artifact.id}` ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
                 </button>
@@ -600,7 +685,7 @@ export function AippTaskActivityCard({
           {artifactError ? <p className="pb-2 text-xs text-red-200">{artifactError}</p> : null}
         </div>
       ) : null}
-      {viewerImage ? <AippImageViewer image={viewerImage} apiFetch={apiFetch} t={t} onClose={() => setViewerImage(null)} /> : null}
+      {viewerImage ? <AippImageViewer image={viewerImage} images={viewerImages} apiFetch={apiFetch} t={t} onClose={() => setViewerImage(null)} /> : null}
     </article>
   );
 }
@@ -714,6 +799,10 @@ export function AippMediaItemCard({
   apiFetch,
   t,
   lang,
+  selected = false,
+  deleting = false,
+  onToggleSelected,
+  onDelete,
 }: {
   item: AippMediaItem;
   images?: AippMediaItem[];
@@ -721,16 +810,44 @@ export function AippMediaItemCard({
   apiFetch: ApiFetch;
   t: Translate;
   lang: "zh" | "en";
+  selected?: boolean;
+  deleting?: boolean;
+  onToggleSelected?: (sequences: number[]) => void;
+  onDelete?: (sequences: number[]) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [selectedImageId, setSelectedImageId] = useState(item.global_sequence);
   const gallery = images?.length ? images : [item];
+  const sequences = gallery.map((entry) => entry.global_sequence);
   const selectedIndex = Math.max(0, gallery.findIndex(image => image.global_sequence === selectedImageId));
   const selectedImage = gallery[selectedIndex];
   const captionText = item.platform_text.trim();
   const publishedAt = formatPublishedAt(item.published_at, lang);
   const captionRef = useRef<HTMLParagraphElement>(null);
   const [canCollapse, setCanCollapse] = useState(false);
+  const selectControl = onToggleSelected ? (
+    <label className="inline-flex h-8 w-8 shrink-0 items-center justify-center">
+      <input
+        type="checkbox"
+        className="h-4 w-4"
+        checked={selected}
+        onChange={() => onToggleSelected(sequences)}
+        aria-label={t("选择这条记录", "Select this record")}
+      />
+    </label>
+  ) : null;
+  const deleteControl = onDelete ? (
+    <button
+      type="button"
+      className="theme-icon-btn h-8 w-8 shrink-0 text-red-200"
+      disabled={deleting}
+      onClick={() => onDelete(sequences)}
+      title={t("删除这条记录", "Delete this record")}
+    >
+      {deleting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+    </button>
+  ) : null;
+  const hasControls = Boolean(selectControl || deleteControl);
   useEffect(() => {
     if (expanded) return;
     const node = captionRef.current;
@@ -757,7 +874,11 @@ export function AippMediaItemCard({
   });
   return (
     <article className="theme-panel min-w-0 overflow-hidden">
-      <div className={hasPreview ? "grid min-w-0 sm:grid-cols-[minmax(104px,24%)_minmax(0,1fr)]" : "min-w-0"}>
+      <div className={hasPreview
+        ? (hasControls
+          ? "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(104px,24%)_minmax(0,1fr)_auto]"
+          : "grid min-w-0 sm:grid-cols-[minmax(104px,24%)_minmax(0,1fr)]")
+        : "flex min-w-0"}>
         {hasPreview ? (
           <div className="relative aspect-video max-h-36 min-h-24 overflow-hidden bg-black/20 sm:aspect-auto sm:min-h-28 sm:max-h-36">
             <div className={gallery.length > 1 ? "h-[calc(100%-2rem)]" : "h-full"}>
@@ -770,12 +891,20 @@ export function AippMediaItemCard({
             </div> : null}
           </div>
         ) : null}
-        <div className="min-w-0 p-3 sm:p-4">
-          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-white/45">
-            <span className="inline-flex items-center gap-1">{item.kind === "video" ? <Video className="h-3.5 w-3.5" /> : <ImageIcon className="h-3.5 w-3.5" />}{item.kind === "video" ? t("视频", "Video") : t("图片", "Image")}</span>
-            <span className="break-all">{item.platform}</span>
-            <span>#{item.global_sequence}</span>
-            {gallery.length > 1 ? <span>{gallery.length} {t("张图片", "images")}</span> : null}
+        <div className={`min-w-0 p-3 sm:p-4 ${hasPreview && hasControls ? "col-span-2 row-start-2 sm:col-span-1 sm:col-start-2 sm:row-start-1" : "flex-1"}`}>
+          <div className="flex min-w-0 items-start justify-between gap-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-white/45">
+              <span className="inline-flex items-center gap-1">{item.kind === "video" ? <Video className="h-3.5 w-3.5" /> : <ImageIcon className="h-3.5 w-3.5" />}{item.kind === "video" ? t("视频", "Video") : t("图片", "Image")}</span>
+              <span className="break-all">{item.platform}</span>
+              <span>#{item.global_sequence}</span>
+              {gallery.length > 1 ? <span>{gallery.length} {t("张图片", "images")}</span> : null}
+            </div>
+            {hasPreview ? null : (
+              <div className="flex shrink-0 items-start gap-1">
+                {selectControl}
+                {deleteControl}
+              </div>
+            )}
           </div>
           <h2 className="mt-2 line-clamp-2 break-words text-sm font-semibold leading-5 text-white/90 [overflow-wrap:anywhere]">{item.title || t("未提供标题", "Untitled")}</h2>
           <div className="mt-1.5 space-y-1 break-words text-xs leading-4 text-white/45 [overflow-wrap:anywhere]">
@@ -818,6 +947,12 @@ export function AippMediaItemCard({
             ) : null}
           </div>
         </div>
+        {hasPreview && hasControls ? (
+          <div className="col-start-2 row-start-1 flex shrink-0 flex-col items-center gap-1 p-2 sm:col-start-3 sm:p-3">
+            {selectControl}
+            {deleteControl}
+          </div>
+        ) : null}
       </div>
     </article>
   );
@@ -848,6 +983,10 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
   const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
   const [cursor, setCursor] = useState<number | null>(null);
   const [cursorHistory, setCursorHistory] = useState<Array<number | null>>([]);
+  const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
+  const [removingTaskIds, setRemovingTaskIds] = useState<string[]>([]);
+  const [selectedCollectionSequences, setSelectedCollectionSequences] = useState<number[]>([]);
+  const [removingCollectionSequences, setRemovingCollectionSequences] = useState<number[]>([]);
   const [installActionSkill, setInstallActionSkill] = useState<string | null>(null);
   const requestSequence = useRef(0);
   const autoRefreshInFlight = useRef(false);
@@ -942,7 +1081,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
       setLoading(true);
       setError(null);
     }
-    const params = new URLSearchParams({ limit: "20", sort_order: sortOrder });
+    const params = new URLSearchParams({ limit: String(AIPP_PAGE_SIZE), sort_order: sortOrder });
     if (cursor != null) params.set("cursor_sequence", String(cursor));
     if (selectedApp.renderer === "collection_feed_v1") {
       if (kind !== "all") params.set("kind", kind);
@@ -987,6 +1126,72 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
     }
   }, [activityChannel, activityStatus, cursor, kind, platform, searchQuery, selectedApp?.installed, selectedApp?.renderer, selectedSkill, sortOrder, showGuide]);
 
+  const removeActivityItems = useCallback(async (taskIds: string[]) => {
+    const uniqueIds = [...new Set(taskIds.filter(Boolean))];
+    if (!selectedSkill || uniqueIds.length === 0 || removingTaskIds.length > 0) return;
+    const accepted = await confirm({
+      title: uniqueIds.length === 1 ? t("删除这条记录", "Delete this record") : t("删除已选记录", "Delete selected records"),
+      message: t(
+        `从应用里移除这 ${uniqueIds.length} 条记录。原始任务和文件仍会保留。`,
+        `Remove ${uniqueIds.length} record${uniqueIds.length === 1 ? "" : "s"} from this app. Original tasks and files stay available.`,
+      ),
+      confirmLabel: t("删除", "Delete"),
+      cancelLabel: t("取消", "Cancel"),
+      tone: "danger",
+    });
+    if (!accepted) return;
+    setRemovingTaskIds(uniqueIds);
+    setError(null);
+    try {
+      const response = await apiFetchRef.current(`/v1/aipps/${encodeURIComponent(selectedSkill)}/items/remove`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task_ids: uniqueIds }),
+      });
+      const body = (await response.json()) as ApiResponse<{ removed_count: number; source_records_preserved: boolean }>;
+      if (!response.ok || !body.ok) throw new Error(body.error || `aipp_items_remove_http_${response.status}`);
+      setSelectedTaskIds((current) => current.filter((taskId) => !uniqueIds.includes(taskId)));
+      await fetchPage();
+    } catch (cause) {
+      setError(formatUiError(cause, t, "记录删除失败。", "Could not delete the records."));
+    } finally {
+      setRemovingTaskIds([]);
+    }
+  }, [confirm, fetchPage, removingTaskIds.length, selectedSkill, t]);
+
+  const removeCollectionItems = useCallback(async (sequences: number[]) => {
+    const uniqueIds = [...new Set(sequences.filter((sequence) => Number.isSafeInteger(sequence) && sequence > 0))];
+    if (!selectedSkill || uniqueIds.length === 0 || removingCollectionSequences.length > 0) return;
+    const accepted = await confirm({
+      title: uniqueIds.length === 1 ? t("删除这条记录", "Delete this record") : t("删除已选记录", "Delete selected records"),
+      message: t(
+        `从应用里移除这 ${uniqueIds.length} 条记录。原始采集数据仍会保留。`,
+        `Remove ${uniqueIds.length} record${uniqueIds.length === 1 ? "" : "s"} from this app. Original collected data stays available.`,
+      ),
+      confirmLabel: t("删除", "Delete"),
+      cancelLabel: t("取消", "Cancel"),
+      tone: "danger",
+    });
+    if (!accepted) return;
+    setRemovingCollectionSequences(uniqueIds);
+    setError(null);
+    try {
+      const response = await apiFetchRef.current(`/v1/aipps/${encodeURIComponent(selectedSkill)}/items/remove`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ global_sequences: uniqueIds }),
+      });
+      const body = (await response.json()) as ApiResponse<{ removed_count: number; source_records_preserved: boolean }>;
+      if (!response.ok || !body.ok) throw new Error(body.error || `aipp_items_remove_http_${response.status}`);
+      setSelectedCollectionSequences((current) => current.filter((sequence) => !uniqueIds.includes(sequence)));
+      await fetchPage();
+    } catch (cause) {
+      setError(formatUiError(cause, t, "记录删除失败。", "Could not delete the records."));
+    } finally {
+      setRemovingCollectionSequences([]);
+    }
+  }, [confirm, fetchPage, removingCollectionSequences.length, selectedSkill, t]);
+
   useEffect(() => {
     void fetchCatalog(initialCatalog.current.length > 0);
   }, [fetchCatalog]);
@@ -994,6 +1199,8 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
   useEffect(() => {
     if (selectedSkill) window.localStorage.setItem(SELECTED_AIPP_STORAGE_KEY, selectedSkill);
     else window.localStorage.removeItem(SELECTED_AIPP_STORAGE_KEY);
+    setSelectedTaskIds([]);
+    setSelectedCollectionSequences([]);
   }, [selectedSkill]);
 
   useEffect(() => {
@@ -1041,6 +1248,14 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
     () => Object.keys(page?.platform_states || {}).sort(),
     [page?.platform_states],
   );
+  const activityItems = activityPage?.items || [];
+  const pageSelectedCount = activityItems.filter((item) => selectedTaskIds.includes(item.task_id)).length;
+  const allPageSelected = activityItems.length > 0 && pageSelectedCount === activityItems.length;
+  const collectionGroups = groupCollectionItems(page?.items || []);
+  const collectionPageSelectedCount = collectionGroups.filter((images) => (
+    images.every((item) => selectedCollectionSequences.includes(item.global_sequence))
+  )).length;
+  const allCollectionPageSelected = collectionGroups.length > 0 && collectionPageSelectedCount === collectionGroups.length;
 
   const openNext = () => {
     const next = selectedApp?.renderer === "task_activity_v1"
@@ -1162,10 +1377,14 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
 
       {selectedApp.renderer === "task_activity_v1" ? <>
         <section className="theme-panel-soft p-3 sm:p-4">
-          <div className="grid gap-2 sm:grid-cols-2 sm:gap-3">
+          <div className="grid gap-2 sm:grid-cols-3 sm:gap-3">
             <div>
               <p className="text-xs text-white/45">{t("当前页记录", "Records on this page")}</p>
               <p className="mt-1 text-sm font-medium text-white/85">{activityPage?.page_item_count ?? 0}</p>
+            </div>
+            <div>
+              <p className="text-xs text-white/45">{t("全部记录", "All records")}</p>
+              <p className="mt-1 text-sm font-medium text-white/85">{activityPage?.total_item_count ?? 0}</p>
             </div>
             <div className="min-w-0">
               <p className="text-xs text-white/45">{t("最近更新", "Latest update")}</p>
@@ -1214,12 +1433,59 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
 
         {error ? <div className="rounded-lg border border-red-400/20 bg-red-500/8 px-4 py-3 text-sm text-red-100">{error}</div> : null}
 
-        <div className="grid min-w-0 gap-3" aria-busy={loading}>
-          {(activityPage?.items || []).map((item) => (
-            <AippTaskActivityCard key={item.task_id} item={item} apiFetch={apiFetch} t={t} lang={lang} />
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <label className="theme-secondary-btn gap-2 px-3 py-2 text-sm">
+            <input
+              type="checkbox"
+              className="h-4 w-4"
+              checked={allPageSelected}
+              disabled={activityItems.length === 0 || removingTaskIds.length > 0}
+              onChange={() => {
+                setSelectedTaskIds((current) => {
+                  if (allPageSelected) return current.filter((taskId) => !activityItems.some((item) => item.task_id === taskId));
+                  const merged = new Set(current);
+                  for (const item of activityItems) merged.add(item.task_id);
+                  return [...merged];
+                });
+              }}
+            />
+            {t("本页全选", "Select this page")}
+          </label>
+          {selectedTaskIds.length > 0 ? (
+            <button
+              type="button"
+              className="theme-secondary-btn px-3 py-2 text-sm text-red-200"
+              disabled={removingTaskIds.length > 0}
+              onClick={() => void removeActivityItems(selectedTaskIds)}
+            >
+              {removingTaskIds.length > 0 ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              {t(`删除已选 ${selectedTaskIds.length} 条`, `Delete ${selectedTaskIds.length} selected`)}
+            </button>
+          ) : null}
+        </div>
+
+        <div className={AIPP_RESULT_GRID_CLASS} aria-busy={loading}>
+          {activityItems.map((item) => (
+            <AippTaskActivityCard
+              key={item.task_id}
+              item={item}
+              apiFetch={apiFetch}
+              t={t}
+              lang={lang}
+              selected={selectedTaskIds.includes(item.task_id)}
+              deleting={removingTaskIds.includes(item.task_id)}
+              onToggleSelected={(taskId) => {
+                setSelectedTaskIds((current) => (
+                  current.includes(taskId)
+                    ? current.filter((value) => value !== taskId)
+                    : [...current, taskId]
+                ));
+              }}
+              onDelete={(taskId) => void removeActivityItems([taskId])}
+            />
           ))}
-          {!loading && activityPage?.items.length === 0 ? (
-            <div className="theme-panel-soft flex min-h-40 flex-col items-center justify-center gap-2 p-5 text-center text-sm text-white/55">
+          {!loading && activityItems.length === 0 ? (
+            <div className="theme-panel-soft col-span-full flex min-h-40 flex-col items-center justify-center gap-2 p-5 text-center text-sm text-white/55">
               <Download className="h-7 w-7" />
               <span>{t("还没有符合条件的媒体处理记录。", "No media processing records match these filters.")}</span>
             </div>
@@ -1228,7 +1494,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
 
         <div className="flex items-center justify-between gap-3">
           <button type="button" className="theme-secondary-btn px-3 py-2 text-sm" disabled={cursorHistory.length === 0 || loading} onClick={openPrevious}>{t("上一页", "Previous")}</button>
-          {loading ? <LoaderCircle className="h-5 w-5 animate-spin text-white/45" /> : <span className="text-xs text-white/40">{activityPage?.items.length || 0}</span>}
+          {loading ? <LoaderCircle className="h-5 w-5 animate-spin text-white/45" /> : <span className="text-xs text-white/40">{t(`当前页 ${activityPage?.page_item_count ?? 0} · 全部 ${activityPage?.total_item_count ?? 0}`, `This page ${activityPage?.page_item_count ?? 0} · All ${activityPage?.total_item_count ?? 0}`)}</span>}
           <button type="button" className="theme-secondary-btn px-3 py-2 text-sm" disabled={activityPage?.next_cursor_sequence == null || loading} onClick={openNext}>{t("下一页", "Next")}</button>
         </div>
       </> : null}
@@ -1280,9 +1546,57 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
 
       {error ? <div className="rounded-lg border border-red-400/20 bg-red-500/8 px-4 py-3 text-sm text-red-100">{error}</div> : null}
 
-      <div className="grid min-w-0 gap-2 md:grid-cols-2 xl:grid-cols-3" aria-busy={loading}>
-        {groupCollectionItems(page?.items || []).map((images) => (
-          <AippMediaItemCard key={collectionGroupKey(images[0])} item={images[0]} images={images} skillName={selectedSkill} apiFetch={apiFetch} t={t} lang={lang} />
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <label className="theme-secondary-btn gap-2 px-3 py-2 text-sm">
+          <input
+            type="checkbox"
+            className="h-4 w-4"
+            checked={allCollectionPageSelected}
+            disabled={collectionGroups.length === 0 || removingCollectionSequences.length > 0}
+            onChange={() => {
+              setSelectedCollectionSequences((current) => {
+                const pageSequences = collectionGroups.flatMap((images) => images.map((item) => item.global_sequence));
+                if (allCollectionPageSelected) return current.filter((sequence) => !pageSequences.includes(sequence));
+                return [...new Set([...current, ...pageSequences])];
+              });
+            }}
+          />
+          {t("本页全选", "Select this page")}
+        </label>
+        {selectedCollectionSequences.length > 0 ? (
+          <button
+            type="button"
+            className="theme-secondary-btn px-3 py-2 text-sm text-red-200"
+            disabled={removingCollectionSequences.length > 0}
+            onClick={() => void removeCollectionItems(selectedCollectionSequences)}
+          >
+            {removingCollectionSequences.length > 0 ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+            {t(`删除已选 ${selectedCollectionSequences.length} 条`, `Delete ${selectedCollectionSequences.length} selected`)}
+          </button>
+        ) : null}
+      </div>
+
+      <div className={AIPP_RESULT_GRID_CLASS} aria-busy={loading}>
+        {collectionGroups.map((images) => (
+          <AippMediaItemCard
+            key={collectionGroupKey(images[0])}
+            item={images[0]}
+            images={images}
+            skillName={selectedSkill}
+            apiFetch={apiFetch}
+            t={t}
+            lang={lang}
+            selected={images.every((item) => selectedCollectionSequences.includes(item.global_sequence))}
+            deleting={images.some((item) => removingCollectionSequences.includes(item.global_sequence))}
+            onToggleSelected={(sequences) => {
+              setSelectedCollectionSequences((current) => {
+                const allSelected = sequences.every((sequence) => current.includes(sequence));
+                if (allSelected) return current.filter((sequence) => !sequences.includes(sequence));
+                return [...new Set([...current, ...sequences])];
+              });
+            }}
+            onDelete={(sequences) => void removeCollectionItems(sequences)}
+          />
         ))}
         {!loading && page?.items.length === 0 ? (
           <div className="theme-panel-soft col-span-full flex min-h-40 flex-col items-center justify-center gap-2 p-5 text-center text-sm text-white/55">
@@ -1294,7 +1608,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
 
       <div className="flex items-center justify-between gap-3">
         <button type="button" className="theme-secondary-btn px-3 py-2 text-sm" disabled={cursorHistory.length === 0 || loading} onClick={openPrevious}>{t("上一页", "Previous")}</button>
-        {loading ? <LoaderCircle className="h-5 w-5 animate-spin text-white/45" /> : <span className="text-xs text-white/40">{t(`第 ${cursorHistory.length + 1} 页 · ${groupCollectionItems(page?.items || []).length} 篇`, `Page ${cursorHistory.length + 1} · ${groupCollectionItems(page?.items || []).length} posts`)}</span>}
+        {loading ? <LoaderCircle className="h-5 w-5 animate-spin text-white/45" /> : <span className="text-xs text-white/40">{t(`第 ${cursorHistory.length + 1} 页 · ${collectionGroups.length} 篇`, `Page ${cursorHistory.length + 1} · ${collectionGroups.length} posts`)}</span>}
         <button type="button" className="theme-secondary-btn px-3 py-2 text-sm" disabled={page?.next_cursor_sequence == null || loading} onClick={openNext}>{t("下一页", "Next")}</button>
       </div>
       </>}

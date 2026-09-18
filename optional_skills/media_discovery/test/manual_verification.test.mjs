@@ -60,7 +60,7 @@ test("a ready visible page never resumes without explicit user confirmation", as
   assert.equal(polls, 6);
 });
 
-test("a confirmed home feed cannot satisfy a search-page verification", async () => {
+test("a confirmed douyin detail cannot satisfy a search-page verification", async () => {
   const page = manualPage();
   const targetUrl = "https://www.douyin.com/search/finance";
   let polls = 0;
@@ -69,6 +69,44 @@ test("a confirmed home feed cannot satisfy a search-page verification", async ()
   assert.equal((await waitForManualAccess({ ...options, shouldStop: async () => ++polls > 5 })).ready, false);
   page.url = () => targetUrl;
   assert.equal((await waitForManualAccess(options)).ready, true);
+});
+
+test("a confirmed douyin jingxuan feed satisfies homepage or search verification", async () => {
+  const page = manualPage();
+  page.url = () => "https://www.douyin.com/jingxuan";
+  for (const targetUrl of ["https://www.douyin.com/", "https://www.douyin.com/search/finance"]) {
+    const result = await waitForManualAccess({ page, context: {}, platform: "douyin",
+      errorCode: "challenge_required", timeoutMs: 3000, confirmation: confirmed, targetUrl });
+    assert.equal(result.ready, true, targetUrl);
+  }
+});
+
+test("a confirmed silent challenge retries in a visible browser", async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "media-discovery-visible-retry-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const modes = [];
+  const result = await handleRequest({ args: { action: "run_once", platform: "douyin", max_items_per_run: 1 },
+    context: { skill_storage: { storage_kind: "directory", directory_path: root } } }, {
+    collectPlatform: async (request) => {
+      modes.push(request.config.browser_mode);
+      if (modes.length === 1) throw new Error("challenge_required");
+      await request.onPage({
+        records: [{
+          kind: "video",
+          dedup_key: "douyin:visible-retry:video",
+          platform: "douyin",
+          title: "fixture",
+          video_page_url: "https://www.douyin.com/video/1234567891",
+          discovered_at: "2026-09-17T12:00:00Z",
+        }],
+        temporaryPaths: [],
+      });
+    },
+    waitForInteractiveLogin: async () => ({ ready: true, user_confirmed: true }),
+  });
+  assert.deepEqual(modes, ["silent", "visible"]);
+  assert.equal(result.status, "ok");
+  assert.equal(result.extra.run.manual_verification.state, "visible_access_restored");
 });
 
 test("the rejected collection URL reaches the manual browser unchanged", async t => {
@@ -88,6 +126,8 @@ test("the rejected collection URL reaches the manual browser unchanged", async t
   });
   assert.equal(windows, 1);
   assert.equal(result.extra.run.capture_summary.records_saved, 0);
+  assert.equal(result.status, "error");
+  assert.equal(result.extra.error_code, "interactive_verification_cancelled");
 });
 
 test("hidden readiness elements do not satisfy a confirmed manual handoff", async () => {
@@ -131,6 +171,9 @@ test("a second silent challenge pauses only the affected platform", async t => {
   });
   assert.equal(attempts, 2);
   assert.equal(windows, 1);
+  assert.equal(result.status, "error");
+  assert.equal(result.extra.error_code, "manual_verification_not_restored");
+  assert.equal(result.extra.message_key, "skill.media_discovery.manual_verification_not_restored");
   assert.equal(result.extra.state, "waiting_for_manual_verification");
   assert.equal(result.extra.run.error_code, "manual_verification_not_restored");
   assert.equal(result.extra.run.manual_verification.retry_error_code, "challenge_required");
@@ -148,14 +191,19 @@ test("closing or timing out verification pauses its platform without repeated po
     let popups = 0;
     const result = await handleRequest({ args: { action: "run_once", platform: "douyin" }, context }, {
       collectPlatform: async () => { throw new Error("login_required"); },
-      waitForInteractiveLogin: async ({ errorCode, shouldStop }) => {
+      waitForInteractiveLogin: async ({ errorCode, shouldStop, timeoutMs }) => {
         popups += 1;
         assert.equal(errorCode, "login_required");
         assert.equal(await shouldStop(), false);
+        assert.equal(timeoutMs, 10 * 60 * 1000);
         return { ready: false, error_code: outcome };
       },
     });
     assert.equal(popups, 1);
+    assert.equal(result.status, "error");
+    assert.equal(result.extra.error_code, outcome);
+    assert.equal(result.extra.message_key, `skill.media_discovery.${outcome}`);
+    assert.equal(result.extra.retryable, true);
     assert.equal(result.extra.state, "waiting_for_manual_verification");
     const status = await handleRequest({ args: { action: "status" }, context });
     assert.equal(status.extra.platforms.douyin.paused, true);

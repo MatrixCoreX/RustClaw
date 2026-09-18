@@ -1,4 +1,5 @@
 import { browserStageError } from "./browser_diagnostics.mjs";
+import { stopsCollection } from "./browser_flow_control.mjs";
 import { assertNavigationResponse, boundedBrowserOperation } from "./browser_search.mjs";
 import { isDetailUrl, matchesVerificationTarget, platformItemId, validatePlatformUrl } from "./platforms.mjs";
 
@@ -71,8 +72,7 @@ export async function withSearchResult(page, platform, itemUrl, source, collect,
     page.off("popup", onPopup);
     for (const [candidate, listener] of listeners) candidate.off("response", listener);
     // Keep access barriers in place for the caller's diagnostic/manual handoff.
-    const blocked = ["login_required", "challenge_required", "network_access_restricted", "rate_limited",
-      "collection_stopped", "interactive_verification_cancelled"].includes(failure?.message);
+    const blocked = stopsCollection(failure);
     if (!blocked && !page.isClosed()) {
       for (const popup of opened) await popup.close().catch(() => {});
       if (!matchesVerificationTarget(platform, source.url, page.url())) {
@@ -80,7 +80,8 @@ export async function withSearchResult(page, platform, itemUrl, source, collect,
           const response = await page.goBack({ waitUntil: "domcontentloaded", timeout: timeoutMs });
           assertNavigationResponse(response, "search_results_restore");
           if (!matchesVerificationTarget(platform, source.url, page.url())) throw new Error("search_results_restore_failed");
-        } catch {
+        } catch (error) {
+          if (stopsCollection(error)) throw error;
           throw browserStageError("search_results_restore_failed", "search_results_restore");
         }
       }

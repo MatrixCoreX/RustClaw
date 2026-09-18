@@ -3,10 +3,16 @@ import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 
-import { browserCapability, collectPlatform, waitForInteractiveLogin } from "./browser.mjs";
+import {
+  browserCapability,
+  collectPlatform,
+  INTERACTIVE_LOGIN_TIMEOUT_MS,
+  waitForInteractiveLogin,
+} from "./browser.mjs";
 import { resolveBrowserMode, sourceUrls, SUPPORTED_PLATFORMS } from "./platforms.mjs";
-import { createBackgroundProgressReporter } from "./progress.mjs";
+import { createBackgroundProgressReporter, createCollectionStartReporter } from "./progress.mjs";
 import { activeRuns, mapBounded, parallelPlatformLimit } from "./run_leases.mjs";
+import { completedDiscoveryPosts, optionalLimit, rememberCompletedPost } from "./collection_progress.mjs";
 import {
   beginBackgroundWorker,
   backgroundWorkerIsFresh,
@@ -34,6 +40,9 @@ const ERROR_CODES = new Set([
   "browser_missing",
   "browser_timeout",
   "browser_mode_invalid",
+  "browser_environment_invalid",
+  "browser_environment_unavailable",
+  "browser_platform_unsupported",
   "background_collection_not_enabled",
   "background_worker_already_active",
   "collection_already_enabled",
@@ -106,6 +115,11 @@ const CONTINUOUS_RETRYABLE_ERROR_CODES = new Set([
   "rate_limited",
   "selector_drift",
 ]);
+const MANUAL_VERIFICATION_BARRIER_CODES = new Set([
+  "interactive_verification_cancelled",
+  "interactive_verification_timeout",
+  "manual_verification_not_restored",
+]);
 const RETRY_BACKOFF_MS = Object.freeze({
   network_access_restricted: Object.freeze({ base: 30 * 60 * 1000, maximum: 6 * 60 * 60 * 1000 }),
   challenge_required: Object.freeze({ base: 15 * 60 * 1000, maximum: 6 * 60 * 60 * 1000 }),
@@ -128,9 +142,9 @@ const RUN_CONFIG_FIELDS = Object.freeze([
   "pacing_max_delay_ms",
 ]);
 
-function integer(value, fallback, minimum, maximum) {
+function integer(value, fallback, minimum, maximum = Number.MAX_SAFE_INTEGER) {
   const parsed = Number(value ?? fallback);
-  if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) throw new Error("invalid_args");
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) throw new Error("invalid_args");
   return parsed;
 }
 
@@ -157,10 +171,10 @@ export function normalizedConfig(args, platform = args.platform) {
     source_mode: sourceMode,
     topics: Array.isArray(args.topics) ? args.topics.map(String).map((value) => value.trim()).filter(Boolean) : [],
     seed_urls: Array.isArray(args.seed_urls) ? args.seed_urls.map(String) : [],
-    max_items_per_run: integer(args.max_items_per_run, 5, 1, 100),
-    max_images_per_post: integer(args.max_images_per_post, 100, 1, 100),
-    max_run_minutes: integer(args.max_run_minutes, 30, 5, 180),
-    max_scrolls_per_source: integer(args.max_scrolls_per_source, 10, 1, 100),
+    max_items_per_run: integer(args.max_items_per_run, Number(args.max_run_minutes) > 0 ? 0 : 5, 0),
+    max_images_per_post: integer(args.max_images_per_post, 0, 0),
+    max_run_minutes: integer(args.max_run_minutes, 0, 0),
+    max_scrolls_per_source: integer(args.max_scrolls_per_source, 0, 0),
     rest_min_seconds: integer(args.rest_min_seconds, 180, 5, 3600),
     rest_max_seconds: integer(args.rest_max_seconds, 420, 5, 7200),
     retain_diagnostics_hours: integer(args.retain_diagnostics_hours, 24, 1, 168),
@@ -190,6 +204,8 @@ export function backgroundRetryDelayMs(
   errorCode,
   consecutiveFailures = 1,
   random = Math.random,
+  retryAfterAt = null,
+  now = Date.now(),
 ) {
   const ordinaryRest = backgroundRestDelayMs(configs, random);
   const policy = RETRY_BACKOFF_MS[errorCode];
@@ -198,7 +214,8 @@ export function backgroundRetryDelayMs(
   const backoff = Math.min(policy.maximum, policy.base * (2 ** exponent));
   const sample = Math.min(0.999999, Math.max(0, Number(random()) || 0));
   const jittered = Math.round(backoff * (0.85 + sample * 0.3));
-  return Math.max(ordinaryRest, jittered);
+  const serverWait = errorCode === "rate_limited" ? (Date.parse(retryAfterAt) || 0) - now : 0;
+  return Math.max(ordinaryRest, jittered, serverWait);
 }
 
 function waitingLifecycleState(errorCode) {
@@ -211,6 +228,15 @@ function waitingLifecycleState(errorCode) {
     manual_verification_not_restored: "waiting_for_manual_verification",
     rate_limited: "rate_limited",
   }[errorCode] || "resting";
+}
+
+function remainingManualVerificationTimeoutMs(deadline, now = Date.now()) {
+  if (!Number.isFinite(deadline)) return INTERACTIVE_LOGIN_TIMEOUT_MS;
+  return Math.min(INTERACTIVE_LOGIN_TIMEOUT_MS, Math.max(0, deadline - now));
+}
+
+function isOneShotManualVerificationBarrier(runtime, errorCode) {
+  return !runtime?.backgroundPlatform && MANUAL_VERIFICATION_BARRIER_CODES.has(errorCode);
 }
 
 function success(action, extra = {}) {
@@ -232,6 +258,9 @@ function errorResponse(action, error) {
     "login_required",
     "no_items_collected",
     "challenge_required",
+    "interactive_verification_cancelled",
+    "interactive_verification_timeout",
+    "manual_verification_not_restored",
     "rate_limited",
     "storage_lock_timeout",
     "collection_capacity_busy",
@@ -345,6 +374,9 @@ async function runOnce(request, args, runtime = {}) {
   const requested = requestedPlatforms(args, true);
   const platforms = requested.length ? requested : Object.keys(state.platforms)
     .filter(platform => state.platforms[platform]?.enabled && !state.platforms[platform]?.paused);
+  runtime = { ...runtime, notifyStart: createCollectionStartReporter({
+    requestId: request.request_id, writeFrame: runtime.writeProgress, platforms,
+  }) };
   if (platforms.length <= 1 || runtime.backgroundPlatform) return runPlatformBatch(request, args, runtime);
   const results = await mapBounded(platforms, runtime.parallelLimit || parallelPlatformLimit(), platform => (
     runPlatformBatch(request, { ...args, platforms: [platform] }, runtime)
@@ -379,6 +411,7 @@ async function runPlatformBatch(request, args, runtime = {}) {
     parallel_limit: runtime.parallelLimit,
   });
   if (!run) return success("run_once", { state: "disabled_or_paused", side_effect_applied: false });
+  runtime.notifyStart?.(run);
   run.searches = [];
   const counts = { items: 0, videos: 0, images: 0, duplicates: 0, failures: 0 };
   const captureSummary = { records_saved: 0, captions_saved: 0, covers_saved: 0, engagement_metrics: [] };
@@ -386,30 +419,36 @@ async function runPlatformBatch(request, args, runtime = {}) {
   let status = "completed_batch";
   let errorCode = null;
   let failureDiagnostic = null;
+  let deadline = Infinity;
   const leaseHeartbeat = setInterval(() => {
     heartbeat(root, run.run_id, counts).catch(() => {});
   }, 30_000);
   leaseHeartbeat.unref?.();
   try {
-    const deadline = Date.now() + Math.min(
-      ...run.platforms.map((platform) => run.platform_configs[platform].max_run_minutes),
+    deadline = Date.now() + Math.min(
+      ...run.platforms.map((platform) => optionalLimit(run.platform_configs[platform].max_run_minutes)),
     ) * 60 * 1000;
     for (const platform of run.platforms) {
       const config = run.platform_configs[platform];
+      const completedPosts = completedDiscoveryPosts(
+        runtime.backgroundPlatform ? await readRecords(root) : [], platform, config,
+      );
       await cleanupExpiredDiagnostics(root, config.retain_diagnostics_hours);
-      const remaining = Math.max(0, config.max_items_per_run - counts.items);
+      const remaining = Math.max(0, optionalLimit(config.max_items_per_run) - counts.items);
       if (remaining === 0) break;
       const collectionRequest = {
         root,
         runId: run.run_id,
         platform,
         config,
+        completedPosts,
         limit: remaining,
         shouldStop: async () => Boolean(runtime.shouldShutdown?.()) || Date.now() >= deadline || (await heartbeat(root, run.run_id, counts)),
         onSearch: async evidence => { run.searches.push(evidence); },
         onPage: async ({ records, temporaryPaths }) => {
           try {
             const result = await commitPageRecords(root, records, run.run_id);
+            rememberCompletedPost(completedPosts, records);
             counts.items += 1;
             for (const record of result.committed) counts[record.kind === "video" ? "videos" : "images"] += 1;
             for (const record of result.committed) {
@@ -427,15 +466,18 @@ async function runPlatformBatch(request, args, runtime = {}) {
           await heartbeat(root, run.run_id, counts);
           progressReporter.emitIfDue();
         },
-        onFailure: async () => {
+        onFailure: async (error) => {
           counts.failures += 1;
-          await heartbeat(root, run.run_id, counts);
+          await heartbeat(root, run.run_id, counts, null, {
+            last_item_error: String(error?.message || "execution_failed").slice(0, 200),
+          });
           progressReporter.emitIfDue();
         },
       };
       const collect = runtime.collectPlatform || collectPlatform;
       try {
-        await collect(collectionRequest);
+        const outcome = await collect(collectionRequest);
+        if (outcome?.stop_reason) run.collection_outcome = outcome;
       } catch (error) {
         const errorCode = String(error?.message || "execution_failed");
         const interactiveLoginAllowed = config.browser_mode === "silent"
@@ -459,23 +501,28 @@ async function runPlatformBatch(request, args, runtime = {}) {
               manual_verification: run.manual_verification,
             });
           },
-          timeoutMs: Math.max(1000, Math.min(10 * 60 * 1000, deadline - Date.now())),
+          timeoutMs: remainingManualVerificationTimeoutMs(deadline),
         });
         if (!loginResult?.ready) {
           run.manual_verification.state = loginResult?.error_code || errorCode;
           throw new Error(loginResult?.error_code || errorCode);
         }
-        run.manual_verification.state = "retrying_silent";
+        run.manual_verification.state = "retrying_visible";
         run.manual_verification.confirmed_at = new Date().toISOString();
-        const remainingAfterLogin = Math.max(0, config.max_items_per_run - counts.items);
+        const remainingAfterLogin = Math.max(0, optionalLimit(config.max_items_per_run) - counts.items);
         if (remainingAfterLogin > 0 && !(await collectionRequest.shouldStop())) {
           await heartbeat(root, run.run_id, counts, "running", { manual_verification: run.manual_verification });
           try {
-            await collect({ ...collectionRequest, limit: remainingAfterLogin });
-            run.manual_verification.state = "silent_access_restored";
+            const outcome = await collect({
+              ...collectionRequest,
+              limit: remainingAfterLogin,
+              config: { ...config, browser_mode: "visible" },
+            });
+            if (outcome?.stop_reason) run.collection_outcome = outcome;
+            run.manual_verification.state = "visible_access_restored";
           } catch (retryError) {
             if (!["login_required", "challenge_required"].includes(retryError?.message)) throw retryError;
-            run.manual_verification.state = "silent_access_not_restored";
+            run.manual_verification.state = "visible_access_not_restored";
             run.manual_verification.retry_error_code = retryError.message;
             throw Object.assign(new Error("manual_verification_not_restored"), {
               discovery_diagnostic: retryError.discovery_diagnostic,
@@ -506,6 +553,9 @@ async function runPlatformBatch(request, args, runtime = {}) {
     };
     status = waitingStates[String(error?.message)] || "failed";
     errorCode = status === "stopped_after_current_item" ? null : String(error?.message || "execution_failed");
+    if (errorCode === "rate_limited" && Number.isFinite(Date.parse(error.retry_after_at))) {
+      run.retry_after_at = new Date(Date.parse(error.retry_after_at)).toISOString();
+    }
     failureDiagnostic = error?.discovery_diagnostic || null;
     if (errorCode && counts.failures === 0) counts.failures = 1;
     const runTemporary = path.join(root, "tmp", run.run_id);
@@ -516,9 +566,22 @@ async function runPlatformBatch(request, args, runtime = {}) {
     progressReporter.stop();
   }
   if (status === "completed_batch" && counts.items === 0) {
-    status = "failed";
-    errorCode = "no_items_collected";
-    if (counts.failures === 0) counts.failures = 1;
+    if (!runtime.backgroundPlatform || counts.failures > 0
+      || !["no_new_results", "source_exhausted"].includes(run.collection_outcome?.stop_reason)) {
+      status = "failed";
+      errorCode = "no_items_collected";
+      if (counts.failures === 0) counts.failures = 1;
+    }
+  }
+  if (run.collection_outcome && Date.now() >= deadline) {
+    run.collection_outcome.stop_reason = "requested_time_limit";
+  }
+  if (run.collection_outcome) {
+    const requestedItems = Math.max(...run.platforms.map(platform => run.platform_configs[platform].max_items_per_run));
+    Object.assign(run.collection_outcome, {
+      handled: counts.items, requested_items: requestedItems,
+      target_reached: requestedItems > 0 && counts.items >= requestedItems,
+    });
   }
   run.counts = counts;
   run.capture_summary = captureSummary;
@@ -528,9 +591,9 @@ async function runPlatformBatch(request, args, runtime = {}) {
   if (status !== "failed") {
     await fs.rm(path.join(root, "tmp", run.run_id), { recursive: true, force: true }).catch(() => {});
   }
-  if (status === "failed") {
+  if (status === "failed" || isOneShotManualVerificationBarrier(runtime, errorCode)) {
     throw Object.assign(new Error(errorCode), {
-      extra: { run_id: run.run_id, run: completed,
+      extra: { run_id: run.run_id, run: completed, state: status,
         ...(failureDiagnostic ? { failure_diagnostic: failureDiagnostic } : {}) },
     });
   }
@@ -579,6 +642,7 @@ async function runContinuous(request, runtime = {}) {
     counts,
     writeFrame: runtime.writeProgress,
   });
+  reporter.start?.();
   let completedBatches = 0;
   let attemptedBatches = 0;
   let lastErrorCode = null;
@@ -602,6 +666,7 @@ async function runContinuous(request, runtime = {}) {
     platformOutcomes[platform] = outcome;
     outcome.lifecycle_state = "running";
     let errorCode = null;
+    let retryAfterAt = null;
     try {
       const result = await runPlatformBatch(request, { action: "run_once" }, {
         ...runtime, backgroundPlatform: platform, workerId: worker.worker_id,
@@ -609,6 +674,7 @@ async function runContinuous(request, runtime = {}) {
       });
       addCounts(counts, result.extra?.run?.counts);
       addCounts(outcome.counts, result.extra?.run?.counts);
+      retryAfterAt = result.extra?.run?.retry_after_at;
       if (["completed_batch", "stopped_after_current_item"].includes(result.extra?.state)) {
         completedBatches += 1;
         outcome.completed_batches += 1;
@@ -620,6 +686,7 @@ async function runContinuous(request, runtime = {}) {
       }
     } catch (error) {
       errorCode = String(error?.message || "execution_failed");
+      retryAfterAt = error.extra?.run?.retry_after_at;
       outcome.consecutive_failures += 1;
       const partial = error.extra?.run?.counts || { failures: 1 };
       addCounts(counts, partial);
@@ -631,12 +698,13 @@ async function runContinuous(request, runtime = {}) {
       }
     }
     lastErrorCode = errorCode;
+    const completedAt = now();
     const delay = backgroundRetryDelayMs({ [platform]: platformState.config || {} },
-      errorCode, outcome.consecutive_failures, runtime.random || Math.random);
+      errorCode, outcome.consecutive_failures, runtime.random || Math.random, retryAfterAt, completedAt);
     Object.assign(outcome, {
       lifecycle_state: fatalErrors.has(platform) ? "failed" : waitingLifecycleState(errorCode),
       last_error_code: errorCode,
-      retry_not_before: new Date(now() + delay).toISOString(),
+      retry_not_before: new Date(completedAt + delay).toISOString(),
     });
     reporter.emitIfDue();
   };
@@ -722,8 +790,8 @@ async function status(request) {
 
 async function listRuns(request, args) {
   const state = await readState(storageRoot(request));
-  const limit = integer(args.limit, 20, 1, 100);
-  const offset = integer(args.offset, 0, 0, 100_000);
+  const limit = integer(args.limit, 20, 1);
+  const offset = integer(args.offset, 0, 0);
   return success("list_runs", {
     runs: (state.runs || []).slice(offset, offset + limit),
     offset,

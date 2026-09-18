@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import { chromium } from "playwright";
 
-import { renderedVideoCover } from "../src/browser.mjs";
+import { renderedVideoCover, screenshotLooksBlank } from "../src/browser.mjs";
 
 const RUN_BROWSER_TEST = process.env.MEDIA_DISCOVERY_BROWSER_TEST === "1";
 
@@ -46,6 +48,32 @@ test("video cover selection prefers an unobscured rendered frame", {
   const cover = await renderedVideoCover(page, "douyin");
   assert.equal(cover?.source, "rendered_video_frame");
   assert.equal(await cover?.locator.evaluate((node) => node.tagName), "VIDEO");
+});
+
+test("Douyin transparent click catchers and side like buttons do not mask the frame", {
+  skip: !RUN_BROWSER_TEST,
+}, async (t) => {
+  const page = await withPage(t, `
+    <main style="position:relative;width:640px;height:360px">
+      <video style="width:640px;height:360px;background:#222"></video>
+      <div style="position:absolute;inset:0;background:transparent;z-index:2"></div>
+      <button style="position:absolute;right:8px;top:40%;width:48px;height:80px;z-index:3;background:#111">like</button>
+    </main>
+  `);
+  assert.equal((await renderedVideoCover(page, "douyin"))?.source, "rendered_video_frame");
+});
+
+test("Douyin player like and caption chrome do not mask the rendered frame", {
+  skip: !RUN_BROWSER_TEST,
+}, async (t) => {
+  const page = await withPage(t, `
+    <main data-e2e="video-player" style="position:relative;width:640px;height:360px">
+      <video style="width:640px;height:360px;background:#222"></video>
+      <button data-e2e="video-like-icon" style="position:absolute;right:8px;top:40%;width:48px;height:80px;z-index:3"></button>
+      <p data-e2e="video-desc" style="position:absolute;left:0;right:80px;bottom:0;height:72px;z-index:3">caption</p>
+    </main>
+  `);
+  assert.equal((await renderedVideoCover(page, "douyin"))?.source, "rendered_video_frame");
 });
 
 test("video cover selection refuses a media element hidden by an overlay", {
@@ -139,4 +167,17 @@ test("Xiaohongshu feed cards allow their structural play control over the poster
   `);
   const cover = await renderedVideoCover(page.locator("section"), "xiaohongshu");
   assert.equal(cover?.source, "rendered_poster_image");
+});
+
+test("a uniform black player screenshot is rejected as a blank cover", {
+  skip: !RUN_BROWSER_TEST,
+}, async (t) => {
+  const page = await withPage(t, `
+    <main style="width:800px;height:600px;background:#111"></main>
+  `);
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "discovery-blank-cover-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const target = path.join(root, "cover.png");
+  await page.locator("main").screenshot({ path: target, type: "png" });
+  assert.equal(await screenshotLooksBlank(target), true);
 });

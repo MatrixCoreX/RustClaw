@@ -24,9 +24,13 @@ DEFAULT_LANGUAGE = "auto"
 DEFAULT_PSM = 6
 DEFAULT_OEM = 1
 DEFAULT_PREPROCESS = True
-DEFAULT_MIN_LINE_CONFIDENCE = 15.0
+DEFAULT_MIN_LINE_CONFIDENCE = 10.0
 DEFAULT_SUFFIX = "_ocr"
-PREPROCESS_SCALE = 2
+PREPROCESS_BORDER_PX = 16
+MAX_PREPROCESS_EDGE = 3600
+PREFERRED_AUTO_LANGUAGES = ("chi_sim", "chi_tra", "jpn", "kor", "eng")
+EXTRA_PSM_CANDIDATES = (4, 11)
+TESSERACT_DPI = "300"
 IMAGE_EXTENSIONS = {
     ".jpg",
     ".jpeg",
@@ -212,6 +216,22 @@ def _needs_space_between(previous: dict[str, object], current: dict[str, object]
     return gap > height * 0.2
 
 
+def _preprocess_scale(width: int, height: int) -> int:
+    short_side = min(width, height)
+    if short_side <= 0:
+        return 1
+    if short_side < 360:
+        scale = 4
+    elif short_side < 720:
+        scale = 3
+    else:
+        scale = 2
+    long_side = max(width, height)
+    if long_side * scale > MAX_PREPROCESS_EDGE:
+        scale = max(1, MAX_PREPROCESS_EDGE // long_side)
+    return scale
+
+
 def _lanczos_resampling(image_module: object) -> object:
     resampling = getattr(image_module, "Resampling", None)
     if resampling is not None:
@@ -269,14 +289,16 @@ def preprocess_image_candidates_for_ocr(
             image = ImageOps.exif_transpose(image)
             image = image.convert("RGB")
             width, height = image.size
-            if width > 0 and height > 0:
+            scale = _preprocess_scale(width, height)
+            if width > 0 and height > 0 and scale > 1:
                 image = image.resize(
-                    (width * PREPROCESS_SCALE, height * PREPROCESS_SCALE),
+                    (width * scale, height * scale),
                     _lanczos_resampling(Image),
                 )
+            image = ImageOps.expand(image, border=PREPROCESS_BORDER_PX, fill=(255, 255, 255))
             grayscale = ImageOps.grayscale(image)
             enhanced = ImageOps.autocontrast(grayscale, cutoff=1).filter(
-                ImageFilter.UnsharpMask(radius=1.4, percent=160, threshold=3)
+                ImageFilter.UnsharpMask(radius=1.6, percent=180, threshold=2)
             )
             enhanced_path = output_dir / f"{image_path.stem}_ocr_enhanced.png"
             enhanced.save(enhanced_path)
@@ -389,9 +411,27 @@ def tesseract_ocr_image(
             )
             for candidate_path in image_candidates
         ]
-
-    best = max(ocr_candidates, key=_ocr_candidate_score)
-    return OcrResult(image_path, normalize_ocr_text(best.text))
+        best_index = max(
+            range(len(ocr_candidates)),
+            key=lambda index: _ocr_candidate_score(ocr_candidates[index]),
+        )
+        best = ocr_candidates[best_index]
+        if psm == DEFAULT_PSM:
+            winning_path = image_candidates[best_index]
+            extra_candidates = [
+                _run_tesseract_tsv(
+                    executable,
+                    winning_path,
+                    original_path=image_path,
+                    language=resolved_language,
+                    psm=extra_psm,
+                    min_line_confidence=min_line_confidence,
+                    verbose=verbose,
+                )
+                for extra_psm in EXTRA_PSM_CANDIDATES
+            ]
+            best = max((best, *extra_candidates), key=_ocr_candidate_score)
+        return OcrResult(image_path, normalize_ocr_text(best.text))
 
 
 def _run_tesseract_tsv(
@@ -410,7 +450,10 @@ def _run_tesseract_tsv(
         language=language,
         psm=psm,
         oem=DEFAULT_OEM,
-        configs={"preserve_interword_spaces": "1"},
+        configs={
+            "preserve_interword_spaces": "1",
+            "user_defined_dpi": TESSERACT_DPI,
+        },
         output_format="tsv",
     )
     if verbose:
@@ -458,7 +501,9 @@ def resolve_tesseract_language(executable: Path | str, requested: str) -> str:
     language = requested.strip()
     if language and language.casefold() != "auto":
         return language
-    return "+".join(available_tesseract_languages(str(executable)))
+    available = available_tesseract_languages(str(executable))
+    preferred = [item for item in PREFERRED_AUTO_LANGUAGES if item in available]
+    return "+".join(preferred or available)
 
 
 def render_ocr_results(results: list[OcrResult]) -> str:

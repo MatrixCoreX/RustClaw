@@ -75,3 +75,22 @@ def prepare_video_inputs(
                                  "message_key": f"media_download.error.{component}_extraction_failed",
                                  "retryable": False}
     return inputs
+
+
+def promote_video_audio_delivery(
+    artifacts: list[dict[str, Any]],
+    processing_inputs: dict[str, Any] | None,
+    describe: Callable[[Path], dict[str, Any]],
+) -> None:
+    descriptor = (processing_inputs or {}).get("video_audio")
+    if not isinstance(descriptor, dict) or descriptor.get("status") != "available":
+        return
+    path = Path(str(descriptor.get("path") or ""))
+    if not path.is_file():
+        return
+    if not any(str(item.get("path") or "") == str(path) for item in artifacts):
+        artifact = describe(path)
+        artifact["artifact_role"] = "extracted_audio"
+        artifacts.append(artifact)
+    descriptor["deliver_to_user"] = True
+    descriptor["artifact_role"] = "extracted_audio"

@@ -128,12 +128,19 @@ fn task_activity_page_projects_current_and_archived_skill_tasks_without_secrets(
         false,
     );
 
-    let page =
-        read_aipp_task_activity_page(&db, "media_download", "all", 0, &AippMediaQuery::default())
-            .expect("activity page");
+    let page = read_aipp_task_activity_page(
+        &db,
+        "media_download",
+        "all",
+        0,
+        &[],
+        &AippMediaQuery::default(),
+    )
+    .expect("activity page");
     let items = page["items"].as_array().expect("items");
     assert_eq!(items.len(), 2);
     assert_eq!(page["page_item_count"], 2);
+    assert_eq!(page["total_item_count"], 2);
     assert_eq!(items[0]["task_id"], "task-archived");
     assert_eq!(items[0]["channel"], "ui");
     assert_eq!(items[1]["channel"], "wechat");
@@ -151,10 +158,12 @@ fn task_activity_page_projects_current_and_archived_skill_tasks_without_secrets(
         "media_download",
         "communication",
         0,
+        &[],
         &AippMediaQuery::default(),
     )
     .expect("communication-only activity page");
     assert_eq!(external_only["page_item_count"], 1);
+    assert_eq!(external_only["total_item_count"], 1);
     assert_eq!(external_only["items"][0]["channel"], "wechat");
     let encoded = serde_json::to_string(&page).expect("page JSON");
     assert!(!encoded.contains("context_token"));
@@ -186,6 +195,7 @@ fn task_activity_page_filters_channels_search_and_uses_stable_cursors() {
         "media_download",
         "communication",
         0,
+        &[],
         &AippMediaQuery {
             limit: Some(1),
             channel: Some("wechat".to_string()),
@@ -195,6 +205,7 @@ fn task_activity_page_filters_channels_search_and_uses_stable_cursors() {
     )
     .expect("first activity page");
     assert_eq!(first["page_item_count"], 1);
+    assert_eq!(first["total_item_count"], 2);
     assert_eq!(first["items"][0]["task_id"], "task-three");
     let cursor = first["next_cursor_sequence"].as_u64().expect("cursor");
     let second = read_aipp_task_activity_page(
@@ -202,6 +213,7 @@ fn task_activity_page_filters_channels_search_and_uses_stable_cursors() {
         "media_download",
         "communication",
         0,
+        &[],
         &AippMediaQuery {
             limit: Some(1),
             channel: Some("wechat".to_string()),
@@ -210,6 +222,8 @@ fn task_activity_page_filters_channels_search_and_uses_stable_cursors() {
         },
     )
     .expect("second activity page");
+    assert_eq!(second["page_item_count"], 1);
+    assert_eq!(second["total_item_count"], 2);
     assert_eq!(second["items"][0]["task_id"], "task-one");
 
     let invalid = read_aipp_task_activity_page(
@@ -217,6 +231,7 @@ fn task_activity_page_filters_channels_search_and_uses_stable_cursors() {
         "media_download",
         "communication",
         0,
+        &[],
         &AippMediaQuery {
             channel: Some("unknown".to_string()),
             ..AippMediaQuery::default()
@@ -259,16 +274,98 @@ fn task_activity_clear_event_time_hides_only_older_view_records() {
         "media_download",
         "all",
         cleared_through_event_ms,
+        &[],
         &AippMediaQuery::default(),
     )
     .expect("activity page after clear");
 
     assert_eq!(page["page_item_count"], 1);
+    assert_eq!(page["total_item_count"], 1);
     assert_eq!(page["items"][0]["task_id"], "task-after-clear");
     let source_task_count = db
         .query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get::<_, i64>(0))
         .expect("source task count");
     assert_eq!(source_task_count, 2);
+}
+
+#[test]
+fn task_activity_hidden_ids_leave_source_tasks_and_other_skills_untouched() {
+    let db = task_activity_db();
+    insert_task_activity(
+        &db,
+        "task-keep",
+        "wechat",
+        "succeeded",
+        "media_download",
+        "media_download.download",
+        false,
+    );
+    insert_task_activity(
+        &db,
+        "task-hide",
+        "ui",
+        "succeeded",
+        "media_download",
+        "media_download.transcribe",
+        false,
+    );
+    insert_task_activity(
+        &db,
+        "task-other",
+        "telegram",
+        "succeeded",
+        "another_skill",
+        "another_skill.run",
+        false,
+    );
+
+    let owned = owned_aipp_task_activity_ids(
+        &db,
+        "media_download",
+        &[
+            "task-keep".to_string(),
+            "task-hide".to_string(),
+            "task-other".to_string(),
+        ],
+    )
+    .expect("owned activity ids");
+    assert_eq!(owned.len(), 2);
+    assert!(owned.contains("task-keep"));
+    assert!(owned.contains("task-hide"));
+    assert!(!owned.contains("task-other"));
+
+    let page = read_aipp_task_activity_page(
+        &db,
+        "media_download",
+        "all",
+        0,
+        &["task-hide".to_string()],
+        &AippMediaQuery::default(),
+    )
+    .expect("page without hidden activity");
+    assert_eq!(page["page_item_count"], 1);
+    assert_eq!(page["total_item_count"], 1);
+    assert_eq!(page["items"][0]["task_id"], "task-keep");
+    let source_task_count = db
+        .query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get::<_, i64>(0))
+        .expect("source task count");
+    assert_eq!(source_task_count, 3);
+    assert_eq!(
+        normalize_aipp_task_ids(&[]).expect_err("empty remove"),
+        "aipp_task_activity_remove_empty"
+    );
+    assert_eq!(
+        normalize_aipp_task_ids(&["bad id".to_string()]).expect_err("invalid remove"),
+        "aipp_task_activity_remove_invalid"
+    );
+    assert_eq!(
+        normalize_aipp_record_sequences(&[]).expect_err("empty collection remove"),
+        "aipp_media_remove_empty"
+    );
+    assert_eq!(
+        normalize_aipp_record_sequences(&[0]).expect_err("invalid collection remove"),
+        "aipp_media_remove_invalid"
+    );
 }
 
 #[test]
@@ -454,6 +551,41 @@ fn media_page_uses_stable_cursor_pagination() {
 }
 
 #[test]
+fn media_page_hidden_sequences_leave_source_records_untouched() {
+    let root = fixture_root();
+    for sequence in 1..=3 {
+        write_record(
+            &root,
+            sequence,
+            json!({
+                "global_sequence": sequence,
+                "sequence": sequence,
+                "kind": "video",
+                "platform": "douyin",
+                "title": format!("item {sequence}"),
+            }),
+        );
+    }
+    let page = read_aipp_media_page_with_hidden(
+        &root,
+        &AippMediaQuery::default(),
+        &std::collections::BTreeSet::from([2u64]),
+    )
+    .expect("page without hidden collection records");
+    let items = page["items"].as_array().expect("items");
+    assert_eq!(items.len(), 2);
+    assert_eq!(page["matching_total"], 2);
+    assert_eq!(items[0]["global_sequence"], 3);
+    assert_eq!(items[1]["global_sequence"], 1);
+    assert!(root.join("records/000000000002.json").is_file());
+    assert_eq!(
+        normalize_aipp_record_sequences(&[2, 2, 3]).expect("deduped collection remove"),
+        vec![2, 3]
+    );
+    fs::remove_dir_all(root).expect("remove fixture");
+}
+
+#[test]
 fn media_page_supports_oldest_first_collection_time_pagination() {
     let root = fixture_root();
     for sequence in 1..=3 {
@@ -510,11 +642,13 @@ fn media_publication_is_optional_bounded_and_separate_from_collection_time() {
     assert_eq!(item["publication_text"], "2 days ago");
     assert_eq!(item["discovered_at"], "2026-09-09T00:00:00Z");
     let old = aipp_media_item(&json!({"kind": "image", "global_sequence": 2,
-        "discovered_at": "2026-09-09T00:00:00Z"})).expect("old record");
+        "discovered_at": "2026-09-09T00:00:00Z"}))
+    .expect("old record");
     assert_eq!(old["published_at"], Value::Null);
     assert_eq!(old["publication_text"], Value::Null);
     let bounded = aipp_media_item(&json!({"kind": "video", "global_sequence": 3,
-        "published_at": 123, "publication_text": "x".repeat(1000)})).expect("bounded record");
+        "published_at": 123, "publication_text": "x".repeat(1000)}))
+    .expect("bounded record");
     assert_eq!(bounded["published_at"], Value::Null);
     assert!(bounded["publication_text"].as_str().unwrap_or("").len() <= 128);
 }

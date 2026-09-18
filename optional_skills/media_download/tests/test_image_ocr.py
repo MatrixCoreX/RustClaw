@@ -67,7 +67,11 @@ class ImageOcrDocumentTest(unittest.TestCase):
             self.image_ocr._ocr_candidate_score(cjk),
         )
 
-    def test_tesseract_evaluates_all_preprocessing_candidates_and_keeps_best(self) -> None:
+    def test_preprocess_scale_upsamples_small_images(self) -> None:
+        self.assertEqual(self.image_ocr._preprocess_scale(200, 120), 4)
+        self.assertEqual(self.image_ocr._preprocess_scale(500, 400), 3)
+        self.assertEqual(self.image_ocr._preprocess_scale(1200, 800), 2)
+        self.assertEqual(self.image_ocr._preprocess_scale(4000, 3000), 1)
         import tempfile
 
         with tempfile.TemporaryDirectory() as directory:
@@ -78,6 +82,8 @@ class ImageOcrDocumentTest(unittest.TestCase):
                 self.image_ocr.ParsedOcrText("original", 40.0),
                 self.image_ocr.ParsedOcrText("enhanced result", 92.0),
                 self.image_ocr.ParsedOcrText("binary", 65.0),
+                self.image_ocr.ParsedOcrText("sparse extra", 50.0),
+                self.image_ocr.ParsedOcrText("column extra", 55.0),
             ]
             with (
                 mock.patch.object(
@@ -98,9 +104,9 @@ class ImageOcrDocumentTest(unittest.TestCase):
                 )
 
             self.assertEqual(result.text, "enhanced result")
-            self.assertEqual(run_tesseract.call_count, 3)
+            self.assertEqual(run_tesseract.call_count, 5)
 
-    def test_auto_language_uses_all_installed_recognition_data(self) -> None:
+    def test_auto_language_prefers_compact_cjk_latin_pack(self) -> None:
         self.image_ocr.available_tesseract_languages.cache_clear()
         completed = subprocess.CompletedProcess(
             ["tesseract", "--list-langs"],
@@ -111,7 +117,21 @@ class ImageOcrDocumentTest(unittest.TestCase):
         with mock.patch.object(self.image_ocr.subprocess, "run", return_value=completed):
             resolved = self.image_ocr.resolve_tesseract_language("tesseract", "auto")
 
-        self.assertEqual(resolved, "ara+chi_sim+eng")
+        self.assertEqual(resolved, "chi_sim+eng")
+        self.image_ocr.available_tesseract_languages.cache_clear()
+
+    def test_auto_language_keeps_installed_set_when_preferred_missing(self) -> None:
+        self.image_ocr.available_tesseract_languages.cache_clear()
+        completed = subprocess.CompletedProcess(
+            ["tesseract", "--list-langs"],
+            0,
+            "List of available languages in /tmp/tessdata (2):\nfra\ndeu\n",
+            "",
+        )
+        with mock.patch.object(self.image_ocr.subprocess, "run", return_value=completed):
+            resolved = self.image_ocr.resolve_tesseract_language("tesseract", "auto")
+
+        self.assertEqual(resolved, "deu+fra")
         self.image_ocr.available_tesseract_languages.cache_clear()
 
     @unittest.skipUnless(importlib.util.find_spec("PIL"), "Pillow is not installed")

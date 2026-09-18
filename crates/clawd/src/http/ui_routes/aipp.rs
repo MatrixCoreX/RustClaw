@@ -10,7 +10,61 @@ const AIPP_TASK_ACTIVITY_RESULT_MAX_CHARS: usize = 65_536;
 const AIPP_TASK_ACTIVITY_ERROR_MAX_CHARS: usize = 4_096;
 const AIPP_TASK_ACTIVITY_ARTIFACT_LIMIT: usize = 64;
 const AIPP_TASK_ACTIVITY_URL_LIMIT: usize = 16;
+const AIPP_TASK_ACTIVITY_REMOVE_LIMIT: usize = 50;
+const AIPP_MEDIA_REMOVE_LIMIT: usize = 500;
+const AIPP_PAGE_SIZE: usize = 30;
+const AIPP_TASK_ACTIVITY_TASK_ID_MAX: usize = 128;
 const AIPP_BUNDLE_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: https:; media-src 'self' blob:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'";
+const AIPP_TASK_ACTIVITY_MATCH_SQL: &str = r#"
+             WHERE (:channel IS NULL OR tasks.channel = :channel)
+               AND (
+                    :communication_only = 0
+                    OR tasks.channel IN ('telegram', 'whatsapp', 'feishu', 'lark', 'wechat')
+               )
+               AND (:status IS NULL OR tasks.status = :status)
+               AND (
+                    :needle IS NULL
+                    OR INSTR(
+                        LOWER(CASE WHEN json_valid(tasks.payload_json)
+                            THEN COALESCE(json_extract(tasks.payload_json, '$.text'), '')
+                            ELSE '' END),
+                        LOWER(:needle)
+                    ) > 0
+                    OR INSTR(
+                        LOWER(CASE WHEN json_valid(tasks.result_json)
+                            THEN COALESCE(json_extract(tasks.result_json, '$.text'), '')
+                            ELSE '' END),
+                        LOWER(:needle)
+                    ) > 0
+               )
+               AND (
+                    EXISTS (
+                        SELECT 1
+                          FROM task_event_stream
+                         WHERE task_event_stream.task_id = tasks.task_id
+                           AND json_extract(task_event_stream.event_json, '$.event_kind') = 'tool_finished'
+                           AND json_extract(task_event_stream.event_json, '$.payload.skill') = :skill_name
+                           AND task_event_stream.created_at_ms > :cleared_through_event_ms
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                          FROM task_event_archive
+                         WHERE task_event_archive.task_id = tasks.task_id
+                           AND json_extract(task_event_archive.event_json, '$.event_kind') = 'tool_finished'
+                           AND json_extract(task_event_archive.event_json, '$.payload.skill') = :skill_name
+                           AND task_event_archive.created_at_ms > :cleared_through_event_ms
+                    )
+               )
+               AND tasks.task_id NOT IN (SELECT value FROM json_each(:hidden_json))
+"#;
+
+#[derive(Debug, Deserialize, Default)]
+struct AippItemsRemoveRequest {
+    #[serde(default)]
+    task_ids: Vec<String>,
+    #[serde(default)]
+    global_sequences: Vec<u64>,
+}
 
 #[derive(Debug, Deserialize, Default)]
 struct AippMediaQuery {
@@ -255,14 +309,11 @@ fn aipp_media_item(record: &Value) -> Option<Value> {
         return None;
     }
     let https_url = |key: &str| {
-        record
-            .get(key)
-            .and_then(Value::as_str)
-            .filter(|value| {
-                value.len() <= 4096
-                    && value.starts_with("https://")
-                    && !value.chars().any(char::is_control)
-            })
+        record.get(key).and_then(Value::as_str).filter(|value| {
+            value.len() <= 4096
+                && value.starts_with("https://")
+                && !value.chars().any(char::is_control)
+        })
     };
     let source_url = if kind == "video" {
         https_url("video_page_url")
@@ -367,17 +418,14 @@ fn valid_task_activity_filter(value: Option<&str>, allowed: &[&str]) -> Result<(
 
 fn task_activity_urls(input: &str) -> Vec<String> {
     static URL_CANDIDATE: OnceLock<regex::Regex> = OnceLock::new();
-    let pattern = URL_CANDIDATE.get_or_init(|| {
-        regex::Regex::new(r#"https?://[^\s<>\"']+"#).expect("static URL pattern")
-    });
+    let pattern = URL_CANDIDATE
+        .get_or_init(|| regex::Regex::new(r#"https?://[^\s<>\"']+"#).expect("static URL pattern"));
     let mut urls = BTreeSet::new();
     for candidate in pattern.find_iter(input).map(|value| {
-        value
-            .as_str()
-            .trim_end_matches([
-                '.', ',', ';', ':', '!', '?', ')', ']', '}', '。', '，', '；', '：', '！',
-                '？', '）', '】', '》',
-            ])
+        value.as_str().trim_end_matches([
+            '.', ',', ';', ':', '!', '?', ')', ']', '}', '。', '，', '；', '：', '！', '？', '）',
+            '】', '》',
+        ])
     }) {
         if candidate.len() > 4_096 || candidate.chars().any(char::is_control) {
             continue;
@@ -411,14 +459,11 @@ fn task_activity_artifacts(task_id: &str, result: &Value) -> Vec<Value> {
             let id = bounded_aipp_optional_text(artifact.get("id"), 256)?;
             let filename = bounded_aipp_optional_text(artifact.get("filename"), 512)?;
             let bounded_route = |key: &str| {
-                artifact
-                    .get(key)
-                    .and_then(Value::as_str)
-                    .filter(|value| {
-                        value.len() <= 4_096
-                            && value.starts_with(&route_prefix)
-                            && !value.chars().any(char::is_control)
-                    })
+                artifact.get(key).and_then(Value::as_str).filter(|value| {
+                    value.len() <= 4_096
+                        && value.starts_with(&route_prefix)
+                        && !value.chars().any(char::is_control)
+                })
             };
             let download_url = bounded_route("download_url")?;
             Some(json!({
@@ -452,10 +497,7 @@ fn task_activity_item(
     let result = result_json
         .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
         .unwrap_or_else(|| json!({}));
-    let input_text = bounded_aipp_text(
-        payload.get("text"),
-        AIPP_TASK_ACTIVITY_INPUT_MAX_CHARS,
-    );
+    let input_text = bounded_aipp_text(payload.get("text"), AIPP_TASK_ACTIVITY_INPUT_MAX_CHARS);
     let mut actions = action_refs
         .unwrap_or_default()
         .split(',')
@@ -486,11 +528,108 @@ fn task_activity_item(
     })
 }
 
+fn valid_aipp_task_id(value: &str) -> bool {
+    let len = value.len();
+    (8..=AIPP_TASK_ACTIVITY_TASK_ID_MAX).contains(&len)
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+}
+
+fn normalize_aipp_task_ids(values: &[String]) -> Result<Vec<String>, String> {
+    if values.is_empty() {
+        return Err("aipp_task_activity_remove_empty".to_string());
+    }
+    if values.len() > AIPP_TASK_ACTIVITY_REMOVE_LIMIT {
+        return Err("aipp_task_activity_remove_limit".to_string());
+    }
+    let mut task_ids = Vec::with_capacity(values.len());
+    for value in values {
+        let task_id = value.trim();
+        if !valid_aipp_task_id(task_id) {
+            return Err("aipp_task_activity_remove_invalid".to_string());
+        }
+        if !task_ids.iter().any(|existing| existing == task_id) {
+            task_ids.push(task_id.to_string());
+        }
+    }
+    Ok(task_ids)
+}
+
+fn normalize_aipp_record_sequences(values: &[u64]) -> Result<Vec<u64>, String> {
+    if values.is_empty() {
+        return Err("aipp_media_remove_empty".to_string());
+    }
+    if values.len() > AIPP_MEDIA_REMOVE_LIMIT {
+        return Err("aipp_media_remove_limit".to_string());
+    }
+    let mut sequences = Vec::with_capacity(values.len());
+    for sequence in values {
+        if *sequence == 0 {
+            return Err("aipp_media_remove_invalid".to_string());
+        }
+        if !sequences.contains(sequence) {
+            sequences.push(*sequence);
+        }
+    }
+    Ok(sequences)
+}
+
+fn aipp_media_record_exists(root: &Path, sequence: u64) -> bool {
+    sequence > 0 && root.join("records").join(format!("{sequence:012}.json")).is_file()
+}
+
+fn owned_aipp_task_activity_ids(
+    db: &rusqlite::Connection,
+    skill_name: &str,
+    task_ids: &[String],
+) -> Result<BTreeSet<String>, String> {
+    let ids_json = serde_json::to_string(task_ids)
+        .map_err(|_| "aipp_task_activity_query_failed".to_string())?;
+    let mut statement = db
+        .prepare(
+            r#"
+            SELECT DISTINCT task_id
+              FROM (
+                    SELECT task_id
+                      FROM task_event_stream
+                     WHERE json_extract(event_json, '$.event_kind') = 'tool_finished'
+                       AND json_extract(event_json, '$.payload.skill') = :skill_name
+                       AND task_id IN (SELECT value FROM json_each(:ids_json))
+                    UNION
+                    SELECT task_id
+                      FROM task_event_archive
+                     WHERE json_extract(event_json, '$.event_kind') = 'tool_finished'
+                       AND json_extract(event_json, '$.payload.skill') = :skill_name
+                       AND task_id IN (SELECT value FROM json_each(:ids_json))
+              )
+            "#,
+        )
+        .map_err(|_| "aipp_task_activity_query_failed".to_string())?;
+    let mut rows = statement
+        .query(rusqlite::named_params! {
+            ":skill_name": skill_name,
+            ":ids_json": ids_json,
+        })
+        .map_err(|_| "aipp_task_activity_query_failed".to_string())?;
+    let mut owned = BTreeSet::new();
+    while let Some(row) = rows
+        .next()
+        .map_err(|_| "aipp_task_activity_query_failed".to_string())?
+    {
+        if let Ok(task_id) = row.get::<_, String>(0) {
+            owned.insert(task_id);
+        }
+    }
+    Ok(owned)
+}
+
 fn read_aipp_task_activity_page(
     db: &rusqlite::Connection,
     skill_name: &str,
     task_channel_scope: &str,
     cleared_through_event_ms: u64,
+    hidden_task_ids: &[String],
     query: &AippMediaQuery,
 ) -> Result<Value, String> {
     let communication_only = match task_channel_scope {
@@ -503,13 +642,17 @@ fn read_aipp_task_activity_page(
     } else {
         &["telegram", "whatsapp", "ui", "feishu", "lark", "wechat"]
     };
-    valid_task_activity_filter(
-        query.channel.as_deref(),
-        allowed_channels,
-    )?;
+    valid_task_activity_filter(query.channel.as_deref(), allowed_channels)?;
     valid_task_activity_filter(
         query.status.as_deref(),
-        &["queued", "running", "succeeded", "failed", "canceled", "timeout"],
+        &[
+            "queued",
+            "running",
+            "succeeded",
+            "failed",
+            "canceled",
+            "timeout",
+        ],
     )?;
     let sort_order = aipp_media_sort_order(query)?;
     let (cursor_operator, order) = if sort_order == "oldest" {
@@ -517,7 +660,7 @@ fn read_aipp_task_activity_page(
     } else {
         ("<", "DESC")
     };
-    let limit = query.limit.unwrap_or(20).clamp(1, AIPP_TASK_ACTIVITY_LIMIT);
+    let limit = query.limit.unwrap_or(AIPP_PAGE_SIZE).clamp(1, AIPP_TASK_ACTIVITY_LIMIT);
     let needle = query
         .query
         .as_deref()
@@ -526,6 +669,23 @@ fn read_aipp_task_activity_page(
     if needle.is_some_and(|value| value.chars().count() > 200) {
         return Err("aipp_task_activity_query_invalid".to_string());
     }
+    let hidden_json = serde_json::to_string(hidden_task_ids)
+        .map_err(|_| "aipp_task_activity_query_failed".to_string())?;
+    let total_item_count: u64 = db
+        .query_row(
+            &format!("SELECT COUNT(*) FROM tasks {AIPP_TASK_ACTIVITY_MATCH_SQL}"),
+            rusqlite::named_params! {
+                ":skill_name": skill_name,
+                ":cleared_through_event_ms": cleared_through_event_ms as i64,
+                ":communication_only": i64::from(communication_only),
+                ":channel": query.channel.as_deref(),
+                ":status": query.status.as_deref(),
+                ":needle": needle,
+                ":hidden_json": hidden_json.as_str(),
+            },
+            |row| row.get(0),
+        )
+        .map_err(|_| "aipp_task_activity_query_failed".to_string())?;
     let sql = format!(
         r#"
         WITH filtered AS MATERIALIZED (
@@ -539,45 +699,7 @@ fn read_aipp_task_activity_page(
                    tasks.created_at,
                    tasks.updated_at
               FROM tasks
-             WHERE (:channel IS NULL OR tasks.channel = :channel)
-               AND (
-                    :communication_only = 0
-                    OR tasks.channel IN ('telegram', 'whatsapp', 'feishu', 'lark', 'wechat')
-               )
-               AND (:status IS NULL OR tasks.status = :status)
-               AND (
-                    :needle IS NULL
-                    OR INSTR(
-                        LOWER(CASE WHEN json_valid(tasks.payload_json)
-                            THEN COALESCE(json_extract(tasks.payload_json, '$.text'), '')
-                            ELSE '' END),
-                        LOWER(:needle)
-                    ) > 0
-                    OR INSTR(
-                        LOWER(CASE WHEN json_valid(tasks.result_json)
-                            THEN COALESCE(json_extract(tasks.result_json, '$.text'), '')
-                            ELSE '' END),
-                        LOWER(:needle)
-                    ) > 0
-               )
-               AND (
-                    EXISTS (
-                        SELECT 1
-                          FROM task_event_stream
-                         WHERE task_event_stream.task_id = tasks.task_id
-                           AND json_extract(task_event_stream.event_json, '$.event_kind') = 'tool_finished'
-                           AND json_extract(task_event_stream.event_json, '$.payload.skill') = :skill_name
-                           AND task_event_stream.created_at_ms > :cleared_through_event_ms
-                    )
-                    OR EXISTS (
-                        SELECT 1
-                          FROM task_event_archive
-                         WHERE task_event_archive.task_id = tasks.task_id
-                           AND json_extract(task_event_archive.event_json, '$.event_kind') = 'tool_finished'
-                           AND json_extract(task_event_archive.event_json, '$.payload.skill') = :skill_name
-                           AND task_event_archive.created_at_ms > :cleared_through_event_ms
-                    )
-               )
+            {AIPP_TASK_ACTIVITY_MATCH_SQL}
                AND (:cursor IS NULL OR tasks.rowid {cursor_operator} :cursor)
              ORDER BY tasks.rowid {order}
              LIMIT :limit
@@ -634,6 +756,7 @@ fn read_aipp_task_activity_page(
             ":channel": query.channel.as_deref(),
             ":status": query.status.as_deref(),
             ":needle": needle,
+            ":hidden_json": hidden_json.as_str(),
             ":cursor": query.cursor_sequence.or(query.before_sequence).map(|value| value as i64),
             ":limit": requested,
         })
@@ -671,6 +794,7 @@ fn read_aipp_task_activity_page(
     Ok(json!({
         "schema_version": 1,
         "page_item_count": items.len(),
+        "total_item_count": total_item_count,
         "items": items,
         "sort_order": sort_order,
         "next_cursor_sequence": next_cursor_sequence,
@@ -686,8 +810,7 @@ fn record_matches_aipp_query(record: &Value, query: &AippMediaQuery) -> bool {
         return false;
     }
     if query.platform.as_deref().is_some_and(|platform| {
-        platform.len() > 64
-            || record.get("platform").and_then(Value::as_str) != Some(platform)
+        platform.len() > 64 || record.get("platform").and_then(Value::as_str) != Some(platform)
     }) {
         return false;
     }
@@ -717,7 +840,16 @@ fn aipp_media_sort_order(query: &AippMediaQuery) -> Result<&'static str, String>
     }
 }
 
+#[cfg(test)]
 fn read_aipp_media_page(root: &Path, query: &AippMediaQuery) -> Result<Value, String> {
+    read_aipp_media_page_with_hidden(root, query, &BTreeSet::new())
+}
+
+fn read_aipp_media_page_with_hidden(
+    root: &Path,
+    query: &AippMediaQuery,
+    hidden_sequences: &BTreeSet<u64>,
+) -> Result<Value, String> {
     let records_root = root.join("records");
     let mut names = match fs::read_dir(&records_root) {
         Ok(entries) => entries
@@ -737,15 +869,23 @@ fn read_aipp_media_page(root: &Path, query: &AippMediaQuery) -> Result<Value, St
     } else {
         names.sort_unstable_by(|left, right| right.cmp(left));
     }
-    let limit = query.limit.unwrap_or(24).clamp(1, AIPP_MEDIA_RECORD_LIMIT);
+    let limit = query.limit.unwrap_or(AIPP_PAGE_SIZE).clamp(1, AIPP_MEDIA_RECORD_LIMIT);
     let has_filter = query.kind.is_some()
         || query.platform.is_some()
         || query
             .query
             .as_deref()
             .is_some_and(|value| !value.trim().is_empty());
+    let visible_total = names
+        .iter()
+        .filter(|name| {
+            name.strip_suffix(".json")
+                .and_then(|value| value.parse::<u64>().ok())
+                .is_none_or(|sequence| sequence == 0 || !hidden_sequences.contains(&sequence))
+        })
+        .count();
     let mut items = Vec::with_capacity(limit + 1);
-    let mut matching_total = if has_filter { 0 } else { names.len() };
+    let mut matching_total = if has_filter { 0 } else { visible_total };
     let cursor_sequence = query.cursor_sequence.or_else(|| {
         (sort_order == "newest")
             .then_some(query.before_sequence)
@@ -756,13 +896,18 @@ fn read_aipp_media_page(root: &Path, query: &AippMediaQuery) -> Result<Value, St
             .strip_suffix(".json")
             .and_then(|value| value.parse::<u64>().ok())
             .unwrap_or_default();
-        if !has_filter && cursor_sequence.is_some_and(|cursor| {
-            if sort_order == "oldest" {
-                file_sequence <= cursor
-            } else {
-                file_sequence >= cursor
-            }
-        }) {
+        if file_sequence != 0 && hidden_sequences.contains(&file_sequence) {
+            continue;
+        }
+        if !has_filter
+            && cursor_sequence.is_some_and(|cursor| {
+                if sort_order == "oldest" {
+                    file_sequence <= cursor
+                } else {
+                    file_sequence >= cursor
+                }
+            })
+        {
             continue;
         }
         let record_path = records_root.join(&name);
@@ -787,7 +932,10 @@ fn read_aipp_media_page(root: &Path, query: &AippMediaQuery) -> Result<Value, St
             .get("global_sequence")
             .and_then(Value::as_u64)
             .unwrap_or_default();
-        if sequence == 0 || (has_filter && !record_matches_aipp_query(&record, query)) {
+        if sequence == 0
+            || hidden_sequences.contains(&sequence)
+            || (has_filter && !record_matches_aipp_query(&record, query))
+        {
             continue;
         }
         if has_filter {
@@ -818,8 +966,9 @@ fn read_aipp_media_page(root: &Path, query: &AippMediaQuery) -> Result<Value, St
     let next_cursor_sequence = has_more
         .then(|| items.last()?.get("global_sequence")?.as_u64())
         .flatten();
-    let next_before_sequence =
-        (sort_order == "newest").then_some(next_cursor_sequence).flatten();
+    let next_before_sequence = (sort_order == "newest")
+        .then_some(next_cursor_sequence)
+        .flatten();
     let state_path = root.join("state.json");
     let state = fs::metadata(&state_path)
         .ok()
@@ -915,19 +1064,30 @@ async fn get_aipp_items(
             .task_channel_scope
             .clone()
             .unwrap_or_else(|| "all".to_string());
-        let cleared_through_event_ms = match aipp_admission_service(&state)
-            .and_then(|service| {
-                service
-                    .aipp_cleared_through_event_ms(&skill_name)
-                    .map_err(|_| "aipp_view_state_unavailable".to_string())
-            })
-        {
+        let cleared_through_event_ms = match aipp_admission_service(&state).and_then(|service| {
+            service
+                .aipp_cleared_through_event_ms(&skill_name)
+                .map_err(|_| "aipp_view_state_unavailable".to_string())
+        }) {
             Ok(sequence) => sequence,
             Err(_) => {
                 return aipp_api_error(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "aipp_view_state_unavailable",
-                )
+                );
+            }
+        };
+        let hidden_task_ids = match aipp_admission_service(&state).and_then(|service| {
+            service
+                .aipp_hidden_task_ids(&skill_name)
+                .map_err(|_| "aipp_view_state_unavailable".to_string())
+        }) {
+            Ok(task_ids) => task_ids.into_iter().collect::<Vec<_>>(),
+            Err(_) => {
+                return aipp_api_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "aipp_view_state_unavailable",
+                );
             }
         };
         let query_state = state.clone();
@@ -943,6 +1103,7 @@ async fn get_aipp_items(
                 &query_skill,
                 &task_channel_scope,
                 cleared_through_event_ms,
+                &hidden_task_ids,
                 &query,
             )
         })
@@ -965,19 +1126,37 @@ async fn get_aipp_items(
                 };
                 aipp_api_error(status, &error)
             }
-            Err(_) => {
-                aipp_api_error(StatusCode::INTERNAL_SERVER_ERROR, "aipp_read_task_failed")
-            }
+            Err(_) => aipp_api_error(StatusCode::INTERNAL_SERVER_ERROR, "aipp_read_task_failed"),
         };
     }
     if active.aipp.data_contract != "media_collection_v1" {
         return aipp_api_error(StatusCode::NOT_FOUND, "aipp_not_available");
     }
-    let root = match state.core.skill_storage.resolved_directory_path(&skill_name) {
+    let root = match state
+        .core
+        .skill_storage
+        .resolved_directory_path(&skill_name)
+    {
         Ok(path) => path,
         Err(_) => return aipp_api_error(StatusCode::BAD_REQUEST, "aipp_storage_invalid"),
     };
-    let page = tokio::task::spawn_blocking(move || read_aipp_media_page(&root, &query)).await;
+    let hidden_sequences = match aipp_admission_service(&state).and_then(|service| {
+        service
+            .aipp_hidden_record_sequences(&skill_name)
+            .map_err(|_| "aipp_view_state_unavailable".to_string())
+    }) {
+        Ok(sequences) => sequences,
+        Err(_) => {
+            return aipp_api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "aipp_view_state_unavailable",
+            );
+        }
+    };
+    let page = tokio::task::spawn_blocking(move || {
+        read_aipp_media_page_with_hidden(&root, &query, &hidden_sequences)
+    })
+    .await;
     match page {
         Ok(Ok(data)) => (
             StatusCode::OK,
@@ -1014,7 +1193,7 @@ async fn clear_aipp_items(
                 return aipp_api_error(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "aipp_items_clear_database_unavailable",
-                )
+                );
             }
         };
         match db.query_row(
@@ -1038,7 +1217,7 @@ async fn clear_aipp_items(
                 return aipp_api_error(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "aipp_items_clear_database_unavailable",
-                )
+                );
             }
         }
     };
@@ -1048,7 +1227,7 @@ async fn clear_aipp_items(
             return aipp_api_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "aipp_view_state_unavailable",
-            )
+            );
         }
     };
     if service
@@ -1075,13 +1254,194 @@ async fn clear_aipp_items(
     )
 }
 
+async fn remove_aipp_items(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(skill_name): AxumPath<String>,
+    Json(payload): Json<AippItemsRemoveRequest>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if let Err(response) = require_ui_admin(&state, &headers) {
+        return response;
+    }
+    let active = match active_aipp_package(&state, &skill_name) {
+        Ok(Some(active)) if aipp_is_installed(&state, &skill_name) => active,
+        _ => return aipp_api_error(StatusCode::NOT_FOUND, "aipp_not_available"),
+    };
+    let has_task_ids = !payload.task_ids.is_empty();
+    let has_sequences = !payload.global_sequences.is_empty();
+    if has_task_ids == has_sequences {
+        return aipp_api_error(StatusCode::BAD_REQUEST, "aipp_items_remove_invalid");
+    }
+    if active.aipp.data_contract == "media_collection_v1" {
+        if has_task_ids {
+            return aipp_api_error(StatusCode::BAD_REQUEST, "aipp_items_remove_unsupported");
+        }
+        return remove_aipp_media_items(&state, &skill_name, &payload.global_sequences);
+    }
+    if active.aipp.data_contract != "skill_task_activity_v1" {
+        return aipp_api_error(StatusCode::BAD_REQUEST, "aipp_items_remove_unsupported");
+    }
+    if has_sequences {
+        return aipp_api_error(StatusCode::BAD_REQUEST, "aipp_items_remove_unsupported");
+    }
+    let task_ids = match normalize_aipp_task_ids(&payload.task_ids) {
+        Ok(task_ids) => task_ids,
+        Err(error) => {
+            let status = if error == "aipp_task_activity_remove_limit" {
+                StatusCode::PAYLOAD_TOO_LARGE
+            } else {
+                StatusCode::BAD_REQUEST
+            };
+            return aipp_api_error(status, &error);
+        }
+    };
+    let owned = {
+        let db = match state.core.db.get() {
+            Ok(db) => db,
+            Err(_) => {
+                return aipp_api_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "aipp_task_activity_database_unavailable",
+                );
+            }
+        };
+        match owned_aipp_task_activity_ids(&db, &skill_name, &task_ids) {
+            Ok(owned) => owned,
+            Err(_) => {
+                return aipp_api_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "aipp_task_activity_query_failed",
+                );
+            }
+        }
+    };
+    let service = match aipp_admission_service(&state) {
+        Ok(service) => service,
+        Err(_) => {
+            return aipp_api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "aipp_view_state_unavailable",
+            );
+        }
+    };
+    let already_hidden = match service.aipp_hidden_task_ids(&skill_name) {
+        Ok(task_ids) => task_ids,
+        Err(_) => {
+            return aipp_api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "aipp_view_state_unavailable",
+            );
+        }
+    };
+    if task_ids
+        .iter()
+        .any(|task_id| !owned.contains(task_id) && !already_hidden.contains(task_id))
+    {
+        return aipp_api_error(StatusCode::BAD_REQUEST, "aipp_task_activity_remove_unknown");
+    }
+    let hidden = match service.hide_aipp_task_ids(&skill_name, &task_ids) {
+        Ok(hidden) => hidden,
+        Err(error) if error.code == "aipp_task_activity_hidden_limit" => {
+            return aipp_api_error(StatusCode::PAYLOAD_TOO_LARGE, error.code);
+        }
+        Err(_) => {
+            return aipp_api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "aipp_items_remove_state_update_failed",
+            );
+        }
+    };
+    (
+        StatusCode::OK,
+        Json(ApiResponse {
+            ok: true,
+            data: Some(json!({
+                "schema_version": 1,
+                "removed_count": task_ids.len(),
+                "newly_hidden_count": hidden,
+                "source_records_preserved": true,
+            })),
+            error: None,
+        }),
+    )
+}
+
+fn remove_aipp_media_items(
+    state: &AppState,
+    skill_name: &str,
+    requested: &[u64],
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    let sequences = match normalize_aipp_record_sequences(requested) {
+        Ok(sequences) => sequences,
+        Err(error) => {
+            let status = if error == "aipp_media_remove_limit" {
+                StatusCode::PAYLOAD_TOO_LARGE
+            } else {
+                StatusCode::BAD_REQUEST
+            };
+            return aipp_api_error(status, &error);
+        }
+    };
+    let root = match state.core.skill_storage.resolved_directory_path(skill_name) {
+        Ok(path) => path,
+        Err(_) => return aipp_api_error(StatusCode::BAD_REQUEST, "aipp_storage_invalid"),
+    };
+    let service = match aipp_admission_service(state) {
+        Ok(service) => service,
+        Err(_) => {
+            return aipp_api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "aipp_view_state_unavailable",
+            );
+        }
+    };
+    let already_hidden = match service.aipp_hidden_record_sequences(skill_name) {
+        Ok(sequences) => sequences,
+        Err(_) => {
+            return aipp_api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "aipp_view_state_unavailable",
+            );
+        }
+    };
+    if sequences
+        .iter()
+        .any(|sequence| !aipp_media_record_exists(&root, *sequence) && !already_hidden.contains(sequence))
+    {
+        return aipp_api_error(StatusCode::BAD_REQUEST, "aipp_media_remove_unknown");
+    }
+    let hidden = match service.hide_aipp_record_sequences(skill_name, &sequences) {
+        Ok(hidden) => hidden,
+        Err(error) if error.code == "aipp_media_hidden_limit" => {
+            return aipp_api_error(StatusCode::PAYLOAD_TOO_LARGE, error.code);
+        }
+        Err(_) => {
+            return aipp_api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "aipp_items_remove_state_update_failed",
+            );
+        }
+    };
+    (
+        StatusCode::OK,
+        Json(ApiResponse {
+            ok: true,
+            data: Some(json!({
+                "schema_version": 1,
+                "removed_count": sequences.len(),
+                "newly_hidden_count": hidden,
+                "source_records_preserved": true,
+            })),
+            error: None,
+        }),
+    )
+}
+
 fn resolve_aipp_preview(root: &Path, sequence: u64) -> Result<(PathBuf, &'static str), String> {
     if sequence == 0 {
         return Err("aipp_preview_not_found".to_string());
     }
-    let record_path = root
-        .join("records")
-        .join(format!("{sequence:012}.json"));
+    let record_path = root.join("records").join(format!("{sequence:012}.json"));
     let record: Value = serde_json::from_slice(
         &fs::read(record_path).map_err(|_| "aipp_preview_not_found".to_string())?,
     )
@@ -1103,8 +1463,8 @@ fn resolve_aipp_preview(root: &Path, sequence: u64) -> Result<(PathBuf, &'static
     {
         return Err("aipp_preview_path_invalid".to_string());
     }
-    let exports_root = fs::canonicalize(root.join("exports"))
-        .map_err(|_| "aipp_preview_not_found".to_string())?;
+    let exports_root =
+        fs::canonicalize(root.join("exports")).map_err(|_| "aipp_preview_not_found".to_string())?;
     let preview = fs::canonicalize(exports_root.join(relative_path))
         .map_err(|_| "aipp_preview_not_found".to_string())?;
     let metadata = fs::metadata(&preview).map_err(|_| "aipp_preview_not_found".to_string())?;
@@ -1142,29 +1502,29 @@ async fn get_aipp_media_preview(
     {
         return aipp_api_error(StatusCode::NOT_FOUND, "aipp_not_available").into_response();
     }
-    let root = match state.core.skill_storage.resolved_directory_path(&skill_name) {
+    let root = match state
+        .core
+        .skill_storage
+        .resolved_directory_path(&skill_name)
+    {
         Ok(path) => path,
         Err(_) => {
-            return aipp_api_error(StatusCode::BAD_REQUEST, "aipp_storage_invalid")
-                .into_response()
+            return aipp_api_error(StatusCode::BAD_REQUEST, "aipp_storage_invalid").into_response();
         }
     };
     let resolved = tokio::task::spawn_blocking(move || resolve_aipp_preview(&root, sequence)).await;
     let (path, content_type) = match resolved {
         Ok(Ok(value)) => value,
-        Ok(Err(error)) => {
-            return aipp_api_error(StatusCode::NOT_FOUND, &error).into_response()
-        }
+        Ok(Err(error)) => return aipp_api_error(StatusCode::NOT_FOUND, &error).into_response(),
         Err(_) => {
             return aipp_api_error(StatusCode::INTERNAL_SERVER_ERROR, "aipp_read_task_failed")
-                .into_response()
+                .into_response();
         }
     };
     let bytes = match tokio::fs::read(path).await {
         Ok(value) => value,
         Err(_) => {
-            return aipp_api_error(StatusCode::NOT_FOUND, "aipp_preview_not_found")
-                .into_response()
+            return aipp_api_error(StatusCode::NOT_FOUND, "aipp_preview_not_found").into_response();
         }
     };
     let mut response = axum::response::Response::new(axum::body::Body::from(bytes));
@@ -1347,17 +1707,17 @@ async fn get_aipp_bundle_asset(
     };
     let bytes = match tokio::fs::read(path).await {
         Ok(bytes) => bytes,
-        Err(_) => return aipp_api_error(StatusCode::NOT_FOUND, "aipp_bundle_asset_not_found").into_response(),
+        Err(_) => {
+            return aipp_api_error(StatusCode::NOT_FOUND, "aipp_bundle_asset_not_found")
+                .into_response();
+        }
     };
     let mut response = axum::response::Response::new(axum::body::Body::from(bytes));
     apply_aipp_bundle_headers(&mut response, content_type);
     response
 }
 
-fn aipp_api_error(
-    status: StatusCode,
-    error: &str,
-) -> (StatusCode, Json<ApiResponse<Value>>) {
+fn aipp_api_error(status: StatusCode, error: &str) -> (StatusCode, Json<ApiResponse<Value>>) {
     (
         status,
         Json(ApiResponse {

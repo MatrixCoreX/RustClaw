@@ -55,6 +55,38 @@ test("extracts a Douyin author caption without collecting adjacent controls", {
   assert.equal(caption, "Una historia breve\n#viaje");
 });
 
+test("Douyin search-card captions behind an overlay are ignored", {
+  skip: !RUN_BROWSER_TEST,
+}, async (t) => {
+  const page = await withPage(t, `
+    <title>发现更多精彩视频 - 抖音搜索</title>
+    <article class="search-result-card" style="width:240px;height:320px">
+      <p data-e2e="video-desc">企业用工方式正在变，外包越来越普遍</p>
+    </article>
+    <div id="overlay" style="position:fixed;inset:0;width:640px;height:360px">
+      <h1 data-e2e="video-desc">年入十万真的很难的么？ #财经 #兜姐财经 #年入10万</h1>
+    </div>
+  `);
+  const caption = await capturePlatformCaption(page, "douyin", "发现更多精彩视频 - 抖音搜索");
+  assert.equal(caption, "年入十万真的很难的么？ #财经 #兜姐财经 #年入10万");
+});
+
+test("Douyin overlay captions ignore leftover feed text outside the overlay", {
+  skip: !RUN_BROWSER_TEST,
+}, async (t) => {
+  const page = await withPage(t, `
+    <p data-e2e="feed-video-desc" style="width:200px;height:40px">wrong leftover title</p>
+    <div id="overlay" style="position:fixed;inset:0;width:640px;height:360px">
+      <video width="500" height="400"></video>
+      <h1 data-e2e="video-desc">年入十万真的很难的么？ #财经 #兜姐财经 #年入10万</h1>
+    </div>
+  `);
+  const overlayCaption = await capturePlatformCaption(page.locator("#overlay"), "douyin", "");
+  assert.equal(overlayCaption, "年入十万真的很难的么？ #财经 #兜姐财经 #年入10万");
+  const pageCaption = await capturePlatformCaption(page, "douyin", "");
+  assert.equal(pageCaption, "wrong leftover title");
+});
+
 test("extracts a Douyin feed caption from its structural marker", {
   skip: !RUN_BROWSER_TEST,
 }, async (t) => {

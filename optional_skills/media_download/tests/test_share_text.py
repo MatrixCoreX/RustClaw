@@ -242,6 +242,40 @@ class ShareTextTest(unittest.TestCase):
         )
         self.assertEqual(article.background_audio_duration, 397.0)
 
+    def test_douyin_image_post_extracts_background_audio_without_caption(self) -> None:
+        payload = {
+            "aweme_id": "7658893225607908651",
+            "author": {"nickname": "图文作者"},
+            "images": [{"url_list": ["https://p.test/1.jpg"]}],
+            "music": {
+                "duration": 18,
+                "play_addr": {
+                    "url_list": ["https://audio.test/image-sound.mp3"],
+                },
+            },
+            "image_album_music_info": {
+                "begin_time": 0,
+                "end_time": 15000,
+            },
+        }
+
+        article = self.downloader.article_from_douyin_payload(
+            payload,
+            source="test",
+        )
+
+        self.assertIsNotNone(article)
+        assert article is not None
+        self.assertEqual(article.title, "")
+        self.assertEqual(article.body, "")
+        self.assertEqual(article.author, "图文作者")
+        self.assertEqual(
+            article.background_audio_url,
+            "https://audio.test/image-sound.mp3",
+        )
+        self.assertEqual(article.background_audio_duration, 15.0)
+        self.assertFalse(self.downloader.article_has_platform_text(article))
+
     def test_douyin_rendered_dom_extracts_complete_exact_post_article(self) -> None:
         item_id = "7658893225607908651"
         body = (
@@ -361,6 +395,55 @@ class ShareTextTest(unittest.TestCase):
         self.assertEqual(result, complete)
         self.assertEqual(gather.call_count, 2)
 
+    def test_image_post_parser_retries_caption_even_when_background_audio_exists(
+        self,
+    ) -> None:
+        image = self.downloader.ImageCandidate("https://p.test/1.webp", "test", 1)
+        audio_only = self.downloader.ArticleContent(
+            "",
+            "",
+            "图文作者",
+            "test",
+            "https://audio.test/image-sound.mp3",
+            15.0,
+        )
+        complete = self.downloader.ArticleContent(
+            "",
+            "完整平台正文",
+            "图文作者",
+            "test",
+            "https://audio.test/image-sound.mp3",
+            15.0,
+        )
+        args = SimpleNamespace(
+            platform="auto",
+            timeout=1.0,
+            browser_fallback=True,
+            browser_timeout=1.0,
+            chrome_path=None,
+            system_browser_cookies=False,
+            extract_audio=False,
+            transcribe=False,
+            print_url=False,
+        )
+
+        with mock.patch.object(
+            self.downloader,
+            "gather_candidates_for_request",
+            side_effect=[
+                ("douyin", "item-1", [], [image], audio_only, []),
+                ("douyin", "item-1", [], [image], complete, []),
+            ],
+        ) as gather:
+            result = self.downloader.gather_candidates_for_request_with_retries(
+                args,
+                "https://v.douyin.com/example/",
+                None,
+            )
+
+        self.assertEqual(result[4], complete)
+        self.assertEqual(gather.call_count, 2)
+
     def test_image_post_download_delivers_images_when_article_is_missing(self) -> None:
         image = self.downloader.ImageCandidate("https://p.test/1.webp", "test", 1)
         with tempfile.TemporaryDirectory() as directory:
@@ -401,6 +484,78 @@ class ShareTextTest(unittest.TestCase):
         self.assertEqual(result, 0)
         download.assert_called_once()
         self.assertIn("component=platform_article", diagnostics.getvalue())
+
+    def test_image_post_download_keeps_background_audio_when_caption_is_missing(
+        self,
+    ) -> None:
+        image = self.downloader.ImageCandidate("https://p.test/1.webp", "test", 1)
+        article = self.downloader.ArticleContent(
+            "",
+            "",
+            "图文作者",
+            "test",
+            "https://audio.test/image-sound.mp3",
+            15.0,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            image_path = output_dir / "note.webp"
+            audio_path = output_dir / "note_background_audio.mp3"
+
+            def fake_download_images(*_args, **_kwargs):
+                image_path.write_bytes(b"image")
+                return [image_path]
+
+            def fake_download_audio(*_args, **_kwargs):
+                audio_path.write_bytes(b"audio")
+                return audio_path
+
+            args = SimpleNamespace(
+                verbose=False,
+                browser_fallback=True,
+                print_url=False,
+                extract_audio=False,
+                transcribe=False,
+                output_dir=directory,
+                output_name="note",
+                overwrite=False,
+                timeout=1.0,
+                save_meta=False,
+                show_info=False,
+                ocr_images=False,
+            )
+            diagnostics = io.StringIO()
+            with (
+                mock.patch.object(
+                    self.downloader,
+                    "download_image_candidates",
+                    side_effect=fake_download_images,
+                ),
+                mock.patch.object(
+                    self.downloader,
+                    "download_image_post_audio",
+                    side_effect=fake_download_audio,
+                ) as download_audio,
+                redirect_stderr(diagnostics),
+            ):
+                result = self.downloader.handle_resolved_media(
+                    args,
+                    "https://www.douyin.com/note/7658893225607908651",
+                    None,
+                    "douyin",
+                    "7658893225607908651",
+                    [],
+                    [image],
+                    [],
+                    article=article,
+                )
+
+            self.assertEqual(result, 0)
+            self.assertTrue(image_path.is_file())
+            self.assertTrue(audio_path.is_file())
+            self.assertFalse((output_dir / "note_article.txt").exists())
+            download_audio.assert_called_once()
+            self.assertIn("component=platform_article", diagnostics.getvalue())
 
     def test_image_candidate_failure_does_not_hide_successful_images(self) -> None:
         candidates = [
@@ -592,6 +747,37 @@ class ShareTextTest(unittest.TestCase):
             self.assertIn("作者：目标作者", article_text)
             self.assertIn("目标正文第一段\n目标正文第二段", article_text)
             self.assertEqual(len(list(output_dir.glob("note_*.jpg"))), 2)
+
+    def test_article_copy_breaks_after_commas_and_periods(self) -> None:
+        formatted = self.downloader.format_article_copy_line_breaks(
+            "今天天气很好，我们去公园。然后回家。"
+        )
+        self.assertEqual(formatted, "今天天气很好，\n我们去公园。\n然后回家。")
+
+    def test_article_copy_keeps_decimals_urls_and_existing_newlines(self) -> None:
+        formatted = self.downloader.format_article_copy_line_breaks(
+            "价格128.50元，详见 www.example.com/a.txt。\n下一段继续。"
+        )
+        self.assertEqual(
+            formatted,
+            "价格128.50元，\n详见 www.example.com/a.txt。\n下一段继续。",
+        )
+
+    def test_article_document_applies_copy_line_breaks_to_body_only(self) -> None:
+        article = self.downloader.ArticleContent(
+            "标题，不要换行。",
+            "第一句，第二句。第三句。",
+            "作者",
+            "test",
+        )
+        document = self.downloader.article_document(
+            article,
+            platform="xiaohongshu",
+            item_id="abc",
+            share_text="https://www.xiaohongshu.com/explore/abc",
+        )
+        self.assertIn("标题：标题，不要换行。\n", document)
+        self.assertIn("正文：\n第一句，\n第二句。\n第三句。\n", document)
 
     def test_douyin_image_article_download_keeps_background_audio(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

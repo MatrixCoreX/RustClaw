@@ -1,19 +1,24 @@
 import fs from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import path from "node:path";
-import { assertDocumentResponse, browserStageError, recordBrowserFailure } from "./browser_diagnostics.mjs";
+import { browserStageError, recordBrowserFailure } from "./browser_diagnostics.mjs";
 import { createManualConfirmation } from "./manual_handoff.mjs";
+import { launchPlatformBrowser } from "./browser_environment.mjs";
 import { capturePublication } from "./publication.mjs";
-import { boundedBrowserOperation, normalizeBrowserError, openKeywordSearch } from "./browser_search.mjs";
+import { assertNavigationResponse, boundedBrowserOperation, normalizeBrowserError, openKeywordSearch } from "./browser_search.mjs";
+import { assertBrowserFlow, observePlatformBackpressure, pacingDelayMs, stopsCollection } from "./browser_flow_control.mjs";
+export { pacingDelayMs } from "./browser_flow_control.mjs";
 import { withSearchResult } from "./browser_search_results.mjs";
 import { collectKuaishouSearchResults } from "./browser_kuaishou_search.mjs";
+import { collectDouyinSearchResults } from "./browser_douyin_search.mjs";
 import { imageSourceIdentity, identityDigest } from "./media_identity.mjs";
+import { collectOrderedPages, optionalLimit, pageProgress } from "./collection_progress.mjs";
 
 import {
   canonicalCandidateUrls,
   isDetailUrl,
   manualVerificationTarget,
-  matchesVerificationTarget,
+  matchesManualAccessTarget,
   resolveBrowserMode,
   SUPPORTED_PLATFORMS,
   platformItemId,
@@ -23,7 +28,57 @@ import {
 
 const NAVIGATION_TIMEOUT_MS = 45_000;
 const SCREENSHOT_MIN_BYTES = 512;
-const INTERACTIVE_LOGIN_TIMEOUT_MS = 10 * 60 * 1000;
+const SCREENSHOT_MIN_BYTES_PER_PIXEL = 0.03;
+
+export function screenshotLooksBlankFromBytes(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < SCREENSHOT_MIN_BYTES) return true;
+  if (buffer.length < 24 || buffer[0] !== 0x89 || buffer.subarray(1, 4).toString("ascii") !== "PNG") {
+    return buffer.length < SCREENSHOT_MIN_BYTES;
+  }
+  const width = buffer.readUInt32BE(16);
+  const height = buffer.readUInt32BE(20);
+  const pixels = width * height;
+  if (!Number.isSafeInteger(pixels) || pixels < 1) return true;
+  return buffer.length / pixels < SCREENSHOT_MIN_BYTES_PER_PIXEL;
+}
+
+export async function screenshotLooksBlank(filePath) {
+  return screenshotLooksBlankFromBytes(await fs.readFile(filePath));
+}
+
+export async function awaitPaintedVideoFrame(locator, timeoutMs = 5_000) {
+  const page = locator.page();
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline && !page.isClosed()) {
+    const painted = await locator.evaluate((node) => {
+      if (!(node instanceof HTMLVideoElement)) return true;
+      if (!node.currentSrc && !node.src) return false;
+      node.muted = true;
+      node.playsInline = true;
+      if (node.paused) node.play().catch(() => {});
+      if (node.readyState < 2 || node.videoWidth < 8 || node.videoHeight < 8) return false;
+      const canvas = document.createElement("canvas");
+      canvas.width = 24;
+      canvas.height = 24;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return node.currentTime > 0;
+      ctx.drawImage(node, 0, 0, 24, 24);
+      const pixels = ctx.getImageData(0, 0, 24, 24).data;
+      let min = 255;
+      let max = 0;
+      for (let index = 0; index < pixels.length; index += 4) {
+        const luma = (pixels[index] + pixels[index + 1] + pixels[index + 2]) / 3;
+        if (luma < min) min = luma;
+        if (luma > max) max = luma;
+      }
+      return (max - min) >= 10;
+    }).catch(() => false);
+    if (painted) return true;
+    await page.waitForTimeout(150).catch(() => {});
+  }
+  return false;
+}
+export const INTERACTIVE_LOGIN_TIMEOUT_MS = 10 * 60 * 1000;
 const INTERACTIVE_LOGIN_POLL_MS = 1000;
 const INTERACTIVE_CHALLENGE_POLL_MS = 1000;
 
@@ -140,11 +195,32 @@ function normalizedPlatformText(value) {
     .slice(0, 32_768);
 }
 
-async function firstSelectorText(scope, selectors) {
+function genericDouyinListingTitle(value) {
+  const text = normalizedPlatformText(value);
+  return !text || /发现更多精彩视频/u.test(text) || /抖音搜索/u.test(text);
+}
+
+export function douyinRecordCopy({ authorTitle = "", listingTitle = "" } = {}) {
+  const author = normalizedPlatformText(authorTitle);
+  const listing = normalizedPlatformText(listingTitle);
+  return {
+    title: author || (genericDouyinListingTitle(listing) ? "" : listing),
+    platform_text: "",
+  };
+}
+
+async function firstSelectorText(scope, selectors, options = {}) {
   for (const selector of selectors) {
-    const values = await scope.locator(selector).evaluateAll((nodes) =>
-      nodes.map((node) => node.innerText || node.textContent || ""),
-    ).catch(() => []);
+    const values = await scope.locator(selector).evaluateAll((nodes, exclude) =>
+      nodes.flatMap((node) => {
+        if (exclude && node.closest(exclude)) return [];
+        const rect = node.getBoundingClientRect();
+        const style = getComputedStyle(node);
+        if (rect.width <= 0 || rect.height <= 0 || style.display === "none" || style.visibility === "hidden") {
+          return [];
+        }
+        return [node.innerText || node.textContent || ""];
+      }), options.excludeClosest || "").catch(() => []);
     for (const value of values) {
       const normalized = normalizedPlatformText(value);
       if (normalized) return normalized;
@@ -162,9 +238,10 @@ function appendDistinctText(parts, candidate) {
 
 export async function capturePlatformCaption(scope, platform, fallback = "") {
   const groups = PLATFORM_CAPTION_SELECTOR_GROUPS[platform] || [];
+  const excludeClosest = platform === "douyin" ? ".search-result-card" : "";
   const parts = [];
   for (const selectors of groups) {
-    appendDistinctText(parts, await firstSelectorText(scope, selectors));
+    appendDistinctText(parts, await firstSelectorText(scope, selectors, { excludeClosest }));
   }
   const fallbackText = normalizedPlatformText(fallback);
   if (parts.length === 0) return fallbackText;
@@ -196,15 +273,16 @@ export async function captureEngagementMetrics(scope, platform, capturedAt) {
   for (const [name, selectors] of Object.entries(ENGAGEMENT_SELECTORS[platform] || {})) {
     let display = null;
     for (const selector of selectors) {
-      const candidates = await scope.locator(selector).evaluateAll((nodes) => nodes.filter(node => {
+      const candidates = await scope.locator(selector).evaluateAll((nodes, platformName) => nodes.filter(node => {
         const rect = node.getBoundingClientRect();
         const style = getComputedStyle(node);
         return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden"
-          && !node.closest('[data-comment-id], .comments-container');
+          && !node.closest('[data-comment-id], .comments-container')
+          && !(platformName === "douyin" && node.closest(".search-result-card"));
       }).map((node) => ({
         machineValue: node.getAttribute("data-count") || node.getAttribute("data-value") || "",
         renderedValue: node instanceof HTMLElement ? node.innerText : node.textContent || "",
-      })));
+      })), platform);
       for (const candidate of candidates) {
         display = normalizedMetricDisplay(candidate.machineValue)
           || normalizedMetricDisplay(candidate.renderedValue);
@@ -261,18 +339,14 @@ export async function browserCapability() {
   };
 }
 
-export function pacingDelayMs(config = {}, random = Math.random, multiplier = 1) {
-  const minimum = Math.max(200, Number(config.pacing_min_delay_ms) || 700);
-  const maximum = Math.max(minimum, Number(config.pacing_max_delay_ms) || 1800);
-  const sample = Math.min(0.999999, Math.max(0, Number(random()) || 0));
-  return Math.round((minimum + (maximum - minimum) * sample) * multiplier);
-}
-
 async function pacingWait(page, config, multiplier = 1) {
+  assertBrowserFlow(page);
   await page.waitForTimeout(pacingDelayMs(config, Math.random, multiplier));
+  assertBrowserFlow(page);
 }
 
 async function pacedScroll(page, config) {
+  assertBrowserFlow(page, "feed_scroll");
   const fraction = 0.62 + Math.random() * 0.28;
   await page.evaluate((scrollFraction) => {
     window.scrollBy(0, Math.max(360, window.innerHeight * scrollFraction));
@@ -328,6 +402,7 @@ export function platformAccessError(platform, currentUrl, captchaFrameUrls = [])
 }
 
 export async function currentPlatformAccessError(page, platform) {
+  assertBrowserFlow(page, "access_check");
   const captchaFrameUrls = await boundedBrowserOperation(page.locator("iframe[src]").evaluateAll((frames) =>
     frames.map((frame) => frame.src || ""),
   ), 10_000, "access_check");
@@ -429,13 +504,13 @@ export async function waitForManualAccess({ page, context, platform, errorCode, 
     try {
       validatePlatformUrl(platform, page.url());
       const selector = {
-        douyin: '[data-aweme-id], [data-e2e="video-detail"], video, a[href*="/video/"], a[href*="/note/"]',
+        douyin: '[data-aweme-id], [data-e2e="video-detail"], video, a[href*="/video/"], a[href*="/note/"], .search-result-card',
         xiaohongshu: 'section.note-item[data-note-id], #detail-title, #detail-desc, a[href*="/explore/"]',
         kuaishou: '.video-card, .video-list .photo-card, .short-video-info-container-detail, video, a[href*="/short-video/"]',
       }[platform];
       const visibleSelector = selector.split(",").map(part => `${part.trim()}:visible`).join(",");
       ready = action === "continue" && !accessError && await page.locator(visibleSelector).count() > 0
-        && matchesVerificationTarget(platform, targetUrl, page.url())
+        && matchesManualAccessTarget(platform, targetUrl, page.url())
         && (errorCode !== "login_required" || await platformAuthenticationPresent(context, platform));
     } catch {
       // User navigation can be transient; only a verified platform document is ready.
@@ -464,16 +539,7 @@ export async function waitForInteractiveLogin({
   if (!executablePath) return { ready: false, error_code: "browser_missing" };
 
   const { chromium } = await import("playwright");
-  const profile = path.join(root, "browser-profile", platform);
-  await fs.mkdir(profile, { recursive: true });
-  const context = await chromium.launchPersistentContext(profile, {
-    executablePath,
-    headless: false,
-    viewport: { width: 1280, height: 900 },
-    args: process.platform === "linux" && process.env.WAYLAND_DISPLAY
-      ? ["--ozone-platform=wayland"]
-      : [],
-  });
+  const context = await launchPlatformBrowser({ chromium, root, platform, executablePath, headless: false });
   try {
     const page = context.pages()[0] || (await context.newPage());
     page.setDefaultTimeout(NAVIGATION_TIMEOUT_MS);
@@ -495,25 +561,32 @@ export async function waitForInteractiveLogin({
 
 export async function discoverCandidates(page, platform, sourceUrl, maxScrolls, limit, shouldStop, config) {
   const discovered = [];
+  const progressing = pageProgress();
   if (isDetailUrl(platform, sourceUrl)) discovered.push(validatePlatformUrl(platform, sourceUrl));
-  for (let scroll = 0; scroll <= maxScrolls && discovered.length < limit; scroll += 1) {
-    const selector = platform === "douyin" ? "a[href], [data-aweme-id]" : "a[href]";
-    const links = await page.locator(selector).evaluateAll((nodes) => nodes.flatMap(node => {
+  for (let scroll = 0; scroll <= optionalLimit(maxScrolls) && discovered.length < limit; scroll += 1) {
+    const links = await visibleDiscoveryCandidates(page, platform);
+    if (!progressing(links)) break;
+    discovered.push(...links);
+    const unique = canonicalCandidateUrls(platform, discovered);
+    discovered.length = 0;
+    discovered.push(...unique);
+    if (discovered.length >= limit || scroll === optionalLimit(maxScrolls) || (await shouldStop())) break;
+    await pacedScroll(page, config);
+  }
+  return discovered.slice(0, limit);
+}
+
+async function visibleDiscoveryCandidates(page, platform) {
+  const selector = platform === "douyin" ? "a[href], [data-aweme-id]" : "a[href]";
+  const links = await page.locator(selector).evaluateAll((nodes) => nodes.flatMap(node => {
       const rect = node.getBoundingClientRect(), style = getComputedStyle(node);
       if (rect.width <= 0 || rect.height <= 0 || style.visibility === "hidden"
         || style.display === "none" || Number(style.opacity) === 0) return [];
       const itemId = node.getAttribute("data-aweme-id");
       return [node.href, /^\d+$/u.test(itemId || "") ? `https://www.douyin.com/video/${itemId}` : null]
         .filter(value => typeof value === "string");
-    }));
-    discovered.push(...canonicalCandidateUrls(platform, links));
-    const unique = canonicalCandidateUrls(platform, discovered);
-    discovered.length = 0;
-    discovered.push(...unique);
-    if (discovered.length >= limit || scroll === maxScrolls || (await shouldStop())) break;
-    await pacedScroll(page, config);
-  }
-  return discovered.slice(0, limit);
+  }));
+  return canonicalCandidateUrls(platform, links);
 }
 
 export async function candidatesForDiscoverySource(
@@ -527,12 +600,12 @@ export async function candidatesForDiscoverySource(
   if ((config.source_mode || "home_feed") === "seed_urls" && isDetailUrl(platform, sourceUrl)) {
     return [validatePlatformUrl(platform, sourceUrl)];
   }
-  const candidateBudget = Math.min(100, Math.max(limit * 3, limit + 5));
+  const candidateBudget = limit;
   return discoverCandidates(
     page,
     platform,
     sourceUrl,
-    config.max_scrolls_per_source || 10,
+    config.max_scrolls_per_source,
     candidateBudget,
     shouldStop,
     config,
@@ -633,9 +706,7 @@ export async function openDouyinRecommendationDetail(page, config = {}, shouldSt
   const detailPath = `/video/${recommendation.itemId}`;
   const destination = page;
   const response = await destination.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT_MS });
-  if (response && [401, 403, 429].includes(response.status())) {
-    throw browserStageError(response.status() === 429 ? "rate_limited" : "challenge_required", "detail_navigation");
-  }
+  assertNavigationResponse(response, "detail_navigation");
   destination.setDefaultTimeout(NAVIGATION_TIMEOUT_MS);
   await destination.waitForLoadState("domcontentloaded", { timeout: NAVIGATION_TIMEOUT_MS }).catch(() => {});
   await pacingWait(destination, config, 1.25);
@@ -693,6 +764,31 @@ export async function advanceDouyinDetailFeed(page, previousItemId, config = {},
   return null;
 }
 
+async function douyinFallbackCover(scope) {
+  for (const selector of ["video:visible", "canvas:visible"]) {
+    const nodes = scope.locator(selector);
+    const count = Math.min(await nodes.count(), 8);
+    for (let index = 0; index < count; index += 1) {
+      const locator = nodes.nth(index);
+      const box = await locator.boundingBox();
+      if (box && box.width >= 180 && box.height >= 120) {
+        return { locator, source: "rendered_video_frame" };
+      }
+    }
+  }
+  return null;
+}
+
+async function largeVisibleVideo(scope) {
+  const videos = scope.locator("video:visible");
+  const count = Math.min(await videos.count(), 8);
+  for (let index = 0; index < count; index += 1) {
+    const box = await videos.nth(index).boundingBox();
+    if (box && box.width >= 180 && box.height >= 120) return true;
+  }
+  return false;
+}
+
 async function pageMetadata(page, platform, requestedUrl, scope = page) {
   const metadata = await page.evaluate(() => {
     const meta = (selector) => document.querySelector(selector)?.getAttribute("content")?.trim() || "";
@@ -711,13 +807,22 @@ async function pageMetadata(page, platform, requestedUrl, scope = page) {
   } catch {
     // Keep the already validated requested URL when a page supplies an invalid canonical value.
   }
+  const authorTitle = platform === "douyin"
+    ? await capturePlatformCaption(scope, "douyin", "")
+    : "";
+  const copy = platform === "douyin"
+    ? douyinRecordCopy({ authorTitle, listingTitle: metadata.title })
+    : null;
   return {
     ...metadata,
     canonical: isDetailUrl(platform, canonicalUrl)
       && platformItemId(platform, canonicalUrl) === platformItemId(platform, requestedUrl) ? canonicalUrl : requestedUrl,
-    hasVideo: await scope.locator("video").count() > 0,
-    title: scope === page ? metadata.title : await firstSelectorText(scope, PLATFORM_CAPTION_SELECTOR_GROUPS[platform]?.[0] || []),
-    platformText: await capturePlatformCaption(scope, platform, scope === page ? metadata.description : ""),
+    hasVideo: await largeVisibleVideo(scope),
+    title: copy ? copy.title : scope === page
+      ? metadata.title
+      : await firstSelectorText(scope, PLATFORM_CAPTION_SELECTOR_GROUPS[platform]?.[0] || []),
+    platformText: copy ? copy.platform_text
+      : await capturePlatformCaption(scope, platform, scope === page ? metadata.description : ""),
   };
 }
 
@@ -788,10 +893,11 @@ async function nextCarouselControl(scope, platform) {
 }
 
 async function clickNextCarousel(scope, platform, config) {
+  const page = typeof scope.page === "function" ? scope.page() : scope;
+  assertBrowserFlow(page, "carousel_next");
   const control = await nextCarouselControl(scope, platform);
   if (!control) return false;
   await control.click({ timeout: 5000 }).catch(() => {});
-  const page = typeof scope.page === "function" ? scope.page() : scope;
   await pacingWait(page, config, 0.5);
   return true;
 }
@@ -811,7 +917,7 @@ export async function collectRenderedImages({
   engagement,
   publication = {},
 }) {
-  const maximum = Math.min(100, config.max_images_per_post || 100);
+  const maximum = optionalLimit(config.max_images_per_post);
   const records = [];
   const temporaryPaths = [];
   const observedSources = new Set();
@@ -873,12 +979,12 @@ export async function collectRenderedImages({
   return { records, temporaryPaths };
 }
 
-export async function screenshotLocator(locator, targetPath, platform, mediaReadyTimeoutMs = 10_000) {
+export async function screenshotLocator(locator, targetPath, platform, mediaReadyTimeoutMs = 10_000, options = {}) {
   const page = locator.page();
   const assertCaptureReady = async () => {
     const accessError = await currentPlatformAccessError(page, platform);
     if (accessError) throw new Error(accessError);
-    if (!await locatorIsUsableCover(locator, 1)) throw new Error("screenshot_obscured");
+    if (!options.allowObscured && !await locatorIsUsableCover(locator, 1, platform)) throw new Error("screenshot_obscured");
   };
   await locator.scrollIntoViewIfNeeded();
   const mediaDeadline = Date.now() + mediaReadyTimeoutMs;
@@ -914,9 +1020,14 @@ async function persistVideoCover(root, platform, itemId, temporaryPath) {
   const relativePath = path.posix.join("video_covers", `${token}.png`);
   const targetPath = path.join(root, "exports", ...relativePath.split("/"));
   await fs.mkdir(path.dirname(targetPath), { recursive: true });
-  await fs.copyFile(temporaryPath, targetPath, fsConstants.COPYFILE_EXCL).catch((error) => {
+  try {
+    await fs.copyFile(temporaryPath, targetPath, fsConstants.COPYFILE_EXCL);
+  } catch (error) {
     if (error?.code !== "EEXIST") throw error;
-  });
+    if (await screenshotLooksBlank(targetPath) && !await screenshotLooksBlank(temporaryPath)) {
+      await fs.copyFile(temporaryPath, targetPath);
+    }
+  }
   return relativePath;
 }
 
@@ -967,25 +1078,39 @@ const VIDEO_COVER_SELECTORS = Object.freeze({
   }),
 });
 
-async function locatorIsUsableCover(locator, minimumWidth = 180) {
-  return locator.evaluate((node, widthFloor) => {
+async function locatorIsUsableCover(locator, minimumWidth = 180, platform = "") {
+  return locator.evaluate((node, args) => {
+    const widthFloor = args.widthFloor;
+    const platformName = args.platform;
     const rect = node.getBoundingClientRect();
     if (rect.width < widthFloor || rect.height < 120) return false;
     const card = node.closest("[data-aweme-id], [data-note-id]");
     const player = node.matches("video.kplayer-video")
       ? node.closest(".swiper-feed .swiper-slide-active .video-container") : null;
+    const douyinPlayer = node.closest('[data-e2e="video-player"], .xgplayer, xg-video-container');
     const left = Math.max(0, rect.left), top = Math.max(0, rect.top);
     const right = Math.min(window.innerWidth, rect.right), bottom = Math.min(window.innerHeight, rect.bottom);
     if (right <= left || bottom <= top) return false;
-    return [0.15, 0.5, 0.85].every(xRatio => [0.15, 0.5, 0.85].every(yRatio => {
+    const hit = (xRatio, yRatio) => {
       const topNode = document.elementFromPoint(left + (right - left) * xRatio, top + (bottom - top) * yRatio);
-      return topNode === node || node.contains(topNode)
-        || (card && topNode instanceof Element && topNode.closest("[data-aweme-id], [data-note-id]") === card)
-        || (player && topNode instanceof Element
-          && topNode.closest(".video-container") === player
-          && topNode.closest(".video-interact-panel, .volume-control-wrapper"));
-    }));
-  }, minimumWidth).catch(() => false);
+      if (!(topNode instanceof Element)) return false;
+      if (topNode === node || node.contains(topNode)) return true;
+      if (card && topNode.closest("[data-aweme-id], [data-note-id]") === card) return true;
+      if (player && topNode.closest(".video-container") === player
+        && topNode.closest(".video-interact-panel, .volume-control-wrapper")) return true;
+      if (douyinPlayer && (douyinPlayer.contains(topNode) || Boolean(topNode.closest(
+        '[data-e2e="video-player"], [data-e2e^="video-"], [data-e2e="feed-active-video"], .xgplayer, .xg-controls, xg-controls',
+      )))) return true;
+      if (platformName === "douyin" && node.parentElement?.contains(topNode)) {
+        const style = getComputedStyle(topNode);
+        const background = style.backgroundColor.replaceAll(" ", "");
+        if (style.opacity === "0" || background === "transparent" || background === "rgba(0,0,0,0)") return true;
+      }
+      return false;
+    };
+    if ([0.15, 0.5, 0.85].every(xRatio => [0.15, 0.5, 0.85].every(yRatio => hit(xRatio, yRatio)))) return true;
+    return (platformName === "douyin" || douyinPlayer || card) && hit(0.5, 0.5);
+  }, { widthFloor: minimumWidth, platform }).catch(() => false);
 }
 
 export async function renderedVideoCover(scope, platform) {
@@ -996,7 +1121,7 @@ export async function renderedVideoCover(scope, platform) {
       for (let index = 0; index < count; index += 1) {
         const locator = candidates.nth(index);
         const minimumWidth = platform === "kuaishou" ? 140 : 180;
-        if (await locatorIsUsableCover(locator, minimumWidth)) return { locator, source };
+        if (await locatorIsUsableCover(locator, minimumWidth, platform)) return { locator, source };
       }
     }
   }
@@ -1009,20 +1134,54 @@ async function freezeVideoIfPresent(locator) {
   }).catch(() => {});
 }
 
+async function capturePaintedCover({
+  scope, platform, screenshotPath, root, itemId, fallbackCoverPng = null,
+}) {
+  const tryLocator = async (locator, source) => {
+    if (!locator) return null;
+    const isVideo = await locator.evaluate((node) => node instanceof HTMLVideoElement).catch(() => false);
+    if (isVideo && !await awaitPaintedVideoFrame(locator)) return null;
+    if (isVideo) await freezeVideoIfPresent(locator);
+    try {
+      await screenshotLocator(locator, screenshotPath, platform, 10_000, {
+        allowObscured: platform === "douyin",
+      });
+    } catch {
+      return null;
+    }
+    if (await screenshotLooksBlank(screenshotPath)) return null;
+    return {
+      coverScreenshotPath: await persistVideoCover(root, platform, itemId, screenshotPath),
+      source,
+    };
+  };
+  const rendered = await renderedVideoCover(scope, platform);
+  let captured = rendered ? await tryLocator(rendered.locator, rendered.source) : null;
+  if (!captured && platform === "douyin" && !(rendered?.source === "rendered_video_frame")) {
+    const fallback = await douyinFallbackCover(scope);
+    captured = fallback ? await tryLocator(fallback.locator, fallback.source) : null;
+  }
+  if (!captured && fallbackCoverPng && !screenshotLooksBlankFromBytes(Buffer.from(fallbackCoverPng))) {
+    await fs.mkdir(path.dirname(screenshotPath), { recursive: true });
+    await fs.writeFile(screenshotPath, fallbackCoverPng);
+    captured = {
+      coverScreenshotPath: await persistVideoCover(root, platform, itemId, screenshotPath),
+      source: "search_tile",
+    };
+  }
+  return captured;
+}
+
 async function collectPage(page, root, runId, platform, itemUrl, config, discoverySource) {
   const response = await page.goto(itemUrl, {
     waitUntil: "domcontentloaded",
     timeout: NAVIGATION_TIMEOUT_MS,
   });
-  if (response && [404, 410].includes(response.status())) throw new Error("source_unavailable");
-  if (response && [401, 403, 429].includes(response.status())) {
-    throw new Error(response.status() === 429 ? "rate_limited" : "challenge_required");
-  }
-  assertDocumentResponse(response, "detail_navigation");
+  assertNavigationResponse(response, "detail_navigation");
   return collectOpenedPage(page, root, runId, platform, itemUrl, config, discoverySource);
 }
 
-async function collectOpenedPage(page, root, runId, platform, itemUrl, config, discoverySource, scopeOverride = null) {
+async function collectOpenedPage(page, root, runId, platform, itemUrl, config, discoverySource, scopeOverride = null, coverOptions = {}) {
   await pacingWait(page, config, 1.25);
   const accessError = await currentPlatformAccessError(page, platform);
   if (accessError) throw browserStageError(accessError, "detail_access");
@@ -1043,39 +1202,45 @@ async function collectOpenedPage(page, root, runId, platform, itemUrl, config, d
   if (detail) await detail.waitFor({ state: "visible", timeout: NAVIGATION_TIMEOUT_MS });
   const scope = detail || page;
   const metadata = await pageMetadata(page, platform, itemUrl, scope);
-  const itemId = platformItemId(platform, metadata.canonical);
+  const sourceUrl = scopeOverride ? itemUrl : metadata.canonical;
+  const itemId = platformItemId(platform, sourceUrl);
   const discoveredAt = new Date().toISOString();
   const engagement = await captureEngagementMetrics(scope, platform, discoveredAt);
   const publication = await capturePublication(scope, platform, itemId);
   const temporaryRoot = path.join(root, "tmp", runId);
-  if (metadata.hasVideo) {
-    const screenshotPath = path.join(temporaryRoot, `${itemId.replaceAll(":", "_")}-video.png`);
-    const cover = await renderedVideoCover(scope, platform);
-    if (!cover) throw new Error("media_element_not_found");
-    await freezeVideoIfPresent(cover.locator);
-    await screenshotLocator(cover.locator, screenshotPath, platform);
-    const coverScreenshotPath = await persistVideoCover(root, platform, itemId, screenshotPath);
-    return {
-      records: [{
-        kind: "video",
-        dedup_key: `${itemId}:video`,
-        platform,
-        browser_mode: config.browser_mode || "silent",
-        source_mode: discoverySource.source_mode,
-        search_keyword: discoverySource.search_keyword || "",
-        discovery_source_url: discoverySource.url,
-        item_id: itemId,
-        title: metadata.title,
-        platform_text: metadata.platformText,
-        cover_screenshot_path: coverScreenshotPath,
-        cover_capture_source: cover.source,
-        video_page_url: metadata.canonical,
-        discovered_at: discoveredAt,
-        ...publication,
-        engagement,
-      }],
-      temporaryPaths: [screenshotPath],
-    };
+  const screenshotPath = path.join(temporaryRoot, `${itemId.replaceAll(":", "_")}-video.png`);
+  const cover = (metadata.hasVideo || coverOptions.fallbackCoverPng)
+    ? await capturePaintedCover({
+      scope,
+      platform,
+      screenshotPath,
+      root,
+      itemId,
+      fallbackCoverPng: coverOptions.fallbackCoverPng,
+    })
+    : null;
+  if (cover) {
+      return {
+        records: [{
+          kind: "video",
+          dedup_key: `${itemId}:video`,
+          platform,
+          browser_mode: config.browser_mode || "silent",
+          source_mode: discoverySource.source_mode,
+          search_keyword: discoverySource.search_keyword || "",
+          discovery_source_url: discoverySource.url,
+          item_id: itemId,
+          title: metadata.title,
+          platform_text: metadata.platformText,
+          cover_screenshot_path: cover.coverScreenshotPath,
+          cover_capture_source: cover.source,
+          video_page_url: sourceUrl,
+          discovered_at: discoveredAt,
+          ...publication,
+          engagement,
+        }],
+        temporaryPaths: [screenshotPath],
+      };
   }
   return collectRenderedImages({
     scope,
@@ -1085,7 +1250,7 @@ async function collectOpenedPage(page, root, runId, platform, itemUrl, config, d
     itemId,
     title: metadata.title,
     platformText: metadata.platformText,
-    sourcePageUrl: metadata.canonical,
+    sourcePageUrl: sourceUrl,
     discoverySource,
     config,
     discoveredAt,
@@ -1169,17 +1334,20 @@ async function collectDouyinRecommendationFeed(
   shouldStop,
   onPage,
   onFailure,
+  completed = new Set(),
 ) {
   const seen = new Set();
+  const progressing = pageProgress();
   let handled = 0;
   let lastError = null;
-  const maxScrolls = config.max_scrolls_per_source || 10;
+  const maxScrolls = optionalLimit(config.max_scrolls_per_source);
   const opened = await openDouyinRecommendationDetail(page, config, shouldStop);
   const detailPage = opened.page;
   let current = opened.entry;
   for (let scroll = 0; scroll <= maxScrolls && handled < limit && current; scroll += 1) {
     if (await shouldStop()) break;
-    if (!seen.has(current.itemId)) {
+    if (!progressing([current.itemId])) break;
+    if (!seen.has(current.itemId) && !completed.has(`douyin:${current.itemId}`)) {
       seen.add(current.itemId);
       try {
         await pacingWait(detailPage, config, 0.5);
@@ -1200,12 +1368,15 @@ async function collectDouyinRecommendationFeed(
       } catch (error) {
         lastError = error;
         await onFailure?.(error);
+        if (stopsCollection(error)) throw error;
       }
     }
     if (handled >= limit || scroll === maxScrolls || (await shouldStop())) break;
     current = await advanceDouyinDetailFeed(detailPage, current.itemId, config, shouldStop);
   }
-  if (handled === 0 && !(await shouldStop())) throw lastError || new Error("selector_drift");
+  if (handled === 0 && !(await shouldStop()) && (lastError || completed.size === 0)) {
+    throw lastError || new Error("selector_drift");
+  }
   return handled;
 }
 
@@ -1347,11 +1518,13 @@ export async function collectXiaohongshuHomeFeed(
   shouldStop,
   onPage,
   onFailure,
+  completed = new Set(),
 ) {
   const seen = new Set();
+  const progressing = pageProgress();
   let handled = 0;
   let lastError = null;
-  const maxScrolls = config.max_scrolls_per_source || 10;
+  const maxScrolls = optionalLimit(config.max_scrolls_per_source);
   await waitForPlatformFeed(page, "xiaohongshu", config, shouldStop);
   for (let scroll = 0; scroll <= maxScrolls && handled < limit; scroll += 1) {
     const accessError = await accessErrorAfterExplicitVisibleWait(page, "xiaohongshu", config, shouldStop);
@@ -1365,9 +1538,11 @@ export async function collectXiaohongshuHomeFeed(
         };
       }),
     );
+    if (!progressing(cards.filter(card => card.visible).map(card => card.itemId))) break;
     for (const card of cards) {
       if (handled >= limit || (await shouldStop())) break;
-      if (!/^[A-Za-z0-9_-]+$/u.test(card.itemId) || !card.visible || seen.has(card.itemId)) continue;
+      if (!/^[A-Za-z0-9_-]+$/u.test(card.itemId) || !card.visible || seen.has(card.itemId)
+        || completed.has(`xiaohongshu:${card.itemId}`)) continue;
       seen.add(card.itemId);
       try {
         await pacingWait(page, config, 0.5);
@@ -1384,14 +1559,15 @@ export async function collectXiaohongshuHomeFeed(
       } catch (error) {
         lastError = error;
         await onFailure?.(error);
-        if (["login_required", "challenge_required", "network_access_restricted", "collection_stopped",
-          "interactive_verification_cancelled", "interactive_verification_timeout"].includes(error.message)) throw error;
+        if (stopsCollection(error)) throw error;
       }
     }
     if (handled >= limit || scroll === maxScrolls || (await shouldStop())) break;
     await pacedScroll(page, config);
   }
-  if (handled === 0 && !(await shouldStop())) throw lastError || new Error("selector_drift");
+  if (handled === 0 && !(await shouldStop()) && (lastError || completed.size === 0)) {
+    throw lastError || new Error("selector_drift");
+  }
   return handled;
 }
 
@@ -1405,11 +1581,13 @@ async function collectKuaishouHomeFeed(
   shouldStop,
   onPage,
   onFailure,
+  completed = new Set(),
 ) {
   const seen = new Set();
+  const progressing = pageProgress();
   let handled = 0;
   let lastError = null;
-  const maxScrolls = config.max_scrolls_per_source || 10;
+  const maxScrolls = optionalLimit(config.max_scrolls_per_source);
   await waitForPlatformFeed(page, "kuaishou", config, shouldStop);
   for (let scroll = 0; scroll <= maxScrolls && handled < limit; scroll += 1) {
     const cards = await page.locator(".video-card").evaluateAll((nodes) =>
@@ -1422,9 +1600,11 @@ async function collectKuaishouHomeFeed(
         };
       }),
     );
+    if (!progressing(cards.filter(card => card.visible).map(card => card.itemUrl))) break;
     for (const card of cards) {
       if (handled >= limit || (await shouldStop())) break;
-      if (!card.visible || !isDetailUrl("kuaishou", card.itemUrl) || seen.has(card.itemUrl)) continue;
+      if (!card.visible || !isDetailUrl("kuaishou", card.itemUrl) || seen.has(card.itemUrl)
+        || completed.has(platformItemId("kuaishou", card.itemUrl))) continue;
       seen.add(card.itemUrl);
       try {
         await pacingWait(page, config, 0.5);
@@ -1441,36 +1621,34 @@ async function collectKuaishouHomeFeed(
       } catch (error) {
         lastError = error;
         await onFailure?.(error);
+        if (stopsCollection(error)) throw error;
       }
     }
     if (handled >= limit || scroll === maxScrolls || (await shouldStop())) break;
     await pacedScroll(page, config);
   }
-  if (handled === 0 && !(await shouldStop())) throw lastError || new Error("selector_drift");
+  if (handled === 0 && !(await shouldStop()) && (lastError || completed.size === 0)) {
+    throw lastError || new Error("selector_drift");
+  }
   return handled;
 }
 
-export async function collectPlatform({ root, runId, platform, config, limit, shouldStop, onPage, onFailure, onSearch }) {
+export async function collectPlatform({ root, runId, platform, config, limit, shouldStop, onPage, onFailure, onSearch,
+  completedPosts = new Set() }) {
   const browserMode = resolveBrowserMode(platform, config.browser_mode);
   config = { ...config, browser_mode: browserMode };
   if (browserMode === "visible" && !guiAvailable()) throw new Error("display_unavailable");
   const executablePath = await existingExecutable();
   if (!executablePath) throw new Error("browser_missing");
   const { chromium } = await import("playwright");
-  const profile = path.join(root, "browser-profile", platform);
-  await fs.mkdir(profile, { recursive: true });
-  const context = await chromium.launchPersistentContext(profile, {
-    executablePath,
-    headless: browserMode === "silent",
-    viewport: { width: 1280, height: 900 },
-    args: browserMode === "visible" && process.platform === "linux" && process.env.WAYLAND_DISPLAY
-      ? ["--ozone-platform=wayland"]
-      : [],
-  });
+  const context = await launchPlatformBrowser({ chromium, root, platform, executablePath,
+    headless: browserMode === "silent" });
+  const stopObserving = observePlatformBackpressure(context, platform);
   let page = context.pages()[0] || (await context.newPage());
   page.setDefaultTimeout(NAVIGATION_TIMEOUT_MS);
   let handled = 0;
   let lastError = null;
+  const outcomes = [];
   let stage = "source_navigation";
   let verificationTarget;
   try {
@@ -1493,25 +1671,39 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
           result_url: discoverySource.url, method: "platform_search_form", result_ready: true });
       } else {
         const response = await page.goto(sourceUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT_MS });
-        if (response && [401, 403, 429].includes(response.status())) {
-          throw browserStageError(response.status() === 429 ? "rate_limited" : "challenge_required", stage);
-        }
-        assertDocumentResponse(response, stage);
+        assertNavigationResponse(response, stage);
       }
       await pacingWait(page, config, 1.25);
       stage = "source_access";
       const accessError = await accessErrorAfterExplicitVisibleWait(page, platform, config, shouldStop);
       if (accessError) throw new Error(accessError);
       stage = "collect_items";
-      if (platform === "kuaishou" && discoverySource.source_mode === "topics"
-        && await page.locator(".video-list .photo-card").count()) {
-        handled += await collectKuaishouSearchResults({ page, config,
+      if (platform === "douyin" && discoverySource.source_mode === "topics"
+        && await page.locator(".search-result-card:visible .videoImage").count()) {
+        const outcome = await collectDouyinSearchResults({ page, config,
           limit: limit - handled, shouldStop, onPage, onFailure,
+          completed: completedPosts, detailed: true,
           checkAccess: candidate => accessErrorAfterExplicitVisibleWait(candidate, platform, config, shouldStop),
           settle: candidate => pacingWait(candidate, config),
           scrollPage: candidate => pacedScroll(candidate, config),
-          collect: (opened, url, scope) => collectOpenedPage(opened, root, runId, platform, url, config, discoverySource, scope),
+          collect: (opened, url, scope, coverOptions) => collectOpenedPage(opened, root, runId, platform, url, config, discoverySource, scope, coverOptions),
         });
+        outcomes.push(outcome);
+        handled += outcome.handled;
+        continue;
+      }
+      if (platform === "kuaishou" && discoverySource.source_mode === "topics"
+        && await page.locator(".video-list .photo-card").count()) {
+        const outcome = await collectKuaishouSearchResults({ page, config,
+          limit: limit - handled, shouldStop, onPage, onFailure,
+          completed: completedPosts, detailed: true,
+          checkAccess: candidate => accessErrorAfterExplicitVisibleWait(candidate, platform, config, shouldStop),
+          settle: candidate => pacingWait(candidate, config),
+          scrollPage: candidate => pacedScroll(candidate, config),
+          collect: (opened, url, scope, coverOptions) => collectOpenedPage(opened, root, runId, platform, url, config, discoverySource, scope, coverOptions),
+        });
+        outcomes.push(outcome);
+        handled += outcome.handled;
         continue;
       }
       if (platform === "douyin" && (config.source_mode || "home_feed") === "home_feed") {
@@ -1525,6 +1717,7 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
           shouldStop,
           onPage,
           onFailure,
+          completedPosts,
         );
         continue;
       }
@@ -1539,6 +1732,7 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
           shouldStop,
           onPage,
           onFailure,
+          completedPosts,
         );
         continue;
       }
@@ -1553,7 +1747,33 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
           shouldStop,
           onPage,
           onFailure,
+          completedPosts,
         );
+        continue;
+      }
+      if (discoverySource.source_mode === "topics") {
+        const outcome = await collectOrderedPages({
+          readCandidates: async () => {
+            const access = await accessErrorAfterExplicitVisibleWait(page, platform, config, shouldStop);
+            if (access) throw browserStageError(access, "search_results_access");
+            return visibleDiscoveryCandidates(page, platform);
+          },
+          identity: url => platformItemId(platform, url),
+          completed: completedPosts,
+          collect: async candidate => {
+            verificationTarget = candidate;
+            await pacingWait(page, config, 0.5);
+            const result = await withSearchResult(page, platform, candidate, discoverySource,
+              opened => collectOpenedPage(opened, root, runId, platform, candidate, config, discoverySource),
+              { shouldStop, checkAccess: opened => currentPlatformAccessError(opened, platform) });
+            await onPage(result);
+          },
+          scroll: () => pacedScroll(page, config),
+          shouldStop, limit: limit - handled, maxScrolls: config.max_scrolls_per_source,
+          onFailure, stopsCollection,
+        });
+        outcomes.push(outcome);
+        handled += outcome.handled;
         continue;
       }
       const candidates = await candidatesForDiscoverySource(
@@ -1582,20 +1802,20 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
         } catch (error) {
           lastError = error;
           await onFailure?.(error);
-          if (["login_required", "challenge_required", "network_access_restricted", "rate_limited",
-            "search_results_restore_failed", "collection_stopped"].includes(String(error?.message))) {
-            throw error;
-          }
+          if (stopsCollection(error)) throw error;
         }
       }
     }
     if (
       handled === 0 &&
-      !(await shouldStop())
+      !(await shouldStop()) && outcomes.length === 0 && completedPosts.size === 0
     ) {
       throw lastError || new Error("selector_drift");
     }
-    return { handled };
+    assertBrowserFlow(page, "collection_complete");
+    return { handled, sources: outcomes,
+      stop_reason: handled >= limit ? "target_reached" : await shouldStop() ? "collection_stopped"
+        : outcomes.at(-1)?.stop_reason || "source_exhausted" };
   } catch (cause) {
     const error = normalizeBrowserError(cause, stage);
     error.discovery_target_url ||= verificationTarget;
@@ -1604,6 +1824,7 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
     }
     throw error;
   } finally {
+    stopObserving();
     await context.close().catch(() => {});
   }
 }
