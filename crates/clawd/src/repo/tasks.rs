@@ -8,6 +8,7 @@ use crate::{now_ts, now_ts_u64, parse_task_status, AppState, ClaimedTask, TaskQu
 mod active;
 mod history;
 mod lifecycle_projection;
+mod success_artifacts;
 
 pub(crate) use active::{
     list_active_tasks_for_user_internal, list_active_tasks_internal, list_all_active_tasks_internal,
@@ -22,6 +23,7 @@ use lifecycle_projection::{
     ready_paused_checkpoint_resume_executor_from_result_json, resume_entrypoint_token,
     summarize_active_task_payload, worker_failure_result_json,
 };
+pub(crate) use success_artifacts::prepare_succeeded_result_json;
 
 pub(crate) const WORKER_LEASE_LOST_STATUS_CODE: &str = "worker_lease_lost";
 
@@ -273,6 +275,7 @@ pub(crate) fn update_task_success(
     claim_attempt: i64,
     result_json: &str,
 ) -> anyhow::Result<()> {
+    let result_json = success_artifacts::prepare_succeeded_result_json(state, task_id, result_json);
     let db = state
         .core
         .db
@@ -333,8 +336,6 @@ pub(crate) fn update_task_success(
                     ],
                 )?;
                 if changed > 0 {
-                    drop(db);
-                    attach_task_artifacts_after_success(state, task_id, claim_attempt, result_json);
                     return Ok(());
                 }
             }
@@ -348,68 +349,7 @@ pub(crate) fn update_task_success(
             &["running", "succeeded"],
         ));
     }
-    drop(db);
-    attach_task_artifacts_after_success(state, task_id, claim_attempt, result_json);
     Ok(())
-}
-
-pub(super) fn attach_task_artifacts_after_success(
-    state: &AppState,
-    task_id: &str,
-    claim_attempt: i64,
-    result_json: &str,
-) {
-    let delivered_result_json = match crate::task_artifacts::materialize_task_result_artifacts(
-        &state.skill_rt.workspace_root,
-        task_id,
-        result_json,
-    ) {
-        Ok(result) => result,
-        Err(error) => {
-            warn!(
-                "task artifact materialization failed task_id={} error={}",
-                task_id, error
-            );
-            return;
-        }
-    };
-    if delivered_result_json == result_json {
-        return;
-    }
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(error) => {
-            warn!("task artifact manifest store unavailable task_id={task_id} error={error}");
-            return;
-        }
-    };
-    match db.execute(
-        "UPDATE tasks
-         SET result_json = ?2, updated_at = ?3
-         WHERE task_id = ?1
-           AND status = 'succeeded'
-           AND result_json = ?4
-           AND lease_owner = ?5
-           AND claim_attempt = ?6",
-        params![
-            task_id,
-            delivered_result_json,
-            now_ts(),
-            result_json,
-            state.worker.worker_id.as_str(),
-            claim_attempt
-        ],
-    ) {
-        Ok(1) => {}
-        Ok(_) => warn!(
-            "task artifact manifest compare-and-set skipped task_id={} claim_attempt={}",
-            task_id, claim_attempt
-        ),
-        Err(error) => warn!(
-            "task artifact manifest store failed task_id={} error={}",
-            task_id, error
-        ),
-    }
 }
 
 pub(crate) fn touch_running_task(

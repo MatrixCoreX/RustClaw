@@ -8,6 +8,7 @@ fn compatibility_decoder_parses_every_legacy_prefix_once() {
         "VIDEO_FILE:/tmp/video.mp4\n",
         "VOICE_FILE:/tmp/voice.ogg\n",
         "MUSIC_FILE:/tmp/music.mp3\n",
+        "AUDIO_FILE:/tmp/audio.mp3\n",
         "FILE_FILE:/tmp/document.pdf\n",
         "FILE:/tmp/auto.bin\n",
         "IMAGE_URL:https://example.invalid/image.png\n",
@@ -17,14 +18,15 @@ fn compatibility_decoder_parses_every_legacy_prefix_once() {
     );
     let tokens = legacy_delivery_tokens(text);
 
-    assert_eq!(tokens.len(), 10);
+    assert_eq!(tokens.len(), 11);
     assert_eq!(tokens[0].kind, LegacyDeliveryKind::Image);
     assert_eq!(tokens[0].reference, "/tmp/image.png");
-    assert_eq!(tokens[4].kind, LegacyDeliveryKind::File);
-    assert_eq!(tokens[5].kind, LegacyDeliveryKind::Auto);
-    assert_eq!(tokens[6].location, LegacyDeliveryLocation::RemoteUrl);
+    assert_eq!(tokens[4].kind, LegacyDeliveryKind::Music);
+    assert_eq!(tokens[5].kind, LegacyDeliveryKind::File);
+    assert_eq!(tokens[6].kind, LegacyDeliveryKind::Auto);
+    assert_eq!(tokens[7].location, LegacyDeliveryLocation::RemoteUrl);
     assert_eq!(strip_legacy_delivery_lines(text), "caption");
-    assert_eq!(legacy_delivery_lines(text).lines().count(), 10);
+    assert_eq!(legacy_delivery_lines(text).lines().count(), 11);
 }
 
 #[test]
@@ -90,4 +92,22 @@ fn compatibility_decoder_does_not_treat_inline_or_unspaced_examples_as_delivery_
     ] {
         assert_eq!(parse_legacy_delivery_line(text), None, "{text}");
     }
+}
+
+#[test]
+fn inline_task_artifact_handles_are_scrubbed_from_caption_prose() {
+    let text = concat!(
+        "- 原创图片（webp，72,426 字节）：IMAGE_FILE:artifact:task/task-1/a_image\n",
+        "- 背景音频：AUDIO_FILE:artifact:task/task-1/a_audio\n",
+        "caption IMAGE_FILE:/tmp/example.png",
+    );
+    let scrubbed = scrub_inline_task_artifact_handles(text);
+    assert_eq!(
+        scrubbed,
+        concat!(
+            "- 原创图片（webp，72,426 字节）\n",
+            "- 背景音频\n",
+            "caption IMAGE_FILE:/tmp/example.png",
+        )
+    );
 }

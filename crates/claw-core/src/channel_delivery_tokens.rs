@@ -52,6 +52,11 @@ const LEGACY_PREFIXES: &[(&str, LegacyDeliveryKind, LegacyDeliveryLocation)] = &
         LegacyDeliveryLocation::LocalFile,
     ),
     (
+        "AUDIO_FILE:",
+        LegacyDeliveryKind::Music,
+        LegacyDeliveryLocation::LocalFile,
+    ),
+    (
         "FILE_FILE:",
         LegacyDeliveryKind::File,
         LegacyDeliveryLocation::LocalFile,
@@ -190,6 +195,59 @@ pub fn normalize_legacy_delivery_reference(value: &str) -> String {
             )
         })
         .to_string()
+}
+
+const TASK_ARTIFACT_HANDLE_PREFIX: &str = "artifact:task/";
+
+/// Remove leftover `PREFIX:artifact:task/...` (and bare handles) from caption
+/// prose. Whole token lines stay a separate protocol concern.
+pub fn scrub_inline_task_artifact_handles(text: &str) -> String {
+    text.lines()
+        .map(scrub_inline_task_artifact_handles_in_line)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn scrub_inline_task_artifact_handles_in_line(line: &str) -> String {
+    let mut rest = line;
+    let mut out = String::new();
+    while let Some((start, end)) = next_inline_task_artifact_span(rest) {
+        out.push_str(&rest[..start]);
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    out.trim_end_matches(|ch: char| matches!(ch, '：' | ':' | ' ' | '\t'))
+        .to_string()
+}
+
+fn next_inline_task_artifact_span(text: &str) -> Option<(usize, usize)> {
+    let mut best: Option<(usize, usize)> = None;
+    for (prefix, _, _) in LEGACY_PREFIXES {
+        let needle = format!("{prefix}{TASK_ARTIFACT_HANDLE_PREFIX}");
+        if let Some(idx) = text.find(&needle) {
+            let end = handle_span_end(text, idx + prefix.len());
+            if best.is_none_or(|(start, _)| idx < start) {
+                best = Some((idx, end));
+            }
+        }
+    }
+    if let Some(idx) = text.find(TASK_ARTIFACT_HANDLE_PREFIX) {
+        if best.is_none_or(|(start, _)| idx < start) {
+            best = Some((idx, handle_span_end(text, idx)));
+        }
+    }
+    best
+}
+
+fn handle_span_end(text: &str, handle_start: usize) -> usize {
+    text[handle_start..]
+        .find(is_task_artifact_handle_terminator)
+        .map(|offset| handle_start + offset)
+        .unwrap_or(text.len())
+}
+
+fn is_task_artifact_handle_terminator(ch: char) -> bool {
+    ch.is_whitespace() || matches!(ch, '，' | ',' | ';' | '。' | ')' | '）')
 }
 
 fn strip_matching_legacy_lines(

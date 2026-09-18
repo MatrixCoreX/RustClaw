@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use serde_json::{Map, Value};
 
 use crate::channel_delivery_tokens::{
-    legacy_delivery_tokens, parse_legacy_delivery_line_ref, LegacyDeliveryKind,
+    legacy_delivery_tokens, parse_legacy_delivery_line_ref, scrub_inline_task_artifact_handles,
+    LegacyDeliveryKind,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,7 +79,7 @@ pub fn extract_image_paths_from_reply(answer: &str, workspace_root: &Path) -> Ve
 }
 
 pub fn strip_wechat_delivery_lines(answer: &str) -> String {
-    answer
+    let without_token_lines = answer
         .lines()
         .filter(|line| {
             let t = line.trim();
@@ -94,7 +95,8 @@ pub fn strip_wechat_delivery_lines(answer: &str) -> String {
             true
         })
         .collect::<Vec<_>>()
-        .join("\n")
+        .join("\n");
+    scrub_inline_task_artifact_handles(&without_token_lines)
 }
 
 fn collect_structured_media(

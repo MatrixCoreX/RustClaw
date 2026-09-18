@@ -12,7 +12,8 @@ use serde_json::Value;
 
 use crate::{
     channel_delivery_tokens::{
-        legacy_delivery_tokens, parse_legacy_delivery_line_ref, LegacyDeliveryLocation,
+        legacy_delivery_tokens, parse_legacy_delivery_line_ref, scrub_inline_task_artifact_handles,
+        LegacyDeliveryLocation,
     },
     wechat_reply_media::strip_wechat_delivery_lines,
 };
@@ -56,10 +57,10 @@ enum DeliveryPreference {
 /// tokens pointing at clawd's immutable task delivery copies. Named `FILE:` / `VIDEO_FILE:`
 /// lines remap onto those copies; they do not drop other non-internal task artifacts that
 /// were already materialized for user delivery. Remaining `artifact:task/...` handles in the
-/// user-visible reply are rewritten to those same resolved filesystem paths. If a task
-/// explicitly disables delivery, all delivery-token lines are removed. If any selected
-/// manifest cannot be resolved safely, the original messages are retained as a compatibility
-/// fallback.
+/// user-visible reply are rewritten to the artifact filename. Dedicated `PREFIX:/abs/path`
+/// lines stay adapter-only. If a task explicitly disables delivery, all delivery-token lines
+/// are removed. If any selected manifest cannot be resolved safely, the original messages
+/// are retained as a compatibility fallback.
 pub fn merge_task_artifact_delivery_messages(
     task_id: &str,
     result_json: Option<&Value>,
@@ -77,11 +78,21 @@ pub fn merge_task_artifact_delivery_messages(
         return messages_without_unresolved_task_artifact_lines(messages);
     }
     let messages = messages_without_internal_manifest_delivery_lines(messages, &manifests);
-    let explicit_references = messages
+    let mut explicit_references: Vec<String> = messages
         .iter()
         .flat_map(|message| legacy_delivery_tokens(message))
         .map(|token| token.reference)
-        .collect::<Vec<_>>();
+        .collect();
+    for message in &messages {
+        for handle in inline_task_artifact_handles(message) {
+            if explicit_references
+                .iter()
+                .all(|existing| existing != &handle)
+            {
+                explicit_references.push(handle);
+            }
+        }
+    }
     let selected_manifests = manifests
         .iter()
         .filter(|manifest| !internal_runtime_artifact(manifest))
@@ -137,7 +148,7 @@ pub fn merge_task_artifact_delivery_messages(
         .iter()
         .map(|(manifest, path)| artifact_delivery_token(manifest, path))
         .collect::<Vec<_>>();
-    let messages = rewrite_artifact_handles_to_resolved_paths(task_id, &resolved, messages);
+    let messages = rewrite_artifact_handles_for_visible_text(task_id, &resolved, messages);
 
     let mut merged = messages_without_delivery_lines(messages);
     let token_block = tokens.join("\n");
@@ -158,19 +169,66 @@ const VISIBLE_ARTIFACT_TOKEN_PREFIXES: &[&str] = &[
     "VIDEO_FILE:",
     "VOICE_FILE:",
     "MUSIC_FILE:",
+    "AUDIO_FILE:",
     "FILE:",
 ];
 
-fn rewrite_artifact_handles_to_resolved_paths(
+/// True when channel copy still names `artifact:task/...` handles and the
+/// succeeded result has not yet stored a materialized artifact manifest.
+pub fn messages_awaiting_task_artifact_materialization(
+    result_json: Option<&Value>,
+    messages: &[String],
+) -> bool {
+    if !messages
+        .iter()
+        .any(|message| message_contains_task_artifact_handle(message))
+    {
+        return false;
+    }
+    result_json
+        .and_then(|result| result.get("artifacts"))
+        .and_then(Value::as_array)
+        .is_none_or(|items| items.is_empty())
+}
+
+fn message_contains_task_artifact_handle(message: &str) -> bool {
+    VISIBLE_ARTIFACT_TOKEN_PREFIXES
+        .iter()
+        .any(|prefix| message.contains(&format!("{prefix}artifact:task/")))
+}
+
+fn inline_task_artifact_handles(message: &str) -> Vec<String> {
+    let mut handles = Vec::new();
+    for prefix in VISIBLE_ARTIFACT_TOKEN_PREFIXES {
+        let needle = format!("{prefix}artifact:task/");
+        let mut search = message;
+        while let Some(start) = search.find(&needle) {
+            let rest = &search[start + prefix.len()..];
+            let handle_end = rest
+                .find(|ch: char| {
+                    ch.is_whitespace() || matches!(ch, '，' | ',' | ';' | '。' | ')' | '）')
+                })
+                .unwrap_or(rest.len());
+            let handle = rest[..handle_end].trim().to_string();
+            if task_artifact_reference(&handle) {
+                handles.push(handle);
+            }
+            search = &search[start + needle.len()..];
+        }
+    }
+    handles
+}
+
+fn rewrite_artifact_handles_for_visible_text(
     task_id: &str,
     resolved: &[(&TaskDeliveryArtifactManifest, PathBuf)],
     messages: Vec<String>,
 ) -> Vec<String> {
     let mut replacements = Vec::new();
-    for (manifest, path) in resolved {
-        let path = path.display().to_string();
+    for (manifest, _) in resolved {
+        let filename = safe_filename(&manifest.filename);
         if let Some(handle) = canonical_task_artifact_ref(task_id, &manifest.id) {
-            replacements.push((handle, path.clone()));
+            replacements.push((handle, filename.clone()));
         }
         let artifact_ref = manifest.artifact_ref.trim();
         if !artifact_ref.is_empty()
@@ -178,21 +236,30 @@ fn rewrite_artifact_handles_to_resolved_paths(
                 .iter()
                 .all(|(existing, _)| existing != artifact_ref)
         {
-            replacements.push((artifact_ref.to_string(), path));
+            replacements.push((artifact_ref.to_string(), filename));
         }
     }
     replacements.sort_by(|left, right| right.0.len().cmp(&left.0.len()));
     messages
         .into_iter()
         .map(|message| {
-            let mut rewritten = message;
-            for (handle, path) in &replacements {
-                for prefix in VISIBLE_ARTIFACT_TOKEN_PREFIXES {
-                    rewritten = rewritten.replace(&format!("{prefix}{handle}"), path);
-                }
-                rewritten = rewritten.replace(handle, path);
-            }
-            rewritten
+            message
+                .lines()
+                .map(|line| {
+                    if parse_legacy_delivery_line_ref(line.trim()).is_some() {
+                        return line.to_string();
+                    }
+                    let mut rewritten = line.to_string();
+                    for (handle, filename) in &replacements {
+                        for prefix in VISIBLE_ARTIFACT_TOKEN_PREFIXES {
+                            rewritten = rewritten.replace(&format!("{prefix}{handle}"), filename);
+                        }
+                        rewritten = rewritten.replace(handle, filename);
+                    }
+                    rewritten
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
         })
         .collect()
 }
@@ -307,16 +374,17 @@ fn messages_without_unresolved_task_artifact_lines(messages: Vec<String>) -> Vec
     messages
         .into_iter()
         .map(|message| {
-            message
+            let kept = message
                 .lines()
                 .filter(|line| {
                     parse_legacy_delivery_line_ref(line.trim())
                         .is_none_or(|token| !task_artifact_reference(token.reference))
                 })
                 .collect::<Vec<_>>()
-                .join("\n")
+                .join("\n");
+            scrub_inline_task_artifact_handles(&kept).trim().to_string()
         })
-        .filter(|message| !message.trim().is_empty())
+        .filter(|message| !message.is_empty())
         .collect()
 }
 
@@ -484,6 +552,8 @@ fn artifact_delivery_token(manifest: &TaskDeliveryArtifactManifest, path: &Path)
         "IMAGE_FILE:"
     } else if kind == "video" || mime.starts_with("video/") {
         "VIDEO_FILE:"
+    } else if kind == "audio" || mime.starts_with("audio/") || kind == "voice" || kind == "music" {
+        "AUDIO_FILE:"
     } else {
         "FILE:"
     };

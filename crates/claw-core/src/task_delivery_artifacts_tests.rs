@@ -222,8 +222,10 @@ fn embedded_artifact_detail_is_preserved_while_all_manifests_are_delivered() {
         .expect("canonical text")
         .display()
         .to_string();
-    assert!(messages[0].contains("- photo.webp · image/webp · 5 bytes: "));
-    assert!(messages[0].contains(&image_canonical));
+    let visible = crate::wechat_reply_media::strip_wechat_delivery_lines(&messages[0]);
+    assert!(visible.contains("- photo.webp · image/webp · 5 bytes: photo.webp"));
+    assert!(!visible.contains(&image_canonical));
+    assert!(!visible.contains("artifact:task/"));
     assert!(!messages[0].contains(&format!("artifact:task/{task_id}/{image_id}")));
     assert!(messages[0].contains(&format!("IMAGE_FILE:{image_canonical}")));
     assert!(messages[0].contains(&format!("FILE:{text_canonical}")));
@@ -358,7 +360,7 @@ fn video_only_answer_still_delivers_companion_audio_and_transcript() {
     assert!(!messages[0].contains(&format!("artifact:task/{task_id}/{video_id}")));
     assert!(messages[0].contains(&format!("VIDEO_FILE:{video_canonical}")));
     assert!(messages[0].contains(&format!(
-        "FILE:{}",
+        "AUDIO_FILE:{}",
         audio_path
             .canonicalize()
             .expect("canonical audio")
@@ -375,7 +377,7 @@ fn video_only_answer_still_delivers_companion_audio_and_transcript() {
 }
 
 #[test]
-fn labeled_artifact_handle_is_rewritten_to_delivery_path() {
+fn labeled_artifact_handle_is_rewritten_to_filename() {
     let workspace = temp_workspace("task_delivery_labeled_path");
     let task_id = "task-labeled-path";
     let artifact_id = "a_video";
@@ -398,8 +400,11 @@ fn labeled_artifact_handle_is_rewritten_to_delivery_path() {
         )],
     );
     let canonical = path.canonicalize().expect("canonical video");
+    let visible = crate::wechat_reply_media::strip_wechat_delivery_lines(&messages[0]);
     assert_eq!(messages.len(), 1);
-    assert!(messages[0].contains(&format!("- 视频（mp4，5 B）：{}", canonical.display())));
+    assert!(visible.contains("- 视频（mp4，5 B）：clip.mp4"));
+    assert!(!visible.contains(&canonical.display().to_string()));
+    assert!(!visible.contains("VIDEO_FILE:"));
     assert!(!messages[0].contains("artifact:task/"));
     assert!(messages[0].contains(&format!("VIDEO_FILE:{}", canonical.display())));
     fs::remove_dir_all(workspace).ok();
@@ -702,6 +707,25 @@ fn unresolved_task_artifact_handle_is_removed_without_any_manifest() {
 }
 
 #[test]
+fn unresolved_inline_task_artifact_handle_is_removed_from_caption() {
+    let workspace = temp_workspace("task_delivery_unresolved_inline");
+    let messages = merge_task_artifact_delivery_messages(
+        "task-current",
+        None,
+        &workspace,
+        vec![
+            "识别完成\n- 原创图片（webp，72,426 字节）：IMAGE_FILE:artifact:task/task-current/missing-artifact"
+                .to_string(),
+        ],
+    );
+
+    assert_eq!(messages, vec!["识别完成\n- 原创图片（webp，72,426 字节）"]);
+    assert!(!messages[0].contains("artifact:task/"));
+    assert!(!messages[0].contains("IMAGE_FILE:"));
+    fs::remove_dir_all(workspace).ok();
+}
+
+#[test]
 fn valid_task_artifact_is_delivered_when_another_handle_is_stale() {
     let workspace = temp_workspace("task_delivery_mixed_handles");
     let task_id = "task-mixed";
@@ -737,10 +761,7 @@ fn valid_task_artifact_is_delivered_when_another_handle_is_stale() {
         .expect("canonical transcript")
         .display()
         .to_string();
-    assert_eq!(
-        messages,
-        vec![format!("转写完成\n{canonical}\nFILE:{canonical}")]
-    );
+    assert_eq!(messages, vec![format!("转写完成\nFILE:{canonical}")]);
     assert!(!messages[0].contains("artifact:task/"));
     fs::remove_dir_all(workspace).ok();
 }
@@ -815,5 +836,84 @@ fn duplicate_content_manifests_produce_one_channel_attachment() {
                 .display()
         )]
     );
+    fs::remove_dir_all(workspace).ok();
+}
+
+#[test]
+fn inline_audio_and_image_handles_wait_until_manifests_exist() {
+    let task_id = "6de8c441-0d3a-4416-9d3d-cf3119719868";
+    let image_id = "a_31c52f90db55fef3da88104ca741b3e1";
+    let audio_id = "a_e86f08dfd89d75daf764a64732cb23ab";
+    let messages = vec![format!(
+        "done\n- 原创图片：IMAGE_FILE:artifact:task/{task_id}/{image_id}\n- 背景音频：AUDIO_FILE:artifact:task/{task_id}/{audio_id}"
+    )];
+
+    assert!(messages_awaiting_task_artifact_materialization(
+        None, &messages
+    ));
+    assert!(messages_awaiting_task_artifact_materialization(
+        Some(&serde_json::json!({ "text": "done" })),
+        &messages
+    ));
+}
+
+#[test]
+fn inline_audio_handle_is_rewritten_and_appended_as_audio_token() {
+    let workspace = temp_workspace("task_delivery_inline_audio");
+    let task_id = "task-inline-audio";
+    let image_id = "image-1";
+    let audio_id = "audio-1";
+    let image_path = write_delivery_artifact(&workspace, task_id, image_id, "photo.webp", b"image");
+    let audio_path = write_delivery_artifact(&workspace, task_id, audio_id, "bg.mp3", b"audio");
+    let mut result = result_with_artifact(
+        task_id,
+        image_id,
+        "photo.webp",
+        "image",
+        "image/webp",
+        5,
+        Some(true),
+    );
+    append_artifact(
+        &mut result,
+        task_id,
+        audio_id,
+        "bg.mp3",
+        "audio",
+        "audio/mpeg",
+        5,
+    );
+
+    let messages = merge_task_artifact_delivery_messages(
+        task_id,
+        Some(&result),
+        &workspace,
+        vec![format!(
+            "已完成\n- 原创图片（webp，5 字节）：IMAGE_FILE:artifact:task/{task_id}/{image_id}\n- 背景音频（mp3，5 字节）：AUDIO_FILE:artifact:task/{task_id}/{audio_id}"
+        )],
+    );
+
+    let image_canonical = image_path
+        .canonicalize()
+        .expect("canonical image")
+        .display()
+        .to_string();
+    let audio_canonical = audio_path
+        .canonicalize()
+        .expect("canonical audio")
+        .display()
+        .to_string();
+    assert_eq!(messages.len(), 1);
+    let visible = crate::wechat_reply_media::strip_wechat_delivery_lines(&messages[0]);
+    assert!(visible.contains("- 原创图片（webp，5 字节）：photo.webp"));
+    assert!(visible.contains("- 背景音频（mp3，5 字节）：bg.mp3"));
+    assert!(!visible.contains("artifact:task/"));
+    assert!(!visible.contains("IMAGE_FILE:"));
+    assert!(!visible.contains("AUDIO_FILE:"));
+    assert!(!visible.contains(&image_canonical));
+    assert!(!visible.contains(&audio_canonical));
+    assert!(!messages[0].contains("artifact:task/"));
+    assert!(messages[0].contains(&format!("IMAGE_FILE:{image_canonical}")));
+    assert!(messages[0].contains(&format!("AUDIO_FILE:{audio_canonical}")));
     fs::remove_dir_all(workspace).ok();
 }

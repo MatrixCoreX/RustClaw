@@ -20,6 +20,24 @@ fn audio_tokens_are_media_and_missing_paths_remain_visible_for_delivery_errors()
 }
 
 #[test]
+fn inline_task_artifact_handles_are_removed_from_the_caption() {
+    let answer = concat!(
+        "已完成\n",
+        "- 原创图片（webp，72,426 字节）：IMAGE_FILE:artifact:task/task-1/a_image\n",
+        "- 平台正文：FILE:artifact:task/task-1/a_text\n",
+        "IMAGE_FILE:/tmp/photo.webp",
+    );
+    assert_eq!(
+        strip_wechat_delivery_lines(answer),
+        concat!(
+            "已完成\n",
+            "- 原创图片（webp，72,426 字节）\n",
+            "- 平台正文"
+        )
+    );
+}
+
+#[test]
 fn numbered_image_tokens_are_extracted_and_removed_from_the_caption() {
     let first = temp_media_path("wechat_numbered_first.webp");
     let second = temp_media_path("wechat_numbered_second.webp");

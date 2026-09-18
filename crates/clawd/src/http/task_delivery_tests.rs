@@ -25,6 +25,22 @@ fn record(status: &str, result_json: Option<Value>) -> TaskDeliveryRecord {
 }
 
 #[test]
+fn successful_terminal_delivery_waits_when_artifact_handles_are_unresolved() {
+    let record = record(
+        "succeeded",
+        Some(serde_json::json!({
+            "messages": [
+                "done\n- 原创图片：IMAGE_FILE:artifact:task/task-1/image-1"
+            ]
+        })),
+    );
+    assert!(super::waiting_for_task_artifact_materialization(
+        &record,
+        &TaskStatus::Succeeded
+    ));
+}
+
+#[test]
 fn successful_terminal_content_prefers_structured_messages() {
     let state = AppState::test_default_with_fixture_provider();
     let record = record(
