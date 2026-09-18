@@ -31,6 +31,113 @@ pub(super) fn trace_json_hash(value: &Value) -> String {
 const TRACE_STORAGE_TRUNCATION_MARKER: &str = "...(truncated)";
 const MAX_RESULT_TRACE_LOCATOR_CHARS: usize = 4096;
 
+fn capability_result_delivers_user_artifact(item: &Value) -> bool {
+    if item
+        .get("status")
+        .and_then(Value::as_str)
+        .is_some_and(|status| status != "ok")
+    {
+        return false;
+    }
+    for pointer in [
+        "/data/extra/delivery/deliver_to_user",
+        "/extra/delivery/deliver_to_user",
+        "/delivery/deliver_to_user",
+    ] {
+        if item.pointer(pointer).and_then(Value::as_bool) == Some(false) {
+            return false;
+        }
+    }
+    for pointer in [
+        "/artifacts",
+        "/data/extra/artifacts",
+        "/data/artifacts",
+        "/extra/artifacts",
+    ] {
+        let Some(artifacts) = item.pointer(pointer).and_then(Value::as_array) else {
+            continue;
+        };
+        if artifacts.iter().any(is_user_delivery_artifact) {
+            return true;
+        }
+    }
+    false
+}
+
+fn is_user_delivery_artifact(item: &Value) -> bool {
+    let Some(object) = item.as_object() else {
+        return false;
+    };
+    if object
+        .get("visibility")
+        .and_then(Value::as_str)
+        .is_some_and(|visibility| matches!(visibility, "internal_processing" | "evidence"))
+    {
+        return false;
+    }
+    object
+        .get("path")
+        .and_then(Value::as_str)
+        .is_some_and(|path| !path.trim().is_empty())
+        || object
+            .get("filename")
+            .and_then(Value::as_str)
+            .is_some_and(|filename| !filename.trim().is_empty())
+        || object
+            .get("sha256")
+            .and_then(Value::as_str)
+            .is_some_and(|digest| !digest.trim().is_empty())
+}
+
+fn retain_user_delivery_capability_results(
+    items: &mut Vec<Value>,
+    max_array_items: usize,
+    stats: &mut TraceStorageStats,
+) {
+    if items.len() <= max_array_items {
+        return;
+    }
+    let omitted = items.len() - max_array_items;
+    let delivery_idx: Vec<usize> = items
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| capability_result_delivers_user_artifact(item))
+        .map(|(index, _)| index)
+        .collect();
+    let other_idx: Vec<usize> = items
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| !capability_result_delivers_user_artifact(item))
+        .map(|(index, _)| index)
+        .collect();
+    let mut keep_idx = Vec::new();
+    if delivery_idx.len() >= max_array_items {
+        keep_idx.extend(
+            delivery_idx
+                .into_iter()
+                .rev()
+                .take(max_array_items)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev(),
+        );
+    } else {
+        let fill = max_array_items - delivery_idx.len();
+        keep_idx.extend(other_idx.into_iter().take(fill));
+        keep_idx.extend(delivery_idx);
+        keep_idx.sort_unstable();
+    }
+    let mut kept = Vec::with_capacity(keep_idx.len());
+    for (index, item) in items.drain(..).enumerate() {
+        if keep_idx.contains(&index) {
+            kept.push(item);
+        }
+    }
+    stats.truncated_arrays += 1;
+    stats.omitted_array_items += omitted;
+    *items = kept;
+}
+
 fn is_preserved_trace_locator_key(key: &str) -> bool {
     matches!(
         key,
@@ -98,6 +205,11 @@ fn compact_result_trace_value_at(
         }
         Value::Object(map) => {
             for (key, child) in map.iter_mut() {
+                if key == "capability_results" {
+                    if let Value::Array(items) = child {
+                        retain_user_delivery_capability_results(items, max_array_items, stats);
+                    }
+                }
                 compact_result_trace_value_at(
                     child,
                     stats,

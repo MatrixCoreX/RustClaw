@@ -106,6 +106,55 @@ fn compact_preserves_artifact_locator_fields_past_string_budget() {
 }
 
 #[test]
+fn compact_keeps_user_delivery_capability_results_when_array_is_trimmed() {
+    let original = json!({
+        "step_results": [],
+        "capability_results": [
+            {"status":"error","capability":"agent.subagent"},
+            {"status":"ok","capability":"task.plan_set"},
+            {"status":"ok","capability":"task.plan_update"},
+            {"status":"ok","capability":"load_capability_groups"},
+            {
+                "status":"ok",
+                "capability":"media_download.download",
+                "data":{"extra":{
+                    "delivery":{"deliver_to_user":true,"intent":"artifact"},
+                    "artifacts":[{"filename":"post.webp","path":"/tmp/post.webp","sha256":"aa"}]
+                }}
+            },
+            {
+                "status":"ok",
+                "capability":"image_vision.extract_text",
+                "data":{"extra":{
+                    "delivery":{"deliver_to_user":true,"intent":"artifact"},
+                    "artifacts":[{"filename":"image_text_ai.txt","path":"/tmp/image_text_ai.txt","sha256":"bb"}]
+                }}
+            }
+        ],
+        "payload": "y".repeat(200_000),
+    });
+    let stored = assert_bound(original);
+    assert_eq!(stored["trace_storage"]["truncated"], true);
+    let capabilities = stored["capability_results"]
+        .as_array()
+        .expect("capability_results");
+    let names: Vec<&str> = capabilities
+        .iter()
+        .filter_map(|item| item.get("capability").and_then(Value::as_str))
+        .collect();
+    assert!(
+        names.contains(&"image_vision.extract_text"),
+        "expected extract_text to survive compaction, got {names:?}"
+    );
+    if capabilities.len() >= 2 {
+        assert!(
+            names.contains(&"media_download.download"),
+            "expected download to survive compaction, got {names:?}"
+        );
+    }
+}
+
+#[test]
 fn small_traces_keep_their_fields_and_report_exact_stored_bytes() {
     let original = json!({"step_results":[],"capability_results":[],"state":"ok"});
     let stored = assert_bound(original.clone());

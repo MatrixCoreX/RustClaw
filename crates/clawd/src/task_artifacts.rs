@@ -58,6 +58,7 @@ pub(crate) fn materialize_task_result_artifacts(
     })?;
     let mut sources = collect_artifact_sources(&result);
     collect_published_transcript_sources(&workspace, task_id, &mut sources);
+    collect_published_image_text_sources(&workspace, task_id, &mut sources);
     if sources.is_empty() {
         return Ok(raw_result.to_string());
     }
@@ -306,6 +307,102 @@ pub(crate) fn inline_preview_allowed(mime_type: &str) -> bool {
             | "video/quicktime"
             | "application/pdf"
     )
+}
+
+const PUBLISHED_IMAGE_TEXT_FILENAME: &str = "image_text_ai.txt";
+
+fn collect_published_image_text_sources(
+    workspace_root: &Path,
+    task_id: &str,
+    out: &mut Vec<ArtifactSource>,
+) {
+    let task_root = claw_core::workspace_state::workspace_artifacts_root(workspace_root)
+        .join("skill-invocations")
+        .join(machine_path_component(task_id, "task"));
+    let Ok(canonical_task_root) = task_root.canonicalize() else {
+        return;
+    };
+    if !canonical_task_root.starts_with(workspace_root) {
+        return;
+    }
+    let mut remaining = MAX_INVOCATION_DIGEST_SEARCH_FILES;
+    let mut found = Vec::new();
+    collect_named_invocation_files(
+        &canonical_task_root,
+        workspace_root,
+        PUBLISHED_IMAGE_TEXT_FILENAME,
+        &mut remaining,
+        &mut found,
+    );
+    for path in found {
+        let Ok(metadata) = path.metadata() else {
+            continue;
+        };
+        if !metadata.is_file() {
+            continue;
+        }
+        let Ok(sha256) = sha256_file(&path) else {
+            continue;
+        };
+        if sha256.len() < 32 {
+            continue;
+        }
+        out.push(ArtifactSource {
+            id: Some(format!("a_{}", &sha256[..32])),
+            path: path.to_string_lossy().to_string(),
+            filename: Some(PUBLISHED_IMAGE_TEXT_FILENAME.to_string()),
+            mime_type: Some("text/plain; charset=utf-8".to_string()),
+            size_bytes: Some(metadata.len()),
+            sha256: Some(sha256),
+        });
+    }
+}
+
+fn collect_named_invocation_files(
+    dir: &Path,
+    workspace_root: &Path,
+    filename: &str,
+    remaining: &mut usize,
+    found: &mut Vec<PathBuf>,
+) {
+    if *remaining == 0 {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if *remaining == 0 {
+            return;
+        }
+        let path = entry.path();
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        if metadata.is_dir() {
+            let Ok(canonical) = path.canonicalize() else {
+                continue;
+            };
+            if !canonical.starts_with(workspace_root) {
+                continue;
+            }
+            collect_named_invocation_files(
+                &canonical,
+                workspace_root,
+                filename,
+                remaining,
+                found,
+            );
+            continue;
+        }
+        if !metadata.is_file() {
+            continue;
+        }
+        *remaining = remaining.saturating_sub(1);
+        if path.file_name().and_then(|name| name.to_str()) == Some(filename) {
+            found.push(path);
+        }
+    }
 }
 
 fn collect_published_transcript_sources(
