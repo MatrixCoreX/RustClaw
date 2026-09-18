@@ -118,6 +118,44 @@ fn reasoning_effort_maps_to_bounded_anthropic_thinking_budget() {
 }
 
 #[test]
+fn manual_thinking_does_not_emit_unsupported_forced_tool_choice() {
+    let mut request = ModelTurnRequest {
+        messages: vec![ModelMessage::text(ModelRole::User, "review")],
+        tools: vec![ModelToolDefinition {
+            name: "respond".to_string(),
+            description: "Terminal response".to_string(),
+            input_schema: json!({"type": "object", "properties": {}}),
+            strict: true,
+        }],
+        tool_choice: ModelToolChoice::Required,
+        response_schema: None,
+        stream: false,
+        metadata: BTreeMap::new(),
+    };
+    for (effort, max_tokens, choice) in [
+        (Some("high"), 4096, "auto"),
+        (Some("low"), 1024, "any"),
+        (None, 4096, "any"),
+    ] {
+        let hints = ChatRequestHints {
+            reasoning_effort: effort.map(str::to_string),
+            max_tokens: Some(max_tokens),
+            ..Default::default()
+        };
+        let body = build_anthropic_request(&provider(), &request, &hints).unwrap();
+        assert_eq!(body["tool_choice"]["type"], choice);
+        assert_eq!(body["tools"][0]["strict"], true);
+        assert_eq!(request.tool_choice, ModelToolChoice::Required);
+        if choice == "auto" {
+            assert_eq!(body["thinking"]["type"], "enabled");
+        }
+    }
+    request.tool_choice = ModelToolChoice::Auto;
+    let body = build_anthropic_request(&provider(), &request, &Default::default()).unwrap();
+    assert_eq!(body["tool_choice"]["type"], "auto");
+}
+
+#[test]
 fn reasoning_effort_is_ignored_when_the_thinking_minimum_cannot_fit() {
     let request = ModelTurnRequest {
         messages: vec![ModelMessage::text(ModelRole::User, "review")],

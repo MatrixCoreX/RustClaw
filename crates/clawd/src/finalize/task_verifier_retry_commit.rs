@@ -41,6 +41,8 @@ pub(super) async fn try_commit_answer_verifier_retry_answer(
         return false;
     }
 
+    let retried_answer =
+        super::preserve_verified_delivery_tokens_after_retry(journal, answer_text, retried_answer);
     *answer_text = retried_answer;
     answer_messages.retain(|message| crate::finalize::is_execution_summary_message(message));
     answer_messages.push(answer_text.clone());

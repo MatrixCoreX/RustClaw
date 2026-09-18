@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "suite_sha256": "ec10efd19a26b11133c9cc2add8ac92e0b31b8f391be35ff4483ef476ac45569",
+  "total_cases": 4,
+  "accepted_prior": {},
+  "deferred_cases": [],
+  "partitions": {
+    "worker_1.txt": {
+      "count": 4,
+      "enable_test_memory": false,
+      "names": [
+        "fresh_git_remote_read_missing_en",
+        "fresh_fs_search_recovery_line_en",
+        "fresh_doc_parse_agents_section_en",
+        "b100_028_run_cmd_pwd_en"
+      ]
+    }
+  }
+}

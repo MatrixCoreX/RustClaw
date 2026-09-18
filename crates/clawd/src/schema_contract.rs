@@ -154,11 +154,15 @@ pub(crate) fn executable_type_constraint_violations(
         .unwrap_or_default()
 }
 
-pub(crate) fn executable_top_level_arg_accepts_null(
+pub(crate) fn executable_required_arg_is_present(
     state: &AppState,
     executable: &str,
     arg: &str,
+    value: &Value,
 ) -> bool {
+    if required_value_is_present(None, value) {
+        return true;
+    }
     let input_schema = state
         .mcp_tool(executable)
         .map(|tool| tool.input_schema)
@@ -167,12 +171,32 @@ pub(crate) fn executable_top_level_arg_accepts_null(
                 .skill_manifest(executable)
                 .and_then(|manifest| manifest.input_schema)
         });
-    input_schema
+    let field_schema = input_schema
         .as_ref()
         .and_then(|schema| schema.get("properties"))
         .and_then(Value::as_object)
-        .and_then(|properties| properties.get(arg))
-        .is_some_and(schema_accepts_null)
+        .and_then(|properties| properties.get(arg));
+    required_value_is_present(field_schema, value)
+}
+
+pub(crate) fn required_value_is_present(schema: Option<&Value>, value: &Value) -> bool {
+    match value {
+        Value::Null => schema.is_some_and(schema_accepts_null),
+        Value::String(value) => {
+            // Literal payloads opt in; identifiers retain nonblank presence checks.
+            // Type, enum and value constraints are checked independently afterward.
+            !value.trim().is_empty()
+                || schema.is_some_and(|schema| {
+                    schema.get("type").and_then(Value::as_str) == Some("string")
+                        && schema.get("minLength").and_then(Value::as_u64) == Some(0)
+                })
+        }
+        Value::Array(values) => values
+            .iter()
+            .any(|value| required_value_is_present(None, value)),
+        Value::Object(values) => !values.is_empty(),
+        Value::Bool(_) | Value::Number(_) => true,
+    }
 }
 
 pub(crate) fn schema_accepts_null(schema: &Value) -> bool {

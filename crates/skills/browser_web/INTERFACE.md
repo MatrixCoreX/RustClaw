@@ -76,8 +76,12 @@ instead of discarding pages that already completed.
   policy applies to every HTTP(S) browser request and captured image fetch.
 - Every image redirect is revalidated; HTTPS-to-HTTP downgrade is rejected.
 - Image responses must use an image media type and are capped at 6 MiB each.
-- Screenshot, wait-map, raw HTML, processed text, image, manifest, and chunk
-  paths are constrained to the configured workspace.
+- Wait-map files and explicitly requested screenshot directories remain
+  workspace-constrained unless the host grants outside-workspace access.
+  Capture artifacts and default screenshots may also use the exact invocation
+  artifact directory issued by the runner. This directory comes from trusted
+  context, never user arguments; output checks reject sibling paths, traversal,
+  and existing symlink ancestors that escape the authorized root.
 - Browser page text keeps a small inline `max_text_chars` view. The complete
   cleaned text and raw HTML are written to capture artifacts; an inline text
   prefix reports exact sizes and an `artifact_range` continuation. The 4 MiB
@@ -159,7 +163,9 @@ Representative codes:
   `ALL_PAGES_FAILED`
 
 HTTP failures are classified from response status; challenge detection uses
-DOM structure. Binary document media types are rejected with a structured
+visible verification inputs/iframes, not document anchor IDs, CSS class names,
+hidden response-token inputs or prose discussing verification. Binary document
+media types are rejected with a structured
 handoff hint for download/document parsing. Error classification never matches
 natural-language exception or page text. Failed pages are not emitted as
 citations or source references.

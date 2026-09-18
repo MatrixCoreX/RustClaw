@@ -9,6 +9,9 @@ use toml::Value as TomlValue;
 
 mod async_contract;
 mod async_projection;
+mod generation_error;
+
+use generation_error::GenerationError;
 
 use async_contract::{
     execute_cancel, execute_poll, music_expires_at, music_poll_after_seconds, provider_music_job_id,
@@ -186,8 +189,8 @@ fn main() -> anyhow::Result<()> {
                     request_id: req.request_id,
                     status: "error".to_string(),
                     text: String::new(),
-                    extra: Some(error_extra("execution_failed")),
-                    error_text: Some(err),
+                    extra: Some(err.extra()),
+                    error_text: Some(err.message),
                 },
             },
             Err(err) => Resp {
@@ -220,7 +223,7 @@ fn execute(
     cfg: &RootConfig,
     workspace_root: &Path,
     args: Value,
-) -> Result<(String, Value), String> {
+) -> Result<(String, Value), GenerationError> {
     let obj = args
         .as_object()
         .ok_or_else(|| "args must be object".to_string())?;
@@ -237,9 +240,9 @@ fn execute(
             preview_args.insert("dry_run".to_string(), Value::Bool(true));
             execute_generate(cfg, workspace_root, &preview_args)
         }
-        "poll" => execute_poll(cfg, workspace_root, obj),
-        "cancel" => execute_cancel(cfg, obj),
-        _ => Err(format!("unsupported action: {action}")),
+        "poll" => execute_poll(cfg, workspace_root, obj).map_err(Into::into),
+        "cancel" => execute_cancel(cfg, obj).map_err(Into::into),
+        _ => Err(format!("unsupported action: {action}").into()),
     }
 }
 
@@ -247,7 +250,7 @@ fn execute_generate(
     cfg: &RootConfig,
     workspace_root: &Path,
     obj: &Map<String, Value>,
-) -> Result<(String, Value), String> {
+) -> Result<(String, Value), GenerationError> {
     let requested_vendor = obj.get("vendor").and_then(Value::as_str);
     let vendor = select_vendor(
         requested_vendor,
@@ -273,19 +276,23 @@ fn execute_generate(
     let lyrics_optimizer =
         optional_bool(obj, "lyrics_optimizer").unwrap_or(!is_instrumental && lyrics.is_empty());
     if prompt.is_empty() && (lyrics.is_empty() || is_instrumental || lyrics_optimizer) {
-        return Err("prompt is required for this music request".to_string());
+        return Err("prompt is required for this music request"
+            .to_string()
+            .into());
     }
     let max_prompt_chars = cfg.music_generation.max_prompt_chars.unwrap_or(2000);
     if prompt.chars().count() > max_prompt_chars {
-        return Err(format!("prompt too long: max={max_prompt_chars} chars"));
+        return Err(format!("prompt too long: max={max_prompt_chars} chars").into());
     }
     let max_lyrics_chars = cfg.music_generation.max_lyrics_chars.unwrap_or(3500);
     if !lyrics.is_empty() && lyrics.chars().count() > max_lyrics_chars {
-        return Err(format!("lyrics too long: max={max_lyrics_chars} chars"));
+        return Err(format!("lyrics too long: max={max_lyrics_chars} chars").into());
     }
     if !is_instrumental && lyrics.is_empty() && !lyrics_optimizer {
         return Err(
-            "lyrics is required unless lyrics_optimizer or is_instrumental is true".to_string(),
+            "lyrics is required unless lyrics_optimizer or is_instrumental is true"
+                .to_string()
+                .into(),
         );
     }
 
@@ -394,7 +401,7 @@ fn execute_generate(
     if !matches!(adapter_kind, MusicAdapterKind::MiniMaxNative) {
         return Err(format!(
             "{provider_name} music adapter is not available; configure adapter_kind=minimax_compatible only for MiniMax-compatible endpoints"
-        ));
+        ).into());
     }
     check_api_key(provider_name, &provider.api_key)?;
     let timeout_seconds = provider
@@ -406,7 +413,8 @@ fn execute_generate(
         .timeout(Duration::from_secs(timeout_seconds))
         .build()
         .map_err(|err| format!("build {provider_name} client failed: {err}"))?;
-    let response = call_music_generation(&client, provider, &payload)?;
+    let response = call_music_generation(&client, provider, &payload)
+        .map_err(|error| error.with_provider(provider_name, &model))?;
     write_music_output(&client, &response, &output_path)?;
     let output = output_path.to_string_lossy().to_string();
     Ok((
@@ -429,7 +437,7 @@ fn call_music_generation(
     client: &Client,
     cfg: &VendorConfig,
     payload: &Value,
-) -> Result<Value, String> {
+) -> Result<Value, GenerationError> {
     let url = format!("{}/music_generation", trim_trailing_slash(&cfg.base_url));
     let resp = client
         .post(url)
@@ -442,10 +450,7 @@ fn call_music_generation(
         .json()
         .map_err(|err| format!("parse minimax music response failed: {err}"))?;
     if status >= 300 {
-        return Err(format!(
-            "minimax music failed status={status}: {}",
-            truncate(&value.to_string(), 400)
-        ));
+        return Err(GenerationError::provider_response(status, &value));
     }
     check_base_resp(&value, "minimax music")?;
     Ok(value)

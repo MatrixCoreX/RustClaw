@@ -1235,6 +1235,37 @@ fn read_range_reports_binary_input_as_structured_machine_error() {
 }
 
 #[test]
+fn read_range_reports_full_file_line_endings_without_changing_bytes() {
+    let root = temp_root("read_range_line_endings");
+    for (index, (content, lf, crlf, terminated)) in [
+        ("", 0, 0, false),
+        ("alpha\nbeta", 1, 0, false),
+        ("alpha\nbeta\n", 2, 0, true),
+        ("alpha\r\nbeta\r\n", 0, 2, true),
+        ("alpha\r\nbeta\n", 1, 1, true),
+        ("alpha\r", 0, 0, false),
+        ("\u{feff}alpha\n", 1, 0, true),
+        ("\n", 1, 0, true),
+    ].into_iter().enumerate() {
+        let target = root.join(format!("ending-{index}.txt"));
+        std::fs::write(&target, content).expect("write fixture");
+        for mode in ["head", "tail", "range"] {
+            let args = json!({"path": target, "mode": mode, "n": 1});
+            let output = read_range(&root, args.as_object().unwrap(), true).expect("read");
+            let value: Value = serde_json::from_str(&output).expect("json");
+            assert_eq!(value["line_endings"], json!({
+                "scope": "file", "lf_count": lf, "crlf_count": crlf,
+                "ends_with_newline": terminated,
+            }), "fixture {index}, mode {mode}");
+            assert_eq!(value["size_bytes"], content.len());
+            assert_eq!(value["sha256"], sha256_hex(content.as_bytes()));
+            assert_eq!(std::fs::read(&target).unwrap(), content.as_bytes());
+        }
+    }
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn read_range_hands_images_and_pdf_to_canonical_capabilities() {
     let root = temp_root("read_range_handoff");
     std::fs::create_dir_all(&root).expect("create root");

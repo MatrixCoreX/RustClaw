@@ -59,8 +59,7 @@ use skill_execution_preflight::{
 use skill_execution_subagent::{
     normalize_subagent_stop_signal, record_subagent_hook_stage, record_subagent_step_execution,
 };
-#[cfg(test)]
-use skill_output_contract::validate_skill_output_contract;
+pub(crate) use skill_output_contract::validate_skill_output_contract;
 use skill_output_contract::{enforce_skill_output_contract, skill_input_contract_error};
 
 pub(super) fn validate_skill_input_contract_for_runtime(
@@ -378,8 +377,18 @@ async fn handle_skill_step_success(
             "completed_with_inconclusive_non_validation_observation",
         ),
     };
+    let current_result = loop_state.capability_results.last().filter(|result| {
+        result.provenance.get("step_id").and_then(Value::as_str)
+            == Some(step_execution.step_id.as_str())
+    });
+    let ledger_job_id = current_result
+        .and_then(|result| result.continuation.as_ref())
+        .filter(|continuation| {
+            continuation.kind == claw_core::capability_result::ContinuationKind::Poll
+        })
+        .and_then(|continuation| continuation.reference.clone());
     let ledger_observed_output =
-        super::observed_output::latest_structured_capability_observation(loop_state);
+        current_result.and_then(super::observed_output::structured_capability_observation);
     super::attempt_ledger::record_attempt(
         loop_state,
         normalized_skill,
@@ -389,6 +398,14 @@ async fn handle_skill_step_success(
         ledger_error_kind,
         ledger_reason,
     );
+    if let Some(entry) = loop_state.attempt_ledger_entries.last_mut() {
+        entry.execution_step_id = Some(step_execution.step_id.clone());
+        entry.async_job_id = ledger_job_id;
+        if entry.async_job_id.is_some() {
+            entry.status = "waiting".to_string();
+            entry.why_not_satisfied = "async_job_pending".to_string();
+        }
+    }
     let had_observed_output = !out.trim().is_empty();
     if had_observed_output {
         loop_state.has_tool_or_skill_output = true;
@@ -1212,6 +1229,7 @@ pub(super) async fn execute_prepared_skill_action(
     };
     let structured_validation = Arc::new(Mutex::new(None::<Value>));
     let structured_extra = Arc::new(Mutex::new(None::<Value>));
+    let output_contract_validation = Arc::new(Mutex::new(None::<Result<(), String>>));
     let structured_validation_slot = Arc::clone(&structured_validation);
     let structured_extra_slot = Arc::clone(&structured_extra);
     let exec_args_for_run = exec_args.clone();
@@ -1261,6 +1279,7 @@ pub(super) async fn execute_prepared_skill_action(
         crate::executor::execute_step(&format!("step_{global_step}"), action, || {
             let structured_validation_slot = Arc::clone(&structured_validation_slot);
             let structured_extra_slot = Arc::clone(&structured_extra_slot);
+            let output_contract_validation = Arc::clone(&output_contract_validation);
             let exec_args_for_run = exec_args_for_run.clone();
             let mutation_execution_context = mutation_execution_context.clone();
             let execute = async move {
@@ -1287,6 +1306,9 @@ pub(super) async fn execute_prepared_skill_action(
                 if let Ok(mut slot) = structured_extra_slot.lock() {
                     *slot = outcome.extra.clone();
                 }
+                if let Ok(mut slot) = output_contract_validation.lock() {
+                    *slot = outcome.output_contract_validation;
+                }
                 Ok(outcome.text)
             };
             async move {
@@ -1300,11 +1322,16 @@ pub(super) async fn execute_prepared_skill_action(
         .ok()
         .and_then(|slot| slot.clone());
     let structured_extra = structured_extra.lock().ok().and_then(|slot| slot.clone());
+    let output_contract_validation = output_contract_validation
+        .lock()
+        .ok()
+        .and_then(|slot| slot.clone());
     if let Some(contract_error) = enforce_skill_output_contract(
         state,
         normalized_skill,
         &mut step_execution,
         structured_extra.as_ref(),
+        output_contract_validation.as_ref(),
     ) {
         warn!(
             "skill_output_contract_rejected task_id={} round={} step={} skill={} err={}",
@@ -1439,6 +1466,17 @@ pub(super) async fn execute_prepared_skill_action(
     if let Some(provenance) = capability_result.provenance.as_object_mut() {
         provenance.insert("task_id".to_string(), json!(task.task_id));
         provenance.insert("action_fingerprint".to_string(), json!(fingerprint));
+        if super::workspace_action_revision::local_primitive_path(
+            state,
+            &crate::AgentAction::CallSkill {
+                skill: normalized_skill.to_string(),
+                args: classification_args.clone(),
+            },
+        )
+        .is_some()
+        {
+            provenance.insert("host_workspace_primitive".to_string(), json!(true));
+        }
     }
     capability_result
         .validate()

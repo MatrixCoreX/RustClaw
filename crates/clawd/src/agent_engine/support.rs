@@ -611,7 +611,11 @@ fn context_compaction_checkpoint_trigger_json(resume_reason: &str) -> Value {
     })
 }
 
-fn attach_task_llm_metrics_checkpoint(state: &AppState, task_id: &str, payload: &mut Value) {
+pub(super) fn attach_task_llm_metrics_checkpoint(
+    state: &AppState,
+    task_id: &str,
+    payload: &mut Value,
+) {
     let Some(boundary) = payload
         .pointer_mut("/task_checkpoint/boundary_context")
         .and_then(Value::as_object_mut)
@@ -704,7 +708,7 @@ pub(super) fn build_agent_loop_checkpoint_progress_payload(
     )
 }
 
-fn build_agent_loop_checkpoint_progress_payload_with_budget(
+pub(super) fn build_agent_loop_checkpoint_progress_payload_with_budget(
     task: &ClaimedTask,
     loop_state: &super::LoopState,
     resume_reason: &str,

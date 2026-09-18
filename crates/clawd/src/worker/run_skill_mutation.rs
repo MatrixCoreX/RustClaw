@@ -149,6 +149,7 @@ pub(super) fn replay_suppressed_run_skill_outcome(
         text,
         notify: None,
         validation: record.verification.clone(),
+        output_contract_validation: None,
         extra,
     }
 }

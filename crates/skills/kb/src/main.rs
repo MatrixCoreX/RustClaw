@@ -261,7 +261,11 @@ fn execute_request(
             request_id: req.request_id,
             status: "error".to_string(),
             text: String::new(),
-            extra: Some(error_extra("execution_failed")),
+            extra: Some(
+                err.downcast_ref::<ingest::CheckpointConflict>()
+                    .map(ingest::CheckpointConflict::extra)
+                    .unwrap_or_else(|| error_extra("execution_failed")),
+            ),
             error_text: Some(err.to_string()),
         },
     }

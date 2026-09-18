@@ -1,0 +1,13 @@
+/.tools/
+/.signing/
+/.gradle/
+/project/.gradle/
+/project/**/build/
+/project/local.properties
+/project/app/src/main/jniLibs/
+/project/tauri.settings.gradle
+/project/app/tauri.build.gradle.kts
+/dist/
+/project/app/tauri.properties
+
+/project/app/src/main/java/org/agent_runtime/mobile/generated/

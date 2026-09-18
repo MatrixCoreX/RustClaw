@@ -37,6 +37,8 @@ struct ArtifactSource {
     path: String,
     filename: Option<String>,
     mime_type: Option<String>,
+    size_bytes: Option<u64>,
+    sha256: Option<String>,
 }
 
 pub(crate) fn materialize_task_result_artifacts(
@@ -48,16 +50,17 @@ pub(crate) fn materialize_task_result_artifacts(
         Ok(value) => value,
         Err(_) => return Ok(raw_result.to_string()),
     };
-    let sources = collect_artifact_sources(&result);
-    if sources.is_empty() {
-        return Ok(raw_result.to_string());
-    }
     let workspace = workspace_root.canonicalize().map_err(|error| {
         anyhow::anyhow!(
             "artifact_workspace_canonicalize_failed:path={} error={error}",
             workspace_root.display()
         )
     })?;
+    let mut sources = collect_artifact_sources(&result);
+    collect_published_transcript_sources(&workspace, task_id, &mut sources);
+    if sources.is_empty() {
+        return Ok(raw_result.to_string());
+    }
     let mut manifests = Vec::new();
     let mut seen_paths = HashSet::new();
     let mut seen_ids = HashSet::new();
@@ -71,7 +74,10 @@ pub(crate) fn materialize_task_result_artifacts(
         {
             continue;
         }
-        let Some(source_path) = validated_source_path(&workspace, &source.path) else {
+        let Some(source_path) = validated_source_path(&workspace, &source.path)
+            .or_else(|| validated_pre_materialized_source_path(&workspace, task_id, &source))
+            .or_else(|| find_invocation_file_by_digest(&workspace, task_id, &source))
+        else {
             continue;
         };
         let source_key = source_path.to_string_lossy().to_string();
@@ -154,6 +160,42 @@ pub(crate) fn materialize_task_result_artifacts(
         }),
     );
     Ok(serde_json::to_string(&result)?)
+}
+
+pub(crate) fn preserve_async_completion_artifacts(
+    workspace_root: &Path,
+    task_id: &str,
+    execution_result_payload: &Value,
+) -> anyhow::Result<bool> {
+    if execution_result_payload
+        .get("executor_result_status")
+        .and_then(Value::as_str)
+        != Some("async_poll_completed")
+    {
+        return Ok(false);
+    }
+    let Some(final_result_json) = execution_result_payload
+        .get("final_result_json")
+        .filter(|value| value.is_object())
+    else {
+        return Ok(false);
+    };
+    let mut candidates = vec![final_result_json.clone()];
+    if let Some(nested_result) = final_result_json
+        .get("output")
+        .and_then(Value::as_str)
+        .and_then(|raw| serde_json::from_str::<Value>(raw.trim()).ok())
+        .filter(Value::is_object)
+    {
+        candidates.push(nested_result);
+    }
+    let mut preserved = false;
+    for candidate in candidates {
+        let raw_result = candidate.to_string();
+        let materialized = materialize_task_result_artifacts(workspace_root, task_id, &raw_result)?;
+        preserved |= materialized != raw_result;
+    }
+    Ok(preserved)
 }
 
 pub(crate) fn manifests_from_result(result: Option<&Value>) -> Vec<TaskArtifactManifest> {
@@ -266,6 +308,43 @@ pub(crate) fn inline_preview_allowed(mime_type: &str) -> bool {
     )
 }
 
+fn collect_published_transcript_sources(
+    workspace_root: &Path,
+    task_id: &str,
+    out: &mut Vec<ArtifactSource>,
+) {
+    let task_key = machine_path_component(task_id, "task");
+    for namespace in ["transcript-review", "transcript-fallback"] {
+        let path = claw_core::workspace_state::workspace_artifacts_root(workspace_root)
+            .join(namespace)
+            .join(&task_key)
+            .join("transcript.txt");
+        let Ok(canonical) = path.canonicalize() else {
+            continue;
+        };
+        let Ok(metadata) = canonical.metadata() else {
+            continue;
+        };
+        if !metadata.is_file() {
+            continue;
+        }
+        let Ok(sha256) = sha256_file(&canonical) else {
+            continue;
+        };
+        if sha256.len() < 24 {
+            continue;
+        }
+        out.push(ArtifactSource {
+            id: Some(format!("{namespace}:{}", &sha256[..24])),
+            path: canonical.to_string_lossy().to_string(),
+            filename: Some("transcript.txt".to_string()),
+            mime_type: Some("text/plain; charset=utf-8".to_string()),
+            size_bytes: Some(metadata.len()),
+            sha256: Some(sha256),
+        });
+    }
+}
+
 fn collect_artifact_sources(result: &Value) -> Vec<ArtifactSource> {
     let mut sources = Vec::new();
     collect_sources_from_object(result, &mut sources, true);
@@ -296,6 +375,7 @@ fn collect_artifact_sources(result: &Value) -> Vec<ArtifactSource> {
                 collect_sources_from_object(data, &mut sources, true);
                 if let Some(extra) = data.get("extra") {
                     collect_sources_from_object(extra, &mut sources, true);
+                    collect_processing_audio_source(extra, &mut sources);
                 }
                 if let Some(output) = data.get("output") {
                     collect_sources_from_object(output, &mut sources, true);
@@ -313,6 +393,25 @@ fn collect_artifact_sources(result: &Value) -> Vec<ArtifactSource> {
         }
     }
     sources
+}
+
+fn collect_processing_audio_source(extra: &Value, out: &mut Vec<ArtifactSource>) {
+    let Some(audio) = extra.pointer("/processing_inputs/video_audio") else {
+        return;
+    };
+    if audio.get("status").and_then(Value::as_str) != Some("available") {
+        return;
+    }
+    if extra
+        .pointer("/delivery/deliver_to_user")
+        .and_then(Value::as_bool)
+        == Some(false)
+    {
+        return;
+    }
+    if let Some(source) = artifact_source(audio, Some("audio/wav")) {
+        out.push(source);
+    }
 }
 
 fn collect_sources_from_object(value: &Value, out: &mut Vec<ArtifactSource>, allow_outputs: bool) {
@@ -348,6 +447,8 @@ fn collect_sources_from_object(value: &Value, out: &mut Vec<ArtifactSource>, all
             path: path.to_string(),
             filename: None,
             mime_type: inherited_mime.map(str::to_string),
+            size_bytes: None,
+            sha256: None,
         });
     }
     if let Some(items) = object.get("outputs").and_then(Value::as_array) {
@@ -397,11 +498,23 @@ fn artifact_source(value: &Value, inherited_mime: Option<&str>) -> Option<Artifa
             .and_then(Value::as_str)
             .or(inherited_mime)
             .map(str::to_string),
+        size_bytes: object.get("size_bytes").and_then(Value::as_u64),
+        sha256: object
+            .get("sha256")
+            .and_then(Value::as_str)
+            .map(str::to_string),
     })
 }
 
+const TRACE_STORAGE_TRUNCATION_MARKER: &str = "...(truncated)";
+const MAX_INVOCATION_DIGEST_SEARCH_FILES: usize = 256;
+
 fn validated_source_path(workspace_root: &Path, raw: &str) -> Option<PathBuf> {
-    let path = Path::new(raw.trim());
+    let raw = raw.trim();
+    if raw.is_empty() || raw.contains(TRACE_STORAGE_TRUNCATION_MARKER) {
+        return None;
+    }
+    let path = Path::new(raw);
     let candidate = if path.is_absolute() {
         path.to_path_buf()
     } else {
@@ -409,6 +522,174 @@ fn validated_source_path(workspace_root: &Path, raw: &str) -> Option<PathBuf> {
     };
     let canonical = candidate.canonicalize().ok()?;
     (canonical.starts_with(workspace_root) && canonical.is_file()).then_some(canonical)
+}
+
+fn validated_pre_materialized_source_path(
+    workspace_root: &Path,
+    task_id: &str,
+    source: &ArtifactSource,
+) -> Option<PathBuf> {
+    let filename = source.filename.as_deref().map(safe_filename)?;
+    let expected_size = source.size_bytes?;
+    let expected_sha256 = source.sha256.as_deref().map(str::trim).filter(|digest| {
+        digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+    })?;
+    if let Some(artifact_id) = source.id.as_deref().and_then(machine_id) {
+        let candidate = delivery_artifact_path(workspace_root, task_id, &artifact_id, &filename);
+        if let Some(canonical) =
+            matching_delivery_file(workspace_root, &candidate, expected_size, expected_sha256)
+        {
+            return Some(canonical);
+        }
+    }
+    find_delivery_file_by_digest(workspace_root, task_id, expected_size, expected_sha256)
+}
+
+fn find_invocation_file_by_digest(
+    workspace_root: &Path,
+    task_id: &str,
+    source: &ArtifactSource,
+) -> Option<PathBuf> {
+    let filename = source
+        .filename
+        .as_deref()
+        .map(safe_filename)
+        .unwrap_or_default();
+    let expected_size = source.size_bytes?;
+    let expected_sha256 = source.sha256.as_deref().map(str::trim).filter(|digest| {
+        digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+    })?;
+    let task_root = claw_core::workspace_state::workspace_artifacts_root(workspace_root)
+        .join("skill-invocations")
+        .join(machine_path_component(task_id, "task"));
+    let canonical_task_root = task_root.canonicalize().ok()?;
+    if !canonical_task_root.starts_with(workspace_root) {
+        return None;
+    }
+    let mut remaining = MAX_INVOCATION_DIGEST_SEARCH_FILES;
+    let mut named_matches = Vec::new();
+    let mut size_matches = Vec::new();
+    collect_invocation_digest_candidates(
+        &canonical_task_root,
+        workspace_root,
+        &filename,
+        expected_size,
+        &mut remaining,
+        &mut named_matches,
+        &mut size_matches,
+    );
+    named_matches
+        .into_iter()
+        .chain(size_matches)
+        .find_map(|candidate| {
+            matching_delivery_file(workspace_root, &candidate, expected_size, expected_sha256)
+                .filter(|canonical| canonical.starts_with(&canonical_task_root))
+        })
+}
+
+fn collect_invocation_digest_candidates(
+    dir: &Path,
+    workspace_root: &Path,
+    filename: &str,
+    expected_size: u64,
+    remaining: &mut usize,
+    named_matches: &mut Vec<PathBuf>,
+    size_matches: &mut Vec<PathBuf>,
+) {
+    if *remaining == 0 {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if *remaining == 0 {
+            return;
+        }
+        let path = entry.path();
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        if metadata.is_dir() {
+            let Ok(canonical) = path.canonicalize() else {
+                continue;
+            };
+            if !canonical.starts_with(workspace_root) {
+                continue;
+            }
+            collect_invocation_digest_candidates(
+                &canonical,
+                workspace_root,
+                filename,
+                expected_size,
+                remaining,
+                named_matches,
+                size_matches,
+            );
+            continue;
+        }
+        if !metadata.is_file() {
+            continue;
+        }
+        *remaining = remaining.saturating_sub(1);
+        if metadata.len() != expected_size {
+            continue;
+        }
+        if path.file_name().and_then(|name| name.to_str()) == Some(filename) {
+            named_matches.push(path);
+        } else {
+            size_matches.push(path);
+        }
+    }
+}
+
+fn matching_delivery_file(
+    workspace_root: &Path,
+    candidate: &Path,
+    expected_size: u64,
+    expected_sha256: &str,
+) -> Option<PathBuf> {
+    let canonical = candidate.canonicalize().ok()?;
+    let metadata = canonical.metadata().ok()?;
+    (canonical.starts_with(workspace_root)
+        && metadata.is_file()
+        && metadata.len() == expected_size
+        && sha256_file(&canonical)
+            .ok()
+            .is_some_and(|actual| actual.eq_ignore_ascii_case(expected_sha256)))
+    .then_some(canonical)
+}
+
+fn find_delivery_file_by_digest(
+    workspace_root: &Path,
+    task_id: &str,
+    expected_size: u64,
+    expected_sha256: &str,
+) -> Option<PathBuf> {
+    let task_root = claw_core::workspace_state::workspace_artifacts_root(workspace_root)
+        .join("delivery")
+        .join(machine_path_component(task_id, "task"));
+    let canonical_task_root = task_root.canonicalize().ok()?;
+    if !canonical_task_root.starts_with(workspace_root) {
+        return None;
+    }
+    for artifact_dir in fs::read_dir(&canonical_task_root).ok()?.flatten() {
+        let artifact_dir = artifact_dir.path();
+        if !artifact_dir.is_dir() {
+            continue;
+        }
+        for file in fs::read_dir(&artifact_dir).ok()?.flatten() {
+            let file = file.path();
+            if let Some(canonical) =
+                matching_delivery_file(workspace_root, &file, expected_size, expected_sha256)
+            {
+                if canonical.starts_with(&canonical_task_root) {
+                    return Some(canonical);
+                }
+            }
+        }
+    }
+    None
 }
 
 fn publish_artifact_file(source: &Path, destination: &Path) -> io::Result<String> {

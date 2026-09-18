@@ -58,7 +58,11 @@ fn unlimited_wechat_media_keep_file_validation_without_a_byte_ceiling() {
     std::fs::create_dir_all(&dir).expect("temp directory");
     let path = dir.join("video.mp4");
     let file = std::fs::File::create(&path).expect("sparse test file");
-    for limit in [wechat_image_max_bytes(), wechat_video_max_bytes(), wechat_file_max_bytes()] {
+    for limit in [
+        wechat_image_max_bytes(),
+        wechat_video_max_bytes(),
+        wechat_file_max_bytes(),
+    ] {
         assert_eq!(limit, None);
         for size in [127_140_539, 4 * 1024 * MIB] {
             file.set_len(size).expect("sparse file length");

@@ -20,3 +20,16 @@ pub mod webview_origin;
 
 pub type Result<T> = std::result::Result<T, String>;
 pub const CHUNK_BYTES: usize = 64 * 1024;
+
+#[cfg(feature = "gui")]
+pub mod application;
+#[cfg(target_os = "android")]
+pub mod android;
+#[cfg(all(target_os = "android", feature = "gui"))]
+#[tauri::mobile_entry_point]
+fn run() {
+    application::run(tauri::generate_context!());
+}
+
+#[cfg(feature="gui")]
+pub mod file_dialog;

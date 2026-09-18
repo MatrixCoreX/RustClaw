@@ -1,0 +1,8 @@
+{
+  "identifier": "mobile-export",
+  "description": "Android main console can export small generated files through the system document picker",
+  "platforms": ["android"],
+  "windows": ["main"],
+  "local": true,
+  "permissions": ["allow-save-export"]
+}

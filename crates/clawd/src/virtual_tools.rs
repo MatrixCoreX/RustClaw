@@ -188,6 +188,12 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
             if !obj.contains_key("paths") {
                 move_value_alias_if_missing(&mut obj, "paths", &["path"]);
             }
+            if let Some(Value::String(path)) = obj.get("paths") {
+                obj.insert(
+                    "paths".to_string(),
+                    Value::Array(vec![Value::String(path.clone())]),
+                );
+            }
             obj.insert(
                 "action".to_string(),
                 Value::String("path_batch_facts".to_string()),

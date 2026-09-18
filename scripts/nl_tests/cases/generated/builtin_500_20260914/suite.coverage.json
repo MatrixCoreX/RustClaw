@@ -1,0 +1,3384 @@
+{
+  "schema_version": 1,
+  "case_count": 500,
+  "reused_regressions": 140,
+  "new_parameter_cases": 360,
+  "fixed_entries": 49,
+  "coverage_kind": "intended_only_verify_against_task_journal",
+  "sha256": "3abee6bbc3fe6e8f4e042313697678edfbd6b10654744a7a14329889f3d1f0c0",
+  "intended_coverage": {
+    "archive_basic": [
+      "fresh_archive_tgz_roundtrip_zh",
+      "b100_049_archive_list_zip_zh",
+      "b100_050_archive_read_member_en",
+      "b100_051_archive_pack_sandbox_zh",
+      "b100_107_archive_safe_roundtrip_zh"
+    ],
+    "audio_synthesize": [
+      "fresh_audio_transcribe_pipeline_zh",
+      "fresh_audio_synthesize_live_en"
+    ],
+    "audio_transcribe": [
+      "fresh_audio_transcribe_pipeline_zh"
+    ],
+    "browser_session": [
+      "fresh_browser_session_rfc_snapshot_en",
+      "b100_browser_session_snapshot_en"
+    ],
+    "browser_web": [
+      "fresh_browser_web_w3c_extract_zh",
+      "b100_073_browser_open_example_en"
+    ],
+    "code_index": [
+      "fresh_code_index_test_inventory_en",
+      "b100_101_code_index_definition_en"
+    ],
+    "config_basic": [
+      "fresh_config_basic_audio_keys_zh",
+      "fresh_config_guard_validate_zh",
+      "b100_016_config_read_vendor_zh",
+      "b100_017_config_read_registry_prompt_en",
+      "b100_018_config_list_top_keys_zh",
+      "b100_019_config_validate_fixture_en",
+      "b100_020_config_guard_host_zh",
+      "b100_021_config_edit_apply_fixture_zh",
+      "b100_023_config_no_secret_leak_zh",
+      "b100_027_system_extract_package_name_en"
+    ],
+    "config_edit": [
+      "fresh_config_edit_locale_fixture_en",
+      "b100_021_config_edit_apply_fixture_zh",
+      "b100_022_config_edit_restore_fixture_zh"
+    ],
+    "config_guard": [
+      "fresh_config_edit_locale_fixture_en",
+      "fresh_config_guard_validate_zh",
+      "b100_019_config_validate_fixture_en",
+      "b100_020_config_guard_host_zh",
+      "b100_021_config_edit_apply_fixture_zh",
+      "b100_022_config_edit_restore_fixture_zh"
+    ],
+    "db_basic": [
+      "fresh_database_order_aggregate_en",
+      "b100_052_db_list_tables_zh",
+      "b100_053_db_schema_version_en",
+      "b100_054_db_select_limit_zh",
+      "b100_055_db_sqlite_query_en",
+      "new_database_001",
+      "new_database_002",
+      "new_database_003",
+      "new_database_004",
+      "new_database_005",
+      "new_database_006",
+      "new_database_007",
+      "new_database_008",
+      "new_database_009",
+      "new_database_010",
+      "new_database_011",
+      "new_database_012",
+      "new_database_013",
+      "new_database_014",
+      "new_database_015",
+      "new_database_016",
+      "new_database_017",
+      "new_database_018",
+      "new_database_019",
+      "new_database_020",
+      "new_database_021",
+      "new_database_022",
+      "new_database_023",
+      "new_database_024",
+      "new_database_025",
+      "new_database_026",
+      "new_database_027",
+      "new_database_028",
+      "new_database_029",
+      "new_database_030",
+      "new_database_031",
+      "new_database_032",
+      "new_database_033",
+      "new_database_034",
+      "new_database_035",
+      "new_database_036",
+      "new_database_037",
+      "new_database_038",
+      "new_database_039",
+      "new_database_040",
+      "new_database_041",
+      "new_database_042",
+      "new_database_043",
+      "new_database_044",
+      "new_database_045"
+    ],
+    "doc_parse": [
+      "fresh_doc_parse_agents_section_en",
+      "b100_059_doc_parse_service_notes_zh",
+      "b100_060_doc_parse_release_checklist_en",
+      "b100_061_doc_parse_archive_readme_zh",
+      "b100_068_kb_resumable_ingest_cycle_zh",
+      "new_document_001",
+      "new_document_002",
+      "new_document_003",
+      "new_document_004",
+      "new_document_005",
+      "new_document_006",
+      "new_document_007",
+      "new_document_008",
+      "new_document_009",
+      "new_document_010",
+      "new_document_011",
+      "new_document_012",
+      "new_document_013",
+      "new_document_014",
+      "new_document_015",
+      "new_document_016",
+      "new_document_017",
+      "new_document_018",
+      "new_document_019",
+      "new_document_020",
+      "new_document_021",
+      "new_document_022",
+      "new_document_023",
+      "new_document_024",
+      "new_document_025",
+      "new_document_026",
+      "new_document_027",
+      "new_document_028",
+      "new_document_029",
+      "new_document_030",
+      "new_document_031",
+      "new_document_032",
+      "new_document_033",
+      "new_document_034",
+      "new_document_035",
+      "new_document_036",
+      "new_document_037",
+      "new_document_038",
+      "new_document_039",
+      "new_document_040",
+      "new_document_041",
+      "new_document_042",
+      "new_document_043",
+      "new_document_044",
+      "new_document_045"
+    ],
+    "docker_basic": [
+      "fresh_docker_images_observe_zh",
+      "b100_056_docker_version_en",
+      "b100_057_docker_ps_zh"
+    ],
+    "extension_manager": [
+      "fresh_extension_gap_pdf_annotations_en",
+      "b100_079_extension_assess_gap_zh",
+      "b100_080_extension_plan_temp_en"
+    ],
+    "fs_basic": [
+      "fresh_read_file_contract_heading_zh",
+      "fresh_write_file_atomic_cleanup_en",
+      "fresh_workspace_patch_preview_zh",
+      "fresh_list_dir_config_copies_en",
+      "fresh_make_dir_nested_cleanup_zh",
+      "fresh_remove_file_exact_target_en",
+      "fresh_fs_compare_docs_zh",
+      "fresh_fs_search_recovery_line_en",
+      "b100_001_fs_stat_readme_zh",
+      "b100_002_fs_list_docs_en",
+      "b100_003_fs_count_logs_zh",
+      "b100_004_fs_read_range_zh",
+      "b100_005_fs_grep_keyword_en",
+      "b100_006_fs_find_markdown_zh",
+      "b100_007_fs_compare_paths_en",
+      "b100_008_fs_hidden_entries_zh",
+      "b100_009_system_tree_summary_zh",
+      "b100_010_fs_write_append_cleanup_zh",
+      "b100_011_fs_missing_file_graceful_en",
+      "b100_012_fs_fuzzy_candidates_zh",
+      "b100_013_fs_file_names_only_zh",
+      "b100_014_fs_batch_facts_en",
+      "b100_015_fs_content_excerpt_boundary_zh",
+      "b100_026_system_workspace_glance_zh",
+      "b100_105_workspace_patch_live_zh",
+      "new_read_001",
+      "new_file_cycle_001",
+      "new_missing_001",
+      "new_multi_001",
+      "new_read_002",
+      "new_file_cycle_002",
+      "new_missing_002",
+      "new_multi_002",
+      "new_read_003",
+      "new_file_cycle_003",
+      "new_missing_003",
+      "new_multi_003",
+      "new_read_004",
+      "new_file_cycle_004",
+      "new_missing_004",
+      "new_multi_004",
+      "new_read_005",
+      "new_file_cycle_005",
+      "new_missing_005",
+      "new_multi_005",
+      "new_read_006",
+      "new_file_cycle_006",
+      "new_missing_006",
+      "new_multi_006",
+      "new_read_007",
+      "new_file_cycle_007",
+      "new_missing_007",
+      "new_multi_007",
+      "new_read_008",
+      "new_file_cycle_008",
+      "new_missing_008",
+      "new_multi_008",
+      "new_read_009",
+      "new_file_cycle_009",
+      "new_missing_009",
+      "new_multi_009",
+      "new_read_010",
+      "new_file_cycle_010",
+      "new_missing_010",
+      "new_multi_010",
+      "new_read_011",
+      "new_file_cycle_011",
+      "new_missing_011",
+      "new_multi_011",
+      "new_read_012",
+      "new_file_cycle_012",
+      "new_missing_012",
+      "new_multi_012",
+      "new_read_013",
+      "new_file_cycle_013",
+      "new_missing_013",
+      "new_multi_013",
+      "new_read_014",
+      "new_file_cycle_014",
+      "new_missing_014",
+      "new_multi_014",
+      "new_read_015",
+      "new_file_cycle_015",
+      "new_missing_015",
+      "new_multi_015",
+      "new_read_016",
+      "new_file_cycle_016",
+      "new_missing_016",
+      "new_multi_016",
+      "new_read_017",
+      "new_file_cycle_017",
+      "new_missing_017",
+      "new_multi_017",
+      "new_read_018",
+      "new_file_cycle_018",
+      "new_missing_018",
+      "new_multi_018",
+      "new_read_019",
+      "new_file_cycle_019",
+      "new_missing_019",
+      "new_multi_019",
+      "new_read_020",
+      "new_file_cycle_020",
+      "new_missing_020",
+      "new_multi_020",
+      "new_read_021",
+      "new_file_cycle_021",
+      "new_missing_021",
+      "new_multi_021",
+      "new_read_022",
+      "new_file_cycle_022",
+      "new_missing_022",
+      "new_multi_022",
+      "new_read_023",
+      "new_file_cycle_023",
+      "new_missing_023",
+      "new_multi_023",
+      "new_read_024",
+      "new_file_cycle_024",
+      "new_missing_024",
+      "new_multi_024",
+      "new_read_025",
+      "new_file_cycle_025",
+      "new_missing_025",
+      "new_multi_025",
+      "new_read_026",
+      "new_file_cycle_026",
+      "new_missing_026",
+      "new_multi_026",
+      "new_read_027",
+      "new_file_cycle_027",
+      "new_missing_027",
+      "new_multi_027",
+      "new_read_028",
+      "new_file_cycle_028",
+      "new_missing_028",
+      "new_multi_028",
+      "new_read_029",
+      "new_file_cycle_029",
+      "new_missing_029",
+      "new_multi_029",
+      "new_read_030",
+      "new_file_cycle_030",
+      "new_missing_030",
+      "new_multi_030",
+      "new_read_031",
+      "new_file_cycle_031",
+      "new_missing_031",
+      "new_multi_031",
+      "new_read_032",
+      "new_file_cycle_032",
+      "new_missing_032",
+      "new_multi_032",
+      "new_read_033",
+      "new_file_cycle_033",
+      "new_missing_033",
+      "new_multi_033",
+      "new_read_034",
+      "new_file_cycle_034",
+      "new_missing_034",
+      "new_multi_034",
+      "new_read_035",
+      "new_file_cycle_035",
+      "new_missing_035",
+      "new_multi_035",
+      "new_read_036",
+      "new_file_cycle_036",
+      "new_missing_036",
+      "new_multi_036",
+      "new_read_037",
+      "new_file_cycle_037",
+      "new_missing_037",
+      "new_multi_037",
+      "new_read_038",
+      "new_file_cycle_038",
+      "new_missing_038",
+      "new_multi_038",
+      "new_read_039",
+      "new_file_cycle_039",
+      "new_missing_039",
+      "new_multi_039",
+      "new_read_040",
+      "new_file_cycle_040",
+      "new_missing_040",
+      "new_multi_040",
+      "new_read_041",
+      "new_file_cycle_041",
+      "new_missing_041",
+      "new_multi_041",
+      "new_read_042",
+      "new_file_cycle_042",
+      "new_missing_042",
+      "new_multi_042",
+      "new_read_043",
+      "new_file_cycle_043",
+      "new_missing_043",
+      "new_multi_043",
+      "new_read_044",
+      "new_file_cycle_044",
+      "new_missing_044",
+      "new_multi_044",
+      "new_read_045",
+      "new_file_cycle_045",
+      "new_missing_045",
+      "new_multi_045"
+    ],
+    "fs_search": [
+      "fresh_fs_search_recovery_line_en",
+      "b100_005_fs_grep_keyword_en",
+      "b100_006_fs_find_markdown_zh",
+      "b100_012_fs_fuzzy_candidates_zh"
+    ],
+    "git_basic": [
+      "fresh_git_recent_subjects_zh",
+      "b100_034_git_status_zh",
+      "b100_035_git_branch_remote_en",
+      "b100_036_git_changed_files_zh",
+      "b100_037_git_log_one_en",
+      "b100_038_git_show_readme_head_en"
+    ],
+    "git_remote_publish": [
+      "fresh_git_remote_publish_reconcile_zh",
+      "b100_git_remote_publish_missing_connection_en"
+    ],
+    "git_remote_read": [
+      "fresh_git_remote_read_missing_en",
+      "b100_git_remote_read_missing_connection_zh"
+    ],
+    "health_check": [
+      "fresh_health_check_paths_en",
+      "b100_043_health_check_zh",
+      "b100_045_service_verify_no_restart_en",
+      "b100_072_local_health_zh"
+    ],
+    "http_basic": [
+      "fresh_http_iana_reserved_en",
+      "b100_071_http_get_example_en"
+    ],
+    "image_edit": [
+      "fresh_image_edit_live_en"
+    ],
+    "image_generate": [
+      "fresh_image_generate_live_zh"
+    ],
+    "image_vision": [
+      "fresh_image_vision_structured_extract_en",
+      "b100_089_image_vision_local_zh"
+    ],
+    "install_module": [
+      "fresh_install_module_preview_en",
+      "b100_042_install_module_live_zh"
+    ],
+    "kb": [
+      "fresh_kb_ingest_search_cleanup_en",
+      "b100_067_kb_list_namespaces_zh",
+      "b100_068_kb_resumable_ingest_cycle_zh",
+      "b100_106_kb_cancel_cleanup_en"
+    ],
+    "list_dir": [
+      "fresh_list_dir_config_copies_en",
+      "b100_002_fs_list_docs_en",
+      "b100_008_fs_hidden_entries_zh"
+    ],
+    "log_analyze": [
+      "fresh_log_analyze_recovery_zh",
+      "b100_033_process_tail_log_zh",
+      "b100_058_log_analyze_app_zh"
+    ],
+    "make_dir": [
+      "fresh_make_dir_nested_cleanup_zh",
+      "b100_010_fs_write_append_cleanup_zh"
+    ],
+    "memory_store": [
+      "fresh_memory_lifecycle_en",
+      "b100_memory_recent_zh"
+    ],
+    "music_generate": [
+      "fresh_music_generate_live_en"
+    ],
+    "nni": [
+      "fresh_nni_public_market_en",
+      "b100_108_nni_status_zh"
+    ],
+    "office_workspace": [
+      "fresh_office_spreadsheet_roundtrip_zh",
+      "b100_103_office_word_live_zh"
+    ],
+    "package_manager": [
+      "fresh_package_manager_detect_ui_en",
+      "b100_039_package_detect_zh",
+      "b100_040_package_install_restore_en",
+      "b100_041_package_remove_restore_zh",
+      "b100_042_install_module_live_zh"
+    ],
+    "process_basic": [
+      "fresh_process_clawd_observation_zh",
+      "b100_031_process_ps_clawd_zh",
+      "b100_032_process_ports_en",
+      "b100_033_process_tail_log_zh"
+    ],
+    "read_file": [
+      "fresh_read_file_contract_heading_zh",
+      "b100_001_fs_stat_readme_zh",
+      "b100_004_fs_read_range_zh",
+      "new_read_001",
+      "new_file_cycle_001",
+      "new_read_002",
+      "new_file_cycle_002",
+      "new_read_003",
+      "new_file_cycle_003",
+      "new_read_004",
+      "new_file_cycle_004",
+      "new_read_005",
+      "new_file_cycle_005",
+      "new_read_006",
+      "new_file_cycle_006",
+      "new_read_007",
+      "new_file_cycle_007",
+      "new_read_008",
+      "new_file_cycle_008",
+      "new_read_009",
+      "new_file_cycle_009",
+      "new_read_010",
+      "new_file_cycle_010",
+      "new_read_011",
+      "new_file_cycle_011",
+      "new_read_012",
+      "new_file_cycle_012",
+      "new_read_013",
+      "new_file_cycle_013",
+      "new_read_014",
+      "new_file_cycle_014",
+      "new_read_015",
+      "new_file_cycle_015",
+      "new_read_016",
+      "new_file_cycle_016",
+      "new_read_017",
+      "new_file_cycle_017",
+      "new_read_018",
+      "new_file_cycle_018",
+      "new_read_019",
+      "new_file_cycle_019",
+      "new_read_020",
+      "new_file_cycle_020",
+      "new_read_021",
+      "new_file_cycle_021",
+      "new_read_022",
+      "new_file_cycle_022",
+      "new_read_023",
+      "new_file_cycle_023",
+      "new_read_024",
+      "new_file_cycle_024",
+      "new_read_025",
+      "new_file_cycle_025",
+      "new_read_026",
+      "new_file_cycle_026",
+      "new_read_027",
+      "new_file_cycle_027",
+      "new_read_028",
+      "new_file_cycle_028",
+      "new_read_029",
+      "new_file_cycle_029",
+      "new_read_030",
+      "new_file_cycle_030",
+      "new_read_031",
+      "new_file_cycle_031",
+      "new_read_032",
+      "new_file_cycle_032",
+      "new_read_033",
+      "new_file_cycle_033",
+      "new_read_034",
+      "new_file_cycle_034",
+      "new_read_035",
+      "new_file_cycle_035",
+      "new_read_036",
+      "new_file_cycle_036",
+      "new_read_037",
+      "new_file_cycle_037",
+      "new_read_038",
+      "new_file_cycle_038",
+      "new_read_039",
+      "new_file_cycle_039",
+      "new_read_040",
+      "new_file_cycle_040",
+      "new_read_041",
+      "new_file_cycle_041",
+      "new_read_042",
+      "new_file_cycle_042",
+      "new_read_043",
+      "new_file_cycle_043",
+      "new_read_044",
+      "new_file_cycle_044",
+      "new_read_045",
+      "new_file_cycle_045"
+    ],
+    "remove_file": [
+      "fresh_make_dir_nested_cleanup_zh",
+      "fresh_remove_file_exact_target_en",
+      "b100_010_fs_write_append_cleanup_zh",
+      "new_file_cycle_001",
+      "new_file_cycle_002",
+      "new_file_cycle_003",
+      "new_file_cycle_004",
+      "new_file_cycle_005",
+      "new_file_cycle_006",
+      "new_file_cycle_007",
+      "new_file_cycle_008",
+      "new_file_cycle_009",
+      "new_file_cycle_010",
+      "new_file_cycle_011",
+      "new_file_cycle_012",
+      "new_file_cycle_013",
+      "new_file_cycle_014",
+      "new_file_cycle_015",
+      "new_file_cycle_016",
+      "new_file_cycle_017",
+      "new_file_cycle_018",
+      "new_file_cycle_019",
+      "new_file_cycle_020",
+      "new_file_cycle_021",
+      "new_file_cycle_022",
+      "new_file_cycle_023",
+      "new_file_cycle_024",
+      "new_file_cycle_025",
+      "new_file_cycle_026",
+      "new_file_cycle_027",
+      "new_file_cycle_028",
+      "new_file_cycle_029",
+      "new_file_cycle_030",
+      "new_file_cycle_031",
+      "new_file_cycle_032",
+      "new_file_cycle_033",
+      "new_file_cycle_034",
+      "new_file_cycle_035",
+      "new_file_cycle_036",
+      "new_file_cycle_037",
+      "new_file_cycle_038",
+      "new_file_cycle_039",
+      "new_file_cycle_040",
+      "new_file_cycle_041",
+      "new_file_cycle_042",
+      "new_file_cycle_043",
+      "new_file_cycle_044",
+      "new_file_cycle_045"
+    ],
+    "rss_fetch": [
+      "fresh_rss_categories_zh",
+      "b100_102_rss_source_health_zh"
+    ],
+    "run_cmd": [
+      "fresh_run_cmd_cli_help_en",
+      "fresh_archive_tgz_roundtrip_zh",
+      "fresh_audio_transcribe_pipeline_zh",
+      "fresh_office_spreadsheet_roundtrip_zh",
+      "b100_021_config_edit_apply_fixture_zh",
+      "b100_022_config_edit_restore_fixture_zh",
+      "b100_028_run_cmd_pwd_en",
+      "b100_029_run_cmd_echo_zh",
+      "b100_030_run_cmd_async_live_en",
+      "b100_042_install_module_live_zh",
+      "b100_048_task_resume_live_en",
+      "b100_103_office_word_live_zh",
+      "b100_105_workspace_patch_live_zh",
+      "b100_107_archive_safe_roundtrip_zh",
+      "new_multi_001",
+      "new_multi_002",
+      "new_multi_003",
+      "new_multi_004",
+      "new_multi_005",
+      "new_multi_006",
+      "new_multi_007",
+      "new_multi_008",
+      "new_multi_009",
+      "new_multi_010",
+      "new_multi_011",
+      "new_multi_012",
+      "new_multi_013",
+      "new_multi_014",
+      "new_multi_015",
+      "new_multi_016",
+      "new_multi_017",
+      "new_multi_018",
+      "new_multi_019",
+      "new_multi_020",
+      "new_multi_021",
+      "new_multi_022",
+      "new_multi_023",
+      "new_multi_024",
+      "new_multi_025",
+      "new_multi_026",
+      "new_multi_027",
+      "new_multi_028",
+      "new_multi_029",
+      "new_multi_030",
+      "new_multi_031",
+      "new_multi_032",
+      "new_multi_033",
+      "new_multi_034",
+      "new_multi_035",
+      "new_multi_036",
+      "new_multi_037",
+      "new_multi_038",
+      "new_multi_039",
+      "new_multi_040",
+      "new_multi_041",
+      "new_multi_042",
+      "new_multi_043",
+      "new_multi_044",
+      "new_multi_045"
+    ],
+    "schedule": [
+      "fresh_schedule_preview_tokyo_zh",
+      "b100_078_schedule_live_cleanup_en",
+      "new_schedule_001",
+      "new_schedule_002",
+      "new_schedule_003",
+      "new_schedule_004",
+      "new_schedule_005",
+      "new_schedule_006",
+      "new_schedule_007",
+      "new_schedule_008",
+      "new_schedule_009",
+      "new_schedule_010",
+      "new_schedule_011",
+      "new_schedule_012",
+      "new_schedule_013",
+      "new_schedule_014",
+      "new_schedule_015",
+      "new_schedule_016",
+      "new_schedule_017",
+      "new_schedule_018",
+      "new_schedule_019",
+      "new_schedule_020",
+      "new_schedule_021",
+      "new_schedule_022",
+      "new_schedule_023",
+      "new_schedule_024",
+      "new_schedule_025",
+      "new_schedule_026",
+      "new_schedule_027",
+      "new_schedule_028",
+      "new_schedule_029",
+      "new_schedule_030",
+      "new_schedule_031",
+      "new_schedule_032",
+      "new_schedule_033",
+      "new_schedule_034",
+      "new_schedule_035",
+      "new_schedule_036",
+      "new_schedule_037",
+      "new_schedule_038",
+      "new_schedule_039",
+      "new_schedule_040",
+      "new_schedule_041",
+      "new_schedule_042",
+      "new_schedule_043",
+      "new_schedule_044",
+      "new_schedule_045"
+    ],
+    "service_control": [
+      "fresh_service_clawd_status_en",
+      "b100_044_service_status_clawd_en",
+      "b100_045_service_verify_no_restart_en"
+    ],
+    "subagent": [
+      "fresh_subagent_readonly_sections_en",
+      "b100_104_subagent_readonly_review_en"
+    ],
+    "system_basic": [
+      "fresh_system_info_machine_fields_zh",
+      "b100_004_fs_read_range_zh",
+      "b100_009_system_tree_summary_zh",
+      "b100_014_fs_batch_facts_en",
+      "b100_024_system_info_zh",
+      "b100_025_system_runtime_status_en",
+      "b100_026_system_workspace_glance_zh",
+      "b100_027_system_extract_package_name_en",
+      "b100_043_health_check_zh"
+    ],
+    "task_control": [
+      "fresh_task_control_active_zh",
+      "b100_046_task_list_zh",
+      "b100_047_task_list_detail_en",
+      "b100_048_task_resume_live_en"
+    ],
+    "task_plan": [
+      "fresh_task_plan_revision_zh",
+      "b100_task_plan_read_en"
+    ],
+    "transform": [
+      "fresh_transform_filter_csv_en",
+      "b100_062_transform_sort_json_zh",
+      "b100_063_transform_filter_json_en",
+      "b100_064_transform_group_sum_zh",
+      "b100_065_transform_csv_project_en",
+      "b100_066_transform_dedupe_zh",
+      "new_transform_001",
+      "new_transform_002",
+      "new_transform_003",
+      "new_transform_004",
+      "new_transform_005",
+      "new_transform_006",
+      "new_transform_007",
+      "new_transform_008",
+      "new_transform_009",
+      "new_transform_010",
+      "new_transform_011",
+      "new_transform_012",
+      "new_transform_013",
+      "new_transform_014",
+      "new_transform_015",
+      "new_transform_016",
+      "new_transform_017",
+      "new_transform_018",
+      "new_transform_019",
+      "new_transform_020",
+      "new_transform_021",
+      "new_transform_022",
+      "new_transform_023",
+      "new_transform_024",
+      "new_transform_025",
+      "new_transform_026",
+      "new_transform_027",
+      "new_transform_028",
+      "new_transform_029",
+      "new_transform_030",
+      "new_transform_031",
+      "new_transform_032",
+      "new_transform_033",
+      "new_transform_034",
+      "new_transform_035",
+      "new_transform_036",
+      "new_transform_037",
+      "new_transform_038",
+      "new_transform_039",
+      "new_transform_040",
+      "new_transform_041",
+      "new_transform_042",
+      "new_transform_043",
+      "new_transform_044",
+      "new_transform_045"
+    ],
+    "video_generate": [
+      "fresh_video_generate_live_zh"
+    ],
+    "web_search_extract": [
+      "fresh_web_search_sqlite_wal_zh",
+      "b100_074_web_search_extract_en",
+      "b100_075_web_search_rust_async_en",
+      "b100_076_web_search_domain_allow_zh"
+    ],
+    "workspace_patch": [
+      "fresh_workspace_patch_preview_zh",
+      "b100_105_workspace_patch_live_zh"
+    ],
+    "write_file": [
+      "fresh_write_file_atomic_cleanup_en",
+      "fresh_remove_file_exact_target_en",
+      "b100_010_fs_write_append_cleanup_zh",
+      "new_file_cycle_001",
+      "new_file_cycle_002",
+      "new_file_cycle_003",
+      "new_file_cycle_004",
+      "new_file_cycle_005",
+      "new_file_cycle_006",
+      "new_file_cycle_007",
+      "new_file_cycle_008",
+      "new_file_cycle_009",
+      "new_file_cycle_010",
+      "new_file_cycle_011",
+      "new_file_cycle_012",
+      "new_file_cycle_013",
+      "new_file_cycle_014",
+      "new_file_cycle_015",
+      "new_file_cycle_016",
+      "new_file_cycle_017",
+      "new_file_cycle_018",
+      "new_file_cycle_019",
+      "new_file_cycle_020",
+      "new_file_cycle_021",
+      "new_file_cycle_022",
+      "new_file_cycle_023",
+      "new_file_cycle_024",
+      "new_file_cycle_025",
+      "new_file_cycle_026",
+      "new_file_cycle_027",
+      "new_file_cycle_028",
+      "new_file_cycle_029",
+      "new_file_cycle_030",
+      "new_file_cycle_031",
+      "new_file_cycle_032",
+      "new_file_cycle_033",
+      "new_file_cycle_034",
+      "new_file_cycle_035",
+      "new_file_cycle_036",
+      "new_file_cycle_037",
+      "new_file_cycle_038",
+      "new_file_cycle_039",
+      "new_file_cycle_040",
+      "new_file_cycle_041",
+      "new_file_cycle_042",
+      "new_file_cycle_043",
+      "new_file_cycle_044",
+      "new_file_cycle_045"
+    ]
+  },
+  "cases": [
+    {
+      "name": "fresh_run_cmd_cli_help_en",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:9",
+      "prompt_sha256": "f0e127a9706364d9dd8cf98d27612b8b5e0563b8f3b34487e8966aedbca6ab8b"
+    },
+    {
+      "name": "fresh_read_file_contract_heading_zh",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:10",
+      "prompt_sha256": "1db472c17b04791a6ba04c1cfcd87de2096e16a4f55355cbf15b9efb26a30ba9"
+    },
+    {
+      "name": "fresh_write_file_atomic_cleanup_en",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:11",
+      "prompt_sha256": "0dba0ff0241869ea8510530eb1864e05035ade8c531c39b4697c8d672c407128"
+    },
+    {
+      "name": "fresh_workspace_patch_preview_zh",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:12",
+      "prompt_sha256": "c333391dba9e415331272abd4cdce99a57795bd514b0b12169b8397af945f7a7"
+    },
+    {
+      "name": "fresh_memory_lifecycle_en",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:13",
+      "prompt_sha256": "3b63346a1cf6a7ae3a9a8e013984b05c8440d716985db807e70f42d7bbf6f048"
+    },
+    {
+      "name": "fresh_task_plan_revision_zh",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:14",
+      "prompt_sha256": "661894f62e78ae6027bd864e003df60e12ac90e66adc601db2242a51e5607baa"
+    },
+    {
+      "name": "fresh_list_dir_config_copies_en",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:15",
+      "prompt_sha256": "f149923b3001868795391da18c83ed5ea7baff48465dc3cce194f1ce3e2ca47f"
+    },
+    {
+      "name": "fresh_make_dir_nested_cleanup_zh",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:16",
+      "prompt_sha256": "28f9770bc152de12eeee43ea4458ba6c543a3b23e8d6cb31b95b100013af9805"
+    },
+    {
+      "name": "fresh_remove_file_exact_target_en",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:17",
+      "prompt_sha256": "d7f5133fb9f9209870a972b502e4ece7afffb7759c0c6c7c7363dddadfd50ac4"
+    },
+    {
+      "name": "fresh_fs_compare_docs_zh",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:18",
+      "prompt_sha256": "3a0b46548b7901b8a7f5e00939d20a10000ee01a7a6541cadfb7011dbd243567"
+    },
+    {
+      "name": "fresh_code_index_test_inventory_en",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:19",
+      "prompt_sha256": "507028f5cbb3b076eb16232398d63e929e25eee48165a018f6dff0bf05abb4d2"
+    },
+    {
+      "name": "fresh_config_basic_audio_keys_zh",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:20",
+      "prompt_sha256": "d9ec6a2c81d3e452aa50e0bf02ae429e0ab15d7baa89993e5c0454d8ea48ec68"
+    },
+    {
+      "name": "fresh_config_edit_locale_fixture_en",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:21",
+      "prompt_sha256": "a27d4b84b9782f95c7951c02d157c32417aeaba4f1275e3b74fc8794afa7a2ce"
+    },
+    {
+      "name": "fresh_schedule_preview_tokyo_zh",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:22",
+      "prompt_sha256": "d0c8b1ecc7fff7a51d34d9c10446f8530c1f32f59b73fd7dd0a6a773317bc9fb"
+    },
+    {
+      "name": "fresh_subagent_readonly_sections_en",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:23",
+      "prompt_sha256": "26cfcf0f565c85e44449eace25cd332f898598790d31a2c0cbbe06ce0a4ea593"
+    },
+    {
+      "name": "fresh_system_info_machine_fields_zh",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:24",
+      "prompt_sha256": "77ff8390d74d1c817b2002acba1dabb3145b7a8fbcb21292669e6f7c4bcec6e2"
+    },
+    {
+      "name": "fresh_http_iana_reserved_en",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:25",
+      "prompt_sha256": "aac022e00777c85e56822b9204cd743c4bbb004ea9e79a3f9245944002e95370"
+    },
+    {
+      "name": "fresh_git_recent_subjects_zh",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:26",
+      "prompt_sha256": "af5126e96600bbc46b00e4ba4faa7c05eca94aac1ff1775a3725f212f3067212"
+    },
+    {
+      "name": "fresh_git_remote_read_missing_en",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:27",
+      "prompt_sha256": "1645c4219290502d705cc2680b2eff931404dc6c405acbf342574585e84a3028"
+    },
+    {
+      "name": "fresh_git_remote_publish_reconcile_zh",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:28",
+      "prompt_sha256": "9c9fd418652eb468e15e0047021f1be6add576fcdbced6b42cbf2d46fb0337a3"
+    },
+    {
+      "name": "fresh_install_module_preview_en",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:29",
+      "prompt_sha256": "70a303e084c48c329c49ac2b605ddb3c9464cbf8f60526075c159acd588b20d3"
+    },
+    {
+      "name": "fresh_process_clawd_observation_zh",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:30",
+      "prompt_sha256": "763c340ee9b8340d80135eeefb441ec6118e878c962bd2441a09988d069c4323"
+    },
+    {
+      "name": "fresh_package_manager_detect_ui_en",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:31",
+      "prompt_sha256": "42b6ad2cf03a0ebd731ab6a56b885dbc3c6e9d1bb66d290fbd8cd162e2f1fb85"
+    },
+    {
+      "name": "fresh_archive_tgz_roundtrip_zh",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:32",
+      "prompt_sha256": "6a498fe114715a92ca4b5282a5e4f4b7b35dd229102e1343b539a6030ff3333a"
+    },
+    {
+      "name": "fresh_database_order_aggregate_en",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:33",
+      "prompt_sha256": "2641a5e4f577d6030359d91aa0207e8b19ef3f22edad32f77a3263a2912ee57d"
+    },
+    {
+      "name": "fresh_docker_images_observe_zh",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:34",
+      "prompt_sha256": "f705b5b9b8301274a9a9b678ec38a0c9b9880d704b1eba3e540e30197173045b"
+    },
+    {
+      "name": "fresh_fs_search_recovery_line_en",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:35",
+      "prompt_sha256": "324e8bf8e891f28e771058b03a3bad1290ba709ea1262229e2579d5891dfbd47"
+    },
+    {
+      "name": "fresh_rss_categories_zh",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:36",
+      "prompt_sha256": "30da08ef97fd45c4078aaadf75e9085bc9083b9567fa6e7876b1117c2d564d3f"
+    },
+    {
+      "name": "fresh_image_vision_structured_extract_en",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:37",
+      "prompt_sha256": "1cadeed9c4c2281aaf697d6c696d6bd6c0aeb3be4f749b489ac01ef073d6bcc8"
+    },
+    {
+      "name": "fresh_image_generate_live_zh",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:38",
+      "prompt_sha256": "0b89b7a5b40d9c9a043974bd61002abcc0feb16a58a3d03c723f7420a02a9491"
+    },
+    {
+      "name": "fresh_image_edit_live_en",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:39",
+      "prompt_sha256": "f81fc6f9a69a24c57fe60594f1e5c11be1d4bdfb61fc3557c7f0f6d6289d74c5"
+    },
+    {
+      "name": "fresh_audio_transcribe_pipeline_zh",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:40",
+      "prompt_sha256": "331ae3b59370ed46131540cdb44115aab7ca347853da3f61f5cae88e56c2a8db"
+    },
+    {
+      "name": "fresh_audio_synthesize_live_en",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:41",
+      "prompt_sha256": "8dc9e37bcc1af87677e9ba5119461e6f57363e8f403dba223735f2d3d5be3e8a"
+    },
+    {
+      "name": "fresh_video_generate_live_zh",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:42",
+      "prompt_sha256": "0d07c783cdb4bd019af3c891cae178e0cf37720b0a0d305bb79f1570f926f554"
+    },
+    {
+      "name": "fresh_music_generate_live_en",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:43",
+      "prompt_sha256": "6930df4ac8c85136f5fa5d85741102ff56ba4de4e036c122320d44921ded3b5d"
+    },
+    {
+      "name": "fresh_health_check_paths_en",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:44",
+      "prompt_sha256": "242dc43980294597e1bb35cf9f4954377bbaa02e806cf3fa7e3cdfca1a663c9c"
+    },
+    {
+      "name": "fresh_log_analyze_recovery_zh",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:45",
+      "prompt_sha256": "afdd98bed5bc4efbe92c4b20ee088cdeb17f2518b27def83b50538c751a50102"
+    },
+    {
+      "name": "fresh_service_clawd_status_en",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:46",
+      "prompt_sha256": "f38b235d8403ca28ec50a07f50b95a43ee8fddc17bd180ae8c203bc77f53e02d"
+    },
+    {
+      "name": "fresh_task_control_active_zh",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:47",
+      "prompt_sha256": "be5e2335ccf99cbc81737acc7738590f07d9e0900123846f8e6a7402d4eb3b47"
+    },
+    {
+      "name": "fresh_nni_public_market_en",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:48",
+      "prompt_sha256": "dcc5794ca3a435b7c073ac886ecc97e8c30a73cfbabf4a14386b6a1e2e59985b"
+    },
+    {
+      "name": "fresh_config_guard_validate_zh",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:49",
+      "prompt_sha256": "551951851e300fcd8314271d52b6046cc2e10b82ac2c1e555be595786a57d120"
+    },
+    {
+      "name": "fresh_doc_parse_agents_section_en",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:50",
+      "prompt_sha256": "24d654cdafcdd62d1b87b0f639a9932dca42fd8fd0267da22cdfc0f7f999291a"
+    },
+    {
+      "name": "fresh_office_spreadsheet_roundtrip_zh",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:51",
+      "prompt_sha256": "d050ba82f72b7a098c60f60d7314bc9a1f3f9ef99294a5af05322782b63ae407"
+    },
+    {
+      "name": "fresh_transform_filter_csv_en",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:52",
+      "prompt_sha256": "e0018ca17371e45b0dcab116730849882b2169bd4228b257abfb325a352c47b1"
+    },
+    {
+      "name": "fresh_web_search_sqlite_wal_zh",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:53",
+      "prompt_sha256": "e3184fc5af05ea146e86b21a218de0a45822b7781d315c2e7bbe856c071d91d6"
+    },
+    {
+      "name": "fresh_kb_ingest_search_cleanup_en",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:54",
+      "prompt_sha256": "9d4f4e2e68c18bad9820f3e3b784424b2040d98ebdccc48ee9029da54865badf"
+    },
+    {
+      "name": "fresh_browser_session_rfc_snapshot_en",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:55",
+      "prompt_sha256": "9de57e71d55fbe389daab1dd04f55d31da04fe7b30d3a67704a94b4eba8d7069"
+    },
+    {
+      "name": "fresh_browser_web_w3c_extract_zh",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:56",
+      "prompt_sha256": "3c8143df72928d601569e28cc714e1e47e7f6c26bdc58b5dec1bb09a9d6a0bae"
+    },
+    {
+      "name": "fresh_extension_gap_pdf_annotations_en",
+      "source": "nl_cases_builtin_tool_skill_fresh_20260830.txt:57",
+      "prompt_sha256": "8f4e1171a224a1fe9d15453713ffc58cd91a0378a9b0d53514126fd394c1a13f"
+    },
+    {
+      "name": "b100_001_fs_stat_readme_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:21",
+      "prompt_sha256": "06b95603513f4099cecb8e5abc968d2095ba7212b615f5c247420015725c8765"
+    },
+    {
+      "name": "b100_002_fs_list_docs_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:22",
+      "prompt_sha256": "101cb61105944ab65011fb7783763ba93adec769a1d212f27683ccc752210bf7"
+    },
+    {
+      "name": "b100_003_fs_count_logs_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:23",
+      "prompt_sha256": "694854033c9c80e434c0b26733d9a4a211780acdcb72662890541f9d861180c3"
+    },
+    {
+      "name": "b100_004_fs_read_range_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:24",
+      "prompt_sha256": "22f325519148eda8dea1fff9aee942454752aaf5cb6f756123897a7ff1dad849"
+    },
+    {
+      "name": "b100_005_fs_grep_keyword_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:25",
+      "prompt_sha256": "c1c9c127e562c3bd88c4e8963ff00310d6db3f7bdd6e226f58c82eb5c2e73697"
+    },
+    {
+      "name": "b100_006_fs_find_markdown_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:26",
+      "prompt_sha256": "358e4a320fd84b88358073dec910c6ca1f343d257fdb298e14148d09f80d7e92"
+    },
+    {
+      "name": "b100_007_fs_compare_paths_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:27",
+      "prompt_sha256": "7ebf84197d462df74b0cdbb0328a61fe4aee7cfeb578814c6e3e284d7b965fc4"
+    },
+    {
+      "name": "b100_008_fs_hidden_entries_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:28",
+      "prompt_sha256": "e60f86a513ab0735a908426d5cb3fd7842814c306fb0c793d7a3f49ba11a0cce"
+    },
+    {
+      "name": "b100_009_system_tree_summary_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:29",
+      "prompt_sha256": "106cc9f0c78e2ac8d1f884ac0f854ac010e2ee02d98b1685b653f45dc7713315"
+    },
+    {
+      "name": "b100_010_fs_write_append_cleanup_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:30",
+      "prompt_sha256": "a8e6e3e3deff52c141efab59d6d7900f4b06b62a92326b24993f629ebc4cbd6a"
+    },
+    {
+      "name": "b100_011_fs_missing_file_graceful_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:31",
+      "prompt_sha256": "fdc77e8d6d51bc281d335e9828dc0f868059eb6c8caa35f159aa1eecfcfb2263"
+    },
+    {
+      "name": "b100_012_fs_fuzzy_candidates_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:32",
+      "prompt_sha256": "69af127775ad5ed0b506ea02291182b0e9cb75b2dff97901b3ffef37db5f763c"
+    },
+    {
+      "name": "b100_013_fs_file_names_only_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:33",
+      "prompt_sha256": "9190aa9ca31b43db61dd66b24eccd26ddc7d0d85bccd0a051fcb22ebf4c3612e"
+    },
+    {
+      "name": "b100_014_fs_batch_facts_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:34",
+      "prompt_sha256": "9cbf10a16004cc480fa5debb643b70b990473e55a5febba7e89494a098dbc7d1"
+    },
+    {
+      "name": "b100_015_fs_content_excerpt_boundary_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:35",
+      "prompt_sha256": "ec9438be1137b342a46aa53aac6fa547dc5d2a0b1cb9a18920c2ba1b0e2adbbe"
+    },
+    {
+      "name": "b100_016_config_read_vendor_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:36",
+      "prompt_sha256": "3a444cd1165b3accacc70980f4f34cdff324a98794dab958bad27da7bfd5c252"
+    },
+    {
+      "name": "b100_017_config_read_registry_prompt_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:37",
+      "prompt_sha256": "16266fac299efeaf113d97a05fc7033fca126016067ad68d8a371cf2429c16a2"
+    },
+    {
+      "name": "b100_018_config_list_top_keys_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:38",
+      "prompt_sha256": "5e606e8edb9dfba99a50374c3f20d9b9225994716604f046d9d7a9346d999881"
+    },
+    {
+      "name": "b100_019_config_validate_fixture_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:39",
+      "prompt_sha256": "903edf449cda65d74dc0163a002ca758ff84636eb2e97ee7e52070a207443532"
+    },
+    {
+      "name": "b100_020_config_guard_host_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:40",
+      "prompt_sha256": "6c76b1d7cb362e8ac4bee5ce2c5a877ae4e8a7b0a77106808642fe6389bf058e"
+    },
+    {
+      "name": "b100_021_config_edit_apply_fixture_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:41",
+      "prompt_sha256": "ffda45b97b6f92c10776dabf744edc18fb8e85bb2f6592cf2cca442d1d33a188"
+    },
+    {
+      "name": "b100_022_config_edit_restore_fixture_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:42",
+      "prompt_sha256": "10fa3447a966f9f2396464d6e6f571571c847f9c7802ebcbc2bb6b69684febcd"
+    },
+    {
+      "name": "b100_023_config_no_secret_leak_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:43",
+      "prompt_sha256": "c318867fd8e20e027e44afd4be519c659c3b57e5bf33708c445e4848db2af1c8"
+    },
+    {
+      "name": "b100_024_system_info_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:44",
+      "prompt_sha256": "ee233a147d20b1673d017b7346c655c766a7dc6b966dc0c362ebcd21cdd5e098"
+    },
+    {
+      "name": "b100_025_system_runtime_status_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:45",
+      "prompt_sha256": "6b645f4094580bc69765819a00ea02a27f6d9b1220b90233a9de58415afd201f"
+    },
+    {
+      "name": "b100_026_system_workspace_glance_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:46",
+      "prompt_sha256": "6faeb91a9b9ae0c7980ad60e3c3dcf3054edb4ccc5d5ae35aa6a81ac2480cc65"
+    },
+    {
+      "name": "b100_027_system_extract_package_name_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:47",
+      "prompt_sha256": "408e31f089715af6fafa3cac5ab63fa4461a11118c520f1122a85c8eec5446c5"
+    },
+    {
+      "name": "b100_028_run_cmd_pwd_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:48",
+      "prompt_sha256": "adc80f70e572368df274cfe075f93a49860ec73217a7118e5f9fb9b466f69edf"
+    },
+    {
+      "name": "b100_029_run_cmd_echo_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:49",
+      "prompt_sha256": "f3ce7d7741621c27d980ff0c2b7c0d765949aa73ea4c98e246daae224f289fb5"
+    },
+    {
+      "name": "b100_030_run_cmd_async_live_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:50",
+      "prompt_sha256": "91b810bbd84f78c3dd65fdc4c61ef47ac59a2b021b92b4723dbde05a391a5780"
+    },
+    {
+      "name": "b100_031_process_ps_clawd_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:51",
+      "prompt_sha256": "e607c05e67880bfb3af5854dc8f3d571dbb639733271b51a53e9522f685b488e"
+    },
+    {
+      "name": "b100_032_process_ports_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:52",
+      "prompt_sha256": "6af7575f9a5dd0a1e91f94c07288d24b1a10bf9104be626629575b4ee4bb3a6a"
+    },
+    {
+      "name": "b100_033_process_tail_log_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:53",
+      "prompt_sha256": "b59a06363b26d0cf0385515e7abb9c79d1d083a7594bc01d83f8ae8522237e7e"
+    },
+    {
+      "name": "b100_034_git_status_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:54",
+      "prompt_sha256": "7539609bd18f62f5551e0d8d9da24499ab5c0991d7ca57d668146a4073cd3272"
+    },
+    {
+      "name": "b100_035_git_branch_remote_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:55",
+      "prompt_sha256": "25d6988e35da23ff3603cec5972d7a7d747cc3a519cbd65121abc1559c91b980"
+    },
+    {
+      "name": "b100_036_git_changed_files_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:56",
+      "prompt_sha256": "44f47d6741882bde572f0f33e491e083ec61dbb3d446d4e6b79fad3249689ede"
+    },
+    {
+      "name": "b100_037_git_log_one_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:57",
+      "prompt_sha256": "cb9f4aec42e7d1bb520d1528abdebdc394d74d2a99bead5af586c795f2d2aeef"
+    },
+    {
+      "name": "b100_038_git_show_readme_head_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:58",
+      "prompt_sha256": "4420b1712c5aded9a884e4284e127cd61ab3e455273f4cf2bed143e078d742a2"
+    },
+    {
+      "name": "b100_git_remote_read_missing_connection_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:59",
+      "prompt_sha256": "4d7c2fb3f9d46002c17613cca785fc51cc227c8506219b4f509d0bb40b192aaf"
+    },
+    {
+      "name": "b100_git_remote_publish_missing_connection_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:60",
+      "prompt_sha256": "037c17002d3426b554e680e2db0c4e82fa37c1ffc0db8805777bbc7d4cc6e057"
+    },
+    {
+      "name": "b100_task_plan_read_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:61",
+      "prompt_sha256": "994e067d8f52f48a5ea3ab814c831802a56b5523148c3b09ccaa5caefde6e042"
+    },
+    {
+      "name": "b100_memory_recent_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:62",
+      "prompt_sha256": "25809029f4405a0fb31fb7101763d69ba8e1c53cb5b625680d8ac9d80f5eef98"
+    },
+    {
+      "name": "b100_browser_session_snapshot_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:63",
+      "prompt_sha256": "10c5efb8b00aea8273d2b17522652aa74e94113eadadde836b6a49c32a56f9db"
+    },
+    {
+      "name": "b100_039_package_detect_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:64",
+      "prompt_sha256": "6c1457d4689be4fd9aed20d0e2119b7f9f2f0b199bf947936a9757653d1bc5c7"
+    },
+    {
+      "name": "b100_040_package_install_restore_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:65",
+      "prompt_sha256": "2e6c6d1518cc27f36549da31b0a47d9ec3adece7186f2dc24dac64ab4a9b319a"
+    },
+    {
+      "name": "b100_041_package_remove_restore_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:66",
+      "prompt_sha256": "7733830b53cafe97190cfd2c4c715d1f6d5d7564d0644293cd113c3b81c7d63e"
+    },
+    {
+      "name": "b100_042_install_module_live_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:67",
+      "prompt_sha256": "c6e2e0e14f2d33e3fdc6e595860cc5527e501595ad963af7a64c4c716b1518e8"
+    },
+    {
+      "name": "b100_043_health_check_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:68",
+      "prompt_sha256": "f2c31d6c6e7c74cdfe1fdef811cc8b80a10ce4a3e1f2c92576c51f1292eb0e29"
+    },
+    {
+      "name": "b100_044_service_status_clawd_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:69",
+      "prompt_sha256": "0481fd60ff5d30bde89c4b2f62e44990edc9c4d1433fc261310b246bbdddf8ed"
+    },
+    {
+      "name": "b100_045_service_verify_no_restart_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:70",
+      "prompt_sha256": "f0d203ee0b44581cd27fe835843585362e3f8370e6e23709a128f45a04c3ff64"
+    },
+    {
+      "name": "b100_046_task_list_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:71",
+      "prompt_sha256": "426b6887a5cc93b6222164fc30323d5a03c30db44e61cc1b59419eeaed215c8c"
+    },
+    {
+      "name": "b100_047_task_list_detail_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:72",
+      "prompt_sha256": "64eb4c58c2f9728c9c999b39738c59457c2e9fc77a046d815c85696a90f4f737"
+    },
+    {
+      "name": "b100_048_task_resume_live_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:73",
+      "prompt_sha256": "e31acceac6561acd180fcbac42645bcc855d5a3a321381ee2138b50045cfbd67"
+    },
+    {
+      "name": "b100_049_archive_list_zip_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:74",
+      "prompt_sha256": "2ceec5b9709c5ead82c909d656f97effaf6a96914e914cbeb41eb5ce852405d5"
+    },
+    {
+      "name": "b100_050_archive_read_member_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:75",
+      "prompt_sha256": "f13345949d3ddb2c09872c83e127701b8235a0f9e0bed28c1ce89751de2bf42d"
+    },
+    {
+      "name": "b100_051_archive_pack_sandbox_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:76",
+      "prompt_sha256": "baa59cf221d72b0800dc735a0ce861df7eeeee247f0883502567abd3584811fc"
+    },
+    {
+      "name": "b100_052_db_list_tables_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:77",
+      "prompt_sha256": "67cdbf2a5c7ded5e5e15c30b0c01e89faadbed0df61f29f26c7dd95850234895"
+    },
+    {
+      "name": "b100_053_db_schema_version_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:78",
+      "prompt_sha256": "f015bcb55491306febc9c7adbd999c9437e549f6e121079f44a8d4cc09c2fb3b"
+    },
+    {
+      "name": "b100_054_db_select_limit_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:79",
+      "prompt_sha256": "1c570f5006479717d21f66399c60c82f68783d262d8bbc4f1324be32fce468fa"
+    },
+    {
+      "name": "b100_055_db_sqlite_query_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:80",
+      "prompt_sha256": "52214904be1a359e14f36366b198e36fc4f3aabd79be33f8d883dbf9f1b84fba"
+    },
+    {
+      "name": "b100_056_docker_version_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:81",
+      "prompt_sha256": "7044efa26cb5fab6f31021ec86f8a27f6a0fb342ce21d9ea2489761b8652c01b"
+    },
+    {
+      "name": "b100_057_docker_ps_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:82",
+      "prompt_sha256": "96ed5894ea8c12d3ffa2a68e18917ffb4866b85524471f9d9d190bf5e607ab8c"
+    },
+    {
+      "name": "b100_058_log_analyze_app_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:83",
+      "prompt_sha256": "f18c5e14cc7cc80321d9ae290f49dd31b638af425e48a3eff155d3a411c57d1e"
+    },
+    {
+      "name": "b100_059_doc_parse_service_notes_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:84",
+      "prompt_sha256": "ea6a82802c6e501099f858f009aa42cdba0f8e11b0005253ea9aa7fd3d37c3f2"
+    },
+    {
+      "name": "b100_060_doc_parse_release_checklist_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:85",
+      "prompt_sha256": "24822f0b44c0391c5aa8766bab07036f71b6a62f5b7bfd7b6ea5f0036069236b"
+    },
+    {
+      "name": "b100_061_doc_parse_archive_readme_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:86",
+      "prompt_sha256": "45aa1090b632fb77d2f98d9d3c1030b41456c25df36a87716277db4240753f68"
+    },
+    {
+      "name": "b100_062_transform_sort_json_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:87",
+      "prompt_sha256": "82222a88cd46a684e4f82c7dd56e68f13e6f36779490119bf8e46b378723ad09"
+    },
+    {
+      "name": "b100_063_transform_filter_json_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:88",
+      "prompt_sha256": "0265fc7e5a0ef08e97b8e0b3f37fef78b0df91234bc63361595ebfe2237555d9"
+    },
+    {
+      "name": "b100_064_transform_group_sum_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:89",
+      "prompt_sha256": "d7492503753c0171a666618c220ed9b380f158d95014721564baacdb73bfadda"
+    },
+    {
+      "name": "b100_065_transform_csv_project_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:90",
+      "prompt_sha256": "a2718640bd1774a4827d8479fcfbb0b13e67b75b8e5e4471d9c7987c6cbb00bc"
+    },
+    {
+      "name": "b100_066_transform_dedupe_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:91",
+      "prompt_sha256": "7a3496034b1fbeb1c86feba46a129a022ddf78f376610857f3d7fbd89c807d39"
+    },
+    {
+      "name": "b100_067_kb_list_namespaces_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:92",
+      "prompt_sha256": "24c64475ee3d5b6eb98a1d76de77e16eb7069fa71e735a3b993162dca7b88647"
+    },
+    {
+      "name": "b100_068_kb_resumable_ingest_cycle_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:93",
+      "prompt_sha256": "84b8ac1ed6ced30dea9ddd6ca0738730274c5189285773cd58c8da5038857b2c"
+    },
+    {
+      "name": "b100_071_http_get_example_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:96",
+      "prompt_sha256": "d162cfcfc9ca2ddc4d4d5364f63acb3a5fce8d70972d852daf3551b7e8905a3e"
+    },
+    {
+      "name": "b100_072_local_health_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:97",
+      "prompt_sha256": "388e12624737ce066111854d59f30321ef711eba19fd59ebb2d11c1f29bfd0b1"
+    },
+    {
+      "name": "b100_073_browser_open_example_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:98",
+      "prompt_sha256": "6f3b58cf05a0c786d85e9e234108f30bf4f452b336d15c2a55b513dc5756ea7e"
+    },
+    {
+      "name": "b100_074_web_search_extract_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:99",
+      "prompt_sha256": "4acb24f3af4b9d959df828085d150074197672cc50eaaf7119f13ef5286685b9"
+    },
+    {
+      "name": "b100_075_web_search_rust_async_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:100",
+      "prompt_sha256": "2c36cf72e9d1c1adfc701a9c1c1629ca3e93cc6e36384743328c87a01022d23e"
+    },
+    {
+      "name": "b100_076_web_search_domain_allow_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:101",
+      "prompt_sha256": "b16669ed1b5f3bac200bc3e04225419fbdc945943396f869586039eb621c89c9"
+    },
+    {
+      "name": "b100_078_schedule_live_cleanup_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:103",
+      "prompt_sha256": "29e23a8a844a3f00399dbd2f2e797d091ace8fc655f59efbd5ba239683a729dc"
+    },
+    {
+      "name": "b100_079_extension_assess_gap_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:104",
+      "prompt_sha256": "adc956b562a8c59393bc2b1b9db1678366306631f99a48c1ae3fec24ca6ca786"
+    },
+    {
+      "name": "b100_080_extension_plan_temp_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:105",
+      "prompt_sha256": "4a1f8c613616fcc5ca16153654342ea7e756f2ea04ea2f89af7444456d5302ea"
+    },
+    {
+      "name": "b100_089_image_vision_local_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:114",
+      "prompt_sha256": "1a06af088da6f516d34e38da096883fa72f75a8a164589e3f293b0daa2ab3f31"
+    },
+    {
+      "name": "b100_101_code_index_definition_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:126",
+      "prompt_sha256": "4b7eacdbe65208b4ec35c9223a7ead7eac623f91e9a7fffe6c6059be64f0dcd3"
+    },
+    {
+      "name": "b100_102_rss_source_health_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:127",
+      "prompt_sha256": "7da09cf527d6a3e18550262bbdb1d39c0e08cb1693cf05267b719ce304144ea0"
+    },
+    {
+      "name": "b100_103_office_word_live_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:128",
+      "prompt_sha256": "465b1dd34a97692c4cd7eab6f2b16c6b015beb3a6073c106e0d927f51a1da734"
+    },
+    {
+      "name": "b100_104_subagent_readonly_review_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:129",
+      "prompt_sha256": "c0930b914c34c0f1b4774bb73dcaf91cf89d4172969d818d1623536db70334ca"
+    },
+    {
+      "name": "b100_105_workspace_patch_live_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:130",
+      "prompt_sha256": "94e5732301468af1d24f220f2ee56b9a0126864f85401da06c6fa206df018b71"
+    },
+    {
+      "name": "b100_106_kb_cancel_cleanup_en",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:131",
+      "prompt_sha256": "9f2cff5e4d07fef81dae332de79e656b30469fda7641f0b2da87d3d9e524d20e"
+    },
+    {
+      "name": "b100_107_archive_safe_roundtrip_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:132",
+      "prompt_sha256": "fc74d8bc234d54b1fe04932b9b7ae3a76b7f1ccd4f4eb6224afb12ec6b564aa4"
+    },
+    {
+      "name": "b100_108_nni_status_zh",
+      "source": "nl_cases_basic_skill_100_coverage_20260629.txt:133",
+      "prompt_sha256": "2f19e8997788b5594abc1c28dc9adb38a9d1498d0ff6c8b43f7dcac2457a9bc0"
+    },
+    {
+      "name": "new_read_001",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "bb332008b63e1c198ac092f1d2a6c4c3dbc78f6c4378a49ccf5d4f519b71facb"
+    },
+    {
+      "name": "new_database_001",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "4b1840307dda71282cb15e4a0d5fadccd1794c70eb8e982c8df6b94ce04f5931"
+    },
+    {
+      "name": "new_transform_001",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "4a5f384acccfba974b87fbc1a3757492fab8d190b28a167769b5f837d01df9ee"
+    },
+    {
+      "name": "new_schedule_001",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "be9b1e3ad763ed377be91ec75d99928f151ab19516b0e7880dbbf641ccdbacd5"
+    },
+    {
+      "name": "new_file_cycle_001",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "b9213f10afcf5fa574a063f4f4ecb1e9856b950a376771c2f3c70b045616db6e"
+    },
+    {
+      "name": "new_document_001",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "5b87513643df22cb45e39358a20a79675a8c10749bb3643e1b8038f9234a7232"
+    },
+    {
+      "name": "new_missing_001",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "0070901d7fd71901e725e854ef8e16df0abc1b057b69d384f6c8930b39ef842d"
+    },
+    {
+      "name": "new_multi_001",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "db923c6f24b5ab7516e6f8afdbb7657959e379ed57935d49aeeec35a2fa3dd46"
+    },
+    {
+      "name": "new_read_002",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "f639016d4b6de97e0e2eaf7876fa00a9285f1046a3716d732123b2b051890991"
+    },
+    {
+      "name": "new_database_002",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "8d3d8c49fb4b4bcfb650981c2af53a1240abc9f2598e14dd13383122008cb9c1"
+    },
+    {
+      "name": "new_transform_002",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "79880f499e352155add4a4a7e077951d60353203445ee7bc0f4dabce874406d7"
+    },
+    {
+      "name": "new_schedule_002",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "37796a1cf500ee85d415adf22431f7c6d161de18f6a468141c831b79888e7910"
+    },
+    {
+      "name": "new_file_cycle_002",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "3a5df66d12277f0c316f7771945b7fddf1158a28c8afc5559bb45e4def1489e9"
+    },
+    {
+      "name": "new_document_002",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "c6e47c4f2f07135bf95b794e6565da1eac72ecee7a7368afa7581f854e8f1fba"
+    },
+    {
+      "name": "new_missing_002",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "50e54ea9cb8a5f69d2019d1a8da504c32ad140e35157d486ec85ba67691a82de"
+    },
+    {
+      "name": "new_multi_002",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "75edcd464572a907bc37260aac497139297b233b02af283f023f324e03e9465f"
+    },
+    {
+      "name": "new_read_003",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "84170e4cc056a2dddef8796b230ee37035f5aeae5aff0cef9ce7fd9450ae562f"
+    },
+    {
+      "name": "new_database_003",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "8f6499ff4e5b3c88395bc63c0d8340616ed20ba82f3319ca21030c7dd0559520"
+    },
+    {
+      "name": "new_transform_003",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "e8ea9e8688150e9f4a0f0d32fe2430d1c244bf4898efe3a8b2ec63ed1863eb72"
+    },
+    {
+      "name": "new_schedule_003",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "ccd910308c2cf3546b3aad235056611d7b2c87b19902f25d528fbafdf779c000"
+    },
+    {
+      "name": "new_file_cycle_003",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "6c40d33bada8fa8d42ff6dc89c977fa0217e74d97f9dea79c56774bfb34795ac"
+    },
+    {
+      "name": "new_document_003",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "97e37921da7d35bc4fd85bfb98fd7d3d512ec9d28ecf8e91d18f862969713b90"
+    },
+    {
+      "name": "new_missing_003",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "798e08c59b946a017c237fe3b543d95ec16ee3d5dc11d70bea3bbbcdcb1585fa"
+    },
+    {
+      "name": "new_multi_003",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "98684c0dc9d9ffac17ac33d66b30c770a7ea62f3eb2f123da8495696c6400781"
+    },
+    {
+      "name": "new_read_004",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "3af05839ee0f7172bbae8a4468b37dd9b51f2fef16cad3aadbdf0713fd052c38"
+    },
+    {
+      "name": "new_database_004",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "17f018ef1df2ec2735f7dae638a16b6207afc5724863e038dc70a074e8c905fc"
+    },
+    {
+      "name": "new_transform_004",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "fbbc7b3e311d82fec8f1de9caff0bb816cc857e30dd82aa84a9e792c1b3a3bd5"
+    },
+    {
+      "name": "new_schedule_004",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "5cb0f73d2ca60fe98f43b4d64f63a94c50d00395ccf1d8107371921f88677cfc"
+    },
+    {
+      "name": "new_file_cycle_004",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "5a5f72abcf57dfd741dc9ef40833250f89c66e66bd2c3af60d62c9f4750c277c"
+    },
+    {
+      "name": "new_document_004",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "499a4531f875a1535778fbcd2c25ec1bcf28e029e82be023ff7bf9c1a8e15a7f"
+    },
+    {
+      "name": "new_missing_004",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "1605024383e29a1e66a0ac708faa99c4b957682d12eb4b172b7b13f496ed2d14"
+    },
+    {
+      "name": "new_multi_004",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "d9ca4af6754370978076dadee4fb13830392f9d2bafee38538deacc4ff5865ea"
+    },
+    {
+      "name": "new_read_005",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "0fe89b3f4a9719756925e4254004efc6ab3e196d01920cc33132fb7b0e2e8b01"
+    },
+    {
+      "name": "new_database_005",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "b4616fe61359b1ea8f32fc8f76783711ca4e2ec393761cf9c7dc4c1e818c4bb0"
+    },
+    {
+      "name": "new_transform_005",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "e93a6961c9273b91a84ae15c209759daf68d717ecab587bcb95526082269aa84"
+    },
+    {
+      "name": "new_schedule_005",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "ef99a256869b06069913bb1034e5af1fb413833105d1ce30b4bdd16f54365b58"
+    },
+    {
+      "name": "new_file_cycle_005",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "dd349a865494a11644d61bf1338d5f6b5d256ac83f0ab09e9dadc5e3b7bd0b0e"
+    },
+    {
+      "name": "new_document_005",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "0926eb4c58aa4e6772c4062ed74ed88b3d4172d7399c25ff1d78ea434bda2d3d"
+    },
+    {
+      "name": "new_missing_005",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "76ff519ae4d5a4f276138ef51e6b23dd4784da2c7a44b3fb07eb2656e88804de"
+    },
+    {
+      "name": "new_multi_005",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "af105cd448df7509c7482f70061558e11a71a2e4912e92a84d710342e97c9f23"
+    },
+    {
+      "name": "new_read_006",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "94c1a4b778b72ad88c269dcaa938a867bc0f0c1cfa2ad6f6eb13a8c97396eea0"
+    },
+    {
+      "name": "new_database_006",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "90678540a0bc115f532eb7ba8e68ad2cd9eff8eaf22cb51e0e6a04689fdf27f5"
+    },
+    {
+      "name": "new_transform_006",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "68851acb223e40286057e43d39a8fa43c7817696121873b88aa115c53c0cdf91"
+    },
+    {
+      "name": "new_schedule_006",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "c0dc5ac94862d6d49b505c491aa10d9917cace6dfe106d82456a697589b006e8"
+    },
+    {
+      "name": "new_file_cycle_006",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "b4d7f416a81d75ee8f5a3bda8bcdcc26a0bd9e9155358367322afa68d56129d5"
+    },
+    {
+      "name": "new_document_006",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "1fe94bf46a35c064e1ef27189c9baab869467d1ca14beba9b0cd7fd516a90d6f"
+    },
+    {
+      "name": "new_missing_006",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "b1f60ed3621d7cab1eb9d24ce03b98f81db102e1153bfe4376d34cc2783e1116"
+    },
+    {
+      "name": "new_multi_006",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "ca7653681d715aedbd8f06d8c0b8c3d7faad3317e585240277b78d695a67e5b1"
+    },
+    {
+      "name": "new_read_007",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "f0b509008da7c8a6ec0412107c994cb613aa2c99bf16882d11d49c5b98f13273"
+    },
+    {
+      "name": "new_database_007",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "136b0bea3d86546d39545e315ada89d5816887674cc8522a028015680824f50f"
+    },
+    {
+      "name": "new_transform_007",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "fc65f0b3cb3830508c0dc6c399eaaeb081a6998e513d8c0a2db0a11bf607a754"
+    },
+    {
+      "name": "new_schedule_007",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "cf3d6ea0ce4025858f16a6318a711ab533561360d74ce9fd92c8e8c13521898b"
+    },
+    {
+      "name": "new_file_cycle_007",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "48932bd9af2d95633c20266694425c450888fe13999e1ad7d559dd4d9703cb0b"
+    },
+    {
+      "name": "new_document_007",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "4c6a15be818020768745e4e2e498f237236f37f9a200a9b0d2d724b2409ac57f"
+    },
+    {
+      "name": "new_missing_007",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "dbbf28c78d88f3273fef62cb81bf5a65ddc26df25ec7a9b851161f940d53bb97"
+    },
+    {
+      "name": "new_multi_007",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "fb5608c9d911c066d5dedf1243fe2114355e0c97e1a2bc97ff960bcdc7ad630f"
+    },
+    {
+      "name": "new_read_008",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "23d36f7609a2ad6da5a6227e687ed449f6950b2ab96cda92e0129778ce467c1d"
+    },
+    {
+      "name": "new_database_008",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "0f40a773e1d90d4114626365bbd123ad86e3a0a5375a48412471e3d770f4d102"
+    },
+    {
+      "name": "new_transform_008",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "6588481d1f9022c1d2884f31beff0760d51a146685ff1622d5e795d3b71372e8"
+    },
+    {
+      "name": "new_schedule_008",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "3365ce8840e63f9d51f4e42692c4121d3c1a1839ccb374916d9b2f0cffea13f9"
+    },
+    {
+      "name": "new_file_cycle_008",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "35a3cc4810ede3fe0503d948c4e85adfc7c63d64478613ec6c550ee66d6fa600"
+    },
+    {
+      "name": "new_document_008",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "4d49cc819f0be8ed653eb003f104026ded0688c551422d4d4fbb8637b642d829"
+    },
+    {
+      "name": "new_missing_008",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "0e78d3bd7d8acc18864d13224382efc00f510b3763b616d7b0c72f2bdd70da39"
+    },
+    {
+      "name": "new_multi_008",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "49986c2f2dd1e78ca6fd13b426bfd4e63db6a2f917a75fb4372b94a27995b6d6"
+    },
+    {
+      "name": "new_read_009",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "5e2baec9c272ac379d2f0768779813b8d98c22ee221fd8a69a8c62d4a6fd7f6e"
+    },
+    {
+      "name": "new_database_009",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "3927f2b194f7295b4194ce5975378796cdb70a22d656eb18efcb9a187f17e6bc"
+    },
+    {
+      "name": "new_transform_009",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "946061313cb60357d2aab129b90e31984ea207ac2a0a5b1b9ad96bbfb26676b4"
+    },
+    {
+      "name": "new_schedule_009",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "fa71d7c996b8373e2ca00dffedc6603d3b1889d04cd4a4cefe648ce3535b3187"
+    },
+    {
+      "name": "new_file_cycle_009",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "df85ba0d3f6aa69d04f6fdb5113b870cc3dc94c9ad07a8b70eeba9ea9f7b54ef"
+    },
+    {
+      "name": "new_document_009",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "b213c487ea047990c3d294a770d694e6b3a545f17a64b69117e797089c63f60c"
+    },
+    {
+      "name": "new_missing_009",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "51aa469726125256b83879534bbfa275a0a722982d3f9e07c25a04bceb6f80ab"
+    },
+    {
+      "name": "new_multi_009",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "7592e7ebae0235b5d93e94b2397c617cd07e32772b73d0a3efdee1ad2c020926"
+    },
+    {
+      "name": "new_read_010",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "55197eeb5da74945bc6c02fe531fc5df0ddb9b7b24ad52af11d88011a1c2644a"
+    },
+    {
+      "name": "new_database_010",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "c22bca17b8b6f6f1a295f064cd2fc1ea352900717ce68e07333ed63b882e937a"
+    },
+    {
+      "name": "new_transform_010",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "3309e30eedcb825eaa092a66a4891700417d86aa1fcd7b0c6525c739e2201ee6"
+    },
+    {
+      "name": "new_schedule_010",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "4e2ddd9debe652470ed3f16a1e44dd0bba2cee6805b8ce763b337c5b1009a09b"
+    },
+    {
+      "name": "new_file_cycle_010",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "5bfc6d4d4234dc698e5e5688b1e3e3bebc0e83a6d198f303998dc48835ae2e60"
+    },
+    {
+      "name": "new_document_010",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "3762c16338e9fb6109b6eb5d5173b811f72899515d818e21a7496e8892465bfa"
+    },
+    {
+      "name": "new_missing_010",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "6c7c717f7e830d441e4afc73b436e5eac4bd92d61a7fa4fadfb4df33c0a200b3"
+    },
+    {
+      "name": "new_multi_010",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "db6f31bfb4ced8dd23437fe9207f2bd9f46eac3f92d94b1605e97f51a6e65501"
+    },
+    {
+      "name": "new_read_011",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "1ff2a90778e00b4e653e2fd903b52eb1cd424ecabaf339222e4885a16892e2e9"
+    },
+    {
+      "name": "new_database_011",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "f28096e5ba8556d811c2f80eb91909647ec2758b59ba0875fd4b56d2c1c6107c"
+    },
+    {
+      "name": "new_transform_011",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "22d213ce6d0e909a8b43f0a46c0616b84a84e095c10bb5e59ec6d657c78b0454"
+    },
+    {
+      "name": "new_schedule_011",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "918ad98bfd479b44be361fa71983cf7fee3c70ad83d68669153e93b23c5afe57"
+    },
+    {
+      "name": "new_file_cycle_011",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "b86a36418944bc1e32fe0c938765e81546e3a5c9006d979a51dc2c33f11f1bd1"
+    },
+    {
+      "name": "new_document_011",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "52f7be666eb2e00447a2df6f6c55beab7d602aabaca76f0743a03c5d9ab35627"
+    },
+    {
+      "name": "new_missing_011",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "a8df314391f3fe986d9f8370f545c8cce7e7f09e881e9a46bcf7c62db00f2a79"
+    },
+    {
+      "name": "new_multi_011",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "70d67d4f96ea5db7cdb3fac1565e77f26608e7598b955960b41cfe5297b7d9e0"
+    },
+    {
+      "name": "new_read_012",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "c3e5bc11fd5ba3f3554820a9ac0bdefbde4a13c8e55722b7f4c16eab11980d7e"
+    },
+    {
+      "name": "new_database_012",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "aef810aa318c39f7c5eeee16acafd46594f7e5557c8395382f2cffeb53915cc1"
+    },
+    {
+      "name": "new_transform_012",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "7d35d1fd43e79a15ab75c9dffa2cb4c84a0c35e5b0bbb3b196689f9201c9011f"
+    },
+    {
+      "name": "new_schedule_012",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "a6c25a3623148127364589e5dadcf5b9466399cabff1b57d778668ffb1cd00c3"
+    },
+    {
+      "name": "new_file_cycle_012",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "1dbe5f8caf3fd902ad9b3b3a47f3c8ca71162fdd16e93342c436b8bf5695f938"
+    },
+    {
+      "name": "new_document_012",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "8a314d0afed521c3f646c1ce9ba0bd9b0b39938f0ba6dd41efa67b98e517177d"
+    },
+    {
+      "name": "new_missing_012",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "73dc6df03e58b8e6ed11868f6bc7e012ff0800515b862706b2541d36bf907914"
+    },
+    {
+      "name": "new_multi_012",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "58a5fa9b424210cf546e34bbeb29bdec6ee3b5fca2d904459c8128a3e09cc857"
+    },
+    {
+      "name": "new_read_013",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "f30421557579d4f6666f52a4d2e903313dde7ad5953cb4754a5ebcdb35b02a77"
+    },
+    {
+      "name": "new_database_013",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "9030355c18086787e8286b4776275fc59fed1c0d2a9091a5224af196411660c2"
+    },
+    {
+      "name": "new_transform_013",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "0f2596cd15c88648daae3397271ae54125f5eef9bdf894eaefb2d84ee34ec7db"
+    },
+    {
+      "name": "new_schedule_013",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "5c97dd64321ba3a92bde15c1a1977766fc3eff182e18af071d2516b08a748e34"
+    },
+    {
+      "name": "new_file_cycle_013",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "928898155a6065a1ae9088047394b3fe0035861e9c4cf2c8198102d2d039e5c3"
+    },
+    {
+      "name": "new_document_013",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "71271d8699320d522487ac5124d89c5fc51e4b53d351e07ea2cb4fb0e400ebd4"
+    },
+    {
+      "name": "new_missing_013",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "12ea58a9c4ddc44aad5e9dba66a4bb5e480fa9cdc5b213cf6fba6709426aac53"
+    },
+    {
+      "name": "new_multi_013",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "86498ea26b1de56f034c75517a1d7ae82265db90d99f2a6db6684453e61c84be"
+    },
+    {
+      "name": "new_read_014",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "13fb0bf79e21e8f93e8e704cc232cacc08907b5a00f26448459ddf32c388b7a8"
+    },
+    {
+      "name": "new_database_014",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "dda56f006210eeba0c18485cad5d54ffea146924662c5ab86a4f5e92e1f755ff"
+    },
+    {
+      "name": "new_transform_014",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "c245e0ee9ad8986f012f603057dcf509707f19b3f660b6e68060522ac72eb28a"
+    },
+    {
+      "name": "new_schedule_014",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "9983308fa59a921bd909ea7c59da9429a9a1003a10f5b2963169830422a53120"
+    },
+    {
+      "name": "new_file_cycle_014",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "e8c77edfc39d6aea4f46737a161d3fc634df8a1dbed2f47b84a771b7f83da075"
+    },
+    {
+      "name": "new_document_014",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "e7c7a691edf14d3299f2b04221dca44cbeec56f5f41accb1b68ee5eb665a6289"
+    },
+    {
+      "name": "new_missing_014",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "4624b0668578437cfc7ef09550d41e4d532c4077c90a2ac0c451576f54197c88"
+    },
+    {
+      "name": "new_multi_014",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "2ef526956ad33dab07a25be32c9532307d840ec2733b0d2e3aaef3522aa47f9d"
+    },
+    {
+      "name": "new_read_015",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "84e58375c386052b7a6a82bda400cd5a3f6f5b2abb1b023f60bd31f24beb545d"
+    },
+    {
+      "name": "new_database_015",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "8d5b7411d54b57786bb8eed37c86d76d16bfc6566c1285eb0c3e5ae99a5aa472"
+    },
+    {
+      "name": "new_transform_015",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "7c14fcfa9a2d234b1adc60d80a2622af4a448a6b189a94e86088f87dbc741000"
+    },
+    {
+      "name": "new_schedule_015",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "433e237a77004a9ad08837f595f96a883e63e4df0377de9d1185eaf56d1c41eb"
+    },
+    {
+      "name": "new_file_cycle_015",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "e39aab94ab32f94e858172edd30a92611798b7bbce477f745dd5196b15585644"
+    },
+    {
+      "name": "new_document_015",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "8beb95801d1b52d70aa36950211063a88a8260d38d1b03d242b933e9ddb2d836"
+    },
+    {
+      "name": "new_missing_015",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "b71294d19e98b4311a4fd2ae30c7c705900db4110f47b93943a820e59be1c278"
+    },
+    {
+      "name": "new_multi_015",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "c7eae010cd165bb3309c1d6edf7c2110bc94558ce7115573fcb3495b70ffb865"
+    },
+    {
+      "name": "new_read_016",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "39bcbc4ef753695b8a4d62319caf09aaad51ded23d613831a1ae48ce3f01f08e"
+    },
+    {
+      "name": "new_database_016",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "89ffbb589e41c4abdf5b6f1cb0509f6d3ba558040b36a39f93e61fc29ad756ed"
+    },
+    {
+      "name": "new_transform_016",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "596fe60802eece5c1c7cc22cf7759fbfceb90456f59c7eef2315e3c620d3c6df"
+    },
+    {
+      "name": "new_schedule_016",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "c32394dac1d2204d7fe68dfbc6d176f43ecb882e08c89f1d571222e68d8d271f"
+    },
+    {
+      "name": "new_file_cycle_016",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "7826c4173ec1365f4d0dd28aeaeb13de712ec9d0a15d5964f4d404f025ef2cfa"
+    },
+    {
+      "name": "new_document_016",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "581193bf219c5621d478b13cf1bc00f47fbe04ed3858f2f2653e5b8289b941eb"
+    },
+    {
+      "name": "new_missing_016",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "f50b89205e29f0045c93479a384d4d0c029e97c34c03ebbe4de98e8cf4cdaa5d"
+    },
+    {
+      "name": "new_multi_016",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "6d7065bf62db2dc7cc0ca05e085ed975b518e7b26db896b8f102b797d40b901c"
+    },
+    {
+      "name": "new_read_017",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "06cb691a6d836c1bb5d7c390cd0306b4b26e2d82656ced59464a9158b166587e"
+    },
+    {
+      "name": "new_database_017",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "315f99024e67ac3813f44a42c93e5965c8f03ed5ea2e57f72b24a4802549234c"
+    },
+    {
+      "name": "new_transform_017",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "27fd8118be6f484eb420281f4c7b8214d73c9e0247320158c2f733fe8570c093"
+    },
+    {
+      "name": "new_schedule_017",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "fdb3000e6e15fe26a2d270206969a72f47a31e4c73df1f6dcea83d7984237f76"
+    },
+    {
+      "name": "new_file_cycle_017",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "1f124c4c5f41404d3dc07d11d4bc492d8ecdc00d2e81f41411d814e99ea5b119"
+    },
+    {
+      "name": "new_document_017",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "49d949d61cd1d09f9f89a1c4739eaa4eb24e799d1b875cf067fb43228a671d59"
+    },
+    {
+      "name": "new_missing_017",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "a2a6350b6bd3384b579dc027226d1414155122f144ff26d5cf459745d83fbb68"
+    },
+    {
+      "name": "new_multi_017",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "4996692245bb8d64a4137ee99b378f4b0ab969eba0edbda3efc148dd7b428166"
+    },
+    {
+      "name": "new_read_018",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "be3137c808717a834e166d9d791ab264d5346e96f7bff699b68afdf2cb529328"
+    },
+    {
+      "name": "new_database_018",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "74e465d3c99530622e9be724c911130d8ceeb031ba4b77301231bc7ab34bf164"
+    },
+    {
+      "name": "new_transform_018",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "9cb5800ac3e0e4e01e7de0e5b13ba540f84b1ce5a974051bd30291a2e3ec038e"
+    },
+    {
+      "name": "new_schedule_018",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "f9646f289323edfef892215e001cccaf07b8403ba2e438196e7dd9ee32e59279"
+    },
+    {
+      "name": "new_file_cycle_018",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "6a05fad364452f11fdd286727b80964f058b009df0587f228ac0947f90a5de3f"
+    },
+    {
+      "name": "new_document_018",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "c914289b1aa4bfc52e2ad282d863876d478e844572e87239ee5a6dabc805830c"
+    },
+    {
+      "name": "new_missing_018",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "63e192fa402e8f763e7f3af950476b05d8c6b288542ee1f3f9babad6f213b373"
+    },
+    {
+      "name": "new_multi_018",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "d1a86bf6ff56ae2ecfaa879feffb70a8f7a720d467b7792c58a07b4614f82438"
+    },
+    {
+      "name": "new_read_019",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "ca5ebaf752a2129f1dd7a06459d056ae8cbee27a46c459da2b74b70bfdd27e2a"
+    },
+    {
+      "name": "new_database_019",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "c854a8316e12602c60b26667b2c18f5d984b3434560d6f724b5760f44a53f7c6"
+    },
+    {
+      "name": "new_transform_019",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "a2c6fe98805530d14c176b1893949b5adac80ed1d3bbddf35132c8c64c2bf72a"
+    },
+    {
+      "name": "new_schedule_019",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "73a0e840d45a90a63b2b19de7bdeb155399c8ec4f2298e0cf69f2ca5de8256b9"
+    },
+    {
+      "name": "new_file_cycle_019",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "fbf7fd6051e92bca47812c556bba57ad9b09265fce632a6efc52134990810faf"
+    },
+    {
+      "name": "new_document_019",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "387262415dd56b6c6ac6906e4b2cb4b95c5cad7b45579de1c525cfde38ef932e"
+    },
+    {
+      "name": "new_missing_019",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "d57daeb8ccf716d9f557bd43bee26c65de00ef864cbb3cc894bffc7d6ebb38bc"
+    },
+    {
+      "name": "new_multi_019",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "ce39f68047cff69130b1424b8a3e890dd90241b4e6dc5923a9a8f273b9f21658"
+    },
+    {
+      "name": "new_read_020",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "d2e533d1671164c4b9716c32bede0350086da8a275d69c5e900059afe0c045d9"
+    },
+    {
+      "name": "new_database_020",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "2580515b31a4d4f140fcb0d7119385e7e02eb5054557973b124ede8be24a1e3e"
+    },
+    {
+      "name": "new_transform_020",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "71f1544a4d51b37db002d751573d4c649aef0415b6b97335697c70d9bc497f52"
+    },
+    {
+      "name": "new_schedule_020",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "f5c224635f705e3d2d043107465baec33aa846bd08def0e647a2eb72703e085b"
+    },
+    {
+      "name": "new_file_cycle_020",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "c5be63285a3f2b742feec65f76d05632c192ae6fdca54627eeff4397b0b8f3d6"
+    },
+    {
+      "name": "new_document_020",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "7b366ac3194986405c4d55e4720473ad95e09de508b56418661ed67d679bb102"
+    },
+    {
+      "name": "new_missing_020",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "2969045cf0bd7b258dbb59e4ab7f5ec58356d3386cd2cdac1220c79b2c360174"
+    },
+    {
+      "name": "new_multi_020",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "761ba09d1bd34178c3082156f5481c8ae2b910b5fb47a5e4f3ec1b5c490d2f44"
+    },
+    {
+      "name": "new_read_021",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "6adc1319f9f8497db8173ad9f6e240fdcea192317d4bf737cefcb0de1a7170c4"
+    },
+    {
+      "name": "new_database_021",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "fb13d284340636eece0332b9aa64193e8502fd627beadfee9f614ce0d224b7ad"
+    },
+    {
+      "name": "new_transform_021",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "b0f3b9456dd194432793fd68a4e40ae1f736f263aa3e7b59402378b832439755"
+    },
+    {
+      "name": "new_schedule_021",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "92e55d2231be47195d8b51c9673064129f7a93e193e7d2f4ec723656e8090259"
+    },
+    {
+      "name": "new_file_cycle_021",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "b4d96cc29ab7617d0454092138c8eecf16a5cc590d9bb1a1380558dfd8d401d1"
+    },
+    {
+      "name": "new_document_021",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "aa3ed536504b31aab732afcdb8c759f318435b97cda3aabf8e15f810cd689b1f"
+    },
+    {
+      "name": "new_missing_021",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "fc90e2d74f654f1a79a628a096dc52c5b6f621ea4f140c37d7e33fef48c966b6"
+    },
+    {
+      "name": "new_multi_021",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "7b832f77c75ab6d3a878094c8916413adcac6ca7811361f65da32f25b3c7b19e"
+    },
+    {
+      "name": "new_read_022",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "b244773152980f326afce251e305ee17ef6260d375e0123dadbcdd500fce2bb1"
+    },
+    {
+      "name": "new_database_022",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "b5c5d477a05a5d03234b28e14b6c179d2b760deac818e869d5f3aa2daa158c6f"
+    },
+    {
+      "name": "new_transform_022",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "d15794dce93538f36faf7a6918ae81e6dd8808827979be5ef29e029374798025"
+    },
+    {
+      "name": "new_schedule_022",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "37ecba1041717f77b5d3933115723f5f68e7abc8e0eb8c25b630320701c6d0dd"
+    },
+    {
+      "name": "new_file_cycle_022",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "46fbc882a8160f7bceece2cb5188d4926486cd4d19e15d106290b08bf17e44ba"
+    },
+    {
+      "name": "new_document_022",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "748f3050b7d6e65358a3c37cbc937243277d7ea7b1c3cc88383345189f5b866a"
+    },
+    {
+      "name": "new_missing_022",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "6b120dea4cf737791c81aa7f41efd9412387a22629b0f584474b1f5f8e2a75d7"
+    },
+    {
+      "name": "new_multi_022",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "4f11a362552ede14f936c62f30a7e7a772de57b6c3c25c7e8546dea9f66f193b"
+    },
+    {
+      "name": "new_read_023",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "1820054e9abfcab4f0ee351fd464c25cfac34d3c7c682a782b109d5f308b5da2"
+    },
+    {
+      "name": "new_database_023",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "f3896132e7d4d9c0834078ab71f916233d6f43ce534b24faa3fd7cc604db2729"
+    },
+    {
+      "name": "new_transform_023",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "da45aa3cc94b8e20878c2379305b269419815d824560fe4a6d47067aea627e71"
+    },
+    {
+      "name": "new_schedule_023",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "9205be5b5829494abd99ba330bc378b4a2287a2abfeebd9ffd769d4af232cd53"
+    },
+    {
+      "name": "new_file_cycle_023",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "616c41197c7e14a639a72dae2a3eb4ec4718d9e756c32dfa37bf7939bc3396c0"
+    },
+    {
+      "name": "new_document_023",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "e8b4bb0f09307f3be42fd59ab1755e5ba92a4350e02ed8cde1d6ccb06dcf742d"
+    },
+    {
+      "name": "new_missing_023",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "c55645dc37431e3b5bb5e794dfb07696b4bd123beefa73a9e160c4b5af30725e"
+    },
+    {
+      "name": "new_multi_023",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "666805102bad2cb6a9d6f80b946683040cc38aeaf83cf5a13bdd4b70b26e6f32"
+    },
+    {
+      "name": "new_read_024",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "a2e68fc859b5002a690165d2439bfb57b711e6865aba4e4783b211cf427ae197"
+    },
+    {
+      "name": "new_database_024",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "c60da232858e38016e7daf6abc332b880d741319fb278a074c1b3432691cd7ae"
+    },
+    {
+      "name": "new_transform_024",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "2d0cb232fb4f3cb944a51f8219ce5ac6088133f3bb2bd5f855151f07e2f569e1"
+    },
+    {
+      "name": "new_schedule_024",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "103b705eaebc52edf8becf0253be686a01f6299b430ac931c480de5b55793fa7"
+    },
+    {
+      "name": "new_file_cycle_024",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "3fdf601694f504c4a56d2052217ae276f73680f1fd26cdf846b56039443495aa"
+    },
+    {
+      "name": "new_document_024",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "1daf1ae5debfc1cbfb5b965b46ae4a37bbd6559e0b02ca3d9058eee0d6fb4b80"
+    },
+    {
+      "name": "new_missing_024",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "caf10fb8d8652bb382639cbb0906a8383e275f32e5219be37cce3257d4c5f615"
+    },
+    {
+      "name": "new_multi_024",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "bfe83fd2ff78a9fbe7d160083ae42ec5f7a9b75af0f311d1b34b845838122a02"
+    },
+    {
+      "name": "new_read_025",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "21f6010b750eaa1f6d5e2cfba23a24e1f60a0211a4a02ae1edbcac16cbbb1489"
+    },
+    {
+      "name": "new_database_025",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "00ab0d36a1e5599e22afe45fe0e1dabe3f984ddc35711e5ed3d4a823d090bd7e"
+    },
+    {
+      "name": "new_transform_025",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "5e75d5f93f78ce1f8ff4a408fbec7e6755d1491147f3094e99267e0fa6f431e5"
+    },
+    {
+      "name": "new_schedule_025",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "2c659ec3e954e461c2e3265ecb39466d6dfcdb28723ee934b5dba338edc3226d"
+    },
+    {
+      "name": "new_file_cycle_025",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "816960e8649da9e8d5b4f2a7a7777c9f388f0437395db30edd2f260b1012b139"
+    },
+    {
+      "name": "new_document_025",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "674fa76efe09707990ae851caf478d11529ba1dcbe098fcc5a3c29903eaeed96"
+    },
+    {
+      "name": "new_missing_025",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "609c3ecc8713720844e22783d7e3eff36b798ef3d71c54499e4d5285b875e172"
+    },
+    {
+      "name": "new_multi_025",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "1c5cc95273980d222fc0df682e199a05da0f68c512366957053e4f0e11b44aed"
+    },
+    {
+      "name": "new_read_026",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "3867304aead551403ad7e3fe7a8c291af881263645ad3a10dad72541a8a451eb"
+    },
+    {
+      "name": "new_database_026",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "90b485d7bf2921848dbf8c8297df6628175b22a9953e4d68de2d47506d7f8146"
+    },
+    {
+      "name": "new_transform_026",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "46aff6e4d95d616b00ddf42a194925c0cd2fcfad8ddd34c069c3a904c89809c8"
+    },
+    {
+      "name": "new_schedule_026",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "a3395e4cb9784024fb58f07780233896596c854a0734d00883c5fbffae7c070f"
+    },
+    {
+      "name": "new_file_cycle_026",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "33eaffee83aab737407a46c56c2b1af2682820682140918f7198743d7ba13368"
+    },
+    {
+      "name": "new_document_026",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "ad9e237cdee86eaf8c464d294732e59b4ade64eea5b601e69477199e36589801"
+    },
+    {
+      "name": "new_missing_026",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "dbb93d6a67ef9290a9fc52f36d8a0398a53cf1a62e8cac42aa880cded9b15c26"
+    },
+    {
+      "name": "new_multi_026",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "a6dfd40a1edb5ea03c0bafd610e88ec871e53a61e9f9e01bbc90b29ca6d5e93e"
+    },
+    {
+      "name": "new_read_027",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "275f2da7222e6fe24628b60de65ca9025b8dae39fb077d75c817dc71eca397af"
+    },
+    {
+      "name": "new_database_027",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "b71a54521c280821ae7d61872de87d898cb2b75962f1d2940d753bb53c49eb2f"
+    },
+    {
+      "name": "new_transform_027",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "e98abafa7107d7ec398ba56627b1d93435b1cb6ecdbbf7f3f37427c3d4460141"
+    },
+    {
+      "name": "new_schedule_027",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "d88ea9aee9c6170f873bd645931a1b1a3dc0cdb7ac858a79214cfbeaf0b7f75b"
+    },
+    {
+      "name": "new_file_cycle_027",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "0c6165d68bb706ba982461daaf345b48d4deb3612e43fb1dea5f5ca52a4135b6"
+    },
+    {
+      "name": "new_document_027",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "17e257ca372e4ea391d41e64610bcee071aa348a2b9a63664456abd2e5e491b6"
+    },
+    {
+      "name": "new_missing_027",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "e4b74471003cf8ce0e1671a635c1b04136ad665ae417f1a222e398c63eb8c5ef"
+    },
+    {
+      "name": "new_multi_027",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "36454e0f3c00a5d6c91f81fbf99d801930ad3951730442d8098ee149d30e78d6"
+    },
+    {
+      "name": "new_read_028",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "d52bcceeb6e89b29481d6ef303da4436dca579815d5e19433f377aa5e9f946db"
+    },
+    {
+      "name": "new_database_028",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "b92a2ab2bf688dbc57ad060dd7ae8017f8e81dcb273683dafdf7375290fb113a"
+    },
+    {
+      "name": "new_transform_028",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "b656f26d8d5ad82822fe94ffe4e8d046c57282c3834c2ee3b46709816f9ab325"
+    },
+    {
+      "name": "new_schedule_028",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "394e337b52d210218535b932eef6c71b77b2f0360ba446ec7ca3e875a9f4ca77"
+    },
+    {
+      "name": "new_file_cycle_028",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "d25885b9dc3dbbac278bd986eee74d8ca48d46c9b32757e050724d3cc5984856"
+    },
+    {
+      "name": "new_document_028",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "bc74d980b2bef17d875c79b1cea7005a5c9a3535290d73686fb0d286882730ec"
+    },
+    {
+      "name": "new_missing_028",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "42c3bb9e857002b6f8a7d3cee412984adb8b14f0e05d8549ecc6931287709c97"
+    },
+    {
+      "name": "new_multi_028",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "63c76f17480ad4df0ad14a830373c2b7f884804e1975fb028a0675fb0a9e21e0"
+    },
+    {
+      "name": "new_read_029",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "36547a29c603bc93349351303d08eb4f483a165441152f59afa07606ab51d62e"
+    },
+    {
+      "name": "new_database_029",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "5d6b35df496acfa434b58c8b3fe05a14834efb5e7b006b05bff377857a807130"
+    },
+    {
+      "name": "new_transform_029",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "a1ff3ed0610da6cf9623351709bc0f52919a9f17e5cde036d5c9b8590005c7c9"
+    },
+    {
+      "name": "new_schedule_029",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "062a137adc843d02f4426d171f109d96d269cd80b202aca9629a8490e874f78e"
+    },
+    {
+      "name": "new_file_cycle_029",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "49a332336e28f1e92d4ad0fa6f15185ae8e4795ded532eac7370cdcd38fbeefd"
+    },
+    {
+      "name": "new_document_029",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "73c30207b496525332adc6656d45cba22e3bf5e2b19cd4c9c9503f60af533bac"
+    },
+    {
+      "name": "new_missing_029",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "a2f2b66ee493b5b12e4e6bbcc0942fd83732febbfd71526b2e370625ccd15862"
+    },
+    {
+      "name": "new_multi_029",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "cd0fdb90fce9ef30a267dc26a83c1c47f08c4942f8c6ac33d5e736ffd6bdc8c2"
+    },
+    {
+      "name": "new_read_030",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "36a213e8ada55b2ebe5db7e9ee95c6b014cba70d086c0d2cc0da74ccfcf4d3f6"
+    },
+    {
+      "name": "new_database_030",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "01b9e4f1d1a9ea857de06f00b21266ef12712d47a416d480ea44fc814e8136a2"
+    },
+    {
+      "name": "new_transform_030",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "73950e4d183e4f139f5185f5531b5aa21608af4ba8a1a515b8b4be075dd7f6e0"
+    },
+    {
+      "name": "new_schedule_030",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "9e257d69b6fbbc9ae91f587fbf6e021802251f6d5033a02aeee71a4d99e360d2"
+    },
+    {
+      "name": "new_file_cycle_030",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "07806c05e4394ec0e2ba87ccd8846bd9c726a547ff7b8b9863c927dfa947d2df"
+    },
+    {
+      "name": "new_document_030",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "1ce68f8c382118ec5e347778d45e65634e4823f3b0cdd30cc73cbfb574fdd163"
+    },
+    {
+      "name": "new_missing_030",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "563ab80e03dabed203f0b2aaafe574ea8aaa58e68c98f36da81dd8d609560e9b"
+    },
+    {
+      "name": "new_multi_030",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "60ad136f95eb4e6bf5c9627b616d8c1d9bc865b180f38eed3277a775dfbdb09d"
+    },
+    {
+      "name": "new_read_031",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "759ff81d1252f0edaa17bf1a0ac7f96baa3b270957292f06fb0a1286f1bc8a53"
+    },
+    {
+      "name": "new_database_031",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "1e43e78c1fde179f4099b7ba704c2e31845c733133b42a39ba0e74b13d4f1295"
+    },
+    {
+      "name": "new_transform_031",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "76250311b433371c32aff303c02f0c1bad0de8f7cb30958906452e0cbe04ebef"
+    },
+    {
+      "name": "new_schedule_031",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "f3443e2fc00b93691f655eaf4481ce7757bcd0f7754106f73033d0ea698f8661"
+    },
+    {
+      "name": "new_file_cycle_031",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "629460624e89831e4b21921ee6bc7c657ba01db4036ea75f7d392bff7c08f9f7"
+    },
+    {
+      "name": "new_document_031",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "68c662ebe23220e494da61590ec442f404d3e48fe86608e17ad1c817dadcf67f"
+    },
+    {
+      "name": "new_missing_031",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "6590bd152156cb30ecf81ab6c923226ab43b349910fb267715b5b4479f39a103"
+    },
+    {
+      "name": "new_multi_031",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "b080e3fb23360e4321b5768edc9fa3722070b113da12f023b5a8d7f7a34d92c1"
+    },
+    {
+      "name": "new_read_032",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "10aac6dee1f409a997ebc34919bca3e86d4170694d21b1eebbf36c6283a43a1b"
+    },
+    {
+      "name": "new_database_032",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "bfe94172f4550c864f6aa267cb96dd6a2fed0998ccee986ceed6d295c85b4a2b"
+    },
+    {
+      "name": "new_transform_032",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "8ea83aa38c541dbb3f170146030a63bf7ed2a5ac8a1ff011df7ce8ed4228341f"
+    },
+    {
+      "name": "new_schedule_032",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "caf98141034976ab93366f6dcff3a774dbea8c45a462e9a441fe06fe1e7d6c48"
+    },
+    {
+      "name": "new_file_cycle_032",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "1e0741bcee960c7c431c5169111717c639557580f4e9f8e823a50f6681064d12"
+    },
+    {
+      "name": "new_document_032",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "c29771faf3073be71a1052111c745bb2d6c443eb07ef6345fce3cd1e4dcc1068"
+    },
+    {
+      "name": "new_missing_032",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "9722f89f905fa6c12afce64c2182a2328cc2a11f012067546f6e9370d2c86358"
+    },
+    {
+      "name": "new_multi_032",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "e8e25a78d30d59619465f707089fb7da1640c6bbf594bc922955c2cd5245cbd5"
+    },
+    {
+      "name": "new_read_033",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "525fc662977d0e9dfb4491490fea44aaba146b3f7f33b8cdef31f313514a77ad"
+    },
+    {
+      "name": "new_database_033",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "1499b1ff2a0dc9f7fed254a6e6c75d569b1ac3d8bd229a03af8b5f0e9875bb9b"
+    },
+    {
+      "name": "new_transform_033",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "a75bb06092cf9e214d19c083c53f652cda7ec30bcc06cd3da398c0907699aace"
+    },
+    {
+      "name": "new_schedule_033",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "a26ccadc32f5ca595b37f90a10755189ddb2b23240a09576aa08c02c6b8d3eeb"
+    },
+    {
+      "name": "new_file_cycle_033",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "f594ead30929ded0ac89bd5efb513f95f90a77399a4e4fadcfdd06c9f2b54ae7"
+    },
+    {
+      "name": "new_document_033",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "a089dafa1ea2341f295976cebcf407f86ece70c6c9d609e6349dde0d0878e251"
+    },
+    {
+      "name": "new_missing_033",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "6b9584385cd20f216fc0beeddec91e839aa00a1867f0b770ca58e2c21b99f1e5"
+    },
+    {
+      "name": "new_multi_033",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "a7b456a7c9c52e47f5358e489b66e9965284f94e0a70b62fc3fa46defd7175e5"
+    },
+    {
+      "name": "new_read_034",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "44690a4eae73bf01d20892dc58a1293e1beec92a3a55da9f9d076fb4bcd00ba6"
+    },
+    {
+      "name": "new_database_034",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "154cb40f87a2474cfea901729863e58911cd7b0d394cb67df8a01884b852c392"
+    },
+    {
+      "name": "new_transform_034",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "648c22a9123f9fec837a8e8d8ddbd2810fb70f8ac4cafe63ef48808d1a6926af"
+    },
+    {
+      "name": "new_schedule_034",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "7d41ab7b39280475b84a954beea74466fda1a475bd085e3cd45cac5c777b0633"
+    },
+    {
+      "name": "new_file_cycle_034",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "514072bd11b11a407435e91e9c620101ca0b4bee4ea4ab2b76a49edd866ab77e"
+    },
+    {
+      "name": "new_document_034",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "fff04d059708b88aa5d151bd1a9f3667ee0c2a9d6cfe61b5279de4888d7d2407"
+    },
+    {
+      "name": "new_missing_034",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "66d9ce81270813ec822c8d073bf69ef77ff53d83cce49bf92ac2e4b858760ebe"
+    },
+    {
+      "name": "new_multi_034",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "2e7a796e0b60a28c388c25822b3e77ee1eaa018d6c25a99c5df9061156aa9e41"
+    },
+    {
+      "name": "new_read_035",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "6131b84aa3d3658bf38a78bf0348c78fe10c14c65adcd1af2c3ac3c9efbc2a13"
+    },
+    {
+      "name": "new_database_035",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "0e4fe283df9cc44bdf1d0708813f76776ff0e1bcc93a1102900721730aac18a5"
+    },
+    {
+      "name": "new_transform_035",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "0a0ae00414d480c69e6e51fba156356f58e22550e710116696ee0d6ab8308566"
+    },
+    {
+      "name": "new_schedule_035",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "b2d29ac8caeeed469d50c79600de838bb578e20d4d0828d04c10ad154a601ce8"
+    },
+    {
+      "name": "new_file_cycle_035",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "359192236be03bd9540d9b687668fadbef65b1f2ee88cf4d560217cda024fd30"
+    },
+    {
+      "name": "new_document_035",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "105ada109fbfa715a667cb296dff886f5434b7819546debd190b3ed98c2a9f26"
+    },
+    {
+      "name": "new_missing_035",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "7110290692440193b2804368b2dd068add2b791dcad80ddab65d299761b0a0ce"
+    },
+    {
+      "name": "new_multi_035",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "14509610af6300518d081a17e1f776cc322cc3d2cc980004ca98f87ff4615f53"
+    },
+    {
+      "name": "new_read_036",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "73c3775f10063f609163b8eb0b5684b7670d9db5193b9c26a39a80a95a9c03f3"
+    },
+    {
+      "name": "new_database_036",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "eb5e7e410fc3ca38f654a9fb7e1015e52bf88e614c3940ee5e7494812c43f68f"
+    },
+    {
+      "name": "new_transform_036",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "479a6bcd67de0d774bd25b470fc9e11b26b1d88881dd18b794d25e4e7a36eb75"
+    },
+    {
+      "name": "new_schedule_036",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "dc3074a0df07509df12ae27bcf607f7c9cde10475ea3a10ca19d38dd1d07c209"
+    },
+    {
+      "name": "new_file_cycle_036",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "2a9d31b5add1eb6dcb5a55519c29189b8b1fbb6621ef85a6d42efbbbcdec9841"
+    },
+    {
+      "name": "new_document_036",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "1876f261e7d4abc2cf63cab546394b02c5923233eab5bf125311e7bd2951d63f"
+    },
+    {
+      "name": "new_missing_036",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "425cc316fa418c9593151499338af89d817706c80cb3e4e0e17f9e383411dd14"
+    },
+    {
+      "name": "new_multi_036",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "7fa4ef7cce63c9f20bb25105bc393a8e3b0fd75b57cef79b83559c2e874f2d36"
+    },
+    {
+      "name": "new_read_037",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "7ad06a254db42f7e1ac48b68b034303914a81fb1aed94c8e6a1630ee863b3db4"
+    },
+    {
+      "name": "new_database_037",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "36f1064edca3eb22b8dc3ebb425d3ab7b07742d06db8de1cb30693d3eca1d289"
+    },
+    {
+      "name": "new_transform_037",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "ed064ebeff3078c8ae7862f737ac186343d5dfa8953db18c617b279bd4e2e999"
+    },
+    {
+      "name": "new_schedule_037",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "f91d6a6a249185dda778468b575ea11fd0b24c7363053a3dbb025975f6ba19c2"
+    },
+    {
+      "name": "new_file_cycle_037",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "aa1afc37c86311ad080fdac728095244868450bc5ec7ad58fb228a17fd779ad6"
+    },
+    {
+      "name": "new_document_037",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "c8ea32b283d518c6dccab4c07c7925c386cb844c2bba1b6b385a5bf4eb4abf36"
+    },
+    {
+      "name": "new_missing_037",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "6c455d30d5e13355d7ef29e1db7dfdfaf86030cf9333a627dd7c2d416c400d63"
+    },
+    {
+      "name": "new_multi_037",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "6ef78fe14bfa02749a9c6d293fb783e1ceaeebbe95f500f0d609b0d172d3e677"
+    },
+    {
+      "name": "new_read_038",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "80339c5a16e888d6f12cce34dae388d43f329048c35b56b2c018591791a20278"
+    },
+    {
+      "name": "new_database_038",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "ee188fff3e0132bfa5dbcd14774fe4b9de83857da27e59cdc7310e76acddfdb1"
+    },
+    {
+      "name": "new_transform_038",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "d0880c2a9d5e976becc74a47690f73a6ffb227bf0446a9fdbaba2ee820d1bce1"
+    },
+    {
+      "name": "new_schedule_038",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "2b651f69387c3e207f3d512be0b74fcfc5673d81518e8653089dcd14aedfe4a4"
+    },
+    {
+      "name": "new_file_cycle_038",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "a2aa9097cdf49a7de8fc86dd893ac3f7b666b094c966d9848610ed3b77b12df6"
+    },
+    {
+      "name": "new_document_038",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "51463575e2814357fe42c999a97c85b62e34d228de2d28ce9eeb202b567122df"
+    },
+    {
+      "name": "new_missing_038",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "a03d9e5539e6e5cf9af2f24c0f00704ca9997c3d66cf97ad73034ce70c0395c6"
+    },
+    {
+      "name": "new_multi_038",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "23f267f08603684e57c15acc4951d0c1775a233fb1022d38b9d9e3ce9d969069"
+    },
+    {
+      "name": "new_read_039",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "5ae6cc2a9b0ebb7966ccb1f94b29623d231a5905dbed2f123e4ce8c10706fbd1"
+    },
+    {
+      "name": "new_database_039",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "5d9e12260f0b941eea45c768c2ed145decde45af4ac570d19a087212ede06c11"
+    },
+    {
+      "name": "new_transform_039",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "ee5bfad0f3d98c7b3d7a3bbfbb4362848abfc7fbd807d9a2e017c846814bca25"
+    },
+    {
+      "name": "new_schedule_039",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "556d217e3ce92a3fa34d895d7ee52cbf5c9e1c82a637b8ece025fa023da85a4c"
+    },
+    {
+      "name": "new_file_cycle_039",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "d878a1d3757bf444aae0b4e555d6819da8c7df22bcdc1a96f31d3db4a688f970"
+    },
+    {
+      "name": "new_document_039",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "fe5f678b2e7a999f9ea1ef14a3c5ca8087cd7f1eb9bdf6b2196f5e456ca0e4c6"
+    },
+    {
+      "name": "new_missing_039",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "9b3bbf94b02e1ca52cb7f223fbc35608df456ac17a438b42384f761e05e0119b"
+    },
+    {
+      "name": "new_multi_039",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "1ac06c664fae7197a97c23d708fccca1c6e913e45652d81c9e3ea3def90bbc40"
+    },
+    {
+      "name": "new_read_040",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "8bcf6ab5287b1013007eff209fa2c521bf46bff2f0c5314fbe9ba42036c765fd"
+    },
+    {
+      "name": "new_database_040",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "919a8c4bc0d6695a1a31f5bf9c2389abe0c879fdd8d82ae88bb8649d05749924"
+    },
+    {
+      "name": "new_transform_040",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "1deab9b83ffee93fcb95080b0c3fd669b09bb56494ab0edc4c859694e5a4d553"
+    },
+    {
+      "name": "new_schedule_040",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "6dedd4dae25d2d0cc7d76ebef61a9428f9a4bac9c9fefefecb195fa1bd6d5682"
+    },
+    {
+      "name": "new_file_cycle_040",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "10b2e6fee0db9fdee23cd01cd9d681703d30f5dc89f9d7cd473e0bd05eee2a7c"
+    },
+    {
+      "name": "new_document_040",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "ca75f8f0999f1479f9db3c246264ec39bf7a6d90d1c5c8d3a215ceb1478c3305"
+    },
+    {
+      "name": "new_missing_040",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "e04cd127729cf9c5860645a926087f6e7926c3519124a718193f49b620011c53"
+    },
+    {
+      "name": "new_multi_040",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "15024b95be8b2d6de874006a9cc65d8e9ddc5f186d5e642b6c8c1d1ba99d0f4e"
+    },
+    {
+      "name": "new_read_041",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "a52a61cc7da450985ab9918c97bd898517f1d262c2e1ed2cf531d45a16af58da"
+    },
+    {
+      "name": "new_database_041",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "afac3d16f45446872c3281148f8d850ff1cf4d49fe27c8ea60614fc1a316d01c"
+    },
+    {
+      "name": "new_transform_041",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "0935ba9e37e91871385e6ad6f3a77b4f43809a849b267258ca9132abb446098f"
+    },
+    {
+      "name": "new_schedule_041",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "4a589c0047c57fe78b8e6eda0fb29d23a3c4eb4959941f8a56473cc1079b1d70"
+    },
+    {
+      "name": "new_file_cycle_041",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "bb1d1e4bd0a1c0bfd77cd1c25d4299ad6f1877f917ecee0664b1723a2ba99b84"
+    },
+    {
+      "name": "new_document_041",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "56ed65f0650322881ebebcc7a4e4ca0aa3cb4a42e8b9b07d35f4af4600fe1a6a"
+    },
+    {
+      "name": "new_missing_041",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "ba17f74f0593d64d916e21ffbfa2c4ce12b0d1c35e5c706e269537660fa8caee"
+    },
+    {
+      "name": "new_multi_041",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "51c252d6f791d3ca5f3552cae4497bd826599f2e6544504e8603d55e055a76fd"
+    },
+    {
+      "name": "new_read_042",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "280c0a7d77800a358ddc8fc0d157c292919ab8255b0c21081d3a1ccab0341d34"
+    },
+    {
+      "name": "new_database_042",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "775ceae01b66f61839611a32f90fb01fdf4f48b34e0e2f42a4025330a78911f4"
+    },
+    {
+      "name": "new_transform_042",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "f98411c3aa7cabd9830d22e26b620384880faa94dc0af20e479bf950cf7aadb9"
+    },
+    {
+      "name": "new_schedule_042",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "f9f932d0af50f6b20cbec670c1367d630da83741f317bcf34f39d2247f4b42f6"
+    },
+    {
+      "name": "new_file_cycle_042",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "b776226f5317f1658efc66885b100e9736ae4cb4d3f5f1e8692525b4aaefaf13"
+    },
+    {
+      "name": "new_document_042",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "a7e1f165e28b0f5dbe634e792da503d77f3825642dd3fc0ec570fdcadcf0ae22"
+    },
+    {
+      "name": "new_missing_042",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "fc6b1a5df0c940bec55a3fa2b8ffe6fcb2a240c79cf51f8b8cf54cb216c8b2b0"
+    },
+    {
+      "name": "new_multi_042",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "9bf605ad1841eaf616c15e156e1fa75821af5892a1e3a7db22fb5a0c9fce76db"
+    },
+    {
+      "name": "new_read_043",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "e6478f0d3c163c81372cd2adf672428a248b6424c1b2f259bccbe22908eb7bb7"
+    },
+    {
+      "name": "new_database_043",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "4737f71004eb6936e5538962ad6bbd95ed3d269350ba4daedb894d50ee2967d1"
+    },
+    {
+      "name": "new_transform_043",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "97daa385b6d48bce85375d171c0496e9cb31b2aeb24cbd65a51cd6aa59b67be1"
+    },
+    {
+      "name": "new_schedule_043",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "a0ce19bfae8adac24ce4578736987bae5bdf53724895f55d9eb674a58426ddba"
+    },
+    {
+      "name": "new_file_cycle_043",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "fd456a11dc85658e91fa3050663950f67f715c2e2f905d5c17fe67ba4a783953"
+    },
+    {
+      "name": "new_document_043",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "01c4376367b830df9103026fd940ccb05ee3f2c39792ff0924f9a4faf08544d2"
+    },
+    {
+      "name": "new_missing_043",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "5fd9850d2396a6c88c01582282a7447c99263031d7e13fda56560da1552327d0"
+    },
+    {
+      "name": "new_multi_043",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "1a70f215d9baf26f1954c286e0b6188484a9c02865a1e8b5f39f4103949f821a"
+    },
+    {
+      "name": "new_read_044",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "68cd257b3b87eb2a8d11c9916e1467eb68be36965d1bdad55fe6e9b8b342c925"
+    },
+    {
+      "name": "new_database_044",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "29d7601b2dc781b030d0185e3b24d2afb98abc0deb6a7f431ba7b21467af6c57"
+    },
+    {
+      "name": "new_transform_044",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "4011aeb80ec42e879cb36976c200a9a4b17704c061ba3ea83560a57c571bfca6"
+    },
+    {
+      "name": "new_schedule_044",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "8dcc14718f67b18e97cc71a427734e9b5425bc94cb87658019b1b647b1b227cd"
+    },
+    {
+      "name": "new_file_cycle_044",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "ea0e19d30c656c29e641457173ac4c006e666abf30b3057d3dbaaa56aa4898dd"
+    },
+    {
+      "name": "new_document_044",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "9cdfd0fcb010abff5b42f3d9a48bc3c1c5ca2ac5f308ad1730aa3f24386f403b"
+    },
+    {
+      "name": "new_missing_044",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "f99650ebbafc396f0ce499e507ad485d418fe18c0394d2adc780f8b1cbe4218a"
+    },
+    {
+      "name": "new_multi_044",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "c6e564a4e6ad280312ee8cc7370310311c6503fadacf69b6d8bae6e7b8c25e46"
+    },
+    {
+      "name": "new_read_045",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "b2062582ef311e864ba0268168bf5973012ed860a41c66f8f76e85b6ed92d966"
+    },
+    {
+      "name": "new_database_045",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "fa95b2e0dd8be030a1a962229f140109a939d84b6d63cae41806c69782a1cc07"
+    },
+    {
+      "name": "new_transform_045",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "0d51624af66626f00b0232bb7290cd841971cdeed32ee2b330514d96aa9d03cc"
+    },
+    {
+      "name": "new_schedule_045",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "0f84183f4306925eae54623a935bfcf4fa8a63b55aede09c91528b36853f5de6"
+    },
+    {
+      "name": "new_file_cycle_045",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "f8c93baeeb4e36235a572d1fa15ade4a1fb25c235b7cf73dbd06fcbc648d236b"
+    },
+    {
+      "name": "new_document_045",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "2a639c81b253e334ba97602cef2a93d94bc2a6b13807eff980900db791609824"
+    },
+    {
+      "name": "new_missing_045",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "76e90e292386ec264eb3e9fe014f354f2c29d11cc10ce15b8b6042938eb29794"
+    },
+    {
+      "name": "new_multi_045",
+      "source": "parameter_matrix_20260914",
+      "prompt_sha256": "b81fc91ba9659cbd96d4f5710c0edd820ecc08589d7899a050ddf31802ef3eae"
+    }
+  ]
+}

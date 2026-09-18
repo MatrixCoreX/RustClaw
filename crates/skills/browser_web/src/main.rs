@@ -716,6 +716,7 @@ fn open_extract_action(
         "domainsDeny": domains_deny,
         "allowProxySyntheticDns": allow_proxy_synthetic_dns,
         "allowPathOutsideWorkspace": allow_path_outside_workspace,
+        "artifactOutputDirectory": artifact_output_directory,
         "workspaceRoot": workspace_root,
         "captureRoot": capture_root,
         "captureSource": "browser_web",

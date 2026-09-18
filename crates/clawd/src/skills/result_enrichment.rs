@@ -2,6 +2,36 @@ use serde_json::{json, Map, Value};
 
 use crate::AppState;
 
+pub(crate) fn validate_and_spill_output(
+    state: &AppState,
+    task_id: &str,
+    skill_name: &str,
+    text: &mut String,
+    extra: &mut Option<Value>,
+) -> Result<(), String> {
+    let validation = crate::agent_engine::validate_skill_output_contract(
+        state,
+        skill_name,
+        text,
+        extra.as_ref(),
+    );
+    if let Err(err) = crate::skill_output_artifact::spill_skill_text_if_needed(
+        &state.skill_rt.workspace_root,
+        task_id,
+        skill_name,
+        text,
+        extra,
+    ) {
+        tracing::warn!(
+            event = "skill_output_artifact_spill_failed",
+            task_id = %task_id,
+            skill = %skill_name,
+            error = %err
+        );
+    }
+    validation
+}
+
 pub(super) fn enrich_runtime_owned_skill_extra(
     state: &AppState,
     skill_name: &str,

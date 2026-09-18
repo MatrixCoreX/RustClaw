@@ -7,10 +7,19 @@ use serde_json::{json, Value};
 const RUNTIME_DELIVERY_OWNER: &str = "runtime";
 const MINIMUM_NOTICE_INTERVAL_SECONDS: u64 = 15 * 60;
 
+#[path = "progress_model_notice.rs"]
+mod model_notice;
+
+#[derive(Debug, Clone)]
+pub(crate) enum ProgressNoticeContent {
+    Template(ChannelNotice),
+    ModelStart(Value),
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeProgressNotice {
     pub(crate) interval: Duration,
-    pub(crate) notice: ChannelNotice,
+    pub(crate) content: ProgressNoticeContent,
     pub(crate) sequence: u64,
 }
 
@@ -32,6 +41,13 @@ fn public_param(value: &Value) -> Option<String> {
 pub(crate) fn runtime_progress_notice(
     frame: &skill_sdk::SkillProgressFrame,
 ) -> Option<RuntimeProgressNotice> {
+    if let Some(evidence) = model_notice::start_evidence(frame) {
+        return Some(RuntimeProgressNotice {
+            interval: Duration::ZERO,
+            sequence: frame.sequence,
+            content: ProgressNoticeContent::ModelStart(evidence),
+        });
+    }
     if !matches!(frame.kind, skill_sdk::SkillProgressKind::Heartbeat)
         || frame
             .params
@@ -73,7 +89,7 @@ pub(crate) fn runtime_progress_notice(
     notice.validate().ok()?;
     Some(RuntimeProgressNotice {
         interval: Duration::from_secs(requested_interval),
-        notice,
+        content: ProgressNoticeContent::Template(notice),
         sequence: frame.sequence,
     })
 }
@@ -117,6 +133,12 @@ pub(crate) async fn deliver_runtime_progress_notice(
     if task.channel.trim().eq_ignore_ascii_case("ui") {
         return Ok(());
     }
+    if let ProgressNoticeContent::ModelStart(evidence) = &progress.content {
+        return model_notice::deliver(state, task, &delivery_payload(task), evidence).await;
+    }
+    let ProgressNoticeContent::Template(notice) = &progress.content else {
+        return Ok(());
+    };
     let now = crate::now_ts_u64();
     let recent_delivery = state
         .core
@@ -140,7 +162,7 @@ pub(crate) async fn deliver_runtime_progress_notice(
         task,
         &payload,
         &suffix,
-        progress.notice.clone(),
+        notice.clone(),
     )
     .map_err(|error| error.to_string())?;
     let result = crate::delivery_service::deliver_task_envelope(state, task, &payload, &envelope)

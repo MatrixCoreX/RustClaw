@@ -14,13 +14,16 @@ import uuid
 ROOT = Path(__file__).resolve().parents[1]
 OUT = Path(os.environ.get('DESKTOP_TEST_OUTPUT_DIR', ROOT / 'test-results')) / ('saved-login-' + uuid.uuid4().hex[:8])
 OUT.mkdir(parents=True)
+(OUT / 'runtime').mkdir(mode=0o700)
+os.environ['XDG_RUNTIME_DIR'] = str(OUT / 'runtime')
+os.environ.pop('GNOME_KEYRING_CONTROL', None)
 assert os.environ.get('DBUS_SESSION_BUS_ADDRESS'), 'run inside a disposable dbus-run-session'
 os.environ.update(XDG_DATA_HOME=str(OUT / 'data'), XDG_CONFIG_HOME=str(OUT / 'config'),
     XDG_CACHE_HOME=str(OUT / 'cache'), GDK_BACKEND='x11', LIBGL_ALWAYS_SOFTWARE='1',
     WEBKIT_DISABLE_DMABUF_RENDERER='1', TAURI_WEBVIEW_AUTOMATION='true')
 xvfb = subprocess.Popen(['Xvfb', '-displayfd', '1', '-screen', '0', '1280x900x24'], stdout=subprocess.PIPE, stderr=(OUT / 'xvfb.log').open('w'))
 os.environ['DISPLAY'] = ':' + xvfb.stdout.readline().decode().strip()
-subprocess.run(['dbus-update-activation-environment', 'DISPLAY', 'XDG_DATA_HOME', 'XDG_CONFIG_HOME'], check=True)
+subprocess.run(['dbus-update-activation-environment', 'DISPLAY', 'XDG_DATA_HOME', 'XDG_CONFIG_HOME', 'XDG_RUNTIME_DIR'], check=True)
 subprocess.run(['gnome-keyring-daemon', '--unlock', '--components=secrets'], input=b'fixture-keyring-password', check=True, stdout=subprocess.DEVNULL)
 from fixture_server import Fixture
 fixture = Fixture(OUT / 'tls')
@@ -85,7 +88,8 @@ def connect(profile):
         assert native('current_session') is None
     execute('location.reload();return true;')
     wait('return !!document.querySelector(".desktop-device-list")')
-    execute('[...document.querySelectorAll("article")].find(a=>a.querySelector("h2").textContent===arguments[0]).querySelector("button:last-child").click();return true;', [profile['alias']])
+    wait('return [...document.querySelectorAll(".desktop-device-list article h2")].some(h=>h.textContent===' + json.dumps(profile['alias']) + ')')
+    execute('[...document.querySelectorAll(".desktop-device-list article")].find(a=>a.querySelector("h2")?.textContent===arguments[0]).querySelector("button:last-child").click();return true;', [profile['alias']])
     wait('return !!document.querySelector("form .primary") && !document.querySelector("form .primary").disabled && document.querySelector("form .primary").textContent==="登录"')
     execute('window.scrollTo(0,0);return true;')
     assert not execute('return document.body.textContent.includes("使用已保存的登录")')
@@ -127,6 +131,14 @@ try:
     assert next(p for p in native('profiles') if p['id'] == first['id'])['saved_login']
     native('login_prefill', {'sessionId': info['id']}, error=True)
     checks.append('manual login saves credentials in isolated native OS keyring; authenticated console cannot read prefill')
+    execute("document.querySelector('button[title=\"切换界面语言\"]').click();return true;")
+    wait("return !!document.querySelector('button[title=\"Switch interface language\"]')")
+    assert execute("return document.querySelector('.desktop-device-bar').textContent.includes('Switch device / Disconnect')")
+    assert execute("return localStorage.getItem('agent-runtime.monitor.lang')") == 'en'
+    screenshot('shared-console-english')
+    execute("document.querySelector('button[title=\"Switch interface language\"]').click();return true;")
+    wait("return !!document.querySelector('button[title=\"切换界面语言\"]')")
+    checks.append('embedded shared UI language switch uses the desktop language preference and updates the device bar without signing out')
 
     count = login_count()
     info = connect(first)
@@ -138,7 +150,7 @@ try:
     screenshot('01-password-prefilled-light')
     bounds = execute('const r=document.querySelector("form .primary").getBoundingClientRect();return {top:r.top,bottom:r.bottom,height:innerHeight};')
     assert bounds['top'] >= 0 and bounds['bottom'] <= bounds['height'], bounds
-    execute('document.querySelector(".desktop-header button").click();return true;')
+    execute('document.querySelector("[data-desktop-theme-toggle]").click();return true;')
     screenshot('02-password-prefilled-dark')
     assert execute('return !Object.values(localStorage).some(v=>v.includes("fixture-password"))')
     login()

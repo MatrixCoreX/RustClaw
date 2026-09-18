@@ -24,7 +24,9 @@ test('shared account pages preserve layout while local transfer uses native conf
   for (const name of ['AssetsPage', 'BancorPage', 'AssetTransferDialog']) {
     const filename = path.resolve(root, `../UI/src/components/${name}.tsx`);
     const source = fs.readFileSync(filename, 'utf8');
-    for (const input of [source, source.replaceAll('\n', '\r\n')]) {
+    // Git can already check out CRLF on Windows. Construct each line-ending
+    // variant explicitly; replacing bare LF would create invalid CRCRLF input.
+    for (const input of [source.replaceAll(/\r?\n/g, '\n'), source.replaceAll(/\r?\n/g, '\r\n')]) {
       const result = transform(input, filename)?.code ?? '';
       assert.ok(result.includes('useDesktopAssetAccount'));
       if (name === 'AssetTransferDialog') {

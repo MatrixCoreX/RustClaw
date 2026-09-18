@@ -178,11 +178,52 @@ component_process_executable_matches() {
   return 1
 }
 
+component_process_config_matches() {
+  local pid="$1"
+  [[ -z "${COMPONENT_CONFIG_PATH:-}" ]] && return 0
+  python3 - "$pid" "$COMPONENT_CONFIG_PATH" <<'PY'
+import os
+from pathlib import Path
+import shlex
+import subprocess
+import sys
+
+pid, expected = sys.argv[1:]
+try:
+    proc = Path('/proc') / pid
+    if (proc / 'cmdline').exists():
+        argv = [os.fsdecode(arg) for arg in (proc / 'cmdline').read_bytes().split(b'\0') if arg]
+        cwd = (proc / 'cwd').resolve()
+    else:
+        command = subprocess.check_output(['ps', '-p', pid, '-o', 'command='], text=True)
+        argv = shlex.split(command)
+        cwd = None
+    # Explicit alternate configs identify isolated instances, not this service.
+    configs = []
+    for index, argument in enumerate(argv):
+        if argument == '--config':
+            configs.append(argv[index + 1])
+        elif argument.startswith('--config='):
+            configs.append(argument.partition('=')[2])
+    for config in configs:
+        path = Path(config)
+        if not path.is_absolute():
+            if cwd is None:
+                raise ValueError('relative_process_config_unverifiable')
+            path = cwd / path
+        if path.resolve() != Path(expected).resolve():
+            raise ValueError('different_process_config')
+except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+    sys.exit(1)
+PY
+}
+
 component_process_matches() {
   local pid="$1"
   local expected_command="$2"
   local cmdline_file="/proc/$pid/cmdline"
   local argument=""
+  component_process_config_matches "$pid" || return 1
   if component_process_executable_matches "$pid" "$expected_command"; then
     return 0
   fi

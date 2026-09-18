@@ -114,10 +114,27 @@ async fn ordinary_agent_loop_executes_safe_mcp_capability_with_event_evidence() 
         ]
     })
     .to_string();
+    let verification_response = json!({
+        "operation_checks": [{
+            "requested_operation": "Look up agent-loop-token using the fixture tool",
+            "required_dispatches": [{"action_type":"call_capability", "action_ref":"mcp.fixture.lookup"}],
+            "evidence_step_ids": ["step_2"],
+            "method_observed": true,
+            "result_observed": true
+        }],
+        "pass": true,
+        "missing_evidence_fields": [],
+        "answer_incomplete_reason": "",
+        "should_retry": false,
+        "retry_instruction": "",
+        "confidence": 0.99
+    })
+    .to_string();
     let responses = vec![
         recorded_call(1, "single_plan_execution_prompt", &discovery_response),
         recorded_call(2, "loop_incremental_plan_prompt", &execution_response),
         recorded_call(3, "loop_incremental_plan_prompt", &terminal_response),
+        recorded_call(4, "answer_verifier_prompt", &verification_response),
     ];
     install_sequence_fixture(&fixture_root.path, case, &responses);
     eprintln!("NL CASE: {user_request}");
@@ -199,7 +216,6 @@ async fn ordinary_agent_loop_executes_safe_mcp_capability_with_event_evidence() 
         "reply={}",
         reply.text
     );
-    assert_eq!(state.task_llm_call_count(&task_id), 3);
     let journal = reply.task_journal.as_ref().expect("task journal");
     assert!(journal.task_observations.iter().any(|observation| {
         observation.get("stage").and_then(Value::as_str) == Some("pre_compact")
@@ -220,6 +236,22 @@ async fn ordinary_agent_loop_executes_safe_mcp_capability_with_event_evidence() 
         state.task_llm_call_sequence(&task_id)
     );
     eprintln!("journal plan steps={journal_plan_steps:?}");
+    assert_eq!(state.task_llm_call_count(&task_id), 4);
+    assert_eq!(
+        state
+            .task_llm_call_sequence(&task_id)
+            .last()
+            .unwrap()
+            .prompt_label,
+        "verifier"
+    );
+    assert!(
+        journal
+            .answer_verifier_summary
+            .as_ref()
+            .expect("verified fixture answer")
+            .pass
+    );
     assert!(
         journal_plan_steps
             .iter()

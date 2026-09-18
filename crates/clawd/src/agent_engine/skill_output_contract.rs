@@ -303,7 +303,7 @@ pub(super) fn normalized_output_candidate(
     Value::String(output.to_string())
 }
 
-pub(super) fn validate_skill_output_contract(
+pub(crate) fn validate_skill_output_contract(
     state: &AppState,
     normalized_skill: &str,
     output: &str,
@@ -321,6 +321,7 @@ pub(super) fn enforce_skill_output_contract(
     normalized_skill: &str,
     step: &mut crate::executor::StepExecutionResult,
     structured_extra: Option<&Value>,
+    pre_spill_validation: Option<&Result<(), String>>,
 ) -> Option<String> {
     if step.status != crate::executor::StepExecutionStatus::Ok {
         return None;
@@ -337,8 +338,12 @@ pub(super) fn enforce_skill_output_contract(
         return None;
     }
     let output = step.output.as_deref()?;
-    let contract_error =
-        validate_skill_output_contract(state, normalized_skill, output, structured_extra).err()?;
+    let contract_error = pre_spill_validation
+        .cloned()
+        .unwrap_or_else(|| {
+            validate_skill_output_contract(state, normalized_skill, output, structured_extra)
+        })
+        .err()?;
     let error = crate::skills::structured_skill_error_from_parts(
         normalized_skill,
         "output_contract_violation",

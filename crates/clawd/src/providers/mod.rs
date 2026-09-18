@@ -14,6 +14,7 @@ pub(crate) mod openai_model_turn;
 pub(crate) mod output;
 pub(crate) mod pricing;
 pub(crate) mod routing;
+mod stream_capture;
 pub(crate) mod usage;
 
 #[cfg(test)]

@@ -9,6 +9,21 @@ fn schedule_extra(args: Value) -> Value {
 }
 
 #[test]
+fn builtin_remove_extra_distinguishes_requested_kind_from_observed_kind() {
+    for requested_kind in [json!("file"), json!("directory"), Value::Null] {
+        let args = json!({"path":"fixture.txt", "target_kind":requested_kind, "recursive":true});
+        let extra = builtin_success_extra(Path::new("/tmp"), "remove_file", &args)
+            .expect("remove request metadata");
+        assert!(extra.get("target_kind").is_none());
+        assert!(extra.get("recursive").is_none());
+        assert_eq!(extra["requested_target_kind"], requested_kind);
+        assert_eq!(extra["requested_recursive"], true);
+        assert_eq!(extra["action"], "remove_path");
+        assert_eq!(extra["path"], "fixture.txt");
+    }
+}
+
+#[test]
 fn schedule_preview_actions_are_always_structured_dry_runs() {
     for args in [
         json!({"action": "preview"}),

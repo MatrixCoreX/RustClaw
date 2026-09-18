@@ -97,11 +97,19 @@ pub(in crate::agent_engine) fn latest_structured_capability_observation(
             if result.status != claw_core::capability_result::CapabilityResultStatus::Ok {
                 return None;
             }
-            let normalized = structured_observed_body(&result.capability, &result.data.to_string())
-                .or_else(|| generic_capability_observation(result))?;
-            let sanitized = crate::visible_text::sanitize_user_visible_text(&normalized);
-            (!sanitized.trim().is_empty()).then_some(sanitized)
+            structured_capability_observation(result)
         })
+}
+
+pub(in crate::agent_engine) fn structured_capability_observation(
+    result: &claw_core::capability_result::CapabilityResultEnvelope,
+) -> Option<String> {
+    let normalized = (result.status == claw_core::capability_result::CapabilityResultStatus::Ok)
+        .then(|| structured_observed_body(&result.capability, &result.data.to_string()))
+        .flatten()
+        .or_else(|| generic_capability_observation(result))?;
+    let sanitized = crate::visible_text::sanitize_user_visible_text(&normalized);
+    (!sanitized.trim().is_empty()).then_some(sanitized)
 }
 
 fn generic_capability_observation(
@@ -124,6 +132,7 @@ fn generic_capability_observation(
         "capability": &result.capability,
         "action": &result.action,
         "status": &result.status,
+        "error": &result.error,
         "artifact_bindings": planner_artifact_bindings(result),
         "machine_continuation": planner_machine_continuation(result),
         "data": data,

@@ -41,6 +41,7 @@ pub(crate) fn build_checkpoint_resume_state(
     let executed_step_provenance = crate::task_journal::checkpoint_step_provenance_records(
         &loop_state.round_traces,
         &loop_state.executed_step_results,
+        &loop_state.task_observations,
     );
     json!({
         "schema_version": 1,

@@ -104,6 +104,10 @@ RUN_MULTI_TURN_FORBIDDEN_SNIPPETS = {
 }
 
 RUN_ALL_WITH_SERVER_REQUIRED_SNIPPETS = {
+    "suite_binary_provenance_uses_selected_binary": 'export NL_CLAWD_BIN="${CLAWD_BIN}"',
+    "isolated_state_retention_is_opt_in": "KEEP_ISOLATED_STATE=0",
+    "isolated_state_can_preserve_raw_evidence": "--keep-isolated-state)",
+    "retained_isolation_is_private": 'chmod 700 "${ISOLATION_ROOT}"',
     "authenticated_health_requires_key": 'if [[ -z "${USER_KEY_VALUE:-}" ]]; then',
     "authenticated_health_fails_http_errors": "curl -fsS --max-time 5",
     "isolated_key_does_not_reuse_host_key": 'USER_KEY_VALUE=""',

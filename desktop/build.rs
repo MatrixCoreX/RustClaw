@@ -47,6 +47,7 @@ fn main() {
                 "discover_devices",
                 "cancel_discovery",
                 "download_cancel",
+                "save_export",
                 "wallet_open",
                 "wallet_status",
                 "wallet_lock",
@@ -64,6 +65,12 @@ fn main() {
                 "wallet_pending",
                 "wallet_cancel_operation",
                 "wallet_confirm",
+                "wallet_nodes",
+                "wallet_add_node",
+                "wallet_connect_node",
+                "wallet_prefer_node",
+                "wallet_disconnect_node",
+                "wallet_market_read",
             ]),
         ))
         .expect("desktop build configuration");

@@ -30,8 +30,9 @@ use super::{
 };
 use runner_support::{
     action_allows_provider_credentials, action_scoped_runner_capabilities,
-    action_scoped_runner_sandbox_mode, add_runner_dispatch_metadata, cancelled_capture_projection,
-    has_planner_capability_prefix, inherited_sandbox_backend, invocation_artifact_output_directory,
+    action_scoped_runner_sandbox_mode, add_runner_dispatch_metadata,
+    apply_parent_execution_backend, cancelled_capture_projection, has_planner_capability_prefix,
+    inherited_sandbox_backend, invocation_artifact_output_directory,
     local_clawd_base_url_from_internal_listen, runner_additional_writable_paths,
     selected_provider_api_key_env_names, stateless_readonly_reuse_allowed,
 };
@@ -1340,13 +1341,13 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
             token_store_dir.display().to_string(),
         );
     }
-    if let Some(backend) = inherited_sandbox_backend {
-        cmd.env(skill_sdk::PARENT_SANDBOX_BACKEND_ENV, backend);
-    } else if let Some(storage_directory) = sandbox_storage_directory {
-        cmd.env(
-            skill_sdk::SKILL_STORAGE_WRITABLE_DIRECTORY_ENV,
-            storage_directory,
-        );
+    if inherited_sandbox_backend.is_none() {
+        if let Some(storage_directory) = sandbox_storage_directory {
+            cmd.env(
+                skill_sdk::SKILL_STORAGE_WRITABLE_DIRECTORY_ENV,
+                storage_directory,
+            );
+        }
     }
     if let Some(token) = &internal_llm_token {
         cmd.env(
@@ -1396,6 +1397,7 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
     for (env_name, token) in &tokenized_secret_envs {
         cmd.env(env_name, token);
     }
+    apply_parent_execution_backend(&mut cmd, inherited_sandbox_backend);
     cmd.current_dir(&state.skill_rt.workspace_root);
     if let Some(plan) = durable_job_plan.as_ref() {
         let (sandbox_job_dir, sandbox_global_slot_root, sandbox_skill_slot_root) =

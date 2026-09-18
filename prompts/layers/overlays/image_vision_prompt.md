@@ -1,5 +1,5 @@
 <!--
-Purpose: image-understanding skill prompt template (`describe` / `compare` / `extract` / `screenshot_summary`)
+Purpose: image-understanding skill prompt template (`describe` / `compare` / `extract` / `extract_text` / `screenshot_summary`)
 Component: `image_vision_skill` (`crates/skills/image_vision/src/main.rs`) loaded dynamically at runtime
 Placeholders: __ACTION__, __DETAIL_LEVEL__, __TASK_INSTRUCTION__, __SCHEMA_HINT__, __LANGUAGE_HINT__
 -->
@@ -19,6 +19,8 @@ __LANGUAGE_HINT__
 
 Output rules:
 - Be accurate and concise.
+- For action=extract_text, transcribe visible source-language text only; do not
+  translate, paraphrase, or describe the image.
 - For action=describe, preserve all readable visible text in natural reading
   order under `visible_text`; use an empty array when none is visible.
 - The order of `visible_text` array items already represents reading order. Do
@@ -33,6 +35,8 @@ Output rules:
 - Do not invent unseen objects, text, timestamps, IDs, counts, UI states, or off-screen context.
 - When evidence is weak or partially occluded, prefer `uncertainties` / empty fields over confident completion.
 - For action=extract, return valid JSON matching schema hint when provided.
+- For action=extract_text, return:
+  {"pages":[{"text":""}],"uncertainties":[]}
 - For action=describe, return:
   {"summary":"","objects":[],"visible_text":[],"uncertainties":[]}
 - For action=compare, return:

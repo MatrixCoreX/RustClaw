@@ -130,6 +130,24 @@ pub(crate) fn build_proactive_notice_envelope(
     )
 }
 
+pub(crate) fn build_proactive_text_envelope(
+    state: &AppState,
+    task: &ClaimedTask,
+    payload: &Value,
+    idempotency_suffix: &str,
+    text: &str,
+) -> anyhow::Result<ChannelDeliveryEnvelope> {
+    build_delivery_envelope(
+        state,
+        task,
+        payload,
+        text,
+        ChannelDeliverySource::ProactiveNotice,
+        idempotency_suffix,
+        None,
+    )
+}
+
 pub(crate) fn build_daemon_delivery_envelope(
     state: &AppState,
     task: &ClaimedTask,

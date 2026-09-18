@@ -23,7 +23,10 @@ pub(crate) mod loop_control;
 mod loop_state_contract_evidence;
 mod loop_state_seed;
 mod media_artifact_plan;
+mod model_blocker_checkpoint;
 pub(crate) mod mutation_ledger;
+mod task_plan_reconciliation;
+mod workspace_action_revision;
 pub(crate) use mutation_ledger::{
     load_task_mutation_reconciliation_directive, safe_mutation_outcome_projection,
     settle_verified_not_applied_mutation,
@@ -46,6 +49,7 @@ mod planning_prompt;
 mod planning_repair;
 mod prepare_round;
 mod skill_execution;
+pub(crate) use skill_execution::validate_skill_output_contract;
 mod skill_quick_index;
 mod subagent_runtime;
 mod support;

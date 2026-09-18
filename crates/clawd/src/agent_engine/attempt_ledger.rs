@@ -5,8 +5,12 @@ use super::LoopState;
 
 const ATTEMPT_LEDGER_PROMPT_VIEW_ITEMS: usize = 10;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Deserialize)]
 pub(crate) struct AttemptLedgerEntry {
+    #[serde(default)]
+    pub(super) execution_step_id: Option<String>,
+    #[serde(default)]
+    pub(super) async_job_id: Option<String>,
     pub(super) attempt_id: String,
     pub(super) action_ref: String,
     pub(super) tool_or_skill: String,
@@ -27,6 +31,21 @@ pub(crate) struct AttemptLedgerEntry {
     pub(super) avoid_repeating: String,
     pub(super) contract_policy: Option<Value>,
     pub(super) provider_status: Option<Value>,
+}
+
+pub(super) fn restore_attempt_ledger_snapshot(loop_state: &mut LoopState, snapshot: &Value) {
+    let Ok(entries) = serde_json::from_value::<Vec<AttemptLedgerEntry>>(snapshot.clone()) else {
+        return;
+    };
+    for entry in entries {
+        if !loop_state
+            .attempt_ledger_entries
+            .iter()
+            .any(|existing| existing.attempt_id == entry.attempt_id)
+        {
+            loop_state.attempt_ledger_entries.push(entry);
+        }
+    }
 }
 
 pub(super) fn record_attempt(
@@ -129,6 +148,8 @@ pub(super) fn record_attempt_with_retry_instruction(
         .flatten();
     let forbidden_repeat_signature = forbidden_repeat_signature(&action_ref, &args_fingerprint);
     loop_state.attempt_ledger_entries.push(AttemptLedgerEntry {
+        execution_step_id: None,
+        async_job_id: None,
         attempt_id,
         action_ref,
         tool_or_skill: tool_or_skill.trim().to_string(),
@@ -284,6 +305,7 @@ pub(super) fn build_attempt_ledger_snapshot(loop_state: &LoopState) -> Option<Va
                 "forbidden_repeat_signature": forbidden_repeat.clone(),
                 "avoid_repeating": avoid_repeating_hint(step.status, error_kind.as_deref()),
                 "contract_policy": contract_policy,
+                "provider_status": provider_status,
                 "repair_signal": executor_repair_signal_json(
                     &step.skill,
                     step.status.as_str(),
@@ -344,6 +366,8 @@ fn rewrite_capability_result_identity(raw: &str, requested_capability: &str) -> 
 
 fn attempt_entry_json(entry: &AttemptLedgerEntry) -> serde_json::Value {
     json!({
+        "execution_step_id": entry.execution_step_id,
+        "async_job_id": entry.async_job_id,
         "attempt_id": entry.attempt_id,
         "action_ref": entry.action_ref,
         "tool_or_skill": entry.tool_or_skill,
@@ -363,6 +387,7 @@ fn attempt_entry_json(entry: &AttemptLedgerEntry) -> serde_json::Value {
         "forbidden_repeat_signature": entry.forbidden_repeat_signature,
         "avoid_repeating": entry.avoid_repeating,
         "contract_policy": entry.contract_policy,
+        "provider_status": entry.provider_status,
         "repair_signal": executor_repair_signal_json(
             &entry.tool_or_skill,
             &entry.status,
@@ -377,6 +402,59 @@ fn attempt_entry_json(entry: &AttemptLedgerEntry) -> serde_json::Value {
             &entry.observed_output,
         ),
     })
+}
+
+pub(super) fn settle_async_attempt(
+    snapshot: &mut Option<Value>,
+    job_id: &str,
+    result: &claw_core::capability_result::CapabilityResultEnvelope,
+) {
+    let Some(snapshot) = snapshot.as_mut() else {
+        return;
+    };
+    let Ok(mut entries) = serde_json::from_value::<Vec<AttemptLedgerEntry>>(snapshot.clone())
+    else {
+        return;
+    };
+    let Some(step_id) = result.provenance.get("step_id").and_then(Value::as_str) else {
+        return;
+    };
+    let Some(entry) = entries.iter_mut().rev().find(|entry| {
+        entry.status == "waiting"
+            && entry.async_job_id.as_deref() == Some(job_id)
+            && entry.execution_step_id.as_deref() == Some(step_id)
+    }) else {
+        return;
+    };
+    let failed = result.status == claw_core::capability_result::CapabilityResultStatus::Error;
+    entry.status = if failed { "error" } else { "ok" }.to_string();
+    entry.observed_output =
+        super::observed_output::structured_capability_observation(result).unwrap_or_default();
+    entry.error_code = result.error.as_ref().map(|error| error.code.clone());
+    entry.retryable = result.error.as_ref().is_some_and(|error| error.retryable);
+    entry.retry_allowed = entry.retryable;
+    entry.why_not_satisfied = if failed {
+        "async_job_failed"
+    } else {
+        "async_job_completed"
+    }
+    .to_string();
+    let status = if failed {
+        crate::executor::StepExecutionStatus::Error
+    } else {
+        crate::executor::StepExecutionStatus::Ok
+    };
+    entry.recovery_action = recovery_action_token(
+        status,
+        entry.error_code.as_deref(),
+        entry.retryable,
+        &entry.missing_evidence,
+        &entry.contract_policy,
+        entry.provider_status.as_ref(),
+    )
+    .to_string();
+    entry.avoid_repeating = avoid_repeating_hint(status, entry.error_code.as_deref()).to_string();
+    *snapshot = Value::Array(entries.iter().map(attempt_entry_json).collect());
 }
 
 fn action_ref(tool_or_skill: &str) -> String {

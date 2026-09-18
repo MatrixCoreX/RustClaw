@@ -1,0 +1,12 @@
+{
+  "format": "asset-account-backup-v1",
+  "public_key": "5F8VazANb16TEfckchqWHbQaKFyVreC3fb1wdLycge6kXNRTH8",
+  "encrypted": {
+    "version": 1,
+    "salt": "141b47fa5ec0c7c402ccd35ccc08fe02",
+    "sealed": {
+      "nonce": "b6ea1aa68f3fc8f6136359c3463ad602f477d654a10cc9fa",
+      "ciphertext": "41037515a2aab555555bb2b564afafc197e6c65a58e1788189274759b29273987cef2564fba65542afe55f32494e62fe"
+    }
+  }
+}

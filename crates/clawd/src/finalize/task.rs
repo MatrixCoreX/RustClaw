@@ -65,8 +65,10 @@ use task_payload_helpers::{
     normalize_existing_file_delivery_token_answer,
 };
 use task_provider_wait::record_provider_wait_checkpoint;
-pub(crate) use task_resume::answer_verifier_retry_answer_has_required_machine_evidence;
-pub(crate) use task_resume::retry_answer_after_verifier;
+pub(crate) use task_resume::{
+    answer_verifier_retry_answer_has_required_machine_evidence,
+    preserve_verified_delivery_tokens_after_retry, retry_answer_after_verifier,
+};
 use task_resume::{
     answer_verifier_retry_applicable, resume_context_execution_summary_messages,
     resume_failure_is_missing_file_delivery_result,

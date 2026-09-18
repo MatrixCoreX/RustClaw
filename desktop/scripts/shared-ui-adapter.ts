@@ -26,6 +26,11 @@ export function sharedUiAdapter(root: string): Plugin {
         if (text.includes(original)) { text = text.replaceAll(original, replacement); imports.add(replacement); }
       }
       if (id === uiRoot + 'App.tsx') {
+        text = `import { useLanguage } from ${JSON.stringify(normalizePath(path.resolve(root, 'frontend/i18n.tsx')))};\n` + text;
+        text = once(text, `  const [lang, setLang] = useState<"zh" | "en">(() => {
+    const saved = window.localStorage.getItem(STORAGE_KEYS.lang);
+    return saved === "en" ? "en" : "zh";
+  });`.replace('window.localStorage', 'desktopStorage'), '  const { lang, setLang } = useLanguage();', id);
         const walletPages = normalizePath(path.resolve(root, 'frontend/wallet/pages.tsx'));
         text = once(text, 'from "./components/AssetsPage"', `from ${JSON.stringify(walletPages)}`, id);
         text = once(text, 'from "./components/BancorPage"', `from ${JSON.stringify(walletPages)}`, id);

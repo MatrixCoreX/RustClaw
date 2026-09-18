@@ -157,7 +157,23 @@ pub(super) fn local_clawd_base_url_from_internal_listen(internal_listen: Option<
 }
 
 pub(super) fn inherited_sandbox_backend(backend: &'static str) -> Option<&'static str> {
-    (backend != "direct").then_some(backend)
+    match backend {
+        // `direct` is produced only by an explicitly authorized DangerFull
+        // invocation, never by an unavailable sandbox or the warm runner.
+        "direct" | "bubblewrap" | "macos_seatbelt" => Some(backend),
+        _ => None,
+    }
+}
+
+pub(super) fn apply_parent_execution_backend(
+    command: &mut tokio::process::Command,
+    backend: Option<&'static str>,
+) {
+    // Neither the parent environment nor a package allowlist owns this grant.
+    command.env_remove(skill_sdk::PARENT_SANDBOX_BACKEND_ENV);
+    if let Some(backend) = backend.and_then(inherited_sandbox_backend) {
+        command.env(skill_sdk::PARENT_SANDBOX_BACKEND_ENV, backend);
+    }
 }
 
 pub(super) fn runner_additional_writable_paths(

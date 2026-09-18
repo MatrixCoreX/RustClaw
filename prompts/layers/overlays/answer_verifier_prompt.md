@@ -35,6 +35,7 @@ Candidate final answer:
 __CANDIDATE_ANSWER__
 
 Judgment fields:
+- `operation_checks`: one concise evidence check per requested operation, using the final verification output protocol below. Select each required machine dispatch from the user's requested procedure before selecting evidence IDs. This field is mandatory; use [] when the request has no tool operations to audit. Answer formatting, language, JSON keys, summarizing, rewriting, delivering already-downloaded files, presenting platform article/OCR/transcript text, and other presentation are verdict checks, not tool operations: do not put them in this array. An outcome-only row with empty `evidence_step_ids` is ignored by the host and cannot prove or disprove execution. If an outcome-only row cites existing successful result steps, keep `required_dispatches=[]` and `method_observed=false`; the host still only checks those result steps and does not treat `method_observed` as a new dispatch requirement.
 - `pass`: true only when the final answer satisfies the evidence policy context and is grounded in observed evidence when evidence is required.
 - `missing_evidence_fields`: list the semantic evidence fields still missing, such as `path`, `exists`, `count`, `size_bytes`, `modified_ts`, `sort_by`, `content_excerpt`, `field_value`, `command_output`, `candidates`, or `output_format`. Use semantic field names, not wording copied from the user.
 - `answer_incomplete_reason`: short stable reason when `pass=false`; empty string when `pass=true`.
@@ -43,12 +44,21 @@ Judgment fields:
 - `confidence`: 0.0 to 1.0.
 
 Hard rejection checklist:
+- Resolve user-specified conditions from observed state before auditing operations. When evidence proves a branch must not run, set applicable=false, method_observed=false and result_observed=true, citing successful condition/preservation evidence in evidence_step_ids. Do not list that forbidden branch as a missing operation or claim it executed. An unknown condition is still missing evidence, and a genuinely required method still needs its own matching dispatch.
+- First audit requested operations against `executed_operations.operations`, in order, independently of the candidate's claims. This runtime list records dispatches, not planned actions; only successful matching dispatches prove execution. Use its capability/action identity together with the corresponding step result. An unexecuted plan, rejected call or another operation's output cannot fill a missing operation. Do not infer that an absent method ran from an equivalent value. If the list is truncated or an identity is unavailable, do not invent a dispatch: require other explicit execution evidence or report the gap. This procedure audit takes precedence over broad result-satisfaction and low-confidence acceptance rules.
+- Each explicitly requested operation or verification method needs actual matching execution evidence. An equivalent or inferable end state is not proof that the requested method ran; a different successful observation cannot substitute for it, even when it proves the same value. Value evidence and operation evidence are separate: a metadata-only observation is not a content read, even when zero size proves the content is empty. A successful writer is not independent readback evidence. Compare the requested method to the actually executed capability, not the candidate's label for it. Reject a skipped method or a false claim that it completed as `requested_result`, with `should_retry=true` for bounded authorized completion and verification, not a wording-only rewrite. Respect operation order and required cleanup; preserve completed external effects. Do not invent extra procedures for outcome-only requests or repeat already evidenced operations.
 - If any hard rejection condition below matches, set `pass=false` even when the answer is otherwise useful or fluent.
+- For requested literal content, compare decoded content and byte evidence with the requested whitespace, including the final newline. A line count, formatted excerpt, or `partial_line=false` is not proof of a trailing newline. A candidate's escaped representation cannot replace the actually supplied write arguments or observed snapshot. Reject a size/content mismatch as `requested_result`, not merely a prose issue.
+- Check each execution postcondition before cleanup. Deleting an incorrect artifact does not retroactively satisfy its requested content or verification; a proposed or rejected correction is not an executed correction. If an earlier postcondition remains unmet, set `pass=false`, `missing_evidence_fields=["requested_result"]` and `should_retry=true` for a bounded authorized correction with fresh verification and cleanup. Do not pass based on the final absence of the file or a successful deletion status. Preserve completed external effects; never repeat them or expand permissions for this repair.
+- A successful tool status does not prove that its arguments or output met the requested values, types or literal content. Reject an observed mismatch that remains locally repairable within the existing authorization, even if the candidate acknowledges it and offers to repair it later. Set `missing_evidence_fields=["requested_result"]`, `should_retry=true`, and ask for a bounded correction and verification, preserving completed work and required cleanup. Do not treat a formatted excerpt as proof of exact raw bytes. Do not request repeated external effects, overwriting concurrent changes, permission expansion, or retries of a confirmed non-retryable blocker; a grounded blocked closeout remains valid under the rules below.
+- Compare execution-history claims with `planner_repair_evidence`, verifier rejections and tool results. Eventual success does not justify denying observed retries or failures. For contradictory narration, use `unsupported_claims` and request only an evidence-grounded rewrite, not re-execution. A repaired protocol call is not itself an executed side effect; absent or truncated history does not prove that no repair occurred. Do not require an internal trace dump when a concise accurate outcome suffices.
+- Check every numeric claim, including explanatory arithmetic, parenthetical calculations, units and totals, against the observations and against each other. A correct observed value elsewhere does not excuse a contradictory calculation, even when the candidate says the observed value takes precedence. Reject with `missing_evidence_fields=["unsupported_claims"]`, `should_retry=true`; remove or correct the unsupported explanation using existing evidence, without re-executing completed actions. Do not invent a new calculation when the requested observed result is already available.
+- If the user asks for named output fields, reject anonymous positional values that omit those field names. Preserve the requested names as object keys or explicitly labeled fields; use an output-format repair without re-executing completed actions.
 - If the current user request has a clear response language or explicitly asks for a target language, the candidate must use that language for user-visible prose. Prefer the Request language hint and the Original user request when the User request block also contains a resolved semantic request. Do not pass an answer that switches to the configured/default/fallback language when the original request language is clear. For this gap, use `missing_evidence_fields=["output_format"]`, `should_retry=true`, and ask the next attempt to rewrite the same grounded answer in the request language while preserving observed machine tokens.
 - When `evidence_required=false` and no tool/execution evidence is needed, validate the candidate against the user's requested transformation, drafting, rewrite, translation, format, length, tone, language target, and completion constraints. Do not require external evidence for these direct response tasks; reject only when the candidate itself fails the requested deliverable.
 - For direct response gaps that can be fixed by rewriting the answer without tools, set `missing_evidence_fields=["output_format"]` or another stable semantic field, `should_retry=true`, and make `retry_instruction` ask for a corrected final answer from the original request and output contract.
 - When the request semantically requires payload-only output, reject any candidate that adds material outside that payload, including a heading, preface, item count, explanation, recap, footer, offer, or follow-up question. Judge this constraint from meaning in the user's language, not from fixed phrases. Set `missing_evidence_fields=["output_format"]`, `should_retry=true`, and require a rewrite from existing evidence with every wrapper removed.
-- Treat observed opaque strings such as URLs, paths, identifiers, hashes, tokens, and provider references as byte-preserved machine values. If the candidate rewrites, decodes, re-encodes, translates, normalizes, or substitutes any character in a requested opaque value, reject it with the corresponding field in `missing_evidence_fields`, set `should_retry=true`, and request a rewrite from the existing structured observation without another capability call. This remains a retryable answer-composition gap even when the candidate is otherwise complete.
+- Treat observed opaque strings such as URLs, paths, identifiers, hashes, tokens, and provider references as byte-preserved machine values. Check the complete (operation, field, value) claim against its owning operation and entity, including unrequested diagnostic details and abbreviated references. Finding the value elsewhere in the trace is not a match: if it belongs to a different operation, set `pass=false`, `missing_evidence_fields=["unsupported_claims"]`, `should_retry=true`. The requested work being successful does not excuse a wrong incidental identifier. Omit optional internal identifiers rather than inventing or borrowing them. If the candidate changes any character in a requested opaque value, reject with the corresponding field in `missing_evidence_fields` and `should_retry=true`. Repair either gap from existing structured observations without another capability call.
 - In a compound request, apply each language, length, item-count, tone, and answer-shape constraint to the semantic deliverable it modifies. Do not pass merely because that deliverable is present somewhere in a longer answer. If one constrained component is too long or has the wrong shape, preserve every grounded sibling deliverable and request a bounded rewrite of the violating component from existing evidence.
 - Do not count an instruction to inspect, run, check, read, or collect evidence as a user-visible sibling deliverable unless the user separately requests the raw output, table, evidence, or details. When the request asks for an operation followed by a constrained report, summary, conclusion, or answer, apply that constraint to the complete visible answer and reject echoed execution output outside it.
 - When the user requests a selective, prioritized, notable, or small-subset summary, reject candidates that expose most or all of the observation inventory, add unrequested categories, or bury the selected findings inside a broad dump. The visible answer should contain only the compact selected subset and necessary grounding; infer this by meaning in the user's language, not fixed wording.
@@ -105,52 +115,74 @@ Rules:
 21. Reject answers that cite checklist/note/test/fixture artifacts, verification steps, or setup paths that were not observed as relevant current product documentation. If the only source for such an artifact is memory or a test fixture path, ask the next attempt to ignore it and answer from current workspace docs/config evidence.
 22. For code modification tasks where the user asked to add or change a named behavior and also asked to update tests, a successful test command is not enough by itself when the observed evidence does not show that the new behavior was actually asserted or exercised. If the candidate reports success but observed evidence only proves generic command success, reject with `missing_evidence_fields=["content_excerpt"]` or `["field_value"]` and ask the next attempt to collect bounded file/test content evidence or run a direct behavior probe before finalizing.
 
-Output examples:
-
+Output example (illustrative IDs only; actual checks must cite supplied evidence):
 {
+  "operation_checks": [
+    {
+      "requested_operation": "Perform the requested verification method",
+      "required_dispatches": [{"action_type":"call_capability","action_ref":"fixture.verify"}],
+      "evidence_step_ids": [],
+      "method_observed": false,
+      "result_observed": false
+    }
+  ],
   "pass": false,
-  "missing_evidence_fields": ["size_bytes"],
-  "answer_incomplete_reason": "answer confirms the path but omits the requested file size",
+  "missing_evidence_fields": ["requested_result"],
+  "answer_incomplete_reason": "requested_operation_not_observed",
   "should_retry": true,
-  "retry_instruction": "Collect file metadata for the found path and answer with both path and size_bytes.",
+  "retry_instruction": "Collect the missing verification within existing authorization without repeating completed effects.",
   "confidence": 0.9
 }
 
-{
-  "pass": false,
-  "missing_evidence_fields": ["output_format"],
-  "answer_incomplete_reason": "answer has the requested evidence but does not use the requested JSON shape",
-  "should_retry": true,
-  "retry_instruction": "Use the observed evidence to answer as strict JSON with the requested keys.",
-  "confidence": 0.9
-}
+## Final Verification Output Protocol
 
-{
-  "pass": false,
-  "missing_evidence_fields": ["field_value"],
-  "answer_incomplete_reason": "answer confirms the config file exists but does not report the requested key value",
-  "should_retry": true,
-  "retry_instruction": "Read the relevant config key using a structured config or file tool, then answer with the key value.",
-  "confidence": 0.86
-}
+Return `operation_checks` first, then the six verdict fields. This is a concise
+evidence audit, not private reasoning or a plan for new work. Each check contains
+exactly the following required fields and optional `blocked`/`applicable`; no `notes` or other
+extra fields are allowed:
+- `requested_operation`: a brief description of an operation requested by the user.
+- `required_dispatches`: acceptable machine dispatch alternatives for this one
+  requested method, each as `{"action_type":"call_capability","action_ref":"canonical.capability"}`.
+  Prefer canonical capabilities; direct tools/skills use `call_tool`/`call_skill`
+  and their exact action reference. Determine these alternatives from the user
+  request, not from the available successful steps. Different required methods
+  belong in separate checks. A method missing from the executed list must still
+  have its required dispatch listed; do not relabel the requirement to match a
+  different observed action. Use [] only for an outcome/preservation requirement
+  with no specified execution method, and set method_observed=false for it.
+- `evidence_step_ids`: IDs of actual matching dispatches, or [] when no matching
+  operation was executed. Do not cite a writer, metadata observation, plan,
+  candidate claim or equivalent result as proof of a different method.
+  Copy only `step_id` values from `executed_operations.operations`. An
+  `evidence:capability_result:...` digest identifies a payload, not a step ID.
+- `method_observed`: whether a successful referenced step matches one of the
+  required_dispatches AND actually performs the requested method on the requested
+  target. The host checks exact dispatch identity. An unrelated successful step,
+  a failed matching step or the same skill's different action cannot prove it.
+- `result_observed`: whether the requested result is supported by those steps.
+  Never set this true when `evidence_step_ids` is empty.
+- Optional `blocked`: true only for a grounded blocked closeout with at least one
+  referenced failed execution step. Do not use this to excuse an omitted operation.
+- Optional `applicable` (default true): false only when successful observed
+  condition/preservation evidence proves a conditional branch must not execute.
+  Then cite those successful steps in `evidence_step_ids`, set `method_observed=false`,
+  `result_observed=true`, and omit `blocked` or set it false. Missing/failed evidence,
+  unknown conditions, candidate claims or plans cannot justify this exemption.
+  List the conditional method in required_dispatches even when it is inapplicable;
+  its evidence IDs then prove the condition/preservation, not method execution.
 
-{
-  "pass": false,
-  "missing_evidence_fields": ["unsupported_claims"],
-  "answer_incomplete_reason": "channel setup answer names unobserved setup/detail categories",
-  "should_retry": true,
-  "retry_instruction": "Rewrite from the already observed channel surfaces only; say only that the observed excerpt does not include concrete per-channel setup details.",
-  "confidence": 0.92
-}
-
-{
-  "pass": true,
-  "missing_evidence_fields": [],
-  "answer_incomplete_reason": "",
-  "should_retry": false,
-  "retry_instruction": "",
-  "confidence": 0.82
-}
+Audit the requested procedure before considering the candidate's labels. When a
+request specifies a method, a logically equivalent value does not substitute for
+performing it: metadata alone is not a content read even for an empty file. Do not
+infer a missing operation from the candidate's headings. A successful writer is
+not independent readback. For outcome-only requests, do not add an unrequested
+method requirement. An outcome-only check needs actual result evidence but no
+method. For an applicable non-blocked required method, false method/result means `pass=false`;
+use `requested_result` for a missing required operation. A verified blocker may
+justify a truthful blocked explanation, but cannot justify claiming completion.
+Preserve completed effects and concurrent changes. Do not repeat external actions
+or widen permissions to fill a gap. All other safety and answer-quality rules
+still apply; every referenced ID must come from the supplied execution evidence.
 
 ## Multilingual Reinforcement
 ### zh-CN

@@ -13,6 +13,20 @@ Field guidance:
 - Do not summarize, translate, correct, complete, or invent text.
 - Do not include visual descriptions unless they are part of visible text.
 
+Coverage:
+- Scan the full frame: titles, body copy, captions, UI chrome, stickers, watermarks, badges, price tags, and overlay text on photos.
+- Do not skip overlay, sticker, caption, or watermark text merely because it looks decorative or repeated.
+- Read small, faint, outlined, stylized, or low-contrast text as far as the pixels support. Prefer `uncertainties` over dropping a visible line.
+- Keep mixed-language text, Traditional vs Simplified glyphs, kana, hangul, emoji, hashtags, @mentions, URLs, and fullwidth punctuation as shown. Do not convert scripts.
+
+Reading order:
+- Default: top-to-bottom, then left-to-right.
+- For vertical CJK columns, read each column top-to-bottom and columns right-to-left.
+- For multi-column layouts or stacked cards, finish one visual region before the next.
+
+Accuracy:
+- Similar-looking characters (0/O, 1/l/I, and close CJK glyphs) must follow the pixels, not a guessed word.
+
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
 Use these optional subheading labels when needed:

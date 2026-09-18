@@ -416,24 +416,45 @@ pub(super) fn build_prompt(
     let schema_hint = schema
         .map(|s| s.to_string())
         .unwrap_or_else(|| "none".to_string());
-    let language_hint = response_language
-        .map(|s| {
-            load_prompt_fragment(
-                workspace_root,
-                prompt_vendor,
-                "prompts/image_vision_language_hint_with_target.md",
-                DEFAULT_IMAGE_VISION_LANGUAGE_HINT_WITH_TARGET_TEMPLATE,
-            )
-            .replace("__RESPONSE_LANGUAGE__", s)
-        })
-        .unwrap_or_else(|| {
-            load_prompt_fragment(
-                workspace_root,
-                prompt_vendor,
-                "prompts/image_vision_language_hint_default.md",
-                DEFAULT_IMAGE_VISION_LANGUAGE_HINT_DEFAULT_TEMPLATE,
-            )
-        });
+    let language_hint = if action == "extract_text" {
+        response_language
+            .map(|s| {
+                load_prompt_fragment(
+                    workspace_root,
+                    prompt_vendor,
+                    "prompts/image_vision_language_hint_extract_text_with_target.md",
+                    DEFAULT_IMAGE_VISION_LANGUAGE_HINT_EXTRACT_TEXT_WITH_TARGET_TEMPLATE,
+                )
+                .replace("__RESPONSE_LANGUAGE__", s)
+            })
+            .unwrap_or_else(|| {
+                load_prompt_fragment(
+                    workspace_root,
+                    prompt_vendor,
+                    "prompts/image_vision_language_hint_extract_text_default.md",
+                    DEFAULT_IMAGE_VISION_LANGUAGE_HINT_EXTRACT_TEXT_DEFAULT_TEMPLATE,
+                )
+            })
+    } else {
+        response_language
+            .map(|s| {
+                load_prompt_fragment(
+                    workspace_root,
+                    prompt_vendor,
+                    "prompts/image_vision_language_hint_with_target.md",
+                    DEFAULT_IMAGE_VISION_LANGUAGE_HINT_WITH_TARGET_TEMPLATE,
+                )
+                .replace("__RESPONSE_LANGUAGE__", s)
+            })
+            .unwrap_or_else(|| {
+                load_prompt_fragment(
+                    workspace_root,
+                    prompt_vendor,
+                    "prompts/image_vision_language_hint_default.md",
+                    DEFAULT_IMAGE_VISION_LANGUAGE_HINT_DEFAULT_TEMPLATE,
+                )
+            })
+    };
     template
         .replace("__ACTION__", action)
         .replace("__DETAIL_LEVEL__", detail_level)
@@ -500,7 +521,8 @@ pub(super) fn openai_compat_chat_rewrite(
     let body = json!({
         "model": model,
         "messages": [{"role": "user", "content": user_prompt}],
-        "temperature": 0.0
+        "temperature": 0.0,
+        "max_tokens": 8192
     });
     let mut request = client.post(&url).bearer_auth(vcfg.api_key.trim());
     if include_api_key_header {
@@ -979,6 +1001,12 @@ const DEFAULT_IMAGE_VISION_LANGUAGE_HINT_WITH_TARGET_TEMPLATE: &str =
     include_str!("../../../../prompts/layers/overlays/image_vision_language_hint_with_target.md");
 const DEFAULT_IMAGE_VISION_LANGUAGE_HINT_DEFAULT_TEMPLATE: &str =
     include_str!("../../../../prompts/layers/overlays/image_vision_language_hint_default.md");
+const DEFAULT_IMAGE_VISION_LANGUAGE_HINT_EXTRACT_TEXT_WITH_TARGET_TEMPLATE: &str = include_str!(
+    "../../../../prompts/layers/overlays/image_vision_language_hint_extract_text_with_target.md"
+);
+const DEFAULT_IMAGE_VISION_LANGUAGE_HINT_EXTRACT_TEXT_DEFAULT_TEMPLATE: &str = include_str!(
+    "../../../../prompts/layers/overlays/image_vision_language_hint_extract_text_default.md"
+);
 const DEFAULT_IMAGE_VISION_ACTION_DESCRIBE_TEMPLATE: &str =
     include_str!("../../../../prompts/layers/overlays/image_vision_action_describe.md");
 const DEFAULT_IMAGE_VISION_ACTION_COMPARE_TEMPLATE: &str =

@@ -74,6 +74,69 @@ fn scheduled_envelope_pins_ingress_context_and_stable_idempotency() {
 }
 
 #[test]
+fn model_progress_text_is_not_localized_or_recorded_as_a_final_answer() {
+    let state = AppState::test_default_with_fixture_provider();
+    let payload = payload();
+    let task = task(&payload);
+    let envelope = build_proactive_text_envelope(
+        &state,
+        &task,
+        &payload,
+        "progress-started",
+        "正在开始采集；需要结束时告诉我停止采集即可。",
+    )
+    .unwrap();
+    assert_eq!(
+        envelope.text_segments[0].text,
+        "正在开始采集；需要结束时告诉我停止采集即可。"
+    );
+    assert!(envelope.notice.is_none());
+    assert_eq!(envelope.source, ChannelDeliverySource::ProactiveNotice);
+    assert_eq!(
+        envelope.history_disposition(),
+        claw_core::channel_delivery::ChannelDeliveryHistoryDisposition::TransportOnly
+    );
+    assert_eq!(
+        envelope.delivery_id,
+        "delivery:task-delivery-service:progress-started"
+    );
+    let terminal = build_scheduled_delivery_envelope(&state, &task, &payload, "finished").unwrap();
+    assert_ne!(envelope.idempotency_key, terminal.idempotency_key);
+}
+
+#[test]
+fn model_progress_envelopes_preserve_each_channel_adapter_and_recipient() {
+    let mut state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    state.channels.whatsapp_phone_number_id = "fixture-phone-id".into();
+    for (channel, adapter) in [
+        ("telegram", "telegram_bot"),
+        ("wechat", "wechat_ilink"),
+        ("feishu", "feishu_open_platform"),
+        ("lark", "lark_open_platform"),
+        ("whatsapp", "whatsapp_web"),
+        ("whatsapp", "whatsapp_cloud"),
+    ] {
+        let mut payload = payload();
+        payload["channel"] = json!(channel);
+        payload["channel_ingress"]["channel"] = json!(channel);
+        payload["channel_ingress"]["adapter"] = json!(adapter);
+        let mut task = task(&payload);
+        task.channel = channel.into();
+        let first =
+            build_proactive_text_envelope(&state, &task, &payload, "progress-started", "Starting.")
+                .unwrap_or_else(|error| panic!("{channel}/{adapter}: {error}"));
+        let replay =
+            build_proactive_text_envelope(&state, &task, &payload, "progress-started", "Starting.")
+                .unwrap();
+        assert_eq!(first, replay);
+        assert_eq!(first.adapter, adapter);
+        assert_eq!(first.reply_target, ChannelReplyTarget::chat("9"));
+        assert_eq!(first.locale, "zh-CN");
+        assert_eq!(first.text_segments[0].text, "Starting.");
+    }
+}
+
+#[test]
 fn proactive_notice_is_localized_from_machine_params() {
     use std::collections::BTreeMap;
 

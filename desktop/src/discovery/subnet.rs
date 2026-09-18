@@ -143,9 +143,11 @@ pub(super) async fn scan(cancel: CancellationToken) -> DiscoveryReport {
     if cancel.is_cancelled() {
         return report;
     }
+    #[cfg(not(target_os="android"))]
     let Ok(interfaces) = if_addrs::get_if_addrs() else {
         return report;
     };
+    #[cfg(not(target_os="android"))]
     let networks: Vec<_> = interfaces
         .into_iter()
         .filter(|i| i.is_oper_up() && !i.is_p2p() && interfaces::physical_interface(i))
@@ -154,6 +156,9 @@ pub(super) async fn scan(cancel: CancellationToken) -> DiscoveryReport {
             _ => None,
         })
         .collect();
+    #[cfg(target_os="android")]
+    let networks: Vec<(Ipv4Addr,Ipv4Addr)> = crate::android::bridge::string("localNetworks", &[])
+        .ok().flatten().and_then(|s|serde_json::from_str(&s).ok()).unwrap_or_default();
     let (hosts, limited) = targets(&networks);
     report.limited = limited;
     report.subnet_available = !hosts.is_empty();

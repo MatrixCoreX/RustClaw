@@ -124,6 +124,9 @@ model prose to decide state, ownership, success, retry, or permission.
 - Clearing a task-activity view stores a host-owned structured-event-time baseline. It hides records at or
   before that baseline from the AiAPP while preserving canonical tasks, events, conversations, and
   artifacts. Newer matching tasks remain visible.
+- Removing selected task-activity records stores host-owned `task_id` view tombstones for the declaring
+  skill. The AiAPP stops listing those tasks; canonical tasks, events, conversations, artifacts, and other
+  skills' private storage remain unchanged.
 - Preview and artifact routes return authenticated, bounded, allowlisted files. They never expose
   private storage paths.
 - Collection thumbnails keep their visibility observer mounted and prefer the authenticated local

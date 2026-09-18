@@ -1,3 +1,4 @@
+import { copy } from "./i18n";
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { friendlyError } from './errors';
@@ -47,14 +48,14 @@ export function LoginFields({sessionId, busy, onLogin, onDisconnect}: {
     void onLogin(input, saved ? false : remember);
   }}>
     <div className="desktop-tabs">
-      <button type="button" disabled={disabled} className={mode === 'password' ? 'selected' : ''} onClick={() => changeMode('password')}>用户名与密码</button>
-      <button type="button" disabled={disabled} className={mode === 'key' ? 'selected' : ''} onClick={() => changeMode('key')}>用户 Key</button>
+      <button type="button" disabled={disabled} className={mode === 'password' ? 'selected' : ''} onClick={() => changeMode('password')}>{copy("用户名与密码")}</button>
+      <button type="button" disabled={disabled} className={mode === 'key' ? 'selected' : ''} onClick={() => changeMode('key')}>{copy("用户 Key")}</button>
     </div>
-    {mode === 'password' && <label>设备账户<input required disabled={disabled} autoComplete="username" value={username} onChange={event => {
+    {mode === 'password' && <label>{copy("设备账户")}<input required disabled={disabled} autoComplete="username" value={username} onChange={event => {
       if (event.target.value !== username) {setSaved(false); setSecret('');}
       setUsername(event.target.value);
     }} /></label>}
-    <label>{mode === 'key' ? '用户 Key' : '密码'}<input required disabled={disabled} type="password" autoComplete="off" value={saved ? SAVED_SECRET_MASK : secret} onFocus={event => {if (saved) event.currentTarget.select();}} onPaste={event => {
+    <label>{mode === 'key' ? copy("用户 Key") : copy("密码")}<input required disabled={disabled} type="password" autoComplete="off" value={saved ? SAVED_SECRET_MASK : secret} onFocus={event => {if (saved) event.currentTarget.select();}} onPaste={event => {
       if (!saved) return;
       event.preventDefault(); setSaved(false); setSecret(event.clipboardData.getData('text'));
     }} onChange={event => {
@@ -65,13 +66,13 @@ export function LoginFields({sessionId, busy, onLogin, onDisconnect}: {
       setSecret(saved ? inserted ?? (value.startsWith(SAVED_SECRET_MASK) ? value.slice(SAVED_SECRET_MASK.length) : /^•*$/.test(value) ? '' : value) : value);
       setSaved(false);
     }} /></label>
-    {saved && <small>已填入保存的登录信息，点击登录即可。</small>}
+    {saved && <small>{copy("已填入保存的登录信息，点击登录即可。")}</small>}
     {prefillError && <p className="desktop-note" role="status">{prefillError}</p>}
-    <label className="desktop-check"><input type="checkbox" disabled={disabled} checked={remember} onChange={event => setRemember(event.target.checked)} />保存到系统凭据库</label>
-    <small>{saved ? '修改登录信息后，可保存并替换原有记录。' : '不勾选时仅当前会话使用。设备账户权限仍由设备管理。'}</small>
+    <label className="desktop-check"><input type="checkbox" disabled={disabled} checked={remember} onChange={event => setRemember(event.target.checked)} />{copy("保存到系统凭据库")}</label>
+    <small>{saved ? copy("修改登录信息后，可保存并替换原有记录。") : copy("不勾选时仅当前会话使用。设备账户权限仍由设备管理。")}</small>
     <div className="desktop-actions">
-      <button type="button" disabled={disabled} onClick={onDisconnect}>断开</button>
-      <button className="primary" disabled={disabled}>{loading ? '正在填入…' : busy ? '正在登录…' : '登录'}</button>
+      <button type="button" disabled={disabled} onClick={onDisconnect}>{copy("断开")}</button>
+      <button className="primary" disabled={disabled}>{loading ? copy("正在填入…") : busy ? copy("正在登录…") : copy("登录")}</button>
     </div>
   </form>;
 }

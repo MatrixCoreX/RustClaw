@@ -419,6 +419,7 @@ fn compact_structured_action_output_for_journal(output: &str) -> Option<String> 
     copy_listing_field(source, &mut compact, "end_line");
     copy_listing_field(source, &mut compact, "total_lines");
     copy_listing_field(source, &mut compact, "line_count");
+    copy_listing_field(source, &mut compact, "line_endings");
     copy_listing_field(source, &mut compact, "first_line");
     copy_listing_field(source, &mut compact, "line_safety");
     copy_listing_field(source, &mut compact, "mode");
@@ -1102,6 +1103,22 @@ impl TaskJournal {
             "validation_result": validation_result_json(self),
             "final_answer": self.final_answer.as_deref().map(crate::truncate_for_log),
         })
+    }
+
+    pub(crate) fn executed_operation_evidence(&self) -> Vec<Value> {
+        let mut requested = requested_capability_sequence(self);
+        self.step_results.iter().map(|step| {
+            let requested = next_requested_capability(&mut requested, step);
+            json!({
+                "step_id": step.step_id,
+                "executed_skill": step.skill,
+                "status": step.status.as_str(),
+                "requested_action_type": requested.as_ref().map(|r| &r.action_type),
+                "requested_capability": requested.as_ref().map(|r| &r.capability),
+                "requested_action_ref": requested.as_ref().and_then(|r| r.action_ref.as_ref()),
+                "resolved_capability": requested.as_ref().and_then(|r| r.resolved_capability.as_ref()),
+            })
+        }).collect()
     }
 
     pub(crate) fn to_trace_json(&self) -> Value {

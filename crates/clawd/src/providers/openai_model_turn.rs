@@ -290,6 +290,7 @@ struct OpenAiStreamAccumulator {
     events: Vec<ModelTurnEvent>,
     raw_frames: Vec<Value>,
     raw_response_bytes: usize,
+    public_capture: super::stream_capture::StreamCapture,
     done: bool,
 }
 
@@ -462,6 +463,7 @@ impl OpenAiStreamAccumulator {
             },
             sink,
         );
+        let raw_response = self.safe_raw_response();
         let turn = ModelTurnResponse {
             text: self.text.clone(),
             tool_calls: completed_calls,
@@ -473,7 +475,7 @@ impl OpenAiStreamAccumulator {
         Ok(ModelTurnProviderResponse {
             turn,
             request_payload: Value::Null,
-            raw_response: provider_safe_stream_raw_response(&self.raw_frames, &self.text),
+            raw_response,
             attempts: 1,
             retryable_error_count: 0,
             last_retry_error_kind: None,
@@ -495,11 +497,12 @@ impl OpenAiStreamAccumulator {
 
     fn record_raw_response(&mut self, value: &Value) {
         const RAW_RESPONSE_LIMIT: usize = 1024 * 1024;
+        let mut safe = value.clone();
+        remove_hidden_reasoning_fields(&mut safe);
+        self.public_capture.observe(&safe);
         if self.raw_response_bytes >= RAW_RESPONSE_LIMIT {
             return;
         }
-        let mut safe = value.clone();
-        remove_hidden_reasoning_fields(&mut safe);
         let encoded_len = safe.to_string().len();
         if self.raw_response_bytes.saturating_add(encoded_len) > RAW_RESPONSE_LIMIT {
             return;
@@ -509,7 +512,11 @@ impl OpenAiStreamAccumulator {
     }
 
     fn safe_raw_response(&self) -> String {
-        provider_safe_stream_raw_response(&self.raw_frames, &self.text)
+        format!(
+            "{}\n{}",
+            self.public_capture.record(self.raw_frames.len(), self.done),
+            provider_safe_stream_raw_response(&self.raw_frames, &self.text)
+        )
     }
 }
 

@@ -166,6 +166,7 @@
   - `action`, `root`, `count`, `results`, `known_match_count`, `total_count_is_complete`, `completeness`, `has_more`, and `scan`; evidence roles `path`, `results`, `status`, and `count`. A partial zero-result scan is not exhaustive absence.
 - `read_range` success `extra` fields:
   - `action`, `path`, `resolved_path`, `start_line`, `end_line`, `total_lines`, `line_count` (stable alias of total file lines), `returned_line_count`, `excerpt`, `excerpt_bytes`, `encoding`, `binary`, `size_bytes`, `sha256`, `content_hash`, `truncated`, `page`, and `line_safety`; optional `first_line` appears when the observed slice includes line 1, and selector projections remain optional; evidence roles `path`, `field_value`, and `count`.
+  - `line_endings` describes the same complete file snapshot as `sha256`, not only the displayed slice: `scope="file"`, `lf_count` (bare LF), `crlf_count` (CRLF pairs), and `ends_with_newline` (last decoded byte is LF, including CRLF). Empty/BOM-only files return zero counts and false; a lone CR is not counted as a line terminator. These fields remain complete when the excerpt is bounded or truncated. No content bytes are changed.
 - `read_artifact_range` success `extra` fields:
   - `action`, `path`, `resolved_path`, `artifact_root`, `content`, `encoding`, `binary`, `size_bytes`, `returned_bytes`, `sha256`, `content_hash`, `truncated`, and exact byte `page` metadata; evidence roles `path`, `field_value`, and `count`.
 - `compare_paths` success `extra` fields:

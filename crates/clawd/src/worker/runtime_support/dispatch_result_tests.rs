@@ -230,6 +230,52 @@ fn seeded_agent_loop_terminal_payload_is_machine_only_for_success_and_failure() 
 }
 
 #[test]
+fn seeded_agent_loop_failed_reply_preserves_new_evidence_and_call_count() {
+    let claimed = seeded_claimed_dispatch();
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        &claimed.task_id,
+        "ask",
+        "verify the exact content",
+    );
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Failure);
+    journal.record_llm_calls_per_task(12);
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_3".to_string(),
+        skill: "read_text_range".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(json!({"content_bytes": 18}).to_string()),
+        error: None,
+        started_at: 10,
+        finished_at: 11,
+    });
+    journal.record_answer_verifier_summary(crate::answer_verifier::AnswerVerifierOut {
+        pass: false,
+        missing_evidence_fields: vec!["requested_result".to_string()],
+        answer_incomplete_reason: "requested_result_not_observed".to_string(),
+        should_retry: false,
+        retry_instruction: String::new(),
+        confidence: 0.93,
+    });
+    let expected = journal.attach_to_result(json!({"text": "partial result"}));
+    let reply = crate::AskReply::non_llm("partial result".to_string())
+        .with_task_journal(journal)
+        .with_failure("raw internal error must not leak");
+    let payload = super::dispatch_result::seeded_agent_loop_terminal_dispatch_result_payload(
+        &claimed,
+        Ok(reply),
+    )
+    .unwrap();
+    assert_eq!(payload["executor_result_status"], "seeded_loop_failed");
+    assert_eq!(payload["error_code"], "seeded_loop_answer_marked_failed");
+    assert_eq!(payload["source_error_present"], true);
+    assert_eq!(payload["failure_result_json"], expected);
+    assert!(payload.get("final_result_json").is_none());
+    assert!(!payload
+        .to_string()
+        .contains("raw internal error must not leak"));
+}
+
+#[test]
 fn seeded_agent_loop_with_new_checkpoint_is_deferred_not_terminal() {
     let claimed = seeded_claimed_dispatch();
     let mut journal =
@@ -247,6 +293,9 @@ fn seeded_agent_loop_with_new_checkpoint_is_deferred_not_terminal() {
     let reply = crate::AskReply::non_llm("waiting".to_string())
         .with_task_journal(journal)
         .with_failure("provisional reply must not terminate a valid checkpoint");
+    assert!(
+        super::dispatch_result::seeded_terminal_journal_record(&claimed.task_id, &reply).is_none()
+    );
 
     let payload = super::dispatch_result::seeded_agent_loop_terminal_dispatch_result_payload(
         &claimed,
@@ -263,6 +312,65 @@ fn seeded_agent_loop_with_new_checkpoint_is_deferred_not_terminal() {
     );
     assert!(payload.get("text").is_none());
     assert!(payload.get("error_text").is_none());
+}
+
+#[test]
+fn seeded_terminal_journal_keeps_digest_bound_execution_streams_before_projection() {
+    let claimed = seeded_claimed_dispatch();
+    for failed in [false, true] {
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task(&claimed.task_id, "ask", "fixture");
+        for n in 0..20 {
+            journal.push_step_result(&crate::executor::StepExecutionResult {
+                step_id: format!("step_{n}"),
+                skill: "fixture_tool".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output: Some(json!({"items": vec!["x".repeat(500); 80]}).to_string()),
+                error: None,
+                started_at: n,
+                finished_at: n + 1,
+            });
+        }
+        let expected = journal.to_log_json();
+        let mut answer = crate::AskReply::non_llm("fixture".to_string()).with_task_journal(journal);
+        answer.should_fail_task = failed;
+        let (phase, record) =
+            super::dispatch_result::seeded_terminal_journal_record(&claimed.task_id, &answer)
+                .unwrap();
+        assert_eq!(phase, if failed { "failure" } else { "finalize" });
+        assert_eq!(record, expected);
+        let payload = super::dispatch_result::seeded_agent_loop_terminal_dispatch_result_payload(
+            &claimed,
+            Ok(answer),
+        )
+        .unwrap();
+        let field = if failed {
+            "failure_result_json"
+        } else {
+            "final_result_json"
+        };
+        let meta = &payload[field]["task_journal"]["trace"]["trace_storage"];
+        assert_eq!(meta["truncated"], true);
+        for name in ["step_results", "capability_results"] {
+            let raw = serde_json::to_vec(&record["trace"][name]).unwrap();
+            let hash = raw.iter().fold(0xcbf29ce484222325_u64, |hash, byte| {
+                (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
+            });
+            assert_eq!(meta["evidence_streams"][name], format!("fnv64:{hash:016x}"));
+        }
+    }
+}
+
+#[test]
+fn seeded_terminal_journal_rejects_missing_or_foreign_identity() {
+    let mut answer = crate::AskReply::non_llm("fixture".to_string());
+    assert!(super::dispatch_result::seeded_terminal_journal_record("task", &answer).is_none());
+    for (id, kind) in [("other", "ask"), ("task", "run_skill")] {
+        answer.task_journal = Some(crate::task_journal::TaskJournal::for_task(
+            id, kind, "fixture",
+        ));
+        assert!(super::dispatch_result::seeded_terminal_journal_record("task", &answer).is_none());
+    }
 }
 
 #[test]

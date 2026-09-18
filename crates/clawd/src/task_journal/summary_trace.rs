@@ -303,6 +303,7 @@ pub(super) struct RequestedPlanCapability {
     pub(super) args_fingerprint: Option<String>,
     pub(super) round_no: Option<usize>,
     pub(super) step_in_round: Option<usize>,
+    executed_step_id: Option<String>,
     pub(super) dispatch_executed: bool,
 }
 
@@ -356,6 +357,7 @@ fn requested_capability_from_raw_step(step: &Value) -> Option<RequestedPlanCapab
         args_fingerprint: None,
         round_no: None,
         step_in_round: None,
+        executed_step_id: None,
         dispatch_executed: false,
     })
 }
@@ -378,6 +380,7 @@ fn requested_capabilities_for_plan(plan: &crate::PlanResult) -> Vec<RequestedPla
                     args_fingerprint: None,
                     round_no: None,
                     step_in_round: None,
+                    executed_step_id: None,
                     dispatch_executed: false,
                 });
             if requested.action_ref.is_none() {
@@ -408,7 +411,70 @@ pub(super) fn requested_capability_sequence(journal: &TaskJournal) -> Vec<Reques
     }
     attach_dispatch_capability_resolutions(&mut requested, &journal.task_observations);
     attach_executed_dispatches(&mut requested, &journal.task_observations);
+    extend_completed_capability_result_requests(journal, &mut requested);
     requested
+}
+
+fn extend_completed_capability_result_requests(
+    journal: &TaskJournal,
+    requested: &mut Vec<RequestedPlanCapability>,
+) {
+    for result in &journal.capability_results {
+        if result.status != claw_core::capability_result::CapabilityResultStatus::Ok {
+            continue;
+        }
+        for evidence in &result.evidence {
+            let step_id = evidence.id.trim();
+            if step_id.is_empty()
+                || requested
+                    .iter()
+                    .any(|item| item.executed_step_id.as_deref() == Some(step_id))
+            {
+                continue;
+            }
+            let Some(resolution) = journal.task_observations.iter().find(|value| {
+                value.get("observation_kind").and_then(Value::as_str)
+                    == Some("capability_resolution")
+                    && value.get("resolution_stage").and_then(Value::as_str) != Some("verify")
+                    && value.get("outcome").and_then(Value::as_str) == Some("resolved")
+                    && value
+                        .get("global_step")
+                        .and_then(Value::as_u64)
+                        .map(|global_step| format!("step_{global_step}"))
+                        .as_deref()
+                        == Some(step_id)
+                    && value
+                        .get("requested_capability")
+                        .and_then(Value::as_str)
+                        .is_some_and(|capability| {
+                            capability_machine_token_eq(capability, &result.capability)
+                        })
+            }) else {
+                continue;
+            };
+            requested.push(RequestedPlanCapability {
+                action_type: "call_capability".to_string(),
+                capability: result.capability.clone(),
+                resolved_capability: optional_trimmed_string(resolution, "resolved_capability"),
+                resolved_tool_or_skill: optional_trimmed_string(
+                    resolution,
+                    "resolved_tool_or_skill",
+                ),
+                action_ref: Some(result.capability.clone()),
+                args_fingerprint: None,
+                round_no: resolution
+                    .get("round_no")
+                    .and_then(Value::as_u64)
+                    .map(|number| number as usize),
+                step_in_round: resolution
+                    .get("step_in_round")
+                    .and_then(Value::as_u64)
+                    .map(|number| number as usize),
+                executed_step_id: Some(step_id.to_string()),
+                dispatch_executed: true,
+            });
+        }
+    }
 }
 
 fn checkpoint_requested_capabilities(observations: &[Value]) -> Vec<RequestedPlanCapability> {
@@ -439,6 +505,7 @@ fn checkpoint_requested_capabilities(observations: &[Value]) -> Vec<RequestedPla
                     .get("step_in_round")
                     .and_then(Value::as_u64)
                     .map(|number| number as usize),
+                executed_step_id: optional_trimmed_string(value, "step_id"),
                 dispatch_executed: true,
             })
         })
@@ -457,38 +524,39 @@ fn optional_trimmed_string(value: &Value, key: &str) -> Option<String> {
 pub(crate) fn checkpoint_step_provenance_records(
     rounds: &[TaskJournalRoundTrace],
     executed_steps: &[crate::executor::StepExecutionResult],
+    observations: &[Value],
 ) -> Vec<Value> {
-    let mut candidates = rounds
-        .iter()
-        .flat_map(|round| {
-            let Some(plan) = round.plan_result.as_ref() else {
-                return Vec::new();
-            };
-            plan.steps
-                .iter()
-                .zip(requested_capabilities_for_plan(plan))
-                .enumerate()
-                .map(|(step_index, (step, mut requested))| {
-                    requested.round_no = Some(round.round_no);
-                    requested.step_in_round = Some(step_index + 1);
-                    (step.step_id.clone(), requested)
-                })
-                .collect::<Vec<_>>()
-        })
-        .collect::<Vec<_>>();
+    let mut candidates = checkpoint_requested_capabilities(observations);
+    candidates.extend(
+        rounds
+            .iter()
+            .flat_map(|round| {
+                let Some(plan) = round.plan_result.as_ref() else {
+                    return Vec::new();
+                };
+                plan.steps
+                    .iter()
+                    .zip(requested_capabilities_for_plan(plan))
+                    .enumerate()
+                    .map(|(step_index, (_, mut requested))| {
+                        requested.round_no = Some(round.round_no);
+                        requested.step_in_round = Some(step_index + 1);
+                        requested
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>(),
+    );
+    attach_dispatch_capability_resolutions(&mut candidates, observations);
+    attach_executed_dispatches(&mut candidates, observations);
 
     executed_steps
         .iter()
         .filter_map(|step| {
-            let candidate_index = candidates
-                .iter()
-                .rposition(|(step_id, _)| step_id == &step.step_id)
-                .or_else(|| {
-                    candidates.iter().rposition(|(_, requested)| {
-                        requested_capability_matches_executed(requested, &step.skill)
-                    })
-                })?;
-            let (_, requested) = candidates.remove(candidate_index);
+            // Plan-local step ids restart each round; only dispatch ids identify execution.
+            let candidate_index =
+                requested_capability_index(&candidates, &step.step_id, &step.skill)?;
+            let requested = candidates.remove(candidate_index);
             Some(json!({
                 "schema_version": 1,
                 "observation_kind": "checkpoint_step_provenance",
@@ -516,6 +584,8 @@ fn attach_dispatch_capability_resolutions(
         .iter()
         .filter(|value| {
             value.get("observation_kind").and_then(Value::as_str) == Some("capability_resolution")
+                // Preflight numbers are provisional and can be reused after rejection.
+                && value.get("resolution_stage").and_then(Value::as_str) != Some("verify")
         })
         .filter_map(|value| {
             let requested = value.get("requested_capability")?.as_str()?.trim();
@@ -542,6 +612,7 @@ fn attach_dispatch_capability_resolutions(
                         .map(str::trim)
                         .filter(|value| !value.is_empty())
                         .map(str::to_string),
+                    observation_step_id(value),
                 )
             })
         })
@@ -550,20 +621,22 @@ fn attach_dispatch_capability_resolutions(
         .iter_mut()
         .filter(|item| item.action_type == "call_capability")
     {
-        let Some((_, _, _, resolved, resolved_tool_or_skill)) =
-            resolutions
-                .iter()
-                .find(|(round_no, step_in_round, requested, _, _)| {
-                    round_no == &item.round_no
-                        && step_in_round == &item.step_in_round
-                        && capability_machine_token_eq(requested, &item.capability)
-                })
+        let Some((_, _, _, resolved, resolved_tool_or_skill, executed_step_id)) = resolutions
+            .iter()
+            .find(|(round_no, step_in_round, requested, _, _, _)| {
+                round_no == &item.round_no
+                    && step_in_round == &item.step_in_round
+                    && capability_machine_token_eq(requested, &item.capability)
+            })
         else {
             continue;
         };
         item.resolved_capability.clone_from(resolved);
         item.resolved_tool_or_skill
             .clone_from(resolved_tool_or_skill);
+        if executed_step_id.is_some() {
+            item.executed_step_id.clone_from(executed_step_id);
+        }
     }
 }
 
@@ -594,7 +667,17 @@ fn attach_executed_dispatches(requested: &mut [RequestedPlanCapability], observa
             continue;
         };
         item.dispatch_executed = true;
+        if let Some(step_id) = observation_step_id(observation) {
+            item.executed_step_id = Some(step_id);
+        }
     }
+}
+
+fn observation_step_id(value: &Value) -> Option<String> {
+    value
+        .get("global_step")
+        .and_then(Value::as_u64)
+        .map(|step| format!("step_{step}"))
 }
 
 fn resolved_executable_name(value: &str) -> &str {
@@ -706,28 +789,47 @@ pub(super) fn next_requested_capability(
     requested: &mut Vec<RequestedPlanCapability>,
     step: &TaskJournalStepTrace,
 ) -> Option<RequestedPlanCapability> {
-    if requested.is_empty() {
-        return None;
-    }
-    let requested_idx = requested
-        .iter()
-        .position(|candidate| {
-            candidate.dispatch_executed && requested_capability_matches_step(candidate, step)
-        })
-        .or_else(|| {
-            requested
-                .iter()
-                .position(|candidate| requested_capability_matches_step(candidate, step))
-        })
-        .unwrap_or(0);
+    let requested_idx = requested_capability_index(requested, &step.step_id, &step.skill)?;
     Some(requested.remove(requested_idx))
 }
 
-fn requested_capability_matches_step(
-    requested: &RequestedPlanCapability,
-    step: &TaskJournalStepTrace,
-) -> bool {
-    let step_skill = step.skill.trim();
+fn requested_capability_index(
+    requested: &[RequestedPlanCapability],
+    step_id: &str,
+    skill: &str,
+) -> Option<usize> {
+    let matches = |candidate: &RequestedPlanCapability| {
+        requested_capability_matches_skill(candidate, skill)
+            && candidate
+                .executed_step_id
+                .as_deref()
+                .is_none_or(|id| id == step_id)
+    };
+    let requested_idx = requested
+        .iter()
+        .position(|candidate| {
+            candidate.dispatch_executed
+                && candidate.executed_step_id.as_deref() == Some(step_id)
+                && matches(candidate)
+        })
+        .or_else(|| {
+            requested.iter().position(|candidate| {
+                candidate.executed_step_id.as_deref() == Some(step_id) && matches(candidate)
+            })
+        });
+    if requested_idx.is_some() {
+        return requested_idx;
+    }
+    let mut unbound = requested
+        .iter()
+        .enumerate()
+        .filter(|(_, candidate)| candidate.executed_step_id.is_none() && matches(candidate));
+    let (index, _) = unbound.next()?;
+    unbound.next().is_none().then_some(index)
+}
+
+fn requested_capability_matches_skill(requested: &RequestedPlanCapability, skill: &str) -> bool {
+    let step_skill = skill.trim();
     if step_skill.is_empty() {
         return false;
     }

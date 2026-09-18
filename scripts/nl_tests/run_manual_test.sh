@@ -84,6 +84,7 @@ Case file format:
   suite|name|tags|prompt|expect=<substring>     # 5th field optional, asserts response contains substring
   suite|name|tags|prompt|expect=contains:<substring>;json_exists:/data/result_json/machine_reply
   suite|name|tags|prompt|expect=json_eq:/data/status=succeeded
+  suite|name|tags|prompt|expect=skill_outcome_json:{"skill":"fixture","success_fields":["description"]}
   suite|name|tags|prompt|expect=contains:<substring>;confirm:确认执行
 
 Case format:
@@ -116,16 +117,9 @@ need_cmd() {
   }
 }
 
-# A1: 启动时打印当前 clawd binary 的位置 + mtime，并和源码比对。
-#
-# 历史教训：Cursor 沙箱 / 远端开发容器会把 CARGO_TARGET_DIR 重定向到 /tmp，
-# 结果 cargo build 后的新 binary 落在沙箱缓存里，target/release/clawd 还是
-# 几天前的旧二进制 —— 但 NL 测试照常跑通，让人误以为新代码已经在跑。
-#
-# 这个函数只警告不阻断：拿到 /v1/health 里的进程信息（如果有），并比对
-# crates/clawd/src 下最新源码 mtime；如果 src 比 binary 新，就喷红字。
+# This checks the caller-declared binary, not the identity of a remote process.
 check_binary_freshness() {
-  local clawd_bin="${ROOT_DIR}/target/release/clawd"
+  local clawd_bin="${NL_CLAWD_BIN:-${ROOT_DIR}/target/release/clawd}"
   if [[ ! -x "$clawd_bin" ]]; then
     echo "[binary] WARN: ${clawd_bin} not found (server may have been started from a different path)"
   else
@@ -133,7 +127,7 @@ check_binary_freshness() {
     bin_mtime="$(file_mtime_epoch "$clawd_bin")"
     local bin_mtime_str
     bin_mtime_str="$(format_epoch_local "$bin_mtime")"
-    echo "[binary] target/release/clawd mtime=${bin_mtime_str} size=$(file_size_bytes "$clawd_bin")"
+    echo "[binary] declared_binary=${clawd_bin} mtime=${bin_mtime_str} size=$(file_size_bytes "$clawd_bin")"
 
     local src_dir="${ROOT_DIR}/crates/clawd/src"
     if [[ -d "$src_dir" ]]; then
@@ -145,7 +139,7 @@ check_binary_freshness() {
         echo "[binary] WARN: source under crates/clawd/src has files newer than binary"
         echo "[binary]       latest src mtime: ${src_str}"
         echo "[binary]       binary  mtime:   ${bin_mtime_str}"
-        echo "[binary]       => the running clawd may NOT contain your latest changes."
+        echo "[binary]       => the declared binary may NOT contain your latest changes."
       fi
     fi
   fi
@@ -276,22 +270,7 @@ PY
 }
 
 extract_status() {
-  python3 - "$1" <<'PY'
-import json
-import re
-import sys
-from pathlib import Path
-
-obj = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-data = obj.get("data") or {}
-status = str(data.get("status") or "")
-lifecycle = data.get("lifecycle") or {}
-lifecycle_state = str(lifecycle.get("state") or "").strip()
-if status == "running" and lifecycle_state == "needs_user":
-    print("needs_user")
-else:
-    print(status)
-PY
+  python3 "${SCRIPT_DIR}/manual_case_lifecycle.py" "$1"
 }
 
 extract_result_summary() {
@@ -659,7 +638,7 @@ poll_until_terminal() {
       last_status="$status"
     fi
     case "$status" in
-      succeeded|failed|canceled|timeout|needs_user)
+      succeeded|failed|canceled|timeout|needs_user|provider_wait)
         log_terminal_result_flags "$out_file"
         return 0
         ;;
@@ -735,6 +714,7 @@ run_one_case() {
   local confirm_reply="${8:-}"
   local safe_name case_dir submit_file final_file meta_file task_id raw rc llm_offset_file
   local started_at ended_at mode submit_payload skill_args health_probe_file
+  local provider_waiting=0
 
   CURRENT_SOURCE_LINE="$source_line"
   safe_name="$(sanitize_name "$case_name")"
@@ -831,6 +811,14 @@ run_one_case() {
       fi
     fi
     print_user_visible_dialog "$final_file" "$prompt" "$PROMPT_REPLY_ONLY"
+
+    if [[ "$(extract_status "$final_file")" == "provider_wait" ]]; then
+      effective_status="provider_unavailable"
+      provider_waiting=1
+      ABORTED_FAIL_FAST=1
+      echo "  [PROVIDER_WAIT] checkpoint retained; resume this task after provider recovery, do not resubmit it"
+      break
+    fi
 
     if [[ -n "$confirm_reply" ]]; then
       if ! final_result_needs_confirmation "$final_file"; then
@@ -945,7 +933,9 @@ else:
     echo "  [stats] wall=$((ended_at - started_at))s consecutive_bad=${CONSECUTIVE_BAD}"
   fi
 
-  LAST_COMPLETED_LINE="$source_line"
+  if (( provider_waiting == 0 )); then
+    LAST_COMPLETED_LINE="$source_line"
+  fi
   CURRENT_SOURCE_LINE=0
 }
 

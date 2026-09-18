@@ -67,6 +67,16 @@ fn checkpoint_for_stage(stage: AgentCheckpointStage) -> crate::task_lifecycle::T
             ..Default::default()
         });
     source.loaded_capability_skills.insert("crypto".to_string());
+    source.task_observations.push(json!({
+        "observation_kind": "capability_resolution",
+        "outcome": "resolved",
+        "requested_capability": "office.edit",
+        "resolved_capability": "office.edit",
+        "resolved_tool_or_skill": "skill:office_workspace",
+        "round_no": 2,
+        "global_step": 1,
+        "step_in_round": 1
+    }));
     source
         .loaded_mcp_capabilities
         .insert("mcp.fixture.lookup".to_string());

@@ -28,6 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--package-root", type=Path, default=ROOT / "data/skill-packages")
     parser.add_argument("--sdk-cli", type=Path, default=ROOT / "target/release/skillctl")
     parser.add_argument("--skill", action="append", default=[])
+    parser.add_argument("--precompiled-root", type=Path)
     parser.add_argument("--target", default="host")
     parser.add_argument(
         "--scope",
@@ -38,7 +39,10 @@ def parse_args() -> argparse.Namespace:
 
 
 def run_projection(args: argparse.Namespace, spec: object) -> dict[str, object]:
-    if spec.adapter == "cargo":
+    if args.precompiled_root is not None:
+        command = [str(args.sdk_cli), "install-precompiled", str(spec.manifest_path),
+                   str(ROOT), str(args.package_root), str(args.precompiled_root)]
+    elif spec.adapter == "cargo":
         command = [
             str(args.sdk_cli),
             "adopt-built",

@@ -69,6 +69,7 @@ fn direct_run_skill_mutation_persists_receipt_and_suppresses_retry() {
         text: serde_json::json!({"status": "ok"}).to_string(),
         notify: None,
         validation: None,
+        output_contract_validation: None,
         extra: Some(serde_json::json!({
             "schema_version": 1,
             "status_code": "mutation_applied",

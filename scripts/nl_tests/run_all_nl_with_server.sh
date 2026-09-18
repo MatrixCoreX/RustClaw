@@ -20,10 +20,13 @@ LOG_DIR="/tmp"
 START_TIMEOUT_SECONDS="80"
 REUSE_SERVER=0
 BUILD_RELEASE=0
+KEEP_ISOLATED_STATE=0
+ENABLE_TEST_MEMORY=0
 EXTRA_SUITE_ARGS=()
 SUITE_SELECTION=(--category all)
 USER_KEY_VALUE="${USER_KEY:-${APP_USER_KEY:-}}"
 INSTALL_ON_DEMAND_SKILLS=()
+PRECOMPILED_ROOT=""
 INSTALLED_ON_DEMAND_SKILLS=()
 
 usage() {
@@ -57,6 +60,12 @@ Options:
   --reuse-server          explicitly reuse an existing server and its databases
   --no-reuse-server       retained compatibility spelling for the safe default
   --build-release         run cargo build -p clawd --release before starting
+  --keep-isolated-state   retain this run's workspace/databases/raw model logs
+                          after stopping its server; never reuse production data
+  --precompiled-root PATH verify and install already admitted Cargo packages;
+                          no nested build/protocol sandbox is required
+  --enable-test-memory    opt the isolated test principal into memory generation
+                          and retrieval; forbidden with --reuse-server
   --install-on-demand-skill NAME
                           install one registry on-demand skill through the
                           isolated Skill Store HTTP API before NL execution;
@@ -83,6 +92,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --source-config)
       SOURCE_CONFIG="$2"
+      shift 2
+      ;;
+    --precompiled-root)
+      PRECOMPILED_ROOT="$2"
       shift 2
       ;;
     --suite)
@@ -137,6 +150,14 @@ while [[ $# -gt 0 ]]; do
       BUILD_RELEASE=1
       shift
       ;;
+    --keep-isolated-state)
+      KEEP_ISOLATED_STATE=1
+      shift
+      ;;
+    --enable-test-memory)
+      ENABLE_TEST_MEMORY=1
+      shift
+      ;;
     --install-on-demand-skill)
       INSTALL_ON_DEMAND_SKILLS+=("$2")
       shift 2
@@ -167,6 +188,11 @@ done
 
 if [[ "${BUILD_RELEASE}" -eq 1 || "${#INSTALL_ON_DEMAND_SKILLS[@]}" -gt 0 ]]; then
   configure_cargo_build_environment
+fi
+
+if [[ "${ENABLE_TEST_MEMORY}" -eq 1 && "${REUSE_SERVER}" -eq 1 ]]; then
+  echo "--enable-test-memory requires an isolated test server" >&2
+  exit 2
 fi
 
 resolve_user_key() {
@@ -285,6 +311,10 @@ wait_for_skill_store_operation() {
 
 project_proactive_skill_receipts() {
   local sdk_cli="${ROOT_DIR}/target/release/skillctl"
+  local -a precompiled_args=()
+  if [[ -n "${PRECOMPILED_ROOT}" ]]; then
+    precompiled_args=(--precompiled-root "${PRECOMPILED_ROOT}")
+  fi
   if [[ ! -x "$sdk_cli" ]]; then
     echo "skill receipt CLI not found: ${sdk_cli}" >&2
     echo "Run: ./build-all.sh no-ui" >&2
@@ -295,7 +325,8 @@ project_proactive_skill_receipts() {
     --scope proactive \
     --binary-dir "${ROOT_DIR}/target/release" \
     --sdk-cli "$sdk_cli" \
-    --package-root "${ISOLATED_WORKSPACE}/data/skill-packages"
+    --package-root "${ISOLATED_WORKSPACE}/data/skill-packages" \
+    "${precompiled_args[@]}"
 }
 
 install_on_demand_skill() {
@@ -354,7 +385,12 @@ cleanup() {
     wait "${started_pid}" >/dev/null 2>&1 || true
   fi
   if [[ -n "${ISOLATION_ROOT}" && -d "${ISOLATION_ROOT}" ]]; then
-    rm -rf "${ISOLATION_ROOT}"
+    if [[ "${KEEP_ISOLATED_STATE}" -eq 1 ]]; then
+      chmod 700 "${ISOLATION_ROOT}"
+      echo "retained_isolated_state=${ISOLATION_ROOT}"
+    else
+      rm -rf "${ISOLATION_ROOT}"
+    fi
   fi
 }
 trap cleanup EXIT
@@ -517,6 +553,11 @@ if [[ "${#INSTALL_ON_DEMAND_SKILLS[@]}" -gt 0 ]]; then
   done
 fi
 
+if [[ "${ENABLE_TEST_MEMORY}" -eq 1 ]]; then
+  python3 "${SCRIPT_DIR}/configure_isolated_nl_memory.py" \
+    --isolation-root "${ISOLATION_ROOT}" --base-url "${BASE_URL}"
+fi
+
 stamp="$(date +%Y%m%d_%H%M%S)"
 SUITE_LOG="${LOG_DIR%/}/agent_full_nl_${stamp}.out"
 
@@ -538,6 +579,7 @@ fi
 echo "suite_log=${SUITE_LOG}"
 echo "suite_cmd=${suite_cmd[*]}"
 
+export NL_CLAWD_BIN="${CLAWD_BIN}"
 set +e
 "${suite_cmd[@]}" > >(tee "${SUITE_LOG}") 2>&1 &
 suite_pid=$!

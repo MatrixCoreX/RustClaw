@@ -143,7 +143,8 @@ pub(super) fn project(
                 && request.is_some_and(|r| {
                     r.account == outcome.account
                         && r.ledger_id == outcome.ledger_id
-                        && (matches!(suffix, "read/verify" | "read/public") || r.operation_id == outcome.operation_id)
+                        && (matches!(suffix, "read/verify" | "read/public")
+                            || r.operation_id == outcome.operation_id)
                 })
                 && !outcome.operation_id.is_nil()
                 && matches!(

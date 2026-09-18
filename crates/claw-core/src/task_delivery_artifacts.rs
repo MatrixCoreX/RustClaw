@@ -53,9 +53,13 @@ enum DeliveryPreference {
 /// Merge structured task artifacts into the messages consumed by native channel adapters.
 ///
 /// When artifacts are available, legacy delivery-token lines are removed and replaced with
-/// tokens pointing at clawd's immutable task delivery copies. If a task explicitly disables
-/// delivery, all delivery-token lines are removed. If any manifest cannot be resolved safely,
-/// the original messages are retained as a compatibility fallback.
+/// tokens pointing at clawd's immutable task delivery copies. Named `FILE:` / `VIDEO_FILE:`
+/// lines remap onto those copies; they do not drop other non-internal task artifacts that
+/// were already materialized for user delivery. Remaining `artifact:task/...` handles in the
+/// user-visible reply are rewritten to those same resolved filesystem paths. If a task
+/// explicitly disables delivery, all delivery-token lines are removed. If any selected
+/// manifest cannot be resolved safely, the original messages are retained as a compatibility
+/// fallback.
 pub fn merge_task_artifact_delivery_messages(
     task_id: &str,
     result_json: Option<&Value>,
@@ -80,13 +84,7 @@ pub fn merge_task_artifact_delivery_messages(
         .collect::<Vec<_>>();
     let selected_manifests = manifests
         .iter()
-        .filter(|manifest| {
-            !internal_runtime_artifact(manifest)
-                && (explicit_references.is_empty()
-                    || explicit_references
-                        .iter()
-                        .any(|reference| manifest_matches_reference(task_id, manifest, reference)))
-        })
+        .filter(|manifest| !internal_runtime_artifact(manifest))
         .collect::<Vec<_>>();
     if selected_manifests.is_empty() {
         return if explicit_references
@@ -115,19 +113,31 @@ pub fn merge_task_artifact_delivery_messages(
         .into_iter()
         .filter(|manifest| seen_digests.insert(manifest.sha256.to_ascii_lowercase()))
         .collect::<Vec<_>>();
-    let tokens = selected_manifests
+    let resolved = selected_manifests
         .iter()
         .filter_map(|manifest| {
             validated_task_artifact_path(workspace_root, task_id, manifest)
-                .map(|path| artifact_delivery_token(manifest, &path))
+                .map(|path| (*manifest, path))
         })
         .collect::<Vec<_>>();
 
-    // Keep the legacy source-path tokens when even one structured artifact is unavailable.
-    // This preserves delivery during rolling upgrades or after a partial artifact cleanup.
-    if tokens.len() != selected_manifests.len() {
-        return messages;
+    // Named artifact handles that cannot be rematerialized must not reach adapters.
+    // Missing files keep legacy local-path tokens only when no structured copy is ready.
+    if resolved.is_empty() {
+        return if explicit_references
+            .iter()
+            .any(|reference| task_artifact_reference(reference))
+        {
+            messages_without_unresolved_task_artifact_lines(messages)
+        } else {
+            messages
+        };
     }
+    let tokens = resolved
+        .iter()
+        .map(|(manifest, path)| artifact_delivery_token(manifest, path))
+        .collect::<Vec<_>>();
+    let messages = rewrite_artifact_handles_to_resolved_paths(task_id, &resolved, messages);
 
     let mut merged = messages_without_delivery_lines(messages);
     let token_block = tokens.join("\n");
@@ -140,6 +150,51 @@ pub fn merge_task_artifact_delivery_messages(
         merged.push(token_block);
     }
     merged
+}
+
+const VISIBLE_ARTIFACT_TOKEN_PREFIXES: &[&str] = &[
+    "FILE_FILE:",
+    "IMAGE_FILE:",
+    "VIDEO_FILE:",
+    "VOICE_FILE:",
+    "MUSIC_FILE:",
+    "FILE:",
+];
+
+fn rewrite_artifact_handles_to_resolved_paths(
+    task_id: &str,
+    resolved: &[(&TaskDeliveryArtifactManifest, PathBuf)],
+    messages: Vec<String>,
+) -> Vec<String> {
+    let mut replacements = Vec::new();
+    for (manifest, path) in resolved {
+        let path = path.display().to_string();
+        if let Some(handle) = canonical_task_artifact_ref(task_id, &manifest.id) {
+            replacements.push((handle, path.clone()));
+        }
+        let artifact_ref = manifest.artifact_ref.trim();
+        if !artifact_ref.is_empty()
+            && replacements
+                .iter()
+                .all(|(existing, _)| existing != artifact_ref)
+        {
+            replacements.push((artifact_ref.to_string(), path));
+        }
+    }
+    replacements.sort_by(|left, right| right.0.len().cmp(&left.0.len()));
+    messages
+        .into_iter()
+        .map(|message| {
+            let mut rewritten = message;
+            for (handle, path) in &replacements {
+                for prefix in VISIBLE_ARTIFACT_TOKEN_PREFIXES {
+                    rewritten = rewritten.replace(&format!("{prefix}{handle}"), path);
+                }
+                rewritten = rewritten.replace(handle, path);
+            }
+            rewritten
+        })
+        .collect()
 }
 
 fn internal_runtime_artifact(manifest: &TaskDeliveryArtifactManifest) -> bool {

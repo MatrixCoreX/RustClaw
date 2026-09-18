@@ -2,9 +2,9 @@ use super::{
     default_chunker_version, default_embedding_version, default_parser_version, sha256_hex, Chunk,
     DocMeta, KbRuntime, NamespaceIndex,
 };
-use crate::ingest::IngestJob;
+use crate::ingest::{CheckpointConflict, IngestJob};
 use anyhow::{anyhow, Context, Result};
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -68,12 +68,21 @@ pub(super) fn save_namespace_and_job(
     runtime: &KbRuntime,
     index: &NamespaceIndex,
     job: &IngestJob,
+    expected_checkpoint: &IngestJob,
 ) -> Result<SaveOutcome> {
     validate_owner(runtime, index)?;
     validate_job_owner(runtime, job)?;
     let mut db = open(runtime)?;
     ensure_schema(&mut db)?;
-    let tx = db.transaction()?;
+    // Compare and commit under one write transaction so a stale batch cannot
+    // overwrite a newer checkpoint or revive a cancelled job.
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let current = load_ingest_job_from(&tx, runtime, &job.job_id)?;
+    if current.next_file_index != expected_checkpoint.next_file_index
+        || current.status != expected_checkpoint.status
+    {
+        return Err(CheckpointConflict { current }.into());
+    }
     let outcome = persist_namespace(&tx, index)?;
     upsert_ingest_job(&tx, job)?;
     tx.commit()?;
@@ -93,6 +102,24 @@ pub(super) fn save_ingest_job(runtime: &KbRuntime, job: &IngestJob) -> Result<()
 pub(super) fn load_ingest_job(runtime: &KbRuntime, job_id: &str) -> Result<IngestJob> {
     let mut db = open(runtime)?;
     ensure_schema(&mut db)?;
+    load_ingest_job_from(&db, runtime, job_id)
+}
+
+pub(super) fn cancel_ingest_job(runtime: &KbRuntime, job_id: &str) -> Result<IngestJob> {
+    let mut db = open(runtime)?;
+    ensure_schema(&mut db)?;
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let mut job = load_ingest_job_from(&tx, runtime, job_id)?;
+    if job.status != "completed" && job.status != "cancelled" {
+        job.status = "cancelled".to_string();
+        job.updated_at_epoch = super::now_epoch();
+        upsert_ingest_job(&tx, &job)?;
+    }
+    tx.commit()?;
+    Ok(job)
+}
+
+fn load_ingest_job_from(db: &Connection, runtime: &KbRuntime, job_id: &str) -> Result<IngestJob> {
     let payload = db
         .query_row(
             "SELECT payload_json FROM kb_ingest_jobs

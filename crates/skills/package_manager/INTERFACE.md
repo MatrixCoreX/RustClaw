@@ -27,8 +27,24 @@ display belong to the host; this record is progress/stall evidence only.
 | `install`/`smart_install_preview`/`smart_install`/`uninstall` | `packages` or `package` | yes | array/string | - | Non-empty package list. Prefer these canonical fields. Structured compatibility aliases `modules` and `module` are accepted but should not be emitted by new planners. |
 | `install` | `manager` | no | string | auto | Explicit package manager override. |
 | `smart_install_preview` | `dry_run` | no | boolean | true | Forced true; never executes an install or writes a skill-local log. |
-| `install`/`smart_install`/`uninstall` | `dry_run` | no | boolean | impl default | Preview package operation without changes. |
+| `install`/`uninstall` | `dry_run` | no | boolean | true | Set false explicitly for an authorized real operation; true only previews. |
+| `smart_install` | `dry_run` | no | boolean | false | Set explicitly to distinguish a real install from a preview. |
 | `install`/`smart_install`/`uninstall` | `use_sudo` | no | boolean | impl default | Use elevated package operation when needed. |
+
+For preview-only requests choose `package.smart_install_preview`; it forces
+`dry_run=true` regardless of input. Real installation and removal require the
+mutating capability with `dry_run=false` and host policy authorization.
+An `ok` result with `extra.dry_run=true` is not an applied installation or removal.
+Verify the actual package state after mutation. Reversible tests must record the
+initial state first and remove a package only when this test installed it.
+Preserving a pre-existing package prohibits its removal, not an explicitly
+requested install invocation. Do not silently cancel that required invocation:
+the selected manager can confirm an already-installed package without removal.
+Verify installation through the selected manager's package database and recorded
+files. A package's executable name may differ from its package name, or live
+outside PATH; `which`/`command -v` alone cannot prove installation or absence.
+Keep optional executable-location probes separate from required verification;
+an absent PATH entry must not invalidate successful package-database evidence.
 
 ## Error Contract
 - Missing or empty package list.

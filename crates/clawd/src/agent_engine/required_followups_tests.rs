@@ -240,6 +240,47 @@ fn successful_preview_still_requires_the_selected_transcription() {
 }
 
 #[test]
+fn failed_image_vision_uses_declared_ocr_fallback_with_args() {
+    let results = vec![
+        CapabilityResultEnvelope::ok(
+            "media_download.download",
+            Some("download".to_string()),
+            json!({
+                "extra": {"content_bundle": {"followup_policy": {
+                    "activation_requirement": "required",
+                    "completion_requirement": "selected_components",
+                    "steps": [{
+                        "component_kind": "images",
+                        "capability": "image_vision.extract_text",
+                        "input_field": "images",
+                        "input_value": [{"path": "/workspace/note.webp"}],
+                        "fallback_capability": "media_download.ocr",
+                        "fallback_input_field": "input_paths",
+                        "fallback_input_value": ["/workspace/note.webp"],
+                        "fallback_args": {"fallback_from": "image_vision.extract_text"}
+                    }]
+                }}}
+            }),
+        ),
+        failed("image_vision.extract_text"),
+    ];
+    let required = next_required_followup(&results).expect("ocr fallback");
+    assert_eq!(required.capability, "media_download.ocr");
+    assert_eq!(
+        required.args["input_paths"],
+        json!(["/workspace/note.webp"])
+    );
+    assert_eq!(required.args["fallback_from"], "image_vision.extract_text");
+
+    let exhausted = vec![
+        results[0].clone(),
+        failed("image_vision.extract_text"),
+        failed("media_download.ocr"),
+    ];
+    assert!(next_required_followup(&exhausted).is_none());
+}
+
+#[test]
 fn in_flight_component_is_not_started_twice() {
     let mut waiting = ok("audio.preview_transcribe");
     waiting.status = CapabilityResultStatus::Waiting;

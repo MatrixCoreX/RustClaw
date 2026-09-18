@@ -53,9 +53,9 @@ use claw_core::{
     skill_registry::{PlannerCapabilityKind, SkillKind},
 };
 
-mod workspace_update_config_snapshot;
 #[path = "ui_routes/nni_owner_financial.rs"]
 mod nni_owner_financial;
+mod workspace_update_config_snapshot;
 use workspace_update_config_snapshot::*;
 
 const TELEGRAM_BOT_HEARTBEAT_STALE_SECONDS: i64 = 45;
@@ -223,6 +223,7 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         )
         .route("/aipps/:skill_name/items", get(get_aipp_items))
         .route("/aipps/:skill_name/items/clear", post(clear_aipp_items))
+        .route("/aipps/:skill_name/items/remove", post(remove_aipp_items))
         .route(
             "/aipps/:skill_name/items/:sequence/preview",
             get(get_aipp_media_preview),

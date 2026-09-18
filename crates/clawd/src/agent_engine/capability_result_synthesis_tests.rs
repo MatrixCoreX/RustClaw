@@ -6,8 +6,9 @@ use claw_core::capability_result::{
 use serde_json::json;
 
 use super::{
-    attach_reviewed_transcript_artifact, attach_unreviewed_transcript_fallback,
-    audio_transcript_label, bounded_result, eligible_for_capability_result_synthesis,
+    append_user_delivery_artifact_tokens, attach_reviewed_transcript_artifact,
+    attach_unreviewed_transcript_fallback, audio_transcript_label, bounded_result,
+    eligible_for_capability_result_synthesis, has_companion_user_delivery_artifacts,
     normalize_transcript_script_for_language, normalized_transcript_language,
     pending_transcript_review, safe_transcript_filename, scheduled_terminal_step_is_synthesizable,
     split_transcript_chunks, synthesis_evidence_catalog, transcript_review_contract,
@@ -278,6 +279,257 @@ fn reviewed_transcript_text_and_artifact_override_save_only_for_explicit_deliver
         answer,
         "音频转写:\n完整校对文本。\nFILE:.agent-runtime/artifacts/transcript-review/task/transcript.txt"
     );
+}
+
+#[test]
+fn transcript_bundle_keeps_video_audio_and_transcript_delivery_tokens() {
+    let mut download = CapabilityResultEnvelope::ok(
+        "media_download.download",
+        Some("download".to_string()),
+        json!({
+            "extra": {
+                "delivery": {"intent": "artifact", "deliver_to_user": true},
+                "processing_inputs": {
+                    "video_audio": {
+                        "status": "available",
+                        "path": "/workspace/clip_video_audio.wav",
+                        "filename": "clip_video_audio.wav",
+                        "mime_type": "audio/x-wav",
+                        "artifact_role": "extracted_audio"
+                    }
+                }
+            }
+        }),
+    );
+    download.delivery.intent = CapabilityDeliveryIntent::Artifact;
+    download.artifacts.push(
+        serde_json::from_value::<ArtifactRef>(json!({
+            "id": "a_video",
+            "artifact_ref": "artifact:task/task-1/a_video",
+            "path": "/workspace/clip.mp4",
+            "filename": "clip.mp4",
+            "media_type": "video/mp4",
+            "artifact_role": "original_video",
+            "visibility": "user_delivery"
+        }))
+        .expect("video artifact"),
+    );
+
+    let mut transcribe = CapabilityResultEnvelope::ok(
+        "audio.transcribe",
+        Some("transcribe".to_string()),
+        json!({"extra": {}}),
+    );
+    let transcript = serde_json::from_value::<ArtifactRef>(json!({
+        "id": "transcript-review:fixture",
+        "path": ".agent-runtime/artifacts/transcript-review/task/transcript.txt",
+        "media_type": "text/plain; charset=utf-8"
+    }))
+    .expect("transcript artifact");
+    let answer = attach_reviewed_transcript_artifact(
+        &mut transcribe,
+        transcript,
+        "transcript.txt",
+        "完整校对文本。",
+        "zh-CN",
+    )
+    .expect("attach reviewed transcript");
+    let results = vec![download, transcribe];
+    assert!(has_companion_user_delivery_artifacts(&results));
+    let merged = append_user_delivery_artifact_tokens(answer, &results, "task-1");
+    assert!(merged.contains("完整校对文本。"));
+    assert!(merged.contains("VIDEO_FILE:artifact:task/task-1/a_video"));
+    assert!(merged.contains("FILE:/workspace/clip_video_audio.wav"));
+    assert!(merged.contains("FILE:.agent-runtime/artifacts/transcript-review/task/transcript.txt"));
+    assert!(super::transcript_bundle_delivery_is_complete(
+        &merged, &results, "task-1"
+    ));
+}
+
+fn image_audio_transcript_results() -> Vec<CapabilityResultEnvelope> {
+    let mut download = CapabilityResultEnvelope::ok(
+        "media_download.download",
+        Some("download".to_string()),
+        json!({
+            "extra": {
+                "delivery": {"intent": "artifact", "deliver_to_user": true}
+            }
+        }),
+    );
+    download.delivery.intent = CapabilityDeliveryIntent::Artifact;
+    download.artifacts.push(
+        serde_json::from_value::<ArtifactRef>(json!({
+            "id": "a_image",
+            "artifact_ref": "artifact:task/task-1/a_image",
+            "path": "/workspace/post.webp",
+            "filename": "post.webp",
+            "media_type": "image/webp",
+            "artifact_role": "original_image",
+            "visibility": "user_delivery"
+        }))
+        .expect("image artifact"),
+    );
+    download.artifacts.push(
+        serde_json::from_value::<ArtifactRef>(json!({
+            "id": "a_audio",
+            "artifact_ref": "artifact:task/task-1/a_audio",
+            "path": "/workspace/post_background_audio.mp3",
+            "filename": "post_background_audio.mp3",
+            "media_type": "audio/mpeg",
+            "artifact_role": "background_audio",
+            "visibility": "user_delivery"
+        }))
+        .expect("background audio artifact"),
+    );
+    let mut transcribe = CapabilityResultEnvelope::ok(
+        "audio.transcribe",
+        Some("transcribe".to_string()),
+        json!({"extra": {}}),
+    );
+    let transcript = serde_json::from_value::<ArtifactRef>(json!({
+        "id": "transcript-review:fixture",
+        "path": ".agent-runtime/artifacts/transcript-review/task/transcript.txt",
+        "media_type": "text/plain; charset=utf-8"
+    }))
+    .expect("transcript artifact");
+    attach_reviewed_transcript_artifact(
+        &mut transcribe,
+        transcript,
+        "transcript.txt",
+        "完整校对文本。",
+        "zh-CN",
+    )
+    .expect("attach reviewed transcript");
+    vec![download, transcribe]
+}
+
+#[test]
+fn transcript_bundle_keeps_image_background_audio_and_transcript_delivery_tokens() {
+    let results = image_audio_transcript_results();
+    assert!(has_companion_user_delivery_artifacts(&results));
+    let merged = append_user_delivery_artifact_tokens(
+        "音频转写:\n完整校对文本。".to_string(),
+        &results,
+        "task-1",
+    );
+    assert!(merged.contains("IMAGE_FILE:artifact:task/task-1/a_image"));
+    assert!(merged.contains("FILE:artifact:task/task-1/a_audio"));
+    assert!(merged.contains("FILE:artifact:task/task-1/transcript-review:fixture"));
+    assert!(!merged.contains("VIDEO_FILE:"));
+    assert!(super::transcript_bundle_delivery_is_complete(
+        &merged, &results, "task-1"
+    ));
+    assert!(!super::transcript_bundle_delivery_is_complete(
+        "IMAGE_FILE:artifact:task/task-1/a_image\nFILE:artifact:task/task-1/a_audio",
+        &results,
+        "task-1"
+    ));
+}
+
+#[test]
+fn transcript_only_bundle_is_complete_without_video_companion() {
+    let mut transcribe = CapabilityResultEnvelope::ok(
+        "audio.transcribe",
+        Some("transcribe".to_string()),
+        json!({"extra": {}}),
+    );
+    let transcript = serde_json::from_value::<ArtifactRef>(json!({
+        "id": "transcript-review:fixture",
+        "path": ".agent-runtime/artifacts/transcript-review/task/transcript.txt",
+        "media_type": "text/plain; charset=utf-8"
+    }))
+    .expect("transcript artifact");
+    let answer = attach_reviewed_transcript_artifact(
+        &mut transcribe,
+        transcript,
+        "transcript.txt",
+        "完整校对文本。",
+        "zh-CN",
+    )
+    .expect("attach reviewed transcript");
+    let results = vec![transcribe];
+    let merged = append_user_delivery_artifact_tokens(answer, &results, "task-1");
+    assert!(!has_companion_user_delivery_artifacts(&results));
+    assert!(merged.contains("FILE:artifact:task/task-1/transcript-review:fixture"));
+    assert!(super::transcript_bundle_delivery_is_complete(
+        &merged, &results, "task-1"
+    ));
+}
+
+#[test]
+fn labeled_delivery_mentions_still_append_clean_companion_tokens() {
+    let mut download = CapabilityResultEnvelope::ok(
+        "media_download.download",
+        Some("download".to_string()),
+        json!({
+            "extra": {
+                "delivery": {"intent": "artifact", "deliver_to_user": true},
+                "processing_inputs": {
+                    "video_audio": {
+                        "status": "available",
+                        "path": "/workspace/clip_video_audio.wav",
+                        "filename": "clip_video_audio.wav",
+                        "mime_type": "audio/x-wav",
+                        "artifact_role": "extracted_audio"
+                    }
+                }
+            }
+        }),
+    );
+    download.delivery.intent = CapabilityDeliveryIntent::Artifact;
+    download.artifacts.push(
+        serde_json::from_value::<ArtifactRef>(json!({
+            "id": "a_video",
+            "artifact_ref": "artifact:task/task-1/a_video",
+            "path": "/workspace/clip.mp4",
+            "filename": "clip.mp4",
+            "media_type": "video/mp4",
+            "artifact_role": "original_video",
+            "visibility": "user_delivery"
+        }))
+        .expect("video artifact"),
+    );
+
+    let mut transcribe = CapabilityResultEnvelope::ok(
+        "audio.transcribe",
+        Some("transcribe".to_string()),
+        json!({"extra": {}}),
+    );
+    let transcript = serde_json::from_value::<ArtifactRef>(json!({
+        "id": "transcript-review:fixture",
+        "path": ".agent-runtime/artifacts/transcript-review/task/transcript.txt",
+        "media_type": "text/plain; charset=utf-8"
+    }))
+    .expect("transcript artifact");
+    attach_reviewed_transcript_artifact(
+        &mut transcribe,
+        transcript,
+        "transcript.txt",
+        "完整校对文本。",
+        "zh-CN",
+    )
+    .expect("attach reviewed transcript");
+    let results = vec![download, transcribe];
+    let labeled = concat!(
+        "已完成音转文\n",
+        "- 视频（mp4）：VIDEO_FILE:artifact:task/task-1/a_video\n",
+        "- 转写文本（UTF-8 `transcript.txt`，已与消息一并发送）"
+    );
+    let merged = append_user_delivery_artifact_tokens(labeled.to_string(), &results, "task-1");
+    let video_lines = merged
+        .lines()
+        .filter(|line| {
+            claw_core::channel_delivery_tokens::parse_legacy_delivery_line_ref(line.trim())
+                .is_some_and(|token| token.reference.contains("a_video"))
+        })
+        .count();
+    assert_eq!(video_lines, 1);
+    assert!(merged.contains("\nVIDEO_FILE:artifact:task/task-1/a_video"));
+    assert!(merged.contains("\nFILE:/workspace/clip_video_audio.wav"));
+    assert!(merged.contains("\nFILE:artifact:task/task-1/transcript-review:fixture"));
+    assert!(super::transcript_bundle_delivery_is_complete(
+        &merged, &results, "task-1"
+    ));
 }
 
 #[test]

@@ -91,6 +91,10 @@ source revision. Do not infer IDs from visible text.
   `move_range(sheet,range,target_cell,target_sheet?)`.
   `value_type` is `text|string|number|boolean|date|formula`; only `formula`
   creates executable workbook formula syntax.
+  `set_range.values` is a two-dimensional JSON array matching the range:
+  `[["Name","Value"],["alpha",13],["beta",21]]` for `A1:B3`.
+  Rows are arrays, not `{"item":[...]}` objects. Omit `value_type` for
+  mixed text/numeric cells so each JSON scalar retains its own type.
 - Layout: `merge_cells(sheet,range)`, `unmerge_cells(sheet,range)`,
   `freeze_panes(sheet,cell)`, `set_auto_filter(sheet,range)`,
   `set_column_width(sheet,column,width)`,

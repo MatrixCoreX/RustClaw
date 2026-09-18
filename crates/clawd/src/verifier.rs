@@ -281,21 +281,6 @@ fn manifest_required_args(state: &AppState, normalized_skill: &str) -> Vec<Strin
         .unwrap_or_default()
 }
 
-fn normalize_schema_token(value: &str) -> String {
-    value
-        .trim()
-        .to_ascii_lowercase()
-        .chars()
-        .map(|ch| {
-            if matches!(ch, '-' | ' ' | '.') {
-                '_'
-            } else {
-                ch
-            }
-        })
-        .collect()
-}
-
 fn planner_mapping_required_args(
     state: &AppState,
     normalized_skill: &str,
@@ -305,12 +290,12 @@ fn planner_mapping_required_args(
         .as_object()
         .and_then(|obj| obj.get("action"))
         .and_then(|value| value.as_str())
-        .map(normalize_schema_token)
+        .map(str::trim)
         .filter(|value| !value.is_empty());
     state.skill_manifest(normalized_skill).and_then(|manifest| {
         claw_core::skill_registry::select_planner_capability_mapping(
             &manifest.planner_capabilities,
-            action.as_deref(),
+            action,
         )
         .map(|mapping| mapping.required.clone())
     })
@@ -330,7 +315,7 @@ fn planner_step_has_structured_policy(
         .as_object()
         .and_then(|obj| obj.get("action"))
         .and_then(|value| value.as_str())
-        .map(normalize_schema_token)
+        .map(str::trim)
         .filter(|value| !value.is_empty());
     state
         .skill_manifest(normalized_skill)
@@ -344,7 +329,7 @@ fn planner_step_has_structured_policy(
             }
             claw_core::skill_registry::select_planner_capability_mapping(
                 &manifest.planner_capabilities,
-                action.as_deref(),
+                action,
             )
             .is_some()
         })
@@ -367,12 +352,12 @@ fn action_scoped_risk_level(
         .as_object()
         .and_then(|obj| obj.get("action"))
         .and_then(|value| value.as_str())
-        .map(normalize_schema_token)
+        .map(str::trim)
         .filter(|value| !value.is_empty());
     state.skill_manifest(normalized_skill).and_then(|manifest| {
         claw_core::skill_registry::select_planner_capability_mapping(
             &manifest.planner_capabilities,
-            action.as_deref(),
+            action,
         )
         .and_then(|mapping| mapping.risk_level)
     })
@@ -390,7 +375,7 @@ fn registry_declares_non_mutating_planner_action(
         .as_object()
         .and_then(|obj| obj.get("action"))
         .and_then(|value| value.as_str())
-        .map(normalize_schema_token)
+        .map(str::trim)
         .filter(|value| !value.is_empty())
     else {
         return false;
@@ -400,7 +385,7 @@ fn registry_declares_non_mutating_planner_action(
         .is_some_and(|manifest| {
             claw_core::skill_registry::select_planner_capability_mapping(
                 &manifest.planner_capabilities,
-                Some(action.as_str()),
+                Some(action),
             )
             .is_some_and(|mapping| {
                 matches!(
@@ -476,16 +461,6 @@ fn first_blocking_issue(issues: &[VerifyIssue]) -> Option<&VerifyIssue> {
         .or_else(|| issues.first())
 }
 
-fn arg_value_is_present(value: &serde_json::Value) -> bool {
-    match value {
-        serde_json::Value::Null => false,
-        serde_json::Value::String(value) => !value.trim().is_empty(),
-        serde_json::Value::Array(values) => values.iter().any(arg_value_is_present),
-        serde_json::Value::Object(values) => !values.is_empty(),
-        serde_json::Value::Bool(_) | serde_json::Value::Number(_) => true,
-    }
-}
-
 fn required_arg_satisfied(
     state: &AppState,
     normalized_skill: &str,
@@ -497,13 +472,12 @@ fn required_arg_satisfied(
         .any(|alternative| {
             alternative.iter().all(|key| {
                 obj.get(key).is_some_and(|value| {
-                    arg_value_is_present(value)
-                        || (value.is_null()
-                            && crate::schema_contract::executable_top_level_arg_accepts_null(
-                                state,
-                                normalized_skill,
-                                key,
-                            ))
+                    crate::schema_contract::executable_required_arg_is_present(
+                        state,
+                        normalized_skill,
+                        key,
+                        value,
+                    )
                 })
             })
         })

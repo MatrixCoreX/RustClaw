@@ -293,6 +293,25 @@ pub(crate) fn claim_recorded_paused_checkpoint_resume_dispatch_result_internal(
     if changed == 0 {
         return Ok(None);
     }
+    drop(db);
+    match crate::task_artifacts::preserve_async_completion_artifacts(
+        &state.skill_rt.workspace_root,
+        task_id,
+        &recorded.execution_result_payload,
+    ) {
+        Ok(true) => tracing::info!(
+            task_id,
+            checkpoint_id,
+            "async completion artifacts preserved before result projection"
+        ),
+        Ok(false) => {}
+        Err(error) => tracing::warn!(
+            task_id,
+            checkpoint_id,
+            error = %error,
+            "async completion artifact preservation before projection failed"
+        ),
+    }
 
     Ok(Some(ClaimedPausedCheckpointResumeDispatchResult {
         task,

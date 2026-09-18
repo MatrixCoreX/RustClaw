@@ -83,6 +83,8 @@ REQUIRED_TOKENS_BY_PATH = {
     "crates/clawd/src/worker/channels.rs": (
         'pointer("/channel_ingress/reply_target/external_id")',
         'pointer("/channel_ingress/context_token")',
+    ),
+    "crates/clawd/src/worker/channels_tests.rs": (
         "wechat_delivery_uses_raw_reply_target_not_scoped_conversation_id",
     ),
     "crates/clawd/src/channel_send.rs": (

@@ -39,13 +39,16 @@ fn runtime_owned_heartbeat_builds_a_valid_localizable_notice() {
     let parsed = runtime_progress_notice(&frame(2, 900)).expect("runtime progress notice");
     assert_eq!(parsed.sequence, 2);
     assert_eq!(parsed.interval, Duration::from_secs(900));
+    let ProgressNoticeContent::Template(notice) = parsed.content else {
+        panic!("template expected");
+    };
     assert_eq!(
-        parsed.notice.message_key,
+        notice.message_key,
         "channel.notice.media_discovery_background_progress"
     );
-    assert_eq!(parsed.notice.params["platforms"], "douyin,xiaohongshu");
-    assert_eq!(parsed.notice.params["items"], "4");
-    parsed.notice.validate().expect("valid channel notice");
+    assert_eq!(notice.params["platforms"], "douyin,xiaohongshu");
+    assert_eq!(notice.params["items"], "4");
+    notice.validate().expect("valid channel notice");
 }
 
 #[test]

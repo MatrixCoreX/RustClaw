@@ -260,7 +260,7 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "deferred_checkpoint_id",
         "deferred_lifecycle_state",
     ),
-    "crates/clawd/src/repo/tasks_tests.rs": (
+    "crates/clawd/src/repo/tasks_checkpoint_scheduling_tests.rs": (
         "due_checkpoint_waits_for_frontend_worker_lease_and_claim_rechecks_it",
     ),
     "crates/clawd/src/repo/tasks_tests/checkpoint_lease.rs": (

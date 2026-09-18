@@ -9,6 +9,9 @@ Requirements:
 - Do not introduce any new line-start numbering, numbered-list punctuation, bullet, middle dot, Markdown marker, or other list prefix. When the recognized source text already contains such a marker, treat it as source content and preserve it exactly; an unmarked source line must remain unmarked.
 - Rejoin a word split only by visual wrapping when the reconstruction is highly certain; otherwise preserve the uncertain fragment.
 - Correct only highly certain recognition mistakes and typographical errors.
+- Do not convert Traditional/Simplified Chinese, kana/kanji variants, hangul, or fullwidth/halfwidth digits unless the recognized fragment is an unambiguous pixel-level error.
+- Preserve hashtags, @mentions, watermark slogans, overlay captions, and mixed-language tokens when they appear in the recognized text.
+- Do not replace a similar-looking CJK character with a more common word unless the correction is unambiguous from the recognized text itself.
 - Preserve all facts, names, numbers, symbols, ordering, uncertainty, and meaningful structure.
 - Preserve URLs, email addresses, account strings, model names, product codes, acronyms, and mixed letter-number identifiers exactly unless the correction is unambiguous from the recognized text itself.
 - Do not summarize, omit, expand, infer missing content, or invent text.

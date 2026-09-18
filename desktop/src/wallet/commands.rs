@@ -1,4 +1,4 @@
-use super::{Account, Status, Vault};
+use super::{worker::VaultClient, Account, Status};
 use crate::{asset_operations::Operations, commands::main_only, Result};
 use std::{
     path::PathBuf,
@@ -16,7 +16,7 @@ pub struct Selection {
     pub generation: u64,
 }
 pub struct WalletState {
-    pub vault: Arc<Mutex<Vault>>,
+    pub vault: Arc<Mutex<VaultClient>>,
     pub operations: tokio::sync::Mutex<Operations>,
     pub selection: Mutex<Selection>,
     pub operation_gate: tokio::sync::Mutex<()>,
@@ -24,7 +24,8 @@ pub struct WalletState {
 }
 impl WalletState {
     pub fn new(directory: PathBuf) -> Result<Self> {
-        let vault = Vault::new(directory.clone())?;
+        super::files::private_directory(&directory)?;
+        let vault = VaultClient::new(directory.clone())?;
         Ok(Self {
             vault: Arc::new(Mutex::new(vault)),
             operations: tokio::sync::Mutex::new(Operations::new(
@@ -65,12 +66,24 @@ fn local_only(window: &WebviewWindow) -> Result<()> {
 }
 pub fn open_window(app: &tauri::AppHandle) -> Result<()> {
     if let Some(window) = app.get_webview_window("wallet") {
-        window.show().map_err(|_| "wallet_window_failed")?;
-        return window
-            .set_focus()
-            .map_err(|_| "wallet_window_failed".into());
+        #[cfg(target_os = "android")]
+        {
+            let _ = window;
+            crate::android::bridge::string("showWallet", &[])?;
+            return Ok(());
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            window.show().map_err(|_| "wallet_window_failed")?;
+            return window
+                .set_focus()
+                .map_err(|_| "wallet_window_failed".into());
+        }
     }
-    WebviewWindowBuilder::new(app, "wallet", WebviewUrl::App("wallet.html".into()))
+    let builder = WebviewWindowBuilder::new(app, "wallet", WebviewUrl::App("wallet.html".into()));
+    #[cfg(target_os = "android")]
+    let builder = builder.activity_name("WalletActivity");
+    builder
         .title(format!(
             "{} · 本地资产安全窗口",
             env!("DESKTOP_DISPLAY_NAME")
@@ -95,7 +108,7 @@ pub async fn wallet_status(window: WebviewWindow, state: State<'_, WalletState>)
     let vault = state.vault.clone();
     tokio::task::spawn_blocking(move || vault.lock().unwrap().status())
         .await
-        .map_err(|_| "wallet_storage_unavailable".into())
+        .map_err(|_| "wallet_storage_unavailable")?
 }
 #[tauri::command]
 pub async fn wallet_lock(window: WebviewWindow, state: State<'_, WalletState>) -> Result<()> {
@@ -165,17 +178,18 @@ pub async fn wallet_backup(
     state: State<'_, WalletState>,
     account_id: Uuid,
     password: String,
+    vault_password: String,
 ) -> Result<bool> {
     let password = Zeroizing::new(password);
+    let vault_password = Zeroizing::new(vault_password);
     wallet_only(&window)?;
     let public = state.vault.lock().unwrap().account(account_id)?.public_key;
     let guard = DialogGuard::new(&state.native_dialogs);
-    let file = rfd::AsyncFileDialog::new()
-        .set_title("保存加密资产备份")
-        .set_file_name(format!("asset-account-{}.backup.json", &public[..8]))
-        .add_filter("加密账户备份", &["json"])
-        .save_file()
-        .await;
+    let file = crate::file_dialog::save(
+        "保存加密资产备份",
+        &format!("asset-account-{}.backup.json", &public[..8]),
+    )
+    .await?;
     drop(guard);
     let Some(file) = file else { return Ok(false) };
     let vault = state.vault.clone();
@@ -183,7 +197,7 @@ pub async fn wallet_backup(
         vault
             .lock()
             .unwrap()
-            .backup(account_id, &password, file.path())
+            .backup(account_id, &vault_password, &password, file.path())
     })
     .await
     .map_err(|_| "wallet_storage_unavailable")??;
@@ -199,11 +213,7 @@ pub async fn wallet_restore(
     let password = Zeroizing::new(password);
     wallet_only(&window)?;
     let guard = DialogGuard::new(&state.native_dialogs);
-    let file = rfd::AsyncFileDialog::new()
-        .set_title("恢复加密资产备份")
-        .add_filter("加密账户备份", &["json"])
-        .pick_file()
-        .await;
+    let file = crate::file_dialog::pick("恢复加密资产备份").await?;
     drop(guard);
     let Some(file) = file else { return Ok(None) };
     let vault = state.vault.clone();

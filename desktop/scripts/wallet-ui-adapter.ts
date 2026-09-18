@@ -14,7 +14,7 @@ export function adaptWalletUi(source: string, id: string, root: string, uiRoot: 
   };
   const imports = ['useDesktopAssetAccount'];
   if (assets || bancor) {
-    imports.push('LocalAccountHistory');
+    imports.push('LocalAccountHistory', 'useStandaloneAssetView');
     const selector = assets
       ? /\{selectedAssetAccount \? \(\n            <label[^>]+data-assets-account-selector="true">[\s\S]*?            <\/div>\n          \)\}/g
       : /\{selectedAssetAccount \? \(\n              <label[^>]+data-bancor-account-selector="true">[\s\S]*?            \) : null\}/g;
@@ -24,17 +24,41 @@ export function adaptWalletUi(source: string, id: string, root: string, uiRoot: 
     text = `import { AccountSelector } from ${JSON.stringify(normalizePath(path.resolve(root, 'frontend/wallet/AccountSelector.tsx')))};\n` + text;
   }
   if (assets) {
-    once('  const assetAccountOptions = useMemo(', '  const desktopAccount = useDesktopAssetAccount();\n  const assetAccountOptions = useMemo(');
+    once(`            <ArrowLeftRight className="h-4 w-4" />
+            {t("交易", "Trade")}`, `            <ArrowLeftRight className="h-4 w-4" />
+            {standaloneAssetView ? "Bancor" : t("交易", "Trade")}`);
+    once('  const assetAccountOptions = useMemo(', '  const standaloneAssetView = useStandaloneAssetView();\n  const desktopAccount = useDesktopAssetAccount();\n  const assetAccountOptions = useMemo(');
     once('  const statusMessage = selectedAssetAccount?.source', '  const statusMessage = desktopAccount ? desktopAccount.statusMessage : selectedAssetAccount?.source');
-    once('  useEffect(() => {\n    const publicKey = selectedAssetAccount?.publicKey', '  useEffect(() => {\n    if (desktopAccount) return;\n    const publicKey = selectedAssetAccount?.publicKey');
+    once('  useEffect(() => {\n    const publicKey = selectedAssetAccount?.publicKey', '  useEffect(() => {\n    if (desktopAccount && !desktopAccount.fullHistory) return;\n    const publicKey = selectedAssetAccount?.publicKey');
     for (const name of ['historySource', 'historyDirection']) {
-      once(`value={${name}}`, `value={${name}}\n              disabled={Boolean(desktopAccount)}\n              title={desktopAccount ? t("当前服务暂不支持流水筛选。", "This service does not support activity filters yet.") : undefined}`);
+      once(`value={${name}}`, `value={${name}}\n              disabled={Boolean(desktopAccount && !desktopAccount.fullHistory)}\n              title={desktopAccount && !desktopAccount.fullHistory ? t("当前服务暂不支持流水筛选。", "This service does not support activity filters yet.") : undefined}`);
     }
-    once('        {!selectedAssetAccount ? (', '        {desktopAccount ? <LocalAccountHistory t={t} /> : <>\n        {!selectedAssetAccount ? (');
+    once('        {!selectedAssetAccount ? (', '        {desktopAccount && !desktopAccount.fullHistory ? <LocalAccountHistory t={t} /> : <>\n        {!selectedAssetAccount ? (');
     once('      </section>\n\n      {transferMessage && !transferDialogOpen', '        </>}\n      </section>\n\n      {transferMessage && !transferDialogOpen');
   }
   if (bancor) {
-    once('  const [side, setSide] = useState<BancorTradeSide>', '  const desktopAccount = useDesktopAssetAccount();\n  const [side, setSide] = useState<BancorTradeSide>');
+    const rewardsButton = `            <button
+              type="button"
+              className="theme-secondary-btn"
+              onClick={onOpenNni}
+            >
+              <Gift className="h-4 w-4" />
+              {t("获得奖励", "Earn rewards")}
+            </button>
+`;
+    once(rewardsButton, `            {!standaloneAssetView && (\n${rewardsButton}            )}\n`);
+    const aprButton = `            <button
+              type="button"
+              className="theme-secondary-btn"
+              data-bancor-open-apr="true"
+              onClick={onOpenApr}
+            >
+              <Percent className="h-4 w-4" />
+              APR
+            </button>
+`;
+    once(aprButton, `            {!standaloneAssetView && (\n${aprButton}            )}\n`);
+    once('  const [side, setSide] = useState<BancorTradeSide>', '  const standaloneAssetView = useStandaloneAssetView();\n  const desktopAccount = useDesktopAssetAccount();\n  const [side, setSide] = useState<BancorTradeSide>');
     once('disabled={accountLoading || !signingDeviceReady}', 'disabled={accountLoading || (desktopAccount ? !desktopAccount.runtime.ready : !signingDeviceReady)}');
     once('{assetSigningReady\n                  ? t(', '{desktopAccount ? (assetSigningReady ? t("交易将在本地安全窗口确认并签名。", "Confirm and sign the trade in the local secure window.") : desktopAccount.statusMessage) : assetSigningReady\n                  ? t(');
     once('{t(\n                "强制流动性算法。', '{desktopAccount ? t("强制流动性算法。使用当前桌面账号交易，在本地安全窗口确认并签名。", "A forced-liquidity algorithm. Trade with the selected desktop account and confirm in the local secure window.") : t(\n                "强制流动性算法。');

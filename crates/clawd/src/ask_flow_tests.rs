@@ -10,6 +10,7 @@ fn attached_image_context_preserves_description_and_visible_text() {
         text: "一张写有营业时间的店铺招牌。".to_string(),
         notify: None,
         validation: None,
+        output_contract_validation: None,
         extra: Some(json!({
             "provider": "fixture",
             "structured": {
@@ -41,6 +42,7 @@ fn attached_image_context_keeps_empty_visible_text_empty() {
         text: "一只猫坐在窗边。".to_string(),
         notify: None,
         validation: None,
+        output_contract_validation: None,
         extra: Some(json!({
             "structured": {
                 "summary": "一只猫坐在窗边。",
@@ -63,6 +65,7 @@ fn attached_image_context_rejects_unstructured_analysis() {
         text: "图像分析结果".to_string(),
         notify: None,
         validation: None,
+        output_contract_validation: None,
         extra: None,
     };
 

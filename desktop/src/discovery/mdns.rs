@@ -47,6 +47,7 @@ pub(super) fn candidate(info: &ResolvedService) -> Option<Candidate> {
     })
 }
 
+#[cfg(not(target_os="android"))]
 pub(super) fn browse(cancel: CancellationToken) -> crate::Result<Vec<Candidate>> {
     let daemon = ServiceDaemon::new().map_err(|_| "discovery_unavailable")?;
     let outcome = (|| {
@@ -69,4 +70,21 @@ pub(super) fn browse(cancel: CancellationToken) -> crate::Result<Vec<Candidate>>
     let _ = daemon.stop_browse(SERVICE_TYPE);
     let _ = daemon.shutdown();
     outcome
+}
+
+#[cfg(target_os="android")]
+pub(super) fn browse(cancel: CancellationToken) -> crate::Result<Vec<Candidate>> {
+    if cancel.is_cancelled() { return Ok(vec![]); }
+    let records = crate::android::bridge::string("discoverMdns", &[])?.ok_or("discovery_unavailable")?;
+    if cancel.is_cancelled() { return Ok(vec![]); }
+    #[derive(serde::Deserialize)]
+    struct Found { name: String, ips: Vec<std::net::Ipv4Addr>, port: u16, private_ca: bool }
+    let found: Vec<Found> = serde_json::from_str(&records).map_err(|_| "discovery_unavailable")?;
+    Ok(found.into_iter().take(64).filter_map(|item| {
+        let ip = item.ips.into_iter().find(|ip| ip.is_private())?;
+        if item.port == 0 || item.name.len() > 253 { return None; }
+        Some(Candidate { name: item.name, address: format!("https://{ip}:{}",item.port),
+            kind: "https", source: "mdns", private_ca: item.private_ca,
+            verified: false, ips: vec![ip], port: item.port })
+    }).collect())
 }

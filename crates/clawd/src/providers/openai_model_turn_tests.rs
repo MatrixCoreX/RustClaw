@@ -71,6 +71,48 @@ fn native_request_maps_messages_and_function_tools() {
 }
 
 #[test]
+fn literal_tool_arguments_survive_json_and_fragmented_stream_decoding() {
+    for content in ["", "\n", "alpha\nbeta\n", "alpha\r\nbeta\r\n", "  value  "] {
+        let arguments = json!({"content":content, "path":"fixture.txt"});
+        let encoded = arguments.to_string();
+        let complete = json!({"choices":[{"message":{"role":"assistant","content":null,
+            "tool_calls":[{"id":"fixture-call","type":"function","function":{
+                "name":"write_fixture","arguments":encoded}}]},"finish_reason":"tool_calls"}]});
+        let result = parse_openai_model_turn(&complete).unwrap();
+        assert_eq!(result.tool_calls[0].arguments, arguments);
+
+        let mut accumulator = OpenAiStreamAccumulator::default();
+        for (index, character) in encoded.chars().enumerate() {
+            accumulator
+                .apply(
+                    SseFrame::Data(json!({"choices":[{"delta":{"tool_calls":[{
+                "index":0,"id":"fixture-call","function":{
+                    "name":if index == 0 { Some("write_fixture") } else { None },
+                    "arguments":character.to_string()}}]}}]})),
+                    None,
+                )
+                .unwrap();
+        }
+        accumulator
+            .apply(
+                SseFrame::Data(json!({"choices":[{"delta":{},"finish_reason":"tool_calls"}]})),
+                None,
+            )
+            .unwrap();
+        accumulator.complete_terminal_eof();
+        let streamed = accumulator.finish(None).unwrap();
+        assert_eq!(streamed.turn.tool_calls[0].arguments, arguments);
+        assert_eq!(
+            streamed.turn.tool_calls[0].arguments["content"]
+                .as_str()
+                .unwrap()
+                .as_bytes(),
+            content.as_bytes()
+        );
+    }
+}
+
+#[test]
 fn reasoning_effort_is_forwarded_as_machine_provider_parameter() {
     let body = build_openai_request(
         &provider(),
@@ -582,4 +624,53 @@ fn stream_raw_response_removes_minimax_think_content_across_frames() {
     assert!(!raw.contains("private"));
     assert!(!raw.contains("<think>"));
     assert!(raw.contains("public answer"));
+}
+
+#[test]
+fn bounded_raw_log_preserves_late_public_tools_terminal_and_usage() {
+    let mut accumulator = OpenAiStreamAccumulator::default();
+    for _ in 0..6000 {
+        accumulator
+            .apply(
+                SseFrame::Data(json!({"id":"x".repeat(200),
+            "choices":[{"delta":{"reasoning_content":"private-trace"}}]})),
+                None,
+            )
+            .unwrap();
+    }
+    let calls = json!([{"index":0,"id":"call-fixture","function":{"name":"fixture","arguments":"{\"value\":\"文字\"}"}}]);
+    accumulator
+        .apply(
+            SseFrame::Data(json!({"choices":[{"index":0,"delta":{"tool_calls":calls}}]})),
+            None,
+        )
+        .unwrap();
+    accumulator
+        .apply(
+            SseFrame::Data(json!({"choices":[{"index":0,"finish_reason":"tool_calls"}]})),
+            None,
+        )
+        .unwrap();
+    accumulator.apply(SseFrame::Data(json!({"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":7,"total_tokens":12}})), None).unwrap();
+    let incomplete = accumulator.safe_raw_response();
+    let partial: Value = serde_json::from_str(incomplete.lines().next().unwrap()).unwrap();
+    assert_eq!(partial["stream_complete"], false);
+    accumulator.apply(SseFrame::Done, None).unwrap();
+    let result = accumulator.finish(None).unwrap();
+    assert_eq!(result.turn.tool_calls[0].arguments, json!({"value":"文字"}));
+    let raw = super::super::output::provider_safe_raw_response(&result.raw_response);
+    assert!(!raw.contains("private-trace"));
+    let logged = crate::truncate_for_log(&raw);
+    let header: Value = serde_json::from_str(logged.lines().next().unwrap()).unwrap();
+    assert_eq!(header["raw_prefix_truncated"], true);
+    assert_eq!(header["tool_frames_complete"], true);
+    assert_eq!(
+        header["tool_frames"][0]["choices"][0]["delta"]["tool_calls"],
+        calls
+    );
+    assert_eq!(header["terminal"]["usage"]["total_tokens"], 12);
+    assert_eq!(
+        header["terminal"]["choices"][0]["finish_reason"],
+        "tool_calls"
+    );
 }

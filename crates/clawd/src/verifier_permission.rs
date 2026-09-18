@@ -45,13 +45,13 @@ fn step_permission_decision_json(
         .as_object()
         .and_then(|obj| obj.get("action"))
         .and_then(|value| value.as_str())
-        .map(normalize_schema_token);
+        .map(str::trim);
     let registry_policy = state
         .skill_manifest(&normalized_skill)
         .and_then(|manifest| {
             let mapping = claw_core::skill_registry::select_planner_capability_mapping(
                 &manifest.planner_capabilities,
-                action.as_deref(),
+                action,
             )?;
             let policy = json!({
                 "capability": mapping.name,
@@ -308,16 +308,13 @@ pub(super) fn step_sandbox_denial_reason(
 ) -> Option<&'static str> {
     let effect =
         crate::execution_recipe::classify_skill_action_effect(state, normalized_skill, args);
-    let action = args
-        .get("action")
-        .and_then(Value::as_str)
-        .map(normalize_schema_token);
+    let action = args.get("action").and_then(Value::as_str).map(str::trim);
     let registry_policy = state
         .skill_manifest(normalized_skill)
         .and_then(|manifest| {
             claw_core::skill_registry::select_planner_capability_mapping(
                 &manifest.planner_capabilities,
-                action.as_deref(),
+                action,
             )
             .map(|mapping| {
                 json!({
@@ -478,7 +475,12 @@ fn fs_basic_action(args: &Value) -> Option<String> {
     args.as_object()
         .and_then(|obj| obj.get("action"))
         .and_then(Value::as_str)
-        .map(normalize_schema_token)
+        .map(|value| {
+            value
+                .trim()
+                .to_ascii_lowercase()
+                .replace(['-', ' ', '.'], "_")
+        })
         .filter(|action| !action.is_empty())
 }
 

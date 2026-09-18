@@ -60,6 +60,28 @@ pub(super) struct IngestJob {
     pub(super) updated_at_epoch: i64,
 }
 
+#[derive(Debug)]
+pub(super) struct CheckpointConflict {
+    pub(super) current: IngestJob,
+}
+
+impl std::fmt::Display for CheckpointConflict {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("ingest checkpoint changed; inspect the current continuation")
+    }
+}
+
+impl std::error::Error for CheckpointConflict {}
+
+impl CheckpointConflict {
+    pub(super) fn extra(&self) -> Value {
+        let mut extra = super::error_extra("checkpoint_conflict");
+        extra["retryable"] = json!(true);
+        extra["job"] = job_status_value(&self.current);
+        extra
+    }
+}
+
 #[cfg(test)]
 pub(super) fn do_ingest(runtime: &KbRuntime, args: &Value) -> Result<Value> {
     do_ingest_with_progress(runtime, args, None)
@@ -134,6 +156,13 @@ pub(super) fn do_resume_ingest_with_progress(
     if job.status == "cancelled" || job.status == "completed" {
         return Ok(job_status_value(&job));
     }
+    let next_file_index = args
+        .get("next_file_index")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| anyhow!("resume_ingest requires a nonnegative next_file_index"))?;
+    if next_file_index != job.next_file_index as u64 {
+        return Err(CheckpointConflict { current: job }.into());
+    }
     let index = if storage::namespace_exists(runtime, &job.namespace)? {
         storage::load_namespace(runtime, &job.namespace)?
     } else {
@@ -151,12 +180,7 @@ pub(super) fn do_ingest_job_status(runtime: &KbRuntime, args: &Value) -> Result<
 
 pub(super) fn do_cancel_ingest(runtime: &KbRuntime, args: &Value) -> Result<Value> {
     let job_id = required_job_id(args, "cancel_ingest")?;
-    let mut job = storage::load_ingest_job(runtime, &job_id)?;
-    if job.status != "completed" {
-        job.status = "cancelled".to_string();
-        job.updated_at_epoch = now_epoch();
-        storage::save_ingest_job(runtime, &job)?;
-    }
+    let job = storage::cancel_ingest_job(runtime, &job_id)?;
     Ok(job_status_value(&job))
 }
 
@@ -214,6 +238,7 @@ fn process_job(
     if job.owner_user_key != runtime.scope_user_key {
         return Err(anyhow!("ingest job owner mismatch"));
     }
+    let expected_checkpoint = job.clone();
     let scan_targets = build_scan_targets(runtime, &job.request.paths)?;
     let started = Instant::now();
     let mut run_files = 0usize;
@@ -385,7 +410,7 @@ fn process_job(
     index.embedding_version = default_embedding_version();
     job.status = if complete { "completed" } else { "waiting" }.to_string();
     job.updated_at_epoch = now_epoch();
-    let persisted = storage::save_namespace_and_job(runtime, &index, &job)?;
+    let persisted = storage::save_namespace_and_job(runtime, &index, &job, &expected_checkpoint)?;
     Ok(job_result_value(
         &job,
         persisted,

@@ -31,6 +31,8 @@ mod event_stream_hooks;
 mod failure_attribution;
 #[path = "task_journal_tests/frontdoor_llm_metrics.rs"]
 mod frontdoor_llm_metrics;
+#[path = "task_journal_tests/trace_storage_bounds.rs"]
+mod trace_storage_bounds;
 
 fn route_for_contract(exact_command_output: bool) -> crate::IntentOutputContract {
     let mut route = crate::IntentOutputContract {
@@ -827,6 +829,18 @@ fn test_plan(kind: crate::PlanKind, steps: Vec<crate::PlanStep>) -> crate::PlanR
 #[test]
 fn trace_json_matches_repeated_round_step_ids_by_execution_order_and_skill() {
     let mut journal = TaskJournal::for_task("task-repeat-step-ids", "ask", "ops repair");
+    for (round_no, step_in_round, global_step, skill) in [
+        (1, 1, 1, "fs_basic"),
+        (1, 2, 2, "synthesize_answer"),
+        (2, 2, 3, "fs_basic"),
+        (2, 3, 4, "http_basic"),
+    ] {
+        journal.push_task_observation(json!({
+            "event_type": "post_tool_use", "round_no": round_no,
+            "step_in_round": step_in_round, "global_step": global_step,
+            "tool_or_skill": skill,
+        }));
+    }
     journal.rounds.push(TaskJournalRoundTrace {
         round_no: 1,
         goal: "current_phase=inspect".to_string(),
@@ -1010,6 +1024,13 @@ fn attach_to_result_caps_large_trace_and_preserves_contract_summary_fields() {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .starts_with("fnv64:"));
+    let complete = journal.to_trace_json();
+    for name in ["step_results", "capability_results"] {
+        assert_eq!(
+            trace["trace_storage"]["evidence_streams"][name],
+            json!(super::trace_json_hash(&complete[name]))
+        );
+    }
     assert!(
         trace
             .get("evidence_policy")
@@ -1538,6 +1559,13 @@ fn trace_json_records_only_canonical_plan_argument_fingerprints() {
     journal
         .step_results
         .push(TaskJournalStepTrace::ok("step_1", "process_basic", "ok"));
+    journal.push_task_observation(json!({
+        "event_type": "post_tool_use",
+        "round_no": 1,
+        "step_in_round": 1,
+        "global_step": 1,
+        "tool_or_skill": "process_basic"
+    }));
 
     let trace = journal.to_trace_json();
     let first = trace
@@ -1780,6 +1808,8 @@ fn step_output_excerpt_compacts_read_range_as_valid_json() {
             "end_line": 4,
             "total_lines": 4,
             "line_count": 4,
+            "line_endings": {"scope": "file", "lf_count": 3, "crlf_count": 0,
+                             "ends_with_newline": false},
             "first_line": "def add(a, b):",
             "line_safety": {
                 "line_numbered": true
@@ -1807,6 +1837,11 @@ fn step_output_excerpt_compacts_read_range_as_valid_json() {
     assert_eq!(
         value.pointer("/extra/first_line").and_then(Value::as_str),
         Some("def add(a, b):")
+    );
+    assert_eq!(
+        value["extra"]["line_endings"],
+        json!({"scope": "file",
+        "lf_count": 3, "crlf_count": 0, "ends_with_newline": false})
     );
     assert_eq!(
         value

@@ -354,7 +354,8 @@ fn minimax_compat_dispatches_multimodal_request() {
         assert!(request.contains("\"model\":\"MiniMax-M3\""));
         assert!(request.contains("data:image/png;base64,YWJj"));
         assert!(request.contains("\"temperature\":0.0"));
-        assert!(!request.contains("\"detail\":\"high\""));
+        assert!(request.contains("\"detail\":\"high\""));
+        assert!(request.contains("\"max_tokens\":8192"));
 
         let body = r#"{"choices":[{"message":{"content":"识别成功"}}]}"#;
         write!(
@@ -791,6 +792,8 @@ fn image_text_revision_prompt_requires_semantic_reflow() {
     assert!(prompt.contains("paragraph boundary, heading, list item, table row"));
     assert!(prompt.contains("Do not introduce any new line-start numbering"));
     assert!(prompt.contains("preserve it exactly"));
+    assert!(prompt.contains("Do not convert Traditional/Simplified Chinese"));
+    assert!(prompt.contains("Preserve hashtags, @mentions, watermark slogans"));
 }
 
 #[test]
@@ -800,6 +803,30 @@ fn image_text_extraction_prompt_preserves_visible_markers_without_inventing_them
 
     assert!(prompt.contains("Preserve every line-start marker that is visibly present"));
     assert!(prompt.contains("Never add a line-start number"));
+    assert!(prompt.contains("Scan the full frame"));
+    assert!(prompt.contains("Do not skip overlay, sticker, caption, or watermark text"));
+    assert!(prompt.contains("Keep mixed-language text"));
+}
+
+#[test]
+fn extract_text_prompt_preserves_source_language_instead_of_reply_language() {
+    let workspace = tempfile::tempdir().expect("tempdir");
+    let prompt = build_prompt(
+        workspace.path(),
+        "minimax",
+        "extract_text",
+        "normal",
+        None,
+        Some("zh-CN"),
+        None,
+    );
+
+    assert!(prompt.contains("Transcribe visible text in its source language"));
+    assert!(prompt.contains("Do not translate, paraphrase, or rewrite it into zh-CN"));
+    assert!(!prompt.contains("Reply strictly in zh-CN"));
+    assert!(
+        prompt.contains("For action=extract_text, transcribe visible source-language text only")
+    );
 }
 
 #[test]

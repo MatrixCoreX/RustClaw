@@ -1,0 +1,236 @@
+{
+  "schema_version": 1,
+  "scope": "test_oracle_only",
+  "previous_suite_sha256": "36ffae358944dbe4e2d2fe5bd79181966e5b32fb530f6026a5d6da6266d1e1ee",
+  "current_suite_sha256": "3abee6bbc3fe6e8f4e042313697678edfbd6b10654744a7a14329889f3d1f0c0",
+  "unchanged_nl_count": 500,
+  "unchanged_tag_count": 500,
+  "reason": "Require ordered exact-path content hash, byte size, full readback and deletion; accept verified local-edit recovery without requiring full-file rewrite.",
+  "changes": [
+    {
+      "case_name": "new_file_cycle_001",
+      "previous_expectation": "expect=observed_eq:content_bytes=17",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_1.txt\",\"schema_version\":1,\"sha256\":\"3b5920f3d2e301e92a3c9cb65599df5d7e1860516a41de73f445fbce6a51a0b5\",\"size_bytes\":17}"
+    },
+    {
+      "case_name": "new_file_cycle_002",
+      "previous_expectation": "expect=observed_eq:content_bytes=17",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_2.txt\",\"schema_version\":1,\"sha256\":\"fc704b8ca55fed2fb12f86d0f565083cb597050713611c6f75406371ae9ed605\",\"size_bytes\":17}"
+    },
+    {
+      "case_name": "new_file_cycle_003",
+      "previous_expectation": "expect=observed_eq:content_bytes=17",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_3.txt\",\"schema_version\":1,\"sha256\":\"1ee7ac9b14fc5db0fffcca72c71087c266b27524b36a5856c95c59dee7d7824e\",\"size_bytes\":17}"
+    },
+    {
+      "case_name": "new_file_cycle_004",
+      "previous_expectation": "expect=observed_eq:content_bytes=17",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_4.txt\",\"schema_version\":1,\"sha256\":\"346ad19e4565e16599dcdd414467e2d4d7d9cd7dc987c9e3be3c2d1c7542c776\",\"size_bytes\":17}"
+    },
+    {
+      "case_name": "new_file_cycle_005",
+      "previous_expectation": "expect=observed_eq:content_bytes=17",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_5.txt\",\"schema_version\":1,\"sha256\":\"25aeb4080bae603b3b835500a68991e0918de445eb30b2277c67ac13b5e8dd41\",\"size_bytes\":17}"
+    },
+    {
+      "case_name": "new_file_cycle_006",
+      "previous_expectation": "expect=observed_eq:content_bytes=17",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_6.txt\",\"schema_version\":1,\"sha256\":\"ce16277719a0b55831a85145849facc8903dcf5466ddd1a8a48382f4d5563fcc\",\"size_bytes\":17}"
+    },
+    {
+      "case_name": "new_file_cycle_007",
+      "previous_expectation": "expect=observed_eq:content_bytes=17",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_7.txt\",\"schema_version\":1,\"sha256\":\"6073d8b4fb97a6ed91c6c3dec48c74e2c96f5f4552cae28cc8f2eea7698c19b4\",\"size_bytes\":17}"
+    },
+    {
+      "case_name": "new_file_cycle_008",
+      "previous_expectation": "expect=observed_eq:content_bytes=18",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_8.txt\",\"schema_version\":1,\"sha256\":\"006d03cac446bf98fb11914933b673b1e2ae9f608dc1b46932f84ad364ac38a3\",\"size_bytes\":18}"
+    },
+    {
+      "case_name": "new_file_cycle_009",
+      "previous_expectation": "expect=observed_eq:content_bytes=18",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_9.txt\",\"schema_version\":1,\"sha256\":\"5fa5230448bb6c4cd4db4346b369c0581218c7f58b6309e7192536522e46071f\",\"size_bytes\":18}"
+    },
+    {
+      "case_name": "new_file_cycle_010",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_10.txt\",\"schema_version\":1,\"sha256\":\"6aee7b6fe4b4a5df2c964ea49c6feeb0b4b8418717e351f68aae6e836a942ba7\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_011",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_11.txt\",\"schema_version\":1,\"sha256\":\"e44307f6e8a92cbf36267e119885374870e8777f36661dbaabb04988a49059d6\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_012",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_12.txt\",\"schema_version\":1,\"sha256\":\"4f99913cf3b8a6f653f660a2f2f27d0a6f1cc74da62614d516319b3a1b3abc87\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_013",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_13.txt\",\"schema_version\":1,\"sha256\":\"023506c22fdd678027ac87f3f187bdb9751c30a1b336126d525a868e3163fbaf\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_014",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_14.txt\",\"schema_version\":1,\"sha256\":\"6944f536af61db1a539e47ef702cf8a5534936cd418f8ede34eedaf41fbba6b8\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_015",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_15.txt\",\"schema_version\":1,\"sha256\":\"49867e95b15ea5b755d2737c90d5b9d483750c6af403c85768d1d2901046fdac\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_016",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_16.txt\",\"schema_version\":1,\"sha256\":\"5aab78544e86e6dce5c557be6819de38a06b238419ea8f7734c0ae939466d4b0\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_017",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_17.txt\",\"schema_version\":1,\"sha256\":\"9c857a1f0147357b49df8788bec0af22c8941f2eb03bb945696ed506b51945e5\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_018",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_18.txt\",\"schema_version\":1,\"sha256\":\"23485a8b76a8657afb4788e5a6d4cd23d030e0bf360da79ff88e675157d8383b\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_019",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_19.txt\",\"schema_version\":1,\"sha256\":\"d7f12d4b84f41c8b4cb593704738ae0e3edddcca47c2c02cb9525e9fc9a508d9\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_020",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_20.txt\",\"schema_version\":1,\"sha256\":\"158aa8a6ae0429e8d6a9e0bd716bb5f4b2354e6c257fffe3ece101de67995159\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_021",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_21.txt\",\"schema_version\":1,\"sha256\":\"28622485dca7f7b2b4f1787b94e5d71e73f5431e654f82daa6044a49c078dc35\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_022",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_22.txt\",\"schema_version\":1,\"sha256\":\"06becd379f97dd1dd62b5931c2c0b04ed455788d08fcc05b002f61acf79496d1\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_023",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_23.txt\",\"schema_version\":1,\"sha256\":\"cf7439e841cecbe09ca5d1568d34f7bc9119f47602361a145e4785ac07f46562\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_024",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_24.txt\",\"schema_version\":1,\"sha256\":\"87a396053435e26e8baaea2e07d7d4996e88a4082d7536f70d6367708edff531\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_025",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_25.txt\",\"schema_version\":1,\"sha256\":\"dc9a2afbf2f3e3aa6ef928a0325abe57ab77255315f846fc37cbb51d1041f6eb\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_026",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_26.txt\",\"schema_version\":1,\"sha256\":\"a23fe61c0d9f9d7e5e2bd1ff10e8bb77b4a230a2ace660bb36a521718b4f3459\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_027",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_27.txt\",\"schema_version\":1,\"sha256\":\"7090b0422736925fbcd5a7501d34277f0c537bc82c7086bf57703e0d3684dbe0\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_028",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_28.txt\",\"schema_version\":1,\"sha256\":\"57d3b385e13281e7b42013eb370aa868730a68ab6507691c69123551fac70571\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_029",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_29.txt\",\"schema_version\":1,\"sha256\":\"ec0cd3af18a941db6dafa7b9bde88d7ecaa6a4e445e6d4c3587f0c786a8b7b0d\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_030",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_30.txt\",\"schema_version\":1,\"sha256\":\"8c938f53848741577f537c56f96ecf0c0b93ed70053593d8e2722b629c6d562b\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_031",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_31.txt\",\"schema_version\":1,\"sha256\":\"f2235a1c4e97a045fb2f438bd6d627b9cf191850a8b84943d1c871c819d4296f\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_032",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_32.txt\",\"schema_version\":1,\"sha256\":\"bbe0ea19de7dec1f65896687d5faa4b1021c37ab65b391d83e519d248f6572b4\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_033",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_33.txt\",\"schema_version\":1,\"sha256\":\"66ce7984b63c03b9198a142ea70935c57ec5d9bec353a893538c9fba881a8e27\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_034",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_34.txt\",\"schema_version\":1,\"sha256\":\"feb18974c3e5d935afc0610fe02903d144ee36ff93aed67f98b4657cdf975acc\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_035",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_35.txt\",\"schema_version\":1,\"sha256\":\"d924519770655aa919b7543e74c4dc00c2153201d2ae9d6a546755f6897d67c0\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_036",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_36.txt\",\"schema_version\":1,\"sha256\":\"594fe65e6a139a5ef7b98d5c32ed396ee1e66d46958d5fb852776a181b579afa\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_037",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_37.txt\",\"schema_version\":1,\"sha256\":\"306612c1e65fd89dbeaad68088800cfced5d3cb7bad7ff17e3089668fbb9cbc8\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_038",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_38.txt\",\"schema_version\":1,\"sha256\":\"6968f4da72d747294d674242b326e8d01e35fd740b24d557573127948c778118\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_039",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_39.txt\",\"schema_version\":1,\"sha256\":\"72a75bca7e59023fae97500a4cef7a01c2e15817d9bac0b81f0d05f2467a3d96\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_040",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_40.txt\",\"schema_version\":1,\"sha256\":\"3e92f1c63c289e96b64495618e183d81f794259e90362bbecaa6996ac6469037\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_041",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_41.txt\",\"schema_version\":1,\"sha256\":\"8135ad1af4db21a564aef7b8cb7b0d7dc03d828226668d39d3ed3a7a54e1c867\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_042",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_42.txt\",\"schema_version\":1,\"sha256\":\"aacea711cb1fa41623cf9108f964cff086cf4677aa70d2fca0194cdcbaafb38d\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_043",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_43.txt\",\"schema_version\":1,\"sha256\":\"3fc85f153a0f893848065f237a4db40433f12a6a708f6529679b838b1cbf57fc\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_044",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_44.txt\",\"schema_version\":1,\"sha256\":\"22334dceb186c632631c2396996be8eaa4bb59f3ef7986d263ee4336dfa5c95a\",\"size_bytes\":19}"
+    },
+    {
+      "case_name": "new_file_cycle_045",
+      "previous_expectation": "expect=observed_eq:content_bytes=19",
+      "current_expectation": "expect=workspace_file_cycle:{\"line_count\":2,\"path\":\"tmp/nl_500_note_45.txt\",\"schema_version\":1,\"sha256\":\"5f3a1f5f8345190c4bf9dfbc38b3219cc40ea7756c605e2917322fc870bb4c90\",\"size_bytes\":19}"
+    }
+  ]
+}

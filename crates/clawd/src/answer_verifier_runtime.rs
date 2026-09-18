@@ -2,6 +2,8 @@ use super::*;
 
 #[path = "answer_verifier_runtime/compacted_machine_ref_gap.rs"]
 mod compacted_machine_ref_gap;
+#[path = "answer_verifier_runtime/operation_audit.rs"]
+mod operation_audit;
 #[path = "answer_verifier_runtime/prompt_evidence_blocks.rs"]
 mod prompt_evidence_blocks;
 #[path = "answer_verifier_runtime/structured_read_scalar_gap.rs"]
@@ -133,7 +135,9 @@ pub(crate) async fn verify_answer_observe_only(
             return None;
         }
     };
-    let validation = match crate::prompt_utils::validate_against_schema::<AnswerVerifierOut>(
+    let validation = match crate::prompt_utils::validate_against_schema::<
+        operation_audit::ModelVerifierOut,
+    >(
         &llm_out,
         crate::prompt_utils::PromptSchemaId::AnswerVerifier,
     ) {
@@ -146,7 +150,7 @@ pub(crate) async fn verify_answer_observe_only(
                     validated.schema_normalized
                 );
             }
-            validated.value.normalized()
+            operation_audit::validate_operation_audit(validated.value, journal)
         }
         Err(err) => {
             tracing::info!(
@@ -154,7 +158,7 @@ pub(crate) async fn verify_answer_observe_only(
                 task.task_id,
                 err
             );
-            return None;
+            return Some(operation_audit::invalid_operation_audit());
         }
     };
     if validation.high_confidence_gap()
@@ -201,7 +205,11 @@ fn verifier_gap_requires_visible_answer_repair(validation: &AnswerVerifierOut) -
     validation.missing_evidence_fields.iter().any(|field| {
         matches!(
             field.as_str(),
-            "output_format" | "unsupported_claims" | "candidates"
+            "output_format"
+                | "unsupported_claims"
+                | "candidates"
+                | "requested_result"
+                | "verification_audit"
         )
     })
 }

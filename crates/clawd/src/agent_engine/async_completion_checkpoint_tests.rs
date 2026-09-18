@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "async_attempt_evidence_tests.rs"]
+mod attempt_evidence;
+
 fn poll_checkpoint() -> TaskCheckpoint {
     TaskCheckpoint {
         schema_version: 1,
@@ -74,6 +77,7 @@ fn completed_async_job_becomes_next_planner_round_with_terminal_evidence() {
     });
     pending.provenance = json!({
         "task_id": "task-1",
+        "step_id": "step-1",
         "action_fingerprint": "fp-audio-transcribe"
     });
     pending_checkpoint.capability_results.push(pending);
@@ -239,6 +243,7 @@ fn failed_async_stt_resumes_planner_with_exact_local_fallback_input() {
     });
     pending.provenance = json!({
         "task_id": "task-1",
+        "step_id": "step-1",
         "action_fingerprint": "fp-audio-transcribe"
     });
     checkpoint.capability_results.push(pending);

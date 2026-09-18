@@ -1,11 +1,11 @@
+use super::secure_memory::{LockedBytes, LockedKey};
 use crate::Result;
-use argon2::{Algorithm, Argon2, Params, Version};
+use argon2::{Algorithm, Argon2, Block, Params, Version};
 use chacha20poly1305::{
-    aead::{Aead, KeyInit, Payload},
+    aead::{Aead, AeadInPlace, KeyInit, Payload},
     XChaCha20Poly1305, XNonce,
 };
 use serde::{Deserialize, Serialize};
-use zeroize::Zeroizing;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -35,15 +35,38 @@ pub fn password_valid(password: &str) -> Result<()> {
     Ok(())
 }
 
-fn derive(password: &str, salt: &[u8]) -> Result<Zeroizing<[u8; 32]>> {
+fn derive(password: &str, salt: &[u8]) -> Result<LockedKey> {
+    derive_with(password, salt, 65_536, 3, 4)
+}
+pub(super) fn derive_with(
+    password: &str,
+    salt: &[u8],
+    memory: u32,
+    iterations: u32,
+    lanes: u32,
+) -> Result<LockedKey> {
     password_valid(password)?;
     if salt.len() != 16 {
         return Err("wallet_data_invalid".into());
     }
-    let mut key = Zeroizing::new([0; 32]);
-    let params = Params::new(65_536, 3, 4, Some(32)).map_err(|_| "wallet_kdf_unavailable")?;
+    let mut key = LockedKey::zeroed()?;
+    let params =
+        Params::new(memory, iterations, lanes, Some(32)).map_err(|_| "wallet_kdf_unavailable")?;
+    // The allocating Argon2 entry point does not wipe its full workspace.
+    // Own and erase it. This workspace is not locked: 256 MiB exceeds normal
+    // unprivileged mlock limits. Output keys use mandatory locked allocations.
+    let mut blocks = zeroize::Zeroizing::new(Vec::new());
+    blocks
+        .try_reserve_exact(params.block_count())
+        .map_err(|_| "wallet_kdf_unavailable")?;
+    blocks.resize(params.block_count(), Block::default());
     Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
-        .hash_password_into(password.as_bytes(), salt, key.as_mut())
+        .hash_password_into_with_memory(
+            password.as_bytes(),
+            salt,
+            key.as_mut(),
+            blocks.as_mut_slice(),
+        )
         .map_err(|_| "wallet_kdf_unavailable")?;
     Ok(key)
 }
@@ -60,16 +83,31 @@ pub fn seal(key: &[u8; 32], aad: &[u8], clear: &[u8]) -> Result<Sealed> {
     })
 }
 
-pub fn open(key: &[u8; 32], aad: &[u8], sealed: &Sealed) -> Result<Zeroizing<Vec<u8>>> {
-    if sealed.nonce.len() != 48 || sealed.ciphertext.len() > 2_000_000 {
+pub fn open(key: &[u8; 32], aad: &[u8], sealed: &Sealed) -> Result<LockedBytes> {
+    if sealed.nonce.len() != 48
+        || sealed.ciphertext.len() < 32
+        || sealed.ciphertext.len() > 2_000_000
+        || sealed.ciphertext.len() % 2 != 0
+    {
         return Err("wallet_data_invalid".into());
     }
     let nonce = hex::decode(&sealed.nonce).map_err(|_| "wallet_data_invalid")?;
-    let bytes = hex::decode(&sealed.ciphertext).map_err(|_| "wallet_data_invalid")?;
+    let split = sealed.ciphertext.len() - 32;
+    let mut bytes = LockedBytes::new(split / 2)?;
+    hex::decode_to_slice(&sealed.ciphertext[..split], bytes.as_mut())
+        .map_err(|_| "wallet_data_invalid")?;
+    let mut tag = [0; 16];
+    hex::decode_to_slice(&sealed.ciphertext[split..], &mut tag)
+        .map_err(|_| "wallet_data_invalid")?;
     XChaCha20Poly1305::new(key.into())
-        .decrypt(XNonce::from_slice(&nonce), Payload { msg: &bytes, aad })
-        .map(Zeroizing::new)
-        .map_err(|_| "wallet_unlock_failed".into())
+        .decrypt_in_place_detached(
+            XNonce::from_slice(&nonce),
+            aad,
+            bytes.as_mut(),
+            (&tag).into(),
+        )
+        .map_err(|_| "wallet_unlock_failed")?;
+    Ok(bytes)
 }
 
 pub fn wrap(password: &str, aad: &[u8], clear: &[u8]) -> Result<Wrapped> {
@@ -82,7 +120,7 @@ pub fn wrap(password: &str, aad: &[u8], clear: &[u8]) -> Result<Wrapped> {
     })
 }
 
-pub fn unwrap(password: &str, aad: &[u8], wrapped: &Wrapped) -> Result<Zeroizing<Vec<u8>>> {
+pub fn unwrap(password: &str, aad: &[u8], wrapped: &Wrapped) -> Result<LockedBytes> {
     if wrapped.version != 1 || wrapped.salt.len() != 32 {
         return Err("wallet_data_invalid".into());
     }

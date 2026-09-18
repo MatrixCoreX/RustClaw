@@ -1,5 +1,9 @@
 // Brand-neutral skill package command-line entry point.
 
+#[cfg(test)]
+#[path = "../skillctl_precompiled_tests.rs"]
+mod precompiled_tests;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -7,8 +11,8 @@ use serde_json::{json, Value};
 use skill_sdk::adapter::{copy_source_tree, source_digest};
 use skill_sdk::{
     scaffold_skill, validate_response_line, AdoptBuiltRequest, ImplementationLanguage,
-    InstallReceiptStore, InstallRequest, PackageManifest, ScaffoldRequest, SkillInstaller,
-    SkillRuntimeResolver, SkillSdkError,
+    InstallReceiptStore, InstallRequest, PackageManifest, PrecompiledInstallRequest,
+    ScaffoldRequest, SkillInstaller, SkillRuntimeResolver, SkillSdkError,
 };
 
 fn main() {
@@ -48,6 +52,7 @@ fn run(args: Vec<String>) -> Result<Value, SkillSdkError> {
         "validate" => validate_command(&args),
         "build" | "protocol-test" | "install-local" => install_command(command, &args),
         "adopt-built" => adopt_built_command(&args),
+        "install-precompiled" => install_precompiled_command(&args),
         "admit" => admit_command(&args),
         "package" => package_command(&args),
         "protocol-validate" => protocol_validate_command(&args),
@@ -63,6 +68,7 @@ fn run(args: Vec<String>) -> Result<Value, SkillSdkError> {
                 "package <skill.toml> <output_dir>",
                 "install-local <skill.toml> <workspace_root> <package_root> [--network] [--target <triple>]",
                 "adopt-built <skill.toml> <workspace_root> <package_root> <binary_path> [--target <triple>]",
+                "install-precompiled <skill.toml> <workspace_root> <package_root> <precompiled_root> [--target <triple>]",
                 "admit <source_dir> <clawd_url> <admin_key> [--disabled] [--network] [--timeout-seconds <seconds>]",
                 "protocol-validate <request_id> <response.jsonl>",
                 "receipt-verify <package_root> <skill_name>",
@@ -152,6 +158,18 @@ fn adopt_built_command(args: &[String]) -> Result<Value, SkillSdkError> {
         control: None,
     })?;
     Ok(json!({"ok": true, "command": "adopt-built", "install": outcome}))
+}
+
+fn install_precompiled_command(args: &[String]) -> Result<Value, SkillSdkError> {
+    let outcome = SkillInstaller.install_precompiled(&PrecompiledInstallRequest {
+        manifest_path: PathBuf::from(required_arg(args, 1, "manifest_path")?),
+        workspace_root: PathBuf::from(required_arg(args, 2, "workspace_root")?),
+        package_root: PathBuf::from(required_arg(args, 3, "package_root")?),
+        precompiled_root: PathBuf::from(required_arg(args, 4, "precompiled_root")?),
+        target: optional_flag_value(args, "--target").map(ToString::to_string),
+        control: None,
+    })?;
+    Ok(json!({"ok": true, "command": "install-precompiled", "install": outcome}))
 }
 
 fn init_command(args: &[String]) -> Result<Value, SkillSdkError> {

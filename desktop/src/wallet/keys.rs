@@ -1,13 +1,12 @@
+use super::secure_memory::LockedKey;
 use crate::Result;
 use k256::ecdsa::SigningKey;
-#[cfg(any(feature = "gui", test))]
 use k256::ecdsa::{signature::Signer, Signature};
 use ripemd::{Digest, Ripemd160};
-use zeroize::Zeroizing;
 
-pub fn generate() -> Result<Zeroizing<[u8; 32]>> {
+pub fn generate() -> Result<LockedKey> {
     for _ in 0..16 {
-        let secret = Zeroizing::new(super::crypto::random()?);
+        let secret = LockedKey::random()?;
         if SigningKey::from_bytes((&*secret).into()).is_ok() {
             return Ok(secret);
         }
@@ -45,7 +44,6 @@ pub fn validate_public(public: &str) -> Result<()> {
 
 // SigningKey::sign hashes the original UTF-8 payload once with SHA-256.
 // Signatures are compact r||s, normalized low-S, matching the browser K1 contract.
-#[cfg(any(feature = "gui", test))]
 pub(super) fn sign(secret: &[u8; 32], payload: &[u8]) -> Result<String> {
     let key = SigningKey::from_bytes(secret.into()).map_err(|_| "wallet_key_invalid")?;
     let signature: Signature = key.sign(payload);

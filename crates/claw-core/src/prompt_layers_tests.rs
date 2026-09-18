@@ -187,6 +187,29 @@ fn test_unregistered_prompt_no_longer_falls_back_to_vendor_tree() {
     let _ = fs::remove_dir_all(root);
 }
 
+#[test]
+fn schedule_prompts_use_only_their_own_contract_across_vendors() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut vendors = vec!["unconfigured-vendor".to_string()];
+    for entry in fs::read_dir(root.join("prompts/layers/vendor_patches")).unwrap() {
+        let entry = entry.unwrap();
+        if entry.file_type().unwrap().is_dir() {
+            vendors.push(entry.file_name().into_string().unwrap());
+        }
+    }
+    let truth = fs::read_to_string(root.join("prompts/layers/base/system_truth.md")).unwrap();
+    for name in ["schedule_intent_prompt", "schedule_intent_rules"] {
+        let overlay =
+            fs::read_to_string(root.join(format!("prompts/layers/overlays/{name}.md"))).unwrap();
+        let expected = format!("{}\n\n{}", truth.trim(), overlay.trim());
+        for vendor in &vendors {
+            let (rendered, source) =
+                load_prompt_template_for_vendor(&root, vendor, &format!("prompts/{name}.md"), "");
+            assert_eq!(rendered, expected, "unexpected contract in {source}");
+        }
+    }
+}
+
 // ============================================================
 // §3.5a prompt version 提取测试
 // ============================================================
