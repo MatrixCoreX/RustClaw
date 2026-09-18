@@ -386,13 +386,7 @@ fn collect_named_invocation_files(
             if !canonical.starts_with(workspace_root) {
                 continue;
             }
-            collect_named_invocation_files(
-                &canonical,
-                workspace_root,
-                filename,
-                remaining,
-                found,
-            );
+            collect_named_invocation_files(&canonical, workspace_root, filename, remaining, found);
             continue;
         }
         if !metadata.is_file() {

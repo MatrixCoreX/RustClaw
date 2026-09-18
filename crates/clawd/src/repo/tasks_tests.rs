@@ -380,7 +380,7 @@ fn update_task_success_can_replace_async_poll_projection_without_visible_reply()
 }
 
 #[test]
-fn update_task_success_attaches_artifacts_only_after_fenced_commit() {
+fn update_task_success_materializes_artifacts_before_terminal_status() {
     let workspace = TempDirGuard::new("successful_artifact_commit");
     let mut state = state_with_tasks_table();
     state.skill_rt.workspace_root = workspace.path.clone();

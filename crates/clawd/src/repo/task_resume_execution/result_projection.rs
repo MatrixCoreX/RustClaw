@@ -991,6 +991,17 @@ fn record_claimed_paused_checkpoint_resume_terminal_projection_internal(
     );
 
     let updated_result_json = terminal_result.to_string();
+    drop(db);
+    let updated_result_json = if db_status == "succeeded" {
+        crate::repo::tasks::prepare_succeeded_result_json(state, task_id, &updated_result_json)
+    } else {
+        updated_result_json
+    };
+    let db = state
+        .core
+        .db
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let changed = db.execute(
         "UPDATE tasks
          SET status = ?2,
@@ -1013,15 +1024,6 @@ fn record_claimed_paused_checkpoint_resume_terminal_projection_internal(
             claim_attempt
         ],
     )?;
-    drop(db);
-    if changed > 0 && db_status == "succeeded" {
-        crate::repo::tasks::attach_task_artifacts_after_success(
-            state,
-            task_id,
-            claim_attempt,
-            &updated_result_json,
-        );
-    }
     Ok(changed > 0)
 }
 

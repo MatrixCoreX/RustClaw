@@ -71,6 +71,9 @@ pub(crate) async fn deliver_task_result(
             );
         }
     };
+    if waiting_for_task_artifact_materialization(&record, &status) {
+        return api_ok(pending_artifact_materialization_response());
+    }
     let (text, notice) = terminal_delivery_content(&state, &record, &payload, status.clone());
     let text = if matches!(status, TaskStatus::Succeeded) {
         project_terminal_delivery_content(&text, request.content)
@@ -148,6 +151,9 @@ pub(crate) async fn deliver_loaded_terminal_task(
     }
     let payload = serde_json::from_str::<Value>(&record.task.payload_json)
         .map_err(|_| anyhow::anyhow!("channel_task_delivery_payload_invalid"))?;
+    if waiting_for_task_artifact_materialization(record, &status) {
+        return Ok(pending_artifact_materialization_response());
+    }
     let (text, notice) = terminal_delivery_content(state, record, &payload, status.clone());
     let text = if matches!(status, TaskStatus::Succeeded) {
         project_terminal_delivery_content(&text, request.content)
@@ -331,6 +337,30 @@ fn project_terminal_delivery_content(text: &str, content: ChannelTaskDeliveryCon
         ChannelTaskDeliveryContent::MediaOnly => {
             claw_core::channel_delivery_tokens::legacy_delivery_lines(text)
         }
+    }
+}
+
+fn waiting_for_task_artifact_materialization(
+    record: &TaskDeliveryRecord,
+    status: &TaskStatus,
+) -> bool {
+    matches!(status, TaskStatus::Succeeded)
+        && claw_core::task_delivery_artifacts::messages_awaiting_task_artifact_materialization(
+            record.result_json.as_ref(),
+            &terminal_success_messages(record.result_json.as_ref()),
+        )
+}
+
+fn pending_artifact_materialization_response() -> ChannelTaskDeliveryResponse {
+    ChannelTaskDeliveryResponse {
+        schema_version: CHANNEL_TASK_DELIVERY_RESPONSE_SCHEMA_VERSION,
+        status: ChannelTaskDeliveryStatus::InProgress,
+        accepted: false,
+        delivered: false,
+        receipt: None,
+        error_code: Some("channel_delivery_artifacts_pending".to_string()),
+        message_key: None,
+        retryable: true,
     }
 }
 
