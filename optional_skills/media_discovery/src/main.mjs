@@ -164,8 +164,9 @@ export function normalizedConfig(args, platform = args.platform) {
   const sourceMode = String(args.source_mode || "home_feed");
   if (!new Set(["home_feed", "topics", "seed_urls"]).has(sourceMode)) throw new Error("source_mode_invalid");
   const browserMode = resolveBrowserMode(platform, args.browser_mode);
-  const pacingMinDelayMs = integer(args.pacing_min_delay_ms, 1000, 200, 5000);
-  const pacingMaxDelayMs = integer(args.pacing_max_delay_ms, 2800, 200, 8000);
+  const xiaohongshu = platform === "xiaohongshu";
+  const pacingMinDelayMs = integer(args.pacing_min_delay_ms, xiaohongshu ? 2400 : 1000, 200, 5000);
+  const pacingMaxDelayMs = integer(args.pacing_max_delay_ms, xiaohongshu ? 5200 : 2800, 200, 8000);
   if (pacingMaxDelayMs < pacingMinDelayMs) throw new Error("invalid_args");
   const config = {
     source_mode: sourceMode,
@@ -175,8 +176,8 @@ export function normalizedConfig(args, platform = args.platform) {
     max_images_per_post: integer(args.max_images_per_post, 0, 0),
     max_run_minutes: integer(args.max_run_minutes, 0, 0),
     max_scrolls_per_source: integer(args.max_scrolls_per_source, 0, 0),
-    rest_min_seconds: integer(args.rest_min_seconds, 180, 5, 3600),
-    rest_max_seconds: integer(args.rest_max_seconds, 420, 5, 7200),
+    rest_min_seconds: integer(args.rest_min_seconds, xiaohongshu ? 360 : 180, 5, 3600),
+    rest_max_seconds: integer(args.rest_max_seconds, xiaohongshu ? 720 : 420, 5, 7200),
     retain_diagnostics_hours: integer(args.retain_diagnostics_hours, 24, 1, 168),
     browser_mode: browserMode,
     pacing_min_delay_ms: pacingMinDelayMs,

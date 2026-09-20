@@ -9,7 +9,7 @@ const PLATFORM_SPECS = Object.freeze({
     topicUrl: (topic) => `https://www.douyin.com/search/${encodeURIComponent(topic)}`,
   },
   xiaohongshu: {
-    defaultBrowserMode: "visible",
+    defaultBrowserMode: "silent",
     homeUrl: "https://www.xiaohongshu.com/explore",
     hosts: ["xiaohongshu.com"],
     detailPath: /^\/(?:explore|search_result|discovery\/item)\/[A-Za-z0-9_-]+(?:\/|$)/u,

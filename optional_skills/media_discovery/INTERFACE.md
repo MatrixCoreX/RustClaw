@@ -6,9 +6,11 @@ Run explicitly requested batch, feed, keyword, or continuous background
 browser collection for Douyin, Xiaohongshu, and Kuaishou. A lone copied share payload or
 URL whose content should be downloaded and returned now belongs to
 `media_download.download`, even when it is used as a `seed_urls` input shape;
-this skill does not provide immediate single-post media delivery. Xiaohongshu
-defaults to `browser_mode=visible`; Douyin and Kuaishou default to `silent`.
-An explicit mode overrides the platform default. Login/verification may open one
+this skill does not provide immediate single-post media delivery. All platforms
+default to `browser_mode=silent`. Pass `visible` only when the user explicitly
+asks to open a browser window. Collection prefers installed
+Chrome, drops Chromium's automation switch, and uses slower Xiaohongshu
+pacing/rest; it does not spoof UA/proxy or bypass challenges. Login/verification may open one
 temporary browser; Douyin sliders are silent-only, and `/` or `/jingxuan` plus the
 local confirm tab resume that batch in a visible browser without solving the slider.
 Rendered media screenshots, author titles (`title`), and captions (`platform_text`,
@@ -163,10 +165,10 @@ Finite and continuous starts emit one machine `media_discovery.collection.starte
 - When the user asks to search one or more keywords before collecting, pass
   `source_mode=topics` and place those exact search terms in `topics[]`. Do not
   invent a second keyword parameter or translate the terms unless requested.
-- Omit `browser_mode` when unspecified: Xiaohongshu uses `visible`, Douyin and
-  Kuaishou use `silent`, including mixed-platform requests. Pass the matching
-  enum for an explicit user preference; never infer a global silent default.
-  Runtime consumes structured fields, not localized words, to select a mode.
+- Omit `browser_mode` when unspecified: every platform uses `silent`, including
+  mixed-platform requests. Pass `visible` only for an explicit user request to
+  open a browser window. Runtime consumes structured fields, not localized
+  words, to select a mode.
 - Both bounded and continuous silent runs may temporarily open one browser
   for manual login or human verification. Do not change `browser_mode` to
   visible for this exception. Closing, pausing, or waiting past 10 minutes
@@ -208,11 +210,11 @@ Examples of equivalent intent (documentation examples, not runtime matchers):
 | `max_images_per_post` | no | Optional user limit; omitted/0 captures the full gallery, stopping at its actual end or repeated unchanged slides. |
 | `max_run_minutes` | no | Optional user deadline in minutes; omitted/0 means no whole-batch deadline. |
 | `max_scrolls_per_source` | no | Optional user scroll limit; omitted/0 traverses until target, cancellation, access barrier, or three observations without new results. |
-| `rest_min_seconds` | no | Minimum random rest between continuous batches, 5..3600, default 180. |
-| `rest_max_seconds` | no | Maximum random rest between continuous batches, 5..7200, default 420 and never below the minimum. |
-| `browser_mode` | no | Omission uses per-platform defaults: Xiaohongshu `visible`, Douyin/Kuaishou `silent`. An explicit `visible` or `silent` overrides the default for all selected platforms. Preview returns `platform_configs`, plus `config` for a single platform. Resume retains the saved mode. |
-| `pacing_min_delay_ms` | no | Lower interaction-delay bound, 200..5000, default 1000. |
-| `pacing_max_delay_ms` | no | Upper interaction-delay bound, 200..8000, default 2800 and never below the minimum. |
+| `rest_min_seconds` | no | Minimum random rest between continuous batches, 5..3600, default 180, or 360 for Xiaohongshu. |
+| `rest_max_seconds` | no | Maximum random rest between continuous batches, 5..7200, default 420, or 720 for Xiaohongshu, and never below the minimum. |
+| `browser_mode` | no | Omission uses `silent` for every platform. Pass `visible` only when the user explicitly asks to open a browser. An explicit `visible` or `silent` overrides the default for all selected platforms. Preview returns `platform_configs`, plus `config` for a single platform. Resume retains the saved mode. |
+| `pacing_min_delay_ms` | no | Lower interaction-delay bound, 200..5000, default 1000, or 2400 for Xiaohongshu. |
+| `pacing_max_delay_ms` | no | Upper interaction-delay bound, 200..8000, default 2800, or 5200 for Xiaohongshu, and never below the minimum. |
 | `confirm` | enable/clear_results | Must be true after runtime approval. |
 
 ## Actions
@@ -375,7 +377,7 @@ Stable examples include `display_unavailable`, `browser_missing`,
 ```
 
 ```json
-{"action":"enable","platform":"xiaohongshu","source_mode":"topics","topics":["AI agent","机器人"],"browser_mode":"visible","confirm":true}
+{"action":"enable","platform":"xiaohongshu","source_mode":"topics","topics":["AI agent","机器人"],"confirm":true}
 ```
 
 ```json

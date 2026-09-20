@@ -11,6 +11,15 @@
 /logs/
 /run/
 /data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+!scripts/nl_tests/fixtures/**/*.sqlite
+!scripts/nl_tests/fixtures/**/*.db
+**/bootstrap-credentials.txt
+.deployed-commit
 /release-bin/
 /prebuilt/
 /skills_output/

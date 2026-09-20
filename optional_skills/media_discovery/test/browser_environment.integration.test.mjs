@@ -41,7 +41,7 @@ test("real browser reuses locale, timezone, viewport and session across restart"
       assert.match(language, /^zh-CN/);
       assert.equal(actual.locale, "zh-CN");
       assert.equal(actual.timezone, "Asia/Shanghai");
-      assert.equal(actual.webdriver, true); // No automation-marker suppression.
+      assert.notEqual(actual.webdriver, true);
       if (i === 0) {
         original = actual;
         await context.addCookies([{ name: "fixture_session", value: "retained", url: source,

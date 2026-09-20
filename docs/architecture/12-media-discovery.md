@@ -10,8 +10,8 @@ Next: [NNI capability and heartbeat control](13-nni-capability.md)
 <!-- ai-learning-navigation:end -->
 
 `media_discovery` is an optional Skill Store capability for bounded discovery on
-Douyin, Xiaohongshu, and Kuaishou. Xiaohongshu defaults to a visible browser;
-Douyin and Kuaishou default to silent mode. Explicit mode preferences take precedence.
+Douyin, Xiaohongshu, and Kuaishou. All platforms default to silent mode.
+Pass `visible` only when the user explicitly asks to open a browser window.
 Silent runs may open a window when the private profile needs manual login or human verification.
 It captures only content that the browser has
 already rendered and exports ordered CSV records; it does not run OCR or model text review,
@@ -111,7 +111,7 @@ flowchart TD
     T[Structured source targets<br/>home feed, keywords, or seed URLs]
     G[Mark active batch draining]
     P[Finish and commit the current complete post]
-    B[Persistent browser profile<br/>Xiaohongshu visible / others silent]
+    B[Persistent browser profile<br/>silent by default]
     Q{Platform access}
     M[Temporary manual login or verification window]
     MR{One retry in the requested silent mode}
@@ -195,8 +195,9 @@ duplicate delivery. One-shot collection does not opt into this reporting path.
 
 ## Screenshot and Capture Boundary
 
-When the user omits a mode preference, the model omits `browser_mode`: Xiaohongshu
-uses `visible`, while Douyin/Kuaishou use `silent`. Explicit mode overrides apply
+When the user omits a mode preference, the model omits `browser_mode` and every
+platform uses `silent`. Pass `visible` only when the user explicitly asks to open
+a browser. Explicit mode overrides apply
 to all selected platforms; resume keeps saved settings. Manual login/verification
 may temporarily open a window for silent runs. Runtime never matches localized
 words to choose a mode. The skill screenshots a rendered

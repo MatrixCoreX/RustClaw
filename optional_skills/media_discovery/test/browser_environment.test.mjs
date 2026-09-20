@@ -3,7 +3,13 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { launchPlatformBrowser, nativeBrowserEnvironment } from "../src/browser_environment.mjs";
+import {
+  AUTOMATION_BLINK_FLAG,
+  AUTOMATION_DEFAULT_ARG,
+  launchPlatformBrowser,
+  nativeBrowserEnvironment,
+  persistentContextLaunchOptions,
+} from "../src/browser_environment.mjs";
 import { handleRequest } from "../src/main.mjs";
 
 const host = { platform: "linux", arch: "x64", locale: "zh-CN", timeZone: "Asia/Shanghai" };
@@ -22,6 +28,22 @@ async function fixture(t) {
     headless: true, native: nativeBrowserEnvironment(host) };
   return { root, launches, chromium, options, closed: () => closed };
 }
+
+test("launch options drop Chromium automation switch without spoofing identity", () => {
+  const environment = nativeBrowserEnvironment(host);
+  const headed = persistentContextLaunchOptions({
+    executablePath: "/fixture/chrome",
+    headless: false,
+    environment,
+    hostEnv: { WAYLAND_DISPLAY: "wayland-0" },
+    hostPlatform: "linux",
+  });
+  assert.deepEqual(headed.ignoreDefaultArgs, [AUTOMATION_DEFAULT_ARG]);
+  assert.equal(headed.args.includes(AUTOMATION_BLINK_FLAG), true);
+  assert.equal(headed.args.includes("--ozone-platform=wayland"), true);
+  assert.equal(headed.userAgent, undefined);
+  assert.equal(headed.proxy, undefined);
+});
 
 test("native settings cover Linux/macOS architectures without fabricating browser identity", () => {
   for (const platform of ["linux", "darwin"]) for (const arch of ["x64", "arm64"]) {
@@ -52,7 +74,8 @@ test("manual and silent launches reuse saved settings and leave login data untou
     assert.equal(actual.timezoneId, "Asia/Shanghai");
     assert.deepEqual(actual.viewport, { width: 1280, height: 900 });
     assert.equal(actual.userAgent, undefined);
-    assert.equal(actual.ignoreDefaultArgs, undefined);
+    assert.deepEqual(actual.ignoreDefaultArgs, [AUTOMATION_DEFAULT_ARG]);
+    assert.equal(actual.args.includes(AUTOMATION_BLINK_FLAG), true);
     assert.equal(actual.proxy, undefined);
   }
   assert.equal(launches[0].options.headless, true);

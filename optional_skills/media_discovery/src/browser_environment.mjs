@@ -60,6 +60,40 @@ async function readEnvironment(file, native) {
   return { environment, needsSave: false };
 }
 
+export const AUTOMATION_DEFAULT_ARG = "--enable-automation";
+export const AUTOMATION_BLINK_FLAG = "--disable-blink-features=AutomationControlled";
+
+export function persistentContextLaunchOptions({
+  executablePath,
+  headless,
+  environment,
+  hostEnv = process.env,
+  hostPlatform = process.platform,
+}) {
+  const args = [AUTOMATION_BLINK_FLAG];
+  if (!headless && hostPlatform === "linux" && hostEnv.WAYLAND_DISPLAY) {
+    args.unshift("--ozone-platform=wayland");
+  }
+  return {
+    executablePath,
+    headless,
+    locale: environment.locale,
+    timezoneId: environment.timezone_id,
+    viewport: environment.viewport,
+    // Drop Chromium's default automation switch. Stored profile data still cannot
+    // add a user-agent, proxy, or extra flags.
+    ignoreDefaultArgs: [AUTOMATION_DEFAULT_ARG],
+    args,
+  };
+}
+
+export async function concealAutomationMarkers(context) {
+  if (typeof context?.addInitScript !== "function") return;
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+  });
+}
+
 export async function launchPlatformBrowser({ chromium, root, platform, executablePath, headless,
   native = nativeBrowserEnvironment() }) {
   if (!SUPPORTED_PLATFORMS.includes(platform)) throw new Error("platform_unsupported");
@@ -68,17 +102,13 @@ export async function launchPlatformBrowser({ chromium, root, platform, executab
   await fs.mkdir(profile, { recursive: true });
   const file = path.join(profile, ENVIRONMENT_FILE);
   const { environment, needsSave } = await readEnvironment(file, native);
-  const context = await chromium.launchPersistentContext(profile, {
+  const context = await chromium.launchPersistentContext(profile, persistentContextLaunchOptions({
     executablePath,
     headless,
-    locale: environment.locale,
-    timezoneId: environment.timezone_id,
-    viewport: environment.viewport,
-    // UA/client hints, OS, fonts and graphics remain native to the installed browser.
-    args: !headless && process.platform === "linux" && process.env.WAYLAND_DISPLAY
-      ? ["--ozone-platform=wayland"] : [],
-  });
+    environment,
+  }));
   try {
+    await concealAutomationMarkers(context);
     // Only persist after Chromium has successfully acquired this profile's lock.
     if (needsSave) await writeAtomic(file, `${JSON.stringify(environment, null, 2)}\n`);
     return context;

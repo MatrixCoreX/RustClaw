@@ -322,10 +322,11 @@ async function existingExecutable() {
         "/usr/local/bin/chromium",
       ]
     : [
+        "/usr/bin/google-chrome-stable",
+        "/usr/bin/google-chrome",
+        "/opt/google/chrome/google-chrome",
         "/usr/bin/chromium",
         "/usr/bin/chromium-browser",
-        "/usr/bin/google-chrome",
-        "/usr/bin/google-chrome-stable",
         "/snap/bin/chromium",
       ];
   for (const candidate of candidates) {
@@ -1556,7 +1557,7 @@ export async function collectXiaohongshuHomeFeed(
         || completed.has(`xiaohongshu:${card.itemId}`)) continue;
       seen.add(card.itemId);
       try {
-        await pacingWait(page, config, 0.5);
+        await pacingWait(page, config, 1.25);
         const result = await withVisibleAccess(page, "xiaohongshu", config, shouldStop, () => collectXiaohongshuFeedCard(
           root,
           runId,
