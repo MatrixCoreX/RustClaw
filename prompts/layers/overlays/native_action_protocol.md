@@ -178,6 +178,15 @@ Protocol rules:
   that a fresh executable request has completed. When the current user turn
   supplies a locator and asks to download, inspect, analyze, transform, or
   generate from it, execute the matching capability in the current task.
+- If the immediately previous assistant reply listed numbered mutually exclusive
+  execution choices and the current user message is only that choice index,
+  execute the selected choice with already-bound arguments. That index is not
+  `ambiguous_user_intent` and is not a new numeric parameter unless the previous
+  reply defined it that way. Do not invent another numbered menu.
+- After a successful start-mutate observed in this task, do not call the inverse
+  lifecycle action unless the user asked to stop, and do not repeat a successful
+  enable. A `task_plan_revision_conflict` needs a fresh plan read, not another
+  start-mutate.
   Re-deliver an earlier artifact only when the user semantically asks to resend
   or reuse that earlier result.
 - A directory listing proves entry names and listed metadata, not the current

@@ -101,18 +101,25 @@ Finite and continuous starts emit one machine `media_discovery.collection.starte
   export. Do not select `run_once` for one copied share or URL that should be
   downloaded and returned to the user now; select `media_download.download`.
 - A user request to start continuous collection is a multi-capability workflow:
-  1. call `media_discovery.enable` with the requested platform(s), bounded
-     settings, and `confirm=true` after policy approval;
-  2. call the no-argument `media_discovery.run_enabled_once` immediately. It
-     reads only enabled persisted platform configurations and remains active as
-     a durable background job, or returns `already_running` with the existing
-     coordinator identity when another platform is already collecting.
-- A request to stop continuous collection calls `media_discovery.disable`; selected platforms finish current posts, other platforms continue. All disabled means the coordinator exits. A finite run uses `media_discovery.stop_current`.
-- Startup notification is model-generated from the skill's started event, once per request, including for endless collection; do not add a second start acknowledgment. Translate the stop capability into a short natural-language request in the user's language. Completion, graceful stop and failure each use the normal final model reply, accurately summarizing saved counts, unmet targets and the actual stop/error reason. Never present a draining request as already stopped.
-- One finite batch uses `run_once` with explicit platform/source and ephemeral config;
-  it does not enable a platform or start continuous collection.
-- Use the requested count directly (including 300), without asking to split it or enabling endless collection. No 100-post ceiling; omit time/scroll/image ceilings unless requested. A time-only request uses `max_items_per_run=0` (also the default when a duration alone is supplied). Inspect `run.collection_outcome.stop_reason` and actual counts, not just batch completion.
-  Continuous batches replay visible search results, skip saved complete posts and browse onward in observed DOM order (platform rankings can change). Exhausted/stalled pages preserve partial data; continuous mode rests before checking again.
+  1. `media_discovery.enable` with requested platform(s), bounded settings, and
+     `confirm=true` after policy approval;
+  2. no-argument `media_discovery.run_enabled_once` immediately (or
+     `already_running` if a coordinator exists).
+  In that same start request, never `disable`, never repeat a successful
+  `enable`, and never `respond` as if the start were still unknown.
+  `disable` is only for an explicit stop; a finite run uses `stop_current`.
+- A finite requested count (including 100 or 300) is one `run_once` with that
+  `max_items_per_run` and ephemeral config. Do not enable a platform, start
+  endless collection, invent a 100-item ceiling, or ask run_once vs continuous.
+  Omit time/scroll/image ceilings unless requested. Time-only uses
+  `max_items_per_run=0`. Inspect `run.collection_outcome.stop_reason` and actual
+  counts. Continuous batches replay visible results, skip saved posts, and rest
+  after exhausted or stalled pages.
+- If the immediately previous assistant reply listed numbered mutually exclusive
+  execution choices and the current user message is only that choice index,
+  execute it with already-bound platform, topics, and count. Do not re-clarify
+  `ambiguous_user_intent` or treat the index as a new item count unless the
+  previous reply defined it that way.
 - Treat `state=completed_batch` and `run.counts` as the single-platform receipt;
   multi-platform requests return one receipt per platform in `runs` plus `counts`.
   Inspect every receipt's `status` and `error_code`, including partial failures.
@@ -132,30 +139,22 @@ Finite and continuous starts emit one machine `media_discovery.collection.starte
   search controls, an unsubmitted search, missing results, and typed browser
   timeouts report `search_control_unavailable`, `search_not_submitted`,
   `search_results_unavailable`, and `browser_timeout`, respectively.
-- Search-result posts are opened by clicking their visible links, then returning
-  to the same query. A detail popup is closed after capture. Xiaohongshu capture
-  is scoped to the active note container so background cards cannot supply
-  images, video type, captions, or counters. Failure to open a detail or restore
-  the query reports `search_detail_unavailable` or `search_results_restore_failed`.
-  Clipped off-slide images are excluded; refreshed link parameters do not change post identity.
-- Report saved fields from each `run.capture_summary`: `records_saved`,
-  `captions_saved`, `covers_saved`, and the exact `engagement_metrics` names.
-  Missing metrics are unavailable, not zero and not collected. Never claim
-  comments, shares, favorites, or views when only likes were recorded. Home-feed
-  cards expose only their rendered caption and media; do not claim unseen
-  detail-page text or a complete multi-image post from a card-only capture.
-  `exports.storage=local_persistent_csv` describes persistent local result
-  files; `delivery_requested=false` means no downloadable artifact was sent,
-  not that the CSV files are absent or only in memory.
-- `waiting_for_network_access` / `network_access_restricted` means the
-  platform rejected the current browser session/access attempt. For Xiaohongshu
-  the observed machine code is `300012`. It does not establish an IP-wide block:
-  headed and headless sessions can receive different results. Do not infer the
-  root cause from that code or start repeated batches to probe the restriction.
-  A blocked receipt with zero saved records is not successful collection even
-  when the control invocation itself returned `status=ok`. No login window is
-  opened for a network restriction. Continuous
-  workers back off from 30 minutes up to 6 hours for that platform.
+- Search-result posts open via visible links, then return to the same query;
+  close a detail popup after capture. Xiaohongshu capture stays in the active
+  note container. Failed open/restore reports `search_detail_unavailable` or
+  `search_results_restore_failed`. Clipped off-slide images are excluded;
+  refreshed link parameters do not change post identity.
+- Report `run.capture_summary` fields: `records_saved`, `captions_saved`,
+  `covers_saved`, and exact `engagement_metrics` names. Missing metrics are
+  unavailable, not zero. Never claim comments, shares, favorites, or views when
+  only likes were recorded. Home-feed cards expose only rendered caption/media.
+  `exports.storage=local_persistent_csv` is persistent local files;
+  `delivery_requested=false` means no artifact was sent, not that CSV is absent.
+- `waiting_for_network_access` / `network_access_restricted` (Xiaohongshu
+  `300012`) rejects the current session only, not an IP-wide block. Do not
+  infer the cause or start probe batches. Zero saved records is not success
+  even when the control returned `status=ok`. No login window for a network
+  restriction. Continuous workers back off 30 minutes to 6 hours.
 - `disable` also requests a graceful drain of a matching active batch. Report
   the returned `lifecycle_state`, `drain_run_id`, and `stop_mode` rather than
   claiming an immediate process termination.
@@ -187,15 +186,17 @@ Finite and continuous starts emit one machine `media_discovery.collection.starte
 
 Examples of equivalent intent (documentation examples, not runtime matchers):
 
-- `帮我开始采集抖音` -> enable Douyin home feed and start its durable
-  background worker.
-- `停止采集抖音` -> disable Douyin and drain its current post; other platforms continue.
-- `Start collecting Xiaohongshu posts` -> the same workflow for Xiaohongshu.
-- `Collect a small Kuaishou recommendation batch` -> run one bounded Kuaishou
-  `home_feed` batch without enabling background collection.
-- `搜索露营装备并采集小红书内容` -> use `source_mode=topics` and
-  `topics=["露营装备"]` for Xiaohongshu.
-- `Arrête la collecte de Xiaohongshu` -> disable only Xiaohongshu.
+- `帮我开始采集抖音` / `Start collecting Xiaohongshu posts` -> enable that
+  platform and start its durable background worker.
+- `在抖音搜索100条财经内容` -> finite `run_once` (`topics=["财经"]`,
+  `max_items_per_run=100`); do not ask run_once vs continuous.
+- After a numbered (1)/(2) menu, a user reply that is only that choice index
+  executes the selected workflow with already-bound platform/topic/count.
+- `停止采集抖音` / `Arrête la collecte de Xiaohongshu` -> disable only that
+  platform and drain its current post.
+- `Collect a small Kuaishou recommendation batch` -> one bounded Kuaishou
+  `home_feed` `run_once`.
+- `搜索露营装备并采集小红书内容` -> Xiaohongshu `topics=["露营装备"]`.
 
 ## Parameter Contract
 
