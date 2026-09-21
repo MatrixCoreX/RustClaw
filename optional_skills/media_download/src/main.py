@@ -461,13 +461,20 @@ def _build_download_command(
     if not _bool(args, "browser_fallback", True):
         command.append("--no-browser-fallback")
 
-    if not resolve_only and storage_directory is not None:
+    if storage_directory is not None:
         command.extend(
             [
-                "--profile-checkpoint-dir",
-                str(storage_directory / "profile_checkpoints"),
+                "--browser-profile-dir",
+                str(storage_directory / "browser-profile"),
             ]
         )
+        if not resolve_only:
+            command.extend(
+                [
+                    "--profile-checkpoint-dir",
+                    str(storage_directory / "profile_checkpoints"),
+                ]
+            )
 
     if resolve_only:
         command.extend(["--print-url", "--no-ocr-images"])
@@ -1518,13 +1525,30 @@ def _failure_from_process(
     ):
         error_code = "dependency_unavailable"
         message_key = "media_download.error.dependency_unavailable"
+    elif "login_required" in lowered:
+        error_code = "login_required"
+        message_key = "media_download.error.login_required"
+    elif "display_unavailable" in lowered:
+        error_code = "display_unavailable"
+        message_key = "media_download.error.display_unavailable"
+    elif "interactive_verification_timeout" in lowered:
+        error_code = "interactive_verification_timeout"
+        message_key = "media_download.error.interactive_verification_timeout"
+    elif "interactive_verification_cancelled" in lowered:
+        error_code = "interactive_verification_cancelled"
+        message_key = "media_download.error.interactive_verification_cancelled"
     elif "no downloadable" in lowered or "no media" in lowered:
         error_code = "media_not_found"
         message_key = "media_download.error.media_not_found"
     else:
         error_code = "execution_failed"
         message_key = "media_download.error.execution_failed"
-    retryable = any(marker in lowered for marker in ("timed out", "timeout", "temporarily", "connection reset"))
+    retryable = error_code in {
+        "login_required",
+        "display_unavailable",
+        "interactive_verification_timeout",
+        "interactive_verification_cancelled",
+    } or any(marker in lowered for marker in ("timed out", "timeout", "temporarily", "connection reset"))
     readable = _diagnostics(stderr) or f"{action} failed with exit code {returncode}"
     details: dict[str, Any] = {
         "exit_code": returncode,
@@ -1893,6 +1917,7 @@ def _capabilities_extra() -> dict[str, Any]:
         "supported_platforms": list(SUPPORTED_PLATFORMS),
         "public_content_only": True,
         "system_browser_cookies": False,
+        "skill_owned_browser_profile": True,
         "image_article_posts": {
             "platforms": ["douyin", "xiaohongshu"],
             "default_outputs": ["original_images", "article_text"],

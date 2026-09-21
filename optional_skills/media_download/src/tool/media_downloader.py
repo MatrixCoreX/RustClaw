@@ -38,6 +38,7 @@ from typing import Any, Callable, Iterable
 
 import image_ocr
 import video_transcriber
+import xiaohongshu_access
 from browser_devtools import DevToolsConnection, DevToolsError
 from task_cancellation import CancellationToken, OperationCancelled, terminate_process
 
@@ -789,19 +790,7 @@ def looks_like_kuaishou_video_url(url: str) -> bool:
 
 
 def looks_like_xiaohongshu_video_url(url: str) -> bool:
-    lowered = unwrap_url(url).lower()
-    if not lowered.startswith(("http://", "https://", "//")):
-        return False
-    parsed = urllib.parse.urlsplit(lowered)
-    host = parsed.netloc
-    path = parsed.path
-    if not path or path == "/":
-        return False
-    if path.endswith((".ico", ".json", ".pdf", ".js", ".css", ".png", ".jpg", ".jpeg", ".webp", ".svg")):
-        return False
-    if "sns-video" in host or "redcdn" in host:
-        return ".mp4" in path or "stream" in path or "video" in path
-    return ".mp4" in path and any(token in host for token in ("xiaohongshu", "xhscdn", "xhs"))
+    return xiaohongshu_access.looks_like_xiaohongshu_video_url(unwrap_url(url))
 
 
 def looks_like_tiktok_video_url(url: str) -> bool:
@@ -1742,18 +1731,15 @@ def extract_xiaohongshu_candidates_from_json(value: Any) -> list[Candidate]:
     for item in iter_dicts(value):
         stream = item.get("stream")
         if isinstance(stream, dict):
-            for codec_index, codec in enumerate(("h264", "h265", "av1")):
-                streams = stream.get(codec)
-                if isinstance(streams, list):
-                    for stream_index, stream_item in enumerate(streams):
-                        add_urls_from_value(
-                            candidates,
-                            seen,
-                            stream_item,
-                            f"xiaohongshu.stream.{codec}[{stream_index}]",
-                            5 + codec_index * 10 + stream_index,
-                            "xiaohongshu",
-                        )
+            for codec, stream_index, stream_item in xiaohongshu_access.iter_xiaohongshu_stream_groups(stream):
+                add_urls_from_value(
+                    candidates,
+                    seen,
+                    stream_item,
+                    f"xiaohongshu.stream.{codec}[{stream_index}]",
+                    5 + stream_index,
+                    "xiaohongshu",
+                )
 
         for key, priority in (
             ("masterUrl", 8),
@@ -2535,6 +2521,7 @@ def gather_browser_candidates(
     chrome_path: str | None = None,
     require_audio: bool = False,
     use_system_browser_cookies: bool = True,
+    browser_profile_dir: str | None = None,
 ) -> tuple[str | None, list[Candidate], list[ImageCandidate], ArticleContent | None, list[str]]:
     platform = normalize_platform(platform)
     urls = extract_urls(share_text)
@@ -2596,6 +2583,10 @@ def gather_browser_candidates(
             target_urls.append(share_url)
 
     prioritized_target_urls = prioritize_browser_target_urls(platform, item_id, target_urls)
+    if platform == "xiaohongshu":
+        prioritized_target_urls = xiaohongshu_access.preferred_browser_urls(share_text, prioritized_target_urls)
+        xhs_target = xiaohongshu_access.select_share_target(share_text, prioritized_target_urls)
+        item_id = item_id or xhs_target.note_id
     if prioritized_target_urls != target_urls and prioritized_target_urls:
         logs.append(f"{platform}: browser fallback added the platform-specific item route")
     target_urls = prioritized_target_urls
@@ -2625,10 +2616,19 @@ def gather_browser_candidates(
                 image_candidates.append(candidate)
         article = richer_article(article, exact_article)
 
-    for target_url in target_urls:
+    xhs_profile = (
+        xiaohongshu_access.persistent_profile_dir(browser_profile_dir)
+        if platform == "xiaohongshu"
+        else None
+    )
+    pending_targets = list(target_urls)
+    login_retry_used = False
+    while pending_targets:
+        target_url = pending_targets.pop(0)
         with tempfile.TemporaryDirectory(prefix="media_downloader_chrome_", ignore_cleanup_errors=True) as tmpdir:
             netlog_path = Path(tmpdir) / "netlog.json"
             require_item_match = browser_target_requires_item_match(platform, target_url, item_id)
+            user_data_dir = str(xhs_profile) if xhs_profile is not None else tmpdir
             command = [
                 chrome,
                 "--headless=new",
@@ -2637,14 +2637,15 @@ def gather_browser_candidates(
                 "--disable-dev-shm-usage",
                 "--mute-audio",
                 "--autoplay-policy=no-user-gesture-required",
-                f"--user-data-dir={tmpdir}",
+                f"--user-data-dir={user_data_dir}",
                 f"--log-net-log={netlog_path}",
                 "--net-log-capture-mode=IncludeSensitive",
                 f"--virtual-time-budget={max(1000, int(timeout * 1000))}",
                 "--dump-dom",
                 target_url,
             ]
-            logs.append(f"{platform}: browser fallback opening {target_url}")
+            opened_path = urllib.parse.urlsplit(target_url).path or target_url
+            logs.append(f"{platform}: browser fallback opening {opened_path}")
             try:
                 completed = run_task_subprocess(
                     command,
@@ -2729,6 +2730,29 @@ def gather_browser_candidates(
                     priority,
                     platform,
                 )
+
+            if (
+                platform == "xiaohongshu"
+                and xiaohongshu_access.xiaohongshu_html_is_login(completed.stdout, target_url)
+                and not candidates
+                and not image_candidates
+            ):
+                logs.append("xiaohongshu: login_required")
+                if not login_retry_used and xhs_profile is not None:
+                    login_retry_used = True
+                    status = xiaohongshu_access.wait_for_skill_owned_login(
+                        chrome=chrome,
+                        profile_dir=xhs_profile,
+                        page_url=target_url,
+                        note_id=item_id,
+                        on_tick=raise_if_task_cancelled,
+                    )
+                    logs.append(f"xiaohongshu: interactive_login={status}")
+                    if status == "ok":
+                        pending_targets.insert(0, target_url)
+                        continue
+                    if status == xiaohongshu_access.DISPLAY_UNAVAILABLE:
+                        logs.append("xiaohongshu: display_unavailable")
 
             if not netlog_path.exists():
                 logs.append(f"{platform}: browser fallback produced no network log")
@@ -4099,6 +4123,18 @@ def gather_web_platform_candidates(
     }
 
     for share_url in urls:
+        request_url = share_url
+        if platform == "xiaohongshu":
+            target = xiaohongshu_access.resolve_xiaohongshu_share_url(
+                share_url,
+                cookie=cookie,
+                timeout=timeout,
+                headers=headers,
+            )
+            request_url = target.page_url
+            item_id = item_id or target.note_id
+            if target.login_barrier:
+                logs.append("xiaohongshu: login_required")
         logs.append(f"{platform}: resolving {share_url}")
         if platform == "tiktok":
             resolved, session_cookie = http_get_with_session_cookies(
@@ -4110,7 +4146,7 @@ def gather_web_platform_candidates(
             )
         else:
             resolved = http_get(
-                share_url,
+                request_url,
                 cookie=cookie,
                 timeout=timeout,
                 max_bytes=6 * 1024 * 1024,
@@ -4120,6 +4156,11 @@ def gather_web_platform_candidates(
         page_text = decode_text(resolved.content, resolved.headers)
         logs.append(f"{platform}: final URL: {resolved.url}")
         item_id = item_id or extract_platform_id(platform, resolved.url, page_text)
+        if platform == "xiaohongshu" and xiaohongshu_access.xiaohongshu_html_is_login(
+            page_text,
+            resolved.url,
+        ):
+            logs.append("xiaohongshu: login_required")
 
         if platform == "xiaohongshu":
             exact_payload = find_xiaohongshu_note_payload_in_html(page_text, item_id)
@@ -4178,6 +4219,7 @@ def gather_candidates_for_request(
     chrome_path: str | None = None,
     require_audio: bool = False,
     use_system_browser_cookies: bool = True,
+    browser_profile_dir: str | None = None,
 ) -> tuple[str, str | None, list[Candidate], list[ImageCandidate], ArticleContent | None, list[str]]:
     platform = normalize_platform(platform)
     resolved_platform = detect_platform(share_text) if platform == "auto" else platform
@@ -4227,6 +4269,7 @@ def gather_candidates_for_request(
                 chrome_path=chrome_path,
                 require_audio=require_audio,
                 use_system_browser_cookies=use_system_browser_cookies,
+                browser_profile_dir=browser_profile_dir,
             )
             logs.extend(browser_logs)
             item_id = item_id or browser_item_id
@@ -4259,6 +4302,7 @@ def gather_candidates_for_request(
                 chrome_path=chrome_path,
                 require_audio=require_audio,
                 use_system_browser_cookies=use_system_browser_cookies,
+                browser_profile_dir=browser_profile_dir,
             )
             platform_logs.extend(browser_logs)
             item_id = item_id or browser_item_id
@@ -5685,6 +5729,7 @@ def gather_candidates_for_request_with_retries(
                 chrome_path=args.chrome_path,
                 require_audio=audio_text_processing_requested(args),
                 use_system_browser_cookies=args.system_browser_cookies,
+                browser_profile_dir=getattr(args, "browser_profile_dir", None),
             )
         except (DouyinDownloadError, OSError) as exc:
             if attempt >= max_attempts:
@@ -5850,6 +5895,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help=(
             "Host-provided private directory for resumable profile checkpoints. "
             "Completed items are content-addressed here and restored after a safe retry."
+        ),
+    )
+    parser.add_argument(
+        "--browser-profile-dir",
+        help=(
+            "Host-provided private directory for this skill's persistent browser "
+            "profiles. Xiaohongshu login is stored only here and is never read "
+            "from the system browser or another skill."
         ),
     )
     parser.add_argument(
@@ -8063,6 +8116,15 @@ def handle_resolved_media(
             )
 
     if not candidates and not image_candidates:
+        joined_logs = "\n".join(logs)
+        if "xiaohongshu: display_unavailable" in joined_logs:
+            raise DouyinDownloadError("display_unavailable")
+        if "interactive_verification_timeout" in joined_logs:
+            raise DouyinDownloadError("interactive_verification_timeout")
+        if "interactive_verification_cancelled" in joined_logs:
+            raise DouyinDownloadError("interactive_verification_cancelled")
+        if "xiaohongshu: login_required" in joined_logs:
+            raise DouyinDownloadError("login_required")
         message = (
             "No downloadable video URL was found. The post may be private, unavailable, "
             "or the platform may require a browser cookie for this page."
@@ -8232,6 +8294,7 @@ def handle_resolved_media(
                         timeout=args.browser_timeout,
                         chrome_path=args.chrome_path,
                         require_audio=True,
+                        browser_profile_dir=getattr(args, "browser_profile_dir", None),
                     )
                 except DouyinDownloadError as exc:
                     last_error = exc

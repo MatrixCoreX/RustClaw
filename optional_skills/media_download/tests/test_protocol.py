@@ -47,6 +47,7 @@ class AdapterTest(unittest.TestCase):
         self.assertEqual(response["extra"]["source_skill"], "media_download")
         self.assertEqual(response["extra"]["status"], "ok")
         self.assertFalse(response["extra"]["system_browser_cookies"])
+        self.assertTrue(response["extra"]["skill_owned_browser_profile"])
         self.assertIn("download", response["extra"]["actions"])
         self.assertEqual(
             response["extra"]["image_article_posts"]["default_outputs"],
@@ -535,7 +536,17 @@ class AdapterTest(unittest.TestCase):
             command[checkpoint_index + 1],
             str(storage / "profile_checkpoints"),
         )
+        profile_index = command.index("--browser-profile-dir")
+        self.assertEqual(
+            command[profile_index + 1],
+            str(storage / "browser-profile"),
+        )
         self.assertNotIn("--profile-checkpoint-dir", resolve_command)
+        resolve_profile_index = resolve_command.index("--browser-profile-dir")
+        self.assertEqual(
+            resolve_command[resolve_profile_index + 1],
+            str(storage / "browser-profile"),
+        )
 
     def test_partial_profile_checkpoint_is_reported_as_a_persisted_side_effect(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -788,6 +799,19 @@ class AdapterTest(unittest.TestCase):
         )
         self.assertEqual(failure.details["failure_phase"], "execution_no_effect")
         self.assertFalse(failure.details["side_effect_applied"])
+
+    def test_failed_download_maps_xiaohongshu_login_wall(self) -> None:
+        failure = self.skill._failure_from_process(
+            "download",
+            1,
+            "xiaohongshu: login_required\nlogin_required",
+            [],
+            output_rollback_ok=True,
+        )
+
+        self.assertEqual(failure.error_code, "login_required")
+        self.assertTrue(failure.retryable)
+        self.assertEqual(failure.message_key, "media_download.error.login_required")
 
     def test_failed_tool_rolls_back_partial_output_and_proves_no_effect(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
