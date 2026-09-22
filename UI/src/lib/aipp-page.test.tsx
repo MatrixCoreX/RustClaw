@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   AippCatalogCard,
+  AippCatalogGrid,
   AippMediaItemCard,
   AippTaskActivityCard,
   formatPublishedAt,
@@ -169,10 +170,27 @@ test("loads sandbox bundles through an opaque iframe and a capability allowlist"
   assert.match(source, /AIPP_BRIDGE_MAX_ARGS_BYTES = 64 \* 1024/);
 });
 
-test("keeps Ai APP installation state separate from its skill", () => {
+test("only installed apps appear in the launcher", () => {
+  const base: AippCatalogItem = {
+    skill_name: "installed", package_version: "1", renderer: "collection_feed_v1",
+    data_contract: "media_collection_v1", icon: "download", default_locale: "en",
+    titles: { en: "Installed" }, descriptions: {}, installed: true,
+    entrypoint: null, bridge_capabilities: [], task_channel_scope: null,
+  };
+  const markup = renderToStaticMarkup(<AippCatalogGrid
+    apps={[base, { ...base, skill_name: "removed", titles: { en: "Removed" }, installed: false }]}
+    lang="en" onOpen={() => undefined} onInstall={() => undefined} />);
+  assert.match(markup, /Installed/);
+  assert.doesNotMatch(markup, /Removed|Install Ai APP/);
+  assert.equal((markup.match(/data-testid="aipp-launcher-icon"/g) || []).length, 1);
+});
+
+test("warns that Ai APP removal also uninstalls its skill while retaining user data", () => {
   const source = readFileSync(new URL("../components/AippPage.tsx", import.meta.url), "utf8");
-  assert.match(source, /method: installed \? "POST" : "DELETE"/);
-  assert.match(source, /对应技能、配置和采集数据都会保留/);
+  assert.match(source, /removeAippAndSkill/);
+  assert.match(source, /卸载应用和技能/);
+  assert.match(source, /配置和已采集数据会保留/);
+  assert.doesNotMatch(source, /method:.*"DELETE"/);
   assert.match(source, /安装 Ai APP/);
 });
 

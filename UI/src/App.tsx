@@ -2422,6 +2422,11 @@ export default function App() {
               apiFetch={apiFetch}
               onOpenAgent={() => setCurrentPage("chat")}
               onOpenSkillStore={() => setCurrentPage("skill_store")}
+              onSkillsChanged={() => {
+                void fetchSkills();
+                void fetchSkillsConfig();
+                void fetchSkillStore(true);
+              }}
             />
           ) : null}
 

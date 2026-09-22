@@ -1018,12 +1018,13 @@ under `aipp/`; the main UI only supplies the generic isolated host. The decoupli
 boundary is checked by `python3 scripts/check_aipp_decoupling.py`.
 
 Ai APP admission follows the skill's exact manifest, receipt, policy grant,
-enable state, and registry generation. Installing a skill can install its Ai APP,
-but the visual application can also be uninstalled independently. That operation
-writes a host overlay tombstone and leaves the skill, its configuration, and its
-private data untouched; reinstalling the Ai APP revalidates the current skill
-package and clears the tombstone. Uninstalling or disabling the skill still makes
-its Ai APP unavailable. `media_discovery` presents its skill-private collection
+enable state, and registry generation. Installing a skill can install its Ai APP.
+The console's uninstall action explicitly confirms removal of both the app and its
+skill, then uses the existing Skill Store removal job while preserving configuration
+and private data. The icon and cached catalog entry disappear after confirmed success;
+reinstall through Skill Store. Apps hidden through the presentation-only API can be
+restored from the separate Install app chooser. Uninstalling or disabling the skill
+makes its Ai APP unavailable. `media_discovery` presents its skill-private collection
 ledger, previews, source links, filters, and cursor-based pages. `media_download`
 uses the generic task-activity renderer to present only retained tasks that actually
 executed that skill, including requests from Agent UI and external communication

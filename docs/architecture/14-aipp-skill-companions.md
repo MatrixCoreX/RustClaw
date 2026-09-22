@@ -69,7 +69,9 @@ flowchart TD
     TL[Runtime task and event ledgers]
     F[Bounded field projection and cursor filter]
     V[Authenticated preview endpoint]
-    T[Independent app tombstone]
+    T[Confirm app and skill removal]
+    J[Skill Store removal job]
+    X[Remove launcher icon after success]
 
     P --> M --> A --> R --> G
     G -->|enabled exact binding| C
@@ -78,8 +80,9 @@ flowchart TD
     H --> HR --> TL --> F
     D --> V --> HR
     H --> SB --> CB --> G
-    C -->|uninstall app only| T
-    T -->|reinstall and revalidate| C
+    C -->|uninstall| T --> J --> X
+    J -->|preserve configuration and private data| D
+    X -->|reinstall from Skill Store| A
 ```
 
 For an admitted package, the runtime verifies the current binding, package
@@ -87,10 +90,13 @@ version, manifest digest, install receipt digest, policy grant, enable state, an
 registry generation before exposing it. A repository package without a runtime
 binding is read from the base registry, subject to the same enable state.
 Disabling, revoking, updating, or uninstalling a skill changes AiPP availability
-with the same transaction. An operator may also uninstall only the Ai APP. This
-writes an overlay tombstone without changing skill execution, configuration, or
-private data. Reinstalling the app clears that tombstone only after the current
-package has passed the same manifest, receipt, and generation checks.
+with the same transaction. The console confirms that uninstalling an app also
+removes its skill, submits the ordinary Skill Store removal job with configuration
+and private data retained, and waits for its successful terminal status before
+removing the launcher icon and cached entry. Cancellation or failure is not success.
+Reinstallation uses Skill Store. The presentation-only API still writes an overlay
+tombstone without changing the skill; its hidden apps are offered in the separate
+Install app chooser, not as launcher icons.
 
 ## Security and Extension Boundary
 
@@ -243,5 +249,6 @@ code to `clawd` or the main UI.
 
 The manifest is part of the immutable package digest and receipt. Runtime-imported
 skills therefore install and update their Ai APP through the same admission
-lifecycle. The separate Ai APP uninstall state controls only presentation and
-does not mutate or uninstall the skill.
+lifecycle. Presentation-only API state controls visibility independently. The
+console's explicit combined uninstall command instead uses the existing skill
+removal lifecycle; no skill-specific runtime or UI branch is added.

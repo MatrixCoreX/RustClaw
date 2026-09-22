@@ -29,6 +29,8 @@ import {
 } from "lucide-react";
 
 import { formatUiError } from "../lib/ui-error";
+import { AippSkillRemovalError, removeAippAndSkill } from "../lib/aipp-skill-removal";
+import { skillStoreErrorMessage } from "../lib/skill-store";
 import { AIPP_PAGE_SIZE, collectionGroupKey, completeCollectionPage, groupCollectionItems } from "../lib/aipp-collection";
 import { appStorageKey } from "../lib/product-identity";
 import { useUiDialog } from "./UiDialogProvider";
@@ -165,6 +167,7 @@ export interface AippPageProps {
   apiFetch: ApiFetch;
   onOpenAgent: () => void;
   onOpenSkillStore: () => void;
+  onSkillsChanged?: () => void;
 }
 
 export function localizedAippCopy(
@@ -236,7 +239,7 @@ export function AippCatalogGrid({ apps, lang, onOpen, onInstall }: {
 }) {
   return (
     <div data-testid="aipp-catalog-grid" className="grid grid-cols-3 items-start gap-x-4 gap-y-6 sm:grid-cols-[repeat(auto-fill,112px)] sm:gap-x-6">
-      {apps.map((app) => (
+      {apps.filter((app) => app.installed).map((app) => (
         <AippCatalogCard key={app.skill_name} app={app} lang={lang} onOpen={() => onOpen(app)} onInstall={() => onInstall(app)} />
       ))}
     </div>
@@ -975,12 +978,14 @@ export function AippMediaItemCard({
   );
 }
 
-export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: AippPageProps) {
-  const { confirm } = useUiDialog();
+export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore, onSkillsChanged }: AippPageProps) {
+  const { confirm, choose } = useUiDialog();
   const initialCatalog = useRef(
     readCachedAippCatalog(typeof window === "undefined" ? undefined : window.sessionStorage),
   );
   const [catalog, setCatalog] = useState<AippCatalogItem[]>(initialCatalog.current);
+  const catalogRef = useRef(initialCatalog.current);
+  const catalogRequestSequence = useRef(0);
   const [selectedSkill, setSelectedSkill] = useState(() =>
     readSelectedAipp(typeof window === "undefined" ? undefined : window.localStorage),
   );
@@ -1005,6 +1010,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
   const [selectedCollectionSequences, setSelectedCollectionSequences] = useState<number[]>([]);
   const [removingCollectionSequences, setRemovingCollectionSequences] = useState<number[]>([]);
   const [installActionSkill, setInstallActionSkill] = useState<string | null>(null);
+  const installAbortRef = useRef<AbortController | null>(null);
   const requestSequence = useRef(0);
   const autoRefreshInFlight = useRef(false);
   const apiFetchRef = useRef(apiFetch);
@@ -1012,74 +1018,118 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
   apiFetchRef.current = apiFetch;
   translateRef.current = t;
   const selectedApp = useMemo(
-    () => catalog.find((app) => app.skill_name === selectedSkill) || null,
+    () => catalog.find((app) => app.skill_name === selectedSkill && app.installed) || null,
     [catalog, selectedSkill],
   );
+  const installedApps = catalog.filter((app) => app.installed);
+  const availableApps = catalog.filter((app) => !app.installed);
   const activityChannels = selectedApp?.task_channel_scope === "communication"
     ? (["wechat", "telegram", "whatsapp", "feishu", "lark"] as const)
     : (["ui", "wechat", "telegram", "whatsapp", "feishu", "lark"] as const);
 
+  const applyCatalog = useCallback((apps: AippCatalogItem[]) => {
+    catalogRef.current = apps;
+    setCatalog(apps);
+    writeCachedAippCatalog(
+      typeof window === "undefined" ? undefined : window.sessionStorage,
+      apps,
+    );
+  }, []);
+
   const fetchCatalog = useCallback(async (silent = false) => {
+    const currentRequest = ++catalogRequestSequence.current;
     if (!silent) {
       setCatalogLoading(true);
       setError(null);
     }
     try {
-      const response = await apiFetchRef.current("/v1/aipps");
+      const response = await apiFetchRef.current("/v1/aipps", { cache: "no-store" });
       const body = (await response.json()) as ApiResponse<AippCatalogResponse>;
+      if (currentRequest !== catalogRequestSequence.current) return;
       if (!response.ok || !body.ok || !body.data) {
         throw new Error(body.error || `aipp_catalog_http_${response.status}`);
       }
-      setCatalog(body.data.apps);
-      writeCachedAippCatalog(
-        typeof window === "undefined" ? undefined : window.sessionStorage,
-        body.data.apps,
-      );
+      applyCatalog(body.data.apps);
       setSelectedSkill((current) =>
         body.data?.apps.some((app) => app.skill_name === current && app.installed)
           ? current
           : "",
       );
     } catch (cause) {
+      if (currentRequest !== catalogRequestSequence.current) return;
       if (!silent) {
         setError(formatUiError(cause, translateRef.current, "AiAPP 列表读取失败。", "Could not load the AiAPP catalog."));
       }
     } finally {
-      if (!silent) setCatalogLoading(false);
+      if (!silent && currentRequest === catalogRequestSequence.current) setCatalogLoading(false);
     }
-  }, []);
+  }, [applyCatalog]);
 
   const updateAippInstallState = useCallback(async (app: AippCatalogItem, installed: boolean) => {
     if (!installed) {
       const accepted = await confirm({
-        title: t("卸载 Ai APP", "Uninstall Ai APP"),
+        title: t("卸载应用和技能", "Uninstall app and skill"),
         message: t(
-          "只移除这个可视化应用。对应技能、配置和采集数据都会保留，可以随时重新安装。",
-          "Only the visual app will be removed. Its skill, configuration, and collected data remain available for later reinstallation.",
+          `将卸载“${localizedAippCopy(app.titles, lang, app.default_locale)}”及对应技能 ${app.skill_name}。卸载后 Agent 和通信端将无法再调用此技能。配置和已采集数据会保留，可以从 Skill Store 重新安装。`,
+          `This will uninstall "${localizedAippCopy(app.titles, lang, app.default_locale)}" and its skill ${app.skill_name}. Agent and messaging channels will no longer be able to call this skill. Configuration and collected data will be kept for reinstallation from Skill Store.`,
         ),
-        confirmLabel: t("卸载", "Uninstall"),
+        confirmLabel: t("卸载应用和技能", "Uninstall app and skill"),
         cancelLabel: t("取消", "Cancel"),
         tone: "danger",
       });
       if (!accepted) return;
     }
     setInstallActionSkill(app.skill_name);
+    const controller = new AbortController();
+    installAbortRef.current = controller;
     setError(null);
     try {
-      const response = await apiFetchRef.current(`/v1/aipps/${encodeURIComponent(app.skill_name)}`, {
-        method: installed ? "POST" : "DELETE",
-      });
-      const body = (await response.json()) as ApiResponse<{ installed: boolean }>;
-      if (!response.ok || !body.ok) throw new Error(body.error || `aipp_install_state_http_${response.status}`);
+      if (installed) {
+        const response = await apiFetchRef.current(`/v1/aipps/${encodeURIComponent(app.skill_name)}`, { method: "POST", signal: controller.signal });
+        const body = (await response.json()) as ApiResponse<{ installed: boolean }>;
+        if (!response.ok || !body.ok || body.data?.installed !== true) {
+          throw new Error(body.error || `aipp_install_state_http_${response.status}`);
+        }
+      } else {
+        await removeAippAndSkill((path, init) => apiFetchRef.current(path, init), app.skill_name, { signal: controller.signal });
+      }
+      if (controller.signal.aborted) return;
+      // Commit the acknowledged state before refreshing; stale reads must not restore removed apps.
+      catalogRequestSequence.current += 1;
+      applyCatalog(installed
+        ? catalogRef.current.map((item) => item.skill_name === app.skill_name ? { ...item, installed } : item)
+        : catalogRef.current.filter((item) => item.skill_name !== app.skill_name));
       if (installed) setSelectedSkill(app.skill_name);
       else if (selectedSkill === app.skill_name) setSelectedSkill("");
+      if (!installed) onSkillsChanged?.();
       await fetchCatalog();
     } catch (cause) {
-      setError(formatUiError(cause, t, "Ai APP 状态更新失败。", "Could not update the Ai APP."));
+      if (controller.signal.aborted) return;
+      setError(cause instanceof AippSkillRemovalError
+        ? cause.pending
+          ? t("卸载仍在后台处理中，请到 Skill Store 查看进度。", "Removal is still running in the background. Check progress in Skill Store.")
+          : skillStoreErrorMessage(cause.code, t)
+        : formatUiError(cause, t, "Ai APP 状态更新失败。", "Could not update the Ai APP."));
     } finally {
-      setInstallActionSkill(null);
+      if (!controller.signal.aborted) setInstallActionSkill(null);
+      if (installAbortRef.current === controller) installAbortRef.current = null;
     }
-  }, [confirm, fetchCatalog, selectedSkill, t]);
+  }, [applyCatalog, confirm, fetchCatalog, lang, onSkillsChanged, selectedSkill, t]);
+
+  const chooseAppToInstall = async () => {
+    const skill = await choose({
+      title: t("安装应用", "Install app"),
+      message: t("选择要安装的应用。", "Choose an app to install."),
+      cancelLabel: t("取消", "Cancel"),
+      choices: availableApps.map((app) => ({
+        value: app.skill_name,
+        label: localizedAippCopy(app.titles, lang, app.default_locale),
+        description: localizedAippCopy(app.descriptions, lang, app.default_locale),
+      })),
+    });
+    const app = catalogRef.current.find((item) => item.skill_name === skill && !item.installed);
+    if (app) await updateAippInstallState(app, true);
+  };
 
   const fetchPage = useCallback(async (silent = false) => {
     const currentRequest = ++requestSequence.current;
@@ -1211,6 +1261,10 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
 
   useEffect(() => {
     void fetchCatalog(initialCatalog.current.length > 0);
+    return () => {
+      catalogRequestSequence.current += 1;
+      installAbortRef.current?.abort();
+    };
   }, [fetchCatalog]);
 
   useEffect(() => {
@@ -1303,7 +1357,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
           <div className="min-w-0">
             <h1 className="text-lg font-semibold text-white">AiAPP</h1>
             <p className={`mt-2 text-sm leading-6 ${error ? "text-red-200" : "text-white/60"}`}>
-              {error || t("当前没有已启用技能提供 AiAPP。", "No enabled skill currently provides an AiAPP.")}
+              {error || t("尚未安装应用。", "No apps installed.")}
             </p>
             <button type="button" className="theme-secondary-btn mt-4 px-3 py-2 text-sm" onClick={onOpenSkillStore}>
               {t("打开 Skill Store", "Open Skill Store")}
@@ -1317,12 +1371,23 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
   if (!selectedApp) {
     return (
       <section className="space-y-4">
-        <header>
-          <p className="text-xs font-medium text-white/45">AiAPP</p>
-          <h1 className="mt-1 text-xl font-semibold text-white">{t("应用", "Apps")}</h1>
+        <header className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-medium text-white/45">AiAPP</p>
+            <h1 className="mt-1 text-xl font-semibold text-white">{t("应用", "Apps")}</h1>
+          </div>
+          {availableApps.length > 0 ? (
+            <button type="button" className="theme-secondary-btn px-3 py-2 text-sm" onClick={() => void chooseAppToInstall()} disabled={installActionSkill !== null}>
+              {installActionSkill ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <PackagePlus className="h-4 w-4" />}
+              {t("安装应用", "Install app")}
+            </button>
+          ) : null}
         </header>
+        <button type="button" className="theme-secondary-btn px-3 py-2 text-sm" onClick={onOpenSkillStore}>{t("打开 Skill Store", "Open Skill Store")}</button>
+        {error ? <p role="alert" className="text-sm text-red-200">{error}</p> : null}
+        {installedApps.length === 0 ? <p className="text-sm text-[var(--theme-text-muted)]">{t("尚未安装应用。", "No apps installed.")}</p> : null}
         <AippCatalogGrid
-          apps={catalog}
+          apps={installedApps}
           lang={lang}
           onOpen={(app) => setSelectedSkill(app.skill_name)}
           onInstall={(app) => void updateAippInstallState(app, true)}
@@ -1368,7 +1433,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
             className="theme-icon-btn h-9 w-9 text-red-200"
             onClick={() => void updateAippInstallState(selectedApp, false)}
             disabled={installActionSkill === selectedApp.skill_name}
-            title={t("卸载 Ai APP", "Uninstall Ai APP")}
+            title={t("卸载应用和技能", "Uninstall app and skill")}
           >
             {installActionSkill === selectedApp.skill_name ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
           </button>

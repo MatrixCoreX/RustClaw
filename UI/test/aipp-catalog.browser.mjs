@@ -25,12 +25,12 @@ try {
       await page.goto(`${base}/test/fixtures/aipp-catalog.html?lang=${lang}&theme=${theme}`);
       const grid = page.getByTestId("aipp-catalog-grid");
       await grid.waitFor();
-      assert.equal(await grid.locator("button").count(), 7);
+      assert.equal(await grid.locator("button").count(), 6);
       const icons = await grid.getByTestId("aipp-launcher-icon").evaluateAll((elements) => elements.map((element) => {
         const box = element.getBoundingClientRect(), style = getComputedStyle(element);
         return { x: box.x, right: box.right, width: box.width, height: box.height, radius: style.borderTopLeftRadius };
       }));
-      assert.equal(icons.length, 7);
+      assert.equal(icons.length, 6);
       for (const icon of icons) {
         assert.ok(Math.abs(icon.width - icon.height) < 1, `Icon must be square: ${JSON.stringify(icon)}`);
         assert.ok(icon.width >= 64 && icon.width <= 97);
@@ -39,17 +39,17 @@ try {
       }
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
       assert.equal(await grid.locator("button").evaluateAll((buttons) => buttons.every((button) => button.scrollWidth <= button.clientWidth + 1)), true);
-      const open = grid.locator("button").first(), install = grid.locator("button").last();
+      const open = grid.locator("button").first();
       assert.match(await open.getAttribute("aria-label"), lang === "zh" ? /^打开/ : /^Open/);
-      assert.match(await install.getAttribute("aria-label"), lang === "zh" ? /^安装 Ai APP/ : /^Install Ai APP/);
+      assert.equal(await grid.getByRole("button", { name: /安装 Ai APP|Install Ai APP/ }).count(), 0);
       assert.equal(await open.getAttribute("title"), lang === "zh" ? "查看已保存的内容。" : "View saved content.");
       await open.click();
       assert.equal(await page.evaluate(() => document.documentElement.dataset.openedApp), "example_app_0");
-      await install.focus();
+      await open.focus();
       await page.keyboard.press("Enter");
-      assert.equal(await page.evaluate(() => document.documentElement.dataset.installedApp), "example_app_6");
+      assert.equal(await page.evaluate(() => document.documentElement.dataset.installedApp), undefined);
       if (lang === "zh") await page.screenshot({ path: path.join(output, `catalog-${width}-${theme}.png`), fullPage: true });
-      console.log(`PASS ${width}px ${theme} ${lang}: square icons, no overflow, open/install, keyboard, localized labels`);
+      console.log(`PASS ${width}px ${theme} ${lang}: only installed icons, no overflow, open, keyboard, localized labels`);
     }
   }
   assert.deepEqual(errors, []);

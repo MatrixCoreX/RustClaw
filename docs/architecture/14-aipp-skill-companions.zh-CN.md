@@ -61,7 +61,9 @@ flowchart TD
     TL[运行时任务与事件账本]
     F[有界字段投影与游标筛选]
     V[需要认证的预览接口]
-    T[独立 Ai APP tombstone]
+    T[确认同时卸载应用与技能]
+    J[Skill Store 卸载任务]
+    X[成功后移除图标]
 
     P --> M --> A --> R --> G
     G -->|精确绑定且已启用| C
@@ -70,16 +72,18 @@ flowchart TD
     H --> HR --> TL --> F
     D --> V --> HR
     H --> SB --> CB --> G
-    C -->|只卸载 Ai APP| T
-    T -->|重新校验并安装| C
+    C -->|卸载| T --> J --> X
+    J -->|保留配置和私有数据| D
+    X -->|从 Skill Store 重新安装| A
 ```
 
 对于已经准入的包，runtime 会在展示前验证当前 binding、包版本、manifest digest、安装
 receipt digest、policy grant、启用状态和 registry generation。没有运行时 binding 的仓库
 内包从 base registry 读取，同样受启用状态约束。禁用、撤销 grant、升级或卸载技能时，
-AiPP 可用性与同一事务一起变化。管理员也可以只卸载 Ai APP：宿主写入一个 overlay tombstone，
-不改变技能执行、配置或私有数据。重新安装 Ai APP 时，只有当前技能包再次通过 manifest、
-receipt 和 generation 校验后才清除 tombstone。
+AiPP 可用性与同一事务一起变化。控制台卸载前会确认同时移除应用及对应技能，复用 Skill Store
+卸载任务并保留配置和私有数据。后台确认成功后才移除图标和缓存条目；取消、失败不算成功。
+重新安装从 Skill Store 进行。展示层独立 API 仍只写 overlay tombstone，不修改技能；这类隐藏
+应用只出现在独立的「安装应用」选择框中，不显示启动图标。
 
 ## 安全与扩展边界
 
@@ -194,4 +198,5 @@ bundle 通过版本化消息报告就绪并调用能力：
 或 renderer 代码添加到 `clawd` 或主 UI。
 
 manifest 会进入不可变包 digest 与 receipt。运行时导入技能通过与技能相同的 admission 生命周期
-安装和升级 Ai APP；独立卸载状态只控制界面，不修改或卸载技能。
+安装和升级 Ai APP。展示层独立 API 状态只控制界面；控制台明确确认的联合卸载操作复用技能
+卸载生命周期，不增加技能专用的主程序或 UI 分支。

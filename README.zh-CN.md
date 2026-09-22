@@ -840,9 +840,10 @@ manifest 声明和包内资源，不需要给 `clawd` 或主 UI 增加技能专�
 才能提供给浏览器。
 
 Ai APP 可用性与精确安装 manifest、receipt、policy grant、启用状态和 registry generation
-一致。安装技能时可以同时安装其 Ai APP，但可视化应用也可以独立卸载。该操作只写入宿主
-overlay tombstone，不改变技能、技能配置或私有数据；重新安装 Ai APP 时会重新校验当前技能包
-并清除 tombstone。禁用或卸载技能仍会使其 Ai APP 不可用。`media_discovery` 是第一个 Ai APP：
+一致。安装技能时可以同时安装其 Ai APP。控制台卸载前会明确提示同时卸载应用及对应技能，
+通过现有 Skill Store 卸载任务执行，保留配置和私有数据。后台确认成功后移除图标及缓存条目，
+可从 Skill Store 重新安装。仅通过展示层 API 隐藏的应用可从独立的「安装应用」入口恢复。
+禁用或卸载技能会使其 Ai APP 不可用。`media_discovery` 是第一个 Ai APP：
 管理员可以查看采集到的图片/视频记录、本地保留的图片下载、预览、来源链接、筛选和游标分页；
 开始或停止采集仍通过 Agent 完成。
 缩略图优先加载经过鉴权的本地图片。打开多图帖子后，可用左右箭头或滑动翻看，
