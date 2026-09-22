@@ -117,6 +117,13 @@ test("renders an installed AiPP as an application launcher card", () => {
   assert.match(markup, /^<article/);
   assert.match(markup, /媒体发现/);
   assert.match(markup, /查看采集内容/);
+  assert.match(markup, /data-testid="aipp-launcher-icon"/);
+  assert.match(markup, /aspect-square/);
+  assert.match(markup, /rounded-\[24%\]/);
+  assert.match(markup, /aria-label="打开：媒体发现"/);
+  assert.match(markup, /title="查看采集内容"/);
+  assert.equal((markup.match(/<button/g) || []).length, 1);
+  assert.doesNotMatch(markup, /theme-panel|min-h-40|line-clamp-3/);
 });
 
 test("keeps app switching in the launcher instead of duplicating apps inside a detail page", () => {
@@ -144,6 +151,9 @@ test("offers Ai APP reinstallation without changing its skill", () => {
     <AippCatalogCard app={app} lang="zh" onOpen={() => undefined} onInstall={() => undefined} />,
   );
   assert.match(markup, /安装 Ai APP/);
+  assert.match(markup, /aria-label="安装 Ai APP：示例"/);
+  assert.equal((markup.match(/<button/g) || []).length, 1);
+  assert.match(markup, /lucide-package-plus/);
   assert.doesNotMatch(markup, /chevron-right/);
 });
 

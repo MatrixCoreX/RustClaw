@@ -196,33 +196,50 @@ export function AippCatalogCard({
   onOpen: () => void;
   onInstall: () => void;
 }) {
+  const title = localizedAippCopy(app.titles, lang, app.default_locale);
+  const description = localizedAippCopy(app.descriptions, lang, app.default_locale);
   return (
-    <article className="theme-panel flex min-h-40 w-full flex-col p-4">
+    <article className="min-w-0">
       <button
         type="button"
-        className="group flex min-w-0 flex-1 flex-col items-start text-left"
+        className="group flex w-full min-w-0 flex-col items-center rounded-xl text-center focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--theme-focus-ring)]"
+        aria-label={`${app.installed ? (lang === "zh" ? "打开" : "Open") : (lang === "zh" ? "安装 Ai APP" : "Install Ai APP")}：${title}`}
+        title={description || title}
         onClick={app.installed ? onOpen : onInstall}
       >
-        <span className="flex h-12 w-12 items-center justify-center rounded-lg border border-white/10 bg-white/6 text-white/80">
-          <AippIcon icon={app.icon} className="h-6 w-6" />
+        <span
+          data-testid="aipp-launcher-icon"
+          aria-hidden="true"
+          className="relative flex aspect-square w-full max-w-20 items-center justify-center rounded-[24%] border border-[var(--theme-secondary-btn-border)] bg-linear-to-br from-[var(--theme-secondary-btn-bg)] to-[var(--theme-card)] text-[var(--theme-secondary-btn-text)] shadow-sm transition-transform group-active:scale-95 motion-safe:group-hover:-translate-y-0.5 sm:max-w-24"
+        >
+          <AippIcon icon={app.icon} className="h-9 w-9 sm:h-10 sm:w-10" />
+          {!app.installed ? (
+            <span className="absolute bottom-0.5 right-0.5 flex h-7 w-7 items-center justify-center rounded-full border border-[var(--theme-border-strong)] bg-[var(--theme-dialog-bg)] text-[var(--theme-text-body)]">
+              <PackagePlus className="h-4 w-4" />
+            </span>
+          ) : null}
         </span>
-        <span className="mt-3 flex w-full min-w-0 items-center gap-2">
-          <span className="min-w-0 flex-1 break-words text-base font-semibold text-white/90">
-            {localizedAippCopy(app.titles, lang, app.default_locale)}
-          </span>
-          {app.installed ? <ChevronRight className="h-4 w-4 shrink-0 text-white/35 transition group-hover:translate-x-0.5 group-hover:text-white/65" /> : null}
+        <span className="mt-2 line-clamp-2 w-full break-words text-sm font-medium leading-5 text-[var(--theme-text-strong)]" title={title}>
+          {title}
         </span>
-        <span className="mt-2 line-clamp-3 break-words text-sm leading-5 text-white/55">
-          {localizedAippCopy(app.descriptions, lang, app.default_locale)}
-        </span>
+        {!app.installed ? <span className="mt-1 text-xs text-[var(--theme-text-muted)]">{lang === "zh" ? "安装 Ai APP" : "Install Ai APP"}</span> : null}
       </button>
-      {!app.installed ? (
-        <button type="button" className="theme-secondary-btn mt-3 w-full px-3 py-2 text-sm" onClick={onInstall}>
-          <PackagePlus className="h-4 w-4" />
-          {lang === "zh" ? "安装 Ai APP" : "Install Ai APP"}
-        </button>
-      ) : null}
     </article>
+  );
+}
+
+export function AippCatalogGrid({ apps, lang, onOpen, onInstall }: {
+  apps: AippCatalogItem[];
+  lang: "zh" | "en";
+  onOpen: (app: AippCatalogItem) => void;
+  onInstall: (app: AippCatalogItem) => void;
+}) {
+  return (
+    <div data-testid="aipp-catalog-grid" className="grid grid-cols-3 items-start gap-x-4 gap-y-6 sm:grid-cols-[repeat(auto-fill,112px)] sm:gap-x-6">
+      {apps.map((app) => (
+        <AippCatalogCard key={app.skill_name} app={app} lang={lang} onOpen={() => onOpen(app)} onInstall={() => onInstall(app)} />
+      ))}
+    </div>
   );
 }
 
@@ -1304,17 +1321,12 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore }: A
           <p className="text-xs font-medium text-white/45">AiAPP</p>
           <h1 className="mt-1 text-xl font-semibold text-white">{t("应用", "Apps")}</h1>
         </header>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {catalog.map((app) => (
-            <AippCatalogCard
-              key={app.skill_name}
-              app={app}
-              lang={lang}
-              onOpen={() => setSelectedSkill(app.skill_name)}
-              onInstall={() => void updateAippInstallState(app, true)}
-            />
-          ))}
-        </div>
+        <AippCatalogGrid
+          apps={catalog}
+          lang={lang}
+          onOpen={(app) => setSelectedSkill(app.skill_name)}
+          onInstall={(app) => void updateAippInstallState(app, true)}
+        />
       </section>
     );
   }
