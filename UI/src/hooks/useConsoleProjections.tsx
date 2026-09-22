@@ -429,6 +429,11 @@ export function useConsoleProjections({
         icon: <MessageCircle className="h-4 w-4" />,
       },
       {
+        id: "aipps" as const,
+        label: "AiAPP",
+        icon: <PanelsTopLeft className="h-4 w-4" />,
+      },
+      {
         id: "nni" as const,
         label: "NNI",
         icon: <Network className="h-4 w-4" />,
@@ -447,11 +452,6 @@ export function useConsoleProjections({
         id: "channels" as const,
         label: t("账号绑定", "Account Binding"),
         icon: <Database className="h-4 w-4" />,
-      },
-      {
-        id: "aipps" as const,
-        label: "AiAPP",
-        icon: <PanelsTopLeft className="h-4 w-4" />,
       },
       {
         id: "skill_store" as const,

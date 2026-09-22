@@ -1,7 +1,19 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { shouldCollapseNavigationForTarget } from "../components/ConsoleLayout";
+
+test("places AiAPP between Agent and NNI in the shared navigation", () => {
+  const source = readFileSync(new URL("../hooks/useConsoleProjections.tsx", import.meta.url), "utf8");
+  const navigation = source.match(/const navItems = useMemo\(([\s\S]*?)const onboardingSteps/);
+  assert.ok(navigation);
+  const ids = [...navigation[1].matchAll(/id: "([^"]+)" as const/g)].map((match) => match[1]);
+  assert.deepEqual(ids, [
+    "dashboard", "chat", "aipps", "nni", "bancor", "assets", "channels",
+    "skill_store", "memory", "logs", "tasks", "ai_learning",
+  ]);
+});
 
 function contentTarget(keepNavigationOpen = false): EventTarget {
   const candidate = {
