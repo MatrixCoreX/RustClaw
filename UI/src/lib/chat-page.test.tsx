@@ -317,3 +317,24 @@ test("updates request numbers and removes progress after completion or a task sw
     await act(() => renderer.unmount());
   }
 });
+
+test("busy tasks keep send and attachment controls enabled, with a removable queue above the composer", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const pageProps = props();
+  const removed: string[] = [];
+  let renderer!: ReactTestRenderer;
+  await act(() => { renderer = create(<ChatPage {...pageProps} chatSending chatWorking chatInput="next"
+    chatQueuedMessages={[{ id: "queued-1", threadId: "thread-1", text: "follow up", attachments: ["note.txt"], status: "queued" }]}
+    onRemoveQueuedMessage={id => removed.push(id)} />); });
+  try {
+    const send = renderer.root.findAllByType("button").find(button => button.props.className?.includes("chat-send-btn"))!;
+    assert.equal(send.props.disabled, false);
+    assert.ok(send.children.includes("排队"));
+    const upload = renderer.root.findAllByType("button").find(button => button.children.includes("上传图片/文件"))!;
+    assert.equal(upload.props.disabled, false);
+    const history = renderer.root.findByProps({ "data-testid": "chat-message-list" });
+    assert.equal(history.findAllByProps({ "data-testid": "chat-message-queue" }).length, 0);
+    await act(() => renderer.root.findByProps({ "aria-label": "移除待发送消息" }).props.onClick());
+    assert.deepEqual(removed, ["queued-1"]);
+  } finally { await act(() => renderer.unmount()); }
+});

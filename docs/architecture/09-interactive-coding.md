@@ -120,6 +120,17 @@ attachment bytes, tool arguments, secrets, and full journals. Browser storage
 holds only drafts and preferences; teaching detail is reloaded through the
 protected task-debug endpoint.
 
+The browser composer remains available while a task is executing. Follow-up
+messages and attachment snapshots enter a per-conversation FIFO queue above
+the composer, separate from chat history and live LLM progress. Each turn is
+submitted only after its predecessor has finished successfully, and receives
+its own task ID and teaching trace. Conversations have independent queues.
+Pending messages can be removed. Failure pauses that conversation's queue for
+explicit continuation; an unknown or waiting task stays a barrier until its
+server status is confirmed. The outbox lives in the current browser tab, not
+the backend: keep the tab open until submission. Leaving with unsent messages
+triggers the browser's unload warning; signing out clears the local outbox.
+
 The dashboard and active-task list use the same identity scope. An admin sees
 all queued/running tasks; a normal key sees that owner's tasks across
 conversations. This keeps queue counts and oldest-running age aligned with

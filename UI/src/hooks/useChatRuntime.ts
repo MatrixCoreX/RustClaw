@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
 import { useUiDialog } from "../components/UiDialogProvider";
+import { useChatMessageQueue } from "./useChatMessageQueue";
 import {
   assertChatAttachmentConstraints,
   attachmentIsAudio,
@@ -9,7 +10,6 @@ import {
   DEFAULT_CHAT_ATTACHMENT_CONSTRAINTS,
   fetchChatAttachmentConstraints,
   fileToChatAttachment,
-  formatAttachmentSize,
   formatVisionResultText,
 } from "../lib/chat-attachments";
 import {
@@ -18,11 +18,9 @@ import {
 } from "../lib/assistant-presentation";
 import {
   advanceConversationBodyDescriptor,
-  conversationHistoryStorageKey,
   fetchConversationHistoryPage,
   fetchNextConversationBodyPage,
   projectConversationHistory,
-  type ServerChatThreadProjection,
 } from "../lib/chat-history";
 import {
   emptyChatActivity,
@@ -30,7 +28,6 @@ import {
 } from "../lib/chat-activity";
 import { followTaskEventStream } from "../lib/task-event-stream";
 import {
-  appStorageKey,
   CLIENT_ORIGIN_HEADER,
 } from "../lib/product-identity";
 import { extractTaskText } from "../lib/task-result";
@@ -38,8 +35,6 @@ import { formatUiError } from "../lib/ui-error";
 import {
   extractTaskArtifactDeliverySummary,
   extractTaskArtifacts,
-  normalizeTaskArtifactDeliverySummary,
-  normalizeTaskArtifacts,
 } from "../lib/task-artifacts";
 import {
   PcmWavRecordingError,
@@ -67,73 +62,36 @@ import type {
 type Translate = (zh: string, en: string) => string;
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
 
-export interface ChatThreadSummary {
-  id: string;
-  agentId: string;
-  title: string;
-  preview: string;
-  updatedAt: number;
-  messageCount: number;
-  teachingMode: boolean;
-  taskId: string | null;
-  taskStatus: TaskQueryResponse["status"] | "running" | null;
-  llmCallCount: number | null;
-}
-
-export interface ChatTeachingRunSummary {
-  id: string;
-  taskId: string | null;
-  userMessageId: string;
-  assistantMessageId: string | null;
-  userText: string;
-  assistantText: string | null;
-  status: TaskQueryResponse["status"] | "running";
-  startedAt: number;
-  completedAt: number | null;
-  callCount: number | null;
-  hasTrace: boolean;
-  traceError: string | null;
-  selected: boolean;
-}
-
-export interface ChatTeachingRunRecord {
-  id: string;
-  taskId: string | null;
-  userMessageId: string;
-  assistantMessageId?: string | null;
-  userText: string;
-  assistantText?: string | null;
-  status: TaskQueryResponse["status"] | "running";
-  startedAt: number;
-  completedAt?: number | null;
-  taskResult?: TaskQueryResponse | null;
-  llmDebug?: TaskLlmDebugResponse | null;
-  llmDebugError?: string | null;
-  callCount?: number | null;
-}
-
-export interface ChatThreadRecord {
-  id: string;
-  agentId: string;
-  title: string;
-  messages: ChatMessage[];
-  input: string;
-  createdAt: number;
-  updatedAt: number;
-  teachingMode: boolean;
-  externalChatId: string;
-  lastTaskId?: string | null;
-  teachingTaskResult?: TaskQueryResponse | null;
-  teachingLlmDebug?: TaskLlmDebugResponse | null;
-  teachingLlmDebugError?: string | null;
-  activeTeachingRunId?: string | null;
-  teachingRuns?: ChatTeachingRunRecord[];
-}
-
-export interface ChatThreadState {
-  activeThreadId: string;
-  threads: ChatThreadRecord[];
-}
+import {
+  threadHasServerHistory,
+  emptyChatThreadState,
+  loadChatThreadState,
+  persistChatThreadState,
+  mergeServerConversationHistory,
+  retainLocalDraftsForPagedRestore,
+  activeTaskStatus,
+  terminalTaskStatus,
+  formatChatAttachmentError,
+  threadHasPendingTask,
+  createChatThread,
+  buildChatThreadSummaries,
+  selectedTeachingRun,
+  buildChatTeachingRunSummaries,
+  appendTeachingRun,
+  updateTeachingRunById,
+  updateTeachingRunsByTaskId,
+  debugCallCount,
+  titleForThreadAfterUserMessage,
+  appendThreadMessages,
+  upsertThreadMessage,
+  loadSelectedVoiceInputDeviceId,
+  persistSelectedVoiceInputDeviceId,
+  defaultAttachmentPrompt,
+  defaultAttachmentMessage,
+} from "../lib/chat-thread-state";
+import type { ChatThreadRecord, ChatThreadState } from "../types/chat-runtime";
+export type { ChatThreadRecord, ChatThreadState, ChatThreadSummary, ChatTeachingRunRecord, ChatTeachingRunSummary } from "../types/chat-runtime";
+export { loadChatThreadState, persistChatThreadState, mergeServerConversationHistory, retainLocalDraftsForPagedRestore, threadHasPendingTask } from "../lib/chat-thread-state";
 
 export interface UseChatRuntimeParams {
   apiFetch: ApiFetch;
@@ -201,10 +159,17 @@ export function useChatRuntime({
   const chatThreadSummaries = buildChatThreadSummaries(chatThreadState.threads, t);
   const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);
   const [chatTeachingLlmDebugLoading, setChatTeachingLlmDebugLoading] = useState(false);
-  const [chatSending, setChatSending] = useState(false);
   const [chatCompacting, setChatCompacting] = useState(false);
-  const [chatWorking, setChatWorking] = useState(false);
-  const [chatActivity, setChatActivity] = useState(emptyChatActivity);
+  const [compactingThreadId, setCompactingThreadId] = useState<string | null>(null);
+  const [liveThreads, setLiveThreads] = useState<Record<string, { working: boolean; activity: ReturnType<typeof emptyChatActivity> }>>({});
+  const outbox = useChatMessageQueue(conversationHistoryScope, chatThreadState.threads
+    .filter(thread => threadHasPendingTask(thread) || thread.id === compactingThreadId).map(thread => thread.id));
+  const chatQueuedMessages = outbox.messages.filter(item => item.threadId === activeChatThread.id && item.status === "queued");
+  const chatQueuePaused = outbox.paused.includes(activeChatThread.id);
+  const chatSending = Boolean(liveThreads[activeChatThread.id]) || threadHasPendingTask(activeChatThread)
+    || outbox.messages.some(item => item.threadId === activeChatThread.id && item.status === "running");
+  const chatWorking = liveThreads[activeChatThread.id]?.working ?? false;
+  const chatActivity = liveThreads[activeChatThread.id]?.activity ?? emptyChatActivity();
   const [chatRecording, setChatRecording] = useState(false);
   const [chatVoiceRecordingAvailability] = useState(voiceRecordingAvailability);
   const chatVoiceRecordingSupported = chatVoiceRecordingAvailability === "available";
@@ -224,7 +189,6 @@ export function useChatRuntime({
   const chatVoiceRecorderRef = useRef<PcmWavRecordingSession | null>(null);
   const chatInputValueRef = useRef("");
   const chatAttachmentsValueRef = useRef<ChatAttachment[]>([]);
-  const chatSendingValueRef = useRef(false);
   const chatRecordingValueRef = useRef(false);
   const chatTeachingModeValueRef = useRef(false);
   const chatAudioInputDeviceIdRef = useRef(chatAudioInputDeviceId);
@@ -240,12 +204,38 @@ export function useChatRuntime({
 
   chatInputValueRef.current = chatInput;
   chatAttachmentsValueRef.current = chatAttachments;
-  chatSendingValueRef.current = chatSending;
   chatRecordingValueRef.current = chatRecording;
   chatTeachingModeValueRef.current = chatTeachingMode;
   chatAudioInputDeviceIdRef.current = chatAudioInputDeviceId;
   activeChatThreadRef.current = activeChatThread;
   apiFetchRef.current = apiFetch;
+
+  const beginLiveThread = (threadId: string) => {
+    if (conversationHistoryScopeRef.current !== conversationHistoryScope.trim()) return;
+    setLiveThreads(current => ({ ...current, [threadId]: { working: true, activity: emptyChatActivity() } }));
+  };
+  const finishLiveThread = (threadId: string) => {
+    if (conversationHistoryScopeRef.current !== conversationHistoryScope.trim()) return;
+    setLiveThreads(current => {
+      const next = { ...current };
+      delete next[threadId];
+      return next;
+    });
+  };
+  const updateLiveThread = (threadId: string, update: (value: { working: boolean; activity: ReturnType<typeof emptyChatActivity> }) => { working: boolean; activity: ReturnType<typeof emptyChatActivity> }) => {
+    if (conversationHistoryScopeRef.current !== conversationHistoryScope.trim()) return;
+    setLiveThreads(current => current[threadId] ? { ...current, [threadId]: update(current[threadId]) } : current);
+  };
+
+  useEffect(() => {
+    setLiveThreads({});
+    setChatAttachments([]);
+    setChatError(null);
+    suspendedChatTaskIdsRef.current.clear();
+    for (const controller of recoveryAbortControllersRef.current.values()) controller.abort();
+    recoveryAbortControllersRef.current.clear();
+    liveChatTaskIdsRef.current.clear();
+  }, [conversationHistoryScope]);
 
   useEffect(
     () => () => {
@@ -439,6 +429,7 @@ export function useChatRuntime({
     threadId: string,
     updater: (thread: ChatThreadRecord) => ChatThreadRecord,
   ) => {
+    if (conversationHistoryScopeRef.current !== conversationHistoryScope.trim()) return;
     setChatThreadState((prev) => ({
       ...prev,
       threads: prev.threads.map((thread) =>
@@ -516,6 +507,7 @@ export function useChatRuntime({
   };
 
   const removeChatThreadLocally = (threadId: string) => {
+    outbox.queue.removeThread(threadId);
     setChatThreadState((prev) => {
       if (prev.threads.length <= 1) {
         const replacement = createChatThread(t, defaultAgentId);
@@ -536,7 +528,7 @@ export function useChatRuntime({
 
   const setActiveChatAgentId = (agentId: string) => {
     if (!availableAgents.some((agent) => agent.id === agentId)) return;
-    if (!activeChatCanChangeAgent) {
+    if (!activeChatCanChangeAgent || outbox.messages.some(item => item.threadId === activeChatThreadRef.current.id)) {
       setChatError(
         t(
           "已有消息的任务不能切换 Agent，请新建任务后再选择。",
@@ -670,6 +662,7 @@ export function useChatRuntime({
     try {
       await archiveChatThreadOnServer(thread);
       const replacement = createChatThread(t, defaultAgentId);
+      outbox.queue.removeThread(thread.id);
       setChatThreadState((prev) => ({
         activeThreadId: replacement.id,
         threads: prev.threads.map((item) =>
@@ -799,10 +792,7 @@ export function useChatRuntime({
     const controller = new AbortController();
     liveChatTaskIdsRef.current.add(taskId);
     recoveryAbortControllersRef.current.set(taskId, controller);
-    chatSendingValueRef.current = true;
-    setChatSending(true);
-    setChatWorking(true);
-    setChatActivity(emptyChatActivity());
+    beginLiveThread(threadId);
     try {
       const presentation = new AssistantPresentationReducer();
       let streamedAssistantMessageId: string | null = null;
@@ -810,15 +800,16 @@ export function useChatRuntime({
         apiFetch,
         taskId,
         async (event) => {
-          setChatActivity((current) => reduceChatActivity(current, event));
+          if (controller.signal.aborted) return;
+          updateLiveThread(threadId, current => ({ ...current, activity: reduceChatActivity(current.activity, event) }));
           const decoded = decodeAssistantPresentationEvent(event);
           if (!decoded) {
-            if (event.event_kind === "task_final") setChatWorking(false);
+            if (event.event_kind === "task_final") updateLiveThread(threadId, current => ({ ...current, working: false }));
             return;
           }
           const stream = await presentation.apply(decoded);
           if (!stream || (!stream.content && stream.status === "streaming")) return;
-          setChatWorking(false);
+          updateLiveThread(threadId, current => ({ ...current, working: false }));
           streamedAssistantMessageId ??= `a-${taskId}`;
           const streamedMessage: ChatMessage = {
             id: streamedAssistantMessageId,
@@ -845,8 +836,10 @@ export function useChatRuntime({
       );
       if (controller.signal.aborted) return;
       const result = await fetchTaskById(taskId);
+      if (controller.signal.aborted) return;
       onTaskResult(taskId, result);
       const terminal = terminalTaskStatus(result.status);
+      if (terminal && result.status !== "succeeded") outbox.queue.pause(threadId);
       const resultText = terminal ? extractTaskText(result) : "";
       const assistantMessage = resultText
         ? {
@@ -882,17 +875,15 @@ export function useChatRuntime({
       if (!terminal) suspendedChatTaskIdsRef.current.add(taskId);
     } catch (error) {
       if (!controller.signal.aborted) {
-        setChatError(formatUiError(error, t, "恢复未完成任务失败。", "Failed to resume the unfinished task."));
+        if (activeChatThreadRef.current.id === threadId) {
+          setChatError(formatUiError(error, t, "恢复未完成任务失败。", "Failed to resume the unfinished task."));
+        }
         suspendedChatTaskIdsRef.current.add(taskId);
       }
     } finally {
       recoveryAbortControllersRef.current.delete(taskId);
       liveChatTaskIdsRef.current.delete(taskId);
-      if (liveChatTaskIdsRef.current.size === 0) {
-        chatSendingValueRef.current = false;
-        setChatSending(false);
-        setChatWorking(false);
-      }
+      finishLiveThread(threadId);
     }
   };
 
@@ -906,6 +897,32 @@ export function useChatRuntime({
       }
     }
   }, [chatThreadState]);
+
+  useEffect(() => {
+    const pending = chatThreadState.threads.filter(thread => outbox.messages.some(item => item.threadId === thread.id))
+      .flatMap(thread => (thread.teachingRuns ?? []).filter(run => run.taskId && activeTaskStatus(run.status)
+        && suspendedChatTaskIdsRef.current.has(run.taskId)).map(run => ({ threadId: thread.id, runId: run.id, taskId: run.taskId! })));
+    if (!pending.length) return;
+    let cancelled = false;
+    let checking = false;
+    const timer = setInterval(async () => {
+      if (checking) return;
+      checking = true;
+      try {
+        for (const run of pending) {
+          const result = await fetchTaskById(run.taskId);
+          if (cancelled) return;
+          if (terminalTaskStatus(result.status)) {
+            suspendedChatTaskIdsRef.current.delete(run.taskId);
+            await recoverPendingChatTask(run.threadId, run.runId, run.taskId);
+          }
+        }
+      } catch {
+        // An uncertain task remains a queue barrier until its status is known.
+      } finally { checking = false; }
+    }, 5000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [chatThreadState, outbox.messages]);
 
   const handleChatAttachmentSelection = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
@@ -946,7 +963,7 @@ export function useChatRuntime({
   };
 
   const startChatVoiceRecording = async () => {
-    if (chatRecordingValueRef.current || chatSendingValueRef.current) return;
+    if (chatRecordingValueRef.current) return;
     const availability = voiceRecordingAvailability();
     if (availability !== "available") {
       setChatError(
@@ -1071,8 +1088,32 @@ export function useChatRuntime({
       setChatError(formatChatAttachmentError(error, chatAttachmentConstraints, t));
       return;
     }
-    const attached = rawAttachments;
-    if ((!text && attached.length === 0) || chatSendingValueRef.current) return;
+    const attached = rawAttachments.map(item => ({ ...item }));
+    if (!text && attached.length === 0) return;
+    const thread = { ...activeChatThreadRef.current };
+    const runId = `teach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    if (options.clearInput) {
+      chatInputValueRef.current = "";
+      updateChatThreadById(thread.id, current => ({ ...current, input: "" }));
+    }
+    if (options.clearAttachments) {
+      chatAttachmentsValueRef.current = [];
+      setChatAttachments([]);
+    }
+    if (chatAttachmentInputRef.current) chatAttachmentInputRef.current.value = "";
+    setChatError(null);
+    outbox.queue.enqueue({ id: runId, threadId: thread.id, text, attachments: attached.map(item => item.name) },
+      signal => executeChatMessageSnapshot(text, attached, thread, runId, signal));
+  };
+
+  const executeChatMessageSnapshot = async (
+    text: string,
+    attached: ChatAttachment[],
+    threadAtSubmit: ChatThreadRecord,
+    teachingRunId: string,
+    signal: AbortSignal,
+  ): Promise<boolean | "waiting"> => {
+    if (signal.aborted || conversationHistoryScopeRef.current !== conversationHistoryScope.trim()) return false;
     const attachedImages = attached.filter(attachmentIsImage);
     const attachedAudios = attached.filter(attachmentIsAudio);
     const attachedFiles = attached.filter(
@@ -1090,17 +1131,15 @@ export function useChatRuntime({
             attachedAudios.length,
             attachedFiles.length,
           ));
-    const threadAtSubmit = activeChatThreadRef.current;
     const submitThreadId = threadAtSubmit.id;
     const teachingModeAtSubmit = threadAtSubmit.teachingMode;
-    const teachingRunId = `teach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    chatSendingValueRef.current = true;
-    setChatSending(true);
-    setChatWorking(true);
-    setChatActivity(emptyChatActivity());
-    setChatError(null);
+    const setTurnError = (message: string | null) => {
+      if (activeChatThreadRef.current.id === submitThreadId) setChatError(message);
+    };
+    beginLiveThread(submitThreadId);
+    setTurnError(null);
     const userMsg: ChatMessage = {
-      id: `u-${Date.now()}`,
+      id: `u-${teachingRunId}`,
       role: "user",
       text:
         text ||
@@ -1136,19 +1175,8 @@ export function useChatRuntime({
         llmDebugError: null,
         callCount: null,
       }),
-      input: options.clearInput ? "" : thread.input,
       updatedAt: Date.now(),
     }));
-    if (options.clearInput) {
-      chatInputValueRef.current = "";
-    }
-    if (options.clearAttachments) {
-      chatAttachmentsValueRef.current = [];
-      setChatAttachments([]);
-    }
-    if (chatAttachmentInputRef.current) {
-      chatAttachmentInputRef.current.value = "";
-    }
 
     let submittedTaskId: string | null = null;
     try {
@@ -1204,6 +1232,7 @@ export function useChatRuntime({
       };
       const submitRes = await apiFetch(`/v1/tasks`, {
         method: "POST",
+        signal,
         headers: {
           "Content-Type": "application/json",
           [CLIENT_ORIGIN_HEADER]: "ui",
@@ -1211,6 +1240,7 @@ export function useChatRuntime({
         body: JSON.stringify(submitBody),
       });
       const submitData = (await submitRes.json()) as ApiResponse<SubmitTaskResponse>;
+      if (signal.aborted) return false;
       if (!submitRes.ok || !submitData.ok || !submitData.data?.task_id) {
         throw new Error(submitData.error || `chat_task_submit_http_${submitRes.status}`);
       }
@@ -1254,18 +1284,19 @@ export function useChatRuntime({
       let streamedAssistantMessageId: string | null = null;
       let completedPresentationText: string | null = null;
       await followTaskEventStream(apiFetch, submittedTaskId, async (event) => {
-        setChatActivity((current) => reduceChatActivity(current, event));
+        if (signal.aborted) return;
+        updateLiveThread(submitThreadId, current => ({ ...current, activity: reduceChatActivity(current.activity, event) }));
         const decoded = decodeAssistantPresentationEvent(event);
         if (!decoded) {
-          if (event.event_kind === "task_final") setChatWorking(false);
+          if (event.event_kind === "task_final") updateLiveThread(submitThreadId, current => ({ ...current, working: false }));
           return;
         }
         const stream = await presentation.apply(decoded);
         if (decoded.kind === "assistant_output_aborted") {
-          setChatWorking(true);
+          updateLiveThread(submitThreadId, current => ({ ...current, working: true }));
         }
         if (!stream || (!stream.content && stream.status === "streaming")) return;
-        setChatWorking(false);
+        updateLiveThread(submitThreadId, current => ({ ...current, working: false }));
         if (stream.status === "completed") completedPresentationText = stream.content;
         streamedAssistantMessageId ??= `a-${submittedTaskId}`;
         const streamedMessage: ChatMessage = {
@@ -1284,14 +1315,17 @@ export function useChatRuntime({
           })),
           updatedAt: Date.now(),
         }));
-      });
+      }, signal);
+      if (signal.aborted) return false;
       const finalResult = await fetchTaskById(submittedTaskId);
+      if (signal.aborted) return false;
+      if (!terminalTaskStatus(finalResult.status)) suspendedChatTaskIdsRef.current.add(submittedTaskId);
       const finalTaskText = extractTaskText(finalResult);
       if (
         completedPresentationText !== null &&
         completedPresentationText !== finalTaskText
       ) {
-        setChatError(t(
+        setTurnError(t(
           "流式回复与最终结果不一致，页面已保留最终结果。",
           "The streamed reply differed from the final result. The final result has been kept.",
         ));
@@ -1305,7 +1339,7 @@ export function useChatRuntime({
           ...run,
           taskId: submittedTaskId,
           status: finalResult.status,
-          completedAt: Date.now(),
+          completedAt: terminalTaskStatus(finalResult.status) ? Date.now() : null,
           taskResult: finalResult,
         })),
         updatedAt: Date.now(),
@@ -1329,17 +1363,20 @@ export function useChatRuntime({
           ...run,
           assistantMessageId: assistantMsg.id,
           assistantText: assistantMsg.text,
-          completedAt: run.completedAt ?? assistantMsg.ts,
+          completedAt: terminalTaskStatus(finalResult.status) ? run.completedAt ?? assistantMsg.ts : null,
         })),
         updatedAt: Date.now(),
       }));
+      return terminalTaskStatus(finalResult.status) ? finalResult.status === "succeeded" : "waiting";
     } catch (err) {
-      const message = formatUiError(err, t, "消息发送失败，请稍后重试。", "The message could not be sent. Try again later.");
-      setChatError(message);
+      if (signal.aborted) return false;
+      if (submittedTaskId) suspendedChatTaskIdsRef.current.add(submittedTaskId);
+      const message = formatUiError(err, t, "连接中断，请检查任务记录后再继续。", "The connection was interrupted. Check the task history before continuing.");
+      setTurnError(message);
       const systemErrMsg: ChatMessage = {
         id: `e-${Date.now()}`,
         role: "system",
-        text: `${t("发送失败", "Send failed")}: ${message}`,
+        text: `${submittedTaskId ? t("任务状态待确认", "Task status unconfirmed") : t("发送失败", "Send failed")}: ${message}`,
         ts: Date.now(),
       };
       updateChatThreadById(submitThreadId, (thread) => ({
@@ -1347,14 +1384,14 @@ export function useChatRuntime({
         messages: appendThreadMessages(thread.messages, systemErrMsg),
         teachingRuns: updateTeachingRunById(thread.teachingRuns, teachingRunId, (run) => ({
           ...run,
-          status: "failed",
+          status: submittedTaskId ? "running" : "failed",
           assistantMessageId: systemErrMsg.id,
           assistantText: systemErrMsg.text,
-          completedAt: Date.now(),
+          completedAt: submittedTaskId ? null : Date.now(),
           taskResult: run.taskId
             ? {
                 task_id: run.taskId,
-                status: "failed",
+                status: "running",
                 result_json: null,
                 error_text: message,
               }
@@ -1363,13 +1400,10 @@ export function useChatRuntime({
         })),
         updatedAt: Date.now(),
       }));
+      return submittedTaskId ? "waiting" : false;
     } finally {
       if (submittedTaskId) liveChatTaskIdsRef.current.delete(submittedTaskId);
-      if (liveChatTaskIdsRef.current.size === 0) {
-        chatSendingValueRef.current = false;
-        setChatSending(false);
-        setChatWorking(false);
-      }
+      finishLiveThread(submitThreadId);
     }
   };
 
@@ -1382,7 +1416,7 @@ export function useChatRuntime({
   };
 
   const compactChatContext = async (focus?: string) => {
-    if (chatSendingValueRef.current || chatCompacting) return false;
+    if (chatSending || chatCompacting || chatQueuedMessages.length > 0) return false;
     const thread = activeChatThreadRef.current;
     const normalizedFocus = focus?.trim() ?? "";
     if (normalizedFocus.length > 4_000) {
@@ -1390,6 +1424,7 @@ export function useChatRuntime({
       return false;
     }
     setChatCompacting(true);
+    setCompactingThreadId(thread.id);
     setChatError(null);
     let submittedTaskId: string | null = null;
     try {
@@ -1456,11 +1491,12 @@ export function useChatRuntime({
       return false;
     } finally {
       setChatCompacting(false);
+      setCompactingThreadId(null);
     }
   };
 
   const handleChatInputKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229) {
       e.preventDefault();
       void sendChatMessage();
     }
@@ -1478,8 +1514,12 @@ export function useChatRuntime({
     chatTeachingRuns,
     activeChatTeachingRunId,
     activeChatAgentId,
-    activeChatCanChangeAgent,
+    activeChatCanChangeAgent: activeChatCanChangeAgent && !outbox.messages.some(item => item.threadId === activeChatThread.id),
     chatSending,
+    chatQueuedMessages,
+    chatQueuePaused,
+    removeQueuedChatMessage: (id: string) => outbox.queue.remove(id),
+    resumeChatQueue: () => outbox.queue.resume(activeChatThreadRef.current.id),
     chatCompacting,
     chatWorking,
     chatActivity,
@@ -1517,641 +1557,4 @@ export function useChatRuntime({
     loadEarlierConversationHistory,
     loadNextChatMessageBody,
   };
-}
-
-function threadHasServerHistory(thread: ChatThreadRecord): boolean {
-  return (
-    Boolean(thread.lastTaskId) ||
-    (thread.teachingRuns ?? []).some((run) => Boolean(run.taskId))
-  );
-}
-
-function emptyChatThreadState(t: Translate, defaultAgentId = "main"): ChatThreadState {
-  const fallback = createChatThread(t, defaultAgentId);
-  return { activeThreadId: fallback.id, threads: [fallback] };
-}
-
-export function loadChatThreadState(
-  t: Translate,
-  scope: string,
-  defaultAgentId = "main",
-): ChatThreadState {
-  const fallback = emptyChatThreadState(t, defaultAgentId);
-  if (typeof window === "undefined") {
-    return fallback;
-  }
-  try {
-    const storageKey = conversationHistoryStorageKey(scope);
-    const raw = storageKey ? window.localStorage.getItem(storageKey) : null;
-    if (!raw) {
-      return fallback;
-    }
-    const parsed = JSON.parse(raw) as Partial<ChatThreadState>;
-    const threads = Array.isArray(parsed.threads)
-      ? parsed.threads
-          .map((thread) => normalizeStoredChatThread(thread, t, defaultAgentId))
-          .filter((thread): thread is ChatThreadRecord => Boolean(thread))
-      : [];
-    if (threads.length === 0) {
-      return fallback;
-    }
-    const activeThreadId =
-      typeof parsed.activeThreadId === "string" &&
-      threads.some((thread) => thread.id === parsed.activeThreadId)
-        ? parsed.activeThreadId
-        : threads[0].id;
-    return { activeThreadId, threads };
-  } catch {
-    return fallback;
-  }
-}
-
-export function persistChatThreadState(state: ChatThreadState, scope: string) {
-  if (typeof window === "undefined") return;
-  try {
-    const storageKey = conversationHistoryStorageKey(scope);
-    if (!storageKey) return;
-    const payload: ChatThreadState = {
-      activeThreadId: state.activeThreadId,
-      threads: state.threads.map((thread) => ({
-        ...thread,
-        teachingTaskResult: thread.teachingTaskResult
-          ? compactTaskResultForChatStorage(thread.teachingTaskResult)
-          : null,
-        teachingLlmDebug: null,
-        teachingLlmDebugError: null,
-        activeTeachingRunId: thread.activeTeachingRunId ?? null,
-        teachingRuns: (thread.teachingRuns ?? []).map(compactTeachingRunForChatStorage),
-        messages: thread.messages.map(stripAttachmentPayloadsFromMessage),
-      })),
-    };
-    window.localStorage.setItem(storageKey, JSON.stringify(payload));
-  } catch {
-    // Local history is a convenience cache; quota/private-mode failures must not block chat.
-  }
-}
-
-export function mergeServerConversationHistory(
-  current: ChatThreadState,
-  restored: ServerChatThreadProjection[],
-  t: Translate,
-  defaultAgentId = "main",
-): ChatThreadState {
-  const existingById = new Map(current.threads.map((thread) => [thread.id, thread]));
-  const serverThreads = restored.map((thread) => {
-    const existing = existingById.get(thread.id);
-    const existingRunsByTask = new Map(
-      (existing?.teachingRuns ?? [])
-        .filter((run) => run.taskId)
-        .map((run) => [run.taskId as string, run]),
-    );
-    const restoredRuns = thread.teachingRuns.map((run) => {
-      const local = existingRunsByTask.get(run.taskId);
-      return {
-        ...run,
-        llmDebug: local?.llmDebug ?? null,
-        llmDebugError: local?.llmDebugError ?? null,
-        callCount: local?.callCount ?? debugCallCount(local?.llmDebug),
-      };
-    });
-    const restoredTaskIds = new Set(restoredRuns.map((run) => run.taskId));
-    const teachingRuns = [
-      ...(existing?.teachingRuns ?? []).filter((run) => !restoredTaskIds.has(run.taskId)),
-      ...restoredRuns,
-    ].sort((left, right) => left.startedAt - right.startedAt);
-    const restoredMessageIds = new Set(thread.messages.map((message) => message.id));
-    const replacedLocalMessageIds = new Set(
-      (existing?.teachingRuns ?? [])
-        .filter((run) => Boolean(run.taskId) && restoredTaskIds.has(run.taskId))
-        .flatMap((run) => [run.userMessageId, run.assistantMessageId])
-        .filter((messageId): messageId is string => Boolean(messageId)),
-    );
-    const messages = [
-      ...(existing?.messages ?? []).filter(
-        (message) =>
-          !restoredMessageIds.has(message.id) && !replacedLocalMessageIds.has(message.id),
-      ),
-      ...thread.messages,
-    ].sort((left, right) => left.ts - right.ts || left.id.localeCompare(right.id));
-    const latestRun = teachingRuns[teachingRuns.length - 1] ?? null;
-    const activeTeachingRunId =
-      existing?.activeTeachingRunId &&
-      teachingRuns.some((run) => run.id === existing.activeTeachingRunId)
-        ? existing.activeTeachingRunId
-        : latestRun?.id ?? null;
-    return {
-      id: thread.id,
-      agentId: thread.agentId || existing?.agentId || defaultAgentId,
-      title: thread.title || t("未命名任务", "Untitled task"),
-      messages,
-      input: existing?.input ?? "",
-      createdAt: Math.min(existing?.createdAt ?? thread.createdAt, thread.createdAt),
-      updatedAt: Math.max(existing?.updatedAt ?? thread.updatedAt, thread.updatedAt),
-      teachingMode: existing?.teachingMode ?? false,
-      externalChatId: thread.externalChatId,
-      lastTaskId:
-        !existing || thread.updatedAt >= existing.updatedAt
-          ? thread.lastTaskId
-          : existing.lastTaskId ?? thread.lastTaskId,
-      teachingTaskResult: latestRun?.taskResult ?? null,
-      teachingLlmDebug: null,
-      teachingLlmDebugError: null,
-      activeTeachingRunId,
-      teachingRuns,
-    } satisfies ChatThreadRecord;
-  });
-  const retainedThreads = current.threads.filter(
-    (thread) => !restored.some((candidate) => candidate.id === thread.id),
-  );
-  const threads = [...retainedThreads, ...serverThreads].sort(
-    (left, right) => right.updatedAt - left.updatedAt,
-  );
-  if (threads.length === 0) {
-    const fallback = createChatThread(t, defaultAgentId);
-    return { activeThreadId: fallback.id, threads: [fallback] };
-  }
-  const activeThreadId = threads.some((thread) => thread.id === current.activeThreadId)
-    ? current.activeThreadId
-    : threads[0].id;
-  return { activeThreadId, threads };
-}
-
-export function retainLocalDraftsForPagedRestore(
-  current: ChatThreadState,
-): ChatThreadState {
-  const threads = current.threads.filter(
-    (thread) =>
-      threadHasPendingTask(thread) ||
-      (!threadHasServerHistory(thread) && !threadIsPristineWelcome(thread)),
-  );
-  return {
-    activeThreadId: current.activeThreadId,
-    threads,
-  };
-}
-
-function threadIsPristineWelcome(thread: ChatThreadRecord): boolean {
-  return (
-    !thread.input.trim() &&
-    !thread.teachingMode &&
-    !thread.lastTaskId &&
-    (thread.teachingRuns ?? []).length === 0 &&
-    thread.messages.length === 1 &&
-    thread.messages[0].role === "system" &&
-    thread.messages[0].id.startsWith("chat-system-welcome-")
-  );
-}
-
-function normalizeStoredChatThread(
-  raw: unknown,
-  t: Translate,
-  defaultAgentId = "main",
-): ChatThreadRecord | null {
-  if (!raw || typeof raw !== "object") return null;
-  const record = raw as Partial<ChatThreadRecord>;
-  if (typeof record.id !== "string" || !record.id.trim()) return null;
-  const now = Date.now();
-  const messages = Array.isArray(record.messages)
-    ? record.messages
-        .map(normalizeStoredChatMessage)
-        .filter((message): message is ChatMessage => Boolean(message))
-    : [];
-  return {
-    id: record.id,
-    agentId:
-      typeof record.agentId === "string" && record.agentId.trim()
-        ? record.agentId.trim()
-        : defaultAgentId,
-    title:
-      typeof record.title === "string" && record.title.trim()
-        ? record.title.trim()
-        : t("未命名任务", "Untitled task"),
-    messages: messages.length > 0 ? messages : [welcomeChatMessage(t)],
-    input: typeof record.input === "string" ? record.input : "",
-    createdAt: typeof record.createdAt === "number" ? record.createdAt : now,
-    updatedAt: typeof record.updatedAt === "number" ? record.updatedAt : now,
-    teachingMode: typeof record.teachingMode === "boolean" ? record.teachingMode : false,
-    externalChatId:
-      typeof record.externalChatId === "string" && record.externalChatId.trim()
-        ? record.externalChatId.trim()
-        : createThreadExternalChatId(),
-    lastTaskId: typeof record.lastTaskId === "string" ? record.lastTaskId : null,
-    teachingTaskResult: normalizeStoredTaskResult(record.teachingTaskResult),
-    teachingLlmDebug: null,
-    teachingLlmDebugError: null,
-    activeTeachingRunId:
-      typeof record.activeTeachingRunId === "string" ? record.activeTeachingRunId : null,
-    teachingRuns: Array.isArray(record.teachingRuns)
-      ? record.teachingRuns
-          .map(normalizeStoredTeachingRun)
-          .filter((run): run is ChatTeachingRunRecord => Boolean(run))
-      : [],
-  };
-}
-
-function compactTeachingRunForChatStorage(run: ChatTeachingRunRecord): ChatTeachingRunRecord {
-  return {
-    id: run.id,
-    taskId: run.taskId ?? null,
-    userMessageId: run.userMessageId,
-    assistantMessageId: run.assistantMessageId ?? null,
-    userText: run.userText,
-    assistantText: run.assistantText ?? null,
-    status: run.status,
-    startedAt: run.startedAt,
-    completedAt: run.completedAt ?? null,
-    taskResult: run.taskResult ? compactTaskResultForChatStorage(run.taskResult) : null,
-    llmDebug: null,
-    llmDebugError: null,
-    callCount: run.callCount ?? debugCallCount(run.llmDebug),
-  };
-}
-
-function compactTaskResultForChatStorage(result: TaskQueryResponse): TaskQueryResponse {
-  return {
-    task_id: result.task_id,
-    status: result.status,
-    goal: result.goal ?? null,
-    result_json: null,
-    error_text: result.error_text ?? null,
-  };
-}
-
-function normalizeStoredTeachingRun(raw: unknown): ChatTeachingRunRecord | null {
-  if (!raw || typeof raw !== "object") return null;
-  const record = raw as Partial<ChatTeachingRunRecord>;
-  if (
-    typeof record.id !== "string" ||
-    typeof record.userMessageId !== "string" ||
-    typeof record.userText !== "string" ||
-    typeof record.startedAt !== "number"
-  ) {
-    return null;
-  }
-  const status = isTaskStatusOrRunning(record.status) ? record.status : "running";
-  return {
-    id: record.id,
-    taskId: typeof record.taskId === "string" && record.taskId.trim() ? record.taskId : null,
-    userMessageId: record.userMessageId,
-    assistantMessageId:
-      typeof record.assistantMessageId === "string" ? record.assistantMessageId : null,
-    userText: record.userText,
-    assistantText: typeof record.assistantText === "string" ? record.assistantText : null,
-    status,
-    startedAt: record.startedAt,
-    completedAt: typeof record.completedAt === "number" ? record.completedAt : null,
-    taskResult: normalizeStoredTaskResult(record.taskResult),
-    llmDebug: null,
-    llmDebugError: null,
-    callCount: typeof record.callCount === "number" ? record.callCount : null,
-  };
-}
-
-function isTaskStatusOrRunning(value: unknown): value is ChatTeachingRunRecord["status"] {
-  return ["queued", "running", "succeeded", "failed", "canceled", "timeout"].includes(String(value));
-}
-
-function activeTaskStatus(status: ChatTeachingRunRecord["status"]): boolean {
-  return status === "queued" || status === "running";
-}
-
-function terminalTaskStatus(status: TaskQueryResponse["status"]): boolean {
-  return !activeTaskStatus(status);
-}
-
-function formatChatAttachmentError(
-  error: unknown,
-  constraints: UiAttachmentConstraints,
-  t: Translate,
-): string {
-  if (!(error instanceof ChatAttachmentConstraintError)) {
-    return formatUiError(error, t, "读取文件失败。", "Failed to read files.");
-  }
-  switch (error.code) {
-    case "ui_attachments_too_many":
-      return t(
-        `一次最多发送 ${constraints.max_attachments} 个附件。`,
-        `You can send up to ${constraints.max_attachments} attachments at once.`,
-      );
-    case "ui_attachment_too_large":
-      return t(
-        `单个附件不能超过 ${formatAttachmentSize(constraints.max_attachment_bytes)}。`,
-        `Each attachment must be no larger than ${formatAttachmentSize(constraints.max_attachment_bytes)}.`,
-      );
-    case "ui_attachments_total_too_large":
-      return t(
-        `附件总大小不能超过 ${formatAttachmentSize(constraints.max_total_attachment_bytes)}。`,
-        `The total attachment size must not exceed ${formatAttachmentSize(constraints.max_total_attachment_bytes)}.`,
-      );
-    default:
-      return t("附件不符合上传要求。", "The attachments do not meet the upload requirements.");
-  }
-}
-
-export function threadHasPendingTask(thread: ChatThreadRecord): boolean {
-  return (thread.teachingRuns ?? []).some(
-    (run) => Boolean(run.taskId) && activeTaskStatus(run.status),
-  );
-}
-
-function normalizeStoredTaskResult(raw: unknown): TaskQueryResponse | null {
-  if (!raw || typeof raw !== "object") return null;
-  const record = raw as Partial<TaskQueryResponse>;
-  if (typeof record.task_id !== "string" || !record.task_id.trim()) return null;
-  return {
-    task_id: record.task_id,
-    status: typeof record.status === "string" ? record.status : "succeeded",
-    goal: record.goal ?? null,
-    result_json: null,
-    error_text: typeof record.error_text === "string" ? record.error_text : null,
-  };
-}
-
-function normalizeStoredChatMessage(raw: unknown): ChatMessage | null {
-  if (!raw || typeof raw !== "object") return null;
-  const record = raw as Partial<ChatMessage>;
-  if (
-    typeof record.id !== "string" ||
-    typeof record.text !== "string" ||
-    typeof record.ts !== "number" ||
-    !["user", "assistant", "system"].includes(String(record.role))
-  ) {
-    return null;
-  }
-  return {
-    id: record.id,
-    role: record.role as ChatMessage["role"],
-    text: record.text,
-    ts: record.ts,
-    artifacts: normalizeTaskArtifacts(record.artifacts),
-    artifactDelivery: normalizeTaskArtifactDeliverySummary(record.artifactDelivery),
-    bodyResult: normalizeStoredConversationBodyDescriptor(record.bodyResult),
-  };
-}
-
-function stripAttachmentPayloadsFromMessage(message: ChatMessage): ChatMessage {
-  return {
-    id: message.id,
-    role: message.role,
-    text: message.text,
-    ts: message.ts,
-    artifacts: normalizeTaskArtifacts(message.artifacts),
-    artifactDelivery: normalizeTaskArtifactDeliverySummary(message.artifactDelivery),
-    bodyResult: normalizeStoredConversationBodyDescriptor(message.bodyResult),
-  };
-}
-
-function normalizeStoredConversationBodyDescriptor(
-  raw: ChatMessage["bodyResult"],
-): ChatMessage["bodyResult"] {
-  if (!raw || typeof raw !== "object") return null;
-  if (
-    raw.schema_version !== 1 ||
-    typeof raw.complete !== "boolean" ||
-    !Number.isSafeInteger(raw.original_size_bytes) ||
-    !Number.isSafeInteger(raw.returned_size_bytes) ||
-    raw.original_size_bytes < raw.returned_size_bytes ||
-    !/^[0-9a-f]{64}$/i.test(raw.content_sha256)
-  ) {
-    return null;
-  }
-  if (
-    !raw.complete &&
-    (!raw.continuation ||
-      raw.continuation.kind !== "conversation_body_range" ||
-      typeof raw.continuation.url !== "string" ||
-      !Number.isSafeInteger(raw.continuation.next_start_byte))
-  ) {
-    return null;
-  }
-  return raw;
-}
-
-function createChatThread(t: Translate, agentId = "main"): ChatThreadRecord {
-  const now = Date.now();
-  return {
-    id: `chat-thread-${now}-${Math.random().toString(36).slice(2, 8)}`,
-    agentId,
-    title: t("新任务", "New task"),
-    messages: [welcomeChatMessage(t)],
-    input: "",
-    createdAt: now,
-    updatedAt: now,
-    teachingMode: false,
-    externalChatId: createThreadExternalChatId(),
-    lastTaskId: null,
-    teachingTaskResult: null,
-    teachingLlmDebug: null,
-    teachingLlmDebugError: null,
-    activeTeachingRunId: null,
-    teachingRuns: [],
-  };
-}
-
-function createThreadExternalChatId(): string {
-  return `ui-chat-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function welcomeChatMessage(t: Translate): ChatMessage {
-  return {
-    id: `chat-system-welcome-${Date.now()}`,
-    role: "system",
-    text: t(
-      "会话窗口已连接 clawd。发送消息后会自动提交 ask 任务并轮询结果。",
-      "The chat window is connected to clawd. Messages submit ask tasks and poll for results automatically.",
-    ),
-    ts: Date.now(),
-  };
-}
-
-function clearedChatMessage(t: Translate): ChatMessage {
-  return {
-    id: `chat-clear-${Date.now()}`,
-    role: "system",
-    text: t("当前任务的聊天记录已清空。", "This task's chat history was cleared."),
-    ts: Date.now(),
-  };
-}
-
-function buildChatThreadSummaries(
-  threads: ChatThreadRecord[],
-  t: Translate,
-): ChatThreadSummary[] {
-  return threads.map((thread) => {
-      const latestRun = latestTeachingRun(thread);
-      const taskResult = latestRun?.taskResult ?? thread.teachingTaskResult ?? null;
-      return {
-        id: thread.id,
-        agentId: thread.agentId,
-        title: thread.title,
-        preview: threadPreview(thread, t),
-        updatedAt: thread.updatedAt,
-        messageCount: thread.messages.filter((message) => message.role !== "system").length,
-        teachingMode: thread.teachingMode,
-        taskId: latestRun?.taskId ?? taskResult?.task_id ?? thread.lastTaskId ?? null,
-        taskStatus: latestRun?.status ?? taskResult?.status ?? null,
-        llmCallCount:
-          latestRun?.callCount ??
-          debugCallCount(latestRun?.llmDebug) ??
-          debugCallCount(thread.teachingLlmDebug),
-      };
-    });
-}
-
-function selectedTeachingRun(thread: ChatThreadRecord): ChatTeachingRunRecord | null {
-  const runs = thread.teachingRuns ?? [];
-  if (runs.length === 0) return null;
-  const activeId = thread.activeTeachingRunId;
-  const activeRun = runs.find((run) => run.id === activeId);
-  if (activeRun) return activeRun;
-  return thread.teachingMode ? (runs[runs.length - 1] ?? null) : null;
-}
-
-function latestTeachingRun(thread: ChatThreadRecord): ChatTeachingRunRecord | null {
-  const runs = thread.teachingRuns ?? [];
-  return runs.reduce<ChatTeachingRunRecord | null>((latest, run) => {
-    if (!latest) return run;
-    return run.startedAt >= latest.startedAt ? run : latest;
-  }, null);
-}
-
-function buildChatTeachingRunSummaries(thread: ChatThreadRecord): ChatTeachingRunSummary[] {
-  const activeId = selectedTeachingRun(thread)?.id ?? null;
-  return [...(thread.teachingRuns ?? [])]
-    .sort((left, right) => right.startedAt - left.startedAt)
-    .map((run) => ({
-      id: run.id,
-      taskId: run.taskId ?? null,
-      userMessageId: run.userMessageId,
-      assistantMessageId: run.assistantMessageId ?? null,
-      userText: run.userText,
-      assistantText: run.assistantText ?? null,
-      status: run.status,
-      startedAt: run.startedAt,
-      completedAt: run.completedAt ?? null,
-      callCount: run.callCount ?? debugCallCount(run.llmDebug),
-      hasTrace: Boolean(run.llmDebug),
-      traceError: run.llmDebugError ?? null,
-      selected: run.id === activeId,
-    }));
-}
-
-function appendTeachingRun(
-  runs: ChatTeachingRunRecord[] | undefined,
-  run: ChatTeachingRunRecord,
-): ChatTeachingRunRecord[] {
-  return [...(runs ?? []), run];
-}
-
-function updateTeachingRunById(
-  runs: ChatTeachingRunRecord[] | undefined,
-  runId: string,
-  updater: (run: ChatTeachingRunRecord) => ChatTeachingRunRecord,
-): ChatTeachingRunRecord[] {
-  return (runs ?? []).map((run) => (run.id === runId ? updater(run) : run));
-}
-
-function updateTeachingRunsByTaskId(
-  runs: ChatTeachingRunRecord[] | undefined,
-  taskId: string,
-  updater: (run: ChatTeachingRunRecord) => ChatTeachingRunRecord,
-): ChatTeachingRunRecord[] {
-  return (runs ?? []).map((run) => (run.taskId === taskId ? updater(run) : run));
-}
-
-function debugCallCount(debug: TaskLlmDebugResponse | null | undefined): number | null {
-  if (!debug) return null;
-  if (typeof debug.call_count === "number") return debug.call_count;
-  return debug.calls?.length ?? debug.entries?.length ?? null;
-}
-
-function threadPreview(thread: ChatThreadRecord, t: Translate): string {
-  const latest = [...thread.messages]
-    .reverse()
-    .find((message) => message.role === "user" || message.role === "assistant");
-  return latest?.text.trim() || t("还没有消息", "No messages yet");
-}
-
-function titleForThreadAfterUserMessage(
-  thread: ChatThreadRecord,
-  message: ChatMessage,
-  t: Translate,
-): string {
-  const hasPriorUserMessage = thread.messages.some((item) => item.role === "user");
-  const defaultTitles = new Set([t("新任务", "New task"), t("未命名任务", "Untitled task")]);
-  if (hasPriorUserMessage || !defaultTitles.has(thread.title)) {
-    return thread.title;
-  }
-  const cleaned = message.text.replace(/\s+/g, " ").trim();
-  if (!cleaned) {
-    return t("附件任务", "Attachment task");
-  }
-  return cleaned.length > 28 ? `${cleaned.slice(0, 28)}...` : cleaned;
-}
-
-function appendThreadMessages(messages: ChatMessage[], message: ChatMessage): ChatMessage[] {
-  return [...messages, message];
-}
-
-function upsertThreadMessage(messages: ChatMessage[], message: ChatMessage): ChatMessage[] {
-  const index = messages.findIndex((item) => item.id === message.id);
-  if (index < 0) return appendThreadMessages(messages, message);
-  const next = [...messages];
-  next[index] = message;
-  return next;
-}
-
-const SELECTED_VOICE_INPUT_DEVICE_STORAGE_KEY =
-  appStorageKey("ui.chat.selected_voice_input_device.v1");
-
-function loadSelectedVoiceInputDeviceId(): string {
-  if (typeof window === "undefined") return "";
-  try {
-    return window.localStorage.getItem(SELECTED_VOICE_INPUT_DEVICE_STORAGE_KEY)?.trim() ?? "";
-  } catch {
-    return "";
-  }
-}
-
-function persistSelectedVoiceInputDeviceId(deviceId: string): void {
-  if (typeof window === "undefined") return;
-  try {
-    if (deviceId) {
-      window.localStorage.setItem(SELECTED_VOICE_INPUT_DEVICE_STORAGE_KEY, deviceId);
-    } else {
-      window.localStorage.removeItem(SELECTED_VOICE_INPUT_DEVICE_STORAGE_KEY);
-    }
-  } catch {
-    // Browser privacy settings may disable local storage; recording still works.
-  }
-}
-
-function defaultAttachmentPrompt(
-  t: Translate,
-  imageCount: number,
-  audioCount: number,
-  fileCount: number,
-): string {
-  if (audioCount > 0 && imageCount === 0 && fileCount === 0) {
-    return t("请根据这段语音继续对话", "Please continue the conversation based on this voice message");
-  }
-  if (imageCount > 0 && fileCount === 0 && audioCount === 0) {
-    return t("请描述这张图片", "Please describe this image");
-  }
-  return t("请查看我上传的附件", "Please review the attachments I uploaded");
-}
-
-function defaultAttachmentMessage(
-  t: Translate,
-  imageCount: number,
-  audioCount: number,
-  fileCount: number,
-): string {
-  if (audioCount > 0 && imageCount === 0 && fileCount === 0) {
-    return t("发送了一段语音", "Sent a voice message");
-  }
-  if (imageCount > 0 && fileCount === 0 && audioCount === 0) {
-    return t("发送了一张图片", "Sent an image");
-  }
-  return t("发送了附件", "Sent attachments");
 }

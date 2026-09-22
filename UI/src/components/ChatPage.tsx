@@ -27,11 +27,15 @@ import {
   Pencil,
   RefreshCw,
   Search,
+  Send,
+  ListPlus,
   Square,
   Trash2,
   X,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import { ChatMessageQueue } from "./ChatMessageQueue";
+import type { QueuedChatMessage } from "../lib/chat-message-queue";
 
 import {
   attachmentIsAudio,
@@ -111,6 +115,10 @@ export interface ChatPageProps {
   chatTeachingRuns: ChatTeachingRunSummary[];
   activeChatTeachingRunId: string | null;
   chatSending: boolean;
+  chatQueuedMessages?: QueuedChatMessage[];
+  chatQueuePaused?: boolean;
+  onRemoveQueuedMessage?: (id: string) => void;
+  onResumeQueue?: () => void;
   chatCompacting: boolean;
   chatWorking: boolean;
   chatActivity: ChatActivitySummary;
@@ -169,6 +177,10 @@ export function ChatPage({
   chatTeachingRuns,
   activeChatTeachingRunId,
   chatSending,
+  chatQueuedMessages = [],
+  chatQueuePaused = false,
+  onRemoveQueuedMessage = () => undefined,
+  onResumeQueue = () => undefined,
   chatCompacting,
   chatWorking,
   chatActivity,
@@ -599,7 +611,7 @@ export function ChatPage({
               event.stopPropagation();
               setCompactionPanelOpen((open) => !open);
             }}
-            disabled={chatCompacting || chatWorking || chatMessages.length === 0}
+            disabled={chatCompacting || chatSending || chatWorking || chatQueuedMessages.length > 0 || chatMessages.length === 0}
             className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-2.5 py-1.5 text-xs hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
             aria-expanded={compactionPanelOpen}
             aria-controls="chat-context-compaction-panel"
@@ -868,6 +880,9 @@ export function ChatPage({
         <ChatWorkingIndicator t={t} activity={chatActivity} />
       ) : null}
 
+      <ChatMessageQueue messages={chatQueuedMessages} paused={chatQueuePaused} busy={chatSending}
+        onRemove={onRemoveQueuedMessage} onResume={onResumeQueue} t={t} />
+
       <div data-testid="chat-composer" className="shrink-0 pt-4">
         <div className="min-w-0">
           {chatAttachments.length > 0 ? (
@@ -898,7 +913,7 @@ export function ChatPage({
             <button
               type="button"
               onClick={() => chatAttachmentInputRef.current?.click()}
-              disabled={chatSending || chatRecording}
+              disabled={chatRecording}
               className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Paperclip className="h-3.5 w-3.5" />
@@ -912,7 +927,7 @@ export function ChatPage({
                   <select
                     value={chatAudioInputDeviceId}
                     onChange={(event) => onAudioInputDeviceChange(event.target.value)}
-                    disabled={chatSending || chatRecording}
+                    disabled={chatRecording}
                     className="theme-input h-8 max-w-52 py-1 text-xs"
                     title={t("选择录音使用的麦克风", "Choose the microphone used for recording")}
                   >
@@ -949,7 +964,6 @@ export function ChatPage({
                     onStopVoiceRecording();
                   }}
                   onContextMenu={(event) => event.preventDefault()}
-                  disabled={chatSending}
                   className={
                     chatRecording
                       ? "inline-flex select-none items-center gap-1.5 rounded-lg border border-emerald-400/35 bg-emerald-500/15 px-3 py-1.5 text-xs text-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
@@ -1018,16 +1032,16 @@ export function ChatPage({
               type="button"
               onClick={() => void onSendMessage()}
               disabled={
-                chatSending || chatRecording || (!chatInput.trim() && chatAttachments.length === 0)
+                chatRecording || (!chatInput.trim() && chatAttachments.length === 0)
               }
               className="theme-accent-btn chat-send-btn min-h-12 min-w-16 shrink-0 self-stretch justify-center sm:min-h-[72px] sm:min-w-20"
             >
-              {chatSending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+              {chatSending || chatCompacting || chatQueuedMessages.length > 0 ? (
+                <ListPlus className="h-4 w-4" />
               ) : (
-                <RefreshCw className="h-4 w-4" />
+                <Send className="h-4 w-4" />
               )}
-              {t("发送", "Send")}
+              {chatSending || chatCompacting || chatQueuedMessages.length > 0 ? t("排队", "Queue") : t("发送", "Send")}
             </button>
           </div>
         </div>

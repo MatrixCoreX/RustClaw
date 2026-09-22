@@ -826,6 +826,10 @@ export default function App() {
     activeChatAgentId,
     activeChatCanChangeAgent,
     chatSending,
+    chatQueuedMessages,
+    chatQueuePaused,
+    removeQueuedChatMessage,
+    resumeChatQueue,
     chatCompacting,
     chatWorking,
     chatActivity,
@@ -1894,6 +1898,10 @@ export default function App() {
               chatTeachingRuns={chatTeachingRuns}
               activeChatTeachingRunId={activeChatTeachingRunId}
               chatSending={chatSending}
+              chatQueuedMessages={chatQueuedMessages}
+              chatQueuePaused={chatQueuePaused}
+              onRemoveQueuedMessage={removeQueuedChatMessage}
+              onResumeQueue={resumeChatQueue}
               chatCompacting={chatCompacting}
               chatWorking={chatWorking}
               chatActivity={chatActivity}
