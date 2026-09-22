@@ -96,9 +96,17 @@ cp "$FIXTURE/installer" "$root/install-agent-cmd.sh"
         signer.write_text("existing trusted signer")
         result = self.run_bootstrap("--no-start")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual((self.fixture / "signer").read_text().strip(), str(signer))
+        self.assertEqual((self.fixture / "signer").read_text().strip(), str(signer.resolve()))
         self.assertEqual(signer.read_text(), "existing trusted signer")
         self.assertIn("--no-restart", (self.fixture / "deploy-args").read_text())
+
+    def test_existing_trust_anchor_under_symlinked_parent(self):
+        actual_parent = self.root / "actual parent"
+        actual_parent.mkdir()
+        linked_parent = self.root / "linked parent"
+        linked_parent.symlink_to(actual_parent, target_is_directory=True)
+        self.install = linked_parent / "runtime with spaces"
+        self.test_existing_trust_anchor_and_no_start()
 
     def test_check_only_does_not_install(self):
         result = self.run_bootstrap("--check-only")
