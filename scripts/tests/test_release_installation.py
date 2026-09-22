@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import struct
 import subprocess
@@ -99,6 +100,23 @@ class ReleaseInstallationTests(unittest.TestCase):
         wheels = (ROOT / ".github/workflows/release-python-wheels.yml").read_text()
         self.assertIn("AGENT_TOOLSDIRECTORY: /opt/agent-python-toolcache", wheels)
         self.assertIn('git config --global --add safe.directory "$GITHUB_WORKSPACE"', wheels)
+
+    def test_package_includes_bridge_local_runtime_dependencies(self):
+        package_source = (ROOT / "package-release.sh").read_text()
+        bridge = ROOT / "services/wa-web-bridge"
+        pending = [bridge / "index.js"]
+        visited = set()
+        while pending:
+            module = pending.pop()
+            if module in visited:
+                continue
+            visited.add(module)
+            relative = module.relative_to(ROOT).as_posix()
+            self.assertTrue(module.is_file(), relative)
+            self.assertIn(f'copy_if_exists "{relative}"', package_source)
+            for dependency in re.findall(r'require\(["\'](\./[^"\']+)["\']\)', module.read_text()):
+                pending.append(module.parent / dependency)
+        self.assertIn(bridge / "media-preflight.js", visited)
 
     def test_updater_detects_all_native_platforms_without_building(self):
         import tomllib

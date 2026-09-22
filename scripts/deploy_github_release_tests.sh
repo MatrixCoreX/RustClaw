@@ -84,6 +84,7 @@ printf 'name = "store_fixture"\n' > "$PACKAGE_DIR/optional_skills/store_fixture/
 printf 'release receipt\n' > "$PACKAGE_DIR/data/skill-packages/core_fixture/current.json"
 printf 'release prebuilt\n' > "$PACKAGE_DIR/prebuilt/skill-packages/store_fixture/current.json"
 printf 'release bridge\n' > "$PACKAGE_DIR/services/wa-web-bridge/index.js"
+printf 'release media preflight\n' > "$PACKAGE_DIR/services/wa-web-bridge/media-preflight.js"
 printf '<!doctype html><title>release ui</title>\n' > "$PACKAGE_DIR/UI/dist/index.html"
 
 ARCHIVE="$TMP_ROOT/$APP_RELEASE_ARTIFACT_ID-ubuntu-x86_64-test.tar.gz"
@@ -148,6 +149,7 @@ printf 'old readme\n' > "$RUNTIME/README.md"
 printf 'keep local optional\n' > "$RUNTIME/data/skill-packages/local_optional/current.json"
 printf 'old bridge\n' > "$RUNTIME/services/wa-web-bridge/index.js"
 printf 'keep source test\n' > "$RUNTIME/services/wa-web-bridge/test.js"
+printf 'keep channel session\n' > "$RUNTIME/services/wa-web-bridge/session.json"
 printf 'ubuntu-x86_64-old\n' > "$RUNTIME/.release-tag"
 
 mkdir "$RUNTIME/.release-deploy.lock"
@@ -216,7 +218,9 @@ grep -Fxq 'release receipt' "$RUNTIME/data/skill-packages/core_fixture/current.j
 grep -Fxq 'keep local optional' "$RUNTIME/data/skill-packages/local_optional/current.json"
 grep -Fxq 'release prebuilt' "$RUNTIME/prebuilt/skill-packages/store_fixture/current.json"
 grep -Fxq 'release bridge' "$RUNTIME/services/wa-web-bridge/index.js"
+grep -Fxq 'release media preflight' "$RUNTIME/services/wa-web-bridge/media-preflight.js"
 grep -Fxq 'keep source test' "$RUNTIME/services/wa-web-bridge/test.js"
+grep -Fxq 'keep channel session' "$RUNTIME/services/wa-web-bridge/session.json"
 cmp /bin/true "$RUNTIME/target/release/clawd"
 find "$RUNTIME/.release-backups" -name files.tar.gz -type f | grep -q .
 ROLLBACK_MARKER_BEFORE="$(cat "$RUNTIME/.release-rollback")"
