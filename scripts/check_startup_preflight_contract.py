@@ -52,6 +52,11 @@ def build_fixture(root: Path) -> Path:
         executable=True,
     )
     write(
+        root / "scripts/model_environment.sh",
+        (ROOT / "scripts/model_environment.sh").read_text(encoding="utf-8"),
+        executable=True,
+    )
+    write(
         root / "scripts/skill_store_packages.py",
         "#!/usr/bin/env python3\n",
         executable=True,
@@ -171,9 +176,10 @@ def main() -> int:
         )
         write(
             root / "target/release/clawd",
-            "#!/usr/bin/env bash\nwhile true; do sleep 1; done\n",
+            '#!/usr/bin/env bash\nprintf "%s" "$MINIMAX_API_KEY" > "$PWD/loaded-model-key"\nwhile true; do sleep 1; done\n',
             executable=True,
         )
+        write(root / ".agent-runtime/credentials/models.env", "MINIMAX_API_KEY=fixture-managed-key\n")
         decoy = subprocess.Popen(
             [
                 "bash",
@@ -189,6 +195,7 @@ def main() -> int:
             env = os.environ.copy()
             env["HOME"] = str(root / "home")
             env["APP_RUNTIME_ENV_SCRIPT"] = str(root / "missing-runtime-env.sh")
+            env["MINIMAX_API_KEY"] = "fixture-old-inherited-key"
             result = subprocess.run(
                 ["bash", str(script), "release"],
                 cwd=root,
@@ -213,6 +220,9 @@ def main() -> int:
                     "STARTUP_PREFLIGHT_CONTRACT failed: an unrelated command "
                     "argument caused a clawd false positive"
                 )
+                return 1
+            if (root / "loaded-model-key").read_text() != "fixture-managed-key":
+                print("STARTUP_PREFLIGHT_CONTRACT failed: managed model environment not inherited")
                 return 1
         finally:
             if started_pid > 0:

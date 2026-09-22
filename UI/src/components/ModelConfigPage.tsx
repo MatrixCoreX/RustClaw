@@ -110,7 +110,6 @@ export function ModelConfigPage({
 }: ModelConfigPageProps) {
   const supportsApiFormat = llmVendorSupportsApiFormat(selectedLlmVendorInfo?.name);
   const credentialEnvNames = selectedLlmVendorInfo?.api_key_env_names ?? [];
-  const isCustomVendor = selectedLlmVendorInfo?.name === "custom";
   const isHostedRelayDraft = matchesHostedRelayDraft(llmConfigData?.hosted_relay, {
     vendor: llmDraftVendor,
     model: llmDraftModel,
@@ -120,7 +119,9 @@ export function ModelConfigPage({
   const credentialLabel = isHostedRelayDraft
     ? t("由设备自动管理", "Managed automatically by this device")
     : selectedLlmVendorInfo?.api_key_configured
-    ? selectedLlmVendorInfo.api_key_source === "systemd_credential"
+    ? selectedLlmVendorInfo.api_key_source === "environment_file"
+      ? t("已保存到本机环境变量文件", "Saved in the local environment file")
+      : selectedLlmVendorInfo.api_key_source === "systemd_credential"
       ? t("由系统凭据保护", "Protected by system credentials")
       : selectedLlmVendorInfo.api_key_source === "macos_keychain"
         ? t("由 macOS 钥匙串保护", "Protected by macOS Keychain")
@@ -144,14 +145,9 @@ export function ModelConfigPage({
               "首次使用时，白名单设备会用 Slot 0 签名一次并自动领取中转密钥。密钥只保存在本机私有凭据中，不进入模型设置或浏览器存储。",
               "On first use, an allowlisted device signs one challenge with Slot 0 and receives a relay key automatically. The key remains in the device's private credential store and is never saved in model settings or browser storage.",
             )
-          : isCustomVendor
-            ? t(
-                "API Key 不进入模型配置或浏览器存储。系统凭据或 macOS 钥匙串优先；不可用时回退到仅由本机文件权限保护的私有凭据文件。",
-                "The API key is never stored in model config or browser storage. System credentials or macOS Keychain take precedence; otherwise it falls back to a private file protected only by local file permissions.",
-              )
           : t(
-              "密钥不会保存到模型配置或浏览器中。系统凭据或 macOS 钥匙串优先；不可用时仅由本机私有文件权限保护。",
-              "The key is never stored in model settings or the browser. System credentials or macOS Keychain take precedence; otherwise it is protected only by local private-file permissions.",
+              "填写后保存到本机环境变量文件，每次启动自动加载。留空保留已有密钥，不写入模型配置或浏览器存储。文件仅允许服务用户读写。",
+              "Entered keys are saved in a local environment file and loaded on every startup. Leave blank to keep the existing key. Keys stay out of model config and browser storage; only the service user can read or write the file.",
             )}
       </p>
       {credentialEnvNames.length > 0 && !isHostedRelayDraft ? (
@@ -170,8 +166,8 @@ export function ModelConfigPage({
           </h3>
           <p className="mt-3 max-w-2xl text-sm leading-7 text-white/70">
             {t(
-              "这里只处理 {product_name} 的主大模型。先在服务环境中设置厂商密钥，再选择厂商、模型和接口地址；保存后如果提示需要重启，就再重启一次。",
-              "This section only handles {product_name}'s main LLM. Set the vendor key in the service environment first, then choose the vendor, model, and endpoint. Restart after saving if prompted.",
+              "选择厂商、模型和接口地址，并填写 API Key；已有环境变量或系统凭据时可以留空。保存后如果提示需要重启，再重启服务。",
+              "Choose a vendor, model, and endpoint, then enter the API key. Leave it blank to use existing environment or system credentials. Restart the service after saving if prompted.",
             )}
           </p>
         </div>
@@ -296,7 +292,7 @@ export function ModelConfigPage({
             {supportsApiFormat ? <div /> : null}
           </div>
 
-          {isCustomVendor && !isHostedRelayDraft ? (
+          {selectedLlmVendorInfo && !isHostedRelayDraft ? (
             <div className="grid gap-4 md:grid-cols-2">
               <label className="block space-y-2">
                 <span className="flex items-center gap-2 text-xs uppercase tracking-widest text-white/50">
@@ -307,6 +303,8 @@ export function ModelConfigPage({
                   className="theme-input"
                   type="password"
                   autoComplete="new-password"
+                  autoCapitalize="none"
+                  spellCheck={false}
                   data-1p-ignore="true"
                   value={llmDraftApiKey}
                   onChange={(event) => onLlmDraftApiKeyChange(event.target.value)}

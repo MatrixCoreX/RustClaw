@@ -49,6 +49,8 @@ use crate::skill_registry::Capability;
 
 #[path = "secrets_file.rs"]
 mod file;
+#[path = "secrets_model_environment.rs"]
+pub mod model_environment;
 pub use file::{
     delete_file_secret, file_secret_is_configured, set_file_secret, EnvFileSecretsBroker,
     SecretProtectionSource,

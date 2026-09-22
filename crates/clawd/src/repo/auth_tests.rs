@@ -391,10 +391,31 @@ fn ensure_bootstrap_admin_key_creates_default_webd_login_for_empty_db() {
         .expect("created credentials");
     let created_key = created.admin_user_key.expect("created key");
     let created_password = created.webd_password.expect("created password");
+    assert_eq!(created.webd_username.as_deref(), Some("admin"));
+    assert_eq!(created_password, "654321");
 
     let login_key = verify_webd_password_login(&db, "admin", &created_password)
         .expect("verify generated webd login");
     assert_eq!(login_key.as_deref(), Some(created_key.as_str()));
+    let stored_hash: String = db
+        .query_row(
+            "SELECT password_hash FROM webd_login_accounts WHERE username = 'admin'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("stored password hash");
+    assert!(stored_hash.starts_with("$argon2id$"));
+    assert_ne!(stored_hash, created_password);
+    assert!(verify_webd_password_login(&db, "admin", "wrong-password")
+        .expect("reject wrong password")
+        .is_none());
+    assert!(ensure_bootstrap_admin_key(&db)
+        .expect("repeat bootstrap")
+        .is_none());
+    assert_eq!(
+        verify_webd_password_login(&db, "admin", "654321").expect("login after restart"),
+        Some(created_key)
+    );
 }
 
 #[test]
@@ -416,6 +437,7 @@ fn ensure_bootstrap_admin_key_backfills_default_webd_login_for_existing_admin() 
         .expect("backfilled credentials");
 
     assert_eq!(created.admin_user_key, None);
+    assert_ne!(created.webd_password.as_deref(), Some("654321"));
     let login_key = verify_webd_password_login(
         &db,
         "admin",
@@ -426,6 +448,57 @@ fn ensure_bootstrap_admin_key_backfills_default_webd_login_for_existing_admin() 
     )
     .expect("verify generated webd login");
     assert_eq!(login_key.as_deref(), Some("rk-existing-admin"));
+    assert!(verify_webd_password_login(&db, "admin", "654321")
+        .expect("reject initial password on existing installation")
+        .is_none());
+}
+
+#[test]
+fn ensure_bootstrap_admin_key_preserves_customized_and_disabled_logins() {
+    for enabled in [true, false] {
+        let db = Connection::open_in_memory().expect("open sqlite");
+        db.execute_batch(crate::KEY_AUTH_UPGRADE_SQL)
+            .expect("create auth schema");
+        db.execute_batch(crate::WEBD_LOGIN_SQL)
+            .expect("create webd login schema");
+        let created = ensure_bootstrap_admin_key(&db)
+            .expect("bootstrap admin key")
+            .expect("created credentials");
+        let key = created.admin_user_key.expect("created key");
+        let password = "customized-login-password";
+        upsert_webd_login_account(&db, "admin", password, &key).expect("change password");
+        db.execute(
+            "UPDATE webd_login_accounts SET enabled = ?1 WHERE username = 'admin'",
+            params![enabled],
+        )
+        .expect("set login state");
+        let before: (String, bool) = db
+            .query_row(
+                "SELECT password_hash, enabled FROM webd_login_accounts WHERE username = 'admin'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("read original login");
+
+        assert!(ensure_bootstrap_admin_key(&db)
+            .expect("bootstrap existing installation")
+            .is_none());
+        let after: (String, bool) = db
+            .query_row(
+                "SELECT password_hash, enabled FROM webd_login_accounts WHERE username = 'admin'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("read preserved login");
+        assert_eq!(after, before);
+        assert_eq!(
+            verify_webd_password_login(&db, "admin", password).expect("verify custom login"),
+            enabled.then_some(key)
+        );
+        assert!(verify_webd_password_login(&db, "admin", "654321")
+            .expect("reject initial password")
+            .is_none());
+    }
 }
 
 #[test]

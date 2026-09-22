@@ -76,10 +76,35 @@ agentctl -health
 ```
 
 The installer validates native binaries and bundled UI assets; it does not
-build missing files. Keep model credentials outside the installation directory.
+build missing files.
+
+In Model Settings, select a provider and enter its API key. Save writes the key
+to `.agent-runtime/credentials/models.env` with directory mode `0700` and file
+mode `0600` on Linux/macOS. Keys are not returned to the browser or written to
+`config.toml`; an empty key field preserves the existing credential. Test
+Connection uses the draft key without saving it.
+
+The launchers load the external environment script (`APP_RUNTIME_ENV_SCRIPT`,
+default `$HOME/runtime_env_filled.sh`) and then this managed model environment
+file on every startup. UI-saved keys override that provider's external key;
+providers without a saved override keep their existing credential source.
+The managed file contains literal `NAME=value` assignments, parsed without
+shell execution; do not `source` it yourself. It is plaintext protected by file
+permissions, so include it only in private backups, never in Git or Release
+packages. Runtime upgrades preserve it. Hosted relay credentials remain
+device-managed and do not require manual entry. Use HTTPS for remote key entry.
 Open webd on its configured port (normally `http://127.0.0.1:8788`). Local use
 does not need nginx. Configure channels and optional skills through the UI.
 Installation alone does not grant a skill permissions or enable it.
+
+On the first start with an empty database, the web login is `admin` with the
+initial password `654321`. Change it immediately in account management to a
+strong password of at least 12 bytes before exposing the service externally.
+Updates and restarts preserve existing accounts, passwords, and disabled states.
+Backfilling a login for an existing admin key and factory resets still generate
+random passwords. Bootstrap credentials are recorded in
+`data/bootstrap-credentials.txt` under the installation directory; store them
+safely, then delete that credentials file.
 
 ## Update an Existing Installation
 

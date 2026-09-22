@@ -801,7 +801,7 @@ timeout_seconds = 180
 }
 
 #[tokio::test]
-async fn test_llm_config_rejects_inline_api_key_for_direct_provider() {
+async fn test_llm_config_rejects_inline_api_key_for_non_admin() {
     let root = temp_workspace_root();
     std::fs::create_dir_all(root.join("configs")).expect("configs dir");
     std::fs::write(
@@ -821,7 +821,7 @@ models = ["MiniMax-M3", "MiniMax-M2.7"]
     .expect("write config");
     let mut state = AppState::test_default_with_fixture_provider();
     state.skill_rt.workspace_root = root;
-    insert_ui_route_auth_key(&state);
+    state.seed_test_auth_identity(UI_ROUTE_TEST_USER_KEY, "user");
 
     let (status, Json(body)) = test_llm_config(
         State(state),

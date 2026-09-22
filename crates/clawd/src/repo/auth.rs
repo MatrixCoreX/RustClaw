@@ -68,6 +68,7 @@ fn map_pending_channel_bind_session(
 }
 
 const DEFAULT_WEBD_USERNAME: &str = "admin";
+const INITIAL_WEBD_PASSWORD: &str = "654321";
 
 #[derive(Debug, Clone)]
 pub(crate) struct BootstrapAdminResult {
@@ -145,7 +146,13 @@ fn ensure_default_webd_admin_login(
         return Ok(None);
     }
 
-    let password = generate_webd_password();
+    // Only a newly bootstrapped installation uses the initial password.
+    // Backfilling a login for an existing admin key keeps a random password.
+    let password = if preferred_admin_key.is_some_and(|key| !key.trim().is_empty()) {
+        INITIAL_WEBD_PASSWORD.to_string()
+    } else {
+        generate_webd_password()
+    };
     let password_hash = auth_webd::hash_password_for_webd_login(&password)?;
     let now = now_ts();
     db.execute(

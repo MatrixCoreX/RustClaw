@@ -40,6 +40,12 @@ fn llm_vendor_api_key_from_env(vendor_name: &str) -> String {
 }
 
 fn llm_vendor_api_key_for_state(state: &AppState, vendor_name: &str) -> (String, &'static str) {
+    let path = claw_core::secrets::model_environment::path(&state.skill_rt.workspace_root);
+    match claw_core::secrets::model_environment::lookup_at(&path, vendor_name) {
+        Ok(Some(value)) => return (value.expose().to_string(), "environment_file"),
+        Err(_) => return (String::new(), "none"),
+        Ok(None) => (),
+    }
     let environment_value = llm_vendor_api_key_from_env(vendor_name);
     if !environment_value.is_empty() {
         return (environment_value, "environment");
@@ -296,7 +302,9 @@ fn build_llm_test_runtime(
     let mut params = claw_core::config::LlmProviderParams::default();
     params.device_key_enrollment = device_key_enrollment;
     let config = claw_core::config::LlmProviderConfig {
-        name: format!("vendor-{}", selected_vendor.trim().to_ascii_lowercase()),
+        // A connection test must use its resolved draft key, not override it
+        // with an older vendor credential from the global runtime broker.
+        name: format!("connection-test-{}", selected_vendor.trim().to_ascii_lowercase()),
         provider_type,
         base_url: vendor_base_url.trim().to_string(),
         api_key: vendor_api_key.trim().to_string(),
@@ -825,9 +833,7 @@ async fn update_llm_config(
     };
     let inline_api_key = req.vendor_api_key.as_deref().map(str::trim).unwrap_or("");
     let selected_vendor = req.selected_vendor.trim().to_ascii_lowercase();
-    if !inline_api_key.is_empty()
-        && (selected_vendor != "custom" || !identity.role.eq_ignore_ascii_case("admin"))
-    {
+    if !inline_api_key.is_empty() && !identity.role.eq_ignore_ascii_case("admin") {
         return (
             StatusCode::BAD_REQUEST,
             Json(ApiResponse {
@@ -994,11 +1000,9 @@ async fn update_llm_config(
         }
     }
     if !inline_api_key.is_empty() {
-        let secret_name = claw_core::secrets::text_secret_name_for_vendor(&selected_vendor);
-        let credential_path = claw_core::git_remote_config::git_credential_store_path(
-            &state.skill_rt.workspace_root,
-        );
-        if claw_core::secrets::set_file_secret(&credential_path, &secret_name, inline_api_key)
+        if claw_core::secrets::model_environment::save(
+            &state.skill_rt.workspace_root, &selected_vendor, inline_api_key,
+        )
             .is_err()
         {
             return (
@@ -1006,7 +1010,7 @@ async fn update_llm_config(
                 Json(ApiResponse {
                     ok: false,
                     data: None,
-                    error: Some("llm_api_key_private_store_write_failed".to_string()),
+                    error: Some("llm_api_key_environment_write_failed".to_string()),
                 }),
             );
         }
@@ -1052,9 +1056,7 @@ async fn test_llm_config(
     };
     let inline_api_key = req.vendor_api_key.as_deref().map(str::trim).unwrap_or("");
     let selected_vendor = req.selected_vendor.trim().to_ascii_lowercase();
-    if !inline_api_key.is_empty()
-        && (selected_vendor != "custom" || !identity.role.eq_ignore_ascii_case("admin"))
-    {
+    if !inline_api_key.is_empty() && !identity.role.eq_ignore_ascii_case("admin") {
         return (
             StatusCode::BAD_REQUEST,
             Json(ApiResponse {

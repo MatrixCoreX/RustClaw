@@ -22,6 +22,7 @@ if [[ -f "$RUNTIME_ENV_SCRIPT" ]]; then
   # shellcheck source=/dev/null
   . "$RUNTIME_ENV_SCRIPT"
 fi
+load_managed_model_environment "$SCRIPT_DIR"
 configure_platform_command_path
 configure_python3_with_tomllib
 configure_local_whisper_model_environment "$SCRIPT_DIR"

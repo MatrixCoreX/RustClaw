@@ -157,7 +157,7 @@ test("marks mimo api format edits as unsaved", () => {
   );
 });
 
-test("uses the hosted relay as the initial draft when no usable direct provider exists", () => {
+test("keeps the selected direct provider so a missing key can be entered", () => {
   assert.deepEqual(
     initialLlmDraft({
       selectedVendor: "minimax",
@@ -171,12 +171,18 @@ test("uses the hosted relay as the initial draft when no usable direct provider 
       runtime: null,
     }),
     {
-      vendor: "custom",
-      model: "minimax",
-      baseUrl: "https://relay.example/v1",
+      vendor: "minimax",
+      model: "MiniMax-M3",
+      baseUrl: "https://api.minimaxi.com/v1",
       apiFormat: "openai_compat",
     },
   );
+});
+
+test("an unconfigured installation does not select the relay automatically", () => {
+  assert.deepEqual(initialLlmDraft({
+    selectedVendor: "", selectedModel: "", vendors: [], hostedRelay, runtime: null,
+  }), { vendor: "", model: "", baseUrl: "", apiFormat: "" });
 });
 
 test("keeps an active direct provider instead of overriding it with the hosted relay", () => {

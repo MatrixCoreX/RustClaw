@@ -19,6 +19,9 @@ if [[ -f "${RUNTIME_ENV_FILE}" ]]; then
   # shellcheck source=/dev/null
   source "${RUNTIME_ENV_FILE}"
 fi
+# shellcheck source=/dev/null
+source "${ROOT_DIR}/scripts/model_environment.sh"
+load_managed_model_environment "$ROOT_DIR"
 # Match the normal multi-component startup path so a standalone clawd restart
 # preserves the platform command PATH and the selected modern Python runtime.
 # shellcheck source=/dev/null

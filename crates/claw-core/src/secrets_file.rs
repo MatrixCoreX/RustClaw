@@ -16,6 +16,7 @@ const MAX_SECRET_BYTES: usize = 64 * 1024;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SecretProtectionSource {
     Environment,
+    EnvironmentFile,
     SystemdCredential,
     MacosKeychain,
     PrivateFile,
@@ -25,6 +26,7 @@ impl SecretProtectionSource {
     pub fn machine_name(self) -> &'static str {
         match self {
             Self::Environment => "environment",
+            Self::EnvironmentFile => "environment_file",
             Self::SystemdCredential => "systemd_credential",
             Self::MacosKeychain => "macos_keychain",
             Self::PrivateFile => "private_file_fallback",
@@ -41,7 +43,8 @@ struct FileSecretDocument {
 }
 
 /// Runtime credential broker backed by a private JSON file, with deployment
-/// environment variables taking precedence. The file is read for every lookup
+/// environment variables taking precedence, except explicit UI model overrides.
+/// The files are read for every lookup
 /// so write-only UI updates and rotations take effect without restarting.
 #[derive(Debug, Clone)]
 pub struct EnvFileSecretsBroker {
@@ -66,6 +69,13 @@ impl EnvFileSecretsBroker {
         name: &str,
     ) -> Result<Option<(SecretValue, SecretProtectionSource)>, SecretsError> {
         validate_secret_name(name)?;
+        if let Some(vendor) = name.strip_prefix("text_").and_then(|v| v.strip_suffix("_api_key")) {
+            if let Some(value) = super::model_environment::lookup_at(
+                &self.path.with_file_name("models.env"), vendor,
+            )? {
+                return Ok(Some((value, SecretProtectionSource::EnvironmentFile)));
+            }
+        }
         if let Some(value) = self.environment.lookup(name)? {
             return Ok(Some((value, SecretProtectionSource::Environment)));
         }
@@ -288,7 +298,7 @@ fn write_document(
     apply_private_file_permissions(path, name)
 }
 
-fn lock_document(path: &Path, name: &str) -> Result<fs::File, SecretsError> {
+pub(super) fn lock_document(path: &Path, name: &str) -> Result<fs::File, SecretsError> {
     let parent = path.parent().ok_or_else(|| SecretsError::BackendIo {
         name: name.to_string(),
         source: invalid_data("credential_store_parent_missing"),

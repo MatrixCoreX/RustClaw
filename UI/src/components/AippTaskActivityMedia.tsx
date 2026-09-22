@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Download, Image as ImageIcon, LoaderCircle, RefreshCw, Video, ZoomIn } from "lucide-react";
+import { Download, Image as ImageIcon, LoaderCircle, Play, RefreshCw, Video, ZoomIn } from "lucide-react";
 
 import {
   fetchTaskArtifactBlob,
-  MAX_AUTOMATIC_ARTIFACT_PREVIEW_BYTES,
   saveTaskArtifactBlob,
   taskArtifactBrowserVideoUrl,
   taskArtifactVideoPosterUrl,
@@ -73,7 +72,41 @@ export function ActivityImagePreview({ artifact, apiFetch, t, onOpen }: {
   );
 }
 
-export function ActivityVideoPreview({ artifact, apiFetch, t }: {
+export function ActivityVideoPreview({ artifact, apiFetch, t, onOpen }: {
+  artifact: AippTaskActivityArtifact;
+  apiFetch: ApiFetch;
+  t: Translate;
+  onOpen: () => void;
+}) {
+  const [poster, setPoster] = useState<string | null>(null);
+  const apiFetchRef = useRef(apiFetch);
+  apiFetchRef.current = apiFetch;
+  const endpoint = taskArtifactVideoPosterUrl(artifact.preview_url || artifact.download_url);
+  useEffect(() => {
+    setPoster(null);
+    if (!endpoint) return;
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+    void fetchTaskArtifactBlob(apiFetchRef.current, endpoint, controller.signal).then((blob) => {
+      if (controller.signal.aborted) return;
+      objectUrl = URL.createObjectURL(blob);
+      setPoster(objectUrl);
+    }).catch(() => { /* A missing poster must not prevent opening the video. */ });
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [endpoint]);
+  return (
+    <button type="button" className="relative block h-full min-h-24 w-full cursor-zoom-in bg-black/20" onClick={onOpen} title={t("展开视频", "Expand video")} aria-label={t("展开视频", "Expand video")}>
+      {poster ? <img src={poster} alt={artifact.filename} className="h-full w-full object-contain" onError={() => setPoster(null)} /> : <span className="flex h-full w-full items-center justify-center text-[var(--theme-text-muted)]"><Video className="h-8 w-8" /></span>}
+      <span className="absolute inset-0 flex items-center justify-center" aria-hidden="true"><span className="flex h-10 w-10 items-center justify-center rounded-full border border-white/40 bg-black/65 text-white"><Play className="ml-0.5 h-5 w-5" /></span></span>
+    </button>
+  );
+}
+
+// Mounted only inside the expanded viewer; the list never fetches the video body.
+export function ActivityVideoPlayer({ artifact, apiFetch, t }: {
   artifact: AippTaskActivityArtifact;
   apiFetch: ApiFetch;
   t: Translate;
@@ -83,11 +116,10 @@ export function ActivityVideoPreview({ artifact, apiFetch, t }: {
   const originalPreviewUrl = previewUrl;
   const videoPosterUrl = taskArtifactVideoPosterUrl(previewUrl);
   const playableInline = /^(video\/mp4|video\/webm)$/i.test(artifact.mime_type.split(";", 1)[0].trim());
-  const automaticPreview = (artifact.size_bytes ?? Number.MAX_SAFE_INTEGER) <= MAX_AUTOMATIC_ARTIFACT_PREVIEW_BYTES;
   const [sourceMode, setSourceMode] = useState<"browser" | "original">(playableInline ? "original" : "browser");
   const mediaPreviewUrl = sourceMode === "browser" ? (browserPreviewUrl || originalPreviewUrl) : originalPreviewUrl;
-  const [previewRequested, setPreviewRequested] = useState(automaticPreview);
-  const [previewState, setPreviewState] = useState<"idle" | "loading" | "ready" | "error">(automaticPreview ? "loading" : "idle");
+  const [retry, setRetry] = useState(0);
+  const [previewState, setPreviewState] = useState<"loading" | "ready" | "error">("loading");
   const [previewObjectUrl, setPreviewObjectUrl] = useState<string | null>(null);
   const [posterObjectUrl, setPosterObjectUrl] = useState<string | null>(null);
   const [unsupported, setUnsupported] = useState(false);
@@ -96,6 +128,17 @@ export function ActivityVideoPreview({ artifact, apiFetch, t }: {
   const apiFetchRef = useRef(apiFetch);
   apiFetchRef.current = apiFetch;
   const fallbackTried = useRef(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const downloadRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => { downloadRequest.current?.abort(); }, []);
+  useEffect(() => {
+    const video = videoRef.current;
+    return () => {
+      video?.pause();
+      video?.removeAttribute("src");
+      video?.load();
+    };
+  }, [previewObjectUrl, unsupported]);
   useEffect(() => {
     fallbackTried.current = false;
   }, [artifact.id]);
@@ -116,8 +159,8 @@ export function ActivityVideoPreview({ artifact, apiFetch, t }: {
   };
 
   useEffect(() => {
-    if (!previewRequested || !mediaPreviewUrl) {
-      setPreviewState(mediaPreviewUrl ? "idle" : "error");
+    if (!mediaPreviewUrl) {
+      setPreviewState("error");
       setPreviewObjectUrl(null);
       setUnsupported(false);
       return;
@@ -143,7 +186,7 @@ export function ActivityVideoPreview({ artifact, apiFetch, t }: {
       controller.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [artifact.id, mediaPreviewUrl, originalPreviewUrl, previewRequested, sourceMode]);
+  }, [artifact.id, mediaPreviewUrl, originalPreviewUrl, retry, sourceMode]);
 
   useEffect(() => {
     if (!videoPosterUrl) {
@@ -172,31 +215,37 @@ export function ActivityVideoPreview({ artifact, apiFetch, t }: {
     if (downloadLoading) return;
     setDownloadLoading(true);
     setDownloadError(null);
+    const controller = new AbortController();
+    downloadRequest.current = controller;
     try {
-      const blob = await fetchTaskArtifactBlob(apiFetchRef.current, artifact.download_url);
-      saveTaskArtifactBlob(blob, artifact.filename);
+      const blob = await fetchTaskArtifactBlob(apiFetchRef.current, artifact.download_url, controller.signal);
+      if (!controller.signal.aborted) saveTaskArtifactBlob(blob, artifact.filename);
     } catch {
-      setDownloadError(t("视频下载失败，请重试。", "Could not download the video. Try again."));
+      if (!controller.signal.aborted) setDownloadError(t("视频下载失败，请重试。", "Could not download the video. Try again."));
     } finally {
-      setDownloadLoading(false);
+      if (!controller.signal.aborted) setDownloadLoading(false);
+      if (downloadRequest.current === controller) downloadRequest.current = null;
     }
   };
 
   const requestPreview = () => {
     setPreviewState("loading");
-    setPreviewRequested(true);
+    fallbackTried.current = false;
+    setUnsupported(false);
+    setRetry((value) => value + 1);
   };
 
   return (
-    <div className="relative flex h-full min-h-28 w-full flex-col bg-black/20">
+    <div className="relative flex h-full min-h-0 w-full flex-col bg-black/20">
       {previewObjectUrl && !unsupported ? (
         <video
+          ref={videoRef}
           controls
           playsInline
           preload="metadata"
           src={previewObjectUrl}
           poster={posterObjectUrl ?? undefined}
-          className="h-full w-full flex-1 object-contain"
+          className="min-h-0 w-full flex-1 object-contain"
           title={artifact.filename}
           onLoadedData={(event) => {
             const video = event.currentTarget;
@@ -207,34 +256,21 @@ export function ActivityVideoPreview({ artifact, apiFetch, t }: {
             if (!switchSource()) setUnsupported(true);
           }}
         />
-      ) : posterObjectUrl && (unsupported || previewState === "error") ? (
-        <div className="flex h-full min-h-28 flex-1 flex-col">
-          <img src={posterObjectUrl} alt={artifact.filename} className="min-h-0 flex-1 object-contain" />
-          <p className="border-t border-white/10 px-2 py-1.5 text-[11px] leading-4 text-white/70">
-            {t("网页里暂时播不了，原视频仍可下载。", "This copy cannot play in the browser. The original video can still be downloaded.")}
-          </p>
-        </div>
       ) : (
-        <div className="flex min-h-28 flex-1 flex-col items-center justify-center gap-2 px-3 py-4 text-center text-xs text-white/65">
-          {previewState === "error" ? (
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-3 py-4 text-center text-sm text-[var(--theme-text-body)]">
+          {previewState === "error" || unsupported ? (
             <>
-              <p>{t("视频预览加载失败。", "The video preview could not load.")}</p>
+              {posterObjectUrl ? <img src={posterObjectUrl} alt={artifact.filename} className="min-h-0 w-full flex-1 object-contain" /> : null}
+              <p role="alert">{t("视频暂时无法播放，可重试或下载原视频。", "The video cannot play right now. Retry or download the original.")}</p>
               <button type="button" className="theme-secondary-btn px-2.5 py-1.5 text-xs" onClick={requestPreview}>
                 <RefreshCw className="h-3.5 w-3.5" />{t("重试", "Retry")}
               </button>
             </>
-          ) : previewRequested ? (
-            <span className="inline-flex items-center gap-2">
+          ) : (
+            <span role="status" className="inline-flex items-center gap-2">
               <LoaderCircle className="h-4 w-4 animate-spin" />
               {t("正在准备可播放预览…", "Preparing a playable preview…")}
             </span>
-          ) : (
-            <>
-              <Video className="h-7 w-7 text-white/40" />
-              <button type="button" className="theme-secondary-btn px-2.5 py-1.5 text-xs" onClick={requestPreview}>
-                {t("预览视频", "Preview video")}
-              </button>
-            </>
           )}
         </div>
       )}

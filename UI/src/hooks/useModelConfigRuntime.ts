@@ -121,7 +121,7 @@ export function useModelConfigRuntime({
   useEffect(() => {
     setLlmTestMessage(null);
     setLlmTestError(null);
-  }, [llmDraftApiFormat, llmDraftBaseUrl, llmDraftModel, llmDraftVendor]);
+  }, [llmDraftApiFormat, llmDraftApiKey, llmDraftBaseUrl, llmDraftModel, llmDraftVendor]);
 
   const fetchLlmConfig = async () => {
     setLlmConfigLoading(true);
@@ -167,7 +167,7 @@ export function useModelConfigRuntime({
           selected_model: llmDraftModel,
           vendor_base_url: llmDraftBaseUrl,
           vendor_api_format: llmVendorSupportsApiFormat(llmDraftVendor) ? llmDraftApiFormat : undefined,
-          vendor_api_key: llmDraftVendor === "custom" && llmDraftApiKey.trim() ? llmDraftApiKey.trim() : undefined,
+          vendor_api_key: llmDraftApiKey.trim() || undefined,
         }),
       });
       const body = (await res.json()) as ApiResponse<{
@@ -178,8 +178,8 @@ export function useModelConfigRuntime({
       }
       setLlmConfigSaveMessage(
         t(
-          "大模型设置已保存到 config.toml（需重启 clawd 生效）",
-          "LLM settings saved to config.toml (restart clawd to apply)",
+          "模型设置已保存。填写的 API Key 已单独保存到本机环境变量文件；请按页面提示重启服务。",
+          "Model settings saved. Any entered API key was saved separately in the local environment file. Restart the service if prompted.",
         ),
       );
       setLlmDraftApiKey("");
@@ -216,7 +216,7 @@ export function useModelConfigRuntime({
           selected_model: llmDraftModel,
           vendor_base_url: llmDraftBaseUrl,
           vendor_api_format: llmVendorSupportsApiFormat(llmDraftVendor) ? llmDraftApiFormat : undefined,
-          vendor_api_key: llmDraftVendor === "custom" && llmDraftApiKey.trim() ? llmDraftApiKey.trim() : undefined,
+          vendor_api_key: llmDraftApiKey.trim() || undefined,
         }),
       });
       const body = (await res.json()) as ApiResponse<LlmTestResponse>;

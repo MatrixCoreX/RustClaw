@@ -87,15 +87,6 @@ export function isHostedRelayDraft(
 
 export function initialLlmDraft(input: InitialLlmDraftInput): LlmDraftSnapshot {
   const selectedVendor = input.vendors.find((vendor) => vendor.name === input.selectedVendor);
-  const activeRuntime = Boolean(input.runtime?.vendor.trim() && input.runtime?.model.trim());
-  const selectedProviderReady = Boolean(
-    input.selectedVendor.trim()
-    && input.selectedModel.trim()
-    && (selectedVendor?.api_key_configured || activeRuntime),
-  );
-  if (!selectedProviderReady && input.hostedRelay) {
-    return hostedRelayDraft(input.hostedRelay);
-  }
   return {
     vendor: input.selectedVendor,
     model: input.selectedModel,

@@ -3,6 +3,8 @@
 COMPONENT_COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "$COMPONENT_COMMON_DIR/../scripts/product_identity.sh"
+# shellcheck source=/dev/null
+source "$COMPONENT_COMMON_DIR/../scripts/model_environment.sh"
 
 component_load_runtime_environment() {
   local runtime_env_script
@@ -11,6 +13,7 @@ component_load_runtime_environment() {
     # shellcheck source=/dev/null
     source "$runtime_env_script"
   fi
+  load_managed_model_environment "${COMPONENT_ROOT:-$COMPONENT_COMMON_DIR/..}"
 }
 
 component_start_init() {

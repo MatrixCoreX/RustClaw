@@ -1029,6 +1029,7 @@ export interface LlmVendorOption {
   api_key_masked?: string | null;
   api_key_source?:
     | "environment"
+    | "environment_file"
     | "systemd_credential"
     | "macos_keychain"
     | "private_file_fallback"

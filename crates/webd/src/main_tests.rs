@@ -455,6 +455,7 @@ fn internal_clawd_routes_are_never_exposed_by_webd() {
 
 #[test]
 fn login_inputs_are_bounded_before_hash_verification_or_lockout_tracking() {
+    assert!(valid_login_input("admin", "654321"));
     assert!(valid_login_input("admin", "a sufficiently long password"));
     assert!(!valid_login_input("", "password"));
     assert!(!valid_login_input("admin", ""));

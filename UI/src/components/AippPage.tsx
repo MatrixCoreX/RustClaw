@@ -35,6 +35,7 @@ import { AIPP_PAGE_SIZE, collectionGroupKey, completeCollectionPage, groupCollec
 import { appStorageKey } from "../lib/product-identity";
 import { useUiDialog } from "./UiDialogProvider";
 import { AippImageViewer, type AippViewerImage } from "./AippImageViewer";
+import { AippVideoViewer } from "./AippVideoViewer";
 import {
   ActivityImagePreview,
   ActivityVideoPreview,
@@ -476,6 +477,7 @@ export function AippTaskActivityCard({
   const [previewIndex, setPreviewIndex] = useState(0);
   const [videoIndex, setVideoIndex] = useState(0);
   const [viewerImage, setViewerImage] = useState<AippViewerImage | null>(null);
+  const [viewerVideo, setViewerVideo] = useState<AippTaskActivityArtifact | null>(null);
   const previewImages = activityImageArtifacts(item);
   const previewVideos = activityVideoArtifacts(item);
   const selectedPreviewIndex = previewImages.length === 0 ? 0 : Math.min(previewIndex, previewImages.length - 1);
@@ -496,6 +498,7 @@ export function AippTaskActivityCard({
     if (open && artifact.kind === "video") {
       const index = previewVideos.findIndex((entry) => entry.id === artifact.id);
       if (index >= 0) setVideoIndex(index);
+      setViewerVideo(artifact);
       return;
     }
     if (artifactAction) return;
@@ -590,7 +593,7 @@ export function AippTaskActivityCard({
             {video ? (
               <div className={`relative ${preview ? "border-t border-white/10" : "aspect-video min-h-24 max-h-36 flex-1 sm:aspect-auto sm:min-h-28"}`}>
                 <div className={previewVideos.length > 1 ? "h-[calc(100%-2rem)]" : "h-full"}>
-                  <ActivityVideoPreview key={video.id} artifact={video} apiFetch={apiFetch} t={t} />
+                  <ActivityVideoPreview key={video.id} artifact={video} apiFetch={apiFetch} t={t} onOpen={() => setViewerVideo(video)} />
                 </div>
                 {previewVideos.length > 1 ? (
                   <div className="absolute inset-x-0 bottom-0 flex h-8 items-center justify-between border-t border-[var(--theme-border)] bg-[var(--theme-dialog-bg)] px-1 text-xs text-[var(--theme-text-strong)]">
@@ -706,6 +709,7 @@ export function AippTaskActivityCard({
         </div>
       ) : null}
       {viewerImage ? <AippImageViewer image={viewerImage} images={viewerImages} apiFetch={apiFetch} t={t} onClose={() => setViewerImage(null)} /> : null}
+      {viewerVideo ? <AippVideoViewer artifact={viewerVideo} apiFetch={apiFetch} t={t} onClose={() => setViewerVideo(null)} /> : null}
     </article>
   );
 }

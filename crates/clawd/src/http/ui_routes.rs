@@ -543,6 +543,10 @@ mod tests;
 mod model_provider_config_tests;
 
 #[cfg(test)]
+#[path = "ui_routes/llm_credentials_tests.rs"]
+mod llm_credentials_tests;
+
+#[cfg(test)]
 #[path = "ui_routes/slo_metrics_tests.rs"]
 mod slo_metrics_tests;
 

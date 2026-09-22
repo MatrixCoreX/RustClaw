@@ -536,10 +536,10 @@ test("lets the generic task activity renderer preview and download video artifac
       onDelete={() => undefined}
     />,
   );
-  assert.match(markup, /正在准备可播放预览/);
-  assert.match(markup, /下载视频/);
+  assert.match(markup, /展开视频/);
+  assert.doesNotMatch(markup, /<video|正在准备可播放预览/);
   assert.match(markup, /clip\.mp4/);
-  assert.ok(markup.indexOf("选择这条记录") > markup.indexOf("下载视频"));
+  assert.ok(markup.indexOf("选择这条记录") > markup.indexOf("展开视频"));
 });
 
 test("supports the generic task activity AiAPP renderer without skill-specific core UI branches", () => {
