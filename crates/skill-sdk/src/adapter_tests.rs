@@ -49,7 +49,10 @@ fn user_python_installation_accepts_wheels_only_and_uses_packaged_wheelhouse() {
     let args = command.get_args().collect::<Vec<_>>();
     assert_eq!(args[0], "--only-binary=:all:");
     assert_eq!(args[1], "--find-links");
-    assert_eq!(Path::new(args[2]), temp.path().join("release-wheels"));
+    assert_eq!(
+        Path::new(args[2]),
+        fs::canonicalize(temp.path().join("release-wheels")).expect("canonical wheelhouse")
+    );
 }
 
 fn artifact(os: &str, arch: &str, contents: &[u8]) -> PlatformArtifact {
