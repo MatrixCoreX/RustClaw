@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createRef, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { act, create, type ReactTestRenderer } from "react-test-renderer";
 
 import { ChatPage } from "../components/ChatPage";
 import { emptyChatActivity } from "./chat-activity";
@@ -267,4 +268,52 @@ test("renders compact structured activity instead of a generic working label", (
   assert.match(markup, /LLM 2/);
   assert.match(markup, /第 3 轮/);
   assert.match(markup, /chat-activity-sweep/);
+});
+
+test("keeps live progress outside conversation history and immediately before the composer", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const pageProps = props();
+  pageProps.chatWorking = true;
+  pageProps.chatTeachingMode = true;
+  pageProps.chatActivity = { ...emptyChatActivity(), stage: "llm_request", llmCallCount: 1 };
+  pageProps.chatMessages = [{ id: "user-1", role: "user", text: "检查项目", ts: 1 }];
+  let renderer!: ReactTestRenderer;
+  await act(() => { renderer = create(<ChatPage {...pageProps} />); });
+  try {
+    const messages = renderer.root.findByProps({ "data-testid": "chat-message-list" });
+    assert.equal(messages.findAllByProps({ "data-testid": "chat-working-indicator" }).length, 0);
+    const progress = renderer.root.findByProps({ "data-testid": "chat-working-indicator" });
+    assert.equal(progress.props.role, "status");
+    assert.equal(progress.props["aria-live"], "polite");
+    assert.match(progress.props.className, /shrink-0/);
+    assert.equal(progress.findByProps({ title: "第 1 次 LLM 调用正在处理" }).children[0], "第 1 次 LLM 调用正在处理");
+    const markup = renderToStaticMarkup(<ChatPage {...pageProps} />);
+    assert.ok(markup.indexOf("教学模式已开启") < markup.indexOf('data-testid="chat-working-indicator"'));
+    assert.ok(markup.indexOf('data-testid="chat-working-indicator"') < markup.indexOf('data-testid="chat-composer"'));
+  } finally {
+    await act(() => renderer.unmount());
+  }
+});
+
+test("updates request numbers and removes progress after completion or a task switch", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const pageProps = props();
+  pageProps.chatSending = true;
+  pageProps.chatActivity = { ...emptyChatActivity(), stage: "llm_request", llmCallCount: 1 };
+  let renderer!: ReactTestRenderer;
+  await act(() => { renderer = create(<ChatPage {...pageProps} />); });
+  try {
+    await act(() => renderer.update(<ChatPage {...pageProps} chatActivity={{ ...pageProps.chatActivity, stage: "llm_response", llmCallCount: 2 }} />));
+    assert.equal(renderer.root.findAllByProps({ title: "第 1 次 LLM 调用正在处理" }).length, 0);
+    assert.equal(renderer.root.findByProps({ title: "第 2 次 LLM 调用正在生成回复" }).children[0], "第 2 次 LLM 调用正在生成回复");
+    await act(() => renderer.update(<ChatPage {...pageProps} chatSending={false} chatWorking={false} />));
+    assert.equal(renderer.root.findAllByProps({ "data-testid": "chat-working-indicator" }).length, 0);
+    await act(() => renderer.update(<ChatPage {...props()} activeChatThreadId="other-thread" />));
+    assert.equal(renderer.root.findAllByProps({ "data-testid": "chat-working-indicator" }).length, 0);
+    const markup = renderToStaticMarkup(<ChatPage {...pageProps} t={(_zh, en) => en} />);
+    assert.match(markup, /LLM call 1 is processing/);
+    assert.match(markup, /Task progress/);
+  } finally {
+    await act(() => renderer.unmount());
+  }
 });

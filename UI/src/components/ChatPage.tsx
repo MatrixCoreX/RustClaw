@@ -705,6 +705,7 @@ export function ChatPage({
 
       <div
         ref={messageListRef}
+        data-testid="chat-message-list"
         className="agent-chat-message-list min-h-80 flex-1 space-y-3 overflow-y-auto rounded-xl border border-white/10 bg-black/30 p-3 md:min-h-0"
       >
         {chatMessages.map((message) => {
@@ -821,10 +822,6 @@ export function ChatPage({
             </div>
           );
         })}
-        {chatSending || chatWorking ? (
-          <ChatWorkingIndicator t={t} activity={chatActivity} />
-        ) : null}
-
       {teachingPanelVisible ? (
         <div className="mt-4 space-y-3">
           <TeachingRunSnapshot
@@ -867,7 +864,11 @@ export function ChatPage({
       ) : null}
       </div>
 
-      <div className="shrink-0 pt-4">
+      {chatSending || chatWorking ? (
+        <ChatWorkingIndicator t={t} activity={chatActivity} />
+      ) : null}
+
+      <div data-testid="chat-composer" className="shrink-0 pt-4">
         <div className="min-w-0">
           {chatAttachments.length > 0 ? (
             <div className="mb-3 flex flex-wrap gap-2 rounded-xl border border-white/10 bg-white/5 p-2">
@@ -1272,20 +1273,20 @@ function ChatWorkingIndicator({
       aria-live="polite"
       aria-label={t("Agent 正在处理", "Agent is working")}
       data-testid="chat-working-indicator"
-      className="space-y-1"
+      className="chat-activity-sweep mt-3 min-w-0 shrink-0 rounded-lg border border-[var(--theme-border)] bg-[var(--theme-card)] px-3 py-2.5 text-sm text-[var(--theme-text-body)]"
     >
-      <div className="text-[11px] text-white/50">{t("任务状态", "Task status")}</div>
-      <div className="chat-activity-sweep min-h-12 max-w-xl rounded-xl border border-emerald-300/20 bg-emerald-500/12 px-3 py-2.5 text-sm text-white">
-        <div className="relative z-[1] flex items-center gap-2">
+      <div className="relative z-[1] mb-1 text-[11px] text-[var(--theme-text-muted)]">{t("执行进度", "Task progress")}</div>
+      <div>
+        <div className="relative z-[1] flex min-h-5 items-center gap-2">
           <Loader2
             aria-hidden="true"
-            className="h-4 w-4 shrink-0 text-emerald-200 motion-safe:animate-spin"
+            className="h-4 w-4 shrink-0 text-[var(--theme-secondary-btn-text)] motion-safe:animate-spin"
           />
           <span className="min-w-0 truncate font-medium" title={activityTitle}>
             {activityTitle}
           </span>
         </div>
-        <div className="relative z-[1] mt-2 flex flex-wrap gap-1.5 text-[10px] text-white/60">
+        <div className="relative z-[1] mt-2 flex flex-wrap gap-1.5 text-[10px] text-[var(--theme-text-muted)]">
           {activity.llmCallCount > 0 ? (
             <span className="rounded-full border border-white/10 bg-black/15 px-2 py-0.5">
               LLM {activity.llmCallCount}
