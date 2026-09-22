@@ -2549,6 +2549,7 @@ def gather_browser_candidates(
     seen_image_urls: set[str] = set()
     seen: set[str] = set()
     target_urls: list[str] = []
+    http_login_barrier = False
 
     for share_url in urls:
         try:
@@ -2569,12 +2570,25 @@ def gather_browser_candidates(
                         article_from_douyin_payload(payload, source="douyin.browser-preresolve"),
                     )
             elif platform == "xiaohongshu":
+                xhs_target = xiaohongshu_access.resolve_xiaohongshu_share_url(
+                    share_url,
+                    cookie=cookie,
+                    timeout=min(timeout, 20.0),
+                    headers={"Referer": platform_referer(platform)},
+                )
+                item_id = item_id or xhs_target.note_id
+                if xhs_target.login_barrier:
+                    http_login_barrier = True
+                    logs.append("xiaohongshu: login_required")
+                    print("xiaohongshu: login_required", file=sys.stderr)
                 payload = find_xiaohongshu_note_payload_in_html(page_text, item_id)
                 if payload is not None:
                     article = richer_article(
                         article,
                         article_from_xiaohongshu_payload(payload, source="xiaohongshu.browser-preresolve"),
                     )
+                if xhs_target.page_url not in target_urls:
+                    target_urls.append(xhs_target.page_url)
             if resolved.url not in target_urls:
                 target_urls.append(resolved.url)
         except DouyinDownloadError as exc:
@@ -2625,6 +2639,8 @@ def gather_browser_candidates(
     login_retry_used = False
     while pending_targets:
         target_url = pending_targets.pop(0)
+        dump_timed_out = False
+        dump_html = ""
         with tempfile.TemporaryDirectory(prefix="media_downloader_chrome_", ignore_cleanup_errors=True) as tmpdir:
             netlog_path = Path(tmpdir) / "netlog.json"
             require_item_match = browser_target_requires_item_match(platform, target_url, item_id)
@@ -2655,6 +2671,7 @@ def gather_browser_candidates(
                     timeout=timeout + 10,
                 )
             except subprocess.TimeoutExpired as exc:
+                dump_timed_out = True
                 logs.append(f"{platform}: browser fallback timed out after {timeout:.1f}s")
                 stdout = exc.output or ""
                 stderr = exc.stderr or ""
@@ -2665,7 +2682,8 @@ def gather_browser_candidates(
                 completed = subprocess.CompletedProcess(command, -1, stdout, stderr)
             except OSError as exc:
                 logs.append(f"{platform}: browser fallback failed to start Chrome: {exc}")
-                continue
+                completed = subprocess.CompletedProcess(command, -1, "", str(exc))
+            dump_html = completed.stdout or ""
 
             if completed.returncode != 0:
                 stderr_line = completed.stderr.strip().splitlines()
@@ -2731,55 +2749,36 @@ def gather_browser_candidates(
                     platform,
                 )
 
-            if (
-                platform == "xiaohongshu"
-                and xiaohongshu_access.xiaohongshu_html_is_login(completed.stdout, target_url)
-                and not candidates
-                and not image_candidates
-            ):
-                logs.append("xiaohongshu: login_required")
-                if not login_retry_used and xhs_profile is not None:
-                    login_retry_used = True
-                    status = xiaohongshu_access.wait_for_skill_owned_login(
-                        chrome=chrome,
-                        profile_dir=xhs_profile,
-                        page_url=target_url,
-                        note_id=item_id,
-                        on_tick=raise_if_task_cancelled,
-                    )
-                    logs.append(f"xiaohongshu: interactive_login={status}")
-                    if status == "ok":
-                        pending_targets.insert(0, target_url)
-                        continue
-                    if status == xiaohongshu_access.DISPLAY_UNAVAILABLE:
-                        logs.append("xiaohongshu: display_unavailable")
-
+            netlog_payload: Any = None
             if not netlog_path.exists():
                 logs.append(f"{platform}: browser fallback produced no network log")
-                continue
-            try:
-                netlog_text = netlog_path.read_text(encoding="utf-8")
-            except OSError as exc:
-                logs.append(f"{platform}: browser fallback could not parse network log: {exc}")
-                continue
-            try:
-                payload = json.loads(netlog_text)
-            except json.JSONDecodeError as exc:
-                logs.append(
-                    f"{platform}: browser fallback network log was incomplete; "
-                    f"scanning captured URLs directly ({exc})"
+            else:
+                try:
+                    netlog_text = netlog_path.read_text(encoding="utf-8")
+                except OSError as exc:
+                    logs.append(f"{platform}: browser fallback could not parse network log: {exc}")
+                    netlog_text = ""
+                if netlog_text:
+                    try:
+                        netlog_payload = json.loads(netlog_text)
+                    except json.JSONDecodeError as exc:
+                        logs.append(
+                            f"{platform}: browser fallback network log was incomplete; "
+                            f"scanning captured URLs directly ({exc})"
+                        )
+                        netlog_payload = netlog_text
+            if netlog_payload is not None:
+                netlog_candidates = extract_browser_candidates_from_netlog_payload(
+                    netlog_payload,
+                    platform,
+                    item_id=item_id,
+                    require_item_match=require_item_match,
                 )
-                payload = netlog_text
-
-            netlog_candidates = extract_browser_candidates_from_netlog_payload(
-                payload,
-                platform,
-                item_id=item_id,
-                require_item_match=require_item_match,
-            )
-            logs.append(f"{platform}: browser fallback found {len(netlog_candidates)} network video candidate(s)")
-            for candidate in netlog_candidates:
-                merge_platform_candidate(candidates, seen, candidate, platform)
+                logs.append(
+                    f"{platform}: browser fallback found {len(netlog_candidates)} network video candidate(s)"
+                )
+                for candidate in netlog_candidates:
+                    merge_platform_candidate(candidates, seen, candidate, platform)
             if candidates and not browser_candidates_are_sufficient(
                 candidates,
                 image_candidates,
@@ -2789,13 +2788,45 @@ def gather_browser_candidates(
                     f"{platform}: browser fallback only found video-only adaptive streams; "
                     "continuing to another item route"
                 )
-                continue
-            if browser_candidates_are_sufficient(
+            elif browser_candidates_are_sufficient(
                 candidates,
                 image_candidates,
                 require_audio=require_audio,
             ):
                 break
+
+        if (
+            platform == "xiaohongshu"
+            and xhs_profile is not None
+            and not login_retry_used
+            and xiaohongshu_access.xiaohongshu_needs_skill_owned_login(
+                page_text=dump_html,
+                url=target_url,
+                http_login_barrier=http_login_barrier
+                or "xiaohongshu: login_required" in logs,
+                dump_timed_out=dump_timed_out,
+                has_media=bool(candidates or image_candidates),
+            )
+        ):
+            login_retry_used = True
+            logs.append("xiaohongshu: login_required")
+            print("xiaohongshu: login_required", file=sys.stderr)
+            status = xiaohongshu_access.wait_for_skill_owned_login(
+                chrome=chrome,
+                profile_dir=xhs_profile,
+                page_url=target_url,
+                note_id=item_id,
+                on_tick=raise_if_task_cancelled,
+            )
+            logs.append(f"xiaohongshu: interactive_login={status}")
+            print(f"xiaohongshu: interactive_login={status}", file=sys.stderr)
+            if status == "ok":
+                pending_targets.insert(0, target_url)
+                continue
+            if status == xiaohongshu_access.DISPLAY_UNAVAILABLE:
+                logs.append("xiaohongshu: display_unavailable")
+                print("xiaohongshu: display_unavailable", file=sys.stderr)
+            break
 
     if (
         platform == "douyin"
@@ -5732,7 +5763,12 @@ def gather_candidates_for_request_with_retries(
                 browser_profile_dir=getattr(args, "browser_profile_dir", None),
             )
         except (DouyinDownloadError, OSError) as exc:
-            if attempt >= max_attempts:
+            if attempt >= max_attempts or str(exc) in {
+                "login_required",
+                "display_unavailable",
+                "interactive_verification_timeout",
+                "interactive_verification_cancelled",
+            }:
                 raise
             print(f"parse_failed: attempt {attempt}/{max_attempts}: {exc}", file=sys.stderr)
             continue
@@ -5751,6 +5787,8 @@ def gather_candidates_for_request_with_retries(
             return result
 
         last_result = result
+        if xiaohongshu_access.xiaohongshu_login_outcome_is_terminal(_logs):
+            return result
         if attempt < max_attempts:
             print(
                 f"parse_failed: attempt {attempt}/{max_attempts}: "
@@ -8114,6 +8152,18 @@ def handle_resolved_media(
                 f"Image candidate {index}: priority={candidate.priority} source={candidate.source} {candidate.url}",
                 file=sys.stderr,
             )
+    elif platform == "xiaohongshu":
+        for line in logs:
+            if any(
+                token in line
+                for token in (
+                    "login_required",
+                    "display_unavailable",
+                    "interactive_login=",
+                    "browser fallback timed out",
+                )
+            ):
+                print(line, file=sys.stderr)
 
     if not candidates and not image_candidates:
         joined_logs = "\n".join(logs)

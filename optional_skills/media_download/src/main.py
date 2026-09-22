@@ -1525,18 +1525,18 @@ def _failure_from_process(
     ):
         error_code = "dependency_unavailable"
         message_key = "media_download.error.dependency_unavailable"
-    elif "login_required" in lowered:
-        error_code = "login_required"
-        message_key = "media_download.error.login_required"
-    elif "display_unavailable" in lowered:
-        error_code = "display_unavailable"
-        message_key = "media_download.error.display_unavailable"
     elif "interactive_verification_timeout" in lowered:
         error_code = "interactive_verification_timeout"
         message_key = "media_download.error.interactive_verification_timeout"
     elif "interactive_verification_cancelled" in lowered:
         error_code = "interactive_verification_cancelled"
         message_key = "media_download.error.interactive_verification_cancelled"
+    elif "display_unavailable" in lowered:
+        error_code = "display_unavailable"
+        message_key = "media_download.error.display_unavailable"
+    elif "login_required" in lowered:
+        error_code = "login_required"
+        message_key = "media_download.error.login_required"
     elif "no downloadable" in lowered or "no media" in lowered:
         error_code = "media_not_found"
         message_key = "media_download.error.media_not_found"

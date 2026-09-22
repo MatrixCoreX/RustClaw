@@ -89,6 +89,33 @@ class XiaohongshuAccessTest(unittest.TestCase):
             )
         )
 
+    def test_empty_or_timed_out_dump_after_http_login_needs_skill_owned_login(self) -> None:
+        item_url = "https://www.xiaohongshu.com/discovery/item/6aafd2c5000000000d027a00?xsec_token=keep"
+        self.assertFalse(self.access.xiaohongshu_html_is_login("", item_url))
+        self.assertTrue(
+            self.access.xiaohongshu_needs_skill_owned_login(
+                page_text="",
+                url=item_url,
+                http_login_barrier=True,
+                dump_timed_out=True,
+                has_media=False,
+            )
+        )
+        self.assertFalse(
+            self.access.xiaohongshu_needs_skill_owned_login(
+                page_text="",
+                url=item_url,
+                http_login_barrier=True,
+                dump_timed_out=True,
+                has_media=True,
+            )
+        )
+        self.assertTrue(
+            self.access.xiaohongshu_login_outcome_is_terminal(
+                ["xiaohongshu: login_required", "parse_attempt: 1/4"]
+            )
+        )
+
     def test_note_access_ready_requires_requested_id(self) -> None:
         self.assertFalse(self.access.note_access_ready({"login": True, "note_ids": ["abc"]}, "abc"))
         self.assertFalse(self.access.note_access_ready({"login": False, "note_ids": ["other"]}, "abc"))
@@ -98,6 +125,16 @@ class XiaohongshuAccessTest(unittest.TestCase):
         self.assertTrue(self.access.desktop_display_available({"DISPLAY": ":0"}, "linux"))
         self.assertFalse(self.access.desktop_display_available({}, "linux"))
         self.assertTrue(self.access.desktop_display_available({}, "darwin"))
+        self.assertEqual(
+            self.access.visible_chrome_args({"WAYLAND_DISPLAY": "wayland-0"}, "linux"),
+            ["--ozone-platform=wayland"],
+        )
+        self.assertEqual(self.access.visible_chrome_args({"DISPLAY": ":0"}, "linux"), [])
+
+    def test_manifest_forwards_host_display_variables(self) -> None:
+        manifest = (Path(__file__).parents[1] / "skill.toml").read_text(encoding="utf-8")
+        for key in ("DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR"):
+            self.assertIn(f'"{key}"', manifest)
 
 
 if __name__ == "__main__":

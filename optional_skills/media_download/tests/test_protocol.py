@@ -813,6 +813,21 @@ class AdapterTest(unittest.TestCase):
         self.assertTrue(failure.retryable)
         self.assertEqual(failure.message_key, "media_download.error.login_required")
 
+    def test_failed_download_prefers_interactive_timeout_over_login_required(self) -> None:
+        failure = self.skill._failure_from_process(
+            "download",
+            1,
+            "xiaohongshu: login_required\nxiaohongshu: interactive_login=interactive_verification_timeout",
+            [],
+            output_rollback_ok=True,
+        )
+
+        self.assertEqual(failure.error_code, "interactive_verification_timeout")
+        self.assertEqual(
+            failure.message_key,
+            "media_download.error.interactive_verification_timeout",
+        )
+
     def test_failed_tool_rolls_back_partial_output_and_proves_no_effect(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

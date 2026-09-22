@@ -239,6 +239,40 @@ def xiaohongshu_html_is_login(page_text: str, url: str = "") -> bool:
     )
 
 
+def xiaohongshu_needs_skill_owned_login(
+    *,
+    page_text: str = "",
+    url: str = "",
+    http_login_barrier: bool = False,
+    dump_timed_out: bool = False,
+    has_media: bool = False,
+) -> bool:
+    """Open the skill-owned profile when the note is a login wall, including empty dump-dom."""
+    if has_media:
+        return False
+    if xiaohongshu_html_is_login(page_text, url):
+        return True
+    if not http_login_barrier:
+        return False
+    text = str(page_text or "")
+    if dump_timed_out or not text.strip():
+        return True
+    return "noteDetailMap" not in text
+
+
+def xiaohongshu_login_outcome_is_terminal(logs: Iterable[str]) -> bool:
+    joined = "\n".join(logs)
+    return any(
+        token in joined
+        for token in (
+            "xiaohongshu: display_unavailable",
+            f"interactive_login={INTERACTIVE_TIMEOUT}",
+            f"interactive_login={INTERACTIVE_CANCELLED}",
+            "xiaohongshu: login_required",
+        )
+    )
+
+
 def looks_like_xiaohongshu_video_url(url: str) -> bool:
     raw = url.strip()
     if raw.startswith("//"):
@@ -289,6 +323,17 @@ def desktop_display_available(
     if host.startswith("linux"):
         return bool(env.get("DISPLAY") or env.get("WAYLAND_DISPLAY"))
     return False
+
+
+def visible_chrome_args(
+    environment: dict[str, str] | None = None,
+    platform: str | None = None,
+) -> list[str]:
+    host = platform or sys.platform
+    env = os.environ if environment is None else environment
+    if host.startswith("linux") and env.get("WAYLAND_DISPLAY"):
+        return ["--ozone-platform=wayland"]
+    return []
 
 
 def note_access_ready(snapshot: dict[str, Any], note_id: str | None) -> bool:
@@ -368,6 +413,7 @@ def wait_for_skill_owned_login(
     port, debug_args = _devtools_port()
     command = [
         chrome,
+        *visible_chrome_args(),
         "--disable-gpu",
         "--no-sandbox",
         "--disable-dev-shm-usage",
