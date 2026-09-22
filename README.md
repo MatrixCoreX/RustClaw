@@ -529,7 +529,7 @@ The [full documentation index](docs/README.md) links every engineering document 
 
 The complete installation, configuration, build, systemd, cloud, Raspberry Pi, update, and troubleshooting runbook is maintained in [USAGE.md](USAGE.md). This README keeps the product and architecture overview instead of duplicating operational instructions.
 
-Most users should download the GitHub Release package matching their platform. Build from source only for development or unsupported platforms.
+Users and deployment agents install only from a matching signed GitHub Release package. Follow the [Release installation guide](docs/release_installation.md); missing packages must not trigger compilation. Source builds are a separate [manual developer workflow](docs/developer_build.md).
 
 ```bash
 # Install local command entrypoints without nginx

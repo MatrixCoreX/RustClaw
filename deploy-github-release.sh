@@ -43,8 +43,8 @@ Options:
       Agent runtime root. Default: directory containing this script.
   --repo OWNER/REPO
       GitHub repository. Default: product identity release_repository.
-  --platform auto|ubuntu-x86_64|pi-aarch64
-      Release platform. Default: auto-detect Linux OS and CPU architecture.
+  --platform auto|ubuntu-x86_64|pi-aarch64|macos-x86_64|macos-aarch64
+      Release platform. Default: auto-detect Linux/macOS and CPU architecture.
   --tag TAG
       Deploy one exact compatible release instead of the newest one.
   --no-restart
@@ -185,13 +185,12 @@ detect_platform() {
   local os arch
   os="$(uname -s)"
   arch="$(uname -m)"
-  if [[ "$os" != "Linux" ]]; then
-    die "unsupported_release_os:$os"
-  fi
-  case "$arch" in
-    x86_64|amd64) printf '%s\n' "ubuntu-x86_64" ;;
-    aarch64|arm64) printf '%s\n' "pi-aarch64" ;;
-    *) die "unsupported_release_arch:$arch" ;;
+  case "$os:$arch" in
+    Linux:x86_64|Linux:amd64) printf '%s\n' "ubuntu-x86_64" ;;
+    Linux:aarch64|Linux:arm64) printf '%s\n' "pi-aarch64" ;;
+    Darwin:x86_64) printf '%s\n' "macos-x86_64" ;;
+    Darwin:arm64|Darwin:aarch64) printf '%s\n' "macos-aarch64" ;;
+    *) die "unsupported_release_host:$os:$arch" ;;
   esac
 }
 
@@ -202,14 +201,17 @@ case "$PLATFORM" in
   ubuntu-x86_64)
     RELEASE_PREFIX="ubuntu-x86_64-"
     ASSET_PREFIX="${APP_RELEASE_ARTIFACT_ID}-ubuntu-x86_64-"
-    ELF_MACHINE=62
     RUST_TARGET="x86_64-unknown-linux-gnu"
     ;;
   pi-aarch64)
     RELEASE_PREFIX="pi-aarch64-"
     ASSET_PREFIX="${APP_RELEASE_ARTIFACT_ID}-pi-aarch64-"
-    ELF_MACHINE=183
     RUST_TARGET="aarch64-unknown-linux-gnu"
+    ;;
+  macos-x86_64|macos-aarch64)
+    RELEASE_PREFIX="${PLATFORM}-"
+    ASSET_PREFIX="${APP_RELEASE_ARTIFACT_ID}-${PLATFORM}-"
+    RUST_TARGET="${PLATFORM#macos-}-apple-darwin"
     ;;
   *)
     die "unsupported_release_platform:$PLATFORM"
@@ -657,19 +659,8 @@ fi
   die "release_package_version_manifest_mismatch"
 [[ -x "$PACKAGE_DIR/target/release/clawd" ]] ||
   die "release_package_missing_clawd"
-python3 - "$PACKAGE_DIR/target/release/clawd" "$ELF_MACHINE" <<'PY'
-from pathlib import Path
-import sys
-
-binary = Path(sys.argv[1]).read_bytes()[:20]
-expected = int(sys.argv[2])
-if len(binary) < 20 or binary[:4] != b"\x7fELF":
-    raise SystemExit("clawd is not an ELF binary")
-byteorder = "little" if binary[5] == 1 else "big"
-machine = int.from_bytes(binary[18:20], byteorder=byteorder)
-if machine != expected:
-    raise SystemExit(f"release ELF architecture mismatch: expected={expected} actual={machine}")
-PY
+python3 "$SCRIPT_DIR/scripts/verify_release_binary.py" \
+  "$PACKAGE_DIR/target/release/clawd" "$RUST_TARGET"
 
 if [[ "$PACKAGE_MODE" -eq 1 ]]; then
   PACKAGE_STAGE_DIR="$(mktemp -d "$ROOT_PARENT/.${ROOT_NAME}-release-stage.XXXXXX")"
@@ -686,7 +677,22 @@ if [[ "$PACKAGE_MODE" -eq 1 ]]; then
       # The stage lives beside ROOT_DIR on the same filesystem. Preserve large
       # runtime databases/package caches without requiring a second full copy;
       # local state keeps the same precedence as the previous copy overlay.
-      cp -al --remove-destination "$source/." "$target/"
+      python3 - "$source" "$target" <<'PY'
+import os
+from pathlib import Path
+import shutil
+import sys
+
+source, target = map(Path, sys.argv[1:])
+
+def link_replace(src, dst):
+    if os.path.lexists(dst):
+        os.unlink(dst)
+    os.link(src, dst)
+    return dst
+
+shutil.copytree(source, target, dirs_exist_ok=True, symlinks=True, copy_function=link_replace)
+PY
     else
       cp -a "$source/." "$target/"
     fi

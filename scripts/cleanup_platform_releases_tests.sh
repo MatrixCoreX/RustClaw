@@ -15,6 +15,11 @@ set -euo pipefail
 args="$*"
 state="${MOCK_GH_STATE:?}"
 
+if [[ "$args" == "release view "* ]]; then
+  python3 -c 'import json,os; suffixes=["", ".sha256", ".spdx.json", ".manifest.json", ".manifest.json.sig"]; print(json.dumps({"assets": [] if os.environ.get("MOCK_INCOMPLETE") else [{"name": "fixture.tar.gz"+s, "size": 100} for s in suffixes]}))'
+  exit 0
+fi
+
 if [[ "$args" == *"releases?per_page=100"* ]]; then
   if [[ "$args" == *"@tsv"* ]]; then
     printf '2026-07-25T08:00:00Z\t200\tubuntu-x86_64-new\n'
@@ -55,6 +60,20 @@ esac
 EOF
 chmod +x "$TMP_ROOT/bin/gh"
 
+# Missing signature/checksum assets must leave both old release and tag intact.
+if GH_TOKEN=test GH_REPO=owner/repo MOCK_GH_STATE="$TMP_ROOT/state" \
+  MOCK_INCOMPLETE=1 PATH="$TMP_ROOT/bin:$PATH" \
+  bash "$SCRIPT_DIR/cleanup-platform-releases.sh" ubuntu-x86_64- --keep-tag ubuntu-x86_64-new; then
+  echo "Incomplete release was accepted" >&2
+  exit 1
+fi
+[[ -f "$TMP_ROOT/state/old_release" && -f "$TMP_ROOT/state/old_tag" ]]
+
+GH_TOKEN=test GH_REPO=owner/repo MOCK_GH_STATE="$TMP_ROOT/state" \
+  PATH="$TMP_ROOT/bin:$PATH" \
+  bash "$SCRIPT_DIR/cleanup-platform-releases.sh" ubuntu-x86_64- --keep-tag ubuntu-x86_64-old
+[[ -f "$TMP_ROOT/state/old_release" && -f "$TMP_ROOT/state/old_tag" ]]
+
 output="$(
   GH_TOKEN=test \
   GH_REPO=owner/repo \
@@ -67,14 +86,14 @@ output="$(
 
 grep -Fq "Keeping newest ubuntu-x86_64- release: ubuntu-x86_64-new" <<<"$output"
 grep -Fq "Deleting old release and tag: ubuntu-x86_64-old" <<<"$output"
-grep -Fq "Deleting orphaned old tag: ubuntu-x86_64-orphan" <<<"$output"
 grep -Fq "Cleanup verified: release=ubuntu-x86_64-new" <<<"$output"
 
-for stale in old_release old_tag orphan_tag; do
+for stale in old_release old_tag; do
   if [[ -e "$TMP_ROOT/state/$stale" ]]; then
     echo "Cleanup left stale mock state: $stale" >&2
     exit 1
   fi
 done
+[[ -f "$TMP_ROOT/state/orphan_tag" ]]
 
 echo "CLEANUP_PLATFORM_RELEASES_TESTS ok"

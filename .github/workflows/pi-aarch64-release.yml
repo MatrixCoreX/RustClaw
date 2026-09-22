@@ -138,6 +138,12 @@ jobs:
           python3 scripts/check_polyglot_skill_contracts.py --require-all
           python3 scripts/check_on_demand_skill_builds.py
 
+      - name: Prepare locked browser skill runtime assets
+        run: npm ci --ignore-scripts --prefix crates/skills/browser_web
+
+      - name: Test Release installation boundaries
+        run: python3 -m unittest discover -s scripts/tests -p test_release_installation.py
+
       - name: Cross-build Rust workspace
         shell: bash
         run: |

@@ -33,7 +33,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 case "$prefix" in
-  ubuntu-x86_64-|pi-aarch64-)
+  ubuntu-x86_64-|pi-aarch64-|macos-x86_64-|macos-aarch64-)
     ;;
   *)
     echo "Unsupported release prefix: $prefix" >&2
@@ -58,12 +58,11 @@ case "$visibility_retries:$retry_seconds" in
 esac
 
 release_rows="$(mktemp)"
-tag_rows="$(mktemp)"
-trap 'rm -f "$release_rows" "$tag_rows"' EXIT
+trap 'rm -f "$release_rows"' EXIT
 
 fetch_release_rows() {
   gh api --paginate "repos/${GH_REPO}/releases?per_page=100" \
-    --jq ".[] | select(.draft == false and (.tag_name | startswith(\"${prefix}\"))) | [.published_at, (.id | tostring), .tag_name] | @tsv" \
+    --jq ".[] | select(.draft == false and .prerelease == false and (.tag_name | startswith(\"${prefix}\"))) | [.published_at, (.id | tostring), .tag_name] | @tsv" \
     | LC_ALL=C sort -r > "$release_rows"
 }
 
@@ -92,6 +91,22 @@ if [[ -z "$keep_tag" ]]; then
 fi
 
 echo "Keeping newest ${prefix} release: ${keep_tag}"
+newest_tag="$(awk -F $'\t' 'NR == 1 { print $3 }' "$release_rows")"
+if [[ "$keep_tag" != "$newest_tag" ]]; then
+  echo "A newer release is already published (${newest_tag}); skipping stale cleanup."
+  exit 0
+fi
+
+# A visible release can still be uploading. Never remove its predecessor until
+# the archive and all verification assets have finished uploading.
+gh release view "$keep_tag" --repo "$GH_REPO" --json assets | python3 -c '
+import json, sys
+assets = {a["name"] for a in json.load(sys.stdin)["assets"] if a.get("size", 0) > 0}
+archives = [name for name in assets if name.endswith(".tar.gz")]
+if len(archives) != 1 or not all(archives[0] + suffix in assets for suffix in
+    (".sha256", ".spdx.json", ".manifest.json", ".manifest.json.sig")):
+    raise SystemExit("Newest release assets are incomplete; refusing cleanup.")
+'
 while IFS=$'\t' read -r _published_at release_id old_tag; do
   [[ -n "$release_id" && -n "$old_tag" ]] || continue
   [[ "$old_tag" != "$keep_tag" ]] || continue
@@ -104,19 +119,8 @@ while IFS=$'\t' read -r _published_at release_id old_tag; do
   fi
 done < "$release_rows"
 
-gh api --paginate "repos/${GH_REPO}/git/matching-refs/tags/${prefix}" \
-  --jq '.[].ref' | LC_ALL=C sort -u > "$tag_rows"
-while IFS= read -r tag_ref; do
-  [[ -n "$tag_ref" ]] || continue
-  tag_name="${tag_ref#refs/tags/}"
-  [[ "$tag_name" != "$keep_tag" ]] || continue
-  if [[ "$dry_run" -eq 1 ]]; then
-    echo "Would delete orphaned old tag: ${tag_name}"
-  else
-    echo "Deleting orphaned old tag: ${tag_name}"
-    gh api --method DELETE "repos/${GH_REPO}/git/refs/tags/${tag_name}"
-  fi
-done < "$tag_rows"
+# Tags without a published release can belong to an in-progress build.
+# Delete only the tags associated with the older releases selected above.
 
 if [[ "$dry_run" -eq 1 ]]; then
   exit 0
@@ -126,20 +130,14 @@ attempt=0
 while true; do
   remaining_releases="$(
     gh api --paginate "repos/${GH_REPO}/releases?per_page=100" \
-      --jq ".[] | select(.draft == false and (.tag_name | startswith(\"${prefix}\"))) | .tag_name"
+      --jq ".[] | select(.draft == false and .prerelease == false and (.tag_name | startswith(\"${prefix}\"))) | .tag_name"
   )"
   remaining_release_count="$(printf '%s\n' "$remaining_releases" | awk 'NF { count++ } END { print count + 0 }')"
-  remaining_tags="$(
-    gh api --paginate "repos/${GH_REPO}/git/matching-refs/tags/${prefix}" \
-      --jq '.[].ref'
-  )"
-  remaining_tag_count="$(printf '%s\n' "$remaining_tags" | awk 'NF { count++ } END { print count + 0 }')"
-  if [[ "$remaining_release_count" == "1" && "$remaining_releases" == "$keep_tag" &&
-    "$remaining_tag_count" == "1" && "$remaining_tags" == "refs/tags/$keep_tag" ]]; then
+  if [[ "$remaining_release_count" == "1" && "$remaining_releases" == "$keep_tag" ]]; then
     break
   fi
   if ((attempt >= visibility_retries)); then
-    echo "Release cleanup verification failed for ${prefix}: releases=${remaining_releases}, tags=${remaining_tags}" >&2
+    echo "Release cleanup verification failed for ${prefix}: releases=${remaining_releases}" >&2
     exit 1
   fi
   attempt=$((attempt + 1))
@@ -147,4 +145,4 @@ while true; do
   sleep "$retry_seconds"
 done
 
-echo "Cleanup verified: release=${keep_tag}, matching releases=1, matching tags=1"
+echo "Cleanup verified: release=${keep_tag}, matching releases=1; unpublished tags preserved"

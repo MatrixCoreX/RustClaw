@@ -508,7 +508,7 @@ Rust、Python、Node、Go、prebuilt、生命周期、安全和发布说明见
 
 完整的安装、配置、构建、systemd、云服务器、树莓派、更新和排障步骤统一维护在 [USAGE.md](USAGE.md)。本 README 只保留项目与架构总览，避免维护第二套操作说明。
 
-普通用户优先下载与平台匹配的 GitHub Release 包；开发者再使用源码构建。
+普通用户和部署 Agent 统一使用与平台匹配的签名 GitHub Release 包，详见[Release 安装说明](docs/release_installation.zh-CN.md)。缺少包时不要自动编译；源码构建作为独立的[技术人员手动操作](docs/developer_build.md)保留。
 
 ```bash
 # 安装本地命令入口，不配置 nginx

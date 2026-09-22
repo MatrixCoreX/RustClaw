@@ -31,6 +31,9 @@
 /.agent-runtime/
 /plan/
 /docs/*
+!/docs/release_installation.md
+!/docs/release_installation.zh-CN.md
+!/docs/developer_build.md
 !/docs/memory_context_architecture_adr.md
 !/docs/architecture/
 !/docs/architecture/*.md

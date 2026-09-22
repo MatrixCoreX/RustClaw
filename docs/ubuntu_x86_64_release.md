@@ -1,5 +1,7 @@
 # Ubuntu x86_64 Release Package
 
+Install from the signed prebuilt package using the [Release installation guide](release_installation.md). Deployment agents must not compile on the destination. The build/publish steps below are for maintainers only.
+
 Agent Runtime can publish a prebuilt Ubuntu x86_64 runtime package through GitHub
 Actions. This package is for regular 64-bit Ubuntu servers and PCs.
 

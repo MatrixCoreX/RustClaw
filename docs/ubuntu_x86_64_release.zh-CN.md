@@ -1,5 +1,7 @@
 # Ubuntu x86_64 Release 包
 
+用户与部署 Agent 按[Release 安装说明](release_installation.zh-CN.md)安装签名预编译包，不在目标设备编译。下方构建和发布流程仅供维护者使用。
+
 Agent Runtime 可以通过 GitHub Actions 发布预编译 Ubuntu x86_64 runtime 包，适用于普通 64 位 Ubuntu 云服务器和 PC。
 
 ## 构建与发布

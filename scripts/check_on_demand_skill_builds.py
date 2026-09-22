@@ -31,9 +31,9 @@ REQUIRED_SNIPPETS = {
         '--package-root "$SCRIPT_DIR/data/skill-packages"',
     ),
     "install-agent-cmd.sh": (
-        "--scope build-excludes --target \"$INSTALL_TARGET\" --format packages",
-        "bash ./build-all.sh no-ui --target",
-        "configure_cargo_build_environment",
+        "Compilation is not an installation step",
+        "verify_release_binary.py",
+        "Release UI assets are missing",
     ),
     "package-release.sh": (
         "--scope build-excludes --target \"$APP_PACKAGE_TARGET\" --format packages",

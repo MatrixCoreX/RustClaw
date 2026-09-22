@@ -9,8 +9,6 @@ configure_platform_command_path
 TARGET="$SCRIPT_DIR/agentctl"
 DEFAULT_INSTALL_DIR="/usr/local/bin"
 USER_INSTALL_DIR="${HOME}/.local/bin"
-FORCE_BUILD=0
-DO_BUILD=0
 USE_USER_DIR=0
 INSTALL_DIR="$DEFAULT_INSTALL_DIR"
 HOST_OS="$(detect_host_os || printf '%s' "unknown")"
@@ -22,11 +20,9 @@ DEPLOY_UI_NGINX=""
 # --pi-app：配置 Pi App 桌面快捷方式 + 开机自启（小屏）
 CONFIGURE_PI_APP=0
 
-# 无构建模式优先使用 Git 跟踪的 release-bin；若本地刚构建，则回退到 target/release
+# Install packaged binaries, never build missing artifacts on the destination.
 TRACKED_RELEASE_DIR="$SCRIPT_DIR/release-bin"
 REQUIRED_BIN_NAME="clawd"
-# 交叉编译拉回路径（与已归档 cross-build 上传脚本的产物布局一致）
-CROSS_TARGET="${APP_CROSS_TARGET:-aarch64-unknown-linux-gnu}"
 
 default_nginx_root() {
   if [[ "$HOST_OS" == "macos" ]]; then
@@ -163,9 +159,7 @@ Usage:
   bash install-agent-cmd.sh [options]
 
 Options:
-  --build          Install deps and build if needed, then install launcher
-  --force-build    Force rebuild before install (implies --build)
-  --target TARGET  Build/install target triple, or use 'host' (default)
+  --target TARGET  Verify the host target triple, or use 'host' (default)
   --user           Install to ~/.local/bin (no sudo)
   --dir <path>     Install to custom directory
   --deploy-ui-nginx [path]   Deploy UI to path (default: auto-detect per OS), configure nginx, reload nginx
@@ -173,14 +167,11 @@ Options:
   --pi-app         Configure Pi App on Raspberry Pi only: desktop shortcut + autostart on login
   -h, --help       Show this help
 
-Default: install the launcher without nginx. Local UI assets are served directly by clawd when started with --with-ui.
+Default: install verified Release command entrypoints without nginx. webd serves the local UI.
 Cloud/server deployments may opt in with --deploy-ui-nginx [path].
-No build unless --build/--force-build; host builds use target/release/clawd, explicit cross targets use target/<target>/release/clawd, then fall back to release-bin/clawd.
-Use --build or --force-build when building from source.
-Build summary:
-  host platform   -> auto-detected from current machine
-  selected target -> host by default
-  primary output  -> target/release for host, target/<target>/release for explicit cross target
+No compiler or UI build is invoked, even when required files are missing.
+Download a matching verified Release first; update with deploy-github-release.sh.
+Developers may build manually before installing: docs/developer_build.md.
 
 Verify after install:
   command -v agentctl
@@ -196,12 +187,10 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --force-build)
-      FORCE_BUILD=1
-      DO_BUILD=1
-      ;;
-    --build)
-      DO_BUILD=1
+    --build|--force-build)
+      echo "Compilation is not an installation step. Use a verified Release package."
+      echo "Developer-only source builds: docs/developer_build.md"
+      exit 2
       ;;
     --target)
       shift
@@ -253,30 +242,16 @@ while [[ $# -gt 0 ]]; do
 done
 
 INSTALL_TARGET="$(resolve_requested_target "$REQUESTED_TARGET")"
+if [[ "$INSTALL_TARGET" != "$HOST_RUST_TARGET" ]]; then
+  echo "Release target does not match this host: $INSTALL_TARGET (host: $HOST_RUST_TARGET)" >&2
+  exit 1
+fi
 BUILD_RELEASE_DIR="$(preferred_release_dir_for_target "$SCRIPT_DIR" "$INSTALL_TARGET")"
 HOST_BUILD_RELEASE_DIR="$(preferred_release_dir_for_target "$SCRIPT_DIR" "$HOST_RUST_TARGET")"
 FALLBACK_RELEASE_DIR="$(target_release_dir "$SCRIPT_DIR" "")"
-CROSS_RELEASE="$(target_release_dir "$SCRIPT_DIR" "$CROSS_TARGET")"
 PACKAGE_FLAVOR="$(package_flavor_for_target "$INSTALL_TARGET" 2>/dev/null || printf '%s' "$INSTALL_TARGET")"
 
 LINK_PATH="$INSTALL_DIR/agentctl"
-
-# ----- 确保 Cargo (Rust) 已安装 -----
-ensure_cargo() {
-  if command -v cargo >/dev/null 2>&1; then
-    return 0
-  fi
-  echo "cargo not found. Installing Rust toolchain (rustup)..."
-  "$SCRIPT_DIR/scripts/install_pinned_rustup.sh"
-  if [[ -f "$HOME/.cargo/env" ]]; then
-    . "$HOME/.cargo/env"
-  fi
-  if ! command -v cargo >/dev/null 2>&1; then
-    echo "Rust install failed or cargo not in PATH. Please run: source \"\$HOME/.cargo/env\""
-    exit 1
-  fi
-  echo "Rust toolchain installed."
-}
 
 ensure_python_runtime() {
   if configure_python3_with_tomllib 2>/dev/null; then
@@ -319,127 +294,6 @@ ensure_python_runtime() {
     exit 1
   fi
   echo "Python runtime installed: $APP_PYTHON_BIN ($($APP_PYTHON_BIN --version 2>&1))"
-}
-
-ensure_protoc() {
-  if command -v protoc >/dev/null 2>&1; then
-    export PROTOC
-    PROTOC="$(command -v protoc)"
-    return 0
-  fi
-  echo "protoc not found. Attempting to install Protocol Buffers compiler..."
-  if command -v brew >/dev/null 2>&1; then
-    brew install protobuf
-  elif command -v apt-get >/dev/null 2>&1; then
-    sudo apt-get update -qq && sudo apt-get install -y protobuf-compiler
-  elif command -v dnf >/dev/null 2>&1; then
-    sudo dnf install -y protobuf-compiler
-  elif command -v yum >/dev/null 2>&1; then
-    sudo yum install -y protobuf-compiler
-  elif command -v zypper >/dev/null 2>&1; then
-    sudo zypper --non-interactive install protobuf
-  elif command -v pacman >/dev/null 2>&1; then
-    sudo pacman -Sy --noconfirm protobuf
-  elif command -v apk >/dev/null 2>&1; then
-    sudo apk add protobuf
-  else
-    echo "Please install protoc first."
-    echo "Debian/Ubuntu: sudo apt-get install protobuf-compiler"
-    echo "macOS: brew install protobuf"
-    exit 1
-  fi
-  if ! command -v protoc >/dev/null 2>&1; then
-    echo "protoc still not found after install attempt."
-    exit 1
-  fi
-  export PROTOC
-  PROTOC="$(command -v protoc)"
-  echo "protoc ready: $PROTOC"
-}
-
-ensure_bindgen_toolchain() {
-  local need_install=0
-  if ! command -v clang >/dev/null 2>&1; then
-    need_install=1
-  elif [[ -z "${LIBCLANG_PATH:-}" ]] && ! ldconfig -p 2>/dev/null | grep -q "libclang\.so"; then
-    need_install=1
-  fi
-
-  if [[ "$need_install" != "1" ]]; then
-    return 0
-  fi
-
-  echo "clang/libclang not found. Attempting to install bindgen toolchain..."
-  if command -v brew >/dev/null 2>&1; then
-    brew install llvm
-    if [[ -z "${LIBCLANG_PATH:-}" ]]; then
-      local llvm_prefix=""
-      llvm_prefix="$(brew --prefix llvm 2>/dev/null || true)"
-      if [[ -n "$llvm_prefix" && -d "$llvm_prefix/lib" ]]; then
-        export LIBCLANG_PATH="$llvm_prefix/lib"
-      fi
-    fi
-  elif command -v apt-get >/dev/null 2>&1; then
-    sudo apt-get update -qq && sudo apt-get install -y clang libclang-dev
-  elif command -v dnf >/dev/null 2>&1; then
-    sudo dnf install -y clang llvm-devel libclang
-  elif command -v yum >/dev/null 2>&1; then
-    sudo yum install -y clang llvm-devel libclang
-  elif command -v zypper >/dev/null 2>&1; then
-    sudo zypper --non-interactive install clang llvm-devel libclang
-  elif command -v pacman >/dev/null 2>&1; then
-    sudo pacman -Sy --noconfirm clang llvm
-  elif command -v apk >/dev/null 2>&1; then
-    sudo apk add clang llvm-dev libclang
-  else
-    echo "Please install clang and libclang first."
-    echo "Debian/Ubuntu: sudo apt-get install clang libclang-dev"
-    echo "macOS: brew install llvm"
-    exit 1
-  fi
-
-  if ! command -v clang >/dev/null 2>&1; then
-    echo "clang still not found after install attempt."
-    exit 1
-  fi
-  if [[ -z "${LIBCLANG_PATH:-}" ]] && ! ldconfig -p 2>/dev/null | grep -q "libclang\.so"; then
-    echo "libclang still not found after install attempt."
-    echo "You may need to set LIBCLANG_PATH manually."
-    exit 1
-  fi
-  echo "bindgen toolchain ready."
-}
-
-# ----- 确保 npm 已安装（存在 UI 目录时） -----
-ensure_npm() {
-  if [[ ! -d "$SCRIPT_DIR/UI" ]]; then
-    return 0
-  fi
-  if command -v npm >/dev/null 2>&1; then
-    return 0
-  fi
-  echo "npm not found. Attempting to install Node.js/npm..."
-  if [[ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]]; then
-    . "${NVM_DIR:-$HOME/.nvm}/nvm.sh"
-    nvm install --lts
-    nvm use --lts
-  elif command -v brew >/dev/null 2>&1; then
-    brew install node
-  elif command -v apt-get >/dev/null 2>&1; then
-    sudo apt-get update -qq && sudo apt-get install -y nodejs npm
-  elif command -v dnf >/dev/null 2>&1; then
-    sudo dnf install -y nodejs npm
-  elif command -v yum >/dev/null 2>&1; then
-    sudo yum install -y nodejs npm
-  else
-    echo "Please install a supported Node.js release from https://nodejs.org/"
-    exit 1
-  fi
-  if ! command -v npm >/dev/null 2>&1; then
-    echo "npm still not found after install attempt."
-    exit 1
-  fi
-  echo "Node.js/npm ready."
 }
 
 path_writable_or_creatable() {
@@ -801,173 +655,7 @@ ensure_nginx_site_link() {
   echo "Ensured nginx site link: $site_link -> $conf_path"
 }
 
-# 判断是否需要构建 release（源码更新或二进制缺失/过期）
-need_release_build() {
-  local force="$1"
-  [[ -f "$HOME/.cargo/env" ]] && . "$HOME/.cargo/env"
-  if ! command -v cargo >/dev/null 2>&1; then
-    echo "1"
-    return
-  fi
-  if ! command -v python3 >/dev/null 2>&1; then
-    echo "1"
-    return
-  fi
-  local need
-  local build_excluded_packages
-  build_excluded_packages="$(
-    python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" \
-      --scope build-excludes --target "$INSTALL_TARGET" --format packages
-  )"
-  need="$(APP_BUILD_EXCLUDED_PACKAGES="$build_excluded_packages" python3 - "$SCRIPT_DIR" "$force" "$INSTALL_TARGET" "$HOST_RUST_TARGET" <<'PY'
-import json
-import os
-import subprocess
-import sys
-from pathlib import Path
-
-root = Path(sys.argv[1]).resolve()
-mode = sys.argv[2].strip().lower()
-install_target = sys.argv[3].strip()
-host_target = sys.argv[4].strip()
-if not install_target or install_target == host_target:
-    release_dir = root / "target" / "release"
-else:
-    release_dir = root / "target" / install_target / "release"
-
-def latest_source_mtime(base: Path) -> float:
-    latest = 0.0
-    tracked_ext = {".rs", ".toml", ".lock"}
-    tracked_names = {"Cargo.toml", "Cargo.lock"}
-    for current, dirs, files in os.walk(base):
-        p = Path(current)
-        if any(seg in {"target", ".git", "node_modules"} for seg in p.parts):
-            continue
-        for name in files:
-            fp = p / name
-            if fp.name in tracked_names or fp.suffix in tracked_ext:
-                try:
-                    latest = max(latest, fp.stat().st_mtime)
-                except OSError:
-                    pass
-    return latest
-
-if mode == "--force-build":
-    print("1")
-    raise SystemExit(0)
-
-try:
-    metadata_raw = subprocess.check_output(
-        ["cargo", "metadata", "--no-deps", "--format-version", "1"],
-        cwd=str(root),
-        text=True,
-    )
-except (subprocess.CalledProcessError, FileNotFoundError):
-    print("1")
-    raise SystemExit(0)
-
-meta = json.loads(metadata_raw)
-workspace_members = set(meta.get("workspace_members", []))
-build_excluded_packages = {
-    value.strip()
-    for value in os.environ.get("APP_BUILD_EXCLUDED_PACKAGES", "").splitlines()
-    if value.strip()
-}
-bins = set()
-for pkg in meta.get("packages", []):
-    if pkg.get("id") not in workspace_members:
-        continue
-    if pkg.get("name") in build_excluded_packages:
-        continue
-    for target in pkg.get("targets", []):
-        if "bin" in (target.get("kind", []) or []):
-            name = (target.get("name") or "").strip()
-            if name:
-                bins.add(name)
-
-if not bins:
-    print("1")
-    raise SystemExit(0)
-
-latest_src = latest_source_mtime(root)
-if latest_src <= 0:
-    print("1")
-    raise SystemExit(0)
-
-oldest_bin = None
-for name in sorted(bins):
-    bp = release_dir / name
-    if not bp.exists():
-        print("1")
-        raise SystemExit(0)
-    try:
-        m = bp.stat().st_mtime
-    except OSError:
-        print("1")
-        raise SystemExit(0)
-    oldest_bin = m if oldest_bin is None else min(oldest_bin, m)
-
-if oldest_bin is None or oldest_bin < latest_src:
-    print("1")
-else:
-    print("0")
-PY
-  )"
-  printf '%s\n' "$need"
-}
-
-# Build UI first, then delegate the Rust release package set to build-all.sh so
-# Skill Store on-demand packages stay excluded from proactive compilation.
-do_release_build() {
-  [[ -f "$HOME/.cargo/env" ]] && . "$HOME/.cargo/env"
-  ensure_cargo
-  ensure_protoc
-  ensure_bindgen_toolchain
-  if [[ "$INSTALL_TARGET" != "$HOST_RUST_TARGET" ]] && command -v rustup >/dev/null 2>&1; then
-    rustup target add "$INSTALL_TARGET" >/dev/null 2>&1 || true
-  fi
-  if [[ -d "$SCRIPT_DIR/UI" ]]; then
-    ensure_npm
-    if [[ ! -d "$SCRIPT_DIR/UI/node_modules" ]]; then
-      echo "Installing UI dependencies..."
-      (cd "$SCRIPT_DIR/UI" && npm install)
-    fi
-    echo "Building UI assets..."
-    (cd "$SCRIPT_DIR/UI" && npm run build)
-  fi
-  echo "Building runtime packages (release, target=$INSTALL_TARGET, output=$BUILD_RELEASE_DIR)..."
-  configure_cargo_build_environment
-  (cd "$SCRIPT_DIR" && SKIP_UI=1 bash ./build-all.sh no-ui --target "$INSTALL_TARGET")
-  if [[ ! -x "$BUILD_RELEASE_DIR/clawd" ]]; then
-    echo "Build finished but $BUILD_RELEASE_DIR/clawd missing."
-    exit 1
-  fi
-  echo "Release build completed."
-}
-
-ensure_build() {
-  local force="$1"
-  ensure_cargo
-  ensure_npm
-  if ! command -v python3 >/dev/null 2>&1; then
-    echo "python3 not found."
-    exit 1
-  fi
-  local need
-  need="$(need_release_build "$force")"
-  if [[ "$need" == "1" ]]; then
-    echo "Release binaries are missing or outdated. Building release..."
-    do_release_build
-  else
-    echo "Release binaries are up-to-date. Skip build."
-  fi
-}
-
-if [[ ! -f "$TARGET" ]]; then
-  echo "Missing launcher script: $TARGET"
-  exit 1
-fi
-
+[[ -f "$TARGET" ]] || { echo "Missing launcher script: $TARGET" >&2; exit 1; }
 echo "Host platform: ${HOST_OS}/${HOST_ARCH} ${HOST_RUST_TARGET:+($HOST_RUST_TARGET)}"
 echo "Selected target: $INSTALL_TARGET"
 echo "Primary output: $BUILD_RELEASE_DIR"
@@ -978,35 +666,19 @@ ensure_python_runtime
 SELECTED_RELEASE_DIR="$(resolve_release_dir)"
 REQUIRED_BIN="$SELECTED_RELEASE_DIR/$REQUIRED_BIN_NAME"
 
-if [[ "$DO_BUILD" == "1" ]]; then
-  if [[ "$FORCE_BUILD" == "1" ]]; then
-    ensure_build "--force-build"
-  else
-    ensure_build ""
-  fi
-else
-  if [[ "$INSTALL_TARGET" != "$HOST_RUST_TARGET" ]] && [[ ! -f "$REQUIRED_BIN" ]]; then
-    if [[ -x "$CROSS_RELEASE/clawd" ]]; then
-      echo "Using cross-compiled binaries from $CROSS_RELEASE"
-      mkdir -p "$BUILD_RELEASE_DIR"
-      for f in "$CROSS_RELEASE"/*; do
-        [[ ! -f "$f" || ! -x "$f" ]] && continue
-        [[ "$f" == *.rlib || "$f" == *.d ]] && continue
-        ln -sf "$f" "$BUILD_RELEASE_DIR/$(basename "$f")" 2>/dev/null || cp -f "$f" "$BUILD_RELEASE_DIR/$(basename "$f")"
-      done
-      SELECTED_RELEASE_DIR="$(resolve_release_dir)"
-      REQUIRED_BIN="$SELECTED_RELEASE_DIR/$REQUIRED_BIN_NAME"
-    fi
-  fi
-  if [[ ! -f "$REQUIRED_BIN" ]]; then
-    echo "Error: binary not found: $REQUIRED_BIN"
-    echo "Copy your built clawd into $BUILD_RELEASE_DIR/ or release-bin/, or run with --build to build from source."
-    echo "To track release executables in git, run: bash scripts/sync-release-bin.sh"
-    echo "Cross path checked: $CROSS_RELEASE/clawd (set APP_CROSS_TARGET if different)."
-    exit 1
-  fi
-  echo "Skipping build (binary present). Installing launcher only."
+if [[ ! -x "$REQUIRED_BIN" || ! -x "$SELECTED_RELEASE_DIR/webd" || ! -x "$SELECTED_RELEASE_DIR/clawcli" ]]; then
+  echo "Release binaries are missing or incomplete: $SELECTED_RELEASE_DIR" >&2
+  echo "Download a matching Release or run: bash deploy-github-release.sh --no-restart" >&2
+  exit 1
 fi
+if [[ ! -f "$SCRIPT_DIR/UI/dist/index.html" ]]; then
+  echo "Release UI assets are missing. Reinstall a complete Release package; no build was attempted." >&2
+  exit 1
+fi
+for runtime_bin in "$REQUIRED_BIN" "$SELECTED_RELEASE_DIR/webd" "$SELECTED_RELEASE_DIR/clawcli"; do
+  python3 "$SCRIPT_DIR/scripts/verify_release_binary.py" "$runtime_bin" "$INSTALL_TARGET"
+done
+echo "Prebuilt runtime and UI are present. Installing command entrypoints only."
 
 chmod +x "$TARGET"
 
@@ -1054,7 +726,8 @@ if [[ -x "$CLAWCLI_BIN" ]]; then
     echo "Installed: $CLAWCLI_LINK -> $CLAWCLI_BIN (sudo)"
   fi
 else
-  echo "Note: clawcli not found ($CLAWCLI_BIN). Run with --build to build workspace including clawcli."
+  echo "Missing Release CLI: $CLAWCLI_BIN. Reinstall the matching Release package." >&2
+  exit 1
 fi
 
 if [[ "$LINK_PATH" == "$USER_INSTALL_DIR/agentctl" ]]; then
@@ -1086,8 +759,8 @@ echo "  agentctl -start release"
 echo "  agentctl -stop"
 echo
 echo "Tip:"
-echo "  bash install-agent-cmd.sh --build     # build from source then install"
-echo "  bash install-agent-cmd.sh --force-build   # force rebuild then install"
+echo "  bash deploy-github-release.sh --check-only   # check compatible Release"
+echo "  bash deploy-github-release.sh                # verified Release update"
 echo "Uninstall (removes command only, does not touch configs):"
 echo "To uninstall, remove the installed agentctl and compatibility links from: $INSTALL_DIR"
 if [[ "$CONFIGURE_PI_APP" == "1" ]]; then
@@ -1113,19 +786,6 @@ if [[ -n "$DEPLOY_UI_NGINX" ]]; then
   echo "Deploying UI to nginx directory: $DEPLOY_UI_NGINX"
   if [[ ! -d "$SCRIPT_DIR/UI" ]]; then
     echo "Error: UI directory not found: $SCRIPT_DIR/UI"
-    exit 1
-  fi
-  ensure_npm
-  if [[ ! -d "$SCRIPT_DIR/UI/dist" ]] || [[ "$DO_BUILD" == "1" ]] || [[ "$FORCE_BUILD" == "1" ]]; then
-    if [[ ! -d "$SCRIPT_DIR/UI/node_modules" ]]; then
-      echo "Installing UI dependencies..."
-      (cd "$SCRIPT_DIR/UI" && npm install)
-    fi
-    echo "Building UI assets..."
-    (cd "$SCRIPT_DIR/UI" && npm run build)
-  fi
-  if [[ ! -d "$SCRIPT_DIR/UI/dist" ]]; then
-    echo "Error: UI build failed (UI/dist missing)."
     exit 1
   fi
   if path_writable_or_creatable "$DEPLOY_UI_NGINX"; then

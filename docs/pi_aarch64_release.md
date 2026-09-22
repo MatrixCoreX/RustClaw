@@ -1,5 +1,7 @@
 # Raspberry Pi aarch64 Release Package
 
+Install from the signed prebuilt package using the [Release installation guide](release_installation.md). Do not compile on the Pi during installation. The build/publish steps below are for maintainers only.
+
 Agent Runtime can publish a prebuilt Raspberry Pi package through GitHub Actions so
 the Pi does not need to run `cargo build`.
 

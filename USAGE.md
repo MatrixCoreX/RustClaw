@@ -1,6 +1,7 @@
 # Agent Runtime 使用手册
 
-本文档是 Agent Runtime 安装、配置、启动、更新和排障的唯一操作手册。
+本文档是 Agent Runtime 配置、启动、更新和排障的操作手册；安装统一遵循
+[Release 安装说明](docs/release_installation.zh-CN.md)，同样适用于代为部署的 Agent。
 
 - 项目定位、Agent Loop 和能力架构：见 `README.zh-CN.md`
 - 英文项目总览：见 `README.md`
@@ -11,13 +12,13 @@
 
 | 场景 | 推荐方式 | 是否需要 nginx | 服务管理 |
 | --- | --- | --- | --- |
-| 本地 Linux/macOS | Release 包或源码，直接运行 | 否 | `agentctl` 命令 |
+| 本地 Linux/macOS | 匹配架构的 Release 包，直接运行 | 否 | `agentctl` 命令 |
 | 树莓派 | Pi aarch64 Release 包 | 否；公网访问时可选 | `agentctl` 或 systemd |
 | 云服务器 | Ubuntu x86_64 Release 包 | 公网域名推荐 | systemd |
 | 开发环境 | Git 源码 | 否 | 前台命令 |
 
-普通用户优先使用 GitHub Releases 中与机器架构匹配的预编译包。只有需要开发、
-修改源码或当前平台没有预编译包时才从源码构建。
+普通用户和部署 Agent 只使用与机器架构匹配的签名预编译包。缺少包时应报告并等待
+对应平台发行，不要改用现场编译。源码构建仅供技术人员明确选择。
 
 ## 2. 系统要求
 
@@ -27,25 +28,10 @@
 - Python 3.11 或更高版本（需要标准库 `tomllib`）
 - `curl`
 - `tar`
+- OpenSSH 的 `ssh-keygen`（校验发行签名）
 
-源码构建还需要：
-
-- Rust/Cargo 1.97 或更高版本
-- Clang 和 libclang
-- Protocol Buffers 编译器 `protoc`
-- Node.js 22 与 npm
-
-查看工具链状态，不修改系统：
-
-```bash
-bash scripts/build_toolchain_manager.sh check
-```
-
-显式更新受支持的工具链后再检查：
-
-```bash
-bash scripts/build_toolchain_manager.sh update
-```
+安装发布包不需要 Rust、Clang、protoc 或 UI 编译工具。技能依赖按需安装；
+源码构建所需工具链见[开发者说明](docs/developer_build.md)。
 
 登录 UI 后，首页“系统依赖检查”也会检查运行环境、源码/UI 构建工具以及内置工具和
 技能的本机依赖，并显示已安装版本。管理员可以对支持自动处理的缺失项点击“安装”；
@@ -53,10 +39,6 @@ bash scripts/build_toolchain_manager.sh update
 传入的任意命令，也不会要求浏览器提交系统密码。Linux 服务需以 root 运行或已具备
 无交互 sudo 权限才会启用自动安装；否则页面只显示缺失状态和手动配置提示。安装在
 后台运行，刷新页面不会丢失进行中状态。
-
-构建脚本会按 CPU 和当前可用内存调整并发：ARM/低内存主机使用一个 Cargo job；
-内存余量充足的 12-16 GiB x86 主机使用两个；更大主机保留 Cargo 默认并发。
-树莓派等低内存设备不应手工提高 Cargo 或 Node.js 并发。
 
 `install-agent-cmd.sh` 会校验这项 Python 运行时依赖；macOS 缺失时通过
 Homebrew 安装当前 `python` 公式，并让 Agent Runtime 精确使用它，不受系统自带旧版
@@ -70,33 +52,20 @@ Homebrew 安装当前 `python` 公式，并让 Agent Runtime 精确使用它，�
 
 - Ubuntu/通用 Linux x86_64：`<artifact-id>-ubuntu-x86_64-*.tar.gz`
 - 树莓派 64 位：`<artifact-id>-pi-aarch64-*.tar.gz`
+- Intel Mac：`<artifact-id>-macos-x86_64-*.tar.gz`
+- Apple Silicon Mac：`<artifact-id>-macos-aarch64-*.tar.gz`
 
 `<artifact-id>` 与发布仓库由发行方在 `configs/product_identity.toml` 中定义。
 
-同时下载 `.sha256` 文件并校验：
-
-```bash
-sha256sum -c <archive>.sha256
-tar -xzf <archive>
-cd <extracted-directory>
-```
+同时下载 `.sha256`、`.spdx.json`、`.manifest.json`、`.manifest.json.sig`，
+按[安装说明](docs/release_installation.zh-CN.md)用可信签名公钥验证后再解压。
+仅校验 SHA-256 不能证明发行来源可信。
 
 Release 包包含预编译二进制和 UI 静态资源，不需要在目标机器重新编译。
 
-### 3.2 使用 Git 源码
+### 3.2 技术人员开发入口
 
-```bash
-git clone <repository-url>
-cd <source-directory>
-```
-
-更新现有工作区：
-
-```bash
-git pull --ff-only
-```
-
-有本地修改时先查看 `git status`，不要用强制覆盖命令丢弃配置或数据。
+需要修改源码时单独使用[开发者构建流程](docs/developer_build.md)，不属于安装步骤。
 
 ## 4. 首次配置
 
@@ -136,11 +105,7 @@ export APP_RUNTIME_ENV_SCRIPT=/absolute/path/runtime_env_filled.sh
 bash install-agent-cmd.sh --user --no-deploy-ui
 ```
 
-从源码构建后安装：
-
-```bash
-bash install-agent-cmd.sh --build --user --no-deploy-ui
-```
+安装器不接受编译操作；缺少二进制、架构不匹配或 UI 不完整时会明确失败。
 
 检查结果：
 
@@ -154,32 +119,10 @@ command -v clawcli
 删除安装器创建的 `agentctl` / `clawcli` 链接不会删除工作区、配置或数据；systemd
 部署应先按第 8 节卸载 unit。当前不提供会删除工作区或数据的一键卸载脚本。
 
-## 6. 从源码构建
+## 6. 发布包与按需技能
 
-完整 release 构建：
-
-```bash
-./build-all.sh
-```
-
-跳过 UI：
-
-```bash
-./build-all.sh no-ui
-```
-
-只验证 Rust 代码：
-
-```bash
-cargo check --workspace
-```
-
-旧的四套 cross 编译入口已归档到 `scripts/archive/cross-build/`，当前部署流程
-不再主动使用它们。需要恢复旧流程时，先阅读该目录的 `README.md` 并重新做
-工具链与目标设备验证；日常构建继续使用 `build-all.sh` 或发布包部署。
-
-按需安装的 Skill Store 技能不会被普通全量构建主动编译；它们只在 UI 安装或
-开发者明确指定单个 package 时编译。
+发布包已包含核心二进制和 UI；现场安装不编译。源码开发步骤单独保留在
+[开发者构建说明](docs/developer_build.md)。
 
 正式平台发行流程会显式预编译匹配目标平台的 Skill Store 包，再由
 `package-release.sh` 打包。发布配置保持 TOML 字段类型和内容不变；若包含内嵌
@@ -322,21 +265,8 @@ unsupported 错误，不会尝试 Linux 服务命令。
 - 关闭：监听 `127.0.0.1:<当前端口>`；同机 nginx 仍可代理 UI/API，直接访问 `IP:<端口>` 会断开。
 - 切换时只修改 `configs/channels/webd.toml` 的监听地址并保留端口，随后短暂重启入口服务。
 
-UI 开发服务器：
-
-```bash
-cd UI
-npm ci
-npm run dev
-```
-
-UI 生产检查：
-
-```bash
-cd UI
-npm run lint
-npm run build
-```
+Release 已包含 UI 静态资源，不需要 npm 编译。UI 开发见
+[开发者构建说明](docs/developer_build.md)。
 
 云服务器使用域名和 TLS 时，可显式部署静态 UI 到 nginx：
 
@@ -397,13 +327,14 @@ cd pi_app
 UI 首页会检查与当前平台匹配的最新 Release。Release 更新会保留本地配置、数据、
 日志和 `.pids` 目录，再部署新二进制与 UI。
 
-也可以在服务器或本地运行目录中直接部署与当前 Linux 平台匹配的最新 Release：
+也可以在服务器或本地运行目录中直接部署与当前 Linux/macOS 平台匹配的最新 Release：
 
 ```bash
 ./deploy-github-release.sh
 ```
 
-脚本会选择 Ubuntu x86_64 或树莓派 aarch64 资产，强制校验配套 SHA256 文件，
+脚本会选择 Linux x86_64、树莓派 aarch64 或 macOS 对应架构的资产，强制校验
+签名、清单、SBOM、目标架构和 SHA256，
 保留本地配置和运行数据，为被替换的程序文件建立回滚备份，并在原服务处于运行状态时
 自动重启。仅检查可用版本或由其他进程安排重启时：
 
@@ -414,7 +345,7 @@ UI 首页会检查与当前平台匹配的最新 Release。Release 更新会保�
 
 源码更新和 Release 更新是两条不同路径：
 
-- 普通用户：优先 Release 更新
+- 普通用户和部署 Agent：只使用 Release 更新
 - 开发者：使用 Git 拉取并重新构建
 
 Release 包安装没有 `.git` 和完整构建源码，因此 UI 默认只显示 Release 更新，不会

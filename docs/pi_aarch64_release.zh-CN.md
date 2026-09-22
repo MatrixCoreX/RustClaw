@@ -1,5 +1,7 @@
 # Raspberry Pi aarch64 Release 包
 
+用户与部署 Agent 按[Release 安装说明](release_installation.zh-CN.md)安装签名预编译包，不在树莓派现场编译。下方构建和发布流程仅供维护者使用。
+
 Agent Runtime 可以通过 GitHub Actions 发布预编译树莓派包，树莓派无需本地运行 `cargo build`。
 
 ## 构建与发布

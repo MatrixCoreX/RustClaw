@@ -117,7 +117,8 @@ echo "[2/6] UI: pack existing UI/dist if present (no build)..."
 if [[ -d "$SCRIPT_DIR/UI/dist" ]] && [[ -f "$SCRIPT_DIR/UI/dist/index.html" ]]; then
   echo "UI/dist found, will include in package."
 else
-  echo "UI/dist missing or incomplete; package will not include frontend assets."
+  echo "UI/dist missing or incomplete; refusing an unusable Release package." >&2
+  exit 1
 fi
 
 echo "[3/6] Prepare staging directory..."
@@ -202,6 +203,9 @@ copy_if_exists "services/wa-web-bridge/package-lock.json"
 copy_if_exists "README.md"
 copy_if_exists "README.zh-CN.md"
 copy_if_exists "USAGE.md"
+copy_if_exists "docs/release_installation.md"
+copy_if_exists "docs/release_installation.zh-CN.md"
+copy_if_exists "docs/developer_build.md"
 copy_if_exists "agentctl"
 copy_if_exists "install-agent-cmd.sh"
 copy_if_exists "build-ui-nginx.sh"

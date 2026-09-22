@@ -41,4 +41,6 @@ previous/next navigation:
 | Platform | English | 中文 |
 | --- | --- | --- |
 | Ubuntu x86_64 | [Ubuntu Release Package](ubuntu_x86_64_release.md) | [Ubuntu Release 包](ubuntu_x86_64_release.zh-CN.md) |
+| Installation / 安装 | [Release-only installation](release_installation.md) | [仅使用 Release 安装](release_installation.zh-CN.md) |
+| Developer builds / 开发构建 | [Manual source builds](developer_build.md) | [技术人员手动构建](developer_build.md) |
 | Raspberry Pi aarch64 | [Pi Release Package](pi_aarch64_release.md) | [树莓派 Release 包](pi_aarch64_release.zh-CN.md) |
