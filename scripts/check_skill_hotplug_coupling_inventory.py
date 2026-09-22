@@ -44,12 +44,19 @@ SURFACE_EXCLUSIONS = {
 DOMAIN_ADAPTER_PATHS = {
     "crates/clawd/src/http/ui_routes/nni_internal_llm.rs",
     "crates/clawd/src/http/ui_routes/nni_remote_join.rs",
+    "crates/clawd/src/http/ui_routes/nni_runtime_state.rs",
     "crates/clawd/src/http/ui_routes/nni_skill_gateway.rs",
     "crates/clawd/src/repo/crypto_storage.rs",
     "crates/clawd/src/skill_storage/data_owners.rs",
     "crates/clawd/src/skill_storage/migration.rs",
     "crates/clawd/src/skill_storage/ownership.rs",
     "crates/clawd/src/skill_storage/schema.rs",
+}
+
+# These primitives are implemented by the host, not selected from user prose.
+# Keep their literals counted so adding another primitive still trips the ratchet.
+HOST_PRIMITIVE_ADAPTER_PATHS = {
+    "crates/clawd/src/agent_engine/workspace_action_revision.rs",
 }
 
 SURFACE_PATTERNS = {
@@ -75,8 +82,9 @@ SURFACE_PATTERNS = {
         r"skill_timeout_seconds\.max\("
     ),
     "semantic_special_case": re.compile(
-        r"(?:skill_name|skill|observed\.skill|name)\s*(?:==|!=)|"
-        r"match\s+(?:skill_name|skill)|starts_with\(\"(?:image|audio|video|crypto|kb)"
+        r'\b(?:skill_name|skill|observed\.skill|name)\s*(?:==|!=)\s*"|'
+        r"\bmatch\s+(?:skill_name|skill)\b|"
+        r'\b(?:skill_name|skill|observed\.skill|name)\.starts_with\("(?:image|audio|video|crypto|kb)'
     ),
 }
 
@@ -134,6 +142,8 @@ def classify_skill_literal(relative: Path, kind: str) -> str:
         return "migration_reader"
     if relative.as_posix() in DOMAIN_ADAPTER_PATHS:
         return "domain_adapter"
+    if relative.as_posix() in HOST_PRIMITIVE_ADAPTER_PATHS:
+        return "host_tool_dispatch"
     if kind == "builtin" and (
         "/skills/builtin" in lowered or relative.as_posix().endswith("/skills.rs")
     ):
@@ -249,6 +259,18 @@ def check_baseline(inventory: dict[str, Any], baseline: dict[str, Any]) -> list[
 
 
 def self_test() -> None:
+    semantic = SURFACE_PATTERNS["semantic_special_case"]
+    for code in (
+        'if name == "crypto" {}', 'if skill_name != "fixture" {}',
+        'match skill_name {', 'if observed.skill.starts_with("image") {}',
+    ):
+        assert semantic.search(code), code
+    for code in (
+        'tool.name == capability_name', 'provider_name == name',
+        'if media_type.starts_with("image/") {}',
+        'match skill_receipt.status {', 'repair_tool_name == NATIVE_RESPOND_TOOL',
+    ):
+        assert not semantic.search(code), code
     with tempfile.TemporaryDirectory(prefix="skill-hotplug-inventory-") as raw:
         root = Path(raw)
         registry = '''[[skills]]\nname="host"\nkind="builtin"\n\n[[skills]]\nname="crypto"\nkind="runner"\n'''

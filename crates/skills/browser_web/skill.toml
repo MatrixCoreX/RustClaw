@@ -23,6 +23,7 @@ binary = "browser-web-skill"
 lockfile = "Cargo.lock"
 network = "deny"
 lifecycle_scripts = false
+runtime_files = [{ "source" = "browser_web.js", "destination" = "runtime/assets/browser_web.js" }, { "source" = "package.json", "destination" = "runtime/assets/package.json" }, { "source" = "package-lock.json", "destination" = "runtime/assets/package-lock.json" }, { "source" = "node_modules/playwright", "destination" = "runtime/assets/node_modules/playwright" }, { "source" = "node_modules/playwright-core", "destination" = "runtime/assets/node_modules/playwright-core" }]
 
 [run]
 launcher = "native"

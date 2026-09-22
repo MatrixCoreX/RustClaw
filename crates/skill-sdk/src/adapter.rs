@@ -51,7 +51,7 @@ pub fn prepare_package(context: &AdapterContext<'_>) -> SkillSdkResult<PreparedP
     }
     fs::create_dir_all(context.staging_root.join("runtime"))?;
     fs::create_dir_all(context.cache_root)?;
-    match context.manifest.build.adapter {
+    let mut prepared = match context.manifest.build.adapter {
         BuildAdapter::Cargo => prepare_cargo(context),
         BuildAdapter::Python => prepare_python(context),
         BuildAdapter::Node => prepare_node(context),
@@ -59,7 +59,14 @@ pub fn prepare_package(context: &AdapterContext<'_>) -> SkillSdkResult<PreparedP
         BuildAdapter::Prebuilt => prepare_prebuilt(context),
         BuildAdapter::GenericProcess => prepare_generic(context),
         BuildAdapter::HttpJson => prepare_http_json(context),
-    }
+    }?;
+    crate::runtime_assets::install(
+        context.manifest,
+        context.manifest_dir,
+        context.staging_root,
+        &mut prepared.artifacts,
+    )?;
+    Ok(prepared)
 }
 
 pub fn source_digest(root: &Path) -> SkillSdkResult<String> {

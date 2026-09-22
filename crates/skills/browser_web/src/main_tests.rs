@@ -514,3 +514,11 @@ fn admin_browser_paths_accept_service_account_visible_locations() {
 
     let _ = std::fs::remove_dir_all(root);
 }
+#[test]
+fn browser_helper_resolves_inside_the_pinned_package() {
+    let binary = Path::new("/packages/fixture/versions/version/runtime/bin/browser-web-skill");
+    assert_eq!(
+        packaged_helper_path(binary).unwrap(),
+        Path::new("/packages/fixture/versions/version/runtime/assets/browser_web.js")
+    );
+}

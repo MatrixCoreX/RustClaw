@@ -893,6 +893,51 @@ async fn make_dir_accepts_parents_machine_arg() {
 }
 
 #[tokio::test]
+async fn make_dir_existing_directory_is_noop_without_snapshotting_children() {
+    let root = TempDirGuard::new("make_dir_existing_large");
+    let directory = root.path.join("existing");
+    fs::create_dir(&directory).unwrap();
+    let large = fs::File::create(directory.join("large")).unwrap();
+    large.set_len(65 * 1024 * 1024).unwrap();
+    let state = test_state(root.path.clone());
+    let output = execute_builtin_skill(
+        &state,
+        "make_dir",
+        &json!({"path": "existing", "parents": true}),
+    )
+    .await
+    .expect("existing directory must not consume snapshot budget");
+    let value: Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(value["state"], "no_op");
+    assert_eq!(value["changed_files"], json!([]));
+    assert_eq!(value["before"], value["after"]);
+    assert_eq!(value["reversible"], false);
+    assert!(value.get("checkpoint_id").is_none());
+    assert_eq!(
+        fs::metadata(directory.join("large")).unwrap().len(),
+        65 * 1024 * 1024
+    );
+}
+
+#[tokio::test]
+async fn make_dir_existing_file_is_not_reported_as_directory_noop() {
+    let root = TempDirGuard::new("make_dir_existing_file");
+    fs::write(root.path.join("existing"), "preserve").unwrap();
+    let state = test_state(root.path.clone());
+    assert!(execute_builtin_skill(
+        &state,
+        "make_dir",
+        &json!({"path": "existing", "parents": true}),
+    )
+    .await
+    .is_err());
+    assert_eq!(
+        fs::read_to_string(root.path.join("existing")).unwrap(),
+        "preserve"
+    );
+}
+
+#[tokio::test]
 async fn make_dir_parents_false_does_not_create_missing_parents() {
     let root = TempDirGuard::new("make_dir_no_parents");
     let state = test_state(root.path.clone());

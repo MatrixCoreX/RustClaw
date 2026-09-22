@@ -1021,11 +1021,9 @@ fn context_allows_path_outside_workspace(context: Option<&Value>) -> bool {
 }
 
 fn call_browser_helper(workspace_root: &Path, input: Value) -> Result<String, SkillFailure> {
-    let helper_path = workspace_root
-        .join("crates")
-        .join("skills")
-        .join("browser_web")
-        .join("browser_web.js");
+    let executable = std::env::current_exe()
+        .map_err(|error| SkillFailure::with_message("DEPENDENCY_MISSING", error.to_string()))?;
+    let helper_path = packaged_helper_path(&executable)?;
 
     if !helper_path.exists() {
         return Err(SkillFailure::with_message(
@@ -1096,6 +1094,14 @@ fn call_browser_helper(workspace_root: &Path, input: Value) -> Result<String, Sk
         .map_err(|error| SkillFailure::with_message("HELPER_OUTPUT_INVALID", error.to_string()))?;
 
     Ok(stdout.trim().to_string())
+}
+
+fn packaged_helper_path(executable: &Path) -> Result<PathBuf, SkillFailure> {
+    executable
+        .parent()
+        .and_then(Path::parent)
+        .map(|runtime| runtime.join("assets/browser_web.js"))
+        .ok_or_else(|| SkillFailure::machine("PACKAGE_LAYOUT_INVALID"))
 }
 
 fn browser_node_executable() -> PathBuf {

@@ -223,12 +223,22 @@ pub struct BuildSpec {
     pub lifecycle_scripts: bool,
     #[serde(default)]
     pub artifacts: Vec<PlatformArtifact>,
+    /// Explicit package-owned runtime data, copied without executing build hooks.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runtime_files: Vec<RuntimeFile>,
     #[serde(default)]
     pub options: BTreeMap<String, String>,
 }
 
 fn current_dir() -> String {
     ".".to_string()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeFile {
+    pub source: String,
+    pub destination: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -876,6 +886,7 @@ impl PackageManifest {
     }
 
     fn validate_adapter_fields(&self) -> SkillSdkResult<()> {
+        crate::runtime_assets::validate(&self.build.runtime_files)?;
         if self.build.adapter != BuildAdapter::Cargo
             && (self.build.package.is_some() || self.build.binary.is_some())
         {

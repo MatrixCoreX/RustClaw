@@ -6,10 +6,35 @@ import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
-from replay_verifier_candidate import matches_expectation, parse_verdict, revised_request, receive_response, render_full_template, compact_evidence_projection
+from replay_verifier_candidate import matches_expectation, parse_verdict, revised_request, receive_response, render_full_template, compact_evidence_projection, load_source, public_response
 
 
 class ReplayVerifierTests(unittest.TestCase):
+    def test_public_replay_omits_hidden_reasoning_but_keeps_public_fields(self):
+        raw = {"choices":[{"message":{"content":'<think>private</think>{"pass":false}',
+                                      "reasoning_content":"private", "role":"assistant"},
+                            "finish_reason":"stop"}],
+               "usage":{"completion_tokens":42,"completion_tokens_details":{"reasoning_tokens":12}}}
+        safe = public_response(raw)
+        self.assertEqual(safe["choices"][0]["message"], {"role":"assistant","content":'{"pass":false}'})
+        self.assertEqual(safe["usage"], raw["usage"])
+        self.assertEqual(safe["choices"][0]["finish_reason"], "stop")
+        self.assertIn("reasoning_content", raw["choices"][0]["message"])
+        self.assertEqual(public_response({"content":"visible<think>incomplete"}), {"content":"visible"})
+
+    def test_frozen_replay_requires_matching_identity_and_preserves_payload(self):
+        frozen = {"source_task_id":"task-a", "prompt_label":"answer_verifier_prompt.md",
+                  "request_payload":{"model":"fixture", "messages":[]}}
+        with patch.object(Path, "read_text", return_value=json.dumps(frozen)):
+            source = load_source(None, None, Path("frozen.json"), "task-a")
+            self.assertEqual(source["request_payload"], frozen["request_payload"])
+            with self.assertRaisesRegex(ValueError, "source_record_mismatch"):
+                load_source(None, None, Path("frozen.json"), "task-b")
+            with self.assertRaisesRegex(ValueError, "source_replay_cannot_use_log_offset"):
+                load_source(None, 0, Path("frozen.json"), "task-a")
+        with self.assertRaisesRegex(ValueError, "source_log_offset_required"):
+            load_source(None, None, None, "task-a")
+
     def test_compact_projection_preserves_distinct_data_and_original(self):
         data = {"extra":{"value":"x" * 5000}, "output":{"text":"kept", "extra":{"value":"x" * 5000}}}
         original = {"capability_result_evidence":[{"result":{"provenance":{"step_id":"s1"},"data":data}}]}

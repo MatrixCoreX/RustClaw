@@ -1,12 +1,27 @@
 #!/usr/bin/env python3
 """Raw model metadata tests, including streamed provider responses."""
 import json
+import io
 import unittest
+from contextlib import redirect_stdout
+from pathlib import Path
 
-from print_llm_raw_trace import raw_response_metadata
+from print_llm_raw_trace import raw_response_metadata, print_row
 
 
 class RawResponseMetadataTests(unittest.TestCase):
+    def test_numbered_trace_preserves_parent_child_attribution(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            print_row({"task_id":"child-a", "parent_task_id":"parent-a",
+                       "child_task_id":"child-a", "logical_call_index":3},
+                      2, Path("model_io.log"), 10, 1000, "")
+        text = output.getvalue()
+        self.assertIn("[LLM#2]", text)
+        self.assertIn("parent_task_id=parent-a", text)
+        self.assertIn("child_task_id=child-a", text)
+        self.assertIn("logical_call_index=3", text)
+
     def test_public_stream_capture_keeps_terminal_metadata_before_truncated_prefix(self):
         header = {"record_type":"public_stream_evidence", "schema_version":1,
                   "terminal":{"choices":[{"finish_reason":"tool_calls"}],

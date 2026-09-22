@@ -129,6 +129,19 @@ CPU 不能成为少装依赖的理由；只有不支持的平台或确实不足�
 宿主目录会固定上游资源版本；资源准备失败时先回滚可变安装指针，不允许技能进入
 启用状态。
 
+`build.runtime_files` 用于随可执行文件发布的小型代码和资源。每项包含相对 manifest
+目录的 `source`，以及严格位于 `runtime/assets/` 下的 `destination`。源码安装和
+`adopt-built` 都把这些文件复制到不可变安装包并逐个记录摘要；预编译安装验证并复制
+同一批产物，不需要原始源码。符号链接、特殊文件、目标重叠、文件冲突和路径越界均被
+拒绝；上限为 128 项声明、50,000 个条目、512 MiB。此声明不授予运行权限，也不执行
+依赖安装钩子。维护者应在打包前准备锁定的依赖，缺少资源时安装失败。大型下载模型
+应使用 `install.runtime_assets`，不要混入可执行资源。
+
+从源码构建 `browser_web` 时，在生成 receipt 前执行
+`npm ci --ignore-scripts --prefix crates/skills/browser_web` 准备锁定的 Node 依赖。
+辅助 JS 和 Playwright 模块随后一起进入 receipt；Node 和兼容的 Chromium 仍由宿主
+提供。运行时从固定版本的安装包加载辅助代码，不读取源码工作区。
+
 普通用户界面使用稳定 phase/code/message key；脱敏且有上限的诊断放在二级详情。
 manifest、回执、操作记录与协议 fixture 都不得包含凭据、原始 provider 响应、
 环境转储或隐藏推理。

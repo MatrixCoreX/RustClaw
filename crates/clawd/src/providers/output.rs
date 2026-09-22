@@ -87,6 +87,26 @@ pub(super) fn provider_safe_raw_response(raw: &str) -> String {
     sanitize_provider_raw_response(raw).0
 }
 
+fn bounded_raw_log_response(safe: &str) -> String {
+    let Some((first, rest)) = safe.split_once('\n') else {
+        return truncate_for_log(safe);
+    };
+    let Ok(mut header) = serde_json::from_str::<Value>(first) else {
+        return truncate_for_log(safe);
+    };
+    if header.get("record_type").and_then(Value::as_str) != Some("public_stream_evidence") {
+        return truncate_for_log(safe);
+    }
+    header["log_source_bytes"] = json!(safe.len());
+    header["log_limit_chars"] = json!(crate::MODEL_IO_LOG_MAX_CHARS);
+    header["log_prefix_truncated"] = json!(false);
+    let candidate = format!("{header}\n{rest}");
+    if candidate.chars().count() > crate::MODEL_IO_LOG_MAX_CHARS {
+        header["log_prefix_truncated"] = json!(true);
+    }
+    truncate_for_log(&format!("{header}\n{rest}"))
+}
+
 fn sanitize_provider_raw_value(value: &mut Value) {
     match value {
         Value::Object(map) => {
@@ -203,7 +223,7 @@ pub(crate) fn append_model_io_log(
             "prompt": truncate_for_log(prompt),
             "request_payload": request_payload,
             "response": clean_response.map(truncate_for_log),
-            "raw_response": safe_raw_response.as_deref().map(truncate_for_log),
+            "raw_response": safe_raw_response.as_deref().map(bounded_raw_log_response),
             "clean_response": clean_response.map(truncate_for_log),
             "usage": usage,
             "sanitized": sanitized,

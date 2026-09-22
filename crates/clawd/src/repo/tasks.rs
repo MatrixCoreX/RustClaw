@@ -275,6 +275,23 @@ pub(crate) fn update_task_success(
     claim_attempt: i64,
     result_json: &str,
 ) -> anyhow::Result<()> {
+    // Materialization writes delivery files, so fence stale claims before that
+    // side effect as well as at the final compare-and-swap below.
+    if !is_task_claim_active_or_pending_ask_success_projection(state, task_id, claim_attempt)? {
+        let db = state
+            .core
+            .db
+            .get()
+            .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+        return Err(worker_task_write_rejection(
+            &db,
+            state,
+            task_id,
+            claim_attempt,
+            "update_task_success",
+            &["running", "succeeded"],
+        ));
+    }
     let result_json = success_artifacts::prepare_succeeded_result_json(state, task_id, result_json);
     let db = state
         .core

@@ -257,8 +257,17 @@ Response shape:
 - Domain wait strategies: `configs/browser_web_wait_map.json` or a
   workspace-local `wait_map_path`
 - Workspace boundary: `WORKSPACE_ROOT`
-- Dependencies: Node.js, Playwright, and a compatible Chromium executable
+- Host dependencies: Node.js and a compatible Chromium executable
 - Registry policy: `configs/skills_registry.toml`
+
+The JavaScript helper and locked Playwright libraries are package-owned runtime
+assets. Installation copies them into `runtime/assets` and includes every file
+in the immutable receipt. Execution resolves the helper relative to the installed
+binary, not the source workspace; missing or modified assets fail verification.
+Source builds must first prepare the locked libraries with
+`npm ci --ignore-scripts --prefix crates/skills/browser_web`. This does not install
+Chromium; use the dependency center for that host dependency. Precompiled packages
+already include the helper and libraries and do not need the source directory.
 
 Linux and macOS executable discovery are supported. Linux-only runtime
 restriction probes are not executed on macOS.

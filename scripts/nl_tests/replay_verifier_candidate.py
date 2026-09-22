@@ -65,14 +65,34 @@ def section(text, start, end):
     return first, last
 
 
+def public_response(raw):
+    value = copy.deepcopy(raw)
+
+    def sanitize(item):
+        if isinstance(item, dict):
+            for key in ("reasoning", "reasoning_content", "reasoning_details",
+                        "reasoning_text", "thinking"):
+                item.pop(key, None)
+            if isinstance(item.get("content"), str):
+                content = re.sub(r"<think\b[^>]*>.*?</think>", "", item["content"], flags=re.S)
+                item["content"] = re.sub(r"<think\b[^>]*>.*$", "", content, flags=re.S)
+            for child in item.values():
+                sanitize(child)
+        elif isinstance(item, list):
+            for child in item:
+                sanitize(child)
+    sanitize(value)
+    return value
+
+
 def receive_response(request, log, payload):
     try:
         with urllib.request.urlopen(request, timeout=300) as response:
-            raw = json.loads(response.read())
+            raw = public_response(json.loads(response.read()))
     except urllib.error.HTTPError as error:
         body = error.read().decode("utf-8", errors="replace")
         try:
-            raw = json.loads(body)
+            raw = public_response(json.loads(body))
         except ValueError:
             raw = body
         failure = {"status": "provider_http_error", "http_status": error.code,
@@ -166,10 +186,34 @@ def compact_evidence_projection(evidence):
     return result
 
 
+def load_source(source_log, offset, source_replay, task_id):
+    if source_replay is not None:
+        if source_log is not None or offset is not None:
+            raise ValueError("source_replay_cannot_use_log_offset")
+        frozen = json.loads(source_replay.read_text())
+        record = {"task_id": frozen.get("source_task_id"),
+                  "prompt_source": frozen.get("prompt_label"),
+                  "request_payload": frozen.get("request_payload")}
+    else:
+        if source_log is None or offset is None or offset < 0:
+            raise ValueError("source_log_offset_required")
+        with source_log.open("rb") as handle:
+            handle.seek(offset)
+            record = json.loads(handle.readline())
+    if (record.get("task_id") != task_id
+            or "answer_verifier_prompt.md" not in (record.get("prompt_source") or "")
+            or not isinstance(record.get("request_payload"), dict)):
+        raise ValueError("source_record_mismatch")
+    return record
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source-log", type=Path, required=True)
-    parser.add_argument("--offset", type=int, required=True)
+    sources = parser.add_mutually_exclusive_group(required=True)
+    sources.add_argument("--source-log", type=Path)
+    sources.add_argument("--source-replay", type=Path,
+                         help="Use the preserved request from an earlier frozen replay")
+    parser.add_argument("--offset", type=int)
     parser.add_argument("--task-id", required=True)
     parser.add_argument("--template", type=Path, required=True)
     parser.add_argument("--config", type=Path, required=True)
@@ -187,11 +231,7 @@ def main():
     parser.add_argument("--expect-issue", default="unsupported_claims")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    with args.source_log.open("rb") as handle:
-        handle.seek(args.offset)
-        record = json.loads(handle.readline())
-    if record.get("task_id") != args.task_id or "answer_verifier_prompt.md" not in record.get("prompt_source", ""):
-        raise ValueError("source_record_mismatch")
+    record = load_source(args.source_log, args.offset, args.source_replay, args.task_id)
     payload = revised_request(record, args.template.read_text(),
                               args.candidate.read_text().strip() if args.candidate else None,
                               json.loads(args.execution_snapshot.read_text()) if args.execution_snapshot else None,
@@ -218,7 +258,9 @@ def main():
         accepted = matches_expectation(parsed, expected, args.expect_issue, schema)
         result = {"schema_version": 1, "llm_call_ref": "LLM#1", "provider": args.vendor,
                   "model": payload["model"], "prompt_label": record.get("prompt_source"),
-                  "logical_prompt_path": record.get("prompt_source"), "source_log": str(args.source_log.resolve()),
+                  "logical_prompt_path": record.get("prompt_source"),
+                  "source_log": str(args.source_log.resolve()) if args.source_log else None,
+                  "source_replay": str(args.source_replay.resolve()) if args.source_replay else None,
                   "source_offset": args.offset, "source_task_id": args.task_id,
                   "execution_snapshot": str(args.execution_snapshot.resolve()) if args.execution_snapshot else None,
                   "output_protocol": str(args.output_protocol.resolve()) if args.output_protocol else None,

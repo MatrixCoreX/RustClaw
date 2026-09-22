@@ -205,6 +205,8 @@ def print_row(
     print(f"{indent}  raw_fields={json.dumps(raw_fields, ensure_ascii=False)}")
     core_fields = {
         "task_id": row.get("task_id"),
+        "parent_task_id": row.get("parent_task_id"),
+        "child_task_id": row.get("child_task_id"),
         "call_id": row.get("call_id"),
         "logical_call_index": row.get("logical_call_index"),
         "prompt_label": prompt_label,

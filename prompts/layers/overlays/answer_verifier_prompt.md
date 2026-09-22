@@ -136,6 +136,19 @@ Output example (illustrative IDs only; actual checks must cite supplied evidence
 
 ## Final Verification Output Protocol
 
+Method identity takes precedence over result sufficiency. First determine what
+evidence each user-specified method must produce, independently of the available
+successful steps. Dispatch alternatives must perform that same method on the
+same target; they must not merely imply its outcome. Do not widen the alternatives
+to include an observed action just so a check can pass. In particular, inspecting
+metadata and reading content are different methods: a metadata-only dispatch
+cannot enter the required-dispatch alternatives for a content read. Knowing the
+content indirectly does not change that distinction. A missing required method
+must retain its own dispatch identity, method_observed=false, pass=false and
+missing_evidence_fields containing requested_result, even when the result is
+inferable or the requested final state has already been reached. Result-only
+rules elsewhere in this prompt cannot override an explicit method requirement.
+
 Return `operation_checks` first, then the six verdict fields. This is a concise
 evidence audit, not private reasoning or a plan for new work. Each check contains
 exactly the following required fields and optional `blocked`/`applicable`; no `notes` or other

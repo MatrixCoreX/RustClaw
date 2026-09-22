@@ -71,6 +71,22 @@ from the current model-I/O log and retained seven-day dated archives; a
 structured availability reason distinguishes full detail, metadata-only
 records, active tasks, and detail that was not recorded or has expired.
 
+Native stream logs preserve a bounded `public_stream_evidence` record before
+the raw prefix: public tool deltas, terminal finish reason, usage, source-frame
+count/bytes/digest, omitted-frame count and completeness flags. Hidden reasoning
+is removed. `raw_prefix_truncated` describes capture truncation;
+`log_prefix_truncated` separately describes the log-size cap. A complete
+terminal record does not imply that every raw frame was retained.
+
+Verification distinguishes method evidence from result evidence. An explicitly
+requested method must reference an actual matching successful dispatch; an
+outcome-only request must not acquire an invented procedure requirement.
+Grounded blockers and conditions retain their real step IDs. Duplicate nested
+result data is replaced by a reference only when it is exactly equal; the
+original journal, child-task attribution and distinct evidence remain intact.
+Model protocol retries do not count as completed tool actions or authorize
+repeating side effects.
+
 ```mermaid
 flowchart LR
     A[Conversation turn] --> B[Durable ask task<br/>conversation_id + bounded result]

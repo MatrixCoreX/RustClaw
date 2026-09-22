@@ -350,11 +350,15 @@ fn installs_a_verified_platform_precompile_without_rebuilding() {
     .expect("lockfile");
     fs::write(source.join("placeholder.rs"), "fn fixture() {}\n").expect("source file");
     let manifest_path = source.join("skill.toml");
-    fs::write(
-        &manifest_path,
-        cargo_manifest(&crate::HostPlatform::current()),
-    )
-    .expect("manifest");
+    let mut manifest =
+        crate::PackageManifest::from_toml_str(&cargo_manifest(&crate::HostPlatform::current()))
+            .expect("parse manifest");
+    manifest.build.runtime_files = vec![crate::manifest::RuntimeFile {
+        source: "helper.js".into(),
+        destination: "runtime/assets/helper.js".into(),
+    }];
+    fs::write(source.join("helper.js"), "module.exports = 42;\n").unwrap();
+    fs::write(&manifest_path, manifest.to_toml_string().unwrap()).expect("manifest");
     let binary = release.join("cargo-fixture-skill");
     fs::write(
         &binary,
@@ -384,6 +388,8 @@ printf '{"request_id":"%s","status":"ok","text":"precompiled","error_text":null,
         })
         .expect("build release receipt");
 
+    fs::remove_file(source.join("helper.js")).unwrap();
+
     let installed_root = temp.path().join("installed");
     let outcome = SkillInstaller
         .install_precompiled(&PrecompiledInstallRequest {
@@ -405,11 +411,29 @@ printf '{"request_id":"%s","status":"ok","text":"precompiled","error_text":null,
         .resolve("cargo_fixture")
         .expect("resolve imported package");
     assert!(launch.program.ends_with("runtime/bin/cargo-fixture"));
+    let asset_path = launch
+        .program
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("assets/helper.js");
+    assert_eq!(
+        fs::read_to_string(asset_path).unwrap(),
+        "module.exports = 42;\n"
+    );
 
     let bundled_launch = SkillRuntimeResolver::new(precompiled_root.clone())
         .resolve("cargo_fixture")
         .expect("resolve bundled package");
-    fs::write(&bundled_launch.program, "tampered artifact").expect("tamper artifact");
+    let asset_path = bundled_launch
+        .program
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("assets/helper.js");
+    fs::write(asset_path, "tampered asset").expect("tamper asset");
     let error = SkillInstaller
         .install_precompiled(&PrecompiledInstallRequest {
             manifest_path,

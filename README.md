@@ -961,6 +961,11 @@ type, select, download, or verify a page transition; its element references are
 tied to the current snapshot generation and mutating interactions remain
 policy/confirmation gated.
 
+The browser helper and its locked JavaScript dependencies are immutable package
+artifacts verified by the receipt, not files loaded from the source workspace.
+See the [SDK resource contract](docs/skill_sdk_contract.md) for source-build
+dependency preparation and package validation.
+
 `media_download` returns original media by default. Douyin and Xiaohongshu
 image-article posts also include verified platform text; up to nine images are
 delivered individually and larger sets use one source-ordered ZIP. OCR or speech

@@ -920,6 +920,28 @@ pub(crate) async fn execute_builtin_skill_with_task(
             let create_parents = optional_bool(map, "parents")
                 .or_else(|| optional_bool(map, "recursive"))
                 .unwrap_or(true);
+            // An idempotent mkdir does not change an existing directory or its
+            // children, so it needs no recursive mutation checkpoint.
+            if create_parents && real_path.is_dir() {
+                let snapshot = serde_json::json!([{"path": path, "kind": "directory",
+                    "sha256": null, "size_bytes": null}]);
+                return Ok(serde_json::json!({
+                    "schema_version": 1,
+                    "source": "workspace_mutation",
+                    "status": "ok",
+                    "action": "make_dir",
+                    "state": "no_op",
+                    "message_key": "workspace.mutation.applied",
+                    "target_path": path,
+                    "snapshot_scope": "target_metadata",
+                    "before": snapshot,
+                    "after": snapshot,
+                    "changed_files": [],
+                    "reversible": false,
+                    "artifact_refs": [],
+                })
+                .to_string());
+            }
             run_authorized_mutation(
                 &state.skill_rt.workspace_root,
                 builtin_task_id(task),

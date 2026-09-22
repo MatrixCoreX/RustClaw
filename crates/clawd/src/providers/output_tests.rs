@@ -168,3 +168,25 @@ fn model_io_lock_preserves_cross_process_jsonl_during_rotation() {
     assert_eq!(identities.len(), 120);
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
+#[test]
+fn bounded_stream_log_marks_log_truncation_separately_from_capture_truncation() {
+    let header = serde_json::json!({
+        "record_type":"public_stream_evidence", "schema_version":1,
+        "raw_prefix_truncated":false, "stream_complete":true,
+        "terminal":{"usage":{"total_tokens":12}}
+    });
+    let raw = format!(
+        "{header}\n{}",
+        "x".repeat(crate::MODEL_IO_LOG_MAX_CHARS + 1)
+    );
+    let logged = super::bounded_raw_log_response(&raw);
+    let retained: serde_json::Value = serde_json::from_str(logged.lines().next().unwrap()).unwrap();
+    assert_eq!(retained["log_prefix_truncated"], true);
+    assert_eq!(retained["raw_prefix_truncated"], false);
+    assert_eq!(retained["log_source_bytes"], raw.len());
+    assert_eq!(retained["terminal"]["usage"]["total_tokens"], 12);
+    let short = format!("{header}\n{{}}");
+    let logged = super::bounded_raw_log_response(&short);
+    let retained: serde_json::Value = serde_json::from_str(logged.lines().next().unwrap()).unwrap();
+    assert_eq!(retained["log_prefix_truncated"], false);
+}

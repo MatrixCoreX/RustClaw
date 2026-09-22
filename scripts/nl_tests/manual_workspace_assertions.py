@@ -32,7 +32,9 @@ def workspace_file_cycle_assertion(spec_text, result, successful_steps):
     journal = result.get("task_journal") or {}
     trace = journal.get("trace") or {}
     caps = trace.get("capability_results") or []
-    steps = {s["step_id"]: (i, s) for i, s in enumerate(successful_steps) if s.get("step_id")}
+    successful_ids = {s["step_id"] for s in successful_steps if s.get("step_id")}
+    steps = {s["step_id"]: (i, s) for i, s in enumerate(trace.get("step_results") or [])
+             if isinstance(s, dict) and s.get("step_id")}
     current = None
     created = verified = removed = False
     previous_index = -1
@@ -68,12 +70,24 @@ def workspace_file_cycle_assertion(spec_text, result, successful_steps):
             continue
         sid = (cap.get("provenance") or {}).get("step_id")
         bound = steps.get(sid)
-        if (cap.get("status") != "ok" or cap.get("truncated") is True
+        if (cap.get("truncated") is True
                 or (cap.get("provenance") or {}).get("source") != "runtime_step"
                 or bound is None or bound[0] <= previous_index
                 or capability not in (bound[1].get("resolved_capability"), bound[1].get("requested_capability"))):
             return fail("unverified_or_unordered_execution")
         previous_index = bound[0]
+        if cap.get("status") == "error":
+            error = cap.get("error") or {}
+            extra = ((error.get("details") or {}).get("structured_error") or {}).get("extra") or {}
+            if (bound[1].get("status") != "error"
+                    or bound[1].get("requested_action_type") not in ("call_capability", "call_tool", "call_skill")
+                    or extra.get("failure_phase") != "pre_dispatch"
+                    or extra.get("side_effect_applied") is not False):
+                return fail("failed_operation_effect_unverified")
+            detail.setdefault("non_applied_steps", []).append({"step_id": sid, "capability": capability})
+            continue
+        if cap.get("status") != "ok" or sid not in successful_ids:
+            return fail("unverified_or_unordered_execution")
         if not isinstance(output, dict):
             return fail("structured_output_missing")
         if mutates:

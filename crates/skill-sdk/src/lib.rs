@@ -17,6 +17,7 @@ pub mod progress;
 pub mod protocol;
 pub mod receipt;
 pub mod runtime;
+mod runtime_assets;
 pub mod safe_archive;
 pub mod sandbox;
 mod secret_scan;

@@ -44,6 +44,7 @@
         "lockfile": { "$ref": "#/$defs/relativePath" },
         "network": { "enum": ["deny", "approval_required"], "default": "deny" },
         "lifecycle_scripts": { "const": false, "default": false },
+        "runtime_files": { "type": "array", "maxItems": 128, "items": { "type": "object", "additionalProperties": false, "required": ["source", "destination"], "properties": { "source": { "$ref": "#/$defs/relativePath" }, "destination": { "type": "string", "pattern": "^runtime/assets/.+" } } } },
         "artifacts": { "type": "array", "items": { "$ref": "#/$defs/platformArtifact" } },
         "options": { "type": "object", "additionalProperties": { "type": "string" } }
       }

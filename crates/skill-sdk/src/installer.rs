@@ -351,6 +351,7 @@ impl SkillInstaller {
             },
             phases: vec!["artifact".to_string()],
         };
+        crate::runtime_assets::install(&manifest, manifest_dir, &staging, &mut prepared.artifacts)?;
         install_aipp_bundle(&manifest, manifest_dir, &staging, &mut prepared.artifacts)?;
         fs::write(staging.join("skill.toml"), manifest.to_toml_string()?)?;
         emit_phase(request.control.as_ref(), "protocol_smoke")?;

@@ -71,7 +71,7 @@ fn unbounded_object_keys_use_an_explicit_minimal_projection() {
 #[test]
 fn compact_preserves_artifact_locator_fields_past_string_budget() {
     let long_path = format!(
-        "/home/guagua/rustclaw/.agent-runtime/artifacts/skill-invocations/{}/image_vision/{}/image_text_ai.txt",
+        "/workspace/agent-runtime/.agent-runtime/artifacts/skill-invocations/{}/image_vision/{}/image_text_ai.txt",
         "1c5349fb-69b7-4013-892b-3f67a62b3f8a",
         "594655cf-7fca-4159-966d-8d68c3de9734",
     );
@@ -95,7 +95,7 @@ fn compact_preserves_artifact_locator_fields_past_string_budget() {
     let artifact = &stored["capability_results"][0]["artifacts"][0];
     assert_eq!(
         artifact["path"].as_str().unwrap(),
-        "/home/guagua/rustclaw/.agent-runtime/artifacts/skill-invocations/1c5349fb-69b7-4013-892b-3f67a62b3f8a/image_vision/594655cf-7fca-4159-966d-8d68c3de9734/image_text_ai.txt"
+        "/workspace/agent-runtime/.agent-runtime/artifacts/skill-invocations/1c5349fb-69b7-4013-892b-3f67a62b3f8a/image_vision/594655cf-7fca-4159-966d-8d68c3de9734/image_text_ai.txt"
     );
     assert_eq!(artifact["sha256"], digest);
     assert_eq!(artifact["filename"], "image_text_ai.txt");

@@ -45,6 +45,7 @@
         "network": { "enum": ["deny", "approval_required"] },
         "lifecycle_scripts": { "const": false },
         "artifacts": { "type": "array", "items": { "type": "object" } },
+        "runtime_files": { "type": "array", "maxItems": 128, "items": { "type": "object", "additionalProperties": false, "required": ["source", "destination"], "properties": { "source": { "$ref": "#/$defs/relativePath" }, "destination": { "type": "string", "pattern": "^runtime/assets/.+" } } } },
         "options": { "type": "object", "additionalProperties": { "type": "string" } }
       }
     },

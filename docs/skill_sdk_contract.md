@@ -32,6 +32,24 @@ deleting shared user caches or granting write access to the user's home.
 Host catalog entries pin provider revisions, and a failed resource preparation
 rolls the mutable package pointer back before the skill can be enabled.
 
+`build.runtime_files` packages small code/resources that must travel with the
+executable. Each declaration has a manifest-relative `source` and a
+`destination` strictly below `runtime/assets/`. Source installation and
+`adopt-built` copy these files into the immutable package and record each digest;
+precompiled installation verifies and copies those same artifacts without
+requiring the source files. Symlinks, special files, overlapping destinations,
+collisions and paths escaping the package are rejected. Limits are 128
+declarations, 50,000 entries and 512 MiB. This grants no runtime permissions and
+runs no dependency-install hooks. Maintainers prepare locked dependencies before
+packaging; missing assets fail closed. Large downloaded models belong in
+`install.runtime_assets`, not in this executable resource set.
+
+For a source build of `browser_web`, prepare its locked Node dependencies with
+`npm ci --ignore-scripts --prefix crates/skills/browser_web` before projecting
+receipts. Its helper and Playwright modules are then receipt-bound; Node and a
+compatible Chromium remain host dependencies. Runtime execution loads helper
+code from the pinned installation, never from the source workspace.
+
 Every local process uses `agent-jsonl-v1`: one JSON request record on stdin
 and exactly one JSON response record on stdout. Diagnostics belong on stderr.
 The response must echo `request_id`; errors require `error_text` plus stable

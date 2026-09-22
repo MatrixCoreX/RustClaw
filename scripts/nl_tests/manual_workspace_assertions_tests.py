@@ -116,6 +116,39 @@ class WorkspaceLifecycleTests(unittest.TestCase):
         output["after"][0]["kind"] = "missing"
         self.assertEqual(check(result), "fail")
 
+    def test_runtime_bound_pre_dispatch_rejection_does_not_mutate_lifecycle(self):
+        result = evidence()
+        trace = result["task_journal"]["trace"]
+        step = {"step_id": "step_0", "requested_action_type": "call_capability", "status": "error",
+                "resolved_capability": "filesystem.make_dir", "executed_skill": "fixture"}
+        cap = {"capability": "filesystem.make_dir", "effect": "mutate", "status": "error",
+               "provenance": {"source": "runtime_step", "step_id": "step_0"},
+               "error": {"details": {"structured_error": {"extra": {
+                   "failure_phase": "pre_dispatch", "side_effect_applied": False}}}}}
+        trace["step_results"].insert(0, step)
+        trace["capability_results"].insert(0, cap)
+        self.assertEqual(check(result), "pass")
+        for key, value in (("side_effect_applied", True), ("side_effect_applied", None),
+                           ("failure_phase", "execution"), ("failure_phase", None)):
+            altered = copy.deepcopy(result)
+            altered["task_journal"]["trace"]["capability_results"][0]["error"]["details"]["structured_error"]["extra"][key] = value
+            self.assertEqual(check(altered), "fail")
+        for key, value in (("status", "ok"), ("requested_action_type", "respond"),
+                           ("resolved_capability", "fixture.other"), ("step_id", "missing")):
+            altered = copy.deepcopy(result)
+            altered["task_journal"]["trace"]["step_results"][0][key] = value
+            self.assertEqual(check(altered), "fail")
+
+    def test_failed_write_never_substitutes_for_applied_write(self):
+        result = evidence()
+        trace = result["task_journal"]["trace"]
+        trace["step_results"][0]["status"] = "error"
+        cap = trace["capability_results"][0]
+        cap["status"] = "error"
+        cap["error"] = {"details": {"structured_error": {"extra": {
+            "failure_phase": "pre_dispatch", "side_effect_applied": False}}}}
+        self.assertEqual(check(result), "fail")
+
     def test_same_size_wrong_content_is_not_success(self):
         result = evidence()
         for cap in result["task_journal"]["trace"]["capability_results"]:

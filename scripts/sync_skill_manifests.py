@@ -374,6 +374,15 @@ def sync_manifests(skills: dict[str, CargoSkill], entries: list[dict[str, object
         version = str(entry.get("package_version") or workspace_version)
         expected = render_manifest(skill, entry, str(version))
         current = path.read_text(encoding="utf-8") if path.is_file() else None
+        # Runtime assets are package-owned declarations, not a second host skill list.
+        if current is not None:
+            runtime_files = tomllib.loads(current).get("build", {}).get("runtime_files", [])
+            if runtime_files:
+                expected = expected.replace(
+                    "lifecycle_scripts = false",
+                    "lifecycle_scripts = false\nruntime_files = " + toml_literal(runtime_files),
+                    1,
+                )
         if current is not None and MARKER not in current:
             raise ValueError(f"refusing to overwrite unmanaged manifest: {path}")
         if current != expected:
