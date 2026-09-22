@@ -217,6 +217,7 @@ copy_if_exists "component_start"
 copy_if_exists "stop-agent.sh"
 copy_if_exists "install-agent-cmd.sh"
 copy_if_exists "deploy-github-release.sh"
+copy_if_exists "install-latest-release.sh"
 while IFS= read -r manifest_path; do
   [[ -n "$manifest_path" ]] || continue
   case "$manifest_path" in

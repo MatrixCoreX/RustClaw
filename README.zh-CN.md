@@ -512,6 +512,9 @@ Rust、Python、Node、Go、prebuilt、生命周期、安全和发布说明见
 
 普通用户和部署 Agent 统一使用与平台匹配的签名 GitHub Release 包，详见[Release 安装说明](docs/release_installation.zh-CN.md)。缺少包时不要自动编译；源码构建作为独立的[技术人员手动操作](docs/developer_build.md)保留。
 
+首次自动安装使用 `install-latest-release.sh --repo OWNER/REPO`（以 Bash 运行）；
+已有安装使用 `bash deploy-github-release.sh --restart` 更新。两者都使用预编译包。
+
 ```bash
 # 安装本地命令入口，不配置 nginx
 bash install-agent-cmd.sh --user --no-deploy-ui

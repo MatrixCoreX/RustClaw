@@ -27,6 +27,21 @@ and OpenSSH's `ssh-keygen`; individual skills can require additional runtimes.
 
 ## First Installation
 
+Download `install-latest-release.sh` from the trusted release repository, then run
+the following command with the repository from `configs/product_identity.toml`:
+
+```bash
+bash install-latest-release.sh --repo OWNER/REPO
+```
+
+This installs the newest matching signed Release into `~/agent-runtime` and starts
+it. No Git checkout, Rust toolchain, source build, or new nginx site is needed.
+Use `--root DIR` for another location, `--check-only` to check without installing,
+or `--no-start` to install without starting services. Bootstrap files are fetched
+over HTTPS from one pinned commit in the explicitly trusted repository; verify
+the repository and script origin first. Existing installations keep their trusted
+release signer. The manual verification procedure follows.
+
 1. Download the matching archive and its `.sha256`, `.spdx.json`,
    `.manifest.json`, and `.manifest.json.sig` assets from the same release.
 2. Obtain `configs/release_allowed_signers` and

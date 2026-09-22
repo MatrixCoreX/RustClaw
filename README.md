@@ -531,6 +531,9 @@ The complete installation, configuration, build, systemd, cloud, Raspberry Pi, u
 
 Users and deployment agents install only from a matching signed GitHub Release package. Follow the [Release installation guide](docs/release_installation.md); missing packages must not trigger compilation. Source builds are a separate [manual developer workflow](docs/developer_build.md).
 
+For automatic first installation, run `bash install-latest-release.sh --repo OWNER/REPO`.
+For existing installations, use `bash deploy-github-release.sh --restart`. Both use prebuilt packages.
+
 ```bash
 # Install local command entrypoints without nginx
 bash install-agent-cmd.sh --user --no-deploy-ui

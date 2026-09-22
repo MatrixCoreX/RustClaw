@@ -24,6 +24,21 @@ tar 和 OpenSSH 的 `ssh-keygen`；技能的额外依赖按需安装。
 
 ## 首次安装
 
+推荐下载发行仓库里的 `install-latest-release.sh`，运行下面的命令；把
+`OWNER/REPO` 换成发行仓库路径（见 `configs/product_identity.toml`）：
+
+```bash
+bash install-latest-release.sh --repo OWNER/REPO
+```
+
+默认安装到 `~/agent-runtime`，自动选择本机平台的最新正式 Release，验证签名后
+安装并启动。无需 Git 或 Rust，不编译源码，不主动配置 nginx。需要自选路径时加
+`--root /path/to/agent-runtime`；只检查版本用 `--check-only`，只安装不启动用
+`--no-start`。首次引导文件来自指定 GitHub 仓库的 HTTPS 地址，并固定到同一提交；
+请先核对仓库和脚本来源。已有安装继续使用原有可信签名公钥。
+
+也可以手动验证安装：
+
 1. 从同一个 Release 下载压缩包和 `.sha256`、`.spdx.json`、`.manifest.json`、
    `.manifest.json.sig` 四个配套文件。
 2. 从独立可信的发行方来源取得 `configs/release_allowed_signers` 和

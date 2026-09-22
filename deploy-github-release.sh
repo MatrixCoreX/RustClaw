@@ -846,7 +846,8 @@ for relative in \
   build-ui-nginx.sh \
   start-all.sh \
   start-all-bin.sh \
-  deploy-github-release.sh; do
+  deploy-github-release.sh \
+  install-latest-release.sh; do
   [[ -e "$PACKAGE_DIR/$relative" ]] || continue
   printf '%s\n' "$relative" >> "$MANAGED_PATHS_FILE"
 done
