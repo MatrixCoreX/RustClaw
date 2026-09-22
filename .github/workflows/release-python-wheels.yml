@@ -18,6 +18,9 @@ jobs:
     if: contains(inputs.target, 'linux')
     runs-on: ${{ startsWith(inputs.target, 'aarch64') && 'ubuntu-24.04-arm' || 'ubuntu-22.04' }}
     container: ubuntu:22.04
+    env:
+      # Do not reuse the host's newer-glibc Python inside the older container.
+      AGENT_TOOLSDIRECTORY: /opt/agent-python-toolcache
     strategy:
       fail-fast: false
       matrix:
@@ -26,7 +29,7 @@ jobs:
       - name: Install publisher tools
         run: |
           apt-get update -qq
-          apt-get install -y -qq git curl ca-certificates build-essential libssl-dev libffi-dev zlib1g-dev
+          apt-get install -y -qq git curl ca-certificates build-essential libssl-dev libffi-dev zlib1g-dev libbz2-1.0 liblzma5 libsqlite3-0 libreadline8
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ inputs.source_ref }}
@@ -37,6 +40,7 @@ jobs:
         env:
           TARGET: ${{ inputs.target }}
         run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           python3 scripts/stage_release_skill_sources.py --target "$TARGET" --destination release-python
           python3 scripts/prepare_release_python_wheels.py --target "$TARGET" --destination release-python
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

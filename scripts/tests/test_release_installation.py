@@ -96,6 +96,9 @@ class ReleaseInstallationTests(unittest.TestCase):
         for name in ("ubuntu-x86_64-release.yml", "pi-aarch64-release.yml", "macos-arm64-release-artifact.yml"):
             source = (ROOT / ".github/workflows" / name).read_text()
             self.assertIn("npm ci --ignore-scripts --prefix crates/skills/browser_web", source)
+        wheels = (ROOT / ".github/workflows/release-python-wheels.yml").read_text()
+        self.assertIn("AGENT_TOOLSDIRECTORY: /opt/agent-python-toolcache", wheels)
+        self.assertIn('git config --global --add safe.directory "$GITHUB_WORKSPACE"', wheels)
 
     def test_updater_detects_all_native_platforms_without_building(self):
         import tomllib

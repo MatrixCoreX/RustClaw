@@ -263,6 +263,7 @@ jobs:
               "dist-release/${PACKAGE_NAME}.manifest.json" \
               "dist-release/${PACKAGE_NAME}.manifest.json.sig" \
             --title "Agent runtime Pi aarch64 ${RELEASE_TAG}" \
+              --target "${GITHUB_SHA}" \
               --notes-file release-notes.md \
               "${release_flags[@]}"
           fi
