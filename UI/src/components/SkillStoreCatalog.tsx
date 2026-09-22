@@ -431,8 +431,8 @@ export function SkillStoreCatalog({
           <h2 className="text-base font-semibold text-white">Skill Store</h2>
           <p className="mt-1 text-sm text-white/55">
             {t(
-              "安装、删除或重新安装可选技能。当前平台有预编译版本时会直接验证并启用；没有匹配版本时才单独构建这个技能。",
-              "Install, remove, or reinstall optional skills. {product_name} verifies and activates a matching platform precompile when available, and builds only this skill when no compatible precompile exists.",
+              "安装、删除或重新安装可选技能。使用发行包提供的技能与现成依赖，不在本机编译；缺少兼容安装包时请先更新 Release。",
+              "Install, remove, or reinstall optional skills using release packages and ready-made dependencies, without local compilation. Update the Release if a compatible package is missing.",
             )}
           </p>
         </div>

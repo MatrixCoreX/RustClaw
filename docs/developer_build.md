@@ -50,6 +50,13 @@ Store packages, and signs the archive manifest. `package-release.sh` refuses
 missing UI assets or embedded credentials; it must not package live local
 configuration, credentials, wallet keys, or mutable runtime data.
 
+The reusable `release-python-wheels.yml` workflow prepares and verifies locked
+Python 3.13 and 3.14 dependencies on matching native publisher runners. Native
+extensions are built there, never during UI installation. Download both workflow
+artifacts into one directory and provide it as
+`APP_RELEASE_PYTHON_WHEELS_ROOT` when invoking `package-release.sh` manually.
+Packaging verifies each bundle's target, source lock digest, and wheel hashes.
+
 See the [Linux x86_64](ubuntu_x86_64_release.md) and
 [Pi aarch64](pi_aarch64_release.md) publishing guides. The macOS artifact workflow
 builds each native architecture from an exact source commit. Validate all five

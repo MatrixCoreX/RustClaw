@@ -25,6 +25,7 @@ const SKILL_STORE_ERROR_MESSAGES: Record<string, readonly [string, string]> = {
   skill_store_unsafe_config_path: ["这个技能声明了不安全的配置路径，已停止操作。", "This skill declares an unsafe configuration path, so the operation was stopped."],
   skill_store_install_start_failed: ["无法启动技能安装，请检查服务状态后重试。", "{product_name} could not start the skill installation. Check the service status and try again."],
   skill_store_install_failed: ["技能安装未完成，请展开诊断信息查看缺少的运行环境或依赖。", "The skill installation did not finish. Open diagnostics to check for a missing runtime or dependency."],
+  skill_store_precompiled_required: ["缺少有效的当前平台技能安装包，请先更新完整 Release 后重试；不会在本机编译。", "A valid skill package for this platform is unavailable. Update the complete Release and retry; no local compilation will be attempted."],
   skill_store_package_remove_failed: ["技能已停用，但安装包删除失败，请检查文件权限。", "The skill was disabled, but its installed package could not be removed. Check file permissions."],
   skill_store_config_remove_failed: ["技能已停用，但配置文件删除失败，请检查文件权限。", "The skill was disabled, but its configuration could not be removed. Check file permissions."],
   skill_store_data_remove_failed: ["技能已停用，但私有数据删除失败，请检查文件权限和服务状态。", "The skill was disabled, but its private data could not be removed. Check file permissions and service status."],

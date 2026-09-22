@@ -90,6 +90,17 @@ or business data just to make an installation pass.
 
 ## Publisher Retention
 
+Every platform Release includes all compatible optional Skill Store packages.
+UI installation uses verified precompiled native skills, Node packages with
+lifecycle scripts disabled, and Python wheels. Dependencies lacking upstream
+wheels are built on matching native publisher runners and included with pinned hashes.
+Target devices do not run Cargo, Go, native dependency builds, or npm lifecycle
+build scripts. Missing/tampered/incompatible native packages fail explicitly;
+the UI never falls back to compiling. Python 3.13 and 3.14 wheels are bundled;
+other interpreters require a compatible dependency bundle, never a source build.
+Host dependencies, browser binaries and model weights may still need a network
+download. Optional packages remain uninstalled/disabled until explicitly admitted.
+
 Publish and validate the replacement before deleting older releases. Retain
 one stable release per supported platform, not one global release. In-progress
 tags and other platforms are not cleanup candidates.

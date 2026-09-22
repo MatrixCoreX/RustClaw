@@ -11,9 +11,10 @@ use super::{
     bundled_admission_binding_needs_refresh, bundled_prompt_for_offline_repair,
     finish_imported_bundle_activation, imported_bundle_staging_dir, imported_skill_machine_alias,
     inspect_declared_runtime_assets_for_target, precompiled_skill_package_root_for,
-    precompiled_source_fallback_allowed, refresh_bundled_install_in_offline_repair,
-    remove_skill_registry_block, render_skill_store_config, skill_store_install_spec,
-    skill_store_operation_store, transition_skill_store_operation, write_runtime_config_to_paths,
+    refresh_bundled_install_in_offline_repair, remove_skill_registry_block,
+    render_skill_store_config, skill_store_install_spec, skill_store_operation_store,
+    skill_store_requires_precompiled, transition_skill_store_operation,
+    write_runtime_config_to_paths,
 };
 use crate::{reload_skill_views, AppState};
 
@@ -103,22 +104,19 @@ fn offline_bundled_repair_allows_fixed_skills_in_historical_generation() {
 }
 
 #[test]
-fn precompiled_fallback_is_limited_to_missing_or_incompatible_packages() {
-    for code in [
-        "precompiled_package_unavailable",
-        "precompiled_platform_mismatch",
-        "precompiled_manifest_mismatch",
-        "manifest_protocol_unsupported",
-        "precompiled_adapter_unsupported",
-    ] {
-        assert!(precompiled_source_fallback_allowed(code), "code={code}");
+fn store_installation_never_builds_compiled_adapters() {
+    use skill_sdk::BuildAdapter;
+    for adapter in [BuildAdapter::Cargo, BuildAdapter::Go] {
+        assert!(skill_store_requires_precompiled(adapter));
     }
-    for code in [
-        "precompiled_receipt_digest_mismatch",
-        "precompiled_artifact_mismatch",
-        "precompiled_install_root_escape",
+    for adapter in [
+        BuildAdapter::Python,
+        BuildAdapter::Node,
+        BuildAdapter::Prebuilt,
+        BuildAdapter::GenericProcess,
+        BuildAdapter::HttpJson,
     ] {
-        assert!(!precompiled_source_fallback_allowed(code), "code={code}");
+        assert!(!skill_store_requires_precompiled(adapter));
     }
 }
 

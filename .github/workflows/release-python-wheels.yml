@@ -1,0 +1,76 @@
+name: Prepare native Release dependency wheels
+
+"on":
+  workflow_call:
+    inputs:
+      target:
+        required: true
+        type: string
+      source_ref:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  linux-wheels:
+    if: contains(inputs.target, 'linux')
+    runs-on: ${{ startsWith(inputs.target, 'aarch64') && 'ubuntu-24.04-arm' || 'ubuntu-22.04' }}
+    container: ubuntu:22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.13', '3.14']
+    steps:
+      - name: Install publisher tools
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq git curl ca-certificates build-essential libssl-dev libffi-dev zlib1g-dev
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.source_ref }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Build locked wheels on the matching native publisher
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          python3 scripts/stage_release_skill_sources.py --target "$TARGET" --destination release-python
+          python3 scripts/prepare_release_python_wheels.py --target "$TARGET" --destination release-python
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-wheels-${{ inputs.target }}-${{ matrix.python }}
+          path: release-python/
+          if-no-files-found: error
+          retention-days: 3
+
+  macos-wheels:
+    if: contains(inputs.target, 'apple')
+    runs-on: ${{ startsWith(inputs.target, 'aarch64') && 'macos-14' || 'macos-15-intel' }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.13', '3.14']
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.source_ref }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Build locked wheels on the matching native publisher
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          python3 scripts/stage_release_skill_sources.py --target "$TARGET" --destination release-python
+          python3 scripts/prepare_release_python_wheels.py --target "$TARGET" --destination release-python
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-wheels-${{ inputs.target }}-${{ matrix.python }}
+          path: release-python/
+          if-no-files-found: error
+          retention-days: 3

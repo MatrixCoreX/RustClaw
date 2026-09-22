@@ -1,5 +1,9 @@
 # Agent Runtime 多语言技能 SDK 合同
 
+UI 安装和导入禁止源码编译。内置原生技能必须使用已验证的平台预编译收据，缺包或
+不兼容不回退 Cargo/Go。Python 只安装 wheel，Node 禁用构建生命周期脚本；Release
+CI 提供所有兼容的其他技能及依赖 wheel。开发者 CLI 仍可显式构建。
+
 新的 Agent Runtime 技能包使用版本为 2 的 `skill.toml`。v1 只作为集中式只读兼容
 输入，新源码安装在激活前会规范化成 v2。manifest 除包、构建和运行信息外，
 还声明类型化 capability/permission request，包括输入/输出 schema、effect、

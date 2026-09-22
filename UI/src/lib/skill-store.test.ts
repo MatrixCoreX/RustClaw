@@ -65,6 +65,8 @@ test("renders structured store errors in the selected UI language", () => {
 
   assert.match(skillStoreErrorMessage("skill_store_install_failed", zh), /安装未完成/);
   assert.match(skillStoreErrorMessage("skill_store_install_failed", en), /installation did not finish/i);
+  assert.match(skillStoreErrorMessage("skill_store_precompiled_required", zh), /不会在本机编译/);
+  assert.match(skillStoreErrorMessage("skill_store_precompiled_required", en), /no local compilation/i);
   assert.match(skillStoreErrorMessage("skill_store_operation_busy", en), /another skill/i);
   assert.match(skillStoreErrorMessage("skill_store_network_approval_required", en), /network access/i);
   assert.match(skillStoreErrorMessage("skill_store_host_dependency_admin_required", zh), /管理员账号/);

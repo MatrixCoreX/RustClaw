@@ -33,6 +33,8 @@ enum SkillStoreErrorCode {
     #[cfg(not(test))]
     InstallStartFailed,
     InstallFailed,
+    #[cfg(not(test))]
+    PrecompiledRequired,
     PackageRemoveFailed,
     ConfigRemoveFailed,
     DataRemoveFailed,
@@ -68,6 +70,8 @@ impl SkillStoreErrorCode {
             #[cfg(not(test))]
             Self::InstallStartFailed => "skill_store_install_start_failed",
             Self::InstallFailed => "skill_store_install_failed",
+            #[cfg(not(test))]
+            Self::PrecompiledRequired => "skill_store_precompiled_required",
             Self::PackageRemoveFailed => "skill_store_package_remove_failed",
             Self::ConfigRemoveFailed => "skill_store_config_remove_failed",
             Self::DataRemoveFailed => "skill_store_data_remove_failed",
@@ -291,10 +295,7 @@ fn precompiled_skill_package_root_for(workspace_root: &Path, target: Option<&str
 #[cfg(not(test))]
 fn precompiled_skill_package_root(state: &AppState) -> PathBuf {
     let platform = skill_sdk::HostPlatform::current();
-    precompiled_skill_package_root_for(
-        &state.skill_rt.workspace_root,
-        platform.target.as_deref(),
-    )
+    precompiled_skill_package_root_for(&state.skill_rt.workspace_root, platform.target.as_deref())
 }
 
 fn skill_store_manifest_metadata(
@@ -349,14 +350,18 @@ fn skill_store_install_spec(
     let relative_manifest = admission_service(state)
         .ok()
         .and_then(|service| service.source_manifest_path(skill_name).ok().flatten())
-        .or_else(|| registry.package_manifest_path(skill_name).map(PathBuf::from))
+        .or_else(|| {
+            registry
+                .package_manifest_path(skill_name)
+                .map(PathBuf::from)
+        })
         .ok_or_else(|| {
-        SkillStoreOperationError::new(
-            StatusCode::CONFLICT,
-            SkillStoreErrorCode::ManifestMissing,
-            format!("skill={skill_name}"),
-        )
-    })?;
+            SkillStoreOperationError::new(
+                StatusCode::CONFLICT,
+                SkillStoreErrorCode::ManifestMissing,
+                format!("skill={skill_name}"),
+            )
+        })?;
     let manifest_path = state.skill_rt.workspace_root.join(relative_manifest);
     let manifest = skill_sdk::PackageManifest::load(&manifest_path).map_err(|error| {
         SkillStoreOperationError::new(
@@ -455,8 +460,9 @@ async fn install_skill_store_package(
     let workspace_root = state.skill_rt.workspace_root.clone();
     let package_root = skill_package_root(state);
     let precompiled_root = precompiled_skill_package_root(state);
+    let requires_precompiled = skill_store_requires_precompiled(spec.adapter);
     tokio::task::spawn_blocking(move || {
-        if precompiled_root.is_dir() {
+        if requires_precompiled {
             let precompiled = skill_sdk::PrecompiledInstallRequest {
                 manifest_path: manifest_path.clone(),
                 workspace_root: workspace_root.clone(),
@@ -465,11 +471,7 @@ async fn install_skill_store_package(
                 target: None,
                 control: Some(control.clone()),
             };
-            match skill_sdk::SkillInstaller.install_precompiled(&precompiled) {
-                Ok(outcome) => return Ok(outcome),
-                Err(error) if precompiled_source_fallback_allowed(&error.code) => {}
-                Err(error) => return Err(error),
-            }
+            return skill_sdk::SkillInstaller.install_precompiled(&precompiled);
         }
         skill_sdk::SkillInstaller.install(&skill_sdk::InstallRequest {
             manifest_path,
@@ -477,54 +479,55 @@ async fn install_skill_store_package(
             package_root,
             target: None,
             allow_network,
-            control: Some(control),
+            control: Some(control.without_source_build()),
         })
     })
-        .await
-        .map_err(|error| {
-            SkillStoreOperationError::new(
+    .await
+    .map_err(|error| {
+        SkillStoreOperationError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            SkillStoreErrorCode::InstallStartFailed,
+            format!("skill={} error={error}", spec.skill_name),
+        )
+    })?
+    .map_err(|error| {
+        let phase = error.phase.clone();
+        let (status, code) = if error.code == "install_resource_insufficient" {
+            (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                SkillStoreErrorCode::ResourceInsufficient,
+            )
+        } else if requires_precompiled || error.code == "source_build_disabled" {
+            (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                SkillStoreErrorCode::PrecompiledRequired,
+            )
+        } else {
+            (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                SkillStoreErrorCode::InstallStartFailed,
-                format!("skill={} error={error}", spec.skill_name),
+                SkillStoreErrorCode::InstallFailed,
             )
-        })?
-        .map_err(|error| {
-            let phase = error.phase.clone();
-            let (status, code) = if error.code == "install_resource_insufficient" {
-                (
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    SkillStoreErrorCode::ResourceInsufficient,
-                )
-            } else {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    SkillStoreErrorCode::InstallFailed,
-                )
-            };
-            SkillStoreOperationError::new(
-                status,
-                code,
-                format!(
-                    "skill={} adapter={} phase={:?} code={} detail={}",
-                    spec.skill_name,
-                    spec.adapter.as_token(),
-                    error.phase,
-                    error.code,
-                    error.detail
-                ),
-            )
-            .with_phase(phase)
-        })
+        };
+        SkillStoreOperationError::new(
+            status,
+            code,
+            format!(
+                "skill={} adapter={} phase={:?} code={} detail={}",
+                spec.skill_name,
+                spec.adapter.as_token(),
+                error.phase,
+                error.code,
+                error.detail
+            ),
+        )
+        .with_phase(phase)
+    })
 }
 
-fn precompiled_source_fallback_allowed(error_code: &str) -> bool {
+fn skill_store_requires_precompiled(adapter: skill_sdk::BuildAdapter) -> bool {
     matches!(
-        error_code,
-        "precompiled_package_unavailable"
-            | "precompiled_platform_mismatch"
-            | "precompiled_manifest_mismatch"
-            | "manifest_protocol_unsupported"
-            | "precompiled_adapter_unsupported"
+        adapter,
+        skill_sdk::BuildAdapter::Cargo | skill_sdk::BuildAdapter::Go
     )
 }
 

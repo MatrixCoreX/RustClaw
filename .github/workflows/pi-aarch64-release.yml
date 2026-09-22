@@ -17,12 +17,19 @@ name: Build Pi aarch64 Release
       - "pi-aarch64-*"
 
 permissions:
+  actions: read
   contents: write
   id-token: write
   attestations: write
 
 jobs:
+  python-wheels:
+    uses: ./.github/workflows/release-python-wheels.yml
+    with:
+      target: aarch64-unknown-linux-gnu
+      source_ref: ${{ github.sha }}
   build-pi-aarch64:
+    needs: python-wheels
     name: Build and publish Pi aarch64 package
     runs-on: ubuntu-22.04
     env:
@@ -100,7 +107,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
-          python-version: "3.11"
+          python-version: "3.13"
 
       - name: Setup Rust target
         shell: bash
@@ -142,7 +149,7 @@ jobs:
         run: npm ci --ignore-scripts --prefix crates/skills/browser_web
 
       - name: Test Release installation boundaries
-        run: python3 -m unittest discover -s scripts/tests -p test_release_installation.py
+        run: python3 -m unittest discover -s scripts/tests -p 'test_release*.py'
 
       - name: Cross-build Rust workspace
         shell: bash
@@ -150,6 +157,11 @@ jobs:
           set -euo pipefail
           INSTALL_DEPS=0 ./scripts/archive/cross-build/cross-build-pi.sh \
             --target pi64 --workspace --no-ui --skip-deps --precompile-skill-store
+
+      - name: Download verified native dependency bundles
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "$GITHUB_RUN_ID" --pattern "release-wheels-${RUST_TARGET}-*" --dir release-wheel-bundles
 
       - name: Package runtime
         shell: bash
@@ -163,6 +175,7 @@ jobs:
           chmod 600 "${signing_key}"
           mkdir -p dist-release
           APP_RELEASE_BIN_DIR="$PWD/target/${RUST_TARGET}/release" \
+            APP_RELEASE_PYTHON_WHEELS_ROOT="$PWD/release-wheel-bundles" \
             APP_PACKAGE_TARGET="${RUST_TARGET}" \
             APP_RELEASE_COMMIT="${GITHUB_SHA}" \
             APP_RELEASE_SIGNING_KEY="${signing_key}" \

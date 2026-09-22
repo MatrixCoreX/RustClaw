@@ -59,6 +59,7 @@ pub struct PrecompiledInstallRequest {
 pub struct InstallControl {
     cancelled: Arc<AtomicBool>,
     progress: Option<Arc<dyn Fn(&str) + Send + Sync>>,
+    source_build_allowed: bool,
 }
 
 impl std::fmt::Debug for InstallControl {
@@ -76,6 +77,7 @@ impl InstallControl {
         Self {
             cancelled,
             progress: None,
+            source_build_allowed: true,
         }
     }
 
@@ -86,11 +88,22 @@ impl InstallControl {
         Self {
             cancelled,
             progress: Some(progress),
+            source_build_allowed: true,
         }
     }
 
     pub fn request_cancel(&self) {
         self.cancelled.store(true, Ordering::Release);
+    }
+
+    /// User-facing installation must never fall back to a local compiler.
+    pub fn without_source_build(mut self) -> Self {
+        self.source_build_allowed = false;
+        self
+    }
+
+    pub(crate) fn source_build_allowed(&self) -> bool {
+        self.source_build_allowed
     }
 
     pub fn is_cancelled(&self) -> bool {

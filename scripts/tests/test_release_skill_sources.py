@@ -32,7 +32,7 @@ class ReleaseSkillSourcesTests(unittest.TestCase):
                 copy_tracked_source(root, source, stage, "missing.lock")
 
     def test_platform_packages_contain_source_and_manifest_without_core_source(self):
-        for target in ("x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin"):
+        for target in ("x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", "aarch64-apple-darwin"):
             with self.subTest(target=target), tempfile.TemporaryDirectory() as directory:
                 stage = Path(directory)
                 count = stage_sources(ROOT, stage, target)

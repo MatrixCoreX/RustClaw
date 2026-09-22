@@ -520,7 +520,7 @@ The [full documentation index](docs/README.md) links every engineering document 
 - `crates/telegramd`, `crates/wechatd`, `crates/feishud`, `crates/larkd`, `crates/whatsappd`, `crates/whatsapp_webd`: channel daemons
 - `services/wa-web-bridge`: local Node bridge used by the WhatsApp Web channel
 - `crates/skills/*`: fixed/core built-in skill implementations and `INTERFACE.md` specs
-- `optional_skills/*`: bundled Skill Store skills compiled and installed on demand
+- `optional_skills/*`: bundled Skill Store packages installed on demand without local compilation
 - `external_skills/*`: externally submitted skills and their required `INTERFACE.md` specs
 - `UI/`: Vite + React local console
 - `pi_app/`: small-screen desktop monitor and launcher scripts
@@ -979,10 +979,14 @@ an installed skill available in the normal inventory but disables it.
 and the normal Tools/Skills inventory while keeping it discoverable in Skill Store.
 Bundled entries marked `install_mode="on_demand"` are excluded from the normal
 `build-all.sh` release build. The current on-demand set is `chinese_almanac`,
-`crypto`, `invest_copy`, `map_merchant`, `media_download`, `photo_organize`,
+`crypto`, `git_forge`, `invest_copy`, `map_merchant`, `media_download`, `photo_organize`,
 `stock`, `weather`, `media_discovery`, and `x`; clicking Install
-reads that skill's `skill.toml`, runs only its declared adapter, performs a
-protocol smoke test, writes a verified receipt, and only then enables/reloads it.
+reads that skill's `skill.toml`, installs verified platform precompiles or locked
+script packages with ready-made dependencies, and only then enables/reloads it.
+The UI never invokes a source compiler or npm lifecycle build script. Python
+installation accepts wheels only; dependency wheels are prepared by native
+release CI. Missing or incompatible native packages require a complete Release
+update, not a fallback build. Developer CLI builds remain explicitly available.
 Normal source, cross-target, Docker, and release-package flows use the registry's
 `supported_os` declarations to build all core/runtime tools plus only the fixed
 runner packages supported by the target platform. An on-demand install is rejected

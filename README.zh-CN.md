@@ -483,7 +483,7 @@ GitHub README 不支持真正的页内分页。详细流程图按顺序维护为
 - `crates/telegramd`、`crates/wechatd`、`crates/feishud`、`crates/larkd`、`crates/whatsappd`、`crates/whatsapp_webd`：通道守护进程
 - `services/wa-web-bridge`：WhatsApp Web 通道使用的本地 Node bridge
 - `crates/skills/*`：固定/核心内建技能实现及其 `INTERFACE.md`
-- `optional_skills/*`：由 Skill Store 按需编译和安装的内建技能
+- `optional_skills/*`：由 Skill Store 按需安装、不在设备上编译的内建技能包
 - `external_skills/*`：外部提交技能及其必须提供的 `INTERFACE.md`
 - `UI/`：基于 Vite + React 的本地控制台
 - `pi_app/`：小屏桌面程序和启动脚本
@@ -492,8 +492,10 @@ GitHub README 不支持真正的页内分页。详细流程图按顺序维护为
 `supported_os`：核心运行组件和核心工具始终按目标平台构建，固定 runner
 只构建该平台支持的 package，`install_mode="on_demand"` 技能一律不进入普通
 构建。用户在 Skill Store 安装按需技能时，系统先校验当前平台，再读取该技能
-的 `skill.toml`，只运行其中声明的 adapter，协议冒烟和回执验证通过后才启用；
-脚本不再维护独立的技能名映射。
+的 `skill.toml`，校验并安装平台预编译产物，或通过解释器安装锁定的脚本技能依赖。
+UI 不调用源码编译器，不运行 npm 构建脚本；Python 只接受 wheel，依赖
+由发行 CI 预先制成 wheel。缺包、损坏或平台不匹配时要求更新完整 Release，不回退
+到现场编译。技术人员可通过独立开发命令显式构建；技能名单由 registry 维护。
 
 当前实现链路与编程语言无关：
 
@@ -825,7 +827,7 @@ Agent Runtime 当前内置的技能已经比较完整，按类别可大致分为
 并在展开安装信息时把该技能声明的宿主、运行时和模型依赖逐条显示为已安装、缺失或
 不适用。安装仍由统一准入服务验证 manifest、协议、receipt 与宿主 policy；关闭技能只
 阻止新调用并保留配置，移除可选技能则让它退出运行时与 planner 可见范围，之后仍可重新安装。
-当前按需安装集合为 `chinese_almanac`、`crypto`、`invest_copy`、`map_merchant`、
+当前按需安装集合为 `chinese_almanac`、`crypto`、`git_forge`、`invest_copy`、`map_merchant`、
 `media_download`、`media_discovery`、`photo_organize`、`stock`、`weather` 和 `x`；普通 `build-all.sh`
 不会主动编译它们，正式发行包通过对应平台的显式 Skill Store 预编译流程提供兼容产物。
 

@@ -36,6 +36,7 @@ REQUIRED_SNIPPETS = {
         "Release UI assets are missing",
     ),
     "package-release.sh": (
+        "prepare_release_python_wheels.py",
         "--scope build-excludes --target \"$APP_PACKAGE_TARGET\" --format packages",
         "pkg.get(\"name\") in excluded_packages",
         'APP_PACKAGE_TARGET="${APP_PACKAGE_TARGET:-$HOST_RUST_TARGET}"',
@@ -43,6 +44,16 @@ REQUIRED_SNIPPETS = {
         "target/prebuilt-skill-packages/$APP_PACKAGE_TARGET",
         "--scope platform-precompiled --target \"$APP_PACKAGE_TARGET\" --format skills",
         "prebuilt/skill-packages",
+    ),
+    "crates/clawd/src/http/ui_routes/skill_store_installation.rs": (
+        "skill_store_requires_precompiled(spec.adapter)",
+        "return skill_sdk::SkillInstaller.install_precompiled(&precompiled)",
+        "control: Some(control.without_source_build())",
+    ),
+    "crates/skill-sdk/src/adapter.rs": (
+        '"--only-binary=:all:"',
+        '"--ignore-scripts"',
+        '"source_build_disabled"',
     ),
     "scripts/archive/cross-build/cross-build-upload.sh": (
         "bash ./build-all.sh no-ui --target",

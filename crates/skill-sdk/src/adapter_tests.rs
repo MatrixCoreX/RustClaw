@@ -2,6 +2,56 @@ use sha2::{Digest, Sha256};
 
 use super::*;
 
+#[test]
+fn user_installation_rejects_compilers_before_any_process_is_started() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let manifest =
+        PackageManifest::from_toml_str(crate::tests::manifest_source()).expect("manifest");
+    let control = InstallControl::new(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+        false,
+    )))
+    .without_source_build();
+    let context = AdapterContext {
+        manifest: &manifest,
+        workspace_root: temp.path(),
+        manifest_dir: temp.path(),
+        staging_root: temp.path(),
+        cache_root: temp.path(),
+        platform: &HostPlatform::current(),
+        target: None,
+        allow_network: false,
+        control: Some(&control),
+    };
+    assert_eq!(
+        prepare_package(&context)
+            .expect_err("compiler forbidden")
+            .code,
+        "source_build_disabled"
+    );
+    assert!(!temp.path().join("runtime").exists());
+    assert!(source_build_disabled(&context));
+    let cloned = control.clone();
+    assert!(!cloned.source_build_allowed());
+}
+
+#[test]
+fn user_python_installation_accepts_wheels_only_and_uses_packaged_wheelhouse() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut command = Command::new("python");
+    configure_python_wheel_sources(&mut command, temp.path(), true).expect("wheel-only policy");
+    assert_eq!(
+        command.get_args().collect::<Vec<_>>(),
+        vec![OsStr::new("--only-binary=:all:")]
+    );
+    fs::create_dir(temp.path().join("release-wheels")).expect("wheelhouse");
+    let mut command = Command::new("python");
+    configure_python_wheel_sources(&mut command, temp.path(), true).expect("bundled wheelhouse");
+    let args = command.get_args().collect::<Vec<_>>();
+    assert_eq!(args[0], "--only-binary=:all:");
+    assert_eq!(args[1], "--find-links");
+    assert_eq!(Path::new(args[2]), temp.path().join("release-wheels"));
+}
+
 fn artifact(os: &str, arch: &str, contents: &[u8]) -> PlatformArtifact {
     PlatformArtifact {
         os: os.to_string(),

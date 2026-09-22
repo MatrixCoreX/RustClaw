@@ -15,6 +15,12 @@ they never contain a shell command. Build network is denied by default,
 dependencies are private to the package install root, and missing sandbox
 support must fail closed.
 
+UI installation and import disable source compilation. Bundled native skills
+must use verified platform receipts; missing/incompatible packages do not fall
+back to Cargo or Go. Python dependency installation is wheel-only and Node
+lifecycle scripts are disabled. Release CI supplies all compatible optional
+skills and dependency wheels. Explicit developer CLI builds remain available.
+
 `install.host_dependencies` may contain only IDs from the host-owned dependency
 catalog. The host checks measurable `install.resources` capacity before any
 mutation, then installs missing system packages through its platform-specific

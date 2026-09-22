@@ -40,6 +40,18 @@ pub struct PreparedPackage {
 
 pub fn prepare_package(context: &AdapterContext<'_>) -> SkillSdkResult<PreparedPackage> {
     context.manifest.validate_for_platform(context.platform)?;
+    if source_build_disabled(context)
+        && (matches!(
+            context.manifest.build.adapter,
+            BuildAdapter::Cargo | BuildAdapter::Go
+        ) || context.manifest.build.lifecycle_scripts)
+    {
+        return Err(SkillSdkError::new(
+            "source_build_disabled",
+            "install a compatible Release package",
+        )
+        .phase("preflight"));
+    }
     if context.manifest.build.network == BuildNetworkPolicy::ApprovalRequired
         && !context.allow_network
     {
@@ -67,6 +79,12 @@ pub fn prepare_package(context: &AdapterContext<'_>) -> SkillSdkResult<PreparedP
         &mut prepared.artifacts,
     )?;
     Ok(prepared)
+}
+
+fn source_build_disabled(context: &AdapterContext<'_>) -> bool {
+    context
+        .control
+        .is_some_and(|control| !control.source_build_allowed())
 }
 
 pub fn source_digest(root: &Path) -> SkillSdkResult<String> {
@@ -245,6 +263,7 @@ fn prepare_python(context: &AdapterContext<'_>) -> SkillSdkResult<PreparedPackag
         .arg("--disable-pip-version-check")
         .arg("-r")
         .arg(lockfile);
+    configure_python_wheel_sources(&mut install, &source_root, source_build_disabled(context))?;
     if !context.allow_network {
         install.arg("--no-index");
     }
@@ -301,6 +320,24 @@ fn prepare_python(context: &AdapterContext<'_>) -> SkillSdkResult<PreparedPackag
             "artifact".to_string(),
         ],
     })
+}
+
+fn configure_python_wheel_sources(
+    command: &mut Command,
+    source_root: &Path,
+    no_build: bool,
+) -> SkillSdkResult<()> {
+    if no_build {
+        command.arg("--only-binary=:all:");
+    }
+    if source_root.join("release-wheels").is_dir() {
+        command.arg("--find-links").arg(confined_source_path(
+            source_root,
+            "release-wheels",
+            false,
+        )?);
+    }
+    Ok(())
 }
 
 fn validate_python_requirement(program: &Path, requirement: Option<&str>) -> SkillSdkResult<()> {

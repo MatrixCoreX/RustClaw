@@ -21,12 +21,19 @@ name: Build macOS Release Artifact
           - x86_64
 
 permissions:
+  actions: read
   contents: read
   id-token: write
   attestations: write
 
 jobs:
+  python-wheels:
+    uses: ./.github/workflows/release-python-wheels.yml
+    with:
+      target: ${{ inputs.architecture }}-apple-darwin
+      source_ref: ${{ inputs.source_ref }}
   build-macos:
+    needs: python-wheels
     name: Build verified macOS ${{ inputs.architecture }} package
     runs-on: ${{ inputs.architecture == 'x86_64' && 'macos-15-intel' || 'macos-14' }}
     env:
@@ -91,7 +98,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
-          python-version: "3.11"
+          python-version: "3.13"
 
       - name: Setup Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
@@ -136,7 +143,7 @@ jobs:
         run: npm ci --ignore-scripts --prefix crates/skills/browser_web
 
       - name: Test Release installation boundaries
-        run: python3 -m unittest discover -s scripts/tests -p test_release_installation.py
+        run: python3 -m unittest discover -s scripts/tests -p 'test_release*.py'
 
       - name: Build native runtime and proactive skill receipts
         shell: bash
@@ -167,6 +174,11 @@ jobs:
               --scope platform-precompiled --target "${RUST_TARGET}" --format skills
           )
 
+      - name: Download verified native dependency bundles
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "$GITHUB_RUN_ID" --pattern "release-wheels-${RUST_TARGET}-*" --dir release-wheel-bundles
+
       - name: Package runtime
         shell: bash
         env:
@@ -180,6 +192,7 @@ jobs:
           chmod 600 "${signing_key}"
           mkdir -p dist-release
           APP_RELEASE_BIN_DIR="$PWD/target/release" \
+            APP_RELEASE_PYTHON_WHEELS_ROOT="$PWD/release-wheel-bundles" \
             APP_PACKAGE_TARGET="${RUST_TARGET}" \
             APP_RELEASE_COMMIT="${RELEASE_COMMIT}" \
             APP_RELEASE_SIGNING_KEY="${signing_key}" \

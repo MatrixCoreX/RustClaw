@@ -230,6 +230,13 @@ done < <(
 )
 python3 "$SCRIPT_DIR/scripts/stage_release_skill_sources.py" \
   --target "$APP_PACKAGE_TARGET" --destination "$STAGE_PROJECT_DIR"
+if [[ -z "${APP_RELEASE_PYTHON_WHEELS_ROOT:-}" ]]; then
+  echo "Prepare native Python 3.13/3.14 dependency bundles before packaging; set APP_RELEASE_PYTHON_WHEELS_ROOT." >&2
+  exit 1
+fi
+python3 "$SCRIPT_DIR/scripts/prepare_release_python_wheels.py" \
+  --target "$APP_PACKAGE_TARGET" --destination "$STAGE_PROJECT_DIR" \
+  --prepared-root "$APP_RELEASE_PYTHON_WHEELS_ROOT"
 PACKAGE_VERSION="$(app_version_from_root "$SCRIPT_DIR")"
 if [[ "$PACKAGE_VERSION" == "unknown" ]]; then
   echo "Unable to resolve agent-runtime package version."

@@ -207,7 +207,10 @@ fn detect_import_plan(
         aliases,
         bundle_rel_dir: bundle_rel_dir.to_string(),
         entry_file: manifest.run.entrypoint,
-        source_url: manifest.package.source.unwrap_or_else(|| source.to_string()),
+        source_url: manifest
+            .package
+            .source
+            .unwrap_or_else(|| source.to_string()),
         enabled,
     })
 }
@@ -227,7 +230,10 @@ fn render_imported_skill_prompt(plan: &ImportedSkillPlan, interface_md: &str) ->
     out.push_str(&format!("- Version: `{}`\n", plan.package_version));
     out.push_str(&format!("- Build adapter: `{}`\n", plan.build_adapter));
     out.push_str(&format!("- Launcher: `{}`\n", plan.launcher));
-    out.push_str(&format!("- Manifest: `{}`\n", plan.package_manifest_rel_path));
+    out.push_str(&format!(
+        "- Manifest: `{}`\n",
+        plan.package_manifest_rel_path
+    ));
     out.push_str(&format!("- Entry file: `{}`\n", plan.entry_file));
     out.push_str(&format!("- Source: `{}`\n", plan.source_url));
     out.push_str("\n## Calling Rules\n");
@@ -574,7 +580,9 @@ async fn finalize_imported_bundle(
         package_root: skill_package_root(state),
         target: None,
         allow_network,
-        control: None,
+        control: Some(
+            skill_sdk::InstallControl::new(Arc::new(AtomicBool::new(false))).without_source_build(),
+        ),
     };
     let install_outcome = match tokio::task::spawn_blocking(move || {
         skill_sdk::SkillInstaller.install(&install_request)
@@ -588,12 +596,16 @@ async fn finalize_imported_bundle(
                 Json(ApiResponse {
                     ok: false,
                     data: None,
-                    error: Some(format!(
-                        "skill package verification failed: code={} phase={} diagnostic={}",
-                        error.code,
-                        error.phase.as_deref().unwrap_or("unknown"),
-                        skill_sdk::redact_diagnostics(&error.detail)
-                    )),
+                    error: Some(if error.code == "source_build_disabled" {
+                        "skill_store_precompiled_required".to_string()
+                    } else {
+                        format!(
+                            "skill package verification failed: code={} phase={} diagnostic={}",
+                            error.code,
+                            error.phase.as_deref().unwrap_or("unknown"),
+                            skill_sdk::redact_diagnostics(&error.detail)
+                        )
+                    }),
                 }),
             );
         }
@@ -753,10 +765,7 @@ async fn finalize_imported_bundle(
     )
 }
 
-async fn materialize_import_source(
-    source: &str,
-    dest_dir: &Path,
-) -> Result<String, String> {
+async fn materialize_import_source(source: &str, dest_dir: &Path) -> Result<String, String> {
     let normalized = normalize_remote_skill_source(source);
     let src_path = Path::new(&normalized);
     if src_path.exists() {

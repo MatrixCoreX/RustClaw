@@ -398,7 +398,9 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       });
       const body = (await res.json()) as ApiResponse<ImportedSkillResponse>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `skill_import_http_${res.status}`);
+        throw new Error(body.error === "skill_store_precompiled_required"
+          ? skillStoreErrorMessage(body.error, t)
+          : body.error || `skill_import_http_${res.status}`);
       }
       setSkillImportPreview(body.data);
       setRecentImportedSkillName(body.data.skill_name);
@@ -459,7 +461,9 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       });
       const body = (await res.json()) as ApiResponse<ImportedSkillResponse>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `local_skill_import_http_${res.status}`);
+        throw new Error(body.error === "skill_store_precompiled_required"
+          ? skillStoreErrorMessage(body.error, t)
+          : body.error || `local_skill_import_http_${res.status}`);
       }
       setSkillImportPreview(body.data);
       setRecentImportedSkillName(body.data.skill_name);
