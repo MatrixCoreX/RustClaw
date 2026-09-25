@@ -74,6 +74,22 @@ fn default_telegram_commands_only_expose_transport_controls() {
 }
 
 #[test]
+fn default_cancel_command_is_available_on_every_interactive_channel() {
+    let catalog = ChannelCommandCatalog::default();
+    for channel in ["telegram", "whatsapp", "wechat", "feishu", "lark"] {
+        let matched = catalog
+            .match_command("/cancel", channel)
+            .unwrap_or_else(|| panic!("missing /cancel for {channel}"));
+        assert_eq!(
+            matched.definition.core_action(),
+            Some(CoreCommandAction::Cancel)
+        );
+        assert!(matched.tail.is_empty());
+        assert!(catalog.match_command("stop the task", channel).is_none());
+    }
+}
+
+#[test]
 fn duplicate_alias_on_overlapping_channels_is_rejected() {
     let raw = r#"
 [[commands]]

@@ -389,6 +389,10 @@ pub(crate) struct WorkerConfig {
     pub(crate) active_running_task_ids: Arc<Mutex<HashSet<String>>>,
     pub(crate) task_cancellation_tokens:
         Arc<Mutex<HashMap<String, tokio_util::sync::CancellationToken>>>,
+    /// One-shot wake tokens for the current provider turn. Conversation input
+    /// rotates this token without canceling the durable task itself.
+    pub(crate) task_model_turn_interrupt_tokens:
+        Arc<Mutex<HashMap<String, tokio_util::sync::CancellationToken>>>,
 }
 
 impl WorkerConfig {
@@ -413,6 +417,9 @@ impl WorkerConfig {
         if let Ok(mut tokens) = self.task_cancellation_tokens.lock() {
             tokens.remove(task_id);
         }
+        if let Ok(mut tokens) = self.task_model_turn_interrupt_tokens.lock() {
+            tokens.remove(task_id);
+        }
     }
 
     pub(crate) fn cancel_active_task(&self, task_id: &str) -> bool {
@@ -426,6 +433,12 @@ impl WorkerConfig {
             })
     }
 
+    pub(crate) fn task_runtime_is_registered(&self, task_id: &str) -> bool {
+        self.active_running_task_ids
+            .lock()
+            .is_ok_and(|active| active.contains(task_id))
+    }
+
     pub(crate) fn task_cancellation_token(
         &self,
         task_id: &str,
@@ -434,6 +447,46 @@ impl WorkerConfig {
             .lock()
             .ok()
             .and_then(|tokens| tokens.get(task_id).cloned())
+    }
+
+    pub(crate) fn model_turn_interrupt_token(
+        &self,
+        task_id: &str,
+    ) -> tokio_util::sync::CancellationToken {
+        self.task_model_turn_interrupt_tokens
+            .lock()
+            .map(|mut tokens| {
+                tokens
+                    .entry(task_id.to_string())
+                    .or_insert_with(tokio_util::sync::CancellationToken::new)
+                    .clone()
+            })
+            .unwrap_or_else(|_| tokio_util::sync::CancellationToken::new())
+    }
+
+    pub(crate) fn interrupt_model_turn_for_conversation_input(&self, task_id: &str) -> bool {
+        self.task_model_turn_interrupt_tokens
+            .lock()
+            .ok()
+            .is_some_and(|mut tokens| {
+                let token = tokens
+                    .entry(task_id.to_string())
+                    .or_insert_with(tokio_util::sync::CancellationToken::new)
+                    .clone();
+                token.cancel();
+                true
+            })
+    }
+
+    pub(crate) fn acknowledge_model_turn_conversation_input(&self, task_id: &str) {
+        if let Ok(mut tokens) = self.task_model_turn_interrupt_tokens.lock() {
+            if tokens
+                .get(task_id)
+                .is_some_and(|token| token.is_cancelled())
+            {
+                tokens.remove(task_id);
+            }
+        }
     }
 
     pub(crate) fn is_task_active(&self, task_id: &str) -> bool {
@@ -462,6 +515,7 @@ impl WorkerConfig {
             last_running_recovery_check_ts: Arc::new(Mutex::new(0)),
             active_running_task_ids: Arc::new(Mutex::new(HashSet::new())),
             task_cancellation_tokens: Arc::new(Mutex::new(HashMap::new())),
+            task_model_turn_interrupt_tokens: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -508,6 +562,9 @@ pub(crate) struct TaskMetricsRegistry {
     /// Live task-event wakeups. Event payloads and replay state live in SQLite; this registry only
     /// wakes connected consumers, so the default test fixture remains lightweight.
     pub(crate) task_event_notifier: crate::task_event_transport::TaskEventNotifier,
+    /// Conversation-input events use a separate wakeup namespace. SQLite remains authoritative;
+    /// this registry only wakes connected consumers after a durable state change.
+    pub(crate) conversation_input_event_notifier: crate::task_event_transport::TaskEventNotifier,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1144,6 +1201,8 @@ impl AppState {
         crate::ensure_channel_schema(&conn).expect("ensure_channel_schema for test main db");
         crate::repo::ensure_principal_ownership_schema(&conn)
             .expect("ensure_principal_ownership_schema for test main db");
+        crate::repo::ensure_conversation_input_schema(&conn)
+            .expect("ensure_conversation_input_schema for test main db");
         crate::repo::child_task_graph::ensure_child_task_graph_schema(&conn)
             .expect("child_task_graph_schema_test");
         crate::repo::task_plan::ensure_task_plan_schema(&conn).expect("task_plan_schema_test");

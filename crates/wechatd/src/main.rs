@@ -31,6 +31,10 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 use claw_core::channel_chunk::{chunk_text_for_channel, SEGMENT_PREFIX_MAX_CHARS};
 use claw_core::channel_commands::ChannelCommandCatalog;
+use claw_core::conversation_input::{
+    ConversationInputClientTaskReceipt, ConversationInputClientTaskRequest,
+    ConversationInputSource, ConversationInputTaskHandoffState,
+};
 use claw_core::types::{
     ApiResponse, AuthIdentity, BindChannelKeyRequest, BindChannelKeyResponse, ChannelKind,
     PendingChannelRequestStatus, PendingChannelRequestStoreRequest, ResolveChannelBindingRequest,
@@ -44,7 +48,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{Mutex, Notify, RwLock, Semaphore};
 use tracing::{info, warn};
 use wechat_ilink::{
     download_decrypted_media, parse_aes_key_base64, parse_aes_key_hex_or_base64_media,
@@ -59,6 +63,21 @@ const BACKOFF_DELAY_MS: u64 = 30_000;
 const ACTIVE_LOGIN_TTL_MS: u64 = 5 * 60_000;
 const WECHAT_TEXT_CHUNK_CHARS: usize = 1800;
 const WECHATD_CHANNEL_VERSION: &str = env!("CARGO_PKG_VERSION");
+const INBOUND_MESSAGE_CONCURRENCY: usize = 16;
+const INBOUND_CONTROL_CONCURRENCY: usize = 8;
+
+struct InboundPeerOrder {
+    next_ticket: u64,
+    serving_ticket: u64,
+    notify: Arc<Notify>,
+}
+
+#[derive(Clone)]
+struct InboundOrderTicket {
+    peer_id: String,
+    ticket: u64,
+    notify: Arc<Notify>,
+}
 
 fn env_non_empty(key: &str) -> Option<String> {
     std::env::var(key)
@@ -176,6 +195,9 @@ struct State {
     active_logins: Arc<RwLock<HashMap<String, ActiveLogin>>>,
     context_tokens: Arc<RwLock<HashMap<String, String>>>,
     pending_key_bind_by_user: Arc<RwLock<HashSet<String>>>,
+    inbound_peer_order: Arc<Mutex<HashMap<String, InboundPeerOrder>>>,
+    inbound_message_slots: Arc<Semaphore>,
+    inbound_control_slots: Arc<Semaphore>,
     sync_buf_path: Arc<PathBuf>,
     config_cache: Arc<Mutex<WeixinConfigManager>>,
 }
@@ -402,7 +424,31 @@ async fn monitor_wechat_loop(state: State) {
                 })
                 .await;
                 for msg in resp.msgs {
-                    handle_incoming_message(state.clone(), msg).await;
+                    let is_control = inbound_message_is_explicit_control(&msg);
+                    let ticket = if is_control {
+                        None
+                    } else {
+                        Some(reserve_inbound_order(&state.inbound_peer_order, &msg).await)
+                    };
+                    let message_state = state.clone();
+                    tokio::spawn(async move {
+                        let slots = if is_control {
+                            message_state.inbound_control_slots.clone()
+                        } else {
+                            message_state.inbound_message_slots.clone()
+                        };
+                        let Ok(_permit) = slots.acquire_owned().await else {
+                            return;
+                        };
+                        if let Some(ticket) = ticket.as_ref() {
+                            wait_for_inbound_order(&message_state.inbound_peer_order, ticket).await;
+                        }
+                        handle_incoming_message(message_state.clone(), msg).await;
+                        if let Some(ticket) = ticket {
+                            complete_inbound_order(&message_state.inbound_peer_order, &ticket)
+                                .await;
+                        }
+                    });
                 }
             }
             Err(err) => {
@@ -479,6 +525,9 @@ async fn main() -> anyhow::Result<()> {
         active_logins: Arc::new(RwLock::new(HashMap::new())),
         context_tokens: Arc::new(RwLock::new(HashMap::new())),
         pending_key_bind_by_user: Arc::new(RwLock::new(HashSet::new())),
+        inbound_peer_order: Arc::new(Mutex::new(HashMap::new())),
+        inbound_message_slots: Arc::new(Semaphore::new(INBOUND_MESSAGE_CONCURRENCY)),
+        inbound_control_slots: Arc::new(Semaphore::new(INBOUND_CONTROL_CONCURRENCY)),
         sync_buf_path,
         config_cache: Arc::new(Mutex::new(WeixinConfigManager::new())),
     };

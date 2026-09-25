@@ -184,6 +184,16 @@ fn replace_all_rejects_stale_occurrence_count() {
         }),
     )
     .expect_err("occurrence mismatch");
-    assert_eq!(error_code(error), "replacement_occurrence_mismatch");
+    let parsed = crate::skills::parse_structured_skill_error(&error)
+        .expect("structured occurrence mismatch");
+    assert_eq!(parsed.error_code, "replacement_occurrence_mismatch");
+    let extra = parsed.extra.expect("canonical error extra");
+    assert_eq!(extra["failure_phase"], "pre_dispatch");
+    assert_eq!(extra["side_effect_applied"], false);
+    assert_eq!(extra["retryable"], true);
+    assert_eq!(extra["recovery_action"], "replan_arguments");
+    assert!(crate::skills::structured_skill_error_proves_not_applied(
+        &error
+    ));
     assert_eq!(workspace.content(), "x x\n");
 }

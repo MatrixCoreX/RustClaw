@@ -4,7 +4,7 @@ use std::sync::{Arc, RwLock};
 
 use super::{
     action_requires_transcript_review_synthesis, classify_skill_failure_recovery,
-    preserve_requested_capability_result_identity,
+    handle_active_turn_control_action, preserve_requested_capability_result_identity,
     preserve_transcript_review_as_intermediate_evidence, strip_internal_execution_args,
     strip_unsupported_planner_metadata_args, synthesize_answer_allows_direct_fallback,
     synthesize_bounded_read_range_direct_answer,
@@ -21,6 +21,132 @@ use crate::{
 };
 use claw_core::config::{AgentConfig, ToolsConfig};
 use claw_core::skill_registry::SkillsRegistry;
+
+fn active_turn_control_fixture() -> (AppState, crate::ClaimedTask) {
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let task = crate::ClaimedTask {
+        claim_attempt: 1,
+        task_id: "active-turn-control-task".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    state
+        .core
+        .db
+        .get()
+        .expect("database")
+        .execute(
+            "INSERT INTO tasks (
+                task_id, user_id, chat_id, principal_id, kind, payload_json, status,
+                created_at, updated_at, lease_owner, claim_attempt
+             ) VALUES (?1, 1, 2, 'principal-test', 'ask', '{}', 'running', 0, 0, ?2, 1)",
+            rusqlite::params![task.task_id, state.worker.worker_id.as_str()],
+        )
+        .expect("running task");
+    (state, task)
+}
+
+#[test]
+fn active_turn_control_enqueues_existing_cancel_contract() {
+    let (state, task) = active_turn_control_fixture();
+    let mut loop_state = LoopState::new();
+    loop_state.conversation_input_revision = 4;
+    let mut executed_actions = 0;
+
+    handle_active_turn_control_action(
+        &state,
+        &task,
+        &mut loop_state,
+        &serde_json::json!({
+            "action": "stop",
+            "expected_instruction_revision": 4,
+        }),
+        "control-active-turn:4",
+        1,
+        1,
+        &mut executed_actions,
+    )
+    .expect("control action");
+
+    let directives = crate::repo::pending_task_control_directives(&state, &task.task_id, 4)
+        .expect("pending directives");
+    assert_eq!(directives.len(), 1);
+    assert_eq!(directives[0].action, "cancel");
+    assert_eq!(directives[0].issued_by, "agent_loop");
+    assert_eq!(directives[0].payload["instruction_revision"], 4);
+    assert_eq!(executed_actions, 1);
+    assert_eq!(loop_state.executed_step_results.len(), 1);
+}
+
+#[test]
+fn active_turn_control_enqueues_manual_pause_contract() {
+    let (state, task) = active_turn_control_fixture();
+    let mut loop_state = LoopState::new();
+    loop_state.conversation_input_revision = 6;
+    let mut executed_actions = 0;
+
+    handle_active_turn_control_action(
+        &state,
+        &task,
+        &mut loop_state,
+        &serde_json::json!({
+            "action": "pause",
+            "expected_instruction_revision": 6,
+        }),
+        "control-active-turn:pause:6",
+        1,
+        1,
+        &mut executed_actions,
+    )
+    .expect("pause control action");
+
+    let directives = crate::repo::pending_task_control_directives(&state, &task.task_id, 4)
+        .expect("pending directives");
+    assert_eq!(directives.len(), 1);
+    assert_eq!(directives[0].action, "pause");
+    assert_eq!(directives[0].payload["instruction_revision"], 6);
+    assert_eq!(directives[0].payload["resume_policy"], "manual");
+    assert_eq!(executed_actions, 1);
+}
+
+#[test]
+fn active_turn_control_rejects_stale_revision_without_side_effect() {
+    let (state, task) = active_turn_control_fixture();
+    let mut loop_state = LoopState::new();
+    loop_state.conversation_input_revision = 5;
+    let mut executed_actions = 0;
+
+    let error = match handle_active_turn_control_action(
+        &state,
+        &task,
+        &mut loop_state,
+        &serde_json::json!({
+            "action": "stop",
+            "expected_instruction_revision": 4,
+        }),
+        "control-active-turn:4",
+        1,
+        1,
+        &mut executed_actions,
+    ) {
+        Ok(_) => panic!("stale revision unexpectedly accepted"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error, "active_turn_control_revision_conflict");
+    assert!(
+        crate::repo::pending_task_control_directives(&state, &task.task_id, 4)
+            .expect("pending directives")
+            .is_empty()
+    );
+    assert_eq!(executed_actions, 0);
+}
 
 #[test]
 fn required_transcript_review_overrides_direct_respond() {
@@ -308,6 +434,92 @@ fn retryable_run_cmd_failure_stops_before_remaining_tool_action() {
             "command not found",
         ),
         Some("recoverable_failure_continue_round")
+    );
+}
+
+#[test]
+fn structured_non_retryable_failure_overrides_skill_retry_policy() {
+    let state = test_state_with_registry();
+    let actions = vec![AgentAction::CallSkill {
+        skill: "map_merchant".to_string(),
+        args: serde_json::json!({"action":"recommend"}),
+    }];
+    let err = format!(
+        "__RC_SKILL_ERROR__:{}",
+        serde_json::json!({
+            "skill": "map_merchant",
+            "error_code": "skill_credentials_missing",
+            "error_text": "required credential is unavailable",
+            "extra": {
+                "schema_version": 1,
+                "source_skill": "map_merchant",
+                "status": "error",
+                "error_code": "skill_credentials_missing",
+                "message_key": "skill.map_merchant.credentials_missing",
+                "retryable": false,
+                "failure_phase": "pre_dispatch",
+                "side_effect_applied": false
+            }
+        })
+    );
+
+    assert_eq!(
+        classify_skill_failure_recovery(
+            &state,
+            &actions,
+            0,
+            4,
+            "map_merchant",
+            Some(&serde_json::json!({"action":"recommend"})),
+            &err,
+        ),
+        Some("recoverable_failure_finalize")
+    );
+}
+
+#[test]
+fn structured_non_retryable_failure_keeps_independent_followup_action() {
+    let state = test_state_with_registry();
+    let actions = vec![
+        AgentAction::CallSkill {
+            skill: "map_merchant".to_string(),
+            args: serde_json::json!({"action":"recommend"}),
+        },
+        AgentAction::CallSkill {
+            skill: "stock".to_string(),
+            args: serde_json::json!({"action":"quote","symbol":"AAPL"}),
+        },
+    ];
+    let err = format!(
+        "__RC_SKILL_ERROR__:{}",
+        serde_json::json!({
+            "skill": "map_merchant",
+            "error_code": "skill_credentials_missing",
+            "error_text": "required credential is unavailable",
+            "extra": {
+                "schema_version": 1,
+                "source_skill": "map_merchant",
+                "status": "error",
+                "error_code": "skill_credentials_missing",
+                "message_key": "skill.map_merchant.credentials_missing",
+                "retryable": false,
+                "failure_phase": "pre_dispatch",
+                "side_effect_applied": false
+            }
+        })
+    );
+
+    assert_eq!(
+        classify_skill_failure_recovery(
+            &state,
+            &actions,
+            0,
+            4,
+            "map_merchant",
+            Some(&serde_json::json!({"action":"recommend"})),
+            &err,
+        ),
+        Some("recoverable_failure_continue_in_round")
     );
 }
 
@@ -937,7 +1149,10 @@ fn workspace_patch_apply_io_failure_does_not_gain_contract_repair() {
             "skill": "workspace_patch",
             "error_code": "patch_apply_failed",
             "error_text": "patch apply failed",
-            "extra": {"error_code": "patch_apply_failed"}
+            "extra": {
+                "error_code": "patch_apply_failed",
+                "retryable": false
+            }
         })
     );
 
@@ -1249,6 +1464,53 @@ fn terminal_direct_respond_publishes_even_when_last_output_matches() {
         loop_state.last_user_visible_respond.as_deref(),
         Some(content)
     );
+}
+
+#[test]
+fn side_reply_is_persisted_without_completing_the_active_task() {
+    let (state, task) = active_turn_control_fixture();
+    let policy = crate::agent_engine::support::load_agent_loop_guard_policy(&state);
+    let mut loop_state = LoopState::new();
+    loop_state.round_no = 1;
+    loop_state.conversation_input_revision = 3;
+    loop_state.conversation_execution_epoch = 2;
+    loop_state.active_action_conversation_relations = vec![Some("side_reply".to_string())];
+    let content = "The requested status is available; the main task is still running.";
+    let actions = vec![AgentAction::Respond {
+        content: content.to_string(),
+    }];
+
+    let outcome = super::handle_respond_action(
+        &state,
+        &task,
+        &actions,
+        &mut loop_state,
+        &policy,
+        0,
+        1,
+        1,
+        "respond:side-reply",
+        content,
+        None,
+    );
+
+    assert!(!outcome.should_stop);
+    assert!(outcome.stop_signal.is_none());
+    assert!(!outcome.ended_with_user_visible_output);
+    assert!(loop_state.delivery_messages.is_empty());
+    assert!(loop_state.last_user_visible_respond.is_none());
+    assert_eq!(
+        loop_state.executed_step_results[0].skill,
+        "conversation_reply_item"
+    );
+    let reply_id = loop_state.task_observations[0]["reply_id"]
+        .as_str()
+        .expect("reply id");
+    let item = crate::repo::get_conversation_reply_item(&state.core.db, reply_id)
+        .expect("load reply")
+        .expect("reply");
+    assert_eq!(item.text, content);
+    assert_eq!(item.relation, "side_reply");
 }
 
 fn ok_step(step_id: &str, skill: &str, output: &str) -> StepExecutionResult {

@@ -7,7 +7,8 @@ pub(super) fn observed_error_step_body(
     step: &crate::executor::StepExecutionResult,
     body: &str,
 ) -> Option<String> {
-    if !crate::skills::is_observable_run_cmd_error(&step.skill, body)
+    if crate::skills::parse_structured_skill_error(body).is_none()
+        && !crate::skills::is_observable_run_cmd_error(&step.skill, body)
         && !crate::skills::is_recoverable_skill_error(&step.skill, body)
     {
         return None;

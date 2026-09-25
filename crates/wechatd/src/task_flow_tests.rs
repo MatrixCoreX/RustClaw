@@ -67,3 +67,14 @@ fn failed_execution_projection_never_polls_forever_under_running_database_status
         WechatTaskPollDisposition::RequiresAttention
     );
 }
+
+#[tokio::test]
+async fn durable_handoff_requires_the_submitter_to_confirm_acceptance() {
+    let (accepted, receipt) = tokio::sync::oneshot::channel();
+    accepted.send(()).expect("handoff receiver");
+    assert!(durable_handoff_received(receipt).await);
+
+    let (dropped, receipt) = tokio::sync::oneshot::channel::<()>();
+    drop(dropped);
+    assert!(!durable_handoff_received(receipt).await);
+}

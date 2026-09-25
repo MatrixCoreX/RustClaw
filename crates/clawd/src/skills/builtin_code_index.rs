@@ -173,7 +173,7 @@ fn refresh_index(
 ) -> Result<(RepositoryIndex, RefreshStats), CodeIndexError> {
     let index_path = workspace_root.join(INDEX_RELATIVE_PATH);
     let previous = load_index(&index_path);
-    let candidates = collect_source_candidates(workspace_root)?;
+    let (candidates, unreadable_entries) = collect_source_candidates(workspace_root)?;
     let scan_snapshot_sha256 = source_candidate_snapshot(workspace_root, &candidates);
     let scan_start = decode_scan_continuation(scan_continuation, &scan_snapshot_sha256)?;
     if scan_start > candidates.len() {
@@ -184,7 +184,9 @@ fn refresh_index(
     }
     let scan_end = scan_start.saturating_add(max_files).min(candidates.len());
     let scan_truncated = scan_end < candidates.len();
+    let scan_complete = !scan_truncated && unreadable_entries == 0;
     let mut stats = RefreshStats {
+        skipped_files: unreadable_entries,
         scan_truncated,
         total_candidates: candidates.len(),
         scan_start,
@@ -216,7 +218,7 @@ fn refresh_index(
         }
         files.insert(candidate.relative_path.clone(), indexed);
     }
-    if !scan_truncated {
+    if scan_complete {
         let current_paths = candidates
             .iter()
             .map(|candidate| candidate.relative_path.as_str())
@@ -234,7 +236,7 @@ fn refresh_index(
     let index = RepositoryIndex {
         schema_version: INDEX_SCHEMA_VERSION,
         generated_at: stats.refreshed_at,
-        scan_complete: !stats.scan_truncated,
+        scan_complete,
         files,
     };
     if persist {
@@ -276,19 +278,39 @@ fn persist_index(path: &Path, index: &RepositoryIndex) -> Result<(), CodeIndexEr
 
 fn collect_source_candidates(
     workspace_root: &Path,
-) -> Result<Vec<SourceCandidate>, CodeIndexError> {
+) -> Result<(Vec<SourceCandidate>, usize), CodeIndexError> {
     let mut candidates = Vec::new();
+    let mut unreadable_entries = 0;
     let mut stack = vec![workspace_root.to_path_buf()];
     while let Some(directory) = stack.pop() {
-        let entries = fs::read_dir(&directory)
-            .map_err(|error| CodeIndexError::new("repository_read_failed", error.to_string()))?;
+        let entries = match fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(_) if directory != workspace_root => {
+                unreadable_entries += 1;
+                continue;
+            }
+            Err(error) => {
+                return Err(CodeIndexError::new(
+                    "repository_read_failed",
+                    error.to_string(),
+                ))
+            }
+        };
         for entry in entries {
-            let entry = entry.map_err(|error| {
-                CodeIndexError::new("repository_read_failed", error.to_string())
-            })?;
-            let file_type = entry.file_type().map_err(|error| {
-                CodeIndexError::new("repository_read_failed", error.to_string())
-            })?;
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(_) => {
+                    unreadable_entries += 1;
+                    continue;
+                }
+            };
+            let file_type = match entry.file_type() {
+                Ok(file_type) => file_type,
+                Err(_) => {
+                    unreadable_entries += 1;
+                    continue;
+                }
+            };
             if file_type.is_symlink() {
                 continue;
             }
@@ -305,9 +327,13 @@ fn collect_source_candidates(
             let Some(language) = source_language(&path) else {
                 continue;
             };
-            let metadata = entry.metadata().map_err(|error| {
-                CodeIndexError::new("repository_read_failed", error.to_string())
-            })?;
+            let metadata = match entry.metadata() {
+                Ok(metadata) => metadata,
+                Err(_) => {
+                    unreadable_entries += 1;
+                    continue;
+                }
+            };
             let relative_path = relative_workspace_path(workspace_root, &path)?;
             candidates.push(SourceCandidate {
                 path,
@@ -319,7 +345,7 @@ fn collect_source_candidates(
         }
     }
     candidates.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
-    Ok(candidates)
+    Ok((candidates, unreadable_entries))
 }
 
 fn source_candidate_snapshot(workspace_root: &Path, candidates: &[SourceCandidate]) -> String {

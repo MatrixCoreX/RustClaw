@@ -452,6 +452,7 @@ fn agent_loop_decision_envelope_schema_drift() {
         "semantic_authority",
         "decision",
         "terminal_intent",
+        "conversation_relation",
         "control_intent",
         "control_reason_code",
         "reason_code",
@@ -508,6 +509,25 @@ fn agent_loop_decision_envelope_schema_drift() {
                 .iter()
                 .any(|value| value.as_str() == Some(token)),
             "terminal_intent enum missing `{token}`"
+        );
+    }
+    let conversation_relations = properties
+        .get("conversation_relation")
+        .and_then(|value| value.get("enum"))
+        .and_then(Value::as_array)
+        .expect("conversation_relation enum");
+    for token in [
+        "continue_current",
+        "amend_current",
+        "start_followup",
+        "side_reply",
+        "clarify",
+    ] {
+        assert!(
+            conversation_relations
+                .iter()
+                .any(|value| value.as_str() == Some(token)),
+            "conversation_relation enum missing `{token}`"
         );
     }
     let control_intents = properties

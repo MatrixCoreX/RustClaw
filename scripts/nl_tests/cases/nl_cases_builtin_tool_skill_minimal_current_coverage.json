@@ -85,7 +85,8 @@
     "b100_task_plan_read_en",
     "b100_memory_recent_zh",
     "b100_browser_session_snapshot_en",
-    "b100_042_install_module_live_zh",
+    "b100_039_package_detect_zh",
+    "b100_042_install_module_preview_zh",
     "b100_045_service_verify_no_restart_en",
     "b100_048_task_resume_live_en",
     "b100_052_db_list_tables_zh",
@@ -114,8 +115,8 @@
     "b100_108_nni_status_zh"
   ],
   "selected_non_x_dry_run_count": 0,
-  "selected_row_count": 40,
+  "selected_row_count": 41,
   "selection_algorithm": "exact_minimum_cardinality_set_cover",
   "source": "scripts/nl_tests/cases/nl_cases_basic_skill_100_coverage_20260629.txt",
-  "source_sha256": "b2316b6ba85f08f5bc1f1739aeaf3a4701b18a977926fa828def323640a04cc5"
+  "source_sha256": "d3e1f1290c1dc0f68e1edfe2bba34b662b200c9087651887b183c3fa2723660c"
 }

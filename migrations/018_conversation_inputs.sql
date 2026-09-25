@@ -1,0 +1,9 @@
+-- Migration id: 018_conversation_inputs_v1
+--
+-- Immutable manifest for the transactional conversation-input ledger. The
+-- executor lives in repo/conversation_inputs.rs and records this file's digest
+-- in runtime_schema_migrations.
+--
+-- The ledger stores durable user input separately from task execution. It owns
+-- receive ordering, idempotency, focus metadata, and lightweight input events;
+-- task journals continue to own tool and model execution details.

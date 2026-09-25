@@ -299,6 +299,7 @@ fn resolver_candidate_rank_prefers_dedicated_low_risk_tool_before_run_cmd() {
             planner_kind: PlannerCapabilityKind::Tool,
             preferred: true,
             risk_level: SkillRiskLevel::High,
+            required_args: Vec::new(),
             required_companions: Vec::new(),
         },
         ResolverCandidate {
@@ -308,6 +309,7 @@ fn resolver_candidate_rank_prefers_dedicated_low_risk_tool_before_run_cmd() {
             planner_kind: PlannerCapabilityKind::Tool,
             preferred: true,
             risk_level: SkillRiskLevel::Low,
+            required_args: Vec::new(),
             required_companions: Vec::new(),
         },
     ];
@@ -1248,6 +1250,7 @@ fn workspace_edit_text_resolves_batch_without_a_second_runtime_action() {
     assert_eq!(args["action"], "replace_text");
     assert_eq!(args["edits"], edits);
     assert_eq!(record.capability_ref, "workspace.edit_text");
+    assert_eq!(record.required_args, vec!["path", "edits"]);
     assert_eq!(
         record.reason_code,
         "capability_resolver_registry_mapping_resolved"

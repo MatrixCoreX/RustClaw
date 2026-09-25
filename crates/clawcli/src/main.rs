@@ -4,6 +4,7 @@ mod assistant_presentation;
 mod auth;
 mod chat;
 mod chat_attachments;
+mod chat_background;
 mod chat_command;
 mod chat_editor;
 mod chat_session;
@@ -369,8 +370,8 @@ enum Command {
     /// POST /v1/tasks/pause-by-task-id
     PauseTask {
         task_id: String,
-        #[arg(long, default_value_t = 3600)]
-        pause_seconds: u64,
+        #[arg(long)]
+        pause_seconds: Option<u64>,
     },
 
     /// POST /v1/tasks/cancel-one by active task index.
@@ -434,8 +435,8 @@ enum SubagentCommand {
     /// Pause one child task without affecting its siblings.
     Pause {
         child_task_id: String,
-        #[arg(long, default_value_t = 3600)]
-        pause_seconds: u64,
+        #[arg(long)]
+        pause_seconds: Option<u64>,
     },
     /// Resume one paused or waiting child task.
     Resume { child_task_id: String },
@@ -566,8 +567,8 @@ enum GoalCommand {
     /// Pause a goal task through the existing checkpoint pause control.
     Pause {
         task_id: String,
-        #[arg(long, default_value_t = 3600)]
-        pause_seconds: u64,
+        #[arg(long)]
+        pause_seconds: Option<u64>,
     },
     /// Resume a goal task through the existing checkpoint resume control.
     Resume {

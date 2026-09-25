@@ -12,10 +12,10 @@ use super::{
     normalize_subagent_stop_signal, preflight_failure_metadata, preflight_permission_decision,
     record_latest_validation_result, record_subagent_step_execution,
     skill_extra_requests_user_input, structured_extra_evidence_output,
-    structured_observation_path_argument_error, try_auto_sudo_retry_after_permission_denied,
-    unresolved_runtime_template_argument_error, validate_skill_output_contract,
-    validation_failure_requires_workspace_repair, validation_observation_with_process_status,
-    AgentLoopGuardPolicy, LoopState,
+    structured_observation_path_argument_error, take_checkpoint_runner_execution_binding,
+    try_auto_sudo_retry_after_permission_denied, unresolved_runtime_template_argument_error,
+    validate_skill_output_contract, validation_failure_requires_workspace_repair,
+    validation_observation_with_process_status, AgentLoopGuardPolicy, LoopState,
 };
 use crate::agent_engine::support::{
     AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope,
@@ -32,6 +32,59 @@ mod scope_tests;
 
 #[path = "skill_execution_validation_tests.rs"]
 mod validation_tests;
+
+#[test]
+fn checkpoint_runner_binding_is_consumed_only_by_the_exact_action_version() {
+    let mut loop_state = LoopState::new();
+    loop_state.conversation_input_revision = 4;
+    loop_state.conversation_execution_epoch = 6;
+    let runner_binding = serde_json::json!({
+        "skill_name": "system_basic",
+        "version": "1.2.3",
+    });
+    loop_state.checkpoint_action_replay = Some(serde_json::json!({
+        "schema_version": 1,
+        "tool_or_skill": "system_basic",
+        "action_ref": "system.inspect",
+        "instruction_revision": 4,
+        "execution_epoch": 6,
+        "execution_binding": {
+            "runner_execution_binding": runner_binding,
+        },
+    }));
+
+    let pinned =
+        take_checkpoint_runner_execution_binding(&mut loop_state, "system_basic", "system.inspect")
+            .expect("matching replay binding")
+            .expect("runner binding");
+
+    assert_eq!(pinned, runner_binding);
+    assert!(loop_state.checkpoint_action_replay.is_none());
+}
+
+#[test]
+fn checkpoint_runner_binding_rejects_stale_conversation_version() {
+    let mut loop_state = LoopState::new();
+    loop_state.conversation_input_revision = 5;
+    loop_state.conversation_execution_epoch = 7;
+    loop_state.checkpoint_action_replay = Some(serde_json::json!({
+        "schema_version": 1,
+        "tool_or_skill": "system_basic",
+        "action_ref": "system.inspect",
+        "instruction_revision": 4,
+        "execution_epoch": 7,
+        "execution_binding": {"runner_execution_binding": null},
+    }));
+
+    let error =
+        take_checkpoint_runner_execution_binding(&mut loop_state, "system_basic", "system.inspect")
+            .expect_err("stale replay must fail closed");
+
+    assert_eq!(
+        error,
+        "checkpoint_action_replay_conversation_version_changed"
+    );
+}
 
 #[test]
 fn capability_result_keeps_the_exact_requested_capability_name() {

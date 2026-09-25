@@ -213,3 +213,56 @@ fn reducer_tracks_abort_and_replacement_without_merging_attempts() {
     );
     assert_eq!(reducer.latest_display_content(), None);
 }
+
+#[test]
+fn reducer_ignores_late_output_from_an_older_execution_epoch() {
+    let mut reducer = AssistantPresentationReducer::default();
+    reducer
+        .apply(
+            decode(&event(
+                "assistant_output_started",
+                json!({"instruction_revision": 1, "execution_epoch": 1}),
+            ))
+            .unwrap()
+            .unwrap(),
+        )
+        .unwrap();
+    reducer
+        .apply(
+            decode(&event(
+                "assistant_output_started",
+                json!({
+                    "stream_id": "stream-2",
+                    "attempt_id": "attempt-2",
+                    "instruction_revision": 2,
+                    "execution_epoch": 2
+                }),
+            ))
+            .unwrap()
+            .unwrap(),
+        )
+        .unwrap();
+    let late = decode(&event(
+        "assistant_output_delta",
+        json!({
+            "sequence": 1,
+            "content": "stale",
+            "instruction_revision": 1,
+            "execution_epoch": 1
+        }),
+    ))
+    .unwrap()
+    .unwrap();
+    assert_eq!(reducer.apply(late).unwrap(), PresentationUpdate::Superseded);
+    assert_eq!(reducer.latest_display_content(), Some(""));
+
+    assert_eq!(
+        decode(&event(
+            "assistant_output_started",
+            json!({"instruction_revision": 3}),
+        ))
+        .expect_err("incomplete execution version")
+        .to_string(),
+        "assistant_presentation_execution_version_incomplete"
+    );
+}

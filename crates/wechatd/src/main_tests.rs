@@ -1,7 +1,8 @@
 use super::{
     build_login_status_response, context_token_store_key, extract_bind_key_candidate,
-    extract_text_message, is_unbound_allowed_command, qr_render_content, qr_svg_data_url,
-    skill_progress_message, wechat_runtime_status_file_path, wechat_t, wechat_task_terminal_kind,
+    extract_text_message, inbound_message_is_explicit_control, is_unbound_allowed_command,
+    qr_render_content, qr_svg_data_url, reserve_inbound_order, skill_progress_message,
+    wait_for_inbound_order, wechat_runtime_status_file_path, wechat_t, wechat_task_terminal_kind,
     workspace_root_from_config_path, ActiveLogin, MessageItem, QRCodeResponse, TaskQueryResponse,
     TaskStatus, TextItem, VoiceItem, WechatRuntimeStatus, WechatSection, WechatTaskTerminalKind,
     WechatTypingHeartbeat, WeixinMessage, TYPING_STATUS_CANCEL, TYPING_STATUS_TYPING,
@@ -11,6 +12,7 @@ use axum::extract::State as AxumState;
 use axum::routing::post;
 use axum::{Json, Router};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -140,6 +142,65 @@ fn extract_text_message_prefers_text_items() {
     assert_eq!(extract_text_message(&msg).as_deref(), Some("hello"));
 }
 
+fn inbound_text_message(peer_id: &str, text: &str) -> WeixinMessage {
+    WeixinMessage {
+        seq: None,
+        message_id: None,
+        from_user_id: Some(peer_id.to_string()),
+        _to_user_id: None,
+        create_time_ms: None,
+        session_id: None,
+        item_list: Some(vec![MessageItem {
+            r#type: Some(1),
+            ref_msg: None,
+            text_item: Some(TextItem {
+                text: Some(text.to_string()),
+            }),
+            voice_item: None,
+            image_item: None,
+            video_item: None,
+            file_item: None,
+        }]),
+        context_token: Some("ctx".to_string()),
+    }
+}
+
+#[test]
+fn only_the_explicit_cancel_command_bypasses_ordinary_inbound_ordering() {
+    assert!(inbound_message_is_explicit_control(&inbound_text_message(
+        "peer", "/cancel"
+    )));
+    assert!(!inbound_message_is_explicit_control(&inbound_text_message(
+        "peer",
+        "please stop after this file"
+    )));
+}
+
+#[tokio::test]
+async fn ordinary_inbound_tickets_preserve_per_peer_order_without_cross_peer_blocking() {
+    let order = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+    let first = reserve_inbound_order(&order, &inbound_text_message("peer-a", "first")).await;
+    let second = reserve_inbound_order(&order, &inbound_text_message("peer-a", "second")).await;
+    let other = reserve_inbound_order(&order, &inbound_text_message("peer-b", "other")).await;
+
+    wait_for_inbound_order(&order, &first).await;
+    wait_for_inbound_order(&order, &other).await;
+    assert!(tokio::time::timeout(
+        Duration::from_millis(20),
+        wait_for_inbound_order(&order, &second)
+    )
+    .await
+    .is_err());
+
+    super::complete_inbound_order(&order, &first).await;
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        wait_for_inbound_order(&order, &second),
+    )
+    .await
+    .expect("second same-peer message becomes ready");
+}
+
 #[test]
 fn extract_text_message_falls_back_to_voice_transcript() {
     let msg = WeixinMessage {
@@ -221,6 +282,18 @@ fn inbound_message_identity_prefers_provider_message_id() {
     assert_eq!(
         super::inbound_provider_message_id(&msg).as_deref(),
         Some("9223372036854775807")
+    );
+}
+
+#[test]
+fn inbound_event_completion_requires_durable_handoff() {
+    assert_eq!(
+        super::inbound_finish_outcome(true),
+        claw_core::channel_event_admission::ChannelEventFinishOutcome::Completed
+    );
+    assert_eq!(
+        super::inbound_finish_outcome(false),
+        claw_core::channel_event_admission::ChannelEventFinishOutcome::RetryableFailure
     );
 }
 

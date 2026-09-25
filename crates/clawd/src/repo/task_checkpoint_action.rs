@@ -14,6 +14,10 @@ CREATE TABLE IF NOT EXISTS task_checkpoint_actions (
     args_json            TEXT NOT NULL,
     output_contract_json TEXT,
     continuation_actions_json TEXT,
+    execution_binding_json TEXT,
+    approval_binding_json TEXT,
+    instruction_revision INTEGER NOT NULL DEFAULT 0,
+    execution_epoch      INTEGER NOT NULL DEFAULT 0,
     integrity_hash       TEXT NOT NULL,
     created_at           INTEGER NOT NULL,
     updated_at           INTEGER NOT NULL,
@@ -33,6 +37,10 @@ pub(crate) struct TaskCheckpointAction {
     pub(crate) args: Value,
     pub(crate) output_contract: Option<Value>,
     pub(crate) continuation_actions: Option<Value>,
+    pub(crate) execution_binding: Option<Value>,
+    pub(crate) approval_binding: Option<Value>,
+    pub(crate) instruction_revision: u64,
+    pub(crate) execution_epoch: u64,
 }
 
 pub(crate) fn upsert_task_checkpoint_action(
@@ -44,6 +52,10 @@ pub(crate) fn upsert_task_checkpoint_action(
     args: &Value,
     output_contract: Option<&Value>,
     continuation_actions: Option<&Value>,
+    execution_binding: Option<&Value>,
+    approval_binding: Option<&Value>,
+    instruction_revision: u64,
+    execution_epoch: u64,
 ) -> anyhow::Result<()> {
     let task_id = required_text(task_id, "task_id")?;
     let checkpoint_id = required_text(checkpoint_id, "checkpoint_id")?;
@@ -58,6 +70,12 @@ pub(crate) fn upsert_task_checkpoint_action(
     if continuation_actions.is_some_and(|value| !value.is_array()) {
         return Err(anyhow!("checkpoint_continuation_actions_not_array"));
     }
+    if execution_binding.is_some_and(|value| !value.is_object()) {
+        return Err(anyhow!("checkpoint_execution_binding_not_object"));
+    }
+    if approval_binding.is_some_and(|value| !value.is_object()) {
+        return Err(anyhow!("checkpoint_approval_binding_not_object"));
+    }
     let args_json =
         serde_json::to_string(args).context("checkpoint_action_args_serialize_failed")?;
     let output_contract_json = output_contract
@@ -68,6 +86,14 @@ pub(crate) fn upsert_task_checkpoint_action(
         .map(serde_json::to_string)
         .transpose()
         .context("checkpoint_continuation_actions_serialize_failed")?;
+    let execution_binding_json = execution_binding
+        .map(serde_json::to_string)
+        .transpose()
+        .context("checkpoint_execution_binding_serialize_failed")?;
+    let approval_binding_json = approval_binding
+        .map(serde_json::to_string)
+        .transpose()
+        .context("checkpoint_approval_binding_serialize_failed")?;
     let integrity_hash = checkpoint_action_integrity_hash(
         task_id,
         checkpoint_id,
@@ -76,6 +102,10 @@ pub(crate) fn upsert_task_checkpoint_action(
         &args_json,
         output_contract_json.as_deref(),
         continuation_actions_json.as_deref(),
+        execution_binding_json.as_deref(),
+        approval_binding_json.as_deref(),
+        instruction_revision,
+        execution_epoch,
     );
     let now = crate::now_ts_u64() as i64;
     let db = pool.get().context("checkpoint_action_db_pool_failed")?;
@@ -83,14 +113,20 @@ pub(crate) fn upsert_task_checkpoint_action(
     db.execute(
         "INSERT INTO task_checkpoint_actions (
              task_id, checkpoint_id, tool_or_skill, action_ref, args_json,
-             output_contract_json, continuation_actions_json, integrity_hash, created_at, updated_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)
+             output_contract_json, continuation_actions_json, execution_binding_json,
+             approval_binding_json, instruction_revision, execution_epoch,
+             integrity_hash, created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13)
          ON CONFLICT(task_id, checkpoint_id) DO UPDATE SET
              tool_or_skill = excluded.tool_or_skill,
              action_ref = excluded.action_ref,
              args_json = excluded.args_json,
              output_contract_json = excluded.output_contract_json,
              continuation_actions_json = excluded.continuation_actions_json,
+             execution_binding_json = excluded.execution_binding_json,
+             approval_binding_json = excluded.approval_binding_json,
+             instruction_revision = excluded.instruction_revision,
+             execution_epoch = excluded.execution_epoch,
              integrity_hash = excluded.integrity_hash,
              updated_at = excluded.updated_at",
         params![
@@ -101,6 +137,12 @@ pub(crate) fn upsert_task_checkpoint_action(
             args_json,
             output_contract_json,
             continuation_actions_json,
+            execution_binding_json,
+            approval_binding_json,
+            i64::try_from(instruction_revision)
+                .map_err(|_| anyhow!("checkpoint_instruction_revision_out_of_range"))?,
+            i64::try_from(execution_epoch)
+                .map_err(|_| anyhow!("checkpoint_execution_epoch_out_of_range"))?,
             integrity_hash,
             now,
         ],
@@ -120,7 +162,9 @@ pub(crate) fn load_task_checkpoint_action(
     let row = db
         .query_row(
             "SELECT tool_or_skill, action_ref, args_json, output_contract_json,
-                    continuation_actions_json, integrity_hash
+                    continuation_actions_json, execution_binding_json,
+                    approval_binding_json, instruction_revision, execution_epoch,
+                    integrity_hash
              FROM task_checkpoint_actions
              WHERE task_id = ?1 AND checkpoint_id = ?2
              LIMIT 1",
@@ -132,7 +176,11 @@ pub(crate) fn load_task_checkpoint_action(
                     row.get::<_, String>(2)?,
                     row.get::<_, Option<String>>(3)?,
                     row.get::<_, Option<String>>(4)?,
-                    row.get::<_, String>(5)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, i64>(7)?,
+                    row.get::<_, i64>(8)?,
+                    row.get::<_, String>(9)?,
                 ))
             },
         )
@@ -143,6 +191,10 @@ pub(crate) fn load_task_checkpoint_action(
         args_json,
         output_contract_json,
         continuation_actions_json,
+        execution_binding_json,
+        approval_binding_json,
+        instruction_revision,
+        execution_epoch,
         integrity_hash,
     )) = row
     else {
@@ -158,6 +210,12 @@ pub(crate) fn load_task_checkpoint_action(
         &args_json,
         output_contract_json.as_deref(),
         continuation_actions_json.as_deref(),
+        execution_binding_json.as_deref(),
+        approval_binding_json.as_deref(),
+        u64::try_from(instruction_revision)
+            .map_err(|_| anyhow!("stored_checkpoint_instruction_revision_invalid"))?,
+        u64::try_from(execution_epoch)
+            .map_err(|_| anyhow!("stored_checkpoint_execution_epoch_invalid"))?,
     );
     if integrity_hash != expected_hash {
         return Err(anyhow!("checkpoint_action_integrity_mismatch"));
@@ -189,6 +247,28 @@ pub(crate) fn load_task_checkpoint_action(
     {
         return Err(anyhow!("stored_checkpoint_continuation_actions_not_array"));
     }
+    let execution_binding = execution_binding_json
+        .as_deref()
+        .map(serde_json::from_str::<Value>)
+        .transpose()
+        .context("checkpoint_execution_binding_parse_failed")?;
+    if execution_binding
+        .as_ref()
+        .is_some_and(|value| !value.is_object())
+    {
+        return Err(anyhow!("stored_checkpoint_execution_binding_not_object"));
+    }
+    let approval_binding = approval_binding_json
+        .as_deref()
+        .map(serde_json::from_str::<Value>)
+        .transpose()
+        .context("checkpoint_approval_binding_parse_failed")?;
+    if approval_binding
+        .as_ref()
+        .is_some_and(|value| !value.is_object())
+    {
+        return Err(anyhow!("stored_checkpoint_approval_binding_not_object"));
+    }
     Ok(Some(TaskCheckpointAction {
         task_id: task_id.to_string(),
         checkpoint_id: checkpoint_id.to_string(),
@@ -197,6 +277,12 @@ pub(crate) fn load_task_checkpoint_action(
         args,
         output_contract,
         continuation_actions,
+        execution_binding,
+        approval_binding,
+        instruction_revision: u64::try_from(instruction_revision)
+            .map_err(|_| anyhow!("stored_checkpoint_instruction_revision_invalid"))?,
+        execution_epoch: u64::try_from(execution_epoch)
+            .map_err(|_| anyhow!("stored_checkpoint_execution_epoch_invalid"))?,
     }))
 }
 
@@ -213,7 +299,21 @@ fn ensure_task_checkpoint_action_schema(db: &rusqlite::Connection) -> anyhow::Re
             "continuation_actions_json ",
             "TEXT"
         ),
-    )
+    )?;
+    for (column, definition) in [
+        ("execution_binding_json", "TEXT"),
+        ("approval_binding_json", "TEXT"),
+        ("instruction_revision", "INTEGER NOT NULL DEFAULT 0"),
+        ("execution_epoch", "INTEGER NOT NULL DEFAULT 0"),
+    ] {
+        crate::app_helpers::ensure_column_exists(
+            db,
+            "task_checkpoint_actions",
+            column,
+            &format!("ALTER TABLE task_checkpoint_actions ADD COLUMN {column} {definition}"),
+        )?;
+    }
+    Ok(())
 }
 
 fn required_text<'a>(value: &'a str, field: &str) -> anyhow::Result<&'a str> {
@@ -244,8 +344,14 @@ fn checkpoint_action_integrity_hash(
     args_json: &str,
     output_contract_json: Option<&str>,
     continuation_actions_json: Option<&str>,
+    execution_binding_json: Option<&str>,
+    approval_binding_json: Option<&str>,
+    instruction_revision: u64,
+    execution_epoch: u64,
 ) -> String {
     let mut hasher = Sha256::new();
+    let instruction_revision = instruction_revision.to_string();
+    let execution_epoch = execution_epoch.to_string();
     for value in [
         task_id,
         checkpoint_id,
@@ -254,6 +360,10 @@ fn checkpoint_action_integrity_hash(
         args_json,
         output_contract_json.unwrap_or_default(),
         continuation_actions_json.unwrap_or_default(),
+        execution_binding_json.unwrap_or_default(),
+        approval_binding_json.unwrap_or_default(),
+        instruction_revision.as_str(),
+        execution_epoch.as_str(),
     ] {
         hasher.update(value.as_bytes());
         hasher.update([0]);

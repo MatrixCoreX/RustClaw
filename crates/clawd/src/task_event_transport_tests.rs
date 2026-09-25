@@ -31,6 +31,27 @@ fn event_schema_is_ordered_deduplicated_and_replayable() {
 }
 
 #[test]
+fn generated_heartbeat_does_not_change_event_fingerprint_payload() {
+    let first = json!({
+        "step_id": "one",
+        "operation_progress": {"heartbeat_at": 10, "phase_key": "running"}
+    });
+    let second = json!({
+        "step_id": "one",
+        "operation_progress": {"heartbeat_at": 11, "phase_key": "running"}
+    });
+
+    assert_eq!(
+        event_fingerprint_payload(&first, true),
+        event_fingerprint_payload(&second, true)
+    );
+    assert_ne!(
+        event_fingerprint_payload(&first, false),
+        event_fingerprint_payload(&second, false)
+    );
+}
+
+#[test]
 fn event_schema_installs_skill_activity_indexes_for_aipp_queries() {
     let state = state();
     publish_event(

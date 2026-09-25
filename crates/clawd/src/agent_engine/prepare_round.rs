@@ -5,6 +5,7 @@ use crate::{AgentAction, AppState, ClaimedTask, PlanResult};
 
 pub(super) struct PreparedRoundActions {
     pub(super) actions: Vec<AgentAction>,
+    pub(super) action_conversation_relations: Vec<Option<String>>,
     pub(super) plan_result: PlanResult,
     pub(super) verify_result: crate::verifier::VerifyResult,
     pub(super) effective_output_contract: Option<crate::IntentOutputContract>,
@@ -216,15 +217,13 @@ fn verifier_gate_requires_immediate_response(
 }
 
 fn planner_user_text<'a>(
-    agent_run_context: Option<&'a AgentRunContext>,
-    fallback: &'a str,
+    _agent_run_context: Option<&'a AgentRunContext>,
+    current_loop_input: &'a str,
 ) -> &'a str {
-    agent_run_context
-        .and_then(|ctx| ctx.original_user_request.as_deref())
-        .filter(|text| !text.trim().is_empty())
-        .or_else(|| agent_run_context.and_then(|ctx| ctx.user_request.as_deref()))
-        .filter(|text| !text.trim().is_empty())
-        .unwrap_or(fallback)
+    // The loop input starts with the original user request and gains durable
+    // conversation-input/control envelopes as the task runs. The context
+    // snapshot is intentionally not authoritative after the loop starts.
+    current_loop_input
 }
 
 fn execution_action_for_verified_step(
@@ -264,6 +263,33 @@ fn verified_execution_actions(
                 .find(|resolution| resolution.plan_step_id == step.step_id)
                 .map(|resolution| resolution.plan_step_index);
             execution_action_for_verified_step(original_plan, step, original_capability_step_index)
+        })
+        .collect()
+}
+
+fn verified_action_conversation_relations(
+    verify_result: &crate::verifier::VerifyResult,
+) -> Vec<Option<String>> {
+    let steps = if !verify_result.rewritten_steps.is_empty() {
+        &verify_result.rewritten_steps
+    } else {
+        &verify_result.approved_steps
+    };
+    steps
+        .iter()
+        .filter_map(|step| {
+            step.to_agent_action().map(|_| {
+                (step.action_type == "respond")
+                    .then(|| {
+                        step.args
+                            .get("conversation_relation")
+                            .and_then(serde_json::Value::as_str)
+                            .map(str::trim)
+                            .filter(|value| !value.is_empty())
+                            .map(str::to_string)
+                    })
+                    .flatten()
+            })
         })
         .collect()
 }
@@ -367,25 +393,30 @@ pub(super) async fn prepare_round_actions(
         loop_state.round_no,
         journal.to_log_json()
     );
-    let actions = if verifier_confirmation_gate_requires_checkpoint(&verify_result) {
-        Vec::new()
-    } else if verifier_gate_requires_immediate_response(&verify_result) {
-        let content = build_verifier_gate_response(
-            state,
-            task,
-            planner_user_text,
-            &plan_result.goal,
-            &verify_result,
-            &plan_result,
-            &loop_state.executed_step_results,
-        )
-        .await;
-        vec![AgentAction::Respond { content }]
-    } else {
-        verified_execution_actions(&plan_result, &verify_result)
-    };
+    let (actions, action_conversation_relations) =
+        if verifier_confirmation_gate_requires_checkpoint(&verify_result) {
+            (Vec::new(), Vec::new())
+        } else if verifier_gate_requires_immediate_response(&verify_result) {
+            let content = build_verifier_gate_response(
+                state,
+                task,
+                planner_user_text,
+                &plan_result.goal,
+                &verify_result,
+                &plan_result,
+                &loop_state.executed_step_results,
+            )
+            .await;
+            (vec![AgentAction::Respond { content }], vec![None])
+        } else {
+            let actions = verified_execution_actions(&plan_result, &verify_result);
+            let relations = verified_action_conversation_relations(&verify_result);
+            debug_assert_eq!(actions.len(), relations.len());
+            (actions, relations)
+        };
     Ok(PreparedRoundActions {
         actions,
+        action_conversation_relations,
         plan_result,
         verify_result,
         effective_output_contract,

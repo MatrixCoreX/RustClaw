@@ -86,12 +86,41 @@ Telegram、微信、飞书、Lark、WhatsApp 等通信守护进程继续使用�
 保护、绑定、附件物化、locale 采集、任务提交、低噪音活动提示和交付回执。已绑定用户的
 普通消息统一经过：
 
-`平台事件 -> 验签/去重/绑定 -> ChannelIngressEnvelope -> TaskKind::Ask -> Agent Runtime`
+`平台事件 -> 验签/去重/绑定 -> ChannelIngressEnvelope -> 持久会话输入 -> Agent Runtime`
 
 Envelope 保留原文与附件事实；MIME 和扩展名只描述附件，不负责选择技能或 capability。
 共享命令只保留 `/help`（`/start` 别名）、`/key`、`/cancel`，以及中央偏好已完整接管时的
 `/voicemode`。已绑定用户发送的 `/run`、`/status` 和未知斜杠文本保持原样进入普通
 `ask`。技能安装、升级、启停和卸载不得改变命令 catalog digest。
+
+通信端普通消息与 UI、CLI 使用同一套 owner-scoped 会话输入收据。第一条被接收的输入
+创建前台任务；后续输入绑定该任务，不再创建第二个终态交付 owner。只有 durable
+handoff 完成后，通信端才确认 provider event。显式 `/cancel` 调用中央当前会话控制
+合同，并可携带精确 UUID guard；非法命令参数会作为普通 agent 输入处理，不能扩大成
+批量取消。
+
+```mermaid
+flowchart LR
+    A[已接收输入] --> B[input_id + input_seq]
+    B --> C[planner 决策<br/>revision + epoch]
+    C --> D[动作派发认领]
+    D --> E[tool / skill 证据]
+    E --> F{终态版本是否仍有效}
+    F -->|是| G[唯一任务交付 owner]
+    F -->|否| H[superseded 事件<br/>不投送过期终态]
+    G --> I[通信端 receipt / 浏览器历史]
+```
+
+输入接收、取消请求和终态收尾是不同的机器事件。面向用户的确定性控制确认使用带 key
+的 i18n 文案；runtime 路由不会解析这些文案。二进制产物继续使用既有统一 delivery
+service 与鉴权 artifact broker。
+
+Adapter 保持同一 peer 的普通消息顺序，同时允许 catalog 中精确的 `/cancel` 命令越过
+缓慢附件物化。该旁路只属于基于命令语法的机器控制，普通自然语言不会获得 transport
+捷径。投送认领由 receipt 驱动：dispatch lease 过期且没有平台确认时转为
+`query_required`；多段消息只部分被平台接收时记录已接收前缀，不会重放整条消息。微信
+在实际发送时解析最新有效 inbound context token，因此 token 过期不能被当作“内容肯定
+没有投送”的证据。
 
 确定性失败使用 `ChannelNotice` 和 public-safe i18n 参数，原始 provider body 与诊断只
 作为运维证据。通信端优先使用平台原生 typing，同一任务最多发送一条慢任务提示，按序列

@@ -13,8 +13,6 @@ use super::{
     task_query::watch_progress_json,
 };
 
-const TUI_DEFAULT_PAUSE_SECONDS: u64 = 3600;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum TuiCommand {
     Refresh,
@@ -88,10 +86,7 @@ pub(crate) fn run_tui(
                 TuiCommand::Pause => {
                     let task_id = selected_task_id.context("selected_task_required_for_pause")?;
                     output::print_json_pretty(&task::pause_task_by_id(
-                        base_url,
-                        key,
-                        task_id,
-                        TUI_DEFAULT_PAUSE_SECONDS,
+                        base_url, key, task_id, None,
                     )?);
                 }
                 TuiCommand::Cancel => {
@@ -181,7 +176,7 @@ pub(crate) fn run_tui(
                         base_url,
                         key,
                         child_task_id.trim(),
-                        TUI_DEFAULT_PAUSE_SECONDS,
+                        None,
                     )?);
                 }
                 TuiCommand::SubagentResume => {

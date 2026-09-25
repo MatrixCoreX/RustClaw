@@ -24,7 +24,8 @@ use crate::repo::child_tasks::{
 use crate::repo::task_plan::{TaskPlanStep, TaskPlanStepStatus};
 use crate::repo::{
     cancel_one_task_for_user_chat, cancel_task_by_id, cancel_tasks_for_user_chat,
-    get_task_admin_target, pause_task_by_id, resume_task_with_input, TaskResumeControlInput,
+    get_task_admin_target, pause_task_by_id, pause_task_until_resumed, resume_task_with_input,
+    TaskResumeControlInput,
 };
 
 struct TempDirGuard {
@@ -58,6 +59,7 @@ fn state_with_tasks_table() -> crate::AppState {
             user_id INTEGER NOT NULL,
             chat_id INTEGER NOT NULL,
             user_key TEXT,
+            principal_id TEXT,
             channel TEXT NOT NULL,
             external_user_id TEXT,
             external_chat_id TEXT,
@@ -92,10 +94,10 @@ fn insert_task(
     let db = state.core.db.get().expect("get db");
     db.execute(
         "INSERT INTO tasks (
-            task_id, user_id, chat_id, user_key, channel, kind, payload_json,
+            task_id, user_id, chat_id, user_key, principal_id, channel, kind, payload_json,
             status, result_json, error_text, created_at, updated_at
         )
-        VALUES (?1, 42, 7, 'test-key', 'ui', 'ask', ?2, ?3, ?4, NULL, ?5, ?5)",
+        VALUES (?1, 42, 7, 'test-key', 'principal-42', 'ui', 'ask', ?2, ?3, ?4, NULL, ?5, ?5)",
         rusqlite::params![
             task_id,
             json!({"text": "long task"}).to_string(),
@@ -1706,6 +1708,57 @@ fn pause_task_by_id_delays_existing_checkpoint_only() {
         update.lifecycle["message_key"],
         "clawd.task.pause_requested"
     );
+}
+
+#[test]
+fn manual_pause_existing_checkpoint_requires_explicit_resume() {
+    let state = state_with_tasks_table();
+    let task_id = Uuid::new_v4().to_string();
+    let checkpoint_id = "ckpt-pause-manual";
+    let result = json!({
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": "waiting",
+            "source": "test",
+            "checkpoint_id": checkpoint_id,
+            "next_check_after": 1
+        },
+        "task_checkpoint": checkpoint_json(checkpoint_id, vec![])
+    });
+    insert_task(&state, &task_id, "running", Some(&result), 1234);
+
+    let update = pause_task_until_resumed(&state, &task_id)
+        .expect("pause task")
+        .expect("task pauseable");
+
+    assert_eq!(update.lifecycle["state"], "needs_user");
+    assert_eq!(update.lifecycle["resume_policy"], "manual");
+    assert_eq!(update.lifecycle["manual_resume_required"], true);
+    assert_eq!(update.lifecycle["resume_due"], false);
+    assert!(update.lifecycle.get("next_check_after").is_none());
+    assert!(
+        list_due_paused_checkpoint_tasks_internal(&state, i64::MAX, 10)
+            .expect("list due checkpoints")
+            .is_empty()
+    );
+
+    let resumed = resume_task_with_input(
+        &state,
+        TaskResumeControlInput {
+            task_id: task_id.clone(),
+            checkpoint_id: Some(checkpoint_id.to_string()),
+            resume_trigger: crate::task_lifecycle::ResumeTrigger::UserFollowup,
+            resume_reason: Some("manual_resume".to_string()),
+            user_message: None,
+            new_constraints: None,
+        },
+    )
+    .expect("resume task")
+    .expect("manual hold resumable");
+    assert_eq!(resumed.lifecycle["state"], "waiting");
+    assert_eq!(resumed.lifecycle["resume_policy"], "explicit_resume");
+    assert!(resumed.lifecycle.get("manual_resume_required").is_none());
+    assert_eq!(resumed.lifecycle["resume_due"], true);
 }
 
 #[test]

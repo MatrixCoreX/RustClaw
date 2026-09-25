@@ -482,6 +482,12 @@ pub(crate) fn task_user_request_for_prompt(task: &ClaimedTask, user_text: &str) 
     if original.is_empty() || original == resolved {
         return resolved.to_string();
     }
+    if resolved
+        .strip_prefix(original)
+        .is_some_and(|suffix| !suffix.trim().is_empty())
+    {
+        return resolved.to_string();
+    }
     format!(
         "Original user request:\n{original}\n\nResolved semantic request:\n{resolved}\n\nUse the resolved semantic request for planning/execution, but preserve the original user's language, final-output format, and wording constraints."
     )

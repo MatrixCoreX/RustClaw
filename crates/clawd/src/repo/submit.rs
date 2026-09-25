@@ -2,7 +2,7 @@ use std::hash::{Hash, Hasher};
 
 use claw_core::channel_ingress::{
     default_adapter_for_channel, default_reply_target, ChannelIngressAttachment,
-    ChannelIngressEnvelope, CHANNEL_INGRESS_SCHEMA_VERSION,
+    ChannelIngressEnvelope, ChannelReplyTargetKind, CHANNEL_INGRESS_SCHEMA_VERSION,
 };
 use claw_core::types::{AuthIdentity, ChannelKind, SubmitTaskRequest};
 use rusqlite::{params, OptionalExtension};
@@ -55,6 +55,15 @@ pub(crate) fn hydrate_submit_task_from_ingress(
     if ingress.adapter.trim().is_empty() {
         return Err("channel_ingress_adapter_required");
     }
+    if ingress.account_id.as_deref().is_some_and(|account_id| {
+        let trimmed = account_id.trim();
+        trimmed.is_empty()
+            || trimmed != account_id
+            || account_id.chars().count() > 256
+            || account_id.contains('\0')
+    }) {
+        return Err("channel_ingress_account_id_invalid");
+    }
     if req
         .channel
         .is_some_and(|channel| channel != ingress.channel)
@@ -71,6 +80,23 @@ pub(crate) fn hydrate_submit_task_from_ingress(
         ingress.external_chat_id.as_deref(),
         "channel_ingress_external_chat_conflict",
     )?;
+    if let Some(reply_target) = ingress.reply_target.as_ref() {
+        let target = reply_target.external_id.trim();
+        if target.is_empty()
+            || target != reply_target.external_id
+            || target.chars().count() > 512
+            || target.contains('\0')
+        {
+            return Err("channel_ingress_reply_target_invalid");
+        }
+        let expected = match reply_target.kind {
+            ChannelReplyTargetKind::Chat => req.external_chat_id.as_deref(),
+            ChannelReplyTargetKind::User => req.external_user_id.as_deref(),
+        };
+        if expected != Some(target) {
+            return Err("channel_ingress_reply_target_conflict");
+        }
+    }
     req.channel = Some(ingress.channel);
     Ok(())
 }
@@ -474,6 +500,12 @@ pub(crate) fn build_channel_ingress_snapshot(
         schema_version: CHANNEL_INGRESS_SCHEMA_VERSION,
         channel,
         adapter,
+        account_id: requested.and_then(|ingress| {
+            ingress
+                .account_id
+                .as_deref()
+                .and_then(non_empty_machine_value)
+        }),
         bound_user_id: Some(bound_user_id),
         conversation_chat_id: Some(conversation_chat_id),
         external_user_id: external_user_id.map(ToString::to_string),

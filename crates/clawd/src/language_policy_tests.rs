@@ -315,3 +315,37 @@ fn task_user_request_for_prompt_keeps_original_language_and_resolved_semantics()
     assert!(rendered.contains("Read the name field"));
     assert!(rendered.contains("preserve the original user's language"));
 }
+
+#[test]
+fn task_user_request_for_prompt_treats_appended_loop_input_as_authoritative() {
+    let original = "Create a twelve-section migration guide.";
+    let task = crate::ClaimedTask {
+        claim_attempt: 0,
+        task_id: "task-appended-loop-input".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: serde_json::json!({"text": original}).to_string(),
+    };
+    let resolved = format!(
+        "{original}\n\n[conversation_input_batch]{}",
+        serde_json::json!({
+            "kind": "conversation_input_batch",
+            "inputs": [{
+                "input_seq": 2,
+                "relation": "amend_current",
+                "text": "Replace the requested output with two short items."
+            }]
+        })
+    );
+
+    let rendered = task_user_request_for_prompt(&task, &resolved);
+
+    assert_eq!(rendered, resolved);
+    assert!(!rendered.contains("Original user request:"));
+    assert!(!rendered.contains("preserve the original user's language"));
+}

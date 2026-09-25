@@ -26,10 +26,12 @@ fn respond_call(content: &str) -> ModelToolCall {
         name: "respond".to_string(),
         arguments: json!({
             "terminal_intent": "answer",
+            "conversation_relation": "continue_current",
             "shape": "free_text",
             "content": content,
             "items": [],
             "exact_item_count": 0,
+            "exact_visible_line_count": 0,
             "fields": [],
             "observed_fields": [],
             "exact_field_count": 0

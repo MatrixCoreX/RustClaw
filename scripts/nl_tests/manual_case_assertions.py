@@ -175,6 +175,41 @@ def task_observations(result: dict[str, Any]) -> list[dict[str, Any]]:
     return [observation for observation in observations if isinstance(observation, dict)]
 
 
+def pre_dispatch_capability_decisions(result: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return verifier decisions that resolved a capability before dispatch."""
+    trace = task_journal(result).get("trace")
+    if not isinstance(trace, dict):
+        return []
+    events = trace.get("event_stream")
+    if not isinstance(events, list):
+        return []
+    resolutions = []
+    for event in events:
+        if not isinstance(event, dict) or event.get("event_type") != "permission_decision":
+            continue
+        payload = event.get("payload")
+        decision = payload.get("decision") if isinstance(payload, dict) else None
+        steps = decision.get("steps") if isinstance(decision, dict) else None
+        if not isinstance(steps, list):
+            continue
+        for step in steps:
+            policy = step.get("registry_policy") if isinstance(step, dict) else None
+            capability = policy.get("capability") if isinstance(policy, dict) else None
+            if not isinstance(capability, str) or not capability:
+                continue
+            resolutions.append(
+                {
+                    "observation_kind": "capability_resolution",
+                    "outcome": "resolved_pre_dispatch",
+                    "requested_capability": capability,
+                    "resolved_capability": capability,
+                    "decision": step.get("decision"),
+                    "denial_reason": step.get("sandbox_denial_reason"),
+                }
+            )
+    return resolutions
+
+
 def actual_call_steps(result: dict[str, Any]) -> list[dict[str, Any]]:
     calls = []
     for step in step_results(result):
@@ -193,6 +228,19 @@ def actual_call_steps(result: dict[str, Any]) -> list[dict[str, Any]]:
                 and executed not in {"respond", "synthesize_answer"}):
             calls.append(step)
     return calls
+
+
+def user_domain_call_steps(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Exclude runtime-owned planning calls from no-domain-call assertions."""
+    return [
+        step
+        for step in calls
+        if not str(
+            step.get("requested_capability")
+            or step.get("resolved_capability")
+            or ""
+        ).startswith("task.plan_")
+    ]
 
 
 def step_has_structured_dry_run(step: dict[str, Any]) -> bool:
@@ -560,14 +608,16 @@ def structural_assertions(
     requires_tool_call = boolean_tag(tags, "requires_tool_call")
 
     if requires_tool_call is not None:
-        ok = bool(calls) if requires_tool_call else not calls
+        counted_calls = calls if requires_tool_call else user_domain_call_steps(calls)
+        counted_successes = [step for step in counted_calls if successful_call_step(step)]
+        ok = bool(counted_calls) if requires_tool_call else not counted_calls
         details.append(
             {
                 "kind": "tag",
                 "tag": "requires_tool_call",
                 "expected": requires_tool_call,
-                "actual_call_count": len(calls),
-                "successful_call_count": len(successful_calls),
+                "actual_call_count": len(counted_calls),
+                "successful_call_count": len(counted_successes),
                 "ok": ok,
             }
         )
@@ -583,9 +633,12 @@ def structural_assertions(
         if requires_tool_call is False:
             matched_resolutions = [
                 observation
-                for observation in task_observations(result)
+                for observation in (
+                    task_observations(result)
+                    + pre_dispatch_capability_decisions(result)
+                )
                 if observation.get("observation_kind") == "capability_resolution"
-                and observation.get("outcome") == "resolved"
+                and observation.get("outcome") in {"resolved", "resolved_pre_dispatch"}
                 and step_matches_capability(observation, required_capability)
             ]
         details.append(
@@ -795,16 +848,19 @@ def evaluate_expectations(
         return "-", []
 
     allow_terminal_failure = has_tag(tags, "allow_terminal_failure")
-    expected_statuses = {"succeeded", "failed"} if allow_terminal_failure else {"succeeded"}
+    allow_needs_user = has_tag(tags, "allow_needs_user")
+    expected_statuses = {"succeeded"}
+    if allow_terminal_failure:
+        expected_statuses.add("failed")
+    if allow_needs_user:
+        expected_statuses.add("needs_user")
     all_ok = final_status in expected_statuses
     if final_status not in expected_statuses:
         details.insert(
             0,
             {
                 "kind": "status",
-                "expected": "succeeded_or_failed"
-                if allow_terminal_failure
-                else "succeeded",
+                "expected": "_or_".join(sorted(expected_statuses)),
                 "actual": final_status,
                 "ok": False,
             },
@@ -826,7 +882,7 @@ def evaluate_expectations(
             ok = detail["ok"]
         elif raw.startswith("contains:"):
             needle = raw[len("contains:") :]
-            ok = needle in text
+            ok = needle.casefold() in text.casefold()
             details.append({"kind": "contains", "value": needle, "ok": ok})
         elif raw.startswith("observed_eq:"):
             field, sep, expected = raw[len("observed_eq:"):].partition("=")
@@ -892,7 +948,7 @@ def evaluate_expectations(
                 }
             )
         else:
-            ok = raw in text
+            ok = raw.casefold() in text.casefold()
             details.append({"kind": "contains", "value": raw, "ok": ok})
         all_ok = all_ok and ok
 

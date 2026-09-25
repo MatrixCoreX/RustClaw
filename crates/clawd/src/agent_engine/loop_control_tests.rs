@@ -1,6 +1,7 @@
 use super::{
     action_result_boundary_requires_planner, answer_contract_for_reply,
-    answer_verifier_retry_summary, apply_structured_respond_clarify_to_loop_state,
+    answer_verifier_retry_summary, append_conversation_input_context,
+    apply_active_task_boundary_controls, apply_structured_respond_clarify_to_loop_state,
     budget_replan_cause, child_loop_budget_limits, coding_workflow_ready_for_model_finalization,
     commit_answer_verifier_retry_answer, forced_boundary_observation_clarify_intent,
     initial_execution_recipe_spec, initial_round_for_agent_loop, next_resumable_budget_action,
@@ -30,6 +31,240 @@ use crate::{
     OutputResponseShape,
 };
 use serde_json::json;
+use uuid::Uuid;
+
+#[test]
+fn conversation_input_context_preserves_multilingual_text_as_structured_user_input() {
+    let input_id = Uuid::new_v4();
+    let record = claw_core::conversation_input::ConversationInputRecord {
+        receipt: claw_core::conversation_input::ConversationInputReceipt {
+            schema_version: 1,
+            input_id,
+            client_message_id: "message-2".to_string(),
+            input_seq: 2,
+            scope: claw_core::conversation_input::ConversationInputScopeRef {
+                conversation_id: "conversation-1".to_string(),
+                agent_id: "main".to_string(),
+                channel: "ui".to_string(),
+                channel_account_id: "browser-session".to_string(),
+            },
+            preparation_state:
+                claw_core::conversation_input::ConversationInputPreparationState::Ready,
+            disposition: claw_core::conversation_input::ConversationInputDisposition::Applied,
+            target_task_id: Some(Uuid::new_v4()),
+            decision_ref: None,
+            instruction_revision: 2,
+            execution_epoch: 1,
+            accepted_at_ts: 10,
+            updated_at_ts: 11,
+            replayed: false,
+        },
+        content: vec![
+            claw_core::conversation_input::ConversationInputContent::Text {
+                text: "不要停止。继续，但保留最初结果。続けてください。".to_string(),
+            },
+        ],
+        delivery_mode: claw_core::conversation_input::ConversationInputDeliveryMode::Auto,
+        expected_task_id: None,
+        expected_instruction_revision: None,
+        source: claw_core::conversation_input::ConversationInputSource::default(),
+    };
+    let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let mut text = "original request".to_string();
+    append_conversation_input_context(&state, &mut text, &[record]).expect("append context");
+
+    let envelope = text
+        .strip_prefix("original request\n\n[conversation_input_batch]")
+        .expect("structured envelope suffix");
+    let value: serde_json::Value = serde_json::from_str(envelope).expect("valid JSON envelope");
+    assert_eq!(value["kind"], "conversation_input_batch");
+    assert_eq!(value["inputs"][0]["input_id"], input_id.to_string());
+    assert_eq!(
+        value["inputs"][0]["content"][0]["text"],
+        "不要停止。继续，但保留最初结果。続けてください。"
+    );
+}
+
+#[test]
+fn active_turn_cancel_is_applied_to_the_task_at_the_safe_boundary() {
+    let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let task = crate::ClaimedTask {
+        claim_attempt: 1,
+        task_id: "active-turn-safe-boundary-cancel".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    state
+        .core
+        .db
+        .get()
+        .expect("database")
+        .execute(
+            "INSERT INTO tasks (
+                task_id, user_id, chat_id, kind, payload_json, status,
+                created_at, updated_at, lease_owner, claim_attempt
+             ) VALUES (?1, 1, 2, 'ask', '{}', 'running', 0, 0, ?2, 1)",
+            rusqlite::params![task.task_id, state.worker.worker_id.as_str()],
+        )
+        .expect("running task");
+    crate::repo::task_control_mailbox::enqueue_task_control(
+        &state,
+        crate::repo::task_control_mailbox::EnqueueTaskControl {
+            task_id: task.task_id.clone(),
+            action: "cancel".to_string(),
+            issued_by: "agent_loop".to_string(),
+            payload: json!({"instruction_revision": 3}),
+            idempotency_key: Some("active-turn:3:stop".to_string()),
+            expected_control_seq: None,
+        },
+    )
+    .expect("enqueue cancel")
+    .expect("active task directive");
+
+    let error = apply_active_task_boundary_controls(
+        &state,
+        &task,
+        &mut "initial request".to_string(),
+        &mut LoopState::new(),
+    )
+    .expect_err("cancel must end the active turn");
+
+    assert_eq!(error, crate::agent_engine::TASK_CANCELED_ERR);
+    assert!(
+        crate::repo::pending_task_control_directives(&state, &task.task_id, 4)
+            .expect("pending directives")
+            .is_empty()
+    );
+    let status: String = state
+        .core
+        .db
+        .get()
+        .expect("database")
+        .query_row(
+            "SELECT status FROM tasks WHERE task_id = ?1",
+            rusqlite::params![task.task_id],
+            |row| row.get(0),
+        )
+        .expect("task status");
+    assert_eq!(status, "canceled");
+}
+
+#[test]
+fn safe_boundary_drains_dense_ready_inputs_before_planning() {
+    let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    state
+        .core
+        .db
+        .get()
+        .expect("database")
+        .execute_batch(
+            "INSERT OR IGNORE INTO principals(
+                principal_id, role, status, revision, created_at, updated_at
+             ) VALUES ('principal-1', 'user', 'active', 1, '1', '1');
+             INSERT INTO auth_keys(user_key, role, enabled, created_at, principal_id)
+             VALUES ('dense-input-key', 'user', 1, '1', 'principal-1');",
+        )
+        .expect("authorized fixture principal");
+    let task_id = Uuid::new_v4();
+    let task = crate::ClaimedTask {
+        claim_attempt: 1,
+        task_id: task_id.to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let scope = claw_core::conversation_input::OwnedConversationInputScope {
+        owner_principal_id: "principal-1".to_string(),
+        conversation: claw_core::conversation_input::ConversationInputScopeRef {
+            conversation_id: "conversation-pages".to_string(),
+            agent_id: "main".to_string(),
+            channel: "ui".to_string(),
+            channel_account_id: "browser-session".to_string(),
+        },
+    };
+    let make_input = |index: usize| crate::repo::conversation_inputs::AcceptConversationInput {
+        owner_principal_id: scope.owner_principal_id.clone(),
+        submission: claw_core::conversation_input::ConversationInputSubmission {
+            schema_version: claw_core::conversation_input::CONVERSATION_INPUT_SCHEMA_VERSION,
+            client_message_id: format!("message-{index}"),
+            scope: scope.conversation.clone(),
+            content: vec![
+                claw_core::conversation_input::ConversationInputContent::Text {
+                    text: format!("instruction {index}"),
+                },
+            ],
+            delivery_mode: claw_core::conversation_input::ConversationInputDeliveryMode::Auto,
+            expected_task_id: None,
+            expected_instruction_revision: None,
+            source: Default::default(),
+        },
+        preparation_state: claw_core::conversation_input::ConversationInputPreparationState::Ready,
+    };
+    let initial =
+        crate::repo::conversation_inputs::accept_conversation_input(&state.core.db, &make_input(0))
+            .expect("accept initial");
+    state
+        .core
+        .db
+        .get()
+        .expect("database")
+        .execute(
+            "INSERT INTO tasks (
+                task_id, user_id, chat_id, principal_id, kind, payload_json, status,
+                created_at, updated_at, lease_owner, claim_attempt
+             ) VALUES (?1, 1, 2, ?2, 'ask', '{}', 'running', 0, 0, ?3, 1)",
+            rusqlite::params![
+                task.task_id,
+                scope.owner_principal_id,
+                state.worker.worker_id.as_str()
+            ],
+        )
+        .expect("running task");
+    crate::repo::conversation_inputs::bind_conversation_input_to_task(
+        &state.core.db,
+        &scope,
+        initial.record.receipt.input_id,
+        task_id,
+        crate::repo::conversation_inputs::ConversationInputTaskBinding::InitialTaskPayload,
+    )
+    .expect("bind initial");
+    for index in 1..=101 {
+        crate::repo::conversation_inputs::accept_conversation_input(
+            &state.core.db,
+            &make_input(index),
+        )
+        .expect("accept follow-up");
+    }
+
+    let mut user_text = "initial".to_string();
+    let mut loop_state = LoopState::new();
+    assert_eq!(
+        apply_active_task_boundary_controls(&state, &task, &mut user_text, &mut loop_state,)
+            .expect("apply all pages"),
+        super::ActiveTaskBoundaryControl::Continue
+    );
+    assert!(
+        !crate::repo::conversation_inputs::task_has_pending_conversation_inputs(
+            &state.core.db,
+            &task.task_id,
+        )
+        .expect("pending state")
+    );
+    assert!(user_text.contains("instruction 101"));
+    assert_eq!(loop_state.conversation_input_revision, 2);
+    assert_eq!(loop_state.conversation_execution_epoch, 2);
+}
 
 #[test]
 fn resumed_agent_loop_starts_after_the_checkpoint_round() {

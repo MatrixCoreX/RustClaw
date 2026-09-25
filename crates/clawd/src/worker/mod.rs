@@ -39,7 +39,8 @@ use run_skill_finalize::{finalize_run_skill_confirmation_required, finalize_run_
 pub(crate) use runtime_support::{
     adopt_recoverable_resume_executions_on_startup, maybe_recover_stale_running_tasks_runtime,
     recover_stale_running_tasks_on_startup, spawn_channel_terminal_delivery_worker,
-    spawn_cleanup_worker, spawn_schedule_worker, spawn_worker, start_task_heartbeat,
+    spawn_cleanup_worker, spawn_conversation_reply_delivery_worker, spawn_schedule_worker,
+    spawn_worker, start_task_heartbeat,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -690,6 +691,7 @@ pub(crate) async fn process_run_skill_task(
                     &prepared_input.skill_name,
                     prepared_input.args.clone(),
                     execution_context.as_ref(),
+                    None,
                 )
                 .await
             }

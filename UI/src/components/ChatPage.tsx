@@ -8,6 +8,7 @@ import {
 } from "react";
 import {
   Check,
+  Clock3,
   Download,
   ExternalLink,
   FileArchive,
@@ -23,6 +24,7 @@ import {
   Paperclip,
   PanelLeftClose,
   PanelLeftOpen,
+  Play,
   Plus,
   Pencil,
   RefreshCw,
@@ -34,8 +36,6 @@ import {
   X,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import { ChatMessageQueue } from "./ChatMessageQueue";
-import type { QueuedChatMessage } from "../lib/chat-message-queue";
 
 import {
   attachmentIsAudio,
@@ -57,6 +57,7 @@ import {
 } from "../lib/task-artifact-content";
 import { artifactPreviewKind } from "../lib/task-artifacts";
 import type { ChatAttachment, ChatMessage, TaskArtifact, TaskLlmDebugResponse, TaskQueryResponse } from "../types/api";
+import type { ChatDeferredInputSummary } from "../types/chat-runtime";
 import type {
   VoiceInputDeviceOption,
   VoiceRecordingAvailability,
@@ -115,10 +116,14 @@ export interface ChatPageProps {
   chatTeachingRuns: ChatTeachingRunSummary[];
   activeChatTeachingRunId: string | null;
   chatSending: boolean;
-  chatQueuedMessages?: QueuedChatMessage[];
-  chatQueuePaused?: boolean;
-  onRemoveQueuedMessage?: (id: string) => void;
-  onResumeQueue?: () => void;
+  chatCanStop?: boolean;
+  chatStopping?: boolean;
+  chatDeliveryMode?: "auto" | "defer";
+  chatDeferredInputs?: ChatDeferredInputSummary[];
+  chatDeferredActionInputId?: string | null;
+  onChatDeliveryModeChange?: (value: "auto" | "defer") => void;
+  onActivateDeferredInput?: (inputId: string) => unknown | Promise<unknown>;
+  onWithdrawDeferredInput?: (inputId: string) => unknown | Promise<unknown>;
   chatCompacting: boolean;
   chatWorking: boolean;
   chatActivity: ChatActivitySummary;
@@ -153,6 +158,7 @@ export interface ChatPageProps {
   onCancelVoiceRecording: () => unknown | Promise<unknown>;
   onAudioInputDeviceChange: (deviceId: string) => void;
   onSendMessage: () => unknown | Promise<unknown>;
+  onStopActiveTask?: () => unknown | Promise<unknown>;
   onCompactContext: (focus?: string) => boolean | Promise<boolean>;
   onQueryChatTeachingLlmDebug: (taskId?: string) => unknown | Promise<unknown>;
 }
@@ -177,10 +183,14 @@ export function ChatPage({
   chatTeachingRuns,
   activeChatTeachingRunId,
   chatSending,
-  chatQueuedMessages = [],
-  chatQueuePaused = false,
-  onRemoveQueuedMessage = () => undefined,
-  onResumeQueue = () => undefined,
+  chatCanStop = false,
+  chatStopping = false,
+  chatDeliveryMode = "auto",
+  chatDeferredInputs = [],
+  chatDeferredActionInputId = null,
+  onChatDeliveryModeChange = () => undefined,
+  onActivateDeferredInput = () => undefined,
+  onWithdrawDeferredInput = () => undefined,
   chatCompacting,
   chatWorking,
   chatActivity,
@@ -215,6 +225,7 @@ export function ChatPage({
   onCancelVoiceRecording,
   onAudioInputDeviceChange,
   onSendMessage,
+  onStopActiveTask = () => undefined,
   onCompactContext,
   onQueryChatTeachingLlmDebug,
 }: ChatPageProps) {
@@ -611,7 +622,7 @@ export function ChatPage({
               event.stopPropagation();
               setCompactionPanelOpen((open) => !open);
             }}
-            disabled={chatCompacting || chatSending || chatWorking || chatQueuedMessages.length > 0 || chatMessages.length === 0}
+            disabled={chatCompacting || chatSending || chatWorking || chatMessages.length === 0}
             className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-2.5 py-1.5 text-xs hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
             aria-expanded={compactionPanelOpen}
             aria-controls="chat-context-compaction-panel"
@@ -880,11 +891,94 @@ export function ChatPage({
         <ChatWorkingIndicator t={t} activity={chatActivity} />
       ) : null}
 
-      <ChatMessageQueue messages={chatQueuedMessages} paused={chatQueuePaused} busy={chatSending}
-        onRemove={onRemoveQueuedMessage} onResume={onResumeQueue} t={t} />
+      {chatDeferredInputs.length > 0 ? (
+        <div
+          data-testid="chat-deferred-inputs"
+          className="mt-3 overflow-hidden rounded-lg border border-amber-300/20 bg-amber-400/5"
+        >
+          <div className="flex items-center gap-2 border-b border-amber-300/15 px-3 py-2 text-sm font-medium text-amber-100">
+            <Clock3 className="h-4 w-4" />
+            {t("延后消息", "Deferred messages")}
+          </div>
+          {chatDeferredInputs.map((input) => {
+            const busy = chatDeferredActionInputId === input.inputId;
+            return (
+              <div
+                key={input.inputId}
+                className="flex min-w-0 items-center gap-3 border-b border-white/5 px-3 py-2 last:border-b-0"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm text-white/80">
+                    {input.text || input.attachmentNames.join(" · ")}
+                  </p>
+                  <p className="mt-0.5 text-xs text-white/45">{toLocalTime(input.acceptedAt)}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void onActivateDeferredInput(input.inputId)}
+                  disabled={Boolean(chatDeferredActionInputId)}
+                  className="inline-flex h-8 items-center gap-1 rounded-md border border-emerald-300/25 px-2 text-xs text-emerald-100 hover:bg-emerald-400/10 disabled:cursor-wait disabled:opacity-50"
+                >
+                  {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+                  {t("立即处理", "Run now")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void onWithdrawDeferredInput(input.inputId)}
+                  disabled={Boolean(chatDeferredActionInputId)}
+                  className="inline-flex h-8 items-center gap-1 rounded-md border border-white/15 px-2 text-xs text-white/65 hover:bg-white/5 disabled:cursor-wait disabled:opacity-50"
+                >
+                  <X className="h-3.5 w-3.5" />
+                  {t("撤回", "Withdraw")}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
 
       <div data-testid="chat-composer" className="shrink-0 pt-4">
         <div className="min-w-0">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <div className="inline-flex rounded-lg border border-white/15 bg-white/5 p-0.5" role="group" aria-label={t("消息处理方式", "Message handling mode")}>
+              <button
+                type="button"
+                aria-pressed={chatDeliveryMode === "auto"}
+                onClick={() => onChatDeliveryModeChange("auto")}
+                className={`rounded-md px-2.5 py-1 text-xs ${
+                  chatDeliveryMode === "auto"
+                    ? "bg-white/15 text-white"
+                    : "text-white/55 hover:text-white/80"
+                }`}
+              >
+                {chatSending ? t("补充当前任务", "Update current task") : t("立即处理", "Run now")}
+              </button>
+              <button
+                type="button"
+                aria-pressed={chatDeliveryMode === "defer"}
+                onClick={() => onChatDeliveryModeChange("defer")}
+                className={`rounded-md px-2.5 py-1 text-xs ${
+                  chatDeliveryMode === "defer"
+                    ? "bg-white/15 text-white"
+                    : "text-white/55 hover:text-white/80"
+                }`}
+              >
+                {t("稍后处理", "Run later")}
+              </button>
+            </div>
+            {chatCanStop ? (
+              <button
+                type="button"
+                onClick={() => void onStopActiveTask()}
+                disabled={chatStopping}
+                className="inline-flex h-7 items-center gap-1.5 rounded-md border border-red-300/35 bg-red-500/10 px-2.5 text-xs text-red-100 hover:bg-red-500/20 disabled:cursor-wait disabled:opacity-60"
+                title={t("停止当前任务并等待安全收尾", "Stop the current task and wait for safe cleanup")}
+              >
+                {chatStopping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
+                {chatStopping ? t("正在提交", "Submitting") : t("停止任务", "Stop task")}
+              </button>
+            ) : null}
+          </div>
           {chatAttachments.length > 0 ? (
             <div className="mb-3 flex flex-wrap gap-2 rounded-xl border border-white/10 bg-white/5 p-2">
               {chatAttachments.map((attachment, index) => (
@@ -1036,12 +1130,18 @@ export function ChatPage({
               }
               className="theme-accent-btn chat-send-btn min-h-12 min-w-16 shrink-0 self-stretch justify-center sm:min-h-[72px] sm:min-w-20"
             >
-              {chatSending || chatCompacting || chatQueuedMessages.length > 0 ? (
+              {chatDeliveryMode === "defer" ? (
+                <Clock3 className="h-4 w-4" />
+              ) : chatSending || chatCompacting ? (
                 <ListPlus className="h-4 w-4" />
               ) : (
                 <Send className="h-4 w-4" />
               )}
-              {chatSending || chatCompacting || chatQueuedMessages.length > 0 ? t("排队", "Queue") : t("发送", "Send")}
+              {chatDeliveryMode === "defer"
+                ? t("延后", "Defer")
+                : chatSending || chatCompacting
+                  ? t("补充", "Update")
+                  : t("发送", "Send")}
             </button>
           </div>
         </div>
@@ -1275,6 +1375,12 @@ function ChatWorkingIndicator({
           "回复已生成，正在完成校验",
           "The response is ready; completing verification",
         );
+      case "adjusting":
+        return t("新要求已接收，正在调整执行计划", "New direction accepted; adjusting the plan");
+      case "stopping":
+        return t("停止请求已接收，正在等待安全收尾", "Stop requested; waiting for safe cleanup");
+      case "stopped":
+        return t("任务及其本地执行已停止", "The task and its local execution have stopped");
       case "finalizing":
         return t("正在整理最终结果", "Preparing the final result");
       default:

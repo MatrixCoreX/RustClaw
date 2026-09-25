@@ -78,6 +78,46 @@ test("projects server turns into deterministic messages and teaching runs", () =
   );
 });
 
+test("restores nonterminal clarification replies without inventing a terminal answer", () => {
+  const input = page();
+  input.turns = [
+    {
+      ...input.turns[0],
+      status: "running",
+      assistant_text: null,
+      conversation_replies: [
+        {
+          schema_version: 1,
+          reply_id: "reply-clarify-1",
+          input_id: null,
+          relation: "clarification",
+          lifecycle_stage: "accepted",
+          text: "请指定日期范围。",
+          instruction_revision: 2,
+          execution_epoch: 3,
+          created_at: 104,
+        },
+      ],
+    },
+  ];
+
+  const thread = projectConversationHistory([input], t)[0];
+
+  assert.deepEqual(
+    thread.messages.map((message) => [message.id, message.text]),
+    [
+      ["u-task-2", "继续测试"],
+      ["conversation-reply-clarify-1", "请指定日期范围。"],
+    ],
+  );
+  assert.equal(
+    thread.teachingRuns[0].assistantMessageId,
+    "conversation-reply-clarify-1",
+  );
+  assert.equal(thread.teachingRuns[0].assistantText, "请指定日期范围。");
+  assert.equal(thread.teachingRuns[0].taskResult.result_json, null);
+});
+
 test("deduplicates replayed pages and localizes attachment-only user display", () => {
   const input = page();
   input.turns = [

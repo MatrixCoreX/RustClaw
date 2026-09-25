@@ -25,6 +25,15 @@ fn respond_call(mut arguments: Value) -> ModelToolCall {
         arguments
             .entry("terminal_intent")
             .or_insert_with(|| json!("answer"));
+        let relation =
+            if arguments.get("terminal_intent").and_then(Value::as_str) == Some("clarify") {
+                "clarify"
+            } else {
+                "continue_current"
+            };
+        arguments
+            .entry("conversation_relation")
+            .or_insert_with(|| json!(relation));
         arguments.entry("fields").or_insert_with(|| json!([]));
         arguments
             .entry("observed_fields")
@@ -32,12 +41,184 @@ fn respond_call(mut arguments: Value) -> ModelToolCall {
         arguments
             .entry("exact_field_count")
             .or_insert_with(|| json!(0));
+        arguments
+            .entry("exact_visible_line_count")
+            .or_insert_with(|| json!(0));
     }
     ModelToolCall {
         id: "respond-1".to_string(),
         name: "respond".to_string(),
         arguments,
     }
+}
+
+#[test]
+fn active_turn_control_requires_the_visible_instruction_revision() {
+    let mut loop_state = LoopState::default();
+    loop_state.conversation_input_revision = 7;
+    let actions = actions_from_native_turn_with_groups(
+        &turn(
+            vec![ModelToolCall {
+                id: "control-1".to_string(),
+                name: NATIVE_CONTROL_ACTIVE_TURN_TOOL.to_string(),
+                arguments: json!({
+                    "action": "stop",
+                    "expected_instruction_revision": 7,
+                }),
+            }],
+            "",
+        ),
+        &[],
+        &BTreeMap::new(),
+        Some(&loop_state),
+    )
+    .expect("valid active turn control");
+    assert!(matches!(
+        actions.as_slice(),
+        [AgentAction::CallTool { tool, args }]
+            if tool == NATIVE_CONTROL_ACTIVE_TURN_TOOL
+                && args["expected_instruction_revision"] == 7
+    ));
+
+    let pause_actions = actions_from_native_turn_with_groups(
+        &turn(
+            vec![ModelToolCall {
+                id: "control-pause".to_string(),
+                name: NATIVE_CONTROL_ACTIVE_TURN_TOOL.to_string(),
+                arguments: json!({
+                    "action": "pause",
+                    "expected_instruction_revision": 7,
+                }),
+            }],
+            "",
+        ),
+        &[],
+        &BTreeMap::new(),
+        Some(&loop_state),
+    )
+    .expect("valid pause control");
+    assert!(matches!(
+        pause_actions.as_slice(),
+        [AgentAction::CallTool { tool, args }]
+            if tool == NATIVE_CONTROL_ACTIVE_TURN_TOOL && args["action"] == "pause"
+    ));
+
+    let error = actions_from_native_turn_with_groups(
+        &turn(
+            vec![ModelToolCall {
+                id: "control-stale".to_string(),
+                name: NATIVE_CONTROL_ACTIVE_TURN_TOOL.to_string(),
+                arguments: json!({
+                    "action": "stop",
+                    "expected_instruction_revision": 6,
+                }),
+            }],
+            "",
+        ),
+        &[],
+        &BTreeMap::new(),
+        Some(&loop_state),
+    )
+    .expect_err("stale revision must fail");
+    assert_eq!(error, "native_active_turn_control_revision_conflict");
+}
+
+#[test]
+fn active_turn_control_schema_exposes_lifecycle_actions_and_exact_revision() {
+    let tool = active_turn_control_tool_definition(11);
+    assert_eq!(tool.name, NATIVE_CONTROL_ACTIVE_TURN_TOOL);
+    assert_eq!(
+        tool.input_schema["properties"]["action"]["enum"],
+        json!(["stop", "pause"])
+    );
+    assert_eq!(
+        tool.input_schema["properties"]["expected_instruction_revision"]["const"],
+        11
+    );
+    assert_eq!(tool.input_schema["additionalProperties"], false);
+}
+
+#[test]
+fn respond_tool_does_not_claim_runtime_mutations_without_evidence() {
+    let request =
+        native_planner_request("system", "user", None, &[], &BTreeMap::new(), &[], &[], &[]);
+    let respond = request
+        .tools
+        .iter()
+        .find(|tool| tool.name == NATIVE_RESPOND_TOOL)
+        .expect("respond tool");
+
+    assert!(respond.description.contains("does not execute or simulate"));
+    assert!(respond
+        .description
+        .contains("first call the matching mutation capability and observe success"));
+    assert!(respond
+        .description
+        .contains("constrains the final reply to one literal value"));
+    assert!(respond.input_schema["required"]
+        .as_array()
+        .is_some_and(|required| required
+            .iter()
+            .any(|field| field.as_str() == Some("conversation_relation"))));
+    assert_eq!(
+        respond.input_schema["properties"]["conversation_relation"]["enum"],
+        json!([
+            "continue_current",
+            "amend_current",
+            "start_followup",
+            "side_reply",
+            "clarify"
+        ])
+    );
+    let relation_description = respond.input_schema["properties"]["conversation_relation"]
+        ["description"]
+        .as_str()
+        .expect("conversation relation description");
+    assert!(relation_description.contains("conversation_input_batch"));
+    assert!(relation_description.contains("interrupted first attempt"));
+    assert!(relation_description.contains("after any accepted plan/reply/effect"));
+    let line_count_description = respond.input_schema["properties"]["exact_visible_line_count"]
+        ["description"]
+        .as_str()
+        .expect("exact visible line count description");
+    assert!(line_count_description.contains("final requested line"));
+    assert!(line_count_description.contains("explicitly requests an additional line"));
+}
+
+#[test]
+fn native_respond_requires_consistent_conversation_relation() {
+    let missing = ModelToolCall {
+        id: "respond-missing-relation".to_string(),
+        name: NATIVE_RESPOND_TOOL.to_string(),
+        arguments: json!({
+            "terminal_intent": "answer",
+            "shape": "free_text",
+            "content": "Done.",
+            "items": [],
+            "exact_item_count": 0,
+            "fields": [],
+            "observed_fields": [],
+            "exact_field_count": 0
+        }),
+    };
+    let error = actions_from_native_turn(&turn(vec![missing], ""), &callable_capabilities())
+        .expect_err("conversation relation is required");
+    assert_eq!(error, "native_respond_conversation_relation_missing");
+
+    let mismatch = respond_call(json!({
+        "terminal_intent": "answer",
+        "conversation_relation": "clarify",
+        "shape": "free_text",
+        "content": "Done.",
+        "items": [],
+        "exact_item_count": 0
+    }));
+    let error = actions_from_native_turn(&turn(vec![mismatch], ""), &callable_capabilities())
+        .expect_err("clarify relation cannot accompany answer intent");
+    assert_eq!(
+        error,
+        "native_respond_conversation_relation_intent_mismatch"
+    );
 }
 
 #[test]
@@ -221,6 +402,70 @@ fn native_respond_maps_free_text_contract_to_terminal_action() {
 }
 
 #[test]
+fn native_respond_enforces_model_selected_exact_visible_line_count() {
+    let actions = actions_from_native_turn(
+        &turn(
+            vec![respond_call(json!({
+                "shape": "free_text",
+                "content": "first\nsecond",
+                "items": [],
+                "exact_item_count": 0,
+                "exact_visible_line_count": 2
+            }))],
+            "",
+        ),
+        &callable_capabilities(),
+    )
+    .expect("two-line response");
+    assert!(matches!(
+        &actions[0],
+        AgentAction::Respond { content } if content == "first\nsecond"
+    ));
+
+    let error = actions_from_native_turn(
+        &turn(
+            vec![respond_call(json!({
+                "shape": "free_text",
+                "content": "first\nsecond\nthird",
+                "items": [],
+                "exact_item_count": 0,
+                "exact_visible_line_count": 2
+            }))],
+            "",
+        ),
+        &callable_capabilities(),
+    )
+    .expect_err("extra visible line rejected");
+    assert_eq!(error, "native_respond_exact_visible_line_count_mismatch");
+}
+
+#[test]
+fn native_clarification_intent_normalizes_duplicate_relation_field() {
+    let mut native_turn = turn(
+        vec![respond_call(json!({
+            "terminal_intent": "clarify",
+            "conversation_relation": "start_followup",
+            "clarify_reason_code": "ambiguous_target",
+            "missing_slot": "target_task",
+            "shape": "free_text",
+            "content": "Which task should I update?",
+            "items": [],
+            "exact_item_count": 0
+        }))],
+        "",
+    );
+
+    assert!(normalize_native_clarify_relation(&mut native_turn));
+    assert_eq!(
+        native_turn.tool_calls[0].arguments["conversation_relation"],
+        "clarify"
+    );
+    let actions = actions_from_native_turn(&native_turn, &callable_capabilities())
+        .expect("normalized clarification response");
+    assert!(matches!(actions.as_slice(), [AgentAction::Respond { .. }]));
+}
+
+#[test]
 fn native_respond_preserves_structured_clarification_control_fields() {
     let native_turn = turn(
         vec![respond_call(json!({
@@ -307,7 +552,8 @@ fn native_respond_renders_only_the_exact_structured_list_items() {
                 "shape": "list",
                 "content": "",
                 "items": ["first", "second", "third"],
-                "exact_item_count": 3
+                "exact_item_count": 3,
+                "exact_visible_line_count": 3
             }))],
             "",
         ),
@@ -323,13 +569,67 @@ fn native_respond_renders_only_the_exact_structured_list_items() {
 }
 
 #[test]
+fn native_respond_accepts_only_equivalent_redundant_list_content() {
+    let actions = actions_from_native_turn(
+        &turn(
+            vec![respond_call(json!({
+                "shape": "list",
+                "content": "- first\n- second\n- third",
+                "items": ["- first", "- second", "- third"],
+                "exact_item_count": 3,
+                "exact_visible_line_count": 3
+            }))],
+            "",
+        ),
+        &callable_capabilities(),
+    )
+    .expect("equivalent redundant list response");
+
+    assert!(matches!(
+        &actions[0],
+        AgentAction::Respond { content }
+            if content == "1. first\n2. second\n3. third"
+    ));
+}
+
+#[test]
+fn native_respond_removes_shared_list_presentation_markers_before_rendering() {
+    for items in [
+        json!(["- alpha", "- beta", "- gamma"]),
+        json!(["1. alpha", "2. beta", "3. gamma"]),
+        json!(["1) alpha", "2) beta", "3) gamma"]),
+    ] {
+        let actions = actions_from_native_turn(
+            &turn(
+                vec![respond_call(json!({
+                    "shape": "list",
+                    "content": "",
+                    "items": items,
+                    "exact_item_count": 3,
+                    "exact_visible_line_count": 3
+                }))],
+                "",
+            ),
+            &callable_capabilities(),
+        )
+        .expect("presentation-only markers should normalize");
+        assert!(matches!(
+            &actions[0],
+            AgentAction::Respond { content }
+                if content == "1. alpha\n2. beta\n3. gamma"
+        ));
+    }
+}
+
+#[test]
 fn native_respond_rejects_list_count_mismatch_and_extra_content() {
     let count_mismatch = turn(
         vec![respond_call(json!({
             "shape": "list",
             "content": "",
             "items": ["first", "second"],
-            "exact_item_count": 3
+            "exact_item_count": 3,
+            "exact_visible_line_count": 3
         }))],
         "",
     );
@@ -344,7 +644,8 @@ fn native_respond_rejects_list_count_mismatch_and_extra_content() {
             "shape": "list",
             "content": "preface",
             "items": ["first"],
-            "exact_item_count": 1
+            "exact_item_count": 1,
+            "exact_visible_line_count": 1
         }))],
         "",
     );

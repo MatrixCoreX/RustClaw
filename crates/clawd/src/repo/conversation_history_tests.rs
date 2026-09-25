@@ -50,6 +50,7 @@ fn state_with_tasks() -> AppState {
         WHERE owner_principal_id IS NOT NULL;",
     )
     .unwrap();
+    crate::repo::ensure_conversation_input_schema(&db).unwrap();
     drop(db);
     state
 }
@@ -194,6 +195,132 @@ fn conversation_history_projects_downloadable_task_artifacts() {
 
     assert_eq!(history.turns[0].artifacts.len(), 1);
     assert_eq!(history.turns[0].artifacts[0].filename, "report.pdf");
+}
+
+#[test]
+fn conversation_history_projects_ordered_followup_inputs_for_the_same_task() {
+    let state = state_with_tasks();
+    let task_id = Uuid::new_v4();
+    insert_turn(
+        &state,
+        TurnFixture {
+            task_id,
+            user_id: 42,
+            user_key: "owner-key",
+            conversation_id: "chat-thread-followups",
+            text: "Start the task",
+            answer: "The amended task completed",
+            updated_at: 360,
+        },
+    );
+    let db = state.core.db.get().unwrap();
+    for (sequence, text, disposition, decision_ref) in [
+        (
+            1_i64,
+            "Apply the first amendment",
+            "applied",
+            "continue_or_amend",
+        ),
+        (2_i64, "Use the revised constraint", "applied", "respond"),
+    ] {
+        let input_id = Uuid::new_v4().to_string();
+        db.execute(
+            "INSERT INTO conversation_inputs (
+                input_id, owner_principal_id, agent_id, channel, channel_account_id,
+                conversation_id, client_message_id, input_seq, request_digest,
+                content_json, delivery_mode, preparation_state, disposition,
+                target_task_id, decision_ref, source_json, instruction_revision,
+                execution_epoch, accepted_at_ts, updated_at_ts
+             ) VALUES (
+                ?1, 'principal-test-owner', 'main', 'ui', '', 'chat-thread-followups',
+                ?2, ?3, ?4, ?5, 'auto', 'ready', ?6, ?7, ?8, '{}', ?3, 0, ?9, ?9
+             )",
+            rusqlite::params![
+                input_id,
+                format!("client-followup-{sequence}"),
+                sequence,
+                format!("digest-{sequence}"),
+                json!([{ "kind": "text", "text": text }]).to_string(),
+                disposition,
+                task_id.to_string(),
+                decision_ref,
+                360 + sequence,
+            ],
+        )
+        .unwrap();
+    }
+    drop(db);
+
+    let history = list_conversation_history(&state, &identity("user"), None, None).unwrap();
+
+    assert_eq!(history.turns.len(), 1);
+    assert_eq!(history.turns[0].conversation_inputs.len(), 2);
+    assert_eq!(
+        history.turns[0]
+            .conversation_inputs
+            .iter()
+            .map(|input| (
+                input.input_seq,
+                input.text.as_str(),
+                input.instruction_revision
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (1, "Apply the first amendment", 1),
+            (2, "Use the revised constraint", 2),
+        ]
+    );
+    assert_eq!(
+        history.turns[0].conversation_inputs[1]
+            .decision_ref
+            .as_deref(),
+        Some("respond")
+    );
+}
+
+#[test]
+fn conversation_history_projects_model_authored_nonterminal_replies() {
+    let state = state_with_tasks();
+    let task_id = Uuid::new_v4();
+    insert_turn(
+        &state,
+        TurnFixture {
+            task_id,
+            user_id: 42,
+            user_key: "owner-key",
+            conversation_id: "chat-thread-clarify",
+            text: "Prepare the report",
+            answer: "",
+            updated_at: 370,
+        },
+    );
+    let db = state.core.db.get().unwrap();
+    crate::repo::conversation_reply_items::ensure_conversation_reply_item_schema(&db).unwrap();
+    db.execute(
+        "INSERT INTO conversation_reply_items (
+             reply_id, task_id, input_id, owner_principal_id,
+             instruction_revision, execution_epoch, relation, lifecycle_stage,
+             text, content_digest, created_at_ts
+         ) VALUES (
+             'reply-history-1', ?1, NULL, 'principal-test-owner',
+             2, 3, 'clarification', 'accepted', ?2, 'digest-history-1', 371
+         )",
+        rusqlite::params![task_id.to_string(), "Which date range should I use?"],
+    )
+    .unwrap();
+    drop(db);
+
+    let history = list_conversation_history(&state, &identity("user"), None, None).unwrap();
+
+    assert_eq!(history.turns.len(), 1);
+    assert_eq!(history.turns[0].conversation_replies.len(), 1);
+    let reply = &history.turns[0].conversation_replies[0];
+    assert_eq!(reply.reply_id, "reply-history-1");
+    assert_eq!(reply.relation, "clarification");
+    assert_eq!(reply.lifecycle_stage, "accepted");
+    assert_eq!(reply.text, "Which date range should I use?");
+    assert_eq!(reply.instruction_revision, 2);
+    assert_eq!(reply.execution_epoch, 3);
 }
 
 #[test]

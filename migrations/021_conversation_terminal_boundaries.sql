@@ -1,0 +1,5 @@
+-- Migration id: 021_conversation_terminal_boundaries_v1
+--
+-- Serializes the final conversation ownership decision against input
+-- acceptance. A claimed boundary means the old task may finish, while later
+-- input must create a follow-up instead of being attached to that task.

@@ -32,8 +32,46 @@ fn route_classes_are_machine_paths_not_natural_language() {
         RequestClass::TaskSubmit
     );
     assert_eq!(
+        classify_request(&Method::POST, "/v1/conversation-inputs"),
+        RequestClass::TaskSubmit
+    );
+    assert_eq!(
+        classify_request(&Method::POST, "/v1/conversation-inputs/client-task"),
+        RequestClass::TaskSubmit
+    );
+    assert_eq!(
+        classify_request(
+            &Method::POST,
+            "/v1/conversation-inputs/0195deaf-965a-7dd0-a39d-d816f93bcd09/withdraw"
+        ),
+        RequestClass::TaskSubmit
+    );
+    assert_eq!(
+        classify_request(
+            &Method::POST,
+            "/v1/conversation-inputs/0195deaf-965a-7dd0-a39d-d816f93bcd09/activate"
+        ),
+        RequestClass::TaskSubmit
+    );
+    assert_eq!(
+        classify_request(&Method::POST, "/v1/conversation-inputs/not/an/id/withdraw"),
+        RequestClass::General
+    );
+    assert_eq!(
+        classify_request(&Method::GET, "/v1/conversation-inputs"),
+        RequestClass::General
+    );
+    assert_eq!(
         classify_request(&Method::GET, "/v1/tasks/task-1/events"),
         RequestClass::Sse
+    );
+    assert_eq!(
+        classify_request(&Method::GET, "/v1/conversations/thread-1/events"),
+        RequestClass::Sse
+    );
+    assert_eq!(
+        classify_request(&Method::GET, "/v1/conversations/nested/thread/events"),
+        RequestClass::General
     );
     assert_eq!(
         classify_request(&Method::POST, "/v1/skills/import/upload"),

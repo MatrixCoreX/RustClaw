@@ -89,15 +89,26 @@ export function mergeServerConversationHistory(
   const existingById = new Map(current.threads.map((thread) => [thread.id, thread]));
   const serverThreads = restored.map((thread) => {
     const existing = existingById.get(thread.id);
-    const existingRunsByTask = new Map(
+    const existingInitialRunsByTask = new Map(
       (existing?.teachingRuns ?? [])
-        .filter((run) => run.taskId)
+        .filter((run) => run.taskId && !run.conversationInputId)
         .map((run) => [run.taskId as string, run]),
     );
+    const existingRunsByInput = new Map(
+      (existing?.teachingRuns ?? [])
+        .filter((run) => run.conversationInputId)
+        .map((run) => [run.conversationInputId as string, run]),
+    );
     const restoredRuns = thread.teachingRuns.map((run) => {
-      const local = existingRunsByTask.get(run.taskId);
+      const local = run.conversationInputId
+        ? existingRunsByInput.get(run.conversationInputId)
+        : existingInitialRunsByTask.get(run.taskId);
       return {
         ...run,
+        conversationInputId: local?.conversationInputId ?? null,
+        conversationInputClientMessageId:
+          local?.conversationInputClientMessageId ?? null,
+        conversationInputRevision: local?.conversationInputRevision ?? null,
         llmDebug: local?.llmDebug ?? null,
         llmDebugError: local?.llmDebugError ?? null,
         callCount: local?.callCount ?? debugCallCount(local?.llmDebug),
@@ -242,6 +253,9 @@ export function compactTeachingRunForChatStorage(run: ChatTeachingRunRecord): Ch
   return {
     id: run.id,
     taskId: run.taskId ?? null,
+    conversationInputId: run.conversationInputId ?? null,
+    conversationInputClientMessageId: run.conversationInputClientMessageId ?? null,
+    conversationInputRevision: run.conversationInputRevision ?? null,
     userMessageId: run.userMessageId,
     assistantMessageId: run.assistantMessageId ?? null,
     userText: run.userText,
@@ -281,6 +295,19 @@ export function normalizeStoredTeachingRun(raw: unknown): ChatTeachingRunRecord 
   return {
     id: record.id,
     taskId: typeof record.taskId === "string" && record.taskId.trim() ? record.taskId : null,
+    conversationInputId:
+      typeof record.conversationInputId === "string" && record.conversationInputId.trim()
+        ? record.conversationInputId
+        : null,
+    conversationInputClientMessageId:
+      typeof record.conversationInputClientMessageId === "string" &&
+      record.conversationInputClientMessageId.trim()
+        ? record.conversationInputClientMessageId
+        : null,
+    conversationInputRevision:
+      typeof record.conversationInputRevision === "number"
+        ? record.conversationInputRevision
+        : null,
     userMessageId: record.userMessageId,
     assistantMessageId:
       typeof record.assistantMessageId === "string" ? record.assistantMessageId : null,
@@ -511,6 +538,9 @@ export function buildChatTeachingRunSummaries(thread: ChatThreadRecord): ChatTea
     .map((run) => ({
       id: run.id,
       taskId: run.taskId ?? null,
+      conversationInputId: run.conversationInputId ?? null,
+      conversationInputClientMessageId: run.conversationInputClientMessageId ?? null,
+      conversationInputRevision: run.conversationInputRevision ?? null,
       userMessageId: run.userMessageId,
       assistantMessageId: run.assistantMessageId ?? null,
       userText: run.userText,

@@ -778,7 +778,13 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
     let llm_out =
         llm_gateway::run_with_fallback_with_prompt_source(state, task, &prompt, &prompt_source)
             .await
-            .map_err(|err| format!("observed answer fallback LLM failed: {err}"))?;
+            .map_err(|err| {
+                if err == llm_gateway::CONVERSATION_INPUT_INTERRUPTED_ERR {
+                    err
+                } else {
+                    format!("observed answer fallback LLM failed: {err}")
+                }
+            })?;
     let llm_out_for_parse = strip_bare_json_language_prefix(&llm_out);
     let (parsed, parsed_from_schema) = match crate::prompt_utils::validate_against_schema::<
         ObservedAnswerFallbackOut,

@@ -1,0 +1,203 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:agent-runtime:conversation-input:v1",
+  "title": "Conversation Input V1",
+  "description": "A durable user input submitted to an authenticated conversation. The server derives the owner principal and verifies the supplied scope.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "client_message_id",
+    "scope",
+    "content"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "client_message_id": {
+      "$ref": "#/$defs/machineToken512"
+    },
+    "scope": {
+      "$ref": "#/$defs/scope"
+    },
+    "content": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/textContent"
+          },
+          {
+            "$ref": "#/$defs/attachmentContent"
+          }
+        ]
+      }
+    },
+    "delivery_mode": {
+      "type": "string",
+      "enum": [
+        "auto",
+        "defer"
+      ],
+      "default": "auto"
+    },
+    "expected_task_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "expected_instruction_revision": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "source": {
+      "$ref": "#/$defs/source"
+    }
+  },
+  "$defs": {
+    "machineToken64": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9_.:@-]+$"
+    },
+    "machineToken160": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[A-Za-z0-9_.:@-]+$"
+    },
+    "machineToken256": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9_.:@-]+$"
+    },
+    "machineToken512": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^[A-Za-z0-9_.:@-]+$"
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "conversation_id",
+        "agent_id",
+        "channel",
+        "channel_account_id"
+      ],
+      "properties": {
+        "conversation_id": {
+          "$ref": "#/$defs/machineToken512"
+        },
+        "agent_id": {
+          "$ref": "#/$defs/machineToken160"
+        },
+        "channel": {
+          "$ref": "#/$defs/machineToken64"
+        },
+        "channel_account_id": {
+          "oneOf": [
+            {
+              "const": ""
+            },
+            {
+              "$ref": "#/$defs/machineToken256"
+            }
+          ]
+        }
+      }
+    },
+    "textContent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "text"
+      ],
+      "properties": {
+        "kind": {
+          "const": "text"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "attachmentContent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "attachment_id"
+      ],
+      "properties": {
+        "kind": {
+          "const": "attachment"
+        },
+        "attachment_id": {
+          "$ref": "#/$defs/machineToken512"
+        },
+        "media_type": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "display_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider_message_id": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/machineToken512"
+            }
+          ]
+        },
+        "reply_to_message_id": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/machineToken512"
+            }
+          ]
+        },
+        "received_at_ts": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

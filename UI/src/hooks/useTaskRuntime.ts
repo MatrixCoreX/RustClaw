@@ -402,7 +402,6 @@ export function useTaskRuntime({
           : control === "pause"
             ? {
                 task_id: normalizedTaskId,
-                pause_seconds: 3600,
                 idempotency_key: `ui-pause-${crypto.randomUUID()}`,
               }
             : {
@@ -422,7 +421,7 @@ export function useTaskRuntime({
         control === "steer"
           ? t("新要求已送达，将在安全步骤边界应用。", "The new direction was accepted and will apply at a safe step boundary.")
           : control === "pause"
-          ? t("任务已暂停，会在稍后再继续。", "Task paused and will continue later.")
+          ? t("任务已暂停，需要你明确恢复后才会继续。", "Task paused and will continue only after you explicitly resume it.")
           : t("任务恢复请求已提交。", "Task resume request submitted."),
       );
       if (control === "steer") {
@@ -469,7 +468,7 @@ export function useTaskRuntime({
         };
       } else if (control === "pause") {
         path = "/v1/tasks/pause-by-task-id";
-        payload = { task_id: normalizedChildId, pause_seconds: 3600, idempotency_key: idempotencyKey };
+        payload = { task_id: normalizedChildId, idempotency_key: idempotencyKey };
       } else if (control === "resume") {
         payload = { task_id: normalizedChildId, resume_reason: "subagent_resumed", idempotency_key: idempotencyKey };
       } else if (control === "stop") {

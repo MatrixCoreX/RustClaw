@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde_json::{json, Value};
 
 use crate::{now_ts, AppState};
@@ -16,6 +16,9 @@ const TASK_CONTROL_KIND_RESUME: &str = "resume";
 const TASK_CONTROL_STATUS_PENDING: &str = "pending";
 const TASK_PAUSED_MESSAGE_KEY: &str = "clawd.task.pause_requested";
 const TASK_RESUMED_MESSAGE_KEY: &str = "clawd.task.resume_requested";
+const TASK_CANCEL_ACCEPTED_MESSAGE_KEY: &str = "channel.control.cancel_accepted";
+const TASK_CANCEL_REQUESTED_MESSAGE_KEY: &str = "channel.control.cancel_requested";
+const TASK_CANCEL_SETTLED_MESSAGE_KEY: &str = "channel.control.cancel_settled";
 const MAX_RESUME_USER_MESSAGE_CHARS: usize = 8_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +34,20 @@ pub(crate) struct TaskAdminTarget {
 struct CancelTaskRecord {
     task_id: String,
     result_json: Option<String>,
+}
+
+struct CancelSettlementOutcome {
+    settled: bool,
+    reply_item: Option<super::conversation_reply_items::ConversationReplyItem>,
+}
+
+impl CancelSettlementOutcome {
+    fn pending() -> Self {
+        Self {
+            settled: false,
+            reply_item: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -59,32 +76,38 @@ pub(crate) fn cancel_tasks_for_user_chat(
     exclude_task_id: Option<&str>,
 ) -> anyhow::Result<i64> {
     let now = now_ts();
-    let db = state
+    let mut db = state
         .core
         .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let exclude_task_id = normalized_optional_task_id(exclude_task_id);
-    let mut stmt = db.prepare(
-        "SELECT task_id, result_json
-         FROM tasks
-         WHERE user_id = ?1
-           AND chat_id = ?2
-           AND status IN ('queued', 'running')
-           AND (?3 IS NULL OR task_id <> ?3)",
-    )?;
-    let records = stmt
-        .query_map(
-            params![user_id, chat_id, exclude_task_id.as_deref()],
-            |row| {
-                Ok(CancelTaskRecord {
-                    task_id: row.get(0)?,
-                    result_json: row.get(1)?,
-                })
-            },
-        )?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    cancel_task_records(state, &db, records, &now)
+    let records = {
+        let mut stmt = db.prepare(
+            "SELECT task_id, result_json
+             FROM tasks
+             WHERE user_id = ?1
+               AND chat_id = ?2
+               AND status IN ('queued', 'running')
+               AND (?3 IS NULL OR task_id <> ?3)",
+        )?;
+        let records = stmt
+            .query_map(
+                params![user_id, chat_id, exclude_task_id.as_deref()],
+                |row| {
+                    Ok(CancelTaskRecord {
+                        task_id: row.get(0)?,
+                        result_json: row.get(1)?,
+                    })
+                },
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        records
+    };
+    let (affected, reply_items) = cancel_task_records(state, &mut db, records, &now)?;
+    drop(db);
+    publish_control_reply_items(state, reply_items);
+    Ok(affected)
 }
 
 pub(crate) fn cancel_one_task_for_user_chat(
@@ -94,28 +117,34 @@ pub(crate) fn cancel_one_task_for_user_chat(
     task_id: &str,
 ) -> anyhow::Result<i64> {
     let now = now_ts();
-    let db = state
+    let mut db = state
         .core
         .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
-    let mut stmt = db.prepare(
-        "SELECT task_id, result_json
-         FROM tasks
-         WHERE user_id = ?1
-           AND chat_id = ?2
-           AND task_id = ?3
-           AND status IN ('queued', 'running')",
-    )?;
-    let records = stmt
-        .query_map(params![user_id, chat_id, task_id], |row| {
-            Ok(CancelTaskRecord {
-                task_id: row.get(0)?,
-                result_json: row.get(1)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    cancel_task_records(state, &db, records, &now)
+    let records = {
+        let mut stmt = db.prepare(
+            "SELECT task_id, result_json
+             FROM tasks
+             WHERE user_id = ?1
+               AND chat_id = ?2
+               AND task_id = ?3
+               AND status IN ('queued', 'running')",
+        )?;
+        let records = stmt
+            .query_map(params![user_id, chat_id, task_id], |row| {
+                Ok(CancelTaskRecord {
+                    task_id: row.get(0)?,
+                    result_json: row.get(1)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        records
+    };
+    let (affected, reply_items) = cancel_task_records(state, &mut db, records, &now)?;
+    drop(db);
+    publish_control_reply_items(state, reply_items);
+    Ok(affected)
 }
 
 pub(crate) fn get_task_admin_target(
@@ -150,7 +179,7 @@ pub(crate) fn get_task_admin_target(
 
 pub(crate) fn cancel_task_by_id(state: &AppState, task_id: &str) -> anyhow::Result<i64> {
     let now = now_ts();
-    let db = state
+    let mut db = state
         .core
         .db
         .get()
@@ -172,8 +201,9 @@ pub(crate) fn cancel_task_by_id(state: &AppState, task_id: &str) -> anyhow::Resu
             .collect::<rusqlite::Result<Vec<_>>>()?;
         records
     };
-    let affected = cancel_task_records(state, &db, records, &now)?;
+    let (affected, reply_items) = cancel_task_records(state, &mut db, records, &now)?;
     drop(db);
+    publish_control_reply_items(state, reply_items);
     if affected > 0 {
         let _ = super::child_tasks::refresh_stored_child_terminal_projection(state, task_id)?;
     }
@@ -258,7 +288,7 @@ pub(crate) fn resume_task_with_input(
         state,
         &input.task_id,
         now_ts,
-        now_ts,
+        Some(now_ts),
         TASK_RESUMED_MESSAGE_KEY,
         Some(&input),
     )?;
@@ -336,28 +366,49 @@ pub(crate) fn pause_task_by_id(
     task_id: &str,
     pause_seconds: u64,
 ) -> anyhow::Result<Option<TaskControlUpdate>> {
-    pause_task_by_id_with_control(state, task_id, pause_seconds, None, None)
+    pause_task_by_id_with_control(state, task_id, Some(pause_seconds), None, None)
+}
+
+#[cfg(test)]
+pub(crate) fn pause_task_until_resumed(
+    state: &AppState,
+    task_id: &str,
+) -> anyhow::Result<Option<TaskControlUpdate>> {
+    pause_task_by_id_with_control(state, task_id, None, None, None)
 }
 
 pub(crate) fn pause_task_by_id_with_control(
     state: &AppState,
     task_id: &str,
-    pause_seconds: u64,
+    pause_seconds: Option<u64>,
     expected_control_seq: Option<i64>,
     idempotency_key: Option<&str>,
 ) -> anyhow::Result<Option<TaskControlUpdate>> {
     let now_ts = crate::now_ts_u64() as i64;
-    let pause_seconds = pause_seconds.clamp(1, 604_800) as i64;
+    let pause_seconds = pause_seconds.map(|seconds| seconds.clamp(1, 604_800) as i64);
+    let resume_after = pause_seconds.map(|seconds| now_ts.saturating_add(seconds));
+    let resume_policy = if pause_seconds.is_some() {
+        "scheduled"
+    } else {
+        "manual"
+    };
     let directive = super::task_control_mailbox::enqueue_task_control(
         state,
         super::task_control_mailbox::EnqueueTaskControl {
             task_id: task_id.to_string(),
             action: TASK_CONTROL_KIND_PAUSE.to_string(),
             issued_by: "task_control_api".to_string(),
-            payload: json!({"pause_seconds": pause_seconds}),
-            idempotency_key: idempotency_key
-                .map(ToOwned::to_owned)
-                .or_else(|| Some(format!("pause:{task_id}:{now_ts}:{pause_seconds}"))),
+            payload: json!({
+                "resume_policy": resume_policy,
+                "pause_seconds": pause_seconds,
+                "resume_after": resume_after,
+            }),
+            idempotency_key: idempotency_key.map(ToOwned::to_owned).or_else(|| {
+                Some(format!(
+                    "pause:{task_id}:{now_ts}:{resume_policy}:{}",
+                    pause_seconds.unwrap_or_default()
+                ))
+            }),
             expected_control_seq,
         },
     )?;
@@ -368,7 +419,7 @@ pub(crate) fn pause_task_by_id_with_control(
         state,
         task_id,
         now_ts,
-        now_ts.saturating_add(pause_seconds),
+        resume_after,
         TASK_PAUSED_MESSAGE_KEY,
         None,
     )? {
@@ -382,7 +433,7 @@ pub(crate) fn pause_task_by_id_with_control(
         update.control_status = "applied".to_string();
         return Ok(Some(update));
     }
-    mark_running_task_pause_requested(state, task_id, &directive, pause_seconds)
+    mark_running_task_pause_requested(state, task_id, &directive, pause_seconds, resume_after)
 }
 
 pub(crate) fn steer_task_by_id(
@@ -419,7 +470,8 @@ fn mark_running_task_pause_requested(
     state: &AppState,
     task_id: &str,
     directive: &super::task_control_mailbox::TaskControlDirective,
-    pause_seconds: i64,
+    pause_seconds: Option<i64>,
+    resume_after: Option<i64>,
 ) -> anyhow::Result<Option<TaskControlUpdate>> {
     let db = state
         .core
@@ -441,7 +493,7 @@ fn mark_running_task_pause_requested(
         .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
         .filter(Value::is_object)
         .unwrap_or_else(|| json!({}));
-    let lifecycle = json!({
+    let mut lifecycle = json!({
         "schema_version": 1,
         "state": "pause_requested",
         "source": TASK_CONTROL_SOURCE,
@@ -449,7 +501,10 @@ fn mark_running_task_pause_requested(
         "can_cancel": true,
         "can_pause": false,
         "requested_at": directive.issued_at,
+        "resume_policy": if pause_seconds.is_some() { "scheduled" } else { "manual" },
+        "manual_resume_required": pause_seconds.is_none(),
         "pause_seconds": pause_seconds,
+        "resume_after": resume_after,
         "control_request": {
             "schema_version": 1,
             "kind": TASK_CONTROL_KIND_PAUSE,
@@ -459,6 +514,9 @@ fn mark_running_task_pause_requested(
             "payload_digest": directive.payload_digest,
         }
     });
+    if let Some(object) = lifecycle.as_object_mut() {
+        object.retain(|_, value| !value.is_null());
+    }
     result["task_lifecycle"] = lifecycle.clone();
     let changed = db.execute(
         "UPDATE tasks SET result_json = ?2, updated_at = ?3
@@ -477,13 +535,19 @@ fn mark_running_task_pause_requested(
 
 fn cancel_task_records(
     state: &AppState,
-    db: &Connection,
+    db: &mut Connection,
     records: Vec<CancelTaskRecord>,
     now: &str,
-) -> anyhow::Result<i64> {
+) -> anyhow::Result<(
+    i64,
+    Vec<super::conversation_reply_items::ConversationReplyItem>,
+)> {
+    crate::repo::conversation_inputs::ensure_conversation_input_schema(db)?;
+    super::conversation_reply_items::ensure_conversation_reply_item_schema(db)?;
     let mut visited = HashSet::new();
+    let mut reply_items = Vec::new();
     let reason = crate::task_lifecycle::TerminalFailureReason::UserCancelled.status_code();
-    cancel_task_records_with_reason(
+    let affected = cancel_task_records_with_reason(
         state,
         db,
         records,
@@ -491,17 +555,20 @@ fn cancel_task_records(
         reason,
         TASK_CANCELLED_MESSAGE_KEY,
         &mut visited,
-    )
+        &mut reply_items,
+    )?;
+    Ok((affected, reply_items))
 }
 
 fn cancel_task_records_with_reason(
     state: &AppState,
-    db: &Connection,
+    db: &mut Connection,
     records: Vec<CancelTaskRecord>,
     now: &str,
     reason: &str,
     message_key: &str,
     visited: &mut HashSet<String>,
+    reply_items: &mut Vec<super::conversation_reply_items::ConversationReplyItem>,
 ) -> anyhow::Result<i64> {
     let now_ts = now.parse::<i64>().unwrap_or_default();
     let mut affected = 0_i64;
@@ -523,29 +590,68 @@ fn cancel_task_records_with_reason(
             cancel_adapter_result.as_ref(),
             message_key,
         );
-        let count = db.execute(
-            "UPDATE tasks
-             SET status = 'canceled',
-                 error_text = ?1,
-                 result_json = ?2,
-                 updated_at = ?3
-             WHERE task_id = ?4
-               AND status IN ('queued', 'running')",
-            params![reason, result_json.to_string(), now, record.task_id],
-        )?;
-        affected += count as i64;
-        if count > 0 {
-            let parent_graph_cancelled =
-                super::child_task_graph::mark_parent_graph_cancelled(db, &record.task_id, now)?;
-            if !parent_graph_cancelled {
-                let _ = super::child_task_graph::record_child_graph_task_terminal(
-                    db,
+        let (count, mut persisted_items) = {
+            let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let count = tx.execute(
+                "UPDATE tasks
+                 SET status = 'canceled',
+                     error_text = ?1,
+                     result_json = ?2,
+                     updated_at = ?3
+                 WHERE task_id = ?4
+                   AND status IN ('queued', 'running')",
+                params![reason, result_json.to_string(), now, record.task_id],
+            )?;
+            let mut persisted_items = Vec::new();
+            if count > 0 {
+                crate::repo::conversation_inputs::defer_pending_conversation_inputs_for_cancel_in_db(
+                    &tx,
                     &record.task_id,
-                    "canceled",
+                )?;
+                let parent_graph_cancelled = super::child_task_graph::mark_parent_graph_cancelled(
+                    &tx,
+                    &record.task_id,
                     now,
                 )?;
+                if !parent_graph_cancelled {
+                    let _ = super::child_task_graph::record_child_graph_task_terminal(
+                        &tx,
+                        &record.task_id,
+                        "canceled",
+                        now,
+                    )?;
+                }
+                for (stage, message_key, deliver_to_channel) in [
+                    ("accepted", TASK_CANCEL_ACCEPTED_MESSAGE_KEY, false),
+                    ("stop_requested", TASK_CANCEL_REQUESTED_MESSAGE_KEY, true),
+                ] {
+                    if let Some(persisted) = super::conversation_reply_items::persist_control_status_reply_item_if_owned_in_db(
+                        &tx,
+                        &record.task_id,
+                        stage,
+                        message_key,
+                        &std::collections::BTreeMap::new(),
+                        deliver_to_channel,
+                    )? {
+                        if persisted.inserted {
+                            persisted_items.push(persisted.item);
+                        }
+                    }
+                }
             }
+            tx.commit()?;
+            (count, persisted_items)
+        };
+        affected += count as i64;
+        if count > 0 {
+            reply_items.append(&mut persisted_items);
+            crate::conversation_input_event_transport::notify(state);
             state.worker.cancel_active_task(&record.task_id);
+            if let Some(item) =
+                settle_cancelled_task_if_ready_in_db(state, db, &record.task_id, now_ts)?.reply_item
+            {
+                reply_items.push(item);
+            }
         }
     }
     let child_records = cancellable_child_task_records(db, &child_task_ids, visited)?;
@@ -558,9 +664,159 @@ fn cancel_task_records_with_reason(
             CHILD_TASK_PARENT_CANCELLED_REASON,
             CHILD_TASK_PARENT_CANCELLED_MESSAGE_KEY,
             visited,
+            reply_items,
         )?;
     }
     Ok(affected)
+}
+
+fn publish_control_reply_items(
+    state: &AppState,
+    items: Vec<super::conversation_reply_items::ConversationReplyItem>,
+) {
+    for item in items {
+        super::conversation_reply_items::publish_conversation_reply_item_event(state, &item);
+        if item.lifecycle_stage == "settled" {
+            crate::task_event_transport::publish_task_status_projection(state, &item.task_id);
+        }
+    }
+}
+
+pub(crate) fn reconcile_cancelled_task_settlements(
+    state: &AppState,
+    limit: usize,
+) -> anyhow::Result<usize> {
+    let mut db = state
+        .core
+        .db
+        .get()
+        .map_err(|error| anyhow::anyhow!("db pool: {error}"))?;
+    let task_ids = {
+        let mut statement = db.prepare(
+            "SELECT task_id FROM tasks
+             WHERE status = 'canceled'
+               AND json_valid(result_json)
+               AND json_extract(result_json, '$.task_lifecycle.state') = 'cancel_requested'
+             ORDER BY updated_at ASC LIMIT ?1",
+        )?;
+        let rows = statement
+            .query_map(params![limit.clamp(1, 256)], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
+    };
+    let now_ts = crate::now_ts_u64() as i64;
+    let mut settled_count = 0usize;
+    let mut settled_items = Vec::new();
+    for task_id in task_ids {
+        let outcome = settle_cancelled_task_if_ready_in_db(state, &mut db, &task_id, now_ts)?;
+        settled_count += usize::from(outcome.settled);
+        if let Some(item) = outcome.reply_item {
+            settled_items.push(item);
+        }
+    }
+    drop(db);
+    publish_control_reply_items(state, settled_items);
+    Ok(settled_count)
+}
+
+fn settle_cancelled_task_if_ready_in_db(
+    state: &AppState,
+    db: &rusqlite::Connection,
+    task_id: &str,
+    now_ts: i64,
+) -> anyhow::Result<CancelSettlementOutcome> {
+    if state.worker.task_runtime_is_registered(task_id) {
+        return Ok(CancelSettlementOutcome::pending());
+    }
+    let raw_result = db
+        .query_row(
+            "SELECT result_json FROM tasks
+             WHERE task_id = ?1 AND status = 'canceled' LIMIT 1",
+            params![task_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten();
+    let Some(raw_result) = raw_result else {
+        return Ok(CancelSettlementOutcome::pending());
+    };
+    let mut result = serde_json::from_str::<Value>(&raw_result).unwrap_or_else(|_| json!({}));
+    if result
+        .pointer("/task_lifecycle/state")
+        .and_then(Value::as_str)
+        != Some("cancel_requested")
+        || !cancel_adapter_has_settled(&result)
+    {
+        return Ok(CancelSettlementOutcome::pending());
+    }
+    if let Some(lifecycle) = result
+        .get_mut("task_lifecycle")
+        .and_then(Value::as_object_mut)
+    {
+        lifecycle.insert("state".to_string(), json!("cancelled"));
+        lifecycle.insert("settled_at".to_string(), json!(now_ts));
+        lifecycle.insert("message_key".to_string(), json!(TASK_CANCELLED_MESSAGE_KEY));
+    }
+    let changed = db.execute(
+        "UPDATE tasks SET result_json = ?2, updated_at = ?3
+         WHERE task_id = ?1 AND status = 'canceled' AND result_json = ?4",
+        params![task_id, result.to_string(), now_ts.to_string(), raw_result],
+    )?;
+    if changed != 1 {
+        return Ok(CancelSettlementOutcome::pending());
+    }
+    match super::conversation_reply_items::persist_control_status_reply_item_if_owned_in_db(
+        db,
+        task_id,
+        "settled",
+        TASK_CANCEL_SETTLED_MESSAGE_KEY,
+        &std::collections::BTreeMap::new(),
+        false,
+    ) {
+        Ok(Some(persisted)) => Ok(CancelSettlementOutcome {
+            settled: true,
+            reply_item: persisted.inserted.then_some(persisted.item),
+        }),
+        Ok(None) => Ok(CancelSettlementOutcome {
+            settled: true,
+            reply_item: None,
+        }),
+        Err(error) => Err(error),
+    }
+}
+
+fn cancel_adapter_has_settled(result: &Value) -> bool {
+    let Some(adapter) = result.get("cancel_adapter_result") else {
+        return true;
+    };
+    let status = adapter
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    match adapter.get("adapter_kind").and_then(Value::as_str) {
+        Some("local_process_poll") => match status {
+            "already_terminal" => true,
+            "accepted" | "already_requested" => adapter
+                .get("job_dir")
+                .and_then(Value::as_str)
+                .map(Path::new)
+                .is_some_and(local_process_cancel_has_settled),
+            _ => false,
+        },
+        Some(_) => false,
+        None => false,
+    }
+}
+
+fn local_process_cancel_has_settled(job_dir: &Path) -> bool {
+    if job_dir.join("exit_code").exists() {
+        return true;
+    }
+    let Some(pid) = crate::local_process_job::read_pid(job_dir) else {
+        return true;
+    };
+    crate::local_process_job::process_identity_state(job_dir, pid)
+        != crate::local_process_job::ProcessIdentityState::AliveVerified
 }
 
 fn cancellable_child_task_records(
@@ -669,7 +925,7 @@ fn cancelled_task_result_json(
             "task_lifecycle".to_string(),
             json!({
                 "schema_version": 1,
-                "state": "cancelled",
+                "state": "cancel_requested",
                 "source": TASK_CANCELLED_SOURCE,
                 "terminal_reason": reason,
                 "cancel_source": reason,
@@ -689,6 +945,48 @@ fn cancelled_task_result_json(
             if let Some(lifecycle) = obj.get_mut("task_lifecycle").and_then(Value::as_object_mut) {
                 lifecycle.insert("cancel_adapter_result".to_string(), cancel_adapter_result);
             }
+        }
+    }
+    result
+}
+
+pub(crate) fn parent_terminal_child_cancel_result(
+    raw_result_json: Option<&str>,
+    child_projection: &Value,
+    reason: &str,
+    now_ts: i64,
+    terminate_grace_seconds: u64,
+    runtime_registered: bool,
+) -> Value {
+    let cancel_adapter_result =
+        cancel_adapter_result_from_task_result(raw_result_json, now_ts, terminate_grace_seconds);
+    let mut result = cancelled_task_result_json(
+        raw_result_json,
+        reason,
+        now_ts,
+        cancel_adapter_result.as_ref(),
+        CHILD_TASK_PARENT_CANCELLED_MESSAGE_KEY,
+    );
+    if let (Some(result), Some(projection)) = (result.as_object_mut(), child_projection.as_object())
+    {
+        for (key, value) in projection {
+            result.insert(key.clone(), value.clone());
+        }
+        if let Some(lifecycle) = result
+            .get_mut("task_lifecycle")
+            .and_then(Value::as_object_mut)
+        {
+            lifecycle.insert("source".to_string(), json!("child_task_graph"));
+            lifecycle.insert("parent_terminal_reason".to_string(), json!(reason));
+        }
+    }
+    if !runtime_registered && cancel_adapter_has_settled(&result) {
+        if let Some(lifecycle) = result
+            .get_mut("task_lifecycle")
+            .and_then(Value::as_object_mut)
+        {
+            lifecycle.insert("state".to_string(), json!("cancelled"));
+            lifecycle.insert("settled_at".to_string(), json!(now_ts));
         }
     }
     result
@@ -971,7 +1269,7 @@ fn update_paused_checkpoint_schedule(
     state: &AppState,
     task_id: &str,
     now_ts: i64,
-    next_check_after: i64,
+    next_check_after: Option<i64>,
     message_key: &str,
     resume_input: Option<&TaskResumeControlInput>,
 ) -> anyhow::Result<Option<TaskControlUpdate>> {
@@ -1016,7 +1314,11 @@ fn update_paused_checkpoint_schedule(
         return Ok(None);
     }
     let checkpoint_id = match readiness {
-        crate::task_lifecycle::PausedCheckpointResumeReadiness::WaitingNotDue {
+        crate::task_lifecycle::PausedCheckpointResumeReadiness::ManualResumeRequired {
+            checkpoint_id,
+            ..
+        }
+        | crate::task_lifecycle::PausedCheckpointResumeReadiness::WaitingNotDue {
             checkpoint_id,
             ..
         }
@@ -1045,15 +1347,37 @@ fn update_paused_checkpoint_schedule(
         return Ok(None);
     };
     obj.insert("source".to_string(), json!(TASK_CONTROL_SOURCE));
-    obj.insert("next_check_after".to_string(), json!(next_check_after));
-    obj.insert(
-        "resume_due".to_string(),
-        json!(next_check_after.saturating_sub(now_ts) == 0),
-    );
-    obj.insert(
-        "resume_wait_seconds".to_string(),
-        json!(next_check_after.saturating_sub(now_ts).max(0)),
-    );
+    if let Some(next_check_after) = next_check_after {
+        obj.insert("state".to_string(), json!("waiting"));
+        obj.insert("next_check_after".to_string(), json!(next_check_after));
+        obj.insert(
+            "resume_due".to_string(),
+            json!(next_check_after.saturating_sub(now_ts) == 0),
+        );
+        obj.insert(
+            "resume_wait_seconds".to_string(),
+            json!(next_check_after.saturating_sub(now_ts).max(0)),
+        );
+        obj.insert(
+            "resume_policy".to_string(),
+            json!(if resume_input.is_some() {
+                "explicit_resume"
+            } else {
+                "scheduled"
+            }),
+        );
+        obj.remove("manual_resume_required");
+        obj.remove("resume_after");
+    } else {
+        obj.insert("state".to_string(), json!("needs_user"));
+        obj.insert("resume_due".to_string(), json!(false));
+        obj.insert("resume_wait_seconds".to_string(), json!(0));
+        obj.insert("resume_policy".to_string(), json!("manual"));
+        obj.insert("manual_resume_required".to_string(), json!(true));
+        obj.remove("next_check_after");
+        obj.remove("next_poll_after");
+        obj.remove("resume_after");
+    }
     obj.insert("message_key".to_string(), json!(message_key));
     obj.insert(
         "control_request".to_string(),

@@ -1,4 +1,6 @@
 pub(crate) mod conversation_history;
+pub(crate) mod conversation_input_events;
+pub(crate) mod conversation_inputs;
 pub(crate) mod memory_routes;
 pub(crate) mod task_artifacts;
 pub(crate) mod task_delivery;

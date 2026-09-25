@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "suite": "live_instruction_steering_smoke_20260924",
+  "provider": "minimax",
+  "model": "MiniMax-M3",
+  "cases": [
+    {
+      "id": "n1_amend_active_output_en",
+      "selected": true,
+      "family": "N1_amend",
+      "language": "en",
+      "initial_input": "Write a detailed twelve-section migration guide. Each section must have a heading and a paragraph, and the final answer must contain exactly twelve sections.",
+      "steering_inputs": [
+        "Change the active task now: output exactly two lines, each beginning with a hyphen and containing a complete short sentence. Put marker LIVE-STEER-8426 inside the first line, add no other lines, and do not write the twelve-section guide."
+      ],
+      "expected": {
+        "status": "succeeded",
+        "relations": [
+          "amend_current"
+        ],
+        "contains": [
+          "LIVE-STEER-8426"
+        ],
+        "absent": [
+          "## 1."
+        ],
+        "exact_nonblank_lines": 2,
+        "min_nonblank_line_chars": 8,
+        "max_chars": 1000,
+        "require_interrupted_model_call": true
+      }
+    },
+    {
+      "id": "n1_quantity_revision_zh",
+      "selected": true,
+      "family": "N1_amend",
+      "language": "zh-CN",
+      "initial_input": "写一份包含二十个编号段落的系统迁移说明，每段至少三句话，最后附上标记 OLD-LONG-219。",
+      "steering_inputs": [
+        "修正当前任务：不要写二十段，只输出三行简短结论，第三行必须是 REVISION-ZH-219。"
+      ],
+      "expected": {
+        "status": "succeeded",
+        "relations": ["amend_current"],
+        "contains": ["REVISION-ZH-219"],
+        "absent": ["OLD-LONG-219"],
+        "exact_nonblank_lines": 3,
+        "max_chars": 600,
+        "require_interrupted_model_call": true
+      }
+    },
+    {
+      "id": "n2_stop_active_zh",
+      "selected": true,
+      "family": "N2_stop_negation",
+      "language": "zh-CN",
+      "initial_input": "请生成一份非常详细的三十节部署手册，每节都包含检查项、风险和回滚步骤。",
+      "steering_inputs": [
+        "停止当前任务，不要继续生成这份手册。"
+      ],
+      "expected": {
+        "status": ["canceled", "cancelled"],
+        "control_actions": ["stop"],
+        "require_interrupted_model_call": true,
+        "max_llm_calls": 4
+      }
+    },
+    {
+      "id": "n2_negated_stop_ja",
+      "selected": true,
+      "family": "N2_stop_negation",
+      "language": "ja",
+      "initial_input": "移行手順を二十章で詳しく作成し、各章に確認項目を含めてください。",
+      "steering_inputs": [
+        "停止しないでください。現在の作業を続けますが、最終回答は日本語の二文だけに変更し、最後に KEEP-GOING-JA-73 を入れてください。"
+      ],
+      "expected": {
+        "status": "succeeded",
+        "relations": ["amend_current"],
+        "forbidden_control_actions": ["stop", "pause"],
+        "contains": ["KEEP-GOING-JA-73"],
+        "max_chars": 600,
+        "require_interrupted_model_call": true
+      }
+    },
+    {
+      "id": "n3_pause_active_en",
+      "selected": true,
+      "family": "N3_pause_resume",
+      "language": "en",
+      "initial_input": "Produce a comprehensive thirty-part operations handbook with validation and rollback details in every part.",
+      "steering_inputs": [
+        "Pause this active task now and keep its checkpoint for an explicit later resume.",
+        {
+          "transport": "resume",
+          "phase": "paused",
+          "text": "Resume the paused task with this new constraint: replace the handbook with exactly two short lines and put RESUMED-EN-508 on the second line."
+        }
+      ],
+      "expected": {
+        "status": "succeeded",
+        "control_actions": ["pause"],
+        "contains": ["RESUMED-EN-508"],
+        "exact_nonblank_lines": 2,
+        "resume_count": 1,
+        "require_interrupted_model_call": true,
+        "max_llm_calls": 6
+      }
+    },
+    {
+      "id": "n4_side_question_en",
+      "selected": true,
+      "family": "N4_side_question_switch",
+      "language": "en",
+      "initial_input": "Write a detailed eighteen-section release-readiness guide and end the completed main deliverable with MAIN-DONE-314.",
+      "steering_inputs": [
+        "Without changing or replacing the active guide, answer this independent question: what is seven times eight? Then continue the guide."
+      ],
+      "expected": {
+        "status": "succeeded",
+        "allowed_relations": ["side_reply", "continue_current"],
+        "forbidden_control_actions": ["stop", "pause"],
+        "contains": ["MAIN-DONE-314"],
+        "require_interrupted_model_call": true,
+        "min_llm_calls": 3
+      }
+    }
+  ]
+}

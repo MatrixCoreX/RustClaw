@@ -77,6 +77,12 @@ async fn handle_claimed_message(bot: Bot, msg: Message, state: BotState) -> anyh
     let core_action = slash_command
         .as_ref()
         .and_then(|command| command.definition.core_action());
+    let cancel_expected_task_id = slash_command
+        .as_ref()
+        .filter(|command| command.definition.core_action() == Some(CoreCommandAction::Cancel))
+        .and_then(|command| {
+            claw_core::conversation_control::parse_cancel_expected_task_id(&command.tail)
+        });
     let logged_text = sanitize_message_text_for_log(text);
     info!(
         "handle_message: chat_id={} user_id={} username={} text={}",
@@ -296,14 +302,18 @@ async fn handle_claimed_message(bot: Bot, msg: Message, state: BotState) -> anyh
         return Ok(());
     }
 
-    if matches!(core_action, Some(CoreCommandAction::Cancel)) {
-        match cancel_tasks_for_chat(&state, user_id, msg.chat.id.0).await {
+    if let Some(expected_task_id) = cancel_expected_task_id {
+        match cancel_tasks_for_chat(
+            &state,
+            msg.chat.id.0,
+            msg.id.0,
+            expected_task_id.map(|task_id| task_id.to_string()),
+        )
+        .await
+        {
             Ok(canceled) => {
                 let reply = if canceled > 0 {
-                    state.i18n.t_with(
-                        "telegram.msg.cancel_ok",
-                        &[("count", &canceled.to_string())],
-                    )
+                    state.i18n.t("telegram.msg.cancel_ok")
                 } else {
                     state.i18n.t("telegram.msg.cancel_none")
                 };
@@ -358,20 +368,21 @@ async fn handle_claimed_message(bot: Bot, msg: Message, state: BotState) -> anyh
     )
     .await
     {
-        Ok(task_id) => {
+        Ok(submitted) if submitted.owns_terminal_delivery => {
             info!(
                 "telegramd: submitted ask task_id={} user_id={} chat_id={}",
-                task_id, user_id, msg.chat.id.0
+                submitted.task_id, user_id, msg.chat.id.0
             );
             spawn_task_result_delivery(
                 bot.clone(),
                 state.clone(),
                 msg.chat.id,
                 user_id,
-                task_id,
+                submitted.task_id,
                 None,
             );
         }
+        Ok(_) => {}
         Err(err) => {
             warn!(chat_id = msg.chat.id.0, error = %err, "task submission failed");
             bot.send_message(

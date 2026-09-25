@@ -22,9 +22,8 @@ pub(super) async fn execute_seeded_agent_loop_dispatch_result(
     }
 
     let mut payload: Value = serde_json::from_str(&claimed.task.payload_json)?;
-    if let Some(resume_input) =
-        load_resume_steering_input(state, &claimed.task_id, &claimed.checkpoint_id)?
-    {
+    let resume_input = load_resume_steering_input(state, &claimed.task_id, &claimed.checkpoint_id)?;
+    if let Some(resume_input) = resume_input.as_ref() {
         apply_resume_steering_prompt(&mut payload, &resume_input);
     }
     let prepared_input = super::prepare_ask_input(state, &claimed.task, &mut payload).await;
@@ -35,17 +34,52 @@ pub(super) async fn execute_seeded_agent_loop_dispatch_result(
             .await?;
     let agent_run_context =
         Some(super::ask_runtime::build_agent_run_context_from_prepared_flow(&prepared_flow));
-    let stored_checkpoint_action = load_required_checkpoint_action(state, claimed)?;
+    let pending_conversation_input =
+        crate::repo::conversation_inputs::task_has_pending_conversation_inputs(
+            &state.core.db,
+            &claimed.task_id,
+        )?;
+    let mut initial_task_observations = prepared_flow.initial_task_observations.clone();
+    let stored_checkpoint_action = if pending_conversation_input || resume_input.is_some() {
+        None
+    } else {
+        match load_required_checkpoint_action(state, claimed) {
+            Ok(Some(action)) => {
+                match validate_checkpoint_action_for_replay(state, claimed, &action) {
+                    Ok(()) => Some(action),
+                    Err(reason_code) => {
+                        let reason_code = reason_code.to_string();
+                        initial_task_observations.push(checkpoint_replay_rejected_observation(
+                            claimed,
+                            &reason_code,
+                        ));
+                        None
+                    }
+                }
+            }
+            Ok(None) => None,
+            Err(error) => {
+                initial_task_observations.push(checkpoint_replay_rejected_observation(
+                    claimed,
+                    &error.to_string(),
+                ));
+                None
+            }
+        }
+    };
 
     info!(
-        "resume replay seeded agent loop starting: task_id={} checkpoint_id={} resume_trigger={} completed_side_effect_count={} stored_action={}",
+        "resume replay seeded agent loop starting: task_id={} checkpoint_id={} resume_trigger={} completed_side_effect_count={} stored_action={} pending_conversation_input={}",
         claimed.task_id,
         claimed.checkpoint_id,
         claimed.resume_trigger,
         claimed.task_checkpoint.completed_side_effect_refs.len(),
-        stored_checkpoint_action.is_some()
+        stored_checkpoint_action.is_some(),
+        pending_conversation_input
     );
     let mut result = if let Some(stored_action) = stored_checkpoint_action {
+        let replay_checkpoint =
+            checkpoint_with_action_replay_binding(&claimed.task_checkpoint, &stored_action);
         let output_contract = stored_action
             .output_contract
             .map(serde_json::from_value::<crate::IntentOutputContract>)
@@ -79,8 +113,8 @@ pub(super) async fn execute_seeded_agent_loop_dispatch_result(
             &claimed.task,
             &request_envelope,
             agent_run_context,
-            &claimed.task_checkpoint,
-            &prepared_flow.initial_task_observations,
+            &replay_checkpoint,
+            &initial_task_observations,
             &plan,
         )
         .await
@@ -92,7 +126,7 @@ pub(super) async fn execute_seeded_agent_loop_dispatch_result(
             &prepared_flow.planner_user_request,
             agent_run_context,
             &claimed.task_checkpoint,
-            &prepared_flow.initial_task_observations,
+            &initial_task_observations,
         )
         .await
     };
@@ -116,6 +150,112 @@ pub(super) async fn execute_seeded_agent_loop_dispatch_result(
     }
 
     Ok(super::runtime_support::seeded_agent_loop_terminal_dispatch_result_payload(claimed, result))
+}
+
+fn validate_checkpoint_action_for_replay(
+    state: &AppState,
+    claimed: &repo::ClaimedDispatchedPausedCheckpointResumeExecution,
+    action: &repo::TaskCheckpointAction,
+) -> Result<()> {
+    if action.task_id != claimed.task_id || action.checkpoint_id != claimed.checkpoint_id {
+        anyhow::bail!("checkpoint_action_identity_mismatch");
+    }
+    let snapshot = crate::repo::conversation_inputs::conversation_execution_snapshot_for_task(
+        &state.core.db,
+        &claimed.task_id,
+    )
+    .map_err(|_| anyhow::anyhow!("checkpoint_conversation_snapshot_unavailable"))?;
+    match snapshot {
+        Some(snapshot)
+            if snapshot.instruction_revision == action.instruction_revision
+                && snapshot.execution_epoch == action.execution_epoch => {}
+        None if action.instruction_revision == 0 && action.execution_epoch == 0 => {}
+        _ => anyhow::bail!("checkpoint_conversation_version_changed"),
+    }
+    let execution_binding = action
+        .execution_binding
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("checkpoint_execution_binding_missing"))?;
+    crate::skills::validate_checkpoint_skill_execution_binding(
+        state,
+        &action.tool_or_skill,
+        execution_binding,
+    )
+    .map_err(|error| anyhow::anyhow!(error))?;
+    validate_checkpoint_approval_binding(state, claimed, action)
+}
+
+fn validate_checkpoint_approval_binding(
+    state: &AppState,
+    claimed: &repo::ClaimedDispatchedPausedCheckpointResumeExecution,
+    action: &repo::TaskCheckpointAction,
+) -> Result<()> {
+    let expected = action
+        .approval_binding
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("checkpoint_approval_binding_missing"))?;
+    let db = state.core.db.get()?;
+    let result_json = db
+        .query_row(
+            "SELECT result_json FROM tasks WHERE task_id = ?1 AND status = 'running' LIMIT 1",
+            [&claimed.task_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten()
+        .ok_or_else(|| anyhow::anyhow!("checkpoint_approval_result_missing"))?;
+    let result: Value = serde_json::from_str(&result_json)?;
+    let approval = result
+        .pointer("/resume_context/approval_request")
+        .filter(|value| value.get("status").and_then(Value::as_str) == Some("approved"))
+        .ok_or_else(|| anyhow::anyhow!("checkpoint_approval_not_approved"))?;
+    for field in [
+        "action_fingerprint",
+        "arguments_hash",
+        "action_count",
+        "targets",
+    ] {
+        if approval.get(field) != expected.get(field) {
+            anyhow::bail!("checkpoint_approval_binding_mismatch");
+        }
+    }
+    Ok(())
+}
+
+fn checkpoint_with_action_replay_binding(
+    checkpoint: &crate::task_lifecycle::TaskCheckpoint,
+    action: &repo::TaskCheckpointAction,
+) -> crate::task_lifecycle::TaskCheckpoint {
+    let mut checkpoint = checkpoint.clone();
+    if let Some(boundary) = checkpoint.boundary_context.as_object_mut() {
+        boundary.insert(
+            "checkpoint_action_replay".to_string(),
+            json!({
+                "schema_version": 1,
+                "tool_or_skill": action.tool_or_skill,
+                "action_ref": action.action_ref,
+                "instruction_revision": action.instruction_revision,
+                "execution_epoch": action.execution_epoch,
+                "execution_binding": action.execution_binding,
+            }),
+        );
+    }
+    checkpoint
+}
+
+fn checkpoint_replay_rejected_observation(
+    claimed: &repo::ClaimedDispatchedPausedCheckpointResumeExecution,
+    reason_code: &str,
+) -> Value {
+    json!({
+        "schema_version": 1,
+        "owner_layer": "resume_replay_executor",
+        "observation_kind": "checkpoint_action_revalidation",
+        "status": "replan_required",
+        "reason_code": reason_code,
+        "task_id": claimed.task_id,
+        "checkpoint_id": claimed.checkpoint_id,
+    })
 }
 
 fn parse_checkpoint_continuation_actions(

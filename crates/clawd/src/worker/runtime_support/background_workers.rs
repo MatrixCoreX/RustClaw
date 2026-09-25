@@ -120,6 +120,111 @@ pub(crate) fn spawn_channel_terminal_delivery_worker(state: AppState) {
     });
 }
 
+pub(crate) fn spawn_conversation_reply_delivery_worker(state: AppState) {
+    tokio::spawn(async move {
+        loop {
+            match conversation_reply_delivery_once(&state).await {
+                Ok(true) => {}
+                Ok(false) => tokio::time::sleep(Duration::from_millis(500)).await,
+                Err(error) => {
+                    error!(error = %error, "conversation reply delivery worker tick failed");
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+            }
+        }
+    });
+}
+
+async fn conversation_reply_delivery_once(state: &AppState) -> anyhow::Result<bool> {
+    if repo::reconcile_cancelled_task_settlements(state, 64)? > 0 {
+        return Ok(true);
+    }
+    let Some(claim) = repo::claim_due_conversation_reply_delivery(
+        &state.core.db,
+        now_ts_u64(),
+        CHANNEL_TERMINAL_DELIVERY_LEASE_SECONDS,
+    )?
+    else {
+        return Ok(false);
+    };
+    if channel_terminal_delivery_retry_budget_exhausted(claim.attempt_count) {
+        repo::finish_conversation_reply_delivery(
+            &state.core.db,
+            &claim,
+            false,
+            None,
+            Some("channel_delivery_retry_budget_exhausted"),
+            now_ts_u64(),
+        )?;
+        return Ok(true);
+    }
+    let Some(item) = repo::get_conversation_reply_item(&state.core.db, &claim.reply_id)? else {
+        repo::finish_conversation_reply_delivery(
+            &state.core.db,
+            &claim,
+            false,
+            None,
+            Some("conversation_reply_not_found"),
+            now_ts_u64(),
+        )?;
+        return Ok(true);
+    };
+    match crate::http::task_delivery::deliver_loaded_conversation_reply(state, &item).await {
+        Ok(response) if response.accepted() => repo::finish_conversation_reply_delivery(
+            &state.core.db,
+            &claim,
+            true,
+            None,
+            None,
+            now_ts_u64(),
+        )?,
+        Ok(response) if !response.retryable => repo::finish_conversation_reply_delivery(
+            &state.core.db,
+            &claim,
+            false,
+            None,
+            response.error_code.as_deref(),
+            now_ts_u64(),
+        )?,
+        Ok(response) => repo::finish_conversation_reply_delivery(
+            &state.core.db,
+            &claim,
+            false,
+            Some(channel_terminal_delivery_retry_delay(
+                5,
+                claim.attempt_count,
+            )),
+            response.error_code.as_deref(),
+            now_ts_u64(),
+        )?,
+        Err(error) => {
+            let error_code = error.to_string();
+            let retry_after = (!matches!(
+                error_code.as_str(),
+                "channel_delivery_authorization_revoked"
+                    | "channel_delivery_owner_missing"
+                    | "channel_delivery_owner_mismatch"
+                    | "channel_delivery_ingress_missing"
+                    | "channel_delivery_ingress_invalid"
+                    | "channel_delivery_scope_mismatch"
+                    | "channel_delivery_reply_target_missing"
+                    | "channel_delivery_reply_target_mismatch"
+                    | "task_not_found"
+            ))
+            .then(|| channel_terminal_delivery_retry_delay(1, claim.attempt_count));
+            repo::finish_conversation_reply_delivery(
+                &state.core.db,
+                &claim,
+                false,
+                retry_after,
+                Some(&error_code),
+                now_ts_u64(),
+            )?;
+        }
+    }
+    Ok(true)
+}
+
 async fn channel_terminal_delivery_once(state: &AppState) -> anyhow::Result<bool> {
     let Some(claim) = repo::claim_due_channel_terminal_delivery(
         &state.core.db,
@@ -145,6 +250,17 @@ async fn channel_terminal_delivery_once(state: &AppState) -> anyhow::Result<bool
         )?;
         return Ok(true);
     }
+    if repo::has_unsettled_conversation_reply_delivery(&state.core.db, &claim.task_id)? {
+        repo::finish_channel_terminal_delivery(
+            &state.core.db,
+            &claim,
+            false,
+            Some(1),
+            Some("conversation_reply_delivery_pending"),
+            now_ts_u64(),
+        )?;
+        return Ok(true);
+    }
     let record = match repo::get_task_delivery_record(state, &claim.task_id)? {
         Some(record) => record,
         None => {
@@ -159,6 +275,20 @@ async fn channel_terminal_delivery_once(state: &AppState) -> anyhow::Result<bool
             return Ok(true);
         }
     };
+    if crate::task_lifecycle::cancellation_settlement_pending(
+        &record.status,
+        record.result_json.as_ref(),
+    ) {
+        repo::finish_channel_terminal_delivery(
+            &state.core.db,
+            &claim,
+            false,
+            Some(1),
+            Some("task_cancellation_settlement_pending"),
+            now_ts_u64(),
+        )?;
+        return Ok(true);
+    }
     let request = claw_core::channel_delivery::ChannelTaskDeliveryRequest::daemon(
         claw_core::channel_delivery::ChannelDeliverySource::BackgroundCompletion,
     );
@@ -204,13 +334,23 @@ async fn channel_terminal_delivery_once(state: &AppState) -> anyhow::Result<bool
             )?;
         }
         Err(error) => {
-            let delay = channel_terminal_delivery_retry_delay(1, claim.attempt_count);
             let error_code = error.to_string();
+            let retry_after = (!matches!(
+                error_code.as_str(),
+                "channel_delivery_authorization_revoked"
+                    | "channel_delivery_owner_missing"
+                    | "channel_delivery_ingress_missing"
+                    | "channel_delivery_ingress_invalid"
+                    | "channel_delivery_scope_mismatch"
+                    | "channel_delivery_reply_target_missing"
+                    | "channel_delivery_reply_target_mismatch"
+            ))
+            .then(|| channel_terminal_delivery_retry_delay(1, claim.attempt_count));
             repo::finish_channel_terminal_delivery(
                 &state.core.db,
                 &claim,
                 false,
-                Some(delay),
+                retry_after,
                 Some(&error_code),
                 now_ts_u64(),
             )?;

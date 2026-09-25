@@ -98,7 +98,7 @@ impl TaskEventNotifier {
         self.sender(task_id).subscribe()
     }
 
-    fn notify(&self, task_id: &str, seq: u64) {
+    pub(crate) fn notify(&self, task_id: &str, seq: u64) {
         let _ = self.sender(task_id).send(seq);
     }
 
@@ -172,16 +172,20 @@ fn publish_event_internal(
     }
     let event_kind = normalize_machine_token(event_kind).context("invalid task event kind")?;
     let mut payload = payload;
+    let generated_operation_progress = payload
+        .as_object()
+        .is_some_and(|object| !object.contains_key("operation_progress"));
     crate::long_task_progress::attach_operation_progress_to_event_payload(&mut payload);
     let redacted_fields = redact_event_value(&mut payload, None, 0);
     let timestamp_ms = now_ms();
     let mut context = event_context(&payload);
     context.fill_missing(task_payload_event_context(state, task_id));
+    let fingerprint_payload = event_fingerprint_payload(&payload, generated_operation_progress);
     let (payload, artifact_refs) =
         persist_large_payload_if_needed(state, task_id, &event_kind, payload, timestamp_ms)?;
     let fingerprint_source = json!({
         "event_kind": event_kind,
-        "payload": payload,
+        "payload": fingerprint_payload,
         "thread_id": context.thread_id,
         "session_id": context.session_id,
         "parent_task_id": context.parent_task_id,
@@ -292,6 +296,19 @@ fn publish_event_internal(
         state.metrics.task_event_notifier.notify(task_id, seq);
     }
     Ok(event)
+}
+
+fn event_fingerprint_payload(payload: &Value, generated_operation_progress: bool) -> Value {
+    let mut fingerprint_payload = payload.clone();
+    if generated_operation_progress {
+        if let Some(progress) = fingerprint_payload
+            .get_mut("operation_progress")
+            .and_then(Value::as_object_mut)
+        {
+            progress.insert("heartbeat_at".to_string(), Value::Null);
+        }
+    }
+    fingerprint_payload
 }
 
 pub(crate) fn replay_events_after(
@@ -567,13 +584,20 @@ pub(crate) fn publish_task_status_projection(state: &AppState, task_id: &str) {
         );
         return;
     }
+    let cancellation_settlement_pending =
+        matches!(task.status, claw_core::types::TaskStatus::Canceled)
+            && crate::task_lifecycle::cancellation_settlement_pending(
+                "canceled",
+                task.result_json.as_ref(),
+            );
     if matches!(
         task.status,
         claw_core::types::TaskStatus::Succeeded
             | claw_core::types::TaskStatus::Failed
             | claw_core::types::TaskStatus::Canceled
             | claw_core::types::TaskStatus::Timeout
-    ) {
+    ) && !cancellation_settlement_pending
+    {
         let artifacts = crate::task_artifacts::manifests_from_result(task.result_json.as_ref());
         let final_payload = if artifacts.is_empty() {
             payload

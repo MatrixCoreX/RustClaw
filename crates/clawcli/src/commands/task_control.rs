@@ -256,7 +256,7 @@ pub(crate) fn run_pause_task(
     base_url: &str,
     key: &str,
     task_id: &str,
-    pause_seconds: u64,
+    pause_seconds: Option<u64>,
 ) -> Result<()> {
     let body = task::pause_task_by_id(base_url, key, task_id, pause_seconds)?;
     output::print_json_pretty(&body);

@@ -57,7 +57,7 @@ MESSAGE_KEY_RE = re.compile(
     r'''["']('''
     r'''(?:common\.[A-Za-z0-9_.-]+|'''
     r'''(?:channel|telegram|wechat|feishu|lark|whatsapp_cloud|whatsapp_web)'''
-    r'''\.(?:msg|error|menu|progress|log|task|notice)\.[A-Za-z0-9_.-]+)'''
+    r'''\.(?:msg|error|menu|progress|log|task|notice|control)\.[A-Za-z0-9_.-]+)'''
     r''')["']'''
 )
 

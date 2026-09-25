@@ -6,7 +6,10 @@ use claw_core::channel_delivery::{
     ChannelTaskDeliveryStatus, CHANNEL_TASK_DELIVERY_RESPONSE_SCHEMA_VERSION,
 };
 use claw_core::channel_notice::{ChannelNotice, ChannelNoticeActionKind, ChannelNoticeNextAction};
-use claw_core::types::{ApiResponse, TaskStatus};
+use claw_core::{
+    channel_ingress::{ChannelIngressEnvelope, ChannelReplyTargetKind},
+    types::{ApiResponse, AuthIdentity, ChannelKind, TaskStatus},
+};
 use serde::Serialize;
 use serde_json::Value;
 use tracing::{error, warn};
@@ -43,9 +46,6 @@ pub(crate) async fn deliver_task_result(
             );
         }
     };
-    if !authorized_delivery_request(&state, &headers, &record) {
-        return api_error(StatusCode::UNAUTHORIZED, "task_delivery_unauthorized");
-    }
     let status = crate::parse_task_status(&record.status);
     if matches!(status, TaskStatus::Queued | TaskStatus::Running) {
         return api_error(StatusCode::CONFLICT, "task_not_terminal");
@@ -71,6 +71,9 @@ pub(crate) async fn deliver_task_result(
             );
         }
     };
+    if !authorized_delivery_request(&state, &headers, &record, &payload) {
+        return api_error(StatusCode::UNAUTHORIZED, "task_delivery_unauthorized");
+    }
     if waiting_for_task_artifact_materialization(&record, &status) {
         return api_ok(pending_artifact_materialization_response());
     }
@@ -151,6 +154,7 @@ pub(crate) async fn deliver_loaded_terminal_task(
     }
     let payload = serde_json::from_str::<Value>(&record.task.payload_json)
         .map_err(|_| anyhow::anyhow!("channel_task_delivery_payload_invalid"))?;
+    current_delivery_identity(state, record, &payload).map_err(|code| anyhow::anyhow!(code))?;
     if waiting_for_task_artifact_materialization(record, &status) {
         return Ok(pending_artifact_materialization_response());
     }
@@ -191,26 +195,126 @@ fn authorized_delivery_request(
     state: &AppState,
     headers: &HeaderMap,
     record: &TaskDeliveryRecord,
+    payload: &Value,
 ) -> bool {
-    let expected = record
-        .task
-        .user_key
-        .as_deref()
-        .map(crate::normalize_user_key)
-        .filter(|value| !value.is_empty());
     let provided = crate::auth_key_from_headers(headers)
         .map(crate::normalize_user_key)
         .filter(|value| !value.is_empty());
-    let (Some(expected), Some(provided)) = (expected, provided) else {
+    let Some(provided) = provided else {
         return false;
     };
-    if expected != provided {
+    let Ok(Some(provided_identity)) = crate::resolve_auth_identity_by_key(state, &provided) else {
         return false;
+    };
+    current_delivery_identity(state, record, payload).is_ok_and(|bound_identity| {
+        provided_identity.principal_id == bound_identity.principal_id
+            && provided_identity.user_key == bound_identity.user_key
+    })
+}
+
+pub(crate) fn current_delivery_identity(
+    state: &AppState,
+    record: &TaskDeliveryRecord,
+    payload: &Value,
+) -> Result<AuthIdentity, &'static str> {
+    let owner_principal_id = record
+        .owner_principal_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or("channel_delivery_owner_missing")?;
+    let ingress = payload
+        .get("channel_ingress")
+        .cloned()
+        .ok_or("channel_delivery_ingress_missing")
+        .and_then(|value| {
+            serde_json::from_value::<ChannelIngressEnvelope>(value)
+                .map_err(|_| "channel_delivery_ingress_invalid")
+        })?;
+    if channel_token(ingress.channel) != record.task.channel
+        || ingress
+            .account_id
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+        || ingress.external_user_id.as_deref() != record.task.external_user_id.as_deref()
+        || ingress.external_chat_id.as_deref() != record.task.external_chat_id.as_deref()
+    {
+        return Err("channel_delivery_scope_mismatch");
     }
-    matches!(
-        crate::resolve_auth_identity_by_key(state, &provided),
-        Ok(Some(_))
+    let reply_target = ingress
+        .reply_target
+        .as_ref()
+        .ok_or("channel_delivery_reply_target_missing")?;
+    let reply_target_matches = match reply_target.kind {
+        ChannelReplyTargetKind::Chat => ingress.external_chat_id.as_deref(),
+        ChannelReplyTargetKind::User => ingress.external_user_id.as_deref(),
+    }
+    .is_some_and(|expected| expected == reply_target.external_id);
+    if !reply_target_matches {
+        return Err("channel_delivery_reply_target_mismatch");
+    }
+    let identity = crate::resolve_channel_binding_identity(
+        state,
+        &record.task.channel,
+        ingress.external_user_id.as_deref(),
+        ingress.external_chat_id.as_deref(),
     )
+    .map_err(|_| "channel_delivery_authorization_lookup_failed")?
+    .filter(|identity| identity.principal_id == owner_principal_id)
+    .ok_or("channel_delivery_authorization_revoked")?;
+    Ok(identity)
+}
+
+pub(crate) async fn deliver_loaded_conversation_reply(
+    state: &AppState,
+    item: &crate::repo::conversation_reply_items::ConversationReplyItem,
+) -> anyhow::Result<crate::delivery_service::ChannelDeliveryServiceResult> {
+    let record = crate::repo::get_task_delivery_record(state, &item.task_id)?
+        .ok_or_else(|| anyhow::anyhow!("task_not_found"))?;
+    if record.task.channel == "ui" {
+        anyhow::bail!("task_channel_delivery_not_supported");
+    }
+    if record.owner_principal_id.as_deref() != Some(item.owner_principal_id.as_str()) {
+        anyhow::bail!("channel_delivery_owner_mismatch");
+    }
+    let payload = serde_json::from_str::<Value>(&record.task.payload_json)
+        .map_err(|_| anyhow::anyhow!("channel_task_delivery_payload_invalid"))?;
+    current_delivery_identity(state, &record, &payload).map_err(|code| anyhow::anyhow!(code))?;
+    let suffix = format!("reply-{}", item.reply_id);
+    let envelope = if let Some(message_key) = item.message_key.as_deref() {
+        let mut notice = ChannelNotice::status(
+            format!("conversation.control.{}", item.lifecycle_stage),
+            message_key,
+            claw_core::channel_notice::ChannelNoticeSeverity::Info,
+        );
+        notice.params = item.params.clone();
+        crate::delivery_service::build_proactive_notice_envelope(
+            state,
+            &record.task,
+            &payload,
+            &suffix,
+            notice,
+        )?
+    } else {
+        crate::delivery_service::build_proactive_text_envelope(
+            state,
+            &record.task,
+            &payload,
+            &suffix,
+            &item.text,
+        )?
+    };
+    crate::delivery_service::deliver_task_envelope(state, &record.task, &payload, &envelope).await
+}
+
+const fn channel_token(channel: ChannelKind) -> &'static str {
+    match channel {
+        ChannelKind::Telegram => "telegram",
+        ChannelKind::Whatsapp => "whatsapp",
+        ChannelKind::Ui => "ui",
+        ChannelKind::Wechat => "wechat",
+        ChannelKind::Feishu => "feishu",
+        ChannelKind::Lark => "lark",
+    }
 }
 
 fn terminal_delivery_content(

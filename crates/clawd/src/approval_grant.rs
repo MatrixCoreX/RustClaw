@@ -437,7 +437,8 @@ fn canonical_value(value: &Value) -> Value {
 }
 
 fn canonical_approval_arguments(state: &AppState, step: &PlanStep) -> Value {
-    let run_cmd = state.resolve_canonical_skill_name(step.skill.trim()) == "run_cmd";
+    let canonical_skill = state.resolve_canonical_skill_name(step.skill.trim());
+    let run_cmd = canonical_skill == "run_cmd";
     let mut args = step.args.clone();
     if run_cmd && args.get("action").and_then(Value::as_str) == Some("exec") {
         // Actionless direct run_skill and the ordinary planner capability both
@@ -448,10 +449,27 @@ fn canonical_approval_arguments(state: &AppState, step: &PlanStep) -> Value {
             args.remove("action");
         }
     }
-    canonical_approval_value(
+    let args = canonical_approval_value(
         &args,
         run_cmd.then_some(state.skill_rt.workspace_root.as_path()),
-    )
+    );
+    if !matches!(step.action_type.as_str(), "call_skill" | "call_tool") {
+        return args;
+    }
+    let execution_binding =
+        crate::skills::checkpoint_skill_execution_binding(state, &canonical_skill).unwrap_or_else(
+            |_| {
+                json!({
+                    "schema_version": 1,
+                    "skill_name": canonical_skill,
+                    "status": "unavailable",
+                })
+            },
+        );
+    canonical_value(&json!({
+        "args": args,
+        "execution_binding": execution_binding,
+    }))
 }
 
 fn canonical_approval_value(value: &Value, implicit_cwd_root: Option<&Path>) -> Value {

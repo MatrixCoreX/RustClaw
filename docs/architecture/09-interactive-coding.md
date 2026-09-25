@@ -79,12 +79,23 @@ flowchart TD
     A[Terminal input] --> B[Command and @path grammar]
     B --> C[Shared ChatSessionState]
     C --> D{Operation}
-    D -->|message / attachment| E[Submit or steer task]
+    D -->|message / attachment| E[Persist conversation input]
     D -->|model / permissions| F[Backend policy validation]
     D -->|compact| G[Durable conversation compaction]
     D -->|diff| H[Workspace diff evidence]
     D -->|resume| I[Conversation / task restore]
-    E --> J[Presentation + machine events]
+    E --> E1{Conversation has active task?}
+    E1 -->|yes| E2[Bind input + wake current loop]
+    E1 -->|no| E3[Create one foreground task]
+    E2 --> E4[Single planner owner reconciles semantics]
+    E3 --> E4
+    E4 --> E5{Current execution phase}
+    E5 -->|model / read-only| E6[Interrupt + re-plan]
+    E5 -->|claimed mutation| E7[Apply at next safe boundary]
+    E5 -->|manual pause| E8[Persist checkpoint]
+    E6 --> J[Presentation + machine events]
+    E7 --> J
+    E8 --> J
     F --> C
     G --> C
     H --> C
@@ -120,16 +131,35 @@ attachment bytes, tool arguments, secrets, and full journals. Browser storage
 holds only drafts and preferences; teaching detail is reloaded through the
 protected task-debug endpoint.
 
-The browser composer remains available while a task is executing. Follow-up
-messages and attachment snapshots enter a per-conversation FIFO queue above
-the composer, separate from chat history and live LLM progress. Each turn is
-submitted only after its predecessor has finished successfully, and receives
-its own task ID and teaching trace. Conversations have independent queues.
-Pending messages can be removed. Failure pauses that conversation's queue for
-explicit continuation; an unknown or waiting task stays a barrier until its
-server status is confirmed. The outbox lives in the current browser tab, not
-the backend: keep the tab open until submission. Leaving with unsent messages
-triggers the browser's unload warning; signing out clears the local outbox.
+The browser composer remains available while a task is executing. Text, voice,
+image, and file snapshots are persisted immediately as owner-scoped
+conversation inputs. A stable client message ID recovers a lost HTTP response without
+submitting duplicate work. The active agent loop observes the ordered input;
+if its task has already reached a terminal boundary, the same input receipt is
+bound to one follow-up task instead. Teaching history records the input ID,
+task ID, and instruction revision, while the task event stream remains the
+source for model and tool progress.
+
+The composer exposes the transport choice directly. **Run now** is the default
+and updates an active task or creates one idle foreground task. **Run later**
+stores a `deferred` input without task creation. Deferred inputs are restored
+from the server and can be explicitly activated or withdrawn; neither action
+depends on browser-local queue state or natural-language phrase matching.
+
+The CLI uses the same input contract and keeps stdin reading independent from
+its event follower, so a user can add instructions while output is streaming.
+Explicit `/cancel` is parsed only as command grammar and calls the authenticated
+current-conversation control endpoint; ordinary natural-language wording stays
+opaque to the transport and is interpreted by the agent loop. Locally queued
+entries are limited to transient network delivery and are never presented as
+server-accepted work.
+
+One planner owner remains authoritative for a task. A new input interrupts a
+model or interruptible read-only turn and causes re-planning; an already claimed
+mutation reaches its next safe boundary before the new revision is applied.
+Manual pause writes a durable checkpoint and never resumes from a timer alone.
+Cancellation publishes separate accepted, requested, and settled machine
+states, so the interface does not claim that an external effect was undone.
 
 The dashboard and active-task list use the same identity scope. An admin sees
 all queued/running tasks; a normal key sees that owner's tasks across

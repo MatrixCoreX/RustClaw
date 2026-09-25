@@ -25,3 +25,6 @@ sha2.workspace = true
 shell-words = "1"
 toml = "0.8"
 uuid.workspace = true
+
+[dev-dependencies]
+portable-pty.workspace = true

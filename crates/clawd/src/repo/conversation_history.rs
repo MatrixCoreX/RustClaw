@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use claw_core::types::AuthIdentity;
+use claw_core::{conversation_input::ConversationInputContent, types::AuthIdentity};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -82,6 +82,10 @@ pub(crate) struct ConversationHistoryTurn {
     pub(crate) agent_id: Option<String>,
     pub(crate) external_chat_id: Option<String>,
     pub(crate) conversation_title: Option<String>,
+    #[serde(default)]
+    pub(crate) conversation_inputs: Vec<ConversationHistoryInput>,
+    #[serde(default)]
+    pub(crate) conversation_replies: Vec<ConversationHistoryReply>,
     pub(crate) task_id: String,
     pub(crate) status: String,
     pub(crate) user_text: Option<String>,
@@ -97,6 +101,33 @@ pub(crate) struct ConversationHistoryTurn {
     pub(crate) artifact_delivery: Option<Value>,
     pub(crate) created_at: i64,
     pub(crate) updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct ConversationHistoryInput {
+    pub(crate) schema_version: u32,
+    pub(crate) input_id: String,
+    pub(crate) client_message_id: String,
+    pub(crate) input_seq: u64,
+    pub(crate) text: String,
+    pub(crate) disposition: String,
+    pub(crate) decision_ref: Option<String>,
+    pub(crate) instruction_revision: u64,
+    pub(crate) accepted_at: i64,
+    pub(crate) updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct ConversationHistoryReply {
+    pub(crate) schema_version: u32,
+    pub(crate) reply_id: String,
+    pub(crate) input_id: Option<String>,
+    pub(crate) relation: String,
+    pub(crate) lifecycle_stage: String,
+    pub(crate) text: String,
+    pub(crate) instruction_revision: u64,
+    pub(crate) execution_epoch: u64,
+    pub(crate) created_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -139,6 +170,7 @@ pub(crate) fn list_conversation_history(
         .db
         .get()
         .map_err(|error| anyhow::anyhow!("conversation_history_db_pool_failed:{error}"))?;
+    crate::repo::conversation_reply_items::ensure_conversation_reply_item_schema(&db)?;
     let mut stmt = db.prepare(
         "SELECT tasks.task_id, tasks.external_chat_id, tasks.payload_json, tasks.status,
                 tasks.result_json, tasks.error_text,
@@ -226,10 +258,14 @@ pub(crate) fn list_conversation_history(
     } else {
         None
     };
-    let turns = collected
-        .into_iter()
-        .filter_map(project_turn)
-        .collect::<Vec<_>>();
+    let mut turns = Vec::with_capacity(collected.len());
+    for row in collected {
+        let inputs = load_conversation_inputs_for_task(&db, identity, &row.task_id)?;
+        let replies = load_conversation_replies_for_task(&db, identity, &row.task_id)?;
+        if let Some(turn) = project_turn(row, inputs, replies) {
+            turns.push(turn);
+        }
+    }
     let content_sha256 = format!("{:x}", Sha256::digest(serde_json::to_vec(&turns)?));
     Ok(ConversationHistoryPage {
         schema_version: 1,
@@ -495,7 +531,11 @@ struct HistoryRow {
     conversation_title: Option<String>,
 }
 
-fn project_turn(row: HistoryRow) -> Option<ConversationHistoryTurn> {
+fn project_turn(
+    row: HistoryRow,
+    conversation_inputs: Vec<ConversationHistoryInput>,
+    conversation_replies: Vec<ConversationHistoryReply>,
+) -> Option<ConversationHistoryTurn> {
     let payload = serde_json::from_str::<Value>(&row.payload_json).ok()?;
     let conversation_id = bounded_machine_ref(payload.get("conversation_id")?.as_str()?)?;
     let user_body = payload
@@ -570,6 +610,8 @@ fn project_turn(row: HistoryRow) -> Option<ConversationHistoryTurn> {
             .conversation_title
             .as_deref()
             .and_then(normalized_conversation_title),
+        conversation_inputs,
+        conversation_replies,
         task_id: row.task_id,
         status: row.status,
         user_text,
@@ -585,6 +627,113 @@ fn project_turn(row: HistoryRow) -> Option<ConversationHistoryTurn> {
         created_at: row.created_at,
         updated_at: row.updated_at,
     })
+}
+
+fn load_conversation_replies_for_task(
+    db: &rusqlite::Connection,
+    identity: &AuthIdentity,
+    task_id: &str,
+) -> anyhow::Result<Vec<ConversationHistoryReply>> {
+    let mut statement = db.prepare(
+        "SELECT reply_id, input_id, relation, lifecycle_stage, text,
+                instruction_revision, execution_epoch, created_at_ts
+         FROM conversation_reply_items
+         WHERE task_id = ?1 AND owner_principal_id = ?2
+           AND relation IN ('side_reply', 'clarification')
+           AND LENGTH(TRIM(text)) > 0
+         ORDER BY created_at_ts ASC, reply_id ASC",
+    )?;
+    let rows = statement.query_map(params![task_id, identity.principal_id], |row| {
+        Ok(ConversationHistoryReply {
+            schema_version: 1,
+            reply_id: row.get(0)?,
+            input_id: row.get(1)?,
+            relation: row.get(2)?,
+            lifecycle_stage: row.get(3)?,
+            text: bounded_text(row.get::<_, String>(4)?.trim(), MAX_ASSISTANT_TEXT_BYTES),
+            instruction_revision: u64::try_from(row.get::<_, i64>(5)?).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    5,
+                    rusqlite::types::Type::Integer,
+                    Box::new(error),
+                )
+            })?,
+            execution_epoch: u64::try_from(row.get::<_, i64>(6)?).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    6,
+                    rusqlite::types::Type::Integer,
+                    Box::new(error),
+                )
+            })?,
+            created_at: i64::try_from(row.get::<_, u64>(7)?).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    7,
+                    rusqlite::types::Type::Integer,
+                    Box::new(error),
+                )
+            })?,
+        })
+    })?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+fn load_conversation_inputs_for_task(
+    db: &rusqlite::Connection,
+    identity: &AuthIdentity,
+    task_id: &str,
+) -> anyhow::Result<Vec<ConversationHistoryInput>> {
+    let mut statement = db.prepare(
+        "SELECT input_id, client_message_id, input_seq, content_json, disposition,
+                decision_ref, instruction_revision, accepted_at_ts, updated_at_ts
+         FROM conversation_inputs
+         WHERE target_task_id = ?1 AND owner_principal_id = ?2
+           AND COALESCE(applied_checkpoint_ref, '') != 'initial_task_payload'
+         ORDER BY input_seq ASC",
+    )?;
+    let rows = statement.query_map(params![task_id, identity.principal_id], |row| {
+        let content_json = row.get::<_, String>(3)?;
+        let content = serde_json::from_str::<Vec<ConversationInputContent>>(&content_json)
+            .map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    3,
+                    rusqlite::types::Type::Text,
+                    Box::new(error),
+                )
+            })?;
+        let text = content
+            .into_iter()
+            .filter_map(|item| match item {
+                ConversationInputContent::Text { text } => Some(text),
+                ConversationInputContent::Attachment { .. } => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        Ok(ConversationHistoryInput {
+            schema_version: 1,
+            input_id: row.get(0)?,
+            client_message_id: row.get(1)?,
+            input_seq: u64::try_from(row.get::<_, i64>(2)?).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    2,
+                    rusqlite::types::Type::Integer,
+                    Box::new(error),
+                )
+            })?,
+            text: bounded_text(text.trim(), MAX_USER_TEXT_BYTES),
+            disposition: row.get(4)?,
+            decision_ref: row.get(5)?,
+            instruction_revision: u64::try_from(row.get::<_, i64>(6)?).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    6,
+                    rusqlite::types::Type::Integer,
+                    Box::new(error),
+                )
+            })?,
+            accepted_at: row.get(7)?,
+            updated_at: row.get(8)?,
+        })
+    })?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
 fn normalized_conversation_title(value: &str) -> Option<String> {

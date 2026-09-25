@@ -27,6 +27,10 @@ use anyhow::{anyhow, Context};
 use claw_core::channel_commands::{ChannelCommandCatalog, CoreCommandAction};
 use claw_core::channel_i18n::safe_generic_text_for_path;
 use claw_core::config::{AppConfig, ResolvedTelegramBotConfig};
+use claw_core::conversation_input::{
+    ConversationInputClientTaskReceipt, ConversationInputClientTaskRequest,
+    ConversationInputSource, ConversationInputTaskHandoffState,
+};
 use claw_core::types::{
     ApiResponse, AuthIdentity, BindChannelKeyRequest, BindChannelKeyResponse, ChannelKind,
     GatewayInstanceRuntimeStatus, PendingChannelRequestStatus, PendingChannelRequestStoreRequest,

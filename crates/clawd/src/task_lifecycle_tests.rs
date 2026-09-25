@@ -3,7 +3,7 @@ use serde_json::json;
 use claw_core::types::TaskExecutionState;
 
 use super::{
-    checkpoint_resume_directive, has_recoverable_resume_execution,
+    cancellation_settlement_pending, checkpoint_resume_directive, has_recoverable_resume_execution,
     paused_checkpoint_recovery_status, paused_checkpoint_resume_readiness,
     task_execution_state_from_lifecycle, task_query_lifecycle_projection, AsyncJobRef,
     AsyncJobStatus, CheckpointBudgetCounters, CheckpointResumeDirective,
@@ -81,6 +81,22 @@ fn paused_checkpoint_recovery_status_classifies_machine_checkpoint_states() {
     );
     assert_eq!(
         paused_checkpoint_recovery_status(
+            &json!({
+                "task_lifecycle": {
+                    "state": "needs_user",
+                    "manual_resume_required": true,
+                    "checkpoint_id": "ckpt-manual"
+                }
+            }),
+            4_000_000_000,
+        ),
+        PausedCheckpointRecoveryStatus::ManualResumeRequired {
+            state: "needs_user".to_string(),
+            checkpoint_id: "ckpt-manual".to_string(),
+        }
+    );
+    assert_eq!(
+        paused_checkpoint_recovery_status(
             &json!({"task_lifecycle": {"state": "waiting", "next_check_after": 200}}),
             100,
         ),
@@ -142,6 +158,35 @@ fn paused_checkpoint_recovery_status_classifies_machine_checkpoint_states() {
             resume_due: true,
             resume_wait_seconds: 0,
         }
+    );
+}
+
+#[test]
+fn manual_resume_hold_never_becomes_due_from_wall_clock() {
+    let result = json!({
+        "task_lifecycle": {
+            "state": "needs_user",
+            "resume_reason": "user_pause_requested",
+            "resume_policy": "manual",
+            "manual_resume_required": true,
+            "checkpoint_id": "ckpt-manual"
+        },
+        "task_checkpoint": checkpoint_value_with_entrypoint(
+            "ckpt-manual",
+            "next_planner_round",
+            None
+        )
+    });
+    assert_eq!(
+        paused_checkpoint_resume_readiness(&result, i64::MAX),
+        PausedCheckpointResumeReadiness::ManualResumeRequired {
+            state: "needs_user".to_string(),
+            checkpoint_id: "ckpt-manual".to_string(),
+        }
+    );
+    assert_eq!(
+        checkpoint_resume_directive(&result, i64::MAX).status_code(),
+        "manual_resume_required"
     );
 }
 
@@ -1145,4 +1190,38 @@ fn task_query_lifecycle_exposes_poll_and_cancel_machine_flags_by_state() {
     assert_eq!(cancelled["can_poll"], true);
     assert_eq!(cancelled["can_cancel"], false);
     assert_eq!(cancelled["recommended_user_action_kind"], "inspect_result");
+}
+
+#[test]
+fn canceled_task_stays_nonterminal_until_cleanup_settles() {
+    let result = json!({
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": "cancel_requested",
+            "cleanup_state": "requested",
+            "can_poll": true,
+            "can_cancel": false
+        }
+    });
+
+    assert!(cancellation_settlement_pending("canceled", Some(&result)));
+    let lifecycle = task_query_lifecycle_projection("canceled", Some(&result), Some(456));
+    assert_eq!(lifecycle["state"], "cancel_requested");
+    assert_eq!(lifecycle["execution_state"], "waiting");
+    assert_eq!(lifecycle["can_cancel"], false);
+    assert_eq!(
+        lifecycle["recommended_user_action_kind"],
+        "poll_task_status"
+    );
+
+    let settled = json!({
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": "cancelled",
+            "cleanup_state": "settled",
+            "can_poll": true,
+            "can_cancel": false
+        }
+    });
+    assert!(!cancellation_settlement_pending("canceled", Some(&settled)));
 }

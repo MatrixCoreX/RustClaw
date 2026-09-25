@@ -97,6 +97,34 @@ fn observe_only_query_builds_fresh_ephemeral_index_without_workspace_writes() {
     assert!(!repo.path.join(".agent-runtime").exists());
 }
 
+#[cfg(unix)]
+#[test]
+fn unreadable_nested_directory_does_not_abort_repository_indexing() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let repo = TempRepo::new();
+    let unreadable = repo.path.join("private-source");
+    fs::create_dir_all(&unreadable).expect("create unreadable fixture");
+    fs::write(unreadable.join("hidden.rs"), "pub fn hidden() {}\n")
+        .expect("write unreadable fixture");
+    fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o000))
+        .expect("make fixture unreadable");
+
+    let read_is_denied = fs::read_dir(&unreadable).is_err();
+    let result = execute_json(
+        &repo,
+        json!({"action": "find_definitions", "symbol": "helper"}),
+    );
+
+    fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o700))
+        .expect("restore fixture permissions");
+    assert_eq!(result["data"]["definitions"][0]["name"], "helper");
+    if read_is_denied {
+        assert_eq!(result["summary"]["skipped_files"], 1);
+        assert_eq!(result["summary"]["scan_complete"], false);
+    }
+}
+
 #[test]
 fn refresh_is_incremental_and_indexes_rust_symbols_references_and_tests() {
     let repo = TempRepo::new();

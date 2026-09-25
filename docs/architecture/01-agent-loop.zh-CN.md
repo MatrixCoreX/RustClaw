@@ -12,8 +12,8 @@
 
 ```mermaid
 flowchart TD
-    A[渠道 / UI / API] --> B[POST /v1/tasks]
-    B --> C[持久化任务并返回 task_id]
+    A[渠道 / UI / API] --> B[持久化会话输入]
+    B --> C[返回 input 收据<br/>绑定活跃任务或创建一个 ask 任务]
     C --> D[Worker 认领与恢复检查]
     D --> E{任务类型}
     E -->|ask| F[物化文本、语音与附件]
@@ -38,9 +38,33 @@ flowchart TD
     R --> W[直接权限/变更检查<br/>+ 共享技能协议]
     W --> T
     Q --> S[输出合同守卫]
-    S --> T[保存结果 + 交付 + 写入 journal]
+    S --> TT{revision 与 epoch 是否仍有效}
+    TT -->|是| T[保存结果 + 交付 + 写入 journal]
+    TT -->|否| U
     V --> T
 ```
+
+普通交互客户端统一通过 `POST /v1/conversation-inputs/client-task` 提交。接收、
+任务绑定和执行是三个独立的持久事实：服务端先保存 owner-scoped 输入收据，再把它
+绑定到当前活跃任务，或原子地只创建一个前台任务。模型请求期间到达的新输入会中断
+过期请求；工具执行期间到达的输入在下一个安全执行边界被读取。Runtime 不会根据
+用户语言中的词语推断停止或修正。
+
+每次 planner 决策都会记录覆盖的 input sequence、instruction revision 与 execution
+epoch。Tool/skill 在真正派发前必须原子认领该精确版本；终态呈现使用同一版本快照，
+因此被替代模型轮次的迟到答案不能覆盖当前答案。当前任务的显式取消是独立的鉴权
+控制操作，在模型 provider 不可用时仍可执行。
+
+同一会话任务只有一个 planner owner。Runtime 不会在 mutation 占有当前 loop state 时
+并发启动第二个语义“控制 planner”。模型/只读请求可以立即中断并重规划；已经认领的
+mutation 则按其取消分类观察，并在下一个安全边界处理。无法在该边界内完成的操作必须
+使用受监督的 async-job/checkpoint 合同。这样既保持实时引导，也不会让两个 planner
+竞争派发副作用。
+
+取消分为 accepted、stop requested、adapter acknowledged 和 settled 阶段。子任务与
+进程组会接收同一机器请求，但已登记 runtime 的 cleanup 真正结算前，终态 cancelled
+呈现会被栅栏阻止。迟到或结果未知的 mutation 会写入 reconciliation ledger，不能恢复
+已经被替代的旧计划。
 
 优先使用 `call_capability`，让 planner 选择稳定能力，再由 resolver 映射到当前 tool 或 skill。`PlanVerifier` 只校验机器合同与策略，不承担第二层语义路由。每个成功的 `CapabilityResultEnvelope` 都会经过有界压缩与脱敏，作为一条通用机器 observation 返回下一轮 planner。领域专用投影可以压缩常用证据，但只是可选优化，不能成为保留 provider、artifact、异步任务或其他结构化结果字段的唯一通道。可恢复错误通过结构化 `RepairEnvelope` 作为 observation 返回同一循环；`BudgetDecision` 则独立决定健康循环应该继续、建立 checkpoint、等待用户、完成还是终止。
 

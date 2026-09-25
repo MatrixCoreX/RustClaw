@@ -13,7 +13,9 @@ pub(crate) fn publish_terminal_answer(state: &AppState, task: &ClaimedTask, answ
     if complete_or_replace_provisional_answer(state, task, &content) {
         return;
     }
-    for (event_kind, payload) in terminal_answer_events(task, answer_text, TERMINAL_DELTA_MAX_BYTES)
+    let execution = presentation_execution_snapshot(state, task);
+    for (event_kind, payload) in
+        terminal_answer_events(task, answer_text, TERMINAL_DELTA_MAX_BYTES, execution)
     {
         if let Err(error) =
             crate::task_event_transport::publish_event(state, &task.task_id, event_kind, payload)
@@ -43,7 +45,13 @@ pub(crate) fn publish_provisional_answer(
         return;
     }
     let published_at_ms = epoch_ms();
-    let common = presentation_common(task, stream_id, attempt_id, "provisional_low_latency");
+    let common = presentation_common(
+        task,
+        stream_id,
+        attempt_id,
+        "provisional_low_latency",
+        presentation_execution_snapshot(state, task),
+    );
     let replay = replay_presentation_state(state, &task.task_id);
     if let Some(previous) = replay.pending_aborted {
         let replacement = with_fields(
@@ -130,6 +138,7 @@ fn terminal_answer_events(
     task: &ClaimedTask,
     answer_text: &str,
     max_delta_bytes: usize,
+    execution: Option<crate::repo::conversation_inputs::ConversationExecutionSnapshot>,
 ) -> Vec<(&'static str, Value)> {
     let content = crate::visible_text::sanitize_user_visible_text(answer_text);
     let content_sha256 = sha256_label(content.as_bytes());
@@ -138,7 +147,7 @@ fn terminal_answer_events(
     let conversation_id = presentation_conversation_id(task);
     let turn_id = presentation_turn_id(task);
     let created_at = crate::now_ts_u64();
-    let common = json!({
+    let mut common = json!({
         "schema_version": PRESENTATION_SCHEMA_VERSION,
         "task_id": task.task_id,
         "conversation_id": conversation_id,
@@ -149,6 +158,7 @@ fn terminal_answer_events(
         "publication_mode": "terminal_only",
         "fallback_reason": "terminal_safe_point",
     });
+    insert_execution_snapshot(&mut common, execution);
     let mut events = vec![(
         "assistant_output_started",
         with_fields(
@@ -236,7 +246,12 @@ fn complete_or_replace_provisional_answer(
         json!(replay.abort_count.saturating_add(1)),
     );
     publish_payload(state, &task.task_id, "assistant_output_aborted", abort);
-    let terminal_events = terminal_answer_events(task, final_content, TERMINAL_DELTA_MAX_BYTES);
+    let terminal_events = terminal_answer_events(
+        task,
+        final_content,
+        TERMINAL_DELTA_MAX_BYTES,
+        presentation_execution_snapshot(state, task),
+    );
     let new_stream_id = terminal_events
         .first()
         .and_then(|(_, payload)| payload.get("stream_id"))
@@ -286,8 +301,9 @@ fn presentation_common(
     stream_id: &str,
     attempt_id: &str,
     publication_mode: &str,
+    execution: Option<crate::repo::conversation_inputs::ConversationExecutionSnapshot>,
 ) -> Value {
-    json!({
+    let mut common = json!({
         "schema_version": PRESENTATION_SCHEMA_VERSION,
         "task_id": task.task_id,
         "conversation_id": presentation_conversation_id(task),
@@ -296,7 +312,38 @@ fn presentation_common(
         "attempt_id": attempt_id,
         "created_at": crate::now_ts_u64(),
         "publication_mode": publication_mode,
-    })
+    });
+    insert_execution_snapshot(&mut common, execution);
+    common
+}
+
+fn presentation_execution_snapshot(
+    state: &AppState,
+    task: &ClaimedTask,
+) -> Option<crate::repo::conversation_inputs::ConversationExecutionSnapshot> {
+    crate::repo::conversation_inputs::conversation_presentation_snapshot_for_task(
+        &state.core.db,
+        &task.task_id,
+    )
+    .ok()
+    .flatten()
+}
+
+fn insert_execution_snapshot(
+    common: &mut Value,
+    execution: Option<crate::repo::conversation_inputs::ConversationExecutionSnapshot>,
+) {
+    let (Some(object), Some(execution)) = (common.as_object_mut(), execution) else {
+        return;
+    };
+    object.insert(
+        "instruction_revision".to_string(),
+        json!(execution.instruction_revision),
+    );
+    object.insert(
+        "execution_epoch".to_string(),
+        json!(execution.execution_epoch),
+    );
 }
 
 fn publish_claimed_payload(
@@ -455,6 +502,8 @@ fn presentation_common_from_payload(payload: &Value) -> Value {
         "attempt_id",
         "created_at",
         "publication_mode",
+        "instruction_revision",
+        "execution_epoch",
     ] {
         if let Some(value) = payload.get(key) {
             object.insert(key.to_string(), value.clone());

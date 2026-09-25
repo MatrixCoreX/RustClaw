@@ -2,12 +2,12 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
@@ -25,17 +25,17 @@ fn pty_chat_completes_coding_thread_with_background_resume_and_review() {
             .expect("clock")
             .as_nanos()
     ));
-    let transcript_path = session_store.with_extension("transcript");
     let base_url = format!("http://{address}");
-    let transcript = transcript_path.to_str().expect("transcript path");
-    let mut pty_command = Command::new("script");
-    #[cfg(target_os = "macos")]
-    pty_command.args([
-        "-q",
-        "-t",
-        "0",
-        transcript,
-        env!("CARGO_BIN_EXE_clawcli"),
+    let pair = native_pty_system()
+        .openpty(PtySize {
+            rows: 40,
+            cols: 120,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .expect("open PTY");
+    let mut command = CommandBuilder::new(env!("CARGO_BIN_EXE_clawcli"));
+    command.args([
         "--base-url",
         &base_url,
         "--key",
@@ -43,43 +43,44 @@ fn pty_chat_completes_coding_thread_with_background_resume_and_review() {
         "chat",
         "--new",
     ]);
-    #[cfg(not(target_os = "macos"))]
-    pty_command.args([
-        "-qefc",
-        &format!(
-            "{} --base-url {} --key test-key chat --new",
-            env!("CARGO_BIN_EXE_clawcli"),
-            base_url
-        ),
-        transcript,
-    ]);
-    let mut child = pty_command
-        .env("APP_CLAWCLI_SESSION_STORE", &session_store)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn PTY chat");
-    let mut stdin = child.stdin.take().expect("PTY stdin");
-    wait_for_pty_prompt(&transcript_path, 1);
-    let turns = [
-        "inspect workspace",
-        "/approve-scope",
-        "update one file",
-        "run focused tests",
-        "/continue",
-        "correct the failing test",
-        "review the diff",
-        "finish with verification",
-        "/exit",
-    ];
-    for (index, line) in turns.into_iter().enumerate() {
-        writeln!(stdin, "{line}").expect("write PTY turn");
-        stdin.flush().expect("flush PTY turn");
-        if line != "/exit" {
-            wait_for_pty_prompt(&transcript_path, index + 2);
+    command.env("APP_CLAWCLI_SESSION_STORE", &session_store);
+    command.cwd(std::env::current_dir().expect("current directory"));
+    let mut child = pair.slave.spawn_command(command).expect("spawn PTY chat");
+    drop(pair.slave);
+    let mut stdin = pair.master.take_writer().expect("PTY writer");
+    let mut reader = pair.master.try_clone_reader().expect("PTY reader");
+    let transcript = Arc::new(Mutex::new(Vec::new()));
+    let reader_transcript = Arc::clone(&transcript);
+    let reader_thread = thread::spawn(move || {
+        let mut buffer = [0_u8; 4096];
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(count) => reader_transcript
+                    .lock()
+                    .expect("transcript lock")
+                    .extend_from_slice(&buffer[..count]),
+                Err(_) => break,
+            }
         }
+    });
+    wait_for_pty_prompt(&transcript, 1);
+    let turns = [
+        ("inspect workspace", "needs_confirmation"),
+        ("/approve-scope", "turn-1-complete"),
+        ("update one file", "turn-2-complete"),
+        ("run focused tests", "checkpoint-coding-3"),
+        ("/continue", "turn-3-complete"),
+        ("correct the failing test", "turn-4-complete"),
+        ("review the diff", "turn-5-complete"),
+        ("finish with verification", "turn-6-complete"),
+    ];
+    for (index, (line, expected_output)) in turns.into_iter().enumerate() {
+        write_pty_line(&mut stdin, line);
+        wait_for_pty_text(&transcript, expected_output);
+        wait_for_pty_prompt(&transcript, index + 2);
     }
+    write_pty_line(&mut stdin, "/exit");
     drop(stdin);
 
     let deadline = Instant::now() + Duration::from_secs(15);
@@ -90,24 +91,18 @@ fn pty_chat_completes_coding_thread_with_background_resume_and_review() {
         if Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
-            let transcript = std::fs::read_to_string(&transcript_path).unwrap_or_default();
+            let transcript =
+                String::from_utf8_lossy(&transcript.lock().expect("transcript lock")).to_string();
             panic!("PTY chat did not finish: {transcript}");
         }
         thread::sleep(Duration::from_millis(50));
     };
-    let stdout = std::fs::read_to_string(&transcript_path).expect("read PTY transcript");
-    let mut stderr = String::new();
-    child
-        .stderr
-        .take()
-        .expect("PTY stderr")
-        .read_to_string(&mut stderr)
-        .expect("read PTY stderr");
+    reader_thread.join().expect("join PTY reader");
+    let stdout = String::from_utf8_lossy(&transcript.lock().expect("transcript lock")).to_string();
     server.join().expect("mock clawd");
     let _ = std::fs::remove_file(session_store);
-    let _ = std::fs::remove_file(transcript_path);
 
-    assert!(status.success(), "stdout={stdout}\nstderr={stderr}");
+    assert!(status.success(), "stdout={stdout}");
     for task_id in ["task-1", "task-2", "task-3", "task-4", "task-5", "task-6"] {
         assert!(stdout.contains(&format!("task_id={task_id}")), "{stdout}");
     }
@@ -117,16 +112,43 @@ fn pty_chat_completes_coding_thread_with_background_resume_and_review() {
     assert_eq!(stdout.matches("turn-6-complete").count(), 1, "{stdout}");
 }
 
-fn wait_for_pty_prompt(transcript_path: &Path, minimum_count: usize) {
+fn write_pty_line(writer: &mut dyn Write, line: &str) {
+    for byte in line.as_bytes() {
+        writer.write_all(&[*byte]).expect("write PTY key");
+        writer.flush().expect("flush PTY key");
+        thread::sleep(Duration::from_millis(2));
+    }
+    writer.write_all(b"\r").expect("write PTY enter");
+    writer.flush().expect("flush PTY enter");
+}
+
+fn wait_for_pty_text(transcript: &Arc<Mutex<Vec<u8>>>, expected: &str) {
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
-        let transcript = std::fs::read_to_string(transcript_path).unwrap_or_default();
-        if transcript.matches("> ").count() >= minimum_count {
+        let snapshot =
+            String::from_utf8_lossy(&transcript.lock().expect("transcript lock")).to_string();
+        if snapshot.contains(expected) {
             return;
         }
         assert!(
             Instant::now() < deadline,
-            "PTY prompt {minimum_count} did not appear: {transcript}"
+            "PTY output {expected:?} did not appear: {snapshot}"
+        );
+        thread::sleep(Duration::from_millis(25));
+    }
+}
+
+fn wait_for_pty_prompt(transcript: &Arc<Mutex<Vec<u8>>>, minimum_count: usize) {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let snapshot =
+            String::from_utf8_lossy(&transcript.lock().expect("transcript lock")).to_string();
+        if snapshot.matches("\u{1b}[?2026l").count() >= minimum_count {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "PTY prompt {minimum_count} did not become ready: {snapshot}"
         );
         thread::sleep(Duration::from_millis(25));
     }
@@ -236,8 +258,11 @@ fn non_tty_plain_chat_exposes_content_before_terminal_and_does_not_repeat_it() {
     let (allow_terminal_tx, allow_terminal_rx) = mpsc::channel();
     let server = thread::spawn(move || {
         let submit = accept_request(&listener);
-        assert_eq!(submit.path, "/v1/tasks");
-        respond_json(submit.stream, &task_submit_response("task-stream"));
+        assert_conversation_task_submit(&submit);
+        respond_json(
+            submit.stream,
+            &conversation_task_submit_response("task-stream"),
+        );
 
         let request = accept_request(&listener);
         assert_eq!(request.path, "/v1/tasks/task-stream/events?cursor=0");
@@ -327,8 +352,11 @@ fn non_tty_jsonl_chat_is_a_closed_one_object_per_line_contract() {
     let address = listener.local_addr().expect("mock address");
     let server = thread::spawn(move || {
         let submit = accept_request(&listener);
-        assert_eq!(submit.path, "/v1/tasks");
-        respond_json(submit.stream, &task_submit_response("task-jsonl"));
+        assert_conversation_task_submit(&submit);
+        respond_json(
+            submit.stream,
+            &conversation_task_submit_response("task-jsonl"),
+        );
 
         let stream = accept_request(&listener);
         assert_eq!(stream.path, "/v1/tasks/task-jsonl/events?cursor=0");
@@ -367,7 +395,7 @@ fn non_tty_jsonl_chat_is_a_closed_one_object_per_line_contract() {
     assert!(output.status.success(), "{stdout}");
     assert_eq!(records.first().unwrap()["record_type"], "chat_session");
     assert!(records.iter().any(|value| {
-        value["record_type"] == "task_submitted" && value["task_id"] == "task-jsonl"
+        value["record_type"] == "conversation_input_accepted" && value["task_id"] == "task-jsonl"
     }));
     assert!(records
         .iter()
@@ -386,12 +414,15 @@ fn conversation_and_attachments_survive_process_restart_then_clear_after_submit(
     let address = listener.local_addr().expect("mock address");
     let server = thread::spawn(move || {
         let submit = accept_request(&listener);
-        assert_eq!(submit.path, "/v1/tasks");
+        assert_conversation_task_submit(&submit);
         let body = parse_json_body(&submit);
-        assert_eq!(body["payload"]["conversation_id"], "conversation-golden");
-        assert_eq!(body["payload"]["session_id"], "conversation-golden");
-        assert_eq!(body["payload"]["text"], "use persisted context");
-        let attachments = body["payload"]["attachments"]
+        assert_eq!(
+            body["task"]["payload"]["conversation_id"],
+            "conversation-golden"
+        );
+        assert_eq!(body["task"]["payload"]["session_id"], "conversation-golden");
+        assert_eq!(body["task"]["payload"]["text"], "use persisted context");
+        let attachments = body["task"]["payload"]["attachments"]
             .as_array()
             .expect("persisted attachments");
         assert_eq!(attachments.len(), 2);
@@ -400,7 +431,10 @@ fn conversation_and_attachments_survive_process_restart_then_clear_after_submit(
         assert!(attachments
             .iter()
             .all(|value| value["sha256"].as_str().is_some()));
-        respond_json(submit.stream, &task_submit_response("task-restart"));
+        respond_json(
+            submit.stream,
+            &conversation_task_submit_response("task-restart"),
+        );
 
         let stream = accept_request(&listener);
         assert_eq!(stream.path, "/v1/tasks/task-restart/events?cursor=0");
@@ -692,12 +726,17 @@ fn assert_jsonl_capability_output(output: &std::process::Output, capability: &st
 
 fn run_mock_clawd(listener: TcpListener) {
     let first_submit = accept_request(&listener);
-    assert_eq!(first_submit.path, "/v1/tasks");
+    assert_conversation_task_submit(&first_submit);
     let first_payload = parse_json_body(&first_submit);
-    let thread_id = json_string(&first_payload, "/payload/thread_id");
-    let session_id = json_string(&first_payload, "/payload/session_id");
-    assert!(first_payload.pointer("/payload/resume_task_id").is_none());
-    respond_json(first_submit.stream, &task_submit_response("task-1"));
+    let thread_id = json_string(&first_payload, "/task/payload/thread_id");
+    let session_id = json_string(&first_payload, "/task/payload/session_id");
+    assert!(first_payload
+        .pointer("/task/payload/resume_task_id")
+        .is_none());
+    respond_json(
+        first_submit.stream,
+        &conversation_task_submit_response("task-1"),
+    );
 
     let first_stream = accept_request(&listener);
     assert_eq!(first_stream.path, "/v1/tasks/task-1/events?cursor=0");
@@ -793,16 +832,19 @@ fn run_mock_clawd(listener: TcpListener) {
 
     for turn in 2..=2 {
         let submit = accept_request(&listener);
-        assert_eq!(submit.path, "/v1/tasks");
+        assert_conversation_task_submit(&submit);
         let payload = parse_json_body(&submit);
-        assert_eq!(json_string(&payload, "/payload/thread_id"), thread_id);
-        assert_eq!(json_string(&payload, "/payload/session_id"), session_id);
+        assert_eq!(json_string(&payload, "/task/payload/thread_id"), thread_id);
         assert_eq!(
-            json_string(&payload, "/payload/resume_task_id"),
+            json_string(&payload, "/task/payload/session_id"),
+            session_id
+        );
+        assert_eq!(
+            json_string(&payload, "/task/payload/resume_task_id"),
             format!("task-{}", turn - 1)
         );
         let task_id = format!("task-{turn}");
-        respond_json(submit.stream, &task_submit_response(&task_id));
+        respond_json(submit.stream, &conversation_task_submit_response(&task_id));
 
         let stream = accept_request(&listener);
         assert_eq!(stream.path, format!("/v1/tasks/{task_id}/events?cursor=0"));
@@ -826,25 +868,28 @@ fn run_mock_clawd(listener: TcpListener) {
     }
 
     let background_submit = accept_request(&listener);
-    assert_eq!(background_submit.path, "/v1/tasks");
+    assert_conversation_task_submit(&background_submit);
     let background_payload = parse_json_body(&background_submit);
     assert_eq!(
-        json_string(&background_payload, "/payload/thread_id"),
+        json_string(&background_payload, "/task/payload/thread_id"),
         thread_id
     );
     assert_eq!(
-        json_string(&background_payload, "/payload/session_id"),
+        json_string(&background_payload, "/task/payload/session_id"),
         session_id
     );
     assert_eq!(
-        json_string(&background_payload, "/payload/resume_task_id"),
+        json_string(&background_payload, "/task/payload/resume_task_id"),
         "task-2"
     );
     assert_eq!(
-        json_string(&background_payload, "/payload/text"),
+        json_string(&background_payload, "/task/payload/text"),
         "run focused tests"
     );
-    respond_json(background_submit.stream, &task_submit_response("task-3"));
+    respond_json(
+        background_submit.stream,
+        &conversation_task_submit_response("task-3"),
+    );
 
     let background_stream = accept_request(&listener);
     assert_eq!(background_stream.path, "/v1/tasks/task-3/events?cursor=0");
@@ -917,20 +962,23 @@ fn run_mock_clawd(listener: TcpListener) {
     ];
     for turn in 4..=6 {
         let submit = accept_request(&listener);
-        assert_eq!(submit.path, "/v1/tasks");
+        assert_conversation_task_submit(&submit);
         let payload = parse_json_body(&submit);
-        assert_eq!(json_string(&payload, "/payload/thread_id"), thread_id);
-        assert_eq!(json_string(&payload, "/payload/session_id"), session_id);
+        assert_eq!(json_string(&payload, "/task/payload/thread_id"), thread_id);
         assert_eq!(
-            json_string(&payload, "/payload/resume_task_id"),
+            json_string(&payload, "/task/payload/session_id"),
+            session_id
+        );
+        assert_eq!(
+            json_string(&payload, "/task/payload/resume_task_id"),
             format!("task-{}", turn - 1)
         );
         assert_eq!(
-            json_string(&payload, "/payload/text"),
+            json_string(&payload, "/task/payload/text"),
             expected_prompts[turn - 4]
         );
         let task_id = format!("task-{turn}");
-        respond_json(submit.stream, &task_submit_response(&task_id));
+        respond_json(submit.stream, &conversation_task_submit_response(&task_id));
 
         let stream = accept_request(&listener);
         assert_eq!(stream.path, format!("/v1/tasks/{task_id}/events?cursor=0"));
@@ -1023,6 +1071,45 @@ fn json_string(value: &Value, pointer: &str) -> String {
 
 fn task_submit_response(task_id: &str) -> Value {
     json!({"ok": true, "data": {"task_id": task_id}})
+}
+
+fn assert_conversation_task_submit(request: &MockRequest) {
+    assert_eq!(request.path, "/v1/conversation-inputs/client-task");
+    let body = parse_json_body(request);
+    assert_eq!(body["input"]["schema_version"], 1);
+    assert_eq!(body["input"]["scope"]["channel"], "ui");
+    assert_eq!(body["task"]["kind"], "ask");
+}
+
+fn conversation_task_submit_response(task_id: &str) -> Value {
+    json!({
+        "ok": true,
+        "data": {
+            "schema_version": 1,
+            "input": {
+                "schema_version": 1,
+                "input_id": "00000000-0000-0000-0000-000000000001",
+                "client_message_id": "cli:test-message",
+                "input_seq": 1,
+                "scope": {
+                    "conversation_id": "conversation-test",
+                    "agent_id": "main",
+                    "channel": "ui",
+                    "channel_account_id": "session-test"
+                },
+                "preparation_state": "ready",
+                "disposition": "pending",
+                "target_task_id": task_id,
+                "decision_ref": null,
+                "instruction_revision": 1,
+                "execution_epoch": 1,
+                "accepted_at_ts": 1,
+                "updated_at_ts": 1,
+                "replayed": false
+            },
+            "handoff_state": "task_created"
+        }
+    })
 }
 
 fn task_status_response(

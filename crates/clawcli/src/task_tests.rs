@@ -1,8 +1,210 @@
 use super::{
     async_final_result_value, auto_review_payload, capability_task_payload, exec_ask_payload,
-    result_text_from_result_json, resume_task_payload, submit_ask, threaded_ask_payload,
-    TaskResumeRequest, TaskStatusView, TaskSubmissionOptions, ThreadAskContext,
+    result_text_from_result_json, resume_task_payload, submit_ask, submit_thread_ask,
+    threaded_ask_payload, TaskResumeRequest, TaskStatusView, TaskSubmissionOptions,
+    ThreadAskContext,
 };
+
+fn read_http_request(stream: &mut std::net::TcpStream) -> (String, Vec<u8>) {
+    use std::io::Read;
+
+    let mut bytes = Vec::new();
+    let mut buffer = [0_u8; 4096];
+    let header_end = loop {
+        let count = stream.read(&mut buffer).expect("read request");
+        assert!(count > 0, "request closed before headers");
+        bytes.extend_from_slice(&buffer[..count]);
+        if let Some(index) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
+            break index + 4;
+        }
+    };
+    let headers = String::from_utf8(bytes[..header_end].to_vec()).expect("utf8 headers");
+    let content_length = headers
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("content-length")
+                .then(|| value.trim().parse::<usize>().expect("content length"))
+        })
+        .unwrap_or(0);
+    while bytes.len() < header_end + content_length {
+        let count = stream.read(&mut buffer).expect("read request body");
+        assert!(count > 0, "request closed before body");
+        bytes.extend_from_slice(&buffer[..count]);
+    }
+    (
+        headers,
+        bytes[header_end..header_end + content_length].to_vec(),
+    )
+}
+
+#[test]
+fn interactive_chat_input_posts_the_atomic_client_task_contract() {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::time::Duration;
+
+    let task_id = "00000000-0000-4000-8000-000000000001";
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind capture server");
+    let address = listener.local_addr().expect("capture address");
+    let capture = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept request");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("set read timeout");
+        let mut bytes = Vec::new();
+        let mut buffer = [0_u8; 4096];
+        let header_end = loop {
+            let count = stream.read(&mut buffer).expect("read request");
+            assert!(count > 0, "request closed before headers");
+            bytes.extend_from_slice(&buffer[..count]);
+            if let Some(index) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
+                break index + 4;
+            }
+        };
+        let headers = String::from_utf8(bytes[..header_end].to_vec()).expect("utf8 headers");
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length")
+                    .then(|| value.trim().parse::<usize>().expect("content length"))
+            })
+            .expect("content-length header");
+        while bytes.len() < header_end + content_length {
+            let count = stream.read(&mut buffer).expect("read request body");
+            assert!(count > 0, "request closed before body");
+            bytes.extend_from_slice(&buffer[..count]);
+        }
+        let body = r#"{"ok":true,"data":{"schema_version":1,"input":{"schema_version":1,"input_id":"10000000-0000-4000-8000-000000000001","client_message_id":"cli:conversation-1:any","input_seq":2,"scope":{"conversation_id":"conversation-1","agent_id":"main","channel":"ui","channel_account_id":"session-1"},"preparation_state":"ready","disposition":"pending","target_task_id":"00000000-0000-4000-8000-000000000001","decision_ref":null,"instruction_revision":2,"execution_epoch":3,"accepted_at_ts":1,"updated_at_ts":1,"replayed":false},"handoff_state":"bound_existing_task"},"error":null}"#;
+        write!(
+            stream,
+            "HTTP/1.1 202 Accepted\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        )
+        .expect("write response");
+        (
+            headers,
+            bytes[header_end..header_end + content_length].to_vec(),
+        )
+    });
+
+    let attachments = Vec::new();
+    let receipt = submit_thread_ask(
+        &format!("http://{address}"),
+        "rk-test",
+        "continue with the corrected constraint",
+        ThreadAskContext {
+            conversation_id: "conversation-1",
+            session_id: "session-1",
+            resume_task_id: Some(task_id),
+            model_override: None,
+            compacted_context_ref: None,
+            goal_ref: None,
+            rewind_anchor: None,
+            completed_side_effect_refs: &[],
+            attachments: &attachments,
+        },
+        TaskSubmissionOptions {
+            yolo: false,
+            permission_mode: Some(crate::chat_session::PermissionMode::Ask),
+        },
+    )
+    .expect("submit interactive conversation input");
+    let (headers, body) = capture.join().expect("join capture server");
+    let request: serde_json::Value = serde_json::from_slice(&body).expect("request JSON");
+    let lower_headers = headers.to_ascii_lowercase();
+
+    assert!(headers.starts_with("POST /v1/conversation-inputs/client-task HTTP/1.1"));
+    assert!(lower_headers.contains("x-agent-client: clawcli"));
+    assert!(lower_headers.contains("x-agent-execution-mode: ask"));
+    assert_eq!(
+        request["input"]["scope"]["conversation_id"],
+        "conversation-1"
+    );
+    assert_eq!(request["input"]["scope"]["channel_account_id"], "session-1");
+    assert_eq!(
+        request["input"]["content"][0]["text"],
+        "continue with the corrected constraint"
+    );
+    assert!(request["input"]["client_message_id"]
+        .as_str()
+        .is_some_and(|value| value.starts_with("cli:conversation-1:")));
+    assert_eq!(request["task"]["payload"]["resume_task_id"], task_id);
+    assert_eq!(receipt.task_id, task_id);
+    assert_eq!(receipt.instruction_revision, 2);
+    assert_eq!(receipt.execution_epoch, 3);
+    assert_eq!(
+        receipt.handoff_state.as_deref(),
+        Some("bound_existing_task")
+    );
+}
+
+#[test]
+fn interactive_chat_input_retries_a_lost_response_with_the_same_message_id() {
+    use std::io::Write;
+    use std::net::TcpListener;
+    use std::time::Duration;
+
+    let task_id = "00000000-0000-4000-8000-000000000001";
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind capture server");
+    let address = listener.local_addr().expect("capture address");
+    let capture = std::thread::spawn(move || {
+        let (mut first, _) = listener.accept().expect("accept first request");
+        first
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("set first timeout");
+        let (_, first_body) = read_http_request(&mut first);
+        drop(first);
+
+        let (mut second, _) = listener.accept().expect("accept retry request");
+        second
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("set retry timeout");
+        let (_, second_body) = read_http_request(&mut second);
+        let body = r#"{"ok":true,"data":{"schema_version":1,"input":{"schema_version":1,"input_id":"10000000-0000-4000-8000-000000000001","client_message_id":"cli:conversation-1:any","input_seq":2,"scope":{"conversation_id":"conversation-1","agent_id":"main","channel":"ui","channel_account_id":"session-1"},"preparation_state":"ready","disposition":"pending","target_task_id":"00000000-0000-4000-8000-000000000001","decision_ref":null,"instruction_revision":2,"execution_epoch":3,"accepted_at_ts":1,"updated_at_ts":1,"replayed":true},"handoff_state":"bound_existing_task"},"error":null}"#;
+        write!(
+            second,
+            "HTTP/1.1 202 Accepted\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        )
+        .expect("write retry response");
+        (first_body, second_body)
+    });
+
+    let attachments = Vec::new();
+    let receipt = submit_thread_ask(
+        &format!("http://{address}"),
+        "rk-test",
+        "apply this once",
+        ThreadAskContext {
+            conversation_id: "conversation-1",
+            session_id: "session-1",
+            resume_task_id: Some(task_id),
+            model_override: None,
+            compacted_context_ref: None,
+            goal_ref: None,
+            rewind_anchor: None,
+            completed_side_effect_refs: &[],
+            attachments: &attachments,
+        },
+        TaskSubmissionOptions::default(),
+    )
+    .expect("retry interactive conversation input");
+    let (first_body, second_body) = capture.join().expect("join capture server");
+    let first: serde_json::Value = serde_json::from_slice(&first_body).expect("first request JSON");
+    let second: serde_json::Value =
+        serde_json::from_slice(&second_body).expect("second request JSON");
+
+    assert_eq!(
+        first["input"]["client_message_id"],
+        second["input"]["client_message_id"]
+    );
+    assert_eq!(first, second);
+    assert_eq!(receipt.input_id, "10000000-0000-4000-8000-000000000001");
+}
 
 #[test]
 fn one_shot_review_uses_a_machine_entrypoint_and_never_enables_blocking() {

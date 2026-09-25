@@ -556,16 +556,22 @@ fn build_active_execution_anchor_context(
 
 fn build_session_alias_context(
     session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+    current_request: &str,
 ) -> String {
     let Some(conversation_state) = session_snapshot.conversation_state.as_ref() else {
         return "<none>".to_string();
     };
-    if conversation_state.alias_bindings.is_empty() {
+    let mentioned_bindings = crate::conversation_state::alias_bindings_mentioned_in_prompt(
+        &conversation_state.alias_bindings,
+        current_request,
+    );
+    if mentioned_bindings.is_empty() {
         return "<none>".to_string();
     }
 
     let mut lines = vec!["### SESSION_ALIAS_BINDINGS".to_string()];
-    for binding in conversation_state.alias_bindings.iter().rev().take(8).rev() {
+    let start = mentioned_bindings.len().saturating_sub(8);
+    for binding in mentioned_bindings.into_iter().skip(start) {
         lines.push(format!(
             "- alias: {}\n  target: {}",
             truncate_context_snippet(&binding.alias, 80),
@@ -670,7 +676,7 @@ pub(crate) fn build_agent_loop_task_context_bundle(
             &session_snapshot,
             &task.task_id,
         ),
-        session_alias_context: build_session_alias_context(&session_snapshot),
+        session_alias_context: build_session_alias_context(&session_snapshot, planner_user_request),
         recent_turns_full,
         last_turn_full: memory::build_last_turn_full_context(
             state,

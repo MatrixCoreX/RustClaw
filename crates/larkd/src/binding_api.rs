@@ -82,6 +82,7 @@ pub(super) async fn store_pending_lark_request(
         ChannelKind::Lark,
         open_platform_contract(OpenPlatformRegion::Lark).source_adapter,
     )
+    .with_account_id(state.config.lark.app_id.clone())
     .with_external_ids(open_id.to_string(), chat_id.to_string())
     .with_message_id(message_id.to_string())
     .with_reply_target(claw_core::channel_ingress::ChannelReplyTarget::chat(

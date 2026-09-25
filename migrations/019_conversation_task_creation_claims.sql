@@ -1,0 +1,5 @@
+-- Migration id: 019_conversation_task_creation_claims_v1
+--
+-- Adds a short durable lease that serializes foreground task creation for one
+-- authenticated conversation scope. The lease is not a task or planner lease;
+-- it exists only across input acceptance, task submission, and task binding.

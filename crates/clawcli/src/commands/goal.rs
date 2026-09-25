@@ -71,7 +71,7 @@ pub(crate) fn run_goal_pause(
     base_url: &str,
     key: &str,
     task_id: &str,
-    pause_seconds: u64,
+    pause_seconds: Option<u64>,
 ) -> Result<()> {
     let body = task::pause_task_by_id(base_url, key, task_id, pause_seconds)?;
     output::print_json_pretty(&goal_control_summary_json("goal_pause", task_id, &body));

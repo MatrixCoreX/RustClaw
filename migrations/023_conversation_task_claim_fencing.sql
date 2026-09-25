@@ -1,0 +1,5 @@
+-- Migration id: 023_conversation_task_claim_fencing_v1
+--
+-- Adds a unique fencing token to each conversation task-creation lease. A
+-- creator that resumes after its lease was replaced cannot bind or release the
+-- replacement creator's task.

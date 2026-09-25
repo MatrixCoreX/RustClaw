@@ -35,6 +35,18 @@ fn checkpoint_action_round_trips_exact_private_args_and_contract() {
         },
         {"type": "synthesize_answer", "evidence_refs": []}
     ]);
+    let execution_binding = serde_json::json!({
+        "schema_version": 1,
+        "skill_name": "run_cmd",
+        "registry_generation": 7,
+    });
+    let approval_binding = serde_json::json!({
+        "schema_version": 1,
+        "action_fingerprint": "sha256:action",
+        "arguments_hash": "sha256:args",
+        "action_count": 1,
+        "targets": ["run_cmd"],
+    });
 
     upsert_task_checkpoint_action(
         &pool,
@@ -45,6 +57,10 @@ fn checkpoint_action_round_trips_exact_private_args_and_contract() {
         &args,
         Some(&contract),
         Some(&continuation_actions),
+        Some(&execution_binding),
+        Some(&approval_binding),
+        4,
+        6,
     )
     .expect("store action");
 
@@ -61,6 +77,10 @@ fn checkpoint_action_round_trips_exact_private_args_and_contract() {
         stored.continuation_actions.as_ref(),
         Some(&continuation_actions)
     );
+    assert_eq!(stored.execution_binding.as_ref(), Some(&execution_binding));
+    assert_eq!(stored.approval_binding.as_ref(), Some(&approval_binding));
+    assert_eq!(stored.instruction_revision, 4);
+    assert_eq!(stored.execution_epoch, 6);
     assert!(
         load_task_checkpoint_action(&pool, "task-1", "other-checkpoint")
             .expect("load other checkpoint")
@@ -82,6 +102,19 @@ fn checkpoint_action_rejects_integrity_mismatch() {
         Some(&serde_json::json!([
             {"type": "synthesize_answer", "evidence_refs": []}
         ])),
+        Some(&serde_json::json!({
+            "schema_version": 1,
+            "skill_name": "run_cmd",
+        })),
+        Some(&serde_json::json!({
+            "schema_version": 1,
+            "action_fingerprint": "sha256:action",
+            "arguments_hash": "sha256:args",
+            "action_count": 1,
+            "targets": ["run_cmd"],
+        })),
+        1,
+        2,
     )
     .expect("store action");
     pool.get()

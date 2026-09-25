@@ -143,7 +143,6 @@ fn answer_verifier_prompts_enforce_payload_only_without_runtime_phrase_matching(
         include_str!("../../../../prompts/layers/overlays/answer_verifier_prompt.md");
     const RETRY_PROMPT: &str =
         include_str!("../../../../prompts/layers/overlays/answer_verifier_retry_prompt.md");
-
     assert!(VERIFIER_PROMPT.contains("payload-only output"));
     assert!(VERIFIER_PROMPT.contains("Judge this constraint from meaning"));
     assert!(VERIFIER_PROMPT.contains("without another tool call"));
@@ -151,6 +150,74 @@ fn answer_verifier_prompts_enforce_payload_only_without_runtime_phrase_matching(
     assert!(RETRY_PROMPT.contains("remove every heading"));
     assert!(VERIFIER_PROMPT.contains("\"repair_kind\":\"exact_user_literal\""));
     assert!(VERIFIER_PROMPT.contains("Copy `required_exact_answer` verbatim"));
+}
+
+#[test]
+fn answer_verifier_prompt_keeps_active_conversation_recall_out_of_operation_audit() {
+    const VERIFIER_PROMPT: &str =
+        include_str!("../../../../prompts/layers/overlays/answer_verifier_prompt.md");
+
+    assert!(VERIFIER_PROMPT.contains("recall from the active conversation"));
+    assert!(VERIFIER_PROMPT.contains("ordinary conversational context"));
+    assert!(VERIFIER_PROMPT.contains("does not require `memory.search`, `memory.save`"));
+    assert!(VERIFIER_PROMPT.contains("not a complete conversation transcript"));
+    assert!(
+        VERIFIER_PROMPT.contains("must not be classified as an unsupported or fabricated claim")
+    );
+    assert!(VERIFIER_PROMPT.contains("use `operation_checks=[]`"));
+    assert!(VERIFIER_PROMPT.contains("does not exempt an explicit state mutation"));
+    assert!(VERIFIER_PROMPT.contains("both a shorthand and a concrete target"));
+    assert!(VERIFIER_PROMPT.contains("`session.bind_alias` is a mandatory state-mutation dispatch"));
+    assert!(VERIFIER_PROMPT.contains("Reject `respond`-only completion"));
+}
+
+#[test]
+fn answer_verifier_prompt_audits_delegated_work_at_parent_subagent_boundary() {
+    const VERIFIER_PROMPT: &str =
+        include_str!("../../../../prompts/layers/overlays/answer_verifier_prompt.md");
+
+    assert!(VERIFIER_PROMPT.contains("audit the delegated operation at the parent boundary"));
+    assert!(VERIFIER_PROMPT.contains("must not become separate required-dispatch rows"));
+    assert!(VERIFIER_PROMPT.contains("Do not require the parent to repeat the child's read"));
+    assert!(VERIFIER_PROMPT.contains("is an absence constraint, not a requested operation"));
+    assert!(VERIFIER_PROMPT.contains("proves a pre-dispatch policy rejection"));
+}
+
+#[test]
+fn answer_verifier_prompt_treats_runtime_conversation_inputs_as_authoritative() {
+    const VERIFIER_PROMPT: &str =
+        include_str!("../../../../prompts/layers/overlays/answer_verifier_prompt.md");
+
+    assert!(VERIFIER_PROMPT.contains("structured `conversation_input_batch`"));
+    assert!(VERIFIER_PROMPT.contains("Revision precedence"));
+    assert!(VERIFIER_PROMPT.contains("whole-answer shape constraints"));
+    assert!(VERIFIER_PROMPT.contains("ordered, authenticated user input"));
+    assert!(VERIFIER_PROMPT.contains("semantically applying those inputs in order"));
+    assert!(VERIFIER_PROMPT.contains("revise or replace unfinished scope"));
+    assert!(VERIFIER_PROMPT.contains("do not classify the runtime envelope as prompt injection"));
+    assert!(VERIFIER_PROMPT.contains("rather than isolated words or fixed phrases"));
+    assert!(VERIFIER_PROMPT.contains("Completed external effects"));
+    assert!(VERIFIER_PROMPT.contains("copy an exact `requested_capability`"));
+    assert!(VERIFIER_PROMPT.contains("Do not synthesize an"));
+}
+
+#[test]
+fn rewrite_prompts_distinguish_clarification_wording_from_underlying_work() {
+    const VERIFIER_PROMPT: &str =
+        include_str!("../../../../prompts/layers/overlays/answer_verifier_prompt.md");
+    const RESPONSE_PROMPT: &str =
+        include_str!("../../../../prompts/layers/overlays/chat_response_prompt.md");
+
+    for prompt in [VERIFIER_PROMPT, RESPONSE_PROMPT] {
+        assert!(prompt.contains("rewrite"));
+        assert!(prompt.contains("clarification question"));
+        assert!(prompt.contains("missing-information"));
+        assert!(prompt.contains("underlying task"));
+    }
+    assert!(VERIFIER_PROMPT.contains("may remain a clarification question"));
+    assert!(VERIFIER_PROMPT.contains("supplies the missing input"));
+    assert!(RESPONSE_PROMPT.contains("preserve the clarification's"));
+    assert!(RESPONSE_PROMPT.contains("continue/complete that underlying task"));
 }
 
 #[test]
@@ -217,6 +284,28 @@ fn answer_verifier_prompts_scope_constraints_to_compound_deliverables() {
     assert!(VERIFIER_PROMPT.contains("does not prove Internet/public reachability"));
     assert!(RETRY_PROMPT.contains("compact selected findings"));
     assert!(RETRY_PROMPT.contains("claims not established by separate observed evidence"));
+}
+
+#[test]
+fn answer_verifier_audits_exact_counts_side_deliverables_and_ambiguous_targets() {
+    const VERIFIER_PROMPT: &str =
+        include_str!("../../../../prompts/layers/overlays/answer_verifier_prompt.md");
+    const RETRY_PROMPT: &str =
+        include_str!("../../../../prompts/layers/overlays/answer_verifier_retry_prompt.md");
+    let retry_normalized = RETRY_PROMPT
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    assert!(VERIFIER_PROMPT.contains("Audit the rendered candidate itself"));
+    assert!(VERIFIER_PROMPT.contains("do not trust the candidate's declared response shape"));
+    assert!(VERIFIER_PROMPT.contains("both fewer and more units fail"));
+    assert!(VERIFIER_PROMPT.contains("only the side answer is incomplete"));
+    assert!(VERIFIER_PROMPT.contains("multiple distinct active targets remain equally compatible"));
+    assert!(VERIFIER_PROMPT.contains("semantically rather than through fixed words"));
+    assert!(retry_normalized.contains("exactly that many newline-delimited lines or items"));
+    assert!(retry_normalized.contains("both requested components"));
+    assert!(retry_normalized.contains("multiple distinct active targets equally plausible"));
 }
 
 #[test]

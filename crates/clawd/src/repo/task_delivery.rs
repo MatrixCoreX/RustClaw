@@ -6,6 +6,7 @@ use crate::{AppState, ClaimedTask};
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct TaskDeliveryRecord {
     pub(crate) task: ClaimedTask,
+    pub(crate) owner_principal_id: Option<String>,
     pub(crate) status: String,
     pub(crate) result_json: Option<Value>,
     pub(crate) error_text: Option<String>,
@@ -21,7 +22,7 @@ pub(crate) fn get_task_delivery_record(
         .get()
         .map_err(|error| anyhow::anyhow!("db pool: {error}"))?;
     db.query_row(
-        "SELECT task_id, user_id, chat_id, user_key, channel,
+        "SELECT task_id, user_id, chat_id, user_key, principal_id, channel,
                 external_user_id, external_chat_id, kind, payload_json,
                 COALESCE(claim_attempt, 0), status, result_json, error_text
          FROM tasks
@@ -29,25 +30,26 @@ pub(crate) fn get_task_delivery_record(
          LIMIT 1",
         params![task_id],
         |row| {
-            let raw_result: Option<String> = row.get(11)?;
+            let raw_result: Option<String> = row.get(12)?;
             Ok(TaskDeliveryRecord {
                 task: ClaimedTask {
                     task_id: row.get(0)?,
                     user_id: row.get(1)?,
                     chat_id: row.get(2)?,
                     user_key: row.get(3)?,
-                    channel: row.get(4)?,
-                    external_user_id: row.get(5)?,
-                    external_chat_id: row.get(6)?,
-                    kind: row.get(7)?,
-                    payload_json: row.get(8)?,
-                    claim_attempt: row.get(9)?,
+                    channel: row.get(5)?,
+                    external_user_id: row.get(6)?,
+                    external_chat_id: row.get(7)?,
+                    kind: row.get(8)?,
+                    payload_json: row.get(9)?,
+                    claim_attempt: row.get(10)?,
                 },
-                status: row.get(10)?,
+                owner_principal_id: row.get(4)?,
+                status: row.get(11)?,
                 result_json: raw_result
                     .as_deref()
                     .and_then(|value| serde_json::from_str(value).ok()),
-                error_text: row.get(12)?,
+                error_text: row.get(13)?,
             })
         },
     )

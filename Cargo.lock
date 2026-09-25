@@ -738,6 +738,7 @@ dependencies = [
  "clap_complete",
  "claw-core",
  "ctrlc",
+ "portable-pty",
  "reqwest 0.12.28",
  "rusqlite",
  "rustyline",
@@ -4688,6 +4689,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

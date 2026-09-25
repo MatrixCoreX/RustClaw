@@ -81,6 +81,36 @@ fn journal_with_final_status(
     journal
 }
 
+fn journal_with_planner_relation(
+    relation: &str,
+    status: crate::task_journal::TaskJournalFinalStatus,
+) -> crate::task_journal::TaskJournal {
+    let mut journal = crate::task_journal::TaskJournal::new("test");
+    journal.record_plan_result(&crate::PlanResult {
+        goal: "respond".to_string(),
+        missing_slots: Vec::new(),
+        needs_confirmation: false,
+        output_contract: None,
+        steps: vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "respond".to_string(),
+            skill: "respond".to_string(),
+            args: json!({
+                "content": "response",
+                "terminal_intent": if relation == "clarify" { "clarify" } else { "answer" },
+                "conversation_relation": relation
+            }),
+            depends_on: Vec::new(),
+            why: String::new(),
+        }],
+        planner_notes: String::new(),
+        plan_kind: crate::PlanKind::Single,
+        raw_plan_text: String::new(),
+    });
+    journal.record_final_status(status);
+    journal
+}
+
 fn next_last_primary_task_prompt(
     prior_state: Option<&ConversationState>,
     route_result: &crate::IntentOutputContract,
@@ -141,6 +171,149 @@ fn plain_chat_without_task_turn_does_not_promote_primary_task() {
         "RC-CONT-CN-0428-A",
     );
     assert_eq!(preserved.as_deref(), Some("帮我写个方案"));
+}
+
+#[test]
+fn planner_relation_starts_primary_task_without_pre_route_analysis() {
+    let route_result = output_contract_for_test();
+    let journal = journal_with_planner_relation(
+        "start_followup",
+        crate::task_journal::TaskJournalFinalStatus::Success,
+    );
+
+    let prompt = super::next_last_primary_task_prompt(
+        None,
+        &route_result,
+        None,
+        &journal,
+        "Write a three-step checklist.",
+        "Write a three-step checklist.",
+    );
+    let output = super::next_last_primary_task_output(
+        None,
+        &route_result,
+        None,
+        &journal,
+        "Write a three-step checklist.",
+        "1. Prepare\n2. Verify\n3. Release",
+        &[],
+    );
+
+    assert_eq!(prompt.as_deref(), Some("Write a three-step checklist."));
+    assert_eq!(output.as_deref(), Some("1. Prepare\n2. Verify\n3. Release"));
+}
+
+#[test]
+fn planner_relation_amends_primary_task_without_pre_route_analysis() {
+    let route_result = output_contract_for_test();
+    let prior_state = ConversationState {
+        last_primary_task_prompt: Some("Write a three-step checklist.".to_string()),
+        last_primary_task_output: Some("1. Prepare\n2. Verify\n3. Release".to_string()),
+        ..ConversationState::default()
+    };
+    let journal = journal_with_planner_relation(
+        "amend_current",
+        crate::task_journal::TaskJournalFinalStatus::Success,
+    );
+
+    let prompt = super::next_last_primary_task_prompt(
+        Some(&prior_state),
+        &route_result,
+        None,
+        &journal,
+        "Mention Python 3.11, not Python 3.10.",
+        "Mention Python 3.11, not Python 3.10.",
+    );
+    let output = super::next_last_primary_task_output(
+        Some(&prior_state),
+        &route_result,
+        None,
+        &journal,
+        "Mention Python 3.11, not Python 3.10.",
+        "1. Install Python 3.11\n2. Verify\n3. Release",
+        &[],
+    );
+
+    assert_eq!(
+        prompt.as_deref(),
+        Some(
+            "Task so far:\nWrite a three-step checklist.\n\nAmendment: Mention Python 3.11, not Python 3.10."
+        )
+    );
+    assert_eq!(
+        output.as_deref(),
+        Some("1. Install Python 3.11\n2. Verify\n3. Release")
+    );
+}
+
+#[test]
+fn planner_side_reply_preserves_primary_task_without_pre_route_analysis() {
+    let route_result = output_contract_for_test();
+    let prior_state = ConversationState {
+        last_primary_task_prompt: Some("Write a three-step checklist.".to_string()),
+        last_primary_task_output: Some("1. Prepare\n2. Verify\n3. Release".to_string()),
+        ..ConversationState::default()
+    };
+    let journal = journal_with_planner_relation(
+        "side_reply",
+        crate::task_journal::TaskJournalFinalStatus::Success,
+    );
+
+    let prompt = super::next_last_primary_task_prompt(
+        Some(&prior_state),
+        &route_result,
+        None,
+        &journal,
+        "What is SQLite?",
+        "What is SQLite?",
+    );
+    let output = super::next_last_primary_task_output(
+        Some(&prior_state),
+        &route_result,
+        None,
+        &journal,
+        "What is SQLite?",
+        "SQLite is an embedded database.",
+        &[],
+    );
+
+    assert_eq!(prompt, prior_state.last_primary_task_prompt);
+    assert_eq!(output, prior_state.last_primary_task_output);
+}
+
+#[test]
+fn failed_planner_amendment_preserves_primary_task() {
+    let route_result = output_contract_for_test();
+    let prior_state = ConversationState {
+        last_primary_task_prompt: Some("Write a three-step checklist.".to_string()),
+        last_primary_task_output: Some("1. Prepare\n2. Verify\n3. Release".to_string()),
+        ..ConversationState::default()
+    };
+    let journal = journal_with_planner_relation(
+        "amend_current",
+        crate::task_journal::TaskJournalFinalStatus::Failure,
+    );
+
+    let prompt = super::next_last_primary_task_prompt(
+        Some(&prior_state),
+        &route_result,
+        None,
+        &journal,
+        "Mention Python 3.11.",
+        "Mention Python 3.11.",
+    );
+    let output = super::next_last_primary_task_output(
+        Some(&prior_state),
+        &route_result,
+        None,
+        &journal,
+        "Mention Python 3.11.",
+        "Provider unavailable.",
+        &[],
+    );
+
+    assert_eq!(prompt, prior_state.last_primary_task_prompt);
+    assert_eq!(output, prior_state.last_primary_task_output);
 }
 
 #[test]
@@ -948,72 +1121,7 @@ fn replace_active_conversation_state_with_pointers_persists_ids() {
 }
 
 #[test]
-fn alias_only_state_patch_clears_stale_active_pointers() {
-    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
-    let task = ClaimedTask {
-        claim_attempt: 0,
-        task_id: "task-alias-update".to_string(),
-        user_id: 11,
-        chat_id: 12,
-        user_key: Some("user-key".to_string()),
-        channel: "telegram".to_string(),
-        external_user_id: None,
-        external_chat_id: None,
-        kind: "ask".to_string(),
-        payload_json: "{}".to_string(),
-    };
-    super::replace_active_conversation_state_with_pointers(
-        &state,
-        &task,
-        None,
-        ActiveSessionPointers {
-            active_followup_task_id: Some("old-followup".to_string()),
-            active_clarify_task_id: Some("old-clarify".to_string()),
-            active_observed_facts_task_id: Some("old-observed".to_string()),
-        },
-    );
-    let route = output_contract_for_test();
-    let turn_analysis = crate::turn_context::TurnAnalysis {
-        turn_type: Some(crate::turn_context::TurnType::PreferenceOrMemory),
-        target_task_policy: None,
-        should_interrupt_active_run: false,
-        state_patch: Some(json!({
-            "alias_bindings": [{
-                "alias": "ALPHA_DOC",
-                "target": "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
-            }]
-        })),
-        attachment_processing_required: false,
-    };
-
-    super::update_active_session_from_ask_outcome(
-        &state,
-        &task,
-        None,
-        "Correction: ALPHA_DOC now refers to scripts/nl_tests/fixtures/device_local/docs/release_checklist.md.",
-        &route,
-        Some(&turn_analysis),
-        "Update ALPHA_DOC alias to point to scripts/nl_tests/fixtures/device_local/docs/release_checklist.md",
-        "alias updated via i18n",
-        &[],
-        false,
-        &[],
-        &empty_journal_for_test(),
-        None,
-    );
-
-    let loaded = super::load_active_conversation_state(&state, &task).expect("state");
-    assert!(loaded.active_followup_task_id.is_none());
-    assert!(loaded.active_clarify_task_id.is_none());
-    assert!(loaded.active_observed_facts_task_id.is_none());
-    assert!(loaded.alias_bindings.iter().any(|binding| {
-        binding.alias == "ALPHA_DOC"
-            && binding.target == "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
-    }));
-}
-
-#[test]
-fn alias_only_state_patch_does_not_clear_current_code_workspace_anchor() {
+fn current_code_workspace_outcome_refreshes_the_active_anchor() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = ClaimedTask {
         claim_attempt: 0,
@@ -1042,18 +1150,6 @@ fn alias_only_state_patch_does_not_clear_current_code_workspace_anchor() {
     let test_path = format!("{project_dir}/test_calc_core.py");
     let mut route = output_contract_for_test();
     route.response_shape = crate::OutputResponseShape::Strict;
-    let turn_analysis = crate::turn_context::TurnAnalysis {
-        turn_type: None,
-        target_task_policy: None,
-        should_interrupt_active_run: false,
-        state_patch: Some(json!({
-            "alias_bindings": [{
-                "alias": "WORKSPACE",
-                "target": project_dir
-            }]
-        })),
-        attachment_processing_required: false,
-    };
     let mut journal =
         crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "create code workspace");
     journal
@@ -1095,7 +1191,7 @@ fn alias_only_state_patch_does_not_clear_current_code_workspace_anchor() {
         None,
         "create code workspace",
         &route,
-        Some(&turn_analysis),
+        None,
         "create code workspace",
         r#"{"created_files":["calc_core.py","test_calc_core.py"],"test_status":"passed"}"#,
         &[],
@@ -1123,97 +1219,6 @@ fn alias_only_state_patch_does_not_clear_current_code_workspace_anchor() {
 }
 
 #[test]
-fn merge_alias_bindings_prefers_structured_state_patch() {
-    let prior = ConversationState {
-        alias_bindings: vec![SessionAliasBinding {
-            alias: "那个文件".to_string(),
-            target: "/tmp/old.md".to_string(),
-            updated_at_ts: 1,
-        }],
-        ..ConversationState::default()
-    };
-    let turn_analysis = crate::turn_context::TurnAnalysis {
-        turn_type: Some(crate::turn_context::TurnType::PreferenceOrMemory),
-        target_task_policy: None,
-        should_interrupt_active_run: false,
-        state_patch: Some(json!({
-            "alias_bindings": [
-                {"alias": "那个文件", "target": "/tmp/new.md"},
-                {"alias": "那个日志", "target": "/tmp/app.log"}
-            ]
-        })),
-        attachment_processing_required: false,
-    };
-    let merged = super::merge_alias_bindings(Some(&prior), Some(&turn_analysis));
-    assert_eq!(merged.len(), 2);
-    assert!(merged
-        .iter()
-        .any(|binding| binding.alias == "那个文件" && binding.target == "/tmp/new.md"));
-    assert!(merged
-        .iter()
-        .any(|binding| { binding.alias == "那个日志" && binding.target == "/tmp/app.log" }));
-    assert!(!merged
-        .iter()
-        .any(|binding| binding.target == "/tmp/regex.md"));
-}
-
-#[test]
-fn structured_alias_state_patch_suppresses_prompt_alias_heuristics() {
-    let route = output_contract_for_test();
-    let turn_analysis = crate::turn_context::TurnAnalysis {
-        turn_type: None,
-        target_task_policy: None,
-        should_interrupt_active_run: false,
-        state_patch: Some(json!({
-            "alias_bindings": [{
-                "alias": "ALPHA_DOC",
-                "target": "scripts/nl_tests/fixtures/device_local/docs/service_notes.md"
-            }]
-        })),
-        attachment_processing_required: false,
-    };
-
-    let merged = super::merge_alias_bindings_for_turn(
-        None,
-        Some(&turn_analysis),
-        "For this conversation, remember that ALPHA_DOC refers to scripts/nl_tests/fixtures/device_local/docs/service_notes.md. Reply only remembered.",
-        &route,
-        "Establish ALPHA_DOC as a temporary alias for scripts/nl_tests/fixtures/device_local/docs/service_notes.md",
-    );
-
-    assert_eq!(merged.len(), 1);
-    assert_eq!(merged[0].alias, "ALPHA_DOC");
-    assert_eq!(
-        merged[0].target,
-        "scripts/nl_tests/fixtures/device_local/docs/service_notes.md"
-    );
-}
-
-#[test]
-fn merge_alias_bindings_accepts_alias_key_compatibility_patch() {
-    let turn_analysis = crate::turn_context::TurnAnalysis {
-        turn_type: Some(crate::turn_context::TurnType::PreferenceOrMemory),
-        target_task_policy: None,
-        should_interrupt_active_run: false,
-        state_patch: Some(json!({
-            "that_file_alias": "/tmp/device/README.md",
-            "currentFolderAlias": {"target": "/tmp/device/docs"}
-        })),
-        attachment_processing_required: false,
-    };
-
-    let merged = super::merge_alias_bindings(None, Some(&turn_analysis));
-
-    assert_eq!(merged.len(), 2);
-    assert!(merged
-        .iter()
-        .any(|binding| binding.alias == "that_file" && binding.target == "/tmp/device/README.md"));
-    assert!(merged
-        .iter()
-        .any(|binding| binding.alias == "currentFolder" && binding.target == "/tmp/device/docs"));
-}
-
-#[test]
 fn alias_surface_match_accepts_user_defined_separator_variants() {
     let bindings = vec![SessionAliasBinding {
         alias: "note_file".to_string(),
@@ -1231,98 +1236,6 @@ fn alias_surface_match_accepts_user_defined_separator_variants() {
 }
 
 #[test]
-fn preference_memory_turn_with_single_locator_derives_alias_without_refresh_flag() {
-    let route = output_contract_for_test();
-    let turn_analysis = crate::turn_context::TurnAnalysis {
-        turn_type: Some(crate::turn_context::TurnType::PreferenceOrMemory),
-        target_task_policy: None,
-        should_interrupt_active_run: false,
-        state_patch: None,
-        attachment_processing_required: false,
-    };
-
-    let merged = super::merge_alias_bindings_for_turn(
-        None,
-        Some(&turn_analysis),
-        "Remember that the note file means scripts/nl_tests/fixtures/device_local/docs/service_notes.md. Reply only confirmed.",
-        &route,
-        "",
-    );
-
-    assert!(merged.iter().any(|binding| {
-        binding.alias == "note file"
-            && binding.target == "scripts/nl_tests/fixtures/device_local/docs/service_notes.md"
-    }));
-}
-
-#[test]
-fn preference_memory_turn_with_machine_alias_derives_exact_token() {
-    let route = output_contract_for_test();
-    let turn_analysis = crate::turn_context::TurnAnalysis {
-        turn_type: Some(crate::turn_context::TurnType::PreferenceOrMemory),
-        target_task_policy: None,
-        should_interrupt_active_run: false,
-        state_patch: None,
-        attachment_processing_required: false,
-    };
-
-    let merged = super::merge_alias_bindings_for_turn(
-        None,
-        Some(&turn_analysis),
-        "For this conversation, remember that ALPHA_DOC refers to scripts/nl_tests/fixtures/device_local/docs/service_notes.md. Reply only remembered.",
-        &route,
-        "",
-    );
-
-    assert!(merged.iter().any(|binding| {
-        binding.alias == "ALPHA_DOC"
-            && binding.target == "scripts/nl_tests/fixtures/device_local/docs/service_notes.md"
-    }));
-    assert!(!merged
-        .iter()
-        .any(|binding| binding.alias.contains("refers")));
-}
-
-#[test]
-fn compact_alias_memory_turn_with_single_locator_derives_structured_binding() {
-    let route = output_contract_for_test();
-    let turn_analysis = crate::turn_context::TurnAnalysis {
-        turn_type: Some(crate::turn_context::TurnType::PreferenceOrMemory),
-        target_task_policy: None,
-        should_interrupt_active_run: false,
-        state_patch: None,
-        attachment_processing_required: false,
-    };
-
-    let merged = super::merge_alias_bindings_for_turn(
-        None,
-        Some(&turn_analysis),
-        "先记一下，甲文件是 scripts/nl_tests/fixtures/device_local/docs/service_notes.md。只回复已记住。",
-        &route,
-        "",
-    );
-
-    assert!(merged.iter().any(|binding| {
-        binding.alias == "甲文件"
-            && binding.target == "scripts/nl_tests/fixtures/device_local/docs/service_notes.md"
-    }));
-}
-
-#[test]
-fn planner_execute_single_locator_does_not_create_prompt_alias_binding() {
-    let route = output_contract_for_test();
-    let merged = super::merge_alias_bindings_for_turn(
-        None,
-        None,
-        "读取 scripts/nl_tests/fixtures/device_local/docs/service_notes.md 的标题",
-        &route,
-        "",
-    );
-
-    assert!(merged.is_empty());
-}
-
-#[test]
 fn successful_session_alias_capability_result_replaces_matching_binding() {
     let prior = vec![SessionAliasBinding {
         alias: "release note".to_string(),
@@ -1330,14 +1243,16 @@ fn successful_session_alias_capability_result_replaces_matching_binding() {
         updated_at_ts: 1,
     }];
     let result = claw_core::capability_result::CapabilityResultEnvelope::ok(
-        "task_control",
+        "session.bind_alias",
         Some("bind_session_alias".to_string()),
         json!({
             "output": {"ignored": true},
             "extra": {
+                "execution_binding": {"skill_name": "task_control"},
                 "session_alias_bindings": [{
                     "alias": "release_note",
-                    "target": "document/release.md"
+                    "target": "document/release.md",
+                    "target_kind": "path"
                 }]
             }
         }),
@@ -1348,6 +1263,37 @@ fn successful_session_alias_capability_result_replaces_matching_binding() {
     assert_eq!(merged.len(), 1);
     assert_eq!(merged[0].alias, "release_note");
     assert_eq!(merged[0].target, "document/release.md");
+}
+
+#[test]
+fn session_alias_state_requires_a_distinct_typed_machine_target() {
+    let result = |alias: &str, target: &str, target_kind: Option<&str>| {
+        let mut binding = json!({"alias": alias, "target": target});
+        if let Some(target_kind) = target_kind {
+            binding["target_kind"] = json!(target_kind);
+        }
+        claw_core::capability_result::CapabilityResultEnvelope::ok(
+            "session.bind_alias",
+            Some("bind_session_alias".to_string()),
+            json!({
+                "extra": {
+                    "execution_binding": {"skill_name": "task_control"},
+                    "session_alias_bindings": [binding]
+                }
+            }),
+        )
+    };
+
+    let merged = super::merge_alias_bindings_from_capability_results(
+        Vec::new(),
+        &[
+            result("marker", "RC-CONT-0428", None),
+            result("RC-CONT-0428", "RC-CONT-0428", Some("resource")),
+            result("marker", "RC-CONT-0428", Some("resource")),
+        ],
+    );
+
+    assert!(merged.is_empty());
 }
 
 #[test]
@@ -1395,141 +1341,6 @@ fn session_alias_state_ignores_unresolved_planner_capability_envelope() {
     let merged = super::merge_alias_bindings_from_capability_results(Vec::new(), &[unresolved]);
 
     assert!(merged.is_empty());
-}
-
-#[test]
-fn quoted_alias_with_single_locator_binds_without_memory_turn_analysis() {
-    let route = output_contract_for_test();
-    let merged = super::merge_alias_bindings_for_turn(
-        None,
-        None,
-        "先记一下，后面我说“那个文件”就是 /home/guagua/agent-runtime/scripts/nl_tests/fixtures/device_local/README.md",
-        &route,
-        "",
-    );
-
-    assert!(merged.iter().any(|binding| {
-        binding.alias == "那个文件"
-            && binding.target
-                == "/home/guagua/agent-runtime/scripts/nl_tests/fixtures/device_local/README.md"
-    }));
-}
-
-#[test]
-fn current_locator_rebinds_existing_alias_without_language_phrase_table() {
-    let prior = ConversationState {
-        alias_bindings: vec![SessionAliasBinding {
-            alias: "note file".to_string(),
-            target: "scripts/nl_tests/fixtures/device_local/docs/service_notes.md".to_string(),
-            updated_at_ts: 1,
-        }],
-        ..ConversationState::default()
-    };
-
-    let bindings = super::structural_alias_rebinds_from_prompt(
-        Some(&prior),
-        "Correction: the note file now means scripts/nl_tests/fixtures/device_local/docs/release_checklist.md. Reply only updated.",
-    );
-    let binding = bindings
-        .first()
-        .expect("existing alias should rebind to the current locator");
-
-    assert_eq!(binding.alias, "note file");
-    assert_eq!(
-        binding.target,
-        "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
-    );
-}
-
-#[test]
-fn compact_alias_current_locator_rebinds_existing_alias() {
-    let prior = ConversationState {
-        alias_bindings: vec![SessionAliasBinding {
-            alias: "甲文件".to_string(),
-            target: "scripts/nl_tests/fixtures/device_local/docs/service_notes.md".to_string(),
-            updated_at_ts: 1,
-        }],
-        ..ConversationState::default()
-    };
-
-    let bindings = super::structural_alias_rebinds_from_prompt(
-        Some(&prior),
-        "不对，甲文件改成 scripts/nl_tests/fixtures/device_local/docs/release_checklist.md。只回复已更新。",
-    );
-    let binding = bindings
-        .first()
-        .expect("existing compact alias should rebind to the current locator");
-
-    assert_eq!(binding.alias, "甲文件");
-    assert_eq!(
-        binding.target,
-        "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
-    );
-}
-
-#[test]
-fn current_locator_rebinds_all_mentioned_alias_surfaces() {
-    let prior = ConversationState {
-        alias_bindings: vec![
-            SessionAliasBinding {
-                alias: "note file".to_string(),
-                target: "scripts/nl_tests/fixtures/device_local/docs/service_notes.md".to_string(),
-                updated_at_ts: 1,
-            },
-            SessionAliasBinding {
-                alias: "the note file".to_string(),
-                target: "scripts/nl_tests/fixtures/device_local/docs/service_notes.md".to_string(),
-                updated_at_ts: 1,
-            },
-        ],
-        ..ConversationState::default()
-    };
-
-    let bindings = super::structural_alias_rebinds_from_prompt(
-        Some(&prior),
-        "Correction: the note file now means scripts/nl_tests/fixtures/device_local/docs/release_checklist.md. Reply only updated.",
-    );
-
-    assert_eq!(bindings.len(), 2);
-    assert!(bindings.iter().all(|binding| {
-        binding.target == "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
-    }));
-}
-
-#[test]
-fn structural_prompt_alias_binding_uses_quote_and_single_locator() {
-    let route = output_contract_for_test();
-
-    let binding = super::structural_alias_binding_from_prompt(
-        "先记一下，后面我说“那个文件”就是 /tmp/device/README.md",
-        &route,
-        "remember that quoted alias maps to /tmp/device/README.md",
-    )
-    .expect("binding");
-
-    assert_eq!(binding.alias, "那个文件");
-    assert_eq!(binding.target, "/tmp/device/README.md");
-}
-
-#[test]
-fn merge_alias_bindings_ignores_prompt_text_without_structured_patch() {
-    let prior = ConversationState {
-        alias_bindings: vec![SessionAliasBinding {
-            alias: "那个文件".to_string(),
-            target: "/tmp/old.md".to_string(),
-            updated_at_ts: 1,
-        }],
-        ..ConversationState::default()
-    };
-    let turn_analysis = crate::turn_context::TurnAnalysis {
-        turn_type: Some(crate::turn_context::TurnType::PreferenceOrMemory),
-        target_task_policy: None,
-        should_interrupt_active_run: false,
-        state_patch: None,
-        attachment_processing_required: false,
-    };
-    let merged = super::merge_alias_bindings(Some(&prior), Some(&turn_analysis));
-    assert_eq!(merged, prior.alias_bindings);
 }
 
 #[test]

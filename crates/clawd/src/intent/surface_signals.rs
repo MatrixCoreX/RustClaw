@@ -60,6 +60,7 @@ impl PromptSurfaceSignals {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn single_filename_candidate(&self) -> Option<&str> {
         self.single_filename_candidate.as_deref()
     }

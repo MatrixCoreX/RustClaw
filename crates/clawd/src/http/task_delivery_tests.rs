@@ -3,7 +3,16 @@ use claw_core::channel_delivery::ChannelDeliverySource;
 
 fn record(status: &str, result_json: Option<Value>) -> TaskDeliveryRecord {
     let payload = serde_json::json!({
-        "channel_ingress": {"locale": "zh-CN"}
+        "channel_ingress": {
+            "schema_version": 1,
+            "channel": "telegram",
+            "adapter": "telegram_bot",
+            "account_id": "bot-main",
+            "external_user_id": "1",
+            "external_chat_id": "2",
+            "reply_target": {"kind": "chat", "external_id": "2"},
+            "locale": "zh-CN"
+        }
     });
     TaskDeliveryRecord {
         task: crate::ClaimedTask {
@@ -18,6 +27,7 @@ fn record(status: &str, result_json: Option<Value>) -> TaskDeliveryRecord {
             kind: "ask".to_string(),
             payload_json: payload.to_string(),
         },
+        owner_principal_id: Some("principal-fixture".to_string()),
         status: status.to_string(),
         result_json,
         error_text: Some("private provider detail".to_string()),
@@ -161,34 +171,117 @@ fn interrupted_terminal_content_uses_shared_resume_notice() {
 }
 
 #[test]
-fn delivery_authorization_requires_the_tasks_exact_active_key() {
+fn delivery_authorization_uses_the_current_bound_key_and_allows_key_rotation() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     state.seed_test_auth_identity("key", "user");
-    let record = record("succeeded", Some(serde_json::json!({"text": "done"})));
+    let identity = crate::resolve_auth_identity_by_key(&state, "key")
+        .expect("identity lookup")
+        .expect("identity");
+    state
+        .core
+        .db
+        .get()
+        .expect("db connection")
+        .execute(
+            "INSERT INTO channel_bindings(
+                channel, external_user_id, external_chat_id, user_key, bound_at, updated_at
+             ) VALUES ('telegram', '1', '2', 'key', '1', '1')",
+            [],
+        )
+        .expect("channel binding");
+    let mut record = record("succeeded", Some(serde_json::json!({"text": "done"})));
+    record.owner_principal_id = Some(identity.principal_id.clone());
+    let payload: Value = serde_json::from_str(&record.task.payload_json).expect("payload");
 
     let mut headers = HeaderMap::new();
     headers.insert(
         claw_core::product_identity::AUTH_KEY_HEADER,
         "key".parse().expect("key header"),
     );
-    assert!(authorized_delivery_request(&state, &headers, &record));
+    assert!(authorized_delivery_request(
+        &state, &headers, &record, &payload
+    ));
 
     headers.insert(
         claw_core::product_identity::AUTH_KEY_HEADER,
         "other".parse().expect("other header"),
     );
-    assert!(!authorized_delivery_request(&state, &headers, &record));
+    assert!(!authorized_delivery_request(
+        &state, &headers, &record, &payload
+    ));
 
     let db = state.core.db.get().expect("db connection");
     db.execute(
-        "UPDATE auth_keys SET enabled = 0 WHERE user_key = 'key'",
+        "INSERT INTO auth_keys(user_key, role, enabled, created_at, principal_id)
+         VALUES ('rotated-key', 'user', 1, '2', ?1)",
+        [&identity.principal_id],
+    )
+    .expect("insert rotated key");
+    db.execute(
+        "UPDATE channel_bindings SET user_key = 'rotated-key', updated_at = '2'
+         WHERE channel = 'telegram' AND external_user_id = '1' AND external_chat_id = '2'",
         [],
     )
-    .expect("disable key");
+    .expect("rotate channel binding");
     drop(db);
     headers.insert(
         claw_core::product_identity::AUTH_KEY_HEADER,
-        "key".parse().expect("key header"),
+        "rotated-key".parse().expect("rotated key header"),
     );
-    assert!(!authorized_delivery_request(&state, &headers, &record));
+    assert!(authorized_delivery_request(
+        &state, &headers, &record, &payload
+    ));
+    headers.insert(
+        claw_core::product_identity::AUTH_KEY_HEADER,
+        "key".parse().expect("old key header"),
+    );
+    assert!(!authorized_delivery_request(
+        &state, &headers, &record, &payload
+    ));
+
+    let db = state.core.db.get().expect("db connection");
+    db.execute(
+        "UPDATE auth_keys SET enabled = 0 WHERE user_key = 'rotated-key'",
+        [],
+    )
+    .expect("disable rotated key");
+    drop(db);
+    headers.insert(
+        claw_core::product_identity::AUTH_KEY_HEADER,
+        "rotated-key".parse().expect("key header"),
+    );
+    assert!(!authorized_delivery_request(
+        &state, &headers, &record, &payload
+    ));
+}
+
+#[test]
+fn delivery_scope_rejects_a_reply_target_that_does_not_match_the_ingress_peer() {
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    state.seed_test_auth_identity("key", "user");
+    let identity = crate::resolve_auth_identity_by_key(&state, "key")
+        .expect("identity lookup")
+        .expect("identity");
+    state
+        .core
+        .db
+        .get()
+        .expect("db connection")
+        .execute(
+            "INSERT INTO channel_bindings(
+                channel, external_user_id, external_chat_id, user_key, bound_at, updated_at
+             ) VALUES ('telegram', '1', '2', 'key', '1', '1')",
+            [],
+        )
+        .expect("channel binding");
+    let mut record = record("succeeded", Some(serde_json::json!({"text": "done"})));
+    record.owner_principal_id = Some(identity.principal_id);
+    let mut payload: Value = serde_json::from_str(&record.task.payload_json).expect("payload");
+    payload["channel_ingress"]["reply_target"]["external_id"] =
+        Value::String("another-chat".to_string());
+
+    assert!(matches!(
+        current_delivery_identity(&state, &record, &payload),
+        Err("channel_delivery_reply_target_mismatch")
+    ));
 }

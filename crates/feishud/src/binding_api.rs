@@ -84,6 +84,7 @@ pub(super) async fn store_pending_feishu_request(
         ChannelKind::Feishu,
         open_platform_contract(OpenPlatformRegion::Feishu).source_adapter,
     )
+    .with_account_id(state.config.feishu.app_id.clone())
     .with_external_ids(open_id.to_string(), chat_id.to_string())
     .with_message_id(message_id.to_string())
     .with_reply_target(claw_core::channel_ingress::ChannelReplyTarget::chat(

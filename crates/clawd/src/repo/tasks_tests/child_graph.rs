@@ -122,6 +122,14 @@ fn parent_failure_cancels_unfinished_graph_and_publishes_snapshot() {
     assert_eq!(stored_status(&state, "task-parent-graph-failure"), "failed");
     assert_eq!(stored_status(&state, "task-child-writer"), "canceled");
     assert_eq!(stored_status(&state, "task-child-verifier"), "canceled");
+    assert_eq!(
+        stored_result_json(&state, "task-child-writer")["task_lifecycle"]["state"],
+        "cancelled"
+    );
+    assert_eq!(
+        stored_result_json(&state, "task-child-writer")["task_lifecycle"]["source"],
+        "child_task_graph"
+    );
     let db = state.core.db.get().expect("get db");
     let graph = crate::repo::child_task_graph::graph_snapshot(&db, "task-parent-graph-failure")
         .expect("graph snapshot")
@@ -139,4 +147,74 @@ fn parent_failure_cancels_unfinished_graph_and_publishes_snapshot() {
     assert!(events.events.iter().any(|event| {
         event.get("event_kind").and_then(serde_json::Value::as_str) == Some("subagent_graph")
     }));
+}
+
+#[test]
+fn parent_failure_waits_for_an_active_child_runtime_before_settling_cancellation() {
+    let state = state_with_tasks_table();
+    insert_task(
+        &state,
+        "task-parent-active-child",
+        "running",
+        Some(&json!({})),
+        1,
+    );
+    set_task_lease(
+        &state,
+        "task-parent-active-child",
+        state.worker.worker_id.as_str(),
+        crate::now_ts_u64() as i64 + 300,
+        1,
+        crate::now_ts_u64() as i64,
+    );
+    let parent = ChildTaskParentContext {
+        parent_task_id: "task-parent-active-child".to_string(),
+        user_id: 42,
+        chat_id: 7,
+        user_key: Some("test-key".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        execution_policy_stamp: None,
+        interactive_approval_available: true,
+    };
+    let child_id = "task-active-child";
+    enqueue_child_task_specs(
+        &state,
+        &parent,
+        &[sample_repo_child_spec(
+            "task-parent-active-child",
+            child_id,
+            true,
+        )],
+        1,
+        1,
+        2,
+    )
+    .expect("enqueue active child");
+    let cancellation = state.worker.register_active_task(child_id);
+
+    update_task_failure(&state, "task-parent-active-child", 1, "provider_failed")
+        .expect("fail parent");
+
+    assert!(cancellation.is_cancelled());
+    assert_eq!(
+        stored_result_json(&state, child_id)["task_lifecycle"]["state"],
+        "cancel_requested"
+    );
+    assert_eq!(
+        stored_result_json(&state, child_id)["task_lifecycle"]["parent_terminal_reason"],
+        "parent_failed"
+    );
+
+    state.worker.unregister_active_task(child_id);
+    assert_eq!(
+        crate::repo::reconcile_cancelled_task_settlements(&state, 10)
+            .expect("settle child cancellation"),
+        1
+    );
+    assert_eq!(
+        stored_result_json(&state, child_id)["task_lifecycle"]["state"],
+        "cancelled"
+    );
 }

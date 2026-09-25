@@ -573,21 +573,41 @@ fn executor_failure_attribution(error_kind: Option<&str>) -> &'static str {
 }
 
 fn structured_error_kind(error_text: &str) -> Option<String> {
-    crate::skills::parse_structured_skill_error(error_text)
-        .map(|structured| structured.error_code)
+    structured_error_code(error_text)
         .or_else(|| (!error_text.trim().is_empty()).then_some("unclassified_error".to_string()))
 }
 
 fn structured_error_code(error_text: &str) -> Option<String> {
-    let structured = crate::skills::parse_structured_skill_error(error_text)?;
-    structured
-        .extra
-        .as_ref()
-        .and_then(|extra| extra.get("error_code").and_then(Value::as_str))
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .or(Some(structured.error_code))
+    if let Some(structured) = crate::skills::parse_structured_skill_error(error_text) {
+        return structured
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.get("error_code").and_then(Value::as_str))
+            .and_then(stable_machine_token)
+            .or_else(|| stable_machine_token(&structured.error_code));
+    }
+    let value = serde_json::from_str::<Value>(error_text.trim()).ok()?;
+    let code = [
+        value.pointer("/error_code"),
+        value.pointer("/extra/error_code"),
+        value.pointer("/error/details/structured_error/error_code"),
+        value.pointer("/error/details/structured_error/extra/error_code"),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(Value::as_str)
+    .and_then(stable_machine_token);
+    code
+}
+
+fn stable_machine_token(value: &str) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.')))
+    .then(|| value.to_string())
 }
 
 fn structured_exit_code(error_text: &str) -> Option<i64> {

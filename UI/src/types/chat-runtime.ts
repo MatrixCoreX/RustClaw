@@ -13,9 +13,19 @@ export interface ChatThreadSummary {
   llmCallCount: number | null;
 }
 
+export interface ChatDeferredInputSummary {
+  inputId: string;
+  text: string;
+  attachmentNames: string[];
+  acceptedAt: number;
+}
+
 export interface ChatTeachingRunSummary {
   id: string;
   taskId: string | null;
+  conversationInputId: string | null;
+  conversationInputClientMessageId: string | null;
+  conversationInputRevision: number | null;
   userMessageId: string;
   assistantMessageId: string | null;
   userText: string;
@@ -32,6 +42,9 @@ export interface ChatTeachingRunSummary {
 export interface ChatTeachingRunRecord {
   id: string;
   taskId: string | null;
+  conversationInputId?: string | null;
+  conversationInputClientMessageId?: string | null;
+  conversationInputRevision?: number | null;
   userMessageId: string;
   assistantMessageId?: string | null;
   userText: string;

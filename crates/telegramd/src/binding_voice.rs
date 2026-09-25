@@ -170,6 +170,7 @@ pub(super) async fn store_pending_telegram_request(
         ChannelKind::Telegram,
         "telegram_bot",
     )
+    .with_account_id(state.bot_name.clone())
     .with_external_ids(platform_user_id.to_string(), platform_chat_id.to_string())
     .with_message_id(message_id.clone())
     .with_reply_target(claw_core::channel_ingress::ChannelReplyTarget::chat(
@@ -267,17 +268,18 @@ pub(super) async fn maybe_handle_resume_continuation(
     )
     .await
     {
-        Ok(task_id) => {
+        Ok(submitted) if submitted.owns_terminal_delivery => {
             spawn_task_result_delivery(
                 bot.clone(),
                 state.clone(),
                 msg.chat.id,
                 user_id,
-                task_id,
+                submitted.task_id,
                 None,
             );
             Ok(true)
         }
+        Ok(_) => Ok(true),
         Err(err) => {
             warn!(chat_id, error = %err, "resumed_task_submission_failed");
             bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.process_failed"))

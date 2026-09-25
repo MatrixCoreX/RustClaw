@@ -41,6 +41,14 @@ pub(crate) fn task_status_lines(
     task_status_lines_with_result(task, include_events, event_filters, true)
 }
 
+pub(crate) fn task_status_lines_without_result(
+    task: &task::TaskStatusView,
+    include_events: bool,
+    event_filters: &EventFilters,
+) -> Vec<String> {
+    task_status_lines_with_result(task, include_events, event_filters, false)
+}
+
 fn task_status_lines_with_result(
     task: &task::TaskStatusView,
     include_events: bool,

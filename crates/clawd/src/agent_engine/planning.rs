@@ -42,7 +42,10 @@ use native_capability_recovery::{
 };
 #[path = "planning/native_respond.rs"]
 mod native_respond;
-use native_respond::{action_from_native_respond_call, preserve_native_respond_control_fields};
+use native_respond::{
+    action_from_native_respond_call, normalize_native_clarify_relation,
+    preserve_native_respond_control_fields,
+};
 #[path = "planning/required_companion_capabilities.rs"]
 mod required_companion_capabilities;
 use required_companion_capabilities::{
@@ -53,6 +56,7 @@ const NATIVE_ACTION_PROTOCOL_PROMPT_LOGICAL_PATH: &str = "prompts/native_action_
 const NATIVE_TURN_CONTEXT_PROMPT_LOGICAL_PATH: &str = "prompts/native_turn_context.md";
 const NATIVE_CALL_CAPABILITY_TOOL: &str = "call_capability";
 const NATIVE_RESPOND_TOOL: &str = "respond";
+pub(super) const NATIVE_CONTROL_ACTIVE_TURN_TOOL: &str = "control_active_turn";
 const MAX_NATIVE_RESPONSE_ITEMS: usize = 64;
 const MAX_NATIVE_RESPONSE_FIELDS: usize = 64;
 const MAX_NATIVE_RESPONSE_SOURCE_PATH: usize = 160;
@@ -435,7 +439,7 @@ pub(super) async fn plan_round_actions(
     let eager_native_group_count = native_capability_groups
         .len()
         .saturating_sub(selected_native_group_count);
-    let native_request = native_planner_request(
+    let mut native_request = native_planner_request(
         &native_system_prompt,
         &native_user_prompt,
         provider_timeout_seconds,
@@ -445,6 +449,17 @@ pub(super) async fn plan_round_actions(
         &native_capability_groups,
         &loadable_capability_group_names,
     );
+    if loop_state.conversation_input_revision > 0 {
+        let insert_at = native_request
+            .tools
+            .iter()
+            .position(|tool| tool.name == NATIVE_RESPOND_TOOL)
+            .unwrap_or(native_request.tools.len());
+        native_request.tools.insert(
+            insert_at,
+            active_turn_control_tool_definition(loop_state.conversation_input_revision),
+        );
+    }
     crate::prompt_budget::publish_model_tool_surface_budget_report(
         state,
         task,
@@ -503,6 +518,14 @@ pub(super) async fn plan_round_actions(
         let mut repair_reason_codes = Vec::new();
         let mut repair_progress = NativeRepairProgress::from_loop_state(loop_state);
         loop {
+            if normalize_native_clarify_relation(&mut native_turn) {
+                loop_state.task_observations.push(json!({
+                    "owner_layer": "planner_contract",
+                    "state": "normalized",
+                    "reason_code": "native_clarify_relation_normalized",
+                    "semantic_source": "model_terminal_intent",
+                }));
+            }
             match actions_from_native_turn_with_schemas(
                 &native_turn,
                 &native_callable_capability_names,
@@ -637,6 +660,7 @@ pub(super) async fn plan_round_actions(
             &plan_actions,
             &planner_notes,
         );
+        record_conversation_input_planner_decision(state, task, loop_state, &plan_actions)?;
         preserve_native_respond_control_fields(&native_turn, &mut plan_result);
         log_plan_split(task, loop_state, &plan_result);
         return Ok(plan_result);
@@ -858,8 +882,53 @@ pub(super) async fn plan_round_actions(
         &plan_actions,
         &planner_notes,
     );
+    record_conversation_input_planner_decision(state, task, loop_state, &plan_actions)?;
     log_plan_split(task, loop_state, &plan_result);
     Ok(plan_result)
+}
+
+fn record_conversation_input_planner_decision(
+    state: &AppState,
+    task: &ClaimedTask,
+    loop_state: &LoopState,
+    actions: &[AgentAction],
+) -> Result<(), String> {
+    let revision = loop_state.conversation_input_revision;
+    if revision == 0 {
+        return Ok(());
+    }
+    let decision_kind = if let Some(control_action) = actions.iter().find_map(|action| match action
+    {
+        AgentAction::CallTool { tool, args } if tool == NATIVE_CONTROL_ACTIVE_TURN_TOOL => args
+            .get("action")
+            .and_then(Value::as_str)
+            .filter(|action| matches!(*action, "stop" | "pause")),
+        _ => None,
+    }) {
+        control_action
+    } else if actions
+        .iter()
+        .all(|action| matches!(action, AgentAction::Respond { .. }))
+    {
+        "respond"
+    } else {
+        "continue_or_amend"
+    };
+    let decision_ref = format!(
+        "planner:{}:{}:{}:{}",
+        task.task_id, loop_state.round_no, revision, decision_kind
+    );
+    crate::repo::conversation_inputs::record_conversation_input_decision(
+        &state.core.db,
+        &task.task_id,
+        revision,
+        decision_kind,
+        &decision_ref,
+    )
+    .map(|_| {
+        crate::conversation_input_event_transport::notify(state);
+    })
+    .map_err(|error| format!("conversation_input_decision_record_failed:{error}"))
 }
 
 fn disclosed_callable_capability_names(
@@ -929,15 +998,17 @@ fn native_planner_request(
     }
     tools.push(ModelToolDefinition {
         name: NATIVE_RESPOND_TOOL.to_string(),
-        description: "Submit either the final user-visible answer or one clarification for a missing required input. This tool formats responses; it does not execute or simulate runtime capabilities. Set terminal_intent=clarify and identify the schema-level missing_slot when a required capability argument is absent; do not invoke an invalid capability merely to prove that its declared input is missing. Runtime-owned provider/config/permission, domain parse/normalize/validate/preview, dry-run, artifact/job, checkpoint, diff, verification, repair, and rewind fields require a prior matching capability result. A lower-level environment observation is supporting context, not a substitute for the disclosed domain capability that owns those fields. Use free_text for prose/scalars, list for exact items, object for model-authored exact named fields, or observed_object to copy selected JSON fields from current-loop success data or structured failure fields without re-serializing their values. Each object value_json contains one complete serialized JSON value and is validated before delivery; JSON string values include their surrounding JSON quotes.".to_string(),
+        description: "Submit either the final user-visible answer or one clarification for a missing required input. This tool formats responses; it does not execute or simulate runtime capabilities. Never use it alone to claim that runtime state was remembered, saved, bound, updated, paused, stopped, or otherwise mutated: first call the matching mutation capability and observe success, even when the user constrains the final reply to one literal value. Set terminal_intent=clarify and identify the schema-level missing_slot when a required capability argument is absent; do not invoke an invalid capability merely to prove that its declared input is missing. Runtime-owned provider/config/permission, domain parse/normalize/validate/preview, dry-run, artifact/job, checkpoint, diff, verification, repair, and rewind fields require a prior matching capability result. A lower-level environment observation is supporting context, not a substitute for the disclosed domain capability that owns those fields. Use free_text for prose/scalars, list for exact items, object for model-authored exact named fields, or observed_object to copy selected JSON fields from current-loop success data or structured failure fields without re-serializing their values. Each object value_json contains one complete serialized JSON value and is validated before delivery; JSON string values include their surrounding JSON quotes.".to_string(),
         input_schema: json!({
             "type": "object",
             "required": [
                 "terminal_intent",
+                "conversation_relation",
                 "shape",
                 "content",
                 "items",
                 "exact_item_count",
+                "exact_visible_line_count",
                 "fields",
                 "observed_fields",
                 "exact_field_count"
@@ -947,6 +1018,17 @@ fn native_planner_request(
                     "type": "string",
                     "enum": ["answer", "clarify"],
                     "description": "answer=final_deliverable; clarify=one_question_for_missing_required_input"
+                },
+                "conversation_relation": {
+                    "type": "string",
+                    "enum": [
+                        "continue_current",
+                        "amend_current",
+                        "start_followup",
+                        "side_reply",
+                        "clarify"
+                    ],
+                    "description": "semantic relation to the active task: continue_current=finish an accepted deliverable unchanged, including a terminal answer that contains both a requested side answer and the completed primary deliverable; amend_current=finish an accepted deliverable with mid-turn changes; start_followup=the initial primary deliverable when no plan/reply/effect was accepted yet, or an independent new primary goal; side_reply=a nonterminal side answer that leaves the primary task active; clarify=missing required input or an unresolved target_ref when multiple active targets remain equally plausible. Never terminate after only a side answer when the same input asks to complete the primary deliverable. Never guess, merge, or update all ambiguous targets. A conversation_input_batch is bound to the same task: merge it into an interrupted first attempt, but after any accepted plan/reply/effect classify its semantic change as amend_current or continue_current. Decide from meaning, never fixed phrases"
                 },
                 "clarify_reason_code": {
                     "type": "string",
@@ -995,6 +1077,12 @@ fn native_planner_request(
                     "type": "integer",
                     "minimum": 0,
                     "maximum": MAX_NATIVE_RESPONSE_ITEMS
+                },
+                "exact_visible_line_count": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": MAX_NATIVE_RESPONSE_ITEMS,
+                    "description": "Exact whole-answer newline-delimited visible line count selected from the current user constraints. Use 0 when no exact whole-answer line, bullet, or numbered-entry count was requested. When nonzero, emit no blank lines, preface, heading, recap, or extra marker line. Include a required trailing marker, signature, checksum, or suffix in the final requested line; do not increase the count unless the user explicitly requests an additional line. For shape=list this must equal exact_item_count."
                 },
                 "fields": {
                     "type": "array",
@@ -1067,6 +1155,29 @@ fn native_planner_request(
         response_schema: None,
         stream: true,
         metadata,
+    }
+}
+
+fn active_turn_control_tool_definition(instruction_revision: u64) -> ModelToolDefinition {
+    ModelToolDefinition {
+        name: NATIVE_CONTROL_ACTIVE_TURN_TOOL.to_string(),
+        description: "contract=active_turn_lifecycle_control;decision_owner=planner;actions=stop,pause;rollback=false".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "required": ["action", "expected_instruction_revision"],
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["stop", "pause"]
+                },
+                "expected_instruction_revision": {
+                    "type": "integer",
+                    "const": instruction_revision
+                }
+            },
+            "additionalProperties": false
+        }),
+        strict: true,
     }
 }
 
@@ -1184,6 +1295,7 @@ fn native_contract_repair_signal_with_context(
                 "content",
                 "items",
                 "exact_item_count",
+                "exact_visible_line_count",
                 "fields",
                 "observed_fields",
                 "exact_field_count",
@@ -1260,6 +1372,7 @@ fn native_contract_repair_signal_with_context(
                     "content": "non_empty",
                     "items": "empty",
                     "exact_item_count": 0,
+                    "exact_visible_line_count": "zero_or_requested_whole_answer_line_count",
                     "fields": "empty",
                     "observed_fields": "empty",
                     "exact_field_count": 0
@@ -1268,6 +1381,7 @@ fn native_contract_repair_signal_with_context(
                     "content": "empty",
                     "items": "non_empty",
                     "exact_item_count": "must_equal_items_length",
+                    "exact_visible_line_count": "zero_or_must_equal_items_length",
                     "fields": "empty",
                     "observed_fields": "empty",
                     "exact_field_count": 0
@@ -1276,6 +1390,7 @@ fn native_contract_repair_signal_with_context(
                     "content": "empty",
                     "items": "empty",
                     "exact_item_count": 0,
+                    "exact_visible_line_count": 0,
                     "fields": "non_empty",
                     "observed_fields": "empty",
                     "exact_field_count": "must_equal_fields_length"
@@ -1284,6 +1399,7 @@ fn native_contract_repair_signal_with_context(
                     "content": "empty",
                     "items": "empty",
                     "exact_item_count": 0,
+                    "exact_visible_line_count": 0,
                     "fields": "empty",
                     "observed_fields": "non_empty",
                     "exact_field_count": "must_equal_observed_fields_length"
@@ -1581,6 +1697,30 @@ fn action_from_native_tool_call_with_schemas(
             action_from_native_capability_call(call, capability_argument_schemas)
         }
         NATIVE_RESPOND_TOOL => action_from_native_respond_call(call, loop_state),
+        NATIVE_CONTROL_ACTIVE_TURN_TOOL => {
+            let arguments = call
+                .arguments
+                .as_object()
+                .ok_or_else(|| "native_active_turn_control_arguments_not_object".to_string())?;
+            if !matches!(
+                arguments.get("action").and_then(Value::as_str),
+                Some("stop" | "pause")
+            ) {
+                return Err("native_active_turn_control_action_invalid".to_string());
+            }
+            let expected_revision = arguments
+                .get("expected_instruction_revision")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| "native_active_turn_control_revision_missing".to_string())?;
+            if loop_state.map(|state| state.conversation_input_revision) != Some(expected_revision)
+            {
+                return Err("native_active_turn_control_revision_conflict".to_string());
+            }
+            Ok(AgentAction::CallTool {
+                tool: NATIVE_CONTROL_ACTIVE_TURN_TOOL.to_string(),
+                args: call.arguments.clone(),
+            })
+        }
         super::capability_discovery::RUNTIME_CAPABILITY_LOADER_TOOL => {
             action_from_native_capability_group_load(call)
         }

@@ -19,6 +19,8 @@ export interface AssistantPresentationEvent {
   sequence: number;
   contentOffsetBytes: number;
   createdAt: number;
+  instructionRevision?: number;
+  executionEpoch?: number;
   content?: string;
   totalContentBytes?: number;
   contentSha256?: string;
@@ -43,6 +45,8 @@ export interface AssistantPresentationState {
   errorCode: string | null;
   messageKey: string | null;
   retryable: boolean | null;
+  instructionRevision: number | null;
+  executionEpoch: number | null;
 }
 
 const PRESENTATION_KINDS = new Set<AssistantPresentationEventKind>([
@@ -81,6 +85,21 @@ export function decodeAssistantPresentationEvent(
     ),
     createdAt: integer(payload.created_at, "assistant_presentation_created_at_invalid"),
   };
+  const hasInstructionRevision = payload.instruction_revision !== undefined;
+  const hasExecutionEpoch = payload.execution_epoch !== undefined;
+  if (hasInstructionRevision !== hasExecutionEpoch) {
+    throw new Error("assistant_presentation_execution_version_incomplete");
+  }
+  if (hasInstructionRevision) {
+    event.instructionRevision = integer(
+      payload.instruction_revision,
+      "assistant_presentation_instruction_revision_invalid",
+    );
+    event.executionEpoch = integer(
+      payload.execution_epoch,
+      "assistant_presentation_execution_epoch_invalid",
+    );
+  }
   if (event.schemaVersion !== 1 || event.taskId !== envelope.task_id) {
     throw new Error("assistant_presentation_identity_mismatch");
   }
@@ -115,6 +134,10 @@ export function decodeAssistantPresentationEvent(
 export class AssistantPresentationReducer {
   private readonly streams = new Map<string, AssistantPresentationState>();
   private readonly seen = new Map<string, Map<number, string>>();
+  private readonly latestExecutionVersion = new Map<
+    string,
+    { instructionRevision: number; executionEpoch: number }
+  >();
 
   async apply(event: AssistantPresentationEvent): Promise<AssistantPresentationState | null> {
     if (event.kind === "assistant_output_replaced") {
@@ -137,6 +160,8 @@ export class AssistantPresentationReducer {
       if (this.streams.has(event.streamId)) {
         throw new Error("assistant_presentation_stream_conflict");
       }
+      if (this.isStaleExecutionVersion(event)) return null;
+      this.advanceExecutionVersion(event);
       const state: AssistantPresentationState = {
         streamId: event.streamId,
         attemptId: event.attemptId,
@@ -151,6 +176,8 @@ export class AssistantPresentationReducer {
         errorCode: null,
         messageKey: null,
         retryable: null,
+        instructionRevision: event.instructionRevision ?? null,
+        executionEpoch: event.executionEpoch ?? null,
       };
       this.streams.set(event.streamId, state);
       streamSeen.set(event.sequence, fingerprint);
@@ -160,6 +187,7 @@ export class AssistantPresentationReducer {
 
     const state = this.streams.get(event.streamId);
     if (!state) throw new Error("assistant_presentation_start_missing");
+    if (this.isStaleStream(state)) return null;
     if (state.status !== "streaming") throw new Error("assistant_presentation_stream_terminal");
     if (event.sequence !== state.nextSequence) {
       throw new Error("assistant_presentation_sequence_gap");
@@ -200,6 +228,41 @@ export class AssistantPresentationReducer {
   get(streamId: string): AssistantPresentationState | null {
     return this.streams.get(streamId) ?? null;
   }
+
+  private isStaleExecutionVersion(event: AssistantPresentationEvent): boolean {
+    if (event.instructionRevision === undefined || event.executionEpoch === undefined) {
+      return false;
+    }
+    const latest = this.latestExecutionVersion.get(event.taskId);
+    return latest ? compareExecutionVersion(event, latest) < 0 : false;
+  }
+
+  private advanceExecutionVersion(event: AssistantPresentationEvent): void {
+    if (event.instructionRevision === undefined || event.executionEpoch === undefined) return;
+    const latest = this.latestExecutionVersion.get(event.taskId);
+    if (!latest || compareExecutionVersion(event, latest) > 0) {
+      this.latestExecutionVersion.set(event.taskId, {
+        instructionRevision: event.instructionRevision,
+        executionEpoch: event.executionEpoch,
+      });
+    }
+  }
+
+  private isStaleStream(state: AssistantPresentationState): boolean {
+    if (state.instructionRevision === null || state.executionEpoch === null) return false;
+    const latest = this.latestExecutionVersion.get(state.taskId);
+    if (!latest) return false;
+    return compareExecutionVersion(state, latest) < 0;
+  }
+}
+
+function compareExecutionVersion(
+  left: { instructionRevision?: number | null; executionEpoch?: number | null },
+  right: { instructionRevision: number; executionEpoch: number },
+): number {
+  const leftEpoch = left.executionEpoch ?? 0;
+  if (leftEpoch !== right.executionEpoch) return leftEpoch - right.executionEpoch;
+  return (left.instructionRevision ?? 0) - right.instructionRevision;
 }
 
 function record(value: unknown, errorCode: string): Record<string, unknown> {

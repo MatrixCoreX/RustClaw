@@ -69,8 +69,16 @@ Agent Runtime 主自然语言路径使用接近 Codex / Claude 的 agent loop。
 
 ```mermaid
 flowchart TD
-    A[通道 / UI / API 请求] --> B[POST /v1/tasks]
-    B --> BA[认证后的任务执行策略<br/>服务端拥有的机器 envelope]
+    A[通道 / UI / API 请求] --> B{入口类型}
+    B -->|普通会话输入| BI[POST /v1/conversation-inputs/client-task]
+    BI --> BJ[持久化输入收据<br/>scope + input_seq + 幂等]
+    BJ --> BK{会话是否有活跃任务}
+    BK -->|是| BL[绑定同一任务<br/>唤醒循环 + 中断过期模型轮次]
+    BK -->|否| BM[原子认领创建权<br/>只创建一个前台 ask 任务]
+    BL --> BA
+    BM --> BA
+    B -->|显式任务 / 自动化 / run_skill| BT[POST /v1/tasks]
+    BT --> BA[认证后的任务执行策略<br/>服务端拥有的机器 envelope]
     BA --> C[持久化任务并入队]
     C --> D[返回 task_id<br/>调用方可轮询]
     D --> E0[worker_once 恢复 tick<br/>stale running + due checkpoint]
@@ -131,11 +139,15 @@ flowchart TD
     Z -. 可选 .-> AC[后台记忆刷新]
 ```
 
-- `POST /v1/tasks`：通道守护进程、浏览器 UI 和 HTTP 调用者都收敛到同一套持久化任务队列。
+- `POST /v1/conversation-inputs/client-task`：UI、CLI 和通信端的普通消息先进入持久会话输入账本。即使尚未绑定任务，输入收据也是权威记录；会话有活跃任务时交给同一 agent loop 调整，空闲时则原子地只创建一个前台 `ask` 任务。
+- `POST /v1/tasks`：继续作为自动化、直接技能执行，以及明确自行管理独立任务的 API 边界。
 - `认证后的任务执行策略`：`clawcli` 默认继续使用配置中的 approval/sandbox 策略，只有当前仍启用的管理员密钥显式请求全局 `--yolo` 才会进入 YOLO；其他通信 adapter 使用管理员密钥认证时默认进入 YOLO。服务端会删除调用方提供的策略 envelope，在认证后重新签发机器合同，并在每次使用时再次确认管理员密钥仍有效。YOLO 表示 `approval_policy=never` 与 `sandbox_mode=danger_full`，不会绕过 registry allow/deny、参数 schema、路径校验、外部发布控制、取消、预算、脱敏和审计。
 - `task_id polling`：API/通道请求的等待超时只影响调用方等多久；后台任务仍可通过 `GET /v1/tasks/{task_id}` 查询，除非 worker 生命周期逻辑已经把它标记为终态。
 - `worker_once recovery tick`：worker 认领新 queued 任务前，会先检查 stale running、受保护 paused checkpoint、到期恢复任务、async poll 结果和结果投影。
 - `Task kind`：`kind=ask` 进入 planner-owned 自然语言路径；`kind=run_skill` 绕过 planner loop、能力选择和 plan verifier，只把显式提供的 `payload.skill_name` 交给共享 skill dispatcher / 协议执行。两种 task kind 都会把结果写回原始 `task_id`，调用方仍可通过 task 查询 API 查看最终状态。
+- `连续会话输入`：每条已接收消息都有稳定的 `input_id`、单调 `input_seq`、disposition、instruction revision 和 execution epoch。Planner 按顺序读取 ready 输入；决策提交后推进 revision，工具派发和终态呈现都会拒绝过期版本。Agent 输入框默认立即补充当前任务；选择“稍后处理”只持久保存输入、不启动工作，并提供“立即处理”和“撤回”操作。显式 `/cancel` 直接调用当前会话的鉴权控制端点，不依赖模型。
+- `单一规划 owner`：同一会话任务同一时间只有一个 planner owner。普通新输入会在 adapter 可安全停止时中断正在进行的只读/模型步骤，否则在下一个派发安全边界应用；runtime 不会在在途 mutation 旁边再启动第二个控制 planner。长 mutation 使用受监督的 async/checkpoint 合同，显式停止继续作为模型外机器控制。
+- `取消收尾`：接收停止、发出停止请求、adapter 确认和 cleanup settled 是不同机器事实。父任务取消会传播到子任务与进程组，但已登记 runtime 的 cleanup 真正结算前，任务不会被呈现或投送为已取消；外部效果未知时进入 reconciliation，不会宣称已经回滚。
 
 ### Ask 与 Run Skill 边界
 
@@ -610,6 +622,11 @@ flowchart LR
 - `GET /v1/system/dependencies`：返回 Linux/macOS 依赖、已安装版本、使用该依赖的工具/技能和可安装状态
 - `POST /v1/admin/system-dependencies/install`：管理员按固定 `dependency_id` 启动受控异步安装，不接受任意命令或包名
 - `POST /v1/tasks`
+- `POST /v1/conversation-inputs/client-task`：持久接收普通消息，并绑定当前任务或只创建一个任务
+- `GET /v1/conversation-inputs`：按会话 cursor 或 `client_message_id` 恢复 owner-scoped 输入收据
+- `GET /v1/conversation-inputs/events`：读取轻量的接收、绑定与 disposition 事件
+- `POST /v1/conversation-inputs/{input_id}/activate|withdraw`：激活 deferred 输入，或撤回尚未应用的输入
+- `POST /v1/conversation-inputs/cancel-current`：幂等请求取消已认证会话的当前任务，可用精确 task UUID 作为 guard
 - `GET /v1/tasks/{task_id}`
 - `GET /v1/tasks/{task_id}/artifacts`：返回经过鉴权的任务产物清单
 - `GET/HEAD /v1/tasks/{task_id}/artifacts/{artifact_id}/content`：预览、下载或只读取一个受控产物的元数据

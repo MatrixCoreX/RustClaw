@@ -194,6 +194,53 @@ fn direct_workspace_diff_resolves_and_remains_confirmation_exempt() {
 }
 
 #[test]
+fn direct_workspace_batch_edit_uses_its_exact_capability_required_args() {
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+    let task = test_task();
+    let plan = crate::agent_engine::direct_capability_plan(
+        &state,
+        "workspace.edit_text",
+        json!({
+            "path": "tmp/example.md",
+            "edits": [
+                {"old_text": "old title", "new_text": "new title"},
+                {"old_text": "old marker", "new_text": "new marker"}
+            ]
+        }),
+    );
+
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            output_contract: None,
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan,
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert_eq!(result.approved_steps[0].skill, "fs_basic");
+    assert_eq!(result.approved_steps[0].args["action"], "replace_text");
+    assert!(!result.issues.iter().any(|issue| {
+        issue.kind == VerifyIssueKind::MissingRequiredArg
+            && issue
+                .missing_fields
+                .iter()
+                .any(|field| matches!(field.as_str(), "old_text" | "new_text"))
+    }));
+    assert_eq!(
+        result.capability_resolutions[0].record.required_args,
+        vec!["path", "edits"]
+    );
+}
+
+#[test]
 fn direct_workspace_rewind_resolves_but_requires_one_shot_confirmation() {
     let state = registry_confirmation::workspace_registry_state();
     let task = test_task();

@@ -1246,17 +1246,24 @@ fn read_range_reports_full_file_line_endings_without_changing_bytes() {
         ("alpha\r", 0, 0, false),
         ("\u{feff}alpha\n", 1, 0, true),
         ("\n", 1, 0, true),
-    ].into_iter().enumerate() {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let target = root.join(format!("ending-{index}.txt"));
         std::fs::write(&target, content).expect("write fixture");
         for mode in ["head", "tail", "range"] {
             let args = json!({"path": target, "mode": mode, "n": 1});
             let output = read_range(&root, args.as_object().unwrap(), true).expect("read");
             let value: Value = serde_json::from_str(&output).expect("json");
-            assert_eq!(value["line_endings"], json!({
-                "scope": "file", "lf_count": lf, "crlf_count": crlf,
-                "ends_with_newline": terminated,
-            }), "fixture {index}, mode {mode}");
+            assert_eq!(
+                value["line_endings"],
+                json!({
+                    "scope": "file", "lf_count": lf, "crlf_count": crlf,
+                    "ends_with_newline": terminated,
+                }),
+                "fixture {index}, mode {mode}"
+            );
             assert_eq!(value["size_bytes"], content.len());
             assert_eq!(value["sha256"], sha256_hex(content.as_bytes()));
             assert_eq!(std::fs::read(&target).unwrap(), content.as_bytes());

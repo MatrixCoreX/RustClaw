@@ -14,21 +14,10 @@ mod conversation_alias;
 pub(crate) use conversation_alias::alias_bindings_mentioned_in_prompt;
 
 #[cfg(test)]
-pub(crate) use conversation_alias::{
-    session_alias_bindings_from_state_patch, single_alias_binding_mentioned_in_prompt,
-    state_patch_is_alias_bindings_only,
-};
+pub(crate) use conversation_alias::single_alias_binding_mentioned_in_prompt;
 
-use conversation_alias::{
-    merge_alias_bindings_for_turn, merge_alias_bindings_from_capability_results,
-    turn_analysis_has_alias_only_state_patch,
-};
-
-#[cfg(test)]
-use conversation_alias::{
-    merge_alias_bindings, structural_alias_binding_from_prompt,
-    structural_alias_rebinds_from_prompt,
-};
+use conversation_alias::merge_alias_bindings_from_capability_results;
+pub(crate) use conversation_alias::session_alias_target_shape_is_valid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub(crate) struct SessionAliasBinding {
@@ -105,6 +94,35 @@ fn normalized_locale_hint(payload: Option<&Value>) -> Option<String> {
         .map(ToString::to_string)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlannerConversationRelation {
+    ContinueCurrent,
+    AmendCurrent,
+    StartFollowup,
+    SideReply,
+    Clarify,
+}
+
+fn planner_conversation_relation(
+    journal: &crate::task_journal::TaskJournal,
+) -> Option<PlannerConversationRelation> {
+    match journal.latest_planner_conversation_relation()?.as_str() {
+        "continue_current" => Some(PlannerConversationRelation::ContinueCurrent),
+        "amend_current" => Some(PlannerConversationRelation::AmendCurrent),
+        "start_followup" => Some(PlannerConversationRelation::StartFollowup),
+        "side_reply" => Some(PlannerConversationRelation::SideReply),
+        "clarify" => Some(PlannerConversationRelation::Clarify),
+        _ => None,
+    }
+}
+
+fn planner_relation_completed_successfully(journal: &crate::task_journal::TaskJournal) -> bool {
+    matches!(
+        journal.final_status,
+        Some(crate::task_journal::TaskJournalFinalStatus::Success)
+    )
+}
+
 fn next_last_primary_task_prompt(
     prior_state: Option<&ConversationState>,
     route_result: &crate::IntentOutputContract,
@@ -113,13 +131,50 @@ fn next_last_primary_task_prompt(
     prompt: &str,
     resolved_prompt_for_execution: &str,
 ) -> Option<String> {
+    let prior_prompt = prior_state.and_then(|state| state.last_primary_task_prompt.clone());
+    if let Some(relation) = planner_conversation_relation(journal) {
+        if !planner_relation_completed_successfully(journal) {
+            return prior_prompt;
+        }
+        let user_prompt = prompt.trim();
+        let resolved_prompt = resolved_prompt_for_execution.trim();
+        let current_prompt = if user_prompt.is_empty() {
+            resolved_prompt
+        } else {
+            user_prompt
+        };
+        if current_prompt.is_empty() {
+            return prior_prompt;
+        }
+        return match relation {
+            PlannerConversationRelation::ContinueCurrent => {
+                Some(merge_primary_task_prompt_with_label(
+                    prior_prompt.as_deref(),
+                    current_prompt,
+                    "Continuation",
+                    None,
+                ))
+            }
+            PlannerConversationRelation::AmendCurrent => {
+                Some(merge_primary_task_prompt_with_label(
+                    prior_prompt.as_deref(),
+                    current_prompt,
+                    "Amendment",
+                    None,
+                ))
+            }
+            PlannerConversationRelation::StartFollowup => Some(current_prompt.to_string()),
+            PlannerConversationRelation::SideReply | PlannerConversationRelation::Clarify => {
+                prior_prompt
+            }
+        };
+    }
     if standalone_preference_or_memory_turn_clears_primary_task(route_result, turn_analysis) {
         return None;
     }
     if should_preserve_active_session_pointers(turn_analysis) {
         return prior_state.and_then(|state| state.last_primary_task_prompt.clone());
     }
-    let prior_prompt = prior_state.and_then(|state| state.last_primary_task_prompt.clone());
     if standalone_scalar_result_should_not_promote(
         prior_prompt.as_deref(),
         route_result,
@@ -178,6 +233,20 @@ fn merge_primary_task_prompt(
     turn_type: crate::turn_context::TurnType,
     state_patch: Option<&Value>,
 ) -> String {
+    let label = match turn_type {
+        crate::turn_context::TurnType::TaskCorrect => "Correction",
+        crate::turn_context::TurnType::TaskScopeUpdate => "Scope update",
+        _ => "Additional instruction",
+    };
+    merge_primary_task_prompt_with_label(prior_prompt, current_prompt, label, state_patch)
+}
+
+fn merge_primary_task_prompt_with_label(
+    prior_prompt: Option<&str>,
+    current_prompt: &str,
+    label: &str,
+    state_patch: Option<&Value>,
+) -> String {
     let prior = prior_prompt
         .map(str::trim)
         .filter(|value| !value.is_empty());
@@ -187,11 +256,6 @@ fn merge_primary_task_prompt(
     if prior == current_prompt {
         return prior.to_string();
     }
-    let label = match turn_type {
-        crate::turn_context::TurnType::TaskCorrect => "Correction",
-        crate::turn_context::TurnType::TaskScopeUpdate => "Scope update",
-        _ => "Additional instruction",
-    };
     let patch = state_patch
         .and_then(render_primary_task_state_patch)
         .map(|patch| format!("\nStructured update: {patch}"))
@@ -504,6 +568,22 @@ fn next_last_primary_task_output(
     answer_text: &str,
     answer_messages: &[String],
 ) -> Option<String> {
+    if let Some(relation) = planner_conversation_relation(journal) {
+        if !planner_relation_completed_successfully(journal) {
+            return prior_last_primary_task_output(prior_state);
+        }
+        return match relation {
+            PlannerConversationRelation::ContinueCurrent
+            | PlannerConversationRelation::AmendCurrent
+            | PlannerConversationRelation::StartFollowup => {
+                let latest_output = current_turn_answer_text(answer_text, answer_messages);
+                latest_output.or_else(|| prior_last_primary_task_output(prior_state))
+            }
+            PlannerConversationRelation::SideReply | PlannerConversationRelation::Clarify => {
+                prior_last_primary_task_output(prior_state)
+            }
+        };
+    }
     if standalone_preference_or_memory_turn_clears_primary_task(route_result, turn_analysis) {
         return None;
     }
@@ -706,11 +786,7 @@ pub(crate) fn update_active_session_from_ask_outcome(
     };
     let current_outcome_refreshes_session_pointers =
         current_outcome_has_session_anchor(route_result, journal, semantic_clarify);
-    let clear_active_session_pointers_for_alias_update =
-        turn_analysis_has_alias_only_state_patch(turn_analysis)
-            && !current_outcome_refreshes_session_pointers;
-    let preserve_active_session_pointers = !clear_active_session_pointers_for_alias_update
-        && !current_outcome_refreshes_session_pointers
+    let preserve_active_session_pointers = !current_outcome_refreshes_session_pointers
         && (should_preserve_active_session_pointers(turn_analysis)
             || preserve_primary_task_for_clarifying_output);
     if preserve_active_session_pointers {
@@ -748,8 +824,6 @@ pub(crate) fn update_active_session_from_ask_outcome(
                         .as_ref()
                         .and_then(|state| state.active_observed_facts_task_id.clone()),
                 )
-            } else if clear_active_session_pointers_for_alias_update {
-                (None, None, None)
             } else {
                 let active_followup_task_id =
                     crate::followup_frame::sync_active_frame_from_ask_outcome_tx(
@@ -825,13 +899,10 @@ pub(crate) fn update_active_session_from_ask_outcome(
             active_clarify_task_id,
             active_observed_facts_task_id,
             alias_bindings: merge_alias_bindings_from_capability_results(
-                merge_alias_bindings_for_turn(
-                    prior_state.as_ref(),
-                    turn_analysis,
-                    prompt,
-                    route_result,
-                    resolved_prompt_for_execution,
-                ),
+                prior_state
+                    .as_ref()
+                    .map(|state| state.alias_bindings.clone())
+                    .unwrap_or_default(),
                 &journal.capability_results,
             ),
             last_primary_task_prompt,
@@ -970,9 +1041,6 @@ pub(crate) fn load_active_session_snapshot(
     }
 }
 
-#[cfg(test)]
-#[path = "conversation_state_alias_state_patch_tests.rs"]
-mod alias_state_patch_tests;
 #[cfg(test)]
 #[path = "conversation_state_tests.rs"]
 mod tests;

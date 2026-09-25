@@ -171,6 +171,17 @@ pub(crate) fn task_query_lifecycle_projection(
     lifecycle
 }
 
+pub(crate) fn cancellation_settlement_pending(
+    db_status: &str,
+    result_json: Option<&Value>,
+) -> bool {
+    db_status.trim() == "canceled"
+        && result_json
+            .and_then(|result| result.pointer("/task_lifecycle/state"))
+            .and_then(Value::as_str)
+            == Some("cancel_requested")
+}
+
 pub(crate) fn task_execution_state_from_lifecycle(lifecycle: &Value) -> TaskExecutionState {
     let state = lifecycle
         .get("state")
@@ -183,7 +194,7 @@ fn task_execution_state_from_lifecycle_state(state: &str) -> TaskExecutionState 
     match state.trim() {
         "queued" => TaskExecutionState::Queued,
         "running" => TaskExecutionState::Running,
-        "waiting" | "pause_requested" => TaskExecutionState::Waiting,
+        "waiting" | "pause_requested" | "cancel_requested" => TaskExecutionState::Waiting,
         "background" => TaskExecutionState::Background,
         "needs_confirmation" | "needs_user" => TaskExecutionState::NeedsConfirmation,
         "blocked" => TaskExecutionState::Blocked,
@@ -198,6 +209,10 @@ fn task_execution_state_from_lifecycle_state(state: &str) -> TaskExecutionState 
 pub(crate) enum PausedCheckpointRecoveryStatus {
     NotPaused,
     InvalidPausedCheckpoint,
+    ManualResumeRequired {
+        state: String,
+        checkpoint_id: String,
+    },
     Waiting {
         state: String,
         checkpoint_id: String,
@@ -208,7 +223,10 @@ pub(crate) enum PausedCheckpointRecoveryStatus {
 
 impl PausedCheckpointRecoveryStatus {
     pub(crate) fn preserve_running_status_for_recovery(&self) -> bool {
-        matches!(self, Self::Waiting { .. })
+        matches!(
+            self,
+            Self::ManualResumeRequired { .. } | Self::Waiting { .. }
+        )
     }
 }
 
@@ -216,6 +234,10 @@ impl PausedCheckpointRecoveryStatus {
 pub(crate) enum PausedCheckpointResumeReadiness {
     NotPaused,
     InvalidPausedCheckpoint,
+    ManualResumeRequired {
+        state: String,
+        checkpoint_id: String,
+    },
     WaitingNotDue {
         state: String,
         checkpoint_id: String,
@@ -377,6 +399,16 @@ pub(crate) fn paused_checkpoint_recovery_status(
     else {
         return PausedCheckpointRecoveryStatus::InvalidPausedCheckpoint;
     };
+    if lifecycle
+        .get("manual_resume_required")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return PausedCheckpointRecoveryStatus::ManualResumeRequired {
+            state,
+            checkpoint_id,
+        };
+    }
     let Some(next_check_after) = lifecycle
         .get("next_check_after")
         .and_then(Value::as_i64)
@@ -458,6 +490,15 @@ pub(crate) fn paused_checkpoint_resume_readiness(
             }
             PausedCheckpointRecoveryStatus::InvalidPausedCheckpoint => {
                 return PausedCheckpointResumeReadiness::InvalidPausedCheckpoint;
+            }
+            PausedCheckpointRecoveryStatus::ManualResumeRequired {
+                state,
+                checkpoint_id,
+            } => {
+                return PausedCheckpointResumeReadiness::ManualResumeRequired {
+                    state,
+                    checkpoint_id,
+                };
             }
             PausedCheckpointRecoveryStatus::Waiting {
                 state,
@@ -610,6 +651,11 @@ pub(crate) fn checkpoint_resume_directive(
         PausedCheckpointResumeReadiness::InvalidPausedCheckpoint => {
             CheckpointResumeDirective::NotReady {
                 status_code: "invalid_paused_checkpoint",
+            }
+        }
+        PausedCheckpointResumeReadiness::ManualResumeRequired { .. } => {
+            CheckpointResumeDirective::NotReady {
+                status_code: "manual_resume_required",
             }
         }
         PausedCheckpointResumeReadiness::WaitingNotDue { .. } => {
@@ -824,7 +870,13 @@ fn lifecycle_state_from_db_status(db_status: &str) -> &'static str {
 fn lifecycle_state_token_is_active(state: &str) -> bool {
     matches!(
         state.trim(),
-        "queued" | "running" | "pause_requested" | "waiting" | "background" | "needs_user"
+        "queued"
+            | "running"
+            | "pause_requested"
+            | "cancel_requested"
+            | "waiting"
+            | "background"
+            | "needs_user"
     )
 }
 
@@ -1326,7 +1378,7 @@ fn append_lifecycle_next_action_fields(obj: &mut serde_json::Map<String, Value>,
             Some("resume_checkpoint")
         } else if state == "needs_user" {
             Some("await_user_input")
-        } else if matches!(state, "queued" | "running") {
+        } else if matches!(state, "queued" | "running" | "cancel_requested") {
             Some("poll_task")
         } else if matches!(state, "succeeded" | "failed" | "cancelled") {
             Some("inspect_result")
@@ -1367,7 +1419,7 @@ fn append_lifecycle_recommended_user_action_fields(
         } else {
             Some("wait_until_next_check")
         }
-    } else if matches!(state, "queued" | "running") {
+    } else if matches!(state, "queued" | "running" | "cancel_requested") {
         Some("poll_task_status")
     } else if matches!(state, "succeeded" | "failed" | "cancelled") {
         Some("inspect_result")

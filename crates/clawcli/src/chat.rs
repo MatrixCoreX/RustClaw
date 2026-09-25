@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use rustyline::ExternalPrinter as _;
 
 use crate::chat_attachments::{
     attachment_payload, extract_path_references, inspect_attachment, merge_attachment,
@@ -46,7 +47,40 @@ pub(crate) fn run_chat(
     } else {
         None
     };
+    let mut background_followers = if !jsonl_output {
+        if let Some(editor) = editor.as_mut() {
+            let mut printer = editor
+                .create_external_printer()
+                .context("chat_external_printer_init_failed")?;
+            let (output_tx, output_rx) = crate::chat_background::output_channel();
+            std::thread::spawn(move || {
+                while let Ok(message) = output_rx.recv() {
+                    let _ = printer.print(message);
+                }
+            });
+            Some(crate::chat_background::ChatBackgroundFollowers::new(
+                output_tx,
+            ))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    if let (Some(followers), Some(task_id)) = (
+        background_followers.as_mut(),
+        session.active_task_id.as_deref(),
+    ) {
+        followers.start(base_url, key, task_id, session.event_cursor);
+    }
     loop {
+        if let Some(followers) = background_followers.as_mut() {
+            for (task_id, cursor) in followers.reap() {
+                if session.active_task_id.as_deref() == Some(task_id.as_str()) {
+                    commands::record_chat_session_cursor(&mut session, cursor)?;
+                }
+            }
+        }
         let line = if let Some(editor) = editor.as_mut() {
             match editor.readline("> ") {
                 Ok(line) => line,
@@ -64,6 +98,13 @@ pub(crate) fn run_chat(
             }
             line
         };
+        if let Some(followers) = background_followers.as_mut() {
+            for (task_id, cursor) in followers.reap() {
+                if session.active_task_id.as_deref() == Some(task_id.as_str()) {
+                    commands::record_chat_session_cursor(&mut session, cursor)?;
+                }
+            }
+        }
         let normalized_line = normalize_multiline_input(&line);
         let text = normalized_line.trim();
         if text.is_empty() {
@@ -96,7 +137,13 @@ pub(crate) fn run_chat(
                 ChatCommand::ResumeTask(task_id) => {
                     session.apply(ChatSessionTransition::TaskSelected(task_id))?;
                     commands::persist_chat_session(&session)?;
-                    follow_and_render_task(base_url, key, &mut session, jsonl_output)?;
+                    observe_or_follow_task(
+                        base_url,
+                        key,
+                        &mut session,
+                        jsonl_output,
+                        background_followers.as_mut(),
+                    )?;
                 }
                 ChatCommand::Cancel => {
                     if let Some(task_id) = session.active_task_id.as_deref() {
@@ -184,7 +231,13 @@ pub(crate) fn run_chat(
                         session_submission_options(&session),
                     )?;
                     commands::record_chat_session_task(&mut session, &task_id)?;
-                    follow_and_render_task(base_url, key, &mut session, jsonl_output)?;
+                    observe_or_follow_task(
+                        base_url,
+                        key,
+                        &mut session,
+                        jsonl_output,
+                        background_followers.as_mut(),
+                    )?;
                 }
                 ChatCommand::Compact(compaction_focus) => {
                     let task_id = task::submit_conversation_compaction(
@@ -223,7 +276,7 @@ pub(crate) fn run_chat(
         }
         commands::persist_chat_session(&session)?;
         let attachments = attachment_payload(&session.attachments)?;
-        let task_id = task::submit_thread_ask(
+        let receipt = task::submit_thread_ask(
             base_url,
             key,
             text,
@@ -240,13 +293,39 @@ pub(crate) fn run_chat(
             },
             session_submission_options(&session),
         )?;
+        let task_id = receipt.task_id.clone();
         session.apply(ChatSessionTransition::AttachmentsCleared)?;
         commands::record_chat_session_task(&mut session, &task_id)?;
         commands::persist_chat_session(&session)?;
-        print_task_submitted(&task_id, jsonl_output)?;
-        follow_and_render_task(base_url, key, &mut session, jsonl_output)?;
+        print_conversation_input_submitted(&receipt, jsonl_output)?;
+        observe_or_follow_task(
+            base_url,
+            key,
+            &mut session,
+            jsonl_output,
+            background_followers.as_mut(),
+        )?;
     }
     Ok(())
+}
+
+fn observe_or_follow_task(
+    base_url: &str,
+    key: &str,
+    session: &mut ChatSessionState,
+    jsonl_output: bool,
+    background_followers: Option<&mut crate::chat_background::ChatBackgroundFollowers>,
+) -> Result<()> {
+    if let Some(followers) = background_followers {
+        let task_id = session
+            .active_task_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("chat_task_missing"))?;
+        followers.start(base_url, key, task_id, session.event_cursor);
+        Ok(())
+    } else {
+        follow_and_render_task(base_url, key, session, jsonl_output)
+    }
 }
 
 fn follow_and_render_task(
@@ -322,7 +401,8 @@ fn follow_and_render_task(
                             }
                             crate::assistant_presentation::PresentationUpdate::Started
                             | crate::assistant_presentation::PresentationUpdate::Replaced
-                            | crate::assistant_presentation::PresentationUpdate::Duplicate => {}
+                            | crate::assistant_presentation::PresentationUpdate::Duplicate
+                            | crate::assistant_presentation::PresentationUpdate::Superseded => {}
                         }
                     }
                     return Ok(!events::task_event_is_terminal(raw_event)
@@ -678,16 +758,30 @@ fn print_attachment_count(count: usize, jsonl_output: bool) -> Result<()> {
     }
 }
 
-fn print_task_submitted(task_id: &str, jsonl_output: bool) -> Result<()> {
+fn print_conversation_input_submitted(
+    receipt: &task::ConversationInputSubmitView,
+    jsonl_output: bool,
+) -> Result<()> {
     if jsonl_output {
         print_jsonl_record(&serde_json::json!({
             "schema_version": 1,
-            "record_type": "task_submitted",
-            "status": "ok",
-            "task_id": task_id,
+            "record_type": "conversation_input_accepted",
+            "status": "accepted",
+            "input_id": receipt.input_id,
+            "task_id": receipt.task_id,
+            "instruction_revision": receipt.instruction_revision,
+            "execution_epoch": receipt.execution_epoch,
+            "handoff_state": receipt.handoff_state,
         }))
     } else {
-        println!("task_id={task_id}");
+        println!("input_id={}", receipt.input_id);
+        println!("task_id={}", receipt.task_id);
+        println!("input_status=accepted");
+        println!("instruction_revision={}", receipt.instruction_revision);
+        println!("execution_epoch={}", receipt.execution_epoch);
+        if let Some(handoff_state) = receipt.handoff_state.as_deref() {
+            println!("handoff_state={handoff_state}");
+        }
         Ok(())
     }
 }

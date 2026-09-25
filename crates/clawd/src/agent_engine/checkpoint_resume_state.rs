@@ -86,6 +86,10 @@ pub(crate) fn restore_checkpoint_resume_state(
     loop_state: &mut LoopState,
     boundary_context: &Value,
 ) -> AgentCheckpointStage {
+    loop_state.checkpoint_action_replay = boundary_context
+        .get("checkpoint_action_replay")
+        .filter(|value| value.get("schema_version").and_then(Value::as_u64) == Some(1))
+        .cloned();
     let Some(resume_state) = boundary_context
         .get("agent_loop_resume_state")
         .filter(|value| value.get("schema_version").and_then(Value::as_u64) == Some(1))

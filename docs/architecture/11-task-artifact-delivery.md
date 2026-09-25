@@ -102,7 +102,7 @@ adapter owns platform verification, replay protection, binding, attachment
 materialization, locale collection, task submission, low-noise activity, and
 delivery receipts. Every ordinary bound-user message follows the same path:
 
-`platform event -> verify/deduplicate/bind -> ChannelIngressEnvelope -> TaskKind::Ask -> agent runtime`
+`platform event -> verify/deduplicate/bind -> ChannelIngressEnvelope -> durable conversation input -> agent runtime`
 
 The envelope preserves original text and attachment facts. MIME and filename
 describe an attachment but do not select a skill or capability. The shared
@@ -111,6 +111,41 @@ command catalog is limited to `/help` (`/start` alias), `/key`, `/cancel`, and
 bound user, `/run`, `/status`, and unknown slash text remain unchanged ordinary
 `ask` input. Skill install, update, enable, disable, and removal must not change
 the command catalog digest.
+
+Ordinary channel messages use the same owner-scoped conversation-input receipt
+as UI and CLI messages. The first accepted input creates the foreground task;
+later inputs bind to that task without creating another terminal-delivery owner.
+The channel acknowledges its provider event only after the durable handoff.
+Explicit `/cancel` calls the central current-conversation control contract and
+may include an exact UUID guard. Invalid command arguments remain ordinary agent
+input rather than widening into a bulk cancellation.
+
+```mermaid
+flowchart LR
+    A[accepted input] --> B[input_id + input_seq]
+    B --> C[planner decision<br/>revision + epoch]
+    C --> D[action dispatch claim]
+    D --> E[tool / skill evidence]
+    E --> F{terminal version still current?}
+    F -->|yes| G[single task delivery owner]
+    F -->|no| H[superseded event<br/>no stale final delivery]
+    G --> I[channel receipt / browser history]
+```
+
+Acceptance, a cancellation request, and terminal settlement are distinct
+machine events. User-visible deterministic control acknowledgements are keyed
+i18n messages; runtime routing never parses them. Binary artifacts continue to
+use the existing delivery service and authenticated artifact broker.
+
+Adapters preserve ordinary per-peer order while allowing the exact catalogued
+`/cancel` command to bypass slow attachment materialization. This bypass is
+syntax-based machine control only; natural-language requests do not receive a
+transport shortcut. Delivery claims are receipt-driven: an expired dispatch
+lease without a platform acknowledgement becomes `query_required`, and a
+partially accepted multipart delivery records its accepted prefix instead of
+replaying the whole message. WeChat delivery resolves the newest valid inbound
+context token at send time, so an expired token is never treated as proof that
+the content was not delivered.
 
 Deterministic failures use `ChannelNotice` and public-safe i18n parameters;
 raw provider bodies and diagnostics remain operator evidence. A transport uses

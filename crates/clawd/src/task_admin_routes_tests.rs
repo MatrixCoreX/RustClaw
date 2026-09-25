@@ -1,15 +1,24 @@
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::Json;
+use claw_core::channel_ingress::{ChannelIngressEnvelope, ChannelReplyTarget};
+use claw_core::conversation_control::{
+    CancelCurrentConversationTaskRequest, CONVERSATION_CONTROL_SCHEMA_VERSION,
+};
+use claw_core::conversation_input::{
+    ConversationInputClientTaskRequest, ConversationInputContent, ConversationInputDeliveryMode,
+    ConversationInputScopeRef, ConversationInputSource, ConversationInputSubmission,
+};
+use claw_core::types::{ChannelKind, SubmitTaskRequest, TaskKind};
 use serde_json::{json, Value};
 
 use super::{
-    cancel_task_by_id, close_child_task_by_id, goal_by_task_id, list_active_tasks,
-    list_approval_scope_grants, list_task_history, resume_task_by_id, retry_child_task_by_id,
-    revoke_approval_scope_grant, stop_child_tasks_by_parent, ActiveTasksRequest,
-    CancelTaskByIdRequest, CloseChildTaskByIdRequest, GoalByTaskIdRequest, ResumeTaskByIdRequest,
-    RetryChildTaskByIdRequest, RevokeApprovalScopeGrantRequest, StopChildTasksByParentRequest,
-    TaskHistoryRequest,
+    cancel_current_conversation_task, cancel_task_by_id, close_child_task_by_id, goal_by_task_id,
+    list_active_tasks, list_approval_scope_grants, list_task_history, resume_task_by_id,
+    retry_child_task_by_id, revoke_approval_scope_grant, stop_child_tasks_by_parent,
+    ActiveTasksRequest, CancelTaskByIdRequest, CloseChildTaskByIdRequest, GoalByTaskIdRequest,
+    ResumeTaskByIdRequest, RetryChildTaskByIdRequest, RevokeApprovalScopeGrantRequest,
+    StopChildTasksByParentRequest, TaskHistoryRequest,
 };
 
 const USER_KEY: &str = "goal-route-test-key";
@@ -80,6 +89,70 @@ fn auth_headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert("x-agent-key", HeaderValue::from_static(USER_KEY));
     headers
+}
+
+fn conversation_client_request(
+    key: &str,
+    message_id: &str,
+    text: &str,
+) -> ConversationInputClientTaskRequest {
+    let conversation_id = "cancel-current-chat";
+    let account_id = "cancel-current-account";
+    ConversationInputClientTaskRequest {
+        input: ConversationInputSubmission {
+            schema_version: 1,
+            client_message_id: message_id.to_string(),
+            scope: ConversationInputScopeRef {
+                conversation_id: conversation_id.to_string(),
+                agent_id: "main".to_string(),
+                channel: "telegram".to_string(),
+                channel_account_id: account_id.to_string(),
+            },
+            content: vec![ConversationInputContent::Text {
+                text: text.to_string(),
+            }],
+            delivery_mode: ConversationInputDeliveryMode::Auto,
+            expected_task_id: None,
+            expected_instruction_revision: None,
+            source: ConversationInputSource {
+                provider_message_id: Some(message_id.to_string()),
+                reply_to_message_id: None,
+                received_at_ts: Some(1),
+            },
+        },
+        task: SubmitTaskRequest {
+            user_id: Some(7),
+            chat_id: Some(7),
+            user_key: Some(key.to_string()),
+            channel: Some(ChannelKind::Telegram),
+            external_user_id: Some("cancel-current-user".to_string()),
+            external_chat_id: Some(conversation_id.to_string()),
+            ingress: Some(
+                ChannelIngressEnvelope::new(ChannelKind::Telegram, "telegram_bot")
+                    .with_account_id(account_id)
+                    .with_external_ids("cancel-current-user", conversation_id)
+                    .with_message_id(message_id)
+                    .with_reply_target(ChannelReplyTarget::chat(conversation_id)),
+            ),
+            idempotency_key: Some(format!("provider:{message_id}")),
+            kind: TaskKind::Ask,
+            payload: json!({ "text": text }),
+        },
+    }
+}
+
+fn cancel_current_request(client_request_id: &str) -> CancelCurrentConversationTaskRequest {
+    CancelCurrentConversationTaskRequest {
+        schema_version: CONVERSATION_CONTROL_SCHEMA_VERSION,
+        client_request_id: client_request_id.to_string(),
+        scope: ConversationInputScopeRef {
+            conversation_id: "cancel-current-chat".to_string(),
+            agent_id: "main".to_string(),
+            channel: "telegram".to_string(),
+            channel_account_id: "cancel-current-account".to_string(),
+        },
+        expected_task_id: None,
+    }
 }
 
 fn stored_payload(state: &crate::AppState, task_id: &str) -> Value {
@@ -210,6 +283,143 @@ async fn cancel_task_by_id_is_idempotent_after_the_task_is_cancelled() {
     assert_eq!(second["status"], "task_cancelled");
     assert_eq!(second["canceled"], 1);
     assert_eq!(second["task_id"], task_id);
+}
+
+#[tokio::test]
+async fn cancel_current_replay_never_cancels_a_later_conversation_task() {
+    let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let key = crate::repo::auth::create_auth_key(&state, "admin").expect("create auth key");
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        claw_core::product_identity::AUTH_KEY_HEADER,
+        HeaderValue::from_str(&key).expect("auth header"),
+    );
+
+    let (status, Json(first)) = crate::http::conversation_inputs::accept_client_task(
+        State(state.clone()),
+        headers.clone(),
+        Json(conversation_client_request(
+            &key,
+            "cancel-message-1",
+            "First task",
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let first_task_id = first
+        .data
+        .expect("first task receipt")
+        .input
+        .target_task_id
+        .expect("first task id");
+
+    let cancel = cancel_current_request("cancel-current-replay-1");
+    let (status, Json(first_cancel)) = cancel_current_conversation_task(
+        State(state.clone()),
+        headers.clone(),
+        Json(cancel.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let first_cancel = first_cancel.data.expect("first cancel receipt");
+    assert_eq!(first_cancel["status"], "cancel_requested");
+    assert_eq!(first_cancel["task_id"], first_task_id.to_string());
+
+    let (status, Json(second)) = crate::http::conversation_inputs::accept_client_task(
+        State(state.clone()),
+        headers.clone(),
+        Json(conversation_client_request(
+            &key,
+            "cancel-message-2",
+            "Second task",
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let second_task_id = second
+        .data
+        .expect("second task receipt")
+        .input
+        .target_task_id
+        .expect("second task id");
+    assert_ne!(second_task_id, first_task_id);
+
+    let (status, Json(replayed)) =
+        cancel_current_conversation_task(State(state.clone()), headers, Json(cancel)).await;
+    assert_eq!(status, StatusCode::OK);
+    let replayed = replayed.data.expect("replayed cancel receipt");
+    assert_eq!(replayed["task_id"], first_task_id.to_string());
+
+    let second_status: String = state
+        .core
+        .db
+        .get()
+        .expect("database")
+        .query_row(
+            "SELECT status FROM tasks WHERE task_id = ?1",
+            rusqlite::params![second_task_id.to_string()],
+            |row| row.get(0),
+        )
+        .expect("second task status");
+    assert_ne!(second_status, "canceled");
+}
+
+#[tokio::test]
+async fn explicit_cancel_target_may_cross_conversations_but_not_principals() {
+    let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let owner_key = crate::repo::auth::create_auth_key(&state, "user").expect("owner key");
+    let other_key = crate::repo::auth::create_auth_key(&state, "user").expect("other key");
+    let mut owner_headers = HeaderMap::new();
+    owner_headers.insert(
+        claw_core::product_identity::AUTH_KEY_HEADER,
+        HeaderValue::from_str(&owner_key).expect("owner auth header"),
+    );
+    let mut other_headers = HeaderMap::new();
+    other_headers.insert(
+        claw_core::product_identity::AUTH_KEY_HEADER,
+        HeaderValue::from_str(&other_key).expect("other auth header"),
+    );
+
+    let (status, Json(submitted)) = crate::http::conversation_inputs::accept_client_task(
+        State(state.clone()),
+        owner_headers.clone(),
+        Json(conversation_client_request(
+            &owner_key,
+            "cross-conversation-message",
+            "Long task in another channel",
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let task_id = submitted
+        .data
+        .expect("task receipt")
+        .input
+        .target_task_id
+        .expect("task id");
+
+    let mut request = cancel_current_request("cross-conversation-cancel-owner");
+    request.scope.channel = "whatsapp".to_string();
+    request.scope.channel_account_id = "other-channel-account".to_string();
+    request.scope.conversation_id = "other-conversation".to_string();
+    request.expected_task_id = Some(task_id);
+    let (status, Json(canceled)) = cancel_current_conversation_task(
+        State(state.clone()),
+        owner_headers,
+        Json(request.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        canceled.data.expect("cancel receipt")["task_id"],
+        task_id.to_string()
+    );
+
+    request.client_request_id = "cross-conversation-cancel-other".to_string();
+    let (status, Json(denied)) =
+        cancel_current_conversation_task(State(state), other_headers, Json(request)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(denied.data.is_none());
 }
 
 #[tokio::test]

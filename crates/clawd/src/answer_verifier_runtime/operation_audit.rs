@@ -37,6 +37,15 @@ impl RequiredDispatch {
                 field("resolved_capability") == Some(self.action_ref.as_str())
                     || (field("requested_action_type") == Some("call_capability")
                         && field("requested_capability") == Some(self.action_ref.as_str()))
+                    || operation
+                        .get("runtime_managed_capabilities")
+                        .and_then(serde_json::Value::as_array)
+                        .is_some_and(|capabilities| {
+                            capabilities.iter().any(|capability| {
+                                capability.as_str() == Some(self.action_ref.as_str())
+                            })
+                        })
+                    || executed_skill_action_alias_matches(&self.action_ref, operation)
             }
             "call_tool" | "call_skill" => {
                 field("requested_action_type") == Some(self.action_type.as_str())
@@ -45,6 +54,26 @@ impl RequiredDispatch {
             _ => false,
         }
     }
+}
+
+fn executed_skill_action_alias_matches(action_ref: &str, operation: &serde_json::Value) -> bool {
+    let Some(executed_skill) = operation
+        .get("executed_skill")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return false;
+    };
+    let Some((alias_skill, alias_action)) = action_ref.rsplit_once('.') else {
+        return false;
+    };
+    if alias_skill != executed_skill {
+        return false;
+    }
+    ["resolved_capability", "requested_capability"]
+        .into_iter()
+        .filter_map(|field| operation.get(field).and_then(serde_json::Value::as_str))
+        .filter_map(|capability| capability.rsplit_once('.').map(|(_, action)| action))
+        .any(|action| action == alias_action)
 }
 
 fn operation_is_applicable() -> bool {
@@ -80,10 +109,10 @@ pub(super) fn validate_operation_audit(
         }
         if check.required_dispatches.is_empty() && check.evidence_step_ids.is_empty() {
             // Summarizing or formatting already-fetched results is a verdict
-            // concern. An empty outcome-only row cannot prove or disprove
-            // execution; claiming a method, blocker, or inapplicable branch
-            // without steps remains an invalid audit.
-            if !check.applicable || check.method_observed || check.blocked {
+            // concern. An empty row cannot prove or disprove execution, so its
+            // method/result booleans are non-authoritative. A blocker or an
+            // inapplicable branch still requires concrete evidence.
+            if !check.applicable || check.blocked {
                 return invalid_operation_audit();
             }
             continue;

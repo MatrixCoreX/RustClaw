@@ -446,4 +446,9 @@ fn native_action_protocol_scopes_output_constraints_semantically() {
     assert!(PROMPT.contains("apply the constraint to the entire visible answer"));
     assert!(PROMPT.contains("return only the selected compact subset"));
     assert!(PROMPT.contains("Do not echo the complete observation inventory"));
+    assert!(PROMPT.contains("Apply later `input_seq` and `instruction_revision`"));
+    assert!(PROMPT.contains("whole-answer shape constraint"));
+    assert!(PROMPT.contains("do not append the superseded draft"));
+    assert!(PROMPT.contains("Replacing the active deliverable"));
+    assert!(PROMPT.contains("not a lifecycle stop"));
 }

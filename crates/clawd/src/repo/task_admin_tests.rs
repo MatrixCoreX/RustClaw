@@ -58,6 +58,7 @@ fn state_with_tasks_table() -> crate::AppState {
             user_id INTEGER NOT NULL,
             chat_id INTEGER NOT NULL,
             user_key TEXT,
+            principal_id TEXT,
             channel TEXT NOT NULL,
             external_user_id TEXT,
             external_chat_id TEXT,
@@ -104,10 +105,10 @@ fn insert_running_task(state: &crate::AppState, task_id: &str, result_json: &Val
     let db = state.core.db.get().expect("get db");
     db.execute(
         "INSERT INTO tasks (
-            task_id, user_id, chat_id, user_key, channel, kind, payload_json,
+            task_id, user_id, chat_id, user_key, principal_id, channel, kind, payload_json,
             status, result_json, error_text, created_at, updated_at
         )
-        VALUES (?1, 42, 7, 'test-key', 'ui', 'ask', ?2, 'running', ?3, NULL, '1', '1')",
+        VALUES (?1, 42, 7, 'test-key', 'principal-42', 'ui', 'ask', ?2, 'running', ?3, NULL, '1', '1')",
         rusqlite::params![
             task_id,
             json!({"text": "visible request"}).to_string(),
@@ -273,8 +274,46 @@ fn cancel_task_by_id_signals_the_matching_active_runtime_only() {
     assert_eq!(cancel_task_by_id(&state, &task_id).expect("cancel task"), 1);
     assert!(token.is_cancelled());
     assert!(!other_token.is_cancelled());
+    assert_eq!(
+        stored_result_json(&state, &task_id)["task_lifecycle"]["state"],
+        "cancel_requested"
+    );
+    let db = state.core.db.get().expect("db");
+    let stages = db
+        .prepare(
+            "SELECT lifecycle_stage FROM conversation_reply_items
+             WHERE task_id = ?1 ORDER BY created_at_ts, lifecycle_stage",
+        )
+        .expect("prepare")
+        .query_map(rusqlite::params![task_id], |row| row.get::<_, String>(0))
+        .expect("query")
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .expect("stages");
+    assert_eq!(stages, ["accepted", "stop_requested"]);
+    drop(db);
 
     state.worker.unregister_active_task(&task_id);
+    assert_eq!(
+        reconcile_cancelled_task_settlements(&state, 10).expect("settle cancellation"),
+        1
+    );
+    assert_eq!(
+        stored_result_json(&state, &task_id)["task_lifecycle"]["state"],
+        "cancelled"
+    );
+    let settled_count = state
+        .core
+        .db
+        .get()
+        .expect("db")
+        .query_row(
+            "SELECT COUNT(*) FROM conversation_reply_items
+             WHERE task_id = ?1 AND lifecycle_stage = 'settled'",
+            rusqlite::params![task_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .expect("settled count");
+    assert_eq!(settled_count, 1);
     state.worker.unregister_active_task(&other_task_id);
 }
 

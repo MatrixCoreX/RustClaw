@@ -37,6 +37,43 @@ fn observed_outputs_include_structured_run_cmd_error() {
 }
 
 #[test]
+fn observed_outputs_include_non_retryable_structured_skill_error() {
+    let err = format!(
+        "__RC_SKILL_ERROR__:{}",
+        serde_json::json!({
+            "skill": "map_merchant",
+            "error_code": "skill_credentials_missing",
+            "error_text": "required credential is unavailable",
+            "extra": {
+                "schema_version": 1,
+                "source_skill": "map_merchant",
+                "status": "error",
+                "error_code": "skill_credentials_missing",
+                "message_key": "clawd.skill.credentials_missing",
+                "retryable": false,
+                "failure_phase": "pre_dispatch",
+                "side_effect_applied": false
+            }
+        })
+    );
+    let mut loop_state = LoopState::new();
+    loop_state
+        .executed_step_results
+        .push(error_step("step_1", "map_merchant", &err));
+
+    let entries = observed_output_entries(&loop_state);
+    let joined = entries.join("\n");
+
+    assert!(has_observed_answer_candidates(&loop_state));
+    assert!(joined.contains("skill(map_merchant)"), "entries: {joined}");
+    assert!(
+        joined.contains("skill_credentials_missing"),
+        "entries: {joined}"
+    );
+    assert!(joined.contains("\"retryable\":false"), "entries: {joined}");
+}
+
+#[test]
 fn observed_outputs_exclude_synthesis_steps() {
     let mut loop_state = LoopState::new();
     loop_state.executed_step_results.push(ok_step(

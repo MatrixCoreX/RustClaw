@@ -9,6 +9,9 @@ export type ChatActivityStage =
   | "running_tool"
   | "tool_returned"
   | "verifying_response"
+  | "adjusting"
+  | "stopping"
+  | "stopped"
   | "finalizing";
 
 const TERMINAL_PRESENTATION_ACTIONS = new Set(["respond", "synthesize_answer"]);
@@ -122,6 +125,52 @@ export function reduceChatActivity(
       progressCurrent: null,
       progressTotal: null,
     };
+  }
+
+  if (eventType === "conversation_reply_item") {
+    const relation = typeof payload.relation === "string" ? payload.relation : "";
+    const stage = typeof payload.lifecycle_stage === "string" ? payload.lifecycle_stage : "";
+    if (relation === "control_status" && stage === "stop_requested") {
+      return {
+        ...next,
+        stage: "stopping",
+        activeName: null,
+        commandPreview: null,
+        progressDetailKey: null,
+        progressCurrent: null,
+        progressTotal: null,
+      };
+    }
+    if (relation === "control_status" && stage === "settled") {
+      return {
+        ...next,
+        stage: "stopped",
+        activeName: null,
+        commandPreview: null,
+        progressDetailKey: null,
+        progressCurrent: null,
+        progressTotal: null,
+      };
+    }
+  }
+
+  if (eventType === "task_control") {
+    const action = typeof payload.action === "string" ? payload.action : "";
+    const status = typeof payload.status === "string" ? payload.status : "";
+    if (
+      status === "task_steering_accepted"
+      || (action === "steer" && status === "accepted")
+    ) {
+      return {
+        ...next,
+        stage: "adjusting",
+        activeName: null,
+        commandPreview: null,
+        progressDetailKey: null,
+        progressCurrent: null,
+        progressTotal: null,
+      };
+    }
   }
 
   if (eventType === "model_turn") {

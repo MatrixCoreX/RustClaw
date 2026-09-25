@@ -135,6 +135,43 @@ fn native_action_protocol_requires_capability_owned_structured_observations() {
 }
 
 #[test]
+fn native_action_protocol_requires_structured_session_alias_persistence() {
+    let prompt = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../prompts/layers/overlays/native_action_protocol.md"),
+    )
+    .expect("read native action protocol");
+
+    assert!(prompt.contains("call `session.bind_alias` before acknowledging"));
+    assert!(prompt.contains("Mandatory semantic preflight"));
+    assert!(prompt.contains("constrains only the eventual visible response"));
+    assert!(prompt.contains("does not persist session state"));
+    assert!(prompt.contains("never use an acknowledgement literal"));
+    assert!(prompt.contains("do not infer a binding from"));
+    assert!(prompt.contains("ordinary conversation context"));
+}
+
+#[test]
+fn native_action_protocol_clarifies_ambiguous_targets_and_keeps_plans_stable() {
+    let prompt = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../prompts/layers/overlays/native_action_protocol.md"),
+    )
+    .expect("read native action protocol");
+    let normalized = prompt.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    assert!(prompt.contains("distinct active targets that are equally compatible"));
+    assert!(prompt.contains("missing_slot=target_ref"));
+    assert!(prompt.contains("language-independent"));
+    assert!(prompt.contains("capability discovery, catalog loading"));
+    assert!(prompt.contains("an update never invents or appends a new step ID"));
+    assert!(normalized.contains("task-plan bookkeeping and that action"));
+    assert!(normalized.contains("Do not spend a separate model turn on bookkeeping alone"));
+    assert!(normalized.contains("`respond` remains a standalone terminal call"));
+    assert!(prompt.contains("never terminate after only the side answer"));
+}
+
+#[test]
 fn native_turn_context_rechecks_open_playbook_obligations_at_decision_boundary() {
     let overlay = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../prompts/layers/overlays/native_turn_context.md");
@@ -152,6 +189,8 @@ fn native_turn_context_rechecks_open_playbook_obligations_at_decision_boundary()
     assert!(normalized.contains("every still-relevant source has a current-loop observation"));
     assert!(prompt.contains("user explicitly narrowed the"));
     assert!(prompt.contains("structured observation established"));
+    assert!(prompt.contains("`completed_action_result_reused`"));
+    assert!(normalized.contains("never propose the same completed action again"));
 }
 
 #[test]
@@ -270,6 +309,36 @@ fn answer_verifier_accepts_grounded_required_input_clarification() {
     assert!(prompt.contains("schema declaration is sufficient machine-contract evidence"));
     assert!(prompt.contains("never require an intentionally invalid capability call"));
     assert!(prompt.contains("set `pass=true`"));
+}
+
+#[test]
+fn drafting_prompts_apply_explicit_replacements_without_unrelated_file_lookup() {
+    let overlays = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts/layers/overlays");
+    for relative_path in [
+        "single_plan_execution_prompt.md",
+        "loop_incremental_plan_prompt.md",
+    ] {
+        let prompt =
+            std::fs::read_to_string(overlays.join(relative_path)).expect("read planner overlay");
+        assert!(prompt.contains("old-to-new correction"), "{relative_path}");
+        assert!(prompt.contains("old value is absent"), "{relative_path}");
+        assert!(prompt.contains("session alias"), "{relative_path}");
+        assert!(
+            prompt.contains("unfinished file mutation"),
+            "{relative_path}"
+        );
+    }
+
+    let response = std::fs::read_to_string(overlays.join("chat_response_prompt.md"))
+        .expect("read chat response overlay");
+    assert!(response.contains("old-to-new correction"));
+    assert!(response.contains("standalone correction with no active draft"));
+
+    let verifier = std::fs::read_to_string(overlays.join("answer_verifier_prompt.md"))
+        .expect("read answer verifier overlay");
+    assert!(verifier.contains("old-to-new correction"));
+    assert!(verifier.contains("asking where the rejected value appeared is incomplete"));
+    assert!(verifier.contains("without a tool call"));
 }
 
 #[test]

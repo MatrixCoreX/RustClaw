@@ -26,6 +26,7 @@ fn terminal_events_preserve_utf8_offsets_sequence_and_digest() {
         &task(r#"{"conversation_id":"conversation-1","turn_id":"turn-1"}"#),
         "A你好B",
         4,
+        None,
     );
 
     assert_eq!(events[0].0, "assistant_output_started");
@@ -47,7 +48,8 @@ fn terminal_events_preserve_utf8_offsets_sequence_and_digest() {
 
 #[test]
 fn terminal_events_use_sanitized_public_content_only() {
-    let events = terminal_answer_events(&task("{}"), "token=sk-secret-value-1234567890", 4096);
+    let events =
+        terminal_answer_events(&task("{}"), "token=sk-secret-value-1234567890", 4096, None);
     let delta = events
         .iter()
         .find(|(kind, _)| *kind == "assistant_output_delta")
@@ -62,7 +64,7 @@ fn terminal_events_use_sanitized_public_content_only() {
 
 #[test]
 fn empty_answer_still_has_started_and_completed_events() {
-    let events = terminal_answer_events(&task("{}"), "", 16);
+    let events = terminal_answer_events(&task("{}"), "", 16, None);
 
     assert_eq!(events.len(), 2);
     assert_eq!(events[0].0, "assistant_output_started");
@@ -76,7 +78,7 @@ fn event_schema_is_identical_across_answer_languages() {
     let shapes = ["plain answer", "中文回答", "respuesta en espanol"]
         .into_iter()
         .map(|text| {
-            terminal_answer_events(&task("{}"), text, 4096)
+            terminal_answer_events(&task("{}"), text, 4096, None)
                 .into_iter()
                 .map(|(kind, payload)| {
                     let mut keys = payload
@@ -94,6 +96,21 @@ fn event_schema_is_identical_across_answer_languages() {
 
     assert_eq!(shapes[0], shapes[1]);
     assert_eq!(shapes[1], shapes[2]);
+}
+
+#[test]
+fn presentation_events_carry_the_instruction_and_execution_versions() {
+    let execution = crate::repo::conversation_inputs::ConversationExecutionSnapshot {
+        instruction_revision: 7,
+        execution_epoch: 4,
+    };
+    let events = terminal_answer_events(&task("{}"), "done", 4096, Some(execution));
+
+    assert!(!events.is_empty());
+    for (_, payload) in events {
+        assert_eq!(payload["instruction_revision"], 7);
+        assert_eq!(payload["execution_epoch"], 4);
+    }
 }
 
 fn claimed_task(state: &crate::AppState, task_id: &str) -> ClaimedTask {

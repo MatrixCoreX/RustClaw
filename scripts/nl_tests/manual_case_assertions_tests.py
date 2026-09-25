@@ -14,6 +14,7 @@ def result_with_steps(
     completed_side_effect_count: int = 0,
     text: str = "machine result",
     task_observations: list[dict] | None = None,
+    event_stream: list[dict] | None = None,
 ) -> dict:
     return {
         "ok": True,
@@ -43,6 +44,7 @@ def result_with_steps(
                     "trace": {
                         "step_results": steps,
                         "task_observations": task_observations or [],
+                        "event_stream": event_stream or [],
                     },
                 },
             },
@@ -74,6 +76,24 @@ def capability_resolution_observation(capability: str) -> dict:
         "outcome": "resolved",
         "requested_capability": capability,
         "resolved_capability": capability,
+    }
+
+
+def pre_dispatch_permission_event(capability: str) -> dict:
+    return {
+        "event_type": "permission_decision",
+        "payload": {
+            "decision": {
+                "allowed": False,
+                "steps": [
+                    {
+                        "decision": "deny",
+                        "sandbox_denial_reason": "fixture_policy_denied",
+                        "registry_policy": {"capability": capability},
+                    }
+                ],
+            }
+        },
     }
 
 
@@ -303,6 +323,25 @@ def main() -> int:
             for detail in pre_dispatch_row["assertion_details"]
         )
 
+        policy_rejection = write_result(
+            root,
+            "policy-rejection.json",
+            result_with_steps(
+                [capability_group_load_step(), terminal_step()],
+                event_stream=[pre_dispatch_permission_event("fixture.preview")],
+            ),
+        )
+        policy_rejection_row = row_for(
+            policy_rejection,
+            "capability:fixture.preview;requires_tool_call:false",
+        )
+        assert policy_rejection_row["assertion"] == "pass"
+        assert any(
+            detail.get("tag") == "capability"
+            and detail.get("matched_resolution_count") == 1
+            for detail in policy_rejection_row["assertion_details"]
+        )
+
         missing_real_call_row = row_for(
             pre_dispatch_rejection,
             "capability:fixture.preview;requires_tool_call:true",
@@ -364,12 +403,36 @@ def main() -> int:
         )
         assert no_tool["assertion"] == "pass"
 
+        internal_plan_failure = capability_step(
+            dry_run=False,
+            capability="task.plan_set",
+        )
+        internal_plan_failure["status"] = "error"
+        internal_plan_failure["error_code"] = "task_plan_revision_conflict"
+        internal_plan_only = write_result(
+            root,
+            "internal-plan-only.json",
+            result_with_steps([internal_plan_failure]),
+        )
+        internal_plan_only_row = row_for(
+            internal_plan_only,
+            "requires_tool_call=false;local_readonly",
+        )
+        assert internal_plan_only_row["assertion"] == "pass"
+
         allowed_failure = row_for_status(
             direct,
             "requires_tool_call=false;allow_terminal_failure",
             "failed",
         )
         assert allowed_failure["assertion"] == "pass"
+
+        allowed_clarification = row_for_status(
+            direct,
+            "requires_tool_call=false;allow_needs_user",
+            "needs_user",
+        )
+        assert allowed_clarification["assertion"] == "pass"
 
         failed_with_error_text = result_with_steps([capability_step()])
         failed_with_error_text["data"]["status"] = "failed"
@@ -923,6 +986,24 @@ def main() -> int:
         assert row_for(observed_line, "requires_tool_call=true", expect="observed_eq:line=8")["assertion"] == "fail"
         assert row_for(observed_line, "requires_tool_call=true", expect="observed_eq:line_number=7")["assertion"] == "fail"
         assert row_for(observed_line, "requires_tool_call=true", expect="observed_eq:line")["assertion"] == "fail"
+
+        case_insensitive_contains = write_result(
+            root,
+            "case-insensitive-contains.json",
+            result_with_steps([], text="Plan exists: no."),
+        )
+        contains_row = row_for(
+            case_insensitive_contains,
+            "",
+            expect="contains:plan",
+        )
+        assert contains_row["assertion"] == "pass"
+        legacy_contains_row = row_for(
+            case_insensitive_contains,
+            "",
+            expect="plan",
+        )
+        assert legacy_contains_row["assertion"] == "pass"
 
     print("MANUAL_CASE_ASSERTIONS_TESTS ok")
     return 0

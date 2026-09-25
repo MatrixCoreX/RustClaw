@@ -1496,13 +1496,13 @@ PY
       fi
       return 1
     fi
-    local skill_guard_reason
-    if ! skill_guard_reason="$(assert_expected_skill_from_tags "$out_file" "$case_tags" 2>&1)"; then
-      echo "Turn ${turn} failed quality guard: ${skill_guard_reason}" >&2
-      echo "  reply=${text:-${error:-<empty>}}" >&2
-      print_log_hints "$task_id" >&2
-      return 1
-    fi
+  fi
+  local skill_guard_reason
+  if ! skill_guard_reason="$(assert_expected_skill_from_tags "$out_file" "$case_tags" 2>&1)"; then
+    echo "Turn ${turn} failed structured execution expectation: ${skill_guard_reason}" >&2
+    echo "  reply=${text:-${error:-<empty>}}" >&2
+    print_log_hints "$task_id" >&2
+    return 1
   fi
   if [[ -n "$expected_marker" && "$case_tags_l" == *",expect_exact_scalar,"* ]]; then
     local scalar_reason

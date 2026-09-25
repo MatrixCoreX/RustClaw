@@ -1,5 +1,6 @@
 use crate::OutputLocatorKind;
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StructuredLocatorTokenKind {
     Path,
@@ -8,6 +9,7 @@ pub(crate) enum StructuredLocatorTokenKind {
     DeliveryToken,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StructuredLocatorToken {
     pub(crate) kind: StructuredLocatorTokenKind,
@@ -22,6 +24,7 @@ pub(crate) struct ExtractedLocator {
     pub(crate) reason: &'static str,
 }
 
+#[cfg(test)]
 pub(crate) fn extract_explicit_locator_for_fallback(
     user_request: &str,
 ) -> Option<ExtractedLocator> {
@@ -60,6 +63,7 @@ pub(crate) fn extract_explicit_locator_for_fallback(
     None
 }
 
+#[cfg(test)]
 pub(crate) fn structured_locator_tokens(user_request: &str) -> Vec<StructuredLocatorToken> {
     let mut out = Vec::new();
     for locator in extract_explicit_locator_candidates_for_fallback(user_request) {
@@ -103,6 +107,7 @@ pub(crate) fn structured_locator_tokens(user_request: &str) -> Vec<StructuredLoc
     out
 }
 
+#[cfg(test)]
 fn push_structured_locator_token(
     out: &mut Vec<StructuredLocatorToken>,
     token: StructuredLocatorToken,

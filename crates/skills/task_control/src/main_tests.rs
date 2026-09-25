@@ -218,7 +218,8 @@ fn session_alias_action_requires_and_preserves_structured_values() {
     let input = parse_input(&json!({
         "action": "bind_session_alias",
         "alias": "甲文件",
-        "target": "scripts/nl_tests/fixtures/device_local/docs/service_notes.md"
+        "target": "scripts/nl_tests/fixtures/device_local/docs/service_notes.md",
+        "target_kind": "path"
     }))
     .expect("session alias input");
 
@@ -228,22 +229,50 @@ fn session_alias_action_requires_and_preserves_structured_values() {
         input.alias_target.as_deref(),
         Some("scripts/nl_tests/fixtures/device_local/docs/service_notes.md")
     );
+    assert_eq!(input.alias_target_kind.as_deref(), Some("path"));
 
     assert_eq!(
-        parse_input(&json!({"action":"bind_session_alias", "target":"note.md"}))
-            .expect_err("alias required"),
+        parse_input(
+            &json!({"action":"bind_session_alias", "target":"note.md", "target_kind":"path"})
+        )
+        .expect_err("alias required"),
         "bind_session_alias_missing_alias"
     );
     assert_eq!(
-        parse_input(&json!({"action":"bind_session_alias", "alias":"note"}))
+        parse_input(&json!({"action":"bind_session_alias", "alias":"note", "target_kind":"path"}))
             .expect_err("target required"),
         "bind_session_alias_missing_target"
+    );
+    assert_eq!(
+        parse_input(&json!({"action":"bind_session_alias", "alias":"note", "target":"note.md"}))
+            .expect_err("target kind required"),
+        "bind_session_alias_missing_target_kind"
+    );
+    assert_eq!(
+        parse_input(&json!({
+            "action":"bind_session_alias",
+            "alias":"RC-CONT-0428",
+            "target":"RC-CONT-0428",
+            "target_kind":"resource"
+        }))
+        .expect_err("alias must identify a distinct target"),
+        "bind_session_alias_alias_equals_target"
+    );
+    assert_eq!(
+        parse_input(&json!({
+            "action":"bind_session_alias",
+            "alias":"marker",
+            "target":"RC-CONT-0428",
+            "target_kind":"resource"
+        }))
+        .expect_err("resource target must be machine addressed"),
+        "bind_session_alias_target_invalid"
     );
 }
 
 #[test]
 fn session_alias_extra_is_machine_state_evidence() {
-    let extra = session_alias_binding_extra("note file", "document/note.md");
+    let extra = session_alias_binding_extra("note file", "document/note.md", "path");
 
     assert_eq!(extra["action"], "bind_session_alias");
     assert_eq!(extra["status"], "ok");
@@ -251,6 +280,38 @@ fn session_alias_extra_is_machine_state_evidence() {
     assert_eq!(
         extra["session_alias_bindings"][0]["target"],
         "document/note.md"
+    );
+    assert_eq!(extra["session_alias_bindings"][0]["target_kind"], "path");
+}
+
+#[test]
+fn session_alias_target_kinds_use_machine_shape_validation() {
+    for (kind, target) in [
+        ("path", "notes/release.md"),
+        ("url", "https://example.invalid/item/1"),
+        ("task", "00000000-0000-4000-8000-000000000001"),
+        ("artifact", "artifact:task/task-1/result-1"),
+        ("resource", "service:local-agent"),
+    ] {
+        let parsed = parse_input(&json!({
+            "action": "bind_session_alias",
+            "alias": "current target",
+            "target": target,
+            "target_kind": kind
+        }))
+        .unwrap_or_else(|error| panic!("{kind} target rejected: {error}"));
+        assert_eq!(parsed.alias_target_kind.as_deref(), Some(kind));
+    }
+
+    assert_eq!(
+        parse_input(&json!({
+            "action":"bind_session_alias",
+            "alias":"target",
+            "target":"note.md",
+            "target_kind":"unknown"
+        }))
+        .expect_err("unknown target kind"),
+        "bind_session_alias_target_kind_invalid"
     );
 }
 

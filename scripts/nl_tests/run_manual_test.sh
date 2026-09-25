@@ -591,6 +591,25 @@ print_new_llm_trace() {
     --state-file "$offset_file"
 }
 
+project_nonterminal_reply_events() {
+  local task_id="$1"
+  local task_file="$2"
+  local events_file
+  local -a auth_args=()
+  events_file="$(mktemp)"
+  array_from_command_lines auth_args curl_auth_args
+  if curl -fsS --max-time 10 \
+      -H "Accept: text/event-stream" \
+      "${auth_args[@]}" \
+      "${BASE_URL}/v1/tasks/${task_id}/events?cursor=0&follow=false" \
+      > "$events_file"; then
+    python3 "${SCRIPT_DIR}/merge_task_reply_events.py" \
+      --task-json "$task_file" \
+      --events-file "$events_file"
+  fi
+  rm -f "$events_file"
+}
+
 poll_until_terminal() {
   local task_id="$1"
   local out_file="$2"
@@ -639,6 +658,9 @@ poll_until_terminal() {
     fi
     case "$status" in
       succeeded|failed|canceled|timeout|needs_user|provider_wait)
+        if [[ "$status" == "needs_user" ]]; then
+          project_nonterminal_reply_events "$task_id" "$out_file"
+        fi
         log_terminal_result_flags "$out_file"
         return 0
         ;;
@@ -800,6 +822,9 @@ run_one_case() {
       if [[ ! -s "$final_file" ]]; then
         printf '%s\n' '{"data":{"status":"timeout","result_json":{"text":""},"error_text":"poll timeout"}}' > "$final_file"
       fi
+    fi
+    if [[ -z "$effective_status" ]]; then
+      effective_status="$(extract_status "$final_file")"
     fi
 
     if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
@@ -1058,9 +1083,11 @@ for raw in path.read_text(encoding="utf-8").splitlines():
         if token.strip()
     }
     allow_terminal_failure = "allow_terminal_failure" in tags
+    allow_needs_user = "allow_needs_user" in tags
     status = str(row.get("status") or "")
     if status in bad_statuses and not (
-        allow_terminal_failure and status == "failed"
+        (allow_terminal_failure and status == "failed")
+        or (allow_needs_user and status == "needs_user")
     ):
         bad = True
     if row.get("assertion") == "fail":

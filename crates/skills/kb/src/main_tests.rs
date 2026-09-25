@@ -396,9 +396,9 @@ fn ingest_job_resumes_from_persisted_checkpoint() {
     assert_eq!(resumed["stats"]["total_docs"], 2);
 
     let index = super::storage::load_namespace(&runtime, "docs").expect("index");
-    let stale_commit = super::storage::save_namespace_and_job(
-        &runtime, &index, &checkpoint, &checkpoint,
-    ).expect_err("an in-flight duplicate cannot overwrite a committed batch");
+    let stale_commit =
+        super::storage::save_namespace_and_job(&runtime, &index, &checkpoint, &checkpoint)
+            .expect_err("an in-flight duplicate cannot overwrite a committed batch");
     assert!(stale_commit.is::<super::ingest::CheckpointConflict>());
 
     let stale = super::do_resume_ingest(&runtime, &first["continuation"])
@@ -458,11 +458,13 @@ fn ingest_job_cancel_is_owner_scoped() {
     let cancelled =
         super::do_cancel_ingest(&owner, &json!({"job_id": job_id})).expect("cancel owned job");
     assert_eq!(cancelled["job_status"], "cancelled");
-    let stale = super::storage::save_namespace_and_job(
-        &owner, &index, &checkpoint, &checkpoint,
-    ).expect_err("an in-flight batch cannot revive a cancelled job");
+    let stale = super::storage::save_namespace_and_job(&owner, &index, &checkpoint, &checkpoint)
+        .expect_err("an in-flight batch cannot revive a cancelled job");
     assert!(stale.is::<super::ingest::CheckpointConflict>());
-    assert_eq!(super::do_ingest_job_status(&owner, &json!({"job_id": job_id})).unwrap(), cancelled);
+    assert_eq!(
+        super::do_ingest_job_status(&owner, &json!({"job_id": job_id})).unwrap(),
+        cancelled
+    );
     let _ = fs::remove_dir_all(root);
 }
 

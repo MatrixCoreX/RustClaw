@@ -96,7 +96,7 @@ pub(crate) fn run_session_continue_latest(
     let mut session = session_store_select_latest_chat_session(&store)?;
     let source_task_id = session.active_task_id.clone();
     let attachments = attachment_payload(&session.attachments)?;
-    let task_id = task::submit_thread_ask(
+    let receipt = task::submit_thread_ask(
         base_url,
         key,
         message,
@@ -113,6 +113,7 @@ pub(crate) fn run_session_continue_latest(
         },
         submission_options,
     )?;
+    let task_id = receipt.task_id;
     session.apply(ChatSessionTransition::AttachmentsCleared)?;
     session_store_record_chat_task(&mut store, &mut session, &task_id)?;
     session_store_persist_chat_session(&mut store, &session)?;

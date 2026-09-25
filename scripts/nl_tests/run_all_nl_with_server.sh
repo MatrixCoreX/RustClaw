@@ -27,7 +27,10 @@ SUITE_SELECTION=(--category all)
 USER_KEY_VALUE="${USER_KEY:-${APP_USER_KEY:-}}"
 INSTALL_ON_DEMAND_SKILLS=()
 PRECOMPILED_ROOT=""
+PYTHON_WHEELHOUSE_ROOT=""
 INSTALLED_ON_DEMAND_SKILLS=()
+LIVE_STEERING_CASES=""
+LIVE_STEERING_SELECTED_ONLY=0
 
 usage() {
   cat <<'EOF'
@@ -64,12 +67,21 @@ Options:
                           after stopping its server; never reuse production data
   --precompiled-root PATH verify and install already admitted Cargo packages;
                           no nested build/protocol sandbox is required
+  --python-wheelhouse-root PATH
+                          stage publisher-built wheels for requested Python
+                          on-demand skills in the isolated source copy
   --enable-test-memory    opt the isolated test principal into memory generation
                           and retrieval; forbidden with --reuse-server
   --install-on-demand-skill NAME
                           install one registry on-demand skill through the
                           isolated Skill Store HTTP API before NL execution;
                           repeat for multiple skills. Reuse-server mode is rejected.
+  --live-steering-cases PATH
+                          run the in-flight conversation steering JSON suite
+                          instead of run_suite.sh, against the same isolated server.
+  --live-steering-selected-only
+                          with --live-steering-cases, run only cases marked
+                          selected=true (the required preflight subset).
   -h, --help              show this help
 
 Examples:
@@ -96,6 +108,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --precompiled-root)
       PRECOMPILED_ROOT="$2"
+      shift 2
+      ;;
+    --python-wheelhouse-root)
+      PYTHON_WHEELHOUSE_ROOT="$2"
       shift 2
       ;;
     --suite)
@@ -162,6 +178,14 @@ while [[ $# -gt 0 ]]; do
       INSTALL_ON_DEMAND_SKILLS+=("$2")
       shift 2
       ;;
+    --live-steering-cases)
+      LIVE_STEERING_CASES="$2"
+      shift 2
+      ;;
+    --live-steering-selected-only)
+      LIVE_STEERING_SELECTED_ONLY=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -221,7 +245,8 @@ ISOLATION_ROOT=""
 ISOLATED_WORKSPACE=""
 
 prepare_isolated_workspace() {
-  local name skill_name
+  local name skill_name adapter
+  local -a materialize_args=()
   ISOLATED_WORKSPACE="${ISOLATION_ROOT}/workspace"
   mkdir -p \
     "${ISOLATED_WORKSPACE}/data/skill-packages" \
@@ -235,10 +260,40 @@ prepare_isolated_workspace() {
   # Runtime path policy deliberately rejects workspace symlink escapes. Copy
   # only Git-visible source and fixtures so normal NL file operations exercise
   # real paths inside the isolated root without copying caches or model data.
-  python3 "${SCRIPT_DIR}/materialize_isolated_workspace.py" \
-    --source "${ROOT_DIR}" \
-    --destination "${ISOLATED_WORKSPACE}" \
+  materialize_args=(
+    --source "${ROOT_DIR}"
+    --destination "${ISOLATED_WORKSPACE}"
     --include-root docs
+  )
+  if [[ -n "${PYTHON_WHEELHOUSE_ROOT}" ]]; then
+    materialize_args+=(--python-wheelhouse-root "${PYTHON_WHEELHOUSE_ROOT}")
+    for skill_name in "${INSTALL_ON_DEMAND_SKILLS[@]}"; do
+      adapter="$(python3 - "${ROOT_DIR}/optional_skills/${skill_name}/skill.toml" <<'PY'
+import sys, tomllib
+from pathlib import Path
+print(tomllib.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))["build"]["adapter"])
+PY
+)"
+      if [[ "${adapter}" == "python" ]]; then
+        materialize_args+=(--wheel-skill "${skill_name}")
+      fi
+    done
+  fi
+  if [[ -n "${PRECOMPILED_ROOT}" ]]; then
+    materialize_args+=(--precompiled-root "${PRECOMPILED_ROOT}")
+    for skill_name in "${INSTALL_ON_DEMAND_SKILLS[@]}"; do
+      adapter="$(python3 - "${ROOT_DIR}/optional_skills/${skill_name}/skill.toml" <<'PY'
+import sys, tomllib
+from pathlib import Path
+print(tomllib.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))["build"]["adapter"])
+PY
+)"
+      if [[ "${adapter}" == "cargo" ]]; then
+        materialize_args+=(--precompiled-skill "${skill_name}")
+      fi
+    done
+  fi
+  python3 "${SCRIPT_DIR}/materialize_isolated_workspace.py" "${materialize_args[@]}"
 
   # Build output and Git object storage are immutable inputs for this harness.
   # They are not exposed as ordinary workspace files to capability tests.
@@ -311,10 +366,6 @@ wait_for_skill_store_operation() {
 
 project_proactive_skill_receipts() {
   local sdk_cli="${ROOT_DIR}/target/release/skillctl"
-  local -a precompiled_args=()
-  if [[ -n "${PRECOMPILED_ROOT}" ]]; then
-    precompiled_args=(--precompiled-root "${PRECOMPILED_ROOT}")
-  fi
   if [[ ! -x "$sdk_cli" ]]; then
     echo "skill receipt CLI not found: ${sdk_cli}" >&2
     echo "Run: ./build-all.sh no-ui" >&2
@@ -325,8 +376,7 @@ project_proactive_skill_receipts() {
     --scope proactive \
     --binary-dir "${ROOT_DIR}/target/release" \
     --sdk-cli "$sdk_cli" \
-    --package-root "${ISOLATED_WORKSPACE}/data/skill-packages" \
-    "${precompiled_args[@]}"
+    --package-root "${ISOLATED_WORKSPACE}/data/skill-packages"
 }
 
 install_on_demand_skill() {
@@ -335,11 +385,20 @@ install_on_demand_skill() {
     echo "Invalid on-demand skill name: ${skill_name}" >&2
     return 2
   fi
-  local response
+  local allow_network response
+  allow_network="$(python3 - "${ROOT_DIR}/optional_skills/${skill_name}/skill.toml" <<'PY'
+import sys
+import tomllib
+from pathlib import Path
+
+manifest = tomllib.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+print("true" if manifest.get("build", {}).get("network") == "approval_required" else "false")
+PY
+)"
   response="$(curl -fsS \
     -H "X-Agent-Key: ${USER_KEY_VALUE}" \
     -H "Content-Type: application/json" \
-    --data "{\"skill_name\":\"${skill_name}\"}" \
+    --data "{\"skill_name\":\"${skill_name}\",\"allow_network\":${allow_network}}" \
     "${BASE_URL%/}/v1/skills/store/install")"
   if ! skill_store_response_ok "$skill_name" install <<<"$response"; then
     echo "$response" >&2
@@ -466,6 +525,7 @@ if [[ "${REUSE_SERVER}" -eq 0 ]]; then
   export APP_INTERNAL_LISTEN="${isolated_listen}"
   export CLIENT_LIKE_CHANNEL="ui"
   export NL_MODEL_IO_LOG="${ISOLATED_WORKSPACE}/logs/model_io.log"
+  export NL_ISOLATED_WORKSPACE="${ISOLATED_WORKSPACE}"
   # An isolated database gets its own generated admin key. Never reuse a key
   # inherited from the developer's normal runtime against that database.
   USER_KEY_VALUE=""
@@ -561,23 +621,50 @@ fi
 stamp="$(date +%Y%m%d_%H%M%S)"
 SUITE_LOG="${LOG_DIR%/}/agent_full_nl_${stamp}.out"
 
-suite_cmd=(
-  bash "${SCRIPT_DIR}/run_suite.sh"
-  "${SUITE_SELECTION[@]}"
-  --base-url "${BASE_URL}"
-  --wait-seconds "${WAIT_SECONDS}"
-  --poll-seconds "${POLL_SECONDS}"
-  --provider-retries "${PROVIDER_RETRIES}"
-)
-if [[ "${PROMPT_REPLY_ONLY}" -eq 1 ]]; then
-  suite_cmd+=(--prompt-reply-only)
-fi
-if [[ "${#EXTRA_SUITE_ARGS[@]}" -gt 0 ]]; then
-  suite_cmd+=("${EXTRA_SUITE_ARGS[@]}")
+if [[ -n "${LIVE_STEERING_CASES}" ]]; then
+  if [[ ! -f "${LIVE_STEERING_CASES}" ]]; then
+    echo "live steering case file not found: ${LIVE_STEERING_CASES}" >&2
+    exit 2
+  fi
+  suite_cmd=(
+    python3 "${SCRIPT_DIR}/run_live_instruction_steering_suite.py"
+    --base-url "${BASE_URL}"
+    --auth-key "${USER_KEY_VALUE}"
+    --cases "${LIVE_STEERING_CASES}"
+    --model-io-log "${NL_MODEL_IO_LOG:-${ROOT_DIR}/logs/model_io.log}"
+    --timeout-seconds "${WAIT_SECONDS}"
+    --poll-seconds "${POLL_SECONDS}"
+    --max-print-chars 900
+  )
+  if [[ "${LIVE_STEERING_SELECTED_ONLY}" -eq 1 ]]; then
+    suite_cmd+=(--selected-only)
+  fi
+  if [[ "${#EXTRA_SUITE_ARGS[@]}" -gt 0 ]]; then
+    suite_cmd+=("${EXTRA_SUITE_ARGS[@]}")
+  fi
+else
+  suite_cmd=(
+    bash "${SCRIPT_DIR}/run_suite.sh"
+    "${SUITE_SELECTION[@]}"
+    --base-url "${BASE_URL}"
+    --wait-seconds "${WAIT_SECONDS}"
+    --poll-seconds "${POLL_SECONDS}"
+    --provider-retries "${PROVIDER_RETRIES}"
+  )
+  if [[ "${PROMPT_REPLY_ONLY}" -eq 1 ]]; then
+    suite_cmd+=(--prompt-reply-only)
+  fi
+  if [[ "${#EXTRA_SUITE_ARGS[@]}" -gt 0 ]]; then
+    suite_cmd+=("${EXTRA_SUITE_ARGS[@]}")
+  fi
 fi
 
 echo "suite_log=${SUITE_LOG}"
-echo "suite_cmd=${suite_cmd[*]}"
+suite_cmd_display="${suite_cmd[*]}"
+if [[ -n "${USER_KEY_VALUE:-}" ]]; then
+  suite_cmd_display="${suite_cmd_display//${USER_KEY_VALUE}/<redacted>}"
+fi
+echo "suite_cmd=${suite_cmd_display}"
 
 export NL_CLAWD_BIN="${CLAWD_BIN}"
 set +e

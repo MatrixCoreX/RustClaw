@@ -255,6 +255,9 @@ fn bounded_answer_retry_uses_structured_issue_without_verifier_prose() {
     assert!(!observed_trace.contains(INSTRUCTION_SENTINEL));
     assert!(!prompt.contains(REASON_SENTINEL));
     assert!(!prompt.contains(INSTRUCTION_SENTINEL));
+    assert!(prompt.contains("ordered instruction stream"));
+    assert!(prompt.contains("instruction_revision"));
+    assert!(prompt.contains("later revision overrides conflicting scope"));
 }
 
 #[test]

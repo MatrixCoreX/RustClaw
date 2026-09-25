@@ -54,8 +54,36 @@ fn ingress_hydration_supports_envelope_only_channel_identifiers() {
 }
 
 #[test]
+fn ingress_hydration_rejects_an_invalid_channel_account() {
+    let ingress = ChannelIngressEnvelope::new(ChannelKind::Wechat, "wechat_ilink")
+        .with_account_id("  ")
+        .with_external_ids("wx-user", "wx-chat");
+    let mut req = request(Some(ingress));
+
+    assert_eq!(
+        hydrate_submit_task_from_ingress(&mut req),
+        Err("channel_ingress_account_id_invalid")
+    );
+}
+
+#[test]
+fn ingress_hydration_rejects_a_reply_target_outside_the_authenticated_peer() {
+    let ingress = ChannelIngressEnvelope::new(ChannelKind::Wechat, "wechat_ilink")
+        .with_account_id("wechat-account")
+        .with_external_ids("wx-user", "wx-chat")
+        .with_reply_target(ChannelReplyTarget::user("another-user"));
+    let mut req = request(Some(ingress));
+
+    assert_eq!(
+        hydrate_submit_task_from_ingress(&mut req),
+        Err("channel_ingress_reply_target_conflict")
+    );
+}
+
+#[test]
 fn snapshot_freezes_bound_context_and_materialized_attachments() {
     let requested = ChannelIngressEnvelope::new(ChannelKind::Wechat, "wechat_ilink")
+        .with_account_id("wechat-account")
         .with_external_ids("wx-user", "wx-chat")
         .with_message_id("message-1")
         .with_reply_target(ChannelReplyTarget::user("wx-user"))
@@ -82,6 +110,7 @@ fn snapshot_freezes_bound_context_and_materialized_attachments() {
     );
 
     assert_eq!(snapshot.bound_user_id, Some(70));
+    assert_eq!(snapshot.account_id.as_deref(), Some("wechat-account"));
     assert_eq!(snapshot.conversation_chat_id, Some(80));
     assert_eq!(snapshot.message_id.as_deref(), Some("message-1"));
     assert_eq!(snapshot.context_token.as_deref(), Some("context-1"));

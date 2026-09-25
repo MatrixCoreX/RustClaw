@@ -1306,11 +1306,21 @@ async fn proxy_inner(state: AppState, client_addr: SocketAddr, req: Request) -> 
     if owner_path.starts_with(claw_core::owner_gateway_context::PREFIX) {
         if let Some(session) = &session {
             let assertion = claw_core::owner_gateway_context::sign(
-                &session.user_key, &session.session_handle, method.as_str(), &owner_path,
-                &bytes, now_unix_secs(),
+                &session.user_key,
+                &session.session_handle,
+                method.as_str(),
+                &owner_path,
+                &bytes,
+                now_unix_secs(),
             );
-            let Some(value) = assertion.and_then(|s| reqwest::header::HeaderValue::from_str(&s).ok()) else {
-                return webd_error_response(StatusCode::FORBIDDEN, "asset_owner_context_invalid", origin.as_ref());
+            let Some(value) =
+                assertion.and_then(|s| reqwest::header::HeaderValue::from_str(&s).ok())
+            else {
+                return webd_error_response(
+                    StatusCode::FORBIDDEN,
+                    "asset_owner_context_invalid",
+                    origin.as_ref(),
+                );
             };
             out_headers.insert(claw_core::owner_gateway_context::HEADER, value);
         }
@@ -1404,6 +1414,15 @@ fn uses_long_running_upstream_wait(method: &axum::http::Method, path_and_query: 
     }
     if method != axum::http::Method::GET && method != axum::http::Method::HEAD {
         return false;
+    }
+    let is_conversation_event_stream = path
+        .strip_prefix("/v1/conversations/")
+        .and_then(|suffix| suffix.strip_suffix("/events"))
+        .is_some_and(|conversation_id| {
+            !conversation_id.is_empty() && !conversation_id.contains('/')
+        });
+    if is_conversation_event_stream {
+        return true;
     }
     let task_suffix = path.strip_prefix("/v1/tasks/");
     let is_event_stream = task_suffix
@@ -1677,8 +1696,10 @@ fn build_outgoing_headers(
             continue;
         }
         if k.as_str().eq_ignore_ascii_case(WEBD_CSRF_HEADER)
-            || k.as_str().eq_ignore_ascii_case(claw_core::owner_gateway_context::HEADER)
-            || k.as_str().eq_ignore_ascii_case("x-agent-owner-context") {
+            || k.as_str()
+                .eq_ignore_ascii_case(claw_core::owner_gateway_context::HEADER)
+            || k.as_str().eq_ignore_ascii_case("x-agent-owner-context")
+        {
             continue;
         }
         if k.as_str().eq_ignore_ascii_case("x-forwarded-for") && forward_x {

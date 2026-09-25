@@ -4,7 +4,7 @@ use claw_core::provider_failure_policy::ProviderFailurePolicy;
 
 use super::{ActiveTaskItem, SkillInput};
 
-pub(super) fn session_alias_binding_extra(alias: &str, target: &str) -> Value {
+pub(super) fn session_alias_binding_extra(alias: &str, target: &str, target_kind: &str) -> Value {
     json!({
         "schema_version": 1,
         "action": "bind_session_alias",
@@ -13,12 +13,14 @@ pub(super) fn session_alias_binding_extra(alias: &str, target: &str) -> Value {
         "session_alias_bindings": [{
             "alias": alias,
             "target": target,
+            "target_kind": target_kind,
         }],
         "field_value": {
             "action": "bind_session_alias",
             "status": "ok",
             "alias": alias,
             "target": target,
+            "target_kind": target_kind,
         },
     })
 }

@@ -1,0 +1,6 @@
+-- Migration id: 020_conversation_action_dispatch_claims_v1
+--
+-- Records the durable commit boundary immediately before a planner-approved
+-- tool or skill action is dispatched. A later conversation input advances the
+-- execution epoch; actions from an older revision/epoch can no longer claim a
+-- dispatch slot.

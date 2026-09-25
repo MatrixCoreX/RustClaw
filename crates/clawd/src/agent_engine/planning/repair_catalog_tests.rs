@@ -26,9 +26,12 @@ fn initial_native_request_requires_protocol_but_keeps_answer_and_clarification()
     );
     for intent in ["answer", "clarify"] {
         let mut arguments = json!({
-            "terminal_intent": intent, "shape": "free_text",
+            "terminal_intent": intent,
+            "conversation_relation": if intent == "clarify" { "clarify" } else { "continue_current" },
+            "shape": "free_text",
             "content": "Model-generated response", "items": [],
-            "exact_item_count": 0, "fields": [], "observed_fields": [],
+            "exact_item_count": 0, "exact_visible_line_count": 0,
+            "fields": [], "observed_fields": [],
             "exact_field_count": 0
         });
         if intent == "clarify" {

@@ -15,6 +15,7 @@ pub(crate) struct CapabilityResolutionRecord {
     pub(crate) canonical_capability_ref: Option<String>,
     pub(crate) resolved_ref: Option<String>,
     pub(crate) planner_kind: Option<&'static str>,
+    pub(crate) required_args: Vec<String>,
     pub(crate) required_companions: Vec<String>,
 }
 
@@ -35,6 +36,7 @@ impl CapabilityResolutionRecord {
             canonical_capability_ref: None,
             resolved_ref: resolved_action_ref(resolved),
             planner_kind: Some(planner_kind.as_token()),
+            required_args: Vec::new(),
             required_companions: Vec::new(),
         }
     }
@@ -49,6 +51,7 @@ impl CapabilityResolutionRecord {
             canonical_capability_ref: None,
             resolved_ref: None,
             planner_kind: None,
+            required_args: Vec::new(),
             required_companions: Vec::new(),
         }
     }
@@ -69,6 +72,7 @@ impl CapabilityResolutionRecord {
             canonical_capability_ref: Some(canonical_capability_ref.into()),
             resolved_ref: Some(resolved_ref_for_skill(planner_kind, skill)),
             planner_kind: Some(planner_kind.as_token()),
+            required_args: Vec::new(),
             required_companions: Vec::new(),
         }
     }
@@ -89,6 +93,7 @@ impl CapabilityResolutionRecord {
             "resolved_capability": self.canonical_capability_ref,
             "resolved_tool_or_skill": self.resolved_ref,
             "planner_kind": self.planner_kind,
+            "required_args": self.required_args,
             "required_companions": self.required_companions,
             "round_no": round_no,
             "global_step": global_step,
@@ -146,6 +151,7 @@ pub(crate) fn resolve_capability_action_with_record_for_state(
         RegistryCapabilityResolution::None => {}
     }
     if let Some(tool) = state.mcp_tool(&normalized) {
+        let required_args = tool.required_args.clone();
         let action = AgentAction::CallTool {
             tool: tool.capability,
             args,
@@ -158,6 +164,7 @@ pub(crate) fn resolve_capability_action_with_record_for_state(
             PlannerCapabilityKind::Tool,
         );
         record.canonical_capability_ref = Some(normalized);
+        record.required_args = required_args;
         return (Some(action), record);
     }
     (None, CapabilityResolutionRecord::unresolved(normalized))
@@ -171,6 +178,7 @@ struct ResolverCandidate {
     planner_kind: PlannerCapabilityKind,
     preferred: bool,
     risk_level: SkillRiskLevel,
+    required_args: Vec<String>,
     required_companions: Vec<String>,
 }
 
@@ -224,6 +232,7 @@ fn resolve_registry_capability_action(
                 .risk_level
                 .or_else(|| manifest.as_ref().and_then(|manifest| manifest.risk_level))
                 .unwrap_or(SkillRiskLevel::Unknown),
+            required_args: mapping.required.clone(),
             required_companions: mapping.required_companions.clone(),
         });
     }
@@ -231,6 +240,7 @@ fn resolve_registry_capability_action(
     if let Some(candidate) = candidates.into_iter().next() {
         let planner_kind = candidate.planner_kind;
         let canonical_capability_ref = candidate.capability.clone();
+        let required_args = candidate.required_args.clone();
         let required_companions = candidate.required_companions.clone();
         let action = resolve_candidate_action(candidate, args);
         let mut record = CapabilityResolutionRecord::resolved(
@@ -241,6 +251,7 @@ fn resolve_registry_capability_action(
             planner_kind,
         );
         record.canonical_capability_ref = Some(canonical_capability_ref);
+        record.required_args = required_args;
         record.required_companions = required_companions;
         return RegistryCapabilityResolution::Resolved(ResolvedCapabilityAction { record, action });
     }

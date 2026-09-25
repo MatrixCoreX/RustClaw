@@ -30,6 +30,9 @@ cat > "$TEST_ROOT/runtime/scripts/shell_compat.sh" <<'EOF'
 configure_platform_command_path() { :; }
 configure_python3_with_tomllib() { :; }
 EOF
+cat > "$TEST_ROOT/runtime/scripts/model_environment.sh" <<'EOF'
+load_managed_model_environment() { :; }
+EOF
 cat > "$TEST_ROOT/runtime/target/release/clawd" <<'EOF'
 #!/bin/bash
 printf '%s\n' "$$" > "$RESTART_TEST_PROCESS_MARKER"

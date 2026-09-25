@@ -65,6 +65,7 @@ struct SkillInput {
     action: String,
     alias: Option<String>,
     alias_target: Option<String>,
+    alias_target_kind: Option<String>,
     failure_class: Option<String>,
     repair_kind: Option<String>,
     index: Option<usize>,
@@ -195,12 +196,21 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string);
+    let alias_target_kind = obj
+        .get("target_kind")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
     if action == "bind_session_alias" {
         if alias.is_none() {
             return Err("bind_session_alias_missing_alias".to_string());
         }
         if alias_target.is_none() {
             return Err("bind_session_alias_missing_target".to_string());
+        }
+        if alias_target_kind.is_none() {
+            return Err("bind_session_alias_missing_target_kind".to_string());
         }
         if alias
             .as_ref()
@@ -211,6 +221,11 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
         {
             return Err("bind_session_alias_value_too_long".to_string());
         }
+        validate_session_alias_target(
+            alias.as_deref().unwrap_or_default(),
+            alias_target.as_deref().unwrap_or_default(),
+            alias_target_kind.as_deref().unwrap_or_default(),
+        )?;
     }
     let failure_class = obj
         .get("failure_class")
@@ -272,6 +287,7 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
             action,
             alias,
             alias_target,
+            alias_target_kind,
             failure_class,
             repair_kind,
             index,
@@ -288,6 +304,7 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
         action,
         alias,
         alias_target,
+        alias_target_kind,
         failure_class,
         repair_kind,
         index,
@@ -326,7 +343,11 @@ fn execute(
                     .alias_target
                     .as_deref()
                     .ok_or("bind_session_alias_missing_target")?;
-                let extra = session_alias_binding_extra(alias, target);
+                let target_kind = input
+                    .alias_target_kind
+                    .as_deref()
+                    .ok_or("bind_session_alias_missing_target_kind")?;
+                let extra = session_alias_binding_extra(alias, target, target_kind);
                 Ok(SkillOutput::structured(extra.to_string(), extra))
             }
             "list" => {
@@ -557,6 +578,44 @@ fn execute(
             _ => Err("unsupported action".to_string()),
         }
     })
+}
+
+fn validate_session_alias_target(
+    alias: &str,
+    target: &str,
+    target_kind: &str,
+) -> Result<(), String> {
+    if alias == target {
+        return Err("bind_session_alias_alias_equals_target".to_string());
+    }
+    let valid = match target_kind {
+        "path" => {
+            !target.contains(['\n', '\r', '\0'])
+                && (target.contains('/')
+                    || target.contains('\\')
+                    || std::path::Path::new(target).extension().is_some())
+        }
+        "url" => target.starts_with("https://") || target.starts_with("http://"),
+        "task" => uuid::Uuid::parse_str(target).is_ok(),
+        "artifact" => claw_core::capability_result::task_artifact_reference_owner(target).is_some(),
+        "resource" => {
+            let Some((namespace, identifier)) = target.split_once(':') else {
+                return Err("bind_session_alias_target_invalid".to_string());
+            };
+            !namespace.is_empty()
+                && !identifier.is_empty()
+                && namespace
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
+                && !target.chars().any(char::is_whitespace)
+        }
+        _ => return Err("bind_session_alias_target_kind_invalid".to_string()),
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err("bind_session_alias_target_invalid".to_string())
+    }
 }
 
 fn clawd_base_url() -> String {

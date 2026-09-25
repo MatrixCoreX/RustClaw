@@ -215,6 +215,7 @@ fn lark_media_is_an_ask_attachment_without_synthetic_instruction() {
     };
     let request = build_lark_submit_request(
         "en-US",
+        "app-1",
         "open-1",
         "chat-1",
         "message-1",
@@ -226,5 +227,6 @@ fn lark_media_is_an_ask_attachment_without_synthetic_instruction() {
     assert_eq!(request.payload["text"], "");
     assert_eq!(request.payload["attachments"][0]["path"], attachment.path);
     let ingress = request.ingress.expect("ingress");
+    assert_eq!(ingress.account_id.as_deref(), Some("app-1"));
     assert_eq!(ingress.attachments, vec![attachment]);
 }

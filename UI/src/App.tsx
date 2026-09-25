@@ -826,10 +826,14 @@ export default function App() {
     activeChatAgentId,
     activeChatCanChangeAgent,
     chatSending,
-    chatQueuedMessages,
-    chatQueuePaused,
-    removeQueuedChatMessage,
-    resumeChatQueue,
+    chatCanStop,
+    chatStopping,
+    chatDeliveryMode,
+    setChatDeliveryMode,
+    chatDeferredInputs,
+    chatDeferredActionInputId,
+    activateDeferredChatInput,
+    withdrawDeferredChatInput,
     chatCompacting,
     chatWorking,
     chatActivity,
@@ -862,6 +866,7 @@ export default function App() {
     cancelChatVoiceRecording,
     setChatAudioInputDeviceId,
     sendChatMessage,
+    stopActiveChatTask,
     compactChatContext,
     queryChatTeachingLlmDebug,
   } = useChatRuntime({
@@ -1898,10 +1903,14 @@ export default function App() {
               chatTeachingRuns={chatTeachingRuns}
               activeChatTeachingRunId={activeChatTeachingRunId}
               chatSending={chatSending}
-              chatQueuedMessages={chatQueuedMessages}
-              chatQueuePaused={chatQueuePaused}
-              onRemoveQueuedMessage={removeQueuedChatMessage}
-              onResumeQueue={resumeChatQueue}
+              chatCanStop={chatCanStop}
+              chatStopping={chatStopping}
+              chatDeliveryMode={chatDeliveryMode}
+              chatDeferredInputs={chatDeferredInputs}
+              chatDeferredActionInputId={chatDeferredActionInputId}
+              onChatDeliveryModeChange={setChatDeliveryMode}
+              onActivateDeferredInput={activateDeferredChatInput}
+              onWithdrawDeferredInput={withdrawDeferredChatInput}
               chatCompacting={chatCompacting}
               chatWorking={chatWorking}
               chatActivity={chatActivity}
@@ -1939,6 +1948,7 @@ export default function App() {
               onCancelVoiceRecording={cancelChatVoiceRecording}
               onAudioInputDeviceChange={setChatAudioInputDeviceId}
               onSendMessage={sendChatMessage}
+              onStopActiveTask={stopActiveChatTask}
               onCompactContext={compactChatContext}
               onQueryChatTeachingLlmDebug={queryChatTeachingLlmDebug}
             />

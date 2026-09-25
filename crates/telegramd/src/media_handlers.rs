@@ -226,6 +226,7 @@ pub(super) async fn store_pending_telegram_attachment(
         ChannelKind::Telegram,
         "telegram_bot",
     )
+    .with_account_id(state.bot_name.clone())
     .with_external_ids(platform_user_id.to_string(), msg.chat.id.0.to_string())
     .with_message_id(msg.id.0.to_string())
     .with_reply_target(claw_core::channel_ingress::ChannelReplyTarget::chat(
@@ -324,14 +325,15 @@ async fn submit_attachment_ask(
     )
     .await
     {
-        Ok(task_id) => spawn_task_result_delivery(
+        Ok(submitted) if submitted.owns_terminal_delivery => spawn_task_result_delivery(
             bot.clone(),
             state.clone(),
             msg.chat.id,
             user_id,
-            task_id,
+            submitted.task_id,
             None,
         ),
+        Ok(_) => {}
         Err(err) => {
             warn!(chat_id = msg.chat.id.0, error = %err, "attachment_task_submission_failed");
             bot.send_message(

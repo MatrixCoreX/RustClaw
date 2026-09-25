@@ -137,3 +137,32 @@ test("keeps ordinary completed capabilities in the tool-returned stage", () => {
   assert.equal(activity.stage, "tool_returned");
   assert.equal(activity.activeName, "rss_fetch");
 });
+
+test("projects durable control reply lifecycle without parsing user text", () => {
+  const stopping = reduceChatActivity(emptyChatActivity(), {
+    schema_version: 1,
+    seq: 9,
+    task_id: "task-stop",
+    event_kind: "conversation_reply_item",
+    payload: {
+      relation: "control_status",
+      lifecycle_stage: "stop_requested",
+      message_key: "channel.control.cancel_requested",
+      text: "this field is not inspected",
+    },
+  });
+  const stopped = reduceChatActivity(stopping, {
+    schema_version: 1,
+    seq: 10,
+    task_id: "task-stop",
+    event_kind: "conversation_reply_item",
+    payload: {
+      relation: "control_status",
+      lifecycle_stage: "settled",
+      message_key: "channel.control.cancel_settled",
+    },
+  });
+
+  assert.equal(stopping.stage, "stopping");
+  assert.equal(stopped.stage, "stopped");
+});

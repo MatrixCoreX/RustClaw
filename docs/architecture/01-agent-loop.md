@@ -15,8 +15,8 @@ should be answered, clarified, or executed.
 
 ```mermaid
 flowchart TD
-    A[Channel / UI / API] --> B[POST /v1/tasks]
-    B --> C[Persist task and return task_id]
+    A[Channel / UI / API] --> B[Durable conversation input]
+    B --> C[Return input receipt<br/>bind active task or create one ask task]
     C --> D[Worker claim and recovery tick]
     D --> E{Task kind}
     E -->|ask| F[Materialize text, audio, and attachments]
@@ -41,9 +41,42 @@ flowchart TD
     R --> W[Direct permission/mutation checks<br/>+ shared skill protocol]
     W --> T
     Q --> S[Output contract guard]
-    S --> T[Persist result + deliver + journal]
+    S --> TT{Current revision and epoch?}
+    TT -->|yes| T[Persist result + deliver + journal]
+    TT -->|no| U
     V --> T
 ```
+
+Ordinary interactive clients submit through
+`POST /v1/conversation-inputs/client-task`. Acceptance, task binding, and
+execution are separate durable facts: the server first records an owner-scoped
+input receipt, then binds it to the active conversation task or atomically
+creates one foreground task. Inputs that arrive during a model turn interrupt
+that stale request; inputs that arrive during a tool call are consumed at the
+next safe execution boundary. The runtime never infers stop or amendment from
+user-language tokens.
+
+Each planner decision records the covered input sequence, instruction revision,
+and execution epoch. A tool or skill action must atomically claim that exact
+version immediately before dispatch. Terminal presentation uses the same
+version snapshot, so a late answer from a superseded model turn cannot replace
+the current answer. Explicit current-task cancellation is a separate
+authenticated control operation and remains available when the model provider
+is unavailable.
+
+There is one planner owner for a conversation task. The runtime does not launch
+a second semantic "control-only" planner while a mutation owns the current loop
+state. A model/read-only request may be interrupted and replanned immediately;
+an already claimed mutation is observed through its cancellation class and the
+next safe boundary. Operations that cannot finish within that boundary must use
+the supervised async-job/checkpoint contract. This keeps steering responsive
+without introducing two planners that can race to dispatch effects.
+
+Cancellation is staged as accepted, stop requested, adapter acknowledged, and
+settled. Child tasks and process groups receive the same machine request, but a
+terminal cancelled presentation is fenced until registered runtime cleanup has
+settled. A late or unknown mutation result is written to the reconciliation
+ledger and cannot resume a superseded plan.
 
 `call_capability` is preferred because the planner chooses a stable capability,
 and the resolver maps it to the current tool or skill implementation.

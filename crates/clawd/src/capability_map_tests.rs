@@ -312,6 +312,48 @@ fn real_config_native_schemas_preserve_nonempty_and_nested_read_contracts() {
 }
 
 #[test]
+fn task_plan_native_schema_and_description_expose_stable_nested_ids() {
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+    let task = crate::ClaimedTask {
+        claim_attempt: 0,
+        task_id: "task-plan-native-schema-contract".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let task_plan = planner_native_capability_groups_for_task(&state, &task)
+        .into_iter()
+        .find(|group| group.skill_name == "task_plan")
+        .expect("task_plan native group");
+    let set_plan = &task_plan.capability_argument_schemas["task.plan_set"];
+    let update_plan = &task_plan.capability_argument_schemas["task.plan_update"];
+
+    assert_eq!(set_plan["required"], serde_json::json!(["steps"]));
+    assert_eq!(
+        set_plan["properties"]["steps"]["items"]["required"],
+        serde_json::json!(["step_id", "title", "status"])
+    );
+    assert_eq!(
+        set_plan["properties"]["steps"]["items"]["additionalProperties"],
+        serde_json::json!(false)
+    );
+    assert_eq!(
+        update_plan["properties"]["updates"]["items"]["required"],
+        serde_json::json!(["step_id"])
+    );
+    assert!(task_plan.capability_descriptions["task.plan_set"]
+        .contains("never use id or step as a field alias"));
+    assert!(task_plan.capability_descriptions["task.plan_update"].contains("stable step_id"));
+}
+
+#[test]
 fn subagent_native_schemas_bind_roles_from_runtime_policy() {
     let state = crate::AppState::test_default_with_fixture_provider()
         .with_prompt_layers_installed()
@@ -471,9 +513,45 @@ fn disclosed_native_groups_keep_core_eager_and_domain_groups_loadable() {
     assert!(initial
         .iter()
         .any(|group| group.tool_name == "call_fs_basic"));
-    assert!(initial
+    assert!(initial.iter().any(|group| group.skill_name == "run_cmd"));
+    assert!(initial.iter().any(|group| group.skill_name == "task_plan"));
+    let initial_capability_count = initial
         .iter()
-        .any(|group| group.tool_name == "call_git_basic"));
+        .map(|group| group.capability_names.len())
+        .sum::<usize>();
+    assert!(
+        initial_capability_count <= 64,
+        "the first planner turn exceeded the canonical capability budget: {initial_capability_count}"
+    );
+    for on_demand_group in [
+        "memory_store",
+        "code_index",
+        "schedule",
+        "subagent",
+        "system_basic",
+        "git_basic",
+        "task_control",
+    ] {
+        assert!(!initial
+            .iter()
+            .any(|group| group.skill_name == on_demand_group));
+        assert!(loadable.contains(&on_demand_group.to_string()));
+    }
+    let task_control = full
+        .iter()
+        .find(|group| group.skill_name == "task_control")
+        .expect("task_control must remain discoverable on demand");
+    assert!(task_control
+        .capability_names
+        .contains(&"session.bind_alias".to_string()));
+    assert!(task_control
+        .capability_descriptions
+        .get("session.bind_alias")
+        .is_some_and(|description| {
+            description.contains("Persist a user-defined shorthand reference")
+                && description.contains("typed machine target")
+                && description.contains("Never use this capability for a fact")
+        }));
     let domain_group = exact_loadable
         .first()
         .cloned()

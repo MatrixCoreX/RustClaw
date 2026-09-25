@@ -1,0 +1,2 @@
+-- Manifest for durable, sanitized conversation-input task creation templates.
+-- Runtime schema creation and upgrades are owned by conversation_inputs.rs.

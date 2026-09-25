@@ -168,6 +168,46 @@ await assert.rejects(
   /assistant_presentation_digest_mismatch/,
 );
 
+const versionReducer = new AssistantPresentationReducer();
+const oldVersionStart = decodeAssistantPresentationEvent(
+  envelope("assistant_output_started", 0, 0, {
+    instruction_revision: 1,
+    execution_epoch: 1,
+  }),
+);
+const newVersionStart = decodeAssistantPresentationEvent(
+  envelope("assistant_output_started", 0, 0, {
+    stream_id: "stream-2",
+    attempt_id: "attempt-2",
+    instruction_revision: 2,
+    execution_epoch: 2,
+  }),
+);
+const lateOldDelta = decodeAssistantPresentationEvent(
+  envelope("assistant_output_delta", 1, 0, {
+    content: "stale",
+    instruction_revision: 1,
+    execution_epoch: 1,
+  }),
+);
+assert.ok(oldVersionStart && newVersionStart && lateOldDelta);
+await versionReducer.apply(oldVersionStart);
+await versionReducer.apply(newVersionStart);
+assert.equal(
+  await versionReducer.apply(lateOldDelta),
+  null,
+  "a late stream from an older execution epoch must not replace current output",
+);
+assert.equal(versionReducer.get("stream-1")?.content, "");
+
+assert.throws(
+  () =>
+    decodeAssistantPresentationEvent(
+      envelope("assistant_output_started", 0, 0, { instruction_revision: 3 }),
+    ),
+  /assistant_presentation_execution_version_incomplete/,
+);
+
 const cryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
 Object.defineProperty(globalThis, "crypto", { configurable: true, value: undefined });
 try {

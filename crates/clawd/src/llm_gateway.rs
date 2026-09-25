@@ -17,6 +17,7 @@ pub(crate) use model_turn::run_native_model_turn_with_fallback;
 const TASK_LLM_COST_POLICY_BLOCKED_ERR: &str = "llm_cost_policy_blocked";
 const NO_ELIGIBLE_LLM_PROVIDER_ERR: &str = "no_eligible_llm_provider";
 pub(crate) const CONTEXT_LENGTH_EXCEEDED_ERR: &str = "context_length_exceeded";
+pub(crate) const CONVERSATION_INPUT_INTERRUPTED_ERR: &str = "conversation_input_interrupted";
 
 fn llm_cost_policy_allows(
     state: &AppState,
@@ -713,6 +714,7 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
     let mut selected_provider_count = 0_u64;
     let mut skipped_providers: Vec<(String, u64)> = Vec::new();
     let mut recoverable_provider_blocker: Option<TaskProviderBlocker> = None;
+    let conversation_interrupt = state.worker.model_turn_interrupt_token(&task.task_id);
 
     for provider in &providers {
         let vendor = crate::llm_vendor_name(provider);
@@ -826,7 +828,56 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
         );
 
         let provider_started_at = std::time::Instant::now();
-        match crate::call_provider_with_retry_with_hints(provider.clone(), prompt, &hints).await {
+        let provider_call =
+            crate::call_provider_with_retry_with_hints(provider.clone(), prompt, &hints);
+        let provider_result = tokio::select! {
+            biased;
+            _ = conversation_interrupt.cancelled() => {
+                stop_llm_task_lease_heartbeat(&mut heartbeat_stop);
+                crate::assistant_presentation::abort_active_answer(
+                    state,
+                    task,
+                    CONVERSATION_INPUT_INTERRUPTED_ERR,
+                    "assistant.output.interrupted_by_new_input",
+                    true,
+                );
+                let _ = crate::task_event_transport::publish_claimed_event(
+                    state,
+                    task,
+                    "model_turn_interrupted",
+                    serde_json::json!({
+                        "schema_version": 1,
+                        "reason_code": CONVERSATION_INPUT_INTERRUPTED_ERR,
+                        "logical_call_index": logical_call_index,
+                        "provider": provider_name,
+                        "usage_status": "unknown",
+                    }),
+                );
+                record_llm_cost(
+                    state,
+                    task,
+                    crate::providers::build_cost_record(
+                        logical_call_index,
+                        prompt_label,
+                        &provider.config.name,
+                        &provider.config.model,
+                        "interrupted",
+                        1,
+                        None,
+                        provider.pricing.as_ref(),
+                    ),
+                    prompt_source,
+                );
+                state.note_task_llm_elapsed_with_label(
+                    &task.task_id,
+                    prompt_label,
+                    call_started_at.elapsed().as_millis() as u64,
+                );
+                return Err(CONVERSATION_INPUT_INTERRUPTED_ERR.to_string());
+            }
+            result = provider_call => result,
+        };
+        match provider_result {
             Ok(output) => {
                 provider
                     .latency

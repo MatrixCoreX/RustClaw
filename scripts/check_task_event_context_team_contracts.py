@@ -252,7 +252,9 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
     "crates/clawd/src/worker/child_task_execution_scope.rs": (
         "ChildTaskExecutionScope",
         "create_or_reuse_execution_isolation",
-        '"owner_layer": "child_task_execution_scope"',
+        '"owner_layer": if self.primary_task',
+        '"primary_task_execution_scope"',
+        '"child_task_execution_scope"',
         '"isolated_worktree"',
         '"primary_workspace_read_only"',
         '"parent_owned_after_patch_decision"',
@@ -269,10 +271,12 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "record_child_task_execution_scope",
         "record_child_task_terminal_projection",
     ),
-    "crates/clawd/src/skills.rs": (
+    "crates/clawd/src/skills/execution_isolation.rs": (
         "execution_isolation_root_profile",
         '"local_worktree"',
-        "CapabilityIsolationProfile::LocalWorktree | CapabilityIsolationProfile::ReadOnly",
+        "CapabilityIsolationProfile::LocalWorktree",
+        "CapabilityIsolationProfile::ReadOnly",
+        "CapabilityIsolationProfile::HostProcess",
     ),
     "crates/clawd/src/repo/child_tasks.rs": (
         "record_child_task_execution_scope",

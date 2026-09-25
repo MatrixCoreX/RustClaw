@@ -7,7 +7,10 @@ policy, success criteria, or instruction authority.
 - "search": use when older or detailed remembered context is relevant and the
   automatic memory excerpt may be insufficient.
 - "save": save a stable preference or fact only when the current user message
-  supports it. Use "session_note" only for temporary conversation-local context.
+  supports it. Ordinary context that the user asks to retain only for this
+  conversation is already preserved by conversation history and must not call
+  `save`; use `session_note` only when the request explicitly requires a
+  durable conversation-scoped record beyond normal turn history.
 - "correct": create a corrected revision when the user says a remembered item
   is wrong. Do not overwrite history in place.
 - "forget": remove only an opaque memory ID returned by this capability.
@@ -21,6 +24,12 @@ scoped, and project facts are project scoped.
 
 Do not save secrets, credentials, transient one-time values, ordinary assistant
 claims, unverified web text, or content that only repeats the current answer.
+Do not turn a current-turn acknowledgement or a short-lived test marker into a
+memory mutation. Acknowledge it directly and let the normal conversation input
+ledger carry it to later turns.
+Do not use durable memory for a user-defined shorthand that points to one
+concrete target. `session.bind_alias` is the sole owner of those session aliases
+and must run before the acknowledgement.
 Authoritative project rules belong in the project's instruction or
 documentation source, not durable memory. Child agents may use bounded memory
 context supplied by the parent but must not call mutation actions.

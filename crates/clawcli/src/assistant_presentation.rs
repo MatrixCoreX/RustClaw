@@ -20,6 +20,8 @@ pub(crate) struct AssistantPresentationEvent {
     pub(crate) attempt_id: String,
     pub(crate) sequence: u64,
     pub(crate) content_offset_bytes: u64,
+    pub(crate) instruction_revision: Option<u64>,
+    pub(crate) execution_epoch: Option<u64>,
     pub(crate) content: Option<String>,
     pub(crate) total_content_bytes: Option<u64>,
     pub(crate) content_sha256: Option<String>,
@@ -60,6 +62,13 @@ pub(crate) fn decode(event: &Value) -> Result<Option<AssistantPresentationEvent>
     let sequence = required_payload_u64(payload, "sequence")?;
     let content_offset_bytes = required_payload_u64(payload, "content_offset_bytes")?;
     required_payload_u64(payload, "created_at")?;
+    let instruction_revision = payload.get("instruction_revision").and_then(Value::as_u64);
+    let execution_epoch = payload.get("execution_epoch").and_then(Value::as_u64);
+    if instruction_revision.is_some() != execution_epoch.is_some() {
+        return Err(anyhow!(
+            "assistant_presentation_execution_version_incomplete"
+        ));
+    }
 
     let mut content = None;
     let mut total_content_bytes = None;
@@ -120,6 +129,8 @@ pub(crate) fn decode(event: &Value) -> Result<Option<AssistantPresentationEvent>
         attempt_id,
         sequence,
         content_offset_bytes,
+        instruction_revision,
+        execution_epoch,
         content,
         total_content_bytes,
         content_sha256,
@@ -140,6 +151,9 @@ enum StreamStatus {
 
 #[derive(Debug, Clone)]
 struct StreamState {
+    task_id: String,
+    instruction_revision: Option<u64>,
+    execution_epoch: Option<u64>,
     status: StreamStatus,
     content: String,
     content_bytes: u64,
@@ -154,6 +168,7 @@ pub(crate) enum PresentationUpdate {
     Aborted,
     Replaced,
     Duplicate,
+    Superseded,
 }
 
 #[derive(Default)]
@@ -162,6 +177,7 @@ pub(crate) struct AssistantPresentationReducer {
     seen: HashMap<(String, u64), AssistantPresentationEvent>,
     latest_stream_id: Option<String>,
     latest_completed_content: Option<String>,
+    latest_execution_version: HashMap<String, (u64, u64)>,
 }
 
 impl AssistantPresentationReducer {
@@ -193,9 +209,28 @@ impl AssistantPresentationReducer {
             if self.streams.contains_key(&event.stream_id) {
                 return Err(anyhow!("assistant_presentation_stream_conflict"));
             }
+            if self.event_is_stale(&event) {
+                self.seen.insert(key, event);
+                return Ok(PresentationUpdate::Superseded);
+            }
+            if let (Some(revision), Some(epoch)) =
+                (event.instruction_revision, event.execution_epoch)
+            {
+                self.latest_execution_version
+                    .entry(event.task_id.clone())
+                    .and_modify(|latest| {
+                        if (epoch, revision) > *latest {
+                            *latest = (epoch, revision);
+                        }
+                    })
+                    .or_insert((epoch, revision));
+            }
             self.streams.insert(
                 event.stream_id.clone(),
                 StreamState {
+                    task_id: event.task_id.clone(),
+                    instruction_revision: event.instruction_revision,
+                    execution_epoch: event.execution_epoch,
                     status: StreamStatus::Streaming,
                     content: String::new(),
                     content_bytes: 0,
@@ -211,6 +246,10 @@ impl AssistantPresentationReducer {
             .streams
             .get_mut(&event.stream_id)
             .ok_or_else(|| anyhow!("assistant_presentation_start_missing"))?;
+        if stream_is_stale(stream, &self.latest_execution_version) {
+            self.seen.insert(key, event);
+            return Ok(PresentationUpdate::Superseded);
+        }
         if stream.status != StreamStatus::Streaming {
             return Err(anyhow!("assistant_presentation_stream_terminal"));
         }
@@ -265,6 +304,29 @@ impl AssistantPresentationReducer {
         )
         .then_some(stream.content.as_str())
     }
+
+    fn event_is_stale(&self, event: &AssistantPresentationEvent) -> bool {
+        let (Some(revision), Some(epoch)) = (event.instruction_revision, event.execution_epoch)
+        else {
+            return false;
+        };
+        self.latest_execution_version
+            .get(&event.task_id)
+            .is_some_and(|latest| (epoch, revision) < *latest)
+    }
+}
+
+fn stream_is_stale(
+    stream: &StreamState,
+    latest_execution_version: &HashMap<String, (u64, u64)>,
+) -> bool {
+    let (Some(revision), Some(epoch)) = (stream.instruction_revision, stream.execution_epoch)
+    else {
+        return false;
+    };
+    latest_execution_version
+        .get(&stream.task_id)
+        .is_some_and(|latest| (epoch, revision) < *latest)
 }
 
 fn required_token(value: &Value, key: &str) -> Result<String> {

@@ -4,7 +4,7 @@ use claw_core::config::AppConfig;
 
 use super::{
     build_providers_for_selection, classify_prompt_source, matches_provider_override,
-    synthesize_llm_providers,
+    run_with_fallback_with_prompt_source, synthesize_llm_providers,
 };
 
 fn repo_config_path() -> PathBuf {
@@ -263,4 +263,39 @@ fn configured_vendor_capabilities_reach_provider_runtime() {
     assert!(google.model_capabilities().native_tools);
     assert!(google.model_capabilities().structured_output);
     assert!(!google.model_capabilities().streaming);
+}
+
+#[tokio::test]
+async fn conversation_input_interrupts_a_non_native_model_call_before_delivery() {
+    let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    state.seed_ask_task_row(
+        "conversation-standard-model-interrupt",
+        7,
+        11,
+        r#"{"text":"initial request"}"#,
+    );
+    let task = crate::repo::claim_next_task(&state)
+        .expect("claim query")
+        .expect("claimed task");
+    state
+        .worker
+        .interrupt_model_turn_for_conversation_input(&task.task_id);
+
+    let error = run_with_fallback_with_prompt_source(
+        &state,
+        &task,
+        "compose the final answer",
+        "test:conversation_input_interrupt",
+    )
+    .await
+    .expect_err("pre-cancelled model turn must not deliver a stale response");
+
+    assert_eq!(error, super::CONVERSATION_INPUT_INTERRUPTED_ERR);
+    let events = crate::task_event_transport::replay_events_after(&state, &task.task_id, 0)
+        .expect("replay model events")
+        .events;
+    assert!(events.iter().any(|event| {
+        event.get("event_kind").and_then(serde_json::Value::as_str)
+            == Some("model_turn_interrupted")
+    }));
 }

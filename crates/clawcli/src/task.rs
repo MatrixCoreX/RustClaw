@@ -35,6 +35,15 @@ pub(crate) struct TaskStatusView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ConversationInputSubmitView {
+    pub(crate) input_id: String,
+    pub(crate) task_id: String,
+    pub(crate) instruction_revision: u64,
+    pub(crate) execution_epoch: u64,
+    pub(crate) handoff_state: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TaskPlanStepView {
     pub(crate) step_id: String,
     pub(crate) title: String,
@@ -429,8 +438,156 @@ pub(crate) fn submit_thread_ask(
     text: &str,
     context: ThreadAskContext<'_>,
     options: TaskSubmissionOptions,
-) -> Result<String> {
-    submit_ask_with_payload(base_url, key, threaded_ask_payload(text, context), options)
+) -> Result<ConversationInputSubmitView> {
+    let conversation_id = context.conversation_id;
+    let session_id = context.session_id;
+    let payload = threaded_ask_payload(text, context);
+    submit_thread_conversation_task(
+        base_url,
+        key,
+        text,
+        conversation_id,
+        session_id,
+        payload,
+        options,
+    )
+}
+
+fn submit_thread_conversation_task(
+    base_url: &str,
+    key: &str,
+    text: &str,
+    conversation_id: &str,
+    session_id: &str,
+    payload: Value,
+    options: TaskSubmissionOptions,
+) -> Result<ConversationInputSubmitView> {
+    let client_message_id = format!("cli:{conversation_id}:{}", uuid::Uuid::new_v4().simple());
+    let body = json!({
+        "input": {
+            "schema_version": 1,
+            "client_message_id": client_message_id.clone(),
+            "scope": {
+                "conversation_id": conversation_id,
+                "agent_id": "main",
+                "channel": "ui",
+                "channel_account_id": session_id,
+            },
+            "content": [{ "kind": "text", "text": text }],
+            "delivery_mode": "auto",
+            "source": {
+                "provider_message_id": client_message_id.clone(),
+            },
+        },
+        "task": {
+            "user_key": key,
+            "channel": "ui",
+            "external_user_id": session_id,
+            "external_chat_id": conversation_id,
+            "idempotency_key": client_message_id,
+            "kind": "ask",
+            "payload": payload,
+        },
+    });
+    let url = format!(
+        "{}/conversation-inputs/client-task",
+        client::base_v1(base_url)
+    );
+    let requested_mode = if options.yolo {
+        Some("yolo")
+    } else {
+        options.permission_mode.map(PermissionMode::as_token)
+    };
+    let mut last_transport_error = None;
+    for _ in 0..2 {
+        let request = client::make_client()?
+            .post(&url)
+            .header("x-agent-key", key)
+            .header("x-agent-client", "clawcli")
+            .header("content-type", "application/json")
+            .json(&body);
+        let request = match requested_mode {
+            Some(mode) => request.header("x-agent-execution-mode", mode),
+            None => request,
+        };
+        let response = match request.send() {
+            Ok(response) => response,
+            Err(error) => {
+                last_transport_error = Some(anyhow::Error::new(error));
+                continue;
+            }
+        };
+        let status = response.status();
+        let response_body: Value = match response.json() {
+            Ok(body) => body,
+            Err(error) => {
+                last_transport_error = Some(anyhow::Error::new(error));
+                continue;
+            }
+        };
+        if !status.is_success() {
+            anyhow::bail!(
+                "submit conversation task returned {}: {:?}",
+                status,
+                response_body.get("error")
+            );
+        }
+        let data = response_body
+            .get("data")
+            .ok_or_else(|| anyhow::anyhow!("conversation task response missing data"))?;
+        let input = data
+            .get("input")
+            .ok_or_else(|| anyhow::anyhow!("conversation task response missing input"))?;
+        let mut receipt = parse_conversation_input_receipt(input)?;
+        receipt.handoff_state = data
+            .get("handoff_state")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        return Ok(receipt);
+    }
+    Err(last_transport_error
+        .unwrap_or_else(|| anyhow::anyhow!("submit conversation task failed"))
+        .context("submit conversation task failed"))
+}
+
+fn parse_conversation_input_receipt(data: &Value) -> Result<ConversationInputSubmitView> {
+    let input_id = required_string(
+        data,
+        "input_id",
+        "conversation input response missing input_id",
+    )?;
+    let task_id = required_string(
+        data,
+        "target_task_id",
+        "conversation input response missing target_task_id",
+    )?;
+    Ok(ConversationInputSubmitView {
+        input_id,
+        task_id,
+        instruction_revision: data
+            .get("instruction_revision")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| {
+                anyhow::anyhow!("conversation input response missing instruction_revision")
+            })?,
+        execution_epoch: data
+            .get("execution_epoch")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| {
+                anyhow::anyhow!("conversation input response missing execution_epoch")
+            })?,
+        handoff_state: None,
+    })
+}
+
+fn required_string(value: &Value, key: &str, error: &'static str) -> Result<String> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| anyhow::anyhow!("{error}"))
 }
 
 pub(crate) fn submit_conversation_compaction(
@@ -790,7 +947,7 @@ pub(crate) fn pause_task_by_id(
     base_url: &str,
     key: &str,
     task_id: &str,
-    pause_seconds: u64,
+    pause_seconds: Option<u64>,
 ) -> Result<serde_json::Value> {
     task_control_by_id(
         base_url,

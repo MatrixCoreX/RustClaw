@@ -40,6 +40,7 @@ mod child_task_contract;
 mod clarify_state;
 mod communication_preferences;
 mod contract_matrix;
+mod conversation_input_event_transport;
 mod conversation_state;
 #[cfg(test)]
 #[path = "http/cors_tests.rs"]
@@ -232,8 +233,9 @@ use task_admin_routes::{
 pub(crate) use worker::task_payload_value;
 use worker::{
     adopt_recoverable_resume_executions_on_startup, recover_stale_running_tasks_on_startup,
-    spawn_channel_terminal_delivery_worker, spawn_cleanup_worker, spawn_schedule_worker,
-    spawn_worker, task_external_chat_id,
+    spawn_channel_terminal_delivery_worker, spawn_cleanup_worker,
+    spawn_conversation_reply_delivery_worker, spawn_schedule_worker, spawn_worker,
+    task_external_chat_id,
 };
 
 pub(crate) const INIT_SQL: &str = include_str!("../../../migrations/001_init.sql");
@@ -651,6 +653,8 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
         repo::task_plan::ensure_task_plan_schema(&db)?;
         memory::indexing::ensure_retrieval_schema(&db)?;
         repo::ensure_principal_ownership_schema(&db)?;
+        repo::ensure_conversation_input_schema(&db)?;
+        repo::ensure_conversation_reply_item_schema(&db)?;
         memory::scope::ensure_memory_scope_schema(&db)?;
         memory::jobs::ensure_memory_job_schema(&db)?;
         memory::ux::ensure_memory_ux_schema(&db)?;
@@ -1120,6 +1124,7 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
             last_running_recovery_check_ts: Arc::new(Mutex::new(0)),
             active_running_task_ids: Arc::new(Mutex::new(HashSet::new())),
             task_cancellation_tokens: Arc::new(Mutex::new(HashMap::new())),
+            task_model_turn_interrupt_tokens: Arc::new(Mutex::new(HashMap::new())),
         },
         metrics: crate::TaskMetricsRegistry::default(),
         channels: ChannelConfig {
@@ -1195,6 +1200,7 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
         config.worker.poll_interval_ms,
         runtime_concurrency.worker_concurrency,
     );
+    http::conversation_inputs::spawn_task_creation_recovery_worker(state.clone());
     match memory::jobs::reconcile_missing_turn_jobs(&state) {
         Ok(repaired) if repaired > 0 => {
             info!(
@@ -1215,12 +1221,46 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
     );
     spawn_cleanup_worker(state.clone());
     spawn_schedule_worker(state.clone());
+    spawn_conversation_reply_delivery_worker(state.clone());
     spawn_channel_terminal_delivery_worker(state.clone());
     http::ui_routes::spawn_nni_heartbeat_worker(state.clone());
 
     let api = Router::new()
         .merge(http::ui_routes::build_ui_router())
         .route("/tasks", post(submit_task))
+        .route(
+            "/conversation-inputs",
+            post(http::conversation_inputs::accept_input)
+                .get(http::conversation_inputs::list_inputs),
+        )
+        .route(
+            "/conversation-inputs/client-task",
+            post(http::conversation_inputs::accept_client_task),
+        )
+        .route(
+            "/conversation-inputs/cancel-current",
+            post(task_admin_routes::cancel_current_conversation_task),
+        )
+        .route(
+            "/conversation-inputs/events",
+            get(http::conversation_inputs::list_input_events),
+        )
+        .route(
+            "/conversations/:conversation_id/events",
+            get(http::conversation_input_events::stream_conversation_input_events),
+        )
+        .route(
+            "/conversation-inputs/:input_id",
+            get(http::conversation_inputs::get_input),
+        )
+        .route(
+            "/conversation-inputs/:input_id/withdraw",
+            post(http::conversation_inputs::withdraw_input),
+        )
+        .route(
+            "/conversation-inputs/:input_id/activate",
+            post(http::conversation_inputs::activate_input),
+        )
         .route(
             "/tasks/:task_id/events",
             get(http::task_events::stream_task_events),
@@ -1828,158 +1868,4 @@ async fn get_task(
     }
 }
 
-fn classifier_source_allowed(source: &str) -> bool {
-    let normalized = source.trim().to_ascii_lowercase();
-    !normalized.is_empty()
-}
-
-fn channel_kind_label(kind: ChannelKind) -> &'static str {
-    match kind {
-        ChannelKind::Telegram => "telegram",
-        ChannelKind::Whatsapp => "whatsapp",
-        ChannelKind::Ui => "ui",
-        ChannelKind::Wechat => "wechat",
-        ChannelKind::Feishu => "feishu",
-        ChannelKind::Lark => "lark",
-    }
-}
-
-fn require_auth_identity_for_api<T: Serialize>(
-    state: &AppState,
-    headers: &HeaderMap,
-) -> Result<AuthIdentity, (StatusCode, Json<ApiResponse<T>>)> {
-    let Some(raw_key) = auth_key_from_headers(headers)
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    else {
-        return Err(api_err::<T>(StatusCode::UNAUTHORIZED, "auth_key_required"));
-    };
-    match resolve_auth_identity_by_key(state, raw_key) {
-        Ok(Some(identity)) => Ok(identity),
-        Ok(None) => Err(api_err::<T>(StatusCode::UNAUTHORIZED, "auth_key_invalid")),
-        Err(err) => {
-            error!("resolve auth identity failed: {}", err);
-            Err(api_err::<T>(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Auth lookup failed",
-            ))
-        }
-    }
-}
-
-async fn classify_direct(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(req): Json<DirectClassifyRequest>,
-) -> (StatusCode, Json<ApiResponse<DirectClassifyResponse>>) {
-    let identity = match require_auth_identity_for_api(&state, &headers) {
-        Ok(identity) => identity,
-        Err(resp) => return resp,
-    };
-    let source = req.source.trim().to_ascii_lowercase();
-    if !classifier_source_allowed(&source) {
-        return api_err::<DirectClassifyResponse>(
-            StatusCode::BAD_REQUEST,
-            "source is required for direct classifier",
-        );
-    }
-    let text = req.text.trim();
-    if text.is_empty() {
-        return api_err::<DirectClassifyResponse>(StatusCode::BAD_REQUEST, "text is required");
-    }
-    let channel_kind = req.channel.unwrap_or(ChannelKind::Ui);
-    let task = ClaimedTask {
-        claim_attempt: 0,
-        task_id: format!("direct-classify-{}", Uuid::new_v4()),
-        user_id: identity.user_id,
-        chat_id: req.chat_id.unwrap_or(identity.chat_id),
-        user_key: Some(identity.user_key.clone()),
-        channel: channel_kind_label(channel_kind).to_string(),
-        external_user_id: normalize_external_id_opt(req.external_user_id.as_deref()),
-        external_chat_id: normalize_external_id_opt(req.external_chat_id.as_deref()),
-        kind: "ask".to_string(),
-        payload_json: json!({
-            "text": text,
-            "source": source
-        })
-        .to_string(),
-    };
-    info!(
-        "direct_classifier_request task_id={} source={} user_id={} chat_id={}",
-        task.task_id, source, task.user_id, task.chat_id
-    );
-    let result = finalize::run_direct_classifier_reply(&state, &task, text).await;
-    state.clear_task_llm_call_count(&task.task_id);
-    match result {
-        Ok(reply) => api_ok(DirectClassifyResponse {
-            text: reply.text.trim().to_string(),
-        }),
-        Err(err) => {
-            warn!(
-                "direct classifier failed: task_id={} source={} err={}",
-                task.task_id, source, err
-            );
-            api_err::<DirectClassifyResponse>(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Direct classifier failed",
-            )
-        }
-    }
-}
-
-#[derive(Debug, Serialize)]
-struct ActiveTaskItem {
-    index: usize,
-    task_id: String,
-    kind: String,
-    status: String,
-    execution_state: String,
-    channel: String,
-    source_user_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    external_user_id: Option<String>,
-    summary: String,
-    age_seconds: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    lifecycle: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Serialize)]
-struct TaskHistoryItem {
-    task_id: String,
-    kind: String,
-    status: String,
-    channel: String,
-    source_user_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    external_user_id: Option<String>,
-    summary: String,
-    created_at_ts: i64,
-    updated_at_ts: i64,
-    duration_seconds: i64,
-}
-
-/// Phase 4: 重载 skill 视图。POST /v1/admin/reload-skills。与现有管理接口一致：需 x-agent-key 鉴权。
-async fn reload_skills_handler(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
-    if let Err((status, json)) = http::ui_routes::require_ui_identity(&state, &headers) {
-        return (status, json);
-    }
-    match reload_skill_views(&state) {
-        Ok(result) => api_ok(serde_json::to_value(&result).unwrap_or_default()),
-        Err(e) => {
-            warn!("reload_skill_views failed: {}", e);
-            api_err::<serde_json::Value>(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                i18n_t_with_default_vars(
-                    &state,
-                    "clawd.msg.reload_failed",
-                    "reload failed: {err}",
-                    &[("err", &e.to_string())],
-                ),
-            )
-        }
-    }
-}
+include!("direct_classifier_admin.rs");

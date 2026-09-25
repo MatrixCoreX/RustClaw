@@ -201,16 +201,6 @@ pub(super) fn apply_structured_respond_clarify_to_loop_state(
         "agent_loop.terminal_intent".to_string(),
         "clarify".to_string(),
     );
-    if let Some(content) = intent
-        .content
-        .as_deref()
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-    {
-        let content = content.to_string();
-        loop_state.delivery_messages.push(content.clone());
-        loop_state.last_user_visible_respond = Some(content);
-    }
     record_structured_clarify_machine_fields(loop_state, intent);
     loop_state.history_compact.push(format!(
         "round={} structured_respond_terminal_intent=clarify missing_slot={}",

@@ -4,6 +4,9 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+#[cfg(unix)]
+use std::collections::{BTreeSet, HashSet};
+
 static ATOMIC_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -253,7 +256,83 @@ pub(crate) fn terminate_verified_process_group(job_dir: &Path, pid: u32, signal:
     if process_identity_state(job_dir, pid) != ProcessIdentityState::AliveVerified {
         return false;
     }
-    signal_process_group_or_pid(pid, signal)
+    let process_groups = discover_descendant_process_groups(pid);
+    if !process_groups.is_empty() {
+        let serialized = process_groups
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        let _ = write_atomic(&job_dir.join("process_group_ids"), &serialized);
+    }
+    signal_process_groups_or_pid(&process_groups, pid, signal)
+}
+
+fn signal_recorded_process_groups(job_dir: &Path, pid: u32, signal: &str) -> bool {
+    let process_groups = std::fs::read_to_string(job_dir.join("process_group_ids"))
+        .ok()
+        .map(|raw| {
+            raw.lines()
+                .filter_map(|line| line.trim().parse::<u32>().ok())
+                .filter(|process_group| *process_group > 1)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    signal_process_groups_or_pid(&process_groups, pid, signal)
+}
+
+fn signal_process_groups_or_pid(process_groups: &[u32], pid: u32, signal: &str) -> bool {
+    let mut signalled = false;
+    for process_group in process_groups {
+        signalled = signal_process_group(*process_group, signal) || signalled;
+    }
+    signalled || signal_process_group_or_pid(pid, signal)
+}
+
+#[cfg(unix)]
+fn discover_descendant_process_groups(root_pid: u32) -> Vec<u32> {
+    let output = match Command::new("ps")
+        .args(["-eo", "pid=,ppid=,pgid="])
+        .output()
+    {
+        Ok(output) if output.status.success() => output,
+        _ => return vec![root_pid],
+    };
+    let rows = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let pid = fields.next()?.parse::<u32>().ok()?;
+            let parent_pid = fields.next()?.parse::<u32>().ok()?;
+            let process_group = fields.next()?.parse::<u32>().ok()?;
+            Some((pid, parent_pid, process_group))
+        })
+        .collect::<Vec<_>>();
+    let mut descendants = HashSet::from([root_pid]);
+    loop {
+        let before = descendants.len();
+        for (pid, parent_pid, _) in &rows {
+            if descendants.contains(parent_pid) {
+                descendants.insert(*pid);
+            }
+        }
+        if descendants.len() == before {
+            break;
+        }
+    }
+    let mut process_groups = rows
+        .iter()
+        .filter(|(pid, _, _)| descendants.contains(pid))
+        .map(|(_, _, process_group)| *process_group)
+        .filter(|process_group| *process_group > 1)
+        .collect::<BTreeSet<_>>();
+    process_groups.insert(root_pid);
+    process_groups.into_iter().collect()
+}
+
+#[cfg(not(unix))]
+fn discover_descendant_process_groups(root_pid: u32) -> Vec<u32> {
+    vec![root_pid]
 }
 
 fn signal_process_group_or_pid(pid: u32, signal: &str) -> bool {
@@ -272,6 +351,8 @@ fn signal_process_group(pid: u32, signal: &str) -> bool {
             .arg(signal)
             .arg("--")
             .arg(format!("-{pid}"))
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .status()
             .map(|status| status.success())
             .unwrap_or(false)
@@ -294,6 +375,8 @@ fn signal_process(pid: u32, signal: &str) -> bool {
         Command::new("kill")
             .arg(signal)
             .arg(pid.to_string())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .status()
             .map(|status| status.success())
             .unwrap_or(false)
@@ -382,12 +465,15 @@ pub(crate) fn maybe_escalate_cancel(job_dir: &Path, now_ts: i64) -> &'static str
         }
         ProcessIdentityState::Missing => {
             // The verified group leader may have exited after TERM while a child
-            // ignored it. Only use the durable group id inside a short fresh
-            // cancellation window; after that, avoid any PID/PGID reuse risk.
+            // ignored it, including a sandbox payload in a nested session. Only
+            // use the groups captured during the verified TERM request inside a
+            // short fresh cancellation window; after that, avoid PID/PGID reuse.
             let latest_safe_escalation = cancel_requested_at
                 .saturating_add(grace_seconds)
                 .saturating_add(60);
-            if now_ts <= latest_safe_escalation && signal_process_group(pid, "KILL") {
+            if now_ts <= latest_safe_escalation
+                && signal_recorded_process_groups(job_dir, pid, "KILL")
+            {
                 let _ = write_atomic(&job_dir.join("cancel_escalated_signal"), "KILL");
                 "kill_sent"
             } else {

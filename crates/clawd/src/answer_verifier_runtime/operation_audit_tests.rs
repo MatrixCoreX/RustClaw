@@ -67,6 +67,22 @@ fn dispatch_matches_verified_alias_or_canonical_but_not_a_different_action() {
         action_ref: "fixture.other".into()
     }
     .matches(&operation));
+    let skill_action_operation = json!({
+        "requested_action_type":"call_capability",
+        "requested_capability":"filesystem.read_text_range",
+        "resolved_capability":"workspace.read_text_range",
+        "executed_skill":"fs_basic"
+    });
+    assert!(RequiredDispatch {
+        action_type: "call_capability".into(),
+        action_ref: "fs_basic.read_text_range".into()
+    }
+    .matches(&skill_action_operation));
+    assert!(!RequiredDispatch {
+        action_type: "call_capability".into(),
+        action_ref: "other.read_text_range".into()
+    }
+    .matches(&skill_action_operation));
 }
 
 #[test]
@@ -213,18 +229,29 @@ fn media_download_delivery_rows_do_not_invalidate_completed_actions() {
 }
 
 #[test]
-fn empty_presentation_check_still_rejects_method_or_blocked_claims() {
-    for check in [
-        json!({"requested_operation":"summarize fetched news","evidence_step_ids":[],
+fn empty_presentation_check_ignores_claim_flags_but_rejects_control_claims() {
+    for (check, expected_pass) in [
+        (
+            json!({"requested_operation":"summarize fetched news","evidence_step_ids":[],
             "required_dispatches":[],"method_observed":true,"result_observed":true}),
-        json!({"requested_operation":"summarize fetched news","evidence_step_ids":[],
+            true,
+        ),
+        (
+            json!({"requested_operation":"summarize fetched news","evidence_step_ids":[],
             "required_dispatches":[],"method_observed":false,"result_observed":false,"blocked":true}),
-        json!({"requested_operation":"summarize fetched news","evidence_step_ids":[],
+            false,
+        ),
+        (
+            json!({"requested_operation":"summarize fetched news","evidence_step_ids":[],
             "required_dispatches":[],"method_observed":false,"result_observed":true,"applicable":false}),
+            false,
+        ),
     ] {
         let verdict = validate_operation_audit(model(json!([check])), &journal());
-        assert_eq!(verdict.missing_evidence_fields, vec!["verification_audit"]);
-        assert!(!verdict.pass);
+        assert_eq!(verdict.pass, expected_pass);
+        if !expected_pass {
+            assert_eq!(verdict.missing_evidence_fields, vec!["verification_audit"]);
+        }
     }
 }
 
@@ -315,6 +342,83 @@ fn completed_resumed_capability_result_satisfies_required_dispatch_audit() {
     });
 
     assert!(validate_operation_audit(model(json!([check])), &journal).pass);
+}
+
+#[test]
+fn runtime_managed_async_poll_satisfies_poll_dispatch_audit() {
+    let mut journal = TaskJournal::for_task(
+        "audit-resumed-video",
+        "ask",
+        "generate a video and wait for the result",
+    );
+    journal
+        .step_results
+        .push(TaskJournalStepTrace::ok("step_4", "video_generate", "{}"));
+    journal.task_observations.push(json!({
+        "observation_kind": "capability_resolution",
+        "outcome": "resolved",
+        "requested_capability": "video.generate",
+        "resolved_capability": "video.generate",
+        "resolved_tool_or_skill": "skill:video_generate",
+        "round_no": 2,
+        "global_step": 4,
+        "step_in_round": 2,
+    }));
+    let mut result = claw_core::capability_result::CapabilityResultEnvelope::ok(
+        "video.generate",
+        Some("generate".to_string()),
+        json!({"status": "Success"}),
+    );
+    result.provenance = json!({
+        "source": "async_job_completion_checkpoint",
+        "step_id": "step_4",
+        "job_id": "provider:video_generate:fixture"
+    });
+    result
+        .evidence
+        .push(claw_core::capability_result::EvidenceRef {
+            id: "step_4".to_string(),
+            source: "video.generate".to_string(),
+            locator: None,
+            digest: None,
+            metadata: json!({}),
+        });
+    journal.capability_results.push(result);
+    journal.task_checkpoint = Some(json!({
+        "boundary_context": {
+            "async_poll_adapter": {
+                "kind": "media_job_poll",
+                "skill_name": "video_generate",
+                "args": {"action": "poll"}
+            },
+            "async_job_terminal_observation": {
+                "status": "succeeded",
+                "job_id": "provider:video_generate:fixture"
+            }
+        }
+    }));
+    let checks = json!([
+        {
+            "requested_operation": "generate video",
+            "evidence_step_ids": ["step_4"],
+            "required_dispatches": [
+                {"action_type": "call_capability", "action_ref": "video.generate"}
+            ],
+            "method_observed": true,
+            "result_observed": true
+        },
+        {
+            "requested_operation": "poll until terminal",
+            "evidence_step_ids": ["step_4"],
+            "required_dispatches": [
+                {"action_type": "call_capability", "action_ref": "video.poll"}
+            ],
+            "method_observed": true,
+            "result_observed": true
+        }
+    ]);
+
+    assert!(validate_operation_audit(model(checks), &journal).pass);
 }
 
 #[test]

@@ -233,6 +233,14 @@ fn planner_can_repair_structured_skill_error(err: &str) -> bool {
     })
 }
 
+fn structured_skill_error_is_non_retryable_before_effect(err: &str) -> bool {
+    crate::skills::parse_structured_skill_error(err)
+        .and_then(|structured| structured.extra)
+        .and_then(|extra| extra.get("retryable").and_then(Value::as_bool))
+        == Some(false)
+        && crate::skills::structured_skill_error_proves_not_applied(err)
+}
+
 fn structured_read_permission_denial_is_terminal(normalized_skill: &str, err: &str) -> bool {
     let Some(structured) = crate::skills::parse_structured_skill_error(err) else {
         return false;
@@ -379,6 +387,12 @@ pub(crate) fn classify_skill_failure_recovery(
             return Some("recoverable_failure_continue_in_round");
         }
         return Some("recoverable_failure_continue_round");
+    }
+    if structured_skill_error_is_non_retryable_before_effect(err) {
+        if has_remaining_action_after(actions, current_idx, max_actions_per_turn) {
+            return Some("recoverable_failure_continue_in_round");
+        }
+        return Some("recoverable_failure_finalize");
     }
     if state.skill_is_retryable(normalized_skill)
         && !state.skill_invocation_requires_confirmation_policy(normalized_skill, call_args)

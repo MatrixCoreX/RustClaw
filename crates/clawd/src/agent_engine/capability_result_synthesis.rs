@@ -225,6 +225,11 @@ async fn synthesize_from_capability_results_with_policy(
         .await;
         let mut synthesis = match synthesis {
             Ok(synthesis) => synthesis,
+            Err(error_code)
+                if error_code == crate::llm_gateway::CONVERSATION_INPUT_INTERRUPTED_ERR =>
+            {
+                return Err(error_code);
+            }
             Err(error_code) => synthesize_unreviewed_transcript_fallback(
                 state,
                 task,
@@ -317,7 +322,13 @@ async fn synthesize_model_capability_answer(
     let raw =
         crate::llm_gateway::run_with_fallback_with_prompt_source(state, task, &prompt, &source)
             .await
-            .map_err(|_| "capability_result_synthesis_provider_unavailable".to_string())?;
+            .map_err(|error| {
+                if error == crate::llm_gateway::CONVERSATION_INPUT_INTERRUPTED_ERR {
+                    error
+                } else {
+                    "capability_result_synthesis_provider_unavailable".to_string()
+                }
+            })?;
     let parsed = crate::prompt_utils::validate_against_schema::<CapabilitySynthesisOutput>(
         raw.trim(),
         crate::prompt_utils::PromptSchemaId::FinalizerOut,
@@ -452,7 +463,13 @@ async fn synthesize_reviewed_transcript(
         let raw =
             crate::llm_gateway::run_with_fallback_with_prompt_source(state, task, &prompt, &source)
                 .await
-                .map_err(|_| "transcript_revision_provider_unavailable".to_string())?;
+                .map_err(|error| {
+                    if error == crate::llm_gateway::CONVERSATION_INPUT_INTERRUPTED_ERR {
+                        error
+                    } else {
+                        "transcript_revision_provider_unavailable".to_string()
+                    }
+                })?;
         let parsed = crate::prompt_utils::validate_against_schema::<TranscriptRevisionOutput>(
             raw.trim(),
             crate::prompt_utils::PromptSchemaId::TranscriptRevision,

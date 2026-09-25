@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
 import { useUiDialog } from "../components/UiDialogProvider";
-import { useChatMessageQueue } from "./useChatMessageQueue";
 import {
   assertChatAttachmentConstraints,
   attachmentIsAudio,
@@ -51,16 +50,37 @@ import type {
   ChatAttachment,
   ChannelName,
   ChatMessage,
+  ConversationInputClientTaskReceipt,
+  ConversationInputPage,
+  ConversationInputReceipt,
   SubmitTaskResponse,
   ConversationArchiveUpdate,
   ConversationTitleUpdate,
   TaskLlmDebugResponse,
+  TaskEventEnvelope,
   TaskQueryResponse,
   UiAttachmentConstraints,
 } from "../types/api";
 
 type Translate = (zh: string, en: string) => string;
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
+
+export function conversationReplyMessage(event: TaskEventEnvelope): ChatMessage | null {
+  const eventType = event.event_type?.trim() || event.event_kind.trim();
+  if (eventType !== "conversation_reply_item") return null;
+  const payload = event.payload ?? {};
+  const relation = typeof payload.relation === "string" ? payload.relation.trim() : "";
+  if (relation !== "side_reply" && relation !== "clarification") return null;
+  const replyId = typeof payload.reply_id === "string" ? payload.reply_id.trim() : "";
+  const text = typeof payload.text === "string" ? payload.text.trim() : "";
+  if (!replyId || !text || payload.terminal === true) return null;
+  return {
+    id: `conversation-${replyId}`,
+    role: "assistant",
+    text,
+    ts: typeof event.timestamp_ms === "number" ? event.timestamp_ms : Date.now(),
+  };
+}
 
 import {
   threadHasServerHistory,
@@ -89,8 +109,12 @@ import {
   defaultAttachmentPrompt,
   defaultAttachmentMessage,
 } from "../lib/chat-thread-state";
-import type { ChatThreadRecord, ChatThreadState } from "../types/chat-runtime";
-export type { ChatThreadRecord, ChatThreadState, ChatThreadSummary, ChatTeachingRunRecord, ChatTeachingRunSummary } from "../types/chat-runtime";
+import type {
+  ChatThreadRecord,
+  ChatThreadState,
+} from "../types/chat-runtime";
+import { useDeferredChatInputs } from "./useDeferredChatInputs";
+export type { ChatDeferredInputSummary, ChatThreadRecord, ChatThreadState, ChatThreadSummary, ChatTeachingRunRecord, ChatTeachingRunSummary } from "../types/chat-runtime";
 export { loadChatThreadState, persistChatThreadState, mergeServerConversationHistory, retainLocalDraftsForPagedRestore, threadHasPendingTask } from "../lib/chat-thread-state";
 
 export interface UseChatRuntimeParams {
@@ -158,17 +182,19 @@ export function useChatRuntime({
     activeChatThread.messages.every((message) => message.role === "system");
   const chatThreadSummaries = buildChatThreadSummaries(chatThreadState.threads, t);
   const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);
+  const [chatDeliveryMode, setChatDeliveryMode] = useState<"auto" | "defer">("auto");
+  const [chatStopping, setChatStopping] = useState(false);
   const [chatTeachingLlmDebugLoading, setChatTeachingLlmDebugLoading] = useState(false);
   const [chatCompacting, setChatCompacting] = useState(false);
   const [compactingThreadId, setCompactingThreadId] = useState<string | null>(null);
   const [liveThreads, setLiveThreads] = useState<Record<string, { working: boolean; activity: ReturnType<typeof emptyChatActivity> }>>({});
-  const outbox = useChatMessageQueue(conversationHistoryScope, chatThreadState.threads
-    .filter(thread => threadHasPendingTask(thread) || thread.id === compactingThreadId).map(thread => thread.id));
-  const chatQueuedMessages = outbox.messages.filter(item => item.threadId === activeChatThread.id && item.status === "queued");
-  const chatQueuePaused = outbox.paused.includes(activeChatThread.id);
   const chatSending = Boolean(liveThreads[activeChatThread.id]) || threadHasPendingTask(activeChatThread)
-    || outbox.messages.some(item => item.threadId === activeChatThread.id && item.status === "running");
+    || compactingThreadId === activeChatThread.id;
   const chatWorking = liveThreads[activeChatThread.id]?.working ?? false;
+  const activeChatTaskId = [...(activeChatThread.teachingRuns ?? [])]
+    .reverse()
+    .find((run) => run.taskId && activeTaskStatus(run.status))
+    ?.taskId?.trim() || null;
   const chatActivity = liveThreads[activeChatThread.id]?.activity ?? emptyChatActivity();
   const [chatRecording, setChatRecording] = useState(false);
   const [chatVoiceRecordingAvailability] = useState(voiceRecordingAvailability);
@@ -199,7 +225,11 @@ export function useChatRuntime({
   const teachingTraceAutoLoadKeysRef = useRef<Set<string>>(new Set());
   const liveChatTaskIdsRef = useRef<Set<string>>(new Set());
   const suspendedChatTaskIdsRef = useRef<Set<string>>(new Set());
+  const conversationInputTaskIdsRef = useRef<Set<string>>(new Set());
   const recoveryAbortControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const submissionAbortControllersRef = useRef<
+    Map<string, { threadId: string; controller: AbortController }>
+  >(new Map());
   const voiceStopRequestedRef = useRef(false);
 
   chatInputValueRef.current = chatInput;
@@ -234,7 +264,12 @@ export function useChatRuntime({
     suspendedChatTaskIdsRef.current.clear();
     for (const controller of recoveryAbortControllersRef.current.values()) controller.abort();
     recoveryAbortControllersRef.current.clear();
+    for (const submission of submissionAbortControllersRef.current.values()) {
+      submission.controller.abort();
+    }
+    submissionAbortControllersRef.current.clear();
     liveChatTaskIdsRef.current.clear();
+    conversationInputTaskIdsRef.current.clear();
   }, [conversationHistoryScope]);
 
   useEffect(
@@ -246,6 +281,10 @@ export function useChatRuntime({
         controller.abort();
       }
       recoveryAbortControllersRef.current.clear();
+      for (const submission of submissionAbortControllersRef.current.values()) {
+        submission.controller.abort();
+      }
+      submissionAbortControllersRef.current.clear();
     },
     [],
   );
@@ -507,7 +546,11 @@ export function useChatRuntime({
   };
 
   const removeChatThreadLocally = (threadId: string) => {
-    outbox.queue.removeThread(threadId);
+    for (const [runId, submission] of submissionAbortControllersRef.current) {
+      if (submission.threadId !== threadId) continue;
+      submission.controller.abort();
+      submissionAbortControllersRef.current.delete(runId);
+    }
     setChatThreadState((prev) => {
       if (prev.threads.length <= 1) {
         const replacement = createChatThread(t, defaultAgentId);
@@ -528,7 +571,7 @@ export function useChatRuntime({
 
   const setActiveChatAgentId = (agentId: string) => {
     if (!availableAgents.some((agent) => agent.id === agentId)) return;
-    if (!activeChatCanChangeAgent || outbox.messages.some(item => item.threadId === activeChatThreadRef.current.id)) {
+    if (!activeChatCanChangeAgent) {
       setChatError(
         t(
           "已有消息的任务不能切换 Agent，请新建任务后再选择。",
@@ -662,7 +705,11 @@ export function useChatRuntime({
     try {
       await archiveChatThreadOnServer(thread);
       const replacement = createChatThread(t, defaultAgentId);
-      outbox.queue.removeThread(thread.id);
+      for (const [runId, submission] of submissionAbortControllersRef.current) {
+        if (submission.threadId !== thread.id) continue;
+        submission.controller.abort();
+        submissionAbortControllersRef.current.delete(runId);
+      }
       setChatThreadState((prev) => ({
         activeThreadId: replacement.id,
         threads: prev.threads.map((item) =>
@@ -802,6 +849,17 @@ export function useChatRuntime({
         async (event) => {
           if (controller.signal.aborted) return;
           updateLiveThread(threadId, current => ({ ...current, activity: reduceChatActivity(current.activity, event) }));
+          const replyMessage = conversationReplyMessage(event);
+          if (replyMessage) {
+            updateChatThreadById(threadId, (thread) => ({
+              ...thread,
+              messages: upsertThreadMessage(thread.messages, replyMessage),
+              updatedAt: Date.now(),
+            }));
+            if (event.payload?.relation === "clarification") {
+              updateLiveThread(threadId, current => ({ ...current, working: false }));
+            }
+          }
           const decoded = decodeAssistantPresentationEvent(event);
           if (!decoded) {
             if (event.event_kind === "task_final") updateLiveThread(threadId, current => ({ ...current, working: false }));
@@ -839,7 +897,6 @@ export function useChatRuntime({
       if (controller.signal.aborted) return;
       onTaskResult(taskId, result);
       const terminal = terminalTaskStatus(result.status);
-      if (terminal && result.status !== "succeeded") outbox.queue.pause(threadId);
       const resultText = terminal ? extractTaskText(result) : "";
       const assistantMessage = resultText
         ? {
@@ -858,9 +915,9 @@ export function useChatRuntime({
           ? upsertThreadMessage(thread.messages, assistantMessage)
           : thread.messages,
         teachingTaskResult: result,
-        teachingRuns: updateTeachingRunById(
+        teachingRuns: updateTeachingRunsByTaskId(
           thread.teachingRuns,
-          teachingRunId,
+          taskId,
           (run) => ({
             ...run,
             status: result.status,
@@ -887,42 +944,73 @@ export function useChatRuntime({
     }
   };
 
+  const deferredInputs = useDeferredChatInputs({
+    apiFetch,
+    t,
+    enabled: Boolean(conversationHistoryScope.trim()),
+    conversation: {
+      id: activeChatThread.id,
+      agentId: activeChatThread.agentId,
+      externalChatId: activeChatThread.externalChatId,
+    },
+    onError: setChatError,
+    onActivated: (input, receipt, taskId) => {
+      const thread = activeChatThreadRef.current;
+      const teachingRunId = `teach-${input.inputId}`;
+      conversationInputTaskIdsRef.current.add(taskId);
+      updateChatThreadById(thread.id, (current) => ({
+        ...current,
+        lastTaskId: taskId,
+        activeTeachingRunId: current.teachingMode
+          ? teachingRunId
+          : current.activeTeachingRunId ?? null,
+        teachingRuns: appendTeachingRun(current.teachingRuns, {
+          id: teachingRunId,
+          taskId,
+          conversationInputId: input.inputId,
+          conversationInputClientMessageId: receipt.client_message_id,
+          conversationInputRevision: receipt.instruction_revision,
+          userMessageId: `u-${input.inputId}`,
+          assistantMessageId: null,
+          userText: input.text || input.attachmentNames.join(" · "),
+          assistantText: null,
+          status: "running",
+          startedAt: input.acceptedAt,
+          completedAt: null,
+          taskResult: {
+            task_id: taskId,
+            status: "running",
+            result_json: null,
+            error_text: null,
+          },
+          llmDebug: null,
+          llmDebugError: null,
+          callCount: null,
+        }),
+        updatedAt: Date.now(),
+      }));
+      onTaskSubmitted(taskId);
+      void recoverPendingChatTask(thread.id, teachingRunId, taskId);
+    },
+  });
+  const chatDeferredInputs = deferredInputs.items;
+  const chatDeferredActionInputId = deferredInputs.actionInputId;
+  const activateDeferredChatInput = deferredInputs.activate;
+  const withdrawDeferredChatInput = deferredInputs.withdraw;
+
   useEffect(() => {
     for (const thread of chatThreadState.threads) {
       for (const run of thread.teachingRuns ?? []) {
         const taskId = run.taskId?.trim();
         if (taskId && activeTaskStatus(run.status)) {
+          if (run.conversationInputId) {
+            conversationInputTaskIdsRef.current.add(taskId);
+          }
           void recoverPendingChatTask(thread.id, run.id, taskId);
         }
       }
     }
   }, [chatThreadState]);
-
-  useEffect(() => {
-    const pending = chatThreadState.threads.filter(thread => outbox.messages.some(item => item.threadId === thread.id))
-      .flatMap(thread => (thread.teachingRuns ?? []).filter(run => run.taskId && activeTaskStatus(run.status)
-        && suspendedChatTaskIdsRef.current.has(run.taskId)).map(run => ({ threadId: thread.id, runId: run.id, taskId: run.taskId! })));
-    if (!pending.length) return;
-    let cancelled = false;
-    let checking = false;
-    const timer = setInterval(async () => {
-      if (checking) return;
-      checking = true;
-      try {
-        for (const run of pending) {
-          const result = await fetchTaskById(run.taskId);
-          if (cancelled) return;
-          if (terminalTaskStatus(result.status)) {
-            suspendedChatTaskIdsRef.current.delete(run.taskId);
-            await recoverPendingChatTask(run.threadId, run.runId, run.taskId);
-          }
-        }
-      } catch {
-        // An uncertain task remains a queue barrier until its status is known.
-      } finally { checking = false; }
-    }, 5000);
-    return () => { cancelled = true; clearInterval(timer); };
-  }, [chatThreadState, outbox.messages]);
 
   const handleChatAttachmentSelection = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
@@ -1102,8 +1190,349 @@ export function useChatRuntime({
     }
     if (chatAttachmentInputRef.current) chatAttachmentInputRef.current.value = "";
     setChatError(null);
-    outbox.queue.enqueue({ id: runId, threadId: thread.id, text, attachments: attached.map(item => item.name) },
-      signal => executeChatMessageSnapshot(text, attached, thread, runId, signal));
+    const deliveryMode = chatDeliveryMode;
+    const activeTaskId = [...(thread.teachingRuns ?? [])]
+      .reverse()
+      .find((run) => run.taskId && activeTaskStatus(run.status))
+      ?.taskId?.trim();
+    if (deliveryMode === "defer") {
+      await submitConversationInputSnapshot(
+        text,
+        attached,
+        thread,
+        runId,
+        activeTaskId,
+        "defer",
+      );
+      setChatDeliveryMode("auto");
+      return;
+    }
+    if (
+      activeTaskId &&
+      conversationInputTaskIdsRef.current.has(activeTaskId) &&
+      (text || attached.length > 0)
+    ) {
+      await submitConversationInputSnapshot(text, attached, thread, runId, activeTaskId, "auto");
+      return;
+    }
+    const controller = new AbortController();
+    submissionAbortControllersRef.current.set(runId, {
+      threadId: thread.id,
+      controller,
+    });
+    void executeChatMessageSnapshot(text, attached, thread, runId, controller.signal).finally(
+      () => submissionAbortControllersRef.current.delete(runId),
+    );
+  };
+
+  const submitConversationInputSnapshot = async (
+    text: string,
+    attached: ChatAttachment[],
+    threadAtSubmit: ChatThreadRecord,
+    teachingRunId: string,
+    activeTaskId: string | undefined,
+    deliveryMode: "auto" | "defer",
+  ) => {
+    const submittedAt = Date.now();
+    const clientMessageId = `ui:${threadAtSubmit.id}:${teachingRunId}`;
+    const attachedImages = attached.filter(attachmentIsImage);
+    const attachedAudios = attached.filter(attachmentIsAudio);
+    const attachedFiles = attached.filter(
+      (attachment) => !attachmentIsImage(attachment) && !attachmentIsAudio(attachment),
+    );
+    const audioOnly = attachedAudios.length > 0 && attachedImages.length === 0 && attachedFiles.length === 0;
+    const primaryAudio = attachedAudios[attachedAudios.length - 1];
+    const requestText =
+      text ||
+      (audioOnly
+        ? ""
+        : defaultAttachmentPrompt(t, attachedImages.length, attachedAudios.length, attachedFiles.length));
+    const userMsg: ChatMessage = {
+      id: `u-${teachingRunId}`,
+      role: "user",
+      text:
+        text ||
+        defaultAttachmentMessage(t, attachedImages.length, attachedAudios.length, attachedFiles.length),
+      ts: submittedAt,
+      attachments: attached,
+      images: attachedImages,
+    };
+    if (deliveryMode === "auto" && activeTaskId) {
+      updateChatThreadById(threadAtSubmit.id, (thread) => ({
+        ...thread,
+        title: titleForThreadAfterUserMessage(thread, userMsg, t),
+        messages: appendThreadMessages(thread.messages, userMsg),
+        activeTeachingRunId: threadAtSubmit.teachingMode
+          ? teachingRunId
+          : thread.activeTeachingRunId ?? null,
+        teachingRuns: appendTeachingRun(thread.teachingRuns, {
+          id: teachingRunId,
+          taskId: activeTaskId,
+          conversationInputId: null,
+          conversationInputClientMessageId: clientMessageId,
+          conversationInputRevision: null,
+          userMessageId: userMsg.id,
+          assistantMessageId: null,
+          userText: userMsg.text,
+          assistantText: null,
+          status: "running",
+          startedAt: submittedAt,
+          completedAt: null,
+          taskResult: {
+            task_id: activeTaskId,
+            status: "running",
+            result_json: null,
+            error_text: null,
+          },
+          llmDebug: null,
+          llmDebugError: null,
+          callCount: null,
+        }),
+        updatedAt: submittedAt,
+      }));
+    }
+    try {
+      const scope = {
+        conversation_id: threadAtSubmit.id,
+        agent_id: threadAtSubmit.agentId,
+        channel: "ui",
+        channel_account_id: threadAtSubmit.externalChatId,
+      };
+      const submission = {
+        schema_version: 1,
+        client_message_id: clientMessageId,
+        scope,
+        content: [{ kind: "text" as const, text: requestText }],
+        delivery_mode: deliveryMode,
+        ...(activeTaskId ? { expected_task_id: activeTaskId } : {}),
+        source: { received_at_ts: Math.floor(submittedAt / 1000) },
+      };
+      const attachmentPayload = attached.map((attachment) => ({
+        name: attachment.name,
+        mime_type: attachment.mimeType,
+        size: attachment.size,
+        kind: attachment.kind,
+        base64: attachment.dataUrl,
+      }));
+      const task = {
+        channel: "ui",
+        kind: "ask",
+        idempotency_key: clientMessageId,
+        ...(activeUserKey ? { user_key: activeUserKey } : {}),
+        ...activeIdentityIds,
+        external_user_id: threadAtSubmit.externalChatId,
+        external_chat_id: threadAtSubmit.id,
+        payload: {
+          text: requestText,
+          conversation_id: threadAtSubmit.id,
+          agent_id: threadAtSubmit.agentId,
+          ...(audioOnly ? { source: "voice" } : {}),
+          ...(attached.length > 0
+            ? {
+                attachments: attachmentPayload,
+                images: attachedImages.map((image) => ({
+                  name: image.name,
+                  mime_type: image.mimeType,
+                  size: image.size,
+                  base64: image.dataUrl,
+                })),
+                ...(primaryAudio
+                  ? {
+                      audio: {
+                        name: primaryAudio.name,
+                        mime_type: primaryAudio.mimeType,
+                        size: primaryAudio.size,
+                        base64: primaryAudio.dataUrl,
+                      },
+                    }
+                  : {}),
+                response_language: lang === "zh" ? "zh-CN" : "en",
+              }
+            : {}),
+        },
+      };
+      let receipt: ConversationInputReceipt;
+      try {
+        receipt = await submitConversationClientTaskWithRecovery(submission, task);
+      } catch (error) {
+        if (!(error instanceof Error) || error.message !== "conversation_input_target_conflict") {
+          throw error;
+        }
+        if (!activeTaskId) throw error;
+        const latestTarget = await fetchTaskById(activeTaskId);
+        if (!terminalTaskStatus(latestTarget.status)) throw error;
+        receipt = await submitConversationClientTaskWithRecovery(
+          { ...submission, expected_task_id: undefined },
+          task,
+        );
+      }
+      if (deliveryMode === "defer") {
+        const deferredUserMessage = { ...userMsg, id: `u-${receipt.input_id}` };
+        updateChatThreadById(threadAtSubmit.id, (thread) => ({
+          ...thread,
+          title: titleForThreadAfterUserMessage(thread, deferredUserMessage, t),
+          messages: upsertThreadMessage(thread.messages, deferredUserMessage),
+          updatedAt: Date.now(),
+        }));
+        deferredInputs.add({
+          inputId: receipt.input_id,
+          text: userMsg.text,
+          attachmentNames: attached.map((item) => item.name),
+          acceptedAt: receipt.accepted_at_ts * 1_000,
+        });
+        return;
+      }
+      const acceptedTaskId = receipt.target_task_id?.trim();
+      if (!acceptedTaskId) throw new Error("conversation_input_task_binding_missing");
+      conversationInputTaskIdsRef.current.add(acceptedTaskId);
+      updateChatThreadById(threadAtSubmit.id, (thread) => ({
+        ...thread,
+        lastTaskId: acceptedTaskId,
+        teachingRuns: updateTeachingRunById(
+          thread.teachingRuns,
+          teachingRunId,
+          (run) => ({
+            ...run,
+            taskId: acceptedTaskId,
+            conversationInputId: receipt.input_id,
+            conversationInputClientMessageId: receipt.client_message_id,
+            conversationInputRevision: receipt.instruction_revision,
+            taskResult: {
+              task_id: acceptedTaskId,
+              status: "running",
+              result_json: null,
+              error_text: null,
+            },
+          }),
+        ),
+        updatedAt: Date.now(),
+      }));
+      if (acceptedTaskId !== activeTaskId) {
+        onTaskSubmitted(acceptedTaskId);
+        void recoverPendingChatTask(threadAtSubmit.id, teachingRunId, acceptedTaskId);
+      }
+    } catch (error) {
+      const message = formatUiError(
+        error,
+        t,
+        deliveryMode === "defer"
+          ? "延后消息未能保存，请重试。"
+          : "补充要求未能提交，请重试。",
+        deliveryMode === "defer"
+          ? "The deferred message could not be saved. Please retry."
+          : "The follow-up instruction could not be submitted. Please retry.",
+      );
+      if (activeChatThreadRef.current.id === threadAtSubmit.id) setChatError(message);
+      const systemMessage: ChatMessage = {
+        id: `e-${teachingRunId}`,
+        role: "system",
+        text: `${t("发送失败", "Send failed")}: ${message}`,
+        ts: Date.now(),
+      };
+      updateChatThreadById(threadAtSubmit.id, (thread) => ({
+        ...thread,
+        messages: appendThreadMessages(thread.messages, systemMessage),
+        teachingRuns:
+          deliveryMode === "auto" && activeTaskId
+            ? updateTeachingRunById(thread.teachingRuns, teachingRunId, (run) => ({
+                ...run,
+                status: "failed",
+                completedAt: systemMessage.ts,
+                assistantMessageId: systemMessage.id,
+                assistantText: systemMessage.text,
+                taskResult: {
+                  task_id: activeTaskId,
+                  status: "failed",
+                  result_json: null,
+                  error_text: message,
+                },
+              }))
+            : thread.teachingRuns,
+        updatedAt: Date.now(),
+      }));
+    }
+  };
+
+  const recoverConversationInputReceipt = async (
+    scope: {
+      conversation_id: string;
+      agent_id: string;
+      channel: string;
+      channel_account_id: string;
+    },
+    clientMessageId: string,
+    signal?: AbortSignal,
+  ): Promise<ConversationInputReceipt | null> => {
+    const query = new URLSearchParams({
+      conversation_id: scope.conversation_id,
+      agent_id: scope.agent_id,
+      channel: scope.channel,
+      channel_account_id: scope.channel_account_id,
+      client_message_id: clientMessageId,
+    });
+    const response = await apiFetch(`/v1/conversation-inputs?${query.toString()}`, { signal });
+    const body = (await response.json()) as ApiResponse<ConversationInputPage>;
+    if (response.status === 404) return null;
+    if (!response.ok || !body.ok || !body.data) {
+      throw new Error(body.error || `conversation_input_recovery_http_${response.status}`);
+    }
+    return body.data.items[0]?.receipt ?? null;
+  };
+
+  const submitConversationClientTaskWithRecovery = async (
+    submission: {
+      schema_version: number;
+      client_message_id: string;
+      scope: {
+        conversation_id: string;
+        agent_id: string;
+        channel: string;
+        channel_account_id: string;
+      };
+      content: Array<{ kind: "text"; text: string }>;
+      delivery_mode: "auto" | "defer";
+      expected_task_id?: string;
+      source: { received_at_ts: number };
+    },
+    task: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<ConversationInputReceipt> => {
+    const submit = async () => {
+      const response = await apiFetch("/v1/conversation-inputs/client-task", {
+        method: "POST",
+        signal,
+        headers: {
+          "Content-Type": "application/json",
+          [CLIENT_ORIGIN_HEADER]: "ui",
+        },
+        body: JSON.stringify({ input: submission, task }),
+      });
+      const body = (await response.json()) as ApiResponse<ConversationInputClientTaskReceipt>;
+      if (!response.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `conversation_input_submit_http_${response.status}`);
+      }
+      return body.data.input;
+    };
+    try {
+      return await submit();
+    } catch (submitError) {
+      if (signal?.aborted) throw submitError;
+      try {
+        const recovered = await recoverConversationInputReceipt(
+          submission.scope,
+          submission.client_message_id,
+          signal,
+        );
+        if (recovered?.target_task_id || submission.delivery_mode === "defer") return recovered;
+      } catch {
+        // Retry the idempotent client-task handoff below.
+      }
+      try {
+        return await submit();
+      } catch {
+        throw submitError;
+      }
+    }
   };
 
   const executeChatMessageSnapshot = async (
@@ -1132,6 +1561,7 @@ export function useChatRuntime({
             attachedFiles.length,
           ));
     const submitThreadId = threadAtSubmit.id;
+    const conversationInputClientMessageId = `ui:${submitThreadId}:${teachingRunId}`;
     const teachingModeAtSubmit = threadAtSubmit.teachingMode;
     const setTurnError = (message: string | null) => {
       if (activeChatThreadRef.current.id === submitThreadId) setChatError(message);
@@ -1163,6 +1593,9 @@ export function useChatRuntime({
       teachingRuns: appendTeachingRun(thread.teachingRuns, {
         id: teachingRunId,
         taskId: null,
+        conversationInputId: null,
+        conversationInputClientMessageId,
+        conversationInputRevision: null,
         userMessageId: userMsg.id,
         assistantMessageId: null,
         userText: userMsg.text,
@@ -1179,12 +1612,9 @@ export function useChatRuntime({
     }));
 
     let submittedTaskId: string | null = null;
+    let ownsTaskFollower = false;
     try {
       const adapterName = interactionAdapter.trim();
-      const explicitExternalChatId = interactionExternalChatId.trim();
-      const effectiveExternalChatId = explicitExternalChatId
-        ? `${explicitExternalChatId}--${threadAtSubmit.externalChatId}`
-        : threadAtSubmit.externalChatId;
       const attachmentPayload = attached.map((attachment) => ({
         name: attachment.name,
         mime_type: attachment.mimeType,
@@ -1193,13 +1623,13 @@ export function useChatRuntime({
         base64: attachment.dataUrl,
       }));
       const submitBody: Record<string, unknown> = {
-        channel: interactionChannel,
+        channel: "ui",
         kind: "ask",
         idempotency_key: `ui:${submitThreadId}:${teachingRunId}`,
         ...(activeUserKey ? { user_key: activeUserKey } : {}),
         ...activeIdentityIds,
         ...(interactionExternalUserId.trim() ? { external_user_id: interactionExternalUserId.trim() } : {}),
-        ...(effectiveExternalChatId ? { external_chat_id: effectiveExternalChatId } : {}),
+        external_chat_id: submitThreadId,
         payload: {
           text: requestText,
           conversation_id: threadAtSubmit.id,
@@ -1230,24 +1660,44 @@ export function useChatRuntime({
             : {}),
         },
       };
-      const submitRes = await apiFetch(`/v1/tasks`, {
-        method: "POST",
-        signal,
-        headers: {
-          "Content-Type": "application/json",
-          [CLIENT_ORIGIN_HEADER]: "ui",
+      const receipt = await submitConversationClientTaskWithRecovery(
+        {
+          schema_version: 1,
+          client_message_id: conversationInputClientMessageId,
+          scope: {
+            conversation_id: submitThreadId,
+            agent_id: threadAtSubmit.agentId,
+            channel: "ui",
+            channel_account_id: threadAtSubmit.externalChatId,
+          },
+          content: [{ kind: "text", text: requestText }],
+          delivery_mode: "auto",
+          source: { received_at_ts: Math.floor(userMsg.ts / 1000) },
         },
-        body: JSON.stringify(submitBody),
-      });
-      const submitData = (await submitRes.json()) as ApiResponse<SubmitTaskResponse>;
+        submitBody,
+        signal,
+      );
       if (signal.aborted) return false;
-      if (!submitRes.ok || !submitData.ok || !submitData.data?.task_id) {
-        throw new Error(submitData.error || `chat_task_submit_http_${submitRes.status}`);
+      const taskId = receipt.target_task_id?.trim();
+      if (!taskId) throw new Error("conversation_input_task_binding_missing");
+      submittedTaskId = taskId;
+      conversationInputTaskIdsRef.current.add(taskId);
+      updateChatThreadById(submitThreadId, (thread) => ({
+        ...thread,
+        teachingRuns: updateTeachingRunById(thread.teachingRuns, teachingRunId, (run) => ({
+          ...run,
+          conversationInputId: receipt.input_id,
+          conversationInputClientMessageId: receipt.client_message_id,
+          conversationInputRevision: receipt.instruction_revision,
+        })),
+        updatedAt: Date.now(),
+      }));
+      const taskAlreadyFollowed = liveChatTaskIdsRef.current.has(submittedTaskId);
+      if (!taskAlreadyFollowed) {
+        liveChatTaskIdsRef.current.add(submittedTaskId);
+        ownsTaskFollower = true;
+        onTaskSubmitted(submittedTaskId);
       }
-
-      submittedTaskId = submitData.data.task_id;
-      liveChatTaskIdsRef.current.add(submittedTaskId);
-      onTaskSubmitted(submittedTaskId);
       updateChatThreadById(submitThreadId, (thread) => ({
         ...thread,
         lastTaskId: submittedTaskId,
@@ -1279,6 +1729,7 @@ export function useChatRuntime({
         })),
         updatedAt: Date.now(),
       }));
+      if (taskAlreadyFollowed) return "waiting";
 
       const presentation = new AssistantPresentationReducer();
       let streamedAssistantMessageId: string | null = null;
@@ -1286,6 +1737,17 @@ export function useChatRuntime({
       await followTaskEventStream(apiFetch, submittedTaskId, async (event) => {
         if (signal.aborted) return;
         updateLiveThread(submitThreadId, current => ({ ...current, activity: reduceChatActivity(current.activity, event) }));
+        const replyMessage = conversationReplyMessage(event);
+        if (replyMessage) {
+          updateChatThreadById(submitThreadId, (thread) => ({
+            ...thread,
+            messages: upsertThreadMessage(thread.messages, replyMessage),
+            updatedAt: Date.now(),
+          }));
+          if (event.payload?.relation === "clarification") {
+            updateLiveThread(submitThreadId, current => ({ ...current, working: false }));
+          }
+        }
         const decoded = decodeAssistantPresentationEvent(event);
         if (!decoded) {
           if (event.event_kind === "task_final") updateLiveThread(submitThreadId, current => ({ ...current, working: false }));
@@ -1335,9 +1797,8 @@ export function useChatRuntime({
         ...thread,
         lastTaskId: submittedTaskId,
         teachingTaskResult: teachingModeAtSubmit ? finalResult : thread.teachingTaskResult,
-        teachingRuns: updateTeachingRunById(thread.teachingRuns, teachingRunId, (run) => ({
+        teachingRuns: updateTeachingRunsByTaskId(thread.teachingRuns, submittedTaskId, (run) => ({
           ...run,
-          taskId: submittedTaskId,
           status: finalResult.status,
           completedAt: terminalTaskStatus(finalResult.status) ? Date.now() : null,
           taskResult: finalResult,
@@ -1359,7 +1820,7 @@ export function useChatRuntime({
       updateChatThreadById(submitThreadId, (thread) => ({
         ...thread,
         messages: upsertThreadMessage(thread.messages, assistantMsg),
-        teachingRuns: updateTeachingRunById(thread.teachingRuns, teachingRunId, (run) => ({
+        teachingRuns: updateTeachingRunsByTaskId(thread.teachingRuns, submittedTaskId, (run) => ({
           ...run,
           assistantMessageId: assistantMsg.id,
           assistantText: assistantMsg.text,
@@ -1402,8 +1863,10 @@ export function useChatRuntime({
       }));
       return submittedTaskId ? "waiting" : false;
     } finally {
-      if (submittedTaskId) liveChatTaskIdsRef.current.delete(submittedTaskId);
-      finishLiveThread(submitThreadId);
+      if (submittedTaskId && ownsTaskFollower) {
+        liveChatTaskIdsRef.current.delete(submittedTaskId);
+      }
+      if (ownsTaskFollower || !submittedTaskId) finishLiveThread(submitThreadId);
     }
   };
 
@@ -1415,8 +1878,68 @@ export function useChatRuntime({
     });
   };
 
+  const stopActiveChatTask = async () => {
+    const thread = activeChatThreadRef.current;
+    const taskId = [...(thread.teachingRuns ?? [])]
+      .reverse()
+      .find((run) => run.taskId && activeTaskStatus(run.status))
+      ?.taskId?.trim();
+    if (!taskId || chatStopping) return;
+
+    setChatStopping(true);
+    setChatError(null);
+    try {
+      const response = await apiFetch("/v1/conversation-inputs/cancel-current", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          schema_version: 1,
+          client_request_id: `ui-stop:${thread.id}:${crypto.randomUUID()}`,
+          scope: {
+            conversation_id: thread.id,
+            agent_id: thread.agentId,
+            channel: "ui",
+            channel_account_id: thread.externalChatId,
+          },
+          expected_task_id: taskId,
+        }),
+      });
+      const body = (await response.json()) as ApiResponse<{
+        status?: string;
+        task_id?: string | null;
+      }>;
+      if (!response.ok || !body.ok) {
+        throw new Error(body.error || `conversation_cancel_http_${response.status}`);
+      }
+      updateLiveThread(thread.id, (current) => ({
+        ...current,
+        working: true,
+        activity: reduceChatActivity(current.activity, {
+          schema_version: 1,
+          task_id: taskId,
+          seq: 0,
+          event_type: "conversation_reply_item",
+          event_kind: "conversation_reply_item",
+          payload: {
+            relation: "control_status",
+            lifecycle_stage: "stop_requested",
+          },
+        }),
+      }));
+    } catch (error) {
+      setChatError(formatUiError(
+        error,
+        t,
+        "停止请求未能提交，请稍后重试。",
+        "The stop request could not be submitted. Try again shortly.",
+      ));
+    } finally {
+      setChatStopping(false);
+    }
+  };
+
   const compactChatContext = async (focus?: string) => {
-    if (chatSending || chatCompacting || chatQueuedMessages.length > 0) return false;
+    if (chatSending || chatCompacting) return false;
     const thread = activeChatThreadRef.current;
     const normalizedFocus = focus?.trim() ?? "";
     if (normalizedFocus.length > 4_000) {
@@ -1514,12 +2037,16 @@ export function useChatRuntime({
     chatTeachingRuns,
     activeChatTeachingRunId,
     activeChatAgentId,
-    activeChatCanChangeAgent: activeChatCanChangeAgent && !outbox.messages.some(item => item.threadId === activeChatThread.id),
+    activeChatCanChangeAgent,
     chatSending,
-    chatQueuedMessages,
-    chatQueuePaused,
-    removeQueuedChatMessage: (id: string) => outbox.queue.remove(id),
-    resumeChatQueue: () => outbox.queue.resume(activeChatThreadRef.current.id),
+    chatCanStop: Boolean(activeChatTaskId),
+    chatStopping,
+    chatDeliveryMode,
+    setChatDeliveryMode,
+    chatDeferredInputs,
+    chatDeferredActionInputId,
+    activateDeferredChatInput,
+    withdrawDeferredChatInput,
     chatCompacting,
     chatWorking,
     chatActivity,
@@ -1545,6 +2072,7 @@ export function useChatRuntime({
     cancelChatVoiceRecording,
     setChatAudioInputDeviceId,
     sendChatMessage,
+    stopActiveChatTask,
     compactChatContext,
     queryChatTeachingLlmDebug,
     chatThreads: chatThreadSummaries,

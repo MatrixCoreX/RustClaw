@@ -128,6 +128,8 @@ export interface ConversationHistoryTurn {
   agent_id?: string | null;
   external_chat_id?: string | null;
   conversation_title?: string | null;
+  conversation_inputs?: ConversationHistoryInput[];
+  conversation_replies?: ConversationHistoryReply[];
   task_id: string;
   status: TaskQueryResponse["status"];
   user_text?: string | null;
@@ -142,6 +144,37 @@ export interface ConversationHistoryTurn {
   artifact_delivery?: unknown;
   created_at: number;
   updated_at: number;
+}
+
+export interface ConversationHistoryInput {
+  schema_version: 1;
+  input_id: string;
+  client_message_id: string;
+  input_seq: number;
+  text: string;
+  disposition:
+    | "pending"
+    | "deferred"
+    | "needs_clarification"
+    | "applied"
+    | "rejected"
+    | "withdrawn";
+  decision_ref?: string | null;
+  instruction_revision: number;
+  accepted_at: number;
+  updated_at: number;
+}
+
+export interface ConversationHistoryReply {
+  schema_version: 1;
+  reply_id: string;
+  input_id?: string | null;
+  relation: "side_reply" | "clarification";
+  lifecycle_stage: "accepted" | "stop_requested" | "settled";
+  text: string;
+  instruction_revision: number;
+  execution_epoch: number;
+  created_at: number;
 }
 
 export interface AgentPersonaPreset {
@@ -439,6 +472,58 @@ export interface TaskHistoryResponse {
 
 export interface SubmitTaskResponse {
   task_id: string;
+}
+
+export interface ConversationInputReceipt {
+  schema_version: number;
+  input_id: string;
+  client_message_id: string;
+  input_seq: number;
+  preparation_state: "pending" | "ready" | "failed";
+  disposition:
+    | "pending"
+    | "deferred"
+    | "needs_clarification"
+    | "applied"
+    | "rejected"
+    | "withdrawn";
+  target_task_id?: string | null;
+  decision_ref?: string | null;
+  instruction_revision: number;
+  execution_epoch: number;
+  accepted_at_ts: number;
+  updated_at_ts: number;
+  replayed: boolean;
+}
+
+export interface ConversationInputClientTaskReceipt {
+  schema_version: number;
+  input: ConversationInputReceipt;
+  handoff_state: "task_created" | "bound_existing_task" | "waiting_for_task" | "deferred";
+}
+
+export interface ConversationInputRecord {
+  receipt: ConversationInputReceipt;
+  content: Array<Record<string, unknown>>;
+  delivery_mode: "auto" | "defer";
+  expected_task_id?: string | null;
+  expected_instruction_revision?: number | null;
+  source: Record<string, unknown>;
+}
+
+export interface ConversationInputPage {
+  schema_version: number;
+  items: ConversationInputRecord[];
+  next_after_input_seq?: number | null;
+}
+
+export interface ConversationInputEventRecord {
+  schema_version: number;
+  event_seq: number;
+  input_id: string;
+  event_kind: string;
+  payload: Record<string, unknown>;
+  created_at_ts: number;
 }
 
 export type WorkspaceUpdateMode =

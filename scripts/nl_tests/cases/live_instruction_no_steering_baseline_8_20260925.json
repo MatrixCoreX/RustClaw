@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "suite": "live_instruction_no_steering_baseline_8_20260925",
+  "provider": "minimax",
+  "model": "MiniMax-M3",
+  "cases": [
+    {
+      "id": "baseline_zh_01",
+      "selected": true,
+      "family": "baseline_no_steering",
+      "language": "zh-CN",
+      "entrypoint": "conversation_input",
+      "initial_input": "写一份八段的发布检查说明，并在末尾原样写 BASELINE-ZH-01。",
+      "steering_inputs": [],
+      "expected": {"status": "succeeded", "contains": ["BASELINE-ZH-01"], "max_chars": 10000, "require_interrupted_model_call": false, "max_llm_calls": 4},
+      "no_external_side_effect": true
+    },
+    {
+      "id": "baseline_zh_02",
+      "selected": true,
+      "family": "baseline_no_steering",
+      "language": "zh-CN",
+      "entrypoint": "conversation_input",
+      "initial_input": "用九段说明如何验证一次安全回滚，最后加入 BASELINE-ZH-02。",
+      "steering_inputs": [],
+      "expected": {"status": "succeeded", "contains": ["BASELINE-ZH-02"], "max_chars": 10000, "require_interrupted_model_call": false, "max_llm_calls": 4},
+      "no_external_side_effect": true
+    },
+    {
+      "id": "baseline_zh_03",
+      "selected": true,
+      "family": "baseline_no_steering",
+      "language": "zh-CN",
+      "entrypoint": "conversation_input",
+      "initial_input": "编写八段数据库迁移前检查建议，结尾保留 BASELINE-ZH-03。",
+      "steering_inputs": [],
+      "expected": {"status": "succeeded", "contains": ["BASELINE-ZH-03"], "max_chars": 10000, "require_interrupted_model_call": false, "max_llm_calls": 4},
+      "no_external_side_effect": true
+    },
+    {
+      "id": "baseline_zh_04",
+      "selected": true,
+      "family": "baseline_no_steering",
+      "language": "zh-CN",
+      "entrypoint": "conversation_input",
+      "initial_input": "给出八段服务恢复流程说明，并在最后输出 BASELINE-ZH-04。",
+      "steering_inputs": [],
+      "expected": {"status": "succeeded", "contains": ["BASELINE-ZH-04"], "max_chars": 10000, "require_interrupted_model_call": false, "max_llm_calls": 4},
+      "no_external_side_effect": true
+    },
+    {
+      "id": "baseline_en_05",
+      "selected": true,
+      "family": "baseline_no_steering",
+      "language": "en",
+      "entrypoint": "conversation_input",
+      "initial_input": "Write an eight-section deployment readiness guide and end it with BASELINE-EN-05.",
+      "steering_inputs": [],
+      "expected": {"status": "succeeded", "contains": ["BASELINE-EN-05"], "max_chars": 10000, "require_interrupted_model_call": false, "max_llm_calls": 4},
+      "no_external_side_effect": true
+    },
+    {
+      "id": "baseline_en_06",
+      "selected": true,
+      "family": "baseline_no_steering",
+      "language": "en",
+      "entrypoint": "conversation_input",
+      "initial_input": "Prepare a nine-part incident recovery checklist ending with BASELINE-EN-06.",
+      "steering_inputs": [],
+      "expected": {"status": "succeeded", "contains": ["BASELINE-EN-06"], "max_chars": 10000, "require_interrupted_model_call": false, "max_llm_calls": 4},
+      "no_external_side_effect": true
+    },
+    {
+      "id": "baseline_ja_07",
+      "selected": true,
+      "family": "baseline_no_steering",
+      "language": "ja",
+      "entrypoint": "conversation_input",
+      "initial_input": "八つの節で運用確認手順を書き、最後に BASELINE-JA-07 を入れてください。",
+      "steering_inputs": [],
+      "expected": {"status": "succeeded", "contains": ["BASELINE-JA-07"], "max_chars": 10000, "require_interrupted_model_call": false, "max_llm_calls": 4},
+      "no_external_side_effect": true
+    },
+    {
+      "id": "baseline_es_08",
+      "selected": true,
+      "family": "baseline_no_steering",
+      "language": "es",
+      "entrypoint": "conversation_input",
+      "initial_input": "Redacta una guía de verificación operativa de ocho secciones y termina con BASELINE-ES-08.",
+      "steering_inputs": [],
+      "expected": {"status": "succeeded", "contains": ["BASELINE-ES-08"], "max_chars": 10000, "require_interrupted_model_call": false, "max_llm_calls": 4},
+      "no_external_side_effect": true
+    }
+  ]
+}

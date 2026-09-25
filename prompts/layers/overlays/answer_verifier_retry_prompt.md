@@ -9,6 +9,17 @@ __FALLBACK_LOCALE__
 Current user request:
 __USER_REQUEST__
 
+The current user request is an ordered instruction stream. If it contains a
+`conversation_input_batch`, process its entries by `input_seq` and
+`instruction_revision`. A later revision overrides conflicting scope, shape,
+constraints, or content from an earlier revision; preserve only the earlier
+requirements that the later revision does not replace. Never reconstruct the
+answer from an obsolete revision merely because it appears first in the block.
+Remove literals, markers, headings, and examples that belonged only to
+replaced or withdrawn unfinished output. Do not mention a superseded value to
+explain its replacement unless the effective request explicitly requests a
+comparison, audit, or quotation.
+
 Structured output contract JSON:
 __OUTPUT_CONTRACT__
 
@@ -43,6 +54,17 @@ count, explanation, recap, footer, offer, and follow-up question.
 When a constraint applies to one semantic component of a compound request,
 preserve every grounded sibling component and rewrite the constrained component
 to its exact language, length, count, tone, and shape without duplicating it.
+For an exact whole-answer line or item count, reconstruct the complete answer
+with exactly that many newline-delimited lines or items. Remove headings, blank
+separators, prefaces, recaps, detached markers, and follow-up offers unless the
+request explicitly counts them; fold a required suffix into the final requested
+line. Do not trust the rejected draft's declared count or shape.
+If the request combines an independent side question with an instruction to
+continue or complete the active primary deliverable, return both requested
+components rather than repairing only the side answer. If the effective request
+leaves multiple distinct active targets equally plausible, do not guess or
+merge them; return one concise clarification that asks which `target_ref` is
+intended.
 Treat inspection, execution, reading, and other evidence collection as internal
 grounding rather than a visible sibling deliverable unless the user separately
 requested raw output or details. If the requested report, summary, conclusion,

@@ -96,12 +96,43 @@ def process_group_alive(process_group_id: int) -> bool:
     return True
 
 
+def recorded_process_groups(job_dir: Path, root_pid: int) -> list[int]:
+    try:
+        recorded = (job_dir / "process_group_ids").read_text(encoding="utf-8")
+    except OSError:
+        recorded = ""
+    groups = {root_pid}
+    for line in recorded.splitlines():
+        try:
+            process_group = int(line.strip())
+        except ValueError:
+            continue
+        if process_group > 1:
+            groups.add(process_group)
+    return sorted(groups)
+
+
+def tracked_process_alive(job_dir: Path, root_pid: int) -> bool:
+    return any(
+        process_group_alive(process_group)
+        for process_group in recorded_process_groups(job_dir, root_pid)
+    )
+
+
 class IsolatedRuntime:
     def __init__(self, binary: Path, log_root: Path, wait_seconds: int) -> None:
         self.binary = binary
         self.log_root = log_root
         self.wait_seconds = wait_seconds
         self.workspace = lifecycle.prepare_workspace()
+        config_path = self.workspace / "configs" / "config.toml"
+        config_text = config_path.read_text(encoding="utf-8")
+        config_text = lifecycle.replace_once(
+            config_text,
+            r"^cmd_terminate_grace_seconds\s*=\s*\d+$",
+            "cmd_terminate_grace_seconds = 30",
+        )
+        config_path.write_text(config_text, encoding="utf-8")
         self.port = lifecycle.free_port()
         self.base_url = f"http://127.0.0.1:{self.port}"
         self.key = self._generate_admin_key()
@@ -205,9 +236,11 @@ class IsolatedRuntime:
                     pid = int((job_dir / "pid").read_text(encoding="utf-8").strip())
                 except (OSError, ValueError):
                     continue
-                if process_group_alive(pid):
+                for process_group in recorded_process_groups(job_dir, pid):
+                    if not process_group_alive(process_group):
+                        continue
                     try:
-                        os.killpg(pid, signal.SIGKILL)
+                        os.killpg(process_group, signal.SIGKILL)
                     except (ProcessLookupError, PermissionError):
                         pass
         shutil.rmtree(self.workspace)
@@ -495,8 +528,11 @@ def run_cancel_boundary(
             runtime,
             case_dir,
             (
-                "printf 'mutation-once\\n' >> document/cancel-boundary-counter.txt; "
-                "trap '' TERM; sleep 60; printf 'UNEXPECTED_CANCEL_RESTART_MISS\\n'"
+                "exec python3 -c \"import pathlib,signal,time; "
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                "pathlib.Path('document/cancel-boundary-counter.txt').open('a').write('mutation-once\\\\n'); "
+                "pathlib.Path('document/cancel-boundary-ready').touch(); "
+                "time.sleep(3600)\""
             ),
             sleep_seconds=60,
         )
@@ -505,6 +541,14 @@ def run_cancel_boundary(
         job_id = str(job.get("job_id") or "")
         job_dir = job_dir_from_ref(str(job.get("cancel_ref") or ""))
         pid = int((job_dir / "pid").read_text(encoding="utf-8").strip())
+        ready_path = runtime.workspace / "document" / "cancel-boundary-ready"
+        ready_deadline = time.monotonic() + min(wait_seconds, 10)
+        while time.monotonic() < ready_deadline and not ready_path.is_file():
+            time.sleep(0.02)
+        if not ready_path.is_file():
+            raise RestartBoundaryFailure(
+                "TERM-ignoring process did not publish its readiness marker"
+            )
         cancel_started = time.monotonic()
         idempotency_key = f"restart-boundary-cancel-{task_id}"
         first = runtime.request(
@@ -515,18 +559,42 @@ def run_cancel_boundary(
             raise RestartBoundaryFailure(f"first cancel failed: {first}")
         if not (job_dir / "cancel_requested_at").is_file():
             raise RestartBoundaryFailure("cancel marker was not persisted before restart")
+        alive_after_cancel = tracked_process_alive(job_dir, pid)
+        write_json(
+            case_dir / "process_after_cancel.json",
+            {
+                "pid": pid,
+                "process_group_alive": alive_after_cancel,
+                "cancel_requested": True,
+            },
+        )
+        if not alive_after_cancel:
+            raise RestartBoundaryFailure(
+                "TERM-ignoring process exited immediately after the cancel request"
+            )
         runtime.stop()
         stopped_after_seconds = time.monotonic() - cancel_started
+        alive_after_clawd_stop = tracked_process_alive(job_dir, pid)
+        write_json(
+            case_dir / "process_after_clawd_stop.json",
+            {
+                "pid": pid,
+                "process_group_alive": alive_after_clawd_stop,
+                "clawd_stop_seconds": round(stopped_after_seconds, 3),
+            },
+        )
         if stopped_after_seconds >= 5:
             raise RestartBoundaryFailure("clawd did not stop within the cancel grace window")
-        if not process_group_alive(pid):
+        if not alive_after_clawd_stop:
             raise RestartBoundaryFailure(
                 "TERM-ignoring process exited before restart recovery could be tested"
             )
         runtime.start("after_restart")
         deadline = time.monotonic() + wait_seconds
         while time.monotonic() < deadline:
-            if (job_dir / "cancel_escalated_signal").is_file() and not process_group_alive(pid):
+            if (job_dir / "cancel_escalated_signal").is_file() and not tracked_process_alive(
+                job_dir, pid
+            ):
                 break
             time.sleep(0.1)
         else:

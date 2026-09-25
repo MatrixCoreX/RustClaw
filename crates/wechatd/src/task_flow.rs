@@ -406,6 +406,7 @@ pub(super) async fn submit_wechat_task_with_payload(
     mut payload: Value,
     provider_message_id: Option<String>,
     existing_task_id: Option<String>,
+    durable_handoff: Option<tokio::sync::oneshot::Sender<()>>,
 ) {
     let from_user_id = context.scope.peer_id().to_string();
     let context_token = context.context_token.clone();
@@ -434,6 +435,7 @@ pub(super) async fn submit_wechat_task_with_payload(
                 ChannelKind::Wechat,
                 "wechat_ilink",
             )
+            .with_account_id(context.account.account_id.clone())
             .with_external_ids(from_user_id.clone(), scoped_chat_id)
             .with_reply_target(claw_core::channel_ingress::ChannelReplyTarget::user(
                 from_user_id.clone(),
@@ -465,13 +467,113 @@ pub(super) async fn submit_wechat_task_with_payload(
     if let Err(error) = send_generating_message_state(&state, &context).await {
         warn!("wechatd: generating state delivery failed err={}", error);
     }
-    let submit_url = format!(
-        "{}/v1/tasks",
-        state.config.clawd_base_url.trim_end_matches('/')
-    );
-    let task_id = if let Some(task_id) = existing_task_id {
-        task_id
+    let (task_id, owns_terminal_delivery) = if let Some(task_id) = existing_task_id {
+        (task_id, true)
+    } else if matches!(submit_req.kind, TaskKind::Ask)
+        && provider_message_id.is_some()
+        && (submit_req
+            .payload
+            .get("text")
+            .and_then(Value::as_str)
+            .is_some_and(|text| !text.trim().is_empty())
+            || submit_req
+                .ingress
+                .as_ref()
+                .is_some_and(|ingress| !ingress.attachments.is_empty()))
+    {
+        let text = submit_req
+            .payload
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let message_id = provider_message_id.as_deref().unwrap_or_default();
+        let request = ConversationInputClientTaskRequest::channel_text(
+            submit_req,
+            wechat_inbound_idempotency_key(&context.account.account_id, message_id),
+            context.scope.storage_key(),
+            "main",
+            ChannelKind::Wechat,
+            context.account.account_id.clone(),
+            text,
+            ConversationInputSource {
+                provider_message_id: Some(message_id.to_string()),
+                reply_to_message_id: None,
+                received_at_ts: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .ok()
+                    .map(|value| value.as_secs()),
+            },
+        );
+        let submit_url = format!(
+            "{}/v1/conversation-inputs/client-task",
+            state.config.clawd_base_url.trim_end_matches('/')
+        );
+        let mut builder = state.client.post(&submit_url).json(&request);
+        if let Some(key) = user_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|key| !key.is_empty())
+        {
+            builder = builder.header(claw_core::product_identity::AUTH_KEY_HEADER, key);
+        }
+        let submit_resp = match builder.send().await {
+            Ok(resp) => resp,
+            Err(err) => {
+                warn!("wechatd: conversation input submit failed err={}", err);
+                finalize_submit_failure(&state, &context, &mut typing_heartbeat).await;
+                return;
+            }
+        };
+        if !submit_resp.status().is_success() {
+            let status = submit_resp.status();
+            let body = submit_resp.text().await.unwrap_or_default();
+            let error = claw_core::channel_provider_error::ChannelProviderError::from_http_response(
+                "wechat_ilink",
+                "submit_conversation_input",
+                status.as_u16(),
+                &body,
+            );
+            warn!(
+                "wechatd: conversation input submit failed error_code={} diagnostic_id={}",
+                error.error_code, error.diagnostic_id
+            );
+            finalize_submit_failure(&state, &context, &mut typing_heartbeat).await;
+            return;
+        }
+        let submit_body: ApiResponse<ConversationInputClientTaskReceipt> =
+            match submit_resp.json().await {
+                Ok(body) => body,
+                Err(err) => {
+                    warn!(
+                        "wechatd: conversation input response parse failed err={}",
+                        err
+                    );
+                    finalize_submit_failure(&state, &context, &mut typing_heartbeat).await;
+                    return;
+                }
+            };
+        let Some(data) = submit_body.data else {
+            warn!("wechatd: conversation input response missing receipt");
+            finalize_submit_failure(&state, &context, &mut typing_heartbeat).await;
+            return;
+        };
+        let Some(task_id) = data.input.target_task_id else {
+            if let Some(durable_handoff) = durable_handoff {
+                let _ = durable_handoff.send(());
+            }
+            finish_typing_heartbeat(&mut typing_heartbeat).await;
+            return;
+        };
+        (
+            task_id.to_string(),
+            data.handoff_state == ConversationInputTaskHandoffState::TaskCreated,
+        )
     } else {
+        let submit_url = format!(
+            "{}/v1/tasks",
+            state.config.clawd_base_url.trim_end_matches('/')
+        );
         let submit_resp = match state
             .client
             .post(&submit_url)
@@ -515,8 +617,15 @@ pub(super) async fn submit_wechat_task_with_payload(
             finalize_submit_failure(&state, &context, &mut typing_heartbeat).await;
             return;
         };
-        task_data.task_id.to_string()
+        (task_data.task_id.to_string(), true)
     };
+    if let Some(durable_handoff) = durable_handoff {
+        let _ = durable_handoff.send(());
+    }
+    if !owns_terminal_delivery {
+        finish_typing_heartbeat(&mut typing_heartbeat).await;
+        return;
+    }
     let started = std::time::Instant::now();
     let delivery_timeout_secs = state.config.task_delivery_timeout_seconds.max(1);
     let poll_interval = Duration::from_millis(1500);
@@ -735,13 +844,14 @@ pub(super) async fn submit_wechat_task_and_reply(
     text: String,
     user_key: Option<String>,
     provider_message_id: String,
-) {
+) -> bool {
     let payload = json!({
         "text": text,
         "channel": "wechat",
         "context_token": context.context_token.clone(),
     });
-    submit_wechat_task_with_payload(
+    let (durable_handoff, accepted) = tokio::sync::oneshot::channel();
+    tokio::spawn(submit_wechat_task_with_payload(
         state,
         context,
         user_key,
@@ -749,8 +859,13 @@ pub(super) async fn submit_wechat_task_and_reply(
         payload,
         Some(provider_message_id),
         None,
-    )
-    .await;
+        Some(durable_handoff),
+    ));
+    durable_handoff_received(accepted).await
+}
+
+async fn durable_handoff_received(accepted: tokio::sync::oneshot::Receiver<()>) -> bool {
+    accepted.await.is_ok()
 }
 
 pub(super) async fn spawn_existing_wechat_task_delivery(
@@ -767,6 +882,7 @@ pub(super) async fn spawn_existing_wechat_task_delivery(
         json!({}),
         None,
         Some(task_id),
+        None,
     ));
 }
 
@@ -779,7 +895,7 @@ pub(super) async fn spawn_inbound_attachment_flow(
     size: u64,
     user_key: String,
     provider_message_id: String,
-) {
+) -> bool {
     let payload = json!({
         "text": "",
         "attachments": [{
@@ -789,6 +905,7 @@ pub(super) async fn spawn_inbound_attachment_flow(
             "size": size,
         }],
     });
+    let (durable_handoff, accepted) = tokio::sync::oneshot::channel();
     tokio::spawn(submit_wechat_task_with_payload(
         state,
         context,
@@ -797,5 +914,7 @@ pub(super) async fn spawn_inbound_attachment_flow(
         payload,
         Some(provider_message_id),
         None,
+        Some(durable_handoff),
     ));
+    durable_handoff_received(accepted).await
 }

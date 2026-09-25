@@ -3,7 +3,9 @@ use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use super::builtin_workspace_mutation::run_checkpointed_workspace_mutation;
+use super::builtin_workspace_mutation::{
+    pre_dispatch_replan_error, run_checkpointed_workspace_mutation,
+};
 use super::builtin_workspace_patch::{canonical_workspace_root, validate_relative_patch_path};
 
 #[path = "builtin_workspace_replace_edit.rs"]
@@ -68,7 +70,8 @@ pub(super) fn execute_workspace_replace_for_root(
         })?
         .to_string_lossy()
         .into_owned();
-    let replacement = prepare_replacement(args, &root, &path, &target)?;
+    let replacement =
+        prepare_replacement(args, &root, &path, &target).map_err(pre_dispatch_replan_error)?;
     let preview = replacement_preview(action, &replacement);
 
     if action == "preview_replace_text" {

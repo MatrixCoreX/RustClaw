@@ -258,6 +258,80 @@ fn restart_recovery_escalates_a_durable_pending_cancellation() {
 
 #[cfg(unix)]
 #[test]
+fn restart_recovery_escalates_a_nested_sandbox_process_group() {
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
+
+    let root = TempDirGuard::new("nested_cancel_restart_recovery");
+    let run_script = root.path().join("run.sh");
+    let nested_pid_path = root.path().join("nested_pid");
+    let nested_ready_path = root.path().join("nested_ready");
+    std::fs::write(
+        &run_script,
+        format!(
+            "#!/usr/bin/env bash\nsetsid bash -c 'trap \"\" TERM; printf \"%s\" \"$$\" > {pid}; touch {ready}; while :; do sleep 1 || true; done' &\nwait\n",
+            pid = nested_pid_path.display(),
+            ready = nested_ready_path.display(),
+        ),
+    )
+    .expect("write nested process-group script");
+    let mut command = Command::new("bash");
+    command
+        .arg(&run_script)
+        .process_group(0)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut child = command.spawn().expect("spawn outer process group");
+    std::fs::write(root.path().join("pid"), child.id().to_string()).expect("write root pid");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !nested_ready_path.is_file() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(
+        nested_ready_path.is_file(),
+        "nested process did not become ready"
+    );
+    let nested_group = std::fs::read_to_string(&nested_pid_path)
+        .expect("read nested pid")
+        .parse::<u32>()
+        .expect("nested pid is numeric");
+
+    assert!(terminate_verified_process_group(
+        root.path(),
+        child.id(),
+        "TERM"
+    ));
+    std::fs::write(root.path().join("cancel_requested_at"), "10").expect("write cancel marker");
+    std::fs::write(root.path().join("terminate_grace_seconds"), "1").expect("write grace");
+    let _ = child.wait();
+    let recorded = std::fs::read_to_string(root.path().join("process_group_ids"))
+        .expect("read captured process groups");
+    assert!(recorded
+        .lines()
+        .any(|line| line == nested_group.to_string()));
+
+    assert_eq!(maybe_escalate_cancel(root.path(), 12), "kill_sent");
+    let nested_group_arg = format!("-{nested_group}");
+    for _ in 0..50 {
+        let alive = Command::new("kill")
+            .args(["-0", "--", nested_group_arg.as_str()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success());
+        if !alive {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let _ = Command::new("kill")
+        .args(["-KILL", "--", nested_group_arg.as_str()])
+        .status();
+    panic!("nested process group remained alive after restart escalation");
+}
+
+#[cfg(unix)]
+#[test]
 fn wrapper_exit_keeps_its_live_process_group_supervisable() {
     use std::os::unix::process::CommandExt;
     use std::process::Command;

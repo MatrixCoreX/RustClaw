@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "suite": "live_instruction_resource_wait_checkpoint_1_20260925",
+  "provider": "minimax",
+  "model": "MiniMax-M3",
+  "environment": "constrained_memory",
+  "cases": [
+    {
+      "id": "resource_wait_zh_read_file",
+      "selected": true,
+      "family": "resource_pressure_bounded_recovery",
+      "language": "zh-CN",
+      "entrypoint": "conversation_input",
+      "initial_input": "读取工作区文件 document/resource-wait-probe.txt 的完整内容，并且只根据实际读取结果回复，不要猜测文件内容。",
+      "steering_inputs": [],
+      "expected": {
+        "require_interrupted_model_call": false,
+        "accepted_outcomes": [
+          {
+            "status": "succeeded",
+            "contains": ["RESOURCE-WAIT-PROBE-01"],
+            "max_llm_calls": 7
+          },
+          {
+            "status": "succeeded",
+            "contains": ["resource_admission_unavailable"],
+            "absent": ["RESOURCE-WAIT-PROBE-01"],
+            "max_llm_calls": 8
+          },
+          {
+            "status": "running",
+            "lifecycle_state": "waiting",
+            "max_llm_calls": 6
+          }
+        ]
+      },
+      "no_external_side_effect": true
+    }
+  ]
+}

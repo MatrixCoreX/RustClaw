@@ -6,19 +6,23 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use claw_core::channel_commands::ChannelCommandCatalog;
+use claw_core::channel_commands::{ChannelCommandCatalog, CoreCommandAction};
 use claw_core::channel_open_platform::{
     open_platform_contract, process_open_platform_rate_limiter, validate_open_platform_content,
     OpenPlatformContentError, OpenPlatformMessageType, OpenPlatformRegion, OpenPlatformTokenCache,
 };
 use claw_core::channel_provider_error::ChannelProviderTransportKind;
+use claw_core::conversation_input::{
+    ConversationInputClientTaskReceipt, ConversationInputClientTaskRequest,
+    ConversationInputSource, ConversationInputTaskHandoffState,
+};
 use claw_core::types::{
     ApiResponse, AuthIdentity, BindChannelKeyRequest, BindChannelKeyResponse, ChannelKind,
     DetectFeishuBindSessionRequest, DetectFeishuBindSessionResponse, PendingChannelRequestStatus,
@@ -394,11 +398,13 @@ fn set_expect_key_reply(state: &AppState, chat_id: &str, enabled: bool) {
     }
 }
 
-fn is_unbound_allowed_command(text: &str) -> bool {
+fn channel_command_catalog() -> &'static ChannelCommandCatalog {
     static COMMAND_CATALOG: OnceLock<ChannelCommandCatalog> = OnceLock::new();
-    COMMAND_CATALOG
-        .get_or_init(ChannelCommandCatalog::default)
-        .allows_unbound_command(text, "lark")
+    COMMAND_CATALOG.get_or_init(ChannelCommandCatalog::default)
+}
+
+fn is_unbound_allowed_command(text: &str) -> bool {
+    channel_command_catalog().allows_unbound_command(text, "lark")
 }
 
 fn extract_bind_key_candidate(text: &str, expect_key_reply: bool) -> Option<String> {
@@ -893,6 +899,7 @@ async fn admit_and_dispatch_event(
 /// 提交任务并 spawn 轮询与回发。
 fn build_lark_submit_request(
     language: &str,
+    account_id: &str,
     open_id: &str,
     chat_id: &str,
     message_id: &str,
@@ -906,6 +913,7 @@ fn build_lark_submit_request(
         ChannelKind::Lark,
         open_platform_contract(OpenPlatformRegion::Lark).source_adapter,
     )
+    .with_account_id(account_id)
     .with_external_ids(open_id, chat_id)
     .with_message_id(message_id)
     .with_reply_target(claw_core::channel_ingress::ChannelReplyTarget::chat(
@@ -937,8 +945,74 @@ async fn handle_text_message_to_clawd(
     user_key: Option<String>,
     existing_task_id: Option<String>,
 ) -> bool {
+    let cancel_expected_task_id = existing_task_id
+        .is_none()
+        .then(|| channel_command_catalog().match_command(&text, "lark"))
+        .flatten()
+        .filter(|command| command.definition.core_action() == Some(CoreCommandAction::Cancel))
+        .and_then(|command| {
+            claw_core::conversation_control::parse_cancel_expected_task_id(&command.tail)
+        });
+    if let Some(expected_task_id) = cancel_expected_task_id {
+        let Some(auth_key) = user_key.as_deref() else {
+            return false;
+        };
+        let request = claw_core::conversation_control::CancelCurrentConversationTaskRequest {
+            schema_version: claw_core::conversation_control::CONVERSATION_CONTROL_SCHEMA_VERSION,
+            client_request_id: format!("lark_cancel:{message_id}"),
+            scope: claw_core::conversation_input::ConversationInputScopeRef {
+                conversation_id: chat_id.clone(),
+                agent_id: "main".to_string(),
+                channel: "lark".to_string(),
+                channel_account_id: state.config.lark.app_id.clone(),
+            },
+            expected_task_id,
+        };
+        let receipt = match claw_core::conversation_control::cancel_current_conversation_task(
+            &state.client,
+            &state.config.lark.clawd_base_url,
+            auth_key,
+            &request,
+        )
+        .await
+        {
+            Ok(receipt) => receipt,
+            Err(error) => {
+                warn!(error = %error, "lark current task cancellation failed");
+                let reply = claw_core::channel_i18n::common_text_for_locale(
+                    &state.config.lark.language,
+                    claw_core::conversation_control::CANCEL_FAILED_MESSAGE_KEY,
+                );
+                let _ = send_lark_text(
+                    &state.config,
+                    &state.client,
+                    &state.token_cache,
+                    &chat_id,
+                    &reply,
+                )
+                .await;
+                return false;
+            }
+        };
+        let message_key = claw_core::conversation_control::cancel_receipt_message_key(&receipt);
+        let reply = claw_core::channel_i18n::common_text_for_locale(
+            &state.config.lark.language,
+            message_key,
+        );
+        return send_lark_text(
+            &state.config,
+            &state.client,
+            &state.token_cache,
+            &chat_id,
+            &reply,
+        )
+        .await
+        .is_ok();
+    }
+
     let submit_req = build_lark_submit_request(
         &state.config.lark.language,
+        &state.config.lark.app_id,
         &open_id,
         &chat_id,
         &message_id,
@@ -947,7 +1021,6 @@ async fn handle_text_message_to_clawd(
         user_key.clone(),
     );
 
-    let submit_url = format!("{}/v1/tasks", state.config.lark.clawd_base_url);
     let client = state.client.clone();
     let config = state.config.clone();
     let token_cache = state.token_cache.clone();
@@ -955,10 +1028,58 @@ async fn handle_text_message_to_clawd(
     let delivery_timeout_secs = state.config.lark.task_delivery_timeout_seconds;
     let user_key_poll = user_key.clone();
 
-    let task_id = if let Some(task_id) = existing_task_id {
-        task_id
+    let (task_id, owns_terminal_delivery) = if let Some(task_id) = existing_task_id {
+        (task_id, true)
     } else {
-        let submit_resp = match client.post(&submit_url).json(&submit_req).send().await {
+        let use_conversation_input = submit_req
+            .payload
+            .get("text")
+            .and_then(Value::as_str)
+            .is_some_and(|text| !text.trim().is_empty())
+            || submit_req
+                .ingress
+                .as_ref()
+                .is_some_and(|ingress| !ingress.attachments.is_empty());
+        let submit_url = if use_conversation_input {
+            format!(
+                "{}/v1/conversation-inputs/client-task",
+                state.config.lark.clawd_base_url
+            )
+        } else {
+            format!("{}/v1/tasks", state.config.lark.clawd_base_url)
+        };
+        let conversation_request = use_conversation_input.then(|| {
+            ConversationInputClientTaskRequest::channel_text(
+                submit_req.clone(),
+                format!("lark:{message_id}"),
+                chat_id.clone(),
+                "main",
+                ChannelKind::Lark,
+                state.config.lark.app_id.clone(),
+                submit_req
+                    .payload
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default(),
+                ConversationInputSource {
+                    provider_message_id: Some(message_id.clone()),
+                    reply_to_message_id: None,
+                    received_at_ts: SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .ok()
+                        .map(|value| value.as_secs()),
+                },
+            )
+        });
+        let builder = client.post(&submit_url);
+        let submit_resp = match if let Some(request) = conversation_request.as_ref() {
+            builder.json(request)
+        } else {
+            builder.json(&submit_req)
+        }
+        .send()
+        .await
+        {
             Ok(r) => r,
             Err(e) => {
                 warn!("larkd: task submit failed err={}", e);
@@ -985,25 +1106,52 @@ async fn handle_text_message_to_clawd(
             return false;
         }
 
-        let submit_body: ApiResponse<SubmitTaskResponse> = match submit_resp.json().await {
-            Ok(b) => b,
-            Err(e) => {
-                warn!("larkd: task submit response parse failed err={}", e);
+        let (task_id, owns_terminal_delivery) = if use_conversation_input {
+            let submit_body: ApiResponse<ConversationInputClientTaskReceipt> =
+                match submit_resp.json().await {
+                    Ok(body) => body,
+                    Err(error) => {
+                        warn!(
+                            "larkd: conversation input response parse failed err={}",
+                            error
+                        );
+                        return false;
+                    }
+                };
+            let Some(data) = submit_body.data else {
+                warn!("larkd: conversation input response missing receipt");
                 return false;
-            }
+            };
+            let owns_delivery =
+                data.handoff_state == ConversationInputTaskHandoffState::TaskCreated;
+            let Some(task_id) = data.input.target_task_id else {
+                return true;
+            };
+            (task_id.to_string(), owns_delivery)
+        } else {
+            let submit_body: ApiResponse<SubmitTaskResponse> = match submit_resp.json().await {
+                Ok(body) => body,
+                Err(error) => {
+                    warn!("larkd: task submit response parse failed err={}", error);
+                    return false;
+                }
+            };
+            let Some(data) = submit_body.data else {
+                warn!("larkd: task submit no task_id");
+                return false;
+            };
+            (data.task_id.to_string(), true)
         };
-
-        let Some(data) = submit_body.data else {
-            warn!("larkd: task submit no task_id");
-            return false;
-        };
-        let task_id = data.task_id.to_string();
         info!(
             "larkd: bound user task submitted task_id={} external_chat_id={}",
             task_id, chat_id
         );
-        task_id
+        (task_id, owns_terminal_delivery)
     };
+
+    if !owns_terminal_delivery {
+        return true;
+    }
 
     tokio::spawn(async move {
         let running_notice_text = lark_t_with(

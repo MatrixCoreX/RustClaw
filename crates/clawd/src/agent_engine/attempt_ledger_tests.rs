@@ -540,6 +540,41 @@ fn attempt_ledger_exposes_structured_error_code_and_exit_code() {
 }
 
 #[test]
+fn attempt_ledger_preserves_host_machine_error_envelope_code() {
+    let mut loop_state = crate::agent_engine::LoopState::new();
+    let err = serde_json::json!({
+        "error_code": "resource_admission_unavailable",
+        "extra": {
+            "error_code": "resource_admission_unavailable",
+            "message_key": "clawd.execution.resource_admission_unavailable",
+            "retryable": true,
+            "wait_reason": "memory_unavailable"
+        },
+        "reason_code": "structured_skill_error"
+    })
+    .to_string();
+    super::record_attempt(
+        &mut loop_state,
+        "filesystem.read_text_range",
+        "action=read_range",
+        crate::executor::StepExecutionStatus::Error,
+        "",
+        None,
+        &err,
+    );
+
+    let value = ledger_value(&build_attempt_ledger_compact(&loop_state));
+    assert_eq!(
+        value.pointer("/0/error_code").and_then(Value::as_str),
+        Some("resource_admission_unavailable")
+    );
+    assert_eq!(
+        value.pointer("/0/retryable").and_then(Value::as_bool),
+        Some(true)
+    );
+}
+
+#[test]
 fn attempt_ledger_exposes_provider_status_in_repair_envelope() {
     let mut loop_state = crate::agent_engine::LoopState::new();
     let err = crate::skills::structured_skill_error_from_parts(

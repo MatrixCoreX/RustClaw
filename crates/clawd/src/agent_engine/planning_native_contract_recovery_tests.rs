@@ -223,6 +223,7 @@ fn native_response_contract_retry_targets_the_respond_schema() {
             "content",
             "items",
             "exact_item_count",
+            "exact_visible_line_count",
             "fields",
             "observed_fields",
             "exact_field_count"

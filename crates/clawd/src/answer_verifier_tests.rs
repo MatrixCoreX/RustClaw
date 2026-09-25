@@ -71,7 +71,7 @@ fn unclassified_freeform_response_skips_answer_verifier() {
 }
 
 #[test]
-fn unclassified_terminal_respond_step_skips_answer_verifier() {
+fn unclassified_terminal_respond_step_uses_operation_audit() {
     let mut route = route_with_mode();
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = false;
@@ -87,15 +87,11 @@ fn unclassified_terminal_respond_step_skips_answer_verifier() {
             "candidate response",
         ));
 
-    assert!(!should_verify_answer(
-        &route,
-        &journal,
-        "candidate response"
-    ));
+    assert!(should_verify_answer(&route, &journal, "candidate response"));
 }
 
 #[test]
-fn planner_plain_terminal_answer_only_skips_answer_verifier() {
+fn planner_plain_terminal_answer_uses_operation_audit() {
     let mut route = route_with_mode();
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = false;
@@ -114,11 +110,7 @@ fn planner_plain_terminal_answer_only_skips_answer_verifier() {
             "candidate response",
         ));
 
-    assert!(!should_verify_answer(
-        &route,
-        &journal,
-        "candidate response"
-    ));
+    assert!(should_verify_answer(&route, &journal, "candidate response"));
 }
 
 #[test]

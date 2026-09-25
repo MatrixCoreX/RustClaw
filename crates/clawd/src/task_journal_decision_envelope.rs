@@ -43,6 +43,7 @@ pub(super) fn agent_loop_round_plan_contract_envelope_json(plan: &crate::PlanRes
         "semantic_authority": "planner_loop_runtime",
         "decision": decision,
         "terminal_intent": terminal_intent,
+        "conversation_relation": null,
         "control_intent": control_intent,
         "control_reason_code": control_reason_code,
         "reason_code": agent_loop_decision_reason_code(decision, &actions),
@@ -73,6 +74,7 @@ pub(super) fn agent_loop_round_plan_contract_envelope_json(plan: &crate::PlanRes
 #[derive(Debug, Clone)]
 struct StructuredRespondTerminalIntent {
     terminal_intent: String,
+    conversation_relation: Option<String>,
     clarify_reason_code: Option<String>,
     missing_slot: Option<String>,
     message_key: Option<String>,
@@ -125,6 +127,18 @@ fn structured_respond_terminal_intent_from_object(
     }
     Some(StructuredRespondTerminalIntent {
         terminal_intent,
+        conversation_relation: string_field(value, &["conversation_relation"])
+            .filter(|value| {
+                matches!(
+                    *value,
+                    "continue_current"
+                        | "amend_current"
+                        | "start_followup"
+                        | "side_reply"
+                        | "clarify"
+                )
+            })
+            .map(str::to_string),
         clarify_reason_code: string_field(value, &["clarify_reason_code"]).map(str::to_string),
         missing_slot: string_field(value, &["missing_slot"]).map(str::to_string),
         message_key: string_field(value, &["message_key"]).map(str::to_string),
@@ -202,6 +216,12 @@ fn apply_structured_respond_terminal_intent(
         json!(control_reason_code),
     );
     obj.insert("terminal_intent".to_string(), json!(intent.terminal_intent));
+    if let Some(conversation_relation) = intent.conversation_relation {
+        obj.insert(
+            "conversation_relation".to_string(),
+            json!(conversation_relation),
+        );
+    }
     if let Some(message_key) = intent.message_key {
         obj.insert("message_key".to_string(), json!(message_key));
     }
@@ -211,6 +231,13 @@ fn apply_structured_respond_terminal_intent(
     if let Some(locator_kind) = intent.locator_kind {
         obj.insert("locator_kind".to_string(), json!(locator_kind));
     }
+}
+
+pub(super) fn structured_respond_conversation_relation_from_plan(
+    plan: &crate::PlanResult,
+) -> Option<String> {
+    structured_respond_terminal_intent_from_plan(plan)
+        .and_then(|intent| intent.conversation_relation)
 }
 
 fn structured_terminal_control_intent(terminal_intent: &str) -> &'static str {

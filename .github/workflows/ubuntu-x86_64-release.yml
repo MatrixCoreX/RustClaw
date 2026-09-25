@@ -252,15 +252,3 @@ jobs:
               --notes-file release-notes.md \
               "${release_flags[@]}"
           fi
-
-      - name: Delete older Ubuntu x86_64 releases
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ steps.meta.outputs.release_tag }}
-        run: |
-          set -euo pipefail
-          ./scripts/cleanup-platform-releases.sh \
-            "ubuntu-x86_64-" \
-            --keep-tag "${RELEASE_TAG}"

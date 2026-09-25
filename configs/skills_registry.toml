@@ -244,7 +244,7 @@ output_schema = { type = "object", required = ["status", "action"], properties =
 name = "memory_store"
 enabled = true
 fixed_on = true
-planner_eager_load = true
+planner_eager_load = false
 kind = "builtin"
 planner_kind = "tool"
 group = "memory"
@@ -252,9 +252,9 @@ aliases = []
 timeout_seconds = 30
 prompt_file = "prompts/skills/memory_store.md"
 output_kind = "text"
-description = "Search, save, correct, forget, or list durable memory within the authenticated current conversation, principal, or project scope."
-description_zh = "在当前已认证对话、个人或项目范围内搜索、保存、纠正、遗忘或列出记忆。"
-semantic_tags = ["durable_memory", "remember", "recall", "correct_memory", "forget_memory", "memory_search"]
+description = "Search, save, correct, forget, or list durable memory that must survive normal conversation history. Session shorthand aliases belong to session.bind_alias, not durable memory."
+description_zh = "搜索、保存、纠正、遗忘或列出需要超越普通对话历史长期保留的记忆；会话简称绑定由 session.bind_alias 负责。"
+semantic_tags = ["durable_memory", "cross_session_memory", "lasting_preference", "recall", "correct_memory", "forget_memory", "memory_search"]
 risk_level = "medium"
 auto_invocable = true
 requires_confirmation = true
@@ -269,7 +269,7 @@ retryable = true
 supported_os = ["linux", "macos", "windows"]
 planner_capabilities = [
   { name = "memory.search", action = "search", description = "Search durable memory only when older or detailed remembered context would help the current task.", semantic_tags = ["memory_recall", "older_context", "durable_memory_search"], effect = "observe", required = ["query"], optional = ["scope", "limit", "cursor"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
-  { name = "memory.save", action = "save", description = "Save a stable preference, fact, or temporary conversation note when it is supported by the current user message. Use project documentation for authoritative project rules.", semantic_tags = ["explicit_remember", "durable_memory_save", "stable_preference"], effect = "mutate", required = ["scope", "kind", "content", "idempotency_key"], optional = ["key", "evidence_refs"], risk_level = "medium", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
+  { name = "memory.save", action = "save", description = "Persist a stable preference or fact only when the user explicitly requires it to survive beyond normal conversation history, such as across sessions or as a lasting default. Current-conversation context needs no memory mutation. Use project documentation for authoritative project rules.", semantic_tags = ["durable_memory_save", "cross_session_memory", "lasting_preference"], effect = "mutate", required = ["scope", "kind", "content", "idempotency_key"], optional = ["key", "evidence_refs"], risk_level = "medium", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
   { name = "memory.forget", action = "forget", description = "Forget one previously returned opaque memory item at its expected revision.", semantic_tags = ["explicit_forget", "memory_delete"], effect = "mutate", required = ["scope", "memory_id", "expected_revision"], optional = [], risk_level = "medium", auto_invocable = false, requires_confirmation = true, preferred = true, once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
   { name = "memory.correct", action = "correct", description = "Create a user-confirmed corrected revision and supersede the old memory item.", semantic_tags = ["memory_correction", "fact_correction"], effect = "mutate", required = ["scope", "memory_id", "expected_revision", "content"], optional = [], risk_level = "medium", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
   { name = "memory.list_recent", action = "list_recent", description = "List recent durable memory items in one authenticated scope.", semantic_tags = ["memory_inventory", "recent_memory"], effect = "observe", optional = ["scope", "limit", "cursor"], risk_level = "low", preferred = false, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
@@ -304,8 +304,8 @@ confirmation_exempt_when = [
 ]
 planner_capabilities = [
   # Task-local plan state is an observation, not validation of business effects.
-  { name = "task.plan_set", action = "set_plan", effect = "observe", required = ["steps"], optional = ["plan_revision"], risk_level = "low", preferred = true, once_per_task = false, idempotent = false, dedup_scope = "args", execution_mode = "sync_short" },
-  { name = "task.plan_update", action = "update_steps", effect = "observe", required = ["plan_revision", "updates"], risk_level = "low", preferred = true, once_per_task = false, idempotent = false, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "task.plan_set", action = "set_plan", description = "Create one ordered plan. Every steps item requires exactly step_id, title, and status; never use id or step as a field alias.", effect = "observe", required = ["steps"], optional = ["plan_revision"], risk_level = "low", preferred = true, once_per_task = false, idempotent = false, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "task.plan_update", action = "update_steps", description = "Update existing plan entries by stable step_id. Every updates item requires step_id and may contain title or status; never create a new ID.", effect = "observe", required = ["plan_revision", "updates"], risk_level = "low", preferred = true, once_per_task = false, idempotent = false, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "task.plan_read", action = "read_plan", effect = "observe", risk_level = "low", preferred = true, once_per_task = false, idempotent = true, dedup_scope = "action", execution_mode = "sync_short", final_answer_shape = "summary_with_evidence" },
 ]
 input_schema = { type = "object", required = ["action"], additionalProperties = false, properties = { action = { type = "string", enum = ["set_plan", "update_steps", "read_plan"] }, plan_revision = { type = "integer", minimum = 0 }, steps = { type = "array", minItems = 1, maxItems = 64, items = { type = "object", additionalProperties = false, required = ["step_id", "title", "status"], properties = { step_id = { type = "string", minLength = 1, maxLength = 80, pattern = "^[A-Za-z0-9][A-Za-z0-9_.:-]*$" }, title = { type = "string", minLength = 1, maxLength = 512 }, status = { type = "string", enum = ["pending", "in_progress", "completed", "cancelled"] } } } }, updates = { type = "array", minItems = 1, maxItems = 64, items = { type = "object", additionalProperties = false, required = ["step_id"], properties = { step_id = { type = "string", minLength = 1, maxLength = 80, pattern = "^[A-Za-z0-9][A-Za-z0-9_.:-]*$" }, title = { type = "string", minLength = 1, maxLength = 512 }, status = { type = "string", enum = ["pending", "in_progress", "completed", "cancelled"] } } } } } }
@@ -494,7 +494,7 @@ output_schema = { type = "object", required = ["text"], properties = { text = { 
 name = "code_index"
 enabled = true
 fixed_on = true
-planner_eager_load = true
+planner_eager_load = false
 kind = "builtin"
 planner_kind = "tool"
 group = "code"
@@ -616,7 +616,7 @@ output_schema = { type = "object", required = ["text"], properties = { text = { 
 name = "schedule"
 enabled = true
 fixed_on = true
-planner_eager_load = true
+planner_eager_load = false
 kind = "builtin"
 planner_kind = "workflow"
 group = "workflow"
@@ -648,7 +648,7 @@ output_schema = { type = "object", required = ["text"], properties = { text = { 
 name = "subagent"
 enabled = true
 fixed_on = true
-planner_eager_load = true
+planner_eager_load = false
 kind = "builtin"
 planner_kind = "tool"
 group = "workflow"
@@ -706,7 +706,7 @@ output_schema = { type = "object", required = ["text"], properties = { text = { 
 name = "system_basic"
 enabled = true
 fixed_on = true
-planner_eager_load = true
+planner_eager_load = false
 kind = "runner"
 planner_kind = "tool"
 group = "system"
@@ -770,7 +770,7 @@ output_schema = { type = "object", required = ["text"], properties = { text = { 
 name = "git_basic"
 enabled = true
 fixed_on = true
-planner_eager_load = true
+planner_eager_load = false
 kind = "runner"
 planner_kind = "tool"
 group = "system"
@@ -1535,14 +1535,14 @@ output_schema = { type = "object", required = ["text"], properties = { text = { 
 [[skills]]
 name = "task_control"
 enabled = true
-planner_eager_load = true
+planner_eager_load = false
 kind = "runner"
 planner_kind = "tool"
 group = "ops"
 package_manifest = "crates/skills/task_control/skill.toml"
 aliases = ["task_manager", "task_status", "task_cancel"]
 timeout_seconds = 30
-prompt_file = "prompts/skills/task_control.md"
+prompt_file = "prompts/layers/generated/skills/task_control.md"
 output_kind = "text"
 capabilities = ["net"]
 supported_os = ["linux", "macos"]
@@ -1551,7 +1551,7 @@ description = "List, inspect, cancel, resume, and pause agent tasks through the 
 description_zh = "查看、检查、取消、恢复和暂停 Agent 任务，并提供不修改状态的任务生命周期与故障恢复预览。"
 semantic_tags = ["task_status", "task_control", "runtime_tasks", "task_lifecycle_fields", "session_alias_binding", "conversation_alias", "resume_preview", "resume_entrypoint", "renewable_lease", "provider_failure_preview", "provider_blocker", "quota_wait", "checkpoint_policy", "retryable_failure_observation", "forbidden_repeat_signature", "bounded_repair_attempts", "missing_field_repair", "blocked_repair_state", "repair_observation", "coding_repair_preview", "failed_verification", "passing_verification", "rewind_reference"]
 planner_capabilities = [
-  { name = "session.bind_alias", action = "bind_session_alias", effect = "observe", required = ["alias", "target"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false },
+  { name = "session.bind_alias", action = "bind_session_alias", description = "Persist a user-defined shorthand reference to one distinct, typed machine target for later conversation turns. The alias must be explicitly assigned or reassigned by the current request; target_kind must classify a path, URL, task UUID, artifact handle, or namespaced resource. Never use this capability for a fact, marker, identifier, preference, acknowledgement literal, prior assistant reply, or a target equal to the alias.", semantic_tags = ["session_alias_binding", "conversation_alias", "shorthand_reference", "typed_machine_target"], effect = "mutate", required = ["alias", "target", "target_kind"], risk_level = "low", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false },
   { name = "task_control.list", action = "list", effect = "observe", optional = ["status", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false },
   { name = "task_control.list_with_first_detail", action = "list_with_first_detail", effect = "observe", optional = ["status", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false },
   { name = "task_control.get", action = "get", effect = "observe", required = ["task_id"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false },
@@ -1565,7 +1565,7 @@ planner_capabilities = [
   { name = "task_control.resume", action = "resume", effect = "mutate", required = ["task_id"], optional = ["checkpoint_id", "resume_reason", "user_message", "new_constraints"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false },
   { name = "task_control.pause", action = "pause", effect = "mutate", required = ["task_id"], optional = ["pause_seconds"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false },
 ]
-input_schema = { type = "object", properties = { action = { type = "string", enum = ["list", "list_with_first_detail", "get", "cancel_all", "cancel_one", "preview_resume", "preview_provider_failure", "preview_retryable_failure_observation", "preview_repair_observation", "preview_coding_repair", "bind_session_alias", "resume", "pause"] }, alias = { type = "string", maxLength = 256 }, target = { type = "string", maxLength = 4096 }, failure_class = { type = "string", enum = ["timeout", "transport_retryable", "provider_retryable_response", "rate_limited", "quota_exhausted", "provider_non_retryable_business", "local_non_retryable"] }, repair_kind = { type = "string", enum = ["missing_required_argument", "bounded_repair_blocked", "provider_external_blocker"] }, index = { type = "integer" }, task_id = { type = "string" }, checkpoint_id = { type = "string" }, resume_reason = { type = "string" }, user_message = { type = "string" }, new_constraints = { type = "object" }, pause_seconds = { type = "integer" }, status = { type = "string" }, limit = { type = "integer" }, confirm = { type = "boolean" } } }
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["list", "list_with_first_detail", "get", "cancel_all", "cancel_one", "preview_resume", "preview_provider_failure", "preview_retryable_failure_observation", "preview_repair_observation", "preview_coding_repair", "bind_session_alias", "resume", "pause"] }, alias = { type = "string", maxLength = 256, description = "Exact shorthand identifier assigned or reassigned by the current user request; never an acknowledgement literal, prior assistant reply, target basename, or a value equal to target." }, target = { type = "string", maxLength = 4096, description = "Exact typed machine locator assigned to the shorthand by the current request." }, target_kind = { type = "string", enum = ["path", "url", "task", "artifact", "resource"], description = "Machine target class. Resource targets use a namespace:identifier token." }, failure_class = { type = "string", enum = ["timeout", "transport_retryable", "provider_retryable_response", "rate_limited", "quota_exhausted", "provider_non_retryable_business", "local_non_retryable"] }, repair_kind = { type = "string", enum = ["missing_required_argument", "bounded_repair_blocked", "provider_external_blocker"] }, index = { type = "integer" }, task_id = { type = "string" }, checkpoint_id = { type = "string" }, resume_reason = { type = "string" }, user_message = { type = "string" }, new_constraints = { type = "object" }, pause_seconds = { type = "integer" }, status = { type = "string" }, limit = { type = "integer" }, confirm = { type = "boolean" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
@@ -2291,7 +2291,7 @@ confirmation_exempt_when = [
   { action = "session_close" },
 ]
 planner_capabilities = [
-  { name = "browser.session_open", action = "session_open", effect = "observe", optional = ["url", "profile", "locale", "timezone", "viewport", "domains_allow", "domains_deny", "include_screenshot", "max_elements", "max_text_chars"], risk_level = "low", preferred = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false },
+  { name = "browser.session_open", action = "session_open", effect = "observe", optional = ["url", "profile", "locale", "timezone", "viewport", "domains_allow", "domains_deny", "allow_proxy_synthetic_dns", "include_screenshot", "max_elements", "max_text_chars"], risk_level = "low", preferred = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false },
   { name = "browser.navigate", action = "navigate", effect = "observe", required = ["session_id", "page_id", "expected_page_generation", "url"], optional = ["wait_until", "include_screenshot", "max_elements", "max_text_chars"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = false, external_publish = false, credential_access = false, subprocess = true },
   { name = "browser.snapshot", action = "snapshot", effect = "observe", required = ["session_id", "page_id", "expected_page_generation"], optional = ["include_screenshot", "max_elements", "max_text_chars", "text_cursor"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", subprocess = true },
   { name = "browser.screenshot", action = "screenshot", effect = "observe", required = ["session_id", "page_id", "expected_page_generation"], risk_level = "low", idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", filesystem_write = true, subprocess = true },

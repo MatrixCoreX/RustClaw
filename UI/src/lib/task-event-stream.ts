@@ -206,6 +206,11 @@ async function taskReachedFollowBoundary(
     const body = (await response.json()) as ApiResponse<TaskQueryResponse>;
     const task = body.ok ? body.data : undefined;
     if (!task) return false;
+    const lifecycleState =
+      task.lifecycle && typeof task.lifecycle.state === "string"
+        ? task.lifecycle.state.trim()
+        : "";
+    if (task.status === "canceled" && lifecycleState === "cancel_requested") return false;
     if (["succeeded", "failed", "canceled", "timeout"].includes(task.status)) return true;
     return taskEventClosesLiveStream({
       schema_version: 1,

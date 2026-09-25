@@ -36,6 +36,12 @@ pub(super) fn action_from_native_respond_call(
         ),
         None => None,
     };
+    let exact_visible_line_count = arguments
+        .get("exact_visible_line_count")
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .filter(|value| *value <= MAX_NATIVE_RESPONSE_ITEMS)
+        .ok_or_else(|| "native_respond_exact_visible_line_count_invalid".to_string())?;
     let fields = match arguments.get("fields") {
         Some(value) => value
             .as_array()
@@ -74,6 +80,7 @@ pub(super) fn action_from_native_respond_call(
             {
                 return Err("native_respond_free_text_contract_mismatch".to_string());
             }
+            validate_exact_visible_lines(content, exact_visible_line_count)?;
             Ok(AgentAction::Respond {
                 content: content.trim().to_string(),
             })
@@ -81,9 +88,6 @@ pub(super) fn action_from_native_respond_call(
         "list" => {
             let exact_item_count = exact_item_count
                 .ok_or_else(|| "native_respond_exact_item_count_invalid".to_string())?;
-            if !content.trim().is_empty() {
-                return Err("native_respond_list_content_not_empty".to_string());
-            }
             if !fields.is_empty()
                 || !observed_fields.is_empty()
                 || exact_field_count.unwrap_or(0) != 0
@@ -93,7 +97,7 @@ pub(super) fn action_from_native_respond_call(
             if exact_item_count == 0 || items.len() != exact_item_count {
                 return Err("native_respond_list_count_mismatch".to_string());
             }
-            let items = items
+            let raw_items = items
                 .iter()
                 .map(|item| {
                     item.as_str()
@@ -105,15 +109,26 @@ pub(super) fn action_from_native_respond_call(
                         .ok_or_else(|| "native_respond_list_item_invalid".to_string())
                 })
                 .collect::<Result<Vec<_>, _>>()?;
+            if !content.trim().is_empty() && !redundant_list_content_matches(content, &raw_items) {
+                return Err("native_respond_list_content_not_empty".to_string());
+            }
+            let items = strip_shared_list_presentation_marker(raw_items);
             let content = items
                 .iter()
                 .enumerate()
                 .map(|(index, item)| format!("{}. {item}", index + 1))
                 .collect::<Vec<_>>()
                 .join("\n");
+            if exact_visible_line_count != 0 && exact_visible_line_count != exact_item_count {
+                return Err("native_respond_exact_visible_line_count_mismatch".to_string());
+            }
+            validate_exact_visible_lines(&content, exact_visible_line_count)?;
             Ok(AgentAction::Respond { content })
         }
         "object" => {
+            if exact_visible_line_count != 0 {
+                return Err("native_respond_exact_visible_line_count_mismatch".to_string());
+            }
             let exact_field_count = exact_field_count
                 .ok_or_else(|| "native_respond_exact_field_count_invalid".to_string())?;
             if !items.is_empty() || exact_item_count.unwrap_or(0) != 0 {
@@ -166,6 +181,9 @@ pub(super) fn action_from_native_respond_call(
             Ok(AgentAction::Respond { content })
         }
         "observed_object" => {
+            if exact_visible_line_count != 0 {
+                return Err("native_respond_exact_visible_line_count_mismatch".to_string());
+            }
             if !content.trim().is_empty()
                 || !items.is_empty()
                 || exact_item_count.unwrap_or(0) != 0
@@ -221,6 +239,74 @@ pub(super) fn action_from_native_respond_call(
     }
 }
 
+fn redundant_list_content_matches(content: &str, items: &[String]) -> bool {
+    let lines = content.trim().lines().map(str::trim).collect::<Vec<_>>();
+    lines.len() == items.len()
+        && lines
+            .iter()
+            .zip(items)
+            .all(|(line, item)| *line == item.trim())
+}
+
+fn strip_shared_list_presentation_marker(items: Vec<String>) -> Vec<String> {
+    for marker in ["- ", "* ", "+ "] {
+        if items.iter().all(|item| item.starts_with(marker)) {
+            return items
+                .into_iter()
+                .map(|item| item[marker.len()..].trim().to_string())
+                .collect();
+        }
+    }
+    for separator in [". ", ") "] {
+        if items.iter().enumerate().all(|(index, item)| {
+            item.strip_prefix(&(index + 1).to_string())
+                .is_some_and(|item| item.starts_with(separator))
+        }) {
+            return items
+                .into_iter()
+                .enumerate()
+                .map(|(index, item)| {
+                    let prefix_len = (index + 1).to_string().len() + separator.len();
+                    item[prefix_len..].trim().to_string()
+                })
+                .collect();
+        }
+    }
+    items
+}
+
+fn validate_exact_visible_lines(content: &str, expected: usize) -> Result<(), String> {
+    if expected == 0 {
+        return Ok(());
+    }
+    let lines = content.trim().lines().collect::<Vec<_>>();
+    if lines.len() != expected || lines.iter().any(|line| line.trim().is_empty()) {
+        return Err("native_respond_exact_visible_line_count_mismatch".to_string());
+    }
+    Ok(())
+}
+
+pub(super) fn normalize_native_clarify_relation(turn: &mut ModelTurnResponse) -> bool {
+    let Some(arguments) = turn
+        .tool_calls
+        .iter_mut()
+        .find(|call| call.name == NATIVE_RESPOND_TOOL)
+        .and_then(|call| call.arguments.as_object_mut())
+    else {
+        return false;
+    };
+    if arguments.get("terminal_intent").and_then(Value::as_str) != Some("clarify")
+        || arguments
+            .get("conversation_relation")
+            .and_then(Value::as_str)
+            == Some("clarify")
+    {
+        return false;
+    }
+    arguments.insert("conversation_relation".to_string(), json!("clarify"));
+    true
+}
+
 const NATIVE_RESPOND_CLARIFY_FIELDS: [&str; 5] = [
     "clarify_reason_code",
     "missing_slot",
@@ -255,6 +341,18 @@ fn validate_native_respond_control_fields(arguments: &Map<String, Value>) -> Res
         .ok_or_else(|| "native_respond_terminal_intent_missing".to_string())?;
     if !matches!(terminal_intent, "answer" | "clarify") {
         return Err("native_respond_terminal_intent_invalid".to_string());
+    }
+    let conversation_relation =
+        native_respond_control_string(arguments, "conversation_relation", 32)?
+            .ok_or_else(|| "native_respond_conversation_relation_missing".to_string())?;
+    if !matches!(
+        conversation_relation,
+        "continue_current" | "amend_current" | "start_followup" | "side_reply" | "clarify"
+    ) {
+        return Err("native_respond_conversation_relation_invalid".to_string());
+    }
+    if (terminal_intent == "clarify") != (conversation_relation == "clarify") {
+        return Err("native_respond_conversation_relation_intent_mismatch".to_string());
     }
 
     let limits = [128, 128, 192, 256, 64];
@@ -296,7 +394,10 @@ pub(super) fn preserve_native_respond_control_fields(
     let Some(step_args) = step.args.as_object_mut() else {
         return;
     };
-    for key in std::iter::once("terminal_intent").chain(NATIVE_RESPOND_CLARIFY_FIELDS) {
+    for key in ["terminal_intent", "conversation_relation"]
+        .into_iter()
+        .chain(NATIVE_RESPOND_CLARIFY_FIELDS)
+    {
         if let Some(value) = arguments.get(key) {
             step_args.insert(key.to_string(), value.clone());
         }

@@ -594,6 +594,115 @@ fn checkpoint_artifact_refs(loop_state: &super::LoopState) -> Vec<String> {
     refs
 }
 
+pub(crate) fn persist_agent_loop_clarification_checkpoint(
+    state: &AppState,
+    task: &ClaimedTask,
+    loop_state: &mut super::LoopState,
+    text: &str,
+    machine_fields: Value,
+) -> Result<crate::repo::conversation_reply_items::PersistConversationReplyOutcome, String> {
+    if !machine_fields.is_object() {
+        return Err("conversation_clarification_machine_fields_invalid".to_string());
+    }
+    if let Some(slice) = loop_state.task_budget_slice.as_mut() {
+        slice.set_decision(crate::task_budget_contract::BudgetDecision::NeedsUser);
+    }
+    let reply_id = crate::repo::conversation_reply_items::nonterminal_reply_id(
+        &task.task_id,
+        "clarification",
+        "accepted",
+        text,
+        loop_state.conversation_input_revision,
+        loop_state.conversation_execution_epoch,
+    );
+    let resume_reason = "structured_clarification_required";
+    let now_ts = crate::now_ts_u64() as i64;
+    let budget = checkpoint_budget_counters(
+        loop_state,
+        state.task_llm_call_count(&task.task_id),
+        state.task_llm_elapsed_ms(&task.task_id),
+    );
+    let checkpoint_id = agent_loop_checkpoint_id(task, loop_state, resume_reason);
+    let checkpoint = TaskCheckpoint {
+        schema_version: 1,
+        checkpoint_id: checkpoint_id.clone(),
+        boundary_context: json!({
+            "schema_version": 1,
+            "source": "agent_clarification",
+            "task_id": task.task_id,
+            "resume_reason": resume_reason,
+            "reply_id": reply_id,
+            "clarification": machine_fields,
+            "agent_loop_resume_state": checkpoint_resume_state(
+                loop_state,
+                super::checkpoint_resume_state::AgentCheckpointStage::Planning,
+            ),
+            "task_budget_slice": loop_state
+                .task_budget_slice
+                .as_ref()
+                .map(crate::task_budget_contract::TaskBudgetSlice::to_machine_json),
+        }),
+        last_successful_round: (loop_state.round_no > 0)
+            .then_some(saturating_u32(loop_state.round_no)),
+        last_successful_step: loop_state
+            .executed_step_results
+            .iter()
+            .rev()
+            .find(|step| step.is_ok())
+            .map(|step| step.step_id.clone()),
+        pending_action: None,
+        observations: checkpoint_step_observations(loop_state),
+        capability_results: loop_state.capability_results.clone(),
+        evidence_refs: loop_state
+            .executed_step_results
+            .iter()
+            .filter(|step| step.is_ok())
+            .map(|step| step.step_id.clone())
+            .collect(),
+        artifact_refs: checkpoint_artifact_refs(loop_state),
+        completed_side_effect_refs: completed_side_effect_refs(loop_state),
+        budget: budget.clone(),
+        attempt_ledger: super::attempt_ledger::build_attempt_ledger_snapshot(loop_state),
+        pending_async_job: None,
+        repair_signal: None,
+        resume_entrypoint: ResumeEntrypoint::AwaitUserInput,
+    };
+    let lifecycle = json!({
+        "schema_version": 1,
+        "state": TaskLifecycleState::NeedsUser,
+        "source": "agent_clarification",
+        "resume_reason": resume_reason,
+        "checkpoint_id": checkpoint_id,
+        "reply_id": reply_id,
+        "can_poll": true,
+        "can_cancel": true,
+        "last_heartbeat_ts": now_ts,
+        "budget": budget,
+    });
+    let payload = json!({
+        "progress_messages": loop_state.progress_messages,
+        "task_lifecycle": lifecycle,
+        "task_checkpoint": checkpoint.to_machine_json(),
+    });
+    let persisted =
+        crate::repo::conversation_reply_items::persist_clarification_reply_with_checkpoint(
+            state,
+            task,
+            text,
+            loop_state.conversation_input_revision,
+            loop_state.conversation_execution_epoch,
+            &payload,
+        )
+        .map_err(|error| format!("conversation_clarification_checkpoint_failed:{error}"))?;
+    loop_state.task_lifecycle = payload.get("task_lifecycle").cloned();
+    loop_state.task_checkpoint = payload.get("task_checkpoint").cloned();
+    loop_state.output_vars.insert(
+        "agent_loop.resume_reason".to_string(),
+        resume_reason.to_string(),
+    );
+    Ok(persisted)
+}
+
 fn checkpoint_resume_message_key(resume_reason: &str) -> Option<&'static str> {
     match resume_reason {
         "task_budget_slice_exhausted" => Some("clawd.task.task_budget_slice_exhausted"),
@@ -1029,11 +1138,7 @@ pub(super) fn publish_agent_loop_checkpoint_progress(
         state.task_llm_call_count(&task.task_id),
         state.task_llm_elapsed_ms(&task.task_id),
     );
-    let next_check_after = if resume_reason == "user_pause_requested" {
-        now_ts.saturating_add(604_800)
-    } else {
-        now_ts.saturating_add(60)
-    };
+    let next_check_after = now_ts.saturating_add(60);
     let mut payload = build_agent_loop_checkpoint_progress_payload_with_budget(
         task,
         loop_state,
@@ -1042,7 +1147,86 @@ pub(super) fn publish_agent_loop_checkpoint_progress(
         next_check_after,
         budget,
     );
-    attach_task_llm_metrics_checkpoint(state, &task.task_id, &mut payload);
+    persist_agent_loop_checkpoint_progress_payload(
+        state,
+        task,
+        loop_state,
+        resume_reason,
+        &mut payload,
+    );
+}
+
+pub(super) fn publish_agent_loop_pause_checkpoint(
+    state: &AppState,
+    task: &ClaimedTask,
+    loop_state: &mut super::LoopState,
+    resume_after: Option<i64>,
+) {
+    let now_ts = crate::now_ts_u64() as i64;
+    let budget = checkpoint_budget_counters(
+        loop_state,
+        state.task_llm_call_count(&task.task_id),
+        state.task_llm_elapsed_ms(&task.task_id),
+    );
+    let mut payload = build_agent_loop_checkpoint_progress_payload_with_budget(
+        task,
+        loop_state,
+        "user_pause_requested",
+        now_ts,
+        resume_after.unwrap_or_else(|| now_ts.saturating_add(1)),
+        budget,
+    );
+    if let Some(lifecycle) = payload
+        .get_mut("task_lifecycle")
+        .and_then(Value::as_object_mut)
+    {
+        lifecycle.insert("source".to_string(), json!("task_control"));
+        if let Some(resume_after) = resume_after {
+            lifecycle.insert("resume_policy".to_string(), json!("scheduled"));
+            lifecycle.insert("resume_after".to_string(), json!(resume_after));
+        } else {
+            lifecycle.insert("state".to_string(), json!(TaskLifecycleState::NeedsUser));
+            lifecycle.insert("resume_policy".to_string(), json!("manual"));
+            lifecycle.insert("manual_resume_required".to_string(), json!(true));
+            lifecycle.insert("resume_due".to_string(), json!(false));
+            lifecycle.insert("resume_wait_seconds".to_string(), json!(0));
+            lifecycle.remove("next_check_after");
+        }
+    }
+    if let Some(boundary) = payload
+        .pointer_mut("/task_checkpoint/boundary_context")
+        .and_then(Value::as_object_mut)
+    {
+        boundary.insert("source".to_string(), json!("task_control"));
+        boundary.insert(
+            "resume_policy".to_string(),
+            json!(if resume_after.is_some() {
+                "scheduled"
+            } else {
+                "manual"
+            }),
+        );
+        if let Some(resume_after) = resume_after {
+            boundary.insert("resume_after".to_string(), json!(resume_after));
+        }
+    }
+    persist_agent_loop_checkpoint_progress_payload(
+        state,
+        task,
+        loop_state,
+        "user_pause_requested",
+        &mut payload,
+    );
+}
+
+fn persist_agent_loop_checkpoint_progress_payload(
+    state: &AppState,
+    task: &ClaimedTask,
+    loop_state: &mut super::LoopState,
+    resume_reason: &str,
+    payload: &mut Value,
+) {
+    attach_task_llm_metrics_checkpoint(state, &task.task_id, payload);
     if let Some(checkpoint_id) = payload
         .pointer("/task_lifecycle/checkpoint_id")
         .and_then(Value::as_str)
@@ -1118,6 +1302,17 @@ pub(crate) fn publish_agent_loop_user_input_checkpoint_progress(
         .transpose()
         .map_err(|_| "checkpoint_action_output_contract_serialize_failed".to_string())?;
     let continuation_actions = checkpoint_continuation_actions(loop_state, step_in_round)?;
+    let execution_binding =
+        crate::skills::checkpoint_skill_execution_binding(state, tool_or_skill)?;
+    let approval_binding = checkpoint_action_approval_binding(
+        state,
+        tool_or_skill,
+        action_ref,
+        args,
+        loop_state.total_steps_executed,
+        loop_state.output_contract.clone(),
+        continuation_actions.as_ref(),
+    )?;
     repo::upsert_task_checkpoint_action(
         &state.core.db,
         &task.task_id,
@@ -1127,6 +1322,10 @@ pub(crate) fn publish_agent_loop_user_input_checkpoint_progress(
         args,
         output_contract.as_ref(),
         continuation_actions.as_ref(),
+        Some(&execution_binding),
+        approval_binding.as_ref(),
+        loop_state.conversation_input_revision,
+        loop_state.conversation_execution_epoch,
     )
     .map_err(|_| "checkpoint_action_persist_failed".to_string())?;
     loop_state.output_vars.insert(
@@ -1173,6 +1372,46 @@ fn checkpoint_continuation_actions(
     serde_json::to_value(actions)
         .map(Some)
         .map_err(|_| "checkpoint_continuation_actions_serialize_failed".to_string())
+}
+
+fn checkpoint_action_approval_binding(
+    state: &AppState,
+    tool_or_skill: &str,
+    action_ref: &str,
+    args: &Value,
+    completed_step_count: usize,
+    output_contract: Option<crate::IntentOutputContract>,
+    continuation_actions: Option<&Value>,
+) -> Result<Option<Value>, String> {
+    let continuation_actions = continuation_actions
+        .cloned()
+        .map(serde_json::from_value::<Vec<crate::AgentAction>>)
+        .transpose()
+        .map_err(|_| "checkpoint_continuation_actions_invalid".to_string())?
+        .unwrap_or_default();
+    let plan = super::checkpoint_action_plan(
+        tool_or_skill,
+        action_ref,
+        args.clone(),
+        completed_step_count,
+        output_contract,
+        continuation_actions,
+    );
+    let Some(first_step_id) = plan.steps.first().map(|step| step.step_id.clone()) else {
+        return Err("checkpoint_action_plan_empty".to_string());
+    };
+    Ok(
+        crate::approval_grant::binding_for_confirmation_steps(state, &plan.steps, &[first_step_id])
+            .map(|binding| {
+                json!({
+                    "schema_version": 1,
+                    "action_fingerprint": binding.action_fingerprint,
+                    "arguments_hash": binding.arguments_hash,
+                    "action_count": binding.action_count,
+                    "targets": binding.targets,
+                })
+            }),
+    )
 }
 
 pub(super) fn publish_agent_loop_mutation_reconciliation_checkpoint(
@@ -1569,383 +1808,8 @@ pub(super) fn maybe_publish_execution_recipe_phase_hint(
     }
 }
 
-/// Append to final delivery only. This is the only path that feeds user-visible result. No progress publish.
-pub(crate) fn append_delivery_message(
-    task_id: &str,
-    delivery_messages: &mut Vec<String>,
-    message: String,
-) {
-    let message = crate::visible_text::sanitize_user_visible_text(&message);
-    delivery_messages.push(message.clone());
-    info!(
-        "delivery appended task_id={} len={} content={}",
-        task_id,
-        delivery_messages.len(),
-        crate::truncate_for_log(&message)
-    );
-}
-
-pub(super) fn action_fingerprint(state: &AppState, action: &AgentAction) -> String {
-    match action {
-        AgentAction::CallTool { tool, args } => {
-            let normalized_skill = state
-                .resolve_canonical_skill_name(tool.trim())
-                .to_ascii_lowercase();
-            let normalized_args = normalize_args_for_fingerprint(state, &normalized_skill, args);
-            format!(
-                "skill:{}:{}",
-                normalized_skill,
-                canonical_json_string(&normalized_args)
-            )
-        }
-        AgentAction::CallSkill { skill, args } => {
-            let normalized_skill = state
-                .resolve_canonical_skill_name(skill)
-                .to_ascii_lowercase();
-            let normalized_args = normalize_args_for_fingerprint(state, &normalized_skill, args);
-            format!(
-                "skill:{}:{}",
-                normalized_skill,
-                canonical_json_string(&normalized_args)
-            )
-        }
-        AgentAction::Respond { content } => {
-            format!("respond:{}", content.trim().to_ascii_lowercase())
-        }
-        AgentAction::SynthesizeAnswer { evidence_refs } => format!(
-            "synthesize_answer:{}",
-            evidence_refs
-                .iter()
-                .map(|item| item.trim().to_ascii_lowercase())
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
-        AgentAction::CallCapability { capability, args } => {
-            let normalized = capability.trim().to_ascii_lowercase();
-            let normalized_args = normalize_args_for_fingerprint(state, &normalized, args);
-            format!(
-                "capability:{}:{}",
-                normalized,
-                canonical_json_string(&normalized_args)
-            )
-        }
-        AgentAction::Think { .. } => "think".to_string(),
-    }
-}
-
-pub(super) fn action_fingerprint_for_policy(
-    state: &AppState,
-    policy: &AgentLoopGuardPolicy,
-    action: &AgentAction,
-) -> String {
-    if !policy.registry_idempotency_guard_enabled() {
-        return action_fingerprint(state, action);
-    }
-    let resolved_action = resolved_registry_action_for_policy(state, action);
-    let policy_action = resolved_action.as_ref().unwrap_or(action);
-    let Some((skill_name, args)) = action_skill_and_args(policy_action) else {
-        return action_fingerprint(state, action);
-    };
-    let normalized_skill = state
-        .resolve_canonical_skill_name(skill_name)
-        .to_ascii_lowercase();
-    let action_token = registry_action_token_from_args(args);
-    let Some(registry) = state.get_skills_registry() else {
-        return action_fingerprint(state, action);
-    };
-    let dedup_scope = registry.resolved_dedup_scope(&normalized_skill, action_token.as_deref());
-    match dedup_scope {
-        claw_core::skill_registry::RegistryDedupScope::Action => {
-            if run_command_action_uses_args_fingerprint(
-                &normalized_skill,
-                action_token.as_deref(),
-                args,
-            ) {
-                return action_fingerprint(state, policy_action);
-            }
-            return format!(
-                "skill:{}:action:{}",
-                normalized_skill,
-                action_token.unwrap_or_else(|| "_default".to_string())
-            );
-        }
-        claw_core::skill_registry::RegistryDedupScope::Resource => {
-            let fields = registry.resolved_dedup_fields(&normalized_skill, action_token.as_deref());
-            let resource = fields
-                .iter()
-                .filter_map(|field| args.get(field).map(|value| (field.clone(), value.clone())))
-                .collect::<serde_json::Map<String, Value>>();
-            if resource.is_empty() {
-                return action_fingerprint(state, policy_action);
-            }
-            return format!(
-                "skill:{}:action:{}:resource:{}",
-                normalized_skill,
-                action_token.unwrap_or_else(|| "_default".to_string()),
-                canonical_json_string(&Value::Object(resource))
-            );
-        }
-        claw_core::skill_registry::RegistryDedupScope::Args => {}
-    }
-    action_fingerprint(state, policy_action)
-}
-
-pub(super) fn registry_idempotency_guard_attribution(
-    state: &AppState,
-    policy: &AgentLoopGuardPolicy,
-    action: &AgentAction,
-    fingerprint: &str,
-    reason_code: &str,
-    repeat_count: Option<usize>,
-    limit: Option<usize>,
-) -> Option<crate::task_journal::TaskJournalRolloutAttribution> {
-    if !policy.registry_idempotency_guard_enabled() {
-        return None;
-    }
-    let resolved_action = resolved_registry_action_for_policy(state, action);
-    let policy_action = resolved_action.as_ref().unwrap_or(action);
-    let (skill_name, args) = action_skill_and_args(policy_action)?;
-    let normalized_skill = state
-        .resolve_canonical_skill_name(skill_name)
-        .to_ascii_lowercase();
-    let action_token = registry_action_token_from_args(args);
-    let registry = state.get_skills_registry()?;
-    let once_per_task = registry.resolved_once_per_task(&normalized_skill, action_token.as_deref());
-    let dedup_scope = registry.resolved_dedup_scope(&normalized_skill, action_token.as_deref());
-    if !once_per_task && dedup_scope == claw_core::skill_registry::RegistryDedupScope::Args {
-        return None;
-    }
-    if run_command_action_uses_args_fingerprint(&normalized_skill, action_token.as_deref(), args) {
-        return None;
-    }
-    Some(
-        crate::task_journal::TaskJournalRolloutAttribution::registry_idempotency_guard_block(
-            reason_code,
-            normalized_skill,
-            action_token,
-            dedup_scope.as_token(),
-            fingerprint,
-            repeat_count,
-            limit,
-        ),
-    )
-}
-
-fn resolved_registry_action_for_policy(
-    state: &AppState,
-    action: &AgentAction,
-) -> Option<AgentAction> {
-    if !matches!(action, AgentAction::CallCapability { .. }) {
-        return None;
-    }
-    let resolved =
-        crate::capability_resolver::resolve_agent_action_for_state(state, action.clone());
-    (!matches!(resolved, AgentAction::CallCapability { .. })).then_some(resolved)
-}
-
-fn action_skill_and_args(action: &AgentAction) -> Option<(&str, &Value)> {
-    match action {
-        AgentAction::CallTool { tool, args } => Some((tool.as_str(), args)),
-        AgentAction::CallSkill { skill, args } => Some((skill.as_str(), args)),
-        _ => None,
-    }
-}
-
-fn registry_action_token_from_args(args: &Value) -> Option<String> {
-    args.get("action")
-        .and_then(Value::as_str)
-        .map(|value| {
-            value
-                .trim()
-                .to_ascii_lowercase()
-                .chars()
-                .map(|ch| {
-                    if matches!(ch, '-' | ' ' | '.') {
-                        '_'
-                    } else {
-                        ch
-                    }
-                })
-                .collect::<String>()
-        })
-        .filter(|value| !value.is_empty())
-}
-
-fn run_command_action_uses_args_fingerprint(
-    normalized_skill: &str,
-    action_token: Option<&str>,
-    args: &Value,
-) -> bool {
-    let is_run_command_action = normalized_skill == "run_cmd"
-        || (normalized_skill == "system_basic" && action_token == Some("run_cmd"));
-    if !is_run_command_action {
-        return false;
-    }
-    args.get("command")
-        .or_else(|| args.get("cmd"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .is_some_and(|command| !command.is_empty())
-}
-
+include!("support_action_identity.rs");
 #[cfg(test)]
 #[path = "support_tests.rs"]
 mod tests;
-fn normalize_run_cmd_command_for_fingerprint(command: &str) -> String {
-    let tokens = command
-        .split_whitespace()
-        .map(normalize_command_token_for_fingerprint)
-        .collect::<Vec<_>>();
-    tokens.join(" ")
-}
-
-fn normalize_command_token_for_fingerprint(token: &str) -> String {
-    if token.is_empty() {
-        return String::new();
-    }
-    if token.starts_with('-') || token.contains('$') || token.contains('*') {
-        return token.to_string();
-    }
-    if token.starts_with("./") || token.contains("/./") || token.contains("//") {
-        return normalize_path_string_for_fingerprint(token);
-    }
-    token.to_string()
-}
-
-fn normalize_path_string_for_fingerprint(raw: &str) -> String {
-    let mut s = raw.trim().to_string();
-    let mut quote_prefix = String::new();
-    let mut quote_suffix = String::new();
-    if (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) {
-        quote_prefix = s[..1].to_string();
-        quote_suffix = s[s.len() - 1..].to_string();
-        s = s[1..s.len().saturating_sub(1)].to_string();
-    }
-
-    while s.starts_with("./") {
-        s = s[2..].to_string();
-    }
-    while s.contains("//") {
-        s = s.replace("//", "/");
-    }
-    s = s.replace("/./", "/");
-
-    let path = Path::new(&s);
-    let mut parts = Vec::new();
-    let mut absolute = false;
-    for comp in path.components() {
-        match comp {
-            Component::RootDir => absolute = true,
-            Component::CurDir => {}
-            Component::Normal(p) => parts.push(p.to_string_lossy().to_string()),
-            Component::ParentDir => parts.push("..".to_string()),
-            Component::Prefix(_) => {}
-        }
-    }
-    let mut out = if absolute {
-        format!("/{}", parts.join("/"))
-    } else {
-        parts.join("/")
-    };
-    if out.is_empty() {
-        out = ".".to_string();
-    }
-    format!("{quote_prefix}{out}{quote_suffix}")
-}
-
-fn normalize_args_for_fingerprint(state: &AppState, action_name: &str, args: &Value) -> Value {
-    if action_name == "subagent"
-        && args.get("action").and_then(Value::as_str) == Some("inline_readonly")
-    {
-        return normalize_inline_subagent_args_for_fingerprint(state, args);
-    }
-    let mut out = args.clone();
-    if action_name == "run_cmd" {
-        if let Some(obj) = out.as_object_mut() {
-            if let Some(cmd) = obj.get("command").and_then(|v| v.as_str()) {
-                obj.insert(
-                    "command".to_string(),
-                    Value::String(normalize_run_cmd_command_for_fingerprint(cmd)),
-                );
-            }
-            if let Some(cwd) = obj.get("cwd").and_then(|v| v.as_str()) {
-                obj.insert(
-                    "cwd".to_string(),
-                    Value::String(normalize_path_string_for_fingerprint(cwd)),
-                );
-            }
-        }
-    }
-    out
-}
-
-fn normalize_inline_subagent_args_for_fingerprint(state: &AppState, args: &Value) -> Value {
-    let config = super::subagent_runtime::load_subagent_runtime_config(state);
-    let role_family = args
-        .get("role")
-        .and_then(Value::as_str)
-        .and_then(|token| config.resolve_role(token))
-        .map(|role| role.family.as_str())
-        .unwrap_or("unresolved");
-    let mut context_refs = args
-        .get("context_refs")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .map(normalize_path_string_for_fingerprint)
-        .filter(|value| !value.is_empty())
-        .collect::<Vec<_>>();
-    context_refs.sort();
-    context_refs.dedup();
-    json!({
-        "action": "inline_readonly",
-        "role_family": role_family,
-        "context_refs": context_refs,
-    })
-}
-
-fn canonicalize_json_value(value: &Value) -> Value {
-    match value {
-        Value::Object(map) => {
-            let mut keys = map.keys().cloned().collect::<Vec<_>>();
-            keys.sort_unstable();
-            let mut out = serde_json::Map::new();
-            for key in keys {
-                if let Some(v) = map.get(&key) {
-                    out.insert(key, canonicalize_json_value(v));
-                }
-            }
-            Value::Object(out)
-        }
-        Value::Array(arr) => Value::Array(arr.iter().map(canonicalize_json_value).collect()),
-        Value::Number(num) => canonicalize_json_number(num),
-        _ => value.clone(),
-    }
-}
-
-fn canonicalize_json_number(num: &serde_json::Number) -> Value {
-    if num.is_i64() || num.is_u64() {
-        return Value::Number(num.clone());
-    }
-    let Some(float_value) = num.as_f64() else {
-        return Value::Number(num.clone());
-    };
-    if !float_value.is_finite() {
-        return Value::Number(num.clone());
-    }
-    let rounded = float_value.round();
-    if (float_value - rounded).abs() <= 1e-12 {
-        if rounded >= 0.0 && rounded <= u64::MAX as f64 {
-            return Value::Number(serde_json::Number::from(rounded as u64));
-        }
-        if rounded >= i64::MIN as f64 && rounded <= i64::MAX as f64 {
-            return Value::Number(serde_json::Number::from(rounded as i64));
-        }
-    }
-    Value::Number(num.clone())
-}
-
-fn canonical_json_string(value: &Value) -> String {
-    serde_json::to_string(&canonicalize_json_value(value)).unwrap_or_else(|_| value.to_string())
-}
+include!("idempotency_fingerprint.rs");

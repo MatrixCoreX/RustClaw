@@ -11,6 +11,8 @@ mod creation_targets;
 mod permission;
 #[path = "verifier_risk_policy.rs"]
 mod risk_policy;
+#[path = "verifier_session_alias.rs"]
+mod session_alias;
 #[path = "verifier_templates.rs"]
 mod templates;
 
@@ -22,6 +24,7 @@ use permission::{
     verify_permission_decision_json, workspace_filesystem_mutation_can_run_autonomously,
 };
 use risk_policy::high_risk_side_effect_requires_confirmation;
+use session_alias::session_alias_reference_issue;
 use templates::{
     step_can_produce_output_for_template_scope, value_contains_unresolved_template,
     TemplatePlaceholderScope,
@@ -487,6 +490,7 @@ fn verify_step_args(
     state: &AppState,
     step: &PlanStep,
     normalized_skill: &str,
+    resolved_capability_required_args: Option<&[String]>,
     template_scope: &TemplatePlaceholderScope,
     issues: &mut Vec<VerifyIssue>,
 ) {
@@ -564,7 +568,9 @@ fn verify_step_args(
             missing_fields: vec![violation.field],
         });
     }
-    let required: Vec<String> = if let Some(mapping_required) =
+    let required: Vec<String> = if let Some(resolved_required) = resolved_capability_required_args {
+        resolved_required.to_vec()
+    } else if let Some(mapping_required) =
         planner_mapping_required_args(state, normalized_skill, &step.args)
     {
         mapping_required
@@ -1044,7 +1050,26 @@ pub(crate) fn verify_plan(
                     missing_fields: Vec::new(),
                 });
             }
-            verify_step_args(state, step, &normalized_skill, &template_scope, &mut issues);
+            let resolved_capability_required_args = capability_resolutions
+                .iter()
+                .find(|resolution| resolution.plan_step_index == idx)
+                .map(|resolution| resolution.record.required_args.as_slice());
+            verify_step_args(
+                state,
+                step,
+                &normalized_skill,
+                resolved_capability_required_args,
+                &template_scope,
+                &mut issues,
+            );
+            if let Some(issue) = session_alias_reference_issue(
+                input.request_text,
+                input.context_bundle_summary,
+                step,
+                &normalized_skill,
+            ) {
+                issues.push(issue);
+            }
             if unbound_locator_boundary
                 && step_reads_path_content_under_unbound_locator(
                     step,

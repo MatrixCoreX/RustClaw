@@ -395,6 +395,90 @@ pub(super) fn handle_respond_action(
         };
     }
 
+    let conversation_relation = loop_state
+        .active_action_conversation_relations
+        .get(idx)
+        .and_then(|relation| relation.as_deref());
+    if conversation_relation == Some("side_reply") {
+        match crate::repo::persist_nonterminal_reply_item(
+            state,
+            task,
+            "side_reply",
+            "accepted",
+            &text,
+            loop_state.conversation_input_revision,
+            loop_state.conversation_execution_epoch,
+        ) {
+            Ok(persisted) => {
+                loop_state.task_observations.push(json!({
+                    "schema_version": 1,
+                    "kind": "conversation_reply_item",
+                    "reply_id": persisted.item.reply_id,
+                    "input_id": persisted.item.input_id,
+                    "instruction_revision": persisted.item.instruction_revision,
+                    "execution_epoch": persisted.item.execution_epoch,
+                    "relation": persisted.item.relation,
+                    "lifecycle_stage": persisted.item.lifecycle_stage,
+                    "terminal": false,
+                }));
+                loop_state
+                    .executed_step_results
+                    .push(crate::executor::StepExecutionResult {
+                        step_id: format!("step_{global_step}"),
+                        skill: "conversation_reply_item".to_string(),
+                        status: crate::executor::StepExecutionStatus::Ok,
+                        output: Some(text.clone()),
+                        error: None,
+                        started_at: 0,
+                        finished_at: 0,
+                    });
+                *loop_state
+                    .successful_action_fingerprints
+                    .entry(fingerprint.to_string())
+                    .or_insert(0) += 1;
+                loop_state.history_compact.push(format!(
+                    "round={} step={} conversation_reply_item relation=side_reply terminal=false",
+                    loop_state.round_no, step_in_round
+                ));
+                return RespondActionOutcome {
+                    ended_with_user_visible_output: false,
+                    stop_signal: None,
+                    should_stop: false,
+                };
+            }
+            Err(error) => {
+                let error = error.to_string();
+                loop_state.has_recoverable_failure_context = true;
+                super::attempt_ledger::record_attempt_with_retry_instruction(
+                    loop_state,
+                    "conversation_reply_item",
+                    "relation=side_reply",
+                    crate::executor::StepExecutionStatus::Error,
+                    "",
+                    Some("conversation_reply_persist_failed"),
+                    &error,
+                    Some("Retry the non-terminal reply after the durable store is available."),
+                );
+                loop_state
+                    .executed_step_results
+                    .push(crate::executor::StepExecutionResult {
+                        step_id: format!("step_{global_step}"),
+                        skill: "conversation_reply_item".to_string(),
+                        status: crate::executor::StepExecutionStatus::Error,
+                        output: None,
+                        error: Some(error),
+                        started_at: 0,
+                        finished_at: 0,
+                    });
+                return RespondActionOutcome {
+                    ended_with_user_visible_output: false,
+                    stop_signal: Some("recoverable_failure_continue_round".to_string()),
+                    should_stop: true,
+                };
+            }
+        }
+    }
+
     let terminal_direct_answer =
         !has_remaining_actions && !text.is_empty() && !loop_state.has_tool_or_skill_output;
     let duplicate_delivery = loop_state
@@ -503,6 +587,18 @@ pub(super) async fn handle_call_tool_action(
     requested_capability: Option<&str>,
     action_trace_kind: &'static str,
 ) -> Result<ActionLoopDecision, String> {
+    if tool == super::planning::NATIVE_CONTROL_ACTIVE_TURN_TOOL {
+        return handle_active_turn_control_action(
+            state,
+            task,
+            loop_state,
+            args,
+            fingerprint,
+            global_step,
+            step_in_round,
+            executed_actions,
+        );
+    }
     if tool == super::capability_discovery::RUNTIME_CAPABILITY_LOADER_TOOL {
         return super::capability_discovery::handle_capability_group_load(
             state,
@@ -674,6 +770,100 @@ pub(super) async fn handle_call_tool_action(
         ended_with_user_visible_output,
         skill_outcome,
     ))
+}
+
+fn handle_active_turn_control_action(
+    state: &AppState,
+    task: &ClaimedTask,
+    loop_state: &mut LoopState,
+    args: &Value,
+    fingerprint: &str,
+    global_step: usize,
+    step_in_round: usize,
+    executed_actions: &mut usize,
+) -> Result<ActionLoopDecision, String> {
+    let requested_action = match args.get("action").and_then(Value::as_str) {
+        Some(action @ ("stop" | "pause")) => action,
+        _ => return Err("active_turn_control_action_invalid".to_string()),
+    };
+    let expected_revision = args
+        .get("expected_instruction_revision")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "active_turn_control_revision_missing".to_string())?;
+    if expected_revision == 0 || expected_revision != loop_state.conversation_input_revision {
+        return Err("active_turn_control_revision_conflict".to_string());
+    }
+    let mailbox_action = if requested_action == "stop" {
+        "cancel"
+    } else {
+        "pause"
+    };
+    let directive = crate::repo::task_control_mailbox::enqueue_task_control(
+        state,
+        crate::repo::task_control_mailbox::EnqueueTaskControl {
+            task_id: task.task_id.clone(),
+            action: mailbox_action.to_string(),
+            issued_by: "agent_loop".to_string(),
+            payload: json!({
+                "source": "conversation_input_decision",
+                "instruction_revision": expected_revision,
+                "resume_policy": (requested_action == "pause").then_some("manual"),
+            }),
+            idempotency_key: Some(format!(
+                "conversation-input-{requested_action}:{}:{}",
+                task.task_id, expected_revision,
+            )),
+            expected_control_seq: None,
+        },
+    )
+    .map_err(|error| format!("active_turn_control_enqueue_failed:{error}"))?
+    .ok_or_else(|| "active_turn_control_task_not_active".to_string())?;
+    let observation = json!({
+        "schema_version": 1,
+        "owner_layer": "agent_loop",
+        "observation_kind": "active_turn_control",
+        "status": "accepted",
+        "action": requested_action,
+        "instruction_revision": expected_revision,
+        "control_id": directive.control_id,
+        "control_seq": directive.control_seq,
+    });
+    let output = observation.to_string();
+    register_step_output(
+        loop_state,
+        global_step,
+        step_in_round,
+        "control_active_turn",
+        &output,
+    );
+    loop_state.task_observations.push(observation.clone());
+    loop_state.has_tool_or_skill_output = true;
+    loop_state
+        .executed_step_results
+        .push(crate::executor::StepExecutionResult {
+            step_id: format!("s{global_step}"),
+            skill: super::planning::NATIVE_CONTROL_ACTIVE_TURN_TOOL.to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(output),
+            error: None,
+            started_at: crate::now_ts_u64(),
+            finished_at: crate::now_ts_u64(),
+        });
+    *loop_state
+        .successful_action_fingerprints
+        .entry(fingerprint.to_string())
+        .or_insert(0) += 1;
+    *executed_actions += 1;
+    loop_state.total_steps_executed += 1;
+    let _ = crate::task_event_transport::publish_claimed_event(
+        state,
+        task,
+        "active_turn_control",
+        observation,
+    );
+    Ok(ActionLoopDecision::StopRound(format!(
+        "active_turn_{requested_action}_requested"
+    )))
 }
 
 pub(super) async fn handle_call_skill_action(
@@ -889,6 +1079,11 @@ pub(super) async fn handle_synthesize_answer_action(
         .await
         {
             Ok(synthesis) => synthesis,
+            Err(error_code)
+                if error_code == crate::llm_gateway::CONVERSATION_INPUT_INTERRUPTED_ERR =>
+            {
+                return Err(error_code);
+            }
             Err(error_code) => {
                 tracing::warn!(
                     "capability_result_synthesis_unavailable task_id={} error_code={}",
@@ -1256,7 +1451,70 @@ pub(super) async fn dispatch_round_action(
             None
         };
     let action = resolved_capability_action.as_ref().unwrap_or(action);
-    match action {
+    let dispatch_claim_id = if matches!(
+        action,
+        AgentAction::CallTool { .. } | AgentAction::CallSkill { .. }
+    ) && loop_state.conversation_execution_epoch > 0
+    {
+        match crate::repo::conversation_inputs::claim_conversation_action_dispatch(
+            &state.core.db,
+            &task.task_id,
+            loop_state.conversation_input_revision,
+            loop_state.conversation_execution_epoch,
+            loop_state.round_no,
+            global_step,
+            fingerprint,
+        )
+        .map_err(|error| format!("conversation_action_dispatch_claim_failed:{error}"))?
+        {
+            crate::repo::conversation_inputs::ConversationActionDispatchClaimOutcome::Untracked => {
+                None
+            }
+            crate::repo::conversation_inputs::ConversationActionDispatchClaimOutcome::Claimed {
+                claim_id,
+            } => Some(claim_id),
+            crate::repo::conversation_inputs::ConversationActionDispatchClaimOutcome::Stale {
+                current,
+                pending_input,
+            } => {
+                loop_state.task_observations.push(json!({
+                    "observation_kind": "conversation_action_dispatch_rejected",
+                    "owner_layer": "execution_scheduler",
+                    "state": "continue",
+                    "reason_code": "conversation_execution_version_stale",
+                    "pending_input": pending_input,
+                    "expected_instruction_revision": loop_state.conversation_input_revision,
+                    "current_instruction_revision": current.instruction_revision,
+                    "expected_execution_epoch": loop_state.conversation_execution_epoch,
+                    "current_execution_epoch": current.execution_epoch,
+                }));
+                return Ok(ActionLoopDecision::StopRound(
+                    "conversation_execution_version_stale".to_string(),
+                ));
+            }
+            crate::repo::conversation_inputs::ConversationActionDispatchClaimOutcome::Existing {
+                claim_id,
+                status,
+            } => {
+                loop_state.task_observations.push(json!({
+                    "observation_kind": "conversation_action_dispatch_rejected",
+                    "owner_layer": "execution_scheduler",
+                    "state": "waiting",
+                    "reason_code": "conversation_action_dispatch_already_claimed",
+                    "claim_id": claim_id,
+                    "claim_status": status,
+                    "instruction_revision": loop_state.conversation_input_revision,
+                    "execution_epoch": loop_state.conversation_execution_epoch,
+                }));
+                return Ok(ActionLoopDecision::StopRound(
+                    "conversation_action_dispatch_already_claimed".to_string(),
+                ));
+            }
+        }
+    } else {
+        None
+    };
+    let dispatch_result = match action {
         AgentAction::CallTool { tool, args } => {
             let capability_result_count = loop_state.capability_results.len();
             let result = handle_call_tool_action(
@@ -1387,7 +1645,16 @@ pub(super) async fn dispatch_round_action(
             loop_state.total_steps_executed += 1;
             Ok(ActionLoopDecision::NextAction)
         }
+    };
+    if let Some(claim_id) = dispatch_claim_id {
+        crate::repo::conversation_inputs::settle_conversation_action_dispatch(
+            &state.core.db,
+            claim_id,
+            dispatch_result.is_ok(),
+        )
+        .map_err(|error| format!("conversation_action_dispatch_settle_failed:{error}"))?;
     }
+    dispatch_result
 }
 
 fn preserve_requested_capability_result_identity(

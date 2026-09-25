@@ -60,10 +60,41 @@ fn session_alias_context_exports_structured_bindings() {
         ..empty_snapshot()
     };
 
-    let context = build_session_alias_context(&snapshot);
+    let context = build_session_alias_context(&snapshot, "read report_ref");
     assert!(context.contains("### SESSION_ALIAS_BINDINGS"));
     assert!(context.contains("report_ref"));
     assert!(context.contains("/workspace/report.txt"));
+}
+
+#[test]
+fn session_alias_context_omits_bindings_unrelated_to_current_request() {
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: Some(crate::conversation_state::ConversationState {
+            alias_bindings: vec![
+                crate::conversation_state::SessionAliasBinding {
+                    alias: "report_ref".to_string(),
+                    target: "/workspace/report.txt".to_string(),
+                    updated_at_ts: 1,
+                },
+                crate::conversation_state::SessionAliasBinding {
+                    alias: "甲文件".to_string(),
+                    target: "/workspace/legacy.md".to_string(),
+                    updated_at_ts: 2,
+                },
+            ],
+            ..Default::default()
+        }),
+        ..empty_snapshot()
+    };
+
+    assert_eq!(
+        build_session_alias_context(&snapshot, "revise the latest checklist"),
+        "<none>"
+    );
+    let referenced = build_session_alias_context(&snapshot, "读取甲文件的标题");
+    assert!(referenced.contains("甲文件"));
+    assert!(referenced.contains("/workspace/legacy.md"));
+    assert!(!referenced.contains("report_ref"));
 }
 
 #[test]

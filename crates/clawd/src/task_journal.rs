@@ -773,6 +773,19 @@ impl TaskJournal {
         self.plan_result = Some(plan_result.clone());
     }
 
+    pub(crate) fn latest_planner_conversation_relation(&self) -> Option<String> {
+        self.plan_result
+            .as_ref()
+            .and_then(decision_envelope::structured_respond_conversation_relation_from_plan)
+            .or_else(|| {
+                self.rounds.iter().rev().find_map(|round| {
+                    round.plan_result.as_ref().and_then(
+                        decision_envelope::structured_respond_conversation_relation_from_plan,
+                    )
+                })
+            })
+    }
+
     pub(crate) fn record_verify_result(&mut self, verify_result: &crate::verifier::VerifyResult) {
         self.verify_result = Some(summarize_verify_result(verify_result));
     }
@@ -1068,6 +1081,7 @@ impl TaskJournal {
             "final_status": self.final_status.map(TaskJournalFinalStatus::as_str),
             "final_stop_signal": self.final_stop_signal.as_deref().map(crate::truncate_for_log),
             "final_failure_attribution": self.final_failure_attribution.as_deref(),
+            "latest_planner_conversation_relation": self.latest_planner_conversation_relation(),
             "rollout_switches_enabled": self.rollout_switches_enabled.clone(),
             "rollout_attribution": self
                 .rollout_attribution
@@ -1109,6 +1123,8 @@ impl TaskJournal {
         let mut requested = requested_capability_sequence(self);
         self.step_results.iter().map(|step| {
             let requested = next_requested_capability(&mut requested, step);
+            let runtime_managed_capabilities =
+                runtime_managed_capabilities_for_step(self, &step.step_id, requested.as_ref());
             json!({
                 "step_id": step.step_id,
                 "executed_skill": step.skill,
@@ -1117,6 +1133,7 @@ impl TaskJournal {
                 "requested_capability": requested.as_ref().map(|r| &r.capability),
                 "requested_action_ref": requested.as_ref().and_then(|r| r.action_ref.as_ref()),
                 "resolved_capability": requested.as_ref().and_then(|r| r.resolved_capability.as_ref()),
+                "runtime_managed_capabilities": runtime_managed_capabilities,
             })
         }).collect()
     }
@@ -1128,6 +1145,7 @@ impl TaskJournal {
             "kind": self.kind.as_deref(),
             "final_stop_signal": self.final_stop_signal.as_deref().map(crate::truncate_for_log),
             "final_failure_attribution": self.final_failure_attribution.as_deref(),
+            "latest_planner_conversation_relation": self.latest_planner_conversation_relation(),
             "rollout_switches_enabled": self.rollout_switches_enabled.clone(),
             "rollout_attribution": self
                 .rollout_attribution
@@ -1224,6 +1242,52 @@ impl TaskJournal {
             "trace": self.to_trace_json(),
         })
     }
+}
+
+fn runtime_managed_capabilities_for_step(
+    journal: &TaskJournal,
+    step_id: &str,
+    requested: Option<&RequestedPlanCapability>,
+) -> Vec<String> {
+    let Some(checkpoint) = journal.task_checkpoint.as_ref() else {
+        return Vec::new();
+    };
+    let terminal_status = checkpoint
+        .pointer("/boundary_context/async_job_terminal_observation/status")
+        .and_then(Value::as_str);
+    if !matches!(terminal_status, Some("succeeded" | "failed")) {
+        return Vec::new();
+    }
+    let Some(poll_action) = checkpoint
+        .pointer("/boundary_context/async_poll_adapter/args/action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|action| {
+            !action.is_empty()
+                && action
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric() || character == '_')
+        })
+    else {
+        return Vec::new();
+    };
+    let Some(result) = journal.capability_results.iter().find(|result| {
+        result.provenance.get("step_id").and_then(Value::as_str) == Some(step_id)
+            && result.provenance.get("source").and_then(Value::as_str)
+                == Some("async_job_completion_checkpoint")
+    }) else {
+        return Vec::new();
+    };
+    let capability = requested
+        .map(|requested| requested.capability.as_str())
+        .unwrap_or(result.capability.as_str());
+    let Some((namespace, _)) = capability.rsplit_once('.') else {
+        return Vec::new();
+    };
+    if namespace.is_empty() {
+        return Vec::new();
+    }
+    vec![format!("{namespace}.{poll_action}")]
 }
 
 pub(crate) fn delivery_payload_consistent(text: &str, messages: &[String]) -> bool {

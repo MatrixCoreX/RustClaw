@@ -1,4 +1,5 @@
 use super::*;
+use claw_core::channel_commands::CoreCommandAction;
 
 const WECHAT_BIND_REQUIRED_FOR_CHAT_KEY: &str = "wechat.msg.bind_key_required_for_chat";
 const WECHAT_BIND_HELP_KEY: &str = "wechat.msg.bind_help";
@@ -7,11 +8,23 @@ const WECHAT_PENDING_RESUME_STOPPED_KEY: &str = "wechat.msg.pending_resume_stopp
 const WECHAT_BIND_INVALID_KEY: &str = "wechat.msg.bind_invalid";
 const WECHAT_BIND_REQUEST_FAILED_KEY: &str = "wechat.msg.bind_request_failed";
 
-pub(super) fn is_unbound_allowed_command(text: &str) -> bool {
+fn channel_command_catalog() -> &'static ChannelCommandCatalog {
     static COMMAND_CATALOG: OnceLock<ChannelCommandCatalog> = OnceLock::new();
-    COMMAND_CATALOG
-        .get_or_init(ChannelCommandCatalog::default)
-        .allows_unbound_command(text, "wechat")
+    COMMAND_CATALOG.get_or_init(ChannelCommandCatalog::default)
+}
+
+pub(super) fn is_unbound_allowed_command(text: &str) -> bool {
+    channel_command_catalog().allows_unbound_command(text, "wechat")
+}
+
+pub(super) fn cancel_expected_task_id(text: &str) -> Option<Option<String>> {
+    channel_command_catalog()
+        .match_command(text, "wechat")
+        .filter(|command| command.definition.core_action() == Some(CoreCommandAction::Cancel))
+        .and_then(|command| {
+            claw_core::conversation_control::parse_cancel_expected_task_id(&command.tail)
+        })
+        .map(|task_id| task_id.map(|task_id| task_id.to_string()))
 }
 
 pub(super) fn extract_bind_key_candidate(text: &str, expect_key_reply: bool) -> Option<String> {
@@ -209,6 +222,7 @@ async fn store_pending_wechat_request(
         ChannelKind::Wechat,
         "wechat_ilink",
     )
+    .with_account_id(task_context.account.account_id.clone())
     .with_external_ids(from_user_id.to_string(), scoped_chat_id.clone())
     .with_message_id(message_id.to_string())
     .with_reply_target(claw_core::channel_ingress::ChannelReplyTarget::user(

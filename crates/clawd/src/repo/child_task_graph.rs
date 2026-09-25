@@ -800,11 +800,12 @@ pub(crate) fn terminate_parent_graph_children(
         return Ok(None);
     }
     let mut stmt = db.prepare(
-        "SELECT child_task_id, role, required
-         FROM child_task_graph_nodes
-         WHERE parent_task_id = ?1
-           AND readiness NOT IN ('succeeded', 'failed', 'timeout', 'canceled')
-         ORDER BY created_at, child_task_id",
+        "SELECT node.child_task_id, node.role, node.required, task.result_json
+         FROM child_task_graph_nodes AS node
+         JOIN tasks AS task ON task.task_id = node.child_task_id
+         WHERE node.parent_task_id = ?1
+           AND node.readiness NOT IN ('succeeded', 'failed', 'timeout', 'canceled')
+         ORDER BY node.created_at, node.child_task_id",
     )?;
     let unfinished = stmt
         .query_map(params![parent_task_id], |row| {
@@ -812,12 +813,14 @@ pub(crate) fn terminate_parent_graph_children(
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, bool>(2)?,
+                row.get::<_, Option<String>>(3)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
     drop(stmt);
-    for (child_task_id, role, required) in unfinished {
-        let result = json!({
+    let now_ts = now.parse::<i64>().unwrap_or_default();
+    for (child_task_id, role, required, raw_result_json) in unfinished {
+        let child_projection = json!({
             "schema_version": CHILD_TASK_GRAPH_SCHEMA_VERSION,
             "source": "child_task_graph",
             "status": "canceled",
@@ -835,12 +838,20 @@ pub(crate) fn terminate_parent_graph_children(
                 "finding_refs": [],
             }
         });
+        let result = super::task_admin::parent_terminal_child_cancel_result(
+            raw_result_json.as_deref(),
+            &child_projection,
+            graph_status,
+            now_ts,
+            state.skill_rt.cmd_terminate_grace_seconds,
+            state.worker.task_runtime_is_registered(&child_task_id),
+        );
         let task_changed = db.execute(
             "UPDATE tasks
-             SET status = 'canceled', result_json = ?2, error_text = NULL,
-                 lease_owner = NULL, lease_expires_at = 0, updated_at = ?3
+             SET status = 'canceled', result_json = ?2, error_text = ?3,
+                 lease_owner = NULL, lease_expires_at = 0, updated_at = ?4
              WHERE task_id = ?1 AND status IN ('queued', 'running')",
-            params![child_task_id, result.to_string(), now],
+            params![child_task_id, result.to_string(), graph_status, now],
         )?;
         if task_changed > 0 {
             state.worker.cancel_active_task(&child_task_id);

@@ -192,3 +192,50 @@ fn agent_loop_decision_envelope_schema_accepts_round_runtime_source() {
         .iter()
         .any(|value| value.as_str() == Some("planner_loop_runtime")));
 }
+
+#[test]
+fn planner_conversation_relation_is_preserved_in_round_envelope_and_journal() {
+    let plan = crate::PlanResult {
+        goal: "revise the current draft".to_string(),
+        missing_slots: Vec::new(),
+        needs_confirmation: false,
+        output_contract: None,
+        steps: vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "respond".to_string(),
+            skill: "respond".to_string(),
+            args: json!({
+                "content": "Revised draft",
+                "terminal_intent": "answer",
+                "conversation_relation": "amend_current"
+            }),
+            depends_on: Vec::new(),
+            why: String::new(),
+        }],
+        planner_notes: String::new(),
+        plan_kind: crate::PlanKind::Single,
+        raw_plan_text: String::new(),
+    };
+    let envelope = super::decision_envelope::agent_loop_round_plan_contract_envelope_json(&plan);
+    assert_eq!(
+        envelope
+            .get("conversation_relation")
+            .and_then(Value::as_str),
+        Some("amend_current")
+    );
+
+    let mut journal = TaskJournal::new("revise it");
+    journal.record_plan_result(&plan);
+    assert_eq!(
+        journal.latest_planner_conversation_relation().as_deref(),
+        Some("amend_current")
+    );
+    assert_eq!(
+        journal.to_summary_json()["latest_planner_conversation_relation"],
+        json!("amend_current")
+    );
+    assert_eq!(
+        journal.to_trace_json()["latest_planner_conversation_relation"],
+        json!("amend_current")
+    );
+}

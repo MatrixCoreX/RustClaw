@@ -436,6 +436,11 @@ pub(super) async fn query_task_status(
         .ok_or_else(|| anyhow!("{}", state.i18n.t("telegram.error.query_task_missing_data")))
 }
 
+pub(super) struct SubmittedTask {
+    pub(super) task_id: String,
+    pub(super) owns_terminal_delivery: bool,
+}
+
 pub(super) async fn submit_task_only(
     state: &BotState,
     user_id: i64,
@@ -443,7 +448,7 @@ pub(super) async fn submit_task_only(
     message_id: Option<String>,
     kind: TaskKind,
     mut payload: serde_json::Value,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<SubmittedTask> {
     if let Some(obj) = payload.as_object_mut() {
         obj.insert(
             "telegram_bot_name".to_string(),
@@ -480,6 +485,7 @@ pub(super) async fn submit_task_only(
                 ChannelKind::Telegram,
                 "telegram_bot",
             )
+            .with_account_id(state.bot_name.clone())
             .with_external_ids(user_id.to_string(), chat_id.to_string())
             .with_reply_target(claw_core::channel_ingress::ChannelReplyTarget::chat(
                 chat_id.to_string(),
@@ -510,23 +516,105 @@ pub(super) async fn submit_task_only(
         payload,
     };
 
-    let submit_url = format!("{}/v1/tasks", state.clawd_base_url);
+    let use_conversation_input = matches!(kind, TaskKind::Ask)
+        && message_id.is_some()
+        && (submit_req
+            .payload
+            .get("text")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|text| !text.trim().is_empty())
+            || submit_req
+                .ingress
+                .as_ref()
+                .is_some_and(|ingress| !ingress.attachments.is_empty()));
+    let submit_url = if use_conversation_input {
+        format!(
+            "{}/v1/conversation-inputs/client-task",
+            state.clawd_base_url
+        )
+    } else {
+        format!("{}/v1/tasks", state.clawd_base_url)
+    };
     debug!(
         "submit_task_only: url={} user_id={} chat_id={} kind={:?}",
         submit_url, user_id, chat_id, submit_req.kind
     );
-    let submit_resp =
-        maybe_with_user_key_header(state.client.post(&submit_url), user_key_header.as_deref())
-            .json(&submit_req)
-            .send()
-            .await
-            .context("submit task request failed")?;
+    let request = use_conversation_input.then(|| {
+        let text = submit_req
+            .payload
+            .get("text")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let provider_message_id = message_id.as_deref().unwrap_or_default();
+        ConversationInputClientTaskRequest::channel_text(
+            submit_req.clone(),
+            telegram_inbound_idempotency_key(&state.bot_name, chat_id, provider_message_id),
+            chat_id.to_string(),
+            "main",
+            ChannelKind::Telegram,
+            state.bot_name.clone(),
+            text,
+            ConversationInputSource {
+                provider_message_id: Some(provider_message_id.to_string()),
+                reply_to_message_id: None,
+                received_at_ts: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .ok()
+                    .map(|value| value.as_secs()),
+            },
+        )
+    });
+    let builder =
+        maybe_with_user_key_header(state.client.post(&submit_url), user_key_header.as_deref());
+    let submit_resp = if let Some(request) = request.as_ref() {
+        builder.json(request)
+    } else {
+        builder.json(&submit_req)
+    }
+    .send()
+    .await
+    .context("submit task request failed")?;
 
     if !submit_resp.status().is_success() {
         let status = submit_resp.status();
         let body = submit_resp.text().await.unwrap_or_default();
         let error = telegram_provider_http_error("submit_task", status, &body);
         return Err(anyhow!("{}", state.i18n.t(&error.message_key)));
+    }
+
+    if use_conversation_input {
+        let submit_body: ApiResponse<ConversationInputClientTaskReceipt> = submit_resp
+            .json()
+            .await
+            .context("decode conversation input response failed")?;
+        if !submit_body.ok {
+            let error = telegram_provider_invalid_response(
+                "submit_conversation_input",
+                submit_body
+                    .error
+                    .as_deref()
+                    .unwrap_or("application_rejected"),
+            );
+            return Err(anyhow!("{}", state.i18n.t(&error.message_key)));
+        }
+        let data = submit_body.data.ok_or_else(|| {
+            anyhow!(
+                "{}",
+                state.i18n.t("telegram.error.submit_task_missing_task_id")
+            )
+        })?;
+        let task_id = data.input.target_task_id.ok_or_else(|| {
+            anyhow!(
+                "{}",
+                state.i18n.t("telegram.error.submit_task_missing_task_id")
+            )
+        })?;
+        return Ok(SubmittedTask {
+            task_id: task_id.to_string(),
+            owns_terminal_delivery: data.handoff_state
+                == ConversationInputTaskHandoffState::TaskCreated,
+        });
     }
 
     let submit_body: ApiResponse<SubmitTaskResponse> = submit_resp
@@ -559,7 +647,10 @@ pub(super) async fn submit_task_only(
         "phase=submit_done user_id={} chat_id={} kind={:?} task_id={} payload_fp={}",
         user_id, chat_id, kind, task_id, payload_fp
     );
-    Ok(task_id.to_string())
+    Ok(SubmittedTask {
+        task_id: task_id.to_string(),
+        owns_terminal_delivery: true,
+    })
 }
 
 fn telegram_inbound_idempotency_key(bot_name: &str, chat_id: i64, message_id: &str) -> String {
@@ -599,44 +690,34 @@ mod idempotency_tests {
 
 pub(super) async fn cancel_tasks_for_chat(
     state: &BotState,
-    user_id: i64,
     chat_id: i64,
+    provider_message_id: i32,
+    expected_task_id: Option<String>,
 ) -> anyhow::Result<i64> {
-    let url = format!("{}/v1/tasks/cancel", state.clawd_base_url);
-    let payload = json!({
-        "user_id": user_id,
-        "chat_id": chat_id,
-    });
-    let resp = maybe_with_user_key_header(
-        state.client.post(&url),
-        bound_user_key_for_chat(state, chat_id).as_deref(),
+    let auth_key =
+        bound_user_key_for_chat(state, chat_id).context("telegram cancel identity is not bound")?;
+    let receipt = claw_core::conversation_control::cancel_current_conversation_task(
+        &state.client,
+        &state.clawd_base_url,
+        &auth_key,
+        &claw_core::conversation_control::CancelCurrentConversationTaskRequest {
+            schema_version: claw_core::conversation_control::CONVERSATION_CONTROL_SCHEMA_VERSION,
+            client_request_id: format!(
+                "telegram_cancel:{}:{chat_id}:{provider_message_id}",
+                state.bot_name
+            ),
+            scope: claw_core::conversation_input::ConversationInputScopeRef {
+                conversation_id: chat_id.to_string(),
+                agent_id: "main".to_string(),
+                channel: "telegram".to_string(),
+                channel_account_id: state.bot_name.clone(),
+            },
+            expected_task_id: expected_task_id
+                .as_deref()
+                .and_then(|task_id| task_id.parse().ok()),
+        },
     )
-    .json(&payload)
-    .send()
     .await
-    .context("request cancel tasks failed")?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        let error = telegram_provider_http_error("cancel_task", status, &body);
-        return Err(anyhow!("{}", state.i18n.t(&error.message_key)));
-    }
-
-    let body: ApiResponse<JsonValue> =
-        resp.json().await.context("decode cancel response failed")?;
-
-    if !body.ok {
-        let error = telegram_provider_invalid_response(
-            "cancel_task",
-            body.error.as_deref().unwrap_or("application_rejected"),
-        );
-        return Err(anyhow!("{}", state.i18n.t(&error.message_key)));
-    }
-
-    let canceled = body
-        .data
-        .and_then(|v| v.get("canceled").and_then(|n| n.as_i64()))
-        .unwrap_or(0);
-    Ok(canceled)
+    .context("cancel current telegram conversation task")?;
+    Ok(i64::try_from(receipt.canceled).unwrap_or(i64::MAX))
 }

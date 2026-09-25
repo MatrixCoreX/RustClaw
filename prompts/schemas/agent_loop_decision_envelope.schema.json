@@ -11,6 +11,7 @@
     "semantic_authority",
     "decision",
     "terminal_intent",
+    "conversation_relation",
     "control_intent",
     "control_reason_code",
     "reason_code",
@@ -51,6 +52,11 @@
       "type": "string",
       "enum": ["answer", "clarify", "cannot_proceed", "needs_confirmation", "continue"],
       "description": "Stable terminal/continuation intent derived from the planner-loop decision. This is machine state, not a rendered user reply."
+    },
+    "conversation_relation": {
+      "type": ["string", "null"],
+      "enum": ["continue_current", "amend_current", "start_followup", "side_reply", "clarify", null],
+      "description": "Planner-owned relation between a terminal response and the active conversational task; null for non-respond rounds."
     },
     "control_intent": {
       "type": "string",

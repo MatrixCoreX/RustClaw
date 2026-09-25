@@ -10,6 +10,7 @@ use crate::types::ChannelKind;
 #[test]
 fn envelope_round_trip_preserves_machine_owned_channel_context() {
     let mut envelope = ChannelIngressEnvelope::new(ChannelKind::Wechat, "wechat_ilink")
+        .with_account_id("wechat-account")
         .with_external_ids("wx-user", "wx-chat")
         .with_message_id("message-1")
         .with_reply_target(ChannelReplyTarget::user("wx-user"))
@@ -26,6 +27,7 @@ fn envelope_round_trip_preserves_machine_owned_channel_context() {
 
     let value = serde_json::to_value(&envelope).expect("serialize ingress envelope");
     assert_eq!(value["schema_version"], CHANNEL_INGRESS_SCHEMA_VERSION);
+    assert_eq!(value["account_id"], "wechat-account");
     assert_eq!(value["reply_target"]["kind"], "user");
     assert_eq!(value["attachments"][0]["path"], "data/inbox/image.jpg");
 

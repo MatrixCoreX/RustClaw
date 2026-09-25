@@ -29,7 +29,7 @@
 - `preview_retryable_failure_observation` - Return a synthetic no-mutation machine contract for a retryable tool failure, including the stable error, recovery, repeat-prevention, and bounded-attempt fields consumed by the planner.
 - `preview_repair_observation` - Return a synthetic no-mutation repair or failure-ownership envelope. Use `repair_kind=provider_external_blocker` when the required machine result is `failure_class=external_blocker`, `provider_blocker=true`, and explicit non-code/non-route attribution.
 - `preview_coding_repair` - Return a synthetic no-mutation coding-loop contract containing checkpoint, diff, failed verification, repair attempt, passing verification, and rewind references.
-- `bind_session_alias` - Return an exact structured `session_alias_bindings` update for a planner-selected `alias` and `target`; the runtime persists only this machine result and does not infer bindings from user-language phrases.
+- `bind_session_alias` - Return an exact structured `session_alias_bindings` update for a planner-selected shorthand and a distinct typed machine target. It is not a general memory action and must not store facts, markers, preferences, acknowledgement text, or a target equal to the alias. The runtime persists only this machine result and does not infer bindings from user-language phrases.
 - `resume` - Mark an existing checkpointed task due for recovery by stable `task_id`.
 - `pause` - Delay an existing waiting/background checkpoint by stable `task_id`.
 - Cancellation dry-runs are executable observations, not static prose: use `cancel_all` with `dry_run=true` when no specific index is supplied, or `cancel_one` with both `index` and `dry_run=true` when the user supplied a numbered task.
@@ -38,8 +38,9 @@
 | Param | Required | Type | Default | Description |
 |---|---|---|---|---|
 | `action` | yes | string | - | One of: `list`, `list_with_first_detail`, `get`, `cancel_all`, `cancel_one`, `preview_resume`, `preview_provider_failure`, `preview_retryable_failure_observation`, `preview_repair_observation`, `preview_coding_repair`, `bind_session_alias`, `resume`, `pause`. |
-| `alias` | required for `bind_session_alias` | string | - | Exact user-defined alias surface selected by the planner; maximum 256 characters. |
-| `target` | required for `bind_session_alias` | string | - | Concrete locator or stable target to retain for later turns; maximum 4096 characters. |
+| `alias` | required for `bind_session_alias` | string | - | Exact shorthand identifier explicitly assigned or reassigned by the current request; it must differ from `target`. Maximum 256 characters. |
+| `target` | required for `bind_session_alias` | string | - | Concrete typed machine locator to retain for later turns; maximum 4096 characters. |
+| `target_kind` | required for `bind_session_alias` | string | - | One of `path`, `url`, `task`, `artifact`, or `resource`. A resource target uses `namespace:identifier`. |
 | `failure_class` | required for `preview_provider_failure` | string | - | One canonical provider cause token: `timeout`, `transport_retryable`, `provider_retryable_response`, `rate_limited`, `quota_exhausted`, `provider_non_retryable_business`, or `local_non_retryable`. It is not the broad ownership-attribution class returned by `provider_external_blocker`. |
 | `repair_kind` | required for `preview_repair_observation` | string | - | One canonical repair shape: `missing_required_argument`, `bounded_repair_blocked`, or `provider_external_blocker`. |
 | `task_id` | required for `get`, `resume`, `pause` | string | - | Stable runtime task id, usually a UUID. |
@@ -68,8 +69,9 @@ Notes:
 - `preview_provider_failure` with a non-canonical token -> structured `status=unsupported_failure_class`.
 - `preview_repair_observation` without `repair_kind` -> structured `status=missing_repair_kind`.
 - `preview_repair_observation` with a non-canonical token -> structured `status=unsupported_repair_kind`.
-- `bind_session_alias` without `alias` or `target` -> `error_text=bind_session_alias_missing_alias|bind_session_alias_missing_target`.
+- `bind_session_alias` without `alias`, `target`, or `target_kind` -> `error_text=bind_session_alias_missing_alias|bind_session_alias_missing_target|bind_session_alias_missing_target_kind`.
 - `bind_session_alias` with an oversized value -> `error_text=bind_session_alias_value_too_long`.
+- `bind_session_alias` with equal alias/target, an unknown kind, or a target that does not match its machine kind -> `error_text=bind_session_alias_alias_equals_target|bind_session_alias_target_kind_invalid|bind_session_alias_target_invalid`.
 - Invalid index -> structured `clawd` API error propagated as `error_text`.
 - Missing/invalid auth for task APIs -> readable error text from `clawd` (for example unauthorized user or invalid user key).
 
@@ -78,12 +80,12 @@ Notes:
 
 Request:
 ```json
-{"request_id":"alias-1","args":{"action":"bind_session_alias","alias":"release note","target":"document/release.md"},"user_id":1,"chat_id":2}
+{"request_id":"alias-1","args":{"action":"bind_session_alias","alias":"release note","target":"document/release.md","target_kind":"path"},"user_id":1,"chat_id":2}
 ```
 
 Response text example:
 ```json
-{"schema_version":1,"action":"bind_session_alias","status":"ok","message_key":"task_control.bind_session_alias.ok","session_alias_bindings":[{"alias":"release note","target":"document/release.md"}],"field_value":{"action":"bind_session_alias","status":"ok","alias":"release note","target":"document/release.md"}}
+{"schema_version":1,"action":"bind_session_alias","status":"ok","message_key":"task_control.bind_session_alias.ok","session_alias_bindings":[{"alias":"release note","target":"document/release.md","target_kind":"path"}],"field_value":{"action":"bind_session_alias","status":"ok","alias":"release note","target":"document/release.md","target_kind":"path"}}
 ```
 
 ### list

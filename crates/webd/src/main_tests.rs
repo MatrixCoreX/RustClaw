@@ -227,7 +227,10 @@ fn web_session_key_overrides_client_key_and_preserves_ui_origin() {
     let mut incoming = HeaderMap::new();
     incoming.insert("x-agent-key", HeaderValue::from_static("client-key"));
     incoming.insert("x-agent-runtime-client", HeaderValue::from_static("ui"));
-    incoming.insert(claw_core::owner_gateway_context::HEADER, HeaderValue::from_static("forged"));
+    incoming.insert(
+        claw_core::owner_gateway_context::HEADER,
+        HeaderValue::from_static("forged"),
+    );
     incoming.insert("x-agent-owner-context", HeaderValue::from_static("forged"));
 
     let outgoing = build_outgoing_headers(
@@ -629,6 +632,26 @@ fn task_event_stream_uses_long_running_upstream_wait() {
     assert!(!uses_long_running_upstream_wait(
         &Method::GET,
         "/v1/tasks/nested/task/events"
+    ));
+}
+
+#[test]
+fn conversation_event_stream_uses_long_running_upstream_wait() {
+    assert!(uses_long_running_upstream_wait(
+        &Method::GET,
+        "/v1/conversations/thread-123/events"
+    ));
+    assert!(uses_long_running_upstream_wait(
+        &Method::GET,
+        "/v1/conversations/thread-123/events?cursor=17"
+    ));
+    assert!(!uses_long_running_upstream_wait(
+        &Method::POST,
+        "/v1/conversations/thread-123/events"
+    ));
+    assert!(!uses_long_running_upstream_wait(
+        &Method::GET,
+        "/v1/conversations/nested/thread/events"
     ));
 }
 

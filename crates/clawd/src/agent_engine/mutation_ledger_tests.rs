@@ -214,6 +214,62 @@ fn structured_pre_dispatch_failure_is_recorded_as_not_applied() {
 }
 
 #[test]
+fn workspace_occurrence_mismatch_is_recorded_as_not_applied() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = task_fixture();
+    insert_active_task_claim(&state, &task);
+    let outcome = prepare_mutation_execution(
+        &state,
+        &task,
+        "workspace_patch",
+        &serde_json::json!({
+            "action": "replace_text",
+            "path": "src/lib.rs",
+            "old_text": "old",
+            "new_text": "new",
+            "replace_all": true,
+            "expected_occurrences": 3
+        }),
+        "skill:workspace_patch:replace-text-mismatch",
+        crate::execution_recipe::ActionEffect::mutate(),
+    )
+    .expect("prepare mutation");
+    let MutationExecutionGuard::Acquired(lease) = outcome else {
+        panic!("expected acquired mutation");
+    };
+    let error = crate::skills::structured_skill_error_from_parts(
+        "workspace_patch",
+        "replacement_occurrence_mismatch",
+        "replacement occurrence mismatch",
+        None,
+        Some(serde_json::json!({
+            "retryable": true,
+            "failure_phase": "pre_dispatch",
+            "side_effect_applied": false,
+            "recovery_action": "replan_arguments"
+        })),
+    );
+
+    assert!(settle_verified_not_applied_mutation(&state, &lease, &error));
+    let db = state.core.db.get().expect("test db");
+    let (phase, reconciliation): (String, String) = db
+        .query_row(
+            "SELECT phase, reconciliation_json FROM task_mutation_ledger WHERE task_id = ?1 AND fingerprint_hash = ?2",
+            rusqlite::params![task.task_id, lease.record.fingerprint_hash],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("load reconciled mutation");
+    assert_eq!(phase, "intent_recorded");
+    let reconciliation: serde_json::Value =
+        serde_json::from_str(&reconciliation).expect("reconciliation json");
+    assert_eq!(reconciliation["disposition"], "not_applied");
+    assert_eq!(
+        reconciliation["reason_code"],
+        "replacement_occurrence_mismatch"
+    );
+}
+
+#[test]
 fn ordinary_mutation_error_does_not_claim_not_applied() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let task = task_fixture();

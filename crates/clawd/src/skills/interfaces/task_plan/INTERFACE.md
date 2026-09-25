@@ -24,6 +24,13 @@ database and is projected as data-only task evidence.
 
 Step status is one of `pending`, `in_progress`, `completed`, or `cancelled`.
 Step IDs are unique and stable. At most one step may be `in_progress`.
+Steps describe user-visible work, required effects, and required evidence.
+Capability discovery, catalog loading, plan bookkeeping, and runtime answer
+transport are not steps. Create the initial plan once. `update_steps` can only
+refer to IDs already present in the current snapshot; a changed requirement
+must retitle, cancel, or reuse an existing unfinished step rather than append an
+invented ID. Before the terminal response, complete an answer-preparation step
+when its candidate and required evidence are already ready.
 
 ## Response Contract
 

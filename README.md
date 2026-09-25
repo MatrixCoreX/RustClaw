@@ -72,8 +72,16 @@ Agent Runtime's main natural-language path uses a Codex / Claude style agent loo
 
 ```mermaid
 flowchart TD
-    A[Channel / UI / API request] --> B[POST /v1/tasks]
-    B --> BA[Authenticated task execution policy<br/>server-owned machine envelope]
+    A[Channel / UI / API request] --> B{Ingress kind}
+    B -->|ordinary conversation input| BI[POST /v1/conversation-inputs/client-task]
+    BI --> BJ[Persist input receipt<br/>scope + input_seq + idempotency]
+    BJ --> BK{Active conversation task?}
+    BK -->|yes| BL[Bind to the same task<br/>wake loop + interrupt stale model turn]
+    BK -->|no| BM[Atomically claim creation<br/>create one foreground ask task]
+    BL --> BA
+    BM --> BA
+    B -->|explicit task / automation / run_skill| BT[POST /v1/tasks]
+    BT --> BA[Authenticated task execution policy<br/>server-owned machine envelope]
     BA --> C[Persist task + queue]
     C --> D[Return task_id<br/>caller can poll]
     D --> E0[worker_once recovery tick<br/>stale running + due checkpoint]
@@ -134,11 +142,15 @@ flowchart TD
     Z -. optional .-> AC[Background memory refresh]
 ```
 
-- `POST /v1/tasks`: channel daemons, the browser UI, and HTTP callers converge on the same persisted task queue.
+- `POST /v1/conversation-inputs/client-task`: ordinary UI, CLI, and communication-channel messages first enter the durable conversation-input ledger. The receipt is authoritative even before a task is bound. An active task is steered through the same agent loop; an idle conversation atomically creates one foreground `ask` task.
+- `POST /v1/tasks`: remains the explicit task boundary for automation, direct skill execution, and callers that intentionally manage a standalone task.
 - `Authenticated task execution policy`: `clawcli` stays on the configured approval/sandbox policy unless an enabled admin key explicitly requests global `--yolo`. Other communication adapters authenticated with an enabled admin key default to YOLO. The server removes caller-supplied policy envelopes, reissues the machine contract after authentication, and revalidates the current admin key before each use. YOLO means `approval_policy=never` plus `sandbox_mode=danger_full`; it does not bypass registry allow/deny, schemas, path validation, external-publish controls, cancellation, budgets, redaction, or audit evidence.
 - `task_id polling`: API/channel request timeouts only affect how long the caller waits. The background task remains queryable through `GET /v1/tasks/{task_id}` unless worker lifecycle logic marks it terminal.
 - `worker_once recovery tick`: before claiming new queued work, the worker checks stale running tasks, protected paused checkpoints, due resume work, async poll results, and result projections.
 - `Task kind`: `kind=ask` enters the planner-owned natural-language path; `kind=run_skill` bypasses the planner loop, capability selection, and plan verifier, then calls the explicitly requested skill through the same shared skill dispatcher/protocol used by planner skill calls. Both task kinds persist results under the original `task_id`, so callers can still inspect final state through task query APIs.
+- `Live conversation input`: each accepted message has a stable `input_id`, monotonic `input_seq`, disposition, instruction revision, and execution epoch. The planner reads ready inputs in order. A committed decision advances the revision; tool dispatch and terminal presentation are fenced against stale revisions. The Agent composer defaults to updating the active task immediately; **Run later** persists an input without starting work and exposes explicit **Run now** and **Withdraw** controls. Explicit `/cancel` uses the authenticated current-conversation control endpoint and does not require a model call.
+- `Single-owner steering`: one planner owns a conversation task at a time. New ordinary input interrupts an in-flight read-only/model step when the adapter can stop safely; otherwise it is applied at the next dispatch boundary. The runtime does not start a second control planner beside an in-flight mutation. Long mutations use supervised async/checkpoint contracts, while explicit stop remains an out-of-band machine control.
+- `Cancellation settlement`: acceptance, stop request, adapter acknowledgement, and cleanup settlement are separate machine facts. Parent cancellation propagates to child tasks and process groups, but a task is not presented or delivered as cancelled until registered runtime cleanup has settled. Unknown external effects enter reconciliation instead of being reported as rolled back.
 
 ### Ask and Run Skill Boundary
 
@@ -634,6 +646,11 @@ Useful endpoints (send `X-Agent-Key` for the current UI/user key):
 - `POST /v1/admin/system-dependencies/install`: starts an allowlisted asynchronous
   install by fixed `dependency_id`; arbitrary commands and package names are rejected
 - `POST /v1/tasks`
+- `POST /v1/conversation-inputs/client-task`: durably accepts an ordinary message and either binds it to the current task or creates one task
+- `GET /v1/conversation-inputs`: recovers owner-scoped receipts by conversation cursor or `client_message_id`
+- `GET /v1/conversation-inputs/events`: reads lightweight receipt, binding, and disposition events
+- `POST /v1/conversation-inputs/{input_id}/activate|withdraw`: activates a deferred input or withdraws an unapplied input
+- `POST /v1/conversation-inputs/cancel-current`: idempotently requests cancellation of the authenticated conversation's current task, optionally guarded by an exact task UUID
 - `GET /v1/tasks/{task_id}`
 - `GET /v1/tasks/{task_id}/artifacts`: returns the authenticated task artifact manifest
 - `GET/HEAD /v1/tasks/{task_id}/artifacts/{artifact_id}/content`: previews,

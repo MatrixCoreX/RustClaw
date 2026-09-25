@@ -57,6 +57,42 @@ fn runtime_timeout_is_machine_readable_for_model_recovery() {
 }
 
 #[test]
+fn only_sync_read_only_mappings_allow_conversation_input_interrupts() {
+    let observe: PlannerCapabilityMapping = toml::from_str(
+        r#"
+name = "fixture.observe"
+effect = "observe"
+execution_mode = "sync_short"
+"#,
+    )
+    .expect("observe mapping");
+    let mutate: PlannerCapabilityMapping = toml::from_str(
+        r#"
+name = "fixture.mutate"
+effect = "mutate"
+execution_mode = "sync_short"
+"#,
+    )
+    .expect("mutate mapping");
+    let async_observe: PlannerCapabilityMapping = toml::from_str(
+        r#"
+name = "fixture.observe_async"
+effect = "observe"
+execution_mode = "async_preferred"
+async_adapter_kind = "http_job_poll"
+"#,
+    )
+    .expect("async observe mapping");
+
+    assert!(mapping_allows_conversation_input_interrupt(Some(&observe)));
+    assert!(!mapping_allows_conversation_input_interrupt(Some(&mutate)));
+    assert!(!mapping_allows_conversation_input_interrupt(Some(
+        &async_observe
+    )));
+    assert!(!mapping_allows_conversation_input_interrupt(None));
+}
+
+#[test]
 fn internal_nni_access_is_capability_driven() {
     let nni_mapping: PlannerCapabilityMapping = toml::from_str(
         r#"

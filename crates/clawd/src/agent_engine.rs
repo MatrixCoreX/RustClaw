@@ -10,6 +10,7 @@ mod async_completion_checkpoint;
 mod async_start_checkpoint;
 mod attempt_ledger;
 pub(crate) mod auto_review;
+mod capability_cancellation;
 mod capability_catalog;
 mod capability_discovery;
 mod capability_result_synthesis;
@@ -22,6 +23,7 @@ mod explicit_machine_command;
 pub(crate) mod loop_control;
 mod loop_state_contract_evidence;
 mod loop_state_seed;
+pub(crate) use loop_state_seed::session_alias_bindings_from_context_summary;
 mod media_artifact_plan;
 mod model_blocker_checkpoint;
 pub(crate) mod mutation_ledger;
@@ -53,6 +55,8 @@ pub(crate) use skill_execution::validate_skill_output_contract;
 mod skill_quick_index;
 mod subagent_runtime;
 mod support;
+#[cfg(test)]
+pub(crate) use support::persist_agent_loop_clarification_checkpoint;
 mod user_output_path;
 
 use self::arg_resolver::{
@@ -78,7 +82,10 @@ pub(crate) fn validate_skill_input_contract_for_runtime(
 }
 
 pub(crate) fn planner_internal_tool_is_visible(tool: &str) -> bool {
-    matches!(tool, "subagent" | "load_capability_groups")
+    matches!(
+        tool,
+        "subagent" | "load_capability_groups" | "control_active_turn"
+    )
 }
 
 pub(crate) fn planner_internal_tool_is_observe_only(tool: &str) -> bool {
@@ -306,6 +313,9 @@ pub(crate) struct LoopState {
     pub(crate) verified_action_window_active: bool,
     /// Private in-memory copy used only to persist the unexecuted suffix at an approval checkpoint.
     pub(crate) active_verified_actions: Vec<AgentAction>,
+    /// Planner-authored machine relation for each action in the current verified batch.
+    /// This is execution metadata only; it must never be inferred from response prose.
+    pub(crate) active_action_conversation_relations: Vec<Option<String>>,
     /// Machine boundary fact from AGENT_LOOP_BOUNDARY_OBSERVATIONS. This lets
     /// the loop accept a terminal clarification even when legacy IntentOutputContract
     /// fields were normalized back to an execution gate for planner entry.
@@ -314,6 +324,16 @@ pub(crate) struct LoopState {
     /// planner outputs may be terminal clarify/update turns instead of broken
     /// execution plans.
     pub(crate) pending_user_boundary_present: bool,
+    /// Latest follow-up conversation-input revision visible to the planner.
+    /// Zero means the task has not consumed an in-flight follow-up input.
+    pub(crate) conversation_input_revision: u64,
+    /// Durable execution authorization generation for the active conversation.
+    /// Tool/skill dispatch must claim this exact epoch before leaving the runtime.
+    pub(crate) conversation_execution_epoch: u64,
+    /// Exact host-owned execution pin for the one pending action restored from
+    /// an approval checkpoint. It is consumed once by the matching action and
+    /// never exposed to the planner or skill arguments.
+    pub(crate) checkpoint_action_replay: Option<Value>,
 }
 
 impl LoopState {

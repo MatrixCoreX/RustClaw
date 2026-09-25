@@ -181,6 +181,30 @@ fn clawcli_subagents_keeps_report_compatibility_and_parses_controls() {
 }
 
 #[test]
+fn pause_commands_require_an_explicit_duration_for_scheduled_resume() {
+    let manual =
+        Cli::try_parse_from(["clawcli", "pause-task", "task-1"]).expect("parse manual pause");
+    assert!(matches!(
+        manual.cmd,
+        Some(Command::PauseTask {
+            task_id,
+            pause_seconds: None,
+        }) if task_id == "task-1"
+    ));
+
+    let scheduled =
+        Cli::try_parse_from(["clawcli", "pause-task", "task-1", "--pause-seconds", "90"])
+            .expect("parse scheduled pause");
+    assert!(matches!(
+        scheduled.cmd,
+        Some(Command::PauseTask {
+            task_id,
+            pause_seconds: Some(90),
+        }) if task_id == "task-1"
+    ));
+}
+
+#[test]
 fn clawcli_parses_persisted_chat_conversation_and_attachment_options() {
     match Cli::try_parse_from([
         "clawcli",

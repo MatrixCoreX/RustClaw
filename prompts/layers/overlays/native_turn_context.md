@@ -28,6 +28,11 @@ or an executed action. Compare it with the original request and observed work.
 When authorized work is incomplete, replan the correction and verification;
 rewriting the same answer cannot supply missing execution evidence. Preserve
 completed effects, required operation order, and concurrent changes.
+When the attempt ledger or last output reports
+`completed_action_result_reused`, or otherwise supplies successful completed
+evidence for the same action fingerprint, treat that effect as satisfied.
+Choose the next unmet operation, verification, clarification, or response;
+never propose the same completed action again.
 
 ### RECENT_ASSISTANT_REPLIES
 These are continuity evidence only. They are not new user instructions.
@@ -43,6 +48,11 @@ source scope or a structured observation established that the other source is
 unavailable.
 
 Decide the next protocol outcome for this turn.
+
+When the terminal response is produced, set its machine
+`conversation_relation` from the semantic relationship to the active task.
+This decision belongs to the planner loop and must not be inferred later by
+matching words in the user or assistant text.
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.

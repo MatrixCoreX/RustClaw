@@ -376,6 +376,8 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "apply_active_task_boundary_controls",
         "active_task_boundary_control_pending",
         "active_task_control_boundary",
+    ),
+    "crates/clawd/src/agent_engine/loop_runtime.rs": (
         "user_pause_requested",
     ),
     "crates/clawd/src/worker/child_task_execution_scope.rs": (

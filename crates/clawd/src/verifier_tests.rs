@@ -1565,6 +1565,37 @@ fn enforce_mode_blocks_skill_not_visible() {
 }
 
 #[test]
+fn enforce_mode_accepts_runtime_native_active_turn_control() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            output_contract: Some(&route_result()),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_tool".to_string(),
+                skill: "control_active_turn".to_string(),
+                args: json!({"action": "pause", "expected_instruction_revision": 2}),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(!result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::SkillNotVisible)));
+}
+
+#[test]
 fn enforce_mode_allows_internal_subagent_tool_visibility() {
     let state = test_state();
     let task = test_task();
@@ -1920,3 +1951,6 @@ mod config_read_contract;
 
 #[path = "verifier_tests/admin_authority.rs"]
 mod admin_authority;
+
+#[path = "verifier_tests/session_alias.rs"]
+mod session_alias;

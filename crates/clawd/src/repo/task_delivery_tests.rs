@@ -26,6 +26,7 @@ fn delivery_record_preserves_terminal_payload_and_channel_route() {
             user_id INTEGER NOT NULL,
             chat_id INTEGER NOT NULL,
             user_key TEXT,
+            principal_id TEXT,
             channel TEXT NOT NULL,
             external_user_id TEXT,
             external_chat_id TEXT,
@@ -42,10 +43,10 @@ fn delivery_record_preserves_terminal_payload_and_channel_route() {
     .expect("create tasks table");
     db.execute(
         "INSERT INTO tasks (
-            task_id, user_id, chat_id, user_key, channel, external_user_id,
+            task_id, user_id, chat_id, user_key, principal_id, channel, external_user_id,
             external_chat_id, kind, payload_json, status, result_json,
             created_at, updated_at
-         ) VALUES (?1, 7, 9, 'user-key', 'telegram', '7', '9', 'ask', ?2,
+         ) VALUES (?1, 7, 9, 'user-key', 'principal-1', 'telegram', '7', '9', 'ask', ?2,
                    'succeeded', ?3, '1', '2')",
         params![task_id, payload.to_string(), result.to_string()],
     )
@@ -56,6 +57,7 @@ fn delivery_record_preserves_terminal_payload_and_channel_route() {
         .expect("load record")
         .expect("record");
     assert_eq!(record.status, "succeeded");
+    assert_eq!(record.owner_principal_id.as_deref(), Some("principal-1"));
     assert_eq!(record.task.external_chat_id.as_deref(), Some("9"));
     assert_eq!(record.result_json.as_ref().unwrap()["text"], "done");
     assert_eq!(

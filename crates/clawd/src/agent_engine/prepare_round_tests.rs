@@ -1,9 +1,42 @@
 use super::{
     execution_action_for_verified_step, planner_user_text, production_verify_mode,
-    verifier_confirmation_gate_requires_checkpoint, verifier_gate_missing_slots,
-    verifier_gate_needs_clarification, verifier_gate_requires_immediate_response,
-    verifier_gate_should_stop_round,
+    verified_action_conversation_relations, verifier_confirmation_gate_requires_checkpoint,
+    verifier_gate_missing_slots, verifier_gate_needs_clarification,
+    verifier_gate_requires_immediate_response, verifier_gate_should_stop_round,
 };
+
+#[test]
+fn verified_response_relation_is_kept_parallel_to_the_executable_batch() {
+    let respond = crate::PlanStep {
+        step_id: "reply".to_string(),
+        action_type: "respond".to_string(),
+        skill: "respond".to_string(),
+        args: serde_json::json!({
+            "content": "status",
+            "terminal_intent": "answer",
+            "conversation_relation": "side_reply"
+        }),
+        depends_on: Vec::new(),
+        why: String::new(),
+    };
+    let result = crate::verifier::VerifyResult {
+        mode: crate::verifier::VerifyMode::Enforce,
+        approved: true,
+        blocked_reason: None,
+        shadow_blocked_reason: None,
+        permission_decision: serde_json::json!({}),
+        approved_steps: vec![respond],
+        needs_confirmation: false,
+        rewritten_steps: Vec::new(),
+        issues: Vec::new(),
+        capability_resolutions: Vec::new(),
+    };
+
+    assert_eq!(
+        verified_action_conversation_relations(&result),
+        vec![Some("side_reply".to_string())]
+    );
+}
 
 #[test]
 fn verifier_failure_evidence_preserves_completed_steps_without_payloads() {
@@ -64,17 +97,19 @@ fn verifier_failure_evidence_preserves_completed_steps_without_payloads() {
 }
 
 #[test]
-fn planner_prefers_raw_current_request_over_pre_route_rewrite() {
+fn planner_uses_current_loop_input_instead_of_stale_start_snapshot() {
     let context = crate::agent_engine::AgentRunContext {
-        original_user_request: Some("raw current request".to_string()),
-        user_request: Some("pre-route semantic rewrite".to_string()),
+        original_user_request: Some("initial request".to_string()),
+        user_request: Some("initial request".to_string()),
         ..Default::default()
     };
-
-    assert_eq!(
-        planner_user_text(Some(&context), "fallback request"),
-        "raw current request"
+    let current = concat!(
+        "initial request\n\n",
+        "[conversation_input_batch]",
+        r#"{"kind":"conversation_input_batch","inputs":[{"input_seq":2}]}"#,
     );
+
+    assert_eq!(planner_user_text(Some(&context), current), current);
 }
 
 #[test]

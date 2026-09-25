@@ -1181,6 +1181,11 @@ pub(super) async fn execute_prepared_skill_action(
             action_trace_kind,
         );
     }
+    let pinned_runner_execution_binding = take_checkpoint_runner_execution_binding(
+        loop_state,
+        normalized_skill,
+        &pre_tool_use_evaluation.outcome.action_ref,
+    )?;
     info!(
         "{} executor_step_execute task_id={} round={} step={} type={} skill={} args={}",
         crate::highlight_tag("skill"),
@@ -1282,6 +1287,7 @@ pub(super) async fn execute_prepared_skill_action(
             let output_contract_validation = Arc::clone(&output_contract_validation);
             let exec_args_for_run = exec_args_for_run.clone();
             let mutation_execution_context = mutation_execution_context.clone();
+            let pinned_runner_execution_binding = pinned_runner_execution_binding.clone();
             let execute = async move {
                 if is_mcp_tool {
                     let (raw, extra) =
@@ -1298,6 +1304,7 @@ pub(super) async fn execute_prepared_skill_action(
                     normalized_skill,
                     exec_args_for_run,
                     mutation_execution_context.as_ref(),
+                    pinned_runner_execution_binding.as_ref(),
                 )
                 .await?;
                 if let Ok(mut slot) = structured_validation_slot.lock() {
@@ -1525,11 +1532,52 @@ pub(super) async fn execute_prepared_skill_action(
             Ok(outcome)
         }
         None => {
-            if !repo::is_task_claim_active(state, &task.task_id, task.claim_attempt).unwrap_or(true)
-            {
+            let err = step_execution.error.clone().unwrap_or_default();
+            if err == crate::llm_gateway::CONVERSATION_INPUT_INTERRUPTED_ERR {
+                let contract = super::capability_cancellation::cancellation_contract_for_execution(
+                    state,
+                    normalized_skill,
+                    classification_args,
+                    raw_action_effect.mutates,
+                );
+                let mut cancellation = contract.projection(
+                    normalized_skill,
+                    classification_args.get("action").and_then(Value::as_str),
+                );
+                if let Some(object) = cancellation.as_object_mut() {
+                    object.insert("trigger".to_string(), json!("conversation_input_interrupt"));
+                }
+                let _ = crate::task_event_transport::publish_claimed_event(
+                    state,
+                    task,
+                    "capability_cancellation",
+                    cancellation.clone(),
+                );
+                loop_state.task_observations.push(cancellation);
+                return Err(err);
+            }
+            let claim_active = repo::is_task_claim_active(state, &task.task_id, task.claim_attempt)
+                .unwrap_or(true);
+            if err == TASK_CANCELED_ERR || !claim_active {
+                let contract = super::capability_cancellation::cancellation_contract_for_execution(
+                    state,
+                    normalized_skill,
+                    classification_args,
+                    raw_action_effect.mutates,
+                );
+                let cancellation = contract.projection(
+                    normalized_skill,
+                    classification_args.get("action").and_then(Value::as_str),
+                );
+                let _ = crate::task_event_transport::publish_claimed_event(
+                    state,
+                    task,
+                    "capability_cancellation",
+                    cancellation.clone(),
+                );
+                loop_state.task_observations.push(cancellation);
                 return Err(TASK_CANCELED_ERR.to_string());
             }
-            let err = step_execution.error.clone().unwrap_or_default();
             let mutation_not_dispatched = mutation_guard.as_ref().is_some_and(|lease| {
                 super::mutation_ledger::settle_verified_not_applied_mutation(state, lease, &err)
             });
@@ -1666,6 +1714,38 @@ pub(super) async fn execute_prepared_skill_action(
             }
         }
     }
+}
+
+fn take_checkpoint_runner_execution_binding(
+    loop_state: &mut LoopState,
+    normalized_skill: &str,
+    action_ref: &str,
+) -> Result<Option<Value>, String> {
+    let Some(replay) = loop_state.checkpoint_action_replay.take() else {
+        return Ok(None);
+    };
+    if replay.get("tool_or_skill").and_then(Value::as_str) != Some(normalized_skill)
+        || replay.get("action_ref").and_then(Value::as_str) != Some(action_ref)
+    {
+        return Err("checkpoint_action_replay_target_mismatch".to_string());
+    }
+    let revision = replay
+        .get("instruction_revision")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "checkpoint_action_replay_revision_missing".to_string())?;
+    let epoch = replay
+        .get("execution_epoch")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "checkpoint_action_replay_epoch_missing".to_string())?;
+    if revision != loop_state.conversation_input_revision
+        || epoch != loop_state.conversation_execution_epoch
+    {
+        return Err("checkpoint_action_replay_conversation_version_changed".to_string());
+    }
+    Ok(replay
+        .pointer("/execution_binding/runner_execution_binding")
+        .filter(|value| value.is_object())
+        .cloned())
 }
 
 #[cfg(test)]

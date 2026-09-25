@@ -3,8 +3,8 @@
 --index-url https://pypi.org/simple
 --extra-index-url https://download.pytorch.org/whl/cpu
 
-aliyun-python-sdk-core==2.16.0 ; platform_machine != 'x86_64' or sys_platform != 'darwin' \
-    --hash=sha256:651caad597eb39d4fad6cf85133dffe92837d53bdf62db9d8f37dab6508bb8f9
+aliyun-python-sdk-core==2.16.1 ; platform_machine != 'x86_64' or sys_platform != 'darwin' \
+    --hash=sha256:0f25a6e8ec1ea29c76610278cff81cbff85149a6e692bf2398a6f9b77e5e7424
 aliyun-python-sdk-kms==2.16.5 ; platform_machine != 'x86_64' or sys_platform != 'darwin' \
     --hash=sha256:24b6cdc4fd161d2942619479c8d050c63ea9cd22b044fe33b60bbb60153786f0 \
     --hash=sha256:f328a8a19d83ecbb965ffce0ec1e9930755216d104638cd95ecd362753b813b3

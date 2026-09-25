@@ -1,9 +1,15 @@
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
+use claw_core::conversation_control::{
+    CancelCurrentConversationTaskRequest, CancelCurrentConversationTaskStatus,
+    CONVERSATION_CONTROL_SCHEMA_VERSION,
+};
+use claw_core::conversation_input::OwnedConversationInputScope;
 use claw_core::types::{ApiResponse, AuthIdentity};
 use serde::Deserialize;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use tracing::{error, info};
 
 use crate::AppState;
@@ -369,6 +375,113 @@ fn begin_route_mutation<'a>(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "task_mutation_receipt_claim_failed",
             ))
+        }
+    }
+}
+
+pub(super) async fn cancel_current_conversation_task(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(mut request): Json<CancelCurrentConversationTaskRequest>,
+) -> TaskAdminApiResponse {
+    let identity = match crate::require_auth_identity_for_api::<Value>(&state, &headers) {
+        Ok(identity) => identity,
+        Err(response) => return response,
+    };
+    if !request.validate() {
+        return super::api_err(
+            StatusCode::BAD_REQUEST,
+            "conversation_control_request_invalid",
+        );
+    }
+    let Some(agent_id) = state.normalize_known_agent_id(Some(&request.scope.agent_id)) else {
+        return super::api_err(StatusCode::BAD_REQUEST, "conversation_input_agent_unknown");
+    };
+    request.scope.agent_id = agent_id;
+    if crate::http::conversation_inputs::parse_channel(&request.scope.channel).is_none() {
+        return super::api_err(
+            StatusCode::BAD_REQUEST,
+            "conversation_input_channel_unknown",
+        );
+    }
+    let owned_scope = OwnedConversationInputScope {
+        owner_principal_id: identity.principal_id,
+        conversation: request.scope.clone(),
+    };
+    let scope_bytes = match serde_json::to_vec(&request.scope) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return super::api_err(
+                StatusCode::BAD_REQUEST,
+                "conversation_control_request_invalid",
+            )
+        }
+    };
+    let mutation_target = format!("conversation:{:x}", Sha256::digest(scope_bytes));
+    let mutation_payload = json!({
+        "schema_version": CONVERSATION_CONTROL_SCHEMA_VERSION,
+        "scope": request.scope,
+        "expected_task_id": request.expected_task_id,
+    });
+    let mutation = match begin_route_mutation(
+        &state,
+        &headers,
+        &request.client_request_id,
+        "cancel_current_conversation_task",
+        &mutation_target,
+        &mutation_payload,
+    ) {
+        Ok(RouteMutationStart::Guard(guard)) => guard,
+        Ok(RouteMutationStart::Replay(response)) | Err(response) => return response,
+    };
+    let selected_task_id = if let Some(explicit_task_id) = request.expected_task_id {
+        // An explicit machine task reference may target another conversation
+        // owned by the same authenticated principal. The authorization check
+        // below remains authoritative; an omitted reference is always scoped
+        // to the current conversation focus.
+        explicit_task_id
+    } else {
+        let active_task_id = match crate::repo::conversation_inputs::active_conversation_task(
+            &state.core.db,
+            &owned_scope,
+        ) {
+            Ok(task_id) => task_id,
+            Err(error) => {
+                error!(error = %error, "conversation_current_task_lookup_failed");
+                return super::api_err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "conversation_current_task_lookup_failed",
+                );
+            }
+        };
+        let Some(active_task_id) = active_task_id else {
+            return mutation.complete(super::api_ok(json!({
+                "schema_version": CONVERSATION_CONTROL_SCHEMA_VERSION,
+                "status": CancelCurrentConversationTaskStatus::NoActiveTask,
+                "task_id": null,
+                "canceled": 0,
+            })));
+        };
+        active_task_id
+    };
+    let task_id = selected_task_id.to_string();
+    if let Err(response) = authorized_task_admin_target_by_id(&state, &headers, &task_id) {
+        return response;
+    }
+    match crate::cancel_task_by_id(&state, &task_id) {
+        Ok(canceled) if canceled > 0 => mutation.complete(super::api_ok(json!({
+            "schema_version": CONVERSATION_CONTROL_SCHEMA_VERSION,
+            "status": CancelCurrentConversationTaskStatus::CancelRequested,
+            "task_id": selected_task_id,
+            "canceled": u64::try_from(canceled).unwrap_or_default(),
+        }))),
+        Ok(_) => super::api_err(StatusCode::CONFLICT, "task_not_active"),
+        Err(error) => {
+            error!(error = %error, "conversation_current_task_cancel_failed");
+            super::api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "conversation_current_task_cancel_failed",
+            )
         }
     }
 }
@@ -800,7 +913,12 @@ pub(super) async fn pause_task_by_id(
         Ok(target) => target,
         Err(resp) => return resp,
     };
-    let pause_seconds = req.pause_seconds.unwrap_or(3600);
+    let pause_seconds = req.pause_seconds;
+    let resume_policy = if pause_seconds.is_some() {
+        "scheduled"
+    } else {
+        "manual"
+    };
     let mutation = match begin_route_mutation(
         &state,
         &headers,
@@ -808,6 +926,7 @@ pub(super) async fn pause_task_by_id(
         "pause",
         &target.task_id,
         &json!({
+            "resume_policy": resume_policy,
             "pause_seconds": pause_seconds,
             "expected_control_seq": req.expected_control_seq,
         }),
@@ -831,6 +950,7 @@ pub(super) async fn pause_task_by_id(
             "checkpoint_id": update.checkpoint_id,
             "control_seq": update.control_seq,
             "control_status": update.control_status,
+            "resume_policy": resume_policy,
             "task_lifecycle": update.lifecycle,
         })),
         Ok(None) => super::api_err::<serde_json::Value>(StatusCode::CONFLICT, "task_not_pauseable"),

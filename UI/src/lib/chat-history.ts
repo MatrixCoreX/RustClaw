@@ -41,6 +41,9 @@ export function conversationHistoryStorageKey(scope: string): string {
 export interface ServerTeachingRunProjection {
   id: string;
   taskId: string;
+  conversationInputId?: string | null;
+  conversationInputClientMessageId?: string | null;
+  conversationInputRevision?: number | null;
   userMessageId: string;
   assistantMessageId: string | null;
   userText: string;
@@ -149,6 +152,45 @@ export async function verifyConversationHistoryPage(
       !validConversationBodyDescriptor(turn.assistant_text_result) ||
       !validConversationBodyDescriptor(turn.error_text_result) ||
       (turn.artifacts != null && !Array.isArray(turn.artifacts)) ||
+      (turn.conversation_inputs != null &&
+        (!Array.isArray(turn.conversation_inputs) ||
+          turn.conversation_inputs.some(
+            (input) =>
+              input.schema_version !== 1 ||
+              !machineRef(input.input_id) ||
+              !machineRef(input.client_message_id) ||
+              !Number.isSafeInteger(input.input_seq) ||
+              input.input_seq < 1 ||
+              typeof input.text !== "string" ||
+              ![
+                "pending",
+                "deferred",
+                "needs_clarification",
+                "applied",
+                "rejected",
+                "withdrawn",
+              ].includes(input.disposition) ||
+              !Number.isSafeInteger(input.instruction_revision) ||
+              !Number.isSafeInteger(input.accepted_at) ||
+              !Number.isSafeInteger(input.updated_at),
+          ))) ||
+      (turn.conversation_replies != null &&
+        (!Array.isArray(turn.conversation_replies) ||
+          turn.conversation_replies.some(
+            (reply) =>
+              reply.schema_version !== 1 ||
+              !machineRef(reply.reply_id) ||
+              (reply.input_id != null && !machineRef(reply.input_id)) ||
+              !["side_reply", "clarification"].includes(reply.relation) ||
+              !["accepted", "stop_requested", "settled"].includes(
+                reply.lifecycle_stage,
+              ) ||
+              typeof reply.text !== "string" ||
+              !reply.text.trim() ||
+              !Number.isSafeInteger(reply.instruction_revision) ||
+              !Number.isSafeInteger(reply.execution_epoch) ||
+              !Number.isSafeInteger(reply.created_at),
+          ))) ||
       !Number.isSafeInteger(turn.created_at) ||
       !Number.isSafeInteger(turn.updated_at)
     ) {
@@ -265,6 +307,104 @@ function projectThread(
       ts: startedAt,
       bodyResult: turn.user_text_result ?? null,
     });
+    const taskResult: TaskQueryResponse = {
+      task_id: turn.task_id,
+      status: turn.status,
+      result_json: turn.assistant_text
+        ? {
+            text: turn.assistant_text,
+            artifacts: normalizeTaskArtifacts(turn.artifacts),
+            artifact_delivery: turn.artifact_delivery,
+          }
+        : null,
+      error_text: turn.error_text ?? null,
+    };
+    const followupInputs = [...(turn.conversation_inputs ?? [])].sort(
+      (left, right) => left.input_seq - right.input_seq,
+    );
+    const followupInputIds = new Set(followupInputs.map((input) => input.input_id));
+    const replies = [...(turn.conversation_replies ?? [])].sort(
+      (left, right) =>
+        left.created_at - right.created_at || left.reply_id.localeCompare(right.reply_id),
+    );
+    const initialReplies = replies.filter(
+      (reply) => !reply.input_id || !followupInputIds.has(reply.input_id),
+    );
+    const latestInitialReply = initialReplies[initialReplies.length - 1] ?? null;
+    const initialAssistantMessageId = latestInitialReply
+      ? `conversation-${latestInitialReply.reply_id}`
+      : followupInputs.length === 0
+        ? assistantMessageId
+        : null;
+    const initialRun: ServerTeachingRunProjection = {
+      id: `teach-${turn.task_id}`,
+      taskId: turn.task_id,
+      conversationInputId: null,
+      conversationInputClientMessageId: null,
+      conversationInputRevision: null,
+      userMessageId,
+      assistantMessageId: initialAssistantMessageId,
+      userText,
+      assistantText: latestInitialReply?.text.trim() ||
+        (followupInputs.length === 0
+          ? turn.assistant_text?.trim() || turn.error_text?.trim() || null
+          : null),
+      status: turn.status,
+      startedAt,
+      completedAt,
+      taskResult,
+    };
+    teachingRuns.push(initialRun);
+    for (const reply of initialReplies) {
+      messages.push({
+        id: `conversation-${reply.reply_id}`,
+        role: "assistant",
+        text: reply.text,
+        ts: timestampMs(reply.created_at),
+      });
+    }
+    for (const input of followupInputs) {
+      const followupMessageId = `u-${input.input_id}`;
+      messages.push({
+        id: followupMessageId,
+        role: "user",
+        text: input.text,
+        ts: timestampMs(input.accepted_at),
+      });
+      const latest = input === followupInputs[followupInputs.length - 1];
+      const inputReplies = replies.filter((reply) => reply.input_id === input.input_id);
+      const latestInputReply = inputReplies[inputReplies.length - 1] ?? null;
+      teachingRuns.push({
+        id: `teach-${input.input_id}`,
+        taskId: turn.task_id,
+        conversationInputId: input.input_id,
+        conversationInputClientMessageId: input.client_message_id,
+        conversationInputRevision: input.instruction_revision,
+        userMessageId: followupMessageId,
+        assistantMessageId: latestInputReply
+          ? `conversation-${latestInputReply.reply_id}`
+          : latest
+            ? assistantMessageId
+            : null,
+        userText: input.text,
+        assistantText: latestInputReply?.text.trim() ||
+          (latest
+            ? turn.assistant_text?.trim() || turn.error_text?.trim() || null
+            : null),
+        status: turn.status,
+        startedAt: timestampMs(input.accepted_at),
+        completedAt,
+        taskResult,
+      });
+      for (const reply of inputReplies) {
+        messages.push({
+          id: `conversation-${reply.reply_id}`,
+          role: "assistant",
+          text: reply.text,
+          ts: timestampMs(reply.created_at),
+        });
+      }
+    }
     const assistantText = turn.assistant_text?.trim() || turn.error_text?.trim() || null;
     if (assistantMessageId && assistantText) {
       messages.push({
@@ -279,31 +419,9 @@ function projectThread(
           : (turn.error_text_result ?? null),
       });
     }
-    teachingRuns.push({
-      id: `teach-${turn.task_id}`,
-      taskId: turn.task_id,
-      userMessageId,
-      assistantMessageId,
-      userText,
-      assistantText,
-      status: turn.status,
-      startedAt,
-      completedAt,
-      taskResult: {
-        task_id: turn.task_id,
-        status: turn.status,
-        result_json: turn.assistant_text
-          ? {
-              text: turn.assistant_text,
-              artifacts: normalizeTaskArtifacts(turn.artifacts),
-              artifact_delivery: turn.artifact_delivery,
-            }
-          : null,
-        error_text: turn.error_text ?? null,
-      },
-    });
   }
   const firstUserText = teachingRuns[0]?.userText.trim() ?? "";
+  messages.sort((left, right) => left.ts - right.ts || left.id.localeCompare(right.id));
   const inferredTitle =
     firstUserText.length > 28 ? `${firstUserText.slice(0, 28)}...` : firstUserText;
   const customTitle = [...turns]

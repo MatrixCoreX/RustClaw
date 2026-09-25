@@ -10,6 +10,9 @@ pub(crate) mod child_task_control;
 pub(crate) mod child_task_graph;
 pub(crate) mod child_tasks;
 pub(crate) mod conversation_history;
+#[allow(dead_code)]
+pub(crate) mod conversation_inputs;
+pub(crate) mod conversation_reply_items;
 pub(crate) mod crypto_storage;
 pub(crate) mod pending_channel_requests;
 pub(crate) mod principal_ownership;
@@ -61,6 +64,12 @@ pub(crate) use channel_event_admission::{
 };
 pub(crate) use child_approval::fail_noninteractive_child_approval;
 pub(crate) use child_task_control::retry_child_task_with_revised_goal;
+pub(crate) use conversation_inputs::ensure_conversation_input_schema;
+pub(crate) use conversation_reply_items::{
+    claim_due_conversation_reply_delivery, ensure_conversation_reply_item_schema,
+    finish_conversation_reply_delivery, get_conversation_reply_item,
+    has_unsettled_conversation_reply_delivery, persist_nonterminal_reply_item,
+};
 #[cfg(test)]
 pub(crate) use crypto_storage::credential_context_for_user_key as crypto_credential_context_for_user_key;
 pub(crate) use pending_channel_requests::{
@@ -76,14 +85,14 @@ pub(crate) use submit::{
     task_count_by_status, task_count_by_status_for_user, task_kind_name, SubmitTaskAccessError,
     SubmitTaskContextError, SubmitTaskLimitError,
 };
-#[cfg(test)]
-pub(crate) use task_admin::pause_task_by_id;
 pub(crate) use task_admin::{
     cancel_child_tasks_for_parent, cancel_one_task_for_user_chat, cancel_task_by_id,
     cancel_tasks_for_user_chat, close_child_task_thread, get_task_admin_target,
-    pause_task_by_id_with_control, resume_task_with_input, steer_task_by_id, TaskAdminTarget,
-    TaskResumeControlInput,
+    pause_task_by_id_with_control, reconcile_cancelled_task_settlements, resume_task_with_input,
+    steer_task_by_id, TaskAdminTarget, TaskResumeControlInput,
 };
+#[cfg(test)]
+pub(crate) use task_admin::{pause_task_by_id, pause_task_until_resumed};
 pub(crate) use task_approval::{
     consume_task_approval_grant, decide_task_approval_request_for_actor,
     task_has_pending_approval_request, TaskApprovalConsumeOutcome,

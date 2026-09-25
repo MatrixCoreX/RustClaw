@@ -448,7 +448,7 @@ fn session_alias_bindings_for_loop_seed(
     bindings
 }
 
-pub(in crate::agent_engine) fn session_alias_bindings_from_context_summary(
+pub(crate) fn session_alias_bindings_from_context_summary(
     summary: &str,
 ) -> Vec<crate::conversation_state::SessionAliasBinding> {
     let mut out = session_alias_bindings_from_context_alias_block(summary);

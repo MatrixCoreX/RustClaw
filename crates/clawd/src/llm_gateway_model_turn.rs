@@ -75,6 +75,7 @@ pub(crate) async fn run_native_model_turn_with_fallback(
     let mut attempted_provider_count = 0_u64;
     let mut context_length_error_count = 0_u64;
     let model_event_index = Arc::new(AtomicU64::new(0));
+    let conversation_interrupt = state.worker.model_turn_interrupt_token(&task.task_id);
 
     for provider in routing_plan.providers {
         let provider_name = format!("{}:{}", provider.config.name, provider.config.model);
@@ -119,14 +120,60 @@ pub(crate) async fn run_native_model_turn_with_fallback(
                 publish_model_turn_event(&event_state, &event_task, &event_provider, index, &event);
                 presentation_observer.observe(&event);
             });
-        match crate::providers::call_model_turn_with_retry(
+        let provider_turn = crate::providers::call_model_turn_with_retry(
             provider.clone(),
             request,
             &hints,
             Some(event_sink),
-        )
-        .await
-        {
+        );
+        let provider_result = tokio::select! {
+            biased;
+            _ = conversation_interrupt.cancelled() => {
+                stop_llm_task_lease_heartbeat(&mut heartbeat_stop);
+                crate::assistant_presentation::abort_active_answer(
+                    state,
+                    task,
+                    super::CONVERSATION_INPUT_INTERRUPTED_ERR,
+                    "assistant.output.interrupted_by_new_input",
+                    true,
+                );
+                let _ = crate::task_event_transport::publish_claimed_event(
+                    state,
+                    task,
+                    "model_turn_interrupted",
+                    json!({
+                        "schema_version": 1,
+                        "reason_code": super::CONVERSATION_INPUT_INTERRUPTED_ERR,
+                        "logical_call_index": logical_call_index,
+                        "provider": provider_name,
+                        "usage_status": "unknown",
+                    }),
+                );
+                record_llm_cost(
+                    state,
+                    task,
+                    crate::providers::build_cost_record(
+                        logical_call_index,
+                        prompt_label,
+                        &provider.config.name,
+                        &provider.config.model,
+                        "interrupted",
+                        1,
+                        None,
+                        provider.pricing.as_ref(),
+                    ),
+                    prompt_source,
+                );
+                state.note_task_llm_elapsed_with_label(
+                    &task.task_id,
+                    prompt_label,
+                    call_started_at.elapsed().as_millis() as u64,
+                );
+                return Err(super::CONVERSATION_INPUT_INTERRUPTED_ERR.to_string());
+            }
+            result = provider_turn => result,
+        };
+        match provider_result {
             Ok(mut output) => {
                 provider
                     .latency

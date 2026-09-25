@@ -27,11 +27,8 @@ fn structured_respond_clarify_step_marks_loop_pending_user_input() {
     let outcome = apply_structured_respond_clarify_to_loop_state(&mut loop_state, &intent);
 
     assert!(loop_state.pending_user_input_required);
-    assert_eq!(loop_state.delivery_messages, vec![question.to_string()]);
-    assert_eq!(
-        loop_state.last_user_visible_respond.as_deref(),
-        Some(question)
-    );
+    assert!(loop_state.delivery_messages.is_empty());
+    assert!(loop_state.last_user_visible_respond.is_none());
     assert_eq!(outcome.executed_actions, 0);
     assert_eq!(
         outcome.stop_signal.as_deref(),
@@ -245,10 +242,7 @@ fn planner_locator_contract_does_not_recover_clarify_into_plan_file_read() {
         outcome.stop_signal.as_deref(),
         Some("structured_respond_clarify")
     );
-    assert_eq!(
-        loop_state.delivery_messages,
-        vec!["Which file should I read?".to_string()]
-    );
+    assert!(loop_state.delivery_messages.is_empty());
 }
 
 #[test]

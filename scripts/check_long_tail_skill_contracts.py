@@ -203,12 +203,36 @@ def check_run_cmd_async_contract(skills_by_name: dict[str, dict[str, Any]]) -> l
     return findings
 
 
-def check_dry_run_restricted_to_x(skills_by_name: dict[str, dict[str, Any]]) -> list[str]:
+def check_dry_run_contract(skills_by_name: dict[str, dict[str, Any]]) -> list[str]:
     findings: list[str] = []
     for skill_name, skill in skills_by_name.items():
-        serialized = repr(skill)
-        if skill_name != "x" and "dry_run" in serialized:
-            findings.append(f"{skill_name}: dry_run is reserved for x")
+        properties = input_properties(skill)
+        dry_run_schema = properties.get("dry_run")
+        capabilities = [
+            capability
+            for capability in skill.get("planner_capabilities") or []
+            if isinstance(capability, dict)
+            and "dry_run"
+            in (required_tokens(capability) | optional_tokens(capability))
+        ]
+        if dry_run_schema is None:
+            if capabilities:
+                findings.append(
+                    f"{skill_name}: planner capability references dry_run but input_schema omits it"
+                )
+            continue
+        if not isinstance(dry_run_schema, dict) or dry_run_schema.get("type") != "boolean":
+            findings.append(f"{skill_name}: dry_run must be a boolean input property")
+        if not capabilities:
+            findings.append(
+                f"{skill_name}: input_schema dry_run has no planner capability contract"
+            )
+        for capability in capabilities:
+            if skill_name != "x" and capability.get("effect") not in {"mutate", "external"}:
+                name = capability.get("name", "<unknown>")
+                findings.append(
+                    f"{skill_name}.{name}: dry_run is allowed only for mutation/external effects"
+                )
     x_skill = skills_by_name.get("x")
     if not x_skill:
         findings.append("x: missing registry skill entry")
@@ -371,7 +395,7 @@ def check_registry(path: Path) -> tuple[int, list[str]]:
         check_timeouts(skills)
         + check_capability_execution_modes(skills)
         + check_run_cmd_async_contract(skills_by_name)
-        + check_dry_run_restricted_to_x(skills_by_name)
+        + check_dry_run_contract(skills_by_name)
         + check_media_preview_contract(skills_by_name)
         + check_video_poll_contract(skills_by_name)
         + check_pollable_media_contracts(skills_by_name)
@@ -466,11 +490,11 @@ def run_self_test() -> int:
         },
         "x": {"input_schema": {"properties": {"dry_run": {"type": "boolean"}}}},
     }
-    dry_run_findings = check_dry_run_restricted_to_x(bad_media)
+    dry_run_findings = check_dry_run_contract(bad_media)
     preview_findings = check_media_preview_contract(bad_media)
     pollable_findings = check_pollable_media_contracts(bad_media)
     expected_tokens = {
-        "dry_run is reserved for x",
+        "input_schema dry_run has no planner capability contract",
         "missing image.preview_generate capability",
         "execution_mode must be async",
         "missing image.poll capability",

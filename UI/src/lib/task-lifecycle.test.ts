@@ -304,4 +304,8 @@ test("live tracking stops for user input but continues for background work", () 
     true,
   );
   assert.equal(shouldTrackTaskLive("succeeded", "completed", { state: "succeeded" }), false);
+  assert.equal(
+    shouldTrackTaskLive("canceled", "waiting", { state: "cancel_requested" }),
+    true,
+  );
 });

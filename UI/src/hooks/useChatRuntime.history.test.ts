@@ -11,6 +11,7 @@ import {
   type ChatThreadState,
 } from "./useChatRuntime";
 import type { ServerChatThreadProjection } from "../lib/chat-history";
+import { projectConversationHistory } from "../lib/chat-history";
 
 const t = (zh: string, _en: string) => zh;
 
@@ -31,6 +32,10 @@ function thread(id: string, status: "queued" | "running" | "succeeded"): ChatThr
       {
         id: `run-${id}`,
         taskId: status === "succeeded" ? `task-${id}` : `pending-${id}`,
+        conversationInputId: status === "running" ? `input-${id}` : null,
+        conversationInputClientMessageId:
+          status === "running" ? `ui:${id}:message` : null,
+        conversationInputRevision: status === "running" ? 3 : null,
         userMessageId: `u-${id}`,
         userText: id,
         status,
@@ -64,6 +69,8 @@ test("identity cache restores every local thread and the selected conversation",
     assert.deepEqual(restored.threads.map((item) => item.id), ["draft", "running"]);
     assert.equal(restored.threads[0].input, "尚未发送的内容");
     assert.ok(threadHasPendingTask(restored.threads[1]));
+    assert.equal(restored.threads[1].teachingRuns?.[0].conversationInputId, "input-running");
+    assert.equal(restored.threads[1].teachingRuns?.[0].conversationInputRevision, 3);
   } finally {
     Object.defineProperty(globalThis, "window", {
       configurable: true,
@@ -217,6 +224,92 @@ test("server restore replaces local optimistic messages for the same task", () =
   assert.deepEqual(
     merged.threads[0].messages.map((message) => message.id),
     ["u-task-same-task", "a-task-same-task"],
+  );
+});
+
+test("server restore keeps ordered followups as distinct teaching turns", () => {
+  const projected = projectConversationHistory(
+    [
+      {
+        schema_version: 1,
+        status: "ok",
+        turns: [
+          {
+            schema_version: 1,
+            conversation_id: "thread-followups",
+            agent_id: "main",
+            external_chat_id: "ui-thread-followups",
+            conversation_title: null,
+            task_id: "task-followups",
+            status: "succeeded",
+            user_text: "Start the task",
+            assistant_text: "The amended task completed",
+            error_text: null,
+            user_text_result: null,
+            assistant_text_result: null,
+            error_text_result: null,
+            attachment_count: 0,
+            attachment_kinds: [],
+            artifacts: [],
+            artifact_delivery: null,
+            created_at: 100,
+            updated_at: 140,
+            conversation_inputs: [
+              {
+                schema_version: 1,
+                input_id: "input-followup-1",
+                client_message_id: "client-followup-1",
+                input_seq: 1,
+                text: "Apply the first amendment",
+                disposition: "applied",
+                decision_ref: "continue_or_amend",
+                instruction_revision: 1,
+                accepted_at: 110,
+                updated_at: 111,
+              },
+              {
+                schema_version: 1,
+                input_id: "input-followup-2",
+                client_message_id: "client-followup-2",
+                input_seq: 2,
+                text: "Use the revised constraint",
+                disposition: "applied",
+                decision_ref: "respond",
+                instruction_revision: 2,
+                accepted_at: 120,
+                updated_at: 121,
+              },
+            ],
+          },
+        ],
+        next_cursor: null,
+        truncated: false,
+        content_sha256: "0".repeat(64),
+      },
+    ],
+    t,
+  );
+
+  assert.deepEqual(
+    projected[0].messages.map((message) => [message.role, message.text]),
+    [
+      ["user", "Start the task"],
+      ["user", "Apply the first amendment"],
+      ["user", "Use the revised constraint"],
+      ["assistant", "The amended task completed"],
+    ],
+  );
+  assert.deepEqual(
+    projected[0].teachingRuns.map((run) => [
+      run.conversationInputId,
+      run.conversationInputRevision,
+      run.assistantMessageId,
+    ]),
+    [
+      [null, null, null],
+      ["input-followup-1", 1, null],
+      ["input-followup-2", 2, "a-task-followups"],
+    ],
   );
 });
 

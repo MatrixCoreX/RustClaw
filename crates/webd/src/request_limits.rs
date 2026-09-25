@@ -359,7 +359,22 @@ pub(super) fn classify_request(method: &Method, path: &str) -> RequestClass {
     if is_task_event_stream(method, path) {
         return RequestClass::Sse;
     }
-    if *method == Method::POST && path == "/v1/tasks" {
+    if *method == Method::POST
+        && (matches!(
+            path,
+            "/v1/tasks"
+                | "/v1/conversation-inputs"
+                | "/v1/conversation-inputs/client-task"
+                | "/v1/conversation-inputs/cancel-current"
+        ) || path
+            .strip_prefix("/v1/conversation-inputs/")
+            .and_then(|suffix| {
+                suffix
+                    .strip_suffix("/withdraw")
+                    .or_else(|| suffix.strip_suffix("/activate"))
+            })
+            .is_some_and(|input_id| !input_id.is_empty() && !input_id.contains('/')))
+    {
         return RequestClass::TaskSubmit;
     }
     if method_is_mutating(method) && is_upload_path(path) {
@@ -378,6 +393,15 @@ fn method_is_mutating(method: &Method) -> bool {
 fn is_task_event_stream(method: &Method, path: &str) -> bool {
     if *method != Method::GET {
         return false;
+    }
+    if path
+        .strip_prefix("/v1/conversations/")
+        .and_then(|suffix| suffix.strip_suffix("/events"))
+        .is_some_and(|conversation_id| {
+            !conversation_id.is_empty() && !conversation_id.contains('/')
+        })
+    {
+        return true;
     }
     path.strip_prefix("/v1/tasks/")
         .and_then(|suffix| suffix.strip_suffix("/events"))

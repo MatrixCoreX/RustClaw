@@ -49,6 +49,8 @@ pub struct ChannelIngressEnvelope {
     pub channel: ChannelKind,
     pub adapter: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bound_user_id: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conversation_chat_id: Option<i64>,
@@ -83,6 +85,7 @@ impl ChannelIngressEnvelope {
             schema_version: CHANNEL_INGRESS_SCHEMA_VERSION,
             channel,
             adapter: adapter.into(),
+            account_id: None,
             bound_user_id: None,
             conversation_chat_id: None,
             external_user_id: None,
@@ -96,6 +99,11 @@ impl ChannelIngressEnvelope {
             attachments: Vec::new(),
             context_token: None,
         }
+    }
+
+    pub fn with_account_id(mut self, account_id: impl Into<String>) -> Self {
+        self.account_id = Some(account_id.into());
+        self
     }
 
     pub fn with_external_ids(

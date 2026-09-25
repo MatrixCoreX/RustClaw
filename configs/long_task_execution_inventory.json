@@ -1762,7 +1762,7 @@
       "isolation_profile": "local_current_workspace",
       "progress_contract": "poll_status",
       "skill": "image_vision",
-      "timeout_seconds": 90
+      "timeout_seconds": 120
     },
     {
       "adapter_kind": "media_job_poll",
@@ -1771,7 +1771,7 @@
       "isolation_profile": "local_current_workspace",
       "progress_contract": "poll_status",
       "skill": "image_vision",
-      "timeout_seconds": 90
+      "timeout_seconds": 120
     },
     {
       "adapter_kind": "media_job_poll",
@@ -1780,7 +1780,7 @@
       "isolation_profile": "local_current_workspace",
       "progress_contract": "poll_status",
       "skill": "image_vision",
-      "timeout_seconds": 90
+      "timeout_seconds": 120
     },
     {
       "adapter_kind": "media_job_poll",
@@ -1789,7 +1789,7 @@
       "isolation_profile": "local_current_workspace",
       "progress_contract": "poll_status",
       "skill": "image_vision",
-      "timeout_seconds": 90
+      "timeout_seconds": 120
     },
     {
       "adapter_kind": "media_job_poll",
@@ -1798,7 +1798,7 @@
       "isolation_profile": "local_current_workspace",
       "progress_contract": "poll_status",
       "skill": "image_vision",
-      "timeout_seconds": 90
+      "timeout_seconds": 120
     },
     {
       "adapter_kind": "media_job_poll",
@@ -1807,7 +1807,7 @@
       "isolation_profile": "local_current_workspace",
       "progress_contract": "poll_status",
       "skill": "image_vision",
-      "timeout_seconds": 90
+      "timeout_seconds": 120
     },
     {
       "adapter_kind": "local_process_poll",
@@ -2006,6 +2006,15 @@
       "progress_contract": "native_progress",
       "skill": "media_discovery",
       "timeout_seconds": 15
+    },
+    {
+      "adapter_kind": null,
+      "capability": "media_discovery.clear_results",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "native_progress",
+      "skill": "media_discovery",
+      "timeout_seconds": 30
     },
     {
       "adapter_kind": null,
@@ -3235,7 +3244,7 @@
       "adapter_kind": null,
       "capability": "session.bind_alias",
       "execution_mode": "sync_short",
-      "isolation_profile": "read_only",
+      "isolation_profile": "local_current_workspace",
       "progress_contract": "not_long_tail",
       "skill": "task_control",
       "timeout_seconds": 30
@@ -3554,14 +3563,14 @@
     "configs/agent_guard.toml"
   ],
   "summary": {
-    "capability_count": 394,
+    "capability_count": 395,
     "execution_modes": {
       "async_preferred": 72,
       "async_required": 9,
-      "sync_short": 313
+      "sync_short": 314
     },
     "progress_contracts": {
-      "native_progress": 49,
+      "native_progress": 50,
       "not_long_tail": 284,
       "poll_status": 61
     },

@@ -12,9 +12,13 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Router;
 use claw_core::channel_chunk::{chunk_text_for_channel, SEGMENT_PREFIX_MAX_CHARS};
-use claw_core::channel_commands::ChannelCommandCatalog;
+use claw_core::channel_commands::{ChannelCommandCatalog, CoreCommandAction};
 use claw_core::channel_i18n::{text_from_path, text_with_vars_from_path};
 use claw_core::config::AppConfig;
+use claw_core::conversation_input::{
+    ConversationInputClientTaskReceipt, ConversationInputClientTaskRequest,
+    ConversationInputSource, ConversationInputTaskHandoffState,
+};
 use claw_core::types::{
     ApiResponse, AuthIdentity, BindChannelKeyRequest, BindChannelKeyResponse, ChannelKind,
     PendingChannelRequestStatus, PendingChannelRequestStoreRequest, ResolveChannelBindingRequest,
@@ -507,6 +511,7 @@ async fn store_pending_whatsapp_request(
         ChannelKind::Whatsapp,
         "whatsapp_cloud",
     )
+    .with_account_id(state.phone_number_id.clone())
     .with_external_ids(msg.from.clone(), msg.from.clone())
     .with_message_id(msg.id.clone())
     .with_received_at_ts(now_ts())
@@ -732,6 +737,44 @@ async fn handle_claimed_inbound_message(state: &AppState, msg: WaMessage) -> any
     let user_id = identity.user_id;
     let chat_id = user_id;
 
+    let cancel_expected_task_id = state
+        .command_catalog
+        .match_command(&inbound_text, "whatsapp")
+        .filter(|command| command.definition.core_action() == Some(CoreCommandAction::Cancel))
+        .and_then(|command| {
+            claw_core::conversation_control::parse_cancel_expected_task_id(&command.tail)
+        });
+    if let Some(expected_task_id) = cancel_expected_task_id {
+        let request = claw_core::conversation_control::CancelCurrentConversationTaskRequest {
+            schema_version: claw_core::conversation_control::CONVERSATION_CONTROL_SCHEMA_VERSION,
+            client_request_id: format!("whatsapp_cancel:{}:{}", msg.id, msg.from),
+            scope: claw_core::conversation_input::ConversationInputScopeRef {
+                conversation_id: msg.from.clone(),
+                agent_id: "main".to_string(),
+                channel: "whatsapp".to_string(),
+                channel_account_id: state.phone_number_id.clone(),
+            },
+            expected_task_id,
+        };
+        let message_key = match claw_core::conversation_control::cancel_current_conversation_task(
+            &state.client,
+            &state.clawd_base_url,
+            &identity.user_key,
+            &request,
+        )
+        .await
+        {
+            Ok(receipt) => claw_core::conversation_control::cancel_receipt_message_key(&receipt),
+            Err(error) => {
+                warn!(error = %error, "whatsapp current task cancellation failed");
+                claw_core::conversation_control::CANCEL_FAILED_MESSAGE_KEY
+            }
+        };
+        let reply = claw_core::channel_i18n::common_text_for_locale(&state.language, message_key);
+        send_whatsapp_text(state, &msg.from, &reply).await?;
+        return Ok(());
+    }
+
     match msg.message_type.as_str() {
         "text" => {
             let text = msg.text.map(|v| v.body).unwrap_or_default();
@@ -739,7 +782,7 @@ async fn handle_claimed_inbound_message(state: &AppState, msg: WaMessage) -> any
                 return Ok(());
             }
             let payload = json!({ "text": text.trim() });
-            let task_id = submit_task_only(
+            let submitted = submit_task_only(
                 state,
                 user_id,
                 chat_id,
@@ -749,9 +792,17 @@ async fn handle_claimed_inbound_message(state: &AppState, msg: WaMessage) -> any
                 payload,
             )
             .await?;
-            let delivered = try_deliver_quick_result(state, &msg.from, &task_id, None).await?;
-            if !delivered {
-                spawn_task_result_delivery(state.clone(), msg.from.clone(), task_id, None);
+            if submitted.owns_terminal_delivery {
+                let delivered =
+                    try_deliver_quick_result(state, &msg.from, &submitted.task_id, None).await?;
+                if !delivered {
+                    spawn_task_result_delivery(
+                        state.clone(),
+                        msg.from.clone(),
+                        submitted.task_id,
+                        None,
+                    );
+                }
             }
         }
         "image" => {
@@ -813,7 +864,7 @@ async fn handle_image_message(
             "size": size,
         }]
     });
-    let task_id = submit_task_only(
+    let submitted = submit_task_only(
         state,
         user_id,
         chat_id,
@@ -823,9 +874,11 @@ async fn handle_image_message(
         payload,
     )
     .await?;
-    let delivered = try_deliver_quick_result(state, wa_id, &task_id, None).await?;
-    if !delivered {
-        spawn_task_result_delivery(state.clone(), wa_id.to_string(), task_id, None);
+    if submitted.owns_terminal_delivery {
+        let delivered = try_deliver_quick_result(state, wa_id, &submitted.task_id, None).await?;
+        if !delivered {
+            spawn_task_result_delivery(state.clone(), wa_id.to_string(), submitted.task_id, None);
+        }
     }
     Ok(())
 }
@@ -860,7 +913,7 @@ async fn handle_audio_message(
             "size": size,
         }]
     });
-    let task_id = submit_task_only(
+    let submitted = submit_task_only(
         state,
         user_id,
         chat_id,
@@ -870,9 +923,17 @@ async fn handle_audio_message(
         payload,
     )
     .await?;
-    let delivered = try_deliver_quick_result(state, wa_id, &task_id, Some(120)).await?;
-    if !delivered {
-        spawn_task_result_delivery(state.clone(), wa_id.to_string(), task_id, Some(120));
+    if submitted.owns_terminal_delivery {
+        let delivered =
+            try_deliver_quick_result(state, wa_id, &submitted.task_id, Some(120)).await?;
+        if !delivered {
+            spawn_task_result_delivery(
+                state.clone(),
+                wa_id.to_string(),
+                submitted.task_id,
+                Some(120),
+            );
+        }
     }
     Ok(())
 }
@@ -957,6 +1018,11 @@ async fn download_whatsapp_media(
     Ok(bytes.len() as u64)
 }
 
+struct SubmittedTask {
+    task_id: String,
+    owns_terminal_delivery: bool,
+}
+
 async fn submit_task_only(
     state: &AppState,
     user_id: i64,
@@ -965,7 +1031,7 @@ async fn submit_task_only(
     message_id: Option<&str>,
     kind: TaskKind,
     payload: Value,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<SubmittedTask> {
     let user_key = state
         .bound_identity_by_user
         .lock()
@@ -990,6 +1056,7 @@ async fn submit_task_only(
                 ChannelKind::Whatsapp,
                 "whatsapp_cloud",
             )
+            .with_account_id(state.phone_number_id.clone())
             .with_external_ids(wa_id.to_string(), wa_id.to_string())
             .with_received_at_ts(now_ts())
             .with_reply_target(claw_core::channel_ingress::ChannelReplyTarget::user(
@@ -1015,18 +1082,85 @@ async fn submit_task_only(
         kind,
         payload,
     };
-    let url = format!("{}/v1/tasks", state.clawd_base_url);
-    let resp = state
-        .client
-        .post(&url)
-        .json(&req)
-        .send()
-        .await
-        .context("submit task request failed")?;
+    let use_conversation_input = matches!(req.kind, TaskKind::Ask)
+        && message_id.is_some()
+        && (req
+            .payload
+            .get("text")
+            .and_then(Value::as_str)
+            .is_some_and(|text| !text.trim().is_empty())
+            || req
+                .ingress
+                .as_ref()
+                .is_some_and(|ingress| !ingress.attachments.is_empty()));
+    let url = if use_conversation_input {
+        format!(
+            "{}/v1/conversation-inputs/client-task",
+            state.clawd_base_url
+        )
+    } else {
+        format!("{}/v1/tasks", state.clawd_base_url)
+    };
+    let conversation_request = use_conversation_input.then(|| {
+        let text = req
+            .payload
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let provider_message_id = message_id.unwrap_or_default();
+        ConversationInputClientTaskRequest::channel_text(
+            req.clone(),
+            format!("whatsapp_cloud:{provider_message_id}"),
+            wa_id,
+            "main",
+            ChannelKind::Whatsapp,
+            state.phone_number_id.clone(),
+            text,
+            ConversationInputSource {
+                provider_message_id: Some(provider_message_id.to_string()),
+                reply_to_message_id: None,
+                received_at_ts: Some(now_ts()),
+            },
+        )
+    });
+    let builder = state.client.post(&url);
+    let resp = if let Some(conversation_request) = conversation_request.as_ref() {
+        builder.json(conversation_request)
+    } else {
+        builder.json(&req)
+    }
+    .send()
+    .await
+    .context("submit task request failed")?;
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
         return Err(whatsapp_provider_http_error("submit_task", status, &body));
+    }
+    if use_conversation_input {
+        let body: ApiResponse<ConversationInputClientTaskReceipt> = resp
+            .json()
+            .await
+            .context("decode conversation input response failed")?;
+        if !body.ok {
+            return Err(whatsapp_provider_invalid_response(
+                "submit_conversation_input",
+                body.error.as_deref().unwrap_or("application_rejected"),
+            ));
+        }
+        let data = body
+            .data
+            .ok_or_else(|| anyhow!("submit conversation input missing receipt"))?;
+        let task_id = data
+            .input
+            .target_task_id
+            .ok_or_else(|| anyhow!("submit conversation input missing task_id"))?;
+        return Ok(SubmittedTask {
+            task_id: task_id.to_string(),
+            owns_terminal_delivery: data.handoff_state
+                == ConversationInputTaskHandoffState::TaskCreated,
+        });
     }
     let body: ApiResponse<SubmitTaskResponse> = resp
         .json()
@@ -1050,7 +1184,10 @@ async fn submit_task_only(
             );
         }
     }
-    Ok(task_id.to_string())
+    Ok(SubmittedTask {
+        task_id: task_id.to_string(),
+        owns_terminal_delivery: true,
+    })
 }
 
 async fn query_task_status(

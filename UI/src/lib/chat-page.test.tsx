@@ -163,6 +163,37 @@ test("keeps the send button aligned while allowing the shorter input to grow ver
   assert.match(markup, /theme-accent-btn chat-send-btn min-h-12 min-w-16.*self-stretch.*sm:min-h-\[72px\]/);
 });
 
+test("labels busy attachment submissions as live updates instead of queued work", () => {
+  const pageProps = props();
+  pageProps.chatSending = true;
+  pageProps.chatAttachments = [
+    {
+      kind: "file",
+      name: "requirements.txt",
+      mimeType: "text/plain",
+      size: 12,
+      dataUrl: "data:text/plain;base64,Zm9vPT0xLjAK",
+    },
+  ];
+
+  const markup = renderToStaticMarkup(<ChatPage {...pageProps} />);
+
+  assert.match(markup, />补充<\/button>/);
+  assert.doesNotMatch(markup, />排队<\/button>/);
+});
+
+test("keeps a machine-control stop action available beside live message handling", () => {
+  const pageProps = props();
+  pageProps.chatSending = true;
+  pageProps.chatCanStop = true;
+
+  const markup = renderToStaticMarkup(<ChatPage {...pageProps} />);
+
+  assert.match(markup, />停止任务<\/button>/);
+  assert.match(markup, /title="停止当前任务并等待安全收尾"/);
+  assert.doesNotMatch(markup, /停止任务<\/button[^>]*disabled/);
+});
+
 test("keeps the composer visible while scrolling only the chat interaction", () => {
   const markup = renderToStaticMarkup(<ChatPage {...props()} />);
 
@@ -318,23 +349,56 @@ test("updates request numbers and removes progress after completion or a task sw
   }
 });
 
-test("busy tasks keep send and attachment controls enabled, with a removable queue above the composer", async () => {
+test("busy tasks keep live-update and attachment controls enabled without a browser execution queue", async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const pageProps = props();
-  const removed: string[] = [];
   let renderer!: ReactTestRenderer;
-  await act(() => { renderer = create(<ChatPage {...pageProps} chatSending chatWorking chatInput="next"
-    chatQueuedMessages={[{ id: "queued-1", threadId: "thread-1", text: "follow up", attachments: ["note.txt"], status: "queued" }]}
-    onRemoveQueuedMessage={id => removed.push(id)} />); });
+  await act(() => { renderer = create(<ChatPage {...pageProps} chatSending chatWorking chatInput="next" />); });
   try {
     const send = renderer.root.findAllByType("button").find(button => button.props.className?.includes("chat-send-btn"))!;
     assert.equal(send.props.disabled, false);
-    assert.ok(send.children.includes("排队"));
+    assert.ok(send.children.includes("补充"));
     const upload = renderer.root.findAllByType("button").find(button => button.children.includes("上传图片/文件"))!;
     assert.equal(upload.props.disabled, false);
     const history = renderer.root.findByProps({ "data-testid": "chat-message-list" });
     assert.equal(history.findAllByProps({ "data-testid": "chat-message-queue" }).length, 0);
-    await act(() => renderer.root.findByProps({ "aria-label": "移除待发送消息" }).props.onClick());
-    assert.deepEqual(removed, ["queued-1"]);
   } finally { await act(() => renderer.unmount()); }
+});
+
+test("offers an explicit defer mode and durable deferred-message actions", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const pageProps = props();
+  const modes: string[] = [];
+  const activated: string[] = [];
+  const withdrawn: string[] = [];
+  pageProps.chatDeliveryMode = "defer";
+  pageProps.chatInput = "later";
+  pageProps.chatDeferredInputs = [{
+    inputId: "input-later",
+    text: "review this after the current task",
+    attachmentNames: [],
+    acceptedAt: 1,
+  }];
+  pageProps.onChatDeliveryModeChange = mode => modes.push(mode);
+  pageProps.onActivateDeferredInput = inputId => activated.push(inputId);
+  pageProps.onWithdrawDeferredInput = inputId => withdrawn.push(inputId);
+  let renderer!: ReactTestRenderer;
+  await act(() => { renderer = create(<ChatPage {...pageProps} />); });
+  try {
+    assert.equal(renderer.root.findByProps({ "data-testid": "chat-deferred-inputs" }) !== null, true);
+    const runLater = renderer.root.findByProps({ "aria-pressed": true });
+    assert.ok(runLater.children.includes("稍后处理"));
+    const send = renderer.root.findAllByType("button").find(button => button.props.className?.includes("chat-send-btn"))!;
+    assert.ok(send.children.includes("延后"));
+    const modeGroup = renderer.root.findByProps({ role: "group", "aria-label": "消息处理方式" });
+    await act(() => modeGroup.findAllByType("button").find(button => button.props["aria-pressed"] === false)!.props.onClick());
+    assert.deepEqual(modes, ["auto"]);
+    const deferredPanel = renderer.root.findByProps({ "data-testid": "chat-deferred-inputs" });
+    await act(() => deferredPanel.findAllByType("button").find(button => button.children.includes("立即处理"))!.props.onClick());
+    await act(() => deferredPanel.findAllByType("button").find(button => button.children.includes("撤回"))!.props.onClick());
+    assert.deepEqual(activated, ["input-later"]);
+    assert.deepEqual(withdrawn, ["input-later"]);
+  } finally {
+    await act(() => renderer.unmount());
+  }
 });

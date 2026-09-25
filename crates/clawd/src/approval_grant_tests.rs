@@ -82,6 +82,29 @@ fn approval_binding_is_stable_across_json_object_key_order() {
 }
 
 #[test]
+fn approval_binding_changes_when_registry_generation_changes() {
+    let state = test_state();
+    let action = step(json!({"path":"notes.txt","content":"alpha"}));
+    let ids = vec!["step-1".to_string()];
+    let before = binding_for_confirmation_steps(&state, &[action.clone()], &ids)
+        .expect("binding before registry change");
+
+    let mut snapshot = SkillViewsSnapshot::default();
+    snapshot.binding.registry_generation = 2;
+    snapshot.binding.registry_generation_digest = Some("sha256:generation-2".to_string());
+    *state
+        .core
+        .skill_views_snapshot
+        .write()
+        .expect("skill snapshot lock") = Arc::new(snapshot);
+
+    let after = binding_for_confirmation_steps(&state, &[action], &ids)
+        .expect("binding after registry change");
+    assert_eq!(before.action_fingerprint, after.action_fingerprint);
+    assert_ne!(before.arguments_hash, after.arguments_hash);
+}
+
+#[test]
 fn approval_binding_changes_when_arguments_change() {
     let state = test_state();
     let ids = vec!["step-1".to_string()];

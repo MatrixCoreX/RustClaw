@@ -69,9 +69,13 @@ impl EnvFileSecretsBroker {
         name: &str,
     ) -> Result<Option<(SecretValue, SecretProtectionSource)>, SecretsError> {
         validate_secret_name(name)?;
-        if let Some(vendor) = name.strip_prefix("text_").and_then(|v| v.strip_suffix("_api_key")) {
+        if let Some(vendor) = name
+            .strip_prefix("text_")
+            .and_then(|v| v.strip_suffix("_api_key"))
+        {
             if let Some(value) = super::model_environment::lookup_at(
-                &self.path.with_file_name("models.env"), vendor,
+                &self.path.with_file_name("models.env"),
+                vendor,
             )? {
                 return Ok(Some((value, SecretProtectionSource::EnvironmentFile)));
             }
