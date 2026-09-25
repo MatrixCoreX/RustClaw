@@ -534,7 +534,13 @@ export function latestTeachingRun(thread: ChatThreadRecord): ChatTeachingRunReco
 export function buildChatTeachingRunSummaries(thread: ChatThreadRecord): ChatTeachingRunSummary[] {
   const activeId = selectedTeachingRun(thread)?.id ?? null;
   return [...(thread.teachingRuns ?? [])]
-    .sort((left, right) => right.startedAt - left.startedAt)
+    .sort(
+      (left, right) =>
+        right.startedAt - left.startedAt ||
+        (right.conversationInputRevision ?? -1) -
+          (left.conversationInputRevision ?? -1) ||
+        right.id.localeCompare(left.id),
+    )
     .map((run) => ({
       id: run.id,
       taskId: run.taskId ?? null,
