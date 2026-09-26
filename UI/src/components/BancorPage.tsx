@@ -1444,7 +1444,94 @@ function BancorFormulaCard({ t, market }: { t: Translate; market: BancorRuntime[
           "⌊ ⌋ rounds down to the smallest unit. AIC and USD both use eight decimal places. Larger trades have a greater effect on the reserve ratio and execution price.",
         )}
       </p>
+      <BancorLiquidityPolicyExplanation t={t} policy={market?.activation_fund_liquidity} />
     </section>
+  );
+}
+
+export function BancorLiquidityPolicyExplanation({
+  t,
+  policy,
+}: {
+  t: Translate;
+  policy: NonNullable<BancorRuntime["market"]>["activation_fund_liquidity"];
+}) {
+  const interval = policy
+    ? policy.interval_seconds % 60 === 0
+      ? t(`${policy.interval_seconds / 60} 分钟`, `${policy.interval_seconds / 60} minutes`)
+      : t(`${policy.interval_seconds} 秒`, `${policy.interval_seconds} seconds`)
+    : null;
+  return (
+    <div
+      className="mt-5 border-t border-white/8 pt-4"
+      data-bancor-liquidity-policy={policy?.strategy ?? "unavailable"}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wide text-emerald-300/70">
+            {t("资金池", "Funding account")}
+          </p>
+          <h3 className="mt-1 text-base font-semibold text-white">
+            {t("动态注入算法", "Dynamic injection algorithm")}
+          </h3>
+        </div>
+        {interval ? (
+          <span className="rounded-md border border-white/8 bg-white/[0.035] px-2 py-1 text-xs text-white/45">
+            {t("检查间隔", "Check interval")}：{interval}
+          </span>
+        ) : null}
+      </div>
+      {policy?.strategy === "dynamic_balance_v1" ? (
+        <>
+          <p className="mt-3 text-xs leading-5 text-white/50">
+            {t(
+              "系统比较 Bancor 的 USD 储备和资金池余额。储备低于目标且超出死区时，差距越大，注入比例会在上下限之间平滑提高；接近目标时自动减慢或停止。",
+              "The system compares the Bancor USD reserve with the funding-account balance. When the reserve is below target and outside the deadband, a larger gap raises the injection rate smoothly within its configured bounds; the rate slows or stops near target.",
+            )}
+          </p>
+          <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-5">
+            {[
+              [t("最低比例", "Minimum rate"), `${policy.min_percentage}%`],
+              [t("最高比例", "Maximum rate"), `${policy.max_percentage}%`],
+              [t("目标占比", "Target share"), `${policy.target_bancor_share_percentage}%`],
+              [t("平衡死区", "Deadband"), `${policy.deadband_percentage}%`],
+              [t("单次池增幅上限", "Pool step cap"), `${policy.max_bancor_step_percentage}%`],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-lg border border-white/8 bg-white/[0.025] px-3 py-2">
+                <p className="text-white/40">{label}</p>
+                <p className="mt-1 font-mono font-semibold text-white/75">{value}</p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 overflow-x-auto rounded-lg border border-white/8 bg-black/10 px-3 py-3 font-mono text-xs leading-6 text-sky-100/80" role="math">
+            <p className="whitespace-nowrap">T = (B + F) × S</p>
+            <p className="whitespace-nowrap">G = max(T − B, 0)</p>
+            <p className="whitespace-nowrap">r = rₘᵢₙ + (rₘₐₓ − rₘᵢₙ) × clamp((G / T − d) / (1 − d), 0, 1)</p>
+            <p className="whitespace-nowrap">A = min(F × r, G, B × c)</p>
+          </div>
+          <p className="mt-2 text-xs leading-5 text-white/40">
+            {t(
+              "B 是 Bancor USD 储备，F 是资金池余额，S 是目标占比，d 是死区，c 是单次池增幅上限。最终金额同时不能超过按比例计算的金额、目标缺口和单次上限；全部按 8 位小数的最小单位向下取整。这是直接增加储备，不产生交易、手续费或 AIC 流动。",
+              "B is the Bancor USD reserve, F is the funding-account balance, S is the target share, d is the deadband, and c is the per-step pool cap. The final amount cannot exceed the rate amount, target gap, or step cap, and is rounded down at eight-decimal precision. This directly adds reserves and creates no trade, fee, or AIC movement.",
+            )}
+          </p>
+        </>
+      ) : policy?.strategy === "fixed_v1" ? (
+        <p className="mt-3 text-xs leading-5 text-white/50">
+          {t(
+            `当前节点仍按固定比例运行：每次注入资金池余额的 ${policy.percentage}%。`,
+            `This node still uses a fixed rate: ${policy.percentage}% of the funding-account balance per run.`,
+          )}
+        </p>
+      ) : (
+        <p className="mt-3 text-xs leading-5 text-white/45">
+          {t(
+            "当前节点尚未返回注入策略参数；升级节点后会在这里显示实际生效的上下限与平衡目标。",
+            "This node has not returned its injection policy yet. After upgrading it, the active bounds and balance target will appear here.",
+          )}
+        </p>
+      )}
+    </div>
   );
 }
 

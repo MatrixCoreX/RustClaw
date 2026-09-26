@@ -70,7 +70,51 @@ fn validate_bancor_market_response(data: &Value) -> Result<(), &'static str> {
     if change <= -100.0 {
         return Err("nni_bancor_market_contract_invalid");
     }
+    if let Some(policy) = object.get("activation_fund_liquidity") {
+        validate_bancor_liquidity_policy(policy)?;
+    }
     Ok(())
+}
+
+fn validate_bancor_liquidity_policy(policy: &Value) -> Result<(), &'static str> {
+    let policy = policy
+        .as_object()
+        .ok_or("nni_bancor_market_contract_invalid")?;
+    if policy.get("schema_version").and_then(Value::as_u64) != Some(1)
+        || policy.get("enabled").and_then(Value::as_bool).is_none()
+        || policy
+            .get("interval_seconds")
+            .and_then(Value::as_u64)
+            .is_none_or(|value| value == 0)
+    {
+        return Err("nni_bancor_market_contract_invalid");
+    }
+    let valid_percentage = |field: &str, allow_zero: bool, upper_exclusive: bool| {
+        finite_decimal(policy, field).is_ok_and(|value| {
+            (allow_zero || value > 0.0)
+                && value >= 0.0
+                && if upper_exclusive { value < 100.0 } else { value <= 100.0 }
+        })
+    };
+    match policy.get("strategy").and_then(Value::as_str) {
+        Some("fixed_v1") if valid_percentage("percentage", false, false) => Ok(()),
+        Some("dynamic_balance_v1") => {
+            let minimum = finite_decimal(policy, "min_percentage")?;
+            let maximum = finite_decimal(policy, "max_percentage")?;
+            if minimum <= 0.0
+                || maximum < minimum
+                || maximum > 100.0
+                || !valid_percentage("target_bancor_share_percentage", false, false)
+                || !valid_percentage("deadband_percentage", true, true)
+                || !valid_percentage("max_bancor_step_percentage", false, false)
+            {
+                Err("nni_bancor_market_contract_invalid")
+            } else {
+                Ok(())
+            }
+        }
+        _ => Err("nni_bancor_market_contract_invalid"),
+    }
 }
 
 fn positive_decimal(
@@ -1574,6 +1618,17 @@ mod nni_bancor_unit_tests {
                 "change_percent": "0.20",
                 "trade_count": 3,
             },
+            "activation_fund_liquidity": {
+                "schema_version": 1,
+                "enabled": true,
+                "strategy": "dynamic_balance_v1",
+                "interval_seconds": 600,
+                "min_percentage": "0.1",
+                "max_percentage": "1",
+                "target_bancor_share_percentage": "50",
+                "deadband_percentage": "1",
+                "max_bancor_step_percentage": "2",
+            },
             "fee_bps": 50,
             "version": 3,
             "updated_at_unix": 1_800_000_000,
@@ -1594,6 +1649,13 @@ mod nni_bancor_unit_tests {
             Value::String("-100.00".to_string());
         assert_eq!(
             validate_bancor_market_response(&inconsistent),
+            Err("nni_bancor_market_contract_invalid"),
+        );
+        let mut invalid_policy = valid.clone();
+        invalid_policy["activation_fund_liquidity"]["max_percentage"] =
+            Value::String("0.01".to_string());
+        assert_eq!(
+            validate_bancor_market_response(&invalid_policy),
             Err("nni_bancor_market_contract_invalid"),
         );
     }

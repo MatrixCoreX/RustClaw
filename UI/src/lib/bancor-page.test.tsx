@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   BANCOR_CANDLE_INTERVALS,
+  BancorLiquidityPolicyExplanation,
   BancorPage,
   BancorQuoteDialog,
   BancorSwapTradePanel,
@@ -52,6 +53,17 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
       usd_reserve_units: "1000000000000",
       usd_reserve: "10000.00000000",
       activation_fund: { usd_balance_units: "86764255082", usd_balance: "867.64255082" },
+      activation_fund_liquidity: {
+        schema_version: 1 as const,
+        enabled: true,
+        strategy: "dynamic_balance_v1" as const,
+        interval_seconds: 600,
+        min_percentage: "0.1",
+        max_percentage: "1",
+        target_bancor_share_percentage: "50",
+        deadband_percentage: "1",
+        max_bancor_step_percentage: "2",
+      },
       marginal_price_usd_per_aic: "0.00010000",
       daily_marginal_price: {
         price_kind: "pool_marginal_usd_per_aic" as const,
@@ -205,6 +217,12 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.doesNotMatch(fundRow, /border-t|pt-2|break-all|mt-1 block/);
   assert.match(fundRow, /class="whitespace-nowrap font-semibold text-white"/);
   assert.match(html, /资金池余额/);
+  assert.match(html, /data-bancor-liquidity-policy="dynamic_balance_v1"/);
+  assert.match(html, /动态注入算法/);
+  assert.match(html, /最低比例/);
+  assert.match(html, /0\.1%/);
+  assert.match(html, /目标占比/);
+  assert.match(html, /A = min\(F × r, G, B × c\)/);
   assert.match(html, /data-nni-decimal-amount="867\.64255082 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
   for (const [activationFund, expected] of [
     [undefined, "Unavailable"],
@@ -478,6 +496,24 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.doesNotMatch(html, /1200\.00000000 AIC|336\.00000000 AIC|0\.03340000 USD/);
   assert.match(html, /grid gap-5 lg:grid-cols-2 lg:items-start/);
   assert.ok(html.indexOf("储备曲线交易公式") > html.indexOf("我的成交记录"));
+});
+
+test("BANCOR liquidity explanation handles old and unavailable Core policies", () => {
+  const fixed = renderToStaticMarkup(
+    <BancorLiquidityPolicyExplanation
+      t={(zh) => zh}
+      policy={{ schema_version: 1, enabled: true, strategy: "fixed_v1",
+        interval_seconds: 600, percentage: "0.1" }}
+    />,
+  );
+  assert.match(fixed, /data-bancor-liquidity-policy="fixed_v1"/);
+  assert.match(fixed, /固定比例运行/);
+  assert.match(fixed, /0\.1%/);
+  const unavailable = renderToStaticMarkup(
+    <BancorLiquidityPolicyExplanation t={(zh) => zh} policy={undefined} />,
+  );
+  assert.match(unavailable, /data-bancor-liquidity-policy="unavailable"/);
+  assert.match(unavailable, /尚未返回注入策略参数/);
 });
 
 test("BANCOR trade layout persists through the product-neutral storage key", () => {

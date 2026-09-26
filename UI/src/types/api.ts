@@ -1558,6 +1558,22 @@ export interface NniRewardsResponse {
   records: NniRewardRecord[];
 }
 
+export type NniActivationFundLiquidityPolicy = {
+  schema_version: 1;
+  enabled: boolean;
+  interval_seconds: number;
+} & ({
+  strategy: "fixed_v1";
+  percentage: string;
+} | {
+  strategy: "dynamic_balance_v1";
+  min_percentage: string;
+  max_percentage: string;
+  target_bancor_share_percentage: string;
+  deadband_percentage: string;
+  max_bancor_step_percentage: string;
+});
+
 export interface NniBancorMarketResponse {
   schema_version: 1;
   status: "open" | "disabled" | "paused";
@@ -1574,6 +1590,7 @@ export interface NniBancorMarketResponse {
     usd_balance_units: string;
     usd_balance: string;
   } | null;
+  activation_fund_liquidity?: NniActivationFundLiquidityPolicy;
   marginal_price_usd_per_aic: string;
   daily_marginal_price: {
     price_kind: "pool_marginal_usd_per_aic";
