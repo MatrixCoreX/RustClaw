@@ -222,6 +222,8 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /最低比例/);
   assert.match(html, /0\.1%/);
   assert.match(html, /目标占比/);
+  assert.match(html, /平衡缓冲区/);
+  assert.doesNotMatch(html, /平衡死区|d 是死区/);
   assert.match(html, /A = min\(F × r, G, B × c\)/);
   assert.match(html, /data-nni-decimal-amount="867\.64255082 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
   for (const [activationFund, expected] of [

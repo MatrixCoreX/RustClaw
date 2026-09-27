@@ -1485,8 +1485,8 @@ export function BancorLiquidityPolicyExplanation({
         <>
           <p className="mt-3 text-xs leading-5 text-white/50">
             {t(
-              "系统比较 Bancor 的 USD 储备和资金池余额。储备低于目标且超出死区时，差距越大，注入比例会在上下限之间平滑提高；接近目标时自动减慢或停止。",
-              "The system compares the Bancor USD reserve with the funding-account balance. When the reserve is below target and outside the deadband, a larger gap raises the injection rate smoothly within its configured bounds; the rate slows or stops near target.",
+              "系统比较 Bancor 的 USD 储备和资金池余额。储备低于目标且超出平衡缓冲区时，差距越大，注入比例会在上下限之间平滑提高；接近目标时自动减慢或停止。",
+              "The system compares the Bancor USD reserve with the funding-account balance. When the reserve is below target and outside the balance buffer, a larger gap raises the injection rate smoothly within its configured bounds; the rate slows or stops near target.",
             )}
           </p>
           <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-5">
@@ -1494,7 +1494,7 @@ export function BancorLiquidityPolicyExplanation({
               [t("最低比例", "Minimum rate"), `${policy.min_percentage}%`],
               [t("最高比例", "Maximum rate"), `${policy.max_percentage}%`],
               [t("目标占比", "Target share"), `${policy.target_bancor_share_percentage}%`],
-              [t("平衡死区", "Deadband"), `${policy.deadband_percentage}%`],
+              [t("平衡缓冲区", "Balance buffer"), `${policy.deadband_percentage}%`],
               [t("单次池增幅上限", "Pool step cap"), `${policy.max_bancor_step_percentage}%`],
             ].map(([label, value]) => (
               <div key={label} className="rounded-lg border border-white/8 bg-white/[0.025] px-3 py-2">
@@ -1511,8 +1511,8 @@ export function BancorLiquidityPolicyExplanation({
           </div>
           <p className="mt-2 text-xs leading-5 text-white/40">
             {t(
-              "B 是 Bancor USD 储备，F 是资金池余额，S 是目标占比，d 是死区，c 是单次池增幅上限。",
-              "B is the Bancor USD reserve, F is the funding-account balance, S is the target share, d is the deadband, and c is the per-step pool cap.",
+              "B 是 Bancor USD 储备，F 是资金池余额，S 是目标占比，d 是平衡缓冲区，c 是单次池增幅上限。",
+              "B is the Bancor USD reserve, F is the funding-account balance, S is the target share, d is the balance buffer, and c is the per-step pool cap.",
             )}
           </p>
         </>
