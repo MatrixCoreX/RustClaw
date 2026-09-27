@@ -350,7 +350,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.doesNotMatch(revokedDeviceHtml, /nni_asset_device_not_authorized/);
   assert.match(html, /data-nni-decimal-amount="100000000\.00000000 AIC"[^>]*data-nni-decimal-fraction-size="normal"/);
   assert.match(html, /data-nni-decimal-amount="10000\.00000000 USD"[^>]*data-nni-decimal-fraction-size="normal"/);
-  assert.match(html, /BANCOR储备曲线市场/);
+  assert.match(html, /Bancor II 储备曲线市场/);
   assert.match(html, /获得奖励/);
   assert.match(html, /data-bancor-open-apr="true"/);
   assert.match(html, />APR<\/button>/);

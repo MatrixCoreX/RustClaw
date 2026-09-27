@@ -614,7 +614,7 @@ export function BancorPage({
           <div>
             <div className="flex items-center gap-2 text-xl font-semibold text-sky-200 sm:text-2xl">
               <TrendingUp className="h-5 w-5" />
-              <span>{t("BANCOR储备曲线市场", "BANCOR reserve-curve market")}</span>
+              <span>{t("Bancor II 储备曲线市场", "Bancor II reserve-curve market")}</span>
             </div>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-white/60">
               {t(
@@ -1511,8 +1511,8 @@ export function BancorLiquidityPolicyExplanation({
           </div>
           <p className="mt-2 text-xs leading-5 text-white/40">
             {t(
-              "B 是 Bancor USD 储备，F 是资金池余额，S 是目标占比，d 是死区，c 是单次池增幅上限。最终金额同时不能超过按比例计算的金额、目标缺口和单次上限；全部按 8 位小数的最小单位向下取整。这是直接增加储备，不产生交易、手续费或 AIC 流动。",
-              "B is the Bancor USD reserve, F is the funding-account balance, S is the target share, d is the deadband, and c is the per-step pool cap. The final amount cannot exceed the rate amount, target gap, or step cap, and is rounded down at eight-decimal precision. This directly adds reserves and creates no trade, fee, or AIC movement.",
+              "B 是 Bancor USD 储备，F 是资金池余额，S 是目标占比，d 是死区，c 是单次池增幅上限。",
+              "B is the Bancor USD reserve, F is the funding-account balance, S is the target share, d is the deadband, and c is the per-step pool cap.",
             )}
           </p>
         </>
