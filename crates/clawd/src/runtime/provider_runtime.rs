@@ -115,6 +115,31 @@ impl LlmProviderRuntime {
         &'a self,
         broker: &dyn claw_core::secrets::SecretsBroker,
     ) -> std::borrow::Cow<'a, str> {
+        // A hosted relay receives its bearer token through device enrollment,
+        // so it is intentionally not stored under a user-editable vendor
+        // credential name. Resolve only the enrolled credential for this mode;
+        // a generic CUSTOM_API_KEY must never override device authorization.
+        if self.config.params.device_key_enrollment {
+            let relay_secret_name = claw_core::secrets::text_secret_name_for_vendor("hosted_relay");
+            match broker.lookup(&relay_secret_name) {
+                Ok(Some(secret)) if !secret.is_empty() => {
+                    return std::borrow::Cow::Owned(secret.expose().to_string());
+                }
+                Ok(_) => tracing::debug!(
+                    "llm_provider_api_key broker_label={} secret={} status=miss fallback=config",
+                    broker.label(),
+                    relay_secret_name
+                ),
+                Err(err) => tracing::debug!(
+                    "llm_provider_api_key broker_label={} secret={} status=err err={} fallback=config",
+                    broker.label(),
+                    relay_secret_name,
+                    err
+                ),
+            }
+            return std::borrow::Cow::Borrowed(&self.config.api_key);
+        }
+
         let Some(vendor) = self.vendor_name_for_secret_lookup() else {
             return std::borrow::Cow::Borrowed(&self.config.api_key);
         };
@@ -141,32 +166,6 @@ impl LlmProviderRuntime {
                 );
             }
             Ok(Some(_)) => {}
-        }
-
-        // A hosted relay receives its bearer token through device enrollment,
-        // so it is intentionally not stored under the user-editable vendor
-        // credential name. Project the enrolled credential through the same
-        // broker path used by normal model calls; skill runners can then issue
-        // a task-scoped child token without copying the secret into TOML or a
-        // second credential file.
-        if self.config.params.device_key_enrollment {
-            let relay_secret_name = claw_core::secrets::text_secret_name_for_vendor("hosted_relay");
-            match broker.lookup(&relay_secret_name) {
-                Ok(Some(secret)) if !secret.is_empty() => {
-                    return std::borrow::Cow::Owned(secret.expose().to_string());
-                }
-                Ok(_) => tracing::debug!(
-                    "llm_provider_api_key broker_label={} secret={} status=miss fallback=config",
-                    broker.label(),
-                    relay_secret_name
-                ),
-                Err(err) => tracing::debug!(
-                    "llm_provider_api_key broker_label={} secret={} status=err err={} fallback=config",
-                    broker.label(),
-                    relay_secret_name,
-                    err
-                ),
-            }
         }
 
         std::borrow::Cow::Borrowed(&self.config.api_key)

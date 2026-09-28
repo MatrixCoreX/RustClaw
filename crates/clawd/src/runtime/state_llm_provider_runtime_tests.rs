@@ -159,6 +159,17 @@ fn hosted_relay_projects_enrolled_device_key_from_broker() {
 }
 
 #[test]
+fn hosted_relay_rejects_generic_custom_provider_key() {
+    let provider = make_hosted_relay_provider();
+    let broker = FixedBroker {
+        expected_name: "text_custom_api_key".to_string(),
+        value: "must-not-authorize-hosted-relay".to_string(),
+    };
+
+    assert!(provider.api_key_using(&broker).is_empty());
+}
+
+#[test]
 fn ordinary_provider_cannot_consume_hosted_relay_device_key() {
     let provider = make_provider("vendor-custom", "config-fallback-key");
     let broker = FixedBroker {
