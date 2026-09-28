@@ -23,6 +23,7 @@ pub(super) fn call_vendor_vision(
         VendorKind::OpenAI => {
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
+                .user_agent(PROVIDER_USER_AGENT)
                 .timeout(Duration::from_secs(effective_provider_timeout_seconds(
                     timeout_seconds,
                     vcfg.timeout_seconds,
@@ -42,6 +43,7 @@ pub(super) fn call_vendor_vision(
         VendorKind::Google => {
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
+                .user_agent(PROVIDER_USER_AGENT)
                 .timeout(Duration::from_secs(effective_provider_timeout_seconds(
                     timeout_seconds,
                     vcfg.timeout_seconds,
@@ -61,6 +63,7 @@ pub(super) fn call_vendor_vision(
         VendorKind::Anthropic => {
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
+                .user_agent(PROVIDER_USER_AGENT)
                 .timeout(Duration::from_secs(effective_provider_timeout_seconds(
                     timeout_seconds,
                     vcfg.timeout_seconds,
@@ -87,6 +90,7 @@ pub(super) fn call_vendor_vision(
             }
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
+                .user_agent(PROVIDER_USER_AGENT)
                 .timeout(Duration::from_secs(effective_provider_timeout_seconds(
                     timeout_seconds,
                     vcfg.timeout_seconds,
@@ -119,6 +123,7 @@ pub(super) fn call_vendor_vision(
             }
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
+                .user_agent(PROVIDER_USER_AGENT)
                 .timeout(Duration::from_secs(effective_provider_timeout_seconds(
                     timeout_seconds,
                     vcfg.timeout_seconds,
@@ -145,6 +150,7 @@ pub(super) fn call_vendor_vision(
             }
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
+                .user_agent(PROVIDER_USER_AGENT)
                 .timeout(Duration::from_secs(effective_provider_timeout_seconds(
                     timeout_seconds,
                     vcfg.timeout_seconds,
@@ -170,6 +176,7 @@ pub(super) fn call_vendor_vision(
         VendorKind::Qwen => {
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
+                .user_agent(PROVIDER_USER_AGENT)
                 .timeout(Duration::from_secs(effective_provider_timeout_seconds(
                     timeout_seconds,
                     vcfg.timeout_seconds,

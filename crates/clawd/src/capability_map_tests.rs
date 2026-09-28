@@ -261,6 +261,25 @@ fn real_registry_does_not_charge_remote_audio_actions_for_local_model_memory() {
 }
 
 #[test]
+fn real_registry_treats_remote_image_understanding_as_a_small_network_task() {
+    let registry_toml = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml"),
+    )
+    .expect("read registry");
+    let image_vision = registry_entry_from(&registry_toml, "image_vision");
+    let request = image_vision
+        .resource_request
+        .as_ref()
+        .expect("image vision resource request");
+
+    assert_eq!(request.class.as_token(), "network");
+    assert_eq!(request.cpu_cores, 1);
+    assert_eq!(request.memory_mb, 64);
+    assert_eq!(request.network_slots, 1);
+    assert_eq!(request.provider_slots, 1);
+}
+
+#[test]
 fn real_config_native_schemas_preserve_nonempty_and_nested_read_contracts() {
     let state = crate::AppState::test_default_with_fixture_provider()
         .with_prompt_layers_installed()

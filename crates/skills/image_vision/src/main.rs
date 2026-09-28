@@ -18,6 +18,7 @@ use prompting::*;
 use providers::*;
 
 const SKILL_NAME: &str = "image_vision";
+const PROVIDER_USER_AGENT: &str = "AgentRuntime/1.0";
 const RUNNER_RESPONSE_RESERVE_SECONDS: u64 = 10;
 
 #[derive(Debug, Clone)]

@@ -514,6 +514,7 @@ pub(super) fn openai_compat_chat_rewrite(
     include_api_key_header: bool,
 ) -> Result<String, String> {
     let client = Client::builder()
+        .user_agent(PROVIDER_USER_AGENT)
         .timeout(Duration::from_secs(timeout_secs.clamp(5, 120)))
         .build()
         .map_err(|e| format!("http client: {e}"))?;
