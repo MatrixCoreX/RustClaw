@@ -17,7 +17,8 @@ Current repository highlights:
 - built-in, external, and runner-based skills for system, files, web, image, audio, video, music, NNI, crypto, KB, and automation tasks
 - local browser UI in `UI/`, including Dashboard, Agent, Models, Tasks,
   Communication Setup, Account Binding, Tools/Skills, AiAPP, Skill Store, Memory,
-  Logs, and Learning / Maintenance pages
+  Logs, Learning / Maintenance, and optional admin-only NNI, Assets, and Bancor+
+  pages
 - Raspberry Pi / small-screen desktop app in `pi_app/`
 - shared Linux/macOS runtime contracts, with fail-closed Bubblewrap and
   Seatbelt process isolation selected through a machine-configured backend
@@ -118,7 +119,7 @@ flowchart TD
     MC --> V
     MU --> ASP
     S --> V
-    V --> W[Evidence coverage + answer-shape check]
+    V --> W[Evidence coverage + operation audit<br/>+ answer-shape check]
     W -->|repair / missing evidence| WR[RepairEnvelope<br/>issue codes + attempt ledger<br/>bounded diagnostic feedback]
     WR --> J
     W -->|round observed| BD{BudgetDecision<br/>progress + deadline + policy + hard ceilings}
@@ -180,6 +181,7 @@ Operationally: use `kind=ask` when the user gave a natural-language request and 
 - `Async job start`: long-tail tool work can publish a machine reply with `checkpoint_id`, `poll_ref`, `next_check_after`, `can_poll`, and `can_cancel` while the task remains recoverable through checkpoint polling. Media skills expose this shape through registry capabilities such as `image.generate` / `image.poll` / `image.cancel`, `audio.synthesize` / `audio.poll` / `audio.cancel`, `video.generate` / `video.poll` / `video.cancel`, and `music.generate` / `music.poll` / `music.cancel`.
 - `Capability result observation`: every successful `CapabilityResultEnvelope` is projected into one bounded, redacted generic machine observation for the next planner turn. Optional domain projections may compact common evidence, but unknown or newly installed capabilities retain structured provider, artifact, async-job, effect, and verification fields without requiring a new runtime branch.
 - `Evidence coverage`: tool, skill, and synthesis outputs become loop observations. Missing evidence or recoverable failures go back into the loop with compact attempted-method history.
+- `Answer-verifier operation audit`: the model returns structured `operation_checks`, `output_field_checks`, and `unsupported_claims`. Each positive operation cites `evidence_step_ids` and any `required_dispatches`; the host cross-checks those claims against the persisted task journal before accepting the answer. Prohibitions and absence constraints remain verdict-level checks rather than invented execution rows. Invalid audit data produces the bounded machine error `verification_audit_invalid` instead of being trusted as prose.
 - `Task plan closeout`: the planner reconciles unfinished steps with execution evidence before the final answer. Runtime supplies the current revision and prepared-response state; delivery itself belongs to runtime. A second reconciliation is allowed only after fewer unfinished steps remain, with a maximum of two across checkpoints. Blocked work stays unfinished, unresolved state remains observable, and completed effects are never replayed merely to close a plan.
 - `Async execution evidence`: attempts bind to an execution step and job ID. Completion replaces only that attempt's waiting observation with its actual receipt or structured error; resuming preserves earlier steps and completed effects. Conditional operations are audited against observed conditions and preserved state, without claiming an excluded operation ran. Both foreground and resumed terminal paths log the full journal before the bounded API projection; evidence recovery must match the task identity and persisted execution-stream digests.
 - `TaskBudgetSlice / BudgetDecision`: interactive work is governed by resumable soft wall-time slices and structured progress, not ordinary `max_rounds` or `max_tool_calls` completion thresholds. After each observed model/tool result, runtime chooses `continue`, `finish`, `checkpoint_requeue`, `waiting`, `needs_user`, or `terminal` from verifier-approved plan facts, evidence/artifact progress, continuation state, policy, cancellation, deadlines, and administrator hard ceilings. Profile timeout classes cap planner provider calls and agent-loop tool/MCP calls before the slice boundary; a timed-out mutation enters reconciliation instead of blind replay. The model can request continuation but cannot raise cost, permission, time, or resource ceilings.
@@ -694,6 +696,37 @@ curl -X POST http://127.0.0.1:8787/v1/tasks \
   -d '{"user_id":1,"chat_id":1,"user_key":"rk-xxxx","channel":"ui","external_user_id":"local-ui","external_chat_id":"local-ui","kind":"ask","payload":{"text":"hello"}}'
 ```
 
+### NNI, Assets, and Bancor+
+
+NNI is an optional administration surface, not part of the ordinary Agent chat path. On a fresh installation its three navigation entries are hidden. An administrator can enable them from Home after accepting the displayed eligibility and risk notice. That setting changes navigation visibility only: it does not join or leave NNI, start or stop heartbeats, execute a trade, or change asset data.
+
+```mermaid
+flowchart LR
+    A[Admin browser<br/>NNI / Assets / Bancor+]
+    W[webd<br/>session + authenticated proxy]
+    C[clawd NNI gateway<br/>local device + signing orchestration]
+    CFG[NNI configuration<br/>node selections]
+    H[Selected heartbeat node]
+    B[Selected Bancor+ node<br/>optional override]
+    S[Selected asset node<br/>optional override]
+    E[Configured external NNI API nodes]
+
+    A --> W --> C --> CFG
+    CFG --> H --> E
+    CFG --> B --> E
+    CFG --> S --> E
+```
+
+- **Independent responsibilities**: NNI device admission, owner binding, heartbeat, rewards, and APR are separate from Bancor+ trading and asset transfers. Bancor+ does not require the local device to be actively earning heartbeat rewards. Binding an asset account also does not start heartbeats; joining remains an explicit action.
+- **Node selection**: heartbeat uses the selected NNI node. Bancor+ and Assets use that node by default, but each can select its own service node. Read paths use bounded structured fallback through configured nodes; node errors remain machine codes instead of language-matched decisions.
+- **Read and mutation boundary**: market data, candles, recent trades, balances, transfer history, network statistics, and rewards are read projections. Joining, binding/recovery, trading, and transfers use challenge-bound signed requests, request IDs, expiry/nonce checks, and the server-side validation appropriate to that operation.
+- **Key handling**: asset private keys sign inside the browser and are neither submitted to `clawd`/remote nodes nor persisted. HTTPS is required by default except on loopback; a non-loopback LAN HTTP page remains blocked until the user explicitly accepts the risk for the current browser session. Delegated hardware signing remains available where the device and account authorization permit it.
+- **Assets**: the UI reads AIC/USD balances and recent transfer history and can submit a signed transfer to a valid public key. Both UI and backend reject self-transfer and invalid precision; memo content is limited to 256 UTF-8 bytes.
+- **Bancor+**: the market exposes reserves, marginal price, candles, recent trades, quotes, dynamic minimum amounts, slippage protection, account balances, and signed execution. Quote and execution are version-bound so stale market state can be rejected before settlement.
+- **Dynamic activation-fund liquidity**: when `dynamic_balance_v1` is active, the displayed policy computes target reserve `T = (B + F) * S`, reserve gap `G = max(T - B, 0)`, and a bounded release rate from the configured minimum/maximum rate, balance buffer, and maximum step. The applied amount is capped by the activation-fund balance, the remaining reserve gap, and the per-step reserve cap. It adds USD reserve directly and is not represented as a user trade, fee, or AIC movement. `fixed_v1` remains the explicit fixed-percentage policy.
+
+The browser-facing route families are `/v1/nni/device/*`, `/v1/nni/config`, `/v1/nni/join/*`, `/v1/nni/heartbeat/*`, `/v1/nni/network-stats`, `/v1/nni/rewards`, `/v1/nni/bancor/*`, and `/v1/nni/assets/*`. They still enter through `webd`; external NNI nodes are not a replacement browser login boundary. The Bancor+ formulas and test-data analysis are maintained separately in the [Bancor+ Paper repository](https://github.com/MatrixCoreX/Bancor-Plus-Paper).
+
 <!-- ai-learning-stage: capabilities-artifacts -->
 <!-- ai-learning-audience: developer -->
 ## Model Capability Catalog and Chinese Provider Validation
@@ -745,9 +778,10 @@ flowchart LR
     RELAY -->|server-held provider credential| UPSTREAM[configured upstream model]
 ```
 
-The initial relay policy permits 100 upstream model attempts per allowlisted Slot 0 device
-per UTC day. Local validation failures, model-list reads, and quota reads do not
-consume that allowance. Once an authenticated request is dispatched upstream,
+The shipped preset advertises a default limit of 1000 upstream model attempts per
+allowlisted Slot 0 device per UTC day. Relay administrators can adjust that limit
+per device. Local validation failures, model-list reads, and quota reads do not
+consume the allowance. Once an authenticated request is dispatched upstream,
 successes and failures both count. The quota database and service credential
 remain on the relay host; prompts, responses, tool arguments, and raw keys are
 not exposed by the quota API.

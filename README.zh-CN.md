@@ -16,7 +16,8 @@ Agent Runtime 面向在消息应用或浏览器中完成日常使用和管理的
 - 共享技能调度层，支持进程内 builtin、external adapter，以及通过 `skill-runner` 拉起的 runner 子进程
 - 覆盖系统、文件、网络、图片、语音、视频、音乐、NNI、加密货币、知识库、自动化等场景的 builtin、external 与 runner 技能
 - 本地浏览器控制台位于 `UI/`，包含首页、Agent、模型、任务、通信设置、账号绑定、
-  工具/技能、AiAPP、Skill Store、记忆、日志和学习/维护等页面
+  工具/技能、AiAPP、Skill Store、记忆、日志、学习/维护，以及可选的管理员 NNI、
+  资产和 Bancor+ 页面
 - 树莓派/小屏桌面程序位于 `pi_app/`
 - Linux 与 macOS 共享同一套运行时合同；进程隔离由机器配置的后端选择
   fail-closed 的 Bubblewrap 或 Seatbelt 实现
@@ -115,7 +116,7 @@ flowchart TD
     MC --> V
     MU --> ASP
     S --> V
-    V --> W[证据覆盖 + 答案形状检查]
+    V --> W[证据覆盖 + 操作审计<br/>+ 答案形状检查]
     W -->|修复 / 缺证据| WR[RepairEnvelope<br/>issue codes + attempt ledger<br/>有界诊断反馈]
     WR --> J
     W -->|本轮已观测| BD{BudgetDecision<br/>progress + deadline + policy + hard ceilings}
@@ -177,6 +178,7 @@ flowchart TD
 - `Async job start`：长尾工具可以先发布包含 `checkpoint_id`、`poll_ref`、`next_check_after`、`can_poll`、`can_cancel` 的机器回复，同时任务仍可通过 checkpoint 轮询恢复。媒体技能通过 registry capability 暴露这类形状，例如 `image.generate` / `image.poll` / `image.cancel`、`audio.synthesize` / `audio.poll` / `audio.cancel`、`video.generate` / `video.poll` / `video.cancel` 和 `music.generate` / `music.poll` / `music.cancel`。
 - `Capability result observation`：每个成功的 `CapabilityResultEnvelope` 都会投影成一条有界、脱敏的通用机器 observation，返回下一轮 planner。领域专用投影可以压缩常用证据，但未知能力或新安装能力无需新增 runtime 分支，也能保留 provider、artifact、异步任务、effect 和 verification 等结构化字段。
 - `Evidence coverage`：工具、技能和合成输出都会成为循环内观测；缺证据或可恢复失败会带着压缩的已尝试方法历史回到循环。
+- `Answer-verifier 操作审计`：模型返回结构化的 `operation_checks`、`output_field_checks` 和 `unsupported_claims`。每个正向操作必须引用 `evidence_step_ids` 和所需的 `required_dispatches`，宿主再与持久化 task journal 中真实执行过的步骤交叉核对。禁止项和“不得发生”约束作为整体 verdict 检查，不伪造成执行记录。审计数据非法时返回有界机器错误 `verification_audit_invalid`，不会把模型 prose 当作已验证事实。
 - `Task plan 收尾`：最终回答前，由 planner 按实际执行证据核对未完成步骤。Runtime 提供最新 revision 和回答已准备好的状态；实际投送由 runtime 负责。只有未完成步骤减少时才允许第二次核对，跨 checkpoint 最多两次。真实阻塞仍保留未完成状态，未收尾状态可被观测，不为关闭计划而重放已完成的副作用。
 - `异步执行证据`：尝试记录绑定执行步骤和 job ID。完成时只将该次等待态观测替换为实际回执或结构化错误；恢复时保留此前步骤和已完成副作用。条件操作依据实际条件和保留状态验收，不把被排除的操作记为已经执行。前台与恢复后的终态路径均在生成有大小限制的 API 投影前记录完整 journal；恢复证据时必须匹配任务身份和持久化执行流摘要。
 - `TaskBudgetSlice / BudgetDecision`：交互任务使用可恢复的软墙钟切片和结构化进度，不再把普通 `max_rounds` 或 `max_tool_calls` 当完成阈值。每次模型/工具结果被观测后，runtime 根据 verifier 通过的计划事实、evidence/artifact 进度、continuation、policy、取消、deadline 和管理员硬上限，选择 `continue`、`finish`、`checkpoint_requeue`、`waiting`、`needs_user` 或 `terminal`。Profile timeout class 会在软切片边界前约束 planner provider 调用和 agent-loop tool/MCP 调用；变更动作超时后进入 reconciliation，而不是盲目重放。模型可以请求续跑，但不能提高成本、权限、时间或资源上限。
@@ -462,7 +464,7 @@ CLI 生命周期及其持久化教学证据见[任务状态与上下文](docs/ar
 <!-- ai-learning-exclude:start -->
 ## 详细架构指南
 
-GitHub README 不支持真正的页内分页。详细流程图按顺序维护为独立页面，让每页只聚焦一个主题；AI 学习页面直接渲染同一组 Markdown 源文件，不再维护第二份内容：
+GitHub README 不支持真正的页内分页。详细流程图按顺序维护为独立页面，让每页只聚焦一个主题；学习/维护页面直接渲染同一组 Markdown 源文件，不再维护第二份内容：
 
 1. [Agent Loop 与规划](docs/architecture/01-agent-loop.zh-CN.md)
 2. [安全与执行](docs/architecture/02-security-execution.zh-CN.md)
@@ -607,7 +609,7 @@ flowchart LR
 - 首页把 WEBD、nginx、可选局域网 HTTPS 和局域网访问名称集中到独立的“Web 访问”分区。Linux 通过 Avahi 广播单段设备名称，macOS 使用 mDNSResponder。mDNS 与 HTTPS 互不依赖：Web 入口可达时可直接使用 `http://<名称>.local/`；只有选择启用本地 CA 安全访问后，才使用 `https://<名称>.local/`。
 - 修改局域网访问名称时只接受安全的单段 DNS 标签，并更新系统 mDNS 名称、重启局域网发现服务。如果设备已经准备过本地 CA，同一次操作会为新的 `.local` 名称续签叶证书，但不会更换浏览器已经信任的根 CA。旧名称失效后，设备 IP 仍可作为恢复入口。
 - 通过域名打开 UI 时，登录页默认沿用当前 origin，不再附加 `:8787` 或 `:8788`；只有本地直连时才推导服务端口
-- `AI 学习` 页面读取随 UI 打包的 README 与架构指南，提供初次使用、使用与运维、开发与维护三条路线，并支持全文搜索、页内导航、阅读进度保存和 Mermaid 缩放/拖动/全屏查看。
+- `学习/维护` 页面读取随 UI 打包的 README 与架构指南，提供初次使用、使用与运维、开发与维护三条路线，并支持全文搜索、页内导航、阅读进度保存和 Mermaid 缩放/拖动/全屏查看。
 - Agent 页面使用服务端会话历史。每个任务都提供直接可见的重命名按钮，名称在刷新页面或重启后仍会保留。
 - 桌面端点击主操作区域任意位置都会自动收起左侧导航，可用导航开关再次展开；移动端选择页面或点击菜单外部后会关闭导航菜单。
 - 首页任务数量与“正在处理的任务”使用同一身份范围：管理员查看系统范围，普通 key 查看本人跨会话的任务。首页“正在运行”数量与最长运行时长只统计持有有效 worker lease 的任务；等待用户、暂停或等待恢复的 checkpoint 保留在任务生命周期视图中，不触发长运行告警。
@@ -667,6 +669,37 @@ curl -X POST http://127.0.0.1:8787/v1/tasks \
   -d '{"user_id":1,"chat_id":1,"user_key":"rk-xxxx","channel":"ui","external_user_id":"local-ui","external_chat_id":"local-ui","kind":"ask","payload":{"text":"hello"}}'
 ```
 
+### NNI、资产与 Bancor+
+
+NNI 是可选的管理员功能区，不属于普通 Agent 对话链路。全新安装默认隐藏 NNI、Bancor+ 和资产三个导航入口；管理员在首页阅读并确认适用资格与风险提示后可以启用。这个开关只控制导航是否可见，不会加入或退出 NNI、启动或停止心跳、执行交易，也不会改变资产数据。
+
+```mermaid
+flowchart LR
+    A[管理员浏览器<br/>NNI / 资产 / Bancor+]
+    W[webd<br/>会话 + 鉴权代理]
+    C[clawd NNI 网关<br/>本机设备 + 签名编排]
+    CFG[NNI 配置<br/>节点选择]
+    H[已选心跳节点]
+    B[已选 Bancor+ 节点<br/>可单独覆盖]
+    S[已选资产节点<br/>可单独覆盖]
+    E[已配置的外部 NNI API 节点]
+
+    A --> W --> C --> CFG
+    CFG --> H --> E
+    CFG --> B --> E
+    CFG --> S --> E
+```
+
+- **职责独立**：NNI 设备准入、资产账户绑定、心跳、奖励和 APR，与 Bancor+ 交易、资产转账相互独立。使用 Bancor+ 不要求本机正在参与心跳奖励；绑定资产账户也不会自动开始心跳，加入网络仍是显式操作。
+- **节点选择**：心跳使用当前选定的 NNI 节点；Bancor+ 和资产默认复用该节点，也可以分别选择自己的服务节点。读取链路会在已配置节点中做有界、结构化回退；节点错误保留为机器码，不通过自然语言硬匹配决定行为。
+- **读取与变更边界**：市场数据、K 线、最近成交、余额、转账历史、网络统计和奖励属于只读投影；加入、绑定/恢复、交易和转账使用绑定 challenge 的签名请求，并按操作校验 request ID、过期时间、nonce 等机器字段。
+- **密钥处理**：资产私钥只在浏览器内完成签名，不会提交给 `clawd` 或远程节点，也不会持久化。除 loopback 外默认要求 HTTPS；局域网非 loopback HTTP 页面会先阻止私钥操作，只有用户针对当前浏览器会话明确接受风险后才可继续。设备和资产授权允许时仍可使用硬件代签。
+- **资产**：UI 展示 AIC/USD 余额和最近转账记录，并可向合规公钥提交签名转账。UI 与后端都会拒绝自己转给自己和非法精度；memo 最长为 256 个 UTF-8 字节。
+- **Bancor+**：市场提供储备量、边际价格、K 线、最近成交、报价、动态最低金额、滑点保护、账户余额和签名成交。报价与执行绑定市场版本，结算前可以拒绝已经过期的市场状态。
+- **激活基金动态流动性**：启用 `dynamic_balance_v1` 时，展示策略按目标储备 `T = (B + F) * S`、储备缺口 `G = max(T - B, 0)`，以及配置的最低/最高释放率、余额缓冲区和单步上限计算有界释放率。实际注入量同时受激活基金余额、剩余储备缺口和单步储备上限约束。它直接增加 USD 储备，不记录成用户成交、手续费或 AIC 变动；`fixed_v1` 仍是明确的固定比例策略。
+
+浏览器侧接口族包括 `/v1/nni/device/*`、`/v1/nni/config`、`/v1/nni/join/*`、`/v1/nni/heartbeat/*`、`/v1/nni/network-stats`、`/v1/nni/rewards`、`/v1/nni/bancor/*` 和 `/v1/nni/assets/*`。它们仍统一经过 `webd`；外部 NNI 节点不会替代浏览器登录安全边界。Bancor+ 公式与测试数据分析独立维护在 [Bancor+ 论文仓库](https://github.com/MatrixCoreX/Bancor-Plus-Paper)。
+
 <!-- ai-learning-stage: capabilities-artifacts -->
 <!-- ai-learning-audience: developer -->
 ## 模型能力目录与中文 Provider 验证
@@ -679,6 +712,23 @@ curl -X POST http://127.0.0.1:8787/v1/tasks \
 
 
 模型目录、readiness 与 provider 验证流程见[技能、多媒体与模型](docs/architecture/05-skills-media-models.zh-CN.md)和[发布验证](docs/architecture/06-release-validation.zh-CN.md)。
+
+### 托管中转预设
+
+模型设置页除直接配置 provider 外，还提供托管的 OpenAI-compatible 中转预设。选择该预设会复用现有 `custom` provider，并设置公开模型别名 `minimax`；它不会增加第二套 provider adapter，也不会静默覆盖已有配置。中转维护自己的 Slot 0 公钥白名单。首次使用时，白名单内的真实或模拟签名设备完成一次短期 challenge 签名，中转只返回一次设备专属访问密钥；`clawd` 把它存入本机私有凭据 broker，不写入 tracked TOML 或浏览器存储。后续模型请求使用该访问密钥，不会每次都要求硬件签名。
+
+```mermaid
+flowchart LR
+    UI[模型设置] -->|选择托管预设| CL[clawd]
+    CL -->|首次使用: Slot 0 challenge 签名| TLS[llm.matrixai.one TLS 入口]
+    TLS -->|一次性返回中转访问密钥| CL
+    CL -->|后续调用: bearer 中转密钥| TLS
+    TLS --> RELAY[独立 LLM 中转服务]
+    RELAY --> QUOTA[按设备鉴权 + UTC 日额度]
+    RELAY -->|服务端托管 provider 凭据| UPSTREAM[已配置的上游模型]
+```
+
+当前发行预设默认给白名单内每个 Slot 0 设备每个 UTC 日 `1000` 次上游模型尝试，管理员可以按设备调整。仅在已鉴权请求真正发往上游后计数，因此成功和上游失败都会占用额度，本地校验失败、模型列表和额度查询不会占用。额度数据库与服务凭据只保留在中转服务器，额度接口不会暴露 prompt、response、tool args 或原始密钥。
 
 ### 如何验证 Provider
 
@@ -859,13 +909,19 @@ manifest 声明和包内资源，不需要给 `clawd` 或主 UI 增加技能专�
 明确声明的 capability。bundle 文件会进入不可变安装目录，并作为 receipt artifact 校验后
 才能提供给浏览器。
 
+Ai APP 安装不会重新编译或重启 `clawd`，也不会重新构建主 UI。经过审核的宿主 renderer
+完全由 manifest 合同选择；自定义 Ai APP 在技能包中独立构建，以最终静态文件放在 `aipp/`，
+主 UI 只提供通用隔离宿主。`python3 scripts/check_aipp_decoupling.py` 会检查这一边界。
+
 Ai APP 可用性与精确安装 manifest、receipt、policy grant、启用状态和 registry generation
 一致。安装技能时可以同时安装其 Ai APP。控制台卸载前会明确提示同时卸载应用及对应技能，
 通过现有 Skill Store 卸载任务执行，保留配置和私有数据。后台确认成功后移除图标及缓存条目，
 可从 Skill Store 重新安装。仅通过展示层 API 隐藏的应用可从独立的「安装应用」入口恢复。
-禁用或卸载技能会使其 Ai APP 不可用。`media_discovery` 是第一个 Ai APP：
-管理员可以查看采集到的图片/视频记录、本地保留的图片下载、预览、来源链接、筛选和游标分页；
-开始或停止采集仍通过 Agent 完成。
+禁用或卸载技能会使其 Ai APP 不可用。`media_discovery` 使用技能私有 collection ledger，
+展示采集记录、预览、来源链接、筛选和游标分页。`media_download` 使用通用 task-activity renderer，
+只展示 Agent UI 或通信端中真实执行过该技能且仍保留的任务，包括已验证来源链接、最终处理文本、
+失败状态和鉴权产物；它不会读取媒体发现 collection。两类界面都保持只读，启动、停止或修改任务
+仍通过 Agent 完成。
 缩略图优先加载经过鉴权的本地图片。打开多图帖子后，可用左右箭头或滑动翻看，
 单独下载当前图片，或按图片顺序打包下载全部图片。加载失败可以重试；
 任一图片下载失败时不会把缺图的 ZIP 当作完整结果保存。
@@ -881,7 +937,8 @@ flowchart LR
     A --> G[已启用 generation]
     G --> C[Ai APP 目录]
     C --> H{渲染方式}
-    H -->|审核合同| R[宿主 renderer]
+    H -->|collection contract| R[技能 ledger renderer]
+    H -->|task activity contract| Q[运行时任务 ledger renderer]
     H -->|sandbox bundle| F[无同源权限 iframe]
     F --> B[capability allowlist bridge]
     B --> L[Agent capability loop]
