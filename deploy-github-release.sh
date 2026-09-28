@@ -63,8 +63,9 @@ Options:
   -h, --help
       Show this help.
 
-Local configuration, data, logs, PID state, external skills, and on-demand
-skills are preserved. Packaged configuration files are copied only when the
+Local user configuration, data, logs, PID state, external skills, and on-demand
+skills are preserved. Release-owned base registries are upgraded with the
+package; other packaged configuration files are copied only when the
 corresponding local file does not already exist.
 USAGE
 }
@@ -715,6 +716,14 @@ PY
     merge_runtime_directory "$relative"
   done
 
+  # The base skill registry is immutable release metadata, not host-local
+  # runtime state. Restore the packaged copy after merging configs so upgrades
+  # cannot keep capability/version/resource contracts from an older release.
+  if [[ -f "$PACKAGE_DIR/configs/skills_registry.toml" ]]; then
+    cp -a "$PACKAGE_DIR/configs/skills_registry.toml" \
+      "$STAGED_ROOT/configs/skills_registry.toml"
+  fi
+
   mkdir -p "$STAGED_ROOT/target/release"
   if [[ -d "$ROOT_DIR/target/release" ]]; then
     while IFS= read -r runtime_binary; do
@@ -851,6 +860,10 @@ for relative in \
   [[ -e "$PACKAGE_DIR/$relative" ]] || continue
   printf '%s\n' "$relative" >> "$MANAGED_PATHS_FILE"
 done
+
+if [[ -f "$PACKAGE_DIR/configs/skills_registry.toml" ]]; then
+  printf '%s\n' "configs/skills_registry.toml" >> "$MANAGED_PATHS_FILE"
+fi
 
 while IFS= read -r binary; do
   [[ -f "$binary" ]] || continue
