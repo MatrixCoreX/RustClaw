@@ -1,6 +1,7 @@
 /* Android viewport changes must not alter any desktop or web UI layout. */
 html[data-platform='android'] { min-width:0; -webkit-text-size-adjust:100%; text-size-adjust:100%; }
-html[data-platform='android'] body { min-width:0; margin:0; overflow-wrap:anywhere; }
+html[data-platform='android'] body { min-width:0; margin:0; overflow-wrap:anywhere; font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue','Noto Sans',system-ui,sans-serif; }
+html[data-platform='android'] button,html[data-platform='android'] a,html[data-platform='android'] input,html[data-platform='android'] select,html[data-platform='android'] textarea { -webkit-tap-highlight-color:rgba(0,104,216,.14); }
 html[data-platform='android'] button,html[data-platform='android'] select,html[data-platform='android'] input:not([type='checkbox']):not([type='radio']) { min-height:48px; touch-action:manipulation; }
 html[data-platform='android'] [data-desktop-theme-toggle] { min-width:48px; }
 html[data-platform='android'] .desktop-check { min-height:48px; align-items:center; }

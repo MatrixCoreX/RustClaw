@@ -70,11 +70,11 @@ export function sharedUiAdapter(root: string): Plugin {
         text = once(text, '<SandboxedAipp app={selectedApp} lang={lang} apiFetch={apiFetch} />', '<DesktopAipp app={selectedApp} lang={lang} />', id);
         text = `import { DesktopAipp } from ${JSON.stringify(components)};\n` + text;
         imports.add('desktopDownload');
-        text = once(text, 'const endpoint = open && artifact.preview_url ? artifact.preview_url : artifact.download_url;', 'if (!open) { await desktopDownload(artifact.download_url, artifact.filename); return; }\n      const endpoint = open && artifact.preview_url ? artifact.preview_url : artifact.download_url;', id);
+        text = once(text, 'const blob = await fetchTaskArtifactBlob(apiFetch, open && artifact.preview_url ? artifact.preview_url : artifact.download_url);', 'if (!open) { await desktopDownload(artifact.download_url, artifact.filename); return; }\n      const blob = await fetchTaskArtifactBlob(apiFetch, open && artifact.preview_url ? artifact.preview_url : artifact.download_url);', id);
       }
       if (id === uiRoot + 'components/AippImageViewer.tsx') {
         imports.add('desktopDownload');
-        text = once(text, 'const response = await apiFetchRef.current(image.downloadUrl, { signal: controller.signal });\n      if (!response.ok) throw new Error(`aipp_image_download_http_${response.status}`);\n      const blob = await response.blob();\n      if (controller.signal.aborted) return;\n      saveTaskArtifactBlob(blob, image.filename);', 'await desktopDownload(image.downloadUrl, image.filename);', id);
+        text = once(text, 'const blob = mode === "all"', 'if (mode === "single") { await desktopDownload(image.downloadUrl, image.filename); setDownloadState("idle"); return; }\n      const blob = mode === "all"', id);
       }
       if (id === uiRoot + 'components/ChatPage.tsx') {
         imports.add('desktopDownload'); imports.add('desktopMediaUrl'); imports.add('desktopCloseMedia');

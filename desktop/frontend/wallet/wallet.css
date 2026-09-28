@@ -1,28 +1,31 @@
 body.wallet-window {
   margin: 0;
-  background: #f2f5f3;
+  background: #e5e5e7;
 }
 [data-theme="dark"] body.wallet-window {
   background: #18211c;
 }
 .wallet-ui {
-  --w-bg: var(--theme-panel, #fff);
-  --w-text: var(--theme-text, #27342e);
-  --w-muted: var(--theme-text-muted, #63716a);
-  --w-line: var(--theme-border, #d9e2dc);
-  --w-accent: #35674d;
+  --w-bg: #f2f2f7;
+  --w-text: #1d1d1f;
+  --w-muted: #6e6e73;
+  --w-line: rgba(60, 60, 67, 0.28);
+  --w-accent: #0068d8;
   color: var(--w-text);
   font:
-    14px/1.6 system-ui,
-    -apple-system,
+    14px/1.6 -apple-system,
+    BlinkMacSystemFont,
+    "SF Pro Text",
+    "Helvetica Neue",
+    system-ui,
     sans-serif;
   min-width: 0;
 }
 [data-theme="dark"] .wallet-ui {
-  --w-bg: var(--theme-panel, #222c29);
-  --w-text: var(--theme-text, #e3ebe6);
-  --w-muted: var(--theme-text-muted, #a5b5ac);
-  --w-line: var(--theme-border, #405249);
+  --w-bg: #222c29;
+  --w-text: #e3ebe6;
+  --w-muted: #a5b5ac;
+  --w-line: #405249;
   --w-accent: #98c9aa;
   color-scheme: dark;
 }
@@ -31,7 +34,9 @@ body.wallet-window {
   min-height: 100vh;
   margin: auto;
   padding: 28px;
-  background: #f2f5f3;
+  background:
+    radial-gradient(circle at 50% 0, rgba(0, 104, 216, 0.07), transparent 34%),
+    #e5e5e7;
   box-sizing: border-box;
 }
 .wallet-manager[data-theme="dark"],
@@ -65,6 +70,7 @@ body.wallet-window {
   padding: 22px;
   margin: 0 0 18px;
   min-width: 0;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.48) inset, 0 12px 30px rgba(0, 0, 0, 0.075);
 }
 .wallet-bar-head {
   display: flex;
@@ -98,6 +104,7 @@ body.wallet-window {
   border-radius: 7px;
   font: inherit;
   cursor: pointer;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08) inset;
 }
 .wallet-ui button:hover {
   border-color: var(--w-accent);
@@ -107,9 +114,10 @@ body.wallet-window {
   cursor: not-allowed;
 }
 .wallet-ui .wallet-primary {
-  background: var(--w-accent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--w-accent) 88%, white 12%), var(--w-accent));
   border-color: var(--w-accent);
   color: #fff;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.22) inset, 0 6px 16px color-mix(in srgb, var(--w-accent) 20%, transparent);
 }
 [data-theme="dark"] .wallet-ui .wallet-primary {
   color: #18261e;
@@ -134,6 +142,7 @@ body.wallet-window {
   border-radius: 7px;
   padding: 10px 12px;
   font: inherit;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset;
 }
 .wallet-ui select option {
   background: var(--w-bg);

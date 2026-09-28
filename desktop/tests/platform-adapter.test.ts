@@ -40,3 +40,18 @@ test('shared account pages preserve layout while local transfer uses native conf
     }
   }
 });
+
+test('AiAPP downloads keep native delivery while previews keep the shared endpoint', () => {
+  const transform = sharedUiAdapter(root).transform as (source: string, id: string) => {code: string} | undefined;
+  const filename = path.resolve(root, '../UI/src/components/AippPage.tsx');
+  const source = fs.readFileSync(filename, 'utf8');
+  const output = transform(source, filename)?.code ?? '';
+  assert.ok(output.includes('if (!open) { await desktopDownload(artifact.download_url, artifact.filename); return; }'));
+  assert.ok(output.includes('open && artifact.preview_url ? artifact.preview_url : artifact.download_url'));
+
+  const viewerFilename = path.resolve(root, '../UI/src/components/AippImageViewer.tsx');
+  const viewerSource = fs.readFileSync(viewerFilename, 'utf8');
+  const viewerOutput = transform(viewerSource, viewerFilename)?.code ?? '';
+  assert.ok(viewerOutput.includes('if (mode === "single") { await desktopDownload(image.downloadUrl, image.filename); setDownloadState("idle"); return; }'));
+  assert.ok(viewerOutput.includes('await downloadAippGallery(gallery, apiFetchRef.current, controller.signal, setCompleted)'));
+});
