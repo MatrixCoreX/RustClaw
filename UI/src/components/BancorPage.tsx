@@ -614,7 +614,7 @@ export function BancorPage({
           <div>
             <div className="flex items-center gap-2 text-xl font-semibold text-sky-200 sm:text-2xl">
               <TrendingUp className="h-5 w-5" />
-              <span>{t("Bancor II 储备曲线市场", "Bancor II reserve-curve market")}</span>
+              <span>{t("Bancor+ 储备曲线市场", "Bancor+ reserve-curve market")}</span>
             </div>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-white/60">
               {t(
