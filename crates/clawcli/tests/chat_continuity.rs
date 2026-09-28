@@ -452,10 +452,10 @@ fn conversation_and_attachments_survive_process_restart_then_clear_after_submit(
         );
     });
 
-    let session_store = temporary_session_store("restart_attachments");
-    let workspace = std::env::current_dir().expect("workspace");
-    let text_path = workspace.join(format!(".clawcli_restart_{}.txt", std::process::id()));
-    let image_path = workspace.join(format!(".clawcli_restart_{}.png", std::process::id()));
+    let fixture_dir = TemporaryFixtureDirectory::new("restart_attachments");
+    let session_store = fixture_dir.path().join("session.json");
+    let text_path = fixture_dir.path().join("context.txt");
+    let image_path = fixture_dir.path().join("image.png");
     std::fs::write(&text_path, "persisted context").expect("write text fixture");
     std::fs::write(&image_path, b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDRfixture")
         .expect("write image fixture");
@@ -514,10 +514,6 @@ fn conversation_and_attachments_survive_process_restart_then_clear_after_submit(
         "{}",
         String::from_utf8_lossy(&third.stdout)
     );
-
-    let _ = std::fs::remove_file(&session_store);
-    let _ = std::fs::remove_file(text_path);
-    let _ = std::fs::remove_file(image_path);
 }
 
 #[test]
@@ -582,6 +578,39 @@ fn temporary_session_store(label: &str) -> std::path::PathBuf {
             .expect("clock")
             .as_nanos()
     ))
+}
+
+struct TemporaryFixtureDirectory {
+    path: std::path::PathBuf,
+}
+
+impl TemporaryFixtureDirectory {
+    fn new(label: &str) -> Self {
+        let path = std::env::current_dir()
+            .expect("workspace")
+            .join("target")
+            .join("clawcli-test-fixtures")
+            .join(format!(
+                "{label}_{}_{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("clock")
+                    .as_nanos()
+            ));
+        std::fs::create_dir_all(&path).expect("create temporary fixture directory");
+        Self { path }
+    }
+
+    fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+}
+
+impl Drop for TemporaryFixtureDirectory {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
 }
 
 fn spawn_chat(
