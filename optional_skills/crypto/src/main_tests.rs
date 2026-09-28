@@ -188,6 +188,18 @@ fn market_quote_extra_exposes_content_excerpt() {
 }
 
 #[test]
+fn market_quote_extra_preserves_observation_timestamp() {
+    let extra = market_quote_extra(
+        json!({"action": "quote", "observed_at": "2026-09-28T00:00:00.000Z"}),
+        "BTCUSDT $69587.26",
+    );
+    assert_eq!(
+        extra.get("observed_at").and_then(Value::as_str),
+        Some("2026-09-28T00:00:00.000Z")
+    );
+}
+
+#[test]
 fn book_ticker_sources_text_uses_machine_fields() {
     let ticker = BookTicker {
         symbol: "BTCUSDT".to_string(),

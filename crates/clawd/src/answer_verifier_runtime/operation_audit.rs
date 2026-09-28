@@ -8,6 +8,15 @@ pub(super) struct ModelVerifierOut {
     #[serde(flatten)]
     pub(super) verdict: AnswerVerifierOut,
     pub(super) operation_checks: Vec<OperationCheck>,
+    pub(super) output_field_checks: Vec<OutputFieldCheck>,
+    #[serde(default)]
+    pub(super) unsupported_claims: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub(super) struct OutputFieldCheck {
+    pub(super) requested_field: String,
+    pub(super) exact_label_present: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -107,6 +116,17 @@ pub(super) fn validate_operation_audit(
         if check.requested_operation.trim().is_empty() {
             return invalid_operation_audit();
         }
+        if !check.applicable
+            && check.evidence_step_ids.is_empty()
+            && !check.method_observed
+            && check.result_observed
+            && !check.blocked
+        {
+            // Models occasionally encode a prohibition/absence constraint as
+            // an inapplicable operation row. It proves nothing and must not
+            // invalidate an otherwise independently audited verdict.
+            continue;
+        }
         if check.required_dispatches.is_empty() && check.evidence_step_ids.is_empty() {
             // Summarizing or formatting already-fetched results is a verdict
             // concern. An empty row cannot prove or disprove execution, so its
@@ -172,6 +192,17 @@ pub(super) fn validate_operation_audit(
         missing_operation |= !check.blocked
             && ((requires_method && !check.method_observed) || !check.result_observed);
     }
+    let mut output_format_gap = false;
+    let mut audited_output_fields = std::collections::BTreeSet::new();
+    for check in model.output_field_checks {
+        let requested_field = check.requested_field.trim();
+        if requested_field.is_empty() || !audited_output_fields.insert(requested_field.to_string())
+        {
+            return invalid_operation_audit();
+        }
+        output_format_gap |= !check.exact_label_present;
+    }
+    let has_unsupported_claims = !model.unsupported_claims.is_empty();
     let mut verdict = model.verdict.normalized();
     if missing_operation {
         verdict.pass = false;
@@ -188,6 +219,68 @@ pub(super) fn validate_operation_audit(
         verdict.confidence = verdict.confidence.max(0.55);
         if verdict.answer_incomplete_reason.is_empty() {
             verdict.answer_incomplete_reason = "requested_operation_not_observed".to_string();
+        }
+    }
+    if has_unsupported_claims {
+        verdict.pass = false;
+        if !verdict
+            .missing_evidence_fields
+            .iter()
+            .any(|field| field == "unsupported_claims")
+        {
+            verdict
+                .missing_evidence_fields
+                .push("unsupported_claims".to_string());
+        }
+        verdict.should_retry = true;
+        verdict.confidence = verdict.confidence.max(0.55);
+        if verdict.answer_incomplete_reason.is_empty() {
+            verdict.answer_incomplete_reason = "unsupported_claims_observed".to_string();
+        }
+    }
+    if output_format_gap {
+        verdict.pass = false;
+        if !verdict
+            .missing_evidence_fields
+            .iter()
+            .any(|field| field == "output_format")
+        {
+            verdict
+                .missing_evidence_fields
+                .push("output_format".to_string());
+        }
+        verdict.should_retry = true;
+        verdict.confidence = verdict.confidence.max(0.55);
+        if verdict.answer_incomplete_reason.is_empty() {
+            verdict.answer_incomplete_reason = "requested_output_field_label_missing".to_string();
+        }
+    }
+    verdict
+}
+
+pub(super) fn validate_output_field_audit(
+    mut verdict: AnswerVerifierOut,
+    checks: &[OutputFieldCheck],
+    candidate_answer: &str,
+) -> AnswerVerifierOut {
+    let output_format_gap = checks.iter().any(|check| {
+        !check.exact_label_present || !candidate_answer.contains(check.requested_field.as_str())
+    });
+    if output_format_gap {
+        verdict.pass = false;
+        if !verdict
+            .missing_evidence_fields
+            .iter()
+            .any(|field| field == "output_format")
+        {
+            verdict
+                .missing_evidence_fields
+                .push("output_format".to_string());
+        }
+        verdict.should_retry = true;
+        verdict.confidence = verdict.confidence.max(0.55);
+        if verdict.answer_incomplete_reason.is_empty() {
+            verdict.answer_incomplete_reason = "requested_output_field_label_missing".to_string();
         }
     }
     verdict

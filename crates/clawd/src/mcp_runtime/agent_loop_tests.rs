@@ -122,6 +122,7 @@ async fn ordinary_agent_loop_executes_safe_mcp_capability_with_event_evidence() 
             "method_observed": true,
             "result_observed": true
         }],
+        "output_field_checks": [],
         "pass": true,
         "missing_evidence_fields": [],
         "answer_incomplete_reason": "",

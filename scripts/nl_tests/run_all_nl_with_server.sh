@@ -572,12 +572,17 @@ else
   fi
   stamp="$(date +%Y%m%d_%H%M%S)"
   SERVER_LOG="${LOG_DIR%/}/clawd_full_nl_${stamp}.log"
+  # The manual NL verifier must inspect the trace emitted by this exact
+  # isolated server. Without this binding it falls back to a production log
+  # (or no log) and reports successful capability calls as missing evidence.
+  export NL_RUNTIME_TRACE_LOG="${SERVER_LOG}"
   (
     cd "${ISOLATED_WORKSPACE}"
     exec "${CLAWD_BIN}" --config "${ISOLATED_CONFIG}"
   ) >"${SERVER_LOG}" 2>&1 &
   started_pid=$!
   echo "server_log=${SERVER_LOG}"
+  echo "runtime_trace_log=${NL_RUNTIME_TRACE_LOG}"
   echo "server_pid=${started_pid}"
 
   for second in $(seq 1 "${START_TIMEOUT_SECONDS}"); do

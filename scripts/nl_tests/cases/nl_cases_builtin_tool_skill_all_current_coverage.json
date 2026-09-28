@@ -68,7 +68,7 @@
   ],
   "optional_case_source_sha256": {
     "scripts/nl_tests/cases/optional_skills/chinese_almanac.txt": "eececa05a697db0b50ef157ec1d024f2878c7b72afe67af3a9717c4c9c024389",
-    "scripts/nl_tests/cases/optional_skills/crypto.txt": "0a8d7e5b1dde60b7c4af1d1399cde38b08142982316a22f4cf7dd9cf96f839c2",
+    "scripts/nl_tests/cases/optional_skills/crypto.txt": "87a21e4b3f3f5b5ddb15acd33d2da1a6798d5c2bc3040464f4fa9ccd1148d5c7",
     "scripts/nl_tests/cases/optional_skills/git_forge.txt": "f95667de56d78d48a68b3f31114b662468c53f31d988da7f43d9a7b15a20a70c",
     "scripts/nl_tests/cases/optional_skills/invest_copy.txt": "7e0320af8afee63a6ce6e24eb7fbc41255c6ec6ccac592437f3972b38bc353b0",
     "scripts/nl_tests/cases/optional_skills/map_merchant.txt": "b0482b1576553976b132abce7c862c7ce80ba024415753a1e67294c94a26a765",

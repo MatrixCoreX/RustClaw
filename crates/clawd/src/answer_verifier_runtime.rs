@@ -150,7 +150,13 @@ pub(crate) async fn verify_answer_observe_only(
                     validated.schema_normalized
                 );
             }
-            operation_audit::validate_operation_audit(validated.value, journal)
+            let output_field_checks = validated.value.output_field_checks.clone();
+            let verdict = operation_audit::validate_operation_audit(validated.value, journal);
+            operation_audit::validate_output_field_audit(
+                verdict,
+                &output_field_checks,
+                candidate_answer,
+            )
         }
         Err(err) => {
             tracing::info!(

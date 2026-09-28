@@ -30,10 +30,58 @@ fn model(mut checks: serde_json::Value) -> ModelVerifierOut {
             );
     }
     serde_json::from_value(json!({
-        "operation_checks":checks,"pass":true,"missing_evidence_fields":[],
+        "operation_checks":checks,"output_field_checks":[],"pass":true,"missing_evidence_fields":[],
         "answer_incomplete_reason":"","should_retry":false,"retry_instruction":"","confidence":0.9,
     }))
     .unwrap()
+}
+
+#[test]
+fn missing_exact_output_field_label_forces_rewrite() {
+    let mut model = model(json!([]));
+    model.output_field_checks = vec![OutputFieldCheck {
+        requested_field: "exchange/source".to_string(),
+        exact_label_present: false,
+    }];
+    let verdict = validate_operation_audit(model, &journal());
+    assert!(!verdict.pass);
+    assert!(verdict.should_retry);
+    assert_eq!(verdict.missing_evidence_fields, vec!["output_format"]);
+    assert_eq!(
+        verdict.answer_incomplete_reason,
+        "requested_output_field_label_missing"
+    );
+}
+
+#[test]
+fn exact_output_field_label_audit_preserves_success() {
+    let mut model = model(json!([]));
+    model.output_field_checks = vec![OutputFieldCheck {
+        requested_field: "exchange/source".to_string(),
+        exact_label_present: true,
+    }];
+    assert!(validate_operation_audit(model, &journal()).pass);
+}
+
+#[test]
+fn host_rejects_a_false_positive_output_field_label_claim() {
+    let checks = vec![OutputFieldCheck {
+        requested_field: "exchange/source".to_string(),
+        exact_label_present: true,
+    }];
+    let verdict = validate_output_field_audit(
+        validate_operation_audit(model(json!([])), &journal()),
+        &checks,
+        "source: provider_api",
+    );
+    assert!(!verdict.pass);
+    assert_eq!(verdict.missing_evidence_fields, vec!["output_format"]);
+    let accepted = validate_output_field_audit(
+        validate_operation_audit(model(json!([])), &journal()),
+        &checks,
+        "exchange/source: provider_api",
+    );
+    assert!(accepted.pass);
 }
 
 #[test]
@@ -244,7 +292,7 @@ fn empty_presentation_check_ignores_claim_flags_but_rejects_control_claims() {
         (
             json!({"requested_operation":"summarize fetched news","evidence_step_ids":[],
             "required_dispatches":[],"method_observed":false,"result_observed":true,"applicable":false}),
-            false,
+            true,
         ),
     ] {
         let verdict = validate_operation_audit(model(json!([check])), &journal());
@@ -432,7 +480,8 @@ fn conditional_branch_requires_successful_condition_and_preservation_evidence() 
     for ids in [json!([]), json!(["unknown"]), json!(["s2"])] {
         let mut invalid = check.clone();
         invalid["evidence_step_ids"] = ids;
-        assert!(!validate_operation_audit(model(json!([invalid])), &journal()).pass);
+        let pass = validate_operation_audit(model(json!([invalid])), &journal()).pass;
+        assert_eq!(pass, invalid["evidence_step_ids"] == json!([]));
     }
     for (field, value) in [
         ("method_observed", true),
@@ -473,12 +522,34 @@ fn blocked_closeout_requires_actual_failure_evidence() {
 
 #[test]
 fn schema_requires_audit_and_does_not_coerce_boolean_or_allow_extra_fields() {
-    let base = json!({"operation_checks":[],"pass":true,"missing_evidence_fields":[],
+    let base = json!({"operation_checks":[],"output_field_checks":[],"pass":true,"missing_evidence_fields":[],
                      "answer_incomplete_reason":"","should_retry":false,"retry_instruction":"","confidence":0.9});
     let schema = crate::prompt_utils::PromptSchemaId::AnswerVerifier;
     assert!(
         crate::prompt_utils::validate_against_schema::<ModelVerifierOut>(&base.to_string(), schema)
             .is_ok()
+    );
+    let mut empty_unsupported_claims = base.clone();
+    empty_unsupported_claims["unsupported_claims"] = json!([]);
+    assert!(
+        crate::prompt_utils::validate_against_schema::<ModelVerifierOut>(
+            &empty_unsupported_claims.to_string(),
+            schema
+        )
+        .is_ok()
+    );
+    let mut unsupported_claims = base.clone();
+    unsupported_claims["unsupported_claims"] = json!(["invented source count"]);
+    let verdict = validate_operation_audit(
+        serde_json::from_value(unsupported_claims).unwrap(),
+        &journal(),
+    );
+    assert!(!verdict.pass);
+    assert!(verdict.should_retry);
+    assert_eq!(verdict.missing_evidence_fields, vec!["unsupported_claims"]);
+    assert_eq!(
+        verdict.answer_incomplete_reason,
+        "unsupported_claims_observed"
     );
     let mut missing = base.clone();
     missing.as_object_mut().unwrap().remove("operation_checks");
@@ -505,6 +576,31 @@ fn schema_requires_audit_and_does_not_coerce_boolean_or_allow_extra_fields() {
             .is_err()
         );
     }
+    let mut observed_inapplicable = base.clone();
+    observed_inapplicable["operation_checks"] = json!([{
+        "requested_operation":"conditional fixture",
+        "required_dispatches":[{"action_type":"call_capability","action_ref":"fixture.inspect"}],
+        "evidence_step_ids":["s1"],
+        "method_observed":false,
+        "result_observed":true,
+        "applicable":false
+    }]);
+    assert!(
+        crate::prompt_utils::validate_against_schema::<ModelVerifierOut>(
+            &observed_inapplicable.to_string(),
+            schema
+        )
+        .is_ok()
+    );
+    let mut unknown_top_level = base;
+    unknown_top_level["unknown_extra"] = json!(true);
+    assert!(
+        crate::prompt_utils::validate_against_schema::<ModelVerifierOut>(
+            &unknown_top_level.to_string(),
+            schema
+        )
+        .is_err()
+    );
 }
 
 #[test]

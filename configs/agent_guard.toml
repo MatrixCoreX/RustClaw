@@ -167,7 +167,10 @@ tool_timeout_class = "standard"
 [agent.task_budget.profiles.fast_read]
 soft_slice_seconds = 120
 stagnation_tolerance = 2
-provider_timeout_class = "short"
+# Native-tool planning can begin with one bookkeeping/discovery action while
+# carrying a large capability catalog. Keep the fast-read slice short, but let
+# a slow healthy provider use its configured standard per-call window.
+provider_timeout_class = "standard"
 tool_timeout_class = "short"
 
 [agent.task_budget.profiles.grounded_summary]

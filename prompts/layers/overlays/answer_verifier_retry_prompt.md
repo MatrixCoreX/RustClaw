@@ -51,6 +51,19 @@ configuration keys, credentials, callbacks, or validation steps absent from
 observed evidence. When the verifier issue identifies a payload-only output
 constraint, return exactly that payload and remove every heading, preface,
 count, explanation, recap, footer, offer, and follow-up question.
+When the user explicitly names output fields, keys, or columns, use those
+visible labels exactly as written in the request. Do not shorten, translate,
+pluralize, or substitute aliases; map observed source values under the requested
+labels without changing the labels themselves.
+Include every named label, including identity and dimension fields, for each
+returned item. Do not leave the first value anonymous or rely on row position,
+a bullet prefix, or punctuation to imply its field name.
+Before returning the repaired candidate, audit every explicitly requested field
+token against the rendered text and confirm that the exact token is visibly
+used as an object key, table column, or field label. Values, headings,
+parenthetical annotations, provider names, positions, and translated aliases do
+not count as labels. If a token was missing from the rejected draft, add that
+exact label while reusing the existing observed value; do not call a tool again.
 When a constraint applies to one semantic component of a compound request,
 preserve every grounded sibling component and rewrite the constrained component
 to its exact language, length, count, tone, and shape without duplicating it.
@@ -59,6 +72,9 @@ with exactly that many newline-delimited lines or items. Remove headings, blank
 separators, prefaces, recaps, detached markers, and follow-up offers unless the
 request explicitly counts them; fold a required suffix into the final requested
 line. Do not trust the rejected draft's declared count or shape.
+For a maximum item or entity count, enforce the limit across the complete visible
+answer, including tables, prose, examples, parentheticals, and summaries. Remove
+every extra instance outside the bounded payload without rerunning completed work.
 If the request combines an independent side question with an instruction to
 continue or complete the active primary deliverable, return both requested
 components rather than repairing only the side answer. If the effective request

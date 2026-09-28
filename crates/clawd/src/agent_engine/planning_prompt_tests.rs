@@ -221,6 +221,21 @@ fn planner_prompts_do_not_treat_historical_delivery_as_current_execution() {
 }
 
 #[test]
+fn planner_common_rules_do_not_probe_workspace_for_capability_credentials() {
+    let prompt_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts/layers");
+    let common = std::fs::read_to_string(prompt_root.join("base/execution/common_rules.md"))
+        .expect("read shared execution rules");
+
+    assert!(common.contains("Do not search or read workspace files, environment files"));
+    assert!(common.contains("Invoke the matching capability with the requested arguments first"));
+    assert!(common.contains("structured missing-credential or missing-dependency result"));
+    assert!(common.contains("preserve those names exactly in the visible result"));
+    assert!(common.contains("including identity and dimension fields"));
+    assert!(common.contains("does not substitute for its field label"));
+    assert!(common.contains("maximum item/entity count applies to the complete visible answer"));
+}
+
+#[test]
 fn planner_overlays_select_subagents_through_capabilities_only() {
     let overlays = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts/layers/overlays");
     for relative_path in [

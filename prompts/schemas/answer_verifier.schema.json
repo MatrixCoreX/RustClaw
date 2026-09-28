@@ -7,6 +7,7 @@
   "additionalProperties": false,
   "required": [
     "operation_checks",
+    "output_field_checks",
     "pass",
     "missing_evidence_fields",
     "answer_incomplete_reason",
@@ -17,12 +18,17 @@
   "properties": {
     "operation_checks": {
       "type": "array",
+      "description": "Positive user-requested runtime operations and positively observed conditional branches only. A prohibition or other absence constraint must be checked against executed operations in the overall verdict and must never create an operation_checks row.",
       "items": {
         "type": "object",
         "additionalProperties": false,
         "required": ["requested_operation", "required_dispatches", "evidence_step_ids", "method_observed", "result_observed"],
         "properties": {
-          "requested_operation": {"type": "string", "minLength": 1},
+          "requested_operation": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A positive requested operation or a conditional branch, never a forbidden or explicitly excluded action."
+          },
           "required_dispatches": {
             "type": "array",
             "maxItems": 16,
@@ -40,10 +46,48 @@
           "evidence_step_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
           "method_observed": {"type": "boolean"},
           "result_observed": {"type": "boolean"},
-          "applicable": {"type": "boolean", "default": true},
+          "applicable": {
+            "type": "boolean",
+            "default": true,
+            "description": "False only for a conditional branch whose condition was positively observed in evidence_step_ids. Never use false for a prohibition or absent forbidden action."
+          },
           "blocked": {"type": "boolean"}
         }
       }
+    },
+    "output_field_checks": {
+      "type": "array",
+      "maxItems": 64,
+      "description": "Complete audit of every output field, key, or column explicitly named by the user. Use an empty array only when the user named no output fields. Preserve requested_field byte-for-byte from the request.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["requested_field", "exact_label_present"],
+        "properties": {
+          "requested_field": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "description": "One exact field/key/column token copied byte-for-byte from the user request."
+          },
+          "exact_label_present": {
+            "type": "boolean",
+            "description": "True only when requested_field is visibly present as an exact object key, table column, or explicit field label in the candidate answer."
+          },
+          "evidence_step_ids": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1},
+            "uniqueItems": true,
+            "description": "Optional non-authoritative evidence annotations. The host validates label presence against the candidate answer itself."
+          }
+        }
+      }
+    },
+    "unsupported_claims": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {"type": "string", "minLength": 1},
+      "description": "Optional machine-readable claims that are not grounded in observed evidence. An empty array has no effect; non-empty entries force an evidence-grounded rewrite."
     },
     "pass": {
       "type": "boolean",

@@ -74,6 +74,7 @@
 
 ### `quote` / `multi_quote` — response `extra`
 - `extra.content_excerpt`: compact quote text for runtime evidence checks. Consumers should use this structured field instead of depending on localized `text` parsing.
+- `extra.observed_at`: UTC RFC 3339 timestamp captured when the quote operation completes.
 - `extra.quote` / `extra.quotes`: preferred quote objects with `symbol`, `price_usd`, `change_24h_pct`, `exchange`, and `source`.
 - `extra.quotes_by_exchange`: per-exchange quote objects when available.
 

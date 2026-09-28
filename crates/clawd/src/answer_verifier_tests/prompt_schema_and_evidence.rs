@@ -42,6 +42,7 @@ fn answer_verifier_prompt_request_preserves_original_language_over_resolved_inte
 fn answer_verifier_schema_accepts_typed_output() {
     let raw = json!({
         "operation_checks": [],
+        "output_field_checks": [],
         "pass": false,
         "missing_evidence_fields": ["size_bytes"],
         "answer_incomplete_reason": "missing requested size evidence",
@@ -77,6 +78,8 @@ fn answer_verifier_schema_drift() {
 
     let expected = [
         "operation_checks",
+        "output_field_checks",
+        "unsupported_claims",
         "pass",
         "missing_evidence_fields",
         "answer_incomplete_reason",
@@ -106,13 +109,26 @@ fn answer_verifier_schema_drift() {
         .iter()
         .filter_map(serde_json::Value::as_str)
         .collect::<BTreeSet<_>>();
+    let required_expected = [
+        "operation_checks",
+        "output_field_checks",
+        "pass",
+        "missing_evidence_fields",
+        "answer_incomplete_reason",
+        "should_retry",
+        "retry_instruction",
+        "confidence",
+    ]
+    .into_iter()
+    .collect::<BTreeSet<_>>();
     assert_eq!(
-        required, expected,
+        required, required_expected,
         "answer_verifier.schema.json required set drifted from model verification contract"
     );
 
     let raw = json!({
         "operation_checks": [],
+        "output_field_checks": [],
         "pass": true,
         "missing_evidence_fields": [],
         "answer_incomplete_reason": "",
@@ -169,6 +185,33 @@ fn answer_verifier_prompt_keeps_active_conversation_recall_out_of_operation_audi
     assert!(VERIFIER_PROMPT.contains("both a shorthand and a concrete target"));
     assert!(VERIFIER_PROMPT.contains("`session.bind_alias` is a mandatory state-mutation dispatch"));
     assert!(VERIFIER_PROMPT.contains("Reject `respond`-only completion"));
+}
+
+#[test]
+fn answer_verifier_contract_keeps_prohibitions_out_of_operation_rows() {
+    const VERIFIER_PROMPT: &str =
+        include_str!("../../../../prompts/layers/overlays/answer_verifier_prompt.md");
+    const VERIFIER_SCHEMA: &str =
+        include_str!("../../../../prompts/schemas/answer_verifier.schema.json");
+
+    assert!(VERIFIER_PROMPT.contains("is an absence constraint, not a requested operation"));
+    assert!(VERIFIER_PROMPT.contains("do not create an `operation_checks` row"));
+    assert!(VERIFIER_SCHEMA.contains("must never create an operation_checks row"));
+    assert!(VERIFIER_SCHEMA.contains("Never use false for a prohibition"));
+}
+
+#[test]
+fn answer_verifier_contract_preserves_explicit_output_field_tokens() {
+    const VERIFIER_PROMPT: &str =
+        include_str!("../../../../prompts/layers/overlays/answer_verifier_prompt.md");
+
+    assert!(VERIFIER_PROMPT.contains("explicitly names fields, keys, or columns to be returned"));
+    assert!(VERIFIER_PROMPT.contains("regardless of whether the result is rendered as prose"));
+    assert!(VERIFIER_PROMPT.contains("including identity and dimension fields"));
+    assert!(VERIFIER_PROMPT.contains("every requested token must appear as a visible label"));
+    assert!(VERIFIER_PROMPT.contains("perform a literal label audit over the rendered candidate"));
+    assert!(VERIFIER_PROMPT.contains("enumerate the missing exact tokens"));
+    assert!(!VERIFIER_PROMPT.contains("Do not require exact field names in ordinary prose answers"));
 }
 
 #[test]
@@ -300,10 +343,14 @@ fn answer_verifier_audits_exact_counts_side_deliverables_and_ambiguous_targets()
     assert!(VERIFIER_PROMPT.contains("Audit the rendered candidate itself"));
     assert!(VERIFIER_PROMPT.contains("do not trust the candidate's declared response shape"));
     assert!(VERIFIER_PROMPT.contains("both fewer and more units fail"));
+    assert!(VERIFIER_PROMPT.contains("count every distinct returned instance"));
+    assert!(VERIFIER_PROMPT.contains("primary table or list itself stays within the limit"));
     assert!(VERIFIER_PROMPT.contains("only the side answer is incomplete"));
     assert!(VERIFIER_PROMPT.contains("multiple distinct active targets remain equally compatible"));
     assert!(VERIFIER_PROMPT.contains("semantically rather than through fixed words"));
     assert!(retry_normalized.contains("exactly that many newline-delimited lines or items"));
+    assert!(retry_normalized
+        .contains("including tables, prose, examples, parentheticals, and summaries"));
     assert!(retry_normalized.contains("both requested components"));
     assert!(retry_normalized.contains("multiple distinct active targets equally plausible"));
 }

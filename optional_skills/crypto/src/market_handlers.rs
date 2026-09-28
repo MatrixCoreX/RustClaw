@@ -69,6 +69,7 @@ pub(super) fn handle_quote(
     let extra = market_quote_extra(
         json!({
             "action": "quote",
+            "observed_at": now_iso_ts(),
             "quote": pref,
             "quotes_by_exchange": {
                 "binance": binance,
@@ -150,7 +151,11 @@ pub(super) fn handle_multi_quote(
             "coingecko": c
         }));
     }
-    let mut extra = json!({ "action": "multi_quote", "quotes": quotes });
+    let mut extra = json!({
+        "action": "multi_quote",
+        "observed_at": now_iso_ts(),
+        "quotes": quotes
+    });
     extra["quotes_by_exchange"] = Value::Array(by_exchange_rows);
     let text = lines.join("\n");
     Ok((text.clone(), market_quote_extra(extra, &text)))
