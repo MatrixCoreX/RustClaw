@@ -120,7 +120,9 @@ impl LlmProviderRuntime {
         };
         let secret_name = claw_core::secrets::text_secret_name_for_vendor(&vendor);
         match broker.lookup(&secret_name) {
-            Ok(Some(secret)) => std::borrow::Cow::Owned(secret.expose().to_string()),
+            Ok(Some(secret)) if !secret.is_empty() => {
+                return std::borrow::Cow::Owned(secret.expose().to_string());
+            }
             Ok(None) => {
                 tracing::debug!(
                     "llm_provider_api_key vendor={} broker_label={} secret={} status=miss fallback=config",
@@ -128,7 +130,6 @@ impl LlmProviderRuntime {
                     broker.label(),
                     secret_name
                 );
-                std::borrow::Cow::Borrowed(&self.config.api_key)
             }
             Err(err) => {
                 tracing::debug!(
@@ -138,9 +139,37 @@ impl LlmProviderRuntime {
                     secret_name,
                     err
                 );
-                std::borrow::Cow::Borrowed(&self.config.api_key)
+            }
+            Ok(Some(_)) => {}
+        }
+
+        // A hosted relay receives its bearer token through device enrollment,
+        // so it is intentionally not stored under the user-editable vendor
+        // credential name. Project the enrolled credential through the same
+        // broker path used by normal model calls; skill runners can then issue
+        // a task-scoped child token without copying the secret into TOML or a
+        // second credential file.
+        if self.config.params.device_key_enrollment {
+            let relay_secret_name = claw_core::secrets::text_secret_name_for_vendor("hosted_relay");
+            match broker.lookup(&relay_secret_name) {
+                Ok(Some(secret)) if !secret.is_empty() => {
+                    return std::borrow::Cow::Owned(secret.expose().to_string());
+                }
+                Ok(_) => tracing::debug!(
+                    "llm_provider_api_key broker_label={} secret={} status=miss fallback=config",
+                    broker.label(),
+                    relay_secret_name
+                ),
+                Err(err) => tracing::debug!(
+                    "llm_provider_api_key broker_label={} secret={} status=err err={} fallback=config",
+                    broker.label(),
+                    relay_secret_name,
+                    err
+                ),
             }
         }
+
+        std::borrow::Cow::Borrowed(&self.config.api_key)
     }
 }
 

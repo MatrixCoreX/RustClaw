@@ -32,6 +32,12 @@ fn make_provider(name: &str, api_key: &str) -> LlmProviderRuntime {
     }
 }
 
+fn make_hosted_relay_provider() -> LlmProviderRuntime {
+    let mut provider = make_provider("vendor-custom", "");
+    provider.config.params.device_key_enrollment = true;
+    provider
+}
+
 /// 返回固定值的 mock broker。
 struct FixedBroker {
     expected_name: String,
@@ -136,6 +142,31 @@ fn api_key_falls_back_when_vendor_part_contains_invalid_chars() {
     let provider = make_provider("vendor-Foo-Bar", "config-fallback-key");
     let key = provider.api_key_using(&AlwaysMissBroker);
     assert_eq!(&*key, "config-fallback-key");
+}
+
+#[test]
+fn hosted_relay_projects_enrolled_device_key_from_broker() {
+    let provider = make_hosted_relay_provider();
+    let broker = FixedBroker {
+        expected_name: "text_hosted_relay_api_key".to_string(),
+        value: "lrk_fixture-enrolled-device-key".to_string(),
+    };
+
+    assert_eq!(
+        provider.api_key_using(&broker),
+        "lrk_fixture-enrolled-device-key"
+    );
+}
+
+#[test]
+fn ordinary_provider_cannot_consume_hosted_relay_device_key() {
+    let provider = make_provider("vendor-custom", "config-fallback-key");
+    let broker = FixedBroker {
+        expected_name: "text_hosted_relay_api_key".to_string(),
+        value: "lrk_fixture-enrolled-device-key".to_string(),
+    };
+
+    assert_eq!(provider.api_key_using(&broker), "config-fallback-key");
 }
 
 #[test]
