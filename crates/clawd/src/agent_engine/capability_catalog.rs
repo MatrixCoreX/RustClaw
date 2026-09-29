@@ -65,6 +65,7 @@ pub(super) fn catalog_entries_for_task(
                     "filesystem_write": capability.filesystem_write,
                     "external_publish": capability.external_publish,
                     "credential_access": capability.credential_access,
+                    "credential_scope": capability.credential_scope.map(|scope| scope.as_token()),
                     "subprocess": capability.subprocess,
                     "package_install": capability.package_install,
                     "privilege_escalation": capability.privilege_escalation,

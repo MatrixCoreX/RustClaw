@@ -72,6 +72,8 @@ struct RegistryCapability {
     filesystem_write: bool,
     external_publish: bool,
     credential_access: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    credential_scope: Option<&'static str>,
     subprocess: bool,
     package_install: bool,
     privilege_escalation: bool,
@@ -197,6 +199,7 @@ fn render_capability(
         filesystem_write: grant.permissions.filesystem_write,
         external_publish: grant.permissions.external_publish,
         credential_access: !grant.permissions.credential_refs.is_empty(),
+        credential_scope: (!grant.permissions.credential_refs.is_empty()).then_some("broker"),
         subprocess: grant.permissions.subprocess,
         package_install: grant.permissions.package_install,
         privilege_escalation: grant.permissions.privilege_escalation,

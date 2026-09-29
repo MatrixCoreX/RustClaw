@@ -121,6 +121,9 @@ fn namespaced_actions_keep_registry_policy_required_args_and_effects() {
                 filesystem_write: mapping.filesystem_write.unwrap_or(false),
                 external_publish: mapping.external_publish.unwrap_or(false),
                 credential_access: mapping.credential_access.unwrap_or(false),
+                broker_scoped_credentials: mapping
+                    .credential_scope
+                    .is_some_and(|scope| scope.as_token() == "broker"),
                 subprocess: mapping.subprocess.unwrap_or(false),
                 package_install: mapping.package_install.unwrap_or(false),
                 privilege_escalation: mapping.privilege_escalation.unwrap_or(false),

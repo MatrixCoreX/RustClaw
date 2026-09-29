@@ -51,6 +51,7 @@ fn planner_capability_policy_equivalent(
         && alias.filesystem_write == target.filesystem_write
         && alias.external_publish == target.external_publish
         && alias.credential_access == target.credential_access
+        && alias.credential_scope == target.credential_scope
         && alias.subprocess == target.subprocess
         && alias.package_install == target.package_install
         && alias.privilege_escalation == target.privilege_escalation

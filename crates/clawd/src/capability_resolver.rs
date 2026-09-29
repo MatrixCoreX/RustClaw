@@ -320,6 +320,7 @@ fn strip_runtime_owned_policy_args(args: &mut serde_json::Map<String, Value>) {
         "filesystem_write",
         "external_publish",
         "credential_access",
+        "credential_scope",
         "subprocess",
         "package_install",
         "privilege_escalation",

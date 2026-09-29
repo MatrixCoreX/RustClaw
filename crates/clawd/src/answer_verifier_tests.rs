@@ -588,6 +588,95 @@ fn should_verify_answer_skips_permission_denied_terminal_finalizer() {
 }
 
 #[test]
+fn should_verify_answer_skips_grounded_interactive_login_blocker_without_content_contract() {
+    let mut route = route_with_mode();
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.delivery_required = false;
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-terminal-interactive-login",
+        "ask",
+        "download a video",
+    );
+    journal.record_output_contract(&route.output_contract);
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "media_download".to_string(),
+        status: crate::executor::StepExecutionStatus::Error,
+        output: None,
+        error: Some(crate::skills::structured_skill_error_from_parts(
+            "media_download",
+            "interactive_verification_timeout",
+            "interactive browser verification did not complete",
+            Some("linux"),
+            Some(json!({
+                "platform": "youtube",
+                "retryable": true
+            })),
+        )),
+        started_at: 1,
+        finished_at: 2,
+    });
+    journal.record_finalizer_summary(crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        contract_ok: true,
+        completion_ok: Some(true),
+        grounded_ok: Some(true),
+        format_ok: Some(true),
+        needs_clarify: Some(false),
+        used_evidence_ids_count: 1,
+        ..Default::default()
+    });
+
+    assert!(!should_verify_answer(
+        &route,
+        &journal,
+        "The download is waiting for interactive verification."
+    ));
+}
+
+#[test]
+fn should_verify_answer_keeps_verifier_for_unclassified_execution_failure() {
+    let mut route = route_with_mode();
+    route.output_contract.requires_content_evidence = false;
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-terminal-generic-failure",
+        "ask",
+        "run an operation",
+    );
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "fixture".to_string(),
+        status: crate::executor::StepExecutionStatus::Error,
+        output: None,
+        error: Some(crate::skills::structured_skill_error_from_parts(
+            "fixture",
+            "execution_failed",
+            "operation failed",
+            Some("linux"),
+            None,
+        )),
+        started_at: 1,
+        finished_at: 2,
+    });
+    journal.record_finalizer_summary(crate::task_journal::TaskJournalFinalizerSummary {
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        contract_ok: true,
+        completion_ok: Some(true),
+        grounded_ok: Some(true),
+        used_evidence_ids_count: 1,
+        ..Default::default()
+    });
+
+    assert!(should_verify_answer(
+        &route,
+        &journal,
+        "The operation failed."
+    ));
+}
+
+#[test]
 fn should_verify_answer_skips_grounded_generic_machine_projection() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;

@@ -36,6 +36,7 @@ pub(crate) struct SandboxRequirements<'a> {
     pub(crate) filesystem_write: bool,
     pub(crate) external_publish: bool,
     pub(crate) credential_access: bool,
+    pub(crate) broker_scoped_credentials: bool,
     pub(crate) subprocess: bool,
     pub(crate) package_install: bool,
     pub(crate) privilege_escalation: bool,
@@ -317,7 +318,10 @@ impl ToolsPolicy {
                 // network grant. Publishing remains a separate denied effect.
                 if requirements.subprocess && requirements.external_publish {
                     Some("sandbox_workspace_external_denied")
-                } else if requirements.subprocess && requirements.credential_access {
+                } else if requirements.subprocess
+                    && requirements.credential_access
+                    && !requirements.broker_scoped_credentials
+                {
                     Some("sandbox_workspace_credential_denied")
                 } else if requirements.package_install || requirements.privilege_escalation {
                     Some("sandbox_workspace_privilege_denied")

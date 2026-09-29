@@ -138,6 +138,20 @@ impl CapabilityIsolationProfile {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityCredentialScope {
+    Broker,
+}
+
+impl CapabilityCredentialScope {
+    pub fn as_token(self) -> &'static str {
+        match self {
+            Self::Broker => "broker",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct PlannerCapabilityMapping {
     pub name: String,
@@ -196,6 +210,8 @@ pub struct PlannerCapabilityMapping {
     pub external_publish: Option<bool>,
     #[serde(default)]
     pub credential_access: Option<bool>,
+    #[serde(default)]
+    pub credential_scope: Option<CapabilityCredentialScope>,
     #[serde(default)]
     pub subprocess: Option<bool>,
     #[serde(default)]
@@ -995,6 +1011,7 @@ fn normalize_planner_capabilities(
             credential_access: mapping
                 .credential_access
                 .or_else(|| mapping.effect.map(|_| false)),
+            credential_scope: mapping.credential_scope,
             subprocess: mapping.subprocess.or(Some(false)),
             package_install: mapping.package_install.or(Some(false)),
             privilege_escalation: mapping.privilege_escalation.or(Some(false)),

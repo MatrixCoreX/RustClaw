@@ -122,6 +122,9 @@ fn planner_capability_hint(mapping: &PlannerCapabilityMapping) -> String {
     if let Some(credential_access) = mapping.credential_access {
         parts.push(format!("credential_access={credential_access}"));
     }
+    if let Some(credential_scope) = mapping.credential_scope {
+        parts.push(format!("credential_scope={}", credential_scope.as_token()));
+    }
     if let Some(subprocess) = mapping.subprocess {
         parts.push(format!("subprocess={subprocess}"));
     }

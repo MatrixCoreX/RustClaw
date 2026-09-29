@@ -1180,7 +1180,9 @@ fn terminal_boundary_retries_a_transient_sqlite_writer_lock() {
         claim_conversation_terminal_boundary(&contender_pool, &contender_task_id, 1, 1)
     });
     std::thread::sleep(std::time::Duration::from_millis(40));
-    owner_tx.commit().expect("release writer lock");
+    // The transaction exists only to hold the lock. Dropping it rolls back and
+    // releases the lock without racing a COMMIT against the contender's reads.
+    drop(owner_tx);
 
     assert_eq!(
         contender

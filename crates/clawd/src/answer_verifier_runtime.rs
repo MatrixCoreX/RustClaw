@@ -300,12 +300,9 @@ pub(super) fn finalizer_account_access_error_can_skip_missing_evidence_gap(
 }
 
 pub(super) fn finalizer_terminal_blocker_can_skip_answer_verifier(
-    route_result: &AnswerContract,
+    _route_result: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> bool {
-    if !route_result.output_contract.requires_content_evidence {
-        return false;
-    }
     let Some(summary) = journal.finalizer_summary.as_ref() else {
         return false;
     };
@@ -377,7 +374,16 @@ pub(super) fn step_error_is_terminal_blocker(error: &str) -> bool {
     crate::skills::parse_structured_skill_error(error).is_some_and(|structured| {
         matches!(
             structured.error_code.as_str(),
-            "permission_denied" | "policy_block" | "path_outside_workspace"
+            "permission_denied"
+                | "policy_block"
+                | "path_outside_workspace"
+                | "invalid_credentials"
+                | "credential_missing"
+                | "auth_failed"
+                | "login_required"
+                | "display_unavailable"
+                | "interactive_verification_timeout"
+                | "interactive_verification_cancelled"
         )
     })
 }

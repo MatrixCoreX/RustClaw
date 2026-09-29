@@ -420,6 +420,7 @@ fn action_scoped_capability_policy(
                 "filesystem_write": mapping.filesystem_write,
                 "external_publish": mapping.external_publish,
                 "credential_access": mapping.credential_access,
+                "credential_scope": mapping.credential_scope.map(|scope| scope.as_token()),
                 "subprocess": mapping.subprocess,
                 "package_install": mapping.package_install,
                 "privilege_escalation": mapping.privilege_escalation,
@@ -552,6 +553,9 @@ fn sandbox_policy_summary(
         "credential_access": capability_policy
             .get("credential_access")
             .and_then(Value::as_bool),
+        "credential_scope": capability_policy
+            .get("credential_scope")
+            .and_then(Value::as_str),
         "subprocess": capability_policy
             .get("subprocess")
             .and_then(Value::as_bool),

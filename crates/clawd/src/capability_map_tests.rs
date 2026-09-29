@@ -132,6 +132,7 @@ fn planner_capability_hint_includes_structured_contract() {
         filesystem_write: Some(false),
         external_publish: Some(false),
         credential_access: Some(false),
+        credential_scope: None,
         subprocess: None,
         package_install: None,
         privilege_escalation: None,

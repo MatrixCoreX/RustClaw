@@ -62,6 +62,7 @@ fn step_permission_decision_json(
                 "filesystem_write": mapping.filesystem_write,
                 "external_publish": mapping.external_publish,
                 "credential_access": mapping.credential_access,
+                "credential_scope": mapping.credential_scope.map(|scope| scope.as_token()),
                 "subprocess": mapping.subprocess,
                 "package_install": mapping.package_install,
                 "privilege_escalation": mapping.privilege_escalation,
@@ -323,6 +324,7 @@ pub(super) fn step_sandbox_denial_reason(
                     "filesystem_write": mapping.filesystem_write,
                     "external_publish": mapping.external_publish,
                     "credential_access": mapping.credential_access,
+                    "credential_scope": mapping.credential_scope.map(|scope| scope.as_token()),
                     "subprocess": mapping.subprocess,
                     "package_install": mapping.package_install,
                     "privilege_escalation": mapping.privilege_escalation,
@@ -365,6 +367,11 @@ fn sandbox_denial_reason(
         },
         external_publish: !run_cmd && bool_field("external_publish"),
         credential_access: !run_cmd && bool_field("credential_access"),
+        broker_scoped_credentials: !run_cmd
+            && registry_policy
+                .and_then(|policy| policy.get("credential_scope"))
+                .and_then(Value::as_str)
+                == Some("broker"),
         subprocess: run_cmd || bool_field("subprocess"),
         package_install: bool_field("package_install"),
         privilege_escalation: bool_field("privilege_escalation"),
@@ -953,6 +960,9 @@ fn verifier_sandbox_summary(
         "credential_access": registry_policy
             .and_then(|policy| policy.get("credential_access"))
             .and_then(Value::as_bool),
+        "credential_scope": registry_policy
+            .and_then(|policy| policy.get("credential_scope"))
+            .and_then(Value::as_str),
     })
 }
 

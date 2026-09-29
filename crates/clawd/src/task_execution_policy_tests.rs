@@ -220,6 +220,7 @@ fn effective_yolo_policy_requires_a_current_admin_identity() {
             filesystem_write: true,
             external_publish: true,
             credential_access: true,
+            broker_scoped_credentials: false,
             subprocess: true,
             package_install: true,
             privilege_escalation: true,

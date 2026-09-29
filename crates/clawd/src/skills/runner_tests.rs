@@ -42,6 +42,50 @@ fn media_ocr_workspace_policy_uses_gateway_without_provider_credentials() {
 }
 
 #[test]
+fn remote_audio_transcription_allows_only_broker_scoped_credentials() {
+    let registry = claw_core::skill_registry::SkillsRegistry::load_from_path(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml"),
+    )
+    .expect("workspace registry");
+    let mapping = registry
+        .planner_capabilities("audio_transcribe")
+        .iter()
+        .find(|mapping| mapping.name == "audio.transcribe")
+        .expect("remote transcription capability");
+    assert_eq!(mapping.credential_access, Some(true));
+    assert_eq!(
+        mapping
+            .credential_scope
+            .expect("credential scope")
+            .as_token(),
+        "broker"
+    );
+    assert_eq!(mapping.subprocess, Some(true));
+
+    let policy = crate::runtime::policy::ToolsPolicy::from_config(
+        &claw_core::config::ToolsConfig::default(),
+    )
+    .expect("workspace policy");
+    let requirements = crate::runtime::policy::SandboxRequirements {
+        network_access: true,
+        filesystem_write: true,
+        credential_access: true,
+        broker_scoped_credentials: true,
+        subprocess: true,
+        isolation_profile: Some("local_current_workspace"),
+        ..Default::default()
+    };
+    assert_eq!(policy.sandbox_denial(requirements), None);
+    assert_eq!(
+        policy.sandbox_denial(crate::runtime::policy::SandboxRequirements {
+            broker_scoped_credentials: false,
+            ..requirements
+        }),
+        Some("sandbox_workspace_credential_denied")
+    );
+}
+
+#[test]
 fn runtime_timeout_is_machine_readable_for_model_recovery() {
     let encoded = runner_runtime_timeout_error("image_vision", 120, true);
     let parsed =

@@ -496,7 +496,7 @@ fn provider_backed_media_actions_keep_required_runtime_capabilities() {
         ("image_edit", "edit", true),
         ("image_edit", "outpaint", true),
         ("image_edit", "restyle", true),
-        ("audio_transcribe", "transcribe", false),
+        ("audio_transcribe", "transcribe", true),
         ("audio_synthesize", "synthesize", true),
         ("audio_synthesize", "poll", true),
         ("audio_synthesize", "cancel", false),
@@ -613,7 +613,9 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
     // (canonical, sorted-tokens) — sorted 顺序与 SkillsRegistry::load_from_path
     // 内部 dedup+sort 后的结果一致。
     const AUDIO_TRANSCRIBE_CAPABILITIES: &[&str] = &[
+        "exec",
         "fs.read",
+        "fs.write",
         "llm",
         "net",
         "secrets.optional.audio_transcribe_anthropic_api_key",

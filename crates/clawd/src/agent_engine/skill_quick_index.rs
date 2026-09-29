@@ -218,6 +218,9 @@ fn planner_capability_tokens(manifest: &SkillManifest) -> Vec<String> {
             if let Some(credential_access) = capability.credential_access {
                 attrs.push(format!("credential_access={credential_access}"));
             }
+            if let Some(credential_scope) = capability.credential_scope {
+                attrs.push(format!("credential_scope={}", credential_scope.as_token()));
+            }
             if let Some(subprocess) = capability.subprocess {
                 attrs.push(format!("subprocess={subprocess}"));
             }

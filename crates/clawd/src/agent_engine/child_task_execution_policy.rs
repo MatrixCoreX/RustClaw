@@ -215,6 +215,7 @@ fn selected_capability(
             "filesystem_write": mapping.filesystem_write,
             "external_publish": mapping.external_publish,
             "credential_access": mapping.credential_access,
+            "credential_scope": mapping.credential_scope.map(|scope| scope.as_token()),
             "subprocess": mapping.subprocess,
             "package_install": mapping.package_install,
             "privilege_escalation": mapping.privilege_escalation,
