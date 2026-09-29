@@ -1,6 +1,11 @@
 use super::*;
 
 #[test]
+fn default_audio_input_limit_is_fifty_mib() {
+    assert_eq!(DEFAULT_MAX_INPUT_BYTES, 50 * 1024 * 1024);
+}
+
+#[test]
 fn transcription_review_always_requests_text_and_artifact_delivery() {
     assert_eq!(
         transcription_review_delivery(),

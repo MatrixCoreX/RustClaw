@@ -417,7 +417,7 @@ fn deployment_contract_hides_internal_routes_and_hardens_the_service() {
         "Strict-Transport-Security",
         "proxy_set_header Forwarded \"\"",
         "limit_except GET POST",
-        "client_max_body_size 32m",
+        "client_max_body_size 50m",
     ] {
         assert!(
             nginx.contains(expected),

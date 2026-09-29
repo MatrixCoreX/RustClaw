@@ -89,7 +89,7 @@ impl RelayConfig {
             model: env_or("RELAY_UPSTREAM_MODEL", "MiniMax-M3"),
             vendor: env_or("RELAY_UPSTREAM_VENDOR", "minimax"),
         };
-        let max_request_body_bytes = env_usize("RELAY_MAX_REQUEST_BODY_BYTES", 32 * 1024 * 1024)?;
+        let max_request_body_bytes = env_usize("RELAY_MAX_REQUEST_BODY_BYTES", 50 * 1024 * 1024)?;
         if !(1024..=128 * 1024 * 1024).contains(&max_request_body_bytes) {
             bail!("RELAY_MAX_REQUEST_BODY_BYTES must be between 1024 and 134217728");
         }

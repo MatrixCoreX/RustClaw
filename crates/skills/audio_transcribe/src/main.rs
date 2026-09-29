@@ -13,6 +13,8 @@ use toml::Value as TomlValue;
 
 mod minimax;
 
+const DEFAULT_MAX_INPUT_BYTES: usize = 50 * 1024 * 1024;
+
 #[derive(Debug, Deserialize)]
 struct Req {
     request_id: String,
@@ -292,7 +294,7 @@ fn execute(
     let max_input_bytes = cfg
         .audio_transcribe
         .max_input_bytes
-        .unwrap_or(25 * 1024 * 1024);
+        .unwrap_or(DEFAULT_MAX_INPUT_BYTES);
     if let AudioInput::LocalPath(audio_path) = &audio_input {
         let metadata = std::fs::metadata(audio_path).map_err(|err| {
             SkillFailure::new(

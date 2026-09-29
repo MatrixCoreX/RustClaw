@@ -82,7 +82,7 @@ local_server_host = "127.0.0.1"
 local_server_port = 8178
 local_server_threads = 4
 max_concurrency = 1
-max_input_bytes = 26214400
+max_input_bytes = 52428800
 minimax_models = ["asr-1.0"]
 models = [
     "asr-1.0",
