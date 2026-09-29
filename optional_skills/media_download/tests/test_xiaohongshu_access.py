@@ -116,10 +116,37 @@ class XiaohongshuAccessTest(unittest.TestCase):
             )
         )
 
-    def test_note_access_ready_requires_requested_id(self) -> None:
-        self.assertFalse(self.access.note_access_ready({"login": True, "note_ids": ["abc"]}, "abc"))
-        self.assertFalse(self.access.note_access_ready({"login": False, "note_ids": ["other"]}, "abc"))
-        self.assertTrue(self.access.note_access_ready({"login": False, "note_ids": ["abc"]}, "abc"))
+    def test_note_access_ready_requires_requested_media(self) -> None:
+        self.assertFalse(
+            self.access.note_access_ready(
+                {"login": True, "note_ids": ["abc"], "media_note_ids": ["abc"]},
+                "abc",
+            )
+        )
+        self.assertFalse(
+            self.access.note_access_ready(
+                {"login": False, "note_ids": ["abc"], "media_note_ids": []},
+                "abc",
+            )
+        )
+        self.assertFalse(
+            self.access.note_access_ready(
+                {"login": False, "note_ids": ["abc"], "media_note_ids": ["other"]},
+                "abc",
+            )
+        )
+        self.assertTrue(
+            self.access.note_access_ready(
+                {"login": False, "note_ids": ["abc"], "media_note_ids": ["abc"]},
+                "abc",
+            )
+        )
+        self.assertTrue(
+            self.access.note_access_ready(
+                {"login": False, "media_note_ids": ["abc"]},
+                None,
+            )
+        )
 
     def test_desktop_display_detection(self) -> None:
         self.assertTrue(self.access.desktop_display_available({"DISPLAY": ":0"}, "linux"))

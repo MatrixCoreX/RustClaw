@@ -47,6 +47,13 @@ class XiaohongshuShareTarget:
     login_barrier: bool = False
 
 
+@dataclass(frozen=True)
+class SkillOwnedAccessResult:
+    status: str
+    page_html: str = ""
+    page_state_json: str = ""
+
+
 def extract_xiaohongshu_note_id(*parts: str) -> str | None:
     for part in parts:
         if not part:
@@ -339,12 +346,12 @@ def visible_chrome_args(
 def note_access_ready(snapshot: dict[str, Any], note_id: str | None) -> bool:
     if snapshot.get("login"):
         return False
-    ids = snapshot.get("note_ids")
+    ids = snapshot.get("media_note_ids")
     if not isinstance(ids, list):
-        ids = []
+        return False
     if note_id:
         return note_id in ids
-    return bool(ids) or bool(snapshot.get("has_video"))
+    return bool(ids)
 
 
 def _devtools_port() -> tuple[int, list[str]]:
@@ -392,13 +399,25 @@ NOTE_ACCESS_SCRIPT = """
   const map = (window.__INITIAL_STATE__ && window.__INITIAL_STATE__.note
     && window.__INITIAL_STATE__.note.noteDetailMap) || {};
   const ids = Object.keys(map);
-  const hasVideo = Object.values(map).some((entry) => entry && entry.note && entry.note.video);
-  return { login, note_ids: ids, has_video: hasVideo };
+  const mediaNoteIds = Object.entries(map).flatMap(([id, entry]) => {
+    const note = entry && entry.note;
+    if (!note) return [];
+    const images = note.imageList || note.image_list || note.images;
+    const hasImages = Array.isArray(images) && images.length > 0;
+    const video = note.video;
+    const hasVideo = Boolean(video && typeof video === 'object' && Object.keys(video).length > 0);
+    return hasImages || hasVideo ? [id] : [];
+  });
+  return { login, note_ids: ids, media_note_ids: mediaNoteIds };
 })()
 """
 
 
-def wait_for_skill_owned_login(
+DOCUMENT_HTML_SCRIPT = "document.documentElement ? document.documentElement.outerHTML : ''"
+NOTE_STATE_SCRIPT = "JSON.stringify((window.__INITIAL_STATE__ && window.__INITIAL_STATE__.note) || {})"
+
+
+def wait_for_skill_owned_access(
     *,
     chrome: str,
     profile_dir: Path,
@@ -406,10 +425,10 @@ def wait_for_skill_owned_login(
     note_id: str | None,
     timeout: float = LOGIN_WAIT_SECONDS,
     on_tick: Callable[[], None] | None = None,
-) -> str:
-    """Open a visible skill-owned profile and wait until the note is readable."""
+) -> SkillOwnedAccessResult:
+    """Open the private profile and return only after the requested media is readable."""
     if not desktop_display_available():
-        return DISPLAY_UNAVAILABLE
+        return SkillOwnedAccessResult(DISPLAY_UNAVAILABLE)
     port, debug_args = _devtools_port()
     command = [
         chrome,
@@ -447,7 +466,7 @@ def wait_for_skill_owned_login(
             if on_tick is not None:
                 on_tick()
             if process.poll() is not None:
-                return INTERACTIVE_CANCELLED
+                return SkillOwnedAccessResult(INTERACTIVE_CANCELLED)
             command_id = client.send(
                 "Runtime.evaluate",
                 {"expression": NOTE_ACCESS_SCRIPT, "returnByValue": True},
@@ -457,13 +476,27 @@ def wait_for_skill_owned_login(
             if note_access_ready(snapshot, note_id):
                 ready_polls += 1
                 if ready_polls >= LOGIN_READY_POLLS:
-                    return "ok"
+                    html_command_id = client.send(
+                        "Runtime.evaluate",
+                        {"expression": DOCUMENT_HTML_SCRIPT, "returnByValue": True},
+                    )
+                    html_event = _wait_devtools_result(client, html_command_id, timeout=5.0)
+                    state_command_id = client.send(
+                        "Runtime.evaluate",
+                        {"expression": NOTE_STATE_SCRIPT, "returnByValue": True},
+                    )
+                    state_event = _wait_devtools_result(client, state_command_id, timeout=5.0)
+                    return SkillOwnedAccessResult(
+                        "ok",
+                        _evaluate_string_result(html_event),
+                        _evaluate_string_result(state_event),
+                    )
             else:
                 ready_polls = 0
             time.sleep(LOGIN_POLL_SECONDS)
-        return INTERACTIVE_TIMEOUT
+        return SkillOwnedAccessResult(INTERACTIVE_TIMEOUT)
     except DevToolsError:
-        return INTERACTIVE_CANCELLED
+        return SkillOwnedAccessResult(INTERACTIVE_CANCELLED)
     finally:
         if client is not None:
             client.close()
@@ -474,6 +507,26 @@ def wait_for_skill_owned_login(
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=5)
+
+
+def wait_for_skill_owned_login(
+    *,
+    chrome: str,
+    profile_dir: Path,
+    page_url: str,
+    note_id: str | None,
+    timeout: float = LOGIN_WAIT_SECONDS,
+    on_tick: Callable[[], None] | None = None,
+) -> str:
+    """Compatibility wrapper for callers that only need the structured status token."""
+    return wait_for_skill_owned_access(
+        chrome=chrome,
+        profile_dir=profile_dir,
+        page_url=page_url,
+        note_id=note_id,
+        timeout=timeout,
+        on_tick=on_tick,
+    ).status
 
 
 def _wait_devtools_result(client: DevToolsConnection, command_id: int, timeout: float) -> dict[str, Any]:
@@ -501,3 +554,14 @@ def _evaluate_result(message: dict[str, Any]) -> dict[str, Any]:
         return {}
     value = inner.get("value")
     return value if isinstance(value, dict) else {}
+
+
+def _evaluate_string_result(message: dict[str, Any]) -> str:
+    result = message.get("result")
+    if not isinstance(result, dict):
+        return ""
+    inner = result.get("result")
+    if not isinstance(inner, dict):
+        return ""
+    value = inner.get("value")
+    return value if isinstance(value, str) else ""

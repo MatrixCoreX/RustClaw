@@ -2812,16 +2812,59 @@ def gather_browser_candidates(
             login_retry_used = True
             logs.append("xiaohongshu: login_required")
             print("xiaohongshu: login_required", file=sys.stderr)
-            status = xiaohongshu_access.wait_for_skill_owned_login(
+            access_result = xiaohongshu_access.wait_for_skill_owned_access(
                 chrome=chrome,
                 profile_dir=xhs_profile,
                 page_url=target_url,
                 note_id=item_id,
                 on_tick=raise_if_task_cancelled,
             )
+            status = access_result.status
             logs.append(f"xiaohongshu: interactive_login={status}")
             print(f"xiaohongshu: interactive_login={status}", file=sys.stderr)
             if status == "ok":
+                captured_payload: dict[str, Any] | None = None
+                if access_result.page_state_json:
+                    try:
+                        captured_state = json.loads(access_result.page_state_json)
+                    except json.JSONDecodeError as exc:
+                        logs.append(f"xiaohongshu: interactive page state was invalid JSON: {exc}")
+                    else:
+                        captured_payload = find_xiaohongshu_note_payload(captured_state, item_id)
+                if captured_payload is None and access_result.page_html:
+                    captured_payload = find_xiaohongshu_note_payload_in_html(
+                        access_result.page_html,
+                        item_id,
+                    )
+                if captured_payload is not None:
+                    article = richer_article(
+                        article,
+                        article_from_xiaohongshu_payload(
+                            captured_payload,
+                            source="xiaohongshu.interactive-page",
+                        ),
+                    )
+                    for candidate in extract_xiaohongshu_candidates_from_json(captured_payload):
+                        merge_platform_candidate(candidates, seen, candidate, platform)
+                    for candidate in extract_xiaohongshu_item_image_candidates(
+                        captured_payload,
+                        source="xiaohongshu.interactive-page.image",
+                    ):
+                        if candidate.url in seen_image_urls:
+                            continue
+                        seen_image_urls.add(candidate.url)
+                        image_candidates.append(candidate)
+                logs.append(
+                    "xiaohongshu: interactive page captured "
+                    f"{len(candidates)} video candidate(s) and "
+                    f"{len(image_candidates)} image candidate(s)"
+                )
+                if browser_candidates_are_sufficient(
+                    candidates,
+                    image_candidates,
+                    require_audio=require_audio,
+                ):
+                    break
                 pending_targets.insert(0, target_url)
                 continue
             if status == xiaohongshu_access.DISPLAY_UNAVAILABLE:
