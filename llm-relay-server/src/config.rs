@@ -89,9 +89,9 @@ impl RelayConfig {
             model: env_or("RELAY_UPSTREAM_MODEL", "MiniMax-M3"),
             vendor: env_or("RELAY_UPSTREAM_VENDOR", "minimax"),
         };
-        let max_request_body_bytes = env_usize("RELAY_MAX_REQUEST_BODY_BYTES", 2 * 1024 * 1024)?;
-        if !(1024..=16 * 1024 * 1024).contains(&max_request_body_bytes) {
-            bail!("RELAY_MAX_REQUEST_BODY_BYTES must be between 1024 and 16777216");
+        let max_request_body_bytes = env_usize("RELAY_MAX_REQUEST_BODY_BYTES", 32 * 1024 * 1024)?;
+        if !(1024..=128 * 1024 * 1024).contains(&max_request_body_bytes) {
+            bail!("RELAY_MAX_REQUEST_BODY_BYTES must be between 1024 and 134217728");
         }
         let max_upstream_response_bytes =
             env_usize("RELAY_MAX_UPSTREAM_RESPONSE_BYTES", 16 * 1024 * 1024)?;
@@ -141,6 +141,10 @@ impl RelayConfig {
 impl ModelProvider {
     pub fn chat_completions_url(&self) -> String {
         format!("{}/chat/completions", self.base_url)
+    }
+
+    pub fn endpoint_url(&self, path: &str) -> String {
+        format!("{}{}", self.base_url, path)
     }
 }
 

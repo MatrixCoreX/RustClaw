@@ -40,6 +40,7 @@ RELAY_MAX_TOKENS_PER_REQUEST=16384
 RELAY_MAX_INFLIGHT=16
 RELAY_MAX_INFLIGHT_PER_KEY=4
 RELAY_UPSTREAM_TIMEOUT_SECONDS=180
+RELAY_MAX_REQUEST_BODY_BYTES=33554432
 RELAY_MAX_UPSTREAM_RESPONSE_BYTES=16777216
 ```
 
@@ -91,10 +92,17 @@ curl https://llm.example.test/v1/chat/completions \
   -H 'Authorization: Bearer DEVICE_KEY' \
   -H 'Content-Type: application/json' \
   -d '{"model":"minimax","messages":[{"role":"user","content":"Hello"}]}'
+
+curl https://llm.example.test/v1/capabilities \
+  -H 'Authorization: Bearer DEVICE_KEY'
 ```
 
 Both JSON and SSE (`stream=true`) Chat Completions responses are supported. Public model aliases
 are replaced with the server-owned upstream model before dispatch and restored in responses.
+The relay also exposes an exact allowlist of native provider endpoints used by the bundled image,
+speech, video, and music skills. It never accepts a caller-provided upstream URL and never forwards
+the caller's authorization header. The request body limit defaults to 32 MiB and may be configured
+up to 128 MiB; keep the nginx `client_max_body_size` no lower than the application value.
 `/health/live`, `/health/ready`, and `/internal/admin/*` are loopback-only endpoints and must not be
 published by the reverse proxy.
 

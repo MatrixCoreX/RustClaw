@@ -914,7 +914,11 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
     let selected_provider_env_names = selected_llm_connection
         .as_ref()
         .map(|connection| {
-            selected_provider_api_key_env_names(&connection.vendor, &connection.provider_type)
+            selected_provider_api_key_env_names(
+                &connection.vendor,
+                &connection.provider_type,
+                connection.hosted_relay,
+            )
         })
         .unwrap_or_default();
     let secret_token_scope = if secret_envs.is_empty()

@@ -1186,6 +1186,7 @@ pub(crate) struct SelectedLlmConnection {
     pub(crate) base_url: String,
     pub(crate) model: String,
     pub(crate) api_key: String,
+    pub(crate) hosted_relay: bool,
 }
 
 pub(crate) fn selected_llm_connection(
@@ -1203,6 +1204,7 @@ pub(crate) fn selected_llm_connection(
         // Keep the same broker-first/config-fallback source used by normal
         // model calls. The runner converts this into scoped child tokens.
         api_key: provider.api_key().to_string(),
+        hosted_relay: provider.config.params.device_key_enrollment,
     })
 }
 

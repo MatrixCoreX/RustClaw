@@ -416,30 +416,34 @@ fn declared_directory_storage_uses_only_its_mapped_sandbox_directory() {
 #[test]
 fn selected_provider_credentials_include_vendor_and_protocol_aliases() {
     assert_eq!(
-        selected_provider_api_key_env_names("minimax", "openai_compat"),
+        selected_provider_api_key_env_names("minimax", "openai_compat", false),
         vec!["MINIMAX_API_KEY", "OPENAI_API_KEY"]
     );
     assert_eq!(
-        selected_provider_api_key_env_names("mimo", "openai_compat"),
+        selected_provider_api_key_env_names("mimo", "openai_compat", false),
         vec!["MIMO_API_KEY", "OPENAI_API_KEY"]
     );
     assert_eq!(
-        selected_provider_api_key_env_names("openai", "openai_compat"),
+        selected_provider_api_key_env_names("openai", "openai_compat", false),
         vec!["OPENAI_API_KEY"]
     );
     assert_eq!(
-        selected_provider_api_key_env_names("anthropic", "anthropic_claude"),
+        selected_provider_api_key_env_names("anthropic", "anthropic_claude", false),
         vec!["ANTHROPIC_API_KEY"]
     );
     assert_eq!(
-        selected_provider_api_key_env_names("google", "google_gemini"),
+        selected_provider_api_key_env_names("google", "google_gemini", false),
         vec!["GOOGLE_API_KEY"]
     );
     assert_eq!(
-        selected_provider_api_key_env_names("custom", "openai_compat"),
+        selected_provider_api_key_env_names("custom", "openai_compat", false),
         vec!["OPENAI_API_KEY"]
     );
-    assert!(selected_provider_api_key_env_names("fixture", "fixture_replay").is_empty());
+    assert!(selected_provider_api_key_env_names("fixture", "fixture_replay", false).is_empty());
+    assert_eq!(
+        selected_provider_api_key_env_names("custom", "openai_compat", true),
+        vec!["OPENAI_API_KEY", "MINIMAX_API_KEY"]
+    );
 }
 
 fn preview_mapping() -> PlannerCapabilityMapping {

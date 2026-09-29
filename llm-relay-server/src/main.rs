@@ -4,7 +4,7 @@ mod openai;
 mod quota;
 mod store;
 
-use std::{io, sync::Arc};
+use std::{io, sync::Arc, time::Instant};
 
 use anyhow::{bail, Context};
 use axum::{
@@ -94,7 +94,15 @@ async fn run_server() -> anyhow::Result<()> {
         .route("/v1/device-key/verify", post(verify_device_key))
         .route("/v1/models", get(models))
         .route("/v1/quota", get(quota))
+        .route("/v1/capabilities", get(capabilities))
         .route("/v1/chat/completions", post(chat_completions))
+        .route("/v1/image_generation", post(image_generation))
+        .route("/v1/speech_to_text", post(speech_to_text))
+        .route("/v1/t2a_v2", post(text_to_audio))
+        .route("/v1/video_generation", post(video_generation))
+        .route("/v1/query/video_generation", get(query_video_generation))
+        .route("/v1/files/retrieve", get(retrieve_file))
+        .route("/v1/music_generation", post(music_generation))
         .route("/internal/admin/usage", get(admin_usage))
         .route(
             "/internal/admin/device-allowlist",
@@ -328,6 +336,234 @@ async fn quota(State(state): State<AppState>, headers: HeaderMap) -> Result<Json
         ApiError::service_unavailable("quota_store_unavailable", "proxy.quota_store_unavailable")
     })?;
     Ok(Json(json!({"usage": usage})))
+}
+
+async fn capabilities(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiError> {
+    let key = authenticate(&state, &headers)?;
+    key.require_inference_scope()
+        .map_err(ApiError::from_store)?;
+    Ok(Json(json!({
+        "schema_version": 1,
+        "provider": state.config.provider.vendor,
+        "capabilities": [
+            "text.chat",
+            "image.understand",
+            "image.generate",
+            "image.edit.reference_url",
+            "audio.transcribe",
+            "audio.synthesize",
+            "video.generate",
+            "music.generate"
+        ],
+        "limits": {
+            "max_request_body_bytes": state.config.max_request_body_bytes,
+            "max_upstream_response_bytes": state.config.max_upstream_response_bytes
+        }
+    })))
+}
+
+async fn image_generation(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, ApiError> {
+    proxy_native_post(state, headers, body, "/image_generation").await
+}
+
+async fn speech_to_text(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, ApiError> {
+    proxy_native_post(state, headers, body, "/speech_to_text").await
+}
+
+async fn text_to_audio(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, ApiError> {
+    proxy_native_post(state, headers, body, "/t2a_v2").await
+}
+
+async fn video_generation(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, ApiError> {
+    proxy_native_post(state, headers, body, "/video_generation").await
+}
+
+async fn music_generation(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, ApiError> {
+    proxy_native_post(state, headers, body, "/music_generation").await
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct VideoTaskQuery {
+    task_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileRetrieveQuery {
+    file_id: String,
+}
+
+async fn query_video_generation(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<VideoTaskQuery>,
+) -> Result<Response, ApiError> {
+    proxy_native_get(
+        state,
+        headers,
+        "/query/video_generation",
+        "task_id",
+        query.task_id,
+    )
+    .await
+}
+
+async fn retrieve_file(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<FileRetrieveQuery>,
+) -> Result<Response, ApiError> {
+    proxy_native_get(state, headers, "/files/retrieve", "file_id", query.file_id).await
+}
+
+async fn proxy_native_post(
+    state: AppState,
+    headers: HeaderMap,
+    body: Bytes,
+    path: &'static str,
+) -> Result<Response, ApiError> {
+    dispatch_native_request(state, headers, Some(body), path, None).await
+}
+
+async fn proxy_native_get(
+    state: AppState,
+    headers: HeaderMap,
+    path: &'static str,
+    query_name: &'static str,
+    query_value: String,
+) -> Result<Response, ApiError> {
+    let query_value = query_value.trim().to_owned();
+    if query_value.is_empty() || query_value.len() > 256 {
+        return Err(ApiError::bad_request(
+            "request_query_invalid",
+            "proxy.request_query_invalid",
+        ));
+    }
+    dispatch_native_request(state, headers, None, path, Some((query_name, query_value))).await
+}
+
+async fn dispatch_native_request(
+    state: AppState,
+    headers: HeaderMap,
+    body: Option<Bytes>,
+    path: &'static str,
+    query: Option<(&'static str, String)>,
+) -> Result<Response, ApiError> {
+    let key = authenticate(&state, &headers)?;
+    key.require_inference_scope()
+        .map_err(ApiError::from_store)?;
+    state.minute_rate.reserve(&key.key_id)?;
+    let _permit = state.inflight.clone().acquire_owned().await.map_err(|_| {
+        ApiError::service_unavailable("relay_shutting_down", "proxy.relay_shutting_down")
+    })?;
+
+    let request_id = Uuid::new_v4().to_string();
+    state
+        .store
+        .reserve_attempt(
+            &key,
+            &request_id,
+            0,
+            state.config.limits.tokens_per_day,
+            state.config.max_inflight_per_key,
+        )
+        .map_err(ApiError::from_store)?;
+
+    let started = Instant::now();
+    let url = state.config.provider.endpoint_url(path);
+    let mut request = if let Some(body) = body {
+        state.http.post(url).body(body)
+    } else {
+        state.http.get(url)
+    };
+    request = request
+        .bearer_auth(&state.config.provider.api_key)
+        .header("x-request-id", &request_id);
+    for name in [header::CONTENT_TYPE, header::ACCEPT] {
+        if let Some(value) = headers.get(&name) {
+            request = request.header(name.as_str(), value);
+        }
+    }
+    if path == "/speech_to_text" {
+        if let Some(value) = headers.get("language") {
+            request = request.header("language", value);
+        }
+    }
+    if let Some((name, value)) = query {
+        request = request.query(&[(name, value)]);
+    }
+
+    let upstream_response = match request.send().await {
+        Ok(response) => response,
+        Err(error) => {
+            settle_quietly(&state.store, &request_id, false, 0);
+            warn!(error = %error, request_id, endpoint = path, "native upstream request failed");
+            return Err(ApiError::bad_gateway(
+                "upstream_request_failed",
+                "proxy.upstream_request_failed",
+            ));
+        }
+    };
+    let status = upstream_response.status();
+    let content_type = upstream_response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .cloned();
+    let response_bytes =
+        read_bounded_upstream_response(upstream_response, state.config.max_upstream_response_bytes)
+            .await
+            .inspect_err(|error| {
+                settle_quietly(&state.store, &request_id, false, 0);
+                warn!(
+                    code = error.code,
+                    request_id,
+                    endpoint = path,
+                    "native upstream response was rejected"
+                );
+            })?;
+    let succeeded = status.is_success();
+    settle_quietly(&state.store, &request_id, succeeded, 0);
+    info!(
+        request_id,
+        endpoint = path,
+        status = status.as_u16(),
+        response_bytes = response_bytes.len(),
+        elapsed_ms = started.elapsed().as_millis(),
+        "native relay request completed"
+    );
+
+    let mut response = (status, response_bytes).into_response();
+    if let Some(content_type) = content_type {
+        response
+            .headers_mut()
+            .insert(header::CONTENT_TYPE, content_type);
+    }
+    insert_request_id(response.headers_mut(), &request_id);
+    Ok(response)
 }
 
 #[derive(Debug, Deserialize)]

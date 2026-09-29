@@ -124,6 +124,7 @@ pub(super) fn add_runner_dispatch_metadata(
 pub(super) fn selected_provider_api_key_env_names(
     vendor: &str,
     provider_type: &str,
+    hosted_relay: bool,
 ) -> Vec<&'static str> {
     let mut names = match vendor.trim().to_ascii_lowercase().as_str() {
         "openai" => vec!["OPENAI_API_KEY"],
@@ -141,6 +142,11 @@ pub(super) fn selected_provider_api_key_env_names(
         && !names.contains(&"OPENAI_API_KEY")
     {
         names.push("OPENAI_API_KEY");
+    }
+    // The managed relay exposes both OpenAI-compatible chat and the provider's
+    // allowlisted native media endpoints under one enrolled device credential.
+    if hosted_relay && !names.contains(&"MINIMAX_API_KEY") {
+        names.push("MINIMAX_API_KEY");
     }
     names
 }

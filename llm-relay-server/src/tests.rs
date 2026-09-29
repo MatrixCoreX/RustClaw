@@ -52,6 +52,7 @@ fn issued_key_authenticates_without_exposing_secret_in_key_list() {
     assert_eq!(authenticated.key_id, issued.key_id);
     assert_eq!(authenticated.label, "device-a");
     assert_eq!(authenticated.device_pubkey, issued.device_pubkey);
+    assert!(authenticated.require_inference_scope().is_ok());
 
     let serialized = serde_json::to_string(&store.list_keys().expect("list keys")).expect("json");
     assert!(!serialized.contains(&issued.token));
@@ -416,6 +417,7 @@ fn deployment_contract_hides_internal_routes_and_hardens_the_service() {
         "Strict-Transport-Security",
         "proxy_set_header Forwarded \"\"",
         "limit_except GET POST",
+        "client_max_body_size 32m",
     ] {
         assert!(
             nginx.contains(expected),
@@ -469,6 +471,21 @@ fn deployment_contract_hides_internal_routes_and_hardens_the_service() {
             "missing service hardening: {expected}"
         );
     }
+}
+
+#[test]
+fn provider_native_endpoint_urls_stay_under_the_configured_base() {
+    let provider = ModelProvider {
+        alias: "public".to_string(),
+        base_url: "https://provider.example/v1".to_string(),
+        api_key: "secret".to_string(),
+        model: "model".to_string(),
+        vendor: "fixture".to_string(),
+    };
+    assert_eq!(
+        provider.endpoint_url("/speech_to_text"),
+        "https://provider.example/v1/speech_to_text"
+    );
 }
 
 fn test_config() -> RelayConfig {

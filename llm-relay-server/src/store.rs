@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 type HmacSha256 = Hmac<Sha256>;
 
-const CLIENT_SCOPES: &str = "chat.completions,models.read,quota.read";
+const CLIENT_SCOPES: &str = "chat.completions,inference.invoke,models.read,quota.read";
 const ADMIN_SCOPES: &str = "usage.admin.read,usage.admin.write";
 
 #[derive(Debug)]
@@ -52,6 +52,18 @@ impl AuthenticatedKey {
             .any(|candidate| candidate == scope)
             .then_some(())
             .ok_or(StoreError::ScopeDenied)
+    }
+
+    pub fn require_inference_scope(&self) -> Result<(), StoreError> {
+        if self
+            .scopes
+            .iter()
+            .any(|scope| scope == "inference.invoke" || scope == "chat.completions")
+        {
+            Ok(())
+        } else {
+            Err(StoreError::ScopeDenied)
+        }
     }
 }
 

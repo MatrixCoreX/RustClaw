@@ -10,7 +10,11 @@ pub(super) struct ProvisionedSkillSecrets {
     pub(super) fallback_credentials: Vec<String>,
 }
 
-fn selected_llm_fallback_matches(secret_name: &str, selected_vendor: &str) -> bool {
+fn selected_llm_fallback_matches(
+    secret_name: &str,
+    selected_vendor: &str,
+    hosted_relay: bool,
+) -> bool {
     let vendor = selected_vendor.trim().to_ascii_lowercase();
     if vendor.is_empty() {
         return false;
@@ -19,6 +23,10 @@ fn selected_llm_fallback_matches(secret_name: &str, selected_vendor: &str) -> bo
     canonical
         .strip_suffix(&format!("_{vendor}_api_key"))
         .is_some_and(|usage| !usage.is_empty())
+        || (hosted_relay
+            && canonical
+                .strip_suffix("_minimax_api_key")
+                .is_some_and(|usage| !usage.is_empty()))
 }
 
 pub(super) fn provision_skill_secret_envs(
@@ -51,7 +59,11 @@ pub(super) fn provision_skill_secret_envs(
                         .iter()
                         .filter_map(move |name| {
                             (allowed_fallbacks.contains(name.as_str())
-                                && selected_llm_fallback_matches(name, &connection.vendor))
+                                && selected_llm_fallback_matches(
+                                    name,
+                                    &connection.vendor,
+                                    connection.hosted_relay,
+                                ))
                             .then(|| name.clone())
                         })
                         .collect()
@@ -102,6 +114,14 @@ mod tests {
             base_url: "https://example.invalid/v1".to_string(),
             model: "fixture-model".to_string(),
             api_key: key.to_string(),
+            hosted_relay: false,
+        }
+    }
+
+    fn hosted_relay(key: &str) -> SelectedLlmConnection {
+        SelectedLlmConnection {
+            hosted_relay: true,
+            ..selected("custom", key)
         }
     }
 
@@ -144,6 +164,27 @@ mod tests {
         assert_eq!(provisioned.envs.len(), 1);
         assert!(provisioned.fallback_credentials.is_empty());
         assert_eq!(provisioned.envs[0].1.expose(), "dedicated-key");
+    }
+
+    #[test]
+    fn hosted_relay_can_supply_minimax_native_media_credential() {
+        let caps = vec![
+            Capability::Llm,
+            Capability::Secrets("image_generation_minimax_api_key".to_string()),
+            Capability::LlmCredentialFallback("image_generation_minimax_api_key".to_string()),
+        ];
+        let provisioned = provision_skill_secret_envs(
+            &FixtureBroker(HashMap::new()),
+            &caps,
+            Some(&hosted_relay("relay-key")),
+        )
+        .expect("hosted relay credential fallback");
+
+        assert!(provisioned.envs.is_empty());
+        assert_eq!(
+            provisioned.fallback_credentials,
+            vec!["image_generation_minimax_api_key"]
+        );
     }
 
     #[test]
