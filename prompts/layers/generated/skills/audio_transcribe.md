@@ -8,7 +8,7 @@
 - If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
 ## Capability Summary (from interface)
-- `audio_transcribe` previews or converts audio input through the configured STT provider. Use only the configured transcription backend; local configuration is delegated to the media skill's private local ASR. Remote failure never authorizes automatic local recognition.
+- `audio_transcribe` previews or converts audio input through the configured STT provider. Use only the configured transcription backend; local configuration is delegated to the media skill's private local ASR. Remote failure never authorizes automatic local recognition. Oversized or long local files sent to a remote provider are normalized into ordered temporary chunks, transcribed by that same provider/model, and merged before shared transcript review. Local STT keeps the original file and does not use this remote-upload chunker.
 - It supports local file path input or public audio URL input, plus optional hints and backend model/vendor selection.
 - Successful responses include machine-readable `extra` metadata such as `provider`, `provider_location`, `recommended_capability`, `fallback_recommended`, `model`, `model_kind`, `audio_path`, and `transcription_review`.
 
@@ -29,7 +29,8 @@
 - These optional, usage-scoped credentials are explicitly requested by the package and granted by the base registry. The host secret broker provisions only authorized declared credentials; the process must not inherit arbitrary parent keys. A missing key for an unused vendor does not block other providers or local mode.
 - `preview_transcribe` has no credential access. Dedicated STT credentials take precedence; same-provider main-model fallback remains available, but a different provider's main key is never interchangeable.
 - The MiniMax adapter uploads local audio, requests JSON text, and passes the primary `language` tag as an HTTP header; omitted or `auto` language enables mixed-language recognition. The endpoint does not accept `transcribe_hint`, so that hint is not sent as an unsupported parameter. Main-model transcript review still applies after recognition.
-- MiniMax's current upstream limit is 500 seconds / 50 MB per audio file. Oversize, rejected, or malformed responses return a structured failure without local fallback; the adapter does not silently truncate audio or repeatedly submit a failed request. See the [official STT API](https://platform.minimax.cn/docs/api-reference/speech-to-text).
+- Remote local-file chunking is configured by `remote_auto_chunk`, `remote_chunk_target_bytes`, `remote_chunk_seconds`, and `max_input_bytes` under `[audio_transcribe]`. Defaults normalize files beyond 20 MiB or 480 seconds to 16 kHz mono PCM WAV chunks. Each chunk must remain below the configured single-request limit. The source file is never modified, temporary chunks are removed after completion or failure, and no automatic provider/model fallback occurs.
+- MiniMax's current upstream limit is 500 seconds / 50 MB per audio file. The default remote chunk boundary stays below both limits. See the [official STT API](https://platform.minimax.cn/docs/api-reference/speech-to-text).
 - Qwen `qwen3-asr-flash` is available via `/chat/completions` `input_audio` with `QWEN_API_KEY` or `[llm.qwen].api_key`.
 - `qwen_chat_models` selects this structured adapter; never infer it from user-language phrases.
 - Local whisper.cpp uses the OpenAI-compatible custom provider:
@@ -44,7 +45,7 @@
 ## Actions (from interface)
 - `preview_transcribe`: resolve the input, provider, provider location, model, adapter plan, recommended execution capability, and disabled fallback policy without reading the source file or calling a provider.
 - `transcribe`: perform actual configured-provider transcription. Use it after preview selects the remote path. This remains the default when `action` is omitted for protocol compatibility.
-- Actual transcription is admitted as a durable long operation instead of the old 120-second whole-process window. Provider request bounds and explicit user cancellation remain active.
+- Actual transcription is admitted as a durable long operation instead of the old 120-second whole-process window. Provider request bounds and explicit user cancellation remain active. Remote chunk calls run sequentially to preserve source order and respect the configured provider concurrency limit.
 
 ## Parameter Contract (from interface)
 | Action | Param | Required | Type | Default | Description |
@@ -65,7 +66,7 @@ Provide one audio source: local path or URL.
 - Invalid/unreadable local audio path or invalid URL input.
 - Compatible adapters that require local file upload return clear path-related errors.
 - Native adapters that require public URL input return clear URL/configuration errors.
-- Provider/runtime transcription failures return structured error evidence and `fallback_recommended=false`. Explain the actual failure using the model; do not automatically invoke local recognition.
+- Provider/runtime transcription failures return structured error evidence and `fallback_recommended=false`. Chunk preparation and chunk transcription failures include a machine-readable stage and, for provider failures, the failed chunk index/count. Explain the actual failure using the model; do not automatically invoke local recognition.
 - Machine-readable failures use `error_code`, `message_key`, and `retryable` (including invalid input/size/configuration/client/request failures); runtime and UI must not parse `error_text` or expose internal transport markers.
 
 ## Request/Response Examples (from interface)

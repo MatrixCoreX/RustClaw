@@ -3,6 +3,20 @@ use super::*;
 #[test]
 fn default_audio_input_limit_is_fifty_mib() {
     assert_eq!(DEFAULT_MAX_INPUT_BYTES, 50 * 1024 * 1024);
+    assert_eq!(DEFAULT_REMOTE_CHUNK_TARGET_BYTES, 20 * 1024 * 1024);
+    assert_eq!(DEFAULT_REMOTE_CHUNK_SECONDS, 480);
+}
+
+#[test]
+fn ordered_chunk_transcripts_are_trimmed_and_merged_without_language_rules() {
+    let merged = merge_ordered_transcript_parts(&[
+        " 第一段。 ".to_string(),
+        String::new(),
+        "Second segment.".to_string(),
+        "الجزء الثالث".to_string(),
+    ]);
+
+    assert_eq!(merged, "第一段。\nSecond segment.\nالجزء الثالث");
 }
 
 #[test]
@@ -298,6 +312,15 @@ fn preview_transcribe_returns_plan_without_file_or_provider_credentials() {
     assert!(extra.get("fallback_capability").is_none());
     assert_eq!(extra["model"], "qwen3-asr-flash");
     assert_eq!(extra["model_kind"], "chat_audio");
+    assert_eq!(extra["remote_chunking"]["enabled"], true);
+    assert_eq!(
+        extra["remote_chunking"]["target_bytes"],
+        DEFAULT_REMOTE_CHUNK_TARGET_BYTES
+    );
+    assert_eq!(
+        extra["remote_chunking"]["max_segment_seconds"],
+        DEFAULT_REMOTE_CHUNK_SECONDS
+    );
     assert_eq!(
         extra["input_path"],
         "document/media_dry_run/audio_check.mp3"
@@ -334,6 +357,7 @@ fn preview_local_provider_selects_local_recognition_without_fallback() {
 
     assert_eq!(extra["provider_location"], "local");
     assert_eq!(extra["recommended_capability"], "media_download.transcribe");
+    assert_eq!(extra["remote_chunking"]["enabled"], false);
     assert_eq!(extra["input_path"], "recordings/local.wav");
     assert_eq!(extra["fallback_recommended"], false);
     assert!(extra.get("fallback_capability").is_none());

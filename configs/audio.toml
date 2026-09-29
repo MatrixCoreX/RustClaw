@@ -83,6 +83,9 @@ local_server_port = 8178
 local_server_threads = 4
 max_concurrency = 1
 max_input_bytes = 52428800
+remote_auto_chunk = true
+remote_chunk_target_bytes = 20971520
+remote_chunk_seconds = 480
 minimax_models = ["asr-1.0"]
 models = [
     "asr-1.0",

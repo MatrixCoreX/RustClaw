@@ -11,9 +11,12 @@ use serde_json::{json, Map, Value};
 use sha1::Sha1;
 use toml::Value as TomlValue;
 
+mod audio_chunks;
 mod minimax;
 
 const DEFAULT_MAX_INPUT_BYTES: usize = 50 * 1024 * 1024;
+const DEFAULT_REMOTE_CHUNK_TARGET_BYTES: usize = 20 * 1024 * 1024;
+const DEFAULT_REMOTE_CHUNK_SECONDS: u64 = 480;
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -106,6 +109,12 @@ struct AudioTranscribeConfig {
     #[serde(default)]
     max_input_bytes: Option<usize>,
     #[serde(default)]
+    remote_auto_chunk: Option<bool>,
+    #[serde(default)]
+    remote_chunk_target_bytes: Option<usize>,
+    #[serde(default)]
+    remote_chunk_seconds: Option<u64>,
+    #[serde(default)]
     allow_compat_adapters: bool,
     #[serde(default)]
     adapter_mode: Option<String>,
@@ -175,10 +184,18 @@ enum AudioInput {
 }
 
 #[derive(Debug)]
+struct TranscriptionBatch {
+    text: String,
+    model_kind: &'static str,
+    chunking: Option<Value>,
+}
+
+#[derive(Debug)]
 struct SkillFailure {
     code: &'static str,
     message: String,
     retryable: bool,
+    details: Option<Value>,
 }
 
 impl SkillFailure {
@@ -187,7 +204,13 @@ impl SkillFailure {
             code,
             message: message.into(),
             retryable,
+            details: None,
         }
+    }
+
+    fn with_details(mut self, details: Value) -> Self {
+        self.details = Some(details);
+        self
     }
 }
 
@@ -224,7 +247,11 @@ fn main() -> anyhow::Result<()> {
                     request_id: req.request_id,
                     status: "error".to_string(),
                     text: String::new(),
-                    extra: Some(error_extra(err.code, err.retryable)),
+                    extra: Some(error_extra_with_details(
+                        err.code,
+                        err.retryable,
+                        err.details,
+                    )),
                     error_text: Some(err.message),
                 },
             },
@@ -243,7 +270,11 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn error_extra(error_code: &str, retryable: bool) -> Value {
-    json!({
+    error_extra_with_details(error_code, retryable, None)
+}
+
+fn error_extra_with_details(error_code: &str, retryable: bool, details: Option<Value>) -> Value {
+    let mut extra = json!({
         "schema_version": 1,
         "source_skill": SKILL_NAME,
         "status": "error",
@@ -251,7 +282,11 @@ fn error_extra(error_code: &str, retryable: bool) -> Value {
         "message_key": format!("skill.{}.{}", SKILL_NAME, error_code),
         "retryable": retryable,
         "fallback_recommended": false,
-    })
+    });
+    if let (Some(extra), Some(details)) = (extra.as_object_mut(), details) {
+        extra.insert("details".to_string(), details);
+    }
+    extra
 }
 
 fn execute(
@@ -291,30 +326,6 @@ fn execute(
         ));
     }
 
-    let max_input_bytes = cfg
-        .audio_transcribe
-        .max_input_bytes
-        .unwrap_or(DEFAULT_MAX_INPUT_BYTES);
-    if let AudioInput::LocalPath(audio_path) = &audio_input {
-        let metadata = std::fs::metadata(audio_path).map_err(|err| {
-            SkillFailure::new(
-                "invalid_input",
-                format!("read audio metadata failed: {err}"),
-                false,
-            )
-        })?;
-        if metadata.len() as usize > max_input_bytes {
-            return Err(SkillFailure::new(
-                "input_too_large",
-                format!(
-                    "audio file too large: {} bytes, max={max_input_bytes}",
-                    metadata.len()
-                ),
-                false,
-            ));
-        }
-    }
-
     let transcribe_hint = args_obj
         .and_then(|v| v.get("transcribe_hint"))
         .and_then(|v| v.as_str())
@@ -348,7 +359,12 @@ fn execute(
                 false,
             )
         })?;
-    let (text, model_kind) = transcribe_by_vendor(
+    let provider_location = transcription_provider_location(provider_cfg);
+    let TranscriptionBatch {
+        text,
+        model_kind,
+        chunking,
+    } = transcribe_with_configured_backend(
         &client,
         &cfg.audio_transcribe,
         provider_cfg,
@@ -360,15 +376,15 @@ fn execute(
         &transcribe_prompt,
         source_language,
         auth_token.as_deref(),
+        provider_location,
     )?;
     let audio_source = match &audio_input {
         AudioInput::LocalPath(p) => p.to_string_lossy().to_string(),
         AudioInput::Url(url) => url.clone(),
     };
-    let provider_location = transcription_provider_location(provider_cfg);
     let response_language = transcript_response_language(args_obj, context);
     let raw_character_count = text.chars().count();
-    let extra = json!({
+    let mut extra = json!({
         "schema_version": 1,
         "source_skill": SKILL_NAME,
         "status": "ok",
@@ -393,7 +409,179 @@ fn execute(
         },
         "latency_ms": 0
     });
+    if let (Some(extra), Some(chunking)) = (extra.as_object_mut(), chunking) {
+        extra.insert("chunking".to_string(), chunking);
+    }
     Ok(("AUDIO_TRANSCRIPTION_READY".to_string(), extra))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn transcribe_with_configured_backend(
+    client: &Client,
+    audio_cfg: &AudioTranscribeConfig,
+    provider_cfg: &VendorConfig,
+    vendor: VendorKind,
+    allow_compat_adapters: bool,
+    vendor_name: &str,
+    model: &str,
+    audio_input: &AudioInput,
+    prompt: &str,
+    source_language: Option<&str>,
+    auth_token: Option<&str>,
+    provider_location: &str,
+) -> Result<TranscriptionBatch, SkillFailure> {
+    let AudioInput::LocalPath(audio_path) = audio_input else {
+        let (text, model_kind) = transcribe_by_vendor(
+            client,
+            audio_cfg,
+            provider_cfg,
+            vendor,
+            allow_compat_adapters,
+            vendor_name,
+            model,
+            audio_input,
+            prompt,
+            source_language,
+            auth_token,
+        )?;
+        return Ok(TranscriptionBatch {
+            text,
+            model_kind,
+            chunking: None,
+        });
+    };
+
+    if provider_location == "local" {
+        let (text, model_kind) = transcribe_by_vendor(
+            client,
+            audio_cfg,
+            provider_cfg,
+            vendor,
+            allow_compat_adapters,
+            vendor_name,
+            model,
+            audio_input,
+            prompt,
+            source_language,
+            auth_token,
+        )?;
+        return Ok(TranscriptionBatch {
+            text,
+            model_kind,
+            chunking: None,
+        });
+    }
+
+    let max_input_bytes = audio_cfg
+        .max_input_bytes
+        .unwrap_or(DEFAULT_MAX_INPUT_BYTES)
+        .max(1) as u64;
+    let target_bytes = audio_cfg
+        .remote_chunk_target_bytes
+        .unwrap_or(DEFAULT_REMOTE_CHUNK_TARGET_BYTES)
+        .max(1) as u64;
+    let max_duration_seconds = audio_cfg
+        .remote_chunk_seconds
+        .unwrap_or(DEFAULT_REMOTE_CHUNK_SECONDS)
+        .clamp(1, 3_600);
+    let prepared = audio_chunks::prepare_remote_audio(
+        audio_path,
+        audio_chunks::RemoteChunkConfig {
+            enabled: audio_cfg.remote_auto_chunk.unwrap_or(true),
+            target_bytes: target_bytes.min(max_input_bytes),
+            max_input_bytes,
+            max_duration_seconds,
+        },
+    )
+    .map_err(|error| {
+        SkillFailure::new(error.code, error.detail, error.retryable).with_details(json!({
+            "stage": "audio_chunk_preparation",
+            "provider_location": provider_location,
+        }))
+    })?;
+
+    let segment_count = prepared.chunks.len();
+    let mut merged = Vec::with_capacity(segment_count);
+    let mut segments = Vec::with_capacity(segment_count);
+    let mut model_kind = None;
+    for chunk in &prepared.chunks {
+        let chunk_input = AudioInput::LocalPath(chunk.path.clone());
+        let (text, current_model_kind) = transcribe_by_vendor(
+            client,
+            audio_cfg,
+            provider_cfg,
+            vendor,
+            allow_compat_adapters,
+            vendor_name,
+            model,
+            &chunk_input,
+            prompt,
+            source_language,
+            auth_token,
+        )
+        .map_err(|error| {
+            let provider_details = error.details.clone();
+            error.with_details(json!({
+                "stage": "audio_chunk_transcription",
+                "chunk_index": chunk.index,
+                "chunk_count": segment_count,
+                "start_ms": chunk.start_ms,
+                "end_ms": chunk.end_ms,
+                "provider_details": provider_details,
+            }))
+        })?;
+        model_kind.get_or_insert(current_model_kind);
+        let text = text.trim().to_string();
+        segments.push(json!({
+            "index": chunk.index,
+            "start_ms": chunk.start_ms,
+            "end_ms": chunk.end_ms,
+            "size_bytes": chunk.size_bytes,
+            "character_count": text.chars().count(),
+        }));
+        merged.push(text);
+    }
+    let text = merge_ordered_transcript_parts(&merged);
+    if text.is_empty() {
+        return Err(SkillFailure::new(
+            "empty_transcript",
+            "all audio chunks returned empty transcripts",
+            false,
+        )
+        .with_details(json!({
+            "stage": "audio_chunk_merge",
+            "chunk_count": segment_count,
+        })));
+    }
+
+    let chunking = prepared.applied.then(|| {
+        json!({
+            "schema_version": 1,
+            "applied": true,
+            "strategy": "ffmpeg_pcm_s16le_16000_mono",
+            "original_size_bytes": prepared.original_size_bytes,
+            "original_duration_ms": prepared.original_duration_ms,
+            "target_bytes": target_bytes.min(max_input_bytes),
+            "max_segment_seconds": max_duration_seconds,
+            "segment_count": segment_count,
+            "segments": segments,
+            "merge_order": "source_time_ascending",
+        })
+    });
+    Ok(TranscriptionBatch {
+        text,
+        model_kind: model_kind.unwrap_or("unknown"),
+        chunking,
+    })
+}
+
+fn merge_ordered_transcript_parts(parts: &[String]) -> String {
+    parts
+        .iter()
+        .map(|part| part.trim())
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn transcription_review_delivery() -> Value {
@@ -454,6 +642,8 @@ fn preview_transcription(
     };
     let model_kind = planned_model_kind(&cfg.audio_transcribe, vendor, model);
     let provider_location = transcription_provider_location(provider_cfg);
+    let remote_chunking_enabled =
+        provider_location == "remote" && cfg.audio_transcribe.remote_auto_chunk.unwrap_or(true);
     let recommended_capability = if provider_location == "local" {
         "media_download.transcribe"
     } else {
@@ -475,6 +665,15 @@ fn preview_transcription(
             "fallback_recommended": false,
             "model": model,
             "model_kind": model_kind,
+            "remote_chunking": {
+                "enabled": remote_chunking_enabled,
+                "target_bytes": cfg.audio_transcribe.remote_chunk_target_bytes
+                    .unwrap_or(DEFAULT_REMOTE_CHUNK_TARGET_BYTES),
+                "max_input_bytes": cfg.audio_transcribe.max_input_bytes
+                    .unwrap_or(DEFAULT_MAX_INPUT_BYTES),
+                "max_segment_seconds": cfg.audio_transcribe.remote_chunk_seconds
+                    .unwrap_or(DEFAULT_REMOTE_CHUNK_SECONDS),
+            },
             "input_kind": input_kind,
             "input_path": input_path,
             "resolved_input_path": resolved_input_path,
