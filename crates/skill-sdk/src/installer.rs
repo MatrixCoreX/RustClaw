@@ -14,7 +14,9 @@ use uuid::Uuid;
 use crate::adapter::{
     copy_source_tree, prepare_package, source_digest, AdapterContext, PreparedPackage,
 };
-use crate::manifest::{BuildAdapter, BuildNetworkPolicy, PackageManifest, AGENT_JSONL_PROTOCOL};
+use crate::manifest::{
+    BuildAdapter, BuildNetworkPolicy, LauncherKind, PackageManifest, AGENT_JSONL_PROTOCOL,
+};
 use crate::process::run_command_controlled;
 use crate::protocol::{validate_response_line, ProtocolRequest};
 use crate::receipt::{
@@ -482,7 +484,7 @@ impl SkillInstaller {
             .phase("precompiled_verify"));
         }
         let bundled_manifest = PackageManifest::load(&source_install.join("skill.toml"))?;
-        let receipt: InstallReceipt =
+        let mut receipt: InstallReceipt =
             serde_json::from_slice(&fs::read(source_install.join("install-receipt.json"))?)?;
         receipt.validate()?;
         if receipt.schema_version == INSTALL_RECEIPT_SCHEMA_VERSION {
@@ -539,6 +541,7 @@ impl SkillInstaller {
             }
         }
         fs::create_dir_all(staging.join(&receipt.launch.working_directory))?;
+        rebind_precompiled_trusted_runtime(&manifest, &mut receipt)?;
         emit_phase(request.control.as_ref(), "precompiled_copy")?;
         let manifest_digest = manifest.digest()?;
         let source_digest = receipt.source_digest.clone();
@@ -558,6 +561,150 @@ impl SkillInstaller {
             request.control.as_ref(),
         )
     }
+}
+
+fn rebind_precompiled_trusted_runtime(
+    manifest: &PackageManifest,
+    receipt: &mut InstallReceipt,
+) -> SkillSdkResult<()> {
+    if receipt.launch.program_scope != LaunchProgramScope::TrustedRuntime {
+        return Ok(());
+    }
+    let runtime_name = match receipt.launch.launcher {
+        LauncherKind::Node => "node",
+        LauncherKind::Java => "java",
+        LauncherKind::Dotnet => "dotnet",
+        launcher => {
+            return Err(SkillSdkError::new(
+                "precompiled_runtime_launcher_unsupported",
+                format!("launcher={launcher:?}"),
+            )
+            .phase("precompiled_verify"))
+        }
+    };
+    let runtime = find_on_path(runtime_name).ok_or_else(|| {
+        SkillSdkError::new(
+            "precompiled_runtime_unavailable",
+            format!("program={runtime_name}"),
+        )
+        .phase("precompiled_verify")
+    })?;
+    let actual_version = trusted_runtime_version(&runtime)?;
+    validate_precompiled_runtime_version(
+        manifest,
+        runtime_name,
+        receipt.launch.trusted_runtime_version.as_deref(),
+        &actual_version,
+    )?;
+    receipt.launch.program = runtime.to_string_lossy().into_owned();
+    receipt.launch.trusted_runtime_sha256 = Some(digest_file(&runtime)?);
+    receipt.launch.trusted_runtime_version = Some(actual_version);
+    Ok(())
+}
+
+fn trusted_runtime_version(program: &Path) -> SkillSdkResult<String> {
+    let mut command = Command::new(program);
+    command.arg("--version").env_clear();
+    if let Some(path) = std::env::var_os("PATH") {
+        command.env("PATH", path);
+    }
+    let output = run_command_controlled(
+        &mut command,
+        None,
+        Duration::from_secs(15),
+        "precompiled_verify",
+        None,
+    )?;
+    if !output.status.success() {
+        return Err(SkillSdkError::new(
+            "precompiled_runtime_version_failed",
+            format!("program={}", program.display()),
+        )
+        .phase("precompiled_verify"));
+    }
+    let value = if output.stdout.is_empty() {
+        output.stderr
+    } else {
+        output.stdout
+    };
+    let version = String::from_utf8_lossy(&value).trim().to_string();
+    if version.is_empty() {
+        return Err(SkillSdkError::new(
+            "precompiled_runtime_version_invalid",
+            format!("program={}", program.display()),
+        )
+        .phase("precompiled_verify"));
+    }
+    Ok(version)
+}
+
+fn validate_precompiled_runtime_version(
+    manifest: &PackageManifest,
+    runtime_name: &str,
+    source_version: Option<&str>,
+    actual_version: &str,
+) -> SkillSdkResult<()> {
+    let actual_major = runtime_major(actual_version).ok_or_else(|| {
+        SkillSdkError::new(
+            "precompiled_runtime_version_invalid",
+            format!("program={runtime_name} actual={actual_version:?}"),
+        )
+        .phase("precompiled_verify")
+    })?;
+    if let Some(requirement) = manifest.build.options.get(runtime_name) {
+        let minimum_major = minimum_runtime_major(requirement).ok_or_else(|| {
+            SkillSdkError::new(
+                "precompiled_runtime_requirement_invalid",
+                format!("program={runtime_name} requirement={requirement:?}"),
+            )
+            .phase("precompiled_verify")
+        })?;
+        if actual_major < minimum_major {
+            return Err(SkillSdkError::new(
+                "precompiled_runtime_version_unsupported",
+                format!("program={runtime_name} required={requirement} actual={actual_version}"),
+            )
+            .phase("precompiled_verify"));
+        }
+        return Ok(());
+    }
+    let source_major = source_version.and_then(runtime_major).ok_or_else(|| {
+        SkillSdkError::new(
+            "precompiled_runtime_version_invalid",
+            format!("program={runtime_name} source={source_version:?}"),
+        )
+        .phase("precompiled_verify")
+    })?;
+    if actual_major != source_major {
+        return Err(SkillSdkError::new(
+            "precompiled_runtime_version_unsupported",
+            format!("program={runtime_name} source_major={source_major} actual={actual_version}"),
+        )
+        .phase("precompiled_verify"));
+    }
+    Ok(())
+}
+
+fn minimum_runtime_major(requirement: &str) -> Option<u64> {
+    let version = requirement.trim().strip_prefix(">=")?;
+    let components = version.split('.').collect::<Vec<_>>();
+    if components.is_empty()
+        || components.len() > 3
+        || components.iter().any(|component| {
+            component.is_empty() || !component.bytes().all(|byte| byte.is_ascii_digit())
+        })
+    {
+        return None;
+    }
+    components[0].parse().ok()
+}
+
+fn runtime_major(version: &str) -> Option<u64> {
+    version
+        .split(|character: char| !character.is_ascii_digit())
+        .find(|component| !component.is_empty())?
+        .parse()
+        .ok()
 }
 
 const AIPP_BUNDLE_MAX_FILES: usize = 256;
@@ -1024,8 +1171,22 @@ fn find_on_path(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path)
         .map(|root| root.join(name))
-        .find(|candidate| candidate.is_file())
+        .find(|candidate| is_executable_file(candidate))
         .and_then(|candidate| fs::canonicalize(candidate).ok())
+}
+
+#[cfg(unix)]
+fn is_executable_file(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::metadata(path)
+        .map(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_executable_file(path: &Path) -> bool {
+    path.is_file()
 }
 
 fn set_executable(path: &Path) -> SkillSdkResult<()> {

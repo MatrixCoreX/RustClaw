@@ -63,6 +63,17 @@ fn package_root_is_canonicalized_before_sandboxed_installation() {
 }
 
 #[test]
+fn precompiled_runtime_requirements_use_strict_minimum_major_versions() {
+    assert_eq!(super::minimum_runtime_major(">=20"), Some(20));
+    assert_eq!(super::minimum_runtime_major(">=20.1.2"), Some(20));
+    assert_eq!(super::minimum_runtime_major("20"), None);
+    assert_eq!(super::minimum_runtime_major(">=20.preview"), None);
+    assert_eq!(super::minimum_runtime_major(">=20.1.2.3"), None);
+    assert_eq!(super::runtime_major("v22.22.1"), Some(22));
+    assert_eq!(super::runtime_major("openjdk 25.0.4"), Some(25));
+}
+
+#[test]
 fn install_resource_preflight_returns_a_stable_insufficient_code() {
     let temp = tempdir().expect("tempdir");
     let mut manifest =
@@ -531,13 +542,46 @@ fn node_adapter_uses_private_dependencies_and_disables_lifecycle_scripts() {
         ),
     )
     .expect("manifest");
+    let manifest_path = source.join("skill.toml");
     let outcome =
-        install_fixture(temp.path(), &workspace, source.join("skill.toml")).expect("node install");
+        install_fixture(temp.path(), &workspace, manifest_path.clone()).expect("node install");
     assert!(outcome
         .install_root
         .join("runtime/src/package.json")
         .is_file());
     assert!(!source.join("node_modules").exists());
+
+    let source_store = crate::InstallReceiptStore::new(temp.path().join("packages"));
+    let receipt_path = outcome.install_root.join("install-receipt.json");
+    let mut receipt: crate::InstallReceipt =
+        serde_json::from_slice(&fs::read(&receipt_path).expect("read receipt"))
+            .expect("parse receipt");
+    receipt.launch.program = "/build-runner/toolcache/node/bin/node".to_string();
+    source_store
+        .write_receipt(&outcome.install_root, &receipt)
+        .expect("rewrite relocated receipt");
+    source_store
+        .activate(&outcome.install_root, &receipt)
+        .expect("activate relocated receipt");
+
+    let imported_root = temp.path().join("imported");
+    SkillInstaller
+        .install_precompiled(&PrecompiledInstallRequest {
+            manifest_path,
+            workspace_root: workspace,
+            package_root: imported_root.clone(),
+            precompiled_root: temp.path().join("packages"),
+            target: None,
+            control: None,
+        })
+        .expect("install relocated precompiled Node adapter");
+    let launch = SkillRuntimeResolver::new(imported_root)
+        .resolve("node_fixture")
+        .expect("resolve rebound Node adapter");
+    assert_eq!(
+        launch.program,
+        fs::canonicalize(find_on_path("node").unwrap()).unwrap()
+    );
 }
 
 #[test]
