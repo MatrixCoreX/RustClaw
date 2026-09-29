@@ -1,4 +1,5 @@
 import type {
+  HostedRelayPreset,
   LlmTestResponse,
   ModelCatalogEntry,
   ModelCatalogResponse,
@@ -83,6 +84,30 @@ export function buildMultimodalDraft(config: ModelConfigResponse): MultimodalDra
     };
   }
   return draft;
+}
+
+function normalizedEndpoint(value: string | null | undefined): string {
+  return (value ?? "").trim().replace(/\/+$/, "");
+}
+
+export function imageVisionUsesHostedRelay(
+  preset: HostedRelayPreset | null | undefined,
+  item: ModelConfigItem | null | undefined,
+): boolean {
+  if (!preset || !item) return false;
+  return item.vendor.trim().toLowerCase() === "openai"
+    && item.model.trim() === preset.model.trim()
+    && normalizedEndpoint(item.base_url) === normalizedEndpoint(preset.base_url);
+}
+
+export function hostedRelayImageVisionDraft(preset: HostedRelayPreset): ModelConfigItem {
+  return {
+    // image_vision consumes the relay through its OpenAI-compatible adapter.
+    vendor: "openai",
+    model: preset.model.trim(),
+    base_url: normalizedEndpoint(preset.base_url),
+    api_key: "",
+  };
 }
 
 export function buildMultimodalSkillEnabledState(

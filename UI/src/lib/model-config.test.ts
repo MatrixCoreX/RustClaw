@@ -14,6 +14,8 @@ import {
   formatLlmTestMessage,
   formatMultimodalToken,
   hasUnsavedMultimodalDraftChanges,
+  hostedRelayImageVisionDraft,
+  imageVisionUsesHostedRelay,
   providerUnsupportedLabel,
   updateMultimodalDraftField,
 } from "./model-config.ts";
@@ -41,6 +43,26 @@ test("builds multimodal drafts from configured sections", () => {
   assert.deepEqual(Object.keys(draft).sort(), [...MULTIMODAL_KEYS].sort());
   assert.equal(draft.image_generation.model, "image-gen");
   assert.equal(draft.music_generation.vendor, "minimax");
+});
+
+test("recognizes and applies the hosted relay for image understanding", () => {
+  const preset = {
+    vendor: "custom" as const,
+    model: "minimax",
+    base_url: "https://relay.example/v1/",
+    api_format: "openai_compat" as const,
+    daily_request_limit: 1000,
+  };
+  const draft = hostedRelayImageVisionDraft(preset);
+  assert.deepEqual(draft, {
+    vendor: "openai",
+    model: "minimax",
+    base_url: "https://relay.example/v1",
+    api_key: "",
+  });
+  assert.equal(imageVisionUsesHostedRelay(preset, draft), true);
+  assert.equal(imageVisionUsesHostedRelay(preset, { ...draft, model: "other" }), false);
+  assert.equal(imageVisionUsesHostedRelay(preset, { ...draft, base_url: "https://provider.example/v1" }), false);
 });
 
 test("maps every multimodal module to its independently switchable skill", () => {
