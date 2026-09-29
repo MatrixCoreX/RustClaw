@@ -118,6 +118,13 @@ class ReleaseInstallationTests(unittest.TestCase):
                 pending.append(module.parent / dependency)
         self.assertIn(bridge / "media-preflight.js", visited)
 
+    def test_package_excludes_skill_build_cache_before_receipt_pruning(self):
+        package_source = (ROOT / "package-release.sh").read_text()
+        cache_cleanup = 'rm -rf "$STAGE_PROJECT_DIR/prebuilt/skill-packages/cache"'
+        receipt_prune = 'prune_staged_receipt_versions "$STAGE_PROJECT_DIR/prebuilt/skill-packages"'
+        self.assertIn(cache_cleanup, package_source)
+        self.assertLess(package_source.index(cache_cleanup), package_source.index(receipt_prune))
+
     def test_updater_detects_all_native_platforms_without_building(self):
         import tomllib
         identity = tomllib.loads((ROOT / "configs/product_identity.toml").read_text())

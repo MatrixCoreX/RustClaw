@@ -310,6 +310,7 @@ if [[ "${#PLATFORM_PRECOMPILED_SKILLS[@]}" -gt 0 ]]; then
   done
   mkdir -p "$STAGE_PROJECT_DIR/prebuilt/skill-packages"
   cp -R "$PRECOMPILED_SOURCE_DIR/." "$STAGE_PROJECT_DIR/prebuilt/skill-packages/"
+  rm -rf "$STAGE_PROJECT_DIR/prebuilt/skill-packages/cache"
   prune_staged_receipt_versions "$STAGE_PROJECT_DIR/prebuilt/skill-packages"
   echo "Included platform Skill Store precompiles: ${PLATFORM_PRECOMPILED_SKILLS[*]}"
 fi
