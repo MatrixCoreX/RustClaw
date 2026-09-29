@@ -14,6 +14,8 @@ import type { ChatDeferredInputSummary } from "../types/chat-runtime";
 type Translate = (zh: string, en: string) => string;
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
 
+const PASSIVE_RETRY_DELAY_MS = 1_000;
+
 interface DeferredConversationRef {
   id: string;
   agentId: string;
@@ -66,11 +68,7 @@ export function useDeferredChatInputs({
   const [items, setItems] = useState<ChatDeferredInputSummary[]>([]);
   const [actionInputId, setActionInputId] = useState<string | null>(null);
   const apiFetchRef = useRef(apiFetch);
-  const onErrorRef = useRef(onError);
-  const tRef = useRef(t);
   apiFetchRef.current = apiFetch;
-  onErrorRef.current = onError;
-  tRef.current = t;
 
   useEffect(() => {
     if (!enabled) {
@@ -80,6 +78,8 @@ export function useDeferredChatInputs({
     const controller = new AbortController();
     let loadRunning = false;
     let loadRequested = false;
+    let reconcileRetry: ReturnType<typeof globalThis.setTimeout> | null = null;
+    let streamRetry: ReturnType<typeof globalThis.setTimeout> | null = null;
     const loadOnce = async () => {
       const records: ConversationInputRecord[] = [];
       let afterInputSeq = 0;
@@ -127,31 +127,47 @@ export function useDeferredChatInputs({
         loadRunning = false;
       }
     };
-    const reportReadError = (error: unknown) => {
-      if (!controller.signal.aborted) {
-        onErrorRef.current(
-          formatUiError(
-            error,
-            tRef.current,
-            "无法读取延后消息。",
-            "Could not load deferred messages.",
-          ),
-        );
+    const scheduleReconcile = () => {
+      if (controller.signal.aborted || reconcileRetry !== null) return;
+      reconcileRetry = globalThis.setTimeout(() => {
+        reconcileRetry = null;
+        void reconcile().catch(scheduleReconcile);
+      }, PASSIVE_RETRY_DELAY_MS);
+    };
+    const reconcilePassively = async () => {
+      try {
+        await reconcile();
+      } catch {
+        scheduleReconcile();
       }
     };
-    void reconcile().catch(reportReadError);
-    void followConversationInputEventStream(
-      (path, init) => apiFetchRef.current(path, init),
-      {
-        conversationId: conversation.id,
-        agentId: conversation.agentId,
-        channel: "ui",
-        channelAccountId: conversation.externalChatId,
-      },
-      reconcile,
-      controller.signal,
-    ).catch(reportReadError);
-    return () => controller.abort();
+    const startEventStream = () => {
+      if (controller.signal.aborted) return;
+      void followConversationInputEventStream(
+        (path, init) => apiFetchRef.current(path, init),
+        {
+          conversationId: conversation.id,
+          agentId: conversation.agentId,
+          channel: "ui",
+          channelAccountId: conversation.externalChatId,
+        },
+        reconcilePassively,
+        controller.signal,
+      ).catch(() => {
+        if (controller.signal.aborted || streamRetry !== null) return;
+        streamRetry = globalThis.setTimeout(() => {
+          streamRetry = null;
+          startEventStream();
+        }, PASSIVE_RETRY_DELAY_MS);
+      });
+    };
+    void reconcilePassively();
+    startEventStream();
+    return () => {
+      controller.abort();
+      if (reconcileRetry !== null) globalThis.clearTimeout(reconcileRetry);
+      if (streamRetry !== null) globalThis.clearTimeout(streamRetry);
+    };
   }, [conversation.agentId, conversation.externalChatId, conversation.id, enabled]);
 
   const activate = async (inputId: string) => {

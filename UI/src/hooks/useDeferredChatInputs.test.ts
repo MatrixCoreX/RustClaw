@@ -128,3 +128,83 @@ test("deferred inputs reconcile across windows from conversation events", async 
     await flush();
   });
 });
+
+test("passive deferred input reads recover without replacing chat errors", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  let records: ConversationInputRecord[] = [];
+  let eventStream: ReadableStreamDefaultController<Uint8Array> | null = null;
+  let listRequests = 0;
+  const errors: Array<string | null> = [];
+  const apiFetch = async (path: string, init?: RequestInit) => {
+    if (path.startsWith("/v1/conversation-inputs?")) {
+      listRequests += 1;
+      if (listRequests === 1) {
+        return new Response(JSON.stringify({ ok: false, error: "webd_upstream_unavailable" }), {
+          status: 503,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return response({ schema_version: 1, items: records, next_after_input_seq: null });
+    }
+    if (path.startsWith("/v1/conversations/") && path.includes("/events?")) {
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            eventStream = controller;
+            init?.signal?.addEventListener("abort", () => controller.close(), { once: true });
+          },
+        }),
+        { headers: { "content-type": "text/event-stream" } },
+      );
+    }
+    throw new Error(`unexpected_request:${path}`);
+  };
+  let runtime!: ReturnType<typeof useDeferredChatInputs>;
+  function Probe() {
+    runtime = useDeferredChatInputs({
+      apiFetch,
+      t: (zh) => zh,
+      enabled: true,
+      conversation: {
+        id: "conversation-1",
+        agentId: "main",
+        externalChatId: "browser-1",
+      },
+      onError: (message) => errors.push(message),
+      onActivated: () => undefined,
+    });
+    return null;
+  }
+  let renderer!: ReactTestRenderer;
+  await act(async () => {
+    renderer = create(React.createElement(Probe));
+    await flush();
+  });
+  assert.deepEqual(errors, []);
+  assert.ok(eventStream);
+
+  records = [record("deferred")];
+  await act(async () => {
+    eventStream!.enqueue(
+      new TextEncoder().encode(
+        `data: ${JSON.stringify({
+          schema_version: 1,
+          event_seq: 1,
+          input_id: "input-external-1",
+          event_kind: "accepted",
+          payload: { disposition: "deferred" },
+          created_at_ts: 10,
+        })}\n\n`,
+      ),
+    );
+    await flush();
+  });
+  assert.ok(listRequests >= 2);
+  assert.deepEqual(runtime.items.map((item) => item.inputId), ["input-external-1"]);
+  assert.deepEqual(errors, []);
+
+  await act(async () => {
+    renderer.unmount();
+    await flush();
+  });
+});
