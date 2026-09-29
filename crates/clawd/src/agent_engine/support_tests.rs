@@ -1370,6 +1370,48 @@ fn registry_idempotency_guard_keeps_validate_capability_args_fingerprint() {
 }
 
 #[test]
+fn media_download_dedup_distinguishes_revised_url_and_conversion_scope() {
+    let registry_toml = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml"),
+    )
+    .expect("read production registry");
+    let state = state_with_registry(&registry_toml, &["media_download"]);
+    let mut policy = base_policy();
+    policy.registry_idempotency_guard_scope = RegistryIdempotencyGuardScope::All;
+    let original = crate::AgentAction::CallCapability {
+        capability: "media_download.download".to_string(),
+        args: serde_json::json!({
+            "share": "https://vt.tiktok.com/original/",
+            "platform": "tiktok"
+        }),
+    };
+    let revised_url = crate::AgentAction::CallCapability {
+        capability: "media_download.download".to_string(),
+        args: serde_json::json!({
+            "share": "https://vt.tiktok.com/revised/",
+            "platform": "tiktok"
+        }),
+    };
+    let revised_conversion = crate::AgentAction::CallCapability {
+        capability: "media_download.download".to_string(),
+        args: serde_json::json!({
+            "share": "https://vt.tiktok.com/original/",
+            "platform": "tiktok",
+            "text_conversion_scope": "audio_only"
+        }),
+    };
+
+    assert_ne!(
+        action_fingerprint_for_policy(&state, &policy, &original),
+        action_fingerprint_for_policy(&state, &policy, &revised_url)
+    );
+    assert_ne!(
+        action_fingerprint_for_policy(&state, &policy, &original),
+        action_fingerprint_for_policy(&state, &policy, &revised_conversion)
+    );
+}
+
+#[test]
 fn registry_idempotency_guard_keeps_direct_run_cmd_command_args_fingerprint() {
     let state = state_with_registry(registry_governance_fixture(), &["run_cmd"]);
     let mut policy = base_policy();

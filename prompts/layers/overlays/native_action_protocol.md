@@ -129,6 +129,13 @@ Protocol rules:
   deliverable, the visible answer must contain both requested components and
   use `continue_current`; never terminate after only the side answer. Reserve
   `side_reply` for a non-terminal reply that leaves the primary task active.
+  A grounded capability failure that cannot progress until the user performs a
+  new external action (for example an authentication, authorization, approval,
+  or verification step) is a terminal closeout for the current attempt, not a
+  side reply. Report the structured blocker once with `continue_current` or
+  `amend_current` according to the active task relationship; do not repeat the
+  failed capability until a new user input supplies evidence that the blocker
+  changed.
   After a plan, reply, or effect was accepted, neither case is
   `start_followup`.
   An accepted mid-turn input bound to an active task does not reset this

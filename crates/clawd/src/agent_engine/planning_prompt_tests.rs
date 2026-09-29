@@ -327,6 +327,25 @@ fn answer_verifier_accepts_grounded_required_input_clarification() {
 }
 
 #[test]
+fn planner_and_verifier_stop_at_external_user_action_blockers() {
+    let overlays = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts/layers/overlays");
+    let native = std::fs::read_to_string(overlays.join("native_action_protocol.md"))
+        .expect("read native action protocol");
+    let verifier = std::fs::read_to_string(overlays.join("answer_verifier_prompt.md"))
+        .expect("read answer verifier prompt");
+    let native = native.split_whitespace().collect::<Vec<_>>().join(" ");
+    let verifier = verifier.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    assert!(native.contains("new external action"));
+    assert!(native.contains("terminal closeout for the current attempt"));
+    assert!(native.contains("not a side reply"));
+    assert!(verifier.contains("not an immediate retry"));
+    assert!(verifier.contains("future user input"));
+    assert!(verifier.contains("`pass=false` and `should_retry=false`"));
+    assert!(verifier.contains("set `blocked=true`"));
+}
+
+#[test]
 fn drafting_prompts_apply_explicit_replacements_without_unrelated_file_lookup() {
     let overlays = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts/layers/overlays");
     for relative_path in [

@@ -39,6 +39,7 @@ from typing import Any, Callable, Iterable
 import image_ocr
 import video_transcriber
 import xiaohongshu_access
+import youtube_access
 from browser_devtools import DevToolsConnection, DevToolsError
 from task_cancellation import CancellationToken, OperationCancelled, terminate_process
 
@@ -4892,6 +4893,20 @@ def find_yt_dlp_binary(yt_dlp_bin: str | None = None) -> str:
     return found
 
 
+def find_ytdlp_js_runtime() -> str | None:
+    for runtime, executables in (
+        ("deno", ("deno",)),
+        ("node", ("node", "nodejs")),
+        ("quickjs", ("qjs", "quickjs")),
+        ("bun", ("bun",)),
+    ):
+        for executable in executables:
+            path = shutil.which(executable)
+            if path:
+                return f"{runtime}:{path}"
+    return None
+
+
 def output_stem_exists(output_dir: Path, stem: str) -> bool:
     return any(path.is_file() and path.stem == stem for path in output_dir.iterdir())
 
@@ -4926,6 +4941,8 @@ def build_youtube_command(
     output_template: Path | None = None,
     format_selector: str = DEFAULT_YOUTUBE_FORMAT,
     cookie: str | None = None,
+    cookies_from_browser: str | None = None,
+    js_runtime: str | None = None,
     timeout: float = 20.0,
     overwrite: bool = False,
     print_url: bool = False,
@@ -4940,6 +4957,10 @@ def build_youtube_command(
     ]
     if cookie:
         command.extend(["--add-header", f"Cookie: {cookie}"])
+    if cookies_from_browser:
+        command.extend(["--cookies-from-browser", cookies_from_browser])
+    if js_runtime:
+        command.extend(["--js-runtimes", js_runtime])
     if print_url:
         command.append("--get-url")
     else:
@@ -4999,24 +5020,65 @@ def download_youtube_video(
     yt_dlp_bin: str | None = None,
     format_selector: str = DEFAULT_YOUTUBE_FORMAT,
     cookie: str | None = None,
+    browser_profile_dir: str | None = None,
+    browser_fallback: bool = True,
+    chrome_path: str | None = None,
     timeout: float = 20.0,
     overwrite: bool = False,
     verbose: bool = False,
 ) -> Path:
     executable = find_yt_dlp_binary(yt_dlp_bin)
     output_template = youtube_output_template(output_dir, output_name, overwrite=overwrite)
-    command = build_youtube_command(
-        executable,
-        candidate.url,
-        output_template=output_template,
-        format_selector=format_selector,
-        cookie=candidate.cookie or cookie,
-        timeout=timeout,
-        overwrite=overwrite,
-    )
-    if verbose:
-        print(" ".join(command), file=sys.stderr)
-    completed = run_task_subprocess(command, check=False, capture_output=True, text=True)
+    chrome = find_chrome_executable(chrome_path) if browser_fallback else None
+    profile = youtube_access.persistent_profile_dir(browser_profile_dir)
+    js_runtime = find_ytdlp_js_runtime()
+
+    def run_download(cookies_from_browser: str | None = None) -> subprocess.CompletedProcess[str]:
+        command = build_youtube_command(
+            executable,
+            candidate.url,
+            output_template=output_template,
+            format_selector=format_selector,
+            cookie=candidate.cookie or cookie,
+            cookies_from_browser=cookies_from_browser,
+            js_runtime=js_runtime,
+            timeout=timeout,
+            overwrite=overwrite,
+        )
+        if verbose:
+            print(" ".join(command), file=sys.stderr)
+        return run_task_subprocess(command, check=False, capture_output=True, text=True)
+
+    completed = run_download()
+    diagnostic = f"{completed.stderr}\n{completed.stdout}"
+    if completed.returncode != 0 and youtube_access.requires_login_diagnostic(diagnostic):
+        browser_spec = None
+        if chrome and profile is not None and youtube_access.profile_has_cookies(profile):
+            browser_spec = youtube_access.ytdlp_browser_spec(chrome, profile)
+            completed = run_download(browser_spec)
+            diagnostic = f"{completed.stderr}\n{completed.stdout}"
+        if (
+            completed.returncode != 0
+            and youtube_access.requires_login_diagnostic(diagnostic)
+            and browser_fallback
+            and chrome
+            and profile is not None
+        ):
+            print("youtube: login_required", file=sys.stderr, flush=True)
+            login_status = youtube_access.wait_for_skill_owned_login(
+                chrome=chrome,
+                profile_dir=profile,
+                page_url=candidate.url,
+                on_tick=raise_if_task_cancelled,
+            )
+            print(f"youtube: interactive_login={login_status}", file=sys.stderr, flush=True)
+            if login_status != "ok":
+                raise DouyinDownloadError(login_status)
+            browser_spec = youtube_access.ytdlp_browser_spec(chrome, profile)
+            completed = run_download(browser_spec)
+            diagnostic = f"{completed.stderr}\n{completed.stdout}"
+        if completed.returncode != 0 and youtube_access.requires_login_diagnostic(diagnostic):
+            raise DouyinDownloadError(youtube_access.LOGIN_REQUIRED)
     if completed.returncode != 0:
         raise DouyinDownloadError(ytdlp_error_message(completed))
 
@@ -5032,15 +5094,19 @@ def print_youtube_media_urls(
     yt_dlp_bin: str | None = None,
     format_selector: str = DEFAULT_YOUTUBE_FORMAT,
     cookie: str | None = None,
+    cookies_from_browser: str | None = None,
     timeout: float = 20.0,
     verbose: bool = False,
 ) -> None:
     executable = find_yt_dlp_binary(yt_dlp_bin)
+    js_runtime = find_ytdlp_js_runtime()
     command = build_youtube_command(
         executable,
         candidate.url,
         format_selector=format_selector,
         cookie=candidate.cookie or cookie,
+        cookies_from_browser=cookies_from_browser,
+        js_runtime=js_runtime,
         timeout=timeout,
         print_url=True,
     )
@@ -5939,7 +6005,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--browser-profile-dir",
         help=(
             "Host-provided private directory for this skill's persistent browser "
-            "profiles. Xiaohongshu login is stored only here and is never read "
+            "profiles. Xiaohongshu and YouTube login state is stored only here and is never read "
             "from the system browser or another skill."
         ),
     )
@@ -8194,11 +8260,27 @@ def handle_resolved_media(
 
     if args.print_url:
         if platform == "youtube" and candidates:
+            youtube_profile = youtube_access.persistent_profile_dir(
+                getattr(args, "browser_profile_dir", None)
+            )
+            youtube_chrome = (
+                find_chrome_executable(getattr(args, "chrome_path", None))
+                if args.browser_fallback
+                else None
+            )
+            youtube_browser_spec = (
+                youtube_access.ytdlp_browser_spec(youtube_chrome, youtube_profile)
+                if youtube_chrome
+                and youtube_profile is not None
+                and youtube_access.profile_has_cookies(youtube_profile)
+                else None
+            )
             print_youtube_media_urls(
                 candidates[0],
                 yt_dlp_bin=args.yt_dlp_bin,
                 format_selector=args.youtube_format,
                 cookie=cookie,
+                cookies_from_browser=youtube_browser_spec,
                 timeout=args.timeout,
                 verbose=args.verbose,
             )
@@ -8226,6 +8308,9 @@ def handle_resolved_media(
             output_name=image_output_name,
             overwrite=args.overwrite,
             cookie=cookie,
+            browser_profile_dir=getattr(args, "browser_profile_dir", None),
+            browser_fallback=args.browser_fallback,
+            chrome_path=getattr(args, "chrome_path", None),
             timeout=args.timeout,
             referer=platform_referer(platform),
         )
@@ -8303,6 +8388,9 @@ def handle_resolved_media(
             yt_dlp_bin=args.yt_dlp_bin,
             format_selector=args.youtube_format,
             cookie=cookie,
+            browser_profile_dir=getattr(args, "browser_profile_dir", None),
+            browser_fallback=args.browser_fallback,
+            chrome_path=getattr(args, "chrome_path", None),
             timeout=args.timeout,
             overwrite=args.overwrite,
             verbose=args.verbose,
