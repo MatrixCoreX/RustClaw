@@ -92,8 +92,14 @@ if [[ "$CHECK_ONLY" -eq 1 ]]; then
 fi
 restart_option=--no-restart
 [[ "$START" -eq 0 ]] || restart_option=--restart
-bash "$BOOTSTRAP/deploy-github-release.sh" --root "$ROOT_DIR" "$restart_option"
+APP_SKIP_AUTOSTART_REGISTRATION=1 \
+  bash "$BOOTSTRAP/deploy-github-release.sh" --root "$ROOT_DIR" "$restart_option"
 export APP_PRODUCT_IDENTITY_CONFIG="$ROOT_DIR/configs/product_identity.toml"
 bash "$ROOT_DIR/install-agent-cmd.sh" --user --no-deploy-ui
+if [[ "$START" -eq 1 && -x "$ROOT_DIR/scripts/configure-autostart.sh" ]]; then
+  if ! bash "$ROOT_DIR/scripts/configure-autostart.sh" --enable --workspace "$ROOT_DIR"; then
+    printf '%s\n' 'Automatic startup registration was not completed; the current runtime remains available.' >&2
+  fi
+fi
 printf 'Installed in %s\n' "$ROOT_DIR"
 printf 'Open the configured webd address (default: http://127.0.0.1:8788).\n'

@@ -8,9 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use super::SessionEntry;
 
-const SESSION_STORE_SCHEMA_VERSION: u32 = 4;
-const PREVIOUS_SESSION_STORE_SCHEMA_VERSION: u32 = 3;
-const MAX_SESSION_STORE_BYTES: u64 = 2 * 1024 * 1024;
+const SESSION_STORE_SCHEMA_VERSION: u32 = 5;
+const MAX_SESSION_STORE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_SESSION_COUNT: usize = 10_000;
 
 #[derive(Deserialize, Serialize)]
@@ -44,15 +43,34 @@ pub(super) fn load_sessions(
         serde_json::from_slice(&raw).context("webd_session_store_parse_failed")?;
     if !matches!(
         document.schema_version,
-        PREVIOUS_SESSION_STORE_SCHEMA_VERSION | SESSION_STORE_SCHEMA_VERSION
+        3 | 4 | SESSION_STORE_SCHEMA_VERSION
     ) {
         anyhow::bail!("webd_session_store_schema_unsupported");
     }
     document.sessions.retain(|session_digest, entry| {
+        if entry.ended_unix.is_none() && entry.expires_unix <= now_unix {
+            let expired_unix = entry.expires_unix;
+            super::end_session(entry, expired_unix, "expired");
+        }
+        let active = super::session_is_active(entry, now_unix);
+        let credentials_valid = if active {
+            !entry.user_key.trim().is_empty()
+                && entry.user_key.len() <= 1024
+                && super::valid_csrf_token(&entry.csrf_token)
+        } else {
+            entry.user_key.is_empty()
+                && entry.csrf_token.is_empty()
+                && entry
+                    .ended_unix
+                    .is_some_and(|ended| ended >= entry.created_unix)
+                && entry.end_reason.as_ref().is_some_and(|reason| {
+                    !reason.trim().is_empty()
+                        && reason.len() <= 64
+                        && reason.chars().all(|character| !character.is_control())
+                })
+        };
         super::valid_session_digest(session_digest)
             && uuid::Uuid::parse_str(&entry.session_handle).is_ok()
-            && !entry.user_key.trim().is_empty()
-            && entry.user_key.len() <= 1024
             && !entry.username.trim().is_empty()
             && entry.username.len() <= super::MAX_LOGIN_USERNAME_BYTES
             && !entry.role.trim().is_empty()
@@ -72,8 +90,7 @@ pub(super) fn load_sessions(
                 .all(|character| !character.is_control())
             && entry.created_unix <= entry.last_activity_unix
             && entry.last_activity_unix <= entry.expires_unix
-            && super::valid_csrf_token(&entry.csrf_token)
-            && entry.expires_unix > now_unix
+            && credentials_valid
     });
     if document.sessions.len() > MAX_SESSION_COUNT {
         anyhow::bail!("webd_session_store_entry_limit_exceeded");

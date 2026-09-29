@@ -68,11 +68,25 @@ test("requires a risk acknowledgement before enabling NNI navigation", () => {
   assert.ok(section);
   assert.match(source, /const confirmEnableNniNavigation = async \(\) =>/);
   assert.match(source, /本功能不向中国或美国公民开放/);
-  assert.match(source, /if \(confirmed\) onSetNniNavigationVisible\(true\)/);
+  assert.match(source, /if \(confirmed\) await saveNniNavigationVisible\(true\)/);
   assert.match(section[0], /t\("启用", "Enable"\)/);
   assert.match(section[0], /t\("关闭", "Disable"\)/);
   assert.match(section[0], /onClick=\{\(\) => void confirmEnableNniNavigation\(\)\}/);
-  assert.match(section[0], /onClick=\{\(\) => onSetNniNavigationVisible\(false\)\}/);
+  assert.match(section[0], /onClick=\{\(\) => void saveNniNavigationVisible\(false\)\}/);
+});
+
+test("syncs the NNI navigation choice through the signed-in web account", () => {
+  const source = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
+  assert.match(source, /safeFetch\("\/webd\/preferences"/);
+  assert.match(source, /nni_navigation_visible: visible/);
+  assert.match(source, /setNniNavigationVisible\(sessionBody\.data\.nni_navigation_visible\)/);
+});
+
+test("polls the web session so an older same-username login is removed promptly", () => {
+  const source = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
+  assert.match(source, /const verifyWebdSession = async \(\) =>/);
+  assert.match(source, /body\.data\?\.end_reason === "signed_in_elsewhere"/);
+  assert.match(source, /setInterval\(\(\) => void verifyWebdSession\(\), 5_000\)/);
 });
 
 test("opens quick setup until required setup is complete", () => {

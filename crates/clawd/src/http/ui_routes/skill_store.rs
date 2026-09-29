@@ -540,6 +540,110 @@ pub(crate) fn repair_bundled_skill_admission_offline(
         .map_err(|error| error.to_string())
 }
 
+pub(crate) fn bootstrap_bundled_skill_admissions_offline(
+    workspace_root: &Path,
+    config: &claw_core::config::AppConfig,
+) -> Result<crate::skill_admission::OverlaySnapshot, String> {
+    let registry_path = config
+        .skills
+        .registry_path
+        .as_deref()
+        .ok_or_else(|| "skills.registry_path is required".to_string())?;
+    let registry_path = if Path::new(registry_path).is_absolute() {
+        PathBuf::from(registry_path)
+    } else {
+        workspace_root.join(registry_path)
+    };
+    let registry = claw_core::skill_registry::SkillsRegistry::load_from_path(&registry_path)?;
+    let package_store =
+        skill_sdk::InstallReceiptStore::new(workspace_root.join("data/skill-packages"));
+    let service = crate::skill_admission::SkillAdmissionService::from_config(workspace_root, config)
+        .map_err(|error| error.to_string())?;
+    let mut skill_names = registry.on_demand_names();
+    skill_names.sort_unstable();
+    let mut mutations = Vec::with_capacity(skill_names.len());
+    for skill_name in skill_names {
+        let entry = registry
+            .get(&skill_name)
+            .ok_or_else(|| format!("bundled registry entry is missing: {skill_name}"))?;
+        let verified = package_store
+            .verified_current_install(&skill_name)
+            .map_err(|error| format!("bundled package is not verified: skill={skill_name} {error}"))?;
+        let grant = bundled_host_policy_grant_for_entry(entry, &skill_name, &verified.manifest)?;
+        let prompt = bundled_prompt_for_offline_repair(workspace_root, &entry.prompt_file)?;
+        let manifest_path = registry
+            .package_manifest_path(&skill_name)
+            .ok_or_else(|| format!("skill_admission_manifest_missing: skill={skill_name}"))?;
+        mutations.push(crate::skill_admission::AdmissionMutation {
+            metadata: crate::skill_admission::ExternalSkillMetadata {
+                name: skill_name,
+                source: crate::skill_admission::SkillAdmissionSource::BundledBase,
+                package_manifest_path: manifest_path.to_string(),
+                description: entry.description.clone().unwrap_or_default(),
+                aliases: entry.aliases.clone(),
+                group: entry
+                    .group
+                    .clone()
+                    .unwrap_or_else(|| "extensions".to_string()),
+            },
+            prompt,
+            state: skill_sdk::AdmissionState::Enabled,
+            grant: Some(grant),
+        });
+    }
+    service
+        .admit_bundled_batch(mutations)
+        .map_err(|error| error.to_string())
+}
+
+pub(crate) async fn prepare_bundled_runtime_assets_offline(
+    workspace_root: &Path,
+    config: &claw_core::config::AppConfig,
+    package_root: &Path,
+    storage_root: &Path,
+) -> Result<BTreeMap<String, Vec<String>>, String> {
+    let registry_path = config
+        .skills
+        .registry_path
+        .as_deref()
+        .ok_or_else(|| "skills.registry_path is required".to_string())?;
+    let registry_path = if Path::new(registry_path).is_absolute() {
+        PathBuf::from(registry_path)
+    } else {
+        workspace_root.join(registry_path)
+    };
+    let registry = claw_core::skill_registry::SkillsRegistry::load_from_path(&registry_path)?;
+    let package_store = skill_sdk::InstallReceiptStore::new(package_root);
+    fs::create_dir_all(storage_root).map_err(|error| error.to_string())?;
+    let control = skill_sdk::InstallControl::new(Arc::new(AtomicBool::new(false)))
+        .without_source_build();
+    let mut installed = BTreeMap::new();
+    for skill_name in registry.on_demand_names() {
+        let verified = package_store
+            .verified_current_install(&skill_name)
+            .map_err(|error| format!("bundled package is not verified: skill={skill_name} {error}"))?;
+        if verified.manifest.install.runtime_assets.is_empty() {
+            continue;
+        }
+        let skill_storage = storage_root.join(&skill_name);
+        let asset_ids = install_declared_runtime_assets_from_root(
+            &verified.manifest.install.runtime_assets,
+            &verified.install_dir,
+            &skill_storage,
+            &control,
+        )
+        .await
+        .map_err(|error| {
+            format!(
+                "bundled runtime asset preparation failed: skill={skill_name} asset={} code={} detail={}",
+                error.asset_id, error.code, error.detail
+            )
+        })?;
+        installed.insert(skill_name, asset_ids);
+    }
+    Ok(installed)
+}
+
 pub(crate) fn refresh_stale_bundled_skill_admissions_offline(
     workspace_root: &Path,
     config: &claw_core::config::AppConfig,

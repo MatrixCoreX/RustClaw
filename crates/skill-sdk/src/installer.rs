@@ -447,13 +447,6 @@ impl SkillInstaller {
             .phase("preflight"));
         }
         let mut manifest = PackageManifest::load(&manifest_path)?;
-        if manifest.build.adapter != BuildAdapter::Cargo {
-            return Err(SkillSdkError::new(
-                "precompiled_adapter_unsupported",
-                format!("adapter={}", manifest.build.adapter.as_token()),
-            )
-            .phase("preflight"));
-        }
         let platform = match request.target.as_deref() {
             Some(target) => HostPlatform::from_target(target)?,
             None => HostPlatform::current(),

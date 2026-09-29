@@ -35,12 +35,29 @@ bash install-latest-release.sh --repo OWNER/REPO
 ```
 
 This installs the newest matching signed Release into `~/agent-runtime` and starts
-it. No Git checkout, Rust toolchain, source build, or new nginx site is needed.
+it. It also registers automatic startup through systemd on Linux/Raspberry Pi or
+a per-user LaunchAgent on macOS. No Git checkout, Rust toolchain, source build,
+or new nginx site is needed.
 Use `--root DIR` for another location, `--check-only` to check without installing,
-or `--no-start` to install without starting services. Bootstrap files are fetched
+or `--no-start` to install without starting services or registering automatic
+startup. Bootstrap files are fetched
 over HTTPS from one pinned commit in the explicitly trusted repository; verify
 the repository and script origin first. Existing installations keep their trusted
 release signer. The manual verification procedure follows.
+
+Inspect or remove the generated startup registration with
+`bash scripts/configure-autostart.sh --status` or
+`bash scripts/configure-autostart.sh --disable`.
+
+The Ubuntu x86_64 full Release preinstalls and enables every platform-compatible
+bundled Skill Store package and companion AiAPP from the base registry without
+compiling on the user's host. The media package includes its pinned FunASR,
+CPU PyTorch, SenseVoiceSmall, and FSMN VAD assets. Deployment initializes only
+missing private skill directories and never overwrites existing media data,
+browser sessions, or configuration. Whisper.cpp remains an independent optional
+local engine and its binary/model are not included. Third-party external skills
+still require host admission and a policy grant. Raspberry Pi and macOS use their
+own platform packages and cannot reuse the x86_64 Python/FunASR runtime.
 
 1. Download the matching archive and its `.sha256`, `.spdx.json`,
    `.manifest.json`, and `.manifest.json.sig` assets from the same release.

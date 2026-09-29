@@ -54,15 +54,18 @@ else:
         self.write_executable(self.fixture / "deploy-github-release.sh", '''#!/usr/bin/env bash
 set -eu
 printf '%s\\n' "$*" > "$FIXTURE/deploy-args"
+printf '%s\\n' "${APP_SKIP_AUTOSTART_REGISTRATION:-}" > "$FIXTURE/deploy-autostart-skip"
 printf '%s\\n' "$APP_RELEASE_ALLOWED_SIGNERS_FILE" > "$FIXTURE/signer"
 [[ "$MOCK_FAIL" != verify ]] || exit 1
 [[ "$*" != *--check-only* ]] || exit 0
 root="$2"
-mkdir -p "$root/configs"
+mkdir -p "$root/configs" "$root/scripts"
 cp "$FIXTURE/configs/product_identity.toml" "$root/configs/product_identity.toml"
 cp "$FIXTURE/installer" "$root/install-agent-cmd.sh"
+cp "$FIXTURE/autostart" "$root/scripts/configure-autostart.sh"
 ''')
         self.write_executable(self.fixture / "installer", '#!/usr/bin/env bash\nprintf "%s\\n" "$*" > "$FIXTURE/install-args"\n')
+        self.write_executable(self.fixture / "autostart", '#!/usr/bin/env bash\nprintf "%s\\n" "$*" > "$FIXTURE/autostart-args"\n')
 
     def write_executable(self, path, content):
         path.write_text(content)
@@ -82,6 +85,11 @@ cp "$FIXTURE/installer" "$root/install-agent-cmd.sh"
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertIn("--restart", (self.fixture / "deploy-args").read_text())
                 self.assertEqual((self.fixture / "install-args").read_text().strip(), "--user --no-deploy-ui")
+                self.assertEqual((self.fixture / "deploy-autostart-skip").read_text().strip(), "1")
+                self.assertEqual(
+                    (self.fixture / "autostart-args").read_text().strip(),
+                    f"--enable --workspace {self.install}",
+                )
         for call in map(json.loads, self.log.read_text().splitlines()):
             self.assertIn("--proto-redir", call["args"])
             if "raw.githubusercontent.com" in call["url"]:
@@ -99,6 +107,7 @@ cp "$FIXTURE/installer" "$root/install-agent-cmd.sh"
         self.assertEqual((self.fixture / "signer").read_text().strip(), str(signer.resolve()))
         self.assertEqual(signer.read_text(), "existing trusted signer")
         self.assertIn("--no-restart", (self.fixture / "deploy-args").read_text())
+        self.assertFalse((self.fixture / "autostart-args").exists())
 
     def test_existing_trust_anchor_under_symlinked_parent(self):
         actual_parent = self.root / "actual parent"

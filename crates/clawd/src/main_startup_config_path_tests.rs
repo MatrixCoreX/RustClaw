@@ -1,8 +1,30 @@
 use super::{
-    resolve_offline_bundled_repair_skill_from, resolve_startup_config_path_from,
+    resolve_offline_bundled_bootstrap_from, resolve_offline_bundled_repair_skill_from,
+    resolve_offline_bundled_runtime_asset_prepare_from, resolve_startup_config_path_from,
     startup_isolation_cleanup_age_seconds, tokio_worker_stack_bytes,
     DEFAULT_TOKIO_WORKER_STACK_BYTES, MAX_TOKIO_WORKER_STACK_BYTES, MIN_TOKIO_WORKER_STACK_BYTES,
 };
+
+#[test]
+fn resolves_offline_bundled_bootstrap_flag() {
+    assert!(resolve_offline_bundled_bootstrap_from(vec![
+        "--bootstrap-bundled-skills".to_string(),
+    ]));
+    assert!(!resolve_offline_bundled_bootstrap_from(vec![
+        "--config".to_string(),
+        "/tmp/fixture.toml".to_string(),
+    ]));
+}
+
+#[test]
+fn resolves_offline_bundled_runtime_asset_prepare_flag() {
+    assert!(resolve_offline_bundled_runtime_asset_prepare_from(vec![
+        "--prepare-bundled-runtime-assets".to_string(),
+    ]));
+    assert!(!resolve_offline_bundled_runtime_asset_prepare_from(vec![
+        "--bootstrap-bundled-skills".to_string(),
+    ]));
+}
 
 #[test]
 fn prefers_cli_config_path() {

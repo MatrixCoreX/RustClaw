@@ -11,6 +11,7 @@ WORKSPACE="$ROOT_DIR"
 RUN_USER="${SUDO_USER:-$(id -un)}"
 UNIT_NAME="${APP_SERVICE_NAME}.service"
 UNIT_DIR="${APP_SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
+SYSTEMD_RUNTIME_DIR="${APP_SYSTEMD_RUNTIME_DIR:-/run/systemd/system}"
 RUNTIME_ENV_SCRIPT="${APP_RUNTIME_ENV_SCRIPT:-}"
 OUTPUT_PATH=""
 ENABLE_SERVICE=0
@@ -128,7 +129,7 @@ require_systemd_host() {
     echo "systemctl is unavailable; use direct Agent process startup." >&2
     exit 3
   fi
-  if [[ ! -d /run/systemd/system ]]; then
+  if [[ ! -d "$SYSTEMD_RUNTIME_DIR" ]]; then
     echo "Systemd is not the active service manager on this host." >&2
     exit 3
   fi

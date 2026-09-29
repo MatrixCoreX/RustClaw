@@ -663,6 +663,69 @@ fi
 python3 "$SCRIPT_DIR/scripts/verify_release_binary.py" \
   "$PACKAGE_DIR/target/release/clawd" "$RUST_TARGET"
 
+bootstrap_bundled_release_skills() {
+  local runtime_root="$1"
+  local package_root="$2"
+  local marker="$package_root/prebuilt/bundled-skill-bootstrap-v1.json"
+  [[ -f "$marker" ]] || return 0
+  [[ -d "$package_root/prebuilt/skill-storage" ]] ||
+    die "bundled_skill_storage_missing"
+  [[ -x "$runtime_root/target/release/clawd" ]] ||
+    die "bundled_skill_bootstrap_clawd_missing"
+  [[ -x "$runtime_root/target/release/skillctl" ]] ||
+    die "bundled_skill_bootstrap_skillctl_missing"
+  [[ -f "$runtime_root/configs/config.toml" ]] ||
+    die "bundled_skill_bootstrap_config_missing"
+
+  while IFS=$'\t' read -r skill_name manifest_relative; do
+    [[ -n "$skill_name" && -n "$manifest_relative" ]] || continue
+    manifest_path="$runtime_root/$manifest_relative"
+    "$runtime_root/target/release/skillctl" install-precompiled \
+      "$manifest_path" \
+      "$runtime_root" \
+      "$runtime_root/data/skill-packages" \
+      "$runtime_root/prebuilt/skill-packages" >/dev/null
+  done < <(
+    python3 - "$marker" <<'PY'
+import json
+import re
+from pathlib import Path
+import sys
+
+value = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+if value.get("schema_version") != 1 or value.get("install_all_bundled_skills") is not True:
+    raise SystemExit("bundled_skill_bootstrap_marker_invalid")
+packages = value.get("packages")
+if not isinstance(packages, list) or not packages:
+    raise SystemExit("bundled_skill_bootstrap_packages_missing")
+for package in packages:
+    if not isinstance(package, dict):
+        raise SystemExit("bundled_skill_bootstrap_package_invalid")
+    skill = package.get("skill_name")
+    manifest = package.get("manifest_path")
+    if not isinstance(skill, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,95}", skill):
+        raise SystemExit("bundled_skill_bootstrap_skill_invalid")
+    if not isinstance(manifest, str) or not re.fullmatch(r"[A-Za-z0-9_./-]+", manifest):
+        raise SystemExit("bundled_skill_bootstrap_manifest_invalid")
+    path = Path(manifest)
+    if path.is_absolute() or ".." in path.parts:
+        raise SystemExit("bundled_skill_bootstrap_manifest_unsafe")
+    print(f"{skill}\t{manifest}")
+PY
+  )
+  python3 "$runtime_root/scripts/seed_bundled_skill_storage.py" \
+    --source "$package_root/prebuilt/skill-storage" \
+    --destination "$runtime_root/data/skills"
+  (
+    cd "$runtime_root"
+    APP_PRODUCT_IDENTITY_CONFIG="$runtime_root/configs/product_identity.toml" \
+      "$runtime_root/target/release/clawd" \
+        --config "$runtime_root/configs/config.toml" \
+        --bootstrap-bundled-skills
+  )
+  printf 'bundled_skill_bootstrap=completed\n'
+}
+
 if [[ "$PACKAGE_MODE" -eq 1 ]]; then
   PACKAGE_STAGE_DIR="$(mktemp -d "$ROOT_PARENT/.${ROOT_NAME}-release-stage.XXXXXX")"
   STAGED_ROOT="$PACKAGE_STAGE_DIR/runtime"
@@ -753,6 +816,7 @@ PY
     die "release_package_staged_config_missing"
   [[ ! -e "$STAGED_ROOT/.git" ]] ||
     die "release_package_staged_git_metadata_present"
+  bootstrap_bundled_release_skills "$STAGED_ROOT" "$STAGED_ROOT"
 
   BACKUP_ROOT="$ROOT_PARENT/.${ROOT_NAME}-release-mode-backups"
   TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -954,6 +1018,7 @@ if [[ -d "$PACKAGE_DIR/configs" ]]; then
     cp -a "$PACKAGE_DIR/$relative" "$ROOT_DIR/$relative"
   done < "$NEW_CONFIG_PATHS_FILE"
 fi
+bootstrap_bundled_release_skills "$ROOT_DIR" "$PACKAGE_DIR"
 printf '%s\n' "$TAG" > "$ROOT_DIR/.release-tag"
 printf '%s\n' "$BACKUP_DIR" > "$ROOT_DIR/.release-rollback"
 printf '%s\n' "$MANIFEST_DIGEST" > "$ROOT_DIR/.release-manifest-digest"

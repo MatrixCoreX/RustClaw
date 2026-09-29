@@ -146,6 +146,12 @@ test("invalidates only structured authentication failures", async () => {
   );
   assert.equal(
     await responseIndicatesExpiredAuthentication(
+      Response.json({ ok: false, data: { error_code: "webd_session_required" } }, { status: 401 }),
+    ),
+    true,
+  );
+  assert.equal(
+    await responseIndicatesExpiredAuthentication(
       Response.json({ ok: false, error: "task_owner_mismatch" }, { status: 401 }),
     ),
     false,

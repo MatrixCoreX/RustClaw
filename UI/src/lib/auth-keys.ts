@@ -49,7 +49,13 @@ export function maskStoredKey(value: string, keep = 6): string {
   return `${visible}${"*".repeat(Math.max(4, trimmed.length - visible.length))}`;
 }
 
-const EXPIRED_AUTH_CODES = new Set(["auth_key_required", "auth_key_invalid"]);
+const EXPIRED_AUTH_CODES = new Set([
+  "auth_key_required",
+  "auth_key_invalid",
+  "webd_session_required",
+  "webd_session_invalid",
+  "webd_session_identity_changed",
+]);
 
 type Translate = (zh: string, en: string) => string;
 

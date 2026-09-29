@@ -170,6 +170,23 @@ agentctl -stop
 ./stop-agent.sh
 ```
 
+已发布安装包首次成功启动后会幂等注册系统自启动：Linux/树莓派使用 systemd，
+macOS 使用当前用户的 LaunchAgent。源码开发目录默认不自动注册，避免测试或开发启动污染主机。
+
+```bash
+# 查看、启用或关闭系统自启动
+bash scripts/configure-autostart.sh --status
+bash scripts/configure-autostart.sh --enable
+bash scripts/configure-autostart.sh --disable
+```
+
+使用 `install-latest-release.sh --no-start` 时，安装器既不启动运行时，也不注册自启动。
+
+Ubuntu x86_64 完整 Release 已携带并启用全部兼容的仓库维护 Skill Store 技能与
+AiAPP，包括本地 FunASR 所需的固定 SenseVoiceSmall/FSMN VAD 模型资产；安装时不在
+用户机器编译。Whisper.cpp 及其模型仍是独立可选能力。更新只初始化缺失的技能私有
+目录，不覆盖已有数据；第三方 external skill 仍需单独准入和授权。
+
 ### 7.1 在终端中连续使用 Agent
 
 启动或恢复最近一次 CLI 会话：
@@ -207,7 +224,12 @@ JSONL 模式的 stdout 每行都是独立、带版本的 JSON 对象，不包含
 模型与权限请求仍由服务端校验；只有管理员密钥显式使用全局 `--yolo` 时，
 `clawcli` 才请求无确认、`danger_full` 的执行策略。
 
-## 8. Linux systemd 服务
+## 8. 系统自启动与 Linux systemd 服务
+
+Release 首装会自动调用跨平台入口 `scripts/configure-autostart.sh --enable`。Linux
+优先安装系统级 systemd unit；普通直接启动无法无提示提权时，会回退到当前用户的
+systemd unit。macOS 写入当前用户的 `~/Library/LaunchAgents/`。两种方式都读取安装
+目录和产品身份配置，不写死用户路径或品牌服务名。
 
 仓库不保存写死用户或安装路径的 `agent-runtime.service`。Linux/systemd 主机应使用
 安装器按当前环境生成 unit：

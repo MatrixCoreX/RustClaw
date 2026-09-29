@@ -240,6 +240,7 @@ def parse_args() -> argparse.Namespace:
             "unsupported-proactive",
             "build-excludes",
             "platform-precompiled",
+            "platform-on-demand",
             "all-runners",
             "selected",
         ),
@@ -285,6 +286,13 @@ def select_specs(args: argparse.Namespace) -> list[SkillBuildSpec]:
             for spec in specs
             if spec.install_mode == "on_demand"
             and spec.adapter == "cargo"
+            and supports_platform(spec, platform_name, arch_name)
+        ]
+    if args.scope == "platform-on-demand":
+        return [
+            spec
+            for spec in specs
+            if spec.install_mode == "on_demand"
             and supports_platform(spec, platform_name, arch_name)
         ]
     if args.scope == "all-runners":

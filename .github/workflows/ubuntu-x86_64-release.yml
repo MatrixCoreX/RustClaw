@@ -23,13 +23,7 @@ permissions:
   attestations: write
 
 jobs:
-  python-wheels:
-    uses: ./.github/workflows/release-python-wheels.yml
-    with:
-      target: x86_64-unknown-linux-gnu
-      source_ref: ${{ github.sha }}
   build-ubuntu-x86-64:
-    needs: python-wheels
     name: Build and publish Ubuntu x86_64 package
     runs-on: ubuntu-22.04
     env:
@@ -157,14 +151,11 @@ jobs:
 
       - name: Precompile platform Skill Store packages
         shell: bash
+        env:
+          APP_PRECOMPILE_ALL_BUNDLED_SKILLS: "1"
         run: |
           set -euo pipefail
           ./scripts/precompile_skill_store.sh "${RUST_TARGET}"
-
-      - name: Download verified native dependency bundles
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh run download "$GITHUB_RUN_ID" --pattern "release-wheels-${RUST_TARGET}-*" --dir release-wheel-bundles
 
       - name: Package runtime
         shell: bash
@@ -178,9 +169,9 @@ jobs:
           chmod 600 "${signing_key}"
           mkdir -p dist-release
           APP_RELEASE_BIN_DIR="$PWD/target/release" \
-            APP_RELEASE_PYTHON_WHEELS_ROOT="$PWD/release-wheel-bundles" \
             APP_PACKAGE_TARGET="x86_64-unknown-linux-gnu" \
             APP_RELEASE_COMMIT="${GITHUB_SHA}" \
+            APP_RELEASE_INSTALL_ALL_BUNDLED_SKILLS=1 \
             APP_RELEASE_SIGNING_KEY="${signing_key}" \
             APP_BUNDLE_DIR="$PWD/dist-release" \
             APP_PACKAGE_BASENAME="${{ steps.meta.outputs.package_name }}" \
@@ -215,7 +206,7 @@ jobs:
             printf 'Target: %s\n' "${RUST_TARGET}"
             printf 'Commit: %s\n' "${GITHUB_SHA}"
             printf '\n'
-            printf '%s\n' "This package contains prebuilt Rust binaries, platform-matched Skill Store packages, and UI/dist assets for Ubuntu x86_64. Keep existing runtime configs/data when updating an existing install."
+            printf '%s\n' "This full package contains prebuilt Rust binaries, every compatible bundled Skill Store package and AiAPP, pinned FunASR model assets, and UI/dist assets for Ubuntu x86_64. It does not compile on the target host and preserves existing runtime configs/private skill data during updates. Third-party external skills remain admission-gated."
           } > release-notes.md
 
       - name: Publish GitHub Release

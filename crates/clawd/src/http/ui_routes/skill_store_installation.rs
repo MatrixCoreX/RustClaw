@@ -460,7 +460,12 @@ async fn install_skill_store_package(
     let workspace_root = state.skill_rt.workspace_root.clone();
     let package_root = skill_package_root(state);
     let precompiled_root = precompiled_skill_package_root(state);
-    let requires_precompiled = skill_store_requires_precompiled(spec.adapter);
+    let packaged_precompiled = precompiled_root
+        .join(&spec.skill_name)
+        .join("current.json")
+        .is_file();
+    let requires_precompiled =
+        packaged_precompiled || skill_store_requires_precompiled(spec.adapter);
     tokio::task::spawn_blocking(move || {
         if requires_precompiled {
             let precompiled = skill_sdk::PrecompiledInstallRequest {

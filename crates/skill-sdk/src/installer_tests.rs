@@ -474,10 +474,24 @@ fn python_adapter_uses_a_private_virtual_environment() {
         ),
     )
     .expect("manifest");
-    let outcome = install_fixture(temp.path(), &workspace, source.join("skill.toml"))
-        .expect("python install");
+    let manifest_path = source.join("skill.toml");
+    let outcome =
+        install_fixture(temp.path(), &workspace, manifest_path.clone()).expect("python install");
     assert!(outcome.install_root.join("runtime/venv").is_dir());
     assert!(!source.join(".venv").exists());
+    let imported = SkillInstaller
+        .install_precompiled(&PrecompiledInstallRequest {
+            manifest_path,
+            workspace_root: workspace,
+            package_root: temp.path().join("imported"),
+            precompiled_root: temp.path().join("packages"),
+            target: None,
+            control: None,
+        })
+        .expect("install precompiled Python adapter");
+    assert_eq!(imported.adapter, crate::BuildAdapter::Python);
+    assert_eq!(imported.origin, InstallOrigin::PlatformPrecompiled);
+    assert!(imported.install_root.join("runtime/venv").is_dir());
 }
 
 #[test]

@@ -406,3 +406,19 @@ if [[ "${#STARTUP_FAILURES[@]}" -gt 0 ]]; then
 fi
 
 echo "One-click binary startup command executed (profile: $PROFILE)." # zh: 一键启动已编译二进制命令已执行（profile: $PROFILE）。
+
+register_release_autostart() {
+  [[ "${APP_SKIP_AUTOSTART_REGISTRATION:-0}" != "1" ]] || return 0
+  [[ "${APP_AUTOSTART_MANAGED:-0}" != "1" ]] || return 0
+  [[ ! -d "$SCRIPT_DIR/.git" || "${APP_FORCE_AUTOSTART_REGISTRATION:-0}" == "1" ]] || return 0
+  local installer="$SCRIPT_DIR/scripts/configure-autostart.sh"
+  [[ -x "$installer" ]] || {
+    echo "Autostart registration skipped: installer is unavailable." >&2
+    return 0
+  }
+  if ! "$installer" --enable --workspace "$SCRIPT_DIR" --non-interactive; then
+    echo "Autostart registration was not completed; the current runtime remains running." >&2
+  fi
+}
+
+register_release_autostart

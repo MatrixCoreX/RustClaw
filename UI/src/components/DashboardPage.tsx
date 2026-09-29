@@ -165,7 +165,7 @@ export interface DashboardPageProps {
   onFetchHostSystemSummary: () => unknown | Promise<unknown>;
   onFetchHostDependencies: () => unknown | Promise<unknown>;
   onInstallHostDependency: (dependencyId: string) => unknown | Promise<unknown>;
-  onSetNniNavigationVisible: (visible: boolean) => void;
+  onSetNniNavigationVisible: (visible: boolean) => unknown | Promise<unknown>;
   onFetchAgentConfig: () => unknown | Promise<unknown>;
   onSaveAgentPersona: (agentId: string, profile: string, customPersona: string) => Promise<boolean>;
   workspaceUpdateStepLabel: (step?: string) => string;
@@ -269,12 +269,29 @@ export function DashboardPage({
   const [sourceBuildExpanded, setSourceBuildExpanded] = useState(
     () => window.localStorage.getItem(DASHBOARD_SOURCE_BUILD_STORAGE_KEY) !== "false",
   );
+  const [nniNavigationSaving, setNniNavigationSaving] = useState(false);
+  const [nniNavigationError, setNniNavigationError] = useState<string | null>(null);
   const toggleSourceBuildExpanded = () => {
     setSourceBuildExpanded((expanded) => {
       const next = !expanded;
       window.localStorage.setItem(DASHBOARD_SOURCE_BUILD_STORAGE_KEY, String(next));
       return next;
     });
+  };
+  const saveNniNavigationVisible = async (visible: boolean) => {
+    setNniNavigationSaving(true);
+    setNniNavigationError(null);
+    try {
+      await onSetNniNavigationVisible(visible);
+    } catch (error) {
+      setNniNavigationError(
+        error instanceof Error
+          ? error.message
+          : t("NNI 导航设置未能保存，请稍后重试。", "The NNI navigation setting could not be saved. Try again shortly."),
+      );
+    } finally {
+      setNniNavigationSaving(false);
+    }
   };
   const confirmEnableNniNavigation = async () => {
     if (nniNavigationVisible) return;
@@ -288,7 +305,7 @@ export function DashboardPage({
       cancelLabel: t("取消", "Cancel"),
       tone: "danger",
     });
-    if (confirmed) onSetNniNavigationVisible(true);
+    if (confirmed) await saveNniNavigationVisible(true);
   };
   const nginxReady = Boolean(nginxStatus?.running && nginxStatus.configured && nginxStatus.ui_deployed);
   const dashboardSections = ([
@@ -589,22 +606,29 @@ export function DashboardPage({
                 type="button"
                 aria-pressed={nniNavigationVisible}
                 className={nniNavigationVisible ? "theme-accent-btn" : "theme-secondary-btn"}
+                disabled={nniNavigationSaving}
                 onClick={() => void confirmEnableNniNavigation()}
               >
-                <Eye className="h-4 w-4" />
+                {nniNavigationSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
                 {t("启用", "Enable")}
               </button>
               <button
                 type="button"
                 aria-pressed={!nniNavigationVisible}
                 className={!nniNavigationVisible ? "theme-accent-btn" : "theme-secondary-btn"}
-                onClick={() => onSetNniNavigationVisible(false)}
+                disabled={nniNavigationSaving}
+                onClick={() => void saveNniNavigationVisible(false)}
               >
                 <EyeOff className="h-4 w-4" />
                 {t("关闭", "Disable")}
               </button>
             </div>
           </div>
+          {nniNavigationError ? (
+            <p className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+              {nniNavigationError}
+            </p>
+          ) : null}
         </section>
       ) : null}
 

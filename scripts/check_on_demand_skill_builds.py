@@ -42,8 +42,11 @@ REQUIRED_SNIPPETS = {
         'APP_PACKAGE_TARGET="${APP_PACKAGE_TARGET:-$HOST_RUST_TARGET}"',
         "target/skill-packages/$APP_PACKAGE_TARGET",
         "target/prebuilt-skill-packages/$APP_PACKAGE_TARGET",
-        "--scope platform-precompiled --target \"$APP_PACKAGE_TARGET\" --format skills",
+        'PRECOMPILED_SCOPE="platform-precompiled"',
+        '--scope "$PRECOMPILED_SCOPE" --target "$APP_PACKAGE_TARGET" --format skills',
         "prebuilt/skill-packages",
+        "target/prebuilt-skill-storage/$APP_PACKAGE_TARGET",
+        "bundled-skill-bootstrap-v1.json",
     ),
     "crates/clawd/src/http/ui_routes/skill_store_installation.rs": (
         "skill_store_requires_precompiled(spec.adapter)",
@@ -104,9 +107,18 @@ REQUIRED_SNIPPETS = {
         "cargo \"${CARGO_ARGS[@]}\"",
         "--scope platform-precompiled",
         "target/prebuilt-skill-packages/$TARGET",
+        "--prepare-bundled-runtime-assets",
+        "target/prebuilt-skill-storage/$TARGET",
     ),
     ".github/workflows/ubuntu-x86_64-release.yml": (
         './scripts/precompile_skill_store.sh "${RUST_TARGET}"',
+        'APP_PRECOMPILE_ALL_BUNDLED_SKILLS: "1"',
+        "APP_RELEASE_INSTALL_ALL_BUNDLED_SKILLS=1",
+    ),
+    "deploy-github-release.sh": (
+        "seed_bundled_skill_storage.py",
+        "--bootstrap-bundled-skills",
+        "bundled-skill-bootstrap-v1.json",
     ),
     ".github/workflows/pi-aarch64-release.yml": (
         "--precompile-skill-store",

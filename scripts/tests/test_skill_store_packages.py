@@ -175,6 +175,62 @@ package_manifest = "{optional_manifest}"
                 ["mac_fixed", "portable_optional"],
             )
 
+    def test_platform_on_demand_includes_non_cargo_adapters(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            registry = root / "registry.toml"
+            cargo_manifest = self._manifest(root, "cargo_optional")
+            node_manifest = root / "skills/node_optional/skill.toml"
+            node_manifest.parent.mkdir(parents=True)
+            node_manifest.write_text(
+                '''schema_version = 1
+[package]
+name = "node_optional"
+version = "1.0.0"
+description = "fixture"
+protocol = "agent-jsonl-v1"
+supported_os = ["linux"]
+supported_arch = ["x86_64"]
+license = "MIT"
+[registry]
+name = "node_optional"
+[build]
+adapter = "node"
+[run]
+launcher = "node"
+entrypoint = "runtime/src/main.mjs"
+[security]
+capability_policy_source = "registry"
+inherit_credentials = false
+''',
+                encoding="utf-8",
+            )
+            registry.write_text(
+                f'''
+[[skills]]
+name = "cargo_optional"
+kind = "runner"
+install_mode = "on_demand"
+package_manifest = "{cargo_manifest}"
+
+[[skills]]
+name = "node_optional"
+kind = "runner"
+install_mode = "on_demand"
+package_manifest = "{node_manifest.relative_to(root).as_posix()}"
+''',
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                self._selection(registry, "platform-precompiled", "linux"),
+                ["cargo_optional"],
+            )
+            self.assertEqual(
+                self._selection(registry, "platform-on-demand", "linux"),
+                ["cargo_optional", "node_optional"],
+            )
+
     def test_selected_scope_resolves_alias_and_rejects_unsupported_platform(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

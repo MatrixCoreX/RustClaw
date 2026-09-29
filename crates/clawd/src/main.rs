@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 
@@ -516,6 +517,30 @@ fn resolve_offline_bundled_repair_skill() -> anyhow::Result<Option<String>> {
     resolve_offline_bundled_repair_skill_from(std::env::args().skip(1))
 }
 
+fn resolve_offline_bundled_bootstrap_from<I>(args: I) -> bool
+where
+    I: IntoIterator<Item = String>,
+{
+    args.into_iter()
+        .any(|argument| argument == "--bootstrap-bundled-skills")
+}
+
+fn resolve_offline_bundled_bootstrap() -> bool {
+    resolve_offline_bundled_bootstrap_from(std::env::args().skip(1))
+}
+
+fn resolve_offline_bundled_runtime_asset_prepare_from<I>(args: I) -> bool
+where
+    I: IntoIterator<Item = String>,
+{
+    args.into_iter()
+        .any(|argument| argument == "--prepare-bundled-runtime-assets")
+}
+
+fn resolve_offline_bundled_runtime_asset_prepare() -> bool {
+    resolve_offline_bundled_runtime_asset_prepare_from(std::env::args().skip(1))
+}
+
 #[cfg(test)]
 #[path = "main_startup_config_path_tests.rs"]
 mod startup_config_path_tests;
@@ -593,7 +618,57 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
     )))
     .map_err(|_| anyhow::anyhow!("credential_broker_already_installed"))?;
     info!("startup config_path={}", config_path);
-    if let Some(skill_name) = resolve_offline_bundled_repair_skill()? {
+    let repair_skill = resolve_offline_bundled_repair_skill()?;
+    let bootstrap_bundled_skills = resolve_offline_bundled_bootstrap();
+    let prepare_bundled_runtime_assets = resolve_offline_bundled_runtime_asset_prepare();
+    let offline_mode_count = usize::from(repair_skill.is_some())
+        + usize::from(bootstrap_bundled_skills)
+        + usize::from(prepare_bundled_runtime_assets);
+    if offline_mode_count > 1 {
+        anyhow::bail!("bundled skill offline modes are mutually exclusive");
+    }
+    if prepare_bundled_runtime_assets {
+        let package_root = std::env::var("APP_BUNDLED_PACKAGE_ROOT")
+            .map(PathBuf::from)
+            .map_err(|_| anyhow::anyhow!("APP_BUNDLED_PACKAGE_ROOT is required"))?;
+        let storage_root = std::env::var("APP_BUNDLED_STORAGE_ROOT")
+            .map(PathBuf::from)
+            .map_err(|_| anyhow::anyhow!("APP_BUNDLED_STORAGE_ROOT is required"))?;
+        let prepared = http::ui_routes::prepare_bundled_runtime_assets_offline(
+            &workspace_root,
+            &config,
+            &package_root,
+            &storage_root,
+        )
+        .await
+        .map_err(anyhow::Error::msg)?;
+        println!(
+            "{}",
+            json!({
+                "command": "prepare-bundled-runtime-assets",
+                "prepared": prepared,
+                "status": "ok"
+            })
+        );
+        return Ok(());
+    }
+    if bootstrap_bundled_skills {
+        let snapshot =
+            http::ui_routes::bootstrap_bundled_skill_admissions_offline(&workspace_root, &config)
+                .map_err(anyhow::Error::msg)?;
+        println!(
+            "{}",
+            json!({
+                "command": "bootstrap-bundled-skills",
+                "enabled_count": snapshot.enabled.len(),
+                "registry_generation": snapshot.generation,
+                "registry_generation_digest": snapshot.generation_digest,
+                "status": "ok"
+            })
+        );
+        return Ok(());
+    }
+    if let Some(skill_name) = repair_skill {
         let snapshot = http::ui_routes::repair_bundled_skill_admission_offline(
             &workspace_root,
             &config,

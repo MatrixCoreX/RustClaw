@@ -72,9 +72,12 @@ mkdir -p \
   "$PACKAGE_DIR/optional_skills/store_fixture" \
   "$PACKAGE_DIR/data/skill-packages/core_fixture" \
   "$PACKAGE_DIR/prebuilt/skill-packages/store_fixture" \
+  "$PACKAGE_DIR/prebuilt/skill-storage/store_fixture/modelscope/model" \
+  "$PACKAGE_DIR/scripts" \
   "$PACKAGE_DIR/services/wa-web-bridge" \
   "$PACKAGE_DIR/UI/dist"
 cp /bin/true "$PACKAGE_DIR/target/release/clawd"
+cp /bin/true "$PACKAGE_DIR/target/release/skillctl"
 printf 'new release readme\n' > "$PACKAGE_DIR/README.md"
 printf '9.8.7\n' > "$PACKAGE_DIR/VERSION"
 printf 'new-default = true\n' > "$PACKAGE_DIR/configs/new-default.toml"
@@ -84,6 +87,11 @@ printf 'name = "core_fixture"\n' > "$PACKAGE_DIR/crates/skills/core_fixture/skil
 printf 'name = "store_fixture"\n' > "$PACKAGE_DIR/optional_skills/store_fixture/skill.toml"
 printf 'release receipt\n' > "$PACKAGE_DIR/data/skill-packages/core_fixture/current.json"
 printf 'release prebuilt\n' > "$PACKAGE_DIR/prebuilt/skill-packages/store_fixture/current.json"
+printf 'model fixture\n' > "$PACKAGE_DIR/prebuilt/skill-storage/store_fixture/modelscope/model/model.pt"
+printf '%s\n' '{"install_all_bundled_skills":true,"schema_version":1,"packages":[{"manifest_path":"optional_skills/store_fixture/skill.toml","skill_name":"store_fixture"}]}' \
+  > "$PACKAGE_DIR/prebuilt/bundled-skill-bootstrap-v1.json"
+cp "$ROOT_DIR/scripts/seed_bundled_skill_storage.py" \
+  "$PACKAGE_DIR/scripts/seed_bundled_skill_storage.py"
 printf 'release bridge\n' > "$PACKAGE_DIR/services/wa-web-bridge/index.js"
 printf 'release media preflight\n' > "$PACKAGE_DIR/services/wa-web-bridge/media-preflight.js"
 printf '<!doctype html><title>release ui</title>\n' > "$PACKAGE_DIR/UI/dist/index.html"
@@ -220,6 +228,7 @@ grep -Fxq 'name = "store_fixture"' "$RUNTIME/optional_skills/store_fixture/skill
 grep -Fxq 'release receipt' "$RUNTIME/data/skill-packages/core_fixture/current.json"
 grep -Fxq 'keep local optional' "$RUNTIME/data/skill-packages/local_optional/current.json"
 grep -Fxq 'release prebuilt' "$RUNTIME/prebuilt/skill-packages/store_fixture/current.json"
+grep -Fxq 'model fixture' "$RUNTIME/data/skills/store_fixture/modelscope/model/model.pt"
 grep -Fxq 'release bridge' "$RUNTIME/services/wa-web-bridge/index.js"
 grep -Fxq 'release media preflight' "$RUNTIME/services/wa-web-bridge/media-preflight.js"
 grep -Fxq 'keep source test' "$RUNTIME/services/wa-web-bridge/test.js"

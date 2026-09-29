@@ -342,6 +342,25 @@ impl SkillAdmissionService {
         self.commit_mutation(mutation)
     }
 
+    pub(crate) fn admit_bundled_batch(
+        &self,
+        mutations: Vec<AdmissionMutation>,
+    ) -> Result<OverlaySnapshot> {
+        if mutations
+            .iter()
+            .any(|mutation| mutation.metadata.source != SkillAdmissionSource::BundledBase)
+        {
+            return Err(error(
+                "skill_admission_source_invalid",
+                "bundled batch admission requires bundled_base sources",
+            ));
+        }
+        if mutations.is_empty() {
+            return self.snapshot();
+        }
+        self.commit_mutations(mutations, false, &BTreeSet::new())
+    }
+
     pub(crate) fn set_state(
         &self,
         skill_name: &str,

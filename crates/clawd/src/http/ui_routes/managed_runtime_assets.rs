@@ -101,6 +101,21 @@ async fn install_declared_runtime_assets(
     storage_directory: &Path,
     control: &skill_sdk::InstallControl,
 ) -> Result<Vec<String>, ManagedRuntimeAssetError> {
+    install_declared_runtime_assets_from_root(
+        asset_ids,
+        &install_outcome.install_root,
+        storage_directory,
+        control,
+    )
+    .await
+}
+
+async fn install_declared_runtime_assets_from_root(
+    asset_ids: &[String],
+    install_root: &Path,
+    storage_directory: &Path,
+    control: &skill_sdk::InstallControl,
+) -> Result<Vec<String>, ManagedRuntimeAssetError> {
     if asset_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -118,7 +133,7 @@ async fn install_declared_runtime_assets(
             code: "runtime_asset_install_cancelled",
             detail: error.detail,
         })?;
-    let python = install_outcome.install_root.join("runtime/venv/bin/python");
+    let python = install_root.join("runtime/venv/bin/python");
     if !python.is_file() {
         return Err(ManagedRuntimeAssetError {
             asset_id: String::new(),
@@ -259,12 +274,16 @@ async fn install_declared_runtime_assets(
         // again after the snapshot finishes so an upstream move cannot be
         // silently accepted during this installation transaction.
         verify_modelscope_remote_revision(definition, storage_directory, control).await?;
-        write_runtime_asset_marker(&marker, definition, &canonical_asset).map_err(|error| {
-            ManagedRuntimeAssetError {
-                asset_id: asset_id.to_string(),
-                code: "runtime_asset_marker_failed",
-                detail: error.to_string(),
-            }
+        write_runtime_asset_marker(
+            &marker,
+            definition,
+            &canonical_asset,
+            &canonical_cache,
+        )
+        .map_err(|error| ManagedRuntimeAssetError {
+            asset_id: asset_id.to_string(),
+            code: "runtime_asset_marker_failed",
+            detail: error.to_string(),
         })?;
         installed.push(asset_id.to_string());
     }
@@ -371,10 +390,35 @@ fn runtime_asset_marker_is_valid(
     {
         return false;
     }
-    let Some(path) = value.get("path").and_then(Value::as_str).map(PathBuf::from) else {
+    let Ok(cache) = fs::canonicalize(cache_directory) else {
         return false;
     };
-    let (Ok(path), Ok(cache)) = (fs::canonicalize(path), fs::canonicalize(cache_directory)) else {
+    let path = match value
+        .get("relative_path")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+    {
+        Some(relative)
+            if !relative.as_os_str().is_empty()
+                && !relative.is_absolute()
+                && !relative.components().any(|component| {
+                    matches!(
+                        component,
+                        std::path::Component::ParentDir
+                            | std::path::Component::Prefix(_)
+                            | std::path::Component::RootDir
+                    )
+                }) => cache.join(relative),
+        Some(_) => return false,
+        None => {
+            let Some(path) = value.get("path").and_then(Value::as_str).map(PathBuf::from)
+            else {
+                return false;
+            };
+            path
+        }
+    };
+    let Ok(path) = fs::canonicalize(path) else {
         return false;
     };
     path.is_dir()
@@ -389,17 +433,21 @@ fn write_runtime_asset_marker(
     marker: &Path,
     definition: &ManagedRuntimeAssetDefinition,
     asset_path: &Path,
+    cache_directory: &Path,
 ) -> std::io::Result<()> {
+    let relative_path = asset_path.strip_prefix(cache_directory).map_err(|_| {
+        std::io::Error::other("runtime asset path is outside its private cache")
+    })?;
     let temporary = marker.with_extension(format!("json.tmp-{}", uuid::Uuid::new_v4().simple()));
     let payload = serde_json::to_vec_pretty(&json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "asset_id": definition.id,
         "provider": definition.provider,
         "source": definition.source,
         "selector": definition.selector,
         "remote_ref": definition.remote_ref,
         "expected_commit": definition.expected_commit,
-        "path": asset_path,
+        "relative_path": relative_path,
     }))
     .map_err(std::io::Error::other)?;
     fs::write(&temporary, payload)?;
@@ -489,7 +537,7 @@ mod managed_runtime_asset_tests {
         for relative in definition.required_files {
             fs::write(asset.join(relative), b"fixture").expect("required model file");
         }
-        write_runtime_asset_marker(&marker, &definition, &asset).expect("write marker");
+        write_runtime_asset_marker(&marker, &definition, &asset, &cache).expect("write marker");
         assert!(runtime_asset_marker_is_valid(&marker, &definition, &cache));
 
         fs::remove_file(asset.join(definition.required_files[0])).expect("remove required file");
@@ -513,7 +561,50 @@ mod managed_runtime_asset_tests {
 
         let outside = root.path().join("outside");
         fs::create_dir_all(&outside).expect("outside directory");
-        write_runtime_asset_marker(&marker, &definition, &outside).expect("outside marker");
-        assert!(!runtime_asset_marker_is_valid(&marker, &definition, &cache));
+        assert!(write_runtime_asset_marker(&marker, &definition, &outside, &cache).is_err());
+    }
+
+    #[test]
+    fn relative_marker_survives_private_storage_relocation() {
+        let source = TestDirectory::new();
+        let source_cache = source.path().join("cache");
+        let source_asset = source_cache.join("asset");
+        let source_marker = source.path().join("asset.json");
+        fs::create_dir_all(&source_asset).expect("source asset directory");
+        let definition = managed_runtime_asset_catalog()[0];
+        for relative in definition.required_files {
+            fs::write(source_asset.join(relative), b"fixture").expect("required model file");
+        }
+        write_runtime_asset_marker(
+            &source_marker,
+            &definition,
+            &source_asset,
+            &source_cache,
+        )
+        .expect("write relocatable marker");
+
+        let destination = TestDirectory::new();
+        let destination_cache = destination.path().join("cache");
+        copy_directory_for_test(&source_cache, &destination_cache);
+        let destination_marker = destination.path().join("asset.json");
+        fs::copy(&source_marker, &destination_marker).expect("copy marker");
+        assert!(runtime_asset_marker_is_valid(
+            &destination_marker,
+            &definition,
+            &destination_cache
+        ));
+    }
+
+    fn copy_directory_for_test(source: &Path, destination: &Path) {
+        fs::create_dir_all(destination).expect("create destination");
+        for entry in fs::read_dir(source).expect("read source") {
+            let entry = entry.expect("source entry");
+            let target = destination.join(entry.file_name());
+            if entry.path().is_dir() {
+                copy_directory_for_test(&entry.path(), &target);
+            } else {
+                fs::copy(entry.path(), target).expect("copy fixture");
+            }
+        }
     }
 }

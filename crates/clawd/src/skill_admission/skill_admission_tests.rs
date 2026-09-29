@@ -17,6 +17,68 @@ use super::{
 };
 
 #[test]
+fn bundled_batch_admission_commits_one_generation() {
+    let root = std::env::temp_dir().join(format!(
+        "bundled-batch-admission-{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let names = ["bundled_alpha", "bundled_beta"];
+    fs::create_dir_all(root.join("configs")).expect("create configs");
+    let registry = root.join("configs/skills_registry.toml");
+    let registry_text = names
+        .iter()
+        .map(|name| {
+            format!(
+                r#"[[skills]]
+name = "{name}"
+enabled = false
+kind = "runner"
+planner_kind = "skill"
+package_manifest = "sources/{name}/skill.toml"
+install_mode = "on_demand"
+"#
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(&registry, registry_text).expect("write registry");
+    let manifests = names
+        .iter()
+        .map(|name| (*name, install_fixture(&root, name)))
+        .collect::<BTreeMap<_, _>>();
+    let service = SkillAdmissionService::for_test(&root, &registry);
+    let mutations = names
+        .iter()
+        .map(|name| AdmissionMutation {
+            metadata: ExternalSkillMetadata {
+                name: (*name).to_string(),
+                source: SkillAdmissionSource::BundledBase,
+                package_manifest_path: format!("sources/{name}/skill.toml"),
+                description: format!("{name} fixture"),
+                aliases: Vec::new(),
+                group: "extensions".to_string(),
+            },
+            prompt: format!("# {name}\n"),
+            state: AdmissionState::Enabled,
+            grant: Some(fixture_grant(
+                manifests.get(name).expect("fixture manifest"),
+                ApprovalSource::ReleaseBaseline,
+            )),
+        })
+        .collect();
+
+    let snapshot = service
+        .admit_bundled_batch(mutations)
+        .expect("admit bundled batch");
+    assert_eq!(snapshot.generation, 1);
+    assert_eq!(
+        snapshot.enabled,
+        names.into_iter().map(str::to_string).collect()
+    );
+    fs::remove_dir_all(root).expect("remove fixture root");
+}
+
+#[test]
 fn aipp_removal_is_independent_from_skill_admission_state() {
     let root = std::env::temp_dir().join(format!("aipp-state-{}", uuid::Uuid::new_v4()));
     let registry = root.join("configs/skills_registry.toml");

@@ -646,6 +646,9 @@ export interface WebdSessionListItem {
   created_unix: number;
   last_activity_unix: number;
   expires_unix: number;
+  active?: boolean;
+  ended_unix?: number | null;
+  end_reason?: string | null;
   current: boolean;
 }
 

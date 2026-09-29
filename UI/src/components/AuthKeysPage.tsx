@@ -60,6 +60,27 @@ function copyButtonText(
   return t("复制 Key", "Copy key");
 }
 
+function webdSessionStatus(session: WebdSessionListItem, t: Translate): string {
+  if (session.current) return t("当前会话", "Current");
+  if (session.active !== false && !session.ended_unix) return t("使用中", "Active");
+  switch (session.end_reason) {
+    case "signed_in_elsewhere":
+      return t("已被新登录替代", "Replaced by a newer sign-in");
+    case "signed_out":
+    case "replaced_by_login":
+      return t("已退出", "Signed out");
+    case "admin_revoked":
+      return t("已撤销", "Revoked");
+    case "expired":
+      return t("已到期", "Expired");
+    case "identity_changed":
+    case "upstream_unauthorized":
+      return t("身份已失效", "Identity no longer valid");
+    default:
+      return t("已结束", "Ended");
+  }
+}
+
 export function AuthKeysPage({
   lang,
   t,
@@ -367,7 +388,7 @@ export function AuthKeysPage({
             <div>
               <h3 className="text-base font-semibold">{t("Web 登录会话", "Web sign-in sessions")}</h3>
               <p className="mt-2 text-sm text-white/65">
-                {t("查看仍可使用的网页登录、登录来源和浏览器信息，并撤销不认识或不再使用的设备。", "Review active web sign-ins, their source and browser details, and revoke devices you do not recognize or no longer use.")}
+                {t("查看当前会话和历史登录记录。相同用户名在新位置登录后，旧会话会立即失效，但记录仍保留。", "Review current and historical sign-ins. A newer sign-in with the same username immediately ends the older session while keeping its record.")}
               </p>
             </div>
             <button
@@ -393,9 +414,12 @@ export function AuthKeysPage({
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-medium text-white/90">{session.username}</span>
                       <span className="rounded border border-white/10 px-1.5 py-0.5 text-xs text-white/60">{session.role}</span>
-                      {session.current ? (
-                        <span className="rounded border border-emerald-400/25 bg-emerald-500/10 px-1.5 py-0.5 text-xs text-emerald-200">{t("当前会话", "Current")}</span>
-                      ) : null}
+                      <span className={session.active !== false && !session.ended_unix
+                        ? "rounded border border-emerald-400/25 bg-emerald-500/10 px-1.5 py-0.5 text-xs text-emerald-200"
+                        : "rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-xs text-white/55"}
+                      >
+                        {webdSessionStatus(session, t)}
+                      </span>
                     </div>
                     <p className="mt-1 text-xs text-white/50">
                       {t("设备", "Device")}: {session.client_platform || t("信息不可用", "Unavailable")} · IP: {session.client_ip || "--"}
@@ -409,16 +433,23 @@ export function AuthKeysPage({
                     <p className="mt-1 text-xs text-white/50">
                       {t("登录", "Signed in")}: {new Date(session.created_unix * 1000).toLocaleString(locale)} · {t("最近活动", "Last active")}: {new Date(session.last_activity_unix * 1000).toLocaleString(locale)} · {t("到期", "Expires")}: {new Date(session.expires_unix * 1000).toLocaleString(locale)}
                     </p>
+                    {session.ended_unix ? (
+                      <p className="mt-1 text-xs text-white/45">
+                        {t("结束", "Ended")}: {new Date(session.ended_unix * 1000).toLocaleString(locale)}
+                      </p>
+                    ) : null}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => void onRevokeWebdSession(session)}
-                    disabled={webdSessionRevoking === session.session_handle}
-                    className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200 transition hover:bg-red-500/20 disabled:opacity-50"
-                  >
-                    {webdSessionRevoking === session.session_handle ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                    {t("撤销", "Revoke")}
-                  </button>
+                  {session.active !== false && !session.ended_unix ? (
+                    <button
+                      type="button"
+                      onClick={() => void onRevokeWebdSession(session)}
+                      disabled={webdSessionRevoking === session.session_handle}
+                      className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200 transition hover:bg-red-500/20 disabled:opacity-50"
+                    >
+                      {webdSessionRevoking === session.session_handle ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                      {t("撤销", "Revoke")}
+                    </button>
+                  ) : null}
                 </div>
               ))
             )}

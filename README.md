@@ -545,6 +545,10 @@ The complete installation, configuration, build, systemd, cloud, Raspberry Pi, u
 
 Users and deployment agents install only from a matching signed GitHub Release package. Follow the [Release installation guide](docs/release_installation.md); missing packages must not trigger compilation. Source builds are a separate [manual developer workflow](docs/developer_build.md).
 
+A normal first Release installation starts the runtime and registers automatic startup. Linux and Raspberry Pi use systemd; macOS uses a per-user LaunchAgent. `--no-start` leaves both the runtime and automatic startup disabled. Use `scripts/configure-autostart.sh --status|--disable` to inspect or remove the registration.
+
+The Ubuntu x86_64 full Release also preinstalls every compatible repository-maintained bundled Skill Store package and AiAPP. Its local FunASR path includes pinned SenseVoiceSmall/FSMN VAD model assets; Whisper.cpp remains an optional host-provided engine. Existing private skill data is preserved, and third-party external submissions remain admission- and policy-gated.
+
 For automatic first installation, run `bash install-latest-release.sh --repo OWNER/REPO`.
 For existing installations, use `bash deploy-github-release.sh --restart`. Both use prebuilt packages.
 
@@ -565,7 +569,7 @@ Operational rules:
 
 - Local deployments open the UI through `webd` and do not need nginx.
 - Cloud deployments opt in to nginx only when a domain or TLS reverse proxy is needed.
-- Linux systemd units are generated for the detected user and workspace by `scripts/install-systemd-service.sh`; the repository does not keep a host-specific unit.
+- Release installation manages cross-platform automatic startup through `scripts/configure-autostart.sh`. Linux systemd units are generated for the detected user and workspace by `scripts/install-systemd-service.sh`; macOS uses a generated per-user LaunchAgent. The repository does not keep a host-specific unit or plist.
 - Raspberry Pi users should prefer the prebuilt aarch64 Release package to avoid repeated full builds on low-memory hardware.
 - Hosts with at most 2 GiB RAM use on-demand database pools and, on Linux/glibc, a small-host allocator profile. See [runtime memory policy and measurement](docs/architecture/runtime_memory_profile.md).
 - Keep credentials in an environment file outside the repository and never commit them.

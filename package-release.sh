@@ -58,6 +58,17 @@ if [[ -z "$HOST_RUST_TARGET" ]]; then
   exit 1
 fi
 APP_PACKAGE_TARGET="${APP_PACKAGE_TARGET:-$HOST_RUST_TARGET}"
+INSTALL_ALL_BUNDLED_SKILLS="${APP_RELEASE_INSTALL_ALL_BUNDLED_SKILLS:-0}"
+if [[ "$INSTALL_ALL_BUNDLED_SKILLS" == "1" ]]; then
+  [[ "$APP_PACKAGE_TARGET" == "$HOST_RUST_TARGET" ]] || {
+    echo "A full bundled-skill Release must be packaged on its native target: host=$HOST_RUST_TARGET target=$APP_PACKAGE_TARGET" >&2
+    exit 1
+  }
+  [[ "$APP_PACKAGE_TARGET" == *-linux-* ]] || {
+    echo "Full bundled-skill installation is currently supported only by Linux Release packages." >&2
+    exit 1
+  }
+fi
 BUILD_EXCLUDED_PACKAGES="$(
   python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" \
     --scope build-excludes --target "$APP_PACKAGE_TARGET" --format packages
@@ -230,15 +241,19 @@ done < <(
   python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" \
     --scope all-runners --target "$APP_PACKAGE_TARGET" --format manifests
 )
-python3 "$SCRIPT_DIR/scripts/stage_release_skill_sources.py" \
-  --target "$APP_PACKAGE_TARGET" --destination "$STAGE_PROJECT_DIR"
-if [[ -z "${APP_RELEASE_PYTHON_WHEELS_ROOT:-}" ]]; then
-  echo "Prepare native Python 3.13/3.14 dependency bundles before packaging; set APP_RELEASE_PYTHON_WHEELS_ROOT." >&2
-  exit 1
+if [[ "$INSTALL_ALL_BUNDLED_SKILLS" == "1" ]]; then
+  echo "Full bundled-skill Release uses verified precompiled packages; source/wheel installers are omitted."
+else
+  python3 "$SCRIPT_DIR/scripts/stage_release_skill_sources.py" \
+    --target "$APP_PACKAGE_TARGET" --destination "$STAGE_PROJECT_DIR"
+  if [[ -z "${APP_RELEASE_PYTHON_WHEELS_ROOT:-}" ]]; then
+    echo "Prepare native Python 3.13/3.14 dependency bundles before packaging; set APP_RELEASE_PYTHON_WHEELS_ROOT." >&2
+    exit 1
+  fi
+  python3 "$SCRIPT_DIR/scripts/prepare_release_python_wheels.py" \
+    --target "$APP_PACKAGE_TARGET" --destination "$STAGE_PROJECT_DIR" \
+    --prepared-root "$APP_RELEASE_PYTHON_WHEELS_ROOT"
 fi
-python3 "$SCRIPT_DIR/scripts/prepare_release_python_wheels.py" \
-  --target "$APP_PACKAGE_TARGET" --destination "$STAGE_PROJECT_DIR" \
-  --prepared-root "$APP_RELEASE_PYTHON_WHEELS_ROOT"
 PACKAGE_VERSION="$(app_version_from_root "$SCRIPT_DIR")"
 if [[ "$PACKAGE_VERSION" == "unknown" ]]; then
   echo "Unable to resolve agent-runtime package version."
@@ -269,13 +284,16 @@ cp -R "$RECEIPT_SOURCE_DIR/." "$STAGE_PROJECT_DIR/data/skill-packages/"
 prune_staged_receipt_versions "$STAGE_PROJECT_DIR/data/skill-packages"
 
 PRECOMPILED_SOURCE_DIR="${APP_PRECOMPILED_SKILLS_DIR:-$SCRIPT_DIR/target/prebuilt-skill-packages/$APP_PACKAGE_TARGET}"
+BUNDLED_SKILL_STORAGE_SOURCE_DIR="${APP_BUNDLED_SKILL_STORAGE_DIR:-$SCRIPT_DIR/target/prebuilt-skill-storage/$APP_PACKAGE_TARGET}"
 SKILL_VERIFY_CLI="${APP_SKILL_VERIFY_CLI:-$SCRIPT_DIR/target/release/skillctl}"
 PLATFORM_PRECOMPILED_SKILLS=()
+PRECOMPILED_SCOPE="platform-precompiled"
+[[ "$INSTALL_ALL_BUNDLED_SKILLS" != "1" ]] || PRECOMPILED_SCOPE="platform-on-demand"
 while IFS= read -r skill_name; do
   [[ -n "$skill_name" ]] && PLATFORM_PRECOMPILED_SKILLS+=("$skill_name")
 done < <(
   python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" \
-    --scope platform-precompiled --target "$APP_PACKAGE_TARGET" --format skills
+    --scope "$PRECOMPILED_SCOPE" --target "$APP_PACKAGE_TARGET" --format skills
 )
 if [[ "${#PLATFORM_PRECOMPILED_SKILLS[@]}" -gt 0 ]]; then
   if [[ ! -d "$PRECOMPILED_SOURCE_DIR" ]]; then
@@ -294,6 +312,51 @@ if [[ "${#PLATFORM_PRECOMPILED_SKILLS[@]}" -gt 0 ]]; then
   cp -R "$PRECOMPILED_SOURCE_DIR/." "$STAGE_PROJECT_DIR/prebuilt/skill-packages/"
   prune_staged_receipt_versions "$STAGE_PROJECT_DIR/prebuilt/skill-packages"
   echo "Included platform Skill Store precompiles: ${PLATFORM_PRECOMPILED_SKILLS[*]}"
+fi
+
+if [[ "$INSTALL_ALL_BUNDLED_SKILLS" == "1" ]]; then
+  if [[ ! -d "$BUNDLED_SKILL_STORAGE_SOURCE_DIR" ]]; then
+    echo "Missing bundled skill runtime assets: $BUNDLED_SKILL_STORAGE_SOURCE_DIR" >&2
+    echo "Run the bundled runtime-asset preparation step before packaging." >&2
+    exit 1
+  fi
+  mkdir -p "$STAGE_PROJECT_DIR/prebuilt/skill-storage"
+  cp -R "$BUNDLED_SKILL_STORAGE_SOURCE_DIR/." "$STAGE_PROJECT_DIR/prebuilt/skill-storage/"
+  python3 - "$STAGE_PROJECT_DIR/prebuilt/bundled-skill-bootstrap-v1.json" "$SCRIPT_DIR" \
+    "${PLATFORM_PRECOMPILED_SKILLS[@]}" <<'PY'
+import json
+from pathlib import Path
+import sys
+import tomllib
+
+output = Path(sys.argv[1])
+root = Path(sys.argv[2]).resolve()
+skills = sorted(set(sys.argv[3:]))
+registry = tomllib.loads((root / "configs/skills_registry.toml").read_text(encoding="utf-8"))
+manifests = {
+    item.get("name"): item.get("package_manifest")
+    for item in registry.get("skills", [])
+}
+packages = []
+for skill in skills:
+    manifest = manifests.get(skill)
+    if not isinstance(manifest, str) or not manifest or Path(manifest).is_absolute() or ".." in Path(manifest).parts:
+        raise SystemExit(f"bundled skill manifest is invalid: {skill}")
+    packages.append({"skill_name": skill, "manifest_path": manifest})
+output.write_text(
+    json.dumps(
+        {
+            "schema_version": 1,
+            "install_all_bundled_skills": True,
+            "packages": packages,
+        },
+        indent=2,
+        sort_keys=True,
+    ) + "\n",
+    encoding="utf-8",
+)
+PY
+  echo "Included verified bundled runtime assets from: $BUNDLED_SKILL_STORAGE_SOURCE_DIR"
 fi
 
 echo "[5/6] Apply sanitized config as configs/config.toml..."

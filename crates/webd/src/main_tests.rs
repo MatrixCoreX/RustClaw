@@ -36,6 +36,9 @@ fn test_session_entry(user_key: &str, csrf_token: String) -> SessionEntry {
         last_activity_unix: now,
         expires_unix: now + 60,
         csrf_token,
+        ended_unix: None,
+        end_reason: None,
+        nni_navigation_visible: false,
     }
 }
 
@@ -856,10 +859,14 @@ async fn bounded_login_preserves_cookie_session_flow() {
     let mut state = login_test_state(6, 900);
     state.upstream = format!("http://{addr}");
     let previous_session_id = uuid::Uuid::new_v4().to_string();
-    state.sessions.lock().expect("sessions").insert(
-        session_id_digest(&previous_session_id),
-        test_session_entry("rk-previous-session", "03".repeat(16)),
-    );
+    let mut previous_session = test_session_entry("rk-previous-session", "03".repeat(16));
+    previous_session.username = "ADMIN".to_string();
+    previous_session.nni_navigation_visible = true;
+    state
+        .sessions
+        .lock()
+        .expect("sessions")
+        .insert(session_id_digest(&previous_session_id), previous_session);
     let shared_state = state.clone();
     let app = build_webd_router(state, root.clone());
     let mut request = Request::builder()
@@ -885,7 +892,7 @@ async fn bounded_login_preserves_cookie_session_flow() {
             41013,
         ))));
 
-    let response = app.oneshot(request).await.expect("login response");
+    let response = app.clone().oneshot(request).await.expect("login response");
     assert_eq!(response.status(), StatusCode::OK);
     assert!(response
         .headers()
@@ -902,14 +909,61 @@ async fn bounded_login_preserves_cookie_session_flow() {
         .as_str()
         .expect("login CSRF token");
     assert_eq!(csrf_token.len(), 32);
+    assert_eq!(body["data"]["nni_navigation_visible"], true);
     let sessions = shared_state.sessions.lock().expect("sessions");
-    assert_eq!(sessions.len(), 1);
-    assert!(!sessions.contains_key(&session_id_digest(&previous_session_id)));
-    let session = sessions.values().next().unwrap();
+    assert_eq!(sessions.len(), 2);
+    let previous = &sessions[&session_id_digest(&previous_session_id)];
+    assert_eq!(previous.end_reason.as_deref(), Some("signed_in_elsewhere"));
+    assert!(previous.ended_unix.is_some());
+    assert!(previous.user_key.is_empty());
+    assert!(previous.csrf_token.is_empty());
+    let session = sessions
+        .values()
+        .find(|entry| entry.ended_unix.is_none())
+        .expect("new active session");
     assert_eq!(session.csrf_token, csrf_token);
+    assert!(session.nni_navigation_visible);
     assert_eq!(session.client_ip, "127.0.0.1");
     assert_eq!(session.client_platform, "FixtureOS");
     assert_eq!(session.user_agent, "BrowserFixture/12.4");
+    drop(sessions);
+    let mut old_session_headers = HeaderMap::new();
+    old_session_headers.insert(
+        header::COOKIE,
+        HeaderValue::from_str(&format!("test-session={previous_session_id}"))
+            .expect("old session cookie"),
+    );
+    assert!(authenticated_session(&shared_state, &old_session_headers).is_none());
+    let mut old_session_request = Request::builder()
+        .uri("/webd/session")
+        .header(header::HOST, "localhost:8788")
+        .header(
+            header::COOKIE,
+            format!("test-session={previous_session_id}"),
+        )
+        .body(Body::empty())
+        .expect("old session status request");
+    old_session_request
+        .extensions_mut()
+        .insert(axum::extract::ConnectInfo(SocketAddr::from((
+            [127, 0, 0, 1],
+            41013,
+        ))));
+    let old_session_response = app
+        .oneshot(old_session_request)
+        .await
+        .expect("old session status response");
+    let old_session_body: serde_json::Value = serde_json::from_slice(
+        &to_bytes(old_session_response.into_body(), 2048)
+            .await
+            .expect("read old session status"),
+    )
+    .expect("decode old session status");
+    assert_eq!(old_session_body["data"]["logged_in"], false);
+    assert_eq!(
+        old_session_body["data"]["end_reason"],
+        "signed_in_elsewhere"
+    );
 
     upstream_task.abort();
     std::fs::remove_dir_all(root).expect("remove UI fixture");
@@ -1032,7 +1086,7 @@ async fn admin_can_list_and_revoke_digest_backed_sessions() {
         .header(header::COOKIE, format!("test-session={current_secret}"))
         .header(WEBD_CSRF_HEADER, csrf_token)
         .body(Body::from(
-            serde_json::json!({ "session_handle": target_handle }).to_string(),
+            serde_json::json!({ "session_handle": target_handle.clone() }).to_string(),
         ))
         .expect("session revoke request");
     revoke_request
@@ -1046,9 +1100,72 @@ async fn admin_can_list_and_revoke_digest_backed_sessions() {
         .await
         .expect("session revoke response");
     assert_eq!(revoke_response.status(), StatusCode::OK);
-    assert_eq!(shared_state.sessions.lock().expect("sessions").len(), 1);
+    let sessions = shared_state.sessions.lock().expect("sessions");
+    assert_eq!(sessions.len(), 2);
+    let revoked = sessions
+        .values()
+        .find(|entry| entry.session_handle == target_handle)
+        .expect("revoked session history");
+    assert_eq!(revoked.end_reason.as_deref(), Some("admin_revoked"));
+    assert!(revoked.ended_unix.is_some());
 
     upstream_task.abort();
+    std::fs::remove_dir_all(root).expect("remove UI fixture");
+}
+
+#[tokio::test]
+async fn nni_navigation_preference_is_shared_by_username() {
+    let root = std::env::temp_dir().join(format!("agent-runtime-webd-ui-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).expect("create UI fixture");
+    std::fs::write(root.join("index.html"), "<html></html>").expect("write UI fixture");
+    let state = login_test_state(6, 900);
+    let current_secret = uuid::Uuid::new_v4().to_string();
+    let other_secret = uuid::Uuid::new_v4().to_string();
+    let csrf_token = "07".repeat(16);
+    let mut current = test_session_entry("rk-current", csrf_token.clone());
+    current.username = "Shared-User".to_string();
+    let mut other = test_session_entry("rk-other", "08".repeat(16));
+    other.username = "shared-user".to_string();
+    state.sessions.lock().expect("sessions").extend([
+        (session_id_digest(&current_secret), current),
+        (session_id_digest(&other_secret), other),
+    ]);
+    let shared_state = state.clone();
+    let app = build_webd_router(state, root.clone());
+
+    let mut request = Request::builder()
+        .method(Method::PUT)
+        .uri("/webd/preferences")
+        .header(header::HOST, "localhost:8788")
+        .header(header::ORIGIN, "http://localhost:8788")
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::COOKIE, format!("test-session={current_secret}"))
+        .header(WEBD_CSRF_HEADER, csrf_token)
+        .body(Body::from(r#"{"nni_navigation_visible":true}"#))
+        .expect("preferences request");
+    request
+        .extensions_mut()
+        .insert(axum::extract::ConnectInfo(SocketAddr::from((
+            [127, 0, 0, 1],
+            41017,
+        ))));
+
+    let response = app.oneshot(request).await.expect("preferences response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload: serde_json::Value = serde_json::from_slice(
+        &to_bytes(response.into_body(), 2048)
+            .await
+            .expect("read preferences response"),
+    )
+    .expect("decode preferences response");
+    assert_eq!(payload["data"]["nni_navigation_visible"], true);
+    assert!(shared_state
+        .sessions
+        .lock()
+        .expect("sessions")
+        .values()
+        .all(|entry| entry.nni_navigation_visible));
+
     std::fs::remove_dir_all(root).expect("remove UI fixture");
 }
 

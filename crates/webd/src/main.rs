@@ -66,6 +66,12 @@ struct SessionEntry {
     last_activity_unix: u64,
     expires_unix: u64,
     csrf_token: String,
+    #[serde(default)]
+    ended_unix: Option<u64>,
+    #[serde(default)]
+    end_reason: Option<String>,
+    #[serde(default)]
+    nni_navigation_visible: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -75,6 +81,7 @@ struct AuthenticatedSession {
     username: String,
     role: String,
     csrf_token: String,
+    nni_navigation_visible: bool,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -225,6 +232,10 @@ fn build_webd_router(state: AppState, ui_dist_dir: PathBuf) -> Router {
         .route("/webd/login", post(webd_login).options(webd_options))
         .route("/webd/logout", post(webd_logout).options(webd_options))
         .route("/webd/session", get(webd_session).options(webd_options))
+        .route(
+            "/webd/preferences",
+            axum::routing::put(webd_update_preferences).options(webd_options),
+        )
         .route("/webd/sessions", get(webd_sessions).options(webd_options))
         .route(
             "/webd/sessions/revoke",
@@ -466,10 +477,26 @@ async fn webd_login(
     let csrf_token = new_csrf_token();
     let created = now_unix_secs();
     let expires = created + state.session_ttl_secs;
-    {
+    let nni_navigation_visible = {
         let mut guard = state.sessions.lock().expect("sessions mutex");
+        expire_sessions(&mut guard, created);
+        let normalized_username = canonical_username(&body.username);
+        let nni_navigation_visible = guard
+            .values()
+            .filter(|entry| canonical_username(&entry.username) == normalized_username)
+            .max_by_key(|entry| entry.last_activity_unix)
+            .is_some_and(|entry| entry.nni_navigation_visible);
+
+        for entry in guard.values_mut().filter(|entry| {
+            canonical_username(&entry.username) == normalized_username
+                && session_is_active(entry, created)
+        }) {
+            end_session(entry, created, "signed_in_elsewhere");
+        }
         for previous_session_id in previous_session_ids {
-            guard.remove(&session_id_digest(&previous_session_id));
+            if let Some(entry) = guard.get_mut(&session_id_digest(&previous_session_id)) {
+                end_session(entry, created, "replaced_by_login");
+            }
         }
         guard.insert(
             session_digest,
@@ -493,10 +520,14 @@ async fn webd_login(
                 last_activity_unix: created,
                 expires_unix: expires,
                 csrf_token: csrf_token.clone(),
+                ended_unix: None,
+                end_reason: None,
+                nni_navigation_visible,
             },
         );
         persist_session_snapshot(&state, &guard);
-    }
+        nni_navigation_visible
+    };
     let cookie = session_cookie_value(
         &session_cookie_name(&state.cookie_name, secure_cookie),
         &sid,
@@ -508,6 +539,7 @@ async fn webd_login(
         "data": {
             "logged_in": true,
             "csrf_token": csrf_token,
+            "nni_navigation_visible": nni_navigation_visible,
         }
     }))
     .into_response();
@@ -686,11 +718,14 @@ async fn webd_logout(
     let session_ids = extract_session_ids(req.headers(), &state.cookie_name);
     if !session_ids.is_empty() {
         let mut guard = state.sessions.lock().expect("sessions mutex");
-        let mut removed = false;
+        let now = now_unix_secs();
+        let mut changed = expire_sessions(&mut guard, now);
         for sid in session_ids {
-            removed |= guard.remove(&session_id_digest(&sid)).is_some();
+            if let Some(entry) = guard.get_mut(&session_id_digest(&sid)) {
+                changed |= end_session(entry, now, "signed_out");
+            }
         }
-        if removed {
+        if changed {
             persist_session_snapshot(&state, &guard);
         }
     }
@@ -729,16 +764,23 @@ async fn webd_session(
         );
     }
     let mut session = authenticated_session(&state, req.headers());
+    let mut end_reason = if session.is_none() {
+        ended_session_reason(&state, req.headers())
+    } else {
+        None
+    };
     if let Some(current) = session.as_ref() {
         match inspect_upstream_identity(&state, &current.user_key).await {
             Ok(role) if role.eq_ignore_ascii_case(&current.role) => {}
             Ok(_) => {
-                revoke_session_by_handle(&state, &current.session_handle);
+                end_session_by_handle(&state, &current.session_handle, "identity_changed");
                 session = None;
+                end_reason = Some("identity_changed".to_string());
             }
             Err(response) if response.status() == StatusCode::UNAUTHORIZED => {
-                revoke_session_by_handle(&state, &current.session_handle);
+                end_session_by_handle(&state, &current.session_handle, "identity_changed");
                 session = None;
+                end_reason = Some("identity_changed".to_string());
             }
             Err(response) => return with_cors(response, origin.as_ref()),
         }
@@ -765,7 +807,128 @@ async fn webd_session(
                     "csrf_token": session.as_ref().map(|session| session.csrf_token.as_str()),
                     "username": session.as_ref().map(|session| session.username.as_str()),
                     "role": session.as_ref().map(|session| session.role.as_str()),
+                    "nni_navigation_visible": session.as_ref().map(|session| session.nni_navigation_visible),
+                    "end_reason": end_reason,
                 }
+            }))
+            .into_response(),
+        ),
+        origin.as_ref(),
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WebdPreferencesBody {
+    nni_navigation_visible: bool,
+}
+
+async fn webd_update_preferences(
+    State(state): State<AppState>,
+    ConnectInfo(client_addr): ConnectInfo<SocketAddr>,
+    req: Request,
+) -> impl IntoResponse {
+    let origin = match require_valid_origin(req.headers()) {
+        Ok(Some(origin)) => Some(origin),
+        Ok(None) | Err(()) => {
+            return webd_error_response(StatusCode::FORBIDDEN, "webd_origin_required", None);
+        }
+    };
+    if cookie_auth_requires_https(req.headers())
+        && !cookie_transport_allowed(req.headers(), client_addr, state.forward_x_forwarded)
+    {
+        return webd_error_response(
+            StatusCode::UPGRADE_REQUIRED,
+            "webd_https_required",
+            origin.as_ref(),
+        );
+    }
+    let session = match authenticated_session(&state, req.headers()) {
+        Some(session) => session,
+        None => {
+            return webd_error_response(
+                StatusCode::UNAUTHORIZED,
+                "webd_session_required",
+                origin.as_ref(),
+            );
+        }
+    };
+    if let Err(error_code) = require_session_csrf(req.headers(), &session.csrf_token) {
+        return webd_error_response(StatusCode::FORBIDDEN, error_code, origin.as_ref());
+    }
+    if !request_has_json_content_type(req.headers()) {
+        return webd_error_response(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "webd_preferences_content_type_invalid",
+            origin.as_ref(),
+        );
+    }
+    let session_id = Some(session.session_handle.as_str());
+    let client_ip = login_client_ip(req.headers(), client_addr, state.forward_x_forwarded);
+    let _request_lease = match state.request_limits.try_acquire(
+        client_ip,
+        session_id,
+        RequestClass::General,
+        now_unix_secs(),
+    ) {
+        Ok(lease) => lease,
+        Err(rejection) => return request_limit_response(rejection, origin.as_ref()),
+    };
+    let body = match to_bytes(req.into_body(), MAX_LOGIN_REQUEST_BODY_BYTES).await {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return webd_error_response(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "webd_preferences_body_invalid",
+                origin.as_ref(),
+            );
+        }
+    };
+    let body = match serde_json::from_slice::<WebdPreferencesBody>(&body) {
+        Ok(body) => body,
+        Err(_) => {
+            return webd_error_response(
+                StatusCode::BAD_REQUEST,
+                "webd_preferences_body_invalid",
+                origin.as_ref(),
+            );
+        }
+    };
+
+    let now = now_unix_secs();
+    let mut guard = state.sessions.lock().expect("sessions mutex");
+    let mut changed = expire_sessions(&mut guard, now);
+    let current_is_active = guard.values().any(|entry| {
+        entry.session_handle == session.session_handle && session_is_active(entry, now)
+    });
+    if !current_is_active {
+        if changed {
+            persist_session_snapshot(&state, &guard);
+        }
+        return webd_error_response(
+            StatusCode::UNAUTHORIZED,
+            "webd_session_required",
+            origin.as_ref(),
+        );
+    }
+    let normalized_username = canonical_username(&session.username);
+    for entry in guard
+        .values_mut()
+        .filter(|entry| canonical_username(&entry.username) == normalized_username)
+    {
+        if entry.nni_navigation_visible != body.nni_navigation_visible {
+            entry.nni_navigation_visible = body.nni_navigation_visible;
+            changed = true;
+        }
+    }
+    if changed {
+        persist_session_snapshot(&state, &guard);
+    }
+    with_cors(
+        with_no_store(
+            Json(json!({
+                "ok": true,
+                "data": { "nni_navigation_visible": body.nni_navigation_visible }
             }))
             .into_response(),
         ),
@@ -796,9 +959,7 @@ async fn webd_sessions(
     };
     let now = now_unix_secs();
     let mut guard = state.sessions.lock().expect("sessions mutex");
-    let before = guard.len();
-    guard.retain(|_, entry| entry.expires_unix > now);
-    if guard.len() != before {
+    if expire_sessions(&mut guard, now) {
         persist_session_snapshot(&state, &guard);
     }
     let mut sessions = guard
@@ -814,7 +975,12 @@ async fn webd_sessions(
                 "created_unix": entry.created_unix,
                 "last_activity_unix": entry.last_activity_unix,
                 "expires_unix": entry.expires_unix,
-                "current": session.as_ref().is_some_and(|current| current.session_handle == entry.session_handle),
+                "active": session_is_active(entry, now),
+                "ended_unix": entry.ended_unix,
+                "end_reason": entry.end_reason,
+                "current": session.as_ref().is_some_and(|current| {
+                    current.session_handle == entry.session_handle && session_is_active(entry, now)
+                }),
             })
         })
         .collect::<Vec<_>>();
@@ -881,15 +1047,15 @@ async fn webd_revoke_session(
             );
         }
     };
+    let now = now_unix_secs();
     let mut guard = state.sessions.lock().expect("sessions mutex");
-    let target = guard
-        .iter()
-        .find(|(_, entry)| entry.session_handle == body.session_handle)
-        .map(|(digest, _)| digest.clone());
-    let revoked = target
-        .as_ref()
-        .is_some_and(|digest| guard.remove(digest).is_some());
-    if revoked {
+    let mut changed = expire_sessions(&mut guard, now);
+    let revoked = guard
+        .values_mut()
+        .find(|entry| entry.session_handle == body.session_handle)
+        .is_some_and(|entry| end_session(entry, now, "admin_revoked"));
+    changed |= revoked;
+    if changed {
         persist_session_snapshot(&state, &guard);
     }
     with_cors(
@@ -999,6 +1165,50 @@ fn bounded_session_header(headers: &HeaderMap, name: &HeaderName, max_bytes: usi
     sanitized[..end].to_string()
 }
 
+fn canonical_username(value: &str) -> String {
+    value.trim().to_lowercase()
+}
+
+fn session_is_active(entry: &SessionEntry, now: u64) -> bool {
+    entry.ended_unix.is_none() && entry.expires_unix > now
+}
+
+fn end_session(entry: &mut SessionEntry, ended_unix: u64, reason: &str) -> bool {
+    if entry.ended_unix.is_some() {
+        return false;
+    }
+    entry.ended_unix = Some(ended_unix.max(entry.created_unix));
+    entry.end_reason = Some(reason.to_string());
+    entry.user_key.clear();
+    entry.csrf_token.clear();
+    true
+}
+
+fn expire_sessions(sessions: &mut HashMap<String, SessionEntry>, now: u64) -> bool {
+    let mut changed = false;
+    for entry in sessions
+        .values_mut()
+        .filter(|entry| entry.ended_unix.is_none() && entry.expires_unix <= now)
+    {
+        let expired_unix = entry.expires_unix;
+        changed |= end_session(entry, expired_unix, "expired");
+    }
+    changed
+}
+
+fn ended_session_reason(state: &AppState, headers: &HeaderMap) -> Option<String> {
+    let session_ids = extract_session_ids(headers, &state.cookie_name);
+    let guard = state.sessions.lock().expect("sessions mutex");
+    session_ids
+        .iter()
+        .map(|session_id| session_id_digest(session_id))
+        .find_map(|digest| {
+            guard
+                .get(&digest)
+                .and_then(|entry| entry.end_reason.clone())
+        })
+}
+
 fn authenticated_session(state: &AppState, headers: &HeaderMap) -> Option<AuthenticatedSession> {
     let session_ids = extract_session_ids(headers, &state.cookie_name);
     if session_ids.is_empty() {
@@ -1006,15 +1216,17 @@ fn authenticated_session(state: &AppState, headers: &HeaderMap) -> Option<Authen
     }
     let mut guard = state.sessions.lock().expect("sessions mutex");
     let now = now_unix_secs();
-    let before = guard.len();
-    guard.retain(|_, v| v.expires_unix > now);
-    if guard.len() != before {
+    if expire_sessions(&mut guard, now) {
         persist_session_snapshot(state, &guard);
     }
     let session_digest = session_ids
         .iter()
         .map(|session_id| session_id_digest(session_id))
-        .find(|digest| guard.contains_key(digest))?;
+        .find(|digest| {
+            guard
+                .get(digest)
+                .is_some_and(|entry| session_is_active(entry, now))
+        })?;
     let entry = guard.get_mut(&session_digest)?;
     let should_persist =
         now.saturating_sub(entry.last_activity_unix) >= SESSION_ACTIVITY_PERSIST_INTERVAL_SECS;
@@ -1027,6 +1239,7 @@ fn authenticated_session(state: &AppState, headers: &HeaderMap) -> Option<Authen
         username: entry.username.clone(),
         role: entry.role.clone(),
         csrf_token: entry.csrf_token.clone(),
+        nni_navigation_visible: entry.nni_navigation_visible,
     };
     if should_persist {
         persist_session_snapshot(state, &guard);
@@ -1113,7 +1326,7 @@ async fn authorize_webd_session_admin(
     let current_role = inspect_upstream_identity(state, user_key).await?;
     if let Some(session) = session.as_ref() {
         if !session.role.eq_ignore_ascii_case(&current_role) {
-            revoke_session_by_handle(state, &session.session_handle);
+            end_session_by_handle(state, &session.session_handle, "identity_changed");
             return Err(webd_error_response(
                 StatusCode::UNAUTHORIZED,
                 "webd_session_identity_changed",
@@ -1131,19 +1344,19 @@ async fn authorize_webd_session_admin(
     Ok(session)
 }
 
-fn revoke_session_by_handle(state: &AppState, session_handle: &str) -> bool {
+fn end_session_by_handle(state: &AppState, session_handle: &str, reason: &str) -> bool {
     let mut guard = state.sessions.lock().expect("sessions mutex");
-    let digest = guard
-        .iter()
-        .find(|(_, entry)| entry.session_handle == session_handle)
-        .map(|(digest, _)| digest.clone());
-    let revoked = digest
-        .as_ref()
-        .is_some_and(|digest| guard.remove(digest).is_some());
-    if revoked {
+    let now = now_unix_secs();
+    let mut changed = expire_sessions(&mut guard, now);
+    let ended = guard
+        .values_mut()
+        .find(|entry| entry.session_handle == session_handle)
+        .is_some_and(|entry| end_session(entry, now, reason));
+    changed |= ended;
+    if changed {
         persist_session_snapshot(state, &guard);
     }
-    revoked
+    ended
 }
 
 fn new_csrf_token() -> String {
@@ -1350,7 +1563,7 @@ async fn proxy_inner(state: AppState, client_addr: SocketAddr, req: Request) -> 
     let status = res.status();
     if status == StatusCode::UNAUTHORIZED {
         if let Some(session) = session.as_ref() {
-            revoke_session_by_handle(&state, &session.session_handle);
+            end_session_by_handle(&state, &session.session_handle, "upstream_unauthorized");
         }
     }
     let resp_headers = sanitize_response_headers(res.headers());

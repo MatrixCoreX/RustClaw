@@ -1027,7 +1027,11 @@ export default function App() {
         ok?: boolean;
         error?: string;
         error_code?: string;
-        data?: { retry_after_seconds?: number; csrf_token?: string };
+        data?: {
+          retry_after_seconds?: number;
+          csrf_token?: string;
+          nni_navigation_visible?: boolean;
+        };
       };
       if (!res.ok || !body.ok) {
         if (body.error_code === "invalid_credentials") {
@@ -1058,6 +1062,9 @@ export default function App() {
       setWebdPassword("");
       setAuthMode("webd");
       setWebdCsrfToken(csrfToken);
+      if (typeof body.data?.nni_navigation_visible === "boolean") {
+        setNniNavigationVisible(body.data.nni_navigation_visible);
+      }
       window.localStorage.setItem(STORAGE_KEYS.authMode, "webd");
       setUiAuthReady(true);
       setAuthMeError(null);
@@ -1090,6 +1097,28 @@ export default function App() {
       if (authEpoch !== authFlowEpochRef.current) return;
       setUiAuthLoading(false);
     }
+  };
+
+  const updateNniNavigationVisible = async (visible: boolean) => {
+    if (authMode !== "webd") {
+      setNniNavigationVisible(visible);
+      return;
+    }
+    const res = await safeFetch("/webd/preferences", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nni_navigation_visible: visible }),
+    });
+    const body = (await res.json()) as ApiResponse<{ nni_navigation_visible: boolean }>;
+    if (!res.ok || !body.ok || typeof body.data?.nni_navigation_visible !== "boolean") {
+      throw new Error(
+        t(
+          "NNI 导航设置未能保存，请稍后重试。",
+          "The NNI navigation setting could not be saved. Try again shortly.",
+        ),
+      );
+    }
+    setNniNavigationVisible(body.data.nni_navigation_visible);
   };
 
   const fetchHealth = async (options?: { silent?: boolean }) => {
@@ -1413,13 +1442,20 @@ export default function App() {
           const sessionRes = await fetch(sessionUrl, { credentials: "include" });
           const sessionBody = (await sessionRes.json()) as {
             ok?: boolean;
-            data?: { logged_in?: boolean; csrf_token?: string | null };
+            data?: {
+              logged_in?: boolean;
+              csrf_token?: string | null;
+              nni_navigation_visible?: boolean | null;
+            };
           };
           const csrfToken = normalizeWebdCsrfToken(sessionBody.data?.csrf_token);
           if (!sessionRes.ok || !sessionBody.ok || !sessionBody.data?.logged_in || !csrfToken) {
             throw new Error("webd_session_invalid");
           }
           setWebdCsrfToken(csrfToken);
+          if (typeof sessionBody.data?.nni_navigation_visible === "boolean") {
+            setNniNavigationVisible(sessionBody.data.nni_navigation_visible);
+          }
           const targetUrl = `${apiBase.replace(/\/$/, "")}/v1/auth/me`;
           const res = await fetch(targetUrl, { credentials: "include" });
           if (authEpoch !== authFlowEpochRef.current) return;
@@ -1495,6 +1531,57 @@ export default function App() {
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiBase, pollingSeconds, uiAuthReady]);
+
+  useEffect(() => {
+    if (!uiAuthReady || authMode !== "webd") return;
+    const authEpoch = authFlowEpochRef.current;
+    let stopped = false;
+    const verifyWebdSession = async () => {
+      try {
+        const response = await fetch(`${apiBase.replace(/\/$/, "")}/webd/session`, {
+          credentials: "include",
+        });
+        const body = (await response.json()) as {
+          ok?: boolean;
+          data?: { logged_in?: boolean; end_reason?: string | null };
+        };
+        if (
+          stopped
+          || authEpoch !== authFlowEpochRef.current
+          || !response.ok
+          || !body.ok
+          || body.data?.logged_in !== false
+        ) {
+          return;
+        }
+        authFlowEpochRef.current += 1;
+        window.localStorage.removeItem(STORAGE_KEYS.authMode);
+        setAuthMode(null);
+        setWebdCsrfToken("");
+        setUiAuthReady(false);
+        setUiAuthLoading(false);
+        setAuthIdentity(null);
+        setInteractionUserId(null);
+        setInteractionChatId(null);
+        setInteractionRole("-");
+        setUiAuthError(
+          body.data?.end_reason === "signed_in_elsewhere"
+            ? t(
+              "同一用户名已在其他位置登录，当前会话已退出。",
+              "The same username signed in elsewhere, so this session was ended.",
+            )
+            : t("Web 会话已失效，请重新登录。", "Web session expired; please sign in again."),
+        );
+      } catch {
+        // A temporary network failure must not sign the user out.
+      }
+    };
+    const timer = window.setInterval(() => void verifyWebdSession(), 5_000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [apiBase, authMode, uiAuthReady, t]);
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEYS.baseUrl, baseUrl);
@@ -1873,7 +1960,7 @@ export default function App() {
               onFetchHostSystemSummary={fetchHostSystemSummary}
               onFetchHostDependencies={() => fetchHostDependencies(false)}
               onInstallHostDependency={installHostDependency}
-              onSetNniNavigationVisible={setNniNavigationVisible}
+              onSetNniNavigationVisible={updateNniNavigationVisible}
               onFetchAgentConfig={fetchAgentConfig}
               onSaveAgentPersona={saveAgentPersona}
               workspaceUpdateStepLabel={workspaceUpdateStepLabel}

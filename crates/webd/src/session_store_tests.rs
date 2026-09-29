@@ -12,7 +12,7 @@ fn test_path(label: &str) -> std::path::PathBuf {
 }
 
 #[test]
-fn persisted_sessions_survive_reload_and_expired_entries_are_dropped() {
+fn persisted_sessions_survive_reload_and_expired_entries_become_history() {
     let path = test_path("reload");
     let active_secret = uuid::Uuid::new_v4().to_string();
     let active_id = crate::session_id_digest(&active_secret);
@@ -32,10 +32,13 @@ fn persisted_sessions_survive_reload_and_expired_entries_are_dropped() {
                 last_activity_unix: 100,
                 expires_unix: 200,
                 csrf_token: "01".repeat(16),
+                ended_unix: None,
+                end_reason: None,
+                nni_navigation_visible: true,
             },
         ),
         (
-            expired_id,
+            expired_id.clone(),
             SessionEntry {
                 user_key: "rk-expired".to_string(),
                 session_handle: uuid::Uuid::new_v4().to_string(),
@@ -48,6 +51,9 @@ fn persisted_sessions_survive_reload_and_expired_entries_are_dropped() {
                 last_activity_unix: 90,
                 expires_unix: 99,
                 csrf_token: "02".repeat(16),
+                ended_unix: None,
+                end_reason: None,
+                nni_navigation_visible: false,
             },
         ),
     ]);
@@ -56,10 +62,16 @@ fn persisted_sessions_survive_reload_and_expired_entries_are_dropped() {
     let persisted = fs::read_to_string(&path).expect("read persisted sessions");
     assert!(!persisted.contains(&active_secret));
     let restored = load_sessions(&path, 100).expect("load sessions");
-    assert_eq!(restored.len(), 1);
+    assert_eq!(restored.len(), 2);
     assert_eq!(restored[&active_id].user_key, "rk-active");
     assert_eq!(restored[&active_id].csrf_token, "01".repeat(16));
     assert_eq!(restored[&active_id].client_ip, "192.0.2.10");
+    let expired = &restored[&expired_id];
+    assert_eq!(expired.ended_unix, Some(99));
+    assert_eq!(expired.end_reason.as_deref(), Some("expired"));
+    assert!(expired.user_key.is_empty());
+    assert!(expired.csrf_token.is_empty());
+    assert!(restored[&active_id].nni_navigation_visible);
 
     #[cfg(unix)]
     {
