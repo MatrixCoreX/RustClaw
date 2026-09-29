@@ -99,6 +99,25 @@ fn independent_provider_inherits_only_missing_main_connection_fields() {
 }
 
 #[test]
+fn selected_connection_key_overrides_only_the_matching_endpoint() {
+    let mut relay = Some(vendor_cfg("https://relay.example/v1/", "direct-key"));
+    apply_selected_key_for_matching_endpoint(
+        &mut relay,
+        Some("https://relay.example/v1"),
+        Some("relay-key"),
+    );
+    assert_eq!(relay.expect("relay provider").api_key, "relay-key");
+
+    let mut direct = Some(vendor_cfg("https://provider.example/v1", "direct-key"));
+    apply_selected_key_for_matching_endpoint(
+        &mut direct,
+        Some("https://relay.example/v1"),
+        Some("relay-key"),
+    );
+    assert_eq!(direct.expect("direct provider").api_key, "direct-key");
+}
+
+#[test]
 fn local_custom_provider_allows_missing_api_key() {
     let cfg = vendor_cfg("http://127.0.0.1:8178/v1", "");
     assert_eq!(provider_auth_token("custom", &cfg).unwrap(), None);

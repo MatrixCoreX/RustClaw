@@ -1398,7 +1398,29 @@ fn inherit_provider_connection_from_llm(
     }
 }
 
+fn apply_selected_key_for_matching_endpoint(
+    target: &mut Option<VendorConfig>,
+    selected_base_url: Option<&str>,
+    selected_api_key: Option<&str>,
+) {
+    let (Some(target), Some(selected_base_url), Some(selected_api_key)) =
+        (target.as_mut(), selected_base_url, selected_api_key)
+    else {
+        return;
+    };
+    let target_base_url = target.base_url.trim().trim_end_matches('/');
+    let selected_base_url = selected_base_url.trim().trim_end_matches('/');
+    if !target_base_url.is_empty()
+        && target_base_url == selected_base_url
+        && !selected_api_key.trim().is_empty()
+    {
+        target.api_key = selected_api_key.trim().to_string();
+    }
+}
+
 fn apply_env_overrides(cfg: &mut RootConfig) {
+    let selected_base_url = env_non_empty("OPENAI_BASE_URL");
+    let selected_minimax_api_key = env_non_empty("MINIMAX_API_KEY");
     apply_vendor_api_key_env(&mut cfg.llm.openai, "OPENAI_API_KEY");
     apply_vendor_api_key_env(&mut cfg.llm.google, "GOOGLE_API_KEY");
     apply_vendor_api_key_env(&mut cfg.llm.anthropic, "ANTHROPIC_API_KEY");
@@ -1456,6 +1478,11 @@ fn apply_env_overrides(cfg: &mut RootConfig) {
     inherit_provider_connection_from_llm(
         &mut cfg.image_generation.providers.minimax,
         &cfg.llm.minimax,
+    );
+    apply_selected_key_for_matching_endpoint(
+        &mut cfg.image_generation.providers.minimax,
+        selected_base_url.as_deref(),
+        selected_minimax_api_key.as_deref(),
     );
     if let Some(enabled) = env_bool("IMAGE_GENERATION_LOCAL_FALLBACK") {
         cfg.image_generation.local_fallback_enabled = enabled;

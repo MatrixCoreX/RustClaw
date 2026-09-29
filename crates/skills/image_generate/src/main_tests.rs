@@ -34,6 +34,25 @@ fn independent_provider_inherits_only_missing_main_connection_fields() {
 }
 
 #[test]
+fn selected_connection_key_overrides_only_the_matching_endpoint() {
+    let mut relay = Some(connection_cfg("https://relay.example/v1/", "direct-key"));
+    apply_selected_key_for_matching_endpoint(
+        &mut relay,
+        Some("https://relay.example/v1"),
+        Some("relay-key"),
+    );
+    assert_eq!(relay.expect("relay provider").api_key, "relay-key");
+
+    let mut direct = Some(connection_cfg("https://provider.example/v1", "direct-key"));
+    apply_selected_key_for_matching_endpoint(
+        &mut direct,
+        Some("https://relay.example/v1"),
+        Some("relay-key"),
+    );
+    assert_eq!(direct.expect("direct provider").api_key, "direct-key");
+}
+
+#[test]
 fn error_extra_exposes_machine_contract() {
     let extra = error_extra("execution_failed");
 
