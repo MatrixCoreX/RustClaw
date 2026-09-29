@@ -35,10 +35,10 @@
 | `UI/src/components/DashboardPage.tsx` | 0 | 4 | 0 |
 | `UI/src/components/NniAprPage.tsx` | 0 | 2 | 0 |
 | `UI/src/hooks/useBancorRuntime.ts` | 0 | 1 | 0 |
-| `UI/src/hooks/useChatRuntime.ts` | 0 | 5 | 0 |
+| `UI/src/lib/chat-thread-state.ts` | 0 | 5 | 0 |
 | `UI/src/lib/nni-owner-public-key.ts` | 0 | 0 | 1 |
 
-源码清单摘要：`36eee754be9ea182bffa190a2ef8144bb5b07559df0bb808969ff029a60cf3c5`。
+源码清单摘要：`d4dcdb501f0b9d6dbce740b837fb996c7c64e9b3f2e32369d373ef280b8e0d85`。
 
 桌面专属入口：设备添加与可信配对、HTTPS / SSH、系统凭据库、设备切换、下载保存、受限回环 Range 媒体通道、独立 AiAPP 窗口、DNS-SD 自动发现、可取消的有界 IPv4 局域网扫描。
 
