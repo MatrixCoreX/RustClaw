@@ -199,6 +199,53 @@ grep -Fq 'release_checksum=verified' <<< "$OUTPUT"
 grep -Fq 'release_update_status=deployed' <<< "$OUTPUT"
 grep -Fxq 'ubuntu-x86_64-test' "$RUNTIME/.release-tag"
 
+MOCK_SYSTEMD_BIN="$TMP_ROOT/mock-systemd-bin"
+MOCK_SYSTEMD_STATE="$TMP_ROOT/mock-systemd-active"
+MOCK_SYSTEMD_SUDO="$TMP_ROOT/mock-systemd-sudo"
+mkdir -p "$MOCK_SYSTEMD_BIN"
+cat > "$MOCK_SYSTEMD_BIN/systemctl" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+case "${1:-}" in
+  cat)
+    printf 'ExecStart=%s/target/release/clawd\n' "$MOCK_SYSTEMD_ROOT"
+    ;;
+  is-active)
+    [[ -f "$MOCK_SYSTEMD_STATE" ]]
+    ;;
+  restart)
+    [[ "${MOCK_SYSTEMD_VIA_SUDO:-0}" == "1" ]] || exit 77
+    : > "$MOCK_SYSTEMD_STATE"
+    ;;
+  *)
+    exit 78
+    ;;
+esac
+SH
+cat > "$MOCK_SYSTEMD_BIN/sudo" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "${1:-}" == "-n" ]] && shift
+printf 'used\n' > "$MOCK_SYSTEMD_SUDO"
+MOCK_SYSTEMD_VIA_SUDO=1 exec "$@"
+SH
+chmod +x "$MOCK_SYSTEMD_BIN/systemctl" "$MOCK_SYSTEMD_BIN/sudo"
+SYSTEMD_OUTPUT="$(
+  PATH="$MOCK_SYSTEMD_BIN:$PATH" \
+  MOCK_SYSTEMD_ROOT="$RUNTIME" \
+  MOCK_SYSTEMD_STATE="$MOCK_SYSTEMD_STATE" \
+  MOCK_SYSTEMD_SUDO="$MOCK_SYSTEMD_SUDO" \
+  APP_RELEASES_JSON_FILE="$RELEASES_JSON" \
+    "$DEPLOY_SCRIPT" \
+      --root "$RUNTIME" \
+      --platform ubuntu-x86_64 \
+      --force \
+      --restart
+)"
+grep -Fq 'runtime_restart=systemd:' <<< "$SYSTEMD_OUTPUT"
+grep -Fxq 'used' "$MOCK_SYSTEMD_SUDO"
+grep -Fxq 'ubuntu-x86_64-test' "$RUNTIME/.release-tag"
+
 assert_rejected_release() {
   local label="$1"
   local metadata="$2"

@@ -323,7 +323,13 @@ printf '%s\n' "$$" > "$LOCK_DIR/pid"
 restart_runtime() {
   RESTART_ATTEMPTED=1
   if systemd_unit_exists; then
-    systemctl restart "$SYSTEMD_UNIT"
+    if [[ "$(id -u)" -eq 0 ]]; then
+      systemctl restart "$SYSTEMD_UNIT"
+    elif command -v sudo >/dev/null 2>&1; then
+      sudo -n systemctl restart "$SYSTEMD_UNIT"
+    else
+      systemctl --no-ask-password restart "$SYSTEMD_UNIT"
+    fi
     local attempt
     for attempt in $(seq 1 60); do
       if systemctl is-active --quiet "$SYSTEMD_UNIT"; then
