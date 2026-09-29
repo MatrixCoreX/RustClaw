@@ -448,7 +448,11 @@ class ShareTextTest(unittest.TestCase):
         image = self.downloader.ImageCandidate("https://p.test/1.webp", "test", 1)
         with tempfile.TemporaryDirectory() as directory:
             image_path = Path(directory) / "note.webp"
-            image_path.write_bytes(b"image")
+
+            def fake_download(_candidate, output_path, **_kwargs):
+                output_path.write_bytes(b"image")
+                return output_path
+
             args = SimpleNamespace(
                 verbose=False,
                 browser_fallback=True,
@@ -466,8 +470,8 @@ class ShareTextTest(unittest.TestCase):
             diagnostics = io.StringIO()
             with mock.patch.object(
                 self.downloader,
-                "download_image_candidates",
-                return_value=[image_path],
+                "download_image_candidate",
+                side_effect=fake_download,
             ) as download, redirect_stderr(diagnostics):
                 result = self.downloader.handle_resolved_media(
                     args,
@@ -481,9 +485,10 @@ class ShareTextTest(unittest.TestCase):
                     article=None,
                 )
 
-        self.assertEqual(result, 0)
-        download.assert_called_once()
-        self.assertIn("component=platform_article", diagnostics.getvalue())
+            self.assertEqual(result, 0)
+            download.assert_called_once()
+            self.assertEqual(image_path.read_bytes(), b"image")
+            self.assertIn("component=platform_article", diagnostics.getvalue())
 
     def test_image_post_download_keeps_background_audio_when_caption_is_missing(
         self,

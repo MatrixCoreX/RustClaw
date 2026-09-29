@@ -8308,9 +8308,6 @@ def handle_resolved_media(
             output_name=image_output_name,
             overwrite=args.overwrite,
             cookie=cookie,
-            browser_profile_dir=getattr(args, "browser_profile_dir", None),
-            browser_fallback=args.browser_fallback,
-            chrome_path=getattr(args, "chrome_path", None),
             timeout=args.timeout,
             referer=platform_referer(platform),
         )
