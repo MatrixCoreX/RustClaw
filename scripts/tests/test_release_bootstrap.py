@@ -88,7 +88,7 @@ cp "$FIXTURE/autostart" "$root/scripts/configure-autostart.sh"
                 self.assertEqual((self.fixture / "deploy-autostart-skip").read_text().strip(), "1")
                 self.assertEqual(
                     (self.fixture / "autostart-args").read_text().strip(),
-                    f"--enable --workspace {self.install}",
+                    f"--enable --workspace {self.install.resolve()}",
                 )
         for call in map(json.loads, self.log.read_text().splitlines()):
             self.assertIn("--proto-redir", call["args"])
