@@ -678,12 +678,13 @@ test("BANCOR funding-only candle keeps its price body and describes funding only
     open: "0.000020000000", high: "0.000020040000", low: "0.000020000000", close: "0.000020040000",
     aic_volume_units: "0", usd_volume_units: "0", aic_volume: "0.00000000", usd_volume: "0.00000000",
     trade_count: 0, has_trades: false, liquidity_event_count: 1, liquidity_usd_units: "200000000", liquidity_usd: "2.00000000",
+    liquidity_percentage_min: "0.25", liquidity_percentage_max: "0.75",
   };
   const html = renderToStaticMarkup(<CandleChart t={(zh) => zh} candles={[row]} intervalSeconds={60} priceDecimalPlaces={12} formatUnixDateTime={(v) => String(v)}
     maximized={false} onMaximizedChange={() => {}} />);
   assert.match(html, /data-bancor-candle-body="true"/);
   assert.doesNotMatch(html, /data-bancor-liquidity-marker|data-bancor-liquidity-detail/);
-  assert.match(html, /<title>[^<]*◆ 资金池注入 2\.00000000 USD<\/title>/);
+  assert.match(html, /<title>[^<]*◆ 资金池注入 2\.00000000 USD · 注入百分比 0\.25%–0\.75%<\/title>/);
   assert.doesNotMatch(html, /data-bancor-volume-direction|<circle/);
   assert.doesNotMatch(html, /data-bancor-candle-gap="true"/);
 });

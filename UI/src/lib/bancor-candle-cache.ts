@@ -23,6 +23,22 @@ export interface BancorCandleCacheRecord {
 
 let databasePromise: Promise<IDBDatabase> | null = null;
 
+function validLiquidityPercentage(value: unknown): value is string {
+  if (typeof value !== "string" || !/^(0|[1-9]\d{0,2})(?:\.\d{1,8})?$/.test(value)) return false;
+  const percentage = Number(value);
+  return Number.isFinite(percentage) && percentage >= 0 && percentage <= 100;
+}
+
+function validLiquidityPercentageRange(candle: Partial<NniBancorCandle>): boolean {
+  const minimum = candle.liquidity_percentage_min;
+  const maximum = candle.liquidity_percentage_max;
+  if (minimum === undefined && maximum === undefined) return true;
+  if ((candle.liquidity_event_count ?? 0) === 0) return minimum === null && maximum === null;
+  return validLiquidityPercentage(minimum)
+    && validLiquidityPercentage(maximum)
+    && Number(minimum) <= Number(maximum);
+}
+
 function normalizedScope(scope: string): string {
   return scope.trim().replace(/\/+$/, "") || "same-origin";
 }
@@ -101,7 +117,8 @@ function isCandle(value: unknown): value is NniBancorCandle {
     && /^\d+$/.test(candle.liquidity_usd_units)
     && typeof candle.liquidity_usd === "string"
     && Number.isFinite(Number(candle.liquidity_usd))
-    && Number(candle.liquidity_usd) >= 0;
+    && Number(candle.liquidity_usd) >= 0
+    && validLiquidityPercentageRange(candle);
 }
 
 export function isBancorCandleResponse(value: unknown, intervalSeconds: number): value is NniBancorCandlesResponse {

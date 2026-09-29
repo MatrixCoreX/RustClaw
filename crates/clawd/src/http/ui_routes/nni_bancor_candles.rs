@@ -137,6 +137,43 @@ fn validate_bancor_candles_response(
         {
             return Err("nni_bancor_candles_contract_invalid");
         }
+        let parse_percentage = |value: &Value| -> Option<f64> {
+            let text = value.as_str()?;
+            let mut parts = text.split('.');
+            let whole = parts.next()?;
+            let fraction = parts.next();
+            if whole.is_empty()
+                || !whole.bytes().all(|byte| byte.is_ascii_digit())
+                || fraction.is_some_and(|part| {
+                    part.is_empty()
+                        || part.len() > 8
+                        || !part.bytes().all(|byte| byte.is_ascii_digit())
+                })
+                || parts.next().is_some()
+            {
+                return None;
+            }
+            text.parse::<f64>()
+                .ok()
+                .filter(|percentage| percentage.is_finite() && (0.0..=100.0).contains(percentage))
+        };
+        match (
+            candle.get("liquidity_percentage_min"),
+            candle.get("liquidity_percentage_max"),
+        ) {
+            (None, None) => {}
+            (Some(Value::Null), Some(Value::Null)) if liquidity_count == 0 => {}
+            (Some(minimum), Some(maximum)) if liquidity_count > 0 => {
+                let minimum = parse_percentage(minimum)
+                    .ok_or("nni_bancor_candles_contract_invalid")?;
+                let maximum = parse_percentage(maximum)
+                    .ok_or("nni_bancor_candles_contract_invalid")?;
+                if minimum > maximum {
+                    return Err("nni_bancor_candles_contract_invalid");
+                }
+            }
+            _ => return Err("nni_bancor_candles_contract_invalid"),
+        }
     }
     Ok(())
 }

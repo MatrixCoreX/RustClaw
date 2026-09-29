@@ -209,6 +209,13 @@ export function resolveBancorCandleVisualState(candle: NniBancorCandle): BancorC
   return close > open ? "up" : "down";
 }
 
+export function formatBancorLiquidityPercentageRange(candle: NniBancorCandle): string | null {
+  const minimum = candle.liquidity_percentage_min;
+  const maximum = candle.liquidity_percentage_max;
+  if (typeof minimum !== "string" || typeof maximum !== "string") return null;
+  return minimum === maximum ? `${minimum}%` : `${minimum}%–${maximum}%`;
+}
+
 export function resolveBancorTradeColor(side: "buy" | "sell", t: Translate): string {
   const palette = resolveBancorCandlePalette(t);
   return side === "buy" ? palette.up.stroke : palette.down.stroke;
@@ -1661,6 +1668,7 @@ export function CandleChart({
   const currentPriceY = yForPrice(currentPrice);
   const currentPriceIsVisible = currentPriceY >= priceTop && currentPriceY <= priceBottom;
   const focused = hoveredIndex === null ? last : values[Math.min(hoveredIndex, values.length - 1)] ?? last;
+  const focusedLiquidityPercentage = formatBancorLiquidityPercentageRange(focused.candle);
   const tickIndexes = new Set([0, Math.floor((values.length - 1) / 2), values.length - 1]);
   const palette = resolveBancorCandlePalette(t);
   const latestVisualState = resolveBancorCandleVisualState(last.candle);
@@ -1890,13 +1898,14 @@ export function CandleChart({
             const highY = yForPrice(value.high);
             const lowY = yForPrice(value.low);
             const volumeHeight = (value.aicVolume / maxVolume) * (volumeBottom - volumeTop);
+            const liquidityPercentage = formatBancorLiquidityPercentageRange(value.candle);
             return (
               <g
                 key={`${value.candle.bucket_start_unix}-${index}`}
                 data-bancor-candle-direction={visualState}
                 data-bancor-candle-state={candleOpen ? "open" : "closed"}
               >
-                <title>{`${formatUnixDateTime(value.candle.bucket_start_unix)} · O ${value.candle.open} · H ${value.candle.high} · L ${value.candle.low} · C ${value.candle.close} · ${value.candle.aic_volume} AIC · ${value.candle.trade_count} ${t("笔", "trades")} · ${(value.candle.liquidity_event_count ?? 0) > 0 ? "◆ " : ""}${t("资金池注入", "Funding account injection")} ${value.candle.liquidity_usd ?? "0"} USD`}</title>
+                <title>{`${formatUnixDateTime(value.candle.bucket_start_unix)} · O ${value.candle.open} · H ${value.candle.high} · L ${value.candle.low} · C ${value.candle.close} · ${value.candle.aic_volume} AIC · ${value.candle.trade_count} ${t("笔", "trades")} · ${(value.candle.liquidity_event_count ?? 0) > 0 ? "◆ " : ""}${t("资金池注入", "Funding account injection")} ${value.candle.liquidity_usd ?? "0"} USD${liquidityPercentage ? ` · ${t("注入百分比", "Injection percentage")} ${liquidityPercentage}` : ""}`}</title>
                 <g clipPath={`url(#${priceClipId})`}>
                   {hasPriceEvents && highY < bodyTop ? <line x1={x} y1={highY} x2={x} y2={bodyTop} stroke={color.stroke} strokeWidth="1.5" /> : null}
                   {hasPriceEvents && bodyBottom < lowY ? <line x1={x} y1={bodyBottom} x2={x} y2={lowY} stroke={color.stroke} strokeWidth="1.5" /> : null}
@@ -2006,7 +2015,7 @@ export function CandleChart({
       <div className="bancor-chart-controls mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-white/45">
         <span>{t("买卖与注资均影响价格；成交量只统计买卖。", "Trades and funding both move the price; volume counts trades only.")}</span>
         {hoveredIndex !== null && (focused.candle.liquidity_event_count ?? 0) > 0 ? (
-          <span data-bancor-liquidity-detail="true"><span aria-hidden="true">◆ </span>{t("资金池注入", "Funding account injection")} +{focused.candle.liquidity_usd} USD · {focused.candle.liquidity_event_count} {t("次", "events")}</span>
+          <span data-bancor-liquidity-detail="true"><span aria-hidden="true">◆ </span>{t("资金池注入", "Funding account injection")} +{focused.candle.liquidity_usd} USD{focusedLiquidityPercentage ? <> · <span data-bancor-liquidity-percentage="true">{t("注入百分比", "Injection percentage")} {focusedLiquidityPercentage}</span></> : null} · {focused.candle.liquidity_event_count} {t("次", "events")}</span>
         ) : null}
         <span>
           {t("当前显示", "Showing")} {visibleWindow.start + 1}–{visibleWindow.end} / {allValues.length}

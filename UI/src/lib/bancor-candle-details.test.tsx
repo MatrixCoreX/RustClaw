@@ -12,6 +12,7 @@ for (const language of ["zh", "en"]) {
       open: "1", high: "2", low: "1", close: "2",
       aic_volume_units: "0", usd_volume_units: "0", aic_volume: "0", usd_volume: "0",
       trade_count: 0, has_trades: false, liquidity_event_count: 1, liquidity_usd: "2.00000000",
+      liquidity_percentage_min: "0.25", liquidity_percentage_max: "0.75",
     };
     let renderer: ReactTestRenderer | null = null;
     await act(async () => {
@@ -39,6 +40,10 @@ for (const language of ["zh", "en"]) {
       assert.equal(detail().length, 1);
       assert.equal(detail()[0].children[1], language === "zh" ? "资金池注入" : "Funding account injection");
       assert.equal(detail()[0].findByProps({ "aria-hidden": "true" }).children.join(""), "◆ ");
+      assert.equal(
+        detail()[0].findByProps({ "data-bancor-liquidity-percentage": "true" }).children.join(""),
+        language === "zh" ? "注入百分比 0.25%–0.75%" : "Injection percentage 0.25%–0.75%",
+      );
       await act(async () => surface.props.onPointerMove(event(0.75)));
       assert.equal(detail().length, 0);
       await act(async () => surface.props.onPointerDown(event(0.25, "touch")));

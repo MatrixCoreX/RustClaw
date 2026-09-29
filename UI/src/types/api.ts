@@ -1631,6 +1631,8 @@ export interface NniBancorCandle {
   liquidity_event_count?: number;
   liquidity_usd_units?: string;
   liquidity_usd?: string;
+  liquidity_percentage_min?: string | null;
+  liquidity_percentage_max?: string | null;
 }
 
 export interface NniBancorCandlesResponse {

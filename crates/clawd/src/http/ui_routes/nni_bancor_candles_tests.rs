@@ -14,7 +14,8 @@ fn pool_funding_moves_ohlc_without_fabricating_a_trade() {
             "trade_count": 0, "has_trades": false,
             "aic_volume_units": "0", "usd_volume_units": "0",
             "aic_volume": "0.00000000", "usd_volume": "0.00000000",
-            "liquidity_event_count": 1, "liquidity_usd_units": "100000000", "liquidity_usd": "1.00000000"}]
+            "liquidity_event_count": 1, "liquidity_usd_units": "100000000", "liquidity_usd": "1.00000000",
+            "liquidity_percentage_min": "0.25", "liquidity_percentage_max": "0.75"}]
     });
     assert_eq!(validate_bancor_candles_response(&value, 60, 10), Ok(()));
     for field in [
@@ -29,6 +30,28 @@ fn pool_funding_moves_ohlc_without_fabricating_a_trade() {
     let mut inconsistent = value.clone();
     inconsistent["candles"][0]["liquidity_event_count"] = json!(0);
     assert!(validate_bancor_candles_response(&inconsistent, 60, 10).is_err());
+    let mut reversed_percentage = value.clone();
+    reversed_percentage["candles"][0]["liquidity_percentage_min"] = json!("0.8");
+    assert!(validate_bancor_candles_response(&reversed_percentage, 60, 10).is_err());
+    let mut incomplete_percentage = value.clone();
+    incomplete_percentage["candles"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("liquidity_percentage_max");
+    assert!(validate_bancor_candles_response(&incomplete_percentage, 60, 10).is_err());
+    let mut legacy_without_percentage = value.clone();
+    legacy_without_percentage["candles"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("liquidity_percentage_min");
+    legacy_without_percentage["candles"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("liquidity_percentage_max");
+    assert_eq!(
+        validate_bancor_candles_response(&legacy_without_percentage, 60, 10),
+        Ok(())
+    );
     let mut wrong_basis = value;
     wrong_basis["price_kind"] = json!("execution_average_usd_per_aic");
     assert!(validate_bancor_candles_response(&wrong_basis, 60, 10).is_err());
