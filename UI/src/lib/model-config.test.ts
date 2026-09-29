@@ -7,6 +7,7 @@ import {
   MULTIMODAL_SKILL_BY_KEY,
   buildModelCatalogEntryViews,
   buildMultimodalDraft,
+  buildMultimodalHostedRelayState,
   buildMultimodalMetaView,
   buildMultimodalSavePayload,
   buildMultimodalSkillEnabledState,
@@ -14,8 +15,7 @@ import {
   formatLlmTestMessage,
   formatMultimodalToken,
   hasUnsavedMultimodalDraftChanges,
-  hostedRelayImageVisionDraft,
-  imageVisionUsesHostedRelay,
+  multimodalUsesHostedRelay,
   providerUnsupportedLabel,
   updateMultimodalDraftField,
 } from "./model-config.ts";
@@ -45,7 +45,7 @@ test("builds multimodal drafts from configured sections", () => {
   assert.equal(draft.music_generation.vendor, "minimax");
 });
 
-test("recognizes and applies the hosted relay for image understanding", () => {
+test("reports the relay connection state for every multimodal module", () => {
   const preset = {
     vendor: "custom" as const,
     model: "minimax",
@@ -53,16 +53,21 @@ test("recognizes and applies the hosted relay for image understanding", () => {
     api_format: "openai_compat" as const,
     daily_request_limit: 1000,
   };
-  const draft = hostedRelayImageVisionDraft(preset);
-  assert.deepEqual(draft, {
-    vendor: "openai",
-    model: "minimax",
-    base_url: "https://relay.example/v1",
-    api_key: "",
+  const draft = buildMultimodalDraft(configFixture());
+  draft.image_vision.base_url = "https://relay.example/v1";
+  draft.audio_transcribe.base_url = "https://relay.example/v1/";
+
+  assert.equal(multimodalUsesHostedRelay(preset, draft.image_vision), true);
+  assert.equal(multimodalUsesHostedRelay(preset, { ...draft.image_vision, base_url: "" }), false);
+  assert.deepEqual(buildMultimodalHostedRelayState(preset, draft), {
+    image_edit: false,
+    image_generation: false,
+    image_vision: true,
+    audio_synthesize: false,
+    audio_transcribe: true,
+    video_generation: false,
+    music_generation: false,
   });
-  assert.equal(imageVisionUsesHostedRelay(preset, draft), true);
-  assert.equal(imageVisionUsesHostedRelay(preset, { ...draft, model: "other" }), false);
-  assert.equal(imageVisionUsesHostedRelay(preset, { ...draft, base_url: "https://provider.example/v1" }), false);
 });
 
 test("maps every multimodal module to its independently switchable skill", () => {

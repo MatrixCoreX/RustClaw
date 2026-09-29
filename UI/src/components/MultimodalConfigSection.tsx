@@ -17,6 +17,8 @@ export interface MultimodalConfigSectionLabels {
   disabled: string;
   switchHint: string;
   switchReadOnlyHint: string;
+  managedRelay: string;
+  independentEndpoint: string;
 }
 
 export interface MultimodalConfigSectionProps {
@@ -28,6 +30,7 @@ export interface MultimodalConfigSectionProps {
   enabledByKey: Record<string, boolean>;
   switchSavingKey: MultimodalKey | null;
   canManageSkills: boolean;
+  hostedRelayByKey: Record<string, boolean>;
   onDraftChange: (key: MultimodalKey, field: keyof ModelConfigItem, value: string) => void;
   onEnabledChange: (key: MultimodalKey, enabled: boolean) => void;
   renderMeta: (key: MultimodalKey) => ReactNode;
@@ -42,6 +45,7 @@ export function MultimodalConfigSection({
   enabledByKey,
   switchSavingKey,
   canManageSkills,
+  hostedRelayByKey,
   onDraftChange,
   onEnabledChange,
   renderMeta,
@@ -56,6 +60,13 @@ export function MultimodalConfigSection({
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
                 <span className="w-24 shrink-0 text-xs font-medium text-white/80">{label}</span>
+                <span
+                  className={hostedRelayByKey[key]
+                    ? "shrink-0 rounded-full border border-emerald-400/25 bg-emerald-400/10 px-2 py-1 text-[11px] text-emerald-200"
+                    : "shrink-0 rounded-full border border-white/15 bg-white/5 px-2 py-1 text-[11px] text-white/55"}
+                >
+                  {hostedRelayByKey[key] ? labels.managedRelay : labels.independentEndpoint}
+                </span>
                 <input
                   className="theme-input w-28 shrink-0 text-xs"
                   placeholder={labels.vendor}

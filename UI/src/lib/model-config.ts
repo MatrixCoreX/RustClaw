@@ -90,24 +90,22 @@ function normalizedEndpoint(value: string | null | undefined): string {
   return (value ?? "").trim().replace(/\/+$/, "");
 }
 
-export function imageVisionUsesHostedRelay(
+export function multimodalUsesHostedRelay(
   preset: HostedRelayPreset | null | undefined,
   item: ModelConfigItem | null | undefined,
 ): boolean {
   if (!preset || !item) return false;
-  return item.vendor.trim().toLowerCase() === "openai"
-    && item.model.trim() === preset.model.trim()
-    && normalizedEndpoint(item.base_url) === normalizedEndpoint(preset.base_url);
+  const endpoint = normalizedEndpoint(item.base_url);
+  return endpoint.length > 0 && endpoint === normalizedEndpoint(preset.base_url);
 }
 
-export function hostedRelayImageVisionDraft(preset: HostedRelayPreset): ModelConfigItem {
-  return {
-    // image_vision consumes the relay through its OpenAI-compatible adapter.
-    vendor: "openai",
-    model: preset.model.trim(),
-    base_url: normalizedEndpoint(preset.base_url),
-    api_key: "",
-  };
+export function buildMultimodalHostedRelayState(
+  preset: HostedRelayPreset | null | undefined,
+  draft: MultimodalDraft,
+): Record<MultimodalKey, boolean> {
+  return Object.fromEntries(
+    MULTIMODAL_KEYS.map((key) => [key, multimodalUsesHostedRelay(preset, draft[key])]),
+  ) as Record<MultimodalKey, boolean>;
 }
 
 export function buildMultimodalSkillEnabledState(

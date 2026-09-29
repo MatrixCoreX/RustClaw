@@ -3,8 +3,7 @@ import { ChevronDown, Database, KeyRound, Loader2, RefreshCw } from "lucide-reac
 
 import { HOSTED_RELAY_SELECTION, isHostedRelayDraft as matchesHostedRelayDraft, llmVendorSupportsApiFormat } from "../lib/llm-config";
 import {
-  hostedRelayImageVisionDraft,
-  imageVisionUsesHostedRelay,
+  buildMultimodalHostedRelayState,
   type ModelCatalogEntryView,
   type MultimodalDraft,
   type MultimodalKey,
@@ -122,19 +121,10 @@ export function ModelConfigPage({
     baseUrl: llmDraftBaseUrl,
     apiFormat: llmDraftApiFormat,
   });
-  const imageVisionHostedRelayActive = imageVisionUsesHostedRelay(
+  const multimodalHostedRelayState = buildMultimodalHostedRelayState(
     llmConfigData?.hosted_relay,
-    multimodalDraft.image_vision,
+    multimodalDraft,
   );
-  const applyHostedRelayToImageVision = () => {
-    const preset = llmConfigData?.hosted_relay;
-    if (!preset) return;
-    const next = hostedRelayImageVisionDraft(preset);
-    onMultimodalDraftChange("image_vision", "vendor", next.vendor);
-    onMultimodalDraftChange("image_vision", "model", next.model);
-    onMultimodalDraftChange("image_vision", "base_url", next.base_url ?? "");
-    onMultimodalDraftChange("image_vision", "api_key", "");
-  };
   const credentialLabel = isHostedRelayDraft
     ? t("由设备自动管理", "Managed automatically by this device")
     : selectedLlmVendorInfo?.api_key_configured
@@ -497,41 +487,6 @@ export function ModelConfigPage({
 
           {modelsAdvancedOpen ? (
             <div className="mt-5 space-y-6 border-t border-white/10 pt-5">
-              {llmConfigData?.hosted_relay ? (
-                <div className="rounded-xl border border-sky-400/20 bg-sky-400/[0.07] px-4 py-3">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-medium text-white/90">{t("托管中转", "Managed Relay")}</span>
-                        <span className={imageVisionHostedRelayActive
-                          ? "rounded-full border border-emerald-400/25 bg-emerald-400/10 px-2 py-0.5 text-[11px] text-emerald-200"
-                          : "rounded-full border border-amber-400/25 bg-amber-400/10 px-2 py-0.5 text-[11px] text-amber-100"}
-                        >
-                          {imageVisionHostedRelayActive
-                            ? t("图像理解正在使用", "Used by Image Vision")
-                            : t("图像理解尚未使用", "Not used by Image Vision")}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-xs leading-5 text-white/55">
-                        {t(
-                          "当前中转支持图像理解；文生图、图像编辑和声音模块仍使用各自服务商接口。",
-                          "The relay currently supports image understanding. Image generation, image editing, and audio modules continue to use their own provider endpoints.",
-                        )}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={applyHostedRelayToImageVision}
-                      disabled={imageVisionHostedRelayActive}
-                      className="theme-secondary-btn px-3 py-2 text-xs disabled:cursor-default disabled:opacity-60"
-                    >
-                      {imageVisionHostedRelayActive
-                        ? t("已使用托管中转", "Managed Relay Active")
-                        : t("用于图像理解", "Use for Image Vision")}
-                    </button>
-                  </div>
-                </div>
-              ) : null}
               <div className="flex flex-wrap items-center justify-end gap-2">
                 <button
                   type="button"
@@ -578,6 +533,7 @@ export function ModelConfigPage({
                 ]}
                 draft={multimodalDraft}
                 enabledByKey={multimodalSkillEnabled}
+                hostedRelayByKey={multimodalHostedRelayState}
                 switchSavingKey={multimodalSkillSwitchSaving}
                 canManageSkills={canManageMultimodalSkills}
                 labels={{
@@ -589,6 +545,8 @@ export function ModelConfigPage({
                   disabled: t("已关闭", "Disabled"),
                   switchHint: t("开关只控制这个技能；关闭后模型设置仍会保留。", "This switch controls only this skill; model settings are preserved when disabled."),
                   switchReadOnlyHint: t("只有管理员可以修改技能开关。", "Only an administrator can change skill switches."),
+                  managedRelay: t("托管中转", "Managed relay"),
+                  independentEndpoint: t("独立/本地接口", "Independent/local endpoint"),
                 }}
                 onDraftChange={onMultimodalDraftChange}
                 onEnabledChange={(key, enabled) => void onMultimodalSkillEnabledChange(key, enabled)}
@@ -607,6 +565,7 @@ export function ModelConfigPage({
                 ]}
                 draft={multimodalDraft}
                 enabledByKey={multimodalSkillEnabled}
+                hostedRelayByKey={multimodalHostedRelayState}
                 switchSavingKey={multimodalSkillSwitchSaving}
                 canManageSkills={canManageMultimodalSkills}
                 labels={{
@@ -618,6 +577,8 @@ export function ModelConfigPage({
                   disabled: t("已关闭", "Disabled"),
                   switchHint: t("开关只控制这个技能；关闭后模型设置仍会保留。", "This switch controls only this skill; model settings are preserved when disabled."),
                   switchReadOnlyHint: t("只有管理员可以修改技能开关。", "Only an administrator can change skill switches."),
+                  managedRelay: t("托管中转", "Managed relay"),
+                  independentEndpoint: t("独立/本地接口", "Independent/local endpoint"),
                 }}
                 onDraftChange={onMultimodalDraftChange}
                 onEnabledChange={(key, enabled) => void onMultimodalSkillEnabledChange(key, enabled)}
@@ -630,6 +591,7 @@ export function ModelConfigPage({
                 entries={[{ key: "video_generation", label: t("视频生成", "Video Generate") }]}
                 draft={multimodalDraft}
                 enabledByKey={multimodalSkillEnabled}
+                hostedRelayByKey={multimodalHostedRelayState}
                 switchSavingKey={multimodalSkillSwitchSaving}
                 canManageSkills={canManageMultimodalSkills}
                 labels={{
@@ -641,6 +603,8 @@ export function ModelConfigPage({
                   disabled: t("已关闭", "Disabled"),
                   switchHint: t("开关只控制这个技能；关闭后模型设置仍会保留。", "This switch controls only this skill; model settings are preserved when disabled."),
                   switchReadOnlyHint: t("只有管理员可以修改技能开关。", "Only an administrator can change skill switches."),
+                  managedRelay: t("托管中转", "Managed relay"),
+                  independentEndpoint: t("独立/本地接口", "Independent/local endpoint"),
                 }}
                 onDraftChange={onMultimodalDraftChange}
                 onEnabledChange={(key, enabled) => void onMultimodalSkillEnabledChange(key, enabled)}
@@ -653,6 +617,7 @@ export function ModelConfigPage({
                 entries={[{ key: "music_generation", label: t("音乐生成", "Music Generate") }]}
                 draft={multimodalDraft}
                 enabledByKey={multimodalSkillEnabled}
+                hostedRelayByKey={multimodalHostedRelayState}
                 switchSavingKey={multimodalSkillSwitchSaving}
                 canManageSkills={canManageMultimodalSkills}
                 labels={{
@@ -664,6 +629,8 @@ export function ModelConfigPage({
                   disabled: t("已关闭", "Disabled"),
                   switchHint: t("开关只控制这个技能；关闭后模型设置仍会保留。", "This switch controls only this skill; model settings are preserved when disabled."),
                   switchReadOnlyHint: t("只有管理员可以修改技能开关。", "Only an administrator can change skill switches."),
+                  managedRelay: t("托管中转", "Managed relay"),
+                  independentEndpoint: t("独立/本地接口", "Independent/local endpoint"),
                 }}
                 onDraftChange={onMultimodalDraftChange}
                 onEnabledChange={(key, enabled) => void onMultimodalSkillEnabledChange(key, enabled)}
