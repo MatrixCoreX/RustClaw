@@ -74,6 +74,46 @@ class XiaohongshuAccessTest(unittest.TestCase):
         self.assertIn("https://sns-video-v3.xhscdn.com/note/ef4/master", urls)
         self.assertIn("https://sns-bak-v1.xhscdn.com/note/ef4/backup", urls)
 
+    def test_network_player_stream_does_not_skip_private_profile_lookup(self) -> None:
+        player_candidate = self.downloader.Candidate(
+            "https://sns-video-v4.xhscdn.com/stream/player.mp4",
+            "xiaohongshu.browser-netlog",
+            5_000_000,
+        )
+        self.assertFalse(
+            self.downloader.xiaohongshu_has_verified_item_media(
+                [player_candidate],
+                [],
+            )
+        )
+
+        structured_candidate = self.downloader.Candidate(
+            "https://sns-video-v4.xhscdn.com/stream/master",
+            "xiaohongshu.stream.EF4[0].masterUrl",
+            5,
+        )
+        self.assertTrue(
+            self.downloader.xiaohongshu_has_verified_item_media(
+                [player_candidate, structured_candidate],
+                [],
+            )
+        )
+        self.assertEqual(
+            self.downloader.selected_video_source_contract(
+                "xiaohongshu",
+                structured_candidate,
+            ),
+            {
+                "schema_version": 1,
+                "platform": "xiaohongshu",
+                "media_kind": "video",
+                "candidate_source": "xiaohongshu.stream.EF4[0].masterUrl",
+                "provenance": "structured_item_payload",
+                "exact_item_structured": True,
+                "rendered_player_fallback": False,
+            },
+        )
+
     def test_login_html_without_note_state_is_a_barrier(self) -> None:
         html = '<html><script>window.__INITIAL_STATE__={"user":{"loggedIn":false}}</script></html>'
         self.assertTrue(
@@ -98,7 +138,7 @@ class XiaohongshuAccessTest(unittest.TestCase):
                 url=item_url,
                 http_login_barrier=True,
                 dump_timed_out=True,
-                has_media=False,
+                has_verified_media=False,
             )
         )
         self.assertFalse(
@@ -107,7 +147,7 @@ class XiaohongshuAccessTest(unittest.TestCase):
                 url=item_url,
                 http_login_barrier=True,
                 dump_timed_out=True,
-                has_media=True,
+                has_verified_media=True,
             )
         )
         self.assertTrue(

@@ -252,10 +252,10 @@ def xiaohongshu_needs_skill_owned_login(
     url: str = "",
     http_login_barrier: bool = False,
     dump_timed_out: bool = False,
-    has_media: bool = False,
+    has_verified_media: bool = False,
 ) -> bool:
-    """Open the skill-owned profile when the note is a login wall, including empty dump-dom."""
-    if has_media:
+    """Open the private profile unless exact-item structured media was verified."""
+    if has_verified_media:
         return False
     if xiaohongshu_html_is_login(page_text, url):
         return True

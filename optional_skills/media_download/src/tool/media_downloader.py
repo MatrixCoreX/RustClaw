@@ -139,6 +139,7 @@ PROFILE_CHECKPOINT_BLOB_FOLDER = "blobs"
 PROFILE_VIDEO_FOLDER = "videos"
 PROFILE_IMAGE_FOLDER = "images"
 PARENT_PROGRESS_PREFIX = "__MEDIA_DOWNLOAD_PROGRESS__:"
+PARENT_RESULT_PREFIX = "__MEDIA_DOWNLOAD_RESULT__:"
 DEFAULT_PROFILE_INTERVAL = 5.0
 INTERACTIVE_HISTORY_LIMIT = 1000
 INTERACTIVE_HISTORY_ENV = "MEDIA_DOWNLOADER_HISTORY"
@@ -2262,6 +2263,34 @@ def browser_candidates_are_sufficient(
     return True
 
 
+def xiaohongshu_has_verified_item_media(
+    candidates: Iterable[Candidate],
+    image_candidates: Iterable[ImageCandidate],
+) -> bool:
+    """Return whether media came from the requested note's structured payload.
+
+    A browser network log can expose the currently rendered player rendition even
+    while the page itself is behind a login wall. That rendition can have a
+    platform watermark baked into its pixels. Only exact-note payload fields are
+    strong enough evidence to stop the private-profile lookup.
+    """
+    structured_video_sources = (
+        "xiaohongshu.stream.",
+        "xiaohongshu.masterUrl",
+        "xiaohongshu.backupUrls",
+        "xiaohongshu.videoUrl",
+        "xiaohongshu.video_url",
+        "xiaohongshu.playUrl",
+    )
+    if any(candidate.source.startswith(structured_video_sources) for candidate in candidates):
+        return True
+    exact_image_sources = (
+        "xiaohongshu.page-item.image",
+        "xiaohongshu.interactive-page.image",
+    )
+    return any(candidate.source.startswith(exact_image_sources) for candidate in image_candidates)
+
+
 def douyin_exact_browser_result_is_complete(
     candidates: list[Candidate],
     image_candidates: list[ImageCandidate],
@@ -2780,20 +2809,31 @@ def gather_browser_candidates(
                 )
                 for candidate in netlog_candidates:
                     merge_platform_candidate(candidates, seen, candidate, platform)
-            if candidates and not browser_candidates_are_sufficient(
+            media_sufficient = browser_candidates_are_sufficient(
                 candidates,
                 image_candidates,
                 require_audio=require_audio,
+            )
+            xiaohongshu_media_verified = (
+                platform != "xiaohongshu"
+                or xiaohongshu_has_verified_item_media(candidates, image_candidates)
+            )
+            if (
+                platform == "xiaohongshu"
+                and http_login_barrier
+                and media_sufficient
+                and not xiaohongshu_media_verified
             ):
+                logs.append(
+                    "xiaohongshu: browser playback media was not verified against "
+                    "the structured note payload; trying the skill-owned profile"
+                )
+            elif candidates and not media_sufficient:
                 logs.append(
                     f"{platform}: browser fallback only found video-only adaptive streams; "
                     "continuing to another item route"
                 )
-            elif browser_candidates_are_sufficient(
-                candidates,
-                image_candidates,
-                require_audio=require_audio,
-            ):
+            elif media_sufficient:
                 break
 
         if (
@@ -2806,7 +2846,10 @@ def gather_browser_candidates(
                 http_login_barrier=http_login_barrier
                 or "xiaohongshu: login_required" in logs,
                 dump_timed_out=dump_timed_out,
-                has_media=bool(candidates or image_candidates),
+                has_verified_media=xiaohongshu_has_verified_item_media(
+                    candidates,
+                    image_candidates,
+                ),
             )
         ):
             login_retry_used = True
@@ -4427,6 +4470,38 @@ def emit_parent_download_progress(current: int, total: int) -> None:
     }
     print(
         PARENT_PROGRESS_PREFIX + json.dumps(payload, separators=(",", ":")),
+        file=sys.stderr,
+        flush=True,
+    )
+
+
+def selected_video_source_contract(platform: str, candidate: Candidate) -> dict[str, Any]:
+    normalized_platform = normalize_platform(platform)
+    contract: dict[str, Any] = {
+        "schema_version": 1,
+        "platform": normalized_platform,
+        "media_kind": "video",
+        "candidate_source": candidate.source,
+    }
+    if normalized_platform == "xiaohongshu":
+        exact_item_structured = xiaohongshu_has_verified_item_media([candidate], [])
+        contract.update(
+            {
+                "provenance": (
+                    "structured_item_payload"
+                    if exact_item_structured
+                    else "rendered_player_network_fallback"
+                ),
+                "exact_item_structured": exact_item_structured,
+                "rendered_player_fallback": not exact_item_structured,
+            }
+        )
+    return contract
+
+
+def emit_parent_result_metadata(payload: dict[str, Any]) -> None:
+    print(
+        PARENT_RESULT_PREFIX + json.dumps(payload, separators=(",", ":")),
         file=sys.stderr,
         flush=True,
     )
@@ -8592,6 +8667,7 @@ def handle_resolved_media(
                 image_candidates,
                 logs,
             )
+        emit_parent_result_metadata(selected_video_source_contract(platform, candidate))
         handle_downloaded_video(saved_path, args)
         return 0
 
@@ -8621,6 +8697,10 @@ def handle_resolved_media(
         print(
             "audio_candidate_fallback: all usable candidates are silent; preserving the best video",
             file=sys.stderr,
+        )
+        assert silent_fallback_candidate is not None
+        emit_parent_result_metadata(
+            selected_video_source_contract(platform, silent_fallback_candidate)
         )
         handle_downloaded_video(output_path, args)
         return 0

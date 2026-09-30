@@ -42,6 +42,7 @@ MAX_DIAGNOSTIC_CHARS = 4_000
 IMAGE_ARCHIVE_THRESHOLD = 9
 SUBPROCESS_TIMEOUT_SLICE_SECONDS = 24 * 60 * 60
 CHILD_PROGRESS_PREFIX = "__MEDIA_DOWNLOAD_PROGRESS__:"
+CHILD_RESULT_PREFIX = "__MEDIA_DOWNLOAD_RESULT__:"
 PROGRESS_STEP_IDS = {
     "precheck": "media_precheck",
     "download": "download_media",
@@ -1469,10 +1470,33 @@ def _prepare_transcription_review_contract(
 
 
 def _diagnostics(stderr: str) -> str:
-    value = stderr.strip()
+    value = "\n".join(
+        line
+        for line in stderr.splitlines()
+        if not line.strip().startswith((CHILD_PROGRESS_PREFIX, CHILD_RESULT_PREFIX))
+    ).strip()
     if len(value) <= MAX_DIAGNOSTIC_CHARS:
         return value
     return value[-MAX_DIAGNOSTIC_CHARS:]
+
+
+def _child_result_metadata(stderr: str) -> dict[str, Any] | None:
+    for line in reversed(stderr.splitlines()):
+        stripped = line.strip()
+        if not stripped.startswith(CHILD_RESULT_PREFIX):
+            continue
+        try:
+            payload = json.loads(stripped[len(CHILD_RESULT_PREFIX) :])
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+            continue
+        if payload.get("media_kind") not in {"video", "images"}:
+            continue
+        if not isinstance(payload.get("platform"), str):
+            continue
+        return payload
+    return None
 
 
 def _rollback_output_changes(
@@ -2085,6 +2109,7 @@ def respond(
         storage_directory,
         progress.forward_child if progress is not None else None,
     )
+    source_media = _child_result_metadata(stderr) if action == "download" else None
     transcription_review = None
     if action == "transcribe":
         transcription_review = _prepare_transcription_review_contract(
@@ -2201,6 +2226,8 @@ def respond(
         "diagnostics": _diagnostics(stderr),
     }
     if action == "download":
+        if source_media is not None:
+            extra["source_media"] = source_media
         extra["content_bundle"] = _content_bundle(
             artifacts,
             inline_article,

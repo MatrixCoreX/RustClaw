@@ -125,6 +125,29 @@ class AdapterTest(unittest.TestCase):
             ("media_download.download.progress", 524288, 1048576),
         )
 
+    def test_child_result_metadata_is_structured_and_hidden_from_diagnostics(self) -> None:
+        line = self.skill.CHILD_RESULT_PREFIX + json.dumps(
+            {
+                "schema_version": 1,
+                "platform": "xiaohongshu",
+                "media_kind": "video",
+                "candidate_source": "xiaohongshu.stream.EF5[0].masterUrl",
+                "provenance": "structured_item_payload",
+                "exact_item_structured": True,
+                "rendered_player_fallback": False,
+            },
+            separators=(",", ":"),
+        )
+        stderr = f"xiaohongshu: login_required\n{line}\n"
+
+        metadata = self.skill._child_result_metadata(stderr)
+
+        self.assertIsNotNone(metadata)
+        assert metadata is not None
+        self.assertTrue(metadata["exact_item_structured"])
+        self.assertEqual(metadata["provenance"], "structured_item_payload")
+        self.assertEqual(self.skill._diagnostics(stderr), "xiaohongshu: login_required")
+
     def test_transcript_target_language_prefers_explicit_then_task_locale(self) -> None:
         request = {"context": {"locale": "zh-CN", "language": "en"}}
 
