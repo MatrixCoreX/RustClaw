@@ -240,6 +240,41 @@ fn host_process_sandbox_keeps_host_pid_view_and_other_boundaries() {
 }
 
 #[cfg(target_os = "linux")]
+#[test]
+fn host_process_sandbox_inherits_network_only_when_explicitly_requested() {
+    if !std::path::Path::new("/usr/bin/bwrap").is_file()
+        && !std::path::Path::new("/bin/bwrap").is_file()
+    {
+        return;
+    }
+    let root = TestDir::new("host_process_network");
+    let prepared = prepare_host_process_command(
+        "bash",
+        ProcessSandboxRequest {
+            mode: ToolSandboxMode::ReadOnly,
+            backend: ToolSandboxBackend::Auto,
+            workspace_root: root.path(),
+            execution_root: root.path(),
+            network: ProcessNetworkPolicy::Inherit,
+            additional_writable_paths: &[],
+        },
+    )
+    .expect("host process command");
+    let args = prepared
+        .command
+        .as_std()
+        .get_args()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+
+    assert!(!args.iter().any(|arg| arg == "--unshare-pid"));
+    assert!(!args.iter().any(|arg| arg == "--unshare-net"));
+    assert!(args.iter().any(|arg| arg == "--unshare-ipc"));
+    assert!(args.iter().any(|arg| arg == "--unshare-uts"));
+    assert!(args.iter().any(|arg| arg == "--ro-bind"));
+}
+
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn read_only_backend_rejects_workspace_mutation() {
     if !std::path::Path::new("/usr/bin/bwrap").is_file()

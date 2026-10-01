@@ -151,6 +151,66 @@ planner_capabilities = [
 }
 
 #[test]
+fn capability_isolation_preflight_allows_explicit_network_for_host_process_observer() {
+    let state = test_state();
+    install_test_registry(
+        &state,
+        r#"
+[[skills]]
+name = "health_check"
+enabled = true
+kind = "runner"
+planner_kind = "tool"
+capabilities = ["net", "exec"]
+planner_capabilities = [
+  { name = "health_check", action = "check", effect = "observe", risk_level = "low", isolation_profile = "host_process", network_access = true, filesystem_write = false, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false },
+]
+"#,
+        &["health_check"],
+    );
+    let args = serde_json::json!({"action": "check"});
+
+    assert!(
+        capability_isolation_policy_error(&state, "health_check", &args).is_none(),
+        "host process observation should honor an explicit network grant"
+    );
+}
+
+#[test]
+fn capability_isolation_preflight_keeps_network_forbidden_in_read_only_profile() {
+    let state = test_state();
+    install_test_registry(
+        &state,
+        r#"
+[[skills]]
+name = "read_only_probe"
+enabled = true
+kind = "runner"
+planner_kind = "tool"
+capabilities = ["net"]
+planner_capabilities = [
+  { name = "read_only_probe", action = "check", effect = "observe", risk_level = "low", isolation_profile = "read_only", network_access = true, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
+]
+"#,
+        &["read_only_probe"],
+    );
+    let args = serde_json::json!({"action": "check"});
+
+    let err = capability_isolation_policy_error(&state, "read_only_probe", &args)
+        .expect("read_only profile must continue to reject network access");
+    let parsed = crate::skills::parse_structured_skill_error(&err)
+        .expect("isolation preflight error should be structured");
+    assert_eq!(parsed.error_code, "isolation_policy_violation");
+    assert_eq!(
+        parsed
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.pointer("/violations/0")),
+        Some(&serde_json::json!("network_access"))
+    );
+}
+
+#[test]
 fn capability_isolation_artifact_refs_report_cleanup_workspace() {
     let mut state = test_state();
     state.skill_rt.workspace_root = std::env::temp_dir().join(format!(

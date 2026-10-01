@@ -656,8 +656,13 @@ fn isolation_profile_violations(
 ) -> Vec<&'static str> {
     let mut violations = Vec::new();
     match isolation_profile {
-        "read_only" | "host_process" => {
+        "read_only" => {
             push_policy_flag_violation(capability_policy, "network_access", &mut violations);
+            push_policy_flag_violation(capability_policy, "filesystem_write", &mut violations);
+            push_policy_flag_violation(capability_policy, "external_publish", &mut violations);
+            push_policy_flag_violation(capability_policy, "credential_access", &mut violations);
+        }
+        "host_process" => {
             push_policy_flag_violation(capability_policy, "filesystem_write", &mut violations);
             push_policy_flag_violation(capability_policy, "external_publish", &mut violations);
             push_policy_flag_violation(capability_policy, "credential_access", &mut violations);
