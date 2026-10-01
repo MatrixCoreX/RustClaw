@@ -1,9 +1,55 @@
 use super::{
     execution_action_for_verified_step, planner_user_text, production_verify_mode,
-    verified_action_conversation_relations, verifier_confirmation_gate_requires_checkpoint,
-    verifier_gate_missing_slots, verifier_gate_needs_clarification,
-    verifier_gate_requires_immediate_response, verifier_gate_should_stop_round,
+    select_effective_output_contract, verified_action_conversation_relations,
+    verifier_confirmation_gate_requires_checkpoint, verifier_gate_missing_slots,
+    verifier_gate_needs_clarification, verifier_gate_requires_immediate_response,
+    verifier_gate_should_stop_round,
 };
+
+#[test]
+fn committed_output_contract_cannot_be_relaxed_by_a_later_round() {
+    let committed = crate::IntentOutputContract {
+        response_shape: crate::OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        selection: crate::pipeline_types::OutputSelectionContract {
+            structured_field_selector: Some("title,source,link".to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let proposed = crate::IntentOutputContract::default();
+
+    let effective = select_effective_output_contract(Some(&committed), Some(&proposed))
+        .expect("committed contract");
+
+    assert_eq!(effective.response_shape, crate::OutputResponseShape::Strict);
+    assert!(effective.requires_content_evidence);
+    assert_eq!(
+        effective.selection.structured_field_selector.as_deref(),
+        Some("title,source,link")
+    );
+}
+
+#[test]
+fn planner_can_establish_contract_when_turn_has_none() {
+    let proposed = crate::IntentOutputContract {
+        response_shape: crate::OutputResponseShape::Scalar,
+        selection: crate::pipeline_types::OutputSelectionContract {
+            structured_field_selector: Some("count".to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let effective =
+        select_effective_output_contract(None, Some(&proposed)).expect("planner contract");
+
+    assert_eq!(effective.response_shape, crate::OutputResponseShape::Scalar);
+    assert_eq!(
+        effective.selection.structured_field_selector.as_deref(),
+        Some("count")
+    );
+}
 
 #[test]
 fn verified_response_relation_is_kept_parallel_to_the_executable_batch() {

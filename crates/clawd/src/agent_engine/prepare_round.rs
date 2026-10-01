@@ -38,6 +38,13 @@ fn production_verify_mode() -> crate::verifier::VerifyMode {
     crate::verifier::VerifyMode::Enforce
 }
 
+fn select_effective_output_contract(
+    committed: Option<&crate::IntentOutputContract>,
+    proposed: Option<&crate::IntentOutputContract>,
+) -> Option<crate::IntentOutputContract> {
+    committed.cloned().or_else(|| proposed.cloned())
+}
+
 async fn build_verifier_gate_response(
     state: &AppState,
     task: &ClaimedTask,
@@ -338,7 +345,12 @@ pub(super) async fn prepare_round_actions(
         crate::truncate_for_log(&plan_result.planner_notes),
         crate::truncate_for_log(&plan_result.raw_plan_text)
     );
-    let effective_output_contract = plan_result.output_contract.clone();
+    // The first accepted contract is a turn-level invariant. Later planner
+    // rounds may complete the work, but must not relax a strict delivery shape.
+    let effective_output_contract = select_effective_output_contract(
+        loop_state.output_contract.as_ref(),
+        plan_result.output_contract.as_ref(),
+    );
     let verify_mode = production_verify_mode();
     let verify_result = crate::verifier::verify_plan(
         state,
