@@ -445,6 +445,18 @@ releases = json.loads(Path(source).read_text(encoding="utf-8"))
 if not isinstance(releases, list):
     raise SystemExit("release metadata is not a list")
 
+# GitHub's releases endpoint is not an ordering contract. Releases edited or
+# published asynchronously can arrive out of chronological order, so select
+# from an explicit newest-first view instead of trusting response position.
+releases.sort(
+    key=lambda release: str(
+        release.get("published_at") or release.get("created_at") or ""
+    )
+    if isinstance(release, dict)
+    else "",
+    reverse=True,
+)
+
 for release in releases:
     if not isinstance(release, dict) or release.get("draft") or release.get("prerelease"):
         continue

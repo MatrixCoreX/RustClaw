@@ -154,6 +154,7 @@ releases = [
         "tag_name": "ubuntu-x86_64-test",
         "draft": False,
         "prerelease": False,
+        "published_at": "2026-01-01T00:00:00Z",
         "assets": [
             {
                 "name": archive.name,
@@ -165,6 +166,19 @@ releases = [
                 "url": checksum.as_uri(),
                 "browser_download_url": "file:///api-asset-preference-must-win/checksum",
             },
+            {"name": manifest.name, "url": manifest.as_uri()},
+            {"name": signature.name, "url": signature.as_uri()},
+            {"name": sbom.name, "url": sbom.as_uri()},
+        ],
+    },
+    {
+        "tag_name": "ubuntu-x86_64-newest",
+        "draft": False,
+        "prerelease": False,
+        "published_at": "2026-02-01T00:00:00Z",
+        "assets": [
+            {"name": archive.name, "url": archive.as_uri()},
+            {"name": checksum.name, "url": checksum.as_uri()},
             {"name": manifest.name, "url": manifest.as_uri()},
             {"name": signature.name, "url": signature.as_uri()},
             {"name": sbom.name, "url": sbom.as_uri()},
@@ -216,7 +230,7 @@ CHECK_OUTPUT="$(
       --platform ubuntu-x86_64 \
       --check-only
 )"
-grep -Fq 'release_tag=ubuntu-x86_64-test' <<< "$CHECK_OUTPUT"
+grep -Fq 'release_tag=ubuntu-x86_64-newest' <<< "$CHECK_OUTPUT"
 grep -Fq 'release_update_status=available' <<< "$CHECK_OUTPUT"
 [[ ! -e "$RUNTIME/.release-deploy.lock" ]]
 
@@ -229,7 +243,7 @@ OUTPUT="$(
 )"
 grep -Fq 'release_checksum=verified' <<< "$OUTPUT"
 grep -Fq 'release_update_status=deployed' <<< "$OUTPUT"
-grep -Fxq 'ubuntu-x86_64-test' "$RUNTIME/.release-tag"
+grep -Fxq 'ubuntu-x86_64-newest' "$RUNTIME/.release-tag"
 
 MOCK_SYSTEMD_BIN="$TMP_ROOT/mock-systemd-bin"
 MOCK_SYSTEMD_STATE="$TMP_ROOT/mock-systemd-active"
@@ -276,7 +290,7 @@ SYSTEMD_OUTPUT="$(
 )"
 grep -Fq 'runtime_restart=systemd:' <<< "$SYSTEMD_OUTPUT"
 grep -Fxq 'used' "$MOCK_SYSTEMD_SUDO"
-grep -Fxq 'ubuntu-x86_64-test' "$RUNTIME/.release-tag"
+grep -Fxq 'ubuntu-x86_64-newest' "$RUNTIME/.release-tag"
 
 assert_rejected_release() {
   local label="$1"
@@ -295,7 +309,7 @@ assert_rejected_release() {
   fi
   after_hash="$(sha256sum "$RUNTIME/target/release/clawd" | awk '{print $1}')"
   [[ "$before_hash" == "$after_hash" ]]
-  grep -Fxq 'ubuntu-x86_64-test' "$RUNTIME/.release-tag"
+  grep -Fxq 'ubuntu-x86_64-newest' "$RUNTIME/.release-tag"
 }
 grep -Fxq 'local-secret = "preserve"' "$RUNTIME/configs/config.toml"
 grep -Fxq 'registry-version = "release"' "$RUNTIME/configs/skills_registry.toml"
@@ -369,7 +383,7 @@ if APP_RELEASES_JSON_FILE="$BAD_RELEASES_JSON" \
 fi
 AFTER_HASH="$(sha256sum "$RUNTIME/target/release/clawd" | awk '{print $1}')"
 [[ "$BEFORE_HASH" == "$AFTER_HASH" ]]
-grep -Fxq 'ubuntu-x86_64-test' "$RUNTIME/.release-tag"
+grep -Fxq 'ubuntu-x86_64-newest' "$RUNTIME/.release-tag"
 
 TAMPERED_SIGNATURE="$TMP_ROOT/tampered-signature.sig"
 cp "$ARCHIVE.manifest.json.sig" "$TAMPERED_SIGNATURE"
@@ -560,7 +574,7 @@ if APP_RELEASES_JSON_FILE="$FAIL_RELEASES_JSON" \
   exit 1
 fi
 cmp /bin/true "$RUNTIME/target/release/clawd"
-grep -Fxq 'ubuntu-x86_64-test' "$RUNTIME/.release-tag"
+grep -Fxq 'ubuntu-x86_64-newest' "$RUNTIME/.release-tag"
 grep -Fxq 'new release readme' "$RUNTIME/README.md"
 grep -Fxq '9.8.7' "$RUNTIME/VERSION"
 [[ ! -e "$RUNTIME/build-ui-nginx.sh" ]]
@@ -601,7 +615,7 @@ grep -Fq 'release_package_status=enabled' <<< "$PACKAGE_MODE_OUTPUT"
 grep -Fq 'release_update_status=deployed' <<< "$PACKAGE_MODE_OUTPUT"
 test ! -e "$SOURCE_RUNTIME/.git"
 test ! -e "$SOURCE_RUNTIME/Cargo.toml"
-grep -Fxq 'ubuntu-x86_64-test' "$SOURCE_RUNTIME/.release-tag"
+grep -Fxq 'ubuntu-x86_64-newest' "$SOURCE_RUNTIME/.release-tag"
 grep -Fxq 'local-secret = "preserve"' "$SOURCE_RUNTIME/configs/config.toml"
 grep -Fxq 'registry-version = "release"' "$SOURCE_RUNTIME/configs/skills_registry.toml"
 grep -Fxq 'runtime-state' "$SOURCE_RUNTIME/data/state.db"
