@@ -77,14 +77,42 @@ mkdir -p \
   "$PACKAGE_DIR/services/wa-web-bridge" \
   "$PACKAGE_DIR/UI/dist"
 cp /bin/true "$PACKAGE_DIR/target/release/clawd"
-cp /bin/true "$PACKAGE_DIR/target/release/skillctl"
+cat > "$PACKAGE_DIR/target/release/skillctl" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+command_name="${1:-}"
+case "$command_name" in
+  receipt-verify)
+    package_root="$2"
+    skill_name="$3"
+    [[ -f "$package_root/$skill_name/.verified" ]]
+    ;;
+  install-precompiled|install-local)
+    package_root="$4"
+    mkdir -p "$package_root/store_fixture"
+    : > "$package_root/store_fixture/.verified"
+    ;;
+  *)
+    exit 64
+    ;;
+esac
+SH
+chmod +x "$PACKAGE_DIR/target/release/skillctl"
 printf 'new release readme\n' > "$PACKAGE_DIR/README.md"
 printf '9.8.7\n' > "$PACKAGE_DIR/VERSION"
 printf 'new-default = true\n' > "$PACKAGE_DIR/configs/new-default.toml"
 printf 'registry-version = "release"\n' > "$PACKAGE_DIR/configs/skills_registry.toml"
 printf 'release-channel = true\n' > "$PACKAGE_DIR/configs/channels/release.toml"
 printf 'name = "core_fixture"\n' > "$PACKAGE_DIR/crates/skills/core_fixture/skill.toml"
-printf 'name = "store_fixture"\n' > "$PACKAGE_DIR/optional_skills/store_fixture/skill.toml"
+cat > "$PACKAGE_DIR/optional_skills/store_fixture/skill.toml" <<'TOML'
+[package]
+name = "store_fixture"
+version = "9.8.7"
+
+[build]
+adapter = "cargo"
+TOML
+printf 'release runner source\n' > "$PACKAGE_DIR/optional_skills/store_fixture/runner.txt"
 printf 'release receipt\n' > "$PACKAGE_DIR/data/skill-packages/core_fixture/current.json"
 printf 'release prebuilt\n' > "$PACKAGE_DIR/prebuilt/skill-packages/store_fixture/current.json"
 printf 'model fixture\n' > "$PACKAGE_DIR/prebuilt/skill-storage/store_fixture/modelscope/model/model.pt"
@@ -149,7 +177,9 @@ PY
 RUNTIME="$TMP_ROOT/runtime"
 mkdir -p \
   "$RUNTIME/configs" \
+  "$RUNTIME/data/skill-packages/store_fixture" \
   "$RUNTIME/data/skill-packages/local_optional" \
+  "$RUNTIME/optional_skills/store_fixture" \
   "$RUNTIME/services/wa-web-bridge" \
   "$RUNTIME/target/release"
 cp /bin/false "$RUNTIME/target/release/clawd"
@@ -157,6 +187,8 @@ printf 'local-secret = "preserve"\n' > "$RUNTIME/configs/config.toml"
 printf 'registry-version = "stale"\n' > "$RUNTIME/configs/skills_registry.toml"
 printf 'old readme\n' > "$RUNTIME/README.md"
 printf 'keep local optional\n' > "$RUNTIME/data/skill-packages/local_optional/current.json"
+printf '%s\n' '{"version":"1.0.0"}' > "$RUNTIME/data/skill-packages/store_fixture/current.json"
+printf 'stale runner source\n' > "$RUNTIME/optional_skills/store_fixture/stale.txt"
 printf 'old bridge\n' > "$RUNTIME/services/wa-web-bridge/index.js"
 printf 'keep source test\n' > "$RUNTIME/services/wa-web-bridge/test.js"
 printf 'keep channel session\n' > "$RUNTIME/services/wa-web-bridge/session.json"
@@ -272,9 +304,12 @@ grep -Fxq 'new release readme' "$RUNTIME/README.md"
 grep -Fxq '9.8.7' "$RUNTIME/VERSION"
 grep -Fxq 'name = "core_fixture"' "$RUNTIME/crates/skills/core_fixture/skill.toml"
 grep -Fxq 'name = "store_fixture"' "$RUNTIME/optional_skills/store_fixture/skill.toml"
+grep -Fxq 'release runner source' "$RUNTIME/optional_skills/store_fixture/runner.txt"
+[[ ! -e "$RUNTIME/optional_skills/store_fixture/stale.txt" ]]
 grep -Fxq 'release receipt' "$RUNTIME/data/skill-packages/core_fixture/current.json"
 grep -Fxq 'keep local optional' "$RUNTIME/data/skill-packages/local_optional/current.json"
 grep -Fxq 'release prebuilt' "$RUNTIME/prebuilt/skill-packages/store_fixture/current.json"
+[[ -f "$RUNTIME/data/skill-packages/store_fixture/.verified" ]]
 grep -Fxq 'model fixture' "$RUNTIME/data/skills/store_fixture/modelscope/model/model.pt"
 grep -Fxq 'release bridge' "$RUNTIME/services/wa-web-bridge/index.js"
 grep -Fxq 'release media preflight' "$RUNTIME/services/wa-web-bridge/media-preflight.js"

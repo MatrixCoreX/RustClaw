@@ -732,6 +732,86 @@ PY
   printf 'bundled_skill_bootstrap=completed\n'
 }
 
+converge_installed_bundled_skills() {
+  local runtime_root="$1"
+  local package_root="$runtime_root/data/skill-packages"
+  local skillctl="$runtime_root/target/release/skillctl"
+  local clawd="$runtime_root/target/release/clawd"
+  local config="$runtime_root/configs/config.toml"
+  local inventory
+
+  [[ -x "$skillctl" && -x "$clawd" && -f "$config" ]] || return 0
+  inventory="$(mktemp "${TMPDIR:-/tmp}/agent-bundled-skills.XXXXXX")"
+  python3 - "$runtime_root" "$package_root" > "$inventory" <<'PY'
+from pathlib import Path
+import json
+import sys
+import tomllib
+
+root = Path(sys.argv[1])
+package_root = Path(sys.argv[2])
+for manifest in sorted((root / "optional_skills").glob("*/skill.toml")):
+    try:
+        value = tomllib.loads(manifest.read_text(encoding="utf-8"))
+        package = value["package"]
+        build = value["build"]
+        skill = package["name"]
+        version = package["version"]
+        adapter = build["adapter"]
+        current_path = package_root / skill / "current.json"
+        if not current_path.is_file():
+            continue
+        current = json.loads(current_path.read_text(encoding="utf-8"))
+        installed_version = current.get("version", "")
+    except (KeyError, OSError, json.JSONDecodeError, tomllib.TOMLDecodeError) as error:
+        raise SystemExit(f"bundled_skill_inventory_invalid: {manifest}: {error}") from error
+    relative = manifest.relative_to(root).as_posix()
+    print(f"{skill}\t{version}\t{installed_version}\t{adapter}\t{relative}")
+PY
+
+  local skill_name release_version installed_version adapter manifest_relative manifest_path
+  while IFS=$'\t' read -r skill_name release_version installed_version adapter manifest_relative; do
+    [[ -n "$skill_name" ]] || continue
+    if [[ "$installed_version" == "$release_version" ]] && \
+      "$skillctl" receipt-verify "$package_root" "$skill_name" >/dev/null 2>&1; then
+      continue
+    fi
+    manifest_path="$runtime_root/$manifest_relative"
+    printf 'bundled_skill_repair=started skill=%s installed=%s release=%s adapter=%s\n' \
+      "$skill_name" "$installed_version" "$release_version" "$adapter"
+    case "$adapter" in
+      cargo)
+        [[ -d "$runtime_root/prebuilt/skill-packages/$skill_name" ]] || {
+          rm -f "$inventory"
+          die "bundled_skill_precompiled_package_missing:$skill_name"
+        }
+        "$skillctl" install-precompiled \
+          "$manifest_path" "$runtime_root" "$package_root" \
+          "$runtime_root/prebuilt/skill-packages" >/dev/null
+        ;;
+      python|node|go|prebuilt|generic_process|http_json)
+        # Release packages carry locked runner sources and offline/native
+        # dependencies. --network acknowledges the manifest policy; adapters
+        # still refuse lifecycle scripts and source-build fallback.
+        "$skillctl" install-local \
+          "$manifest_path" "$runtime_root" "$package_root" --network >/dev/null
+        ;;
+      *)
+        rm -f "$inventory"
+        die "bundled_skill_adapter_unsupported:$skill_name:$adapter"
+        ;;
+    esac
+    "$skillctl" receipt-verify "$package_root" "$skill_name" >/dev/null
+    (
+      cd "$runtime_root"
+      "$clawd" --config "$config" --repair-bundled-skill "$skill_name" >/dev/null
+    )
+    printf 'bundled_skill_repair=completed skill=%s version=%s\n' \
+      "$skill_name" "$release_version"
+  done < "$inventory"
+  rm -f "$inventory"
+}
+
 if [[ "$PACKAGE_MODE" -eq 1 ]]; then
   PACKAGE_STAGE_DIR="$(mktemp -d "$ROOT_PARENT/.${ROOT_NAME}-release-stage.XXXXXX")"
   STAGED_ROOT="$PACKAGE_STAGE_DIR/runtime"
@@ -779,11 +859,24 @@ PY
     run \
     skills_output \
     external_skills \
-    optional_skills \
     .release-backups \
     image/download; do
     merge_runtime_directory "$relative"
   done
+
+  # Preserve locally added optional package directories that are not part of
+  # this release, while keeping release-owned bundled packages authoritative.
+  if [[ -d "$ROOT_DIR/optional_skills" ]]; then
+    mkdir -p "$STAGED_ROOT/optional_skills"
+    while IFS= read -r local_skill_dir; do
+      skill_name="$(basename "$local_skill_dir")"
+      [[ ! -e "$STAGED_ROOT/optional_skills/$skill_name" ]] || continue
+      cp -a "$local_skill_dir" "$STAGED_ROOT/optional_skills/$skill_name"
+    done < <(
+      find "$ROOT_DIR/optional_skills" \
+        -mindepth 1 -maxdepth 1 -type d | LC_ALL=C sort
+    )
+  fi
 
   # The base skill registry is immutable release metadata, not host-local
   # runtime state. Restore the packaged copy after merging configs so upgrades
@@ -823,6 +916,7 @@ PY
   [[ ! -e "$STAGED_ROOT/.git" ]] ||
     die "release_package_staged_git_metadata_present"
   bootstrap_bundled_release_skills "$STAGED_ROOT" "$STAGED_ROOT"
+  converge_installed_bundled_skills "$STAGED_ROOT"
 
   BACKUP_ROOT="$ROOT_PARENT/.${ROOT_NAME}-release-mode-backups"
   TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -940,7 +1034,7 @@ while IFS= read -r binary; do
   printf 'target/release/%s\n' "$(basename "$binary")" >> "$MANAGED_PATHS_FILE"
 done < <(find "$PACKAGE_DIR/target/release" -mindepth 1 -maxdepth 1 -type f | LC_ALL=C sort)
 
-for manifest_root in crates/skills optional_skills external_skills; do
+for manifest_root in crates/skills external_skills; do
   [[ -d "$PACKAGE_DIR/$manifest_root" ]] || continue
   while IFS= read -r manifest; do
     [[ -f "$manifest" ]] || continue
@@ -950,6 +1044,19 @@ for manifest_root in crates/skills optional_skills external_skills; do
       -mindepth 2 -maxdepth 2 -type f -name skill.toml | LC_ALL=C sort
   )
 done
+
+# Bundled optional sources and their offline dependency payloads are immutable
+# release content. Replace each complete package directory so an upgrade cannot
+# combine a new manifest with stale runner code or omit release wheels.
+if [[ -d "$PACKAGE_DIR/optional_skills" ]]; then
+  while IFS= read -r skill_dir; do
+    [[ -d "$skill_dir" && -f "$skill_dir/skill.toml" ]] || continue
+    printf '%s\n' "${skill_dir#"$PACKAGE_DIR/"}" >> "$MANAGED_PATHS_FILE"
+  done < <(
+    find "$PACKAGE_DIR/optional_skills" \
+      -mindepth 1 -maxdepth 1 -type d | LC_ALL=C sort
+  )
+fi
 
 # The packaged data tree contains repository-maintained proactive receipts only.
 # Install those directories individually so optional/external runtime receipts
@@ -1025,6 +1132,7 @@ if [[ -d "$PACKAGE_DIR/configs" ]]; then
   done < "$NEW_CONFIG_PATHS_FILE"
 fi
 bootstrap_bundled_release_skills "$ROOT_DIR" "$PACKAGE_DIR"
+converge_installed_bundled_skills "$ROOT_DIR"
 printf '%s\n' "$TAG" > "$ROOT_DIR/.release-tag"
 printf '%s\n' "$BACKUP_DIR" > "$ROOT_DIR/.release-rollback"
 printf '%s\n' "$MANIFEST_DIGEST" > "$ROOT_DIR/.release-manifest-digest"
