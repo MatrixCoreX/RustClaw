@@ -492,6 +492,7 @@ async fn dispatch_native_request(
             state.config.max_inflight_per_key,
         )
         .map_err(ApiError::from_store)?;
+    let mut settlement = AttemptSettlement::new(Arc::clone(&state.store), request_id.clone());
 
     let started = Instant::now();
     let url = state.config.provider.endpoint_url(path);
@@ -520,7 +521,6 @@ async fn dispatch_native_request(
     let upstream_response = match request.send().await {
         Ok(response) => response,
         Err(error) => {
-            settle_quietly(&state.store, &request_id, false, 0);
             warn!(error = %error, request_id, endpoint = path, "native upstream request failed");
             return Err(ApiError::bad_gateway(
                 "upstream_request_failed",
@@ -537,7 +537,6 @@ async fn dispatch_native_request(
         read_bounded_upstream_response(upstream_response, state.config.max_upstream_response_bytes)
             .await
             .inspect_err(|error| {
-                settle_quietly(&state.store, &request_id, false, 0);
                 warn!(
                     code = error.code,
                     request_id,
@@ -546,7 +545,7 @@ async fn dispatch_native_request(
                 );
             })?;
     let succeeded = status.is_success();
-    settle_quietly(&state.store, &request_id, succeeded, 0);
+    settlement.settle(succeeded, 0);
     info!(
         request_id,
         endpoint = path,
@@ -789,6 +788,7 @@ async fn chat_completions(
             state.config.max_inflight_per_key,
         )
         .map_err(ApiError::from_store)?;
+    let mut settlement = AttemptSettlement::new(Arc::clone(&state.store), request_id.clone());
 
     let upstream_response = state
         .http
@@ -801,7 +801,6 @@ async fn chat_completions(
     let upstream_response = match upstream_response {
         Ok(response) => response,
         Err(error) => {
-            settle_quietly(&state.store, &request_id, false, 0);
             warn!(error = %error, request_id, "upstream request failed");
             return Err(ApiError::bad_gateway(
                 "upstream_request_failed",
@@ -811,7 +810,6 @@ async fn chat_completions(
     };
     let status = upstream_response.status();
     if !status.is_success() {
-        settle_quietly(&state.store, &request_id, false, 0);
         warn!(
             status = status.as_u16(),
             request_id, "upstream rejected request"
@@ -820,12 +818,12 @@ async fn chat_completions(
     }
 
     if request.is_streaming() {
+        settlement.set_failure_fallback(u64::from(reserved_tokens));
         return Ok(streaming_response(
             upstream_response,
-            Arc::clone(&state.store),
+            settlement,
             request_id,
             provider.alias.clone(),
-            u64::from(reserved_tokens),
             state.config.max_upstream_response_bytes,
         ));
     }
@@ -834,14 +832,12 @@ async fn chat_completions(
         read_bounded_upstream_response(upstream_response, state.config.max_upstream_response_bytes)
             .await
             .inspect_err(|error| {
-                settle_quietly(&state.store, &request_id, false, 0);
                 warn!(
                     code = error.code,
                     request_id, "upstream response was rejected"
                 );
             })?;
     let mut body: Value = serde_json::from_slice(&response_bytes).map_err(|error| {
-        settle_quietly(&state.store, &request_id, false, 0);
         warn!(error = %error, request_id, "upstream response was not valid JSON");
         ApiError::bad_gateway("upstream_invalid_json", "proxy.upstream_invalid_json")
     })?;
@@ -851,7 +847,7 @@ async fn chat_completions(
     } else {
         usage.total_tokens
     };
-    settle_quietly(&state.store, &request_id, true, charged_tokens);
+    settlement.settle(true, charged_tokens);
     openai::mask_model_name(&mut body, &provider.alias);
     let mut response = Json(body).into_response();
     insert_request_id(response.headers_mut(), &request_id);
@@ -860,16 +856,14 @@ async fn chat_completions(
 
 fn streaming_response(
     response: reqwest::Response,
-    store: Arc<RelayStore>,
+    settlement: AttemptSettlement,
     request_id: String,
     public_model: String,
-    fallback_tokens: u64,
     max_response_bytes: usize,
 ) -> Response {
     let mut upstream = response.bytes_stream();
-    let guard = StreamSettlement::new(store, request_id.clone(), fallback_tokens);
     let stream = async_stream::stream! {
-        let mut guard = guard;
+        let mut settlement = settlement;
         let mut pending = Vec::new();
         let mut received_bytes = 0_usize;
         let mut total_tokens = 0_u64;
@@ -894,7 +888,7 @@ fn streaming_response(
                         let line = pending.drain(..=position).collect::<Vec<_>>();
                         let (line, usage) = rewrite_sse_line(line, &public_model);
                         total_tokens = total_tokens.max(usage);
-                        guard.observe(usage);
+                        settlement.observe(usage);
                         yield Ok::<Bytes, io::Error>(Bytes::from(line));
                     }
                 }
@@ -907,10 +901,10 @@ fn streaming_response(
         if !pending.is_empty() {
             let (line, usage) = rewrite_sse_line(pending, &public_model);
             total_tokens = total_tokens.max(usage);
-            guard.observe(usage);
+            settlement.observe(usage);
             yield Ok::<Bytes, io::Error>(Bytes::from(line));
         }
-        guard.complete(total_tokens);
+        settlement.settle(true, total_tokens);
     };
     let mut response = Response::new(Body::from_stream(stream));
     response.headers_mut().insert(
@@ -1030,49 +1024,53 @@ fn settle_quietly(store: &RelayStore, request_id: &str, succeeded: bool, total_t
     }
 }
 
-struct StreamSettlement {
+struct AttemptSettlement {
     store: Arc<RelayStore>,
     request_id: String,
-    completed: bool,
+    settled: bool,
     observed_tokens: u64,
-    fallback_tokens: u64,
+    failure_fallback_tokens: u64,
 }
 
-impl StreamSettlement {
-    fn new(store: Arc<RelayStore>, request_id: String, fallback_tokens: u64) -> Self {
+impl AttemptSettlement {
+    fn new(store: Arc<RelayStore>, request_id: String) -> Self {
         Self {
             store,
             request_id,
-            completed: false,
+            settled: false,
             observed_tokens: 0,
-            fallback_tokens,
+            failure_fallback_tokens: 0,
         }
+    }
+
+    fn set_failure_fallback(&mut self, total_tokens: u64) {
+        self.failure_fallback_tokens = total_tokens;
     }
 
     fn observe(&mut self, total_tokens: u64) {
         self.observed_tokens = self.observed_tokens.max(total_tokens);
     }
 
-    fn complete(&mut self, total_tokens: u64) {
+    fn settle(&mut self, succeeded: bool, total_tokens: u64) {
         self.observe(total_tokens);
-        let charged_tokens = if self.observed_tokens == 0 {
-            self.fallback_tokens
-        } else {
+        let charged_tokens = if succeeded {
             self.observed_tokens
+        } else {
+            self.observed_tokens.max(self.failure_fallback_tokens)
         };
-        settle_quietly(&self.store, &self.request_id, true, charged_tokens);
-        self.completed = true;
+        settle_quietly(&self.store, &self.request_id, succeeded, charged_tokens);
+        self.settled = true;
     }
 }
 
-impl Drop for StreamSettlement {
+impl Drop for AttemptSettlement {
     fn drop(&mut self) {
-        if !self.completed {
+        if !self.settled {
             settle_quietly(
                 &self.store,
                 &self.request_id,
                 false,
-                self.observed_tokens.max(self.fallback_tokens),
+                self.observed_tokens.max(self.failure_fallback_tokens),
             );
         }
     }

@@ -19,6 +19,9 @@ challenge, and persists per-device UTC-day usage in its own SQLite database.
 - Caller-provided upstream URLs, headers, credentials, and unknown routing fields are rejected.
 - Both buffered and streaming upstream responses have a strict byte limit so a provider or proxy
   cannot force the relay to retain unbounded response data.
+- Every persisted upstream reservation is protected by a drop guard. Client disconnects, cancelled
+  handler futures, upstream errors, and interrupted streams settle the attempt and release its
+  per-device concurrency slot; process startup also reconciles attempts interrupted by a crash.
 - nginx exposes only `/health` and `/v1/*`; readiness details and administration routes remain on
   the loopback listener. Forwarded client-address headers are removed at this trust boundary.
 

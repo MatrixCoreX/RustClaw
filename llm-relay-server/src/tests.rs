@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use chrono::Utc;
 use p256::ecdsa::{signature::hazmat::PrehashSigner, Signature, SigningKey};
 use serde_json::json;
@@ -11,6 +13,7 @@ use crate::{
     quota::QuotaLimits,
     rewrite_sse_line,
     store::{IssuedKey, RelayStore, StoreError},
+    AttemptSettlement,
 };
 
 const TEST_PEPPER: &str = "test-only-pepper-with-at-least-thirty-two-bytes";
@@ -163,6 +166,31 @@ fn per_key_inflight_limit_is_atomic() {
     store
         .reserve_attempt(&key, "request-after-settle", 10, 100, 1)
         .expect("reservation after settlement");
+}
+
+#[test]
+fn cancelled_request_guard_releases_the_persistent_inflight_slot() {
+    let directory = tempdir().expect("temp directory");
+    let store =
+        Arc::new(RelayStore::open(&directory.path().join("relay.db"), TEST_PEPPER).expect("store"));
+    let issued = enroll_device(&store, "device-cancelled", 3, 7);
+    let key = store.authenticate(&issued.token).expect("authenticate");
+    store
+        .reserve_attempt(&key, "request-cancelled", 10, 100, 1)
+        .expect("reserve cancelled attempt");
+
+    drop(AttemptSettlement::new(
+        Arc::clone(&store),
+        "request-cancelled".to_owned(),
+    ));
+
+    let snapshot = store.quota_snapshot(&key).expect("quota snapshot");
+    assert_eq!(snapshot.request_count, 1);
+    assert_eq!(snapshot.successful_requests, 0);
+    assert_eq!(snapshot.failed_requests, 1);
+    store
+        .reserve_attempt(&key, "request-after-cancel", 10, 100, 1)
+        .expect("released inflight slot after cancellation");
 }
 
 #[test]
