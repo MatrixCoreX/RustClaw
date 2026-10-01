@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use claw_core::config::AppConfig;
 
 use super::{
-    build_providers_for_selection, classify_prompt_source, matches_provider_override,
-    run_with_fallback_with_prompt_source, synthesize_llm_providers,
+    acquire_llm_resource_lease, build_providers_for_selection, classify_prompt_source,
+    matches_provider_override, run_with_fallback_with_prompt_source, synthesize_llm_providers,
 };
 
 fn repo_config_path() -> PathBuf {
@@ -12,6 +12,53 @@ fn repo_config_path() -> PathBuf {
         .join("../../configs/config.toml")
         .canonicalize()
         .expect("repo config path should resolve")
+}
+
+#[test]
+fn model_turns_share_resource_broker_provider_capacity() {
+    let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let mut leases = Vec::new();
+    let mut rejected_task = None;
+    for index in 0..64 {
+        let task = crate::ClaimedTask {
+            claim_attempt: 1,
+            task_id: format!("model-resource-{index}"),
+            user_id: 1,
+            chat_id: 1,
+            user_key: None,
+            channel: "ui".to_string(),
+            external_user_id: None,
+            external_chat_id: None,
+            kind: "ask".to_string(),
+            payload_json: "{}".to_string(),
+        };
+        match acquire_llm_resource_lease(&state, &task) {
+            Ok(lease) => leases.push(lease),
+            Err(error) => {
+                assert_eq!(error, super::LLM_RESOURCE_ADMISSION_WAIT_ERR);
+                rejected_task = Some(task);
+                break;
+            }
+        }
+    }
+    assert!(
+        !leases.is_empty(),
+        "at least one model turn must be admitted"
+    );
+    let rejected_task = rejected_task.expect("provider capacity must be bounded");
+    let blocker = state
+        .task_provider_blocker(&rejected_task.task_id)
+        .expect("resource refusal must remain machine readable");
+    assert_eq!(blocker.provider, "resource_broker");
+    assert!(!blocker.external_provider_blocked);
+    assert_eq!(
+        blocker.retry_after_seconds,
+        super::LLM_RESOURCE_ADMISSION_RETRY_SECONDS
+    );
+
+    drop(leases.pop());
+    acquire_llm_resource_lease(&state, &rejected_task)
+        .expect("releasing a model-turn lease must restore capacity");
 }
 
 #[test]

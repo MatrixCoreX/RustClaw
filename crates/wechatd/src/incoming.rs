@@ -215,25 +215,24 @@ async fn handle_claimed_incoming_message(
         let bound_user_key = identity.user_key;
         if let Some((ep, key)) = inbound_image_decrypt_params(&msg) {
             let cdn = state.config.cdn_base_url.trim();
-            match download_decrypted_media(&state.client, &ep, &key, cdn, "inbound-image").await {
-                Ok(bytes) => {
-                    if bytes.len() > 25 * 1024 * 1024 {
-                        warn!("wechatd: inbound image too large ({} bytes)", bytes.len());
-                        return true;
-                    }
-                    let rel = build_wechat_inbox_rel_path(
-                        &state.config.image_inbox_dir,
-                        &from_user_id,
-                        &format!("{}.jpg", provider_message_id),
-                    );
-                    let abs = state.workspace_root.join(&rel);
-                    if let Some(parent) = abs.parent() {
-                        let _ = tokio::fs::create_dir_all(parent).await;
-                    }
-                    if tokio::fs::write(&abs, &bytes).await.is_err() {
-                        warn!("wechatd: failed to write inbound image {}", rel);
-                        return false;
-                    }
+            let rel = build_wechat_inbox_rel_path(
+                &state.config.image_inbox_dir,
+                &from_user_id,
+                &format!("{}.jpg", provider_message_id),
+            );
+            let abs = state.workspace_root.join(&rel);
+            match download_decrypted_media_to_file(
+                &state.client,
+                &ep,
+                &key,
+                cdn,
+                "inbound-image",
+                &abs,
+                INBOUND_IMAGE_MAX_BYTES,
+            )
+            .await
+            {
+                Ok(byte_len) => {
                     update_status(&state, |status| {
                         status.healthy = true;
                         status.status = "message_received".to_string();
@@ -248,7 +247,7 @@ async fn handle_claimed_incoming_message(
                         "image",
                         rel,
                         "image/jpeg",
-                        bytes.len() as u64,
+                        byte_len,
                         bound_user_key.clone(),
                         provider_message_id.clone(),
                     )
@@ -261,25 +260,24 @@ async fn handle_claimed_incoming_message(
         }
         if let Some((ep, key)) = inbound_video_decrypt_params(&msg) {
             let cdn = state.config.cdn_base_url.trim();
-            match download_decrypted_media(&state.client, &ep, &key, cdn, "inbound-video").await {
-                Ok(bytes) => {
-                    if bytes.len() > 100 * 1024 * 1024 {
-                        warn!("wechatd: inbound video too large");
-                        return true;
-                    }
-                    let rel = build_wechat_inbox_rel_path(
-                        &state.config.video_inbox_dir,
-                        &from_user_id,
-                        &format!("{}.mp4", provider_message_id),
-                    );
-                    let abs = state.workspace_root.join(&rel);
-                    if let Some(parent) = abs.parent() {
-                        let _ = tokio::fs::create_dir_all(parent).await;
-                    }
-                    if tokio::fs::write(&abs, &bytes).await.is_err() {
-                        warn!("wechatd: failed to write inbound video {}", rel);
-                        return false;
-                    }
+            let rel = build_wechat_inbox_rel_path(
+                &state.config.video_inbox_dir,
+                &from_user_id,
+                &format!("{}.mp4", provider_message_id),
+            );
+            let abs = state.workspace_root.join(&rel);
+            match download_decrypted_media_to_file(
+                &state.client,
+                &ep,
+                &key,
+                cdn,
+                "inbound-video",
+                &abs,
+                INBOUND_MEDIA_MAX_BYTES,
+            )
+            .await
+            {
+                Ok(byte_len) => {
                     update_status(&state, |status| {
                         status.healthy = true;
                         status.status = "message_received".to_string();
@@ -294,7 +292,7 @@ async fn handle_claimed_incoming_message(
                         "video",
                         rel,
                         "video/mp4",
-                        bytes.len() as u64,
+                        byte_len,
                         bound_user_key.clone(),
                         provider_message_id.clone(),
                     )
@@ -307,25 +305,24 @@ async fn handle_claimed_incoming_message(
         }
         if let Some((ep, key, safe_name)) = inbound_file_decrypt_params(&msg) {
             let cdn = state.config.cdn_base_url.trim();
-            match download_decrypted_media(&state.client, &ep, &key, cdn, "inbound-file").await {
-                Ok(bytes) => {
-                    if bytes.len() > 100 * 1024 * 1024 {
-                        warn!("wechatd: inbound file too large");
-                        return true;
-                    }
-                    let rel = build_wechat_inbox_rel_path(
-                        &state.config.file_inbox_dir,
-                        &from_user_id,
-                        &format!("{}_{}", provider_message_id, safe_name),
-                    );
-                    let abs = state.workspace_root.join(&rel);
-                    if let Some(parent) = abs.parent() {
-                        let _ = tokio::fs::create_dir_all(parent).await;
-                    }
-                    if tokio::fs::write(&abs, &bytes).await.is_err() {
-                        warn!("wechatd: failed to write inbound file {}", rel);
-                        return false;
-                    }
+            let rel = build_wechat_inbox_rel_path(
+                &state.config.file_inbox_dir,
+                &from_user_id,
+                &format!("{}_{}", provider_message_id, safe_name),
+            );
+            let abs = state.workspace_root.join(&rel);
+            match download_decrypted_media_to_file(
+                &state.client,
+                &ep,
+                &key,
+                cdn,
+                "inbound-file",
+                &abs,
+                INBOUND_MEDIA_MAX_BYTES,
+            )
+            .await
+            {
+                Ok(byte_len) => {
                     update_status(&state, |status| {
                         status.healthy = true;
                         status.status = "message_received".to_string();
@@ -340,7 +337,7 @@ async fn handle_claimed_incoming_message(
                         "file",
                         rel,
                         "application/octet-stream",
-                        bytes.len() as u64,
+                        byte_len,
                         bound_user_key.clone(),
                         provider_message_id.clone(),
                     )
@@ -353,12 +350,17 @@ async fn handle_claimed_incoming_message(
         }
         if let Some((ep, key)) = inbound_voice_decrypt_params(&msg) {
             let cdn = state.config.cdn_base_url.trim();
-            match download_decrypted_media(&state.client, &ep, &key, cdn, "inbound-voice").await {
+            match download_decrypted_media(
+                &state.client,
+                &ep,
+                &key,
+                cdn,
+                "inbound-voice",
+                INBOUND_VOICE_MAX_BYTES,
+            )
+            .await
+            {
                 Ok(bytes) => {
-                    if bytes.len() > 20 * 1024 * 1024 {
-                        warn!("wechatd: inbound voice too large");
-                        return true;
-                    }
                     let (rel, data_to_write) =
                         if let Some(wav) = wechat_silk_wav::try_silk_to_wav(&bytes) {
                             (

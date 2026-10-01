@@ -11,6 +11,11 @@ pub(super) fn should_expect_key_reply(state: &BotState, chat_id: i64) -> bool {
 pub(super) fn set_expect_key_reply(state: &BotState, chat_id: i64, enabled: bool) {
     if let Ok(mut set) = state.pending_key_bind_by_chat.lock() {
         if enabled {
+            claw_core::bounded_cache::prepare_hash_set_insert(
+                &mut set,
+                &chat_id,
+                CHANNEL_RUNTIME_CACHE_MAX_ENTRIES,
+            );
             set.insert(chat_id);
         } else {
             set.remove(&chat_id);
@@ -51,6 +56,11 @@ pub(super) async fn send_bind_key_required_prompt(
 
 pub(super) fn store_bound_identity(state: &BotState, chat_id: i64, identity: &AuthIdentity) {
     if let Ok(mut map) = state.bound_identity_by_chat.lock() {
+        claw_core::bounded_cache::prepare_hash_map_insert(
+            &mut map,
+            &chat_id,
+            CHANNEL_RUNTIME_CACHE_MAX_ENTRIES,
+        );
         map.insert(chat_id, identity.clone());
     }
 }

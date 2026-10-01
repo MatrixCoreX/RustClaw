@@ -88,7 +88,7 @@ test("uses the shared skill progress event without exposing frame params", () =>
     payload: {
       skill_name: "media_download",
       frame: {
-        detail_key: "media_download.transcribe.recognizing_speech",
+        detail_key: "local_asr.recognizing_speech",
         params: { unsafe_display_text: "do not render me" },
         current: 2,
         total: 3,
@@ -98,7 +98,7 @@ test("uses the shared skill progress event without exposing frame params", () =>
 
   assert.equal(activity.stage, "running_tool");
   assert.equal(activity.activeName, "media_download");
-  assert.equal(activity.progressDetailKey, "media_download.transcribe.recognizing_speech");
+  assert.equal(activity.progressDetailKey, "local_asr.recognizing_speech");
   assert.equal(activity.progressCurrent, 2);
   assert.equal(activity.progressTotal, 3);
   assert.equal(JSON.stringify(activity).includes("do not render me"), false);

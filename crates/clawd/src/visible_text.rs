@@ -368,7 +368,10 @@ fn sensitive_key_name(key: &str) -> bool {
     if normalized.is_empty() {
         return false;
     }
-    if matches!(normalized.as_str(), "message_key" | "i18n_message_key") {
+    if matches!(
+        normalized.as_str(),
+        "message_key" | "i18n_message_key" | "continuation_token"
+    ) {
         return false;
     }
     normalized == "key"

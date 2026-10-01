@@ -371,3 +371,38 @@ fn with_meta_falls_back_to_default_template_version() {
 
     let _ = fs::remove_dir_all(root);
 }
+
+#[test]
+fn prompt_revision_changes_when_a_layer_or_vendor_candidate_changes() {
+    let root = temp_workspace("revision");
+    write_file(
+        &root,
+        "prompts/layers/manifest.toml",
+        r#"
+[[prompts]]
+logical_path = "prompts/revision.md"
+base = ["prompts/layers/base/revision.md"]
+vendor_patch = "routing/revision.md"
+"#,
+    );
+    write_file(&root, "prompts/layers/base/revision.md", "base");
+
+    let initial = prompt_template_revision(&root, "openai", "prompts/revision.md");
+    write_file(
+        &root,
+        "prompts/layers/vendor_patches/openai/routing/revision.md",
+        "new preferred vendor patch",
+    );
+    let with_patch = prompt_template_revision(&root, "openai", "prompts/revision.md");
+    assert_ne!(initial, with_patch);
+
+    write_file(
+        &root,
+        "prompts/layers/base/revision.md",
+        "base changed and longer",
+    );
+    let with_base_change = prompt_template_revision(&root, "openai", "prompts/revision.md");
+    assert_ne!(with_patch, with_base_change);
+
+    let _ = fs::remove_dir_all(root);
+}

@@ -795,7 +795,7 @@ async fn nni_skill_public_node_data(
         }
         .timeout(nni_remote_api_timeout());
         match request.send().await {
-            Ok(response) => {
+            Ok(mut response) => {
                 let status = response.status();
                 if response
                     .content_length()
@@ -808,9 +808,23 @@ async fn nni_skill_public_node_data(
                     }));
                     continue;
                 }
-                let bytes = match response.bytes().await {
-                    Ok(bytes) if bytes.len() <= NNI_SKILL_REMOTE_RESPONSE_MAX_BYTES => bytes,
-                    Ok(_) => {
+                let mut bytes = Vec::new();
+                let response_read = loop {
+                    match response.chunk().await {
+                        Ok(Some(chunk)) => {
+                            if bytes.len().saturating_add(chunk.len())
+                                > NNI_SKILL_REMOTE_RESPONSE_MAX_BYTES
+                            {
+                                break Err("nni_response_too_large");
+                            }
+                            bytes.extend_from_slice(&chunk);
+                        }
+                        Ok(None) => break Ok(()),
+                        Err(_) => break Err("nni_response_contract_invalid"),
+                    }
+                };
+                match response_read {
+                    Err("nni_response_too_large") => {
                         attempts.push(json!({
                             "node_host": nni_node_host(node_url),
                             "http_status": status.as_u16(),
@@ -818,16 +832,16 @@ async fn nni_skill_public_node_data(
                         }));
                         continue;
                     }
-                    Err(error) => {
+                    Err(error_code) => {
                         attempts.push(json!({
                             "node_host": nni_node_host(node_url),
                             "http_status": status.as_u16(),
-                            "error_code": "nni_response_contract_invalid",
-                            "detail": error.to_string(),
+                            "error_code": error_code,
                         }));
                         continue;
                     }
-                };
+                    Ok(()) => {}
+                }
                 match serde_json::from_slice::<ApiResponse<Value>>(&bytes) {
                     Ok(response) if status.is_success() && response.ok => {
                         if let Some(mut data) = response.data {

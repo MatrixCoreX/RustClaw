@@ -118,14 +118,32 @@ fn io_builtin_error(
     )
 }
 
+#[cfg(test)]
 pub(crate) async fn execute_builtin_skill_for_task(
     state: &AppState,
     task: &ClaimedTask,
     skill_name: &str,
     args: &Value,
 ) -> Result<String, String> {
+    execute_builtin_skill_for_task_with_resource_lease(state, task, skill_name, args, None).await
+}
+
+pub(crate) async fn execute_builtin_skill_for_task_with_resource_lease(
+    state: &AppState,
+    task: &ClaimedTask,
+    skill_name: &str,
+    args: &Value,
+    resource_lease: Option<crate::resource_scheduler::ResourceLease>,
+) -> Result<String, String> {
     if skill_name != "schedule" {
-        return execute_builtin_skill_with_task(state, Some(task), skill_name, args).await;
+        return execute_builtin_skill_with_task_and_resource_lease(
+            state,
+            Some(task),
+            skill_name,
+            args,
+            resource_lease,
+        )
+        .await;
     }
     let map = ensure_args_object(args)?;
     let action = required_string(map, "action")?.trim().to_ascii_lowercase();
@@ -153,11 +171,22 @@ pub(crate) async fn execute_builtin_skill(
     execute_builtin_skill_with_task(state, None, skill_name, args).await
 }
 
+#[cfg(test)]
 pub(crate) async fn execute_builtin_skill_with_task(
     state: &AppState,
     task: Option<&ClaimedTask>,
     skill_name: &str,
     args: &Value,
+) -> Result<String, String> {
+    execute_builtin_skill_with_task_and_resource_lease(state, task, skill_name, args, None).await
+}
+
+async fn execute_builtin_skill_with_task_and_resource_lease(
+    state: &AppState,
+    task: Option<&ClaimedTask>,
+    skill_name: &str,
+    args: &Value,
+    resource_lease: Option<crate::resource_scheduler::ResourceLease>,
 ) -> Result<String, String> {
     let execution_policy = task
         .map(|task| crate::task_execution_policy::effective_policy_for_task(state, task))
@@ -190,7 +219,9 @@ pub(crate) async fn execute_builtin_skill_with_task(
 
     let map = ensure_args_object(args)?;
     match skill_name {
-        "browser_session" => builtin_browser_session::execute(state, task, map).await,
+        "browser_session" => {
+            builtin_browser_session::execute(state, task, map, resource_lease).await
+        }
         "memory_store" => builtin_memory_store::execute(state, task, map).await,
         "code_index" => {
             let workspace_root = state.skill_rt.workspace_root.clone();

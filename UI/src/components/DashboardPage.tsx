@@ -27,6 +27,7 @@ import {
 
 import {
   areRequiredDashboardStepsComplete,
+  DASHBOARD_SECTION_STORAGE_KEY,
   getDefaultDashboardSection,
   type DashboardOverviewItem,
   type DashboardSection,
@@ -70,7 +71,6 @@ interface DashboardNavigationItem {
   adminOnly?: boolean;
 }
 
-export const DASHBOARD_SECTION_STORAGE_KEY = appStorageKey("monitor.dashboardSection");
 const DASHBOARD_SOURCE_BUILD_STORAGE_KEY = appStorageKey("monitor.sourceBuildExpanded");
 const DASHBOARD_SECTION_IDS = new Set<DashboardSection>([
   "overview",
@@ -107,6 +107,8 @@ export interface DashboardPageProps {
   hostDependenciesLoading: boolean;
   hostDependenciesErrorCode: string | null;
   dependencyInstallingId: string | null;
+  systemDiagnosticsExporting: boolean;
+  systemDiagnosticsExportError: string | null;
   isAdminIdentity: boolean;
   nniNavigationVisible: boolean;
   workspaceUpdateLoading: boolean;
@@ -165,6 +167,7 @@ export interface DashboardPageProps {
   onFetchHostSystemSummary: () => unknown | Promise<unknown>;
   onFetchHostDependencies: () => unknown | Promise<unknown>;
   onInstallHostDependency: (dependencyId: string) => unknown | Promise<unknown>;
+  onExportSystemDiagnostics: () => unknown | Promise<unknown>;
   onSetNniNavigationVisible: (visible: boolean) => unknown | Promise<unknown>;
   onFetchAgentConfig: () => unknown | Promise<unknown>;
   onSaveAgentPersona: (agentId: string, profile: string, customPersona: string) => Promise<boolean>;
@@ -185,6 +188,8 @@ export function DashboardPage({
   hostDependenciesLoading,
   hostDependenciesErrorCode,
   dependencyInstallingId,
+  systemDiagnosticsExporting,
+  systemDiagnosticsExportError,
   isAdminIdentity,
   nniNavigationVisible,
   workspaceUpdateLoading,
@@ -240,6 +245,7 @@ export function DashboardPage({
   onFetchHostSystemSummary,
   onFetchHostDependencies,
   onInstallHostDependency,
+  onExportSystemDiagnostics,
   onSetNniNavigationVisible,
   onFetchAgentConfig,
   onSaveAgentPersona,
@@ -640,8 +646,11 @@ export function DashboardPage({
         errorCode={hostDependenciesErrorCode}
         isAdmin={isAdminIdentity}
         installingId={dependencyInstallingId}
+        diagnosticsExporting={systemDiagnosticsExporting}
+        diagnosticsExportError={systemDiagnosticsExportError}
         onRefresh={onFetchHostDependencies}
         onInstall={onInstallHostDependency}
+        onExportDiagnostics={onExportSystemDiagnostics}
       />
       ) : null}
 

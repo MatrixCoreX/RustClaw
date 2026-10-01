@@ -4,15 +4,15 @@
 > Keep this spec aligned with the audio_transcribe implementation.
 
 ## Capability Summary
-- `audio_transcribe` previews or converts audio input through the configured STT provider. Use only the configured transcription backend; local configuration is delegated to the media skill's private local ASR. Remote failure never authorizes automatic local recognition. Oversized or long local files sent to a remote provider are normalized into ordered temporary chunks, transcribed by that same provider/model, and merged before shared transcript review. Local STT keeps the original file and does not use this remote-upload chunker.
+- `audio_transcribe` previews or converts audio input through the configured STT provider. Use only the configured transcription backend; local configuration is delegated to the isolated optional `local_asr` skill. Remote failure never authorizes automatic local recognition. Oversized or long local files sent to a remote provider are normalized into ordered temporary chunks, transcribed by that same provider/model, and merged before shared transcript review. Local STT keeps the original file and does not use this remote-upload chunker.
 - It supports local file path input or public audio URL input, plus optional hints and backend model/vendor selection.
 - Successful responses include machine-readable `extra` metadata such as `provider`, `provider_location`, `recommended_capability`, `fallback_recommended`, `model`, `model_kind`, `audio_path`, and `transcription_review`.
 
 ## Planner Selection Notes
 - For ordinary audio/video transcription, always use `audio.preview_transcribe` before the actual STT call. It reads configuration without reading the source file or contacting a provider.
-- If preview returns `provider_location=remote`, use `audio.transcribe`. If it returns `provider_location=local`, use `media_download.transcribe` instead so local recognition stays inside that skill's private environment.
+- If preview returns `provider_location=remote`, use `audio.transcribe`. If it returns `provider_location=local`, use `local_asr.transcribe` so local recognition and its model dependencies stay inside that skill's private environment.
 - If the configured remote `audio.transcribe` call fails, use its structured error evidence to explain the failure in the user's language. Do not call local Whisper/FunASR or change provider/model to recover automatically. Local recognition is available when the user selects a local STT configuration.
-- For video input, first call `media_download.transcribe` with `extract_audio_only=true` and `deliver_to_user=false`, then preview/transcribe the returned WAV path.
+- For a public video share, `media_download.download` prepares a task-scoped WAV when the structured conversion scope includes audio. Preview and transcribe that exact returned path; do not guess an artifact path.
 - Successful remote and local results both declare `transcription_review`; the shared main-model finalizer corrects recognition errors and broken sentences, uses the user's response language, and always delivers the complete reviewed text inline and as a UTF-8 text artifact.
 - Keep the user-provided source in a structured audio field. Do not infer paths or URLs from unrelated prose.
 
@@ -60,7 +60,7 @@ Provide one audio source: local path or URL.
 - Preview responses include `action=preview_transcribe`, `status=dry_run`, `dry_run=true`, `provider_call=false`, `filesystem_write=false`, `input_path`, `resolved_input_path`, and `input_exists`.
 - `provider`: resolved backend provider name
 - `provider_location`: `remote` or `local`, determined from the configured provider endpoint rather than the user request text.
-- `recommended_capability`: `audio.transcribe` for remote configuration or `media_download.transcribe` for local configuration.
+- `recommended_capability`: `audio.transcribe` for remote configuration or `local_asr.transcribe` for local configuration.
 - `fallback_recommended`: always `false`; a failed configured backend does not authorize another recognition backend. No fallback capability or fallback input binding is emitted.
 - `model`: resolved model name
 - `model_kind`: adapter/runtime mode chosen by implementation
@@ -109,5 +109,5 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-3","status":"ok","text":"AUDIO_TRANSCRIBE_PREVIEW","extra":{"provider":"custom","provider_location":"local","recommended_capability":"media_download.transcribe","fallback_recommended":false,"model":"local-whisper","model_kind":"compat","input_path":"recordings/chinese.wav"},"error_text":null}
+{"request_id":"demo-3","status":"ok","text":"AUDIO_TRANSCRIBE_PREVIEW","extra":{"provider":"custom","provider_location":"local","recommended_capability":"local_asr.transcribe","fallback_recommended":false,"model":"local-whisper","model_kind":"compat","input_path":"recordings/chinese.wav"},"error_text":null}
 ```

@@ -963,6 +963,10 @@ fn checkpoint_resume_reuses_terminal_child_merge_without_respawning() {
                         "required": true,
                         "status": "succeeded",
                         "result_status": "ok",
+                        "structured_result": {
+                            "first_line_text": "# Agent Runtime",
+                            "heading_level": 1
+                        },
                         "findings": {},
                         "finding_refs": [],
                         "evidence_refs": []
@@ -1002,6 +1006,10 @@ fn checkpoint_resume_reuses_terminal_child_merge_without_respawning() {
     assert_eq!(observation["action"], "subagent_child_task_merge_reused");
     assert_eq!(observation["status"], "ready");
     assert_eq!(observation["child_task_merge"]["terminal_child_count"], 1);
+    assert_eq!(
+        observation["model_observation"]["results"][0]["result"]["first_line_text"],
+        "# Agent Runtime"
+    );
     assert!(loop_state.task_checkpoint.is_none());
 
     assert_eq!(

@@ -65,6 +65,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub maintenance: MaintenanceConfig,
     #[serde(default)]
+    pub runtime_resources: RuntimeResourcesConfig,
+    #[serde(default)]
     pub memory: MemoryConfig,
     #[serde(default)]
     pub tools: ToolsConfig,
@@ -527,7 +529,7 @@ pub struct WebdConfig {
     pub request_timeout_seconds: u64,
     #[serde(default = "default_webd_forward_x_forwarded")]
     pub forward_x_forwarded: bool,
-    /// 入站请求体最大字节数（缓冲后转发给 clawd）；过大返回 413。
+    /// 入站请求体最大字节数；上传类请求流式转发，其余请求按分类上限读取，过大返回 413。
     #[serde(default = "default_webd_max_incoming_body_bytes")]
     pub max_incoming_body_bytes: usize,
     /// HttpOnly 会话 Cookie 名。
@@ -1195,6 +1197,101 @@ impl Default for MaintenanceConfig {
             audit_retention_days: default_audit_retention_days(),
             audit_max_rows: default_audit_max_rows(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RuntimeResourcesConfig {
+    /// Optional fixed host reserve. When absent, the runtime derives a reserve
+    /// from the effective host or cgroup memory limit.
+    pub safety_reserve_mib: Option<u64>,
+    pub critical_available_floor_mib: Option<u64>,
+    pub critical_available_ratio: Option<f64>,
+    pub constrained_available_ratio: Option<f64>,
+    pub compact_available_ratio: Option<f64>,
+    pub critical_psi_avg10: Option<f64>,
+    pub constrained_psi_avg10: Option<f64>,
+    pub compact_psi_avg10: Option<f64>,
+    pub escalation_samples: Option<u8>,
+    pub recovery_samples: Option<u8>,
+}
+
+impl RuntimeResourcesConfig {
+    pub fn pressure_policy(&self) -> crate::host_resources::ResourcePressurePolicy {
+        let mut policy = crate::host_resources::ResourcePressurePolicy::default();
+        if let Some(value) = self.critical_available_floor_mib {
+            policy.critical_available_floor_bytes = value.saturating_mul(1024 * 1024);
+        }
+        if let Some(value) = self.critical_available_ratio {
+            policy.critical_available_ratio = value;
+        }
+        if let Some(value) = self.constrained_available_ratio {
+            policy.constrained_available_ratio = value;
+        }
+        if let Some(value) = self.compact_available_ratio {
+            policy.compact_available_ratio = value;
+        }
+        if let Some(value) = self.critical_psi_avg10 {
+            policy.critical_psi_avg10 = value;
+        }
+        if let Some(value) = self.constrained_psi_avg10 {
+            policy.constrained_psi_avg10 = value;
+        }
+        if let Some(value) = self.compact_psi_avg10 {
+            policy.compact_psi_avg10 = value;
+        }
+        if let Some(value) = self.escalation_samples {
+            policy.escalation_samples = value;
+        }
+        if let Some(value) = self.recovery_samples {
+            policy.recovery_samples = value;
+        }
+        policy
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self
+            .safety_reserve_mib
+            .is_some_and(|value| !(64..=65_536).contains(&value))
+            || self
+                .critical_available_floor_mib
+                .is_some_and(|value| !(32..=65_536).contains(&value))
+        {
+            return Err("runtime_resource_memory_threshold_invalid".to_string());
+        }
+        let policy = self.pressure_policy();
+        let ratios = [
+            policy.critical_available_ratio,
+            policy.constrained_available_ratio,
+            policy.compact_available_ratio,
+        ];
+        if ratios
+            .iter()
+            .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
+            || !(ratios[0] <= ratios[1] && ratios[1] <= ratios[2])
+        {
+            return Err("runtime_resource_pressure_ratio_invalid".to_string());
+        }
+        let psi = [
+            policy.critical_psi_avg10,
+            policy.constrained_psi_avg10,
+            policy.compact_psi_avg10,
+        ];
+        if psi
+            .iter()
+            .any(|value| !value.is_finite() || !(0.0..=100.0).contains(value))
+            || !(psi[0] >= psi[1] && psi[1] >= psi[2])
+        {
+            return Err("runtime_resource_pressure_psi_invalid".to_string());
+        }
+        if !(1..=60).contains(&policy.escalation_samples)
+            || !(1..=60).contains(&policy.recovery_samples)
+            || policy.recovery_samples < policy.escalation_samples
+        {
+            return Err("runtime_resource_hysteresis_invalid".to_string());
+        }
+        Ok(())
     }
 }
 

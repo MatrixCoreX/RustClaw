@@ -908,9 +908,17 @@ fn update_skill_store_installation(
     }))
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct SkillStoreCatalogQuery {
+    page: Option<usize>,
+    page_size: Option<usize>,
+    q: Option<String>,
+}
+
 async fn get_skill_store_catalog(
     State(state): State<AppState>,
     headers: HeaderMap,
+    Query(query): Query<SkillStoreCatalogQuery>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
     if let Err(response) = require_ui_identity(&state, &headers) {
         return response;
@@ -966,11 +974,50 @@ async fn get_skill_store_catalog(
         .collect::<Vec<_>>();
     let mut names = registry.all_names();
     names.sort_unstable();
-    let package_resolver = skill_sdk::SkillRuntimeResolver::new(skill_package_root(&state));
-    let items = names
+    let normalized_query = query.q.unwrap_or_default().trim().to_lowercase();
+    names.retain(|name| {
+        if hide_skill_in_ui(&state, name)
+            || !skill_store_item_belongs_to_other_group(&state, name)
+        {
+            return false;
+        }
+        if normalized_query.is_empty() {
+            return true;
+        }
+        registry.get(name).is_some_and(|entry| {
+            name.to_lowercase().contains(&normalized_query)
+                || entry
+                    .description
+                    .as_deref()
+                    .is_some_and(|value| value.to_lowercase().contains(&normalized_query))
+                || entry
+                    .description_zh
+                    .as_deref()
+                    .is_some_and(|value| value.to_lowercase().contains(&normalized_query))
+                || entry
+                    .group
+                    .as_deref()
+                    .is_some_and(|value| value.to_lowercase().contains(&normalized_query))
+        })
+    });
+    let total = names.len();
+    let page_size = query.page_size.unwrap_or(48).clamp(1, 100);
+    let total_pages = total.div_ceil(page_size).max(1);
+    let page = query.page.unwrap_or(1).max(1).min(total_pages);
+    let start = page.saturating_sub(1).saturating_mul(page_size);
+    let page_names = names
         .into_iter()
-        .filter(|name| !hide_skill_in_ui(&state, name))
-        .filter(|name| skill_store_item_belongs_to_other_group(&state, name))
+        .skip(start)
+        .take(page_size)
+        .collect::<Vec<_>>();
+    let page_uninstalled = page_names
+        .iter()
+        .filter(|name| uninstalled.contains(*name))
+        .cloned()
+        .collect::<Vec<_>>();
+    let package_resolver = skill_sdk::SkillRuntimeResolver::new(skill_package_root(&state));
+    let items = page_names
+        .into_iter()
         .filter_map(|name| {
             let entry = registry.get(&name)?;
             let configured_installed = admission_snapshot
@@ -1043,6 +1090,12 @@ async fn get_skill_store_catalog(
                 "runtime_assets": manifest
                     .as_ref()
                     .map(|value| &value.install.runtime_assets),
+                "min_memory_mb": manifest
+                    .as_ref()
+                    .map(|value| value.install.resources.min_memory_mb),
+                "min_free_disk_mb": manifest
+                    .as_ref()
+                    .map(|value| value.install.resources.min_free_disk_mb),
                 "supported_os": manifest.as_ref().map(|value| &value.package.supported_os),
                 "supported_arch": manifest.as_ref().map(|value| &value.package.supported_arch),
                 "package_version": manifest.as_ref().map(|value| value.package.version.as_str()),
@@ -1062,7 +1115,12 @@ async fn get_skill_store_catalog(
             ok: true,
             data: Some(json!({
                 "items": items,
-                "uninstalled_skill_names": uninstalled,
+                "uninstalled_skill_names": page_uninstalled,
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+                "has_more": start.saturating_add(page_size) < total,
+                "query": normalized_query,
                 "active_operation": active_operation,
                 "recent_operations": recent_operations,
             })),

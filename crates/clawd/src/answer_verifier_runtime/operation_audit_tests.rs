@@ -64,6 +64,25 @@ fn exact_output_field_label_audit_preserves_success() {
 }
 
 #[test]
+fn host_output_field_checks_only_follow_structured_output_contract() {
+    let free = crate::IntentOutputContract::default();
+    assert!(
+        host_output_field_checks(&free, "HTTP status: 200; contains Example Domain: yes")
+            .is_empty()
+    );
+
+    let mut exact = crate::IntentOutputContract::default();
+    exact.response_shape = crate::OutputResponseShape::Strict;
+    exact.selection.structured_field_selector = Some("path,total_lines".to_string());
+    let checks = host_output_field_checks(&exact, r#"{"path":"README.md"}"#);
+    assert_eq!(checks.len(), 2);
+    assert_eq!(checks[0].requested_field, "path");
+    assert!(checks[0].exact_label_present);
+    assert_eq!(checks[1].requested_field, "total_lines");
+    assert!(!checks[1].exact_label_present);
+}
+
+#[test]
 fn host_rejects_a_false_positive_output_field_label_claim() {
     let checks = vec![OutputFieldCheck {
         requested_field: "exchange/source".to_string(),
@@ -327,13 +346,62 @@ fn failed_required_dispatch_cannot_borrow_an_unrelated_success() {
 }
 
 #[test]
+fn successful_retry_with_same_step_id_satisfies_required_dispatch() {
+    let mut journal =
+        media_download_journal(&[("step_10", "media_download.download", "media_download")]);
+    journal.step_results[0].status = crate::executor::StepExecutionStatus::Error;
+    journal
+        .step_results
+        .push(TaskJournalStepTrace::ok("step_10", "media_download", "{}"));
+    let check = json!({
+        "requested_operation":"download media",
+        "evidence_step_ids":["step_10"],
+        "required_dispatches":[{
+            "action_type":"call_capability",
+            "action_ref":"media_download.download"
+        }],
+        "method_observed":true,
+        "result_observed":true
+    });
+
+    assert!(validate_operation_audit(model(json!([check])), &journal).pass);
+}
+
+#[test]
+fn failed_attempt_without_success_still_cannot_satisfy_required_dispatch() {
+    let mut journal =
+        media_download_journal(&[("step_10", "media_download.download", "media_download")]);
+    journal.step_results[0].status = crate::executor::StepExecutionStatus::Error;
+    let check = json!({
+        "requested_operation":"download media",
+        "evidence_step_ids":["step_10"],
+        "required_dispatches":[{
+            "action_type":"call_capability",
+            "action_ref":"media_download.download"
+        }],
+        "method_observed":true,
+        "result_observed":true
+    });
+
+    let verdict = validate_operation_audit(model(json!([check])), &journal);
+    assert!(!verdict.pass);
+    assert_eq!(verdict.missing_evidence_fields, vec!["verification_audit"]);
+}
+
+#[test]
 fn missing_method_cannot_be_overridden_by_a_known_result_or_pass_boolean() {
     let check = json!({"requested_operation":"fixture method","evidence_step_ids":["s1"],
                       "method_observed":false,"result_observed":true});
     let verdict = validate_operation_audit(model(json!([check])), &journal());
     assert!(!verdict.pass);
     assert!(verdict.should_retry);
-    assert_eq!(verdict.missing_evidence_fields, vec!["requested_result"]);
+    assert_eq!(
+        verdict.missing_evidence_fields,
+        vec![
+            "requested_result",
+            "required_dispatch:call_capability:fixture.inspect"
+        ]
+    );
 }
 
 #[test]
@@ -550,6 +618,24 @@ fn schema_requires_audit_and_does_not_coerce_boolean_or_allow_extra_fields() {
     assert_eq!(
         verdict.answer_incomplete_reason,
         "unsupported_claims_observed"
+    );
+    let mut output_annotation = base.clone();
+    output_annotation["output_field_checks"] = json!([{
+        "requested_field": "status",
+        "exact_label_present": true,
+        "satisfied": true,
+        "value_present": true
+    }]);
+    let normalized = crate::prompt_utils::validate_against_schema::<ModelVerifierOut>(
+        &output_annotation.to_string(),
+        schema,
+    )
+    .expect("non-authoritative output-field annotations should be discarded");
+    assert!(normalized.schema_normalized);
+    assert_eq!(normalized.value.output_field_checks.len(), 1);
+    assert_eq!(
+        normalized.value.output_field_checks[0].requested_field,
+        "status"
     );
     let mut missing = base.clone();
     missing.as_object_mut().unwrap().remove("operation_checks");

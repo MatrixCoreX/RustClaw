@@ -8,7 +8,7 @@ import tempfile
 from typing import Any, Callable
 import wave
 
-from video_transcriber import build_extract_audio_command
+from media_audio import build_extract_audio_command
 
 
 def prepare_video_inputs(

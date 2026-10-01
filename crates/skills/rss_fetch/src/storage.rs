@@ -111,6 +111,22 @@ fn open(runtime: &RssRuntime) -> Result<Connection, String> {
         .map_err(|_| "storage_journal_mode_failed".to_string())?;
     db.pragma_update(None, "synchronous", "NORMAL")
         .map_err(|_| "storage_synchronous_mode_failed".to_string())?;
+    if let Some(cache_size_kib) = runtime.storage_cache_size_kib.filter(|value| *value > 0) {
+        db.pragma_update(None, "cache_size", -(i64::from(cache_size_kib)))
+            .map_err(|_| "storage_cache_profile_failed".to_string())?;
+    }
+    if let Some(mmap_size_bytes) = runtime.storage_mmap_size_bytes {
+        db.pragma_update(
+            None,
+            "mmap_size",
+            mmap_size_bytes.min(i64::MAX as u64) as i64,
+        )
+        .map_err(|_| "storage_mmap_profile_failed".to_string())?;
+    }
+    if runtime.storage_temp_store.as_deref() == Some("file") {
+        db.pragma_update(None, "temp_store", 1_i64)
+            .map_err(|_| "storage_temp_profile_failed".to_string())?;
+    }
     Ok(db)
 }
 

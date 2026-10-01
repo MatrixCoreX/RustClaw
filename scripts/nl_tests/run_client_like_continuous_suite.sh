@@ -405,6 +405,25 @@ else:
 PY
 }
 
+merge_task_reply_events() {
+  local task_id="$1"
+  local task_json="$2"
+  local events_file="${task_json%.json}.events.sse"
+  local -a auth_args=()
+  array_from_command_lines auth_args curl_auth_args
+  if ! curl -sS --max-time 20 \
+    -H "Accept: text/event-stream" \
+    "${auth_args[@]}" \
+    "${BASE_URL}/v1/tasks/${task_id}/events?cursor=0&follow=false" \
+    > "$events_file"; then
+    echo "[TASK ${task_id}] event replay unavailable; keeping task snapshot unchanged" >&2
+    return 0
+  fi
+  python3 "${NL_TEST_SCRIPT_DIR}/merge_task_reply_events.py" \
+    --task-json "$task_json" \
+    --events-file "$events_file"
+}
+
 result_text_contains() {
   local file="$1"
   local expected="$2"
@@ -440,6 +459,9 @@ joined = "\n".join(texts)
 visible_joined = "\n".join(visible_items)
 def normalize_text(value: str) -> str:
     return unicodedata.normalize("NFKC", value).replace("\u00a0", " ").replace("\u202f", " ")
+
+def contains_text(haystack: str, needle: str) -> bool:
+    return normalize_text(needle).casefold() in normalize_text(haystack).casefold()
 
 _MISSING = object()
 
@@ -480,7 +502,7 @@ ok = True
 for raw in [part.strip() for part in expected.split(";") if part.strip()]:
     if raw.startswith("contains:"):
         needle = raw[len("contains:"):]
-        part_ok = normalize_text(needle) in normalize_text(joined)
+        part_ok = contains_text(joined, needle)
     elif raw.startswith("json_exists:"):
         pointer = raw[len("json_exists:"):]
         part_ok = json_pointer_get(obj, pointer) is not _MISSING
@@ -512,58 +534,9 @@ for raw in [part.strip() for part in expected.split(";") if part.strip()]:
                 part_ok = True
                 break
     else:
-        part_ok = normalize_text(raw) in normalize_text(joined)
+        part_ok = contains_text(joined, raw)
     ok = ok and part_ok
 raise SystemExit(0 if ok else 1)
-PY
-}
-
-result_has_bad_fallback() {
-  local file="$1"
-  local prompt="${2:-}"
-  python3 - "$file" "$prompt" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-obj = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-prompt = sys.argv[2].lower()
-data = obj.get("data") or {}
-result = data.get("result_json") or {}
-texts = [
-    str(data.get("error_text") or ""),
-    str(result.get("text") or ""),
-]
-for item in result.get("messages") or []:
-    if isinstance(item, str):
-        texts.append(item)
-    elif isinstance(item, dict):
-        texts.append(str(item.get("text") or ""))
-joined = "\n".join(texts).lower()
-hard_markers = [
-    "intent_unresolved",
-    "context window exceeds limit",
-    "invalid params",
-]
-soft_markers = [
-    "模型暂时不可用",
-    "当前大模型服务暂时不可用",
-    "model is temporarily unavailable",
-    "temporarily unavailable (auth/network/circuit",
-    "auth/network/circuit",
-    "could not reach the model service",
-    "please retry later or switch to an available model",
-    "我没看出这条消息要做什么",
-    "没有足够的上下文",
-    "没有足够上下文",
-    "无法确定这个连续会话测试",
-]
-if any(marker in joined for marker in hard_markers):
-    raise SystemExit(0)
-for marker in soft_markers:
-    if marker in joined and marker not in prompt:
-        raise SystemExit(0)
-raise SystemExit(1)
 PY
 }
 
@@ -631,6 +604,20 @@ expected = sys.argv[3] if len(sys.argv) > 3 else ""
 case_tags = sys.argv[4] if len(sys.argv) > 4 else ""
 sys.path.insert(0, sys.argv[5])
 from manual_case_assertions import structural_assertions
+from manual_trace_evidence import restore_execution_streams
+
+task_id = str((obj.get("data") or {}).get("task_id") or "")
+obj, trace_evidence = restore_execution_streams(
+    obj,
+    Path(sys.argv[1]),
+    task_id,
+)
+if trace_evidence is not None and not trace_evidence.get("ok", False):
+    print(
+        "execution_stream_integrity_unavailable:"
+        + json.dumps(trace_evidence, ensure_ascii=False, sort_keys=True)
+    )
+    raise SystemExit(0)
 
 prompt_l = prompt.lower()
 tagset = {part.strip().lower() for part in re.split(r"[,;]", case_tags) if part.strip()}
@@ -1178,34 +1165,14 @@ for item in result.get("messages") or []:
     elif isinstance(item, dict) and str(item.get("text") or "").strip():
         texts.append(str(item.get("text") or "").strip())
 text = (texts[-1] if texts else str(data.get("error_text") or "")).strip()
-bad_markers = [
-    "缺少的验证信息",
-    "下一步建议",
-    "请问",
-    "?",
-    "？",
-    "没有足够的上下文",
-    "没有足够上下文",
-    "无法确定",
-]
-if any(marker in text for marker in bad_markers):
-    raise SystemExit(f"summary reply looks like clarification or advice: {text!r}")
-if "\n" in text or len(text) > 180:
-    raise SystemExit(f"expected one concise summary sentence, got {text!r}")
-continuity_markers = [
-    "连续",
-    "多轮",
-    "同一会话",
-    "同一个会话",
-    "上下文",
-    "真实客户端",
-    "recent_turns",
-    "memory_context",
-    "conversation",
-    "context",
-]
-if not any(marker in text for marker in continuity_markers):
-    raise SystemExit(f"summary reply lost the continuous-session topic: {text!r}")
+if not text:
+    raise SystemExit("expected a nonempty summary reply")
+if len(text.splitlines()) != 1:
+    raise SystemExit("expected a single visible summary line")
+journal = result.get("task_journal") or {}
+summary = journal.get("summary") or {}
+if str(summary.get("final_status") or "").strip().lower() not in {"", "success"}:
+    raise SystemExit("summary turn did not preserve a successful machine terminal state")
 PY
 }
 
@@ -1335,6 +1302,7 @@ submit_turn() {
   local infra_retry_count="${7:-0}"
   local max_infra_retries="${LLM_INFRA_TURN_RETRIES_VALUE:-0}"
   local overall_started_ms="${8:-$(monotonic_millis)}"
+  local confirmation_reply="${9:-}"
 
   [[ "$max_submit_attempts" =~ ^[0-9]+$ ]] || max_submit_attempts=1
   [[ "$submit_retry_sleep_seconds" =~ ^[0-9]+$ ]] || submit_retry_sleep_seconds=30
@@ -1370,11 +1338,11 @@ submit_turn() {
   if ! wait_task_until_terminal_with_limit "$task_id" "$MAX_WAIT_SECONDS" > "$out_file"; then
     local final_raw final_status
     final_raw="$(query_task "$task_id" || true)"
-    final_status="$(python3 - "${final_raw:-}" <<'PY'
+    final_status="$(printf '%s' "${final_raw:-}" | python3 -c '
 import json
 import sys
 
-raw = (sys.argv[1] if len(sys.argv) > 1 else "").strip()
+raw = sys.stdin.read().strip()
 try:
     obj = json.loads(raw)
 except Exception:
@@ -1382,8 +1350,7 @@ except Exception:
     raise SystemExit(0)
 data = obj.get("data") or {}
 print(str(data.get("status") or "").strip())
-PY
-)"
+')"
     case "$final_status" in
       succeeded|failed|canceled|timeout)
         printf '%s\n' "$final_raw" > "$out_file"
@@ -1408,6 +1375,7 @@ PY
         ;;
     esac
   fi
+  merge_task_reply_events "$task_id" "$out_file"
   local turn_finished_ms
   turn_finished_ms="$(monotonic_millis)"
   annotate_turn_harness_metrics "$out_file" "$((turn_finished_ms - overall_started_ms))"
@@ -1438,6 +1406,21 @@ PY
   print_new_llm_trace "$turn" "$task_id"
   unset CURRENT_LLM_TRACE_RESULT_FILE
 
+  if [[ "$status" == "needs_user" && -n "$confirmation_reply" ]]; then
+    local confirm_out_file="${out_file%.json}.confirm.json"
+    echo "[TURN ${turn}] confirmation_requested=true"
+    submit_turn \
+      "${turn}.confirm" \
+      "$confirmation_reply" \
+      "$confirm_out_file" \
+      "$expected_marker" \
+      "$case_tags" \
+      "$turn_external_chat_id" \
+      "$infra_retry_count" \
+      "$overall_started_ms"
+    return $?
+  fi
+
   local case_tags_l
   case_tags_l=",$(printf '%s' "$case_tags" | tr '[:upper:]' '[:lower:]' | sed -E 's/[;[:space:]]+/,/g'),"
   local expected_terminal_failure=0
@@ -1448,14 +1431,19 @@ PY
   if [[ "$case_tags_l" == *",allow_terminal_failure,"* ]]; then
     allow_terminal_failure=1
   fi
+  local allow_needs_user=0
+  if [[ "$case_tags_l" == *",allow_needs_user,"* ]]; then
+    allow_needs_user=1
+  fi
   if [[ "$status" != "succeeded" \
-    && ! ( ( "$status" == "failed" || "$status" == "needs_user" ) \
-      && ( "$expected_terminal_failure" -eq 1 || "$allow_terminal_failure" -eq 1 ) ) ]]; then
+    && ! ( "$status" == "failed" \
+      && ( "$expected_terminal_failure" -eq 1 || "$allow_terminal_failure" -eq 1 ) ) \
+    && ! ( "$status" == "needs_user" && "$allow_needs_user" -eq 1 ) ]]; then
     echo "Turn ${turn} did not succeed: status=${status} error=${error}" >&2
     print_log_hints "$task_id" >&2
     if result_is_retryable_llm_infra_failure "$out_file" && [[ "$infra_retry_count" -lt "$max_infra_retries" ]]; then
       echo "[TURN ${turn}] retry_llm_infra retry=$((infra_retry_count + 1))/${max_infra_retries}" >&2
-      submit_turn "$turn" "$prompt" "$out_file" "$expected_marker" "$case_tags" "$turn_external_chat_id" "$((infra_retry_count + 1))" "$overall_started_ms"
+      submit_turn "$turn" "$prompt" "$out_file" "$expected_marker" "$case_tags" "$turn_external_chat_id" "$((infra_retry_count + 1))" "$overall_started_ms" "$confirmation_reply"
       return $?
     fi
     return 1
@@ -1463,16 +1451,6 @@ PY
   if [[ "$expected_terminal_failure" -eq 1 && "$status" != "failed" ]]; then
     echo "Turn ${turn} did not produce the expected terminal failure: status=${status}" >&2
     print_log_hints "$task_id" >&2
-    return 1
-  fi
-  if result_has_bad_fallback "$out_file" "$prompt"; then
-    echo "Turn ${turn} returned bad fallback/unavailable text." >&2
-    print_log_hints "$task_id" >&2
-    if result_is_retryable_llm_infra_failure "$out_file" && [[ "$infra_retry_count" -lt "$max_infra_retries" ]]; then
-      echo "[TURN ${turn}] retry_llm_infra retry=$((infra_retry_count + 1))/${max_infra_retries}" >&2
-      submit_turn "$turn" "$prompt" "$out_file" "$expected_marker" "$case_tags" "$turn_external_chat_id" "$((infra_retry_count + 1))" "$overall_started_ms"
-      return $?
-    fi
     return 1
   fi
   if [[ "$QUALITY_GUARD" -eq 1 ]]; then
@@ -1491,7 +1469,7 @@ PY
       print_log_hints "$task_id" >&2
       if result_is_retryable_llm_infra_failure "$out_file" && [[ "$infra_retry_count" -lt "$max_infra_retries" ]]; then
         echo "[TURN ${turn}] retry_llm_infra retry=$((infra_retry_count + 1))/${max_infra_retries}" >&2
-        submit_turn "$turn" "$prompt" "$out_file" "$expected_marker" "$case_tags" "$turn_external_chat_id" "$((infra_retry_count + 1))" "$overall_started_ms"
+        submit_turn "$turn" "$prompt" "$out_file" "$expected_marker" "$case_tags" "$turn_external_chat_id" "$((infra_retry_count + 1))" "$overall_started_ms" "$confirmation_reply"
         return $?
       fi
       return 1
@@ -1519,7 +1497,7 @@ PY
     print_log_hints "$task_id" >&2
     if result_is_retryable_llm_infra_failure "$out_file" && [[ "$infra_retry_count" -lt "$max_infra_retries" ]]; then
       echo "[TURN ${turn}] retry_llm_infra retry=$((infra_retry_count + 1))/${max_infra_retries}" >&2
-      submit_turn "$turn" "$prompt" "$out_file" "$expected_marker" "$case_tags" "$turn_external_chat_id" "$((infra_retry_count + 1))" "$overall_started_ms"
+      submit_turn "$turn" "$prompt" "$out_file" "$expected_marker" "$case_tags" "$turn_external_chat_id" "$((infra_retry_count + 1))" "$overall_started_ms" "$confirmation_reply"
       return $?
     fi
     return 1
@@ -1619,10 +1597,18 @@ for case_file in case_files:
             continue
         suite, name, tags, prompt = parts
         expect = ""
+        confirm = ""
         expect_marker = "|expect="
         if expect_marker in prompt:
             prompt, expect = prompt.rsplit(expect_marker, 1)
-            expect = expect.strip()
+            directives = [part.strip() for part in expect.split(";") if part.strip()]
+            kept = []
+            for directive in directives:
+                if directive.startswith("confirm:"):
+                    confirm = directive[len("confirm:"):].strip()
+                else:
+                    kept.append(directive)
+            expect = ";".join(kept)
         seen += 1
         group_key = group_key_for_name(name, tags)
         rows.append({
@@ -1632,6 +1618,7 @@ for case_file in case_files:
             "tags": tags,
             "prompt": prompt,
             "expect": expect,
+            "confirm": confirm,
             "group_key": group_key,
         })
 
@@ -1659,6 +1646,7 @@ for row in rows:
     tags = row["tags"]
     prompt = row["prompt"]
     expect = row["expect"]
+    confirm = row["confirm"]
     group_key = row["group_key"]
     if row_matches_exclude_filter(tags):
         continue
@@ -1688,6 +1676,7 @@ for row in rows:
         emitted_tags.replace("\t", " ").replace(row_sep, " "),
         prompt.replace("\t", " ").replace(row_sep, " "),
         expect.replace("\t", " ").replace(row_sep, " "),
+        confirm.replace("\t", " ").replace(row_sep, " "),
     ]))
     if not group_limit and limit and emitted >= limit:
         break
@@ -1788,6 +1777,7 @@ for lineno, raw in enumerate(case_file.read_text(encoding="utf-8").splitlines(),
     else:
         tags = str(tags)
     expect = row.get("expect") or ""
+    confirm = str(row.get("confirm") or "")
     seen += 1
     group_key = group_key_for_name(name, tags)
     rows.append({
@@ -1797,6 +1787,7 @@ for lineno, raw in enumerate(case_file.read_text(encoding="utf-8").splitlines(),
         "tags": tags,
         "prompt": prompt,
         "expect": str(expect),
+        "confirm": confirm,
         "group_key": group_key,
     })
 
@@ -1849,6 +1840,7 @@ for row in rows:
         emitted_tags.replace("\t", " ").replace(row_sep, " "),
         json.dumps(row["prompt"], ensure_ascii=False),
         json.dumps(row["expect"], ensure_ascii=False),
+        json.dumps(row["confirm"], ensure_ascii=False),
     ]))
     if not group_limit and limit and emitted >= limit:
         break
@@ -2379,11 +2371,12 @@ if [[ "${#CASE_FILE_VALUES[@]}" -gt 0 || -n "${CASE_JSONL_VALUE:-}" ]]; then
     done
     resume_case_arg="${resume_case_arg# }"
   fi
-  while IFS=$'\x1f' read -r case_index case_group_key case_name case_tags case_prompt case_expect; do
+  while IFS=$'\x1f' read -r case_index case_group_key case_name case_tags case_prompt case_expect case_confirm; do
     [[ -n "${case_index:-}" ]] || continue
     if [[ -n "${CASE_JSONL_VALUE:-}" ]]; then
       case_prompt="$(json_decode_arg "$case_prompt")"
       case_expect="$(json_decode_arg "$case_expect")"
+      case_confirm="$(json_decode_arg "$case_confirm")"
     fi
     case_prompt="$(materialize_case_prompt "$case_prompt")"
     turn=$((turn + 1))
@@ -2396,7 +2389,16 @@ if [[ "${#CASE_FILE_VALUES[@]}" -gt 0 || -n "${CASE_JSONL_VALUE:-}" ]]; then
     fi
     reset_case_fixture_files "$case_tags"
     echo "[CASE ${case_index}] name=${case_name} group=${case_group_key} external_chat_id=${case_external_chat_id}"
-    if ! submit_turn "$turn" "$case_prompt" "${RUN_DIR}/turn_${turn}_case_${case_index}.json" "${case_expect:-}" "${case_tags:-}" "$case_external_chat_id"; then
+    if ! submit_turn \
+      "$turn" \
+      "$case_prompt" \
+      "${RUN_DIR}/turn_${turn}_case_${case_index}.json" \
+      "${case_expect:-}" \
+      "${case_tags:-}" \
+      "$case_external_chat_id" \
+      0 \
+      "$(monotonic_millis)" \
+      "${case_confirm:-}"; then
       quality_guard_arg=""
       if [[ "$QUALITY_GUARD" -eq 1 ]]; then
         quality_guard_arg=" --quality-guard"

@@ -5,6 +5,7 @@
 
 <!-- ai-learning-navigation:start -->
 上一页：[AiPP 技能配套界面](14-aipp-skill-companions.zh-CN.md) |
+[下一页：运行期资源准入与恢复](16-runtime-resource-recovery.zh-CN.md) |
 [架构索引](README.md)
 <!-- ai-learning-navigation:end -->
 

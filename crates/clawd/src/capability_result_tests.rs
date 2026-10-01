@@ -30,7 +30,7 @@ impl Drop for ArtifactFixture {
 #[test]
 fn async_completion_replaces_the_matching_waiting_result() {
     let mut envelope = super::successful_execution_envelope(
-        "media_download.transcribe",
+        "local_asr.transcribe",
         "step_3",
         &json!({"action": "transcribe"}),
         "pending",
@@ -95,7 +95,7 @@ fn task_bound_artifact_is_typed_owned_digest_checked_and_resolvable() {
     let fixture = ArtifactFixture::new();
     let path = fixture.file.to_string_lossy().to_string();
     let mut envelope = super::successful_execution_envelope(
-        "media_download.transcribe",
+        "local_asr.transcribe",
         "step_audio",
         &json!({"action": "transcribe"}),
         "saved",
@@ -158,7 +158,7 @@ fn save_only_delivery_downgrades_declared_artifacts_to_internal_visibility() {
     let fixture = ArtifactFixture::new();
     let path = fixture.file.to_string_lossy().to_string();
     let mut envelope = super::successful_execution_envelope(
-        "media_download.transcribe",
+        "local_asr.transcribe",
         "step_private",
         &json!({"action": "transcribe"}),
         "saved",

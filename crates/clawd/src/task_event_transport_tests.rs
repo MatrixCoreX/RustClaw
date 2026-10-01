@@ -524,6 +524,93 @@ fn legacy_hot_suffix_backfill_adds_archive_envelope_versions() {
 }
 
 #[test]
+fn legacy_hot_suffix_backfill_batches_archive_and_snapshot_work() {
+    const EVENT_COUNT: u64 = 300;
+
+    let state = state();
+    let mut db = state.core.db.get().expect("get db");
+    db.execute_batch(INIT_TASK_EVENT_SQL)
+        .expect("ensure event schema");
+    let tx = db.transaction().expect("begin legacy insert");
+    {
+        let mut statement = tx
+            .prepare(
+                "INSERT INTO task_event_stream (
+                    task_id, seq, event_hash, event_json, created_at_ms
+                 ) VALUES (?1, ?2, ?3, ?4, ?5)",
+            )
+            .expect("prepare legacy event insert");
+        for seq in 1..=EVENT_COUNT {
+            let event_hash = format!("legacy-hash-{seq}");
+            let event_json = json!({
+                "schema_version": 1,
+                "seq": seq,
+                "timestamp_ms": seq * 1000,
+                "task_id": "task-legacy-batched",
+                "event_kind": "task_observation",
+                "event_type": "task_observation",
+                "payload": {"index": seq}
+            })
+            .to_string();
+            statement
+                .execute(rusqlite::params![
+                    "task-legacy-batched",
+                    seq,
+                    event_hash,
+                    event_json,
+                    seq * 1000
+                ])
+                .expect("insert legacy event");
+        }
+    }
+    tx.commit().expect("commit legacy events");
+    drop(db);
+
+    let replay = replay_events_after(&state, "task-legacy-batched", 0).unwrap();
+    assert_eq!(replay.replay_source, "archive");
+
+    let db = state.core.db.get().expect("get db");
+    let archive_count: u64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM task_event_archive WHERE task_id = ?1",
+            ["task-legacy-batched"],
+            |row| row.get(0),
+        )
+        .expect("count archive rows");
+    assert_eq!(archive_count, EVENT_COUNT);
+    let previous_hash: String = db
+        .query_row(
+            "SELECT previous_event_hash
+             FROM task_event_archive
+             WHERE task_id = ?1 AND seq = 257",
+            ["task-legacy-batched"],
+            |row| row.get(0),
+        )
+        .expect("read cross-batch hash link");
+    assert_eq!(previous_hash, "legacy-hash-256");
+
+    let snapshots = db
+        .prepare(
+            "SELECT source_seq_start, source_seq_end, source_event_count
+             FROM task_event_snapshots
+             WHERE task_id = ?1
+             ORDER BY snapshot_seq ASC",
+        )
+        .expect("prepare snapshot query")
+        .query_map(["task-legacy-batched"], |row| {
+            Ok((
+                row.get::<_, u64>(0)?,
+                row.get::<_, u64>(1)?,
+                row.get::<_, u64>(2)?,
+            ))
+        })
+        .expect("query snapshots")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("collect snapshots");
+    assert_eq!(snapshots, vec![(1, 256, 256), (257, 300, 44)]);
+}
+
+#[test]
 fn irrecoverable_archive_gap_returns_structured_expired_cursor_state() {
     let state = state();
     for index in 0..3 {

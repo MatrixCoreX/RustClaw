@@ -1226,6 +1226,12 @@ struct LogsLatestQuery {
 }
 
 #[derive(Debug, serde::Deserialize, Default)]
+struct LogsFilesQuery {
+    cursor: Option<String>,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, serde::Deserialize, Default)]
 struct RecentRobotTasksQuery {
     limit: Option<usize>,
 }
@@ -1237,6 +1243,12 @@ struct UsageRecordsQuery {
     search: Option<String>,
     channel: Option<String>,
     status: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, Default)]
+struct UsageRecordDetailQuery {
+    limit: Option<usize>,
+    offset: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1296,6 +1308,10 @@ struct UsageHistoryRecordDetail {
     #[serde(flatten)]
     summary: UsageHistoryRecordSummary,
     entries: Vec<UsageHistoryChainEntry>,
+    entry_total: usize,
+    limit: usize,
+    offset: usize,
+    has_more: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1369,6 +1385,14 @@ struct UsageHistoryPage {
     page_size: usize,
     total_records: usize,
     total_pages: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct UsageHistoryScanWindow {
+    total_bytes: u64,
+    scanned_bytes: u64,
+    max_bytes: u64,
+    truncated_before: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

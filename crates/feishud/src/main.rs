@@ -112,6 +112,8 @@ struct AppState {
     pending_key_bind_by_chat: Arc<Mutex<HashSet<String>>>,
 }
 
+const CHANNEL_RUNTIME_CACHE_MAX_ENTRIES: usize = 4096;
+
 #[derive(Clone, Deserialize)]
 struct FeishuConfig {
     #[serde(default)]
@@ -303,7 +305,13 @@ fn should_expect_key_reply(state: &AppState, chat_id: &str) -> bool {
 fn set_expect_key_reply(state: &AppState, chat_id: &str, enabled: bool) {
     if let Ok(mut set) = state.pending_key_bind_by_chat.lock() {
         if enabled {
-            set.insert(chat_id.to_string());
+            let chat_id = chat_id.to_string();
+            claw_core::bounded_cache::prepare_hash_set_insert(
+                &mut set,
+                &chat_id,
+                CHANNEL_RUNTIME_CACHE_MAX_ENTRIES,
+            );
+            set.insert(chat_id);
         } else {
             set.remove(chat_id);
         }
@@ -651,18 +659,43 @@ async fn handle_incoming_feishu_media(state: AppState, ctx: FeishuMediaCtx) -> b
         }
     };
 
+    let max_len = match ctx.message_type.as_str() {
+        "image" | "sticker" => 25 * 1024 * 1024,
+        "audio" => 20 * 1024 * 1024,
+        _ => 100 * 1024 * 1024,
+    };
+    let storage_id = claw_core::channel_event_admission::sha256_hex(
+        format!("{}\0{}", ctx.message_id, ctx.resource_key).as_bytes(),
+    );
+    let root_dir = feishu_inbox_root_for_message_type(&ctx.message_type, &config.feishu);
+    let fname = feishu_saved_file_name(&ctx.message_type, &ctx.content, &storage_id[..32]);
+    let rel = build_feishu_inbox_rel_path(root_dir, &ctx.chat_id, &fname);
+    let abs = workspace_root.join(&rel);
     let api_base = config.feishu.api_base_url.trim();
-    let bytes = match download_feishu_message_resource(
+    let size = match download_feishu_message_resource(
         &client,
         api_base,
         &token,
         &ctx.message_id,
         &ctx.resource_key,
         ctx.query_type,
+        &abs,
+        max_len,
     )
     .await
     {
-        Ok(b) => b,
+        Ok(size) => size,
+        Err(FeishuMediaDownloadError::Storage(
+            claw_core::channel_media_download::ChannelMediaDownloadError::TooLarge { .. },
+        )) => {
+            let msg = feishu_t(
+                &config,
+                FEISHU_I18N_MEDIA_FILE_TOO_LARGE_KEY,
+                FEISHU_MEDIA_FILE_TOO_LARGE_FALLBACK,
+            );
+            let _ = send_feishu_text(&config, &client, &token_cache, &ctx.chat_id, &msg).await;
+            return true;
+        }
         Err(e) => {
             warn!("feishud: media download failed err={}", e);
             let msg = feishu_t(
@@ -675,49 +708,11 @@ async fn handle_incoming_feishu_media(state: AppState, ctx: FeishuMediaCtx) -> b
         }
     };
 
-    let max_len = match ctx.message_type.as_str() {
-        "image" | "sticker" => 25 * 1024 * 1024,
-        "audio" => 20 * 1024 * 1024,
-        _ => 100 * 1024 * 1024,
-    };
-    if bytes.len() > max_len {
-        warn!(
-            "feishud: media too large len={} max={}",
-            bytes.len(),
-            max_len
-        );
-        let msg = feishu_t(
-            &config,
-            FEISHU_I18N_MEDIA_FILE_TOO_LARGE_KEY,
-            FEISHU_MEDIA_FILE_TOO_LARGE_FALLBACK,
-        );
-        let _ = send_feishu_text(&config, &client, &token_cache, &ctx.chat_id, &msg).await;
-        return true;
-    }
-
-    let storage_id = claw_core::channel_event_admission::sha256_hex(
-        format!("{}\0{}", ctx.message_id, ctx.resource_key).as_bytes(),
-    );
-    let root_dir = feishu_inbox_root_for_message_type(&ctx.message_type, &config.feishu);
-    let fname = feishu_saved_file_name(&ctx.message_type, &ctx.content, &storage_id[..32]);
-    let rel = build_feishu_inbox_rel_path(root_dir, &ctx.chat_id, &fname);
-    let abs = workspace_root.join(&rel);
-    if let Some(parent) = abs.parent() {
-        if let Err(e) = tokio::fs::create_dir_all(parent).await {
-            warn!("feishud: create media inbox dir failed err={}", e);
-            return false;
-        }
-    }
-    if let Err(e) = tokio::fs::write(&abs, &bytes).await {
-        warn!("feishud: write media file failed err={}", e);
-        return false;
-    }
-
     let attachment = claw_core::channel_ingress::ChannelIngressAttachment {
         kind: feishu_media_kind_token(&ctx.message_type).to_string(),
         path: rel,
         mime_type: Some(feishu_media_mime_type(&ctx.message_type).to_string()),
-        size: Some(bytes.len() as u64),
+        size: Some(size),
     };
     handle_text_message_to_clawd(
         state,
@@ -1105,6 +1100,8 @@ async fn handle_text_message_to_clawd(
         let started = std::time::Instant::now();
         let mut last_seen_status: Option<TaskStatus> = None;
         let mut timeout_logged = false;
+        let mut progress_projection =
+            claw_core::channel_progress::ChannelProgressProjectionState::default();
         loop {
             let url = format!("{}/v1/tasks/{}", clawd_base, task_id);
             let mut req = client.get(&url);
@@ -1249,6 +1246,22 @@ async fn handle_text_message_to_clawd(
             debug!("feishud: poll task_id={} status={:?} result_json={} messages_len={} text_len={} elapsed_secs={}", task_id, task.status, task.result_json.is_some(), msg_len, text_len, started.elapsed().as_secs());
             match task.status {
                 TaskStatus::Queued | TaskStatus::Running => {
+                    if progress_projection.should_emit_resource_wait_notice(task) {
+                        let message = claw_core::channel_i18n::common_text_with_vars_for_locale(
+                            &config.feishu.language,
+                            "channel.notice.resource_waiting",
+                            &[("task_id", task_id.as_str())],
+                        );
+                        let _ = send_feishu_text(
+                            &config,
+                            &client,
+                            &token_cache,
+                            &chat_id_delivery,
+                            &message,
+                        )
+                        .await;
+                        timeout_logged = true;
+                    }
                     if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
                         if !timeout_logged {
                             warn!("feishud: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} (continue_polling=true)", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status);
@@ -1270,6 +1283,7 @@ async fn handle_text_message_to_clawd(
                 | TaskStatus::Failed
                 | TaskStatus::Canceled
                 | TaskStatus::Timeout => {
+                    progress_projection.mark_terminal();
                     request_unified_terminal_delivery(
                         "feishud",
                         &client,
@@ -1513,7 +1527,9 @@ async fn download_feishu_message_resource(
     message_id: &str,
     resource_key: &str,
     query_type: &str,
-) -> Result<Vec<u8>, String> {
+    local_path: &std::path::Path,
+    max_bytes: u64,
+) -> Result<u64, FeishuMediaDownloadError> {
     let base = api_base.trim_end_matches('/');
     let mid = urlencoding::encode(message_id);
     let key = urlencoding::encode(resource_key);
@@ -1526,21 +1542,39 @@ async fn download_feishu_message_resource(
         .header("Authorization", format!("Bearer {}", token))
         .send()
         .await
-        .map_err(|e| format!("download request failed: {}", e))?;
+        .map_err(FeishuMediaDownloadError::Request)?;
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(feishu_provider_http_error(
-            "download_media",
-            status.as_u16(),
-            &text,
+        return Err(FeishuMediaDownloadError::Provider(
+            feishu_provider_http_error("download_media", status.as_u16(), &text),
         ));
     }
-    resp.bytes()
+    claw_core::channel_media_download::persist_bounded_response(resp, local_path, max_bytes)
         .await
-        .map(|b| b.to_vec())
-        .map_err(|e| format!("download body read failed: {}", e))
+        .map_err(FeishuMediaDownloadError::Storage)
 }
+
+#[derive(Debug)]
+enum FeishuMediaDownloadError {
+    Request(reqwest::Error),
+    Provider(String),
+    Storage(claw_core::channel_media_download::ChannelMediaDownloadError),
+}
+
+impl std::fmt::Display for FeishuMediaDownloadError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Request(error) => {
+                write!(formatter, "feishu_media_download_request_failed:{error}")
+            }
+            Self::Provider(error) => formatter.write_str(error),
+            Self::Storage(error) => write!(formatter, "{error}"),
+        }
+    }
+}
+
+impl std::error::Error for FeishuMediaDownloadError {}
 
 async fn get_tenant_access_token(
     config: &FeishuSection,

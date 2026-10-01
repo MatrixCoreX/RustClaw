@@ -1,4 +1,4 @@
-use axum::extract::{Multipart, Path as AxumPath, Query, State};
+use axum::extract::{DefaultBodyLimit, Multipart, Path as AxumPath, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, post, put};
@@ -15,7 +15,7 @@ use std::process::{Command as StdCommand, Stdio as StdProcessStdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
 
@@ -68,6 +68,11 @@ const WORKSPACE_UPDATE_LOG_MAX_CHARS: usize = 12000;
 const WORKSPACE_UPDATE_PATH_BATCH_SIZE: usize = 128;
 const WORKSPACE_UPDATE_PATH_LIST_MAX_BYTES: usize = 32 * 1024 * 1024;
 const WORKSPACE_UPDATE_PATH_LIST_MAX_ITEMS: usize = 250_000;
+const SKILL_UPLOAD_MAX_TOTAL_BYTES: usize = 100 * 1024 * 1024;
+const SKILL_UPLOAD_MAX_FILE_BYTES: usize = 100 * 1024 * 1024;
+const SKILL_UPLOAD_MAX_FILES: usize = 4096;
+const SKILL_UPLOAD_MAX_METADATA_BYTES: usize = 4096;
+const SKILL_UPLOAD_MAX_INTERFACE_BYTES: u64 = 1024 * 1024;
 const FEISHU_CONFIG_TEMPLATE: &str = include_str!("../../templates/feishu_china_config.toml");
 const LARK_CONFIG_TEMPLATE: &str = include_str!("../../templates/lark_international_config.toml");
 const LLM_CONNECTIVITY_TEST_PROMPT: &str = "Reply with OK only.";
@@ -199,6 +204,7 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         )
         .route("/system/host-summary", get(host_system_summary))
         .route("/system/dependencies", get(host_dependencies))
+        .route("/system/diagnostics/export", get(export_system_diagnostics))
         .route(
             "/admin/system-dependencies/install",
             post(start_dependency_install),
@@ -264,7 +270,10 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         )
         .route("/admin/lark/reset", post(reset_lark_config_handler))
         .route("/skills/import", post(import_external_skill))
-        .route("/skills/import/upload", post(import_external_skill_upload))
+        .route(
+            "/skills/import/upload",
+            post(import_external_skill_upload).layer(DefaultBodyLimit::disable()),
+        )
         .route("/skills/uninstall", post(uninstall_external_skill))
         .route("/llm/config", get(get_llm_config).post(update_llm_config))
         .route("/llm/test", post(test_llm_config))
@@ -494,6 +503,7 @@ include!("ui_routes/agent_config.rs");
 include!("ui_routes/git_remote_config.rs");
 include!("ui_routes/host_system.rs");
 include!("ui_routes/host_dependencies.rs");
+include!("ui_routes/system_diagnostics.rs");
 include!("ui_routes/managed_runtime_assets.rs");
 include!("ui_routes/nni_internal_llm.rs");
 
@@ -557,6 +567,10 @@ mod teaching_trace_security_tests;
 #[cfg(test)]
 #[path = "ui_routes/skill_store_tests.rs"]
 mod skill_store_tests;
+
+#[cfg(test)]
+#[path = "ui_routes/skill_upload_stream_tests.rs"]
+mod skill_upload_stream_tests;
 
 #[cfg(test)]
 #[path = "ui_routes/aipp_tests.rs"]

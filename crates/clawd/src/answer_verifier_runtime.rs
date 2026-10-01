@@ -150,8 +150,16 @@ pub(crate) async fn verify_answer_observe_only(
                     validated.schema_normalized
                 );
             }
-            let output_field_checks = validated.value.output_field_checks.clone();
-            let verdict = operation_audit::validate_operation_audit(validated.value, journal);
+            let mut model = validated.value;
+            let output_field_checks = operation_audit::host_output_field_checks(
+                &route_result.output_contract,
+                candidate_answer,
+            );
+            // Exact visible labels are a host-owned structured contract. The
+            // verifier may audit them, but it cannot create new label
+            // obligations by interpreting prose from the user request.
+            model.output_field_checks = output_field_checks.clone();
+            let verdict = operation_audit::validate_operation_audit(model, journal);
             operation_audit::validate_output_field_audit(
                 verdict,
                 &output_field_checks,

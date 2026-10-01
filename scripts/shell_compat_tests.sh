@@ -9,8 +9,13 @@ source "$ROOT_DIR/scripts/shell_compat.sh"
 [[ "$(cargo_jobs_for_host_capacity x86_64 14680064 9437184 8)" == "2" ]]
 [[ "$(cargo_jobs_for_host_capacity x86_64 14680064 6291456 8)" == "1" ]]
 [[ "$(cargo_jobs_for_host_capacity aarch64 33554432 25165824 8)" == "1" ]]
-if cargo_jobs_for_host_capacity x86_64 33554432 25165824 8 >/dev/null; then
-  echo "large host unexpectedly received a small-host Cargo jobs override" >&2
+[[ "$(cargo_jobs_for_host_capacity x86_64 33554432 25165824 8)" == "8" ]]
+[[ "$(cargo_jobs_for_host_capacity x86_64 33554432 6291456 16)" == "1" ]]
+[[ "$(node_heap_mb_for_available_memory 4194304 1536)" == "1536" ]]
+[[ "$(node_heap_mb_for_available_memory 1572864 1536)" == "921" ]]
+[[ "$(node_heap_mb_for_available_memory 4194304 4096)" == "2457" ]]
+if node_heap_mb_for_available_memory 786432 1536 >/dev/null; then
+  echo "unsafe Node heap unexpectedly accepted insufficient available memory" >&2
   exit 1
 fi
 

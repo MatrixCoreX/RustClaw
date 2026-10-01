@@ -1,6 +1,48 @@
 use super::*;
 
 #[test]
+fn model_delta_archive_projection_is_bounded_and_keeps_terminal_events() {
+    let mut projection = ModelTurnEventArchiveProjection::default();
+    assert!(projection.should_publish(&ModelTurnEvent::Started { attempt: 1 }));
+
+    let mut published = 0;
+    for index in 0..1_024 {
+        let event = ModelTurnEvent::TextDelta {
+            text: format!("fragment-{index}"),
+        };
+        published += usize::from(projection.should_publish(&event));
+    }
+
+    assert_eq!(published, 17);
+    assert!(projection.should_publish(&ModelTurnEvent::Finished {
+        reason: claw_core::model_turn::ModelFinishReason::Stop,
+    }));
+}
+
+#[test]
+fn model_delta_archive_projection_resets_for_provider_retry() {
+    let mut projection = ModelTurnEventArchiveProjection::default();
+    assert!(projection.should_publish(&ModelTurnEvent::Started { attempt: 1 }));
+    assert!(projection.should_publish(&ModelTurnEvent::TextDelta {
+        text: "first".to_string(),
+    }));
+    assert!(!projection.should_publish(&ModelTurnEvent::TextDelta {
+        text: "second".to_string(),
+    }));
+    assert!(projection.should_publish(&ModelTurnEvent::Interrupted {
+        code: "provider_retry".to_string(),
+        retryable: true,
+    }));
+    assert!(projection.should_publish(&ModelTurnEvent::Started { attempt: 2 }));
+    assert!(projection.should_publish(&ModelTurnEvent::ToolCallDelta {
+        index: 0,
+        id: None,
+        name: Some("respond".to_string()),
+        arguments_delta: "{}".to_string(),
+    }));
+}
+
+#[test]
 fn text_delta_event_exposes_size_without_model_content() {
     let payload = model_turn_event_payload(
         "vendor-minimax:MiniMax-M3",

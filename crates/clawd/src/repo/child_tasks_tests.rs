@@ -150,6 +150,47 @@ fn child_payload(spec: &ChildTaskSpec) -> Value {
     })
 }
 
+#[test]
+fn terminal_projection_exposes_only_validated_machine_result_contract_fields() {
+    let temp = TempDirGuard::new("child_structured_result_projection");
+    let state = file_backed_state_with_schema(&temp.path.join("tasks.sqlite"));
+    let mut spec = sample_child_spec(
+        "task-parent-structured-result",
+        "task-child-structured-result",
+        true,
+    );
+    spec.result_contract = json!({
+        "output_format": "machine_json",
+        "required_keys": ["first_line_text", "heading_level"]
+    });
+    let payload = child_payload(&spec);
+    insert_task(
+        &state,
+        &spec.child_task_id,
+        "succeeded",
+        &payload,
+        &json!({
+            "text": "{\"first_line_text\":\"# Agent Runtime\",\"heading_level\":1,\"unrequested\":\"not projected\"}"
+        }),
+    );
+
+    assert!(
+        record_child_task_terminal_projection(&state, &spec.child_task_id, &payload)
+            .expect("record terminal projection")
+    );
+    let result = stored_result_json(&state, &spec.child_task_id);
+    assert_eq!(
+        result["child_task_result"]["structured_result"],
+        json!({
+            "first_line_text": "# Agent Runtime",
+            "heading_level": 1
+        })
+    );
+    assert!(result["child_task_result"]["structured_result"]
+        .get("unrequested")
+        .is_none());
+}
+
 fn insert_task(
     state: &crate::AppState,
     task_id: &str,

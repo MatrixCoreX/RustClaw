@@ -28,6 +28,9 @@ function props(): ActiveTasksPanelProps {
     activeTasksLoading: false,
     activeTasksError: null,
     activeTasksLastUpdated: null,
+    activeTasksTotal: 1,
+    activeTasksOffset: 0,
+    activeTasksLimit: 20,
     resumeTaskError: null,
     resumeTaskMessage: null,
     cancelTaskError: null,
@@ -66,4 +69,18 @@ test("active task cards show their channel and sending user", () => {
   assert.match(markup, /来源: 微信/);
   assert.match(markup, /用户:/);
   assert.match(markup, /wechat-user-17/);
+});
+
+test("active task pagination is shown only when the server reports more rows", () => {
+  const markup = renderToStaticMarkup(
+    <ActiveTasksPanel
+      {...props()}
+      activeTasksTotal={21}
+      activeTasksLimit={20}
+    />,
+  );
+
+  assert.match(markup, /显示第 1-1 项，共 21 项/);
+  assert.match(markup, /上一页/);
+  assert.match(markup, /下一页/);
 });

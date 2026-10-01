@@ -422,6 +422,12 @@ export interface TaskLlmDebugResponse {
     } | null | undefined;
   } | null;
   call_count?: number | null;
+  pagination?: {
+    limit: number;
+    offset: number;
+    total: number;
+    has_more: boolean;
+  } | null;
   flow_summary?: TaskLlmDebugFlowSummary | null;
   calls?: TaskLlmDebugCall[] | null;
   entries?: TaskLlmDebugCall[] | null;
@@ -445,6 +451,10 @@ export interface ActiveTaskItem {
 
 export interface ActiveTasksResponse {
   count: number;
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
   tasks: ActiveTaskItem[];
 }
 
@@ -767,6 +777,8 @@ export interface SkillStoreItem {
   build_network_policy?: "deny" | "approval_required" | null;
   host_dependencies?: string[] | null;
   runtime_assets?: string[] | null;
+  min_memory_mb?: number | null;
+  min_free_disk_mb?: number | null;
   supported_os?: string[] | null;
   supported_arch?: string[] | null;
   package_version?: string | null;
@@ -782,6 +794,11 @@ export interface SkillStoreItem {
 export interface SkillStoreResponse {
   items: SkillStoreItem[];
   uninstalled_skill_names: string[];
+  page?: number;
+  page_size?: number;
+  total?: number;
+  has_more?: boolean;
+  query?: string;
   active_operation?: SkillStoreOperation | null;
   recent_operations?: SkillStoreOperation[];
 }
@@ -1897,6 +1914,10 @@ export interface LogLatestResponse {
 
 export interface LogFilesResponse {
   files: string[];
+  total?: number;
+  limit?: number;
+  has_more?: boolean;
+  next_cursor?: string | null;
 }
 
 export interface WhatsappWebLoginStatus {
@@ -2074,6 +2095,30 @@ export interface HostSystemSummary {
   memory: HostCapacitySummary;
   storage: HostCapacitySummary;
   uptime_seconds: number | null;
+  runtime_resources: {
+    pressure_state: "normal" | "compact" | "constrained" | "critical" | null;
+    reserved_memory_bytes: number | null;
+    active_leases: number | null;
+    reserved_cpu_cores: number | null;
+    reserved_network_slots: number | null;
+    reserved_provider_slots: number | null;
+    reserved_browser_slots: number | null;
+    active_heavy_leases: number | null;
+    waiting_tasks: number | null;
+    resource_waiting_tasks: number | null;
+    recent_waiting_reason_code: string | null;
+    recent_admission_refusal_reason: string | null;
+    recent_admission_refusal_at_epoch: number | null;
+    swap_used_bytes: number | null;
+    cgroup_version: number | null;
+    process_memory_measurement: string | null;
+    process_count: number | null;
+    process_memory_current_bytes: number | null;
+    process_memory_peak_bytes: number | null;
+    process_memory_warning: boolean | null;
+    process_memory_roles_current_bytes: Record<string, number> | null;
+    process_memory_roles_peak_bytes: Record<string, number> | null;
+  };
   unavailable_fields: HostUnavailableField[];
 }
 
@@ -2082,6 +2127,9 @@ export type HostDependencyCategory = "runtime" | "build" | "tool" | "skill" | "o
 export interface HostDependencySummary {
   total: number;
   installed: number;
+  ready: number;
+  installed_disabled: number;
+  resource_constrained: number;
   missing_required: number;
   missing_optional: number;
 }
@@ -2097,6 +2145,8 @@ export interface HostDependencyStatus {
   installable: boolean;
   used_by: string[];
   status_code: "installed" | "missing_required" | "missing_optional" | string;
+  runtime_state: "ready" | "missing" | "resource_constrained" | "installed_disabled" | string;
+  runtime_reason_code: string | null;
 }
 
 export interface DependencyInstallOperation {
@@ -2120,6 +2170,32 @@ export interface HostDependenciesSnapshot {
   summary: HostDependencySummary;
   dependencies: HostDependencyStatus[];
   operations: DependencyInstallOperation[];
+}
+
+export interface SystemDiagnosticExport {
+  schema_version: number;
+  generated_at_ts: number;
+  redacted: true;
+  size_limit_bytes: number;
+  host: HostSystemSummary;
+  dependency_summary: HostDependencySummary;
+  dependencies: Array<{
+    id: string;
+    category: HostDependencyCategory;
+    required: boolean;
+    installed: boolean;
+    version: string | null;
+    installable: boolean;
+    status_code: string;
+    runtime_state: HostDependencyStatus["runtime_state"];
+    runtime_reason_code: string | null;
+  }>;
+  skills: {
+    registry_generation: number;
+    registry_entries: number;
+    enabled: number;
+    disabled: number;
+  };
 }
 
 export interface ServiceActionNotice {

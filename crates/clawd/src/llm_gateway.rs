@@ -9,6 +9,7 @@ use crate::providers::build_llm_http_client;
 use crate::providers::client::ProviderErrorKind;
 use crate::runtime::TaskProviderBlocker;
 use crate::{AppState, ClaimedTask, LlmProviderRuntime};
+use claw_core::skill_registry::{SkillResourceClass, SkillResourceRequest};
 
 #[path = "llm_gateway_model_turn.rs"]
 mod model_turn;
@@ -18,6 +19,64 @@ const TASK_LLM_COST_POLICY_BLOCKED_ERR: &str = "llm_cost_policy_blocked";
 const NO_ELIGIBLE_LLM_PROVIDER_ERR: &str = "no_eligible_llm_provider";
 pub(crate) const CONTEXT_LENGTH_EXCEEDED_ERR: &str = "context_length_exceeded";
 pub(crate) const CONVERSATION_INPUT_INTERRUPTED_ERR: &str = "conversation_input_interrupted";
+const LLM_RESOURCE_ADMISSION_WAIT_ERR: &str = "llm_resource_admission_wait";
+const LLM_RESOURCE_ADMISSION_RETRY_SECONDS: u64 = 15;
+
+fn acquire_llm_resource_lease(
+    state: &AppState,
+    task: &ClaimedTask,
+) -> Result<crate::resource_scheduler::ResourceLease, String> {
+    let request = SkillResourceRequest {
+        class: SkillResourceClass::ProviderQuota,
+        cpu_cores: 1,
+        memory_mb: 64,
+        network_slots: 1,
+        provider_slots: 1,
+        ..SkillResourceRequest::default()
+    };
+    match state
+        .skill_rt
+        .skill_concurrency_gates
+        .resource_broker()
+        .try_acquire(
+            Some(&request),
+            state.skill_rt.skill_global_max_concurrency.max(1),
+        ) {
+        Ok(lease) => Ok(lease),
+        Err(grant) => {
+            let wait_reason = grant
+                .wait_reason
+                .unwrap_or("resource_admission_unavailable");
+            state.note_task_provider_blocker(
+                &task.task_id,
+                TaskProviderBlocker {
+                    provider: "resource_broker".to_string(),
+                    status_code: wait_reason.to_string(),
+                    retry_after_seconds: LLM_RESOURCE_ADMISSION_RETRY_SECONDS,
+                    external_provider_blocked: false,
+                    message_key: "clawd.task.resource_waiting".to_string(),
+                },
+            );
+            let _ = crate::task_event_transport::publish_claimed_event(
+                state,
+                task,
+                "resource_admission",
+                serde_json::json!({
+                    "schema_version": 1,
+                    "source": "resource_broker",
+                    "phase_key": "resource_waiting",
+                    "progress_kind": "poll_status",
+                    "resource_scope": "llm_model_turn",
+                    "wait_reason": wait_reason,
+                    "resource_grant": grant.projection,
+                    "can_pause": true,
+                    "can_cancel": true,
+                }),
+            );
+            Err(LLM_RESOURCE_ADMISSION_WAIT_ERR.to_string())
+        }
+    }
+}
 
 fn llm_cost_policy_allows(
     state: &AppState,
@@ -666,6 +725,7 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
     }
     state.clear_task_provider_blocker(&task.task_id);
     state.clear_task_cost_blocker(&task.task_id);
+    let _resource_lease = acquire_llm_resource_lease(state, task)?;
     state.restore_task_llm_call_count_from_cost_ledger(&task.task_id);
     if !llm_cost_policy_allows(state, task, None, prompt_source) {
         return Err(TASK_LLM_COST_POLICY_BLOCKED_ERR.to_string());

@@ -21,15 +21,27 @@ pub(super) fn checkpoint_blocked_model_error(
                 "cost_policy",
             )
         } else if let Some(blocker) = state.task_provider_blocker(&task.task_id) {
-            (
-                claw_core::provider_failure_policy::PROVIDER_WAIT_RESUME_REASON,
-                "llm_gateway_provider_wait",
-                "provider_status",
-                blocker.to_machine_json(),
-                blocker.message_key,
-                blocker.retry_after_seconds,
-                "provider",
-            )
+            if blocker.provider == "resource_broker" && !blocker.external_provider_blocked {
+                (
+                    "resource_admission_wait",
+                    "resource_broker",
+                    "resource_status",
+                    blocker.to_machine_json(),
+                    blocker.message_key,
+                    blocker.retry_after_seconds,
+                    "resource",
+                )
+            } else {
+                (
+                    claw_core::provider_failure_policy::PROVIDER_WAIT_RESUME_REASON,
+                    "llm_gateway_provider_wait",
+                    "provider_status",
+                    blocker.to_machine_json(),
+                    blocker.message_key,
+                    blocker.retry_after_seconds,
+                    "provider",
+                )
+            }
         } else {
             return Ok(false);
         };

@@ -8,6 +8,9 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::{Child, ChildStderr, ChildStdin, Command};
 use tokio_util::codec::{FramedRead, LinesCodec};
 
+use claw_core::host_resources::HostResourceSnapshot;
+use claw_core::host_resources::ResourcePressureState;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct WarmRunnerKey {
     pub(crate) scope_token: String,
@@ -19,6 +22,7 @@ pub(crate) struct WarmRunnerKey {
     pub(crate) overlay_generation_digest: Option<String>,
     pub(crate) sandbox_backend: String,
     pub(crate) timeout_seconds: u64,
+    pub(crate) memory_reservation_mib: u64,
 }
 
 pub(crate) struct WarmRunnerProcess {
@@ -71,6 +75,10 @@ impl WarmRunnerProcess {
         matches!(self.child.try_wait(), Ok(None))
     }
 
+    pub(crate) fn resident_memory_mib(&self) -> Option<u64> {
+        process_tree_resident_memory_mib(self.child.id()?)
+    }
+
     pub(crate) async fn shutdown(&mut self) -> Result<(), std::io::Error> {
         self.stdin.take();
         match tokio::time::timeout(Duration::from_secs(1), self.child.wait()).await {
@@ -114,6 +122,7 @@ pub(crate) struct WarmRunnerPool {
     idle_timeout: Duration,
     epoch: AtomicU64,
     idle: Mutex<HashMap<WarmRunnerKey, Vec<IdleRunner>>>,
+    resource_broker: crate::resource_scheduler::ResourceBroker,
 }
 
 impl WarmRunnerPool {
@@ -123,6 +132,22 @@ impl WarmRunnerPool {
         min_available_memory_mib: u64,
         idle_timeout_seconds: u64,
     ) -> Self {
+        Self::new_with_resource_broker(
+            enabled,
+            max_idle_per_scope,
+            min_available_memory_mib,
+            idle_timeout_seconds,
+            crate::resource_scheduler::ResourceBroker::default(),
+        )
+    }
+
+    pub(crate) fn new_with_resource_broker(
+        enabled: bool,
+        max_idle_per_scope: usize,
+        min_available_memory_mib: u64,
+        idle_timeout_seconds: u64,
+        resource_broker: crate::resource_scheduler::ResourceBroker,
+    ) -> Self {
         Self {
             enabled,
             max_idle_per_scope: max_idle_per_scope.min(64),
@@ -130,6 +155,7 @@ impl WarmRunnerPool {
             idle_timeout: Duration::from_secs(idle_timeout_seconds.clamp(1, 3_600)),
             epoch: AtomicU64::new(1),
             idle: Mutex::new(HashMap::new()),
+            resource_broker,
         }
     }
 
@@ -137,7 +163,10 @@ impl WarmRunnerPool {
         if !self.enabled || self.max_idle_per_scope == 0 {
             return WarmPoolCheckout::Fallback("warm_pool_disabled");
         }
-        if available_memory_mib().is_some_and(|value| value < self.min_available_memory_mib) {
+        if HostResourceSnapshot::collect()
+            .available_memory_mib()
+            .is_some_and(|value| value < self.min_available_memory_mib)
+        {
             self.invalidate_all();
             return WarmPoolCheckout::Fallback("warm_pool_low_memory");
         }
@@ -169,23 +198,51 @@ impl WarmRunnerPool {
         mut process: WarmRunnerProcess,
     ) {
         if !self.enabled || self.max_idle_per_scope == 0 || !process.is_alive() {
+            schedule_runner_reap(process);
+            return;
+        }
+        let pressure_state = self.resource_broker.pressure_state();
+        if matches!(
+            pressure_state,
+            ResourcePressureState::Constrained | ResourcePressureState::Critical
+        ) {
+            schedule_runner_reap(process);
+            return;
+        }
+        if process
+            .resident_memory_mib()
+            .is_some_and(|rss| rss > key.memory_reservation_mib)
+        {
+            schedule_runner_reap(process);
             return;
         }
         process.last_used = Instant::now();
         let mut idle = self.idle.lock().unwrap();
         if checkout_epoch != self.epoch.load(Ordering::Acquire) {
+            drop(idle);
+            schedule_runner_reap(process);
             return;
         }
         let runners = idle.entry(key).or_default();
         if runners.len() < self.max_idle_per_scope {
             runners.push(IdleRunner { process });
+        } else {
+            drop(idle);
+            schedule_runner_reap(process);
         }
     }
 
     pub(crate) fn invalidate_all(&self) {
-        let mut idle = self.idle.lock().unwrap();
-        self.epoch.fetch_add(1, Ordering::AcqRel);
-        idle.clear();
+        let processes = {
+            let mut idle = self.idle.lock().unwrap();
+            self.epoch.fetch_add(1, Ordering::AcqRel);
+            idle.drain()
+                .flat_map(|(_, runners)| runners.into_iter().map(|runner| runner.process))
+                .collect::<Vec<_>>()
+        };
+        for process in processes {
+            schedule_runner_reap(process);
+        }
     }
 
     #[cfg(test)]
@@ -194,28 +251,102 @@ impl WarmRunnerPool {
     }
 }
 
-impl Default for WarmRunnerPool {
-    fn default() -> Self {
-        Self::new(false, 1, 512, 60)
+fn schedule_runner_reap(mut process: WarmRunnerProcess) {
+    match tokio::runtime::Handle::try_current() {
+        Ok(runtime) => {
+            runtime.spawn(async move {
+                process.kill_and_wait().await;
+            });
+        }
+        Err(_) => {
+            let _ = process.child.start_kill();
+        }
     }
 }
 
 #[cfg(target_os = "linux")]
-fn available_memory_mib() -> Option<u64> {
-    let raw = std::fs::read_to_string("/proc/meminfo").ok()?;
-    let kib = raw
-        .lines()
-        .find_map(|line| line.strip_prefix("MemAvailable:"))?
-        .split_whitespace()
-        .next()?
-        .parse::<u64>()
-        .ok()?;
-    Some(kib / 1024)
+pub(crate) fn process_tree_resident_memory_mib(pid: u32) -> Option<u64> {
+    let mut pending = vec![pid];
+    let mut visited = std::collections::HashSet::new();
+    let mut total_kib = 0_u64;
+    let mut observed = false;
+    while let Some(current) = pending.pop() {
+        if !visited.insert(current) {
+            continue;
+        }
+        if let Ok(status) = std::fs::read_to_string(format!("/proc/{current}/status")) {
+            if let Some(kib) = status.lines().find_map(|line| {
+                line.strip_prefix("VmRSS:")
+                    .and_then(|value| value.split_whitespace().next())
+                    .and_then(|value| value.parse::<u64>().ok())
+            }) {
+                total_kib = total_kib.saturating_add(kib);
+                observed = true;
+            }
+        }
+        if let Ok(children) =
+            std::fs::read_to_string(format!("/proc/{current}/task/{current}/children"))
+        {
+            pending.extend(
+                children
+                    .split_whitespace()
+                    .filter_map(|value| value.parse::<u32>().ok()),
+            );
+        }
+    }
+    observed.then(|| total_kib.div_ceil(1024))
 }
 
-#[cfg(not(target_os = "linux"))]
-fn available_memory_mib() -> Option<u64> {
+#[cfg(target_os = "macos")]
+pub(crate) fn process_tree_resident_memory_mib(pid: u32) -> Option<u64> {
+    let output = std::process::Command::new("/bin/ps")
+        .args(["-axo", "pid=,ppid=,rss="])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let raw = String::from_utf8(output.stdout).ok()?;
+    let rows = raw
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            Some((
+                fields.next()?.parse::<u32>().ok()?,
+                fields.next()?.parse::<u32>().ok()?,
+                fields.next()?.parse::<u64>().ok()?,
+            ))
+        })
+        .collect::<Vec<_>>();
+    let mut descendants = std::collections::HashSet::from([pid]);
+    loop {
+        let before = descendants.len();
+        for (child, parent, _) in &rows {
+            if descendants.contains(parent) {
+                descendants.insert(*child);
+            }
+        }
+        if descendants.len() == before {
+            break;
+        }
+    }
+    let total_kib = rows
+        .iter()
+        .filter(|(process, _, _)| descendants.contains(process))
+        .map(|(_, _, rss)| *rss)
+        .sum::<u64>();
+    (total_kib > 0).then(|| total_kib.div_ceil(1024))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+pub(crate) fn process_tree_resident_memory_mib(_pid: u32) -> Option<u64> {
     None
+}
+
+impl Default for WarmRunnerPool {
+    fn default() -> Self {
+        Self::new(false, 1, 512, 60)
+    }
 }
 
 #[cfg(test)]

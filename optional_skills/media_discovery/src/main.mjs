@@ -11,7 +11,7 @@ import {
 } from "./browser.mjs";
 import { resolveBrowserMode, sourceUrls, SUPPORTED_PLATFORMS } from "./platforms.mjs";
 import { createBackgroundProgressReporter, createCollectionStartReporter } from "./progress.mjs";
-import { activeRuns, mapBounded, parallelPlatformLimit } from "./run_leases.mjs";
+import { activeRuns, grantedBrowserParallelLimit, mapBounded, parallelPlatformLimit } from "./run_leases.mjs";
 import { completedDiscoveryPosts, optionalLimit, rememberCompletedPost } from "./collection_progress.mjs";
 import {
   beginBackgroundWorker,
@@ -831,6 +831,10 @@ async function clearResults(request, args) {
 }
 
 export async function handleRequest(request, runtime = {}) {
+  runtime = {
+    ...runtime,
+    parallelLimit: runtime.parallelLimit ?? grantedBrowserParallelLimit(request?.context),
+  };
   const args = request?.args;
   const action = typeof args?.action === "string" ? args.action : "";
   if (!ACTIONS.has(action)) return errorResponse(action || "unknown", new Error("action_unsupported"));

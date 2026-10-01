@@ -72,6 +72,32 @@ fn block(state: &AppState, task: &ClaimedTask) {
 }
 
 #[test]
+fn model_resource_refusal_uses_resource_wait_checkpoint() {
+    let (state, task, mut loop_state) = fixture();
+    state.note_task_provider_blocker(
+        &task.task_id,
+        crate::TaskProviderBlocker {
+            provider: "resource_broker".to_string(),
+            status_code: "provider_slot_unavailable".to_string(),
+            retry_after_seconds: 1,
+            external_provider_blocked: false,
+            message_key: "clawd.task.resource_waiting".to_string(),
+        },
+    );
+
+    assert!(checkpoint_blocked_model_error(&state, &task, &mut loop_state).unwrap());
+    let lifecycle = loop_state.task_lifecycle.as_ref().unwrap();
+    assert_eq!(lifecycle["state"], "waiting");
+    assert_eq!(lifecycle["resume_reason"], "resource_admission_wait");
+    assert_eq!(lifecycle["source"], "resource_broker");
+    assert_eq!(
+        lifecycle["resource_status"]["status_code"],
+        "provider_slot_unavailable"
+    );
+    assert!(lifecycle.get("provider_status").is_none());
+}
+
+#[test]
 fn provider_wait_retains_execution_evidence_and_resume_fingerprints() {
     let (state, task, mut loop_state) = fixture();
     block(&state, &task);

@@ -5,6 +5,7 @@ use claw_core::{
     config::{AppConfig, PersonaConfig},
     prompt_layers::{self, ResolvedPromptTemplate},
 };
+use sha2::{Digest, Sha256};
 use tracing::{info, warn};
 
 use crate::{llm_vendor_name, AppState};
@@ -407,23 +408,46 @@ pub(crate) fn load_prompt_template_for_state_with_meta(
     default_template: &str,
 ) -> ResolvedPromptTemplate {
     let vendor = active_prompt_vendor_name(state);
-    prompt_layers::load_prompt_template_for_vendor_with_meta(
+    let revision =
+        prompt_layers::prompt_template_revision(&state.skill_rt.workspace_root, &vendor, rel_path);
+    let mut default_digest = Sha256::new();
+    default_digest.update(default_template.as_bytes());
+    let cache_key = format!(
+        "{}\0{}\0{:x}",
+        vendor,
+        rel_path.trim(),
+        default_digest.finalize()
+    );
+    let snapshot = state.get_skill_views_snapshot();
+    if let Some(resolved) = snapshot.binding.prompt_templates.get(&cache_key, &revision) {
+        return resolved;
+    }
+    let resolved = prompt_layers::load_prompt_template_for_vendor_with_meta(
         &state.skill_rt.workspace_root,
         &vendor,
         rel_path,
         default_template,
-    )
+    );
+    snapshot
+        .binding
+        .prompt_templates
+        .insert(cache_key, revision, resolved)
 }
 
 pub(crate) fn load_required_prompt_template_for_state_with_meta(
     state: &AppState,
     rel_path: &str,
 ) -> Result<ResolvedPromptTemplate, RequiredPromptLoadError> {
-    load_required_prompt_template_for_vendor_with_meta(
-        &state.skill_rt.workspace_root,
-        Some(&active_prompt_vendor_name(state)),
-        rel_path,
-    )
+    let vendor = active_prompt_vendor_name(state);
+    let resolved = load_prompt_template_for_state_with_meta(state, rel_path, "");
+    if resolved.template.trim().is_empty() {
+        return Err(RequiredPromptLoadError {
+            logical_path: rel_path.to_string(),
+            resolved_source: resolved.source,
+            vendor,
+        });
+    }
+    Ok(resolved)
 }
 
 /// §3.5d: prompt hot-reload 汇总报告。`persona/schedule_*` 字段记录 reload 前后的字符数；
@@ -464,8 +488,8 @@ impl PromptReloadReport {
 /// §3.5d: prompt hot-reload 主入口。
 ///
 /// 设计要点：
-/// - 大部分 `load_prompt_template_for_state_*` 路径已经每次调用时从磁盘读 prompt，
-///   编辑 `prompts/layers/**/*.md` 下次 LLM 调用就生效，**无须**任何 reload 操作。
+/// - `load_prompt_template_for_state_*` 使用绑定到 registry generation 的共享缓存；
+///   文件依赖元数据变化会让下一次读取自动重建，显式 reload 也会主动清空缓存。
 /// - 真正在启动期被快照进内存的字段只有：
 ///     - `policy.persona_prompt`（`load_persona_prompt` 的产物）
 ///     - `policy.schedule.intent_prompt_template` / `intent_rules_template`
@@ -486,7 +510,14 @@ impl PromptReloadReport {
 /// - 不清 `semantic_judge` 的 task-scoped cache —— key 含 `task_id`，新任务自然吃新 prompt；
 ///   旧任务继续用上一版判定是合理的"运行中事务隔离"行为。
 pub(crate) fn reload_runtime_prompts(state: &AppState, config_path: &str) -> PromptReloadReport {
-    reload_runtime_prompts_impl(&state.skill_rt.workspace_root, &state.policy, config_path)
+    let report =
+        reload_runtime_prompts_impl(&state.skill_rt.workspace_root, &state.policy, config_path);
+    let removed = state.clear_prompt_template_cache();
+    info!(
+        removed,
+        "prompt_hot_reload: cleared shared prompt templates"
+    );
+    report
 }
 
 /// §3.5d: testable inner — 只依赖 `workspace_root + PolicyConfig`，便于单测构造。

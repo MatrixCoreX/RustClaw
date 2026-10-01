@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type {
   ApiResponse,
@@ -58,6 +58,7 @@ export interface UseWechatRuntimeParams {
   uiAuthReady: boolean;
   enabled: boolean;
   serviceHealthy: boolean;
+  statusPollingEnabled?: boolean;
 }
 
 export function useWechatRuntime({
@@ -67,6 +68,7 @@ export function useWechatRuntime({
   uiAuthReady,
   enabled,
   serviceHealthy,
+  statusPollingEnabled = true,
 }: UseWechatRuntimeParams) {
   const [wechatLoginLoading, setWechatLoginLoading] = useState(false);
   const [wechatLoginError, setWechatLoginError] = useState<string | null>(null);
@@ -74,8 +76,12 @@ export function useWechatRuntime({
   const [wechatSessionKey, setWechatSessionKey] = useState<string | null>(null);
   const [wechatQrStarting, setWechatQrStarting] = useState(false);
   const [wechatQrPreviewRequested, setWechatQrPreviewRequested] = useState(false);
+  const statusRequestRef = useRef<Promise<void> | null>(null);
+  const qrPollRequestRef = useRef<Promise<void> | null>(null);
 
-  const fetchWechatLoginStatus = async (silent = false) => {
+  const fetchWechatLoginStatus = (silent = false): Promise<void> => {
+    if (statusRequestRef.current) return statusRequestRef.current;
+    const request = (async () => {
     if (!silent) {
       setWechatLoginLoading(true);
       setWechatLoginError(null);
@@ -105,6 +111,12 @@ export function useWechatRuntime({
         setWechatLoginLoading(false);
       }
     }
+    })();
+    statusRequestRef.current = request;
+    void request.finally(() => {
+      if (statusRequestRef.current === request) statusRequestRef.current = null;
+    });
+    return request;
   };
 
   const startWechatQrLogin = async (force = true) => {
@@ -158,7 +170,9 @@ export function useWechatRuntime({
     }
   };
 
-  const pollWechatQrLogin = async (sessionKey: string) => {
+  const pollWechatQrLogin = (sessionKey: string): Promise<void> => {
+    if (qrPollRequestRef.current) return qrPollRequestRef.current;
+    const request = (async () => {
     try {
       const res = await apiFetch(`/v1/wechat/login-qr/wait`, {
         method: "POST",
@@ -209,33 +223,52 @@ export function useWechatRuntime({
       const message = formatUiError(err, t, "微信登录确认失败，请刷新二维码后重试。", "WeChat sign-in confirmation failed. Refresh the QR code and try again.");
       setWechatLoginError(message);
     }
+    })();
+    qrPollRequestRef.current = request;
+    void request.finally(() => {
+      if (qrPollRequestRef.current === request) qrPollRequestRef.current = null;
+    });
+    return request;
   };
 
   useEffect(() => {
-    if (!uiAuthReady || !enabled || !serviceHealthy) {
+    if (!uiAuthReady || !enabled || !serviceHealthy || !statusPollingEnabled) {
       setWechatLoginStatus(null);
       setWechatSessionKey(null);
       return;
     }
-    void fetchWechatLoginStatus(true);
-    const timer = window.setInterval(() => {
-      void fetchWechatLoginStatus(true);
-    }, 5000);
-    return () => window.clearInterval(timer);
+    if (wechatSessionKey && !wechatLoginStatus?.connected) return;
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void fetchWechatLoginStatus(true);
+    };
+    refreshWhenVisible();
+    const timer = window.setInterval(refreshWhenVisible, 5000);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiBase, uiAuthReady, enabled, serviceHealthy]);
+  }, [apiBase, uiAuthReady, enabled, serviceHealthy, statusPollingEnabled, wechatSessionKey, wechatLoginStatus?.connected]);
 
   useEffect(() => {
-    if (!uiAuthReady || !enabled || !serviceHealthy) return;
+    if (!uiAuthReady || !enabled || !serviceHealthy || !statusPollingEnabled) return;
     if (!wechatSessionKey) return;
     if (wechatLoginStatus?.connected) return;
-    const timer = window.setInterval(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState !== "visible") return;
       void pollWechatQrLogin(wechatSessionKey);
       void fetchWechatLoginStatus(true);
-    }, 2000);
-    return () => window.clearInterval(timer);
+    };
+    refreshWhenVisible();
+    const timer = window.setInterval(refreshWhenVisible, 2000);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wechatSessionKey, wechatLoginStatus?.connected, apiBase, uiAuthReady, enabled, serviceHealthy]);
+  }, [wechatSessionKey, wechatLoginStatus?.connected, apiBase, uiAuthReady, enabled, serviceHealthy, statusPollingEnabled]);
 
   return {
     wechatLoginLoading,

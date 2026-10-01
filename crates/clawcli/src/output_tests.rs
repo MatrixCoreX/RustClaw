@@ -157,6 +157,36 @@ fn task_status_lines_derive_wait_tokens_from_machine_state() {
 }
 
 #[test]
+fn task_status_lines_keep_resource_admission_wait_non_terminal() {
+    let task = TaskStatusView {
+        task_id: "task-cli-resource-wait".to_string(),
+        status: "running".to_string(),
+        raw_data: serde_json::json!({
+            "execution_state": "waiting",
+            "task_lifecycle": {
+                "state": "waiting",
+                "execution_state": "waiting",
+                "waiting_reason_code": "resource_admission_wait",
+                "message_key": "clawd.task.resource_waiting",
+                "next_action_kind": "wait_for_resource_admission",
+                "resume_due": false
+            }
+        }),
+        result_text: None,
+        error_text: None,
+        events: Vec::new(),
+    };
+
+    let lines = task_status_lines(&task, false, &EventFilters::default());
+
+    assert!(lines.contains(&"status: running".to_string()));
+    assert!(lines.contains(&"execution_state: waiting".to_string()));
+    assert!(lines.contains(&"lifecycle_state: waiting".to_string()));
+    assert!(lines.contains(&"next_action: wait_for_resource_admission".to_string()));
+    assert!(!lines.iter().any(|line| line.starts_with("error:")));
+}
+
+#[test]
 fn task_status_lines_render_the_revisioned_plan_without_raw_json() {
     let task = TaskStatusView {
         task_id: "task-cli-plan".to_string(),

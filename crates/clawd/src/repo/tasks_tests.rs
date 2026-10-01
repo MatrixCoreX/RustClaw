@@ -3,10 +3,10 @@ use uuid::Uuid;
 
 use super::{
     check_task_view_access, claim_due_paused_checkpoint_task_internal, claim_next_task,
-    claim_ready_paused_checkpoint_resume_executor_internal, get_task_query_record,
-    list_active_tasks_for_user_internal, list_active_tasks_internal,
-    list_all_active_tasks_internal, list_all_task_history_internal,
-    list_due_paused_checkpoint_tasks_internal,
+    claim_ready_paused_checkpoint_resume_executor_internal, get_task_artifact_result_projection,
+    get_task_query_record, list_active_tasks_for_user_internal, list_active_tasks_internal,
+    list_all_active_tasks_internal, list_all_active_tasks_page_internal,
+    list_all_task_history_internal, list_due_paused_checkpoint_tasks_internal,
     list_ready_paused_checkpoint_resume_executors_internal, list_task_history_for_user_internal,
     record_paused_checkpoint_resume_executor_state_internal,
     record_paused_checkpoint_resume_work_item_internal, touch_running_task,
@@ -1197,6 +1197,35 @@ fn get_task_query_record_exposes_lifecycle_projection() {
 }
 
 #[test]
+fn task_artifact_projection_does_not_materialize_unrelated_result_fields() {
+    let state = state_with_tasks_table();
+    let task_id = Uuid::new_v4();
+    let result = json!({
+        "text": "x".repeat(512 * 1024),
+        "task_journal": {"trace": "y".repeat(512 * 1024)},
+        "artifacts": [{"id": "artifact-1", "filename": "report.txt"}],
+    });
+    insert_task(
+        &state,
+        &task_id.to_string(),
+        "succeeded",
+        Some(&result),
+        1234,
+    );
+
+    let (projection, user_key, channel) = get_task_artifact_result_projection(&state, task_id)
+        .expect("query artifact projection")
+        .expect("task exists");
+
+    assert_eq!(user_key.as_deref(), Some("test-key"));
+    assert_eq!(channel, "ui");
+    let projection = projection.expect("artifact projection");
+    assert_eq!(projection["artifacts"][0]["id"], "artifact-1");
+    assert!(projection.get("text").is_none());
+    assert!(projection.get("task_journal").is_none());
+}
+
+#[test]
 fn get_task_query_record_exposes_the_persisted_task_plan_snapshot() {
     let state = state_with_tasks_table();
     let task_id = Uuid::new_v4();
@@ -1373,6 +1402,88 @@ fn active_task_scopes_cover_exact_chat_user_and_system_views() {
     );
     assert_eq!(user.len(), 2);
     assert_eq!(system.len(), 3);
+}
+
+#[test]
+fn active_task_page_limits_rows_before_result_projection() {
+    let state = state_with_tasks_table();
+    insert_task(&state, "task-page-a", "running", None, 100);
+    insert_task(&state, "task-page-b", "running", None, 101);
+    insert_task(&state, "task-page-c", "queued", None, 102);
+
+    let first =
+        list_all_active_tasks_page_internal(&state, None, 2, 0).expect("list first active page");
+    assert_eq!(first.total, 3);
+    assert_eq!(first.limit, 2);
+    assert_eq!(first.offset, 0);
+    assert!(first.has_more);
+    assert_eq!(first.tasks.len(), 2);
+    assert_eq!(first.tasks[0].index, 1);
+
+    let second =
+        list_all_active_tasks_page_internal(&state, None, 2, 2).expect("list second active page");
+    assert_eq!(second.total, 3);
+    assert!(!second.has_more);
+    assert_eq!(second.tasks.len(), 1);
+    assert_eq!(second.tasks[0].index, 3);
+    assert_eq!(second.tasks[0].task_id, "task-page-c");
+}
+
+#[test]
+fn canceling_a_resource_waiting_task_prevents_checkpoint_requeue() {
+    let state = state_with_tasks_table();
+    let task_id = Uuid::new_v4().to_string();
+    let checkpoint_id = "checkpoint-resource-cancel";
+    let waiting = json!({
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": "waiting",
+            "resume_reason": "resource_admission_wait",
+            "next_check_after": 1,
+            "checkpoint_id": checkpoint_id,
+        },
+        "task_checkpoint": {
+            "schema_version": 1,
+            "checkpoint_id": checkpoint_id,
+            "boundary_context": {},
+            "observations": [],
+            "capability_results": [],
+            "evidence_refs": [],
+            "artifact_refs": [],
+            "completed_side_effect_refs": ["write_file:workspace/report.txt"],
+            "budget": {
+                "round": 1,
+                "step": 1,
+                "llm_calls": 1,
+                "tool_calls": 1,
+                "elapsed_ms": 1,
+                "llm_elapsed_ms": 1,
+                "tool_elapsed_ms": 0,
+            },
+            "resume_entrypoint": "next_planner_round",
+        },
+    });
+    insert_task(&state, &task_id, "running", Some(&waiting), 100);
+
+    assert_eq!(
+        cancel_task_by_id(&state, &task_id).expect("cancel waiting task"),
+        1
+    );
+    let db = state.core.db.get().expect("get db");
+    let (status, lease_owner, lease_expires_at): (String, Option<String>, i64) = db
+        .query_row(
+            "SELECT status, lease_owner, lease_expires_at FROM tasks WHERE task_id = ?1",
+            [&task_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("canceled task row");
+    assert_eq!(status, "canceled");
+    assert_eq!(lease_owner, None);
+    assert_eq!(lease_expires_at, 0);
+    drop(db);
+    assert!(list_due_paused_checkpoint_tasks_internal(&state, 10, 16)
+        .expect("list resumable checkpoints")
+        .is_empty());
 }
 
 #[test]

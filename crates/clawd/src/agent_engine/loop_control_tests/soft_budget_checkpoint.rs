@@ -1,9 +1,10 @@
 use super::super::{
     checkpoint_handoff_reply, loop_state_has_checkpoint_handoff,
     loop_state_has_recoverable_checkpoint_state, recoverable_machine_blocker_resume_reason,
-    recoverable_provider_blocker_resume_reason,
+    recoverable_provider_blocker_resume_reason, round_machine_blocker_resume_reason,
 };
-use super::LoopState;
+use super::{LoopState, RoundOutcome};
+use crate::agent_engine::ResourceWaitReplayAction;
 
 #[test]
 fn provider_blocker_uses_machine_wait_reason() {
@@ -51,34 +52,31 @@ fn resource_admission_blocker_uses_machine_wait_reason() {
         })),
     );
 
-    for attempt in 1..=3 {
-        crate::agent_engine::attempt_ledger::record_attempt(
-            &mut loop_state,
-            "fs_basic",
-            &format!("attempt={attempt}"),
-            crate::executor::StepExecutionStatus::Error,
-            "",
-            None,
-            &resource_error,
-        );
-        assert_eq!(recoverable_machine_blocker_resume_reason(&loop_state), None);
-        if attempt == 1 {
-            crate::agent_engine::attempt_ledger::record_attempt(
-                &mut loop_state,
-                "fs_basic",
-                "start_line=0",
-                crate::executor::StepExecutionStatus::Error,
-                "",
-                Some("contract_arg_rejected"),
-                "contract_arg_rejected",
-            );
-            assert_eq!(recoverable_machine_blocker_resume_reason(&loop_state), None);
-        }
-    }
     crate::agent_engine::attempt_ledger::record_attempt(
         &mut loop_state,
         "fs_basic",
-        "attempt=4",
+        "attempt=1",
+        crate::executor::StepExecutionStatus::Error,
+        "",
+        None,
+        &resource_error,
+    );
+    assert_eq!(recoverable_machine_blocker_resume_reason(&loop_state), None);
+    crate::agent_engine::attempt_ledger::record_attempt(
+        &mut loop_state,
+        "fs_basic",
+        "start_line=0",
+        crate::executor::StepExecutionStatus::Error,
+        "",
+        Some("contract_arg_rejected"),
+        "contract_arg_rejected",
+    );
+    assert_eq!(recoverable_machine_blocker_resume_reason(&loop_state), None);
+
+    crate::agent_engine::attempt_ledger::record_attempt(
+        &mut loop_state,
+        "fs_basic",
+        "attempt=2",
         crate::executor::StepExecutionStatus::Error,
         "",
         None,
@@ -100,6 +98,29 @@ fn resource_admission_blocker_uses_machine_wait_reason() {
         "completed_with_observation",
     );
     assert_eq!(recoverable_machine_blocker_resume_reason(&loop_state), None);
+}
+
+#[test]
+fn replayable_resource_refusal_waits_without_another_planner_round() {
+    let mut loop_state = LoopState::new();
+    loop_state.resource_wait_replay_action = Some(ResourceWaitReplayAction {
+        tool_or_skill: "fs_basic".to_string(),
+        action_ref: "filesystem.list_entries".to_string(),
+        args: serde_json::json!({"path": "."}),
+        continuation_actions: Vec::new(),
+    });
+    let outcome = RoundOutcome {
+        executed_actions: 1,
+        had_error: true,
+        stop_signal: Some("resource_admission_wait".to_string()),
+        next_goal_hint: None,
+        no_progress: true,
+    };
+
+    assert_eq!(
+        round_machine_blocker_resume_reason(Some(&outcome), &loop_state),
+        Some("resource_admission_wait")
+    );
 }
 
 #[test]

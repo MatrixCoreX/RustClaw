@@ -17,6 +17,7 @@ fn checkpoint_for_stage(stage: AgentCheckpointStage) -> crate::task_lifecycle::T
     source.last_user_visible_respond = Some("completed-result".to_string());
     source.last_publishable_synthesis_output = Some("synthesized-result".to_string());
     source.last_capability_synthesis_output = Some("capability-result".to_string());
+    source.resource_wait_attempts = 4;
     source
         .executed_step_results
         .push(crate::executor::StepExecutionResult {
@@ -175,6 +176,7 @@ fn restart_matrix_restores_all_agent_phase_machine_state() {
             restored.last_capability_synthesis_output.as_deref(),
             Some("capability-result")
         );
+        assert_eq!(restored.resource_wait_attempts, 4);
         assert_eq!(restored.executed_step_results.len(), 1);
         assert_eq!(restored.executed_step_results[0].step_id, "step_1");
         assert_eq!(restored.executed_step_results[0].skill, "office_workspace");
@@ -249,5 +251,40 @@ fn restart_snapshot_preserves_large_state_and_ignores_unknown_stage_tokens() {
             "rss_fetch".to_string(),
             "weather".to_string(),
         ])
+    );
+}
+
+#[test]
+fn checkpoint_resume_state_keeps_recent_recovery_records_bounded() {
+    let mut source = LoopState::new();
+    for index in 0..160 {
+        source.history_compact.push(format!("history-{index}"));
+        source.task_observations.push(json!({"sequence": index}));
+        source
+            .executed_step_results
+            .push(crate::executor::StepExecutionResult {
+                step_id: format!("step-{index}"),
+                skill: "fs_basic".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output: Some(format!("output-{index}")),
+                error: None,
+                started_at: index,
+                finished_at: index + 1,
+            });
+    }
+
+    let snapshot = build_checkpoint_resume_state(&source, AgentCheckpointStage::ToolExecution);
+
+    assert_eq!(snapshot["history_compact"].as_array().unwrap().len(), 128);
+    assert_eq!(snapshot["history_compact"][0], json!("history-32"));
+    assert_eq!(snapshot["task_observations"].as_array().unwrap().len(), 128);
+    assert_eq!(snapshot["task_observations"][0]["sequence"], json!(32));
+    assert_eq!(
+        snapshot["executed_step_results"].as_array().unwrap().len(),
+        128
+    );
+    assert_eq!(
+        snapshot["executed_step_results"][0]["step_id"],
+        json!("step-32")
     );
 }

@@ -160,7 +160,7 @@ export interface ChatPageProps {
   onSendMessage: () => unknown | Promise<unknown>;
   onStopActiveTask?: () => unknown | Promise<unknown>;
   onCompactContext: (focus?: string) => boolean | Promise<boolean>;
-  onQueryChatTeachingLlmDebug: (taskId?: string) => unknown | Promise<unknown>;
+  onQueryChatTeachingLlmDebug: (taskId?: string, offset?: number) => unknown | Promise<unknown>;
 }
 
 export function ChatPage({
@@ -1307,11 +1307,11 @@ function ChatWorkingIndicator({
         return t("正在下载媒体文件", "Downloading the media file");
       case "media_download.download.completed":
         return t("媒体下载完成，正在准备后续处理", "The media download is complete; preparing the next step");
-      case "media_download.transcribe.extracting_audio":
+      case "local_asr.extracting_audio":
         return t("视频已下载，正在提取音频", "The video is downloaded; extracting its audio");
-      case "media_download.transcribe.recognizing_speech":
+      case "local_asr.recognizing_speech":
         return t("音频提取完成，正在转写文字", "Audio extraction is complete; transcribing speech");
-      case "media_download.transcribe.completed":
+      case "local_asr.completed":
         return t("文字转写完成，正在整理结果", "Transcription is complete; preparing the result");
       case "browser_web.pages.starting":
         return t("正在打开并读取网页", "Opening and reading web pages");

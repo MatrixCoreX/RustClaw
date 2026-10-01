@@ -10,17 +10,24 @@ use rand::Rng;
 use reqwest::Client;
 use serde::Deserialize;
 use serde::Serialize;
+use tokio::io::AsyncReadExt;
+use tokio_util::io::ReaderStream;
 use tracing::{info, warn};
 
 use crate::contract::{
     new_wechat_client_id, WechatCdnMedia, WechatMessageItem, WechatSendMessageRequest,
     UPLOAD_MEDIA_TYPE_FILE, UPLOAD_MEDIA_TYPE_IMAGE, UPLOAD_MEDIA_TYPE_VIDEO,
 };
-use crate::crypto::{aes_ecb_padded_size, decrypt_aes_128_ecb, encrypt_aes_128_ecb};
+use crate::crypto::{
+    aes_ecb_padded_size, decrypt_aes_128_ecb, decrypt_aes_128_ecb_file, encrypt_aes_128_ecb,
+    encrypt_aes_128_ecb_file,
+};
 use crate::http::{post_ilink_json, BaseInfo, IlinkAuth};
 
 const DEFAULT_API_TIMEOUT_MS: u64 = 15_000;
 const CDN_UPLOAD_MAX_RETRIES: u32 = 3;
+const REMOTE_MEDIA_DOWNLOAD_SAFETY_MAX_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+const PROVIDER_ERROR_BODY_MAX_BYTES: usize = 64 * 1024;
 
 pub fn build_cdn_download_url(encrypted_query_param: &str, cdn_base_url: &str) -> String {
     let base = cdn_base_url.trim_end_matches('/');
@@ -45,14 +52,29 @@ pub async fn download_decrypted_media(
     key: &[u8; 16],
     cdn_base_url: &str,
     label: &str,
+    max_plaintext_bytes: u64,
 ) -> Result<Vec<u8>, String> {
     let url = build_cdn_download_url(encrypt_query_param, cdn_base_url);
-    let ct = fetch_cdn_bytes(client, &url, label).await?;
-    decrypt_aes_128_ecb(&ct, key).map_err(|e| format!("{label}: {e}"))
+    let max_ciphertext_bytes = padded_size_u64(max_plaintext_bytes)?;
+    let ct = fetch_cdn_bytes(client, &url, label, max_ciphertext_bytes).await?;
+    let plaintext = decrypt_aes_128_ecb(&ct, key).map_err(|e| format!("{label}: {e}"))?;
+    if plaintext.len() as u64 > max_plaintext_bytes {
+        return Err(format!(
+            "{label}: decrypted media exceeds limit:{}:{}",
+            plaintext.len(),
+            max_plaintext_bytes
+        ));
+    }
+    Ok(plaintext)
 }
 
-pub async fn fetch_cdn_bytes(client: &Client, url: &str, label: &str) -> Result<Vec<u8>, String> {
-    let res = client
+pub async fn fetch_cdn_bytes(
+    client: &Client,
+    url: &str,
+    label: &str,
+    max_bytes: u64,
+) -> Result<Vec<u8>, String> {
+    let mut res = client
         .get(url)
         .timeout(Duration::from_secs(120))
         .send()
@@ -60,7 +82,7 @@ pub async fn fetch_cdn_bytes(client: &Client, url: &str, label: &str) -> Result<
         .map_err(|e| format!("{label}: cdn fetch {e}"))?;
     if !res.status().is_success() {
         let status = res.status();
-        let body = res.text().await.unwrap_or_default();
+        let body = response_text_prefix(res, PROVIDER_ERROR_BODY_MAX_BYTES).await;
         return Err(
             claw_core::channel_provider_error::ChannelProviderError::from_http_response(
                 "wechat_ilink",
@@ -71,10 +93,95 @@ pub async fn fetch_cdn_bytes(client: &Client, url: &str, label: &str) -> Result<
             .to_string(),
         );
     }
-    res.bytes()
+    if let Some(actual_bytes) = res.content_length() {
+        if actual_bytes > max_bytes {
+            return Err(format!(
+                "{label}: cdn body exceeds limit:{actual_bytes}:{max_bytes}"
+            ));
+        }
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = res
+        .chunk()
         .await
-        .map(|b| b.to_vec())
-        .map_err(|e| format!("{label}: cdn read body {e}"))
+        .map_err(|e| format!("{label}: cdn read body {e}"))?
+    {
+        let next = body.len() as u64 + chunk.len() as u64;
+        if next > max_bytes {
+            return Err(format!(
+                "{label}: cdn body exceeds limit:{next}:{max_bytes}"
+            ));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
+pub async fn download_decrypted_media_to_file(
+    client: &Client,
+    encrypt_query_param: &str,
+    key: &[u8; 16],
+    cdn_base_url: &str,
+    label: &str,
+    destination: &Path,
+    max_plaintext_bytes: u64,
+) -> Result<u64, String> {
+    let parent = destination
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .ok_or_else(|| format!("{label}: destination parent missing"))?;
+    tokio::fs::create_dir_all(parent)
+        .await
+        .map_err(|error| format!("{label}: destination mkdir {error}"))?;
+    let encrypted_path = temporary_path(parent, "cdn-encrypted");
+    let plaintext_path = temporary_path(parent, "cdn-plaintext");
+    let result = async {
+        let url = build_cdn_download_url(encrypt_query_param, cdn_base_url);
+        let response = client
+            .get(url)
+            .timeout(Duration::from_secs(120))
+            .send()
+            .await
+            .map_err(|error| format!("{label}: cdn fetch {error}"))?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response_text_prefix(response, PROVIDER_ERROR_BODY_MAX_BYTES).await;
+            return Err(
+                claw_core::channel_provider_error::ChannelProviderError::from_http_response(
+                    "wechat_ilink",
+                    "download_media",
+                    status.as_u16(),
+                    &body,
+                )
+                .to_string(),
+            );
+        }
+        claw_core::channel_media_download::persist_bounded_response(
+            response,
+            &encrypted_path,
+            padded_size_u64(max_plaintext_bytes)?,
+        )
+        .await
+        .map_err(|error| format!("{label}: {error}"))?;
+        let plaintext_size = decrypt_aes_128_ecb_file(&encrypted_path, &plaintext_path, key)
+            .await
+            .map_err(|error| format!("{label}: {error}"))?;
+        if plaintext_size > max_plaintext_bytes {
+            return Err(format!(
+                "{label}: decrypted media exceeds limit:{plaintext_size}:{max_plaintext_bytes}"
+            ));
+        }
+        replace_file(&plaintext_path, destination)
+            .await
+            .map_err(|error| format!("{label}: destination replace {error}"))?;
+        Ok(plaintext_size)
+    }
+    .await;
+    let _ = tokio::fs::remove_file(&encrypted_path).await;
+    if result.is_err() {
+        let _ = tokio::fs::remove_file(&plaintext_path).await;
+    }
+    result
 }
 
 pub async fn download_remote_media_to_temp(
@@ -106,10 +213,6 @@ pub async fn download_remote_media_to_temp(
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .map(str::to_string);
-    let body = res
-        .bytes()
-        .await
-        .map_err(|e| format!("remote media download failed: read body {e}"))?;
     tokio::fs::create_dir_all(dest_dir)
         .await
         .map_err(|e| format!("remote media download failed: mkdir {e}"))?;
@@ -120,10 +223,52 @@ pub async fn download_remote_media_to_temp(
         filename.push_str(&ext);
     }
     let path = dest_dir.join(filename);
-    tokio::fs::write(&path, &body)
-        .await
-        .map_err(|e| format!("remote media download failed: write {e}"))?;
+    claw_core::channel_media_download::persist_bounded_response(
+        res,
+        &path,
+        REMOTE_MEDIA_DOWNLOAD_SAFETY_MAX_BYTES,
+    )
+    .await
+    .map_err(|e| format!("remote media download failed: {e}"))?;
     Ok(path)
+}
+
+fn padded_size_u64(plaintext_size: u64) -> Result<u64, String> {
+    let plaintext_size = usize::try_from(plaintext_size)
+        .map_err(|_| "media size exceeds platform address space".to_string())?;
+    Ok(aes_ecb_padded_size(plaintext_size) as u64)
+}
+
+fn temporary_path(parent: &Path, label: &str) -> PathBuf {
+    parent.join(format!(
+        ".{label}-{}-{}.part",
+        std::process::id(),
+        hex::encode(rand::random::<[u8; 8]>())
+    ))
+}
+
+async fn response_text_prefix(mut response: reqwest::Response, max_bytes: usize) -> String {
+    let mut body = Vec::with_capacity(max_bytes.min(4096));
+    while body.len() < max_bytes {
+        let chunk = match response.chunk().await {
+            Ok(Some(chunk)) => chunk,
+            Ok(None) | Err(_) => break,
+        };
+        let remaining = max_bytes - body.len();
+        body.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+    }
+    String::from_utf8_lossy(&body).into_owned()
+}
+
+async fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
+    match tokio::fs::rename(source, destination).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            tokio::fs::remove_file(destination).await?;
+            tokio::fs::rename(source, destination).await
+        }
+        Err(error) => Err(error),
+    }
 }
 
 #[derive(Serialize)]
@@ -261,6 +406,127 @@ pub async fn upload_plaintext_to_cdn(
     })
 }
 
+pub async fn upload_file_to_cdn(
+    client: &Client,
+    ilink_base_url: &str,
+    token: &str,
+    auth: IlinkAuth<'_>,
+    cdn_base_url: &str,
+    to_user_id: &str,
+    plaintext_path: &Path,
+    upload_media_type: i64,
+    channel_version: &str,
+) -> Result<UploadedCdnBlob, String> {
+    let (rawsize, rawfilemd5) = file_size_and_md5(plaintext_path).await?;
+    let filesize = padded_size_u64(rawsize)?;
+    let rawsize_i64 = i64::try_from(rawsize)
+        .map_err(|_| "outbound media size exceeds provider contract".to_string())?;
+    let filesize_i64 = i64::try_from(filesize)
+        .map_err(|_| "encrypted media size exceeds provider contract".to_string())?;
+    let plaintext_size = usize::try_from(rawsize)
+        .map_err(|_| "outbound media exceeds platform address space".to_string())?;
+    let ciphertext_size = usize::try_from(filesize)
+        .map_err(|_| "encrypted media exceeds platform address space".to_string())?;
+    let (filekey, aeskey_bytes, aeskey_hex) = {
+        let mut rng = rand::thread_rng();
+        let filekey: String = hex::encode(rng.gen::<[u8; 16]>());
+        let aeskey_bytes: [u8; 16] = rng.gen();
+        let aeskey_hex = hex::encode(aeskey_bytes);
+        (filekey, aeskey_bytes, aeskey_hex)
+    };
+    let req = GetUploadUrlReq {
+        filekey: filekey.clone(),
+        media_type: upload_media_type,
+        to_user_id: to_user_id.to_string(),
+        rawsize: rawsize_i64,
+        rawfilemd5,
+        filesize: filesize_i64,
+        thumb_rawsize: None,
+        thumb_rawfilemd5: None,
+        thumb_filesize: None,
+        no_need_thumb: true,
+        aeskey: aeskey_hex.clone(),
+        base_info: BaseInfo {
+            channel_version: channel_version.to_string(),
+        },
+    };
+    let up = ilink_get_upload_url(client, ilink_base_url, token, auth, &req).await?;
+    let upload_full_url = up
+        .upload_full_url
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let upload_param = up
+        .upload_param
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    if upload_full_url.is_none() && upload_param.is_none() {
+        return Err("getuploadurl: missing upload_full_url/upload_param".to_string());
+    }
+    let encrypted_path = temporary_path(&std::env::temp_dir(), "channel-cdn-upload");
+    let result = async {
+        let (actual_rawsize, actual_filesize) =
+            encrypt_aes_128_ecb_file(plaintext_path, &encrypted_path, &aeskey_bytes).await?;
+        if actual_rawsize != rawsize || actual_filesize != filesize {
+            return Err("outbound media changed while preparing upload".to_string());
+        }
+        let cdn_url = upload_full_url.unwrap_or_else(|| {
+            build_cdn_upload_url(
+                cdn_base_url.trim_end_matches('/'),
+                upload_param.as_deref().unwrap_or_default(),
+                &filekey,
+            )
+        });
+        let download_encrypted_query_param = upload_cdn_ciphertext_file(
+            client,
+            &cdn_url,
+            &encrypted_path,
+            filesize,
+            true,
+            "cdn upload",
+        )
+        .await?
+        .ok_or_else(|| "cdn upload: missing x-encrypted-param".to_string())?;
+        Ok(UploadedCdnBlob {
+            filekey,
+            download_encrypted_query_param,
+            aeskey_hex,
+            plaintext_size,
+            ciphertext_size,
+        })
+    }
+    .await;
+    let _ = tokio::fs::remove_file(encrypted_path).await;
+    result
+}
+
+async fn file_size_and_md5(path: &Path) -> Result<(u64, String), String> {
+    let expected_size = tokio::fs::metadata(path)
+        .await
+        .map_err(|error| format!("outbound media metadata: {error}"))?
+        .len();
+    let mut file = tokio::fs::File::open(path)
+        .await
+        .map_err(|error| format!("outbound media open: {error}"))?;
+    let mut hash = Md5::new();
+    let mut actual_size = 0_u64;
+    let mut buffer = vec![0_u8; 64 * 1024];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .await
+            .map_err(|error| format!("outbound media read: {error}"))?;
+        if read == 0 {
+            break;
+        }
+        hash.update(&buffer[..read]);
+        actual_size = actual_size.saturating_add(read as u64);
+    }
+    if actual_size != expected_size {
+        return Err("outbound media changed while hashing".to_string());
+    }
+    Ok((actual_size, format!("{:x}", hash.finalize())))
+}
+
 async fn upload_cdn_ciphertext(
     client: &Client,
     cdn_url: &str,
@@ -293,7 +559,7 @@ async fn upload_cdn_ciphertext(
                 .and_then(|v| v.to_str().ok())
             {
                 Some(s) if !s.is_empty() => s.to_string(),
-                _ => res.text().await.unwrap_or_default(),
+                _ => response_text_prefix(res, PROVIDER_ERROR_BODY_MAX_BYTES).await,
             };
             return Err(
                 claw_core::channel_provider_error::ChannelProviderError::from_http_response(
@@ -337,6 +603,84 @@ async fn upload_cdn_ciphertext(
             return Ok(Some(param));
         }
         return Ok(None);
+    }
+    Err(last_err)
+}
+
+async fn upload_cdn_ciphertext_file(
+    client: &Client,
+    cdn_url: &str,
+    ciphertext_path: &Path,
+    ciphertext_size: u64,
+    require_download_param: bool,
+    label: &str,
+) -> Result<Option<String>, String> {
+    let mut last_err = String::new();
+    for attempt in 1..=CDN_UPLOAD_MAX_RETRIES {
+        let file = tokio::fs::File::open(ciphertext_path)
+            .await
+            .map_err(|error| format!("{label}: open encrypted body {error}"))?;
+        let body = reqwest::Body::wrap_stream(ReaderStream::new(file));
+        let res = match client
+            .post(cdn_url)
+            .header("Content-Type", "application/octet-stream")
+            .header(reqwest::header::CONTENT_LENGTH, ciphertext_size)
+            .timeout(Duration::from_secs(120))
+            .body(body)
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(error) => {
+                last_err = format!("{label} attempt {attempt}: {error}");
+                warn!("wechat-ilink: {}", last_err);
+                continue;
+            }
+        };
+        let status = res.status();
+        if status.is_client_error() {
+            let provider_body = match res
+                .headers()
+                .get("x-error-message")
+                .and_then(|value| value.to_str().ok())
+            {
+                Some(value) if !value.is_empty() => value.to_string(),
+                _ => response_text_prefix(res, PROVIDER_ERROR_BODY_MAX_BYTES).await,
+            };
+            return Err(
+                claw_core::channel_provider_error::ChannelProviderError::from_http_response(
+                    "wechat_ilink",
+                    "upload_media",
+                    status.as_u16(),
+                    &provider_body,
+                )
+                .to_string(),
+            );
+        }
+        if !status.is_success() {
+            last_err = format!("{label} attempt {attempt} status={status}");
+            warn!("wechat-ilink: {}", last_err);
+            continue;
+        }
+        let download_param = res
+            .headers()
+            .get("x-encrypted-param")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string)
+            .filter(|value| !value.is_empty())
+            .or_else(|| {
+                res.headers()
+                    .get("x-encrypted-query-param")
+                    .and_then(|value| value.to_str().ok())
+                    .map(str::to_string)
+                    .filter(|value| !value.is_empty())
+            });
+        if require_download_param && download_param.is_none() {
+            last_err = format!("{label} attempt {attempt}: missing encrypted response parameter");
+            warn!("wechat-ilink: {}", last_err);
+            continue;
+        }
+        return Ok(download_param);
     }
     Err(last_err)
 }
@@ -465,17 +809,14 @@ pub async fn send_weixin_image_from_file_with_client_id(
         "image",
         claw_core::channel_media_limits::wechat_image_max_bytes(),
     )?;
-    let plaintext = tokio::fs::read(file_path)
-        .await
-        .map_err(|e| format!("read outbound image: {e}"))?;
-    let uploaded = upload_plaintext_to_cdn(
+    let uploaded = upload_file_to_cdn(
         client,
         ilink_base_url,
         token,
         auth,
         cdn_base_url,
         to_user_id,
-        &plaintext,
+        file_path,
         UPLOAD_MEDIA_TYPE_IMAGE,
         channel_version,
     )
@@ -552,17 +893,14 @@ pub async fn send_weixin_video_from_file_with_client_id(
         "video",
         claw_core::channel_media_limits::wechat_video_max_bytes(),
     )?;
-    let plaintext = tokio::fs::read(file_path)
-        .await
-        .map_err(|e| format!("read outbound video: {e}"))?;
-    let uploaded = upload_plaintext_to_cdn(
+    let uploaded = upload_file_to_cdn(
         client,
         ilink_base_url,
         token,
         auth,
         cdn_base_url,
         to_user_id,
-        &plaintext,
+        file_path,
         UPLOAD_MEDIA_TYPE_VIDEO,
         channel_version,
     )
@@ -636,17 +974,14 @@ pub async fn send_weixin_file_from_file_with_client_id(
         "file",
         claw_core::channel_media_limits::wechat_file_max_bytes(),
     )?;
-    let plaintext = tokio::fs::read(file_path)
-        .await
-        .map_err(|e| format!("read outbound file: {e}"))?;
-    let uploaded = upload_plaintext_to_cdn(
+    let uploaded = upload_file_to_cdn(
         client,
         ilink_base_url,
         token,
         auth,
         cdn_base_url,
         to_user_id,
-        &plaintext,
+        file_path,
         UPLOAD_MEDIA_TYPE_FILE,
         channel_version,
     )

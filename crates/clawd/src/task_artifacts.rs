@@ -210,16 +210,6 @@ pub(crate) fn manifests_from_result(result: Option<&Value>) -> Vec<TaskArtifactM
         .collect()
 }
 
-pub(crate) fn manifest_by_id(
-    result: Option<&Value>,
-    artifact_id: &str,
-) -> Option<TaskArtifactManifest> {
-    let artifact_id = machine_id(artifact_id)?;
-    manifests_from_result(result)
-        .into_iter()
-        .find(|artifact| artifact.id == artifact_id)
-}
-
 pub(crate) fn delivery_artifact_path(
     workspace_root: &Path,
     task_id: &str,

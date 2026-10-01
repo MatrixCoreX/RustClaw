@@ -15,6 +15,8 @@ function storeItem(overrides: Partial<SkillStoreItem> = {}): SkillStoreItem {
     enabled: false,
     host_dependencies: ["git", "ffmpeg", "tesseract_chi_sim"],
     runtime_assets: ["modelscope_sensevoice_small", "modelscope_fsmn_vad"],
+    min_memory_mb: 2048,
+    min_free_disk_mb: 4096,
     skill: { name: "media_download" },
     ...overrides,
   };
@@ -54,6 +56,10 @@ test("shows manifest-declared dependencies in Skill Store install details", () =
   assert.match(markup, />本地模型\/资源</);
   assert.match(markup, /SenseVoice Small 语音识别模型/);
   assert.match(markup, /FSMN 语音活动检测模型/);
+  assert.match(markup, />最低可用内存</);
+  assert.match(markup, /2048 MiB/);
+  assert.match(markup, />最低可用存储</);
+  assert.match(markup, /4096 MiB/);
 });
 
 test("makes the absence of extra dependencies explicit", () => {
@@ -61,6 +67,46 @@ test("makes the absence of extra dependencies explicit", () => {
 
   assert.match(markup, /无需额外安装/);
   assert.match(markup, /无需额外下载/);
+});
+
+test("renders server-owned catalog pagination without materializing every card", () => {
+  const item = storeItem();
+  const markup = renderToStaticMarkup(
+    <SkillStoreCatalog
+      lang="zh"
+      t={(zh) => zh}
+      data={{
+        items: [item],
+        uninstalled_skill_names: [item.name],
+        page: 2,
+        page_size: 1,
+        total: 3,
+        has_more: true,
+        query: "",
+      }}
+      loading={false}
+      error={null}
+      message={null}
+      actionName={null}
+      onRefresh={() => undefined}
+      onBrowse={() => undefined}
+      onCheckDependencies={async () => ({
+        schema_version: 1,
+        skill_name: item.name,
+        checked_at_unix: 1,
+        all_installed: true,
+        dependencies: [],
+      })}
+      onInstall={() => undefined}
+      onRemove={() => undefined}
+      onCancel={() => undefined}
+    />,
+  );
+
+  assert.match(markup, /共 3/);
+  assert.match(markup, /2\/3/);
+  assert.match(markup, />上一页</);
+  assert.match(markup, />下一页</);
 });
 
 test("renders every dependency with its observed installation state", () => {

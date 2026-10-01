@@ -87,7 +87,7 @@ fn declared_dispatch_queue_is_per_user_and_undeclared_skills_keep_existing_behav
         &state,
         &claimed_task("media-2", 7, 11),
         "media_download",
-        &serde_json::json!({"action": "transcribe"}),
+        &serde_json::json!({"action": "resolve"}),
     )
     .expect("same user queue selection");
     let other_user = skill_dispatch_queue_selection(
@@ -109,11 +109,35 @@ fn declared_dispatch_queue_is_per_user_and_undeclared_skills_keep_existing_behav
     .is_none());
     assert!(skill_dispatch_queue_selection(
         &state,
+        &claimed_task("removed-media-transcribe", 7, 10),
+        "media_download",
+        &serde_json::json!({"action": "transcribe"}),
+    )
+    .is_none());
+    assert!(skill_dispatch_queue_selection(
+        &state,
         &claimed_task("ordinary", 7, 10),
         "transform",
         &serde_json::json!({"action": "transform_data"}),
     )
     .is_none());
+
+    let global_first = skill_dispatch_queue_selection(
+        &state,
+        &claimed_task("asr-1", 7, 10),
+        "local_asr",
+        &serde_json::json!({"action": "transcribe"}),
+    )
+    .expect("global local ASR queue selection");
+    let global_other_user = skill_dispatch_queue_selection(
+        &state,
+        &claimed_task("asr-2", 8, 11),
+        "local_asr",
+        &serde_json::json!({"action": "transcribe"}),
+    )
+    .expect("same global local ASR queue selection");
+    assert_eq!(global_first.key, global_other_user.key);
+    assert_eq!(global_first.scope, "global");
 }
 
 #[test]

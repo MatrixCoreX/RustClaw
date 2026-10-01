@@ -309,6 +309,12 @@ fn completed_terminal_termination_allows_replay(
 }
 
 fn registry_allows_repeated_idempotent_action(state: &AppState, action: &AgentAction) -> bool {
+    let Some((idempotent, once_per_task)) = resolved_registry_repeat_contract(state, action) else {
+        return false;
+    };
+    if !idempotent || once_per_task {
+        return false;
+    }
     let (skill_name, args) = match action {
         AgentAction::CallSkill { skill, args } => (skill.as_str(), args),
         AgentAction::CallTool { tool, args } => (tool.as_str(), args),
@@ -332,10 +338,51 @@ fn registry_allows_repeated_idempotent_action(state: &AppState, action: &AgentAc
         .filter(|value| !value.is_empty());
     state.get_skills_registry().is_some_and(|registry| {
         registry.resolved_idempotent(&canonical_skill, action)
-            && !registry.resolved_once_per_task(&canonical_skill, action)
             && crate::execution_recipe::classify_skill_action_effect(state, &canonical_skill, args)
                 .mutates
     })
+}
+
+fn resolved_registry_repeat_contract(
+    state: &AppState,
+    action: &AgentAction,
+) -> Option<(bool, bool)> {
+    let (skill_name, args) = match action {
+        AgentAction::CallSkill { skill, args } => (skill.as_str(), args),
+        AgentAction::CallTool { tool, args } => (tool.as_str(), args),
+        AgentAction::CallCapability { .. } => {
+            let resolved =
+                crate::capability_resolver::resolve_agent_action_for_state(state, action.clone());
+            if matches!(resolved, AgentAction::CallCapability { .. }) {
+                return None;
+            }
+            return resolved_registry_repeat_contract(state, &resolved);
+        }
+        AgentAction::SynthesizeAnswer { .. }
+        | AgentAction::Respond { .. }
+        | AgentAction::Think { .. } => return None,
+    };
+    let canonical_skill = state.resolve_canonical_skill_name(skill_name);
+    let action = args
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    state.get_skills_registry().map(|registry| {
+        (
+            registry.resolved_idempotent(&canonical_skill, action),
+            registry.resolved_once_per_task(&canonical_skill, action),
+        )
+    })
+}
+
+fn registry_allows_fresh_non_idempotent_repeat(state: &AppState, action: &AgentAction) -> bool {
+    resolved_registry_repeat_contract(state, action)
+        .is_some_and(|(idempotent, once_per_task)| !idempotent && !once_per_task)
+}
+
+fn registry_allows_completed_result_reuse(state: &AppState, action: &AgentAction) -> bool {
+    resolved_registry_repeat_contract(state, action).is_some_and(|(idempotent, _)| idempotent)
 }
 
 fn action_effect_for_repeat_guard(
@@ -490,6 +537,13 @@ fn check_repeat_action_guard(
         if repeated_action_allowed {
             return None;
         }
+        if registry_allows_fresh_non_idempotent_repeat(state, action) {
+            loop_state.history_compact.push(format!(
+                "round={} step={} non_idempotent_action_requires_fresh_execution",
+                loop_state.round_no, step_in_round
+            ));
+            return None;
+        }
         let repeated_observation_ready = action_effect_for_repeat_guard(state, loop_state, action)
             .is_some_and(|effect| !effect.mutates && (effect.observes || effect.validates));
         let (reason_code, stop_signal) = if repeated_observation_ready {
@@ -514,14 +568,19 @@ fn check_repeat_action_guard(
         ) {
             loop_state.rollout_attribution.push(attribution);
         }
-        if let Some(previous) = loop_state.capability_results.iter().rev().find(|result| {
-            result.status == claw_core::capability_result::CapabilityResultStatus::Ok
-                && result
-                    .provenance
-                    .get("action_fingerprint")
-                    .and_then(Value::as_str)
-                    == Some(fingerprint)
-        }) {
+        if let Some(previous) = registry_allows_completed_result_reuse(state, action)
+            .then(|| {
+                loop_state.capability_results.iter().rev().find(|result| {
+                    result.status == claw_core::capability_result::CapabilityResultStatus::Ok
+                        && result
+                            .provenance
+                            .get("action_fingerprint")
+                            .and_then(Value::as_str)
+                            == Some(fingerprint)
+                })
+            })
+            .flatten()
+        {
             let identity = previous.canonical_evidence_identity();
             let reused = json!({
                 "schema_version": 1,

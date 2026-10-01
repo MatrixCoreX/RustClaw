@@ -366,6 +366,28 @@ fn canonicalize_schedule_intent_schema_object(
     canonicalize_schedule_intent_fields(map, false)
 }
 
+fn canonicalize_answer_verifier_schema_object(
+    mut map: serde_json::Map<String, Value>,
+) -> (Value, bool) {
+    let mut normalized = false;
+    if let Some(Value::Array(checks)) = map.get_mut("output_field_checks") {
+        for check in checks {
+            let Value::Object(fields) = check else {
+                continue;
+            };
+            let original_len = fields.len();
+            fields.retain(|key, _| {
+                matches!(
+                    key.as_str(),
+                    "requested_field" | "exact_label_present" | "evidence_step_ids"
+                )
+            });
+            normalized |= fields.len() != original_len;
+        }
+    }
+    (Value::Object(map), normalized)
+}
+
 fn canonicalize_schedule_intent_fields(
     mut map: serde_json::Map<String, Value>,
     mut normalized: bool,
@@ -559,6 +581,9 @@ fn schema_scalar_text(value: &Value) -> String {
 
 fn canonicalize_schema_input(schema_id: PromptSchemaId, value: Value) -> (Value, bool) {
     match (schema_id, value) {
+        (PromptSchemaId::AnswerVerifier, Value::Object(map)) => {
+            canonicalize_answer_verifier_schema_object(map)
+        }
         (PromptSchemaId::PlanResult, Value::Array(steps)) => {
             let (steps, _) = canonicalize_plan_steps_value(Value::Array(steps));
             (json!({ "steps": steps }), true)

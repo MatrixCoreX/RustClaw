@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('fs/promises');
+const fsSync = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const readline = require('readline');
@@ -323,28 +324,184 @@ async function describeElement(handle) {
     });
 }
 
-async function screenshotArtifact(state, prefix = 'snapshot') {
-    if (!artifactRoot) throw bridgeError('ARTIFACT_ROOT_UNAVAILABLE');
-    await fs.mkdir(artifactRoot, { recursive: true });
-    const id = crypto.randomUUID();
-    const finalPath = ensureWithinRoot(artifactRoot, path.join(artifactRoot, `${prefix}-${id}.png`));
-    const temporaryPath = `${finalPath}.tmp`;
-    try {
-        await state.page.screenshot({ path: temporaryPath, type: 'png', fullPage: true, timeout: ACTION_TIMEOUT_MS });
-        await fs.rename(temporaryPath, finalPath);
-    } finally {
-        await fs.rm(temporaryPath, { force: true }).catch(() => {});
+function validatedScreenshotContract(request) {
+    const contract = request.screenshot_contract;
+    if (contract === undefined) {
+        return { schema_version: 1, mode: 'single_full_page', preserve_full_page: true };
     }
-    const bytes = await fs.readFile(finalPath);
+    if (!contract || typeof contract !== 'object' || contract.schema_version !== 1
+        || contract.preserve_full_page !== true
+        || !['single_full_page', 'segmented_full_page'].includes(contract.mode)) {
+        throw bridgeError('SCREENSHOT_CONTRACT_INVALID');
+    }
+    if (contract.mode === 'segmented_full_page') {
+        if (!Number.isInteger(contract.max_tile_pixels)
+            || contract.max_tile_pixels < 262144
+            || contract.max_tile_pixels > 16777216
+            || !Number.isInteger(contract.max_tiles)
+            || contract.max_tiles < 1
+            || contract.max_tiles > 256) {
+            throw bridgeError('SCREENSHOT_CONTRACT_INVALID');
+        }
+    }
+    return contract;
+}
+
+function planScreenshotTiles(width, height, viewport, contract) {
+    const pageWidth = Math.ceil(Number(width));
+    const pageHeight = Math.ceil(Number(height));
+    if (!Number.isInteger(pageWidth) || pageWidth < 1
+        || !Number.isInteger(pageHeight) || pageHeight < 1) {
+        throw bridgeError('SCREENSHOT_GEOMETRY_INVALID');
+    }
+    const viewportWidth = Math.max(1, Math.floor(Number(viewport?.width) || pageWidth));
+    const viewportHeight = Math.max(1, Math.floor(Number(viewport?.height) || pageHeight));
+    const tileWidth = Math.min(pageWidth, viewportWidth, contract.max_tile_pixels);
+    const tileHeight = Math.min(
+        pageHeight,
+        viewportHeight,
+        Math.max(1, Math.floor(contract.max_tile_pixels / tileWidth)),
+    );
+    const columns = Math.ceil(pageWidth / tileWidth);
+    const rows = Math.ceil(pageHeight / tileHeight);
+    const requiredTiles = columns * rows;
+    if (requiredTiles > contract.max_tiles) {
+        throw bridgeError('SCREENSHOT_BOUNDS_EXCEEDED', {
+            page_width: pageWidth,
+            page_height: pageHeight,
+            required_tiles: requiredTiles,
+            max_tiles: contract.max_tiles,
+        });
+    }
+    const tiles = [];
+    for (let row = 0; row < rows; row += 1) {
+        for (let column = 0; column < columns; column += 1) {
+            const x = column * tileWidth;
+            const y = row * tileHeight;
+            tiles.push({
+                x,
+                y,
+                width: Math.min(tileWidth, pageWidth - x),
+                height: Math.min(tileHeight, pageHeight - y),
+            });
+        }
+    }
+    return tiles;
+}
+
+async function screenshotFileArtifact(finalPath, id, extra = {}) {
+    const [metadata, sha256] = await Promise.all([
+        fs.stat(finalPath),
+        sha256File(finalPath),
+    ]);
     return {
-        id: `browser-session:${id}`,
-        artifact_ref: `browser-session:${id}`,
+        id,
+        artifact_ref: id,
         path: finalPath,
         media_type: 'image/png',
-        size_bytes: bytes.length,
-        sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
+        size_bytes: metadata.size,
+        sha256,
         kind: 'browser_screenshot',
+        ...extra,
     };
+}
+
+async function screenshotArtifacts(state, request, prefix = 'snapshot') {
+    if (!artifactRoot) throw bridgeError('ARTIFACT_ROOT_UNAVAILABLE');
+    await fs.mkdir(artifactRoot, { recursive: true });
+    const contract = validatedScreenshotContract(request);
+    const id = crypto.randomUUID();
+    if (contract.mode === 'single_full_page') {
+        const finalPath = ensureWithinRoot(artifactRoot, path.join(artifactRoot, `${prefix}-${id}.png`));
+        const temporaryPath = `${finalPath}.tmp`;
+        try {
+            await state.page.screenshot({
+                path: temporaryPath,
+                type: 'png',
+                fullPage: true,
+                animations: 'disabled',
+                caret: 'hide',
+                scale: 'css',
+                timeout: ACTION_TIMEOUT_MS,
+            });
+            await fs.rename(temporaryPath, finalPath);
+        } finally {
+            await fs.rm(temporaryPath, { force: true }).catch(() => {});
+        }
+        return [await screenshotFileArtifact(finalPath, `browser-session:${id}`, {
+            screenshot_mode: contract.mode,
+            sequence: 1,
+            total: 1,
+            full_page_complete: true,
+        })];
+    }
+
+    const geometry = await state.page.evaluate(() => {
+        const root = document.documentElement;
+        const body = document.body;
+        return {
+            width: Math.max(root?.scrollWidth || 0, root?.clientWidth || 0,
+                body?.scrollWidth || 0, body?.clientWidth || 0),
+            height: Math.max(root?.scrollHeight || 0, root?.clientHeight || 0,
+                body?.scrollHeight || 0, body?.clientHeight || 0),
+        };
+    });
+    const tiles = planScreenshotTiles(
+        geometry.width,
+        geometry.height,
+        state.page.viewportSize(),
+        contract,
+    );
+    const finalPaths = [];
+    try {
+        for (let index = 0; index < tiles.length; index += 1) {
+            const finalPath = ensureWithinRoot(
+                artifactRoot,
+                path.join(artifactRoot, `${prefix}-${id}-${index + 1}-of-${tiles.length}.png`),
+            );
+            const temporaryPath = `${finalPath}.tmp`;
+            try {
+                await state.page.screenshot({
+                    path: temporaryPath,
+                    type: 'png',
+                    clip: tiles[index],
+                    animations: 'disabled',
+                    caret: 'hide',
+                    scale: 'css',
+                    timeout: ACTION_TIMEOUT_MS,
+                });
+                await fs.rename(temporaryPath, finalPath);
+            } finally {
+                await fs.rm(temporaryPath, { force: true }).catch(() => {});
+            }
+            finalPaths.push(finalPath);
+        }
+        return await Promise.all(finalPaths.map((finalPath, index) => screenshotFileArtifact(
+            finalPath,
+            `browser-session:${id}:${index + 1}`,
+            {
+                screenshot_mode: contract.mode,
+                screenshot_group_id: `browser-session:${id}`,
+                sequence: index + 1,
+                total: finalPaths.length,
+                clip: tiles[index],
+                full_page_complete: true,
+            },
+        )));
+    } catch (error) {
+        await Promise.all(finalPaths.map((finalPath) => fs.rm(finalPath, { force: true })));
+        throw error;
+    }
+}
+
+function sha256File(filePath) {
+    return new Promise((resolve, reject) => {
+        const digest = crypto.createHash('sha256');
+        const stream = fsSync.createReadStream(filePath);
+        stream.on('data', chunk => digest.update(chunk));
+        stream.once('error', reject);
+        stream.once('end', () => resolve(digest.digest('hex')));
+    });
 }
 
 async function snapshotPage(state, request = {}) {
@@ -439,7 +596,7 @@ async function snapshotPage(state, request = {}) {
     state.snapshot = internal;
     const artifacts = [];
     if (request.include_screenshot === true) {
-        artifacts.push(await screenshotArtifact(state));
+        artifacts.push(...await screenshotArtifacts(state, request));
     }
     return {
         schema_version: 1,
@@ -914,14 +1071,14 @@ async function dispatch(request) {
     if (command === 'snapshot') return snapshotPage(getPageState(request), request);
     if (command === 'screenshot') {
         const state = getPageState(request);
-        const artifact = await screenshotArtifact(state, 'screenshot');
+        const artifacts = await screenshotArtifacts(state, request, 'screenshot');
         return {
             schema_version: 1,
             page_id: state.pageId,
             page_generation: state.generation,
             current_url: safeUrl(state.page.url()),
-            artifact,
-            artifacts: [artifact],
+            artifact: artifacts[0],
+            artifacts,
         };
     }
     if (['click', 'type', 'select', 'press_key', 'scroll', 'wait_for', 'back'].includes(command)) {
@@ -1012,6 +1169,8 @@ module.exports = {
     bridgeError,
     checkPostcondition,
     detectMediaType,
+    planScreenshotTiles,
     redactText,
     safeUrl,
+    validatedScreenshotContract,
 };

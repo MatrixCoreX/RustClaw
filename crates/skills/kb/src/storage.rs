@@ -269,6 +269,19 @@ fn open(runtime: &KbRuntime) -> Result<Connection> {
     db.pragma_update(None, "journal_mode", "WAL")?;
     db.pragma_update(None, "synchronous", "NORMAL")?;
     db.pragma_update(None, "foreign_keys", "ON")?;
+    if let Some(cache_size_kib) = runtime.storage_cache_size_kib.filter(|value| *value > 0) {
+        db.pragma_update(None, "cache_size", -(i64::from(cache_size_kib)))?;
+    }
+    if let Some(mmap_size_bytes) = runtime.storage_mmap_size_bytes {
+        db.pragma_update(
+            None,
+            "mmap_size",
+            mmap_size_bytes.min(i64::MAX as u64) as i64,
+        )?;
+    }
+    if runtime.storage_temp_store.as_deref() == Some("file") {
+        db.pragma_update(None, "temp_store", 1_i64)?;
+    }
     Ok(db)
 }
 

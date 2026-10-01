@@ -13,7 +13,7 @@ RESTART_MODE="auto"
 CHECK_ONLY=0
 FORCE=0
 PACKAGE_MODE=0
-KEEP_BACKUPS=2
+KEEP_BACKUPS=1
 SYSTEMD_UNIT="${APP_SERVICE_NAME}.service"
 
 WORK_DIR=""
@@ -59,7 +59,7 @@ Options:
       Atomically replace a source checkout with the verified Release package.
       Persistent runtime state is preserved and the source tree is backed up.
   --keep-backups N
-      Number of successful deployment backups to retain. Default: 2.
+      Number of successful deployment backups to retain. Default: 1.
   -h, --help
       Show this help.
 

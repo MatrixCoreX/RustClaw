@@ -4,7 +4,6 @@ import json
 import mimetypes
 import os
 from pathlib import Path
-import platform
 import queue
 import re
 import subprocess
@@ -33,7 +32,6 @@ SUPPORTED_ACTIONS = (
     "capabilities",
     "download",
     "resolve",
-    "transcribe",
     "ocr",
     "prepare_x",
 )
@@ -47,8 +45,6 @@ PROGRESS_STEP_IDS = {
     "precheck": "media_precheck",
     "download": "download_media",
     "resolve": "resolve_media",
-    "extract_audio": "extract_audio",
-    "transcribe": "transcribe_speech",
     "ocr": "recognize_images",
     "prepare_x": "prepare_media",
 }
@@ -152,10 +148,6 @@ def _progress_metadata(detail_key: str) -> dict[str, str]:
     step_name = ""
     if detail_key == "media_download.precheck.starting":
         step_name = "precheck"
-    elif detail_key == "media_download.transcribe.extracting_audio":
-        step_name = "extract_audio"
-    elif detail_key == "media_download.transcribe.recognizing_speech":
-        step_name = "transcribe"
     else:
         parts = detail_key.split(".")
         if len(parts) == 3 and parts[0] == "media_download":
@@ -456,7 +448,6 @@ def _build_download_command(
             "--profile-interval",
             f"{profile_interval:g}",
             "--no-system-browser-cookies",
-            "--no-simplify-chinese",
         ]
     )
     if not _bool(args, "browser_fallback", True):
@@ -494,57 +485,6 @@ def _build_download_command(
                 command.append(flag)
         command.append("--no-ocr-images")
     command.append(share)
-    return command
-
-
-def _build_transcribe_command(request: dict[str, Any], args: dict[str, Any], output_dir: Path) -> list[str]:
-    engine = _choice(args, "engine", ("whisper", "funasr"), "whisper")
-    available_engines = _available_transcription_engines()
-    if not _bool(args, "extract_audio_only", False) and engine not in available_engines:
-        raise SkillFailure(
-            f"transcription engine is unavailable on this platform: {engine}",
-            error_code="dependency_unavailable",
-            message_key="media_download.error.dependency_unavailable",
-            details={
-                "requested_engine": engine,
-                "available_engines": list(available_engines),
-                "unavailable_reason_code": "platform_binary_unavailable",
-            },
-        )
-    raw = _string(args, "input_path", required=True, max_length=4_096)
-    assert raw is not None
-    input_path = _input_path(request, raw)
-    language = _string(args, "language", default="auto", max_length=32) or "auto"
-    target_language = _target_transcript_language(request, args)
-    command = _tool("video_transcriber.py")
-    command.extend(
-        [
-            "--output-dir",
-            str(output_dir),
-            "--engine",
-            engine,
-            "--language",
-            language,
-            "--no-progress",
-            (
-                "--simplify-chinese"
-                if _transcript_requires_simplified_chinese(target_language)
-                else "--no-simplify-chinese"
-            ),
-        ]
-    )
-    flag_map = {
-        "extract_audio_only": "--extract-only",
-        "translate": "--translate",
-        "fast": "--fast",
-        "no_gpu": "--no-gpu",
-        "timestamps": "--timestamps",
-        "overwrite": "--overwrite",
-    }
-    for name, flag in flag_map.items():
-        if _bool(args, name, False):
-            command.append(flag)
-    command.append(str(input_path))
     return command
 
 
@@ -658,8 +598,6 @@ def _artifact(path: Path) -> dict[str, Any]:
         artifact["artifact_role"] = "original_image"
     elif artifact["mime_type"].startswith("video/"):
         artifact["artifact_role"] = "original_video"
-    elif path.suffix.lower() == ".txt" and path.stem.endswith("_transcript"):
-        artifact["artifact_role"] = "transcript_text"
     elif artifact["mime_type"].startswith("audio/"):
         artifact["artifact_role"] = (
             "background_audio"
@@ -949,7 +887,7 @@ def _content_bundle(
                 "input_value": audio_path,
                 "completion_capabilities": [
                     "audio.transcribe",
-                    "media_download.transcribe",
+                    "local_asr.transcribe",
                 ],
                 "recommended_capability_pointer": "/extra/recommended_capability",
                 "result_label_kind": "audio_transcript",
@@ -994,7 +932,7 @@ def _content_bundle(
                 "input_value": background_audio.get("path"),
                 "completion_capabilities": [
                     "audio.transcribe",
-                    "media_download.transcribe",
+                    "local_asr.transcribe",
                 ],
                 "recommended_capability_pointer": "/extra/recommended_capability",
                 "result_label_kind": "audio_transcript",
@@ -1387,88 +1325,6 @@ def _review_local_ocr_artifact(
     }
 
 
-def _target_transcript_language(
-    request: dict[str, Any],
-    args: dict[str, Any],
-) -> str:
-    explicit = args.get("response_language")
-    if isinstance(explicit, str) and explicit.strip():
-        return explicit.strip()
-    context = request.get("context")
-    if isinstance(context, dict):
-        for key in ("locale", "language"):
-            value = context.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-    memory = args.get("_memory")
-    if isinstance(memory, dict):
-        value = memory.get("lang_hint")
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return "preserve-source-language"
-
-
-def _transcript_requires_simplified_chinese(language: str) -> bool:
-    normalized = language.strip().replace("_", "-").lower()
-    return normalized in {"zh", "zh-cn", "zh-sg", "zh-hans"} or normalized.startswith(
-        "zh-hans-"
-    )
-
-
-def _prepare_transcription_review_contract(
-    request: dict[str, Any],
-    args: dict[str, Any],
-    artifacts: list[dict[str, Any]],
-) -> dict[str, Any] | None:
-    if _bool(args, "extract_audio_only", False):
-        return None
-    transcript_artifact = next(
-        (item for item in artifacts if item.get("artifact_role") == "transcript_text"),
-        None,
-    )
-    if transcript_artifact is None:
-        raise SkillFailure(
-            "transcription completed without a text artifact",
-            error_code="transcript_missing",
-            message_key="media_download.error.transcript_missing",
-            details={"failure_phase": "execution_partial", "side_effect_applied": True},
-        )
-    transcript_path = Path(str(transcript_artifact["path"]))
-    try:
-        raw_transcript = transcript_path.read_text(encoding="utf-8").strip()
-    except OSError as exc:
-        raise SkillFailure(
-            f"cannot read local transcript for review: {exc}",
-            error_code="transcript_read_failed",
-            message_key="media_download.error.transcript_read_failed",
-            details={"failure_phase": "execution_partial", "side_effect_applied": True},
-        ) from exc
-    if not raw_transcript:
-        raise SkillFailure(
-            "local transcription produced no text",
-            error_code="transcript_empty",
-            message_key="media_download.error.transcript_empty",
-            details={"failure_phase": "execution_partial", "side_effect_applied": True},
-        )
-    target_language = _target_transcript_language(request, args)
-    return {
-        "schema_version": 1,
-        "required": True,
-        "source": "media_download_local_asr",
-        "source_engine": _string(args, "engine", max_length=64) or "whisper",
-        "raw_text": raw_transcript,
-        "raw_character_count": len(raw_transcript),
-        "response_language": target_language,
-        "corrections": ["recognition_errors", "typos", "broken_sentences"],
-        "preserve_meaning": True,
-        "delivery": {
-            "mode": "inline_and_artifact",
-            "text_format": "text/plain; charset=utf-8",
-            "text_filename": "transcript.txt",
-        },
-    }
-
-
 def _diagnostics(stderr: str) -> str:
     value = "\n".join(
         line
@@ -1655,8 +1511,6 @@ def _run_tool(
     checkpoint_before = _profile_checkpoint_pointers(storage_directory)
     environment = os.environ.copy()
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
-    if storage_directory is not None:
-        environment["MODELSCOPE_CACHE"] = str(storage_directory / "modelscope")
     try:
         completed = _run_process(
             command,
@@ -1910,28 +1764,7 @@ def _urls(stdout: str) -> list[str]:
     return urls
 
 
-def _funasr_prebuilt_supported(
-    system_name: str | None = None,
-    machine: str | None = None,
-) -> bool:
-    system = (system_name or platform.system()).strip().lower()
-    architecture = (machine or platform.machine()).strip().lower()
-    return not (system == "darwin" and architecture in {"x86_64", "amd64"})
-
-
-def _available_transcription_engines(
-    system_name: str | None = None,
-    machine: str | None = None,
-) -> tuple[str, ...]:
-    engines = ["whisper"]
-    if _funasr_prebuilt_supported(system_name, machine):
-        engines.append("funasr")
-    return tuple(engines)
-
-
 def _capabilities_extra() -> dict[str, Any]:
-    available_engines = _available_transcription_engines()
-    funasr_supported = "funasr" in available_engines
     return {
         "schema_version": SCHEMA_VERSION,
         "source_skill": SKILL_NAME,
@@ -1958,39 +1791,8 @@ def _capabilities_extra() -> dict[str, Any]:
             "media_processing": ["ffmpeg", "ffprobe"],
             "ocr": ["tesseract", "tesseract_language_data"],
             "browser_fallback": ["chromium_or_chrome"],
-            "transcription_alternative": (
-                [
-                    "funasr",
-                    "modelscope",
-                    "torch",
-                    "modelscope_sensevoice_small",
-                    "modelscope_fsmn_vad",
-                ]
-                if funasr_supported
-                else []
-            ),
         },
-        "host_integrated_dependencies": {
-            "default_transcription": ["whisper.cpp"],
-        },
-        "available_transcription_engines": list(available_engines),
-        "transcription_engines": {
-            "whisper": {
-                "supported": True,
-                "default": True,
-                "dependency_source": "host",
-            },
-            "funasr": {
-                "supported": funasr_supported,
-                "default": False,
-                "dependency_source": "skill_package",
-                **(
-                    {}
-                    if funasr_supported
-                    else {"unavailable_reason_code": "platform_binary_unavailable"}
-                ),
-            },
-        },
+        "speech_recognition_capability": "local_asr.transcribe",
     }
 
 
@@ -2060,13 +1862,12 @@ def respond(
             )
 
         output_dir = _artifact_output_directory(request)
-        # Downloads and local transcription may legitimately take a long time.
-        # Keep per-request network timeouts, cancellation, and durable background
-        # polling, but never impose a whole-operation deadline supplied by a
-        # planner or an older client for either action.
+        # Downloads may legitimately take a long time. Keep per-request network
+        # timeouts, cancellation, and durable background polling without adding
+        # a planner-supplied whole-operation deadline.
         operation_timeout = (
             None
-            if action in {"download", "transcribe"}
+            if action == "download"
             else _optional_integer(
                 args,
                 "operation_timeout_seconds",
@@ -2084,8 +1885,6 @@ def respond(
             )
         elif action == "resolve":
             command = _build_download_command(args, output_dir, resolve_only=True)
-        elif action == "transcribe":
-            command = _build_transcribe_command(request, args, output_dir)
         elif action == "ocr":
             command = _build_ocr_command(request, args, output_dir)
         else:
@@ -2093,7 +1892,7 @@ def respond(
     except SkillFailure as failure:
         raise _mark_not_applied(failure, "pre_dispatch")
 
-    if progress is not None and action != "transcribe":
+    if progress is not None:
         progress.emit(
             f"media_download.{action}.starting",
             params={"action": action},
@@ -2110,29 +1909,13 @@ def respond(
         progress.forward_child if progress is not None else None,
     )
     source_media = _child_result_metadata(stderr) if action == "download" else None
-    transcription_review = None
-    if action == "transcribe":
-        transcription_review = _prepare_transcription_review_contract(
-            request,
-            args,
-            artifacts,
-        )
     if progress is not None:
-        if action == "transcribe":
-            total = 2 if _bool(args, "extract_audio_only", False) else 3
-            progress.emit(
-                "media_download.transcribe.completed",
-                params={"action": action},
-                current=total,
-                total=total,
-            )
-        else:
-            progress.emit(
-                f"media_download.{action}.completed",
-                params={"action": action},
-                current=1,
-                total=1,
-            )
+        progress.emit(
+            f"media_download.{action}.completed",
+            params={"action": action},
+            current=1,
+            total=1,
+        )
     if action == "ocr":
         for artifact in artifacts:
             artifact["artifact_role"] = "recognized_text"
@@ -2149,7 +1932,7 @@ def respond(
             message_key="media_download.error.media_not_found",
             details={"diagnostics": _diagnostics(stderr)},
         )
-    delivery_capable = action in {"download", "transcribe", "ocr"}
+    delivery_capable = action in {"download", "ocr"}
     deliver_to_user = not delivery_capable or _bool(args, "deliver_to_user", True)
     inline_article = None
     inline_recognition = None
@@ -2188,21 +1971,7 @@ def respond(
     result_artifacts = artifacts
     delivery = None
     saved_files = None
-    if action == "transcribe" and deliver_to_user:
-        if _bool(args, "extract_audio_only", False):
-            result_artifacts = [
-                item
-                for item in artifacts
-                if item.get("artifact_role") == "extracted_audio"
-            ]
-            delivery = {"intent": "artifact", "deliver_to_user": True}
-        else:
-            assert transcription_review is not None
-            result_artifacts = []
-            saved_files = artifacts
-            text = "MEDIA_TRANSCRIPTION_READY"
-            delivery = {"intent": "model_synthesis", "deliver_to_user": True}
-    elif delivery_capable:
+    if delivery_capable:
         delivery = {
             "intent": (
                 "artifact"
@@ -2242,38 +2011,6 @@ def respond(
             extra["profile_collection"] = profile_collection
         if inline_article is not None:
             extra["article_delivery"] = inline_article
-    if action == "transcribe" and transcription_review is not None:
-        extra["transcription"] = {
-            "source": transcription_review["source"],
-            "source_engine": transcription_review["source_engine"],
-            "target_language": transcription_review["response_language"],
-            "raw_character_count": transcription_review["raw_character_count"],
-            "reviewed_by_model": False,
-            "review_required": True,
-        }
-        extra["transcription_review"] = transcription_review
-    if action == "transcribe" and _bool(args, "extract_audio_only", False):
-        extracted_audio = next(
-            (
-                item
-                for item in artifacts
-                if item.get("artifact_role") == "extracted_audio"
-            ),
-            None,
-        )
-        if extracted_audio is not None:
-            extra["processing_outputs"] = {
-                "extracted_audio": extracted_audio,
-            }
-            if not deliver_to_user:
-                audio_path = str(extracted_audio["path"])
-                extra["followup_policy"] = {
-                    "next_action": "preview_transcription",
-                    "capability": "audio.preview_transcribe",
-                    "input_field": "input_path",
-                    "input_value": audio_path,
-                    "deliver_intermediate": False,
-                }
     if delivery is not None:
         extra["delivery"] = delivery
     if saved_files is not None:

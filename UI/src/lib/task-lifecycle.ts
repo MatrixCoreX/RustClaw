@@ -13,6 +13,7 @@ export interface TaskLifecycleProjection {
   resume_due?: boolean;
   resume_wait_seconds?: number;
   resume_reason?: string;
+  message_key?: string;
   resume_directive?: string;
   waiting_reason_code?: string;
   checkpoint_id?: string;
@@ -212,7 +213,6 @@ export function buildTaskLifecycleView(
   const processObservation = lifecycle?.process_observation;
   const elapsed = elapsedLabel(lang, processObservation?.started_at, processObservation?.updated_at);
   const meta: string[] = [];
-  if (lifecycle?.waiting_reason_code) meta.push(`${t(lang, "等待原因", "Wait reason")}: ${lifecycle.waiting_reason_code}`);
   if (Number.isFinite(lifecycle?.resume_wait_seconds)) {
     meta.push(`${t(lang, "恢复等待", "Resume wait")}: ${Math.max(0, Number(lifecycle?.resume_wait_seconds))}s`);
   }
@@ -261,10 +261,34 @@ export function buildTaskLifecycleView(
       );
     } else if (lifecycle?.resume_due === true) {
       detail = t(lang, "恢复窗口已到，系统可以继续处理。", "The resume window is due and the system can continue.");
+    } else if (
+      lifecycle?.message_key === "clawd.task.resource_waiting"
+      || lifecycle?.resume_reason === "resource_admission_wait"
+    ) {
+      detail = t(
+        lang,
+        "系统正在等待足够的运行资源，资源可用后会从检查点继续。",
+        "The system is waiting for enough runtime resources and will continue from its checkpoint when capacity is available.",
+      );
+    } else if (
+      lifecycle?.message_key === "clawd.task.provider_waiting"
+      || lifecycle?.resume_reason === "provider_blocker_wait_background"
+    ) {
+      detail = t(
+        lang,
+        "模型服务暂时不可用，系统已保存进度并会稍后继续。",
+        "The model service is temporarily unavailable. Progress is saved and the system will continue later.",
+      );
+    } else if (lifecycle?.message_key === "clawd.task.task_budget_slice_exhausted") {
+      detail = t(
+        lang,
+        "本阶段已保存进度，系统会从检查点继续后续步骤。",
+        "Progress for this stage is saved, and the system will continue the remaining steps from its checkpoint.",
+      );
+    } else if (lifecycle?.message_key === "clawd.task.pause_requested") {
+      detail = t(lang, "任务已暂停并保存当前进度。", "The task is paused with its current progress saved.");
     } else {
-      detail = lifecycle?.resume_reason
-        ? `${t(lang, "恢复原因", "Resume reason")}: ${lifecycle.resume_reason}`
-        : t(lang, "任务已进入可恢复状态。", "The task is in a resumable state.");
+      detail = t(lang, "任务已进入可恢复状态。", "The task is in a resumable state.");
     }
   } else if (state === "queued" || state === "running") {
     detail = t(lang, "可以稍后刷新或取消。", "You can refresh later or cancel it.");

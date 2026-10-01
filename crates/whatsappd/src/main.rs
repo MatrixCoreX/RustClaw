@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -39,6 +38,7 @@ const WA_I18N_PENDING_RESUME_STOPPED_KEY: &str = "whatsapp_cloud.msg.pending_res
 const WA_I18N_BIND_INVALID_KEY: &str = "whatsapp_cloud.msg.bind_invalid";
 const WA_I18N_BIND_HELP_KEY: &str = "whatsapp_cloud.msg.bind_help";
 const WHATSAPP_TEXT_CHUNK_CHARS: usize = 3500;
+const CHANNEL_RUNTIME_CACHE_MAX_ENTRIES: usize = 4096;
 const WA_I18N_REQUEST_TIMEOUT_RETRY_LATER_KEY: &str =
     "whatsapp_cloud.msg.request_timeout_retry_later";
 
@@ -385,7 +385,13 @@ fn should_expect_key_reply(state: &AppState, wa_id: &str) -> bool {
 fn set_expect_key_reply(state: &AppState, wa_id: &str, enabled: bool) {
     if let Ok(mut set) = state.pending_key_bind.lock() {
         if enabled {
-            set.insert(wa_id.to_string());
+            let key = wa_id.to_string();
+            claw_core::bounded_cache::prepare_hash_set_insert(
+                &mut set,
+                &key,
+                CHANNEL_RUNTIME_CACHE_MAX_ENTRIES,
+            );
+            set.insert(key);
         } else {
             set.remove(wa_id);
         }
@@ -394,7 +400,13 @@ fn set_expect_key_reply(state: &AppState, wa_id: &str, enabled: bool) {
 
 fn store_bound_identity(state: &AppState, wa_id: &str, identity: &AuthIdentity) {
     if let Ok(mut map) = state.bound_identity_by_user.lock() {
-        map.insert(wa_id.to_string(), identity.clone());
+        let key = wa_id.to_string();
+        claw_core::bounded_cache::prepare_hash_map_insert(
+            &mut map,
+            &key,
+            CHANNEL_RUNTIME_CACHE_MAX_ENTRIES,
+        );
+        map.insert(key, identity.clone());
     }
 }
 
@@ -638,6 +650,11 @@ async fn handle_claimed_inbound_message(state: &AppState, msg: WaMessage) -> any
         return Ok(());
     }
     if let Ok(mut windows) = state.last_inbound_at_by_user.lock() {
+        claw_core::bounded_cache::prepare_hash_map_insert(
+            &mut windows,
+            &msg.from,
+            CHANNEL_RUNTIME_CACHE_MAX_ENTRIES,
+        );
         windows.insert(msg.from.clone(), now_ts());
     }
     let inbound_text = msg
@@ -854,7 +871,16 @@ async fn handle_image_message(
     let abs_path = std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join(&rel_path);
-    let size = download_whatsapp_media(state, &media.id, &abs_path).await?;
+    let size = download_whatsapp_media(
+        state,
+        &media.id,
+        &abs_path,
+        claw_core::channel_media_limits::required_channel_media_max_bytes(
+            claw_core::channel_capabilities::ChannelAdapterKind::WhatsappCloud,
+            claw_core::channel_capabilities::ChannelCapabilityKind::SendImage,
+        ),
+    )
+    .await?;
     let payload = json!({
         "text": "",
         "attachments": [{
@@ -903,7 +929,16 @@ async fn handle_audio_message(
     let abs_path = std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join(&rel_path);
-    let size = download_whatsapp_media(state, &media.id, &abs_path).await?;
+    let size = download_whatsapp_media(
+        state,
+        &media.id,
+        &abs_path,
+        claw_core::channel_media_limits::required_channel_media_max_bytes(
+            claw_core::channel_capabilities::ChannelAdapterKind::WhatsappCloud,
+            claw_core::channel_capabilities::ChannelCapabilityKind::SendAudio,
+        ),
+    )
+    .await?;
     let payload = json!({
         "text": "",
         "attachments": [{
@@ -982,6 +1017,7 @@ async fn download_whatsapp_media(
     state: &AppState,
     media_id: &str,
     local_path: &Path,
+    max_bytes: u64,
 ) -> anyhow::Result<u64> {
     let meta_url = format!("{}/v23.0/{}", state.api_base, media_id);
     let meta = state
@@ -1001,21 +1037,22 @@ async fn download_whatsapp_media(
         ));
     }
     let meta_body: WaMediaMeta = meta.json().await.context("decode media meta failed")?;
-    let bytes = state
+    let response = state
         .client
         .get(&meta_body.url)
         .bearer_auth(state.access_token.trim())
         .send()
         .await
-        .context("download media failed")?
-        .bytes()
-        .await
-        .context("read media bytes failed")?;
-    if let Some(parent) = local_path.parent() {
-        fs::create_dir_all(parent)?;
+        .context("download media failed")?;
+    if !response.status().is_success() {
+        return Err(anyhow!(
+            "whatsapp_media_download_http_status:{}",
+            response.status()
+        ));
     }
-    fs::write(local_path, &bytes)?;
-    Ok(bytes.len() as u64)
+    claw_core::channel_media_download::persist_bounded_response(response, local_path, max_bytes)
+        .await
+        .context("persist whatsapp media failed")
 }
 
 struct SubmittedTask {
@@ -1269,6 +1306,8 @@ async fn poll_task_result_with_soft_timeout(
     let started = std::time::Instant::now();
     let mut timeout_notice_sent = false;
     let mut last_seen_status: Option<TaskStatus> = None;
+    let mut progress_projection =
+        claw_core::channel_progress::ChannelProgressProjectionState::default();
 
     loop {
         let task = match query_task_status(state, task_id, user_key).await {
@@ -1296,6 +1335,15 @@ async fn poll_task_result_with_soft_timeout(
         last_seen_status = Some(task.status.clone());
         match task.status {
             TaskStatus::Queued | TaskStatus::Running => {
+                if progress_projection.should_emit_resource_wait_notice(&task) {
+                    let message = claw_core::channel_i18n::common_text_with_vars_for_locale(
+                        &state.language,
+                        "channel.notice.resource_waiting",
+                        &[("task_id", task_id)],
+                    );
+                    let _ = send_whatsapp_text(state, wa_id, &message).await;
+                    timeout_notice_sent = true;
+                }
                 if started.elapsed() > Duration::from_secs(delivery_timeout_secs)
                     && !timeout_notice_sent
                 {
@@ -1314,7 +1362,10 @@ async fn poll_task_result_with_soft_timeout(
             TaskStatus::Succeeded
             | TaskStatus::Failed
             | TaskStatus::Canceled
-            | TaskStatus::Timeout => return Ok(timeout_notice_sent),
+            | TaskStatus::Timeout => {
+                progress_projection.mark_terminal();
+                return Ok(timeout_notice_sent);
+            }
         }
     }
 }

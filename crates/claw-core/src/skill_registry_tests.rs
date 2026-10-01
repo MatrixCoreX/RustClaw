@@ -193,6 +193,36 @@ resource_request = { class = "cpu", cpu_cores = 4, memory_mb = 2048, disk_io_wei
     assert_eq!(request.class, SkillResourceClass::Cpu);
     assert_eq!(request.cpu_cores, 4);
 
+    let local_model_registry = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "local_model"
+resource_request = { class = "local_model", cpu_cores = 2, memory_mb = 2048, allow_cpu_fallback = true }
+"#,
+    )
+    .expect("valid local model resource request");
+    let local_model = local_model_registry
+        .resource_request("local_model")
+        .expect("local model resource request");
+    assert_eq!(local_model.class, SkillResourceClass::LocalModel);
+    assert!(local_model.allow_cpu_fallback);
+
+    let browser_registry = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "browser"
+resource_request = { class = "memory", memory_mb = 512, browser_slots = 2 }
+"#,
+    )
+    .expect("valid browser resource request");
+    assert_eq!(
+        browser_registry
+            .resource_request("browser")
+            .expect("browser request")
+            .browser_slots,
+        2
+    );
+
     let error = SkillsRegistry::load_from_str(
         r#"
 [[skills]]
@@ -202,6 +232,16 @@ resource_request = { class = "memory", memory_mb = 1048577 }
     )
     .expect_err("unbounded descriptor must fail");
     assert!(error.contains("memory_mb_out_of_range"));
+
+    let error = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "invalid_browser"
+resource_request = { class = "memory", browser_slots = 65 }
+"#,
+    )
+    .expect_err("unbounded browser slots must fail");
+    assert!(error.contains("browser_slots_out_of_range"));
 }
 
 #[test]
@@ -562,6 +602,12 @@ dispatch_queue = { scope = "user", actions = ["Download", "transcribe", "prepare
 name = "parallel_fixture"
 enabled = true
 kind = "runner"
+
+[[skills]]
+name = "global_fixture"
+enabled = true
+kind = "runner"
+dispatch_queue = { scope = "global", actions = ["transcribe"] }
 "#,
     )
     .expect("valid dispatch queue registry");
@@ -576,6 +622,11 @@ kind = "runner"
     assert!(!queued.applies_to(Some("capabilities")));
     assert!(!queued.applies_to(None));
     assert!(registry.dispatch_queue("parallel_fixture").is_none());
+    let global = registry
+        .dispatch_queue("global_fixture")
+        .expect("declared global queue");
+    assert_eq!(global.scope, SkillDispatchQueueScope::Global);
+    assert!(global.applies_to(Some("transcribe")));
 }
 
 #[test]

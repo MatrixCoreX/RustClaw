@@ -546,6 +546,9 @@ fn private_credentials_are_loaded_from_skill_owned_storage() {
         user_key: Some("rk-user".to_string()),
         skill_storage: Some(SkillStorageContext {
             database_path: database_path.display().to_string(),
+            database_cache_size_kib: None,
+            database_mmap_size_bytes: None,
+            database_temp_store: None,
         }),
         ..Default::default()
     };

@@ -1,7 +1,10 @@
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 
-use super::{register_step_output, ActionLoopDecision, AppState, ClaimedTask, LoopState};
+use super::{
+    register_failed_step_output, register_step_output, ActionLoopDecision, AppState, ClaimedTask,
+    LoopState,
+};
 
 pub(super) const RUNTIME_CAPABILITY_LOADER_TOOL: &str = "load_capability_groups";
 
@@ -41,12 +44,22 @@ pub(super) fn handle_capability_group_load(
     executed_actions: &mut usize,
 ) -> Result<ActionLoopDecision, String> {
     if args.get("op").and_then(Value::as_str) == Some("search") {
-        let query = args
+        let Some(query) = args
             .get("query")
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|query| !query.is_empty())
-            .ok_or_else(|| "capability_catalog_search_query_missing".to_string())?;
+        else {
+            return record_loader_failure(
+                loop_state,
+                json!({"error_code": "capability_catalog_search_query_missing"}),
+                args,
+                fingerprint,
+                global_step,
+                step_in_round,
+                executed_actions,
+            );
+        };
         let output = super::capability_catalog::search_catalog(state, task, query);
         return record_catalog_observation(
             loop_state,
@@ -68,7 +81,20 @@ pub(super) fn handle_capability_group_load(
             .map(str::to_string)
             .collect::<Vec<_>>();
         let (mut output, groups) =
-            super::capability_catalog::expand_catalog(state, task, &references)?;
+            match super::capability_catalog::expand_catalog(state, task, &references) {
+                Ok(expanded) => expanded,
+                Err(error) => {
+                    return record_loader_failure(
+                        loop_state,
+                        structured_loader_error(&error),
+                        args,
+                        fingerprint,
+                        global_step,
+                        step_in_round,
+                        executed_actions,
+                    );
+                }
+            };
         let evicted_scopes = activate_registry_groups(loop_state, &groups);
         if let Some(object) = output.as_object_mut() {
             object.insert("loaded_groups".to_string(), json!(groups));
@@ -92,7 +118,20 @@ pub(super) fn handle_capability_group_load(
             "capability_contracts_expanded",
         );
     }
-    let groups = parse_requested_groups(args)?;
+    let groups = match parse_requested_groups(args) {
+        Ok(groups) => groups,
+        Err(error_code) => {
+            return record_loader_failure(
+                loop_state,
+                json!({"error_code": error_code}),
+                args,
+                fingerprint,
+                global_step,
+                step_in_round,
+                executed_actions,
+            );
+        }
+    };
     let loadable = crate::capability_map::planner_loadable_capability_group_members_for_task(
         state,
         task,
@@ -109,11 +148,24 @@ pub(super) fn handle_capability_group_load(
         .cloned()
         .collect::<Vec<_>>();
     if !invalid.is_empty() {
-        return Err(json!({
-            "error_code": "capability_group_not_loadable",
-            "invalid_groups": invalid,
-        })
-        .to_string());
+        let valid_requested_groups = groups
+            .iter()
+            .filter(|group| loadable.contains_key(*group) || authorized.contains_key(*group))
+            .cloned()
+            .collect::<Vec<_>>();
+        return record_loader_failure(
+            loop_state,
+            json!({
+                "error_code": "capability_group_not_loadable",
+                "invalid_groups": invalid,
+                "valid_requested_groups": valid_requested_groups,
+            }),
+            args,
+            fingerprint,
+            global_step,
+            step_in_round,
+            executed_actions,
+        );
     }
 
     let resolved_skills = groups
@@ -186,6 +238,101 @@ pub(super) fn handle_capability_group_load(
     *executed_actions += 1;
     Ok(ActionLoopDecision::StopRound(
         "capability_groups_loaded".to_string(),
+    ))
+}
+
+fn structured_loader_error(error: &str) -> Value {
+    serde_json::from_str::<Value>(error)
+        .ok()
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({"error_code": error}))
+}
+
+fn record_loader_failure(
+    loop_state: &mut LoopState,
+    details: Value,
+    args: &Value,
+    fingerprint: &str,
+    global_step: usize,
+    step_in_round: usize,
+    executed_actions: &mut usize,
+) -> Result<ActionLoopDecision, String> {
+    let mut observation = details.as_object().cloned().unwrap_or_default();
+    observation.insert("schema_version".to_string(), json!(1));
+    observation.insert("owner_layer".to_string(), json!("agent_loop"));
+    observation.insert(
+        "observation_kind".to_string(),
+        json!("capability_loader_result"),
+    );
+    observation.insert("status".to_string(), json!("error"));
+    observation.insert(
+        "source_tool".to_string(),
+        json!(RUNTIME_CAPABILITY_LOADER_TOOL),
+    );
+    observation.insert("retryable".to_string(), json!(true));
+    observation.insert(
+        "next_action".to_string(),
+        json!("replan_from_capability_loader_observation"),
+    );
+    let observation = Value::Object(observation);
+    let output = observation.to_string();
+    let error_code = observation
+        .get("error_code")
+        .and_then(Value::as_str)
+        .unwrap_or("capability_loader_contract_error")
+        .to_string();
+
+    loop_state.task_observations.push(observation);
+    crate::append_subtask_result(
+        &mut loop_state.subtask_results,
+        global_step,
+        RUNTIME_CAPABILITY_LOADER_TOOL,
+        false,
+        &output,
+    );
+    register_failed_step_output(
+        loop_state,
+        global_step,
+        step_in_round,
+        RUNTIME_CAPABILITY_LOADER_TOOL,
+        RUNTIME_CAPABILITY_LOADER_TOOL,
+        &output,
+    );
+    super::attempt_ledger::record_attempt_with_retry_instruction(
+        loop_state,
+        RUNTIME_CAPABILITY_LOADER_TOOL,
+        &args.to_string(),
+        crate::executor::StepExecutionStatus::Error,
+        &output,
+        Some(&error_code),
+        &error_code,
+        Some("replan_from_capability_loader_observation"),
+    );
+    loop_state
+        .executed_step_results
+        .push(crate::executor::StepExecutionResult {
+            step_id: format!("step_{global_step}"),
+            skill: RUNTIME_CAPABILITY_LOADER_TOOL.to_string(),
+            status: crate::executor::StepExecutionStatus::Error,
+            output: None,
+            error: Some(output),
+            started_at: 0,
+            finished_at: 0,
+        });
+    loop_state.history_compact.push(format!(
+        "round={} step={} capability_loader_error={error_code}",
+        loop_state.round_no, step_in_round
+    ));
+    *loop_state
+        .failed_action_fingerprints
+        .entry(fingerprint.to_string())
+        .or_insert(0) += 1;
+    loop_state.tool_calls_total += 1;
+    loop_state.total_steps_executed += 1;
+    *executed_actions += 1;
+
+    Ok(ActionLoopDecision::StopRound(
+        "recoverable_failure_continue_round".to_string(),
     ))
 }
 

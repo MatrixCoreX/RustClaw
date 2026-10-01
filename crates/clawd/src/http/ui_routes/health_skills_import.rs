@@ -1033,75 +1033,7 @@ async fn import_external_skill_upload(
     let mut bundle_name = String::new();
     let mut enabled = true;
     let mut allow_network = false;
-    let mut uploaded_files: Vec<(PathBuf, Vec<u8>)> = Vec::new();
-
-    while let Ok(Some(field)) = multipart.next_field().await {
-        let field_name = field.name().unwrap_or("").to_string();
-        match field_name.as_str() {
-            "bundle_name" => {
-                if let Ok(text) = field.text().await {
-                    bundle_name = text.trim().to_string();
-                }
-            }
-            "enabled" => {
-                if let Ok(text) = field.text().await {
-                    enabled = text.trim() != "false";
-                }
-            }
-            "allow_network" => {
-                if let Ok(text) = field.text().await {
-                    allow_network = text.trim() == "true";
-                }
-            }
-            "files" => {
-                let raw_path = field
-                    .file_name()
-                    .map(str::to_string)
-                    .unwrap_or_else(|| "INTERFACE.md".to_string());
-                let Some(rel_path) = sanitize_upload_relative_path(&raw_path) else {
-                    continue;
-                };
-                let Ok(bytes) = field.bytes().await else {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(ApiResponse {
-                            ok: false,
-                            data: None,
-                            error: Some("read uploaded file failed".to_string()),
-                        }),
-                    );
-                };
-                uploaded_files.push((rel_path, bytes.to_vec()));
-            }
-            _ => {}
-        }
-    }
-
-    if uploaded_files.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some("no uploaded files found".to_string()),
-            }),
-        );
-    }
-
-    let guessed_name = if !bundle_name.trim().is_empty() {
-        bundle_name.trim().to_string()
-    } else {
-        uploaded_files
-            .first()
-            .and_then(|(path, _)| path.components().next())
-            .and_then(|part| match part {
-                std::path::Component::Normal(v) => v.to_str(),
-                _ => None,
-            })
-            .unwrap_or("uploaded-skill")
-            .to_string()
-    };
-    let bundle_dir = match imported_bundle_staging_dir(&state.skill_rt.workspace_root) {
+    let upload_root = match imported_bundle_staging_dir(&state.skill_rt.workspace_root) {
         Ok(path) => path,
         Err(error) => {
             return (
@@ -1114,55 +1046,145 @@ async fn import_external_skill_upload(
             );
         }
     };
+    let mut uploaded_files = Vec::<PathBuf>::new();
+    let mut uploaded_bytes = 0usize;
 
-    let mut interface_md_path = None;
-    for (rel_path, bytes) in uploaded_files {
-        let normalized = rel_path
-            .strip_prefix(&guessed_name)
-            .ok()
-            .filter(|p| !p.as_os_str().is_empty())
-            .map(PathBuf::from)
-            .unwrap_or(rel_path);
-        let target_path = bundle_dir.join(&normalized);
-        if let Some(parent) = target_path.parent() {
-            if let Err(err) = std::fs::create_dir_all(parent) {
-                let _ = std::fs::remove_dir_all(&bundle_dir);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ApiResponse {
-                        ok: false,
-                        data: None,
-                        error: Some(format!("create uploaded subdirectory failed: {err}")),
-                    }),
-                );
+    loop {
+        let field = match multipart.next_field().await {
+            Ok(Some(field)) => field,
+            Ok(None) => break,
+            Err(_) => {
+                let _ = tokio::fs::remove_dir_all(&upload_root).await;
+                return skill_upload_error(StatusCode::BAD_REQUEST, "skill_upload_read_failed");
             }
-        }
-        if let Err(err) = std::fs::write(&target_path, bytes) {
-            let _ = std::fs::remove_dir_all(&bundle_dir);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(format!("write uploaded file failed: {err}")),
-                }),
-            );
-        }
-        if normalized
-            .file_name()
-            .and_then(|v| v.to_str())
-            .map(|name| name.eq_ignore_ascii_case("INTERFACE.md"))
-            .unwrap_or(false)
-        {
-            interface_md_path = Some(target_path);
+        };
+        let field_name = field.name().unwrap_or("").to_string();
+        match field_name.as_str() {
+            "bundle_name" => {
+                let text = match read_bounded_multipart_text(field).await {
+                    Ok(text) => text,
+                    Err(()) => {
+                        let _ = tokio::fs::remove_dir_all(&upload_root).await;
+                        return skill_upload_error(
+                            StatusCode::BAD_REQUEST,
+                            "skill_upload_metadata_invalid",
+                        );
+                    }
+                };
+                bundle_name = text.trim().to_string();
+            }
+            "enabled" => {
+                let text = match read_bounded_multipart_text(field).await {
+                    Ok(text) => text,
+                    Err(()) => {
+                        let _ = tokio::fs::remove_dir_all(&upload_root).await;
+                        return skill_upload_error(
+                            StatusCode::BAD_REQUEST,
+                            "skill_upload_metadata_invalid",
+                        );
+                    }
+                };
+                enabled = text.trim() != "false";
+            }
+            "allow_network" => {
+                let text = match read_bounded_multipart_text(field).await {
+                    Ok(text) => text,
+                    Err(()) => {
+                        let _ = tokio::fs::remove_dir_all(&upload_root).await;
+                        return skill_upload_error(
+                            StatusCode::BAD_REQUEST,
+                            "skill_upload_metadata_invalid",
+                        );
+                    }
+                };
+                allow_network = text.trim() == "true";
+            }
+            "files" => {
+                if uploaded_files.len() >= SKILL_UPLOAD_MAX_FILES {
+                    let _ = tokio::fs::remove_dir_all(&upload_root).await;
+                    return skill_upload_error(
+                        StatusCode::PAYLOAD_TOO_LARGE,
+                        "skill_upload_file_count_exceeded",
+                    );
+                }
+                let raw_path = field
+                    .file_name()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| "INTERFACE.md".to_string());
+                let Some(rel_path) = sanitize_upload_relative_path(&raw_path) else {
+                    continue;
+                };
+                let target_path = upload_root.join(&rel_path);
+                match stream_multipart_field_to_file(
+                    field,
+                    &target_path,
+                    &mut uploaded_bytes,
+                )
+                .await
+                {
+                    Ok(()) => uploaded_files.push(rel_path),
+                    Err(error) => {
+                        let _ = tokio::fs::remove_dir_all(&upload_root).await;
+                        return skill_upload_error(error.status, error.code);
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
-    let interface_md_path = interface_md_path.unwrap_or_else(|| bundle_dir.join("INTERFACE.md"));
+    if uploaded_files.is_empty() {
+        let _ = tokio::fs::remove_dir_all(&upload_root).await;
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("no uploaded files found".to_string()),
+            }),
+        );
+    }
+
+    let guessed_name = sanitize_upload_bundle_name(&bundle_name).unwrap_or_else(|| {
+        uploaded_files
+            .first()
+            .filter(|path| path.components().count() > 1)
+            .and_then(|path| path.components().next())
+            .and_then(|part| match part {
+                std::path::Component::Normal(v) => v.to_str(),
+                _ => None,
+            })
+            .unwrap_or("uploaded-skill")
+            .to_string()
+    });
+    let nested_bundle_root = upload_root.join(&guessed_name);
+    let staged_bundle_root = if nested_bundle_root.join("skill.toml").is_file() {
+        if uploaded_files
+            .iter()
+            .any(|path| !path.starts_with(&guessed_name))
+        {
+            let _ = tokio::fs::remove_dir_all(&upload_root).await;
+            return skill_upload_error(StatusCode::BAD_REQUEST, "skill_upload_mixed_roots");
+        }
+        nested_bundle_root
+    } else {
+        upload_root.clone()
+    };
+    let interface_md_path = staged_bundle_root.join("INTERFACE.md");
+    if std::fs::metadata(&interface_md_path)
+        .ok()
+        .is_some_and(|metadata| metadata.len() > SKILL_UPLOAD_MAX_INTERFACE_BYTES)
+    {
+        let _ = tokio::fs::remove_dir_all(&upload_root).await;
+        return skill_upload_error(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "skill_upload_interface_too_large",
+        );
+    }
     let interface_md = match std::fs::read_to_string(&interface_md_path) {
         Ok(v) => v,
         Err(err) => {
-            let _ = std::fs::remove_dir_all(&bundle_dir);
+            let _ = std::fs::remove_dir_all(&upload_root);
             return (
                 StatusCode::BAD_REQUEST,
                 Json(ApiResponse {
@@ -1176,10 +1198,13 @@ async fn import_external_skill_upload(
         }
     };
 
-    let activation = match activate_imported_bundle(&state.skill_rt.workspace_root, &bundle_dir) {
+    let activation = match activate_imported_bundle(
+        &state.skill_rt.workspace_root,
+        &staged_bundle_root,
+    ) {
         Ok(value) => value,
         Err(error) => {
-            let _ = std::fs::remove_dir_all(&bundle_dir);
+            let _ = std::fs::remove_dir_all(&upload_root);
             return (
                 StatusCode::CONFLICT,
                 Json(ApiResponse {
@@ -1190,6 +1215,9 @@ async fn import_external_skill_upload(
             );
         }
     };
+    if upload_root != staged_bundle_root {
+        let _ = std::fs::remove_dir_all(&upload_root);
+    }
     let response = finalize_imported_bundle(
         &state,
         &activation.bundle_dir,

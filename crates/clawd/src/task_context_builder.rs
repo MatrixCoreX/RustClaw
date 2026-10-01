@@ -7,6 +7,9 @@ use crate::{AppState, ClaimedTask};
 
 const CONTEXT_PROMPT_TEMPLATE_MAX_CHARS: usize = 2_000;
 const CONTEXT_PROMPT_OVERHEAD_MAX_CHARS: usize = 1_800;
+const RECENT_TURN_APPROX_CHARS: usize = 1_200;
+const RECENT_TURN_MIN_CONTEXT_CHARS: usize = 2_400;
+const RECENT_TURN_MAX_CONTEXT_CHARS: usize = 48_000;
 
 #[path = "task_context_builder/compaction.rs"]
 mod compaction;
@@ -98,6 +101,33 @@ impl ExecutionContextBudgetTier {
 fn context_slot_present(value: &str) -> bool {
     let trimmed = value.trim();
     !trimmed.is_empty() && trimmed != "<none>"
+}
+
+fn recent_turn_load_budget(
+    chat_memory_budget_chars: usize,
+    policy: Option<&ContextWindowPolicy>,
+) -> (usize, usize) {
+    let provider_history_chars = policy
+        .map(|policy| {
+            let reserved_tokens = policy
+                .output_reserve_tokens
+                .saturating_add(policy.tool_observation_reserve_tokens)
+                .saturating_add(policy.estimator_safety_margin_tokens);
+            policy
+                .context_window_tokens
+                .saturating_sub(reserved_tokens)
+                .saturating_div(4)
+                .saturating_mul(2)
+        })
+        .unwrap_or(RECENT_TURN_MAX_CONTEXT_CHARS);
+    let max_total_chars = chat_memory_budget_chars
+        .saturating_mul(2)
+        .min(provider_history_chars)
+        .clamp(RECENT_TURN_MIN_CONTEXT_CHARS, RECENT_TURN_MAX_CONTEXT_CHARS);
+    let max_turns = max_total_chars
+        .div_ceil(RECENT_TURN_APPROX_CHARS)
+        .clamp(2, 64);
+    (max_turns, max_total_chars)
 }
 
 fn context_slot_metadata(slot: &str) -> (&'static str, &'static str) {
@@ -655,6 +685,9 @@ pub(crate) fn build_agent_loop_task_context_bundle(
         &chat_memory_decision,
         memory_settings_snapshot.as_ref(),
     );
+    let context_window_policy = ContextWindowPolicy::for_task(state, task);
+    let (recent_turn_limit, recent_turn_chars) =
+        recent_turn_load_budget(chat_memory_budget_chars, context_window_policy.as_ref());
     let (recent_turns_full, context_source_task_ids) =
         memory::build_recent_turns_full_context_with_sources(
             state,
@@ -662,10 +695,23 @@ pub(crate) fn build_agent_loop_task_context_bundle(
             task.user_id,
             task.chat_id,
             conversation_id.as_deref(),
-            64,
+            recent_turn_limit,
             560,
-            48_000,
+            recent_turn_chars,
         );
+    let last_turn_full = if recent_turns_full == "<none>" {
+        memory::build_last_turn_full_context(
+            state,
+            task.user_key.as_deref(),
+            task.user_id,
+            task.chat_id,
+            conversation_id.as_deref(),
+            1200,
+            2400,
+        )
+    } else {
+        "<none>".to_string()
+    };
     let execution_view = ExecutionContextView {
         budget_tier,
         memory_ctx,
@@ -678,15 +724,7 @@ pub(crate) fn build_agent_loop_task_context_bundle(
         ),
         session_alias_context: build_session_alias_context(&session_snapshot, planner_user_request),
         recent_turns_full,
-        last_turn_full: memory::build_last_turn_full_context(
-            state,
-            task.user_key.as_deref(),
-            task.user_id,
-            task.chat_id,
-            conversation_id.as_deref(),
-            1200,
-            2400,
-        ),
+        last_turn_full,
         recent_execution_anchor: crate::routing_context::build_recent_execution_anchor_context(
             state, task,
         ),

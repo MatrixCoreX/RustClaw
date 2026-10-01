@@ -26,6 +26,9 @@ impl TempStorage {
         RssRuntime {
             storage_database_path: self.root.join("rss_fetch/state.db"),
             storage_busy_timeout_ms: 5_000,
+            storage_cache_size_kib: None,
+            storage_mmap_size_bytes: None,
+            storage_temp_store: None,
         }
     }
 }
@@ -95,6 +98,9 @@ fn storage_requires_absolute_state_database_identity() {
     let relative = RssRuntime {
         storage_database_path: PathBuf::from("data/skills/rss_fetch/state.db"),
         storage_busy_timeout_ms: 5_000,
+        storage_cache_size_kib: None,
+        storage_mmap_size_bytes: None,
+        storage_temp_store: None,
     };
     assert_eq!(
         initialize_and_load(&relative, &RssMachineState::default()).unwrap_err(),
@@ -105,6 +111,9 @@ fn storage_requires_absolute_state_database_identity() {
     let invalid = RssRuntime {
         storage_database_path: temp.root.join("rss_fetch/rss.db"),
         storage_busy_timeout_ms: 5_000,
+        storage_cache_size_kib: None,
+        storage_mmap_size_bytes: None,
+        storage_temp_store: None,
     };
     assert_eq!(
         initialize_and_load(&invalid, &RssMachineState::default()).unwrap_err(),

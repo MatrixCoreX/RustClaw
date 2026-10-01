@@ -86,7 +86,9 @@ test("polls the web session so an older same-username login is removed promptly"
   const source = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
   assert.match(source, /const verifyWebdSession = async \(\) =>/);
   assert.match(source, /body\.data\?\.end_reason === "signed_in_elsewhere"/);
-  assert.match(source, /setInterval\(\(\) => void verifyWebdSession\(\), 5_000\)/);
+  assert.match(source, /const verifyWhenVisible = \(\) => \{/);
+  assert.match(source, /document\.visibilityState === "visible"/);
+  assert.match(source, /setInterval\(verifyWhenVisible, 5_000\)/);
 });
 
 test("opens quick setup until required setup is complete", () => {

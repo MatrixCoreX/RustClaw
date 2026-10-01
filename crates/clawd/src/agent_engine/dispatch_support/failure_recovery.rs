@@ -289,6 +289,9 @@ pub(crate) fn classify_skill_failure_recovery(
     if crate::skills::is_crypto_account_access_error(normalized_skill, err) {
         return Some("recoverable_failure_finalize");
     }
+    if crate::skills::is_retryable_resource_admission_error(err) {
+        return Some("recoverable_failure_continue_round");
+    }
     if crate::skills::structured_skill_error_requests_replan(err) {
         return Some("recoverable_failure_continue_round");
     }

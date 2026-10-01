@@ -171,10 +171,14 @@ pub(super) async fn remember_context_token(state: &State, user_id: &str, token: 
         let session = state.session.read().await;
         session_account_id(session.as_ref())
     };
-    state.context_tokens.write().await.insert(
-        context_token_store_key(&account_id, user_id),
-        token.to_string(),
+    let key = context_token_store_key(&account_id, user_id);
+    let mut tokens = state.context_tokens.write().await;
+    claw_core::bounded_cache::prepare_hash_map_insert(
+        &mut tokens,
+        &key,
+        CHANNEL_RUNTIME_CACHE_MAX_ENTRIES,
     );
+    tokens.insert(key, token.to_string());
 }
 
 pub(super) async fn resolve_delivery_context_token(

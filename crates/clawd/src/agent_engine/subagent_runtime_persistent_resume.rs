@@ -168,11 +168,11 @@ fn reuse_parent_child_graph(
     } else {
         CheckpointChildGraphOutcome::Blocked
     };
+    let model_observation = child_structured_result_observation(&merge);
     loop_state.task_checkpoint = None;
     loop_state.task_lifecycle = None;
     loop_state.has_tool_or_skill_output = true;
-    loop_state.last_output = Some(merge.to_string());
-    loop_state.task_observations.push(json!({
+    let mut observation = json!({
         "schema_version": 2,
         "owner_layer": "subagent_runtime",
         "output_format": "machine_json",
@@ -186,8 +186,40 @@ fn reuse_parent_child_graph(
         "global_step": global_step,
         "step_in_round": step_in_round,
         "round_no": loop_state.round_no,
-    }));
+    });
+    if let (Some(object), Some(model_observation)) =
+        (observation.as_object_mut(), model_observation)
+    {
+        object.insert("model_observation".to_string(), model_observation);
+    }
+    loop_state.last_output = Some(observation.to_string());
+    loop_state.task_observations.push(observation);
     Ok(Some(outcome))
+}
+
+fn child_structured_result_observation(merge: &Value) -> Option<Value> {
+    let results = merge
+        .pointer("/child_task_graph/nodes")
+        .and_then(Value::as_array)?
+        .iter()
+        .filter_map(|node| {
+            let result = node.pointer("/runtime/child_task_result/structured_result")?;
+            Some(json!({
+                "child_task_id": node.get("child_task_id"),
+                "role": node.get("role"),
+                "status": node.pointer("/runtime/child_task_result/status"),
+                "result": result,
+            }))
+        })
+        .collect::<Vec<_>>();
+    (!results.is_empty()).then(|| {
+        json!({
+            "schema_version": 1,
+            "observation_kind": "subagent_structured_results",
+            "status": "completed",
+            "results": results,
+        })
+    })
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -2,7 +2,7 @@ use anyhow::Result;
 use rusqlite::OptionalExtension;
 use serde_json::json;
 use serde_json::Value;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::{repo, AppState};
 
@@ -79,7 +79,7 @@ pub(super) async fn execute_seeded_agent_loop_dispatch_result(
     );
     let mut result = if let Some(stored_action) = stored_checkpoint_action {
         let replay_checkpoint =
-            checkpoint_with_action_replay_binding(&claimed.task_checkpoint, &stored_action);
+            checkpoint_with_action_replay_binding(state, &claimed.task_checkpoint, &stored_action)?;
         let output_contract = stored_action
             .output_contract
             .map(serde_json::from_value::<crate::IntentOutputContract>)
@@ -134,6 +134,13 @@ pub(super) async fn execute_seeded_agent_loop_dispatch_result(
         if let Some(journal) = answer.task_journal.as_mut() {
             journal.record_runtime_llm_metrics(state, &claimed.task_id);
         }
+    } else if let Err(error) = &result {
+        warn!(
+            task_id = %claimed.task_id,
+            checkpoint_id = %claimed.checkpoint_id,
+            error = %crate::truncate_for_log(error),
+            "resume replay seeded agent loop failed"
+        );
     }
 
     if result.is_err() {
@@ -190,6 +197,16 @@ fn validate_checkpoint_approval_binding(
     claimed: &repo::ClaimedDispatchedPausedCheckpointResumeExecution,
     action: &repo::TaskCheckpointAction,
 ) -> Result<()> {
+    if claimed
+        .task_checkpoint
+        .pending_action
+        .as_ref()
+        .and_then(|action| action.get("kind"))
+        .and_then(Value::as_str)
+        == Some("resource_admission_retry")
+    {
+        return Ok(());
+    }
     let expected = action
         .approval_binding
         .as_ref()
@@ -223,24 +240,58 @@ fn validate_checkpoint_approval_binding(
 }
 
 fn checkpoint_with_action_replay_binding(
+    state: &AppState,
     checkpoint: &crate::task_lifecycle::TaskCheckpoint,
     action: &repo::TaskCheckpointAction,
-) -> crate::task_lifecycle::TaskCheckpoint {
+) -> Result<crate::task_lifecycle::TaskCheckpoint> {
     let mut checkpoint = checkpoint.clone();
+    let resource_retry = checkpoint
+        .pending_action
+        .as_ref()
+        .and_then(|pending| pending.get("kind"))
+        .and_then(Value::as_str)
+        == Some("resource_admission_retry");
+    let runtime_action_ref = if resource_retry {
+        checkpoint_resource_runtime_action_ref(state, action)?
+    } else {
+        action.action_ref.clone()
+    };
     if let Some(boundary) = checkpoint.boundary_context.as_object_mut() {
         boundary.insert(
             "checkpoint_action_replay".to_string(),
             json!({
                 "schema_version": 1,
                 "tool_or_skill": action.tool_or_skill,
-                "action_ref": action.action_ref,
+                "action_ref": runtime_action_ref,
+                "capability_ref": action.action_ref,
                 "instruction_revision": action.instruction_revision,
                 "execution_epoch": action.execution_epoch,
                 "execution_binding": action.execution_binding,
             }),
         );
     }
-    checkpoint
+    Ok(checkpoint)
+}
+
+fn checkpoint_resource_runtime_action_ref(
+    state: &AppState,
+    action: &repo::TaskCheckpointAction,
+) -> Result<String> {
+    let resolved = crate::capability_resolver::resolve_capability_action_for_state(
+        state,
+        &action.action_ref,
+        action.args.clone(),
+    )
+    .ok_or_else(|| anyhow::anyhow!("checkpoint_action_capability_unavailable"))?;
+    let (tool_or_skill, args) = match resolved {
+        crate::AgentAction::CallTool { tool, args } => (tool, args),
+        crate::AgentAction::CallSkill { skill, args } => (skill, args),
+        _ => anyhow::bail!("checkpoint_action_capability_not_executable"),
+    };
+    if tool_or_skill != action.tool_or_skill {
+        anyhow::bail!("checkpoint_action_resolved_target_changed");
+    }
+    Ok(crate::agent_hooks::tool_action_ref(&tool_or_skill, &args))
 }
 
 fn checkpoint_replay_rejected_observation(
@@ -281,12 +332,14 @@ fn load_required_checkpoint_action(
 }
 
 fn checkpoint_requires_stored_action(checkpoint: &crate::task_lifecycle::TaskCheckpoint) -> bool {
-    checkpoint
-        .pending_action
-        .as_ref()
-        .and_then(|action| action.get("kind"))
-        .and_then(Value::as_str)
-        == Some("agent_hook_pre_tool_use")
+    matches!(
+        checkpoint
+            .pending_action
+            .as_ref()
+            .and_then(|action| action.get("kind"))
+            .and_then(Value::as_str),
+        Some("agent_hook_pre_tool_use" | "resource_admission_retry")
+    )
 }
 
 fn load_resume_steering_input(

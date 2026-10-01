@@ -1,5 +1,19 @@
 use super::*;
 
+fn prune_active_logins(logins: &mut HashMap<String, ActiveLogin>) {
+    logins.retain(|_, login| active_login_is_fresh(login));
+    while logins.len() >= ACTIVE_LOGIN_MAX_ENTRIES {
+        let Some(oldest_key) = logins
+            .iter()
+            .min_by_key(|(_, login)| login.started_at_ms)
+            .map(|(key, _)| key.clone())
+        else {
+            break;
+        };
+        logins.remove(&oldest_key);
+    }
+}
+
 pub(super) fn build_login_status_response(
     status: &WechatRuntimeStatus,
     active_login: Option<&ActiveLogin>,
@@ -43,6 +57,7 @@ pub(super) async fn login_qr_start(
 ) -> Result<Json<LoginStartResponse>, (axum::http::StatusCode, String)> {
     let session_key = "primary".to_string();
     let mut active = state.active_logins.write().await;
+    prune_active_logins(&mut active);
     if !req.force {
         if let Some(existing) = active.get(&session_key) {
             if active_login_is_fresh(existing) {
@@ -172,7 +187,9 @@ pub(super) async fn login_qr_wait(
                 .map_err(|e| (axum::http::StatusCode::BAD_GATEWAY, e))?;
                 let qrcode_url = qr_svg_data_url(qr_render_content(&refreshed))
                     .map_err(|e| (axum::http::StatusCode::BAD_GATEWAY, e))?;
-                state.active_logins.write().await.insert(
+                let mut active_logins = state.active_logins.write().await;
+                prune_active_logins(&mut active_logins);
+                active_logins.insert(
                     req.session_key.clone(),
                     ActiveLogin {
                         session_key: req.session_key.clone(),

@@ -363,6 +363,14 @@ tasks_max_rows = 2000
 # 非对话任务保留天数；ask 对话不会自动过期 / Non-conversation task retention; ask history does not expire automatically.
 tasks_retention_days = 7
 
+# 用途/Purpose: 运行期资源压力与任务准入的可选管理员覆盖。
+# 建议修改/Recommended change: 通常保持空配置，让运行时根据宿主/cgroup 自动判断。
+# 风险/Risk: 过低的安全储备或过宽阈值可能增加 OOM 风险；非法配置会阻止启动。
+[runtime_resources]
+# 可选字段包括 safety_reserve_mib、critical_available_floor_mib、
+# critical/constrained/compact_available_ratio、对应的 psi_avg10，以及
+# escalation_samples/recovery_samples。默认值只由 Rust 运行时维护。
+
 # 用途/Purpose: 记忆模块独立配置入口.
 # 建议修改/Recommended change: 一般不改，除非你迁移了路径.
 # 风险/Risk: 路径错误会导致记忆模块配置加载失败.
@@ -407,8 +415,8 @@ request_timeout_seconds = 30
 [skills]
 # 技能注册表路径（启用后走 registry 主链：发现/启用/kind 分发）；未设则 fallback 到 skills_list + skill_switches
 registry_path = "configs/skills_registry.toml"
-skill_switches = { browser_web = true, crypto = false, doc_parse = true, extension_manager = true, invest_copy = false, kb = true, map_merchant = false, media_download = false, music_generate = true, office_workspace = true, photo_organize = false, schedule = true, stock = false, task_control = true, transform = true, video_generate = true, weather = false, web_search_extract = true, x = false }
-uninstalled_skills = ["crypto", "invest_copy", "map_merchant", "media_download", "photo_organize", "stock", "weather", "x"]
+skill_switches = { browser_web = true, crypto = false, doc_parse = true, extension_manager = true, invest_copy = false, kb = true, local_asr = false, map_merchant = false, media_download = false, music_generate = true, office_workspace = true, photo_organize = false, schedule = true, stock = false, task_control = true, transform = true, video_generate = true, weather = false, web_search_extract = true, x = false }
+uninstalled_skills = ["crypto", "invest_copy", "local_asr", "map_merchant", "media_download", "photo_organize", "stock", "weather", "x"]
 skill_max_concurrency = 2
 # 仅复用 manifest 声明且宿主复核为无状态只读的外层 runner；低内存、版本或
 # generation/policy 变化时自动回退到逐请求启动。

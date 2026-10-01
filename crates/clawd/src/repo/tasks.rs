@@ -10,8 +10,13 @@ mod history;
 mod lifecycle_projection;
 mod success_artifacts;
 
+#[cfg(test)]
 pub(crate) use active::{
     list_active_tasks_for_user_internal, list_active_tasks_internal, list_all_active_tasks_internal,
+};
+pub(crate) use active::{
+    list_active_tasks_for_user_page_internal, list_active_tasks_page_internal,
+    list_all_active_tasks_page_internal,
 };
 pub(crate) use history::{
     list_all_task_history_internal, list_task_history_for_user_internal, list_task_history_internal,
@@ -1377,40 +1382,84 @@ pub(crate) fn list_ready_paused_checkpoint_resume_executors_internal(
     limit: usize,
 ) -> anyhow::Result<Vec<ReadyPausedCheckpointResumeExecutor>> {
     let limit = limit.max(1);
+    let candidate_batch = limit.saturating_mul(2).clamp(16, 128);
+    let scan_limit = limit.saturating_mul(8).clamp(candidate_batch, 1024);
+    let aging_cutoff = now_ts.saturating_sub(60);
     let db = state
         .core
         .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let mut stmt = db.prepare(
-        "SELECT task_id, result_json
-         FROM tasks
-         WHERE status = 'running'
-           AND result_json IS NOT NULL
-         ORDER BY CAST(COALESCE(NULLIF(updated_at, ''), created_at, '0') AS INTEGER) ASC,
-                  task_id ASC",
+        "WITH candidates AS (
+             SELECT task_id,
+                    result_json,
+                    CAST(COALESCE(NULLIF(updated_at, ''), created_at, '0') AS INTEGER) AS update_epoch,
+                    json_extract(result_json, '$.task_lifecycle.state') AS lifecycle_state,
+                    json_extract(result_json, '$.task_lifecycle.next_check_after') AS lifecycle_next_check,
+                    json_extract(result_json, '$.task_lifecycle.resume_executor.next_check_after') AS executor_next_check,
+                    json_extract(result_json, '$.task_lifecycle.resume_executor.executor_state') AS executor_state,
+                    json_extract(result_json, '$.task_lifecycle.resume_executor_claim.expires_at') AS claim_expires_at
+             FROM tasks
+             WHERE status = 'running'
+               AND result_json IS NOT NULL
+               AND json_valid(result_json) = 1
+         )
+         SELECT task_id, result_json
+         FROM candidates
+         WHERE lifecycle_state IN ('waiting', 'running', 'background')
+           AND (
+                COALESCE(lifecycle_next_check, executor_next_check) IS NULL
+                OR COALESCE(lifecycle_next_check, executor_next_check) <= ?2
+           )
+           AND (
+                executor_state IN ('ready_for_planner_resume', 'ready_to_finalize', 'poll_scheduled')
+                OR (
+                    executor_state IN ('executing_planner_resume', 'executing_finalize', 'executing_async_poll')
+                    AND COALESCE(claim_expires_at, 0) <= ?2
+                )
+           )
+         ORDER BY CASE
+                    WHEN update_epoch <= ?1 THEN 0
+                    WHEN lifecycle_state = 'waiting' THEN 1
+                    WHEN lifecycle_state = 'running' THEN 2
+                    ELSE 3
+                  END ASC,
+                  update_epoch ASC,
+                  task_id ASC
+         LIMIT ?3 OFFSET ?4",
     )?;
-    let rows = stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
-    })?;
 
     let mut out = Vec::new();
-    for row in rows {
-        let (task_id, result_json) = row?;
-        let Some(result_json) =
-            result_json.and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
-        else {
-            continue;
-        };
-        let Some(ready) =
-            ready_paused_checkpoint_resume_executor_from_result_json(task_id, &result_json, now_ts)
-        else {
-            continue;
-        };
-        out.push(ready);
-        if out.len() >= limit {
+    let mut offset = 0usize;
+    while offset < scan_limit && out.len() < limit {
+        let rows = stmt.query_map(
+            params![aging_cutoff, now_ts, candidate_batch as i64, offset as i64],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )?;
+        let mut scanned = 0usize;
+        for row in rows {
+            scanned = scanned.saturating_add(1);
+            let (task_id, raw_result_json) = row?;
+            let Ok(result_json) = serde_json::from_str::<Value>(&raw_result_json) else {
+                continue;
+            };
+            let Some(ready) = ready_paused_checkpoint_resume_executor_from_result_json(
+                task_id,
+                &result_json,
+                now_ts,
+            ) else {
+                continue;
+            };
+            out.push(ready);
+            if out.len() >= limit {
+                break;
+            }
+        }
+        if scanned < candidate_batch {
             break;
         }
+        offset = offset.saturating_add(scanned);
     }
     Ok(out)
 }
@@ -1912,6 +1961,41 @@ pub(crate) fn get_task_query_record(
     }
 
     Ok(row)
+}
+
+pub(crate) fn get_task_artifact_result_projection(
+    state: &AppState,
+    task_id: Uuid,
+) -> anyhow::Result<Option<(Option<Value>, Option<String>, String)>> {
+    let db = state
+        .core
+        .db
+        .get()
+        .map_err(|error| anyhow::anyhow!("db pool: {error}"))?;
+    db.query_row(
+        "SELECT CASE
+                    WHEN json_valid(result_json)
+                    THEN json_extract(result_json, '$.artifacts')
+                    ELSE NULL
+                END,
+                user_key,
+                channel
+         FROM tasks
+         WHERE task_id = ?1
+         LIMIT 1",
+        params![task_id.to_string()],
+        |row| {
+            let artifacts_json = row.get::<_, Option<String>>(0)?;
+            let result_projection = artifacts_json
+                .as_deref()
+                .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+                .filter(Value::is_array)
+                .map(|artifacts| serde_json::json!({"artifacts": artifacts}));
+            Ok((result_projection, row.get(1)?, row.get(2)?))
+        },
+    )
+    .optional()
+    .map_err(Into::into)
 }
 
 include!("tasks/view_access.rs");

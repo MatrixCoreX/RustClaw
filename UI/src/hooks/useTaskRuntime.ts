@@ -25,6 +25,7 @@ type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
 type TaskSubmitKind = "ask" | "run_skill";
 
 const TERMINAL_TASK_STATUSES = ["succeeded", "failed", "canceled", "timeout"];
+const ACTIVE_TASK_PAGE_SIZE = 20;
 const TASK_HISTORY_PAGE_SIZE = 20;
 
 function isTaskQueryStatus(status: string): status is TaskQueryResponse["status"] {
@@ -66,6 +67,9 @@ export function useTaskRuntime({
   const [activeTasksLoading, setActiveTasksLoading] = useState(false);
   const [activeTasksError, setActiveTasksError] = useState<string | null>(null);
   const [activeTasksLastUpdated, setActiveTasksLastUpdated] = useState<number | null>(null);
+  const [activeTasksTotal, setActiveTasksTotal] = useState(0);
+  const [activeTasksOffset, setActiveTasksOffset] = useState(0);
+  const [activeTasksLimit, setActiveTasksLimit] = useState(ACTIVE_TASK_PAGE_SIZE);
   const [taskHistory, setTaskHistory] = useState<TaskHistoryItem[]>([]);
   const [taskHistoryLoading, setTaskHistoryLoading] = useState(false);
   const [taskHistoryLoaded, setTaskHistoryLoaded] = useState(false);
@@ -111,9 +115,14 @@ export function useTaskRuntime({
     return body.data;
   };
 
-  const fetchTaskLlmDebugById = async (id: string): Promise<TaskLlmDebugResponse> => {
+  const fetchTaskLlmDebugById = async (
+    id: string,
+    offset = 0,
+  ): Promise<TaskLlmDebugResponse> => {
     const normalizedId = encodeURIComponent(id.trim());
-    const res = await apiFetch(`/v1/debug/tasks/${normalizedId}?teaching=true`);
+    const res = await apiFetch(
+      `/v1/debug/tasks/${normalizedId}?teaching=true&limit=20&offset=${Math.max(0, Math.floor(offset))}`,
+    );
     const body = (await res.json()) as ApiResponse<TaskLlmDebugResponse>;
     if (!res.ok || !body.ok || !body.data) {
       throw new Error(body.error || `task_llm_debug_query_http_${res.status}`);
@@ -121,7 +130,10 @@ export function useTaskRuntime({
     return body.data;
   };
 
-  const fetchActiveTasks = async (silent = false): Promise<ActiveTaskItem[]> => {
+  const fetchActiveTasks = async (
+    silent = false,
+    offset = activeTasksOffset,
+  ): Promise<ActiveTaskItem[]> => {
     const keyAuthenticated = Boolean(activeUserKey.trim());
     if (!keyAuthenticated && (interactionUserId == null || interactionChatId == null)) {
       if (!silent) {
@@ -140,6 +152,8 @@ export function useTaskRuntime({
         body: JSON.stringify({
           user_id: interactionUserId ?? 0,
           chat_id: interactionChatId ?? 0,
+          limit: ACTIVE_TASK_PAGE_SIZE,
+          offset: Math.max(0, Math.floor(offset)),
         }),
       });
       const body = (await res.json()) as ApiResponse<ActiveTasksResponse>;
@@ -148,6 +162,9 @@ export function useTaskRuntime({
       }
       const tasks = body.data.tasks ?? [];
       setActiveTasks(tasks);
+      setActiveTasksTotal(body.data.total ?? tasks.length);
+      setActiveTasksOffset(body.data.offset ?? 0);
+      setActiveTasksLimit(body.data.limit ?? ACTIVE_TASK_PAGE_SIZE);
       setActiveTasksError(null);
       setActiveTasksLastUpdated(Date.now());
       return tasks;
@@ -238,13 +255,13 @@ export function useTaskRuntime({
     setTaskLoading(false);
   };
 
-  const queryTaskLlmDebug = async (id?: string) => {
+  const queryTaskLlmDebug = async (id?: string, offset = 0) => {
     const targetTaskId = (id ?? taskId).trim();
     if (!targetTaskId) return null;
     setTaskLlmDebugLoading(true);
     setTaskLlmDebugError(null);
     try {
-      const result = await fetchTaskLlmDebugById(targetTaskId);
+      const result = await fetchTaskLlmDebugById(targetTaskId, offset);
       setTaskLlmDebug(result);
       return result;
     } catch (err) {
@@ -725,6 +742,10 @@ export function useTaskRuntime({
   };
 
   useEffect(() => {
+    setActiveTasks([]);
+    setActiveTasksTotal(0);
+    setActiveTasksOffset(0);
+    setActiveTasksLimit(ACTIVE_TASK_PAGE_SIZE);
     taskHistoryRequestEpoch.current += 1;
     setTaskHistory([]);
     setTaskHistoryLoading(false);
@@ -790,12 +811,20 @@ export function useTaskRuntime({
     ) {
       return;
     }
-    void fetchActiveTasks(true);
-    void fetchApprovalScopeGrants(true);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      void fetchActiveTasks(true, activeTasksOffset);
+      void fetchApprovalScopeGrants(true);
+    };
+    refreshWhenVisible();
     const interval = window.setInterval(() => {
-      void fetchActiveTasks(true);
+      refreshWhenVisible();
     }, 5000);
-    return () => window.clearInterval(interval);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     currentPage,
@@ -804,6 +833,7 @@ export function useTaskRuntime({
     activeUserKey,
     interactionUserId,
     interactionChatId,
+    activeTasksOffset,
   ]);
 
   return {
@@ -820,6 +850,9 @@ export function useTaskRuntime({
     activeTasksLoading,
     activeTasksError,
     activeTasksLastUpdated,
+    activeTasksTotal,
+    activeTasksOffset,
+    activeTasksLimit,
     taskHistory,
     taskHistoryLoading,
     taskHistoryLoaded,

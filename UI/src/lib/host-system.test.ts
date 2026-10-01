@@ -10,7 +10,7 @@ import {
 import type { HostSystemSummary } from "../types/api.ts";
 
 const summary: HostSystemSummary = {
-  schema_version: 1,
+  schema_version: 4,
   collected_at_ts: 1_000,
   os: {
     family: "linux",
@@ -31,6 +31,30 @@ const summary: HostSystemSummary = {
     available_ratio: 0.4,
   },
   uptime_seconds: 500,
+  runtime_resources: {
+    pressure_state: "normal",
+    reserved_memory_bytes: 0,
+    active_leases: 0,
+    reserved_cpu_cores: 0,
+    reserved_network_slots: 0,
+    reserved_provider_slots: 0,
+    reserved_browser_slots: 0,
+    active_heavy_leases: 0,
+    waiting_tasks: 0,
+    resource_waiting_tasks: 0,
+    recent_waiting_reason_code: null,
+    recent_admission_refusal_reason: null,
+    recent_admission_refusal_at_epoch: null,
+    swap_used_bytes: 0,
+    cgroup_version: 2,
+    process_memory_measurement: "pss_plus_swap_pss",
+    process_count: 4,
+    process_memory_current_bytes: 512,
+    process_memory_peak_bytes: 768,
+    process_memory_warning: false,
+    process_memory_roles_current_bytes: { core: 400, web_gateway: 112 },
+    process_memory_roles_peak_bytes: { core: 600, web_gateway: 168 },
+  },
   unavailable_fields: [],
 };
 

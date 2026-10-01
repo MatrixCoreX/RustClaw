@@ -92,6 +92,35 @@ test("renders the task plan as a clear step card with raw JSON collapsed", () =>
   assert.match(markup, />v2</);
 });
 
+test("renders bounded LLM trace pagination without renumbering calls", () => {
+  const base = props();
+  base.taskLlmDebug = {
+    task_id: "task-plan-card",
+    call_count: 25,
+    pagination: {
+      limit: 20,
+      offset: 20,
+      total: 25,
+      has_more: false,
+    },
+    calls: [
+      {
+        call_index: 21,
+        status: "ok",
+        request_payload: { messages: [] },
+        response: "done",
+      },
+    ],
+  };
+
+  const markup = renderToStaticMarkup(<TaskResultPanel {...base} />);
+
+  assert.match(markup, /LLM #21/);
+  assert.match(markup, /显示第 21-21 次，共 25 次/);
+  assert.match(markup, /上一页/);
+  assert.match(markup, /下一页/);
+});
+
 test("renders a completed goal without requiring an approval request", () => {
   const base = props();
   base.taskResult = {

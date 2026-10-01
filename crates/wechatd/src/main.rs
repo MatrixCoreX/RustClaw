@@ -51,9 +51,9 @@ use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, Notify, RwLock, Semaphore};
 use tracing::{info, warn};
 use wechat_ilink::{
-    download_decrypted_media, parse_aes_key_base64, parse_aes_key_hex_or_base64_media,
-    WechatConversationScope, WechatMessageItem, WechatSendMessageRequest, TYPING_STATUS_CANCEL,
-    TYPING_STATUS_TYPING,
+    download_decrypted_media, download_decrypted_media_to_file, parse_aes_key_base64,
+    parse_aes_key_hex_or_base64_media, WechatConversationScope, WechatMessageItem,
+    WechatSendMessageRequest, TYPING_STATUS_CANCEL, TYPING_STATUS_TYPING,
 };
 
 const SESSION_EXPIRED_ERRCODE: i64 = -14;
@@ -65,6 +65,11 @@ const WECHAT_TEXT_CHUNK_CHARS: usize = 1800;
 const WECHATD_CHANNEL_VERSION: &str = env!("CARGO_PKG_VERSION");
 const INBOUND_MESSAGE_CONCURRENCY: usize = 16;
 const INBOUND_CONTROL_CONCURRENCY: usize = 8;
+const CHANNEL_RUNTIME_CACHE_MAX_ENTRIES: usize = 4096;
+const ACTIVE_LOGIN_MAX_ENTRIES: usize = 32;
+const INBOUND_IMAGE_MAX_BYTES: u64 = 25 * 1024 * 1024;
+const INBOUND_MEDIA_MAX_BYTES: u64 = 100 * 1024 * 1024;
+const INBOUND_VOICE_MAX_BYTES: u64 = 20 * 1024 * 1024;
 
 struct InboundPeerOrder {
     next_ticket: u64,

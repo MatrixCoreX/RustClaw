@@ -42,6 +42,18 @@ fn keeps_i18n_message_key_machine_fields() {
 }
 
 #[test]
+fn keeps_pagination_continuation_tokens_visible() {
+    let raw = r#"continuation_token=null {"continuation_token":"cursor-v1"} token=secret-token"#;
+
+    let sanitized = sanitize_user_visible_text(raw);
+
+    assert!(sanitized.contains("continuation_token=null"));
+    assert!(sanitized.contains(r#""continuation_token":"cursor-v1""#));
+    assert!(sanitized.contains("token=[REDACTED]"));
+    assert!(!sanitized.contains("secret-token"));
+}
+
+#[test]
 fn redacts_short_lived_secret_token_references_from_visible_text() {
     let raw = "adapter returned agent-secret://v1/12345678-1234-1234-1234-123456789abc";
 

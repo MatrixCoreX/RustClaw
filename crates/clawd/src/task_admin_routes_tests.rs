@@ -191,6 +191,8 @@ async fn admin_active_task_list_uses_the_same_system_scope_as_health() {
             user_id: 0,
             chat_id: 0,
             exclude_task_id: None,
+            limit: None,
+            offset: None,
         }),
     )
     .await;
@@ -198,6 +200,10 @@ async fn admin_active_task_list_uses_the_same_system_scope_as_health() {
     assert_eq!(status, StatusCode::OK);
     let data = response.data.expect("active tasks response");
     assert_eq!(data["count"], 2);
+    assert_eq!(data["total"], 2);
+    assert_eq!(data["limit"], 100);
+    assert_eq!(data["offset"], 0);
+    assert_eq!(data["has_more"], false);
     let tasks = data["tasks"].as_array().expect("active task array");
     assert!(tasks.iter().all(|task| task["channel"] == "ui"));
     assert!(tasks

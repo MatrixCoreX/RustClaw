@@ -12,6 +12,9 @@ function props(): ComponentProps<typeof LogsPage> {
     t,
     tSlash: (text) => text,
     logFiles: ["runtime-current.log", "webd-device.log"],
+    logFilesTotal: 2,
+    logFilesHasPrevious: false,
+    logFilesHasNext: false,
     logFilesLoading: false,
     logFilesError: null,
     selectedLogFile: "runtime-current.log",
@@ -26,6 +29,8 @@ function props(): ComponentProps<typeof LogsPage> {
     onSelectedLogFileChange: () => {},
     onLogTailLinesChange: () => {},
     onLogFollowTailChange: () => {},
+    onPreviousLogFilesPage: () => {},
+    onNextLogFilesPage: () => {},
     onRefreshLogs: () => {},
   };
 }

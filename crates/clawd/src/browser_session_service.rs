@@ -14,11 +14,16 @@ use tokio_util::codec::{FramedRead, LinesCodec};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use claw_core::host_resources::{HostResourceSnapshot, ResourcePressureState};
+
 const PROTOCOL_VERSION: u64 = 1;
 const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 const DEFAULT_IDLE_LEASE: Duration = Duration::from_secs(300);
 const DEFAULT_MAX_LIFETIME: Duration = Duration::from_secs(1800);
+const LOW_MEMORY_SCREENSHOT_HOST_MAX_MIB: u64 = 4 * 1024;
+const LOW_MEMORY_SCREENSHOT_MAX_TILE_PIXELS: u64 = 2 * 1024 * 1024;
+const LOW_MEMORY_SCREENSHOT_MAX_TILES: u64 = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BrowserSessionBinding {
@@ -61,6 +66,7 @@ struct ServiceInner {
     session_slots: Arc<Semaphore>,
     idle_lease: Duration,
     max_lifetime: Duration,
+    resource_broker: crate::resource_scheduler::ResourceBroker,
 }
 
 struct LiveSession {
@@ -69,10 +75,13 @@ struct LiveSession {
     created_at: u64,
     max_expires_at: u64,
     last_used_at: StdMutex<u64>,
+    heartbeat_at: StdMutex<u64>,
     lease_expires_at: StdMutex<u64>,
+    idle_lease_seconds: u64,
     last_safe_snapshot: StdMutex<Option<Value>>,
     bridge: Mutex<BridgeProcess>,
     _session_slot: OwnedSemaphorePermit,
+    resource_lease: crate::resource_scheduler::ResourceLease,
 }
 
 struct BridgeProcess {
@@ -97,7 +106,18 @@ impl Drop for BridgeProcess {
 }
 
 impl BrowserSessionService {
+    #[cfg(test)]
     pub(crate) fn new(workspace_root: &Path) -> Self {
+        Self::new_with_resource_broker(
+            workspace_root,
+            crate::resource_scheduler::ResourceBroker::default(),
+        )
+    }
+
+    pub(crate) fn new_with_resource_broker(
+        workspace_root: &Path,
+        resource_broker: crate::resource_scheduler::ResourceBroker,
+    ) -> Self {
         let workspace_root = workspace_root
             .canonicalize()
             .unwrap_or_else(|_| workspace_root.to_path_buf());
@@ -108,6 +128,7 @@ impl BrowserSessionService {
             session_slots: Arc::new(Semaphore::new(detect_session_capacity())),
             idle_lease: DEFAULT_IDLE_LEASE,
             max_lifetime: DEFAULT_MAX_LIFETIME,
+            resource_broker,
         });
         Self::spawn_reaper(&inner);
         Self { inner }
@@ -125,28 +146,50 @@ impl BrowserSessionService {
                 interval.tick().await;
                 let Some(inner) = weak.upgrade() else { break };
                 let now = unix_now();
-                let expired = {
+                let (expired, active) = {
                     let sessions = inner.sessions.lock().await;
-                    sessions
-                        .iter()
-                        .filter_map(|(id, session)| {
-                            let lease = session.lease_expires_at.lock().map(|v| *v).unwrap_or(0);
-                            (now >= lease || now >= session.max_expires_at).then(|| id.clone())
-                        })
-                        .collect::<Vec<_>>()
+                    let mut expired = Vec::new();
+                    let mut active = Vec::new();
+                    for (id, session) in sessions.iter() {
+                        let lease = session.lease_expires_at.lock().map(|v| *v).unwrap_or(0);
+                        if now >= session.max_expires_at {
+                            expired.push((id.clone(), "max_lifetime"));
+                        } else if now >= lease {
+                            expired.push((id.clone(), "idle_deadline"));
+                        } else {
+                            active.push(session.clone());
+                        }
+                    }
+                    (expired, active)
                 };
-                for session_id in expired {
-                    shutdown_session(&inner, &session_id).await;
+                for session in active {
+                    refresh_session_resource_reservation(&session).await;
+                }
+                for (session_id, reason) in expired {
+                    shutdown_session(&inner, &session_id, reason).await;
                 }
             }
         });
     }
 
+    #[cfg(test)]
     pub(crate) async fn open(
+        &self,
+        binding: BrowserSessionBinding,
+        input: Value,
+        cancellation: Option<CancellationToken>,
+    ) -> Result<Value, BrowserSessionError> {
+        self.open_with_resource_lease(binding, input, cancellation, None, None)
+            .await
+    }
+
+    pub(crate) async fn open_with_resource_lease(
         &self,
         binding: BrowserSessionBinding,
         mut input: Value,
         cancellation: Option<CancellationToken>,
+        resource_lease: Option<crate::resource_scheduler::ResourceLease>,
+        resource_request: Option<&claw_core::skill_registry::SkillResourceRequest>,
     ) -> Result<Value, BrowserSessionError> {
         if !self.inner.bridge_path.is_file() {
             return Err(BrowserSessionError::new(
@@ -167,6 +210,31 @@ impl BrowserSessionService {
                     json!({"reason": "session_capacity"}),
                 )
             })?;
+        let fallback_request = claw_core::skill_registry::SkillResourceRequest {
+            class: claw_core::skill_registry::SkillResourceClass::Memory,
+            cpu_cores: 1,
+            memory_mb: 512,
+            network_slots: 1,
+            browser_slots: 1,
+            ..claw_core::skill_registry::SkillResourceRequest::default()
+        };
+        let resource_lease = match resource_lease {
+            Some(resource_lease) => resource_lease,
+            None => self
+                .inner
+                .resource_broker
+                .try_acquire(resource_request.or(Some(&fallback_request)), 1)
+                .map_err(|grant| {
+                    BrowserSessionError::new(
+                        "BROWSER_RESOURCE_LIMIT",
+                        true,
+                        json!({
+                            "reason": grant.wait_reason,
+                            "resource_grant": grant.projection,
+                        }),
+                    )
+                })?,
+        };
         let session_id = Uuid::new_v4().simple().to_string();
         let now = unix_now();
         let task_ref = hex::encode(sha2::Sha256::digest(binding.task_id.as_bytes()));
@@ -184,10 +252,13 @@ impl BrowserSessionService {
             created_at: now,
             max_expires_at: now.saturating_add(self.inner.max_lifetime.as_secs()),
             last_used_at: StdMutex::new(now),
+            heartbeat_at: StdMutex::new(now),
             lease_expires_at: StdMutex::new(now.saturating_add(self.inner.idle_lease.as_secs())),
+            idle_lease_seconds: self.inner.idle_lease.as_secs(),
             last_safe_snapshot: StdMutex::new(None),
             bridge: Mutex::new(bridge),
             _session_slot: session_slot,
+            resource_lease,
         });
         if !input.is_object() {
             input = json!({});
@@ -205,8 +276,19 @@ impl BrowserSessionService {
             "artifact_root".to_string(),
             Value::String(artifact_root.display().to_string()),
         );
+        if object
+            .get("include_screenshot")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            object.insert(
+                "screenshot_contract".to_string(),
+                screenshot_contract(&self.inner.resource_broker),
+            );
+        }
         match call_bridge(&session, input, cancellation).await {
             Ok(result) => {
+                refresh_session_resource_reservation(&session).await;
                 self.inner
                     .sessions
                     .lock()
@@ -218,7 +300,7 @@ impl BrowserSessionService {
                 ))
             }
             Err(error) => {
-                kill_bridge(&session).await;
+                terminate_live_session(&session, "open_failed").await;
                 Err(error)
             }
         }
@@ -240,12 +322,26 @@ impl BrowserSessionService {
             .as_object_mut()
             .expect("object normalized")
             .insert("command".to_string(), Value::String(command.to_string()));
+        if command == "screenshot"
+            || input
+                .get("include_screenshot")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        {
+            input.as_object_mut().expect("object normalized").insert(
+                "screenshot_contract".to_string(),
+                screenshot_contract(&self.inner.resource_broker),
+            );
+        }
         match call_bridge(&session, input, cancellation).await {
-            Ok(result) => Ok(project_result(&session, result)),
+            Ok(result) => {
+                refresh_session_resource_reservation(&session).await;
+                Ok(project_result(&session, result))
+            }
             Err(error) => {
                 let error = with_last_safe_snapshot(&session, error);
                 if bridge_error_is_fatal(&error.code) {
-                    shutdown_session(&self.inner, session_id).await;
+                    shutdown_session(&self.inner, session_id, "fatal_bridge_error").await;
                 }
                 Err(error)
             }
@@ -263,7 +359,7 @@ impl BrowserSessionService {
             .await
             .map(|result| project_result(&session, result));
         self.inner.sessions.lock().await.remove(session_id);
-        kill_bridge(&session).await;
+        terminate_live_session(&session, "user_close").await;
         response
     }
 
@@ -283,7 +379,28 @@ impl BrowserSessionService {
         };
         let count = sessions.len();
         for session in sessions {
-            kill_bridge(&session).await;
+            terminate_live_session(&session, "task_terminal").await;
+        }
+        count
+    }
+
+    pub(crate) async fn reclaim_idle(&self, minimum_idle: Duration) -> usize {
+        let now = unix_now();
+        let minimum_idle_seconds = minimum_idle.as_secs();
+        let session_ids = {
+            let sessions = self.inner.sessions.lock().await;
+            sessions
+                .iter()
+                .filter_map(|(session_id, session)| {
+                    let last_used = session.last_used_at.lock().map(|value| *value).ok()?;
+                    (now.saturating_sub(last_used) >= minimum_idle_seconds)
+                        .then(|| session_id.clone())
+                })
+                .collect::<Vec<_>>()
+        };
+        let count = session_ids.len();
+        for session_id in session_ids {
+            shutdown_session(&self.inner, &session_id, "resource_pressure_idle_reclaim").await;
         }
         count
     }
@@ -311,14 +428,55 @@ impl BrowserSessionService {
         let now = unix_now();
         let lease = session.lease_expires_at.lock().map(|v| *v).unwrap_or(0);
         if now >= lease || now >= session.max_expires_at {
-            shutdown_session(&self.inner, session_id).await;
+            let reason = if now >= session.max_expires_at {
+                "max_lifetime"
+            } else {
+                "idle_deadline"
+            };
+            shutdown_session(&self.inner, session_id, reason).await;
             return Err(BrowserSessionError::new(
                 "BROWSER_SESSION_EXPIRED",
                 true,
                 json!({"session_id": session_id}),
             ));
         }
+        touch_session(&session, now);
         Ok(session)
+    }
+}
+
+fn screenshot_contract(broker: &crate::resource_scheduler::ResourceBroker) -> Value {
+    let status = broker.status();
+    screenshot_contract_for_resources(
+        status.snapshot.effective_memory_mib(),
+        status.pressure_state,
+    )
+}
+
+fn screenshot_contract_for_resources(
+    effective_memory_mib: Option<u64>,
+    pressure_state: ResourcePressureState,
+) -> Value {
+    let segmented = effective_memory_mib
+        .is_some_and(|memory_mib| memory_mib <= LOW_MEMORY_SCREENSHOT_HOST_MAX_MIB)
+        || matches!(
+            pressure_state,
+            ResourcePressureState::Constrained | ResourcePressureState::Critical
+        );
+    if segmented {
+        json!({
+            "schema_version": 1,
+            "mode": "segmented_full_page",
+            "max_tile_pixels": LOW_MEMORY_SCREENSHOT_MAX_TILE_PIXELS,
+            "max_tiles": LOW_MEMORY_SCREENSHOT_MAX_TILES,
+            "preserve_full_page": true,
+        })
+    } else {
+        json!({
+            "schema_version": 1,
+            "mode": "single_full_page",
+            "preserve_full_page": true,
+        })
     }
 }
 
@@ -473,12 +631,7 @@ async fn call_bridge(
         }
     }?;
     let now = unix_now();
-    if let Ok(mut value) = session.last_used_at.lock() {
-        *value = now;
-    }
-    if let Ok(mut value) = session.lease_expires_at.lock() {
-        *value = now.saturating_add(DEFAULT_IDLE_LEASE.as_secs());
-    }
+    touch_session(session, now);
     if let Some(snapshot) = result
         .get("snapshot")
         .cloned()
@@ -500,6 +653,7 @@ fn compact_session_open_result(mut result: Value) -> Value {
 
 fn project_result(session: &LiveSession, result: Value) -> Value {
     let lease_expires_at = session.lease_expires_at.lock().map(|v| *v).unwrap_or(0);
+    let heartbeat_at = session.heartbeat_at.lock().map(|v| *v).unwrap_or(0);
     json!({
         "schema_version": 1,
         "session_id": session.id,
@@ -510,6 +664,7 @@ fn project_result(session: &LiveSession, result: Value) -> Value {
         "registry_generation_digest": session.binding.registry_digest,
         "policy_digest": session.binding.policy_digest,
         "created_at": session.created_at,
+        "heartbeat_at": heartbeat_at,
         "lease_expires_at": lease_expires_at,
         "max_expires_at": session.max_expires_at,
         "result": result,
@@ -550,9 +705,45 @@ fn bridge_error_is_fatal(code: &str) -> bool {
     )
 }
 
-async fn shutdown_session(inner: &Arc<ServiceInner>, session_id: &str) {
+fn touch_session(session: &LiveSession, now: u64) {
+    if let Ok(mut value) = session.last_used_at.lock() {
+        *value = now;
+    }
+    if let Ok(mut value) = session.heartbeat_at.lock() {
+        *value = now;
+    }
+    if let Ok(mut value) = session.lease_expires_at.lock() {
+        *value = now.saturating_add(session.idle_lease_seconds);
+    }
+}
+
+async fn shutdown_session(inner: &Arc<ServiceInner>, session_id: &str, exit_reason: &'static str) {
     if let Some(session) = inner.sessions.lock().await.remove(session_id) {
-        kill_bridge(&session).await;
+        terminate_live_session(&session, exit_reason).await;
+    }
+}
+
+async fn terminate_live_session(session: &LiveSession, exit_reason: &'static str) {
+    let process_id = session.bridge.lock().await.child.id();
+    tracing::info!(
+        session_id = session.id,
+        task_id = session.binding.task_id,
+        actor_ref = session.binding.actor_ref,
+        process_id,
+        exit_reason,
+        "browser_session_terminated"
+    );
+    kill_bridge(session).await;
+}
+
+async fn refresh_session_resource_reservation(session: &LiveSession) {
+    let process_id = session.bridge.lock().await.child.id();
+    if let Some(memory_mib) =
+        process_id.and_then(crate::skills::runner_pool::process_tree_resident_memory_mib)
+    {
+        session
+            .resource_lease
+            .refresh_materialized_memory(memory_mib);
     }
 }
 
@@ -571,28 +762,13 @@ fn unix_now() -> u64 {
 }
 
 fn detect_session_capacity() -> usize {
-    let cpu_capacity = std::thread::available_parallelism()
-        .map(usize::from)
-        .unwrap_or(1)
-        .div_ceil(2)
-        .clamp(1, 4);
-    #[cfg(target_os = "linux")]
+    let snapshot = HostResourceSnapshot::collect();
+    let cpu_capacity = snapshot.cpu_parallelism.div_ceil(2).clamp(1, 4);
+    if snapshot
+        .available_memory_mib()
+        .is_some_and(|available| available < 1536)
     {
-        let available_kib = std::fs::read_to_string("/proc/meminfo")
-            .ok()
-            .and_then(|content| {
-                content.lines().find_map(|line| {
-                    line.strip_prefix("MemAvailable:")?
-                        .split_whitespace()
-                        .next()?
-                        .parse::<u64>()
-                        .ok()
-                })
-            })
-            .unwrap_or(u64::MAX);
-        if available_kib < 1_572_864 {
-            return 1;
-        }
+        return 1;
     }
     cpu_capacity
 }
@@ -640,13 +816,35 @@ mod tests {
         assert!((1..=4).contains(&detect_session_capacity()));
     }
 
+    #[test]
+    fn screenshot_contract_segments_only_when_host_resources_require_it() {
+        let low_memory =
+            screenshot_contract_for_resources(Some(2048), ResourcePressureState::Normal);
+        assert_eq!(low_memory["mode"], "segmented_full_page");
+        assert_eq!(low_memory["preserve_full_page"], true);
+        assert_eq!(
+            low_memory["max_tile_pixels"],
+            LOW_MEMORY_SCREENSHOT_MAX_TILE_PIXELS
+        );
+
+        let pressured =
+            screenshot_contract_for_resources(Some(8192), ResourcePressureState::Constrained);
+        assert_eq!(pressured["mode"], "segmented_full_page");
+
+        let normal = screenshot_contract_for_resources(Some(8192), ResourcePressureState::Normal);
+        assert_eq!(normal["mode"], "single_full_page");
+        assert_eq!(normal["preserve_full_page"], true);
+        assert!(normal.get("max_tile_pixels").is_none());
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn live_service_enforces_binding_and_recovers_from_bridge_loss() {
         let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../..")
             .canonicalize()
             .expect("workspace");
-        let service = BrowserSessionService::new(&workspace);
+        let broker = crate::resource_scheduler::ResourceBroker::default();
+        let service = BrowserSessionService::new_with_resource_broker(&workspace, broker.clone());
         let binding = fixture_binding("actor-a", "task-live-browser-session");
         let opened = service
             .open(binding.clone(), json!({"locale": "en-US"}), None)
@@ -658,6 +856,7 @@ mod tests {
             .as_u64()
             .expect("page generation");
         assert!(opened["result"].get("snapshot").is_none());
+        assert_eq!(broker.status().active_heavy_leases, 1);
         let session = service
             .inner
             .sessions
@@ -687,6 +886,18 @@ mod tests {
             .expect_err("browser_cross_actor");
         assert_eq!(mismatch.code, "BROWSER_SESSION_BINDING_MISMATCH");
 
+        let session = service
+            .inner
+            .sessions
+            .lock()
+            .await
+            .get(session_id)
+            .cloned()
+            .expect("live session before lease refresh");
+        let lease_before_request = unix_now().saturating_add(1);
+        *session.lease_expires_at.lock().expect("lease expiry lock") = lease_before_request;
+        drop(session);
+
         let snapshot = service
             .request(
                 session_id,
@@ -699,6 +910,10 @@ mod tests {
             .expect("bound actor snapshot");
         assert_eq!(snapshot["session_id"], session_id);
         assert_eq!(snapshot["result"]["page_id"], page_id);
+        assert!(snapshot["heartbeat_at"].as_u64().is_some());
+        assert!(snapshot["lease_expires_at"]
+            .as_u64()
+            .is_some_and(|value| value > lease_before_request));
 
         let session = service
             .inner
@@ -723,6 +938,52 @@ mod tests {
         assert_eq!(lost.code, "BROWSER_SESSION_LOST");
         assert!(lost.details.get("last_safe_snapshot").is_some());
         assert!(!service.inner.sessions.lock().await.contains_key(session_id));
+        assert_eq!(broker.status().active_heavy_leases, 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn open_accepts_dispatch_lease_without_acquiring_a_second_browser_slot() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("workspace");
+        let broker = crate::resource_scheduler::ResourceBroker::default();
+        let request = claw_core::skill_registry::SkillResourceRequest {
+            class: claw_core::skill_registry::SkillResourceClass::Memory,
+            cpu_cores: 1,
+            memory_mb: 512,
+            network_slots: 1,
+            browser_slots: 1,
+            ..claw_core::skill_registry::SkillResourceRequest::default()
+        };
+        let dispatch_lease = broker
+            .try_acquire(Some(&request), 1)
+            .expect("dispatch browser lease");
+        assert_eq!(broker.status().reserved_browser_slots, 1);
+
+        let service = BrowserSessionService::new_with_resource_broker(&workspace, broker.clone());
+        let binding = fixture_binding("actor-dispatch-lease", "task-dispatch-lease");
+        let opened = service
+            .open_with_resource_lease(
+                binding.clone(),
+                json!({}),
+                None,
+                Some(dispatch_lease),
+                Some(&request),
+            )
+            .await
+            .expect("open must reuse dispatch lease");
+        assert_eq!(broker.status().reserved_browser_slots, 1);
+
+        service
+            .close(
+                opened["session_id"].as_str().expect("session id"),
+                &binding,
+                None,
+            )
+            .await
+            .expect("close browser session");
+        assert_eq!(broker.status().reserved_browser_slots, 0);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -793,7 +793,7 @@ fn agent_loop_async_failure_carries_recovery_checkpoint_without_prose_routing() 
                 "error_code": "provider_request_failed",
                 "message_key": "skill.audio_transcribe.provider_request_failed",
                 "retryable": true,
-                "fallback_capability": "media_download.transcribe",
+                "fallback_capability": "local_asr.transcribe",
                 "fallback_input_field": "input_path",
                 "fallback_input_value": "/workspace/extracted.wav"
             }

@@ -885,7 +885,7 @@ class ShareTextTest(unittest.TestCase):
             with (
                 mock.patch.object(self.downloader, "download_candidate", side_effect=fake_download),
                 mock.patch.object(
-                    self.downloader.video_transcriber,
+                    self.downloader.media_audio,
                     "probe_audio_stream",
                     side_effect=[False, True],
                 ),
@@ -945,7 +945,7 @@ class ShareTextTest(unittest.TestCase):
                 mock.patch.object(self.downloader, "download_candidate", side_effect=fake_download),
                 mock.patch.object(self.downloader, "mux_separate_audio_stream", side_effect=fake_mux) as muxed,
                 mock.patch.object(
-                    self.downloader.video_transcriber,
+                    self.downloader.media_audio,
                     "probe_audio_stream",
                     side_effect=[False, True],
                 ),
@@ -996,7 +996,7 @@ class ShareTextTest(unittest.TestCase):
             with (
                 mock.patch.object(self.downloader, "download_candidate", side_effect=fake_download),
                 mock.patch.object(
-                    self.downloader.video_transcriber,
+                    self.downloader.media_audio,
                     "probe_audio_stream",
                     return_value=False,
                 ),
@@ -1056,7 +1056,7 @@ class ShareTextTest(unittest.TestCase):
                 mock.patch.object(self.downloader, "compose_live_photo_video", side_effect=fake_compose) as composed,
                 mock.patch.object(self.downloader, "mux_separate_audio_stream") as adaptive_mux,
                 mock.patch.object(
-                    self.downloader.video_transcriber,
+                    self.downloader.media_audio,
                     "probe_audio_stream",
                     return_value=True,
                 ),
@@ -1109,7 +1109,7 @@ class ShareTextTest(unittest.TestCase):
             with (
                 mock.patch.object(self.downloader, "download_candidate", side_effect=fake_download),
                 mock.patch.object(
-                    self.downloader.video_transcriber,
+                    self.downloader.media_audio,
                     "probe_audio_stream",
                     side_effect=[False, False],
                 ),

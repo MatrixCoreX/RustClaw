@@ -416,6 +416,10 @@ fn declared_skill_storage_descriptor_uses_its_mapped_sandbox_target() {
         storage_kind: "sqlite",
         database_path: storage_directory.join("state.db").display().to_string(),
         database_busy_timeout_ms: 5_000,
+        database_resource_profile: "constrained",
+        database_cache_size_kib: Some(1024),
+        database_mmap_size_bytes: Some(0),
+        database_temp_store: Some("file"),
         directory_path: None,
     };
 
@@ -443,6 +447,10 @@ fn declared_directory_storage_uses_only_its_mapped_sandbox_directory() {
         storage_kind: "directory",
         database_path: String::new(),
         database_busy_timeout_ms: 0,
+        database_resource_profile: "standard",
+        database_cache_size_kib: None,
+        database_mmap_size_bytes: None,
+        database_temp_store: None,
         directory_path: Some(host_storage.display().to_string()),
     };
 
@@ -755,6 +763,7 @@ fn runner_context_carries_internal_idempotency_contract_outside_skill_args() {
         "ui",
         None,
         std::path::Path::new("/runtime/artifacts/invocation"),
+        None,
         Some(&execution),
     );
 
@@ -779,6 +788,45 @@ fn runner_context_carries_internal_idempotency_contract_outside_skill_args() {
             .get("artifact_output_directory")
             .and_then(serde_json::Value::as_str),
         Some("/runtime/artifacts/invocation")
+    );
+}
+
+#[test]
+fn runner_context_carries_host_resource_grant_outside_skill_args() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = crate::ClaimedTask {
+        claim_attempt: 1,
+        task_id: "task-runner-resource-grant".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let grant = json!({
+        "schema_version": 1,
+        "grant": {"memory_mb": 512, "browser_slots": 1},
+    });
+    let context = build_runner_skill_context(
+        &state,
+        &task,
+        "ui",
+        None,
+        std::path::Path::new("/runtime/artifacts/invocation"),
+        Some(&grant),
+        None,
+    );
+
+    assert_eq!(
+        context.pointer("/resource_grant/grant/browser_slots"),
+        Some(&json!(1))
+    );
+    assert_eq!(
+        context.pointer("/resource_grant/grant/memory_mb"),
+        Some(&json!(512))
     );
 }
 
@@ -809,6 +857,7 @@ fn runner_context_exposes_only_the_calling_skills_storage_descriptor() {
         Some(descriptor),
         std::path::Path::new("/runtime/artifacts/invocation"),
         None,
+        None,
     );
     assert_eq!(
         context.pointer("/skill_storage/skill_name"),
@@ -821,6 +870,10 @@ fn runner_context_exposes_only_the_calling_skills_storage_descriptor() {
     assert_eq!(
         context.pointer("/skill_storage/schema_version"),
         Some(&json!(3))
+    );
+    assert_eq!(
+        context.pointer("/skill_storage/database_resource_profile"),
+        Some(&json!("standard"))
     );
     assert!(context.get("database_sqlite_path").is_none());
     assert!(context.get("database_busy_timeout_ms").is_none());

@@ -10,6 +10,7 @@ use reqwest::multipart::{Form, Part};
 use serde::Deserialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use tokio_util::io::ReaderStream;
 use toml::Value as TomlValue;
 use tracing::{info, warn};
 
@@ -83,6 +84,28 @@ const WHATSAPP_TEXT_CHUNK_CHARS: usize = 3500;
 const CLAWD_WECHAT_CHANNEL_VERSION: &str = env!("CARGO_PKG_VERSION");
 const WECHAT_MEDIA_OUTBOUND_TEMP_DIR: &str = "/tmp/agent-runtime/wechat/media/outbound-temp";
 const CHANNEL_MEDIA_OUTBOUND_TEMP_DIR: &str = "/tmp/agent-runtime/channel/media/outbound-temp";
+
+async fn streaming_multipart_part(
+    path: &Path,
+    filename: String,
+    mime_type: Option<&str>,
+) -> Result<Part, String> {
+    let size = tokio::fs::metadata(path)
+        .await
+        .map_err(|error| format!("channel_media_metadata_failed:{error}"))?
+        .len();
+    let file = tokio::fs::File::open(path)
+        .await
+        .map_err(|error| format!("channel_media_open_failed:{error}"))?;
+    let body = reqwest::Body::wrap_stream(ReaderStream::new(file));
+    let part = Part::stream_with_length(body, size).file_name(filename);
+    match mime_type {
+        Some(mime_type) => part
+            .mime_str(mime_type)
+            .map_err(|error| format!("channel_media_mime_invalid:{error}")),
+        None => Ok(part),
+    }
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ChannelSendOutcome {
@@ -407,17 +430,15 @@ pub(crate) async fn send_telegram_message_for_bot(
         claw_core::channel_media_limits::validate_local_media_file(
             &path, "Telegram", label, max_bytes,
         )?;
-        let bytes = tokio::fs::read(&path)
-            .await
-            .map_err(|err| format!("read Telegram outbound media failed: {err}"))?;
         let filename = path
             .file_name()
             .and_then(|value| value.to_str())
             .unwrap_or("file.bin")
             .to_string();
+        let part = streaming_multipart_part(&path, filename, None).await?;
         let form = Form::new()
             .text("chat_id", chat_id.to_string())
-            .part(field, Part::bytes(bytes).file_name(filename));
+            .part(field, part);
         let resp = state
             .core
             .http_client
@@ -630,27 +651,24 @@ pub(crate) async fn send_whatsapp_cloud_text_message(
             .and_then(|value| value.to_str())
             .unwrap_or("file.bin")
             .to_string();
-        let bytes_result = tokio::fs::read(&prepared.path).await;
-        if prepared.compatible_copy_created {
-            let _ = tokio::fs::remove_file(&prepared.path).await;
-        }
-        let bytes =
-            bytes_result.map_err(|err| format!("whatsapp_cloud_media_read_failed:{err}"))?;
-        let part = Part::bytes(bytes)
-            .file_name(filename.clone())
-            .mime_str(prepared.mime_type)
-            .map_err(|err| format!("prepare WhatsApp Cloud media failed: {err}"))?;
+        let part =
+            streaming_multipart_part(&prepared.path, filename.clone(), Some(prepared.mime_type))
+                .await?;
         let form = Form::new()
             .text("messaging_product", "whatsapp")
             .part("file", part);
-        let upload_resp = state
+        let upload_result = state
             .core
             .http_client
             .post(format!("{base}/v23.0/{phone_number_id}/media"))
             .bearer_auth(token)
             .multipart(form)
             .send()
-            .await
+            .await;
+        if prepared.compatible_copy_created {
+            let _ = tokio::fs::remove_file(&prepared.path).await;
+        }
+        let upload_resp = upload_result
             .map_err(|error| provider_transport_error("whatsapp_cloud", "upload_media", &error))?;
         if !upload_resp.status().is_success() {
             let status = upload_resp.status();
@@ -1321,15 +1339,14 @@ async fn upload_open_platform_media(
     path: &Path,
     plan: OpenPlatformMediaPlan,
 ) -> Result<String, String> {
-    let bytes = tokio::fs::read(path).await.map_err(|error| {
-        provider_invalid_response(source_adapter, "upload_media", &error.to_string())
-    })?;
     let filename = path
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or("file.bin")
         .to_string();
-    let part = Part::bytes(bytes).file_name(filename.clone());
+    let part = streaming_multipart_part(path, filename.clone(), None)
+        .await
+        .map_err(|error| provider_invalid_response(source_adapter, "upload_media", &error))?;
     let (upload_url, form) = match plan.upload_endpoint {
         OpenPlatformUploadEndpoint::Image => (
             format!("{base}/open-apis/im/v1/images"),

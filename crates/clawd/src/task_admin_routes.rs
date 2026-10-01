@@ -26,6 +26,8 @@ pub(super) struct ActiveTasksRequest {
     user_id: i64,
     chat_id: i64,
     exclude_task_id: Option<String>,
+    limit: Option<usize>,
+    offset: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -491,6 +493,8 @@ pub(super) async fn list_active_tasks(
     headers: HeaderMap,
     Json(req): Json<ActiveTasksRequest>,
 ) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
+    let limit = req.limit.unwrap_or(100).clamp(1, 100);
+    let offset = req.offset.unwrap_or(0).min(100_000);
     let provided_key = crate::auth_key_from_headers(&headers)
         .map(str::trim)
         .filter(|value| !value.is_empty());
@@ -500,12 +504,19 @@ pub(super) async fn list_active_tasks(
             Err(response) => return response,
         };
         if identity.role == "admin" {
-            crate::list_all_active_tasks_internal(&state, req.exclude_task_id.as_deref())
+            crate::list_all_active_tasks_page_internal(
+                &state,
+                req.exclude_task_id.as_deref(),
+                limit,
+                offset,
+            )
         } else {
-            crate::list_active_tasks_for_user_internal(
+            crate::list_active_tasks_for_user_page_internal(
                 &state,
                 identity.user_id,
                 req.exclude_task_id.as_deref(),
+                limit,
+                offset,
             )
         }
     } else {
@@ -513,17 +524,23 @@ pub(super) async fn list_active_tasks(
             Ok(user_id) => user_id,
             Err(resp) => return resp,
         };
-        crate::list_active_tasks_internal(
+        crate::list_active_tasks_page_internal(
             &state,
             effective_user_id,
             req.chat_id,
             req.exclude_task_id.as_deref(),
+            limit,
+            offset,
         )
     };
     match tasks {
-        Ok(tasks) => super::api_ok(json!({
-            "count": tasks.len(),
-            "tasks": tasks,
+        Ok(page) => super::api_ok(json!({
+            "count": page.tasks.len(),
+            "total": page.total,
+            "limit": page.limit,
+            "offset": page.offset,
+            "has_more": page.has_more,
+            "tasks": page.tasks,
         })),
         Err(err) => {
             error!("List active tasks failed: {}", err);
@@ -1274,13 +1291,15 @@ pub(super) async fn cancel_one_task(
             ),
         );
     }
-    let tasks = match crate::list_active_tasks_internal(
+    let page = match crate::list_active_tasks_page_internal(
         &state,
         effective_user_id,
         req.chat_id,
         req.exclude_task_id.as_deref(),
+        1,
+        req.index.saturating_sub(1),
     ) {
-        Ok(tasks) => tasks,
+        Ok(page) => page,
         Err(err) => {
             error!("Cancel one task list failed: {}", err);
             return super::api_err::<serde_json::Value>(
@@ -1293,7 +1312,7 @@ pub(super) async fn cancel_one_task(
             );
         }
     };
-    let Some(target) = tasks.into_iter().find(|t| t.index == req.index) else {
+    let Some(target) = page.tasks.into_iter().next() else {
         return super::api_err::<serde_json::Value>(
             StatusCode::NOT_FOUND,
             crate::i18n_t_with_default_vars(

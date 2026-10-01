@@ -420,7 +420,7 @@ The browser teaching-mode trace, `clawcli llm-trace`, and `/v1/debug/tasks/{task
 
 When teaching mode is selected, clicking either the user's question or the assistant's reply selects that turn and shows the corresponding task id, status, LLM call count, stage count, verifier/finalizer counts, goal/context/team/coding/checkpoint event timeline, model/provider capability decision, selected-model readiness decision, resume/checkpoint decision, and numbered raw LLM request/response details. When teaching mode is not selected, message clicks do not change the teaching trace.
 
-Execution boundaries are exposed as machine fields instead of prose-only notes. Teaching mode, subagent review, `clawcli report`, and replay tooling should consume fields such as `workspace_root`, `current_process_cwd`, `current_workspace_scope`, `write_enabled`, `external_publish_enabled`, `allowed_roles`, `runtime_config.max_concurrent_threads_per_session`, the legacy-compatible `runtime_config.max_parallel_readonly`, `thread_state`, `execution_state`, `queue_reason`, `join_wait_ms`, `runtime_deadline_ms`, `hook_stages`, `hook_decisions`, `permission_decision`, `policy_decision`, `checkpoint_id`, `poll_ref`, and `provider_blocker`. Consumers do not infer lifecycle from finalizer or child prose.
+Execution boundaries are exposed as machine fields instead of prose-only notes. Teaching mode, subagent review, `clawcli report`, and replay tooling should consume fields such as `workspace_root`, `current_process_cwd`, `current_workspace_scope`, `write_enabled`, `external_publish_enabled`, `allowed_roles`, `runtime_config.max_concurrent_threads_per_session`, `thread_state`, `execution_state`, `queue_reason`, `join_wait_ms`, `runtime_deadline_ms`, `hook_stages`, `hook_decisions`, `permission_decision`, `policy_decision`, `checkpoint_id`, `poll_ref`, and `provider_blocker`. Consumers do not infer lifecycle from finalizer or child prose.
 
 When debugging memory behavior, check these questions in order:
 
@@ -571,8 +571,30 @@ Operational rules:
 - Cloud deployments opt in to nginx only when a domain or TLS reverse proxy is needed.
 - Release installation manages cross-platform automatic startup through `scripts/configure-autostart.sh`. Linux systemd units are generated for the detected user and workspace by `scripts/install-systemd-service.sh`; macOS uses a generated per-user LaunchAgent. The repository does not keep a host-specific unit or plist.
 - Raspberry Pi users should prefer the prebuilt aarch64 Release package to avoid repeated full builds on low-memory hardware.
-- Hosts with at most 2 GiB RAM use on-demand database pools and, on Linux/glibc, a small-host allocator profile. See [runtime memory policy and measurement](docs/architecture/runtime_memory_profile.md).
+- Runtime admission continuously observes effective host/cgroup memory, available memory, swap, cgroup events, and Linux PSI where available. Every tool, skill, browser, local-model, background, and model-provider operation uses the shared resource broker; temporary pressure creates a resumable waiting checkpoint instead of a false task failure. Hosts with at most 2 GiB RAM additionally use on-demand database pools and, on Linux/glibc, a small-host allocator profile. See [runtime memory policy and measurement](docs/architecture/runtime_memory_profile.md).
 - Keep credentials in an environment file outside the repository and never commit them.
+
+### Runtime resource pressure and recovery
+
+```mermaid
+flowchart LR
+    A[Host and cgroup metrics] --> B[HostResourceSnapshot]
+    B --> C[Pressure state with hysteresis]
+    D[Capability resource contract] --> E[ResourceBroker]
+    C --> E
+    E -->|grant pinned lease| F[Tool, skill, browser, model, or background job]
+    E -->|capacity unavailable| G[resource_waiting checkpoint]
+    F --> H[Heartbeat and observed process-tree peak]
+    H --> E
+    F -->|finish, cancel, or crash| I[Release or reconcile lease]
+    G --> J[Resume worker]
+    J -->|capacity recovered| E
+```
+
+`resource_waiting` is a resumable lifecycle state, not a failed task. The runtime keeps cancellation,
+steering, pinned skill receipts, completed side effects, and channel delivery receipts intact while it
+waits. See [runtime resource admission and recovery](docs/architecture/16-runtime-resource-recovery.md)
+for resource tiers, administrator overrides, observability, and validation evidence.
 
 ## Identity and Access
 
@@ -637,7 +659,8 @@ flowchart LR
 - The Agent page keeps server-backed conversation history. Each task has a directly available rename control, and the saved name remains available after refresh or restart.
 - On desktop, clicking anywhere in the main work area collapses the navigation sidebar; the sidebar toggle restores it. The mobile navigation menu closes after page selection or an outside click.
 - Dashboard task counts and the Active Tasks page share one identity scope: admins see the system scope, while normal keys see their own tasks across conversations. Dashboard running counts and oldest-running age include only tasks with a live worker lease; user-waiting, paused, and resumable checkpoints remain visible through task lifecycle surfaces without triggering long-running warnings.
-- The dashboard system-dependency check covers Agent Runtime runtime requirements, source/UI build tools, and native dependencies used by built-in tools and skills. It reports detected versions and capability ownership. Administrators can start allowlisted installs through a Linux package manager or macOS Homebrew when the service already has non-interactive package-manager permission; installs run asynchronously and remain observable after a page refresh. The browser cannot submit arbitrary package names, system commands, or operating-system passwords.
+- The dashboard system-dependency check covers Agent Runtime runtime requirements, source/UI build tools, and native dependencies used by built-in tools and skills. It distinguishes missing dependencies, installed dependencies whose owning skills are disabled, and capabilities temporarily unavailable under current memory pressure. Administrators can start allowlisted installs through a Linux package manager or macOS Homebrew when the service already has non-interactive package-manager permission; installs run asynchronously and remain observable after a page refresh. The browser cannot submit arbitrary package names, system commands, or operating-system passwords.
+- The same section exports a read-only diagnostic JSON capped at 256 KiB. It includes bounded host capacity, pressure, dependency, and skill-count summaries, while excluding credentials, task content, logs, PIDs, executable paths, workspace paths, and raw configuration values.
 
 `clawd` has a fixed internal endpoint at `127.0.0.1:8787`; it is not a user-facing listen setting. `webd` uses `configs/channels/webd.toml` and can listen on either `0.0.0.0:8788` for direct device-IP access or `127.0.0.1:8788` for nginx-only/local access. The dashboard preserves the configured port when switching scope and atomically updates only the listener address. Docker publishes `8788`, not `8787`; container networking must be evaluated before changing the listener to loopback.
 
@@ -649,6 +672,8 @@ Useful endpoints (send `X-Agent-Key` for the current UI/user key):
   Agent Runtime data-volume storage, uptime, and machine-readable unavailable fields
 - `GET /v1/system/dependencies`: returns Linux/macOS dependency state, installed
   versions, consuming tools/skills, and controlled-install availability
+- `GET /v1/system/diagnostics/export`: returns the authenticated, bounded, and
+  redacted read-only diagnostic summary used by the dashboard download action
 - `POST /v1/admin/system-dependencies/install`: starts an allowlisted asynchronous
   install by fixed `dependency_id`; arbitrary commands and package names are rejected
 - `POST /v1/tasks`

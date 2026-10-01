@@ -50,6 +50,30 @@ class ReleaseInstallationTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
             self.assertIn("Compilation is not an installation step", result.stdout)
 
+    def test_release_deployment_is_prebuilt_and_keeps_one_rollback(self):
+        deploy_source = (ROOT / "deploy-github-release.sh").read_text()
+        bootstrap_source = (ROOT / "install-latest-release.sh").read_text()
+        for source in (deploy_source, bootstrap_source):
+            for forbidden in ("cargo build", "npm install", "npm run build", "vite build"):
+                self.assertNotIn(forbidden, source)
+        self.assertIn("KEEP_BACKUPS=1", deploy_source)
+        self.assertIn('rm -rf "$WORK_DIR"', deploy_source)
+        self.assertIn('rm -rf "$PACKAGE_STAGE_DIR"', deploy_source)
+
+    def test_release_package_contains_runtime_assets_without_build_caches(self):
+        package_source = (ROOT / "package-release.sh").read_text()
+        self.assertIn('cp -R "$SCRIPT_DIR/UI/dist" "$STAGE_PROJECT_DIR/UI/dist"', package_source)
+        self.assertIn('mkdir -p "$STAGE_PROJECT_DIR/target/release"', package_source)
+        self.assertIn('mkdir -p "$STAGE_PROJECT_DIR/prebuilt/skill-packages"', package_source)
+        self.assertIn("bundled-skill-bootstrap-v1.json", package_source)
+        for forbidden in (
+            'copy_if_exists "UI/src"',
+            'copy_if_exists "UI/node_modules"',
+            'copy_if_exists "target"',
+            'copy_if_exists "crates"',
+        ):
+            self.assertNotIn(forbidden, package_source)
+
     def test_missing_assets_fail_before_installing_links(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

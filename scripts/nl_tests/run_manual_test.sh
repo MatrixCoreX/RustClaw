@@ -353,38 +353,38 @@ from pathlib import Path
 obj = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 data = obj.get("data") or {}
 result = data.get("result_json") or {}
-messages = result.get("messages") or []
-parts = [
-    str(data.get("error_text") or ""),
-    str(result.get("text") or ""),
-]
-for item in messages:
-    if isinstance(item, dict):
-        parts.append(str(item.get("text") or ""))
-text = "\n".join(parts).lower()
-markers = [
-    "当前大模型服务暂时不可用",
-    "模型暂时不可用",
-    "selected model is at capacity",
-    "usage limit exceeded",
-    "rate limit",
-    "rate_limit",
-    "too many requests",
-    "http 429",
-    "http 401",
-    "authorized_error",
-    "login fail",
-    "鉴权失败",
-]
-if any(m in text for m in markers):
-    print("[model] unavailable/capacity/rate-limit message observed in final result")
+
+def walk(value):
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from walk(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from walk(child)
+
+provider_codes = set()
+for item in walk(result):
+    for field in (
+        "error_code",
+        "provider_blocker_status_code",
+        "reason_code",
+        "status_code",
+    ):
+        code = str(item.get(field) or "").strip().lower()
+        if code == "rate_limited" or code.startswith(("provider_", "llm_provider_")):
+            provider_codes.add(code)
+    if item.get("external_provider_blocked") is True:
+        provider_codes.add("external_provider_blocked")
+
+if provider_codes:
+    print("[model] structured provider blocker: " + ",".join(sorted(provider_codes)))
 PY
 }
 
 final_result_provider_unavailable() {
   python3 - "$1" <<'PY'
 import json
-import re
 import sys
 from pathlib import Path
 
@@ -444,98 +444,9 @@ for item in machine_objects:
         or code.startswith("llm_provider_")
         for code in codes
     )
-    if external_blocked and (attribution == "provider_gap" or provider_code):
+    if provider_code or (external_blocked and attribution == "provider_gap"):
         raise SystemExit(0)
 
-messages = result.get("messages") or []
-error_text = str(data.get("error_text") or "").strip().lower()
-result_text = str(result.get("text") or "").strip().lower()
-message_texts = []
-for item in messages:
-    if isinstance(item, dict):
-        message_texts.append(str(item.get("text") or "").strip().lower())
-
-strong_markers = [
-    "当前大模型服务暂时不可用",
-    "模型暂时不可用",
-    "模型暂不可用",
-    "selected model is at capacity",
-    "usage limit exceeded",
-    "rate limit",
-    "rate_limit",
-    "too many requests",
-    "http 401",
-    "http 429",
-    "http 529",
-    "529 overloaded",
-    "authorized_error",
-    "login fail",
-    "鉴权失败",
-    "missing choices[0].message.content",
-    "timeout: error sending request for url",
-    "error sending request for url",
-    "operation timed out",
-]
-
-def provider_like_blob(text: str) -> bool:
-    text = (text or "").strip().lower()
-    if not text:
-        return False
-    if any(marker in text for marker in strong_markers):
-        return True
-    return (
-        "provider=vendor-" in text
-        and (
-            re.search(r"http 5\d\d", text) is not None
-            or '"type":"server_error"' in text
-            or "unknown error, 520" in text
-        )
-    )
-
-def provider_like_final_text(text: str) -> bool:
-    text = (text or "").strip().lower()
-    if not text:
-        return False
-    if len(text) > 400:
-        return False
-    anchored_markers = [
-        "当前大模型服务暂时不可用",
-        "模型暂时不可用",
-        "模型暂不可用",
-        "selected model is at capacity",
-        "usage limit exceeded",
-        "rate limit",
-        "rate_limit",
-        "too many requests",
-        "http 401",
-        "http 429",
-        "http 529",
-        "529 overloaded",
-        "authorized_error",
-        "login fail",
-        "鉴权失败",
-        "missing choices[0].message.content",
-        "timeout: error sending request for url",
-        "error sending request for url",
-        "operation timed out",
-    ]
-    if any(text.startswith(marker) for marker in anchored_markers):
-        return True
-    return (
-        "provider=vendor-" in text
-        and (
-            re.search(r"http 5\d\d", text) is not None
-            or '"type":"server_error"' in text
-            or "unknown error, 520" in text
-        )
-    )
-
-if provider_like_blob(error_text):
-    raise SystemExit(0)
-if provider_like_final_text(result_text):
-    raise SystemExit(0)
-if any(provider_like_final_text(text) for text in message_texts):
-    raise SystemExit(0)
 raise SystemExit(1)
 PY
 }

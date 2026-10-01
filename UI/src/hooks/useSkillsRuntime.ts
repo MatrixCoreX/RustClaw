@@ -60,6 +60,8 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
   const previousSkillStoreOperationRef = useRef<SkillStoreResponse["active_operation"]>(null);
   const skillStoreFetchRef = useRef<Promise<void> | null>(null);
   const skillStoreFetchedAtRef = useRef(0);
+  const skillStorePageRef = useRef(1);
+  const skillStoreQueryRef = useRef("");
   const skillStoreActionName = resolveSkillStoreActionName(localSkillStoreActionName, skillStoreData);
 
   const fetchSkills = async () => {
@@ -98,15 +100,35 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
     }
   };
 
-  const fetchSkillStore = (force = false): Promise<void> => {
+  const fetchSkillStore = (
+    force = false,
+    page = skillStorePageRef.current,
+    query = skillStoreQueryRef.current,
+  ): Promise<void> => {
+    const normalizedPage = Math.max(1, Math.trunc(page));
+    const normalizedQuery = query.trim();
+    const browsingChanged = normalizedPage !== skillStorePageRef.current
+      || normalizedQuery !== skillStoreQueryRef.current;
+    skillStorePageRef.current = normalizedPage;
+    skillStoreQueryRef.current = normalizedQuery;
     const freshEnough = Date.now() - skillStoreFetchedAtRef.current < 3_000;
-    if (!force && freshEnough) return Promise.resolve();
-    if (skillStoreFetchRef.current) return skillStoreFetchRef.current;
+    if (!force && !browsingChanged && freshEnough) return Promise.resolve();
+    if (skillStoreFetchRef.current) {
+      const activeRequest = skillStoreFetchRef.current;
+      return browsingChanged
+        ? activeRequest.then(() => fetchSkillStore(true, normalizedPage, normalizedQuery))
+        : activeRequest;
+    }
     const request = (async () => {
       setSkillStoreLoading(true);
       setSkillStoreError(null);
       try {
-        const res = await apiFetch(`/v1/skills/store`);
+        const params = new URLSearchParams({
+          page: String(normalizedPage),
+          page_size: "24",
+        });
+        if (normalizedQuery) params.set("q", normalizedQuery);
+        const res = await apiFetch(`/v1/skills/store?${params.toString()}`);
         const body = (await res.json()) as ApiResponse<SkillStoreResponse>;
         if (!res.ok || !body.ok || !body.data) {
           throw new Error(skillStoreErrorMessage(body.error, t));
@@ -292,10 +314,17 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
   useEffect(() => {
     const activeOperation = skillStoreData?.active_operation;
     if (!activeOperation) return;
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void fetchSkillStore(true);
+    };
     const timer = window.setInterval(() => {
-      void fetchSkillStore(true);
+      refreshWhenVisible();
     }, 1_500);
-    return () => window.clearInterval(timer);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
     // The operation identity is the server-owned polling boundary.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [

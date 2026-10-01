@@ -131,14 +131,6 @@ class VideoInputsTests(unittest.TestCase):
         self.assertNotEqual(first, second)
         self.assertTrue(Path(first).is_file())
 
-    def test_extract_only_does_not_require_a_local_asr_engine(self):
-        request = {"context": {"workspace_root": str(self.root)}}
-        with mock.patch.object(self.skill, "_available_transcription_engines", return_value=()):
-            command = self.skill._build_transcribe_command(request, {
-                "input_path": str(self.source), "extract_audio_only": True,
-            }, self.root)
-        self.assertIn("--extract-only", command)
-
     @unittest.skipUnless(shutil.which("ffmpeg"), "FFmpeg is not installed")
     def test_real_ffmpeg_extracts_valid_audio_and_handles_silent_video(self):
         audio_video = self.root / "fixture.mov"

@@ -1,5 +1,9 @@
 fn is_log_file_name(file_name: &str) -> bool {
-    if file_name.is_empty() || file_name.starts_with('.') {
+    if file_name.is_empty()
+        || file_name.starts_with('.')
+        || std::path::Path::new(file_name).file_name()
+            != Some(std::ffi::OsStr::new(file_name))
+    {
         return false;
     }
     if file_name.ends_with(".log") {
@@ -10,11 +14,31 @@ fn is_log_file_name(file_name: &str) -> bool {
         .is_some_and(|(_, suffix)| !suffix.is_empty() && suffix != "lock")
 }
 
-fn available_log_file_names(log_dir: &std::path::Path) -> anyhow::Result<Vec<String>> {
+#[derive(Debug, PartialEq, Eq)]
+struct LogFilesPage {
+    files: Vec<String>,
+    total: usize,
+    has_more: bool,
+    next_cursor: Option<String>,
+}
+
+fn available_log_file_names_page(
+    log_dir: &std::path::Path,
+    cursor: Option<&str>,
+    limit: usize,
+) -> anyhow::Result<LogFilesPage> {
     if !log_dir.is_dir() {
-        return Ok(Vec::new());
+        return Ok(LogFilesPage {
+            files: Vec::new(),
+            total: 0,
+            has_more: false,
+            next_cursor: None,
+        });
     }
-    let mut files = Vec::new();
+    let limit = limit.clamp(1, 200);
+    let cursor = cursor.map(str::trim).filter(|value| !value.is_empty());
+    let mut candidates = std::collections::BinaryHeap::new();
+    let mut total = 0usize;
     for entry in std::fs::read_dir(log_dir)? {
         let Ok(entry) = entry else {
             continue;
@@ -29,20 +53,49 @@ fn available_log_file_names(log_dir: &std::path::Path) -> anyhow::Result<Vec<Str
             continue;
         };
         if is_log_file_name(&file_name) {
-            files.push(file_name);
+            total = total.saturating_add(1);
+            if cursor.is_some_and(|cursor| file_name.as_str() <= cursor) {
+                continue;
+            }
+            candidates.push(file_name);
+            if candidates.len() > limit.saturating_add(1) {
+                candidates.pop();
+            }
         }
     }
+    let mut files = candidates.into_vec();
     files.sort();
-    files.dedup();
-    Ok(files)
+    let has_more = files.len() > limit;
+    files.truncate(limit);
+    let next_cursor = has_more.then(|| files.last().cloned()).flatten();
+    Ok(LogFilesPage {
+        files,
+        total,
+        has_more,
+        next_cursor,
+    })
 }
 
-fn select_available_log_file(files: &[String], raw: Option<&str>) -> Option<String> {
+fn select_available_log_file(
+    log_dir: &std::path::Path,
+    raw: Option<&str>,
+) -> anyhow::Result<Option<String>> {
     let candidate = raw.unwrap_or("").trim();
     if candidate.is_empty() {
-        return files.first().cloned();
+        return Ok(available_log_file_names_page(log_dir, None, 1)?
+            .files
+            .into_iter()
+            .next());
     }
-    files.iter().find(|file| file.as_str() == candidate).cloned()
+    if !is_log_file_name(candidate) {
+        return Ok(None);
+    }
+    let metadata = match log_dir.join(candidate).symlink_metadata() {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    Ok(metadata.is_file().then(|| candidate.to_string()))
 }
 
 fn read_last_lines(path: &std::path::Path, limit_lines: usize) -> anyhow::Result<String> {
@@ -62,6 +115,47 @@ fn read_last_lines(path: &std::path::Path, limit_lines: usize) -> anyhow::Result
     }
     let start = lines.len().saturating_sub(limit_lines);
     Ok(lines[start..].join("\n"))
+}
+
+const USAGE_LOG_SCAN_BYTES_LOW_MEMORY: u64 = 2 * 1024 * 1024;
+const USAGE_LOG_SCAN_BYTES_DEFAULT: u64 = 8 * 1024 * 1024;
+
+fn usage_log_scan_budget_bytes() -> u64 {
+    let snapshot = claw_core::host_resources::HostResourceSnapshot::collect();
+    if snapshot
+        .effective_memory_mib()
+        .is_some_and(|memory_mib| memory_mib <= 2 * 1024)
+    {
+        USAGE_LOG_SCAN_BYTES_LOW_MEMORY
+    } else {
+        USAGE_LOG_SCAN_BYTES_DEFAULT
+    }
+}
+
+fn open_usage_log_window(
+    path: &Path,
+    max_bytes: u64,
+) -> anyhow::Result<(std::io::BufReader<std::fs::File>, UsageHistoryScanWindow)> {
+    let mut file = std::fs::File::open(path)?;
+    let total_bytes = file.metadata()?.len();
+    let read_from = total_bytes.saturating_sub(max_bytes.max(1));
+    file.seek(SeekFrom::Start(read_from))?;
+    let mut reader = std::io::BufReader::new(file);
+    let mut discarded_prefix_bytes = 0u64;
+    if read_from > 0 {
+        let mut incomplete_line = Vec::new();
+        discarded_prefix_bytes = reader.read_until(b'\n', &mut incomplete_line)? as u64;
+    }
+    let first_complete_byte = read_from.saturating_add(discarded_prefix_bytes);
+    Ok((
+        reader,
+        UsageHistoryScanWindow {
+            total_bytes,
+            scanned_bytes: total_bytes.saturating_sub(first_complete_byte),
+            max_bytes,
+            truncated_before: first_complete_byte > 0,
+        },
+    ))
 }
 
 fn canonical_bound_channel_name(raw: &str) -> String {
@@ -129,23 +223,10 @@ async fn logs_latest(
         return resp;
     }
     let log_dir = state.skill_rt.workspace_root.join("logs");
-    let files = match available_log_file_names(&log_dir) {
-        Ok(files) => files,
-        Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some("log_directory_read_failed".to_string()),
-                }),
-            );
-        }
-    };
-    let file_name = match select_available_log_file(&files, query.file.as_deref()) {
-        Some(file_name) => file_name,
-        None => {
-            let error = if files.is_empty() {
+    let file_name = match select_available_log_file(&log_dir, query.file.as_deref()) {
+        Ok(Some(file_name)) => file_name,
+        Ok(None) => {
+            let error = if query.file.as_deref().is_none_or(|value| value.trim().is_empty()) {
                 "log_files_empty"
             } else {
                 "log_file_not_found"
@@ -156,6 +237,16 @@ async fn logs_latest(
                     ok: false,
                     data: None,
                     error: Some(error.to_string()),
+                }),
+            );
+        }
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some("log_directory_read_failed".to_string()),
                 }),
             );
         }
@@ -192,17 +283,25 @@ async fn logs_latest(
 async fn logs_files(
     State(state): State<AppState>,
     headers: HeaderMap,
+    Query(query): Query<LogsFilesQuery>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
     if let Err(resp) = require_ui_identity(&state, &headers) {
         return resp;
     }
     let log_dir = state.skill_rt.workspace_root.join("logs");
-    match available_log_file_names(&log_dir) {
-        Ok(files) => (
+    let limit = query.limit.unwrap_or(100).clamp(1, 200);
+    match available_log_file_names_page(&log_dir, query.cursor.as_deref(), limit) {
+        Ok(page) => (
             StatusCode::OK,
             Json(ApiResponse {
                 ok: true,
-                data: Some(json!({ "files": files })),
+                data: Some(json!({
+                    "files": page.files,
+                    "total": page.total,
+                    "limit": limit,
+                    "has_more": page.has_more,
+                    "next_cursor": page.next_cursor,
+                })),
                 error: None,
             }),
         ),
@@ -599,6 +698,12 @@ async fn usage_records(
         .join("logs")
         .join("model_io.log");
     if !log_path.exists() {
+        let scan_window = UsageHistoryScanWindow {
+            total_bytes: 0,
+            scanned_bytes: 0,
+            max_bytes: usage_log_scan_budget_bytes(),
+            truncated_before: false,
+        };
         return (
             StatusCode::OK,
             Json(ApiResponse {
@@ -619,14 +724,15 @@ async fn usage_records(
                         total_records: 0,
                         total_pages: 0,
                     },
+                    "scan_window": scan_window,
                 })),
                 error: None,
             }),
         );
     }
 
-    let file = match std::fs::File::open(&log_path) {
-        Ok(file) => file,
+    let (reader, scan_window) = match open_usage_log_window(&log_path, usage_log_scan_budget_bytes()) {
+        Ok(window) => window,
         Err(err) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -638,7 +744,6 @@ async fn usage_records(
             );
         }
     };
-    let reader = std::io::BufReader::new(file);
     let mut meta_cache: HashMap<String, Option<UsageTaskMeta>> = HashMap::new();
     let mut tasks_by_id: HashMap<String, (UsageTaskMeta, Vec<TaskDebugEntry>)> = HashMap::new();
     let mut stats = UsageHistoryStats {
@@ -747,6 +852,7 @@ async fn usage_records(
                     total_records,
                     total_pages,
                 },
+                "scan_window": scan_window,
             })),
             error: None,
         }),
@@ -757,6 +863,7 @@ async fn usage_record_detail(
     State(state): State<AppState>,
     headers: HeaderMap,
     AxumPath(task_id): AxumPath<String>,
+    Query(query): Query<UsageRecordDetailQuery>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
     let identity = match require_ui_identity(&state, &headers) {
         Ok(identity) => identity,
@@ -807,8 +914,13 @@ async fn usage_record_detail(
         );
     }
 
-    let mut entries = match read_task_debug_entries(&state, task_id) {
-        Ok(entries) => entries,
+    let entries_page = match read_task_debug_entries_page(
+        &state,
+        task_id,
+        query.limit.unwrap_or(20),
+        query.offset.unwrap_or(0),
+    ) {
+        Ok(page) => page,
         Err(err) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -820,7 +932,7 @@ async fn usage_record_detail(
             );
         }
     };
-    if entries.is_empty() {
+    if entries_page.total == 0 {
         return (
             StatusCode::NOT_FOUND,
             Json(ApiResponse {
@@ -830,11 +942,17 @@ async fn usage_record_detail(
             }),
         );
     }
+    let mut entries = entries_page.entries;
     entries.sort_by(|a, b| (a.ts.unwrap_or(0)).cmp(&b.ts.unwrap_or(0)));
-    let summary = summarize_usage_task(task_id.to_string(), meta, &entries);
+    let mut summary = summarize_usage_task(task_id.to_string(), meta, &entries);
+    summary.llm_call_count = entries_page.total;
     let record = UsageHistoryRecordDetail {
         summary,
         entries: entries.iter().map(usage_chain_entry_from_entry).collect(),
+        entry_total: entries_page.total,
+        limit: entries_page.limit,
+        offset: entries_page.offset,
+        has_more: entries_page.has_more,
     };
 
     (
@@ -847,11 +965,41 @@ async fn usage_record_detail(
     )
 }
 
-fn read_task_debug_entries(state: &AppState, task_id: &str) -> anyhow::Result<Vec<TaskDebugEntry>> {
+struct TaskDebugEntriesPage {
+    entries: Vec<TaskDebugEntry>,
+    total: usize,
+    limit: usize,
+    offset: usize,
+    has_more: bool,
+}
+
+fn read_task_debug_entries_page(
+    state: &AppState,
+    task_id: &str,
+    limit: usize,
+    offset: usize,
+) -> anyhow::Result<TaskDebugEntriesPage> {
     let trace_task_ids = task_debug_trace_task_ids(state, task_id)?;
-    let mut entries = Vec::new();
     let logs_dir = state.skill_rt.workspace_root.join("logs");
-    for path in model_io_log_paths(&logs_dir)? {
+    read_task_debug_entries_page_from_paths(
+        &trace_task_ids,
+        &model_io_log_paths(&logs_dir)?,
+        limit,
+        offset,
+    )
+}
+
+fn read_task_debug_entries_page_from_paths(
+    trace_task_ids: &std::collections::HashSet<String>,
+    paths: &[PathBuf],
+    limit: usize,
+    offset: usize,
+) -> anyhow::Result<TaskDebugEntriesPage> {
+    let limit = limit.clamp(1, 50);
+    let offset = offset.min(100_000);
+    let mut entries = Vec::new();
+    let mut total = 0usize;
+    for path in paths {
         let file = std::fs::File::open(path)?;
         let reader = std::io::BufReader::new(file);
         for line in reader.lines() {
@@ -870,11 +1018,20 @@ fn read_task_debug_entries(state: &AppState, task_id: &str) -> anyhow::Result<Ve
                 .as_deref()
                 .is_some_and(|entry_task_id| trace_task_ids.contains(entry_task_id))
             {
-                entries.push(entry);
+                if total >= offset && entries.len() < limit {
+                    entries.push(entry);
+                }
+                total = total.saturating_add(1);
             }
         }
     }
-    Ok(entries)
+    Ok(TaskDebugEntriesPage {
+        has_more: offset.saturating_add(entries.len()) < total,
+        entries,
+        total,
+        limit,
+        offset,
+    })
 }
 
 fn model_io_log_paths(logs_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
@@ -935,7 +1092,15 @@ fn task_debug_trace_task_ids(
     Ok(task_ids)
 }
 
+#[cfg(test)]
 fn numbered_task_debug_calls(entries: &[TaskDebugEntry]) -> Vec<TaskDebugCall> {
+    numbered_task_debug_calls_from(entries, 0)
+}
+
+fn numbered_task_debug_calls_from(
+    entries: &[TaskDebugEntry],
+    offset: usize,
+) -> Vec<TaskDebugCall> {
     entries
         .iter()
         .cloned()
@@ -943,7 +1108,7 @@ fn numbered_task_debug_calls(entries: &[TaskDebugEntry]) -> Vec<TaskDebugCall> {
         .map(|(index, entry)| {
             let flow = task_debug_flow_for_entry(&entry);
             TaskDebugCall {
-                call_index: index + 1,
+                call_index: offset + index + 1,
                 flow,
                 entry,
             }
@@ -1210,8 +1375,13 @@ async fn task_debug_detail(
                 return teaching_trace_error(StatusCode::FORBIDDEN, error_code);
             }
         };
-    let mut entries = match read_task_debug_entries(&state, normalized_task_id) {
-        Ok(entries) => entries,
+    let entries_page = match read_task_debug_entries_page(
+        &state,
+        normalized_task_id,
+        query.limit.unwrap_or(20),
+        query.offset.unwrap_or(0),
+    ) {
+        Ok(page) => page,
         Err(err) => {
             tracing::warn!(
                 "teaching trace model log read failed error={}",
@@ -1223,12 +1393,13 @@ async fn task_debug_detail(
             );
         }
     };
+    let mut entries = entries_page.entries;
     entries.sort_by(|a, b| {
         (a.ts.unwrap_or(0), a.call_id.as_deref().unwrap_or_default())
             .cmp(&(b.ts.unwrap_or(0), b.call_id.as_deref().unwrap_or_default()))
     });
     let mut redacted_fields = redact_task_debug_entries(&mut entries);
-    let calls = numbered_task_debug_calls(&entries);
+    let calls = numbered_task_debug_calls_from(&entries, entries_page.offset);
     let flow_summary = build_task_debug_flow_summary(&calls);
     let task_result_json = match read_task_result_json_for_debug(&state, normalized_task_id) {
         Ok(value) => value,
@@ -1279,7 +1450,13 @@ async fn task_debug_detail(
                     "policy": "teaching_trace_v1",
                 },
                 "trace_layers": teaching_trace_layers(),
-                "call_count": calls.len(),
+                "call_count": entries_page.total,
+                "pagination": {
+                    "limit": entries_page.limit,
+                    "offset": entries_page.offset,
+                    "total": entries_page.total,
+                    "has_more": entries_page.has_more,
+                },
                 "trace_availability": trace_availability,
                 "flow_summary": flow_summary,
                 "calls": calls,

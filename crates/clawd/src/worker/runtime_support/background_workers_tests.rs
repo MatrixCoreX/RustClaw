@@ -226,6 +226,34 @@ fn cleanup_preserves_conversation_tasks_for_user_controlled_history() {
 }
 
 #[test]
+fn cleanup_limits_each_expired_task_pass_to_a_fixed_batch() {
+    let mut state = test_state();
+    state.policy.maintenance.tasks_max_rows = 10_000;
+    let total = MAINTENANCE_DELETE_BATCH_SIZE as usize + 5;
+    for index in 0..total {
+        insert_task_with_kind(
+            &state,
+            &format!("task-batched-cleanup-{index:04}"),
+            "run_skill",
+            "succeeded",
+            Some(&json!({})),
+        );
+    }
+
+    cleanup_once(&state).expect("run bounded cleanup");
+
+    let db = state.core.db.get().expect("get db");
+    let remaining: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM tasks WHERE task_id LIKE 'task-batched-cleanup-%'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count remaining tasks");
+    assert_eq!(remaining, 5);
+}
+
+#[test]
 fn scheduled_wakeup_resumes_waiting_thread_without_enqueuing_duplicate_task() {
     let state = test_state();
     let now = crate::now_ts_u64() as i64;

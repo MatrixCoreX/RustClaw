@@ -53,6 +53,26 @@ pub(crate) fn structured_skill_error_requests_replan(err: &str) -> bool {
         .is_some_and(structured_error_allows_bounded_replan)
 }
 
+pub(crate) fn is_retryable_resource_admission_error(err: &str) -> bool {
+    let Some(structured) = parse_structured_skill_error(err) else {
+        return false;
+    };
+    if structured.error_code != "resource_admission_unavailable" {
+        return false;
+    }
+    let Some(extra) = structured.extra.as_ref().and_then(Value::as_object) else {
+        return false;
+    };
+    extra.get("retryable").and_then(Value::as_bool) == Some(true)
+        && extra.get("side_effect_applied").and_then(Value::as_bool) == Some(false)
+        && extra.get("failure_phase").and_then(Value::as_str) == Some("pre_dispatch")
+        && extra
+            .get("wait_reason")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .is_some_and(|reason| !reason.is_empty())
+}
+
 pub(crate) fn policy_block_error(
     reason_code: &str,
     observed_facts: Vec<String>,

@@ -368,7 +368,7 @@ test("renders cross-channel media task input, processed content, links, and safe
     task_id: "12345678-activity-task",
     channel: "wechat",
     status: "succeeded",
-    actions: ["media_download.download", "media_download.transcribe"],
+    actions: ["media_download.download", "local_asr.transcribe"],
     input_text: "下载并转写 https://media.example.test/post/1",
     result_text: "整理后的完整转写内容。",
     error_text: null,

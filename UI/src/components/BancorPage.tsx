@@ -51,6 +51,7 @@ import {
   type AssetAccountOption,
 } from "../lib/asset-account-options";
 import { resolveBancorMarketDirectionColors } from "../lib/bancor-market-colors";
+import { BANCOR_CANDLE_AUTO_REFRESH_SECONDS } from "../lib/bancor-refresh";
 import { nniPrivateKeyOperationsAllowed } from "../lib/nni-owner-public-key";
 import { appStorageKey } from "../lib/product-identity";
 import { BancorPriceChangePage } from "./BancorPriceChangePage";
@@ -65,7 +66,6 @@ type BancorWheelTarget = {
   addEventListener: (type: "wheel", listener: EventListener, options?: AddEventListenerOptions) => void;
   removeEventListener: (type: "wheel", listener: EventListener) => void;
 };
-export const BANCOR_CANDLE_AUTO_REFRESH_SECONDS = 15;
 export const BANCOR_DEFAULT_VISIBLE_CANDLES = 100;
 const BANCOR_MIN_VISIBLE_CANDLES = 6;
 const BANCOR_DRAG_HISTORY_HEADROOM = 6;

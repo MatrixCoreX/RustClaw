@@ -98,7 +98,8 @@ pub(crate) use task_approval::{
     task_has_pending_approval_request, TaskApprovalConsumeOutcome,
 };
 pub(crate) use task_checkpoint_action::{
-    load_task_checkpoint_action, upsert_task_checkpoint_action, TaskCheckpointAction,
+    load_task_checkpoint_action, replace_current_task_checkpoint_action,
+    upsert_task_checkpoint_action, TaskCheckpointAction,
 };
 pub(crate) use task_control_mailbox::{
     applied_task_steering_directives, apply_task_control_directive,
@@ -134,10 +135,11 @@ pub(crate) use task_resume_execution::{
 pub(crate) use task_workspace::record_task_execution_workspace;
 pub(crate) use tasks::{
     check_task_view_access, claim_due_paused_checkpoint_task_internal, claim_next_task,
-    claim_ready_paused_checkpoint_resume_executor_internal, get_task_query_record,
-    is_task_claim_active, is_task_claim_active_or_pending_ask_success_projection,
-    list_active_tasks_for_user_internal, list_active_tasks_internal,
-    list_all_active_tasks_internal, list_all_task_history_internal,
+    claim_ready_paused_checkpoint_resume_executor_internal, get_task_artifact_result_projection,
+    get_task_query_record, is_task_claim_active,
+    is_task_claim_active_or_pending_ask_success_projection,
+    list_active_tasks_for_user_page_internal, list_active_tasks_page_internal,
+    list_all_active_tasks_page_internal, list_all_task_history_internal,
     list_due_paused_checkpoint_tasks_internal,
     list_ready_paused_checkpoint_resume_executors_internal, list_task_history_for_user_internal,
     list_task_history_internal, record_paused_checkpoint_resume_execution_plan_internal,

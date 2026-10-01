@@ -30,6 +30,35 @@ pub(crate) async fn run_pinned_async_poll_skill_with_runner(
         return Err("async poll runner cannot dispatch a builtin skill".to_string());
     }
 
+    let resource_request = state.skill_resource_request_for_dispatch(&adapter_id, Some("poll"));
+    let resource_estimate_key = super::resource_estimate_key(state, &adapter_id, Some("poll"));
+    let resource_lease = state
+        .skill_rt
+        .skill_concurrency_gates
+        .resource_broker()
+        .try_acquire_background_for_estimate_key(
+            resource_request.as_ref(),
+            state
+                .skill_max_concurrency_for_dispatch(&adapter_id)
+                .unwrap_or(state.skill_rt.skill_global_max_concurrency),
+            Some(&resource_estimate_key),
+        )
+        .map_err(|grant| {
+            structured_skill_error_from_parts(
+                &adapter_id,
+                "resource_admission_unavailable",
+                "resource_admission_unavailable",
+                Some(std::env::consts::OS),
+                Some(json!({
+                    "message_key": "clawd.execution.resource_admission_unavailable",
+                    "retryable": true,
+                    "wait_reason": grant.wait_reason,
+                    "resource_grant": grant.projection,
+                })),
+            )
+        })?;
+    let resource_grant = resource_lease.grant().clone();
+
     let timeout = resolve_skill_timeout(state, &adapter_id, &args);
     let serialization_key = skill_dispatch_serialization_key(state, &adapter_id, &args);
     let _dispatch_permits = acquire_skill_dispatch_permits_with_serialization(
@@ -55,9 +84,11 @@ pub(crate) async fn run_pinned_async_poll_skill_with_runner(
         &args,
         source,
         timeout.seconds,
+        Some(&resource_grant.projection),
         None,
         None,
         Some(execution_binding),
+        Some(&resource_estimate_key),
     )
     .await?;
     if value.get("status").and_then(Value::as_str) != Some("ok") {

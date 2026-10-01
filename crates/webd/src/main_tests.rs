@@ -3,7 +3,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use axum::body::{to_bytes, Body};
+use axum::body::{to_bytes, Body, Bytes};
 use axum::http::{header, HeaderMap, HeaderValue, Method, Request, StatusCode};
 use axum::response::Response;
 use axum::routing::{get, post};
@@ -21,6 +21,10 @@ use super::{
     valid_login_input, webd_error_response, with_cors, AppState, LoginAttemptKey, RequestLimits,
     SessionEntry, WEBD_CSRF_HEADER,
 };
+
+async fn upload_body_size(body: Bytes) -> String {
+    body.len().to_string()
+}
 
 fn test_session_entry(user_key: &str, csrf_token: String) -> SessionEntry {
     let now = super::now_unix_secs();
@@ -57,6 +61,55 @@ fn login_test_state(failure_limit: u32, lockout_secs: u64) -> AppState {
         login_attempts: Arc::new(Mutex::new(HashMap::new())),
         request_limits: RequestLimits::new(WebdRequestLimitsConfig::default(), 1024),
     }
+}
+
+#[tokio::test]
+async fn upload_proxy_streams_chunks_and_enforces_cumulative_limit() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind upload upstream");
+    let addr = listener.local_addr().expect("read upload upstream address");
+    let upstream = Router::new().route("/v1/skills/import/upload", post(upload_body_size));
+    let upstream_task = tokio::spawn(async move {
+        axum::serve(listener, upstream)
+            .await
+            .expect("serve upload upstream");
+    });
+
+    let mut state = login_test_state(6, 900);
+    state.upstream = format!("http://{addr}");
+    let client_addr = SocketAddr::from(([127, 0, 0, 1], 41004));
+    let chunks = futures_util::stream::iter([
+        Ok::<_, std::io::Error>(Bytes::from(vec![1u8; 400])),
+        Ok(Bytes::from(vec![2u8; 500])),
+    ]);
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/v1/skills/import/upload")
+        .body(Body::from_stream(chunks))
+        .expect("build bounded upload request");
+    let response = proxy_inner(state.clone(), client_addr, request).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        &to_bytes(response.into_body(), 32)
+            .await
+            .expect("read upload response")[..],
+        b"900"
+    );
+
+    let oversized_chunks = futures_util::stream::iter([
+        Ok::<_, std::io::Error>(Bytes::from(vec![3u8; 600])),
+        Ok(Bytes::from(vec![4u8; 600])),
+    ]);
+    let oversized_request = Request::builder()
+        .method(Method::POST)
+        .uri("/v1/skills/import/upload")
+        .body(Body::from_stream(oversized_chunks))
+        .expect("build oversized upload request");
+    let oversized_response = proxy_inner(state, client_addr, oversized_request).await;
+    assert_eq!(oversized_response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+
+    upstream_task.abort();
 }
 
 #[tokio::test]

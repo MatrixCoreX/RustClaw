@@ -1760,6 +1760,66 @@ fn pending_input_wakes_a_user_checkpoint_into_a_planner_resume() {
 }
 
 #[test]
+fn pending_input_advances_resource_wait_without_repeating_completed_side_effects() {
+    let pool = pool();
+    let initial =
+        accept_conversation_input(&pool, &input("resource-message-1")).expect("initial input");
+    let task_id = Uuid::new_v4();
+    let mut waiting = waiting_checkpoint("checkpoint-resource", "next_planner_round");
+    waiting["task_lifecycle"]["state"] = serde_json::json!("waiting");
+    waiting["task_lifecycle"]["resume_reason"] = serde_json::json!("resource_admission_wait");
+    waiting["task_lifecycle"]["next_check_after"] =
+        serde_json::json!(crate::now_ts_u64().saturating_add(300));
+    waiting["task_checkpoint"]["completed_side_effect_refs"] =
+        serde_json::json!(["write_file:workspace/report.txt"]);
+    pool.get()
+        .unwrap()
+        .execute(
+            "INSERT INTO tasks(task_id, principal_id, status, result_json, updated_at)
+             VALUES (?1, ?2, 'running', ?3, '1')",
+            rusqlite::params![task_id.to_string(), "principal-1", waiting.to_string()],
+        )
+        .expect("insert resource-waiting task");
+    bind_conversation_input_to_task(
+        &pool,
+        &scope("principal-1"),
+        initial.record.receipt.input_id,
+        task_id,
+        ConversationInputTaskBinding::InitialTaskPayload,
+    )
+    .expect("bind initial input");
+
+    let mut followup_input = input("resource-message-2");
+    followup_input.submission.expected_instruction_revision = Some(1);
+    followup_input.submission.expected_task_id = Some(task_id);
+    let followup = accept_conversation_input(&pool, &followup_input).expect("follow-up input");
+    assert!(wake_task_for_pending_conversation_input(
+        &pool,
+        task_id,
+        followup.record.receipt.input_id,
+    )
+    .expect("wake resource checkpoint"));
+
+    let raw_result: String = pool
+        .get()
+        .unwrap()
+        .query_row(
+            "SELECT result_json FROM tasks WHERE task_id = ?1",
+            [task_id.to_string()],
+            |row| row.get(0),
+        )
+        .expect("resource wait result");
+    let result: serde_json::Value = serde_json::from_str(&raw_result).expect("result JSON");
+    assert_eq!(result["task_lifecycle"]["state"], "waiting");
+    assert_eq!(result["task_lifecycle"]["source"], "conversation_input");
+    assert_eq!(result["task_lifecycle"]["resume_due"], true);
+    assert_eq!(
+        result["task_checkpoint"]["completed_side_effect_refs"],
+        serde_json::json!(["write_file:workspace/report.txt"])
+    );
+}
+
+#[test]
 fn pending_input_does_not_implicitly_resume_a_manual_pause() {
     let pool = pool();
     let initial =

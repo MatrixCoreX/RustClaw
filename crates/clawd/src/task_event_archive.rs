@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 const ARCHIVE_SNAPSHOT_INTERVAL: u64 = 256;
+const ARCHIVE_BACKFILL_BATCH_SIZE: u64 = 256;
 
 pub(crate) struct ArchivedReplay {
     pub(crate) events: Vec<Value>,
@@ -69,46 +70,64 @@ pub(crate) fn backfill_hot_suffix(tx: &Transaction<'_>, task_id: &str) -> anyhow
     if archived_count > 0 {
         return Ok(());
     }
-    let rows = {
-        let mut statement = tx.prepare(
-            "SELECT seq, event_hash, event_json, created_at_ms
-             FROM task_event_stream
-             WHERE task_id = ?1
-             ORDER BY seq ASC",
-        )?;
-        let rows = statement
-            .query_map(params![task_id], |row| {
-                Ok((
-                    row.get::<_, u64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, u64>(3)?,
-                ))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        rows
-    };
     let mut previous_hash: Option<String> = None;
     let mut newest = None;
-    for (seq, event_hash, event_json, created_at_ms) in rows {
-        let archived_event_json =
-            normalize_archived_event_json(&event_json, &event_hash, previous_hash.as_deref())?;
-        tx.execute(
-            "INSERT OR IGNORE INTO task_event_archive (
-                task_id, seq, event_hash, previous_event_hash, event_json,
-                payload_schema_version, redaction_policy, created_at_ms
-             ) VALUES (?1, ?2, ?3, ?4, ?5, 1, 'task_event_redaction_v1', ?6)",
-            params![
-                task_id,
-                seq,
-                event_hash,
-                previous_hash.as_deref(),
-                archived_event_json,
-                created_at_ms
-            ],
-        )?;
-        previous_hash = Some(event_hash);
-        newest = Some((seq, created_at_ms));
+    let mut after_seq = None;
+    loop {
+        let rows = {
+            let mut statement = tx.prepare(
+                "SELECT seq, event_hash, event_json, created_at_ms
+                 FROM task_event_stream
+                 WHERE task_id = ?1 AND (?2 IS NULL OR seq > ?2)
+                 ORDER BY seq ASC
+                 LIMIT ?3",
+            )?;
+            let rows = statement
+                .query_map(
+                    params![task_id, after_seq, ARCHIVE_BACKFILL_BATCH_SIZE],
+                    |row| {
+                        Ok((
+                            row.get::<_, u64>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, u64>(3)?,
+                        ))
+                    },
+                )?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
+        if rows.is_empty() {
+            break;
+        }
+        let batch_len = rows.len();
+        for (seq, event_hash, event_json, created_at_ms) in rows {
+            let archived_event_json =
+                normalize_archived_event_json(&event_json, &event_hash, previous_hash.as_deref())?;
+            tx.execute(
+                "INSERT OR IGNORE INTO task_event_archive (
+                    task_id, seq, event_hash, previous_event_hash, event_json,
+                    payload_schema_version, redaction_policy, created_at_ms
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, 1, 'task_event_redaction_v1', ?6)",
+                params![
+                    task_id,
+                    seq,
+                    event_hash,
+                    previous_hash.as_deref(),
+                    archived_event_json,
+                    created_at_ms
+                ],
+            )?;
+            previous_hash = Some(event_hash);
+            newest = Some((seq, created_at_ms));
+            after_seq = Some(seq);
+            if seq % ARCHIVE_SNAPSHOT_INTERVAL == 0 {
+                persist_snapshot(tx, task_id, seq, created_at_ms)?;
+            }
+        }
+        if batch_len < ARCHIVE_BACKFILL_BATCH_SIZE as usize {
+            break;
+        }
     }
     if let Some((seq, created_at_ms)) = newest {
         persist_snapshot(tx, task_id, seq, created_at_ms)?;
@@ -153,7 +172,8 @@ pub(crate) fn replay_after(
     })
 }
 
-pub(crate) fn delete_orphaned_records(db: &Connection) -> anyhow::Result<usize> {
+pub(crate) fn delete_orphaned_records(db: &Connection, batch_size: usize) -> anyhow::Result<usize> {
+    let batch_size = batch_size.clamp(1, 10_000) as i64;
     let mut deleted = 0;
     for table in [
         "task_event_stream",
@@ -163,12 +183,15 @@ pub(crate) fn delete_orphaned_records(db: &Connection) -> anyhow::Result<usize> 
     ] {
         deleted += db.execute(
             &format!(
-                "DELETE FROM {table}
-                 WHERE NOT EXISTS (
-                     SELECT 1 FROM tasks WHERE tasks.task_id = {table}.task_id
+                "DELETE FROM {table} WHERE rowid IN (
+                     SELECT {table}.rowid FROM {table}
+                     WHERE NOT EXISTS (
+                         SELECT 1 FROM tasks WHERE tasks.task_id = {table}.task_id
+                     )
+                     LIMIT ?1
                  )"
             ),
-            [],
+            [batch_size],
         )?;
     }
     Ok(deleted)

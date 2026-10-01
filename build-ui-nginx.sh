@@ -108,9 +108,17 @@ ensure_ui_deps() {
 }
 
 ui_node_options() {
-  local heap_mb="${APP_UI_NODE_MAX_OLD_SPACE_MB:-1536}"
-  if [[ ! "$heap_mb" =~ ^[0-9]+$ ]] || (( heap_mb < 512 )); then
+  local requested_heap_mb="${APP_UI_NODE_MAX_OLD_SPACE_MB:-1536}"
+  if [[ ! "$requested_heap_mb" =~ ^[0-9]+$ ]] || (( requested_heap_mb < 512 )); then
     echo "Error: APP_UI_NODE_MAX_OLD_SPACE_MB must be an integer of at least 512." >&2
+    return 1
+  fi
+
+  local available_kb heap_mb
+  available_kb="$(cargo_host_available_memory_kb 2>/dev/null || printf '%s' "0")"
+  heap_mb="$(node_heap_mb_for_available_memory "$available_kb" "$requested_heap_mb" 2>/dev/null || true)"
+  if [[ -z "$heap_mb" ]]; then
+    echo "Error: insufficient or unknown available memory for a safe UI build (minimum safe Node heap: 512 MiB)." >&2
     return 1
   fi
 

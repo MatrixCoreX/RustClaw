@@ -23,6 +23,7 @@ GitHub 的 README 不支持真正的页内分页。Agent Runtime 因此只在仓
 | 13 | [NNI capability and heartbeat control](13-nni-capability.md) | [NNI 能力与心跳控制](13-nni-capability.zh-CN.md) |
 | 14 | [AiPP skill companion interfaces](14-aipp-skill-companions.md) | [AiPP 技能配套界面](14-aipp-skill-companions.zh-CN.md) |
 | 15 | [AiAPP development guide](15-aipp-development-guide.md) | [AiAPP 开发手册](15-aipp-development-guide.zh-CN.md) |
+| 16 | [Runtime resource admission and recovery](16-runtime-resource-recovery.md) | [运行期资源准入与恢复](16-runtime-resource-recovery.zh-CN.md) |
 
 These files are also the source documents rendered by the UI's Learning / Maintenance
 page. Edit a diagram here instead of copying it into UI source.

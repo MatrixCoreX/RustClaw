@@ -115,11 +115,6 @@ pub(crate) fn seed_loop_state_from_task_checkpoint(
             "agent_loop.resume_attempt_ledger_present".to_string(),
             "true".to_string(),
         );
-        if let Ok(snapshot) = serde_json::to_string(attempt_ledger) {
-            loop_state
-                .history_compact
-                .push(format!("checkpoint_attempt_ledger_json={snapshot}"));
-        }
     }
 
     loop_state.history_compact.push(format!(

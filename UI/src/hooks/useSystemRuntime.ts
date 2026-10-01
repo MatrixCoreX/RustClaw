@@ -17,6 +17,7 @@ import type {
   HostDependenciesSnapshot,
   NginxUiStatus,
   PiAppStatusResponse,
+  SystemDiagnosticExport,
   WebdExposureStatus,
   WorkspaceUpdateMode,
   WorkspaceUpdateStatus,
@@ -74,6 +75,8 @@ export function useSystemRuntime({
   const [hostDependenciesLoading, setHostDependenciesLoading] = useState(false);
   const [hostDependenciesErrorCode, setHostDependenciesErrorCode] = useState<string | null>(null);
   const [dependencyInstallingId, setDependencyInstallingId] = useState<string | null>(null);
+  const [systemDiagnosticsExporting, setSystemDiagnosticsExporting] = useState(false);
+  const [systemDiagnosticsExportError, setSystemDiagnosticsExportError] = useState<string | null>(null);
   const [piAppStatus, setPiAppStatus] = useState<PiAppStatusResponse | null>(null);
   const [piAppRestarting, setPiAppRestarting] = useState(false);
   const [piAppRestartMessage, setPiAppRestartMessage] = useState<string | null>(null);
@@ -150,6 +153,40 @@ export function useSystemRuntime({
       setHostDependenciesErrorCode("disconnected");
     } finally {
       setDependencyInstallingId(null);
+    }
+  };
+
+  const exportSystemDiagnostics = async () => {
+    setSystemDiagnosticsExporting(true);
+    setSystemDiagnosticsExportError(null);
+    try {
+      const response = await apiFetch("/v1/system/diagnostics/export");
+      const body = (await response.json()) as ApiResponse<SystemDiagnosticExport>;
+      if (!response.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `system_diagnostic_export_http_${response.status}`);
+      }
+      const content = JSON.stringify(body.data, null, 2);
+      if (new TextEncoder().encode(content).byteLength > body.data.size_limit_bytes) {
+        throw new Error("system_diagnostic_size_limit_exceeded");
+      }
+      const blob = new Blob([content], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `system-diagnostics-${body.data.generated_at_ts}.json`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setSystemDiagnosticsExportError(
+        formatUiError(
+          error,
+          t,
+          "诊断信息暂时无法导出，请稍后重试。",
+          "Diagnostics could not be exported. Try again shortly.",
+        ),
+      );
+    } finally {
+      setSystemDiagnosticsExporting(false);
     }
   };
 
@@ -650,8 +687,15 @@ export function useSystemRuntime({
       (operation) => operation.status === "queued" || operation.status === "running",
     );
     if (!hasActiveInstall) return;
-    const interval = window.setInterval(() => void fetchHostDependencies(true), 2500);
-    return () => window.clearInterval(interval);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void fetchHostDependencies(true);
+    };
+    const interval = window.setInterval(refreshWhenVisible, 2500);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiBase, uiAuthReady, currentPage, hostDependencies?.operations]);
 
@@ -693,7 +737,8 @@ export function useSystemRuntime({
     if (!uiAuthReady || !isAdminIdentity) return;
     const status = workspaceUpdateStatus?.status;
     if (status !== "running" && status !== "restarting") return;
-    const interval = window.setInterval(async () => {
+    const refreshWhenVisible = async () => {
+      if (document.visibilityState !== "visible") return;
       const next = await fetchWorkspaceUpdateStatus(true);
       if (!next) {
         workspaceUpdateSilentFailuresRef.current += 1;
@@ -712,8 +757,13 @@ export function useSystemRuntime({
         await sleep(1800);
         await fetchHealth({ silent: true });
       }
-    }, 2500);
-    return () => window.clearInterval(interval);
+    };
+    const interval = window.setInterval(() => void refreshWhenVisible(), 2500);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiBase, uiAuthReady, isAdminIdentity, workspaceUpdateStatus?.status]);
 
@@ -727,6 +777,8 @@ export function useSystemRuntime({
     hostDependenciesLoading,
     hostDependenciesErrorCode,
     dependencyInstallingId,
+    systemDiagnosticsExporting,
+    systemDiagnosticsExportError,
     piAppStatus,
     piAppRestarting,
     piAppRestartMessage,
@@ -753,5 +805,6 @@ export function useSystemRuntime({
     fetchHostSystemSummary,
     fetchHostDependencies,
     installHostDependency,
+    exportSystemDiagnostics,
   };
 }

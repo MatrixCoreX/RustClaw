@@ -26,6 +26,12 @@ CREATE TABLE IF NOT EXISTS task_checkpoint_actions (
 );
 CREATE INDEX IF NOT EXISTS idx_task_checkpoint_actions_updated
     ON task_checkpoint_actions(updated_at);
+CREATE TRIGGER IF NOT EXISTS trg_task_checkpoint_actions_terminal_cleanup
+AFTER UPDATE OF status ON tasks
+WHEN NEW.status IN ('succeeded', 'failed', 'canceled', 'cancelled', 'timeout')
+BEGIN
+    DELETE FROM task_checkpoint_actions WHERE task_id = NEW.task_id;
+END;
 "#;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -56,6 +62,70 @@ pub(crate) fn upsert_task_checkpoint_action(
     approval_binding: Option<&Value>,
     instruction_revision: u64,
     execution_epoch: u64,
+) -> anyhow::Result<()> {
+    upsert_task_checkpoint_action_inner(
+        pool,
+        task_id,
+        checkpoint_id,
+        tool_or_skill,
+        action_ref,
+        args,
+        output_contract,
+        continuation_actions,
+        execution_binding,
+        approval_binding,
+        instruction_revision,
+        execution_epoch,
+        false,
+    )
+}
+
+pub(crate) fn replace_current_task_checkpoint_action(
+    pool: &DbPool,
+    task_id: &str,
+    checkpoint_id: &str,
+    tool_or_skill: &str,
+    action_ref: &str,
+    args: &Value,
+    output_contract: Option<&Value>,
+    continuation_actions: Option<&Value>,
+    execution_binding: Option<&Value>,
+    approval_binding: Option<&Value>,
+    instruction_revision: u64,
+    execution_epoch: u64,
+) -> anyhow::Result<()> {
+    upsert_task_checkpoint_action_inner(
+        pool,
+        task_id,
+        checkpoint_id,
+        tool_or_skill,
+        action_ref,
+        args,
+        output_contract,
+        continuation_actions,
+        execution_binding,
+        approval_binding,
+        instruction_revision,
+        execution_epoch,
+        true,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn upsert_task_checkpoint_action_inner(
+    pool: &DbPool,
+    task_id: &str,
+    checkpoint_id: &str,
+    tool_or_skill: &str,
+    action_ref: &str,
+    args: &Value,
+    output_contract: Option<&Value>,
+    continuation_actions: Option<&Value>,
+    execution_binding: Option<&Value>,
+    approval_binding: Option<&Value>,
+    instruction_revision: u64,
+    execution_epoch: u64,
+    replace_other_task_actions: bool,
 ) -> anyhow::Result<()> {
     let task_id = required_text(task_id, "task_id")?;
     let checkpoint_id = required_text(checkpoint_id, "checkpoint_id")?;
@@ -108,9 +178,10 @@ pub(crate) fn upsert_task_checkpoint_action(
         execution_epoch,
     );
     let now = crate::now_ts_u64() as i64;
-    let db = pool.get().context("checkpoint_action_db_pool_failed")?;
+    let mut db = pool.get().context("checkpoint_action_db_pool_failed")?;
     ensure_task_checkpoint_action_schema(&db)?;
-    db.execute(
+    let tx = db.transaction()?;
+    tx.execute(
         "INSERT INTO task_checkpoint_actions (
              task_id, checkpoint_id, tool_or_skill, action_ref, args_json,
              output_contract_json, continuation_actions_json, execution_binding_json,
@@ -147,6 +218,14 @@ pub(crate) fn upsert_task_checkpoint_action(
             now,
         ],
     )?;
+    if replace_other_task_actions {
+        tx.execute(
+            "DELETE FROM task_checkpoint_actions
+             WHERE task_id = ?1 AND checkpoint_id <> ?2",
+            params![task_id, checkpoint_id],
+        )?;
+    }
+    tx.commit()?;
     Ok(())
 }
 

@@ -20,7 +20,7 @@ fn list_due_paused_checkpoint_tasks_filters_and_orders_machine_checkpoints() {
     let due_from_root = json!({
         "task_lifecycle": {
             "state": "waiting",
-            "resume_reason": "agent_loop_soft_budget",
+            "resume_reason": "resource_admission_wait",
             "next_check_after": now - 10,
             "checkpoint_id": "ckpt-root"
         },
@@ -307,7 +307,7 @@ fn due_checkpoint_waits_for_frontend_worker_lease_and_claim_rechecks_it() {
     let due = json!({
         "task_lifecycle": {
             "state": "waiting",
-            "resume_reason": "task_budget_slice_exhausted",
+            "resume_reason": "resource_admission_wait",
             "next_check_after": now - 1,
             "checkpoint_id": "ckpt-worker-owned"
         },

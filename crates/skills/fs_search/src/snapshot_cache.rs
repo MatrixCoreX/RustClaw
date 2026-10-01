@@ -15,6 +15,9 @@ const CACHE_MAX_PAYLOAD_BYTES: usize = 8 * 1024 * 1024;
 #[derive(Debug, Clone)]
 pub(super) struct SnapshotCache {
     database_path: PathBuf,
+    cache_size_kib: Option<u32>,
+    mmap_size_bytes: Option<u64>,
+    temp_store: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -59,6 +62,17 @@ impl SnapshotCache {
             .ok_or_else(|| "skill_storage_invalid".to_string())?;
         let cache = Self {
             database_path: path,
+            cache_size_kib: storage
+                .get("database_cache_size_kib")
+                .and_then(Value::as_u64)
+                .and_then(|value| u32::try_from(value).ok()),
+            mmap_size_bytes: storage
+                .get("database_mmap_size_bytes")
+                .and_then(Value::as_u64),
+            temp_store: storage
+                .get("database_temp_store")
+                .and_then(Value::as_str)
+                .map(str::to_string),
         };
         cache.initialize()?;
         Ok(Some(cache))
@@ -180,7 +194,25 @@ impl SnapshotCache {
     }
 
     fn open(&self) -> Result<Connection, String> {
-        Connection::open(&self.database_path).map_err(|_| "snapshot_cache_open_failed".to_string())
+        let db = Connection::open(&self.database_path)
+            .map_err(|_| "snapshot_cache_open_failed".to_string())?;
+        if let Some(cache_size_kib) = self.cache_size_kib.filter(|value| *value > 0) {
+            db.pragma_update(None, "cache_size", -(i64::from(cache_size_kib)))
+                .map_err(|_| "snapshot_cache_profile_failed".to_string())?;
+        }
+        if let Some(mmap_size_bytes) = self.mmap_size_bytes {
+            db.pragma_update(
+                None,
+                "mmap_size",
+                mmap_size_bytes.min(i64::MAX as u64) as i64,
+            )
+            .map_err(|_| "snapshot_cache_profile_failed".to_string())?;
+        }
+        if self.temp_store.as_deref() == Some("file") {
+            db.pragma_update(None, "temp_store", 1_i64)
+                .map_err(|_| "snapshot_cache_profile_failed".to_string())?;
+        }
+        Ok(db)
     }
 
     fn prune(&self, db: &Connection, now: i64) -> Result<(), String> {

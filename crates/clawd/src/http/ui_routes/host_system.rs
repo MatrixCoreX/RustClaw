@@ -12,7 +12,34 @@ struct HostSystemSummary {
     memory: HostCapacity,
     storage: HostCapacity,
     uptime_seconds: Option<u64>,
+    runtime_resources: HostRuntimeResources,
     unavailable_fields: Vec<HostUnavailableField>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct HostRuntimeResources {
+    pressure_state: Option<claw_core::host_resources::ResourcePressureState>,
+    reserved_memory_bytes: Option<u64>,
+    active_leases: Option<usize>,
+    reserved_cpu_cores: Option<usize>,
+    reserved_network_slots: Option<usize>,
+    reserved_provider_slots: Option<usize>,
+    reserved_browser_slots: Option<usize>,
+    active_heavy_leases: Option<usize>,
+    waiting_tasks: Option<usize>,
+    resource_waiting_tasks: Option<usize>,
+    recent_waiting_reason_code: Option<String>,
+    recent_admission_refusal_reason: Option<&'static str>,
+    recent_admission_refusal_at_epoch: Option<u64>,
+    swap_used_bytes: Option<u64>,
+    cgroup_version: Option<u8>,
+    process_memory_measurement: Option<String>,
+    process_count: Option<usize>,
+    process_memory_current_bytes: Option<u64>,
+    process_memory_peak_bytes: Option<u64>,
+    process_memory_warning: Option<bool>,
+    process_memory_roles_current_bytes: Option<std::collections::BTreeMap<String, u64>>,
+    process_memory_roles_peak_bytes: Option<std::collections::BTreeMap<String, u64>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -63,18 +90,41 @@ struct HostPlatformSnapshot {
     uptime_seconds: Option<u64>,
 }
 
+#[derive(Debug, Default)]
+struct HostTaskWaitingSummary {
+    waiting_tasks: usize,
+    resource_waiting_tasks: usize,
+    recent_waiting_reason_code: Option<String>,
+}
+
 async fn host_system_summary(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    if let Err(response) = require_ui_identity(&state, &headers) {
-        return response;
-    }
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err(response) => return response,
+    };
 
     let workspace_root = state.skill_rt.workspace_root.clone();
-    let summary = tokio::task::spawn_blocking(move || collect_host_system_summary(&workspace_root))
-        .await
-        .unwrap_or_else(|_| HostSystemSummary::collection_failed());
+    let resource_broker = state
+        .skill_rt
+        .skill_concurrency_gates
+        .resource_broker()
+        .clone();
+    let waiting_summary = host_task_waiting_summary(&state).ok();
+    let mut summary = tokio::task::spawn_blocking(move || {
+        collect_host_system_summary(
+            &workspace_root,
+            resource_broker.status(),
+            waiting_summary,
+        )
+    })
+    .await
+    .unwrap_or_else(|_| HostSystemSummary::collection_failed());
+    if !identity.role.eq_ignore_ascii_case("admin") {
+        summary.redact_admin_details();
+    }
     (
         StatusCode::OK,
         Json(ApiResponse {
@@ -86,6 +136,12 @@ async fn host_system_summary(
 }
 
 impl HostSystemSummary {
+    fn redact_admin_details(&mut self) {
+        self.runtime_resources.cgroup_version = None;
+        self.runtime_resources.process_memory_roles_current_bytes = None;
+        self.runtime_resources.process_memory_roles_peak_bytes = None;
+    }
+
     fn collection_failed() -> Self {
         let unavailable_fields = [
             "os.name",
@@ -105,7 +161,7 @@ impl HostSystemSummary {
         })
         .collect();
         Self {
-            schema_version: 1,
+            schema_version: 4,
             collected_at_ts: now_unix_seconds(),
             os: HostOperatingSystem {
                 family: std::env::consts::OS.to_string(),
@@ -118,12 +174,40 @@ impl HostSystemSummary {
             memory: HostCapacity::new(None, None),
             storage: HostCapacity::new(None, None),
             uptime_seconds: None,
+            runtime_resources: HostRuntimeResources {
+                pressure_state: None,
+                reserved_memory_bytes: None,
+                active_leases: None,
+                reserved_cpu_cores: None,
+                reserved_network_slots: None,
+                reserved_provider_slots: None,
+                reserved_browser_slots: None,
+                active_heavy_leases: None,
+                waiting_tasks: None,
+                resource_waiting_tasks: None,
+                recent_waiting_reason_code: None,
+                recent_admission_refusal_reason: None,
+                recent_admission_refusal_at_epoch: None,
+                swap_used_bytes: None,
+                cgroup_version: None,
+                process_memory_measurement: None,
+                process_count: None,
+                process_memory_current_bytes: None,
+                process_memory_peak_bytes: None,
+                process_memory_warning: None,
+                process_memory_roles_current_bytes: None,
+                process_memory_roles_peak_bytes: None,
+            },
             unavailable_fields,
         }
     }
 }
 
-fn collect_host_system_summary(workspace_root: &Path) -> HostSystemSummary {
+fn collect_host_system_summary(
+    workspace_root: &Path,
+    resource_status: crate::resource_scheduler::ResourceBrokerStatus,
+    waiting_summary: Option<HostTaskWaitingSummary>,
+) -> HostSystemSummary {
     let platform = collect_host_platform_snapshot();
     let data_volume = nearest_existing_path(&workspace_root.join("data"));
     let (storage_total_bytes, storage_available_bytes) = data_volume
@@ -186,9 +270,15 @@ fn collect_host_system_summary(workspace_root: &Path) -> HostSystemSummary {
         &platform.uptime_seconds,
         "uptime_unavailable",
     );
+    if waiting_summary.is_none() {
+        unavailable_fields.push(HostUnavailableField {
+            field: "runtime_resources.waiting_tasks",
+            code: "task_waiting_summary_unavailable",
+        });
+    }
 
     HostSystemSummary {
-        schema_version: 1,
+        schema_version: 4,
         collected_at_ts: now_unix_seconds(),
         os: HostOperatingSystem {
             family: std::env::consts::OS.to_string(),
@@ -204,8 +294,104 @@ fn collect_host_system_summary(workspace_root: &Path) -> HostSystemSummary {
         ),
         storage: HostCapacity::new(storage_total_bytes, storage_available_bytes),
         uptime_seconds: platform.uptime_seconds,
+        runtime_resources: HostRuntimeResources {
+            pressure_state: Some(resource_status.pressure_state),
+            reserved_memory_bytes: Some(
+                resource_status
+                    .reserved_memory_mib
+                    .saturating_mul(1024 * 1024),
+            ),
+            active_leases: Some(resource_status.active_leases),
+            reserved_cpu_cores: Some(resource_status.reserved_cpu_cores),
+            reserved_network_slots: Some(resource_status.reserved_network_slots),
+            reserved_provider_slots: Some(resource_status.reserved_provider_slots),
+            reserved_browser_slots: Some(resource_status.reserved_browser_slots),
+            active_heavy_leases: Some(resource_status.active_heavy_leases),
+            waiting_tasks: waiting_summary.as_ref().map(|summary| summary.waiting_tasks),
+            resource_waiting_tasks: waiting_summary
+                .as_ref()
+                .map(|summary| summary.resource_waiting_tasks),
+            recent_waiting_reason_code: waiting_summary
+                .and_then(|summary| summary.recent_waiting_reason_code),
+            recent_admission_refusal_reason: resource_status.recent_admission_refusal_reason,
+            recent_admission_refusal_at_epoch: resource_status
+                .recent_admission_refusal_at_epoch,
+            swap_used_bytes: resource_status.snapshot.swap_used_bytes,
+            cgroup_version: resource_status.snapshot.cgroup_version,
+            process_memory_measurement: resource_status
+                .runtime_process_memory
+                .as_ref()
+                .map(|sample| sample.measurement.clone()),
+            process_count: resource_status
+                .runtime_process_memory
+                .as_ref()
+                .map(|sample| sample.process_count),
+            process_memory_current_bytes: resource_status
+                .runtime_process_memory
+                .as_ref()
+                .map(|sample| sample.current_bytes),
+            process_memory_peak_bytes: resource_status
+                .runtime_process_memory
+                .as_ref()
+                .map(|sample| sample.peak_bytes),
+            process_memory_warning: resource_status
+                .runtime_process_memory
+                .as_ref()
+                .map(|sample| sample.warning),
+            process_memory_roles_current_bytes: resource_status
+                .runtime_process_memory
+                .as_ref()
+                .map(|sample| sample.roles_current_bytes.clone()),
+            process_memory_roles_peak_bytes: resource_status
+                .runtime_process_memory
+                .as_ref()
+                .map(|sample| sample.roles_peak_bytes.clone()),
+        },
         unavailable_fields,
     }
+}
+
+fn host_task_waiting_summary(state: &AppState) -> anyhow::Result<HostTaskWaitingSummary> {
+    let db = state
+        .core
+        .db
+        .get()
+        .map_err(|error| anyhow::anyhow!("db pool: {error}"))?;
+    let waiting_predicate = "status IN ('queued', 'running', 'waiting', 'background', 'needs_user')
+        AND json_extract(result_json, '$.task_lifecycle.state') IN ('waiting', 'background')";
+    let (waiting_tasks, resource_waiting_tasks) = db.query_row(
+        &format!(
+            "SELECT COUNT(*),
+                    COALESCE(SUM(CASE
+                        WHEN json_extract(result_json, '$.task_lifecycle.resume_reason') = 'resource_admission_wait'
+                        THEN 1 ELSE 0 END), 0)
+             FROM tasks WHERE {waiting_predicate}"
+        ),
+        [],
+        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+    )?;
+    let recent_waiting_reason_code = db
+        .query_row(
+            &format!(
+                "SELECT COALESCE(
+                            json_extract(result_json, '$.task_lifecycle.waiting_reason_code'),
+                            json_extract(result_json, '$.task_lifecycle.resume_reason')
+                        )
+                 FROM tasks
+                 WHERE {waiting_predicate}
+                 ORDER BY CAST(COALESCE(NULLIF(updated_at, ''), created_at, '0') AS INTEGER) DESC,
+                          task_id DESC
+                 LIMIT 1"
+            ),
+            [],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?;
+    Ok(HostTaskWaitingSummary {
+        waiting_tasks: waiting_tasks.max(0) as usize,
+        resource_waiting_tasks: resource_waiting_tasks.max(0) as usize,
+        recent_waiting_reason_code: recent_waiting_reason_code.flatten(),
+    })
 }
 
 fn record_unavailable<T>(
@@ -226,8 +412,7 @@ fn collect_host_platform_snapshot() -> HostPlatformSnapshot {
         .as_deref()
         .map(parse_linux_os_release)
         .unwrap_or_default();
-    let meminfo = read_bounded_text(Path::new("/proc/meminfo")).unwrap_or_default();
-    let (memory_total_bytes, memory_available_bytes) = parse_linux_meminfo(&meminfo);
+    let resources = claw_core::host_resources::HostResourceSnapshot::collect();
     let uptime_seconds = read_bounded_text(Path::new("/proc/uptime"))
         .as_deref()
         .and_then(parse_linux_uptime);
@@ -240,8 +425,8 @@ fn collect_host_platform_snapshot() -> HostPlatformSnapshot {
         os_version,
         kernel,
         deployment,
-        memory_total_bytes,
-        memory_available_bytes,
+        memory_total_bytes: resources.effective_memory_limit_bytes,
+        memory_available_bytes: resources.memory_available_bytes,
         uptime_seconds,
     }
 }
@@ -254,17 +439,7 @@ fn collect_host_platform_snapshot() -> HostPlatformSnapshot {
         .as_deref()
         .map(parse_macos_system_version)
         .unwrap_or_else(|| (Some("macOS".to_string()), None));
-    let memory_total_bytes = bounded_command_output("/usr/sbin/sysctl", &["-n", "hw.memsize"])
-        .and_then(|raw| raw.parse::<u64>().ok());
-    let page_size = bounded_command_output("/usr/sbin/sysctl", &["-n", "hw.pagesize"])
-        .and_then(|raw| raw.parse::<u64>().ok());
-    let memory_available_bytes = match (
-        bounded_command_output("/usr/bin/vm_stat", &[]),
-        page_size,
-    ) {
-        (Some(vm_stat), Some(page_size)) => parse_macos_available_memory(&vm_stat, page_size),
-        _ => None,
-    };
+    let resources = claw_core::host_resources::HostResourceSnapshot::collect();
     let uptime_seconds =
         bounded_command_output("/usr/sbin/sysctl", &["-n", "kern.boottime"])
             .as_deref()
@@ -276,8 +451,8 @@ fn collect_host_platform_snapshot() -> HostPlatformSnapshot {
         os_version,
         kernel: bounded_command_output("/usr/bin/uname", &["-r"]),
         deployment: Some("local_host".to_string()),
-        memory_total_bytes,
-        memory_available_bytes,
+        memory_total_bytes: resources.effective_memory_limit_bytes,
+        memory_available_bytes: resources.memory_available_bytes,
         uptime_seconds,
     }
 }
@@ -362,29 +537,6 @@ fn parse_linux_os_release(text: &str) -> (Option<String>, Option<String>) {
 }
 
 #[cfg(any(target_os = "linux", test))]
-fn parse_linux_meminfo(text: &str) -> (Option<u64>, Option<u64>) {
-    let mut total = None;
-    let mut available = None;
-    for line in text.lines().take(256) {
-        if let Some(raw) = line.strip_prefix("MemTotal:") {
-            total = parse_kib_value(raw);
-        } else if let Some(raw) = line.strip_prefix("MemAvailable:") {
-            available = parse_kib_value(raw);
-        }
-    }
-    (total, available)
-}
-
-#[cfg(any(target_os = "linux", test))]
-fn parse_kib_value(raw: &str) -> Option<u64> {
-    raw.split_whitespace()
-        .next()?
-        .parse::<u64>()
-        .ok()
-        .map(|value| value.saturating_mul(1024))
-}
-
-#[cfg(any(target_os = "linux", test))]
 fn parse_linux_uptime(text: &str) -> Option<u64> {
     text.split_whitespace()
         .next()?
@@ -414,27 +566,6 @@ fn parse_plist_string(text: &str, key: &str) -> Option<String> {
     } else {
         Some(value.chars().take(256).collect())
     }
-}
-
-#[cfg(any(target_os = "macos", test))]
-fn parse_macos_available_memory(text: &str, page_size: u64) -> Option<u64> {
-    let free = parse_macos_vm_pages(text, "Pages free")?;
-    let inactive = parse_macos_vm_pages(text, "Pages inactive").unwrap_or(0);
-    let speculative = parse_macos_vm_pages(text, "Pages speculative").unwrap_or(0);
-    Some(
-        free.saturating_add(inactive)
-            .saturating_add(speculative)
-            .saturating_mul(page_size),
-    )
-}
-
-#[cfg(any(target_os = "macos", test))]
-fn parse_macos_vm_pages(text: &str, key: &str) -> Option<u64> {
-    text.lines().take(256).find_map(|line| {
-        let line = line.trim();
-        let raw = line.strip_prefix(key)?.strip_prefix(':')?.trim();
-        raw.trim_end_matches('.').parse::<u64>().ok()
-    })
 }
 
 #[cfg(any(target_os = "macos", test))]

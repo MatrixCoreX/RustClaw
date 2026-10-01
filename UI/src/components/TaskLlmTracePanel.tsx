@@ -1,4 +1,4 @@
-import { Database, Loader2, RefreshCw, Workflow } from "lucide-react";
+import { ChevronLeft, ChevronRight, Database, Loader2, RefreshCw, Workflow } from "lucide-react";
 
 import {
   taskLlmDebugCallEntry,
@@ -28,7 +28,7 @@ export interface TaskLlmTracePanelProps {
   taskLlmDebug: TaskLlmDebugResponse | null;
   taskLlmDebugLoading: boolean;
   taskLlmDebugError: string | null;
-  onQueryTaskLlmDebug: (taskId?: string) => unknown | Promise<unknown>;
+  onQueryTaskLlmDebug: (taskId?: string, offset?: number) => unknown | Promise<unknown>;
 }
 
 function compactMetaValue(value: string | number | null | undefined): string | null {
@@ -207,6 +207,7 @@ export function TaskLlmTracePanel({
       ? taskLlmDebug.calls
       : taskLlmDebug?.entries ?? [];
   const callCount = taskLlmDebug?.call_count ?? calls.length;
+  const pagination = taskLlmDebug?.pagination;
   const runtimeTraceLayer = taskLlmDebug?.trace_layers?.agent_decisions;
   const availabilityStatus = taskLlmTraceAvailabilityStatus(taskLlmDebug);
   const retentionDays = taskLlmDebug?.trace_availability?.retention_days ?? 7;
@@ -228,7 +229,7 @@ export function TaskLlmTracePanel({
         </div>
         <button
           type="button"
-          onClick={() => void onQueryTaskLlmDebug(taskResult.task_id)}
+          onClick={() => void onQueryTaskLlmDebug(taskResult.task_id, pagination?.offset ?? 0)}
           disabled={taskLlmDebugLoading}
           className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-xs font-medium transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -569,6 +570,36 @@ export function TaskLlmTracePanel({
               {t("这个任务还没有可显示的模型调用记录。", "No model call records are available for this task yet.")}
             </p>
           )}
+          {pagination && pagination.total > pagination.limit ? (
+            <div className="mt-3 flex items-center justify-between gap-3 border-t border-white/10 pt-3">
+              <span className="text-xs text-white/50">
+                {t(
+                  `显示第 ${pagination.offset + 1}-${Math.min(pagination.offset + calls.length, pagination.total)} 次，共 ${pagination.total} 次`,
+                  `Showing calls ${pagination.offset + 1}-${Math.min(pagination.offset + calls.length, pagination.total)} of ${pagination.total}`,
+                )}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void onQueryTaskLlmDebug(taskResult.task_id, Math.max(0, pagination.offset - pagination.limit))}
+                  disabled={taskLlmDebugLoading || pagination.offset === 0}
+                  className="theme-secondary-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                  {t("上一页", "Previous")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void onQueryTaskLlmDebug(taskResult.task_id, pagination.offset + pagination.limit)}
+                  disabled={taskLlmDebugLoading || !pagination.has_more}
+                  className="theme-secondary-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {t("下一页", "Next")}
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

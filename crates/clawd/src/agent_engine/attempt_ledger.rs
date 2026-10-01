@@ -181,6 +181,31 @@ pub(super) fn record_attempt_with_retry_instruction(
     });
 }
 
+pub(super) fn compact_repeated_resource_admission_attempts(loop_state: &mut LoopState) {
+    let Some(latest_index) = loop_state
+        .attempt_ledger_entries
+        .iter()
+        .rposition(|entry| entry.error_code.as_deref() == Some("resource_admission_unavailable"))
+    else {
+        return;
+    };
+    let action_ref = loop_state.attempt_ledger_entries[latest_index]
+        .action_ref
+        .clone();
+    let args_fingerprint = loop_state.attempt_ledger_entries[latest_index]
+        .args_fingerprint
+        .clone();
+    let mut index = 0usize;
+    loop_state.attempt_ledger_entries.retain(|entry| {
+        let is_same_wait = entry.error_code.as_deref() == Some("resource_admission_unavailable")
+            && entry.action_ref == action_ref
+            && entry.args_fingerprint == args_fingerprint;
+        let keep = !is_same_wait || index == latest_index;
+        index += 1;
+        keep
+    });
+}
+
 pub(super) fn build_attempt_ledger_compact(loop_state: &LoopState) -> String {
     build_attempt_ledger_snapshot(loop_state)
         .map(|snapshot| {

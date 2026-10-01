@@ -1,0 +1,85 @@
+schema_version = 2
+
+[package]
+name = "local_asr"
+version = "0.1.0"
+description = "Run local speech recognition in an isolated on-demand process so large model dependencies and model memory are not part of ordinary media downloading."
+protocol = "agent-jsonl-v1"
+supported_os = ["linux", "macos"]
+supported_arch = ["x86_64", "aarch64"]
+license = "LicenseRef-Proprietary"
+source = "optional_skills/local_asr"
+
+[registry]
+name = "local_asr"
+capability_policy_source = "registry"
+
+[build]
+adapter = "python"
+source_root = "optional_skills/local_asr"
+lockfile = "requirements.lock"
+network = "approval_required"
+lifecycle_scripts = false
+options = { python = ">=3.13" }
+
+[install]
+host_dependencies = ["ffmpeg"]
+runtime_assets = ["modelscope_sensevoice_small", "modelscope_fsmn_vad"]
+
+[install.resources]
+min_memory_mb = 2048
+min_free_disk_mb = 4096
+
+[run]
+launcher = "python"
+entrypoint = "runtime/src/src/main.py"
+working_directory = "."
+timeout_seconds = 86400
+environment_allowlist = ["HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "PATH", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "WHISPER_BIN", "WHISPER_CLI", "WHISPER_CPP_BIN", "WHISPER_CPP_MODEL", "WHISPER_MODEL", "WHISPER_MODEL_PATH", "WORKSPACE_ROOT"]
+smoke_args = { action = "capabilities" }
+progress_frames = true
+
+[security]
+capability_policy_source = "registry"
+sandbox = "workspace_write"
+runtime_network = false
+inherit_credentials = false
+
+[storage]
+kind = "directory"
+schema_version = 1
+migration_owner = "local_asr"
+
+[lifecycle]
+config_files = []
+preserve_data_on_uninstall = true
+update_strategy = "atomic_replace"
+
+[capability_request]
+schema_version = 1
+input_schema = { type = "object", required = ["action"], additionalProperties = false, properties = { action = { type = "string", enum = ["capabilities", "transcribe"] }, input_path = { type = "string", minLength = 1, maxLength = 4096 }, engine = { type = "string", enum = ["whisper", "funasr"] }, language = { type = "string", minLength = 1, maxLength = 64 }, response_language = { type = "string", minLength = 1, maxLength = 64 }, whisper_bin = { type = "string", minLength = 1, maxLength = 4096 }, whisper_model = { type = "string", minLength = 1, maxLength = 4096 }, threads = { type = "integer", minimum = 1, maximum = 64 }, translate = { type = "boolean" }, fast = { type = "boolean" }, no_gpu = { type = "boolean" }, funasr_model = { type = "string", minLength = 1, maxLength = 512 }, funasr_vad_model = { type = "string", minLength = 1, maxLength = 512 }, funasr_batch_size_s = { type = "integer", minimum = 1, maximum = 600 }, rich_text = { type = "boolean" } } }
+output_schema = { type = "object", required = ["text", "extra"], properties = { text = { type = "string" }, extra = { type = "object", required = ["schema_version", "source_skill", "status", "action"], properties = { schema_version = { type = "integer" }, source_skill = { type = "string" }, status = { type = "string", enum = ["ok", "error"] }, action = { type = "string" }, engine = { type = "string" }, artifacts = { type = "array", items = { type = "object" } }, saved_files = { type = "array", items = { type = "object" } }, delivery = { type = "object" }, chunking = { type = "object" }, transcription = { type = "object" }, transcription_review = { type = "object" }, error_code = { type = "string" }, message_key = { type = "string" }, retryable = { type = "boolean" } } } } }
+config_entry_points = []
+capabilities = [
+  { name = "local_asr.capabilities", action = "capabilities", effect = "observe", execution_mode = "sync_short", required = [], optional = [], timeout_seconds = 15, description = "Report local speech-recognition engines and process lifecycle metadata without loading a model." },
+  { name = "local_asr.transcribe", action = "transcribe", effect = "mutate", execution_mode = "async_preferred", required = ["input_path"], optional = ["engine", "language", "response_language", "whisper_bin", "whisper_model", "threads", "translate", "fast", "no_gpu", "funasr_model", "funasr_vad_model", "funasr_batch_size_s", "rich_text"], description = "Transcribe a local audio or video file only after audio.preview_transcribe selects a local provider. Load the chosen model for this invocation and return raw transcript evidence for shared model review." },
+]
+
+[capability_request.permissions]
+llm_gateway = false
+network = false
+filesystem_read = true
+filesystem_write = true
+subprocess = true
+package_install = false
+privilege_escalation = false
+external_publish = false
+credential_refs = []
+
+[capability_request.artifact_contract]
+kinds = ["file", "audio", "video"]
+output_fields = ["extra.artifacts", "extra.saved_files"]
+
+[capability_request.evidence_contract]
+required = false
+selectors = ["extra.transcription", "extra.transcription_review", "extra.saved_files"]

@@ -60,12 +60,14 @@ pub(crate) fn init_db(config: &AppConfig) -> anyhow::Result<DbPool> {
     apply_private_sqlite_permissions(database_path)?;
 
     let busy_ms = config.database.busy_timeout_ms;
+    let resource_profile = crate::runtime_memory::sqlite_resource_profile();
     let manager = SqliteConnectionManager::file(&config.database.sqlite_path).with_init(
         move |conn: &mut Connection| {
             conn.busy_timeout(Duration::from_millis(busy_ms))?;
             conn.pragma_update(None, "journal_mode", "WAL")?;
             conn.pragma_update(None, "synchronous", "NORMAL")?;
             conn.pragma_update(None, "foreign_keys", "ON")?;
+            crate::runtime_memory::apply_sqlite_resource_profile(conn, resource_profile)?;
             Ok(())
         },
     );
@@ -95,12 +97,14 @@ pub(crate) fn init_audit_db(config: &AppConfig) -> anyhow::Result<DbPool> {
     apply_private_sqlite_permissions(database_path)?;
 
     let busy_ms = config.database.busy_timeout_ms;
+    let resource_profile = crate::runtime_memory::sqlite_resource_profile();
     let manager = SqliteConnectionManager::file(&config.database.audit_sqlite_path).with_init(
         move |conn: &mut Connection| {
             conn.busy_timeout(Duration::from_millis(busy_ms))?;
             conn.pragma_update(None, "journal_mode", "WAL")?;
             conn.pragma_update(None, "synchronous", "NORMAL")?;
             conn.pragma_update(None, "foreign_keys", "ON")?;
+            crate::runtime_memory::apply_sqlite_resource_profile(conn, resource_profile)?;
             Ok(())
         },
     );

@@ -277,6 +277,53 @@ fn record_paused_checkpoint_resume_execution_plan_requires_active_executor_claim
 fn list_planned_paused_checkpoint_resume_executions_requires_active_machine_plan() {
     let state = state_with_tasks_table();
     let now = 6_000;
+    for index in 0..130 {
+        let task_id = format!("invalid-batched-plan-{index:03}");
+        let checkpoint_id = format!("ckpt-invalid-batched-{index:03}");
+        let invalid_plan = json!({
+            "task_lifecycle": {
+                "schema_version": 1,
+                "state": "running",
+                "checkpoint_id": checkpoint_id,
+                "resume_claim": {
+                    "schema_version": 1,
+                    "owner": state.worker.worker_id,
+                    "checkpoint_id": checkpoint_id,
+                    "expires_at": now + 30
+                },
+                "resume_executor": {
+                    "schema_version": 1,
+                    "checkpoint_id": checkpoint_id,
+                    "executor_state": "executing_planner_resume",
+                    "resume_trigger": "worker_recovery",
+                    "resume_directive": "run_next_planner_round",
+                    "execution_plan_action": "run_seeded_agent_loop"
+                },
+                "resume_executor_claim": {
+                    "schema_version": 1,
+                    "checkpoint_id": checkpoint_id,
+                    "executor_state": "executing_planner_resume",
+                    "expires_at": now + 30
+                },
+                "resume_execution_plan": {
+                    "schema_version": 1,
+                    "task_id": task_id,
+                    "checkpoint_id": checkpoint_id,
+                    "executor_state": "executing_planner_resume",
+                    "executor_action": "run_seeded_agent_loop",
+                    "text": "invalid machine plan"
+                }
+            },
+            "task_checkpoint": checkpoint_json(&checkpoint_id, vec![])
+        });
+        insert_task(
+            &state,
+            &task_id,
+            "running",
+            Some(&invalid_plan),
+            index as i64,
+        );
+    }
     let ready_planner = json!({
         "task_lifecycle": {
             "schema_version": 1,
@@ -340,14 +387,20 @@ fn list_planned_paused_checkpoint_resume_executions_requires_active_machine_plan
         },
         "task_checkpoint": checkpoint_json("ckpt-text-plan", vec![])
     });
-    insert_task(&state, "ready-planned", "running", Some(&ready_planner), 10);
+    insert_task(
+        &state,
+        "ready-planned",
+        "running",
+        Some(&ready_planner),
+        200,
+    );
     activate_resume_owner(&state, "ready-planned", "ckpt-planned", now, now + 31);
     insert_task(
         &state,
         "invalid-text-plan",
         "running",
         Some(&invalid_text_plan),
-        20,
+        201,
     );
 
     let claimed = claim_ready_paused_checkpoint_resume_executor_internal(

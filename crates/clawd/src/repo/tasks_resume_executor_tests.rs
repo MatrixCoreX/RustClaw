@@ -171,6 +171,71 @@ fn list_ready_paused_checkpoint_resume_executors_filters_machine_states() {
 }
 
 #[test]
+fn resume_executor_queue_prioritizes_interactive_waits_with_background_aging() {
+    let state = state_with_tasks_table();
+    let now = 10_000;
+    let ready = |checkpoint: &str, lifecycle_state: &str| {
+        json!({
+            "task_lifecycle": {
+                "schema_version": 1,
+                "state": lifecycle_state,
+                "resume_reason": "resource_admission_wait",
+                "next_check_after": now,
+                "checkpoint_id": checkpoint,
+                "resume_executor": {
+                    "schema_version": 1,
+                    "checkpoint_id": checkpoint,
+                    "executor_state": "ready_for_planner_resume",
+                    "resume_trigger": "worker_recovery",
+                    "resume_directive": "run_next_planner_round"
+                }
+            },
+            "task_checkpoint": checkpoint_json(checkpoint, vec![])
+        })
+    };
+
+    insert_task(
+        &state,
+        "recent-background",
+        "running",
+        Some(&ready("ckpt-background", "background")),
+        now - 5,
+    );
+    insert_task(
+        &state,
+        "interactive-wait",
+        "running",
+        Some(&ready("ckpt-interactive", "waiting")),
+        now - 1,
+    );
+
+    let prioritized = list_ready_paused_checkpoint_resume_executors_internal(&state, now, 2)
+        .expect("prioritized queue");
+    assert_eq!(prioritized[0].task_id, "interactive-wait");
+    assert_eq!(prioritized[1].task_id, "recent-background");
+
+    let aged_state = state_with_tasks_table();
+    insert_task(
+        &aged_state,
+        "aged-background",
+        "running",
+        Some(&ready("ckpt-aged", "background")),
+        now - 61,
+    );
+    insert_task(
+        &aged_state,
+        "new-interactive-wait",
+        "running",
+        Some(&ready("ckpt-new-interactive", "waiting")),
+        now - 1,
+    );
+    let aged = list_ready_paused_checkpoint_resume_executors_internal(&aged_state, now, 2)
+        .expect("aged queue");
+    assert_eq!(aged[0].task_id, "aged-background");
+    assert_eq!(aged[1].task_id, "new-interactive-wait");
+}
+
+#[test]
 fn claim_ready_paused_checkpoint_resume_executor_sets_machine_lease() {
     let state = state_with_tasks_table();
     let now = 4_000;

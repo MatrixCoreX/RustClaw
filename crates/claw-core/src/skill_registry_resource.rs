@@ -6,6 +6,7 @@ use serde::Deserialize;
 #[serde(rename_all = "snake_case")]
 pub enum SkillDispatchQueueScope {
     User,
+    Global,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -40,6 +41,7 @@ pub enum SkillResourceClass {
     Cpu,
     Memory,
     Gpu,
+    LocalModel,
     DiskIo,
     Network,
     ProviderQuota,
@@ -52,6 +54,7 @@ impl SkillResourceClass {
             Self::Cpu => "cpu",
             Self::Memory => "memory",
             Self::Gpu => "gpu",
+            Self::LocalModel => "local_model",
             Self::DiskIo => "disk_io",
             Self::Network => "network",
             Self::ProviderQuota => "provider_quota",
@@ -77,6 +80,8 @@ pub struct SkillResourceRequest {
     #[serde(default)]
     pub provider_slots: usize,
     #[serde(default)]
+    pub browser_slots: usize,
+    #[serde(default)]
     pub allow_cpu_fallback: bool,
 }
 
@@ -97,6 +102,9 @@ pub(super) fn validate_resource_request(
     }
     if request.network_slots > 4_096 || request.provider_slots > 4_096 {
         return Err("resource_slots_out_of_range");
+    }
+    if request.browser_slots > 64 {
+        return Err("browser_slots_out_of_range");
     }
     Ok(())
 }

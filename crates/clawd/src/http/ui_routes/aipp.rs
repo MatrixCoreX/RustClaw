@@ -851,24 +851,12 @@ fn read_aipp_media_page_with_hidden(
     hidden_sequences: &BTreeSet<u64>,
 ) -> Result<Value, String> {
     let records_root = root.join("records");
-    let mut names = match fs::read_dir(&records_root) {
-        Ok(entries) => entries
-            .filter_map(Result::ok)
-            .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
-            .filter(|name| name.len() == 17 && name.ends_with(".json"))
-            .collect::<Vec<_>>(),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+    let entries = match fs::read_dir(&records_root) {
+        Ok(entries) => Some(entries),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(_) => return Err("aipp_media_storage_read_failed".to_string()),
     };
-    if names.len() > AIPP_MEDIA_RECORD_SCAN_LIMIT {
-        return Err("aipp_media_record_limit_exceeded".to_string());
-    }
     let sort_order = aipp_media_sort_order(query)?;
-    if sort_order == "oldest" {
-        names.sort_unstable();
-    } else {
-        names.sort_unstable_by(|left, right| right.cmp(left));
-    }
     let limit = query.limit.unwrap_or(AIPP_PAGE_SIZE).clamp(1, AIPP_MEDIA_RECORD_LIMIT);
     let has_filter = query.kind.is_some()
         || query.platform.is_some()
@@ -876,22 +864,26 @@ fn read_aipp_media_page_with_hidden(
             .query
             .as_deref()
             .is_some_and(|value| !value.trim().is_empty());
-    let visible_total = names
-        .iter()
-        .filter(|name| {
-            name.strip_suffix(".json")
-                .and_then(|value| value.parse::<u64>().ok())
-                .is_none_or(|sequence| sequence == 0 || !hidden_sequences.contains(&sequence))
-        })
-        .count();
-    let mut items = Vec::with_capacity(limit + 1);
-    let mut matching_total = if has_filter { 0 } else { visible_total };
+    let mut candidates = Vec::with_capacity(limit + 1);
+    let mut matching_total = 0_usize;
+    let mut visible_total = 0_usize;
+    let mut scanned_records = 0_usize;
     let cursor_sequence = query.cursor_sequence.or_else(|| {
         (sort_order == "newest")
             .then_some(query.before_sequence)
             .flatten()
     });
-    for name in names {
+    for entry in entries.into_iter().flatten().filter_map(Result::ok) {
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        if name.len() != 17 || !name.ends_with(".json") {
+            continue;
+        }
+        scanned_records = scanned_records.saturating_add(1);
+        if scanned_records > AIPP_MEDIA_RECORD_SCAN_LIMIT {
+            return Err("aipp_media_record_limit_exceeded".to_string());
+        }
         let file_sequence = name
             .strip_suffix(".json")
             .and_then(|value| value.parse::<u64>().ok())
@@ -899,6 +891,7 @@ fn read_aipp_media_page_with_hidden(
         if file_sequence != 0 && hidden_sequences.contains(&file_sequence) {
             continue;
         }
+        visible_total = visible_total.saturating_add(1);
         if !has_filter
             && cursor_sequence.is_some_and(|cursor| {
                 if sort_order == "oldest" {
@@ -910,14 +903,14 @@ fn read_aipp_media_page_with_hidden(
         {
             continue;
         }
-        let record_path = records_root.join(&name);
-        if fs::metadata(&record_path)
+        if entry
+            .metadata()
             .map(|metadata| metadata.len() > AIPP_MEDIA_RECORD_MAX_BYTES)
             .unwrap_or(true)
         {
             continue;
         }
-        let raw = match fs::read(record_path) {
+        let raw = match fs::read(entry.path()) {
             Ok(raw) => raw,
             Err(_) => continue,
         };
@@ -950,15 +943,27 @@ fn read_aipp_media_page_with_hidden(
         }) {
             continue;
         }
-        if items.len() <= limit {
-            if let Some(item) = aipp_media_item(&record) {
-                items.push(item);
+        if let Some(item) = aipp_media_item(&record) {
+            candidates.push((file_sequence, item));
+            candidates.sort_unstable_by(|left, right| {
+                if sort_order == "oldest" {
+                    left.0.cmp(&right.0)
+                } else {
+                    right.0.cmp(&left.0)
+                }
+            });
+            if candidates.len() > limit + 1 {
+                candidates.truncate(limit + 1);
             }
         }
-        if !has_filter && items.len() > limit {
-            break;
-        }
     }
+    if !has_filter {
+        matching_total = visible_total;
+    }
+    let mut items = candidates
+        .into_iter()
+        .map(|(_, item)| item)
+        .collect::<Vec<_>>();
     let has_more = items.len() > limit;
     if has_more {
         items.truncate(limit);
@@ -1442,6 +1447,13 @@ fn resolve_aipp_preview(root: &Path, sequence: u64) -> Result<(PathBuf, &'static
         return Err("aipp_preview_not_found".to_string());
     }
     let record_path = root.join("records").join(format!("{sequence:012}.json"));
+    if record_path
+        .metadata()
+        .map(|metadata| metadata.len() > AIPP_MEDIA_RECORD_MAX_BYTES)
+        .unwrap_or(true)
+    {
+        return Err("aipp_preview_record_invalid".to_string());
+    }
     let record: Value = serde_json::from_slice(
         &fs::read(record_path).map_err(|_| "aipp_preview_not_found".to_string())?,
     )
@@ -1521,13 +1533,23 @@ async fn get_aipp_media_preview(
                 .into_response();
         }
     };
-    let bytes = match tokio::fs::read(path).await {
-        Ok(value) => value,
+    let file = match tokio::fs::File::open(path).await {
+        Ok(file) => file,
         Err(_) => {
             return aipp_api_error(StatusCode::NOT_FOUND, "aipp_preview_not_found").into_response();
         }
     };
-    let mut response = axum::response::Response::new(axum::body::Body::from(bytes));
+    let content_length = match file.metadata().await {
+        Ok(metadata) if metadata.is_file() && metadata.len() <= AIPP_PREVIEW_MAX_BYTES => {
+            metadata.len()
+        }
+        _ => {
+            return aipp_api_error(StatusCode::NOT_FOUND, "aipp_preview_not_found").into_response();
+        }
+    };
+    let mut response = axum::response::Response::new(axum::body::Body::from_stream(
+        tokio_util::io::ReaderStream::new(file),
+    ));
     *response.status_mut() = StatusCode::OK;
     response.headers_mut().insert(
         axum::http::header::CONTENT_TYPE,
@@ -1541,6 +1563,11 @@ async fn get_aipp_media_preview(
         axum::http::header::X_CONTENT_TYPE_OPTIONS,
         axum::http::HeaderValue::from_static("nosniff"),
     );
+    if let Ok(value) = axum::http::HeaderValue::from_str(&content_length.to_string()) {
+        response
+            .headers_mut()
+            .insert(axum::http::header::CONTENT_LENGTH, value);
+    }
     response
 }
 
@@ -1705,15 +1732,31 @@ async fn get_aipp_bundle_asset(
         Ok(value) => value,
         Err(error) => return aipp_api_error(StatusCode::NOT_FOUND, &error).into_response(),
     };
-    let bytes = match tokio::fs::read(path).await {
-        Ok(bytes) => bytes,
+    let file = match tokio::fs::File::open(path).await {
+        Ok(file) => file,
         Err(_) => {
             return aipp_api_error(StatusCode::NOT_FOUND, "aipp_bundle_asset_not_found")
                 .into_response();
         }
     };
-    let mut response = axum::response::Response::new(axum::body::Body::from(bytes));
+    let content_length = match file.metadata().await {
+        Ok(metadata) if metadata.is_file() && metadata.len() <= AIPP_BUNDLE_ASSET_MAX_BYTES => {
+            metadata.len()
+        }
+        _ => {
+            return aipp_api_error(StatusCode::NOT_FOUND, "aipp_bundle_asset_not_found")
+                .into_response();
+        }
+    };
+    let mut response = axum::response::Response::new(axum::body::Body::from_stream(
+        tokio_util::io::ReaderStream::new(file),
+    ));
     apply_aipp_bundle_headers(&mut response, content_type);
+    if let Ok(value) = axum::http::HeaderValue::from_str(&content_length.to_string()) {
+        response
+            .headers_mut()
+            .insert(axum::http::header::CONTENT_LENGTH, value);
+    }
     response
 }
 

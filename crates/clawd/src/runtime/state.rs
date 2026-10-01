@@ -82,6 +82,66 @@ pub(crate) struct SkillViewsSnapshot {
     pub(crate) binding: SkillViewsBinding,
 }
 
+const MAX_SHARED_PROMPT_TEMPLATES: usize = 512;
+
+struct CachedPromptTemplate {
+    revision: String,
+    resolved: Arc<claw_core::prompt_layers::ResolvedPromptTemplate>,
+}
+
+/// Reconstructable prompt cache owned by one immutable registry generation.
+/// Replacing the generation swaps this cache atomically with the skill view;
+/// critical resource pressure may clear it without touching durable state.
+#[derive(Default)]
+pub(crate) struct PromptTemplateCache {
+    entries: RwLock<HashMap<String, CachedPromptTemplate>>,
+}
+
+impl PromptTemplateCache {
+    pub(crate) fn get(
+        &self,
+        key: &str,
+        revision: &str,
+    ) -> Option<claw_core::prompt_layers::ResolvedPromptTemplate> {
+        let entries = self.entries.read().unwrap();
+        let cached = entries.get(key)?;
+        (cached.revision == revision).then(|| cached.resolved.as_ref().clone())
+    }
+
+    pub(crate) fn insert(
+        &self,
+        key: String,
+        revision: String,
+        resolved: claw_core::prompt_layers::ResolvedPromptTemplate,
+    ) -> claw_core::prompt_layers::ResolvedPromptTemplate {
+        let mut entries = self.entries.write().unwrap();
+        if entries.len() >= MAX_SHARED_PROMPT_TEMPLATES && !entries.contains_key(&key) {
+            entries.clear();
+        }
+        let resolved = Arc::new(resolved);
+        entries.insert(
+            key,
+            CachedPromptTemplate {
+                revision,
+                resolved: resolved.clone(),
+            },
+        );
+        resolved.as_ref().clone()
+    }
+
+    pub(crate) fn clear(&self) -> usize {
+        let mut entries = self.entries.write().unwrap();
+        let removed = entries.len();
+        entries.clear();
+        removed
+    }
+
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.entries.read().unwrap().len()
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct SkillViewsBinding {
     pub(crate) registry_generation: u64,
@@ -89,6 +149,7 @@ pub(crate) struct SkillViewsBinding {
     pub(crate) base_registry_digest: Option<String>,
     pub(crate) overlay_generation_digest: Option<String>,
     pub(crate) admission_bindings: Arc<BTreeMap<String, AdmissionExecutionBinding>>,
+    pub(crate) prompt_templates: PromptTemplateCache,
 }
 
 /// P2.1 — 把"对外通道适配器配置"从 [`AppState`] 主体中剥出来，放进独立子 struct。
@@ -241,9 +302,18 @@ pub(crate) struct SkillRuntime {
     pub(crate) default_locator_search_dir: PathBuf,
 }
 
-#[derive(Default)]
 pub(crate) struct SkillConcurrencyGates {
     gates: Mutex<HashMap<String, SkillConcurrencyGate>>,
+    resource_broker: crate::resource_scheduler::ResourceBroker,
+}
+
+impl Default for SkillConcurrencyGates {
+    fn default() -> Self {
+        Self {
+            gates: Mutex::new(HashMap::new()),
+            resource_broker: crate::resource_scheduler::ResourceBroker::default(),
+        }
+    }
 }
 
 struct SkillConcurrencyGate {
@@ -252,6 +322,17 @@ struct SkillConcurrencyGate {
 }
 
 impl SkillConcurrencyGates {
+    pub(crate) fn new(resource_broker: crate::resource_scheduler::ResourceBroker) -> Self {
+        Self {
+            gates: Mutex::new(HashMap::new()),
+            resource_broker,
+        }
+    }
+
+    pub(crate) fn resource_broker(&self) -> &crate::resource_scheduler::ResourceBroker {
+        &self.resource_broker
+    }
+
     pub(crate) fn semaphore(&self, skill_name: &str, limit: usize) -> Arc<Semaphore> {
         let limit = limit.max(1);
         let mut gates = self.gates.lock().unwrap();
@@ -794,6 +875,7 @@ pub(crate) fn assemble_skill_views_snapshot(
             base_registry_digest: overlay.base_registry_digest.clone(),
             overlay_generation_digest: overlay.generation_digest.clone(),
             admission_bindings: Arc::new(overlay.execution_bindings.clone()),
+            prompt_templates: PromptTemplateCache::default(),
         },
     }
 }
@@ -1637,6 +1719,12 @@ impl AppState {
 
     pub(crate) fn get_skill_views_snapshot(&self) -> Arc<SkillViewsSnapshot> {
         self.snapshot()
+    }
+
+    /// Drop only reconstructable prompt templates for the active generation.
+    /// Durable task state and the pinned registry snapshot are unaffected.
+    pub(crate) fn clear_prompt_template_cache(&self) -> usize {
+        self.snapshot().binding.prompt_templates.clear()
     }
 
     pub(crate) fn get_skills_list(&self) -> Arc<HashSet<String>> {

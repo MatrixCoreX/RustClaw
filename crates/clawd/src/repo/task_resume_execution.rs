@@ -70,65 +70,25 @@ pub(crate) struct ClaimedHandoffPausedCheckpointResumeExecution {
     pub(crate) task_checkpoint: crate::task_lifecycle::TaskCheckpoint,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ResumeExecutionCandidateStage {
+    OwnedPlan = 0,
+    Dispatched = 1,
+    RecordedResult = 2,
+}
+
 pub(crate) fn list_planned_paused_checkpoint_resume_executions_internal(
     state: &AppState,
     now_ts: i64,
     limit: usize,
 ) -> anyhow::Result<Vec<PlannedPausedCheckpointResumeExecution>> {
-    let limit = limit.max(1);
-    let db = state
-        .core
-        .db
-        .get()
-        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
-    let mut stmt = db.prepare(
-        "SELECT task_id, user_id, chat_id, user_key, channel, external_user_id, external_chat_id, kind, payload_json, result_json,
-                COALESCE(claim_attempt, 0)
-         FROM tasks
-         WHERE status = 'running'
-           AND result_json IS NOT NULL
-         ORDER BY CAST(COALESCE(NULLIF(updated_at, ''), created_at, '0') AS INTEGER) ASC,
-                  task_id ASC",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        Ok((
-            ClaimedTask {
-                claim_attempt: row.get(10)?,
-                task_id: row.get(0)?,
-                user_id: row.get(1)?,
-                chat_id: row.get(2)?,
-                user_key: row.get(3)?,
-                channel: row.get(4)?,
-                external_user_id: row.get(5)?,
-                external_chat_id: row.get(6)?,
-                kind: row.get(7)?,
-                payload_json: row.get(8)?,
-            },
-            row.get::<_, Option<String>>(9)?,
-        ))
-    })?;
-
-    let mut out = Vec::new();
-    for row in rows {
-        let (task, result_json) = row?;
-        let Some(result_json) =
-            result_json.and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
-        else {
-            continue;
-        };
-        if let Some(planned) = planned_paused_checkpoint_resume_execution_from_result_json(
-            task,
-            &result_json,
-            &state.worker.worker_id,
-            now_ts,
-        ) {
-            out.push(planned);
-            if out.len() >= limit {
-                break;
-            }
-        }
-    }
-    Ok(out)
+    list_paused_checkpoint_resume_candidates_internal(
+        state,
+        now_ts,
+        limit,
+        ResumeExecutionCandidateStage::OwnedPlan,
+        planned_paused_checkpoint_resume_execution_from_result_json,
+    )
 }
 
 pub(crate) fn list_handoff_paused_checkpoint_resume_executions_internal(
@@ -136,6 +96,24 @@ pub(crate) fn list_handoff_paused_checkpoint_resume_executions_internal(
     now_ts: i64,
     limit: usize,
 ) -> anyhow::Result<Vec<HandoffPausedCheckpointResumeExecution>> {
+    list_paused_checkpoint_resume_candidates_internal(
+        state,
+        now_ts,
+        limit,
+        ResumeExecutionCandidateStage::OwnedPlan,
+        handoff_paused_checkpoint_resume_execution_from_result_json,
+    )
+}
+
+pub(super) fn list_paused_checkpoint_resume_candidates_internal<T>(
+    state: &AppState,
+    now_ts: i64,
+    limit: usize,
+    stage: ResumeExecutionCandidateStage,
+    mut project: impl FnMut(ClaimedTask, &Value, &str, i64) -> Option<T>,
+) -> anyhow::Result<Vec<T>> {
+    const SCAN_BATCH_SIZE: usize = 128;
+
     let limit = limit.max(1);
     let db = state
         .core
@@ -143,17 +121,98 @@ pub(crate) fn list_handoff_paused_checkpoint_resume_executions_internal(
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let mut stmt = db.prepare(
-        "SELECT task_id, user_id, chat_id, user_key, channel, external_user_id, external_chat_id, kind, payload_json, result_json,
-                COALESCE(claim_attempt, 0)
-         FROM tasks
-         WHERE status = 'running'
-           AND result_json IS NOT NULL
-         ORDER BY CAST(COALESCE(NULLIF(updated_at, ''), created_at, '0') AS INTEGER) ASC,
-                  task_id ASC",
+        "WITH candidates AS (
+             SELECT task_id, user_id, chat_id, user_key, channel, external_user_id,
+                    external_chat_id, kind, payload_json, result_json,
+                    COALESCE(claim_attempt, 0) AS claim_attempt,
+                    CAST(COALESCE(NULLIF(updated_at, ''), created_at, '0') AS INTEGER) AS sort_ts,
+                    COALESCE(
+                        json_extract(result_json, '$.task_lifecycle.state'),
+                        json_extract(result_json, '$.task_journal.summary.task_lifecycle.state')
+                    ) AS lifecycle_state,
+                    COALESCE(
+                        json_extract(result_json, '$.task_lifecycle.resume_claim.owner'),
+                        json_extract(result_json, '$.task_journal.summary.task_lifecycle.resume_claim.owner')
+                    ) AS resume_owner,
+                    CAST(COALESCE(
+                        json_extract(result_json, '$.task_lifecycle.resume_claim.expires_at'),
+                        json_extract(result_json, '$.task_journal.summary.task_lifecycle.resume_claim.expires_at'),
+                        0
+                    ) AS INTEGER) AS resume_claim_expires_at,
+                    CAST(COALESCE(
+                        json_extract(result_json, '$.task_lifecycle.resume_executor_claim.expires_at'),
+                        json_extract(result_json, '$.task_journal.summary.task_lifecycle.resume_executor_claim.expires_at'),
+                        0
+                    ) AS INTEGER) AS executor_claim_expires_at,
+                    COALESCE(
+                        json_type(result_json, '$.task_lifecycle.resume_execution_plan'),
+                        json_type(result_json, '$.task_journal.summary.task_lifecycle.resume_execution_plan')
+                    ) AS execution_plan_type,
+                    COALESCE(
+                        json_type(result_json, '$.task_lifecycle.resume_executor_handoff'),
+                        json_type(result_json, '$.task_journal.summary.task_lifecycle.resume_executor_handoff')
+                    ) AS handoff_type,
+                    CAST(COALESCE(
+                        json_extract(result_json, '$.task_lifecycle.resume_executor_handoff_claim.expires_at'),
+                        json_extract(result_json, '$.task_journal.summary.task_lifecycle.resume_executor_handoff_claim.expires_at'),
+                        0
+                    ) AS INTEGER) AS handoff_claim_expires_at,
+                    COALESCE(
+                        json_type(result_json, '$.task_lifecycle.resume_executor_handoff_dispatch'),
+                        json_type(result_json, '$.task_journal.summary.task_lifecycle.resume_executor_handoff_dispatch')
+                    ) AS dispatch_type,
+                    COALESCE(
+                        json_type(result_json, '$.task_lifecycle.resume_executor_dispatch_result'),
+                        json_type(result_json, '$.task_journal.summary.task_lifecycle.resume_executor_dispatch_result')
+                    ) AS dispatch_result_type
+             FROM tasks
+             WHERE status = 'running'
+               AND result_json IS NOT NULL
+               AND json_valid(result_json)
+         )
+         SELECT task_id, user_id, chat_id, user_key, channel, external_user_id,
+                external_chat_id, kind, payload_json, result_json, claim_attempt, sort_ts
+         FROM candidates
+         WHERE lifecycle_state = 'running'
+           AND execution_plan_type = 'object'
+           AND (
+                (?1 IN (0, 1)
+                 AND resume_owner = ?2
+                 AND resume_claim_expires_at > ?3
+                 AND executor_claim_expires_at > ?3)
+                OR
+                (?1 = 2 AND dispatch_result_type = 'object')
+           )
+           AND (?1 != 1 OR (
+                handoff_type = 'object'
+                AND handoff_claim_expires_at > ?3
+                AND dispatch_type = 'object'
+           ))
+           AND (?1 != 2 OR (
+                handoff_type = 'object'
+                AND dispatch_type = 'object'
+                AND dispatch_result_type = 'object'
+           ))
+           AND (sort_ts > ?4 OR (sort_ts = ?4 AND task_id > ?5))
+         ORDER BY sort_ts ASC, task_id ASC
+         LIMIT ?6",
     )?;
-    let rows = stmt.query_map([], |row| {
-        Ok((
-            ClaimedTask {
+    let mut out = Vec::new();
+    let mut after_sort_ts = i64::MIN;
+    let mut after_task_id = String::new();
+    loop {
+        let mut batch_count = 0usize;
+        let mut rows = stmt.query(params![
+            stage as i64,
+            state.worker.worker_id.as_str(),
+            now_ts,
+            after_sort_ts,
+            after_task_id,
+            SCAN_BATCH_SIZE as i64
+        ])?;
+        while let Some(row) = rows.next()? {
+            batch_count += 1;
+            let task = ClaimedTask {
                 claim_attempt: row.get(10)?,
                 task_id: row.get(0)?,
                 user_id: row.get(1)?,
@@ -164,29 +223,22 @@ pub(crate) fn list_handoff_paused_checkpoint_resume_executions_internal(
                 external_chat_id: row.get(6)?,
                 kind: row.get(7)?,
                 payload_json: row.get(8)?,
-            },
-            row.get::<_, Option<String>>(9)?,
-        ))
-    })?;
-
-    let mut out = Vec::new();
-    for row in rows {
-        let (task, result_json) = row?;
-        let Some(result_json) =
-            result_json.and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
-        else {
-            continue;
-        };
-        if let Some(handoff) = handoff_paused_checkpoint_resume_execution_from_result_json(
-            task,
-            &result_json,
-            &state.worker.worker_id,
-            now_ts,
-        ) {
-            out.push(handoff);
-            if out.len() >= limit {
-                break;
+            };
+            let raw_result_json: String = row.get(9)?;
+            after_sort_ts = row.get(11)?;
+            after_task_id.clone_from(&task.task_id);
+            let Ok(result_json) = serde_json::from_str::<Value>(&raw_result_json) else {
+                continue;
+            };
+            if let Some(candidate) = project(task, &result_json, &state.worker.worker_id, now_ts) {
+                out.push(candidate);
+                if out.len() >= limit {
+                    return Ok(out);
+                }
             }
+        }
+        if batch_count < SCAN_BATCH_SIZE {
+            break;
         }
     }
     Ok(out)

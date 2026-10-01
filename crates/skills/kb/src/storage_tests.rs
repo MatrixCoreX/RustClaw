@@ -9,6 +9,9 @@ fn runtime(root: &Path, user_key: &str) -> KbRuntime {
         workspace_root: root.to_path_buf(),
         storage_database_path: root.join("data/skills/kb/state.db"),
         storage_busy_timeout_ms: 5_000,
+        storage_cache_size_kib: None,
+        storage_mmap_size_bytes: None,
+        storage_temp_store: None,
         path_policy: skill_sdk::SkillPathPolicy::new(root, None)
             .expect("create KB test path policy"),
     }
@@ -55,6 +58,39 @@ fn snapshot(owner: &str, namespace: &str, documents: &[(&str, &str)]) -> Namespa
         docs,
         chunks,
     }
+}
+
+#[test]
+fn sqlite_resource_contract_is_applied_to_skill_owned_connections() {
+    let root = std::env::temp_dir().join(format!(
+        "kb-resource-profile-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    let mut runtime = runtime(&root, "user:resource-profile");
+    runtime.storage_cache_size_kib = Some(384);
+    runtime.storage_mmap_size_bytes = Some(0);
+    runtime.storage_temp_store = Some("file".to_string());
+
+    let db = open(&runtime).expect("open profiled KB storage");
+    let cache_size: i64 = db
+        .query_row("PRAGMA cache_size", [], |row| row.get(0))
+        .expect("cache size");
+    let mmap_size: i64 = db
+        .query_row("PRAGMA mmap_size", [], |row| row.get(0))
+        .unwrap_or(0);
+    let temp_store: i64 = db
+        .query_row("PRAGMA temp_store", [], |row| row.get(0))
+        .expect("temp store");
+
+    assert_eq!(cache_size, -384);
+    assert_eq!(mmap_size, 0);
+    assert_eq!(temp_store, 1);
+    drop(db);
+    std::fs::remove_dir_all(root).expect("remove KB profile fixture");
 }
 
 #[test]

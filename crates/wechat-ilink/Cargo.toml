@@ -19,6 +19,7 @@ reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["fs", "macros", "rt-multi-thread"] }
+tokio-util = { workspace = true, features = ["io"] }
 tracing = "0.1"
 urlencoding = "2"
 

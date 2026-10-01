@@ -19,6 +19,27 @@ pub(super) struct OutputFieldCheck {
     pub(super) exact_label_present: bool,
 }
 
+pub(super) fn host_output_field_checks(
+    output_contract: &crate::IntentOutputContract,
+    candidate_answer: &str,
+) -> Vec<OutputFieldCheck> {
+    if !output_contract.requests_exact_structured_fields() {
+        return Vec::new();
+    }
+    output_contract
+        .selection
+        .structured_field_selector
+        .as_deref()
+        .and_then(crate::machine_selector::exact_machine_field_selector)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|requested_field| OutputFieldCheck {
+            exact_label_present: candidate_answer.contains(&requested_field),
+            requested_field,
+        })
+        .collect()
+}
+
 #[derive(Debug, Deserialize)]
 pub(super) struct OperationCheck {
     pub(super) requested_operation: String,
@@ -39,6 +60,10 @@ pub(super) struct RequiredDispatch {
 }
 
 impl RequiredDispatch {
+    fn missing_evidence_field(&self) -> String {
+        format!("required_dispatch:{}:{}", self.action_type, self.action_ref)
+    }
+
     fn matches(&self, operation: &serde_json::Value) -> bool {
         let field = |name| operation.get(name).and_then(serde_json::Value::as_str);
         match self.action_type.as_str() {
@@ -112,6 +137,7 @@ pub(super) fn validate_operation_audit(
         .map(|(_, operation)| operation)
         .collect::<Vec<_>>();
     let mut missing_operation = false;
+    let mut missing_dispatches = std::collections::BTreeSet::new();
     for check in model.operation_checks {
         if check.requested_operation.trim().is_empty() {
             return invalid_operation_audit();
@@ -142,22 +168,31 @@ pub(super) fn validate_operation_audit(
         let mut matching_success = false;
         let mut matching_failure = false;
         for id in &check.evidence_step_ids {
-            let Some(step) = operations.iter().find(|step| {
-                step.get("step_id").and_then(serde_json::Value::as_str) == Some(id.as_str())
-            }) else {
-                return invalid_operation_audit();
-            };
-            successful |= step.get("status").and_then(serde_json::Value::as_str) == Some("ok");
-            failed |= step.get("status").and_then(serde_json::Value::as_str) == Some("error");
-            if check
-                .required_dispatches
+            let matching_attempts = operations
                 .iter()
-                .any(|required| required.matches(step))
-            {
-                matching_success |=
-                    step.get("status").and_then(serde_json::Value::as_str) == Some("ok");
-                matching_failure |=
-                    step.get("status").and_then(serde_json::Value::as_str) == Some("error");
+                .filter(|step| {
+                    step.get("step_id").and_then(serde_json::Value::as_str) == Some(id.as_str())
+                })
+                .collect::<Vec<_>>();
+            if matching_attempts.is_empty() {
+                return invalid_operation_audit();
+            }
+            // A retry keeps the logical step ID, so audit every recorded
+            // attempt instead of letting the first failed attempt hide a
+            // later successful execution of the same dispatch.
+            for step in matching_attempts {
+                successful |= step.get("status").and_then(serde_json::Value::as_str) == Some("ok");
+                failed |= step.get("status").and_then(serde_json::Value::as_str) == Some("error");
+                if check
+                    .required_dispatches
+                    .iter()
+                    .any(|required| required.matches(step))
+                {
+                    matching_success |=
+                        step.get("status").and_then(serde_json::Value::as_str) == Some("ok");
+                    matching_failure |=
+                        step.get("status").and_then(serde_json::Value::as_str) == Some("error");
+                }
             }
         }
         if !check.applicable {
@@ -191,6 +226,14 @@ pub(super) fn validate_operation_audit(
         }
         missing_operation |= !check.blocked
             && ((requires_method && !check.method_observed) || !check.result_observed);
+        if !check.blocked && requires_method && !check.method_observed {
+            missing_dispatches.extend(
+                check
+                    .required_dispatches
+                    .iter()
+                    .map(RequiredDispatch::missing_evidence_field),
+            );
+        }
     }
     let mut output_format_gap = false;
     let mut audited_output_fields = std::collections::BTreeSet::new();
@@ -214,6 +257,15 @@ pub(super) fn validate_operation_audit(
             verdict
                 .missing_evidence_fields
                 .push("requested_result".to_string());
+        }
+        for dispatch in missing_dispatches {
+            if !verdict
+                .missing_evidence_fields
+                .iter()
+                .any(|field| field == &dispatch)
+            {
+                verdict.missing_evidence_fields.push(dispatch);
+            }
         }
         verdict.should_retry = true;
         verdict.confidence = verdict.confidence.max(0.55);

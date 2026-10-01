@@ -273,6 +273,12 @@ struct ExchangeCredentialInput {
 #[derive(Debug, Clone, Deserialize)]
 struct SkillStorageContext {
     database_path: String,
+    #[serde(default)]
+    database_cache_size_kib: Option<u32>,
+    #[serde(default)]
+    database_mmap_size_bytes: Option<u64>,
+    #[serde(default)]
+    database_temp_store: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -978,6 +984,22 @@ fn skill_owned_exchange_credentials(
     ) else {
         return HashMap::new();
     };
+    if storage
+        .database_cache_size_kib
+        .filter(|value| *value > 0)
+        .is_some_and(|value| {
+            db.pragma_update(None, "cache_size", -(i64::from(value)))
+                .is_err()
+        })
+        || storage.database_mmap_size_bytes.is_some_and(|value| {
+            db.pragma_update(None, "mmap_size", value.min(i64::MAX as u64) as i64)
+                .is_err()
+        })
+        || (storage.database_temp_store.as_deref() == Some("file")
+            && db.pragma_update(None, "temp_store", 1_i64).is_err())
+    {
+        return HashMap::new();
+    }
     let Ok(mut statement) = db.prepare(
         "SELECT exchange, api_key, api_secret, passphrase
          FROM exchange_api_credentials

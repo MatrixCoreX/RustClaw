@@ -256,11 +256,13 @@ fn open_pool(
     ensure_schema: fn(&Connection) -> anyhow::Result<()>,
 ) -> anyhow::Result<DbPool> {
     let path = PathBuf::from(path);
+    let resource_profile = crate::runtime_memory::sqlite_resource_profile();
     let manager = SqliteConnectionManager::file(&path).with_init(move |conn| {
         conn.busy_timeout(Duration::from_millis(busy_timeout_ms.max(1)))?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
+        crate::runtime_memory::apply_sqlite_resource_profile(conn, resource_profile)?;
         Ok(())
     });
     let pool = crate::runtime_memory::sqlite_pool_builder(max_size)

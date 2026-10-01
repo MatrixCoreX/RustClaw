@@ -911,7 +911,10 @@ fn recoverable_provider_blocker_resume_reason(loop_state: &LoopState) -> Option<
 fn recoverable_resource_blocker_resume_reason(loop_state: &LoopState) -> Option<&'static str> {
     const RESOURCE_ADMISSION_ERROR: &str = "resource_admission_unavailable";
     const RESOURCE_WAIT_RESUME_REASON: &str = "resource_admission_wait";
-    const RESOURCE_REPLAN_LIMIT: usize = 4;
+    // Legacy actions that cannot be mapped to a replayable capability get one
+    // planner opportunity. Replayable actions enter the durable wait path on
+    // their first admission refusal and do not consume another model turn.
+    const RESOURCE_REPLAN_LIMIT: usize = 2;
 
     let mut blocked_attempts = 0usize;
     for entry in loop_state.attempt_ledger_entries.iter().rev() {
@@ -932,6 +935,18 @@ fn recoverable_resource_blocker_resume_reason(loop_state: &LoopState) -> Option<
 fn recoverable_machine_blocker_resume_reason(loop_state: &LoopState) -> Option<&'static str> {
     recoverable_provider_blocker_resume_reason(loop_state)
         .or_else(|| recoverable_resource_blocker_resume_reason(loop_state))
+}
+
+fn round_machine_blocker_resume_reason(
+    outcome: Option<&RoundOutcome>,
+    loop_state: &LoopState,
+) -> Option<&'static str> {
+    if outcome.and_then(|round| round.stop_signal.as_deref()) == Some("resource_admission_wait")
+        && loop_state.resource_wait_replay_action.is_some()
+    {
+        return Some("resource_admission_wait");
+    }
+    recoverable_machine_blocker_resume_reason(loop_state)
 }
 
 fn task_budget_soft_slice_exhausted(started_at: Instant, loop_state: &LoopState) -> bool {
@@ -1300,8 +1315,9 @@ fn observe_task_budget(
     let recoverable_failure = outcome.is_some_and(|round| {
         round.stop_signal.as_deref() == Some("recoverable_failure_continue_round")
     });
-    let machine_waiting = (recoverable_failure
-        && recoverable_provider_blocker_resume_reason(loop_state).is_some())
+    let machine_waiting = round_machine_blocker_resume_reason(outcome, loop_state).is_some()
+        || (recoverable_failure
+            && recoverable_provider_blocker_resume_reason(loop_state).is_some())
         || recoverable_resource_blocker_resume_reason(loop_state).is_some();
     let progress = BudgetProgress {
         evidence_count: super::progress_contract::machine_progress_fingerprint_count(loop_state)

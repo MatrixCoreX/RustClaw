@@ -52,6 +52,12 @@ struct SkillStorageContext {
     storage_kind: String,
     database_path: String,
     database_busy_timeout_ms: u64,
+    #[serde(default)]
+    database_cache_size_kib: Option<u32>,
+    #[serde(default)]
+    database_mmap_size_bytes: Option<u64>,
+    #[serde(default)]
+    database_temp_store: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -69,6 +75,9 @@ struct KbRuntime {
     workspace_root: PathBuf,
     storage_database_path: PathBuf,
     storage_busy_timeout_ms: u64,
+    storage_cache_size_kib: Option<u32>,
+    storage_mmap_size_bytes: Option<u64>,
+    storage_temp_store: Option<String>,
     path_policy: SkillPathPolicy,
 }
 
@@ -325,6 +334,9 @@ fn build_runtime_context(req: &SkillRequest) -> Result<KbRuntime> {
         workspace_root,
         storage_database_path: PathBuf::from(&storage.database_path),
         storage_busy_timeout_ms: storage.database_busy_timeout_ms.max(1),
+        storage_cache_size_kib: storage.database_cache_size_kib,
+        storage_mmap_size_bytes: storage.database_mmap_size_bytes,
+        storage_temp_store: storage.database_temp_store,
         path_policy,
     };
     storage::initialize(&runtime)?;

@@ -17,6 +17,9 @@ function snapshot(): HostDependenciesSnapshot {
     summary: {
       total: 2,
       installed: 1,
+      ready: 0,
+      installed_disabled: 0,
+      resource_constrained: 1,
       missing_required: 1,
       missing_optional: 0,
     },
@@ -32,6 +35,8 @@ function snapshot(): HostDependenciesSnapshot {
         installable: true,
         used_by: ["workspace"],
         status_code: "missing_required",
+        runtime_state: "missing",
+        runtime_reason_code: "dependency_missing",
       },
       {
         id: "ffmpeg",
@@ -44,6 +49,8 @@ function snapshot(): HostDependenciesSnapshot {
         installable: true,
         used_by: ["audio_transcribe"],
         status_code: "installed",
+        runtime_state: "resource_constrained",
+        runtime_reason_code: "dependent_skills_resource_constrained",
       },
     ],
     operations: [],
@@ -60,14 +67,19 @@ test("shows missing dependencies, versions, capability ownership, and install co
         errorCode={null}
         isAdmin
         installingId={null}
+        diagnosticsExporting={false}
+        diagnosticsExportError={null}
         onRefresh={() => {}}
         onInstall={() => {}}
+        onExportDiagnostics={() => {}}
       />
     </UiDialogProvider>,
   );
 
   assert.match(markup, /系统依赖检查/);
   assert.match(markup, /系统必需缺失 1 项/);
+  assert.match(markup, /内存不足，暂不可运行/);
+  assert.match(markup, /导出诊断/);
   assert.match(markup, /Git 版本管理/);
   assert.match(markup, /ffmpeg version 7\.1/);
   assert.match(markup, /技能依赖/);
@@ -85,8 +97,11 @@ test("does not expose installation controls to non-admin users", () => {
         errorCode={null}
         isAdmin={false}
         installingId={null}
+        diagnosticsExporting={false}
+        diagnosticsExportError={null}
         onRefresh={() => {}}
         onInstall={() => {}}
+        onExportDiagnostics={() => {}}
       />
     </UiDialogProvider>,
   );

@@ -161,7 +161,7 @@ fn required_transcript_review_overrides_direct_respond() {
     loop_state
         .capability_results
         .push(claw_core::capability_result::CapabilityResultEnvelope::ok(
-            "media_download.transcribe",
+            "local_asr.transcribe",
             Some("transcribe".to_string()),
             serde_json::json!({
                 "extra": {
@@ -474,6 +474,44 @@ fn structured_non_retryable_failure_overrides_skill_retry_policy() {
             &err,
         ),
         Some("recoverable_failure_finalize")
+    );
+}
+
+#[test]
+fn retryable_resource_admission_failure_replans_from_machine_contract() {
+    let state = test_state_with_registry();
+    let actions = vec![AgentAction::CallSkill {
+        skill: "fs_basic".to_string(),
+        args: serde_json::json!({"action":"list","path":"."}),
+    }];
+    let err = crate::skills::structured_skill_error_from_parts(
+        "fs_basic",
+        "resource_admission_unavailable",
+        "resource_admission_unavailable",
+        None,
+        Some(serde_json::json!({
+            "message_key": "clawd.execution.resource_admission_unavailable",
+            "retryable": true,
+            "failure_phase": "pre_dispatch",
+            "side_effect_applied": false,
+            "wait_reason": "memory_unavailable"
+        })),
+    );
+
+    assert_eq!(
+        classify_skill_failure_recovery(
+            &state,
+            &actions,
+            0,
+            4,
+            "fs_basic",
+            actions.first().map(|action| match action {
+                AgentAction::CallSkill { args, .. } => args,
+                _ => unreachable!(),
+            }),
+            &err,
+        ),
+        Some("recoverable_failure_continue_round")
     );
 }
 

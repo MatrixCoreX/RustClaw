@@ -398,6 +398,16 @@ function sha256Hex(text) {
     return crypto.createHash('sha256').update(text || '', 'utf8').digest('hex');
 }
 
+function sha256File(filePath) {
+    return new Promise((resolve, reject) => {
+        const digest = crypto.createHash('sha256');
+        const stream = fsSync.createReadStream(filePath);
+        stream.on('data', chunk => digest.update(chunk));
+        stream.once('error', reject);
+        stream.once('end', () => resolve(digest.digest('hex')));
+    });
+}
+
 function chunkTextByChars(text, maxChars) {
     const clean = normalizeWhitespace(text || '');
     if (!clean) return [];
@@ -1436,9 +1446,7 @@ async function openExtract(input) {
                     const contentHash = sha256Hex(item.canonical_text || item.text || '');
                     const htmlHash = sha256Hex(item.raw_html || '');
                     const screenshotHash = item.screenshot_path
-                        ? crypto.createHash('sha256')
-                            .update(await fs.readFile(item.screenshot_path))
-                            .digest('hex')
+                        ? await sha256File(item.screenshot_path)
                         : null;
                     const receiptId = `browser_page:${capture.runId}:${pageOrdinal}:${contentHash}`;
                     let imageRel = item.screenshot_path ? toPosixRel(capture.runRoot, item.screenshot_path) : null;

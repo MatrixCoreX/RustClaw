@@ -31,6 +31,8 @@ PYTHON_WHEELHOUSE_ROOT=""
 INSTALLED_ON_DEMAND_SKILLS=()
 LIVE_STEERING_CASES=""
 LIVE_STEERING_SELECTED_ONLY=0
+PRESSURE_MEMORY_MIB=0
+PRESSURE_HOLD_SECONDS=60
 
 usage() {
   cat <<'EOF'
@@ -82,6 +84,10 @@ Options:
   --live-steering-selected-only
                           with --live-steering-cases, run only cases marked
                           selected=true (the required preflight subset).
+  --pressure-memory-mib N allocate and touch N MiB inside the isolated test
+                          scope before starting the suite; isolated mode only.
+  --pressure-hold-seconds N
+                          release injected pressure after N seconds. Default: 60
   -h, --help              show this help
 
 Examples:
@@ -186,6 +192,14 @@ while [[ $# -gt 0 ]]; do
       LIVE_STEERING_SELECTED_ONLY=1
       shift
       ;;
+    --pressure-memory-mib)
+      PRESSURE_MEMORY_MIB="$2"
+      shift 2
+      ;;
+    --pressure-hold-seconds)
+      PRESSURE_HOLD_SECONDS="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -209,6 +223,11 @@ for numeric_value in "$WAIT_SECONDS" "$POLL_SECONDS" "$START_TIMEOUT_SECONDS"; d
     exit 2
   fi
 done
+if ! [[ "$PRESSURE_MEMORY_MIB" =~ ^[0-9]+$ ]] \
+  || ! [[ "$PRESSURE_HOLD_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "pressure memory must be a non-negative integer and hold seconds must be positive" >&2
+  exit 2
+fi
 
 if [[ "${BUILD_RELEASE}" -eq 1 || "${#INSTALL_ON_DEMAND_SKILLS[@]}" -gt 0 ]]; then
   configure_cargo_build_environment
@@ -216,6 +235,10 @@ fi
 
 if [[ "${ENABLE_TEST_MEMORY}" -eq 1 && "${REUSE_SERVER}" -eq 1 ]]; then
   echo "--enable-test-memory requires an isolated test server" >&2
+  exit 2
+fi
+if [[ "${PRESSURE_MEMORY_MIB}" -gt 0 && "${REUSE_SERVER}" -eq 1 ]]; then
+  echo "--pressure-memory-mib requires an isolated test server" >&2
   exit 2
 fi
 
@@ -241,6 +264,7 @@ curl_health() {
 
 started_pid=""
 suite_pid=""
+pressure_pid=""
 ISOLATION_ROOT=""
 ISOLATED_WORKSPACE=""
 
@@ -436,6 +460,10 @@ cleanup() {
     kill "${suite_pid}" >/dev/null 2>&1 || true
     wait "${suite_pid}" >/dev/null 2>&1 || true
   fi
+  if [[ -n "${pressure_pid}" ]] && kill -0 "${pressure_pid}" >/dev/null 2>&1; then
+    kill "${pressure_pid}" >/dev/null 2>&1 || true
+    wait "${pressure_pid}" >/dev/null 2>&1 || true
+  fi
   if [[ -n "${started_pid}" ]] && kill -0 "${started_pid}" >/dev/null 2>&1; then
     remove_installed_on_demand_skills || true
   fi
@@ -453,6 +481,41 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
+
+start_isolated_memory_pressure() {
+  [[ "${PRESSURE_MEMORY_MIB}" -gt 0 ]] || return 0
+  local ready_file="${ISOLATION_ROOT}/memory-pressure-ready"
+  rm -f "${ready_file}"
+  python3 - "${PRESSURE_MEMORY_MIB}" "${PRESSURE_HOLD_SECONDS}" "${ready_file}" <<'PY' &
+import sys
+import time
+from pathlib import Path
+
+memory_mib = int(sys.argv[1])
+hold_seconds = int(sys.argv[2])
+ready_file = Path(sys.argv[3])
+payload = bytearray(memory_mib * 1024 * 1024)
+for offset in range(0, len(payload), 4096):
+    payload[offset] = 1
+ready_file.write_text(str(len(payload)), encoding="utf-8")
+time.sleep(hold_seconds)
+PY
+  pressure_pid=$!
+  for _ in $(seq 1 60); do
+    if [[ -s "${ready_file}" ]]; then
+      echo "isolated_memory_pressure=ready memory_mib=${PRESSURE_MEMORY_MIB} hold_seconds=${PRESSURE_HOLD_SECONDS} pid=${pressure_pid}"
+      return 0
+    fi
+    if ! kill -0 "${pressure_pid}" >/dev/null 2>&1; then
+      wait "${pressure_pid}" || true
+      echo "isolated memory pressure process exited before readiness" >&2
+      return 1
+    fi
+    sleep 0.5
+  done
+  echo "isolated memory pressure readiness timeout" >&2
+  return 1
+}
 
 cd "${ROOT_DIR}"
 mkdir -p "${LOG_DIR}"
@@ -623,6 +686,8 @@ if [[ "${ENABLE_TEST_MEMORY}" -eq 1 ]]; then
     --isolation-root "${ISOLATION_ROOT}" --base-url "${BASE_URL}"
 fi
 
+start_isolated_memory_pressure
+
 stamp="$(date +%Y%m%d_%H%M%S)"
 SUITE_LOG="${LOG_DIR%/}/agent_full_nl_${stamp}.out"
 
@@ -696,7 +761,7 @@ fi
 set -e
 
 prompt_count="$(grep -Ec '^(\[PROMPT\]|PROMPT:)' "${SUITE_LOG}" 2>/dev/null || true)"
-rate_limit_count="$(grep -Ec 'Rate limit|rate_limit|usage limit|限流|模型暂时不可用' "${SUITE_LOG}" 2>/dev/null || true)"
+rate_limit_count="$(grep -Ec 'provider_rate_limited|provider_unavailable|provider_quota_exhausted|external_blocker' "${SUITE_LOG}" 2>/dev/null || true)"
 
 echo "NL_SUITE_STATUS=${suite_status}"
 echo "PROMPT_COUNT=${prompt_count}"

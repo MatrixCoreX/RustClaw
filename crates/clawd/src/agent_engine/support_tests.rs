@@ -4,11 +4,14 @@ use super::{
     build_agent_loop_recovery_snapshot_payload,
     build_agent_loop_user_input_checkpoint_progress_payload, checkpoint_continuation_actions,
     collect_execution_recipe_progress_hints, execution_recipe_phase_progress_key,
-    load_agent_loop_guard_policy, refresh_agent_loop_checkpoint_snapshot, AgentLoopGuardPolicy,
-    AnswerVerifierRequiredEvidenceScope, LoopBudgetProfile, LoopRecipeOverrides,
-    RegistryIdempotencyGuardScope,
+    load_agent_loop_guard_policy, persist_resource_wait_checkpoint_action,
+    refresh_agent_loop_checkpoint_snapshot, resource_wait_retry_after_seconds,
+    AgentLoopGuardPolicy, AnswerVerifierRequiredEvidenceScope, LoopBudgetProfile,
+    LoopRecipeOverrides, RegistryIdempotencyGuardScope,
 };
-use crate::agent_engine::{seed_loop_state_for_agent_run, AgentRunContext, LoopState};
+use crate::agent_engine::{
+    seed_loop_state_for_agent_run, AgentRunContext, LoopState, ResourceWaitReplayAction,
+};
 use crate::execution_recipe::{
     ExecutionRecipeKind, ExecutionRecipePhase, ExecutionRecipeProfile, ExecutionRecipeRuntimeState,
     ExecutionRecipeSpec, ExecutionRecipeTargetScope,
@@ -485,6 +488,10 @@ fn provider_blocker_checkpoint_payload_records_background_resume_contract() {
         "provider_blocker_wait_background"
     );
     assert_eq!(
+        payload["task_lifecycle"]["message_key"],
+        "clawd.task.provider_waiting"
+    );
+    assert_eq!(
         payload["task_checkpoint"]["boundary_context"]["resume_reason"],
         "provider_blocker_wait_background"
     );
@@ -520,6 +527,153 @@ fn provider_blocker_checkpoint_payload_records_background_resume_contract() {
             ["provider_status"]["retry_after_seconds"],
         60
     );
+}
+
+#[test]
+fn resource_wait_checkpoint_payload_exposes_a_stable_message_key() {
+    let task = support_test_task();
+    let mut loop_state = LoopState::new();
+    loop_state.resource_wait_replay_action = Some(ResourceWaitReplayAction {
+        tool_or_skill: "browser_session".to_string(),
+        action_ref: "browser.session_open".to_string(),
+        args: serde_json::json!({
+            "action": "session_open",
+            "url": "https://example.invalid",
+            "credential": "private-test-value"
+        }),
+        continuation_actions: Vec::new(),
+    });
+    let payload = build_agent_loop_checkpoint_progress_payload(
+        &task,
+        &loop_state,
+        "resource_admission_wait",
+        1_781_800_000,
+        1_781_800_060,
+    );
+
+    assert_eq!(payload["task_lifecycle"]["state"], "waiting");
+    assert_eq!(
+        payload["task_lifecycle"]["message_key"],
+        "clawd.task.resource_waiting"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["boundary_context"]["message_key"],
+        "clawd.task.resource_waiting"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["pending_action"]["kind"],
+        "resource_admission_retry"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["pending_action"]["action_ref"],
+        "browser.session_open"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["pending_action"]["args_keys"],
+        serde_json::json!(["action", "credential", "url"])
+    );
+    assert!(!payload["task_checkpoint"]["pending_action"]
+        .to_string()
+        .contains("private-test-value"));
+    assert_eq!(
+        payload["task_checkpoint"]["boundary_context"]["agent_loop_resume_state"]["stage"],
+        "tool_execution"
+    );
+}
+
+#[test]
+fn resource_wait_retry_backoff_is_bounded_and_monotonic() {
+    assert_eq!(resource_wait_retry_after_seconds(0), 15);
+    assert_eq!(resource_wait_retry_after_seconds(1), 15);
+    assert_eq!(resource_wait_retry_after_seconds(2), 30);
+    assert_eq!(resource_wait_retry_after_seconds(3), 60);
+    assert_eq!(resource_wait_retry_after_seconds(4), 120);
+    assert_eq!(resource_wait_retry_after_seconds(u32::MAX), 120);
+}
+
+#[test]
+fn resource_wait_checkpoint_persists_exact_private_action() {
+    let state = state_with_registry(
+        r#"
+[[skills]]
+name = "browser_session"
+enabled = true
+kind = "builtin"
+planner_capabilities = [
+  { name = "browser.session_open", action = "session_open", effect = "external" },
+]
+"#,
+        &["browser_session"],
+    )
+    .with_seeded_db_schema();
+    state
+        .core
+        .db
+        .get()
+        .expect("database")
+        .execute(
+            "INSERT INTO tasks (
+                task_id, user_id, chat_id, user_key, principal_id, channel, kind, payload_json,
+                status, result_json, error_text, created_at, updated_at
+             ) VALUES (
+                'task-support', 1, 2, 'support-key', 'support-principal', 'ui', 'ask', '{}',
+                'running', NULL, NULL, '1', '1'
+             )",
+            [],
+        )
+        .expect("insert task");
+    let task = support_test_task();
+    let private_args = serde_json::json!({
+        "action": "session_open",
+        "url": "https://example.invalid",
+        "credential": "private-test-value"
+    });
+    let mut loop_state = LoopState::new();
+    loop_state.conversation_input_revision = 7;
+    loop_state.conversation_execution_epoch = 11;
+    loop_state.resource_wait_replay_action = Some(ResourceWaitReplayAction {
+        tool_or_skill: "browser_session".to_string(),
+        action_ref: "browser.session_open".to_string(),
+        args: private_args.clone(),
+        continuation_actions: vec![crate::AgentAction::SynthesizeAnswer {
+            evidence_refs: Vec::new(),
+        }],
+    });
+    let payload = build_agent_loop_checkpoint_progress_payload(
+        &task,
+        &loop_state,
+        "resource_admission_wait",
+        1_781_800_000,
+        1_781_800_060,
+    );
+
+    persist_resource_wait_checkpoint_action(&state, &task, &loop_state, &payload)
+        .expect("persist resource wait action");
+
+    let checkpoint_id = payload["task_lifecycle"]["checkpoint_id"]
+        .as_str()
+        .expect("checkpoint id");
+    let stored =
+        crate::repo::load_task_checkpoint_action(&state.core.db, &task.task_id, checkpoint_id)
+            .expect("load checkpoint action")
+            .expect("stored checkpoint action");
+    assert_eq!(stored.tool_or_skill, "browser_session");
+    assert_eq!(stored.action_ref, "browser.session_open");
+    assert_eq!(stored.args, private_args);
+    assert_eq!(stored.instruction_revision, 7);
+    assert_eq!(stored.execution_epoch, 11);
+    assert!(stored.approval_binding.is_none());
+    assert_eq!(
+        stored
+            .execution_binding
+            .as_ref()
+            .and_then(|binding| binding.get("skill_name"))
+            .and_then(serde_json::Value::as_str),
+        Some("browser_session")
+    );
+    assert!(!payload["task_checkpoint"]["pending_action"]
+        .to_string()
+        .contains("private-test-value"));
 }
 
 #[test]
@@ -682,6 +836,16 @@ fn task_budget_slice_checkpoint_payload_records_message_key() {
 
 #[test]
 fn seed_loop_state_restores_checkpoint_budget_and_side_effect_guards() {
+    let mut source_loop_state = LoopState::new();
+    crate::agent_engine::attempt_ledger::record_attempt(
+        &mut source_loop_state,
+        "config_edit",
+        "target=config",
+        crate::executor::StepExecutionStatus::Error,
+        "",
+        Some("needs_retry"),
+        "needs_retry",
+    );
     let checkpoint = crate::task_lifecycle::TaskCheckpoint {
         schema_version: 1,
         checkpoint_id: "ckpt-seed-state".to_string(),
@@ -716,13 +880,9 @@ fn seed_loop_state_restores_checkpoint_budget_and_side_effect_guards() {
             llm_elapsed_ms: 900,
             tool_elapsed_ms: 0,
         },
-        attempt_ledger: Some(serde_json::json!([{
-            "attempt_id": "a1",
-            "action_ref": "config_edit",
-            "tool_or_skill": "config_edit",
-            "status": "error",
-            "error_code": "needs_retry"
-        }])),
+        attempt_ledger: crate::agent_engine::attempt_ledger::build_attempt_ledger_snapshot(
+            &source_loop_state,
+        ),
         pending_async_job: None,
         repair_signal: None,
         resume_entrypoint: crate::task_lifecycle::ResumeEntrypoint::NextPlannerRound,
@@ -782,11 +942,15 @@ fn seed_loop_state_restores_checkpoint_budget_and_side_effect_guards() {
             .get("agent_loop.resume_attempt_ledger_present"),
         Some(&"true".to_string())
     );
-    assert!(loop_state
+    assert_eq!(loop_state.attempt_ledger_entries.len(), 1);
+    assert_eq!(
+        loop_state.attempt_ledger_entries[0].error_code.as_deref(),
+        Some("needs_retry")
+    );
+    assert!(!loop_state
         .history_compact
         .iter()
-        .any(|line| line.starts_with("checkpoint_attempt_ledger_json=")
-            && line.contains("\"error_code\":\"needs_retry\"")));
+        .any(|line| line.starts_with("checkpoint_attempt_ledger_json=")));
     assert_eq!(
         loop_state
             .task_checkpoint

@@ -62,6 +62,14 @@ pub(super) fn spawn_task_result_delivery(
             {
                 Ok(task) => match task.status {
                     TaskStatus::Queued | TaskStatus::Running => {
+                        if progress_projection.should_emit_resource_wait_notice(&task) {
+                            let message = claw_core::channel_i18n::common_text_with_vars_for_locale(
+                                &state.language,
+                                "channel.notice.resource_waiting",
+                                &[("task_id", task_id.as_str())],
+                            );
+                            let _ = bot.send_message(chat_id, message).await;
+                        }
                         if let Some((seq, message)) = skill_progress_message(&state, &task) {
                             if progress_projection.should_emit_progress(
                                 seq,
@@ -176,6 +184,11 @@ pub(super) fn spawn_task_result_delivery(
                                 resume_context,
                             };
                             if let Ok(mut guard) = state.pending_resume_by_chat.lock() {
+                                claw_core::bounded_cache::prepare_hash_map_insert(
+                                    &mut guard,
+                                    &chat_id.0,
+                                    CHANNEL_RUNTIME_CACHE_MAX_ENTRIES,
+                                );
                                 guard.insert(chat_id.0, pending);
                             }
                             break;

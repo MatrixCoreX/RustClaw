@@ -6,7 +6,6 @@ const WECHAT_REQUEST_TIMEOUT_RETRY_LATER_KEY: &str = "wechat.msg.request_timeout
 const WECHAT_TASK_REQUIRES_ATTENTION_KEY: &str = "wechat.msg.task_requires_attention";
 const WECHAT_SKILL_PROGRESS_KB_KEY: &str = "wechat.msg.skill_progress_kb";
 const WECHAT_SKILL_PROGRESS_PACKAGE_KEY: &str = "wechat.msg.skill_progress_package";
-const WECHAT_SKILL_PROGRESS_GENERIC_KEY: &str = "wechat.msg.skill_progress_generic";
 
 #[derive(Clone)]
 pub(super) struct WechatAccountSnapshot {
@@ -108,11 +107,15 @@ pub(super) async fn pin_inbound_task_context(
         }
     };
     let scope = WechatConversationScope::wechat_ilink(&account.account_id, peer_id).ok()?;
-    state
-        .context_tokens
-        .write()
-        .await
-        .insert(scope.storage_key(), context_token.clone());
+    let context_key = scope.storage_key();
+    let mut context_tokens = state.context_tokens.write().await;
+    claw_core::bounded_cache::prepare_hash_map_insert(
+        &mut context_tokens,
+        &context_key,
+        CHANNEL_RUNTIME_CACHE_MAX_ENTRIES,
+    );
+    context_tokens.insert(context_key, context_token.clone());
+    drop(context_tokens);
     let typing_ticket = {
         let mut manager = state.config_cache.lock().await;
         manager
@@ -170,7 +173,7 @@ pub(super) fn skill_progress_message(
         "skill_dispatch.queue.started" | "skill_dispatch.queue.waiting" => return None,
         "kb.operation.starting" => WECHAT_SKILL_PROGRESS_KB_KEY,
         "package_manager.operation.starting" => WECHAT_SKILL_PROGRESS_PACKAGE_KEY,
-        _ => WECHAT_SKILL_PROGRESS_GENERIC_KEY,
+        _ => return None,
     };
     Some((seq, wechat_t(config, message_key)))
 }
@@ -637,6 +640,8 @@ pub(super) async fn submit_wechat_task_with_payload(
     let mut timeout_notice_sent = false;
     let mut last_skill_progress_seq = 0_u64;
     let mut last_seen_status: Option<TaskStatus> = None;
+    let mut progress_projection =
+        claw_core::channel_progress::ChannelProgressProjectionState::default();
     loop {
         let url = format!(
             "{}/v1/tasks/{}",
@@ -730,6 +735,15 @@ pub(super) async fn submit_wechat_task_with_payload(
         last_seen_status = Some(task.status.clone());
         match wechat_task_poll_disposition(&task) {
             WechatTaskPollDisposition::Continue => {
+                if progress_projection.should_emit_resource_wait_notice(&task) {
+                    let message = claw_core::channel_i18n::common_text_with_vars_for_locale(
+                        &state.config.language,
+                        "channel.notice.resource_waiting",
+                        &[("task_id", task_id.as_str())],
+                    );
+                    deliver_pinned_progress_text(&state, &context, &message).await;
+                    timeout_notice_sent = true;
+                }
                 if let Some((seq, message)) = skill_progress_message(&task, &state.config) {
                     if seq > last_skill_progress_seq {
                         last_skill_progress_seq = seq;
@@ -758,6 +772,7 @@ pub(super) async fn submit_wechat_task_with_payload(
                 continue;
             }
             WechatTaskPollDisposition::RequiresAttention => {
+                progress_projection.mark_terminal();
                 finish_typing_heartbeat(&mut typing_heartbeat).await;
                 let attention_text = wechat_t_with(
                     &state.config,
@@ -779,6 +794,7 @@ pub(super) async fn submit_wechat_task_with_payload(
                 break;
             }
             WechatTaskPollDisposition::DeliverTerminal => {
+                progress_projection.mark_terminal();
                 finish_typing_heartbeat(&mut typing_heartbeat).await;
                 request_unified_terminal_delivery(
                     &state,

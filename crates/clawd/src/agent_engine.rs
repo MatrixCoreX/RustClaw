@@ -234,6 +234,14 @@ fn build_turn_analysis_prompt_block(
 // Phase 3.3 Stage 2.3：LoopState 字段升 pub(crate)，因 finalize/loop_reply.rs 物理搬到了
 // 不同模块（`crate::finalize`），无法再通过 `pub(super)` 隐式继承；继续保持仅 `pub(crate)`，
 // 不暴露给 crate 外部。改字段时请关注 crate::finalize::* 与 crate::agent_engine::* 内的写入点。
+#[derive(Debug, Clone)]
+pub(crate) struct ResourceWaitReplayAction {
+    pub(crate) tool_or_skill: String,
+    pub(crate) action_ref: String,
+    pub(crate) args: Value,
+    pub(crate) continuation_actions: Vec<AgentAction>,
+}
+
 #[derive(Debug, Default, Clone)]
 pub(crate) struct LoopState {
     pub(crate) round_no: usize,
@@ -334,6 +342,14 @@ pub(crate) struct LoopState {
     /// an approval checkpoint. It is consumed once by the matching action and
     /// never exposed to the planner or skill arguments.
     pub(crate) checkpoint_action_replay: Option<Value>,
+    /// A verifier-approved action rejected before dispatch only because the
+    /// host lacked resources. A resource-wait checkpoint persists it privately
+    /// so wakeups do not need another model turn before retrying admission.
+    pub(crate) resource_wait_replay_action: Option<ResourceWaitReplayAction>,
+    /// Consecutive resource-admission refusals carried across checkpoints.
+    /// This drives bounded machine retry backoff and is reset after any
+    /// successful capability execution.
+    pub(crate) resource_wait_attempts: u32,
 }
 
 impl LoopState {

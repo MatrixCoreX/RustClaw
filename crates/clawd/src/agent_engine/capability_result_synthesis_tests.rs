@@ -80,7 +80,7 @@ fn latest_successful_transcription_contract_drives_review() {
             }),
         ),
         CapabilityResultEnvelope::ok(
-            "media_download.transcribe",
+            "local_asr.transcribe",
             Some("transcribe".to_string()),
             json!({
                 "extra": {
@@ -127,7 +127,7 @@ fn latest_successful_transcription_contract_drives_review() {
 #[test]
 fn transcript_review_requires_its_own_terminal_model_synthesis_result() {
     let mut silent = CapabilityResultEnvelope::ok(
-        "media_download.transcribe",
+        "local_asr.transcribe",
         Some("transcribe".to_string()),
         json!({
             "extra": {
@@ -142,7 +142,7 @@ fn transcript_review_requires_its_own_terminal_model_synthesis_result() {
     assert!(!pending_transcript_review(&[silent]));
 
     let mut waiting = CapabilityResultEnvelope::ok(
-        "media_download.transcribe",
+        "local_asr.transcribe",
         Some("transcribe".to_string()),
         json!({
             "extra": {

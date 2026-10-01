@@ -90,7 +90,7 @@ fn group_loader_expands_only_exact_registry_groups() {
     assert!(matches!(repeated, ActionLoopDecision::StopRound(_)));
     assert_eq!(executed, 2);
 
-    let error = match handle_capability_group_load(
+    let recovery = handle_capability_group_load(
         &state,
         &task,
         &mut loop_state,
@@ -99,11 +99,95 @@ fn group_loader_expands_only_exact_registry_groups() {
         3,
         3,
         &mut executed,
-    ) {
-        Ok(_) => panic!("unknown registry group must be rejected"),
-        Err(error) => error,
+    )
+    .expect("unknown registry group must become a planner-visible recovery observation");
+    assert!(matches!(
+        recovery,
+        ActionLoopDecision::StopRound(signal)
+            if signal == "recoverable_failure_continue_round"
+    ));
+    assert_eq!(executed, 3);
+    assert!(loop_state.has_recoverable_failure_context);
+    assert_eq!(
+        loop_state
+            .executed_step_results
+            .last()
+            .map(|step| step.status),
+        Some(crate::executor::StepExecutionStatus::Error)
+    );
+    let observation: serde_json::Value = serde_json::from_str(
+        loop_state
+            .last_output
+            .as_deref()
+            .expect("loader failure observation"),
+    )
+    .expect("structured loader failure");
+    assert_eq!(
+        observation["error_code"],
+        json!("capability_group_not_loadable")
+    );
+    assert_eq!(observation["invalid_groups"], json!(["not_registered"]));
+    assert_eq!(observation["retryable"], json!(true));
+    assert_eq!(
+        loop_state.failed_action_fingerprints.get("load:invalid"),
+        Some(&1)
+    );
+}
+
+#[test]
+fn group_loader_contract_errors_are_recoverable_machine_observations() {
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+    let task = crate::ClaimedTask {
+        claim_attempt: 0,
+        task_id: "capability-loader-contract-error".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
     };
-    assert!(error.contains("capability_group_not_loadable"));
+    let mut loop_state = LoopState::new();
+    loop_state.round_no = 1;
+    let mut executed = 0;
+
+    let decision = handle_capability_group_load(
+        &state,
+        &task,
+        &mut loop_state,
+        &json!({"op": "search"}),
+        "load:missing-query",
+        1,
+        1,
+        &mut executed,
+    )
+    .expect("missing search query must be recoverable");
+
+    assert!(matches!(
+        decision,
+        ActionLoopDecision::StopRound(signal)
+            if signal == "recoverable_failure_continue_round"
+    ));
+    assert_eq!(executed, 1);
+    let observation: serde_json::Value = serde_json::from_str(
+        loop_state
+            .last_output
+            .as_deref()
+            .expect("contract failure observation"),
+    )
+    .expect("structured contract failure");
+    assert_eq!(
+        observation["error_code"],
+        json!("capability_catalog_search_query_missing")
+    );
+    assert_eq!(
+        observation["next_action"],
+        json!("replan_from_capability_loader_observation")
+    );
 }
 
 #[test]

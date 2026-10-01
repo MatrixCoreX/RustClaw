@@ -1,5 +1,5 @@
 import type { RefObject } from "react";
-import { Loader2, RefreshCw } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2, RefreshCw } from "lucide-react";
 
 type Translate = (zh: string, en: string) => string;
 
@@ -7,6 +7,9 @@ export interface LogsPageProps {
   t: Translate;
   tSlash: (mixed: string) => string;
   logFiles: string[];
+  logFilesTotal: number;
+  logFilesHasPrevious: boolean;
+  logFilesHasNext: boolean;
   logFilesLoading: boolean;
   logFilesError: string | null;
   selectedLogFile: string;
@@ -21,6 +24,8 @@ export interface LogsPageProps {
   onSelectedLogFileChange: (value: string) => void;
   onLogTailLinesChange: (value: number) => void;
   onLogFollowTailChange: (value: boolean) => void;
+  onPreviousLogFilesPage: () => void | Promise<void>;
+  onNextLogFilesPage: () => void | Promise<void>;
   onRefreshLogs: () => void | Promise<void>;
 }
 
@@ -28,6 +33,9 @@ export function LogsPage({
   t,
   tSlash,
   logFiles,
+  logFilesTotal,
+  logFilesHasPrevious,
+  logFilesHasNext,
   logFilesLoading,
   logFilesError,
   selectedLogFile,
@@ -42,6 +50,8 @@ export function LogsPage({
   onSelectedLogFileChange,
   onLogTailLinesChange,
   onLogFollowTailChange,
+  onPreviousLogFilesPage,
+  onNextLogFilesPage,
   onRefreshLogs,
 }: LogsPageProps) {
   return (
@@ -79,6 +89,31 @@ export function LogsPage({
               ))
             )}
           </select>
+          <span className="flex items-center justify-between gap-2 text-xs text-white/50">
+            <span>{t(`共 ${logFilesTotal} 个`, `${logFilesTotal} total`)}</span>
+            <span className="flex gap-1">
+              <button
+                type="button"
+                title={t("上一页", "Previous page")}
+                aria-label={t("上一页", "Previous page")}
+                className="theme-icon-btn h-7 w-7"
+                disabled={logFilesLoading || !logFilesHasPrevious}
+                onClick={() => void onPreviousLogFilesPage()}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                title={t("下一页", "Next page")}
+                aria-label={t("下一页", "Next page")}
+                className="theme-icon-btn h-7 w-7"
+                disabled={logFilesLoading || !logFilesHasNext}
+                onClick={() => void onNextLogFilesPage()}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </span>
+          </span>
         </label>
 
         <label className="space-y-2">

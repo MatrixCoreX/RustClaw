@@ -146,7 +146,7 @@ pub(crate) mod runner;
 pub(crate) mod runner_pool;
 pub(crate) use async_poll::run_pinned_async_poll_skill_with_runner;
 
-pub(crate) use builtin::execute_builtin_skill_for_task;
+pub(crate) use builtin::execute_builtin_skill_for_task_with_resource_lease;
 #[cfg(test)]
 pub(crate) use builtin::run_safe_command;
 // `execute_builtin_skill`（无 task 版本）只在 `builtin.rs` 内部测试用，
@@ -1152,6 +1152,20 @@ fn skill_action_token(args: &Value) -> Option<String> {
         .map(|value| value.to_ascii_lowercase().replace(['-', ' ', '.'], "_"))
 }
 
+fn resource_estimate_key(
+    state: &AppState,
+    skill_name: &str,
+    action: Option<&str>,
+) -> crate::resource_scheduler::ResourceEstimateKey {
+    let views = state.get_skill_views_snapshot();
+    crate::resource_scheduler::ResourceEstimateKey {
+        scope: skill_name.to_string(),
+        action: action.unwrap_or("default").to_string(),
+        registry_generation: views.binding.registry_generation,
+        registry_generation_digest: views.binding.registry_generation_digest.clone(),
+    }
+}
+
 fn action_scoped_planner_mapping(
     state: &AppState,
     skill_name: &str,
@@ -1203,6 +1217,10 @@ fn skill_dispatch_queue_selection(
         SkillDispatchQueueScope::User => Some(SkillDispatchQueueSelection {
             key: format!("__dispatch_queue__{skill_name}__user__{}", task.user_id),
             scope: "user",
+        }),
+        SkillDispatchQueueScope::Global => Some(SkillDispatchQueueSelection {
+            key: format!("__dispatch_queue__{skill_name}__global"),
+            scope: "global",
         }),
     }
 }
@@ -1573,6 +1591,62 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
         kind_str
     );
 
+    let action = skill_action_token(&args);
+    let resource_request =
+        state.skill_resource_request_for_dispatch(&skill_name, action.as_deref());
+    let resource_estimate_key = resource_estimate_key(state, &skill_name, action.as_deref());
+    let configured_skill_ceiling = state
+        .skill_max_concurrency_for_dispatch(&skill_name)
+        .unwrap_or(state.skill_rt.skill_global_max_concurrency);
+    let resource_lease = match state
+        .skill_rt
+        .skill_concurrency_gates
+        .resource_broker()
+        .try_acquire_for_estimate_key(
+            resource_request.as_ref(),
+            configured_skill_ceiling,
+            Some(&resource_estimate_key),
+        ) {
+        Ok(lease) => lease,
+        Err(grant) => {
+            return Err(structured_skill_error_from_parts(
+                &skill_name,
+                "resource_admission_unavailable",
+                "resource_admission_unavailable",
+                Some(std::env::consts::OS),
+                Some(json!({
+                    "message_key": "clawd.execution.resource_admission_unavailable",
+                    "retryable": true,
+                    "failure_phase": "pre_dispatch",
+                    "side_effect_applied": false,
+                    "wait_reason": grant.wait_reason,
+                    "resource_grant": grant.projection,
+                })),
+            ));
+        }
+    };
+    let mut resource_lease = Some(resource_lease);
+    let resource_grant = resource_lease
+        .as_ref()
+        .expect("resource lease must be held during dispatch")
+        .grant()
+        .clone();
+    let _ = crate::task_event_transport::publish_claimed_event(
+        state,
+        task,
+        "resource_admission",
+        json!({
+            "schema_version": 1,
+            "source": "resource_broker",
+            "skill_name": skill_name,
+            "resource_grant": resource_grant.projection.clone(),
+            "phase_key": "resource_admitted",
+            "progress_kind": "poll_status",
+            "can_pause": true,
+            "can_cancel": true,
+        }),
+    );
+
     match kind {
         SkillKind::Builtin => {
             if skill_name == "run_cmd" {
@@ -1587,8 +1661,14 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
                 builtin_success_extra(&execution_state.skill_rt.workspace_root, &skill_name, &args),
                 isolation_artifact_refs,
             );
-            let mut text =
-                execute_builtin_skill_for_task(execution_state, task, &skill_name, &args).await?;
+            let mut text = execute_builtin_skill_for_task_with_resource_lease(
+                execution_state,
+                task,
+                &skill_name,
+                &args,
+                resource_lease.take(),
+            )
+            .await?;
             if skill_name == "workspace_patch" {
                 extra = append_extra_artifact_refs(
                     serde_json::from_str::<Value>(&text).ok(),
@@ -1623,43 +1703,6 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
     );
 
     let dispatch_queue = skill_dispatch_queue_selection(state, task, &skill_name, &args);
-    let action = skill_action_token(&args);
-    let resource_request =
-        state.skill_resource_request_for_dispatch(&skill_name, action.as_deref());
-    let configured_skill_ceiling = state
-        .skill_max_concurrency_for_dispatch(&skill_name)
-        .unwrap_or(state.skill_rt.skill_global_max_concurrency);
-    let resource_grant =
-        crate::resource_scheduler::host_grant(resource_request.as_ref(), configured_skill_ceiling);
-    if !resource_grant.admitted {
-        return Err(structured_skill_error_from_parts(
-            &skill_name,
-            "resource_admission_unavailable",
-            "resource_admission_unavailable",
-            Some(std::env::consts::OS),
-            Some(json!({
-                "message_key": "clawd.execution.resource_admission_unavailable",
-                "retryable": true,
-                "wait_reason": resource_grant.wait_reason,
-                "resource_grant": resource_grant.projection,
-            })),
-        ));
-    }
-    let _ = crate::task_event_transport::publish_claimed_event(
-        state,
-        task,
-        "resource_admission",
-        json!({
-            "schema_version": 1,
-            "source": "resource_scheduler",
-            "skill_name": skill_name,
-            "resource_grant": resource_grant.projection,
-            "phase_key": "resource_admitted",
-            "progress_kind": "poll_status",
-            "can_pause": true,
-            "can_cancel": true,
-        }),
-    );
     let action_mapping = action_scoped_planner_mapping(state, &skill_name, &args);
     let durable_background =
         runner::local_process_durable_background_requested(action_mapping.as_ref());
@@ -1749,16 +1792,27 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
                 &args,
                 &source,
                 skill_timeout_secs,
+                Some(&resource_grant.projection),
                 execution_context,
                 dispatch_queue
                     .as_ref()
                     .map(|selection| selection.key.as_str()),
                 pinned_execution_binding,
+                Some(&resource_estimate_key),
             )
             .await?
         }
         SkillKind::Builtin => unreachable!(),
     };
+    if durable_background {
+        if let Some(job_dir) = pending_local_process_job_directory(&value) {
+            resource_lease
+                .take()
+                .expect("resource lease must be available for durable handoff")
+                .hold_until_durable_job_terminal(job_dir)
+                .await?;
+        }
+    }
     if let (Some(selection), Some(job_dir), Some(permit)) = (
         dispatch_queue.as_ref(),
         pending_local_process_job_directory(&value),

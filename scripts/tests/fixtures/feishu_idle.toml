@@ -1,0 +1,19 @@
+[feishu]
+enabled = true
+mode = "webhook"
+listen = "127.0.0.1:18789"
+clawd_base_url = "http://127.0.0.1:18787"
+api_base_url = "http://127.0.0.1:18790"
+language = "en-US"
+i18n_path = "configs/i18n/feishud.en-US.toml"
+image_inbox_dir = "tmp/channel-idle/feishu/image"
+video_inbox_dir = "tmp/channel-idle/feishu/video"
+audio_inbox_dir = "tmp/channel-idle/feishu/audio"
+file_inbox_dir = "tmp/channel-idle/feishu/file"
+app_id = "idle-probe"
+app_secret = "idle-probe"
+verification_token = "idle-probe"
+encrypt_key = "idle-probe"
+request_timeout_seconds = 5
+task_delivery_timeout_seconds = 5
+text_chunk_chars = 4000

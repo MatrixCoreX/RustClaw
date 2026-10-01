@@ -584,9 +584,9 @@ fn wechat_media_progress_stays_transport_state_without_canned_replies() {
     for detail_key in [
         "media_download.download.starting",
         "media_download.download.completed",
-        "media_download.transcribe.extracting_audio",
-        "media_download.transcribe.recognizing_speech",
-        "media_download.transcribe.completed",
+        "local_asr.extracting_audio",
+        "local_asr.recognizing_speech",
+        "local_asr.completed",
     ] {
         task.skill_progress
             .as_mut()

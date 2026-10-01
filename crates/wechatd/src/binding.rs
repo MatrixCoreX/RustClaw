@@ -62,6 +62,11 @@ pub(super) async fn set_expect_key_reply(
     let key = scope.storage_key();
     let mut guard = state.pending_key_bind_by_user.write().await;
     if enabled {
+        claw_core::bounded_cache::prepare_hash_set_insert(
+            &mut guard,
+            &key,
+            CHANNEL_RUNTIME_CACHE_MAX_ENTRIES,
+        );
         guard.insert(key);
     } else {
         guard.remove(&key);

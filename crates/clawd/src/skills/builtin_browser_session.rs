@@ -44,6 +44,7 @@ pub(super) async fn execute(
     state: &AppState,
     task: Option<&ClaimedTask>,
     map: &Map<String, Value>,
+    resource_lease: Option<crate::resource_scheduler::ResourceLease>,
 ) -> Result<String, String> {
     let Some(task) = task else {
         return Err(super::builtin_error(
@@ -84,7 +85,19 @@ pub(super) async fn execute(
         object.remove("session_id");
     }
     let result = match action.as_str() {
-        "session_open" => service.open(binding, bridge_input, cancellation).await,
+        "session_open" => {
+            let resource_request =
+                state.skill_resource_request_for_dispatch("browser_session", Some("session_open"));
+            service
+                .open_with_resource_lease(
+                    binding,
+                    bridge_input,
+                    cancellation,
+                    resource_lease,
+                    resource_request.as_ref(),
+                )
+                .await
+        }
         "session_close" => {
             service
                 .close(

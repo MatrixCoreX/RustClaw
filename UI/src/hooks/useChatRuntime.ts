@@ -733,9 +733,14 @@ export function useChatRuntime({
     }
   };
 
-  const fetchChatTeachingLlmDebugById = async (id: string): Promise<TaskLlmDebugResponse> => {
+  const fetchChatTeachingLlmDebugById = async (
+    id: string,
+    offset = 0,
+  ): Promise<TaskLlmDebugResponse> => {
     const normalizedId = encodeURIComponent(id.trim());
-    const res = await apiFetch(`/v1/debug/tasks/${normalizedId}?teaching=true`);
+    const res = await apiFetch(
+      `/v1/debug/tasks/${normalizedId}?teaching=true&limit=20&offset=${Math.max(0, Math.floor(offset))}`,
+    );
     const body = (await res.json()) as ApiResponse<TaskLlmDebugResponse>;
     if (!res.ok || !body.ok || !body.data) {
       throw new Error(body.error || `chat_teaching_trace_query_http_${res.status}`);
@@ -743,7 +748,7 @@ export function useChatRuntime({
     return body.data;
   };
 
-  const queryChatTeachingLlmDebug = async (taskId?: string) => {
+  const queryChatTeachingLlmDebug = async (taskId?: string, offset = 0) => {
     const threadAtQuery = activeChatThreadRef.current;
     const targetTaskId = (
       taskId ??
@@ -758,7 +763,7 @@ export function useChatRuntime({
       teachingLlmDebugError: null,
     }));
     try {
-      const result = await fetchChatTeachingLlmDebugById(targetTaskId);
+      const result = await fetchChatTeachingLlmDebugById(targetTaskId, offset);
       updateChatThreadById(threadAtQuery.id, (thread) => ({
         ...thread,
         lastTaskId: targetTaskId,

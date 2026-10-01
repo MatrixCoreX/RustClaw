@@ -5,6 +5,7 @@ import {
   Download,
   Loader2,
   PackageCheck,
+  PauseCircle,
   RefreshCw,
   Wrench,
 } from "lucide-react";
@@ -25,8 +26,11 @@ interface SystemDependenciesPanelProps {
   errorCode: string | null;
   isAdmin: boolean;
   installingId: string | null;
+  diagnosticsExporting: boolean;
+  diagnosticsExportError: string | null;
   onRefresh: () => unknown | Promise<unknown>;
   onInstall: (dependencyId: string) => unknown | Promise<unknown>;
+  onExportDiagnostics: () => unknown | Promise<unknown>;
 }
 
 const DEPENDENCY_NAMES: Record<string, [string, string]> = {
@@ -159,6 +163,8 @@ function DependencyRow({
   const capabilityLabel = dependency.used_by
     .map((token) => localizedToken(t, token, CAPABILITY_NAMES))
     .join(t("、", ", "));
+  const resourceConstrained = dependency.runtime_state === "resource_constrained";
+  const installedDisabled = dependency.runtime_state === "installed_disabled";
 
   const install = async () => {
     const accepted = await confirm({
@@ -177,7 +183,11 @@ function DependencyRow({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            {dependency.installed ? (
+            {resourceConstrained ? (
+              <AlertTriangle className="h-4 w-4 shrink-0 text-amber-300" />
+            ) : installedDisabled ? (
+              <PauseCircle className="h-4 w-4 shrink-0 text-white/50" />
+            ) : dependency.installed ? (
               <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-300" />
             ) : (
               <AlertTriangle className={`h-4 w-4 shrink-0 ${dependency.required ? "text-rose-300" : "text-amber-300"}`} />
@@ -192,6 +202,16 @@ function DependencyRow({
                 {localizedToken(t, dependency.category, CATEGORY_NAMES)}
               </span>
             )}
+            {resourceConstrained ? (
+              <span className="theme-status-pill border-amber-300/25 text-[10px] text-amber-100">
+                {t("内存不足，暂不可运行", "Temporarily unavailable: low memory")}
+              </span>
+            ) : null}
+            {installedDisabled ? (
+              <span className="theme-status-pill text-[10px] text-white/60">
+                {t("已安装但关闭", "Installed but disabled")}
+              </span>
+            ) : null}
           </div>
           <p className="mt-1.5 break-words text-xs leading-5 text-white/52">
             {dependency.installed
@@ -240,8 +260,11 @@ export function SystemDependenciesPanel({
   errorCode,
   isAdmin,
   installingId,
+  diagnosticsExporting,
+  diagnosticsExportError,
   onRefresh,
   onInstall,
+  onExportDiagnostics,
 }: SystemDependenciesPanelProps) {
   const operationsByDependency = useMemo(() => {
     const operations = [...(snapshot?.operations ?? [])].sort(
@@ -250,7 +273,15 @@ export function SystemDependenciesPanel({
     return new Map(operations.map((operation) => [operation.dependency_id, operation]));
   }, [snapshot?.operations]);
   const dependencies = useMemo(
-    () => [...(snapshot?.dependencies ?? [])].sort((left, right) => Number(left.installed) - Number(right.installed)),
+    () => {
+      const rank = (dependency: HostDependencyStatus) => {
+        if (!dependency.installed) return 0;
+        if (dependency.runtime_state === "resource_constrained") return 1;
+        if (dependency.runtime_state === "installed_disabled") return 2;
+        return 3;
+      };
+      return [...(snapshot?.dependencies ?? [])].sort((left, right) => rank(left) - rank(right));
+    },
     [snapshot?.dependencies],
   );
 
@@ -267,24 +298,41 @@ export function SystemDependenciesPanel({
             <p className="mt-1.5 text-xs leading-5 text-white/52">
               {snapshot
                 ? t(
-                    `已检测 ${snapshot.summary.total} 项，${snapshot.summary.installed} 项可用；系统必需缺失 ${snapshot.summary.missing_required} 项，可选能力缺失 ${snapshot.summary.missing_optional} 项。`,
-                    `${snapshot.summary.total} checked and ${snapshot.summary.installed} available; ${snapshot.summary.missing_required} required and ${snapshot.summary.missing_optional} optional dependencies are missing.`,
+                    `已检测 ${snapshot.summary.total} 项，${snapshot.summary.ready} 项可运行；系统必需缺失 ${snapshot.summary.missing_required} 项，可选能力缺失 ${snapshot.summary.missing_optional} 项，内存不足 ${snapshot.summary.resource_constrained} 项，已安装但关闭 ${snapshot.summary.installed_disabled} 项。`,
+                    `${snapshot.summary.total} checked and ${snapshot.summary.ready} ready; ${snapshot.summary.missing_required} required and ${snapshot.summary.missing_optional} optional dependencies are missing, ${snapshot.summary.resource_constrained} are memory-constrained, and ${snapshot.summary.installed_disabled} are installed but disabled.`,
                   )
                 : t("检查 {product_name}、内置工具和技能所需的本机依赖。", "Check local dependencies used by {product_name}, built-in tools, and skills.")}
             </p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => void onRefresh()}
-          disabled={loading}
-          className="theme-icon-btn"
-          title={t("重新检查", "Check again")}
-          aria-label={t("重新检查", "Check again")}
-        >
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void onExportDiagnostics()}
+            disabled={diagnosticsExporting}
+            className="theme-secondary-btn px-3 py-2 text-xs"
+          >
+            {diagnosticsExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            {t("导出诊断", "Export diagnostics")}
+          </button>
+          <button
+            type="button"
+            onClick={() => void onRefresh()}
+            disabled={loading}
+            className="theme-icon-btn"
+            title={t("重新检查", "Check again")}
+            aria-label={t("重新检查", "Check again")}
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          </button>
+        </div>
       </div>
+
+      {diagnosticsExportError ? (
+        <p className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/[0.06] px-3 py-2 text-xs text-amber-100/85">
+          {diagnosticsExportError}
+        </p>
+      ) : null}
 
       {errorCode ? (
         <div className="mt-4 flex items-start gap-2 rounded-lg border border-amber-300/20 bg-amber-300/[0.06] px-3 py-2 text-xs text-amber-100/85">

@@ -7,43 +7,141 @@ use super::{
 };
 use crate::{now_ts, ActiveTaskItem, AppState};
 
+#[cfg(test)]
+const ACTIVE_TASK_INTERNAL_LIMIT: usize = 256;
+const ACTIVE_TASK_PAGE_MAX: usize = 256;
+
+pub(crate) struct ActiveTaskPage {
+    pub(crate) tasks: Vec<ActiveTaskItem>,
+    pub(crate) total: usize,
+    pub(crate) limit: usize,
+    pub(crate) offset: usize,
+    pub(crate) has_more: bool,
+}
+
+#[cfg(test)]
 pub(crate) fn list_active_tasks_internal(
     state: &AppState,
     user_id: i64,
     chat_id: i64,
     exclude_task_id: Option<&str>,
 ) -> anyhow::Result<Vec<ActiveTaskItem>> {
-    list_active_tasks_scoped_internal(state, Some(user_id), Some(chat_id), exclude_task_id)
+    Ok(list_active_tasks_scoped_page_internal(
+        state,
+        Some(user_id),
+        Some(chat_id),
+        exclude_task_id,
+        ACTIVE_TASK_INTERNAL_LIMIT,
+        0,
+    )?
+    .tasks)
 }
 
+#[cfg(test)]
 pub(crate) fn list_active_tasks_for_user_internal(
     state: &AppState,
     user_id: i64,
     exclude_task_id: Option<&str>,
 ) -> anyhow::Result<Vec<ActiveTaskItem>> {
-    list_active_tasks_scoped_internal(state, Some(user_id), None, exclude_task_id)
+    Ok(list_active_tasks_scoped_page_internal(
+        state,
+        Some(user_id),
+        None,
+        exclude_task_id,
+        ACTIVE_TASK_INTERNAL_LIMIT,
+        0,
+    )?
+    .tasks)
 }
 
+#[cfg(test)]
 pub(crate) fn list_all_active_tasks_internal(
     state: &AppState,
     exclude_task_id: Option<&str>,
 ) -> anyhow::Result<Vec<ActiveTaskItem>> {
-    list_active_tasks_scoped_internal(state, None, None, exclude_task_id)
+    Ok(list_active_tasks_scoped_page_internal(
+        state,
+        None,
+        None,
+        exclude_task_id,
+        ACTIVE_TASK_INTERNAL_LIMIT,
+        0,
+    )?
+    .tasks)
 }
 
-fn list_active_tasks_scoped_internal(
+pub(crate) fn list_active_tasks_page_internal(
+    state: &AppState,
+    user_id: i64,
+    chat_id: i64,
+    exclude_task_id: Option<&str>,
+    limit: usize,
+    offset: usize,
+) -> anyhow::Result<ActiveTaskPage> {
+    list_active_tasks_scoped_page_internal(
+        state,
+        Some(user_id),
+        Some(chat_id),
+        exclude_task_id,
+        limit,
+        offset,
+    )
+}
+
+pub(crate) fn list_active_tasks_for_user_page_internal(
+    state: &AppState,
+    user_id: i64,
+    exclude_task_id: Option<&str>,
+    limit: usize,
+    offset: usize,
+) -> anyhow::Result<ActiveTaskPage> {
+    list_active_tasks_scoped_page_internal(
+        state,
+        Some(user_id),
+        None,
+        exclude_task_id,
+        limit,
+        offset,
+    )
+}
+
+pub(crate) fn list_all_active_tasks_page_internal(
+    state: &AppState,
+    exclude_task_id: Option<&str>,
+    limit: usize,
+    offset: usize,
+) -> anyhow::Result<ActiveTaskPage> {
+    list_active_tasks_scoped_page_internal(state, None, None, exclude_task_id, limit, offset)
+}
+
+fn list_active_tasks_scoped_page_internal(
     state: &AppState,
     user_id: Option<i64>,
     chat_id: Option<i64>,
     exclude_task_id: Option<&str>,
-) -> anyhow::Result<Vec<ActiveTaskItem>> {
+    limit: usize,
+    offset: usize,
+) -> anyhow::Result<ActiveTaskPage> {
     let exclude_task_id = normalized_optional_task_id(exclude_task_id);
+    let limit = limit.clamp(1, ACTIVE_TASK_PAGE_MAX);
+    let offset = offset.min(100_000);
     let now = now_ts().parse::<i64>().unwrap_or_default();
     let db = state
         .core
         .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    let total = db.query_row(
+        "SELECT COUNT(*)
+         FROM tasks
+         WHERE (?1 IS NULL OR user_id = ?1)
+           AND (?2 IS NULL OR chat_id = ?2)
+           AND status IN ('running', 'queued')
+           AND (?3 IS NULL OR task_id <> ?3)",
+        params![user_id, chat_id, exclude_task_id.as_deref()],
+        |row| row.get::<_, i64>(0),
+    )?;
+    let total = total.max(0) as usize;
     let mut stmt = db.prepare(
         "SELECT task_id, kind, payload_json, status, result_json,
                 CAST(COALESCE(NULLIF(created_at, ''), '0') AS INTEGER) AS created_ts,
@@ -62,10 +160,17 @@ fn list_active_tasks_scoped_internal(
            AND (?3 IS NULL OR task_id <> ?3)
          ORDER BY CASE status WHEN 'running' THEN 0 ELSE 1 END,
                   created_ts ASC,
-                  task_id ASC",
+                  task_id ASC
+         LIMIT ?4 OFFSET ?5",
     )?;
     let rows = stmt.query_map(
-        params![user_id, chat_id, exclude_task_id.as_deref()],
+        params![
+            user_id,
+            chat_id,
+            exclude_task_id.as_deref(),
+            limit as i64,
+            offset as i64
+        ],
         |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -129,7 +234,7 @@ fn list_active_tasks_scoped_internal(
         let execution_state =
             crate::task_lifecycle::task_execution_state_from_lifecycle(&lifecycle);
         out.push(ActiveTaskItem {
-            index: idx + 1,
+            index: offset + idx + 1,
             task_id,
             kind,
             status,
@@ -145,5 +250,11 @@ fn list_active_tasks_scoped_internal(
             lifecycle: Some(lifecycle),
         });
     }
-    Ok(out)
+    Ok(ActiveTaskPage {
+        has_more: offset.saturating_add(out.len()) < total,
+        tasks: out,
+        total,
+        limit,
+        offset,
+    })
 }

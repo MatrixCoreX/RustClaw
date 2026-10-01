@@ -1955,6 +1955,24 @@
     },
     {
       "adapter_kind": null,
+      "capability": "local_asr.capabilities",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "native_progress",
+      "skill": "local_asr",
+      "timeout_seconds": 60
+    },
+    {
+      "adapter_kind": "local_process_poll",
+      "capability": "local_asr.transcribe",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "native_progress",
+      "skill": "local_asr",
+      "timeout_seconds": null
+    },
+    {
+      "adapter_kind": null,
       "capability": "log_analyze",
       "execution_mode": "sync_short",
       "isolation_profile": null,
@@ -2154,15 +2172,6 @@
     {
       "adapter_kind": "local_process_poll",
       "capability": "media_download.resolve",
-      "execution_mode": "async_preferred",
-      "isolation_profile": "local_current_workspace",
-      "progress_contract": "native_progress",
-      "skill": "media_download",
-      "timeout_seconds": null
-    },
-    {
-      "adapter_kind": "local_process_poll",
-      "capability": "media_download.transcribe",
       "execution_mode": "async_preferred",
       "isolation_profile": "local_current_workspace",
       "progress_contract": "native_progress",
@@ -3563,14 +3572,14 @@
     "configs/agent_guard.toml"
   ],
   "summary": {
-    "capability_count": 395,
+    "capability_count": 396,
     "execution_modes": {
       "async_preferred": 72,
       "async_required": 9,
-      "sync_short": 314
+      "sync_short": 315
     },
     "progress_contracts": {
-      "native_progress": 50,
+      "native_progress": 51,
       "not_long_tail": 284,
       "poll_status": 61
     },

@@ -1,9 +1,28 @@
 use super::{
     apply_execution_context_to_prompts, build_active_execution_anchor_context,
     build_active_task_context, build_session_alias_context, build_task_goal_context,
-    session_snapshot_provides_execution_state_anchor, ExecutionContextBudgetTier,
-    ExecutionContextView, PlannerContextView, TaskContextBundle, TaskContextRawSources,
+    recent_turn_load_budget, session_snapshot_provides_execution_state_anchor,
+    ExecutionContextBudgetTier, ExecutionContextView, PlannerContextView, TaskContextBundle,
+    TaskContextRawSources,
 };
+
+#[test]
+fn recent_turn_query_limit_is_decided_before_history_load() {
+    assert_eq!(recent_turn_load_budget(512, None), (2, 2_400));
+    assert_eq!(recent_turn_load_budget(100_000, None), (40, 48_000));
+
+    let policy = super::ContextWindowPolicy::new(
+        "fixture".to_string(),
+        "small-context".to_string(),
+        8_000,
+        1_000,
+        1_000,
+        1_000,
+        1_000,
+        super::ContextTokenScope::Total,
+    );
+    assert_eq!(recent_turn_load_budget(100_000, Some(&policy)), (3, 2_500));
+}
 
 fn empty_snapshot() -> crate::conversation_state::ActiveSessionSnapshot {
     crate::conversation_state::ActiveSessionSnapshot {

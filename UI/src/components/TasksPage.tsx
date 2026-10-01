@@ -87,7 +87,7 @@ export function TasksPage(props: TasksPageProps) {
           <Activity className="h-4 w-4" />
           {props.t("正在处理", "Active")}
           <span className="rounded-md border border-current/20 px-1.5 py-0.5 text-[11px] leading-none">
-            {props.activeTasks.length}
+            {props.activeTasksTotal}
           </span>
         </button>
         <button

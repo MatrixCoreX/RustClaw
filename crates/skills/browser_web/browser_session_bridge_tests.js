@@ -11,8 +11,10 @@ const { once } = require('events');
 const {
     checkPostcondition,
     detectMediaType,
+    planScreenshotTiles,
     redactText,
     safeUrl,
+    validatedScreenshotContract,
 } = require('./browser_session_bridge.js');
 
 test('session projection helpers remove URL secrets and diagnostic credentials', () => {
@@ -43,6 +45,32 @@ test('postconditions use structured observations only', () => {
     assert.deepEqual(checkPostcondition({ kind: 'page_count_changed' }, before, after), {
         status: 'observed', kind: 'page_count_changed',
     });
+});
+
+test('low-memory screenshot contract tiles the complete page without oversized tiles', () => {
+    const contract = validatedScreenshotContract({
+        screenshot_contract: {
+            schema_version: 1,
+            mode: 'segmented_full_page',
+            max_tile_pixels: 1_000_000,
+            max_tiles: 16,
+            preserve_full_page: true,
+        },
+    });
+    const tiles = planScreenshotTiles(1800, 2400, { width: 900, height: 700 }, contract);
+    assert.equal(tiles.length, 8);
+    assert.equal(
+        tiles.reduce((total, tile) => total + tile.width * tile.height, 0),
+        1800 * 2400,
+    );
+    assert.equal(tiles.every((tile) => tile.width * tile.height <= 1_000_000), true);
+    assert.throws(
+        () => planScreenshotTiles(1800, 2400, { width: 900, height: 700 }, {
+            ...contract,
+            max_tiles: 2,
+        }),
+        (error) => error.code === 'SCREENSHOT_BOUNDS_EXCEEDED',
+    );
 });
 
 test('versioned bridge opens, snapshots, rejects stale page generations, writes artifact, and exits', {
@@ -306,6 +334,30 @@ test('versioned bridge opens, snapshots, rejects stale page generations, writes 
     const screenshotPath = screenshot.result.artifact.path;
     assert.equal(path.resolve(screenshotPath).startsWith(`${path.resolve(artifactRoot)}${path.sep}`), true);
     assert.equal((await fs.stat(screenshotPath)).size > 0, true);
+
+    const segmentedScreenshot = await request({
+        command: 'screenshot', page_id: pageId,
+        expected_page_generation: challenge.result.page_generation,
+        screenshot_contract: {
+            schema_version: 1,
+            mode: 'segmented_full_page',
+            max_tile_pixels: 1_048_576,
+            max_tiles: 64,
+            preserve_full_page: true,
+        },
+    });
+    assert.equal(segmentedScreenshot.status, 'ok');
+    assert.equal(segmentedScreenshot.result.artifacts.length > 1, true);
+    assert.equal(segmentedScreenshot.result.artifact.sequence, 1);
+    assert.equal(
+        segmentedScreenshot.result.artifacts.every((artifact) => (
+            artifact.screenshot_mode === 'segmented_full_page'
+                && artifact.total === segmentedScreenshot.result.artifacts.length
+                && artifact.full_page_complete === true
+                && artifact.clip.width * artifact.clip.height <= 1_048_576
+        )),
+        true,
+    );
 
     const exited = once(child, 'exit');
     const closed = await request({ command: 'session_close' });

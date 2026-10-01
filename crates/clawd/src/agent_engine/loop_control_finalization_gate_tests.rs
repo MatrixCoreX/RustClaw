@@ -54,6 +54,10 @@ fn ordinary_tool_turn_verifies_inside_loop_without_frontdoor_contract() {
         json!(["requested_result"])
     );
     assert_eq!(
+        loop_state.task_observations[0]["required_dispatches"],
+        json!([])
+    );
+    assert_eq!(
         loop_state.task_observations[0]["model_feedback"]["trust"],
         "untrusted_model_output"
     );
@@ -76,6 +80,34 @@ fn ordinary_no_io_turn_still_skips_unnecessary_verification() {
         reply.task_journal.as_ref().unwrap(),
         &reply.text,
     ));
+}
+
+#[test]
+fn verifier_replan_projects_missing_dispatch_as_machine_data() {
+    let summary = TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec![
+            "requested_result".to_string(),
+            "required_dispatch:call_capability:kb.ingest_job_status".to_string(),
+        ],
+        answer_incomplete_reason: "requested_operation_not_observed".to_string(),
+        should_retry: true,
+        retry_instruction: String::new(),
+        confidence: 0.9,
+    };
+    let mut loop_state = LoopState::default();
+
+    assert!(super::super::prepare_answer_verifier_evidence_replan(
+        &mut loop_state,
+        &summary
+    ));
+    assert_eq!(
+        loop_state.task_observations[0]["required_dispatches"],
+        json!([{
+            "action_type": "call_capability",
+            "action_ref": "kb.ingest_job_status",
+        }])
+    );
 }
 
 #[test]

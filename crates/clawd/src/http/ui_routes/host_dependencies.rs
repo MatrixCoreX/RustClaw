@@ -17,6 +17,9 @@ struct HostDependenciesSnapshot {
 struct HostDependencySummary {
     total: usize,
     installed: usize,
+    ready: usize,
+    installed_disabled: usize,
+    resource_constrained: usize,
     missing_required: usize,
     missing_optional: usize,
 }
@@ -33,6 +36,17 @@ struct HostDependencyStatus {
     installable: bool,
     used_by: Vec<String>,
     status_code: String,
+    runtime_state: String,
+    runtime_reason_code: Option<String>,
+}
+
+#[derive(Clone)]
+struct HostDependencyRuntimeContext {
+    registry: Option<Arc<claw_core::skill_registry::SkillsRegistry>>,
+    enabled_skills: Arc<std::collections::HashSet<String>>,
+    pressure_state: claw_core::host_resources::ResourcePressureState,
+    available_memory_mib: Option<u64>,
+    active_heavy_leases: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -106,14 +120,26 @@ async fn host_dependencies(
         Err(response) => return response,
     };
     let workspace_root = state.skill_rt.workspace_root.clone();
-    let snapshot = tokio::task::spawn_blocking(move || collect_host_dependencies(&workspace_root))
-        .await
-        .unwrap_or_else(|_| HostDependenciesSnapshot::collection_failed());
+    let runtime_context = host_dependency_runtime_context(&state);
+    let snapshot = tokio::task::spawn_blocking(move || {
+        collect_host_dependencies(&workspace_root, &runtime_context)
+    })
+    .await
+    .unwrap_or_else(|_| HostDependenciesSnapshot::collection_failed());
     let snapshot = if identity.role.eq_ignore_ascii_case("admin") {
         snapshot
     } else {
+        let dependencies = snapshot
+            .dependencies
+            .into_iter()
+            .map(|mut dependency| {
+                dependency.executable = None;
+                dependency
+            })
+            .collect();
         HostDependenciesSnapshot {
             operations: Vec::new(),
+            dependencies,
             ..snapshot
         }
     };
@@ -125,6 +151,21 @@ async fn host_dependencies(
             error: None,
         }),
     )
+}
+
+fn host_dependency_runtime_context(state: &AppState) -> HostDependencyRuntimeContext {
+    let broker_status = state
+        .skill_rt
+        .skill_concurrency_gates
+        .resource_broker()
+        .status();
+    HostDependencyRuntimeContext {
+        registry: state.get_skills_registry(),
+        enabled_skills: state.get_skills_list(),
+        pressure_state: broker_status.pressure_state,
+        available_memory_mib: broker_status.snapshot.available_memory_mib(),
+        active_heavy_leases: broker_status.active_heavy_leases,
+    }
 }
 
 async fn start_dependency_install(
@@ -516,7 +557,10 @@ fn prune_dependency_operations(operations: &mut HashMap<String, DependencyInstal
     }
 }
 
-fn collect_host_dependencies(workspace_root: &Path) -> HostDependenciesSnapshot {
+fn collect_host_dependencies(
+    workspace_root: &Path,
+    runtime_context: &HostDependencyRuntimeContext,
+) -> HostDependenciesSnapshot {
     let package_manager = detect_package_manager();
     let dependencies = host_dependency_catalog()
         .into_iter()
@@ -539,6 +583,11 @@ fn collect_host_dependencies(workspace_root: &Path) -> HostDependenciesSnapshot 
                 )
                 .is_some()
             };
+            let (runtime_state, runtime_reason_code) = dependency_runtime_availability(
+                &definition,
+                installed,
+                runtime_context,
+            );
             HostDependencyStatus {
                 id: definition.id.to_string(),
                 category: definition.category.to_string(),
@@ -560,12 +609,26 @@ fn collect_host_dependencies(workspace_root: &Path) -> HostDependenciesSnapshot 
                 } else {
                     "missing_optional".to_string()
                 },
+                runtime_state: runtime_state.to_string(),
+                runtime_reason_code: runtime_reason_code.map(ToString::to_string),
             }
         })
         .collect::<Vec<_>>();
     let installed = dependencies
         .iter()
         .filter(|dependency| dependency.installed)
+        .count();
+    let ready = dependencies
+        .iter()
+        .filter(|dependency| dependency.runtime_state == "ready")
+        .count();
+    let installed_disabled = dependencies
+        .iter()
+        .filter(|dependency| dependency.runtime_state == "installed_disabled")
+        .count();
+    let resource_constrained = dependencies
+        .iter()
+        .filter(|dependency| dependency.runtime_state == "resource_constrained")
         .count();
     let missing_required = dependencies
         .iter()
@@ -576,13 +639,16 @@ fn collect_host_dependencies(workspace_root: &Path) -> HostDependenciesSnapshot 
         .filter(|dependency| !dependency.required && !dependency.installed)
         .count();
     HostDependenciesSnapshot {
-        schema_version: 1,
+        schema_version: 2,
         collected_at_ts: now_unix_seconds(),
         platform: std::env::consts::OS.to_string(),
         package_manager,
         summary: HostDependencySummary {
             total: dependencies.len(),
             installed,
+            ready,
+            installed_disabled,
+            resource_constrained,
             missing_required,
             missing_optional,
         },
@@ -599,19 +665,90 @@ fn collect_host_dependencies(workspace_root: &Path) -> HostDependenciesSnapshot 
 impl HostDependenciesSnapshot {
     fn collection_failed() -> Self {
         Self {
-            schema_version: 1,
+            schema_version: 2,
             collected_at_ts: now_unix_seconds(),
             platform: std::env::consts::OS.to_string(),
             package_manager: detect_package_manager(),
             summary: HostDependencySummary {
                 total: 0,
                 installed: 0,
+                ready: 0,
+                installed_disabled: 0,
+                resource_constrained: 0,
                 missing_required: 0,
                 missing_optional: 0,
             },
             dependencies: Vec::new(),
             operations: Vec::new(),
         }
+    }
+}
+
+fn dependency_runtime_availability<'a>(
+    definition: &HostDependencyDefinition,
+    installed: bool,
+    context: &'a HostDependencyRuntimeContext,
+) -> (&'static str, Option<&'static str>) {
+    if !installed {
+        return ("missing", Some("dependency_missing"));
+    }
+    let Some(registry) = context.registry.as_deref() else {
+        return ("ready", None);
+    };
+    let matching_entries = definition
+        .used_by
+        .iter()
+        .filter_map(|token| {
+            let canonical = registry.resolve_canonical(token)?;
+            registry.get(canonical).map(|entry| (canonical, entry))
+        })
+        .collect::<Vec<_>>();
+    if matching_entries.is_empty() {
+        return ("ready", None);
+    }
+    let enabled_entries = matching_entries
+        .iter()
+        .filter(|(canonical, _)| {
+            context.enabled_skills.is_empty() || context.enabled_skills.contains(*canonical)
+        })
+        .map(|(_, entry)| *entry)
+        .collect::<Vec<_>>();
+    if enabled_entries.is_empty() {
+        return ("installed_disabled", Some("dependent_skills_disabled"));
+    }
+    let blocked_count = enabled_entries
+        .iter()
+        .filter(|entry| {
+            entry.resource_request.as_ref().is_some_and(|request| {
+                let requested_memory_mib = crate::resource_scheduler::requested_memory_mb(request);
+                let insufficient_memory = context
+                    .available_memory_mib
+                    .is_some_and(|available| available < requested_memory_mib);
+                let heavy = crate::resource_scheduler::resource_request_is_heavy(request);
+                insufficient_memory
+                    || (heavy
+                        && (context.pressure_state
+                            == claw_core::host_resources::ResourcePressureState::Critical
+                            || (context.pressure_state
+                                == claw_core::host_resources::ResourcePressureState::Constrained
+                                && context.active_heavy_leases > 0)))
+            })
+        })
+        .count();
+    dependency_runtime_state_from_counts(enabled_entries.len(), blocked_count)
+}
+
+fn dependency_runtime_state_from_counts(
+    enabled_skill_count: usize,
+    resource_blocked_count: usize,
+) -> (&'static str, Option<&'static str>) {
+    if enabled_skill_count > 0 && resource_blocked_count == enabled_skill_count {
+        (
+            "resource_constrained",
+            Some("dependent_skills_resource_constrained"),
+        )
+    } else {
+        ("ready", None)
     }
 }
 

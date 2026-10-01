@@ -42,6 +42,20 @@ pub(super) fn prepare_answer_verifier_evidence_replan(
         return false;
     }
 
+    let required_dispatches = summary
+        .missing_evidence_fields
+        .iter()
+        .filter_map(|field| {
+            let remainder = field.strip_prefix("required_dispatch:")?;
+            let (action_type, action_ref) = remainder.split_once(':')?;
+            (!action_type.is_empty() && !action_ref.is_empty()).then(|| {
+                json!({
+                    "action_type": action_type,
+                    "action_ref": action_ref,
+                })
+            })
+        })
+        .collect::<Vec<_>>();
     let observation = json!({
         "kind": "answer_verifier_evidence_gap",
         "owner_layer": "agent_loop",
@@ -49,6 +63,7 @@ pub(super) fn prepare_answer_verifier_evidence_replan(
         "status": "needs_more_evidence",
         "reason_code": "answer_verifier_missing_evidence",
         "missing_evidence_fields": summary.missing_evidence_fields,
+        "required_dispatches": required_dispatches,
         "next_action": "collect_missing_evidence",
         "terminal_response_allowed": false,
         "model_feedback": {

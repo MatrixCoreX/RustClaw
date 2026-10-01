@@ -1,10 +1,24 @@
 use super::{
     bounded_tail, browser_playwright_install_commands, build_ui_router,
-    dependency_command_candidates, dependency_install_commands, dependency_version_text,
-    dependency_version_text_for, detect_browser_playwright_manifest, host_dependency_catalog,
+    dependency_command_candidates, dependency_install_commands,
+    dependency_runtime_state_from_counts, dependency_version_text, dependency_version_text_for,
+    detect_browser_playwright_manifest, host_dependency_catalog,
     install_declared_host_dependencies, linux_dependency_package,
     playwright_managed_browser_available, prepare_dependency_install,
 };
+
+#[test]
+fn dependency_runtime_state_requires_every_enabled_owner_to_be_blocked() {
+    assert_eq!(
+        dependency_runtime_state_from_counts(1, 1),
+        (
+            "resource_constrained",
+            Some("dependent_skills_resource_constrained")
+        )
+    );
+    assert_eq!(dependency_runtime_state_from_counts(2, 1), ("ready", None));
+    assert_eq!(dependency_runtime_state_from_counts(0, 0), ("ready", None));
+}
 use crate::AppState;
 use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
@@ -235,6 +249,38 @@ async fn dependency_snapshot_requires_ui_authentication() {
 }
 
 #[tokio::test]
+async fn ordinary_user_dependency_snapshot_hides_executable_paths() {
+    const KEY: &str = "rk-dependency-snapshot-user-test";
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    state.seed_test_auth_identity(KEY, "user");
+    let response = axum::Router::new()
+        .nest("/v1", build_ui_router())
+        .with_state(state)
+        .oneshot(
+            Request::builder()
+                .uri("/v1/system/dependencies")
+                .header("x-agent-key", KEY)
+                .body(Body::empty())
+                .expect("dependency request"),
+        )
+        .await
+        .expect("dependency response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), 128 * 1024)
+        .await
+        .expect("bounded dependency response");
+    let value: Value = serde_json::from_slice(&body).expect("dependency JSON");
+    assert!(value["data"]["operations"]
+        .as_array()
+        .is_some_and(Vec::is_empty));
+    assert!(value["data"]["dependencies"]
+        .as_array()
+        .is_some_and(|dependencies| dependencies
+            .iter()
+            .all(|dependency| dependency["executable"].is_null())));
+}
+
+#[tokio::test]
 async fn install_endpoint_rejects_unknown_dependency_tokens() {
     const KEY: &str = "rk-dependency-admin-test";
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
@@ -305,10 +351,52 @@ async fn authenticated_snapshot_reports_bounded_machine_dependency_fields() {
         .await
         .expect("bounded dependency response");
     let value: Value = serde_json::from_slice(&body).expect("dependency JSON");
-    assert_eq!(value["data"]["schema_version"], 1);
+    assert_eq!(value["data"]["schema_version"], 2);
     assert!(value["data"]["summary"]["total"].as_u64().unwrap_or(0) >= 20);
+    assert!(value["data"]["summary"]["ready"].is_number());
+    assert!(value["data"]["summary"]["installed_disabled"].is_number());
+    assert!(value["data"]["summary"]["resource_constrained"].is_number());
     assert!(value["data"]["dependencies"].as_array().is_some());
+    assert!(value["data"]["dependencies"]
+        .as_array()
+        .and_then(|items| items.first())
+        .is_some_and(|item| item["runtime_state"].is_string()));
     let encoded = String::from_utf8(body.to_vec()).expect("UTF-8 response");
     assert!(!encoded.contains(KEY));
     assert!(!encoded.contains("PATH="));
+}
+
+#[tokio::test]
+async fn system_diagnostic_export_is_bounded_and_redacted() {
+    const KEY: &str = "rk-system-diagnostic-export-test";
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    state.seed_test_auth_identity(KEY, "admin");
+    let response = axum::Router::new()
+        .nest("/v1", build_ui_router())
+        .with_state(state)
+        .oneshot(
+            Request::builder()
+                .uri("/v1/system/diagnostics/export")
+                .header("x-agent-key", KEY)
+                .body(Body::empty())
+                .expect("diagnostic export request"),
+        )
+        .await
+        .expect("diagnostic export response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), 256 * 1024)
+        .await
+        .expect("bounded diagnostic export");
+    let value: Value = serde_json::from_slice(&body).expect("diagnostic export JSON");
+    assert_eq!(value["data"]["schema_version"], 1);
+    assert_eq!(value["data"]["redacted"], true);
+    assert!(value["data"]["host"]["runtime_resources"].is_object());
+    assert!(value["data"]["host"]["runtime_resources"]["cgroup_version"].is_null());
+    assert!(value["data"]["dependency_summary"].is_object());
+    assert!(value["data"]["skills"]["enabled"].is_number());
+    let encoded = String::from_utf8(body.to_vec()).expect("UTF-8 response");
+    assert!(!encoded.contains(KEY));
+    assert!(!encoded.contains("workspace_root"));
+    assert!(!encoded.contains("executable"));
+    assert!(!encoded.contains("payload_json"));
 }

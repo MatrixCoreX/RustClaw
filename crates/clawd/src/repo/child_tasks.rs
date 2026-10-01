@@ -894,6 +894,77 @@ fn machine_token(value: &str) -> String {
     }
 }
 
+fn validated_child_structured_result(payload: &Value, result_json: &Value) -> Option<Value> {
+    const MAX_STRUCTURED_RESULT_BYTES: usize = 32 * 1024;
+
+    let result_contract = payload.pointer("/child_task_contract/result_contract")?;
+    if result_contract.get("output_format").and_then(Value::as_str) != Some("machine_json") {
+        return None;
+    }
+    let required_keys = result_contract
+        .get("required_keys")
+        .and_then(Value::as_array)?
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|key| !key.is_empty())
+        .collect::<Vec<_>>();
+    if required_keys.is_empty() {
+        return None;
+    }
+
+    let candidate_strings = [
+        result_json.get("text").and_then(Value::as_str),
+        result_json
+            .pointer("/final_result_json/text")
+            .and_then(Value::as_str),
+        result_json
+            .pointer("/task_journal/summary/final_answer")
+            .and_then(Value::as_str),
+    ];
+    let direct_candidates = [
+        result_json.get("structured_result"),
+        result_json.pointer("/child_model_result/result"),
+        result_json.pointer("/final_result_json/structured_result"),
+    ];
+
+    direct_candidates
+        .into_iter()
+        .flatten()
+        .cloned()
+        .chain(
+            candidate_strings
+                .into_iter()
+                .flatten()
+                .filter_map(|candidate| {
+                    serde_json::from_str::<Value>(candidate.trim())
+                        .ok()
+                        .or_else(|| {
+                            crate::extract_first_json_value_any(candidate)
+                                .and_then(|json| serde_json::from_str::<Value>(&json).ok())
+                        })
+                }),
+        )
+        .find_map(|candidate| {
+            let source = candidate
+                .get("result")
+                .filter(|value| value.is_object())
+                .unwrap_or(&candidate)
+                .as_object()?;
+            let projected = required_keys
+                .iter()
+                .map(|key| {
+                    source
+                        .get(*key)
+                        .cloned()
+                        .map(|value| ((*key).to_string(), value))
+                })
+                .collect::<Option<serde_json::Map<String, Value>>>()?;
+            let value = Value::Object(projected);
+            (value.to_string().len() <= MAX_STRUCTURED_RESULT_BYTES).then_some(value)
+        })
+}
+
 fn child_task_result_projection(status: &str, payload: &Value, result_json: &Value) -> Value {
     let contract = payload.get("child_task_contract").unwrap_or(&Value::Null);
     let child_task_id = contract
@@ -921,6 +992,9 @@ fn child_task_result_projection(status: &str, payload: &Value, result_json: &Val
     let mut evidence_refs = vec![format!("task:{child_task_id}:result_json")];
     let mut artifact_refs = Vec::new();
     let verification_artifact = child_verification_artifact(child_task_id, result_json);
+    let structured_result = (status == "succeeded")
+        .then(|| validated_child_structured_result(payload, result_json))
+        .flatten();
     for pointer in [
         "/child_task_execution_scope/patch_artifact/patch_ref",
         "/child_task_execution_scope/artifact_refs/0/cleanup_ref",
@@ -939,7 +1013,7 @@ fn child_task_result_projection(status: &str, payload: &Value, result_json: &Val
         evidence_refs.push(reference.clone());
         artifact_refs.push(reference);
     }
-    json!({
+    let mut projection = json!({
         "schema_version": CHILD_TASK_SCHEMA_VERSION,
         "parent_task_id": parent_task_id,
         "child_task_id": child_task_id,
@@ -984,7 +1058,12 @@ fn child_task_result_projection(status: &str, payload: &Value, result_json: &Val
         } else {
             json!([])
         },
-    })
+    });
+    if let (Some(object), Some(structured_result)) = (projection.as_object_mut(), structured_result)
+    {
+        object.insert("structured_result".to_string(), structured_result);
+    }
+    projection
 }
 
 fn child_budget_consumed(result_json: &Value) -> Value {

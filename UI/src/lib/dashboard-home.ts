@@ -1,4 +1,8 @@
+import { appStorageKey } from "./product-identity";
+
 export type DashboardStepStatus = "done" | "attention" | "todo";
+
+export const DASHBOARD_SECTION_STORAGE_KEY = appStorageKey("monitor.dashboardSection");
 
 export type DashboardSection =
   | "overview"

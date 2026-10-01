@@ -482,6 +482,95 @@ fn sanitize_upload_relative_path(input: &str) -> Option<PathBuf> {
     }
 }
 
+fn sanitize_upload_bundle_name(input: &str) -> Option<String> {
+    let path = sanitize_upload_relative_path(input)?;
+    if path.components().count() != 1 {
+        return None;
+    }
+    path.file_name()?.to_str().map(ToOwned::to_owned)
+}
+
+struct SkillUploadError {
+    status: StatusCode,
+    code: &'static str,
+}
+
+fn skill_upload_error(
+    status: StatusCode,
+    code: &'static str,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    (
+        status,
+        Json(ApiResponse {
+            ok: false,
+            data: None,
+            error: Some(code.to_string()),
+        }),
+    )
+}
+
+async fn read_bounded_multipart_text(mut field: axum::extract::multipart::Field<'_>) -> Result<String, ()> {
+    let mut bytes = Vec::new();
+    while let Some(chunk) = field.chunk().await.map_err(|_| ())? {
+        if bytes.len().saturating_add(chunk.len()) > SKILL_UPLOAD_MAX_METADATA_BYTES {
+            return Err(());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    String::from_utf8(bytes).map_err(|_| ())
+}
+
+async fn stream_multipart_field_to_file(
+    mut field: axum::extract::multipart::Field<'_>,
+    target_path: &Path,
+    total_bytes: &mut usize,
+) -> Result<(), SkillUploadError> {
+    if let Some(parent) = target_path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|_| SkillUploadError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "skill_upload_create_directory_failed",
+            })?;
+    }
+    let mut file = tokio::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(target_path)
+        .await
+        .map_err(|_| SkillUploadError {
+            status: StatusCode::CONFLICT,
+            code: "skill_upload_duplicate_path",
+        })?;
+    let mut file_bytes = 0usize;
+    while let Some(chunk) = field.chunk().await.map_err(|_| SkillUploadError {
+        status: StatusCode::BAD_REQUEST,
+        code: "skill_upload_read_failed",
+    })? {
+        file_bytes = file_bytes.saturating_add(chunk.len());
+        *total_bytes = total_bytes.saturating_add(chunk.len());
+        if file_bytes > SKILL_UPLOAD_MAX_FILE_BYTES
+            || *total_bytes > SKILL_UPLOAD_MAX_TOTAL_BYTES
+        {
+            drop(file);
+            let _ = tokio::fs::remove_file(target_path).await;
+            return Err(SkillUploadError {
+                status: StatusCode::PAYLOAD_TOO_LARGE,
+                code: "skill_upload_body_too_large",
+            });
+        }
+        file.write_all(&chunk).await.map_err(|_| SkillUploadError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "skill_upload_write_failed",
+        })?;
+    }
+    file.flush().await.map_err(|_| SkillUploadError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "skill_upload_write_failed",
+    })?;
+    Ok(())
+}
+
 #[derive(Debug)]
 struct ImportedBundleActivation {
     bundle_dir: PathBuf,

@@ -12,7 +12,7 @@ use axum::http::header::{
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use claw_core::types::{ApiResponse, TaskQueryResponse};
+use claw_core::types::ApiResponse;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
@@ -20,7 +20,9 @@ use tokio::process::Command;
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
-use crate::repo::{check_task_view_access, get_task_query_record, TaskViewerAccessError};
+use crate::repo::{
+    check_task_view_access, get_task_artifact_result_projection, TaskViewerAccessError,
+};
 use crate::task_artifacts::{self, TaskArtifactManifest};
 use crate::AppState;
 
@@ -55,11 +57,10 @@ pub(crate) async fn list_task_artifacts(
     headers: HeaderMap,
     Path(task_id): Path<Uuid>,
 ) -> Response {
-    let task = match visible_task(&state, &headers, task_id) {
-        Ok(task) => task,
+    let artifacts = match visible_task_artifacts(&state, &headers, task_id) {
+        Ok(artifacts) => artifacts,
         Err(response) => return response,
     };
-    let artifacts = task_artifacts::manifests_from_result(task.result_json.as_ref());
     (
         StatusCode::OK,
         Json(ApiResponse {
@@ -101,12 +102,13 @@ async fn serve_task_artifact(
     query: TaskArtifactContentQuery,
     include_body: bool,
 ) -> Response {
-    let task = match visible_task(&state, &headers, task_id) {
-        Ok(task) => task,
+    let artifacts = match visible_task_artifacts(&state, &headers, task_id) {
+        Ok(artifacts) => artifacts,
         Err(response) => return response,
     };
-    let Some(manifest) =
-        task_artifacts::manifest_by_id(task.result_json.as_ref(), artifact_id.trim())
+    let Some(manifest) = artifacts
+        .into_iter()
+        .find(|manifest| manifest.id == artifact_id.trim())
     else {
         return api_error(StatusCode::NOT_FOUND, "task_artifact_not_found");
     };
@@ -490,9 +492,14 @@ async fn load_or_generate_video_poster(
 ) -> Result<Vec<u8>, VideoPosterError> {
     let cache_path =
         video_poster_cache_path(path, &manifest.sha256).ok_or(VideoPosterError::InvalidOutput)?;
-    if let Ok(cached) = tokio::fs::read(&cache_path).await {
-        if valid_video_poster(&cached) {
-            return Ok(cached);
+    let cached_is_bounded = tokio::fs::metadata(&cache_path)
+        .await
+        .is_ok_and(|metadata| metadata.len() <= MAX_VIDEO_POSTER_BYTES as u64);
+    if cached_is_bounded {
+        if let Ok(cached) = tokio::fs::read(&cache_path).await {
+            if valid_video_poster(&cached) {
+                return Ok(cached);
+            }
         }
     }
 
@@ -583,26 +590,30 @@ fn valid_video_poster(bytes: &[u8]) -> bool {
         && bytes.ends_with(&[0xff, 0xd9])
 }
 
-fn visible_task(
+fn visible_task_artifacts(
     state: &AppState,
     headers: &HeaderMap,
     task_id: Uuid,
-) -> Result<TaskQueryResponse, Response> {
-    let Some((task, task_user_key, channel)) = (match get_task_query_record(state, task_id) {
-        Ok(record) => record,
-        Err(error) => {
-            tracing::error!("task artifact task lookup failed: {error}");
-            return Err(api_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "task_artifact_store_error",
-            ));
-        }
-    }) else {
+) -> Result<Vec<TaskArtifactManifest>, Response> {
+    let Some((result_projection, task_user_key, channel)) =
+        (match get_task_artifact_result_projection(state, task_id) {
+            Ok(record) => record,
+            Err(error) => {
+                tracing::error!("task artifact task lookup failed: {error}");
+                return Err(api_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "task_artifact_store_error",
+                ));
+            }
+        })
+    else {
         return Err(api_error(StatusCode::NOT_FOUND, "task_not_found"));
     };
     let provided_key = crate::auth_key_from_headers(headers);
     match check_task_view_access(state, task_user_key.as_deref(), &channel, provided_key) {
-        Ok(()) => Ok(task),
+        Ok(()) => Ok(task_artifacts::manifests_from_result(
+            result_projection.as_ref(),
+        )),
         Err(TaskViewerAccessError::AuthLookup(error)) => {
             tracing::error!("task artifact auth lookup failed: {error}");
             Err(api_error(

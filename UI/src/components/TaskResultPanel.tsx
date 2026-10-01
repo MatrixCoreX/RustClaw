@@ -70,7 +70,7 @@ export interface TaskResultPanelProps {
   taskControlError: string | null;
   onTaskIdChange: (value: string) => void;
   onQueryTask: () => unknown | Promise<unknown>;
-  onQueryTaskLlmDebug: (taskId?: string) => unknown | Promise<unknown>;
+  onQueryTaskLlmDebug: (taskId?: string, offset?: number) => unknown | Promise<unknown>;
   onResumeDraftChange: (taskId: string, value: string) => void;
   onSubmitResume: (taskId: string) => unknown | Promise<unknown>;
   onDecideTaskApproval: (

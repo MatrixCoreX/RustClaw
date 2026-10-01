@@ -15,6 +15,9 @@ fn runtime(root: &std::path::Path, user_key: &str) -> KbRuntime {
         workspace_root: root.to_path_buf(),
         storage_database_path: root.join("data/skills/kb/state.db"),
         storage_busy_timeout_ms: 5_000,
+        storage_cache_size_kib: None,
+        storage_mmap_size_bytes: None,
+        storage_temp_store: None,
         path_policy: skill_sdk::SkillPathPolicy::new(root, None)
             .expect("create KB test path policy"),
     }
@@ -494,6 +497,9 @@ fn path_policy_confines_regular_users_and_allows_verified_admin_absolute_sources
         workspace_root: workspace.clone(),
         storage_database_path: workspace.join("data/skills/kb/state.db"),
         storage_busy_timeout_ms: 5_000,
+        storage_cache_size_kib: None,
+        storage_mmap_size_bytes: None,
+        storage_temp_store: None,
         path_policy: skill_sdk::SkillPathPolicy::new(&workspace, Some(&host_grant_context))
             .expect("host path policy"),
     };

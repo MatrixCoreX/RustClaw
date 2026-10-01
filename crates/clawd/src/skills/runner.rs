@@ -629,9 +629,11 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
     args: &serde_json::Value,
     source: &str,
     skill_timeout_secs: u64,
+    resource_grant: Option<&Value>,
     execution_context: Option<&super::SkillExecutionContext>,
     dispatch_queue_key: Option<&str>,
     pinned_execution_binding: Option<&Value>,
+    resource_estimate_key: Option<&crate::resource_scheduler::ResourceEstimateKey>,
 ) -> Result<serde_json::Value, String> {
     let dispatch_started = std::time::Instant::now();
     let package_root = state.skill_rt.workspace_root.join("data/skill-packages");
@@ -1108,6 +1110,7 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
         source,
         storage_descriptor,
         &sandbox_artifact_output_directory,
+        resource_grant,
         execution_context,
     );
     let req_line = serde_json::json!({
@@ -1337,6 +1340,14 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
             overlay_generation_digest: skill_views.binding.overlay_generation_digest.clone(),
             sandbox_backend: sandbox_backend.to_string(),
             timeout_seconds: skill_timeout_secs,
+            memory_reservation_mib: crate::resource_scheduler::requested_memory_mb(
+                &state
+                    .skill_resource_request_for_dispatch(
+                        canonical_skill_name,
+                        super::skill_action_token(args).as_deref(),
+                    )
+                    .unwrap_or_default(),
+            ),
         });
     let (mut runner_process, runner_dispatch_mode, runner_fallback_reason, reusable_key) =
         match warm_key {
@@ -1363,6 +1374,10 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
         .await
         .map_err(|err| format!("write skill-runner stdin failed: {err}"))?;
 
+    let runner_pid = runner_process.id();
+    let mut resource_sample_interval = tokio::time::interval(Duration::from_millis(250));
+    resource_sample_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut observed_peak_memory_mib = 0_u64;
     let mut out_line = String::new();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(skill_timeout_secs.max(1));
     let task_cancellation = state.worker.task_cancellation_token(&task.task_id);
@@ -1376,37 +1391,47 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
     loop {
         let read_record = tokio::time::timeout_at(deadline, runner_process.records.next());
         tokio::pin!(read_record);
-        let read_result = tokio::select! {
-            biased;
-            _ = wait_for_optional_cancellation(task_cancellation.as_ref()) => {
-                let _ = terminate_subprocess_group(runner_process.id()).await;
-                runner_process.kill_and_wait().await;
-                if let Some(payload) = cancelled_capture_projection(
-                    &artifact_output_directory,
-                    &task.task_id,
-                    canonical_skill_name,
-                ) {
-                    if let Err(error) = crate::task_event_transport::publish_claimed_event(
-                        state,
-                        task,
-                        "skill_partial_receipts",
-                        payload,
+        let read_result = loop {
+            tokio::select! {
+                biased;
+                _ = wait_for_optional_cancellation(task_cancellation.as_ref()) => {
+                    let _ = terminate_subprocess_group(runner_process.id()).await;
+                    runner_process.kill_and_wait().await;
+                    if let Some(payload) = cancelled_capture_projection(
+                        &artifact_output_directory,
+                        &task.task_id,
+                        canonical_skill_name,
                     ) {
-                        tracing::warn!(
-                            skill = canonical_skill_name,
-                            error = %error,
-                            "cancelled_skill_receipt_projection_failed"
-                        );
+                        if let Err(error) = crate::task_event_transport::publish_claimed_event(
+                            state,
+                            task,
+                            "skill_partial_receipts",
+                            payload,
+                        ) {
+                            tracing::warn!(
+                                skill = canonical_skill_name,
+                                error = %error,
+                                "cancelled_skill_receipt_projection_failed"
+                            );
+                        }
                     }
+                    return Err(crate::agent_engine::TASK_CANCELED_ERR.to_string());
                 }
-                return Err(crate::agent_engine::TASK_CANCELED_ERR.to_string());
+                _ = wait_for_optional_cancellation(conversation_interrupt.as_ref()) => {
+                    let _ = terminate_subprocess_group(runner_process.id()).await;
+                    runner_process.kill_and_wait().await;
+                    return Err(crate::llm_gateway::CONVERSATION_INPUT_INTERRUPTED_ERR.to_string());
+                }
+                _ = resource_sample_interval.tick() => {
+                    if let Some(memory_mib) = runner_pid.and_then(
+                        super::runner_pool::process_tree_resident_memory_mib,
+                    ) {
+                        observed_peak_memory_mib = observed_peak_memory_mib.max(memory_mib);
+                    }
+                    continue;
+                }
+                result = &mut read_record => break result,
             }
-            _ = wait_for_optional_cancellation(conversation_interrupt.as_ref()) => {
-                let _ = terminate_subprocess_group(runner_process.id()).await;
-                runner_process.kill_and_wait().await;
-                return Err(crate::llm_gateway::CONVERSATION_INPUT_INTERRUPTED_ERR.to_string());
-            }
-            result = &mut read_record => result,
         };
         let record = match read_result {
             Ok(Some(Ok(line))) => line,
@@ -1573,6 +1598,13 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
         crate::now_ts_u64(),
     )?;
     add_runner_dispatch_metadata(&mut response, runner_dispatch_mode, runner_fallback_reason);
+    if let Some(resource_estimate_key) = resource_estimate_key {
+        state
+            .skill_rt
+            .skill_concurrency_gates
+            .resource_broker()
+            .record_observed_peak_memory(resource_estimate_key.clone(), observed_peak_memory_mib);
+    }
     if let Some((key, epoch)) = reusable_key {
         state
             .skill_rt
@@ -1700,6 +1732,7 @@ pub(crate) fn build_runner_skill_context(
     source: &str,
     storage_descriptor: Option<crate::skill_storage::SkillStorageDescriptor>,
     artifact_output_directory: &std::path::Path,
+    resource_grant: Option<&Value>,
     execution_context: Option<&super::SkillExecutionContext>,
 ) -> Value {
     let mut ctx = serde_json::Map::new();
@@ -1749,6 +1782,9 @@ pub(crate) fn build_runner_skill_context(
         "artifact_output_directory".to_string(),
         Value::String(artifact_output_directory.display().to_string()),
     );
+    if let Some(resource_grant) = resource_grant {
+        ctx.insert("resource_grant".to_string(), resource_grant.clone());
+    }
     if let Some(execution_context) = execution_context {
         ctx.insert(
             "execution".to_string(),

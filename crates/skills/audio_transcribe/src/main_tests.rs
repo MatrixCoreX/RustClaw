@@ -356,7 +356,7 @@ fn preview_local_provider_selects_local_recognition_without_fallback() {
     .expect("local preview");
 
     assert_eq!(extra["provider_location"], "local");
-    assert_eq!(extra["recommended_capability"], "media_download.transcribe");
+    assert_eq!(extra["recommended_capability"], "local_asr.transcribe");
     assert_eq!(extra["remote_chunking"]["enabled"], false);
     assert_eq!(extra["input_path"], "recordings/local.wav");
     assert_eq!(extra["fallback_recommended"], false);

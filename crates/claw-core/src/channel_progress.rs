@@ -39,6 +39,7 @@ impl ChannelProgressCapabilities {
 pub struct ChannelProgressProjectionState {
     last_sequence: u64,
     slow_notice_count: u8,
+    resource_wait_notice_sent: bool,
     terminal: bool,
 }
 
@@ -68,10 +69,22 @@ impl ChannelProgressProjectionState {
             || slow_threshold_seconds == 0
             || elapsed_seconds < slow_threshold_seconds
             || self.slow_notice_count >= capabilities.slow_notice_limit
+            || self.resource_wait_notice_sent
         {
             return false;
         }
         self.slow_notice_count = self.slow_notice_count.saturating_add(1);
+        true
+    }
+
+    pub fn should_emit_resource_wait_notice(
+        &mut self,
+        task: &crate::types::TaskQueryResponse,
+    ) -> bool {
+        if self.terminal || self.resource_wait_notice_sent || !task_is_waiting_for_resources(task) {
+            return false;
+        }
+        self.resource_wait_notice_sent = true;
         true
     }
 
@@ -80,8 +93,33 @@ impl ChannelProgressProjectionState {
     }
 
     pub fn notice_sent(&self) -> bool {
-        self.slow_notice_count > 0
+        self.slow_notice_count > 0 || self.resource_wait_notice_sent
     }
+}
+
+pub fn task_is_waiting_for_resources(task: &crate::types::TaskQueryResponse) -> bool {
+    if !matches!(
+        task.status,
+        crate::types::TaskStatus::Queued | crate::types::TaskStatus::Running
+    ) {
+        return false;
+    }
+    let lifecycle = task.lifecycle.as_ref();
+    matches!(
+        task.execution_state,
+        Some(crate::types::TaskExecutionState::Waiting)
+    ) && lifecycle.is_some_and(|value| {
+        value
+            .get("resume_reason")
+            .and_then(serde_json::Value::as_str)
+            == Some("resource_admission_wait")
+            || value
+                .get("waiting_reason_code")
+                .and_then(serde_json::Value::as_str)
+                == Some("resource_admission_wait")
+            || value.get("message_key").and_then(serde_json::Value::as_str)
+                == Some("clawd.task.resource_waiting")
+    })
 }
 
 #[cfg(test)]

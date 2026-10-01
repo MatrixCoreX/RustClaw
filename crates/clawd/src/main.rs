@@ -95,6 +95,7 @@ mod resource_scheduler;
 mod routing_context;
 mod runtime;
 mod runtime_memory;
+mod runtime_process_memory;
 mod schedule_service;
 mod scheduled_run_contract;
 mod schema_contract;
@@ -189,8 +190,8 @@ pub(crate) use repo::{
     get_pending_channel_bind_session_by_id, get_pending_channel_bind_session_by_token,
     get_task_admin_target, get_task_query_record, has_channel_binding_for_user_key,
     hydrate_submit_task_from_ingress, insert_audit_log, insert_submitted_task, is_user_allowed,
-    list_active_tasks_for_user_internal, list_active_tasks_internal,
-    list_all_active_tasks_internal, list_all_task_history_internal, list_auth_keys,
+    list_active_tasks_for_user_page_internal, list_active_tasks_page_internal,
+    list_all_active_tasks_page_internal, list_all_task_history_internal, list_auth_keys,
     list_task_history_for_user_internal, list_task_history_internal,
     mark_pending_channel_bind_session_detected, mark_pending_channel_bind_session_expired,
     mark_pending_channel_bind_session_failed, normalize_user_key, pending_channel_resume_candidate,
@@ -596,6 +597,14 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
         config.memory.background_job_concurrency,
         config.skills.runner_warm_pool_enabled,
     );
+    let workspace_root = std::env::current_dir()?;
+    let resource_estimate_store = claw_core::workspace_state::workspace_state_root(&workspace_root)
+        .join("resource-estimates-v1.json");
+    let resource_broker = crate::resource_scheduler::ResourceBroker::new(
+        config.runtime_resources.pressure_policy(),
+        config.runtime_resources.safety_reserve_mib,
+    )
+    .with_estimate_store_path(resource_estimate_store);
     info!(
         configured_workers = config.worker.concurrency,
         effective_workers = runtime_concurrency.worker_concurrency,
@@ -609,7 +618,6 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
         host_memory_total_mib = runtime_concurrency.memory_total_mib.unwrap_or_default(),
         "runtime_concurrency_plan"
     );
-    let workspace_root = std::env::current_dir()?;
     ensure_private_runtime_directories(&workspace_root)?;
     let credential_store_path =
         claw_core::git_remote_config::git_credential_store_path(&workspace_root);
@@ -1138,24 +1146,29 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
             skill_views_snapshot: Arc::new(RwLock::new(Arc::new(initial_skill_views))),
             active_provider_type,
             mcp_runtime,
-            browser_sessions: crate::browser_session_service::BrowserSessionService::new(
-                &workspace_root,
-            ),
+            browser_sessions:
+                crate::browser_session_service::BrowserSessionService::new_with_resource_broker(
+                    &workspace_root,
+                    resource_broker.clone(),
+                ),
         },
         skill_rt: crate::SkillRuntime {
             skill_timeout_seconds: config.skills.skill_timeout_seconds,
             skill_runner_path: effective_skill_runner_path,
             skill_global_max_concurrency: runtime_concurrency.skill_concurrency,
             skill_semaphore: Arc::new(Semaphore::new(runtime_concurrency.skill_concurrency)),
-            skill_concurrency_gates: Arc::new(
-                crate::runtime::state::SkillConcurrencyGates::default(),
-            ),
-            runner_pool: Arc::new(crate::skills::runner_pool::WarmRunnerPool::new(
-                runtime_concurrency.runner_warm_pool_enabled,
-                config.skills.runner_warm_pool_max_idle_per_skill,
-                config.skills.runner_warm_pool_min_available_memory_mib,
-                config.skills.runner_warm_pool_idle_timeout_seconds,
+            skill_concurrency_gates: Arc::new(crate::runtime::state::SkillConcurrencyGates::new(
+                resource_broker.clone(),
             )),
+            runner_pool: Arc::new(
+                crate::skills::runner_pool::WarmRunnerPool::new_with_resource_broker(
+                    runtime_concurrency.runner_warm_pool_enabled,
+                    config.skills.runner_warm_pool_max_idle_per_skill,
+                    config.skills.runner_warm_pool_min_available_memory_mib,
+                    config.skills.runner_warm_pool_idle_timeout_seconds,
+                    resource_broker,
+                ),
+            ),
             tools_policy: Arc::new(tools_policy),
             cmd_timeout_seconds: config.tools.cmd_timeout_seconds.max(1),
             cmd_idle_timeout_seconds: config.tools.cmd_idle_timeout_seconds.max(1),
@@ -1270,6 +1283,9 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
             "restored pending local process cancellation escalation"
         );
     }
+    let restored_resource_leases = resource_scheduler::restore_durable_resource_leases(&state);
+    info!(restored_resource_leases, "durable_resource_leases_restored");
+    resource_scheduler::spawn_resource_pressure_monitor(state.clone());
     spawn_worker(
         state.clone(),
         config.worker.poll_interval_ms,

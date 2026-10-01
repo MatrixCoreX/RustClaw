@@ -22,10 +22,10 @@ fn bundle_result_with_activation(activation_requirement: Option<&str>) -> Capabi
                 "capability": "audio.preview_transcribe",
                 "input_field": "audio_path",
                 "input_value": "artifact:task/task-1/audio-1",
-                "fallback_capability": "media_download.transcribe",
+                "fallback_capability": "local_asr.transcribe",
                 "fallback_input_field": "input_path",
                 "fallback_input_value": "artifact:task/task-1/audio-1",
-                "completion_capabilities": ["audio.transcribe", "media_download.transcribe"],
+                "completion_capabilities": ["audio.transcribe", "local_asr.transcribe"],
                 "recommended_capability_pointer": "/extra/recommended_capability"
             }
         ]
@@ -60,10 +60,10 @@ fn selected_bundle_result() -> CapabilityResultEnvelope {
                     "capability": "audio.preview_transcribe",
                     "input_field": "audio_path",
                     "input_value": "artifact:task/task-1/video-1",
-                    "fallback_capability": "media_download.transcribe",
+                    "fallback_capability": "local_asr.transcribe",
                     "fallback_input_field": "input_path",
                     "fallback_input_value": "artifact:task/task-1/video-1",
-                    "completion_capabilities": ["audio.transcribe", "media_download.transcribe"],
+                    "completion_capabilities": ["audio.transcribe", "local_asr.transcribe"],
                     "recommended_capability_pointer": "/extra/recommended_capability"
                 }]
             }}}
@@ -205,7 +205,7 @@ fn failed_primary_transcription_uses_declared_fallback_once() {
         failed("audio.transcribe"),
     ];
     let required = next_required_followup(&results).expect("fallback");
-    assert_eq!(required.capability, "media_download.transcribe");
+    assert_eq!(required.capability, "local_asr.transcribe");
     assert_eq!(required.args["input_path"], "artifact:task/task-1/audio-1");
 
     let exhausted = vec![
@@ -213,7 +213,7 @@ fn failed_primary_transcription_uses_declared_fallback_once() {
         ok("image_vision.extract_text"),
         preview("audio.transcribe"),
         failed("audio.transcribe"),
-        failed("media_download.transcribe"),
+        failed("local_asr.transcribe"),
     ];
     assert!(next_required_followup(&exhausted).is_none());
 }
@@ -232,10 +232,10 @@ fn successful_preview_still_requires_the_selected_transcription() {
     let local = vec![
         bundle_result(),
         ok("image_vision.extract_text"),
-        preview("media_download.transcribe"),
+        preview("local_asr.transcribe"),
     ];
     let required = next_required_followup(&local).expect("local transcription");
-    assert_eq!(required.capability, "media_download.transcribe");
+    assert_eq!(required.capability, "local_asr.transcribe");
     assert_eq!(required.args["input_path"], "artifact:task/task-1/audio-1");
 }
 

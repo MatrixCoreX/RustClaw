@@ -8,6 +8,12 @@ export function parallelPlatformLimit() {
   return memory < 4 * 1024 ** 3 ? 1 : memory < 8 * 1024 ** 3 ? 2 : 3;
 }
 
+export function grantedBrowserParallelLimit(context) {
+  const value = context?.resource_grant?.grant?.browser_slots;
+  if (!Number.isSafeInteger(value) || value < 1) return undefined;
+  return Math.min(value, 3);
+}
+
 export function activeRunIsFresh(run) {
   if (!run) return false;
   const heartbeat = Date.parse(run.heartbeat_at || run.started_at || "");

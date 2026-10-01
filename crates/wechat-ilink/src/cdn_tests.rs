@@ -6,7 +6,7 @@ use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::IntoResponse;
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::Engine;
 use reqwest::Client;
@@ -14,9 +14,10 @@ use serde_json::{json, Value};
 use tokio::net::TcpListener;
 
 use super::{
-    send_weixin_file_from_file, send_weixin_image_from_file,
+    download_decrypted_media_to_file, send_weixin_file_from_file, send_weixin_image_from_file,
     send_weixin_image_from_file_with_client_id, send_weixin_video_from_file, B64,
 };
+use crate::crypto::encrypt_aes_128_ecb;
 use crate::http::IlinkAuth;
 
 #[derive(Clone, Default)]
@@ -25,6 +26,7 @@ struct TestState {
     sendmessage_body: Arc<Mutex<Option<Value>>>,
     upload_queries: Arc<Mutex<Vec<String>>>,
     upload_full_url: Arc<Mutex<Option<String>>>,
+    download_body: Arc<Mutex<Vec<u8>>>,
 }
 
 async fn handle_getuploadurl(State(state): State<TestState>, body: Bytes) -> impl IntoResponse {
@@ -70,6 +72,14 @@ async fn handle_upload(State(state): State<TestState>, uri: Uri) -> impl IntoRes
     )
 }
 
+async fn handle_download(State(state): State<TestState>) -> impl IntoResponse {
+    state
+        .download_body
+        .lock()
+        .expect("download body lock")
+        .clone()
+}
+
 async fn handle_sendmessage(
     State(state): State<TestState>,
     headers: HeaderMap,
@@ -95,6 +105,7 @@ async fn spawn_test_server() -> (SocketAddr, TestState) {
         .route("/ilink/bot/getuploadurl", post(handle_getuploadurl))
         .route("/upload", post(handle_upload))
         .route("/upload-full", post(handle_upload))
+        .route("/download", get(handle_download))
         .route("/ilink/bot/sendmessage", post(handle_sendmessage))
         .with_state(state.clone());
     let listener = TcpListener::bind("127.0.0.1:0")
@@ -105,6 +116,45 @@ async fn spawn_test_server() -> (SocketAddr, TestState) {
         axum::serve(listener, app).await.expect("serve test app");
     });
     (addr, state)
+}
+
+#[tokio::test]
+async fn inbound_media_streams_to_file_and_rejects_oversize_ciphertext() {
+    let (addr, state) = spawn_test_server().await;
+    let key = [11_u8; 16];
+    let plaintext = vec![23_u8; 64 * 1024 + 7];
+    *state.download_body.lock().expect("set download body") =
+        encrypt_aes_128_ecb(&plaintext, &key).unwrap();
+    let destination = unique_temp_file("download", "bin");
+    let base = format!("http://{addr}");
+    let size = download_decrypted_media_to_file(
+        &Client::new(),
+        "download-token",
+        &key,
+        &base,
+        "test-download",
+        &destination,
+        plaintext.len() as u64,
+    )
+    .await
+    .unwrap();
+    assert_eq!(size, plaintext.len() as u64);
+    assert_eq!(tokio::fs::read(&destination).await.unwrap(), plaintext);
+    tokio::fs::remove_file(&destination).await.unwrap();
+
+    let error = download_decrypted_media_to_file(
+        &Client::new(),
+        "download-token",
+        &key,
+        &base,
+        "test-download",
+        &destination,
+        1024,
+    )
+    .await
+    .unwrap_err();
+    assert!(error.contains("too_large"));
+    assert!(!destination.exists());
 }
 
 fn unique_temp_file(label: &str, extension: &str) -> PathBuf {

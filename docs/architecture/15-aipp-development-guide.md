@@ -5,6 +5,7 @@
 
 <!-- ai-learning-navigation:start -->
 Previous: [AiPP skill companion interfaces](14-aipp-skill-companions.md) |
+[Next: Runtime resource admission and recovery](16-runtime-resource-recovery.md) |
 [Architecture index](README.md)
 <!-- ai-learning-navigation:end -->
 

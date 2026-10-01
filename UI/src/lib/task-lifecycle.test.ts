@@ -47,7 +47,8 @@ test("surfaces waiting checkpoint details without raw json", () => {
       state: "waiting",
       can_poll: true,
       can_cancel: true,
-      resume_reason: "provider_gap_retry_window",
+      resume_reason: "provider_blocker_wait_background",
+      message_key: "clawd.task.provider_waiting",
       next_check_after: 1781800300,
       resume_due: false,
       resume_wait_seconds: 120,
@@ -62,7 +63,7 @@ test("surfaces waiting checkpoint details without raw json", () => {
 
   assert.equal(view.stateLabel, "等待中");
   assert.equal(view.tone, "attention");
-  assert.equal(view.detail, "恢复原因: provider_gap_retry_window");
+  assert.equal(view.detail, "模型服务暂时不可用，系统已保存进度并会稍后继续。");
   assert.equal(view.recommendedAction.label, "保持等待");
   assert.ok(view.meta.some((item) => item === "恢复等待: 120s"));
   assert.ok(view.meta.some((item) => item === "检查点: ckpt-1"));
@@ -110,7 +111,8 @@ test("uses next action fields without exposing them as primary meta", () => {
     "en",
   );
 
-  assert.deepEqual(view.meta.slice(0, 2), ["Wait reason: provider_backoff", "Resume wait: 45s"]);
+  assert.equal(view.meta[0], "Resume wait: 45s");
+  assert.ok(view.meta.every((item) => !item.includes("provider_backoff")));
   assert.ok(view.meta.every((item) => !item.includes("poll_async_job")));
   assert.ok(view.meta.every((item) => !item.includes("Next action ref")));
   assert.ok(view.meta.some((item) => item === "Checkpoint: ckpt-9"));
@@ -118,6 +120,25 @@ test("uses next action fields without exposing them as primary meta", () => {
   assert.ok(view.meta.some((item) => item === "Cancelable: Yes"));
   assert.equal(view.recommendedAction.actionKind, "poll_async_job");
   assert.equal(view.recommendedAction.label, "Waiting for background result");
+});
+
+test("explains resource waiting without exposing machine reason tokens", () => {
+  const view = buildTaskLifecycleView(
+    {
+      state: "waiting",
+      can_poll: true,
+      can_cancel: true,
+      resume_reason: "resource_admission_wait",
+      message_key: "clawd.task.resource_waiting",
+      checkpoint_id: "ckpt-resource",
+    },
+    "running",
+    "en",
+  );
+
+  assert.match(view.detail, /waiting for enough runtime resources/i);
+  assert.doesNotMatch(view.detail, /resource_admission_wait/);
+  assert.ok(view.meta.every((item) => !item.includes("resource_admission_wait")));
 });
 
 test("builds resume lifecycle machine tokens for UI resume surface", () => {

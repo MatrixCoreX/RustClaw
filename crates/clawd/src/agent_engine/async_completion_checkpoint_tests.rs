@@ -64,7 +64,7 @@ fn poll_checkpoint() -> TaskCheckpoint {
 fn completed_async_job_becomes_next_planner_round_with_terminal_evidence() {
     let mut pending_checkpoint = poll_checkpoint();
     let mut pending = claw_core::capability_result::CapabilityResultEnvelope::ok(
-        "media_download.transcribe",
+        "local_asr.transcribe",
         Some("transcribe".to_string()),
         json!({"output": "pending"}),
     );
@@ -262,7 +262,7 @@ fn failed_async_stt_resumes_planner_with_exact_local_fallback_input() {
                 "error_code": "provider_request_failed",
                 "message_key": "skill.audio_transcribe.provider_request_failed",
                 "retryable": true,
-                "fallback_capability": "media_download.transcribe",
+                "fallback_capability": "local_asr.transcribe",
                 "fallback_input_field": "input_path",
                 "fallback_input_value": "/workspace/extracted.wav"
             }

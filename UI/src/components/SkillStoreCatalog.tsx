@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Bitcoin,
   BookOpen,
@@ -196,6 +196,7 @@ export interface SkillStoreCatalogProps {
   message: string | null;
   actionName: string | null;
   onRefresh: () => unknown | Promise<unknown>;
+  onBrowse?: (page: number, query: string) => unknown | Promise<unknown>;
   onCheckDependencies: (name: string) => Promise<SkillStoreDependencyResponse>;
   onInstall: (name: string) => unknown | Promise<unknown>;
   onRemove: (name: string, preserveConfig: boolean, preserveData: boolean) => unknown | Promise<unknown>;
@@ -211,6 +212,7 @@ export function SkillStoreCatalog({
   message,
   actionName,
   onRefresh,
+  onBrowse,
   onCheckDependencies,
   onInstall,
   onRemove,
@@ -220,8 +222,21 @@ export function SkillStoreCatalog({
   const [pendingRemoval, setPendingRemoval] = useState<SkillStoreItem | null>(null);
   const [dependencyChecks, setDependencyChecks] = useState<Record<string, DependencyCheckState>>({});
   const items = useMemo(() => {
-    return filterSkillStoreItems(data?.items ?? [], query);
-  }, [data?.items, query]);
+    return onBrowse ? data?.items ?? [] : filterSkillStoreItems(data?.items ?? [], query);
+  }, [data?.items, onBrowse, query]);
+  const currentPage = data?.page ?? 1;
+  const pageSize = data?.page_size ?? Math.max(items.length, 1);
+  const totalItems = data?.total ?? items.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+
+  useEffect(() => {
+    if (!onBrowse) return;
+    const requestedQuery = query.trim();
+    const normalizedQuery = requestedQuery.toLocaleLowerCase();
+    if (normalizedQuery === (data?.query ?? "").trim().toLocaleLowerCase()) return;
+    const timer = window.setTimeout(() => void onBrowse(1, requestedQuery), 300);
+    return () => window.clearTimeout(timer);
+  }, [data?.query, onBrowse, query]);
   const mutationRunning = actionName !== null;
   const activeOperation = data?.active_operation ?? null;
   const recentFailure = latestUnresolvedSkillStoreFailure(data?.recent_operations);
@@ -374,6 +389,14 @@ export function SkillStoreCatalog({
                 t={t}
               />
             </dd>
+            <dt>{t("最低可用内存", "Minimum available memory")}</dt>
+            <dd className="break-all text-white/75">
+              {item.min_memory_mb ? `${item.min_memory_mb} MiB` : t("无额外要求", "No additional requirement")}
+            </dd>
+            <dt>{t("最低可用存储", "Minimum free storage")}</dt>
+            <dd className="break-all text-white/75">
+              {item.min_free_disk_mb ? `${item.min_free_disk_mb} MiB` : t("无额外要求", "No additional requirement")}
+            </dd>
           </dl>
           {dependencyChecks[item.name]?.error ? (
             <p className="mt-2 text-amber-200/80">{dependencyChecks[item.name].error}</p>
@@ -492,6 +515,31 @@ export function SkillStoreCatalog({
         </details>
       ) : null}
       <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{items.map(renderItem)}</div>
+      {onBrowse && totalItems > pageSize ? (
+        <div className="mt-4 flex items-center justify-between gap-3 border-t border-white/10 pt-4 text-xs text-white/55">
+          <span>
+            {t("共", "Total")} {totalItems} · {currentPage}/{totalPages}
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => void onBrowse(Math.max(1, currentPage - 1), query.trim())}
+              disabled={loading || currentPage <= 1}
+              className="theme-topbar-btn px-3 py-2 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {t("上一页", "Previous")}
+            </button>
+            <button
+              type="button"
+              onClick={() => void onBrowse(Math.min(totalPages, currentPage + 1), query.trim())}
+              disabled={loading || !data?.has_more}
+              className="theme-topbar-btn px-3 py-2 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {t("下一页", "Next")}
+            </button>
+          </div>
+        </div>
+      ) : null}
       {!loading && items.length === 0 ? (
         <p className="mt-4 border border-white/10 bg-white/5 px-4 py-6 text-center text-sm text-white/50 rounded-lg">
           {t("没有找到匹配的技能。", "No matching skills found.")}

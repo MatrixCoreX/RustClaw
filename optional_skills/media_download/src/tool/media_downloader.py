@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 import image_ocr
-import video_transcriber
+import media_audio
 import xiaohongshu_access
 import youtube_access
 from browser_devtools import DevToolsConnection, DevToolsError
@@ -4845,7 +4845,7 @@ def mux_separate_audio_stream(
             raise DouyinDownloadError(
                 "ffmpeg completed without creating the combined adaptive video."
             )
-        if video_transcriber.probe_audio_stream(muxed_path) is False:
+        if media_audio.probe_audio_stream(muxed_path) is False:
             raise DouyinDownloadError(
                 "The combined adaptive video still contains no audio stream."
             )
@@ -5752,93 +5752,6 @@ def process_x_folder(args: argparse.Namespace) -> int:
     return 1 if summary.failed else 0
 
 
-def audio_text_processing_requested(args: argparse.Namespace) -> bool:
-    return bool(args.extract_audio or args.transcribe)
-
-
-def extract_audio_and_transcribe_if_needed(path: Path, args: argparse.Namespace) -> None:
-    if not audio_text_processing_requested(args):
-        return
-    raise_if_task_cancelled()
-    cancel_token = current_cancellation_token()
-
-    audio_path = video_transcriber.output_path_for(
-        path,
-        args.audio_output,
-        None,
-        video_transcriber.DEFAULT_AUDIO_SUFFIX,
-        ".wav",
-    )
-    try:
-        reuse_audio = bool(args.transcribe and args.audio_output is None and audio_path.exists())
-        saved_audio = video_transcriber.extract_audio(
-            path,
-            audio_path,
-            overwrite=args.overwrite,
-            reuse_audio=reuse_audio,
-            sample_rate=args.audio_sample_rate,
-            channels=args.audio_channels,
-            cancel_token=cancel_token,
-            verbose=args.verbose,
-        )
-    except OperationCancelled:
-        raise
-    except Exception as exc:
-        raise DouyinDownloadError(f"Audio extraction failed: {exc}") from exc
-    print(f"audio: {saved_audio}")
-
-    if not args.transcribe:
-        return
-
-    transcript_path = video_transcriber.output_path_for(
-        path,
-        args.text_output,
-        None,
-        video_transcriber.DEFAULT_TRANSCRIPT_SUFFIX,
-        ".txt",
-    )
-    try:
-        whisper_bin = (
-            video_transcriber.find_whisper_binary(args.whisper_bin)
-            if args.transcribe_engine == "whisper"
-            else None
-        )
-        model_path = (
-            video_transcriber.find_whisper_model(args.whisper_model)
-            if args.transcribe_engine == "whisper"
-            else None
-        )
-        transcript = video_transcriber.transcribe_audio_with_engine(
-            saved_audio,
-            transcript_path,
-            engine=args.transcribe_engine,
-            whisper_bin=whisper_bin,
-            whisper_model_path=model_path,
-            language=args.whisper_language,
-            threads=args.whisper_threads,
-            translate=args.whisper_translate,
-            fast=args.whisper_fast,
-            no_gpu=args.whisper_no_gpu,
-            no_timestamps=not args.whisper_timestamps,
-            print_progress=args.whisper_progress,
-            funasr_model=args.funasr_model,
-            funasr_device=args.funasr_device,
-            funasr_vad_model=args.funasr_vad_model,
-            funasr_punc_model=args.funasr_punc_model,
-            funasr_batch_size_s=args.funasr_batch_size_s,
-            funasr_rich_text=args.funasr_rich_text,
-            simplify_chinese=args.simplify_chinese,
-            cancel_token=cancel_token,
-            overwrite=args.overwrite,
-            verbose=args.verbose,
-        )
-    except OperationCancelled:
-        raise
-    except Exception as exc:
-        raise DouyinDownloadError(f"Audio transcription failed: {exc}") from exc
-    print(f"transcript: {transcript}")
-
-
 def ocr_images_if_needed(paths: list[Path], output_stem: str, args: argparse.Namespace) -> None:
     if not args.ocr_images:
         return
@@ -5890,8 +5803,6 @@ def handle_downloaded_video(path: Path, args: argparse.Namespace) -> None:
         print_media_info(path)
     else:
         print(path)
-    extract_audio_and_transcribe_if_needed(path, args)
-    raise_if_task_cancelled()
     if args.x_compatible:
         try:
             make_x_compatible_if_needed(path, args)
@@ -5942,7 +5853,7 @@ def gather_candidates_for_request_with_retries(
                 browser_fallback=args.browser_fallback,
                 browser_timeout=args.browser_timeout,
                 chrome_path=args.chrome_path,
-                require_audio=audio_text_processing_requested(args),
+                require_audio=False,
                 use_system_browser_cookies=args.system_browser_cookies,
                 browser_profile_dir=getattr(args, "browser_profile_dir", None),
             )
@@ -6210,134 +6121,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Disable image enhancement before OCR.",
     )
     parser.add_argument(
-        "--extract-audio",
-        action="store_true",
-        help="After a successful video download, extract a separate WAV audio file.",
-    )
-    parser.add_argument(
-        "--transcribe",
-        action="store_true",
-        help="After a successful video download, extract audio and transcribe it with a local ASR engine.",
-    )
-    parser.add_argument(
-        "--audio-output",
-        help="Output WAV path for --extract-audio or --transcribe. Default: downloaded video stem plus _audio.wav",
-    )
-    parser.add_argument(
-        "--text-output",
-        help="Output transcript TXT path for --transcribe. Default: downloaded video stem plus _transcript.txt",
-    )
-    parser.add_argument(
-        "--audio-sample-rate",
-        type=int,
-        default=video_transcriber.DEFAULT_SAMPLE_RATE,
-        help="Sample rate for extracted WAV audio. Default: 16000",
-    )
-    parser.add_argument(
-        "--audio-channels",
-        type=int,
-        default=video_transcriber.DEFAULT_CHANNELS,
-        help="Channel count for extracted WAV audio. Default: 1",
-    )
-    parser.add_argument(
-        "--whisper-bin",
-        help="Path or executable name for whisper.cpp whisper-cli used by --transcribe.",
-    )
-    parser.add_argument(
-        "--transcribe-engine",
-        choices=video_transcriber.TRANSCRIBE_ENGINES,
-        default=video_transcriber.DEFAULT_TRANSCRIBE_ENGINE,
-        help=f"Local transcription engine for --transcribe. Default: {video_transcriber.DEFAULT_TRANSCRIBE_ENGINE}",
-    )
-    parser.add_argument(
-        "--whisper-model",
-        help="Path to a whisper.cpp ggml model used by --transcribe.",
-    )
-    parser.add_argument(
-        "--whisper-language",
-        default=video_transcriber.DEFAULT_LANGUAGE,
-        help="Spoken language for whisper.cpp, or auto. Default: auto",
-    )
-    parser.add_argument(
-        "--whisper-threads",
-        type=int,
-        default=video_transcriber.default_whisper_threads(),
-        help=f"Thread count passed to whisper.cpp. Default: auto, capped at {video_transcriber.DEFAULT_MAX_THREADS}",
-    )
-    parser.add_argument(
-        "--whisper-translate",
-        action="store_true",
-        help="Ask whisper.cpp to translate speech to English.",
-    )
-    parser.add_argument(
-        "--whisper-fast",
-        action="store_true",
-        help="Use faster greedy whisper.cpp decoding. May reduce transcription quality.",
-    )
-    parser.add_argument(
-        "--whisper-no-gpu",
-        action="store_true",
-        help="Pass --no-gpu to whisper.cpp.",
-    )
-    parser.add_argument(
-        "--whisper-timestamps",
-        action="store_true",
-        help="Keep timestamps in whisper.cpp text output.",
-    )
-    parser.add_argument(
-        "--whisper-no-progress",
-        dest="whisper_progress",
-        action="store_false",
-        default=True,
-        help="Disable whisper.cpp progress output.",
-    )
-    simplify_group = parser.add_mutually_exclusive_group()
-    simplify_group.add_argument(
-        "--simplify-chinese",
-        dest="simplify_chinese",
-        action="store_true",
-        default=video_transcriber.DEFAULT_SIMPLIFY_CHINESE,
-        help="Convert transcript text from traditional to simplified Chinese with OpenCC. Default: enabled",
-    )
-    simplify_group.add_argument(
-        "--no-simplify-chinese",
-        dest="simplify_chinese",
-        action="store_false",
-        help="Keep the ASR engine's original Chinese script without OpenCC conversion.",
-    )
-    parser.add_argument(
-        "--funasr-model",
-        default=video_transcriber.DEFAULT_FUNASR_MODEL,
-        help=f"FunASR model id or local path used by --transcribe-engine funasr. Default: {video_transcriber.DEFAULT_FUNASR_MODEL}",
-    )
-    parser.add_argument(
-        "--funasr-device",
-        default=video_transcriber.DEFAULT_FUNASR_DEVICE,
-        help=f"FunASR device used by --transcribe-engine funasr. Default: {video_transcriber.DEFAULT_FUNASR_DEVICE}",
-    )
-    parser.add_argument(
-        "--funasr-vad-model",
-        default=video_transcriber.DEFAULT_FUNASR_VAD_MODEL,
-        help=f"FunASR VAD model, or none/off. Default: {video_transcriber.DEFAULT_FUNASR_VAD_MODEL}",
-    )
-    parser.add_argument(
-        "--funasr-punc-model",
-        default=video_transcriber.DEFAULT_FUNASR_PUNC_MODEL,
-        help="Optional FunASR punctuation model, or none/off. Default: none",
-    )
-    parser.add_argument(
-        "--funasr-batch-size-s",
-        type=int,
-        default=video_transcriber.DEFAULT_FUNASR_BATCH_SIZE_S,
-        help=f"FunASR batch duration in seconds. Default: {video_transcriber.DEFAULT_FUNASR_BATCH_SIZE_S}",
-    )
-    parser.add_argument(
-        "--funasr-rich-text",
-        action="store_true",
-        default=video_transcriber.DEFAULT_FUNASR_RICH_TEXT,
-        help="Keep SenseVoice rich transcription emoji for emotion and audio events. Default: off",
-    )
-    parser.add_argument(
         "--x-folder",
         help=(
             "Recursively check every video in this folder and create an X-compatible "
@@ -6485,24 +6268,13 @@ INTERACTIVE_BASE_COMMANDS = (
 INTERACTIVE_BOOL_OPTIONS = {
     "browser-fallback": "browser_fallback",
     "system-browser-cookies": "system_browser_cookies",
-    "extract-audio": "extract_audio",
-    "audio": "extract_audio",
     "print-url": "print_url",
     "save-meta": "save_meta",
     "show-info": "show_info",
     "ocr-images": "ocr_images",
     "ocr": "ocr_images",
     "ocr-preprocess": "ocr_preprocess",
-    "transcribe": "transcribe",
-    "stt": "transcribe",
-    "simplify-chinese": "simplify_chinese",
     "verbose": "verbose",
-    "funasr-rich-text": "funasr_rich_text",
-    "whisper-fast": "whisper_fast",
-    "whisper-no-gpu": "whisper_no_gpu",
-    "whisper-progress": "whisper_progress",
-    "whisper-timestamps": "whisper_timestamps",
-    "whisper-translate": "whisper_translate",
     "overwrite": "overwrite",
     "x-compatible": "x_compatible",
     "x-force": "x_force",
@@ -6512,26 +6284,15 @@ INTERACTIVE_BOOL_OPTIONS = {
 INTERACTIVE_BOOL_DEFAULTS = {
     "browser-fallback": True,
     "system-browser-cookies": True,
-    "funasr-rich-text": video_transcriber.DEFAULT_FUNASR_RICH_TEXT,
     "ocr": True,
     "ocr-images": True,
     "ocr-preprocess": image_ocr.DEFAULT_PREPROCESS,
-    "simplify-chinese": video_transcriber.DEFAULT_SIMPLIFY_CHINESE,
-    "whisper-progress": True,
 }
 
 INTERACTIVE_VALUE_OPTIONS = {
-    "audio-channels": ("audio_channels", int, video_transcriber.DEFAULT_CHANNELS),
-    "audio-output": ("audio_output", str, None),
-    "audio-sample-rate": ("audio_sample_rate", int, video_transcriber.DEFAULT_SAMPLE_RATE),
     "browser-timeout": ("browser_timeout", float, DEFAULT_BROWSER_TIMEOUT),
     "chrome-path": ("chrome_path", str, None),
     "cookie": ("cookie", str, None),
-    "funasr-batch-size-s": ("funasr_batch_size_s", int, video_transcriber.DEFAULT_FUNASR_BATCH_SIZE_S),
-    "funasr-device": ("funasr_device", str, video_transcriber.DEFAULT_FUNASR_DEVICE),
-    "funasr-model": ("funasr_model", str, video_transcriber.DEFAULT_FUNASR_MODEL),
-    "funasr-punc-model": ("funasr_punc_model", str, video_transcriber.DEFAULT_FUNASR_PUNC_MODEL),
-    "funasr-vad-model": ("funasr_vad_model", str, video_transcriber.DEFAULT_FUNASR_VAD_MODEL),
     "output-dir": ("output_dir", str, "downloads"),
     "output-name": ("output_name", str, None),
     "ocr-bin": ("ocr_bin", str, None),
@@ -6546,13 +6307,7 @@ INTERACTIVE_VALUE_OPTIONS = {
     "platform": ("platform", str, "auto"),
     "profile-interval": ("profile_interval", float, DEFAULT_PROFILE_INTERVAL),
     "profile-limit": ("profile_limit", profile_limit_argument, DEFAULT_PROFILE_LIMIT),
-    "text-output": ("text_output", str, None),
     "timeout": ("timeout", float, 20.0),
-    "transcribe-engine": ("transcribe_engine", str, video_transcriber.DEFAULT_TRANSCRIBE_ENGINE),
-    "whisper-bin": ("whisper_bin", str, None),
-    "whisper-language": ("whisper_language", str, video_transcriber.DEFAULT_LANGUAGE),
-    "whisper-model": ("whisper_model", str, None),
-    "whisper-threads": ("whisper_threads", int, video_transcriber.default_whisper_threads()),
     "x-crf": ("x_crf", int, 23),
     "x-output-dir": ("x_output_dir", str, None),
     "yt-dlp-bin": ("yt_dlp_bin", str, None),
@@ -6580,25 +6335,8 @@ INTERACTIVE_STATUS_OPTIONS = [
     "browser-timeout",
     "profile-interval",
     "profile-limit",
-    "extract-audio",
     "yt-dlp-bin",
     "youtube-format",
-    "transcribe",
-    "audio-output",
-    "text-output",
-    "transcribe-engine",
-    "simplify-chinese",
-    "funasr-rich-text",
-    "funasr-model",
-    "funasr-device",
-    "funasr-vad-model",
-    "funasr-punc-model",
-    "funasr-batch-size-s",
-    "whisper-language",
-    "whisper-threads",
-    "whisper-fast",
-    "whisper-no-gpu",
-    "whisper-progress",
     "x-compatible",
     "x-force",
     "x-output-dir",
@@ -6611,7 +6349,6 @@ INTERACTIVE_COMMAND_OPTIONS = tuple(
 INTERACTIVE_OPTION_NAMES = tuple(sorted(set(INTERACTIVE_BOOL_OPTIONS) | set(INTERACTIVE_VALUE_OPTIONS)))
 INTERACTIVE_BOOL_VALUES = ("on", "off", "toggle")
 INTERACTIVE_PLATFORM_VALUES = ("auto", "douyin", "kuaishou", "xiaohongshu", "tiktok", "youtube")
-INTERACTIVE_TRANSCRIBE_ENGINE_VALUES = video_transcriber.TRANSCRIBE_ENGINES
 
 
 def interactive_option_key(name: str) -> str:
@@ -6636,8 +6373,6 @@ def interactive_value_completions(option: str, prefix: str) -> list[str]:
         return matching_completions(prefix, INTERACTIVE_BOOL_VALUES)
     if normalized == "platform":
         return matching_completions(prefix, INTERACTIVE_PLATFORM_VALUES)
-    if normalized == "transcribe-engine":
-        return matching_completions(prefix, INTERACTIVE_TRANSCRIBE_ENGINE_VALUES)
     return []
 
 
@@ -6771,21 +6506,12 @@ def print_interactive_help() -> None:
                     [
                         "browser-fallback",
                         "system-browser-cookies",
-                        "extract-audio",
                         "print-url",
                         "save-meta",
                         "show-info",
                         "ocr-images",
                         "ocr-preprocess",
-                        "transcribe",
-                        "simplify-chinese",
                         "verbose",
-                        "funasr-rich-text",
-                        "whisper-fast",
-                        "whisper-no-gpu",
-                        "whisper-progress",
-                        "whisper-timestamps",
-                        "whisper-translate",
                         "overwrite",
                         "x-compatible",
                         "x-force",
@@ -6812,20 +6538,6 @@ def print_interactive_help() -> None:
                         "cookie",
                         "yt-dlp-bin",
                         "youtube-format",
-                        "audio-output",
-                        "text-output",
-                        "audio-sample-rate",
-                        "audio-channels",
-                        "transcribe-engine",
-                        "funasr-model",
-                        "funasr-device",
-                        "funasr-vad-model",
-                        "funasr-punc-model",
-                        "funasr-batch-size-s",
-                        "whisper-bin",
-                        "whisper-model",
-                        "whisper-language",
-                        "whisper-threads",
                         "x-crf",
                         "x-output-dir",
                     ]
@@ -6860,12 +6572,6 @@ def set_interactive_option(
         if value not in PLATFORMS:
             raise DouyinDownloadError(
                 "Invalid platform. Use auto, douyin, kuaishou, xiaohongshu, tiktok, or youtube."
-            )
-    if normalized == "transcribe-engine":
-        value = str(value).lower()
-        if value not in video_transcriber.TRANSCRIBE_ENGINES:
-            raise DouyinDownloadError(
-                f"Invalid transcribe-engine. Use {', '.join(video_transcriber.TRANSCRIBE_ENGINES)}."
             )
     if normalized == "profile-interval" and float(value) < 0:
         raise DouyinDownloadError("profile-interval must be zero or greater.")
@@ -8373,9 +8079,6 @@ def handle_resolved_media(
 
     print(media_type_message(platform, candidates, image_candidates), file=sys.stderr)
 
-    if args.print_url and audio_text_processing_requested(args):
-        raise DouyinDownloadError("--print-url cannot be used with --extract-audio or --transcribe.")
-
     if args.print_url:
         if platform == "youtube" and candidates:
             youtube_profile = youtube_access.persistent_profile_dir(
@@ -8618,7 +8321,7 @@ def handle_resolved_media(
                 )
             if (
                 candidate.separate_audio_url
-                and video_transcriber.probe_audio_stream(saved_path) is False
+                and media_audio.probe_audio_stream(saved_path) is False
             ):
                 saved_path = mux_separate_audio_stream(
                     saved_path,
@@ -8634,7 +8337,7 @@ def handle_resolved_media(
                 print(f"Rejected candidate: {exc}", file=sys.stderr)
             continue
 
-        if video_transcriber.probe_audio_stream(saved_path) is False:
+        if media_audio.probe_audio_stream(saved_path) is False:
             missing_audio_candidate = True
             last_error = DouyinDownloadError(
                 f"Downloaded candidate contains no audio stream ({candidate.source})"
@@ -8682,7 +8385,7 @@ def handle_resolved_media(
             "A video-only adaptive stream was found, but no matching audio stream could be combined."
         )
 
-    if silent_fallback_path is not None and not audio_text_processing_requested(args):
+    if silent_fallback_path is not None:
         output_path.unlink(missing_ok=True)
         silent_fallback_path.replace(output_path)
         if args.save_meta:

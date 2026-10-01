@@ -2,11 +2,66 @@ use std::time::Duration;
 
 use r2d2::Builder;
 use r2d2_sqlite::SqliteConnectionManager;
+use rusqlite::Connection;
 
 const LOW_MEMORY_MAX_MIB: u64 = 2048;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SqliteResourceProfile {
+    Constrained,
+    Standard,
+}
+
+impl SqliteResourceProfile {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Constrained => "constrained",
+            Self::Standard => "standard",
+        }
+    }
+
+    pub(crate) fn cache_size_kib(self) -> Option<u32> {
+        (self == Self::Constrained).then_some(1024)
+    }
+
+    pub(crate) fn mmap_size_bytes(self) -> Option<u64> {
+        (self == Self::Constrained).then_some(0)
+    }
+
+    pub(crate) fn temp_store(self) -> Option<&'static str> {
+        (self == Self::Constrained).then_some("file")
+    }
+}
+
 fn low_memory_host(memory_mib: Option<u64>) -> bool {
     memory_mib.is_some_and(|value| value > 0 && value <= LOW_MEMORY_MAX_MIB)
+}
+
+pub(crate) fn sqlite_resource_profile() -> SqliteResourceProfile {
+    sqlite_resource_profile_for_host(crate::resource_scheduler::total_memory_mib())
+}
+
+fn sqlite_resource_profile_for_host(memory_mib: Option<u64>) -> SqliteResourceProfile {
+    if low_memory_host(memory_mib) {
+        SqliteResourceProfile::Constrained
+    } else {
+        SqliteResourceProfile::Standard
+    }
+}
+
+pub(crate) fn apply_sqlite_resource_profile(
+    connection: &Connection,
+    profile: SqliteResourceProfile,
+) -> rusqlite::Result<()> {
+    if profile == SqliteResourceProfile::Constrained {
+        // Keep each connection's page cache bounded and send large temporary
+        // intermediates to SQLite-managed files instead of process heap.
+        connection.pragma_update(None, "cache_size", -1024_i64)?;
+        connection.pragma_update(None, "mmap_size", 0_i64)?;
+        connection.pragma_update(None, "temp_store", 1_i64)?;
+        connection.pragma_update(None, "cache_spill", true)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn sqlite_pool_builder(max_size: u32) -> Builder<SqliteConnectionManager> {

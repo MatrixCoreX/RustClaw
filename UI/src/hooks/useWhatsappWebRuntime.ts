@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { sleep } from "../lib/display-format";
 import type { ApiResponse, ServiceActionNotice, WhatsappWebLoginStatus } from "../types/api";
@@ -12,6 +12,7 @@ export interface UseWhatsappWebRuntimeParams {
   apiBase: string;
   uiAuthReady: boolean;
   whatsappWebHealthy: boolean;
+  statusPollingEnabled?: boolean;
   setServiceActionMessage: (notice: ServiceActionNotice | null) => void;
 }
 
@@ -37,6 +38,7 @@ export function useWhatsappWebRuntime({
   apiBase,
   uiAuthReady,
   whatsappWebHealthy,
+  statusPollingEnabled = true,
   setServiceActionMessage,
 }: UseWhatsappWebRuntimeParams) {
   const [waLoginDialogOpen, setWaLoginDialogOpen] = useState(false);
@@ -45,8 +47,11 @@ export function useWhatsappWebRuntime({
   const [waLoginStatus, setWaLoginStatus] = useState<WhatsappWebLoginStatus | null>(null);
   const [waWebBridgeReachable, setWaWebBridgeReachable] = useState(false);
   const [waLogoutLoading, setWaLogoutLoading] = useState(false);
+  const statusRequestRef = useRef<Promise<void> | null>(null);
 
-  const fetchWhatsappWebLoginStatus = async (silent = false) => {
+  const fetchWhatsappWebLoginStatus = (silent = false): Promise<void> => {
+    if (statusRequestRef.current) return statusRequestRef.current;
+    const request = (async () => {
     if (!silent) {
       setWaLoginLoading(true);
       setWaLoginError(null);
@@ -75,6 +80,12 @@ export function useWhatsappWebRuntime({
         setWaLoginLoading(false);
       }
     }
+    })();
+    statusRequestRef.current = request;
+    void request.finally(() => {
+      if (statusRequestRef.current === request) statusRequestRef.current = null;
+    });
+    return request;
   };
 
   const logoutWhatsappWeb = async () => {
@@ -105,34 +116,45 @@ export function useWhatsappWebRuntime({
   };
 
   useEffect(() => {
-    if (!uiAuthReady) return;
+    if (!uiAuthReady || !statusPollingEnabled) return;
     if (!waLoginDialogOpen) return;
     if (!whatsappWebHealthy) {
       setWaWebBridgeReachable(false);
       setWaLoginError(null);
       return;
     }
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void fetchWhatsappWebLoginStatus(true);
+    };
     void fetchWhatsappWebLoginStatus();
-    const timer = window.setInterval(() => {
-      void fetchWhatsappWebLoginStatus(true);
-    }, 2000);
-    return () => window.clearInterval(timer);
+    const timer = window.setInterval(refreshWhenVisible, 2000);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [waLoginDialogOpen, apiBase, uiAuthReady, whatsappWebHealthy]);
+  }, [waLoginDialogOpen, apiBase, uiAuthReady, whatsappWebHealthy, statusPollingEnabled]);
 
   useEffect(() => {
-    if (!uiAuthReady) return;
+    if (!uiAuthReady || !statusPollingEnabled) return;
+    if (waLoginDialogOpen) return;
     if (!whatsappWebHealthy) {
       setWaWebBridgeReachable(false);
       return;
     }
-    void fetchWhatsappWebLoginStatus(true);
-    const timer = window.setInterval(() => {
-      void fetchWhatsappWebLoginStatus(true);
-    }, 5000);
-    return () => window.clearInterval(timer);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void fetchWhatsappWebLoginStatus(true);
+    };
+    refreshWhenVisible();
+    const timer = window.setInterval(refreshWhenVisible, 5000);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiBase, uiAuthReady, whatsappWebHealthy]);
+  }, [apiBase, uiAuthReady, whatsappWebHealthy, statusPollingEnabled, waLoginDialogOpen]);
 
   return {
     waLoginDialogOpen,

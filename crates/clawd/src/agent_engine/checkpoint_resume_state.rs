@@ -2,6 +2,10 @@ use serde_json::{json, Value};
 
 use super::LoopState;
 
+const CHECKPOINT_RECENT_HISTORY_LIMIT: usize = 128;
+const CHECKPOINT_RECENT_OBSERVATION_LIMIT: usize = 128;
+const CHECKPOINT_RECENT_STEP_RESULT_LIMIT: usize = 128;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AgentCheckpointStage {
     Planning,
@@ -38,10 +42,23 @@ pub(crate) fn build_checkpoint_resume_state(
     loop_state: &LoopState,
     stage: AgentCheckpointStage,
 ) -> Value {
-    let executed_step_provenance = crate::task_journal::checkpoint_step_provenance_records(
-        &loop_state.round_traces,
-        &loop_state.executed_step_results,
+    let executed_step_provenance = recent_values(
+        &crate::task_journal::checkpoint_step_provenance_records(
+            &loop_state.round_traces,
+            &loop_state.executed_step_results,
+            &loop_state.task_observations,
+        ),
+        CHECKPOINT_RECENT_OBSERVATION_LIMIT,
+    );
+    let history_compact =
+        recent_values(&loop_state.history_compact, CHECKPOINT_RECENT_HISTORY_LIMIT);
+    let task_observations = recent_values(
         &loop_state.task_observations,
+        CHECKPOINT_RECENT_OBSERVATION_LIMIT,
+    );
+    let executed_step_results = recent_values(
+        &loop_state.executed_step_results,
+        CHECKPOINT_RECENT_STEP_RESULT_LIMIT,
     );
     json!({
         "schema_version": 1,
@@ -58,16 +75,16 @@ pub(crate) fn build_checkpoint_resume_state(
             .collect::<Vec<_>>(),
         "active_capability_scopes": loop_state.active_capability_scopes,
         "last_output": loop_state.last_output,
-        "history_compact": loop_state.history_compact,
-        "task_observations": loop_state.task_observations,
+        "history_compact": history_compact,
+        "task_observations": task_observations,
         "executed_step_provenance": executed_step_provenance,
         "latest_validation_result": loop_state.latest_validation_result,
         "delivery_messages": loop_state.delivery_messages,
         "last_user_visible_respond": loop_state.last_user_visible_respond,
         "last_publishable_synthesis_output": loop_state.last_publishable_synthesis_output,
         "last_capability_synthesis_output": loop_state.last_capability_synthesis_output,
-        "executed_step_results": loop_state
-            .executed_step_results
+        "resource_wait_attempts": loop_state.resource_wait_attempts,
+        "executed_step_results": executed_step_results
             .iter()
             .map(|step| json!({
                 "step_id": step.step_id,
@@ -80,6 +97,10 @@ pub(crate) fn build_checkpoint_resume_state(
             }))
             .collect::<Vec<_>>(),
     })
+}
+
+fn recent_values<T: Clone>(values: &[T], limit: usize) -> Vec<T> {
+    values[values.len().saturating_sub(limit)..].to_vec()
 }
 
 pub(crate) fn restore_checkpoint_resume_state(
@@ -143,6 +164,11 @@ pub(crate) fn restore_checkpoint_resume_state(
         string_field(resume_state, "last_publishable_synthesis_output");
     loop_state.last_capability_synthesis_output =
         string_field(resume_state, "last_capability_synthesis_output");
+    loop_state.resource_wait_attempts = resume_state
+        .get("resource_wait_attempts")
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+        .unwrap_or_default();
     if loop_state.executed_step_results.is_empty() {
         loop_state
             .executed_step_results

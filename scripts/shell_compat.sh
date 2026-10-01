@@ -549,19 +549,42 @@ cargo_jobs_for_host_capacity() {
     printf '%s\n' "1"
     return 0
   fi
-  if [[ "$total_kb" -gt 0 && "$total_kb" -le 16777216 ]]; then
-    if [[ "$total_kb" -ge 14680064 && "$available_kb" -ge 10485760 \
-      && "$cpu_count" -ge 8 ]]; then
-      printf '%s\n' "4"
-    elif [[ "$total_kb" -ge 12582912 && "$available_kb" -ge 8388608 \
-      && "$cpu_count" -ge 4 ]]; then
-      printf '%s\n' "2"
-    else
-      printf '%s\n' "1"
-    fi
-    return 0
+  if [[ "$available_kb" -le 0 || "$cpu_count" -le 0 ]]; then
+    return 1
   fi
-  return 1
+
+  local jobs=1
+  if [[ "$available_kb" -ge 20971520 && "$cpu_count" -ge 8 ]]; then
+    jobs=8
+  elif [[ "$available_kb" -ge 10485760 && "$cpu_count" -ge 4 ]]; then
+    jobs=4
+  elif [[ "$available_kb" -ge 8388608 && "$cpu_count" -ge 2 ]]; then
+    jobs=2
+  fi
+  printf '%s\n' "$jobs"
+}
+
+node_heap_mb_for_available_memory() {
+  local available_kb="${1:-0}"
+  local requested_mb="${2:-1536}"
+  case "$available_kb:$requested_mb" in
+    *[!0-9:]*) return 1 ;;
+  esac
+  if [[ "$available_kb" -le 0 || "$requested_mb" -lt 512 ]]; then
+    return 1
+  fi
+
+  # V8 needs native memory outside its old-space heap. Keep 40% of currently
+  # available memory for Node, the linker, npm, and the operating system.
+  local safe_mb=$(( available_kb * 3 / 5 / 1024 ))
+  if [[ "$safe_mb" -lt 512 ]]; then
+    return 1
+  fi
+  if [[ "$requested_mb" -lt "$safe_mb" ]]; then
+    printf '%s\n' "$requested_mb"
+  else
+    printf '%s\n' "$safe_mb"
+  fi
 }
 
 cargo_jobs_for_small_host() {

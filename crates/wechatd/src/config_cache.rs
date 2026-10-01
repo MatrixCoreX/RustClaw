@@ -13,6 +13,7 @@ use wechat_ilink::WechatConversationScope;
 const CONFIG_CACHE_TTL_MS: u64 = 24 * 60 * 60 * 1000;
 const CONFIG_CACHE_INITIAL_RETRY_MS: u64 = 2_000;
 const CONFIG_CACHE_MAX_RETRY_MS: u64 = 60 * 60 * 1000;
+const CONFIG_CACHE_MAX_ENTRIES: usize = 4096;
 
 #[derive(Clone, Default)]
 pub struct CachedWeixinConfig {
@@ -71,6 +72,11 @@ impl WeixinConfigManager {
             {
                 Ok(Some(ticket)) => {
                     // ret == 0 from upstream; ticket may be empty (no typing support).
+                    claw_core::bounded_cache::prepare_hash_map_insert(
+                        &mut self.cache,
+                        &cache_key,
+                        CONFIG_CACHE_MAX_ENTRIES,
+                    );
                     self.cache.insert(
                         cache_key.clone(),
                         CacheEntry {
@@ -115,6 +121,11 @@ impl WeixinConfigManager {
                         e.next_fetch_at = now + Duration::from_millis(next_delay);
                     }
                     None => {
+                        claw_core::bounded_cache::prepare_hash_map_insert(
+                            &mut self.cache,
+                            &cache_key,
+                            CONFIG_CACHE_MAX_ENTRIES,
+                        );
                         self.cache.insert(
                             cache_key.clone(),
                             CacheEntry {

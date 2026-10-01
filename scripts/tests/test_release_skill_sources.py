@@ -1,6 +1,7 @@
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -46,6 +47,22 @@ class ReleaseSkillSourcesTests(unittest.TestCase):
     def test_package_script_stages_sources_before_archive(self):
         source = (ROOT / "package-release.sh").read_text()
         self.assertLess(source.index("stage_release_skill_sources.py"), source.index('tar -czf "$OUT"'))
+
+    def test_local_asr_heavy_dependencies_are_isolated(self):
+        media_requirements = (ROOT / "optional_skills/media_download/requirements.in").read_text().lower()
+        local_asr_requirements = (ROOT / "optional_skills/local_asr/requirements.in").read_text().lower()
+        for dependency in ("funasr", "modelscope", "torch", "torchaudio"):
+            self.assertNotIn(dependency, media_requirements)
+            self.assertIn(dependency, local_asr_requirements)
+        registry = tomllib.loads((ROOT / "configs/skills_registry.toml").read_text())
+        local_asr = next(item for item in registry["skills"] if item["name"] == "local_asr")
+        self.assertEqual(local_asr["install_mode"], "on_demand")
+        transcribe = next(
+            item
+            for item in local_asr["planner_capabilities"]
+            if item["name"] == "local_asr.transcribe"
+        )
+        self.assertEqual(transcribe["resource_request"]["class"], "local_model")
 
 
 if __name__ == "__main__":

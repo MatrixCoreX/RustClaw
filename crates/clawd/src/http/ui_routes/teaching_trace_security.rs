@@ -2,6 +2,10 @@
 struct TeachingTraceQuery {
     #[serde(default)]
     teaching: Option<bool>,
+    #[serde(default)]
+    limit: Option<usize>,
+    #[serde(default)]
+    offset: Option<usize>,
 }
 
 fn teaching_trace_error(

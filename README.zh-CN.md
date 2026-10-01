@@ -386,7 +386,7 @@ Task journal summary 和 trace 会记录 `memory_trace`。它包含 stage、use 
 
 选中教学模式时，点击用户提问或助手回复会选中该轮次，并展示对应的 task id、状态、LLM 调用次数、stage 数、verifier/finalizer 次数、目标/上下文/team/coding/checkpoint 事件时间线、模型/厂商能力决策、当前模型 readiness 决策、后台续跑/checkpoint 决策，以及基于 `flow_stage`、`flow_node`、`code_module`、`code_entrypoint` 和调用编号的原始 LLM 请求/响应详情。未选中教学模式时，点击消息不会改变教学 trace。
 
-执行边界以机器字段而不是纯文字说明暴露。教学模式、subagent review、`clawcli report` 和 replay 工具应消费 `workspace_root`、`current_process_cwd`、`current_workspace_scope`、`write_enabled`、`external_publish_enabled`、`allowed_roles`、`runtime_config.max_concurrent_threads_per_session`、兼容旧读取器的 `runtime_config.max_parallel_readonly`、`thread_state`、`execution_state`、`queue_reason`、`join_wait_ms`、`runtime_deadline_ms`、`hook_stages`、`hook_decisions`、`permission_decision`、`policy_decision`、`checkpoint_id`、`poll_ref`、`provider_blocker` 等字段。消费方不得从 finalizer 或 child 文案推断生命周期。
+执行边界以机器字段而不是纯文字说明暴露。教学模式、subagent review、`clawcli report` 和 replay 工具应消费 `workspace_root`、`current_process_cwd`、`current_workspace_scope`、`write_enabled`、`external_publish_enabled`、`allowed_roles`、`runtime_config.max_concurrent_threads_per_session`、`thread_state`、`execution_state`、`queue_reason`、`join_wait_ms`、`runtime_deadline_ms`、`hook_stages`、`hook_decisions`、`permission_decision`、`policy_decision`、`checkpoint_id`、`poll_ref`、`provider_blocker` 等字段。消费方不得从 finalizer 或 child 文案推断生命周期。
 
 排查记忆行为时，按顺序确认这些问题：
 
@@ -548,8 +548,29 @@ agentctl -logs clawd 200 --follow
 - 云服务器使用域名/TLS 时，再显式部署 UI 到 nginx。
 - Linux systemd unit 由 `scripts/install-systemd-service.sh` 根据实际用户和路径生成；仓库不保存写死主机路径的 unit。
 - 树莓派优先使用预编译 aarch64 Release 包，避免低内存设备重复完整编译。
-- 不超过 2 GiB 内存的设备使用按需数据库连接池，Linux/glibc 还启用小内存分配策略，详见[内存策略与测量](docs/architecture/runtime_memory_profile.md)。
+- 运行时持续观测宿主/cgroup 有效内存、当前可用内存、swap、cgroup 事件，以及平台支持时的 Linux PSI。所有工具、技能、浏览器、本地模型、后台任务和模型请求都经过统一资源 broker；临时压力会进入可恢复等待 checkpoint，而不是误报任务失败。不超过 2 GiB 内存的设备还使用按需数据库连接池，Linux/glibc 启用小内存分配策略，详见[内存策略与测量](docs/architecture/runtime_memory_profile.md)。
 - 密钥放在仓库外的环境文件中，不提交到 Git。
+
+### 运行期资源压力与任务恢复
+
+```mermaid
+flowchart LR
+    A[宿主与 cgroup 指标] --> B[HostResourceSnapshot]
+    B --> C[带滞回的压力状态]
+    D[能力资源合同] --> E[ResourceBroker]
+    C --> E
+    E -->|授予固定租约| F[工具、技能、浏览器、模型或后台任务]
+    E -->|容量暂不可用| G[resource_waiting 检查点]
+    F --> H[心跳与进程树观测峰值]
+    H --> E
+    F -->|完成、取消或崩溃| I[释放或核对租约]
+    G --> J[恢复 worker]
+    J -->|容量恢复| E
+```
+
+`resource_waiting` 是可恢复的生命周期状态，不是任务失败。等待期间仍保留取消、连续修正、
+固定技能收据、已完成副作用和通信端投送收据。资源档位、管理员覆盖、可观测性和验收证据见
+[运行期资源准入与恢复](docs/architecture/16-runtime-resource-recovery.zh-CN.md)。
 
 ## 身份与访问控制
 
@@ -613,7 +634,8 @@ flowchart LR
 - Agent 页面使用服务端会话历史。每个任务都提供直接可见的重命名按钮，名称在刷新页面或重启后仍会保留。
 - 桌面端点击主操作区域任意位置都会自动收起左侧导航，可用导航开关再次展开；移动端选择页面或点击菜单外部后会关闭导航菜单。
 - 首页任务数量与“正在处理的任务”使用同一身份范围：管理员查看系统范围，普通 key 查看本人跨会话的任务。首页“正在运行”数量与最长运行时长只统计持有有效 worker lease 的任务；等待用户、暂停或等待恢复的 checkpoint 保留在任务生命周期视图中，不触发长运行告警。
-- 首页“系统依赖检查”会检查 Agent Runtime 运行、源码/UI 构建以及内置工具和技能使用的本机依赖，显示检测到的版本和对应能力。服务已具备无交互包管理权限时，管理员可按依赖白名单启动 Linux 包管理器或 macOS Homebrew 安装；安装作为异步作业运行，刷新页面后仍可查看进行中状态和失败日志。浏览器不能提交任意软件包名、系统命令或操作系统密码。
+- 首页“系统依赖检查”会检查 Agent Runtime 运行、源码/UI 构建以及内置工具和技能使用的本机依赖，并区分依赖缺失、依赖已安装但对应技能关闭、以及当前内存压力下暂不可运行。服务已具备无交互包管理权限时，管理员可按依赖白名单启动 Linux 包管理器或 macOS Homebrew 安装；安装作为异步作业运行，刷新页面后仍可查看进行中状态和失败日志。浏览器不能提交任意软件包名、系统命令或操作系统密码。
+- 同一区域可以导出最大 256 KiB 的只读诊断 JSON。内容只包含有界的主机容量、资源压力、依赖和技能数量摘要，不包含凭据、任务内容、日志、PID、可执行路径、工作区路径或原始配置值。
 
 `clawd` 固定使用内部地址 `127.0.0.1:8787`，不再提供面向用户的监听配置。`webd` 从 `configs/channels/webd.toml` 读取监听地址，可使用 `0.0.0.0:8788` 提供设备 IP 直连，也可使用 `127.0.0.1:8788` 只允许 nginx/本机访问。首页切换访问范围时会保留原端口，只原子修改监听地址。Docker 只发布 `8788`，不发布 `8787`；容器网络中改为 loopback 前必须单独确认网络拓扑。
 
@@ -622,6 +644,7 @@ flowchart LR
 - `GET /v1/health`
 - `GET /v1/system/host-summary`：返回经过鉴权、带版本且不含密钥的首页主机摘要，包括系统/版本、架构、内存、Agent Runtime 数据卷存储、运行时长和机器可读的缺失字段
 - `GET /v1/system/dependencies`：返回 Linux/macOS 依赖、已安装版本、使用该依赖的工具/技能和可安装状态
+- `GET /v1/system/diagnostics/export`：返回首页下载使用的、经过鉴权、大小受限且默认脱敏的只读诊断摘要
 - `POST /v1/admin/system-dependencies/install`：管理员按固定 `dependency_id` 启动受控异步安装，不接受任意命令或包名
 - `POST /v1/tasks`
 - `POST /v1/conversation-inputs/client-task`：持久接收普通消息，并绑定当前任务或只创建一个任务

@@ -164,7 +164,7 @@ fn task_report_json_exposes_stable_machine_fields() {
                     "trace": {
                         "capability_results": [{
                             "status": "ok",
-                            "capability": "media_download.transcribe",
+                            "capability": "local_asr.transcribe",
                             "artifacts": [{
                                 "artifact_ref": "artifact:task/task-report/a_transcript",
                                 "visibility": "internal_processing"
@@ -253,10 +253,7 @@ fn task_report_json_exposes_stable_machine_fields() {
     assert_eq!(report["lifecycle_state"], "completed");
     assert_eq!(report["terminal"], true);
     assert_eq!(report["goal_outcome"], report["outcome"]);
-    assert_eq!(
-        report["last_successful_capability"],
-        "media_download.transcribe"
-    );
+    assert_eq!(report["last_successful_capability"], "local_asr.transcribe");
     assert_eq!(
         report["pending_plan_node"]["capability"],
         "audio.transcribe"

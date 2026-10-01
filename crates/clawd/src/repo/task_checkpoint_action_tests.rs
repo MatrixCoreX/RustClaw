@@ -1,11 +1,17 @@
-use super::{load_task_checkpoint_action, upsert_task_checkpoint_action};
+use super::{
+    load_task_checkpoint_action, replace_current_task_checkpoint_action,
+    upsert_task_checkpoint_action,
+};
 
 fn pool() -> crate::db_init::DbPool {
     let pool = crate::db_init::test_pool();
     let db = pool.get().expect("test db");
     db.execute_batch(
         "PRAGMA foreign_keys = ON;
-         CREATE TABLE tasks (task_id TEXT PRIMARY KEY);",
+         CREATE TABLE tasks (
+             task_id TEXT PRIMARY KEY,
+             status TEXT NOT NULL DEFAULT 'running'
+         );",
     )
     .expect("create tasks");
     db.execute("INSERT INTO tasks (task_id) VALUES ('task-1')", [])
@@ -130,4 +136,97 @@ fn checkpoint_action_rejects_integrity_mismatch() {
     let error = load_task_checkpoint_action(&pool, "task-1", "checkpoint-1")
         .expect_err("integrity mismatch");
     assert_eq!(error.to_string(), "checkpoint_action_integrity_mismatch");
+}
+
+#[test]
+fn replacing_current_checkpoint_action_prunes_stale_rows_atomically() {
+    let pool = pool();
+    upsert_task_checkpoint_action(
+        &pool,
+        "task-1",
+        "checkpoint-old",
+        "browser_session",
+        "browser.session_open",
+        &serde_json::json!({"url": "https://example.com/old"}),
+        None,
+        None,
+        Some(&serde_json::json!({"schema_version": 1})),
+        None,
+        1,
+        1,
+    )
+    .expect("store old action");
+
+    replace_current_task_checkpoint_action(
+        &pool,
+        "task-1",
+        "checkpoint-current",
+        "browser_session",
+        "browser.session_open",
+        &serde_json::json!({"url": "https://example.com/current"}),
+        None,
+        None,
+        Some(&serde_json::json!({"schema_version": 1})),
+        None,
+        1,
+        1,
+    )
+    .expect("replace current action");
+
+    assert!(
+        load_task_checkpoint_action(&pool, "task-1", "checkpoint-old")
+            .expect("load stale action")
+            .is_none()
+    );
+    let current = load_task_checkpoint_action(&pool, "task-1", "checkpoint-current")
+        .expect("load current action")
+        .expect("current action");
+    assert_eq!(
+        current.args["url"],
+        serde_json::json!("https://example.com/current")
+    );
+    let row_count: i64 = pool
+        .get()
+        .expect("test db")
+        .query_row(
+            "SELECT COUNT(*) FROM task_checkpoint_actions WHERE task_id = 'task-1'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count checkpoint actions");
+    assert_eq!(row_count, 1);
+}
+
+#[test]
+fn terminal_task_transition_removes_consumed_checkpoint_actions() {
+    let pool = pool();
+    upsert_task_checkpoint_action(
+        &pool,
+        "task-1",
+        "checkpoint-current",
+        "browser_session",
+        "browser.session_open",
+        &serde_json::json!({"url": "https://example.com"}),
+        None,
+        None,
+        Some(&serde_json::json!({"schema_version": 1})),
+        None,
+        1,
+        1,
+    )
+    .expect("store action");
+
+    pool.get()
+        .expect("test db")
+        .execute(
+            "UPDATE tasks SET status = 'succeeded' WHERE task_id = 'task-1'",
+            [],
+        )
+        .expect("mark task terminal");
+
+    assert!(
+        load_task_checkpoint_action(&pool, "task-1", "checkpoint-current")
+            .expect("load action after terminal transition")
+            .is_none()
+    );
 }

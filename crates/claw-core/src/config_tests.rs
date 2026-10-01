@@ -1,7 +1,7 @@
 use super::runtime::apply_llm_vendor_api_key_envs_with;
 use super::{
-    llm_vendor_api_key_env_names, AppConfig, LlmVendorConfig, MemoryConfig, SkillsConfig,
-    ToolsConfig, WorkspaceInstructionsConfig,
+    llm_vendor_api_key_env_names, AppConfig, LlmVendorConfig, MemoryConfig, RuntimeResourcesConfig,
+    SkillsConfig, ToolsConfig, WorkspaceInstructionsConfig,
 };
 use std::fs;
 
@@ -521,6 +521,48 @@ fn skill_config_defaults_do_not_duplicate_registry_membership() {
     assert_eq!(
         skills.registry_path.as_deref(),
         Some("configs/skills_registry.toml")
+    );
+}
+
+#[test]
+fn runtime_resource_overrides_keep_one_default_policy_and_validate_ordering() {
+    let defaults = RuntimeResourcesConfig::default();
+    assert_eq!(
+        defaults.pressure_policy(),
+        crate::host_resources::ResourcePressurePolicy::default()
+    );
+    assert!(defaults.validate().is_ok());
+
+    let configured = RuntimeResourcesConfig {
+        safety_reserve_mib: Some(384),
+        constrained_available_ratio: Some(0.22),
+        recovery_samples: Some(8),
+        ..RuntimeResourcesConfig::default()
+    };
+    assert!(configured.validate().is_ok());
+    assert_eq!(
+        configured.pressure_policy().constrained_available_ratio,
+        0.22
+    );
+    assert_eq!(configured.pressure_policy().recovery_samples, 8);
+
+    assert_eq!(
+        RuntimeResourcesConfig {
+            critical_available_ratio: Some(0.4),
+            compact_available_ratio: Some(0.2),
+            ..RuntimeResourcesConfig::default()
+        }
+        .validate(),
+        Err("runtime_resource_pressure_ratio_invalid".to_string())
+    );
+    assert_eq!(
+        RuntimeResourcesConfig {
+            escalation_samples: Some(8),
+            recovery_samples: Some(2),
+            ..RuntimeResourcesConfig::default()
+        }
+        .validate(),
+        Err("runtime_resource_hysteresis_invalid".to_string())
     );
 }
 

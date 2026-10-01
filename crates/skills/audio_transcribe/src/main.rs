@@ -645,7 +645,7 @@ fn preview_transcription(
     let remote_chunking_enabled =
         provider_location == "remote" && cfg.audio_transcribe.remote_auto_chunk.unwrap_or(true);
     let recommended_capability = if provider_location == "local" {
-        "media_download.transcribe"
+        "local_asr.transcribe"
     } else {
         "audio.transcribe"
     };

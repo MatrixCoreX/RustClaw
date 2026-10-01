@@ -34,7 +34,14 @@ pub(super) async fn handle_image_message(
         .unwrap_or_else(|_| PathBuf::from("."))
         .join(&rel_path);
 
-    download_telegram_file(state, bot, file_id, &abs_path).await?;
+    download_telegram_file(
+        state,
+        bot,
+        file_id,
+        &abs_path,
+        claw_core::channel_media_limits::telegram_file_max_bytes(),
+    )
+    .await?;
 
     submit_attachment_ask(
         bot,
@@ -70,7 +77,14 @@ pub(super) async fn handle_audio_message(
     let abs_path = std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join(&rel_path);
-    download_telegram_file(state, bot, file_id, &abs_path).await?;
+    download_telegram_file(
+        state,
+        bot,
+        file_id,
+        &abs_path,
+        state.max_audio_input_bytes as u64,
+    )
+    .await?;
     if let Ok(meta) = tokio::fs::metadata(&abs_path).await {
         if meta.len() as usize > state.max_audio_input_bytes {
             bot.send_message(
@@ -123,7 +137,14 @@ pub(super) async fn handle_file_message(
     let abs_path = std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join(&rel_path);
-    download_telegram_file(state, bot, file_id, &abs_path).await?;
+    download_telegram_file(
+        state,
+        bot,
+        file_id,
+        &abs_path,
+        claw_core::channel_media_limits::telegram_file_max_bytes(),
+    )
+    .await?;
     submit_attachment_ask(
         bot,
         msg,
@@ -158,7 +179,14 @@ pub(super) async fn handle_video_message(
     let abs_path = std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join(&rel_path);
-    download_telegram_file(state, bot, file_id, &abs_path).await?;
+    download_telegram_file(
+        state,
+        bot,
+        file_id,
+        &abs_path,
+        claw_core::channel_media_limits::telegram_file_max_bytes(),
+    )
+    .await?;
     submit_attachment_ask(
         bot,
         msg,
@@ -213,7 +241,12 @@ pub(super) async fn store_pending_telegram_attachment(
     let abs_path = std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join(&rel_path);
-    download_telegram_file(state, bot, file_id, &abs_path).await?;
+    let max_bytes = if kind == "audio" {
+        state.max_audio_input_bytes as u64
+    } else {
+        claw_core::channel_media_limits::telegram_file_max_bytes()
+    };
+    download_telegram_file(state, bot, file_id, &abs_path, max_bytes).await?;
     let size = tokio::fs::metadata(&abs_path)
         .await
         .ok()
@@ -515,6 +548,7 @@ pub(super) async fn download_telegram_file(
     bot: &Bot,
     file_id: String,
     local_path: &Path,
+    max_bytes: u64,
 ) -> anyhow::Result<()> {
     let file = bot
         .get_file(file_id)
@@ -524,23 +558,21 @@ pub(super) async fn download_telegram_file(
         "https://api.telegram.org/file/bot{}/{}",
         state.bot_token, file.path
     );
-    let bytes = state
+    let response = state
         .client
         .get(file_url)
         .send()
         .await
-        .context("download telegram file request failed")?
-        .bytes()
-        .await
-        .context("read telegram file bytes failed")?;
-    if let Some(parent) = local_path.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .context("create telegram media inbox dir failed")?;
+        .context("download telegram file request failed")?;
+    if !response.status().is_success() {
+        return Err(anyhow!(
+            "telegram_media_download_http_status:{}",
+            response.status()
+        ));
     }
-    tokio::fs::write(local_path, &bytes)
+    claw_core::channel_media_download::persist_bounded_response(response, local_path, max_bytes)
         .await
-        .context("write downloaded file failed")?;
+        .context("persist telegram media failed")?;
     Ok(())
 }
 

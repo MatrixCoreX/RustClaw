@@ -289,3 +289,29 @@ fn single_plan_prompt_keeps_low_risk_drafting_nonblocking_rule() {
     assert!(prompt.contains("neutral assumptions"));
     assert!(prompt.contains("requested output shape"));
 }
+
+#[test]
+fn state_prompt_cache_reuses_stable_revision_and_rebuilds_after_file_change() {
+    let root = temp_workspace("shared_cache");
+    write_file(&root, "prompts/cache.md", "CACHE_V1");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.clone();
+
+    let first = load_prompt_template_for_state_with_meta(&state, "prompts/cache.md", "FALLBACK");
+    assert_eq!(first.template, "CACHE_V1");
+    let snapshot = state.get_skill_views_snapshot();
+    assert_eq!(snapshot.binding.prompt_templates.len(), 1);
+
+    let second = load_prompt_template_for_state_with_meta(&state, "prompts/cache.md", "FALLBACK");
+    assert_eq!(second, first);
+    assert_eq!(snapshot.binding.prompt_templates.len(), 1);
+
+    write_file(&root, "prompts/cache.md", "CACHE_V2_WITH_NEW_LENGTH");
+    let changed = load_prompt_template_for_state_with_meta(&state, "prompts/cache.md", "FALLBACK");
+    assert_eq!(changed.template, "CACHE_V2_WITH_NEW_LENGTH");
+    assert_eq!(snapshot.binding.prompt_templates.len(), 1);
+
+    assert_eq!(state.clear_prompt_template_cache(), 1);
+    assert_eq!(snapshot.binding.prompt_templates.len(), 0);
+    let _ = std::fs::remove_dir_all(root);
+}

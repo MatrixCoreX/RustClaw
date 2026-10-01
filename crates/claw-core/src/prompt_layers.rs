@@ -1,6 +1,8 @@
 use std::path::Path;
+use std::time::UNIX_EPOCH;
 
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 
 const PROMPT_LAYER_MANIFEST_PATH: &str = "prompts/layers/manifest.toml";
 const SKILL_LAYER_BASE_PATH: &str = "prompts/layers/base/skills/common_rules.md";
@@ -100,6 +102,80 @@ pub struct ResolvedPromptTemplate {
     pub template: String,
     pub source: String,
     pub version: Option<String>,
+}
+
+/// Return a cheap revision token for every file that can contribute to a
+/// resolved prompt. The token intentionally uses metadata instead of reading
+/// prompt bodies: callers can validate a shared parsed cache without paying
+/// the allocation and concatenation cost that the cache is meant to avoid.
+///
+/// The layer manifest and optional vendor candidates are part of the token, so
+/// adding/removing a preferred patch also invalidates an existing entry.
+pub fn prompt_template_revision(workspace_root: &Path, vendor: &str, rel_path: &str) -> String {
+    let vendor = normalize_prompt_vendor_name(vendor);
+    let rel_path = rel_path.trim();
+    let mut dependencies = Vec::new();
+
+    if rel_path.starts_with("prompts/") {
+        dependencies.push(PROMPT_LAYER_MANIFEST_PATH.to_string());
+    }
+
+    if let Some(default_skill_rel) = canonical_skill_prompt_body_rel_path(rel_path) {
+        let skill_name = default_skill_rel
+            .trim_start_matches(&format!("{SKILL_LAYER_BODY_DIR}/"))
+            .to_string();
+        dependencies.push(SKILL_LAYER_BASE_PATH.to_string());
+        dependencies.push(default_skill_rel);
+        for patch_rel in [
+            "skills/common.md".to_string(),
+            format!("skills/{skill_name}"),
+        ] {
+            dependencies.extend(vendor_patch_candidates(&vendor, &patch_rel));
+        }
+    } else if let Some(manifest) = prompt_layer_manifest(workspace_root) {
+        if let Some(entry) = layered_prompt_entry(&manifest, rel_path) {
+            dependencies.extend(entry.base.iter().cloned());
+            dependencies.extend(entry.overlay.iter().cloned());
+            if let Some(patch_rel) = entry.vendor_patch.as_deref() {
+                dependencies.extend(vendor_patch_candidates(&vendor, patch_rel));
+            }
+        } else {
+            dependencies.push(resolve_prompt_rel_path_for_vendor(
+                workspace_root,
+                &vendor,
+                rel_path,
+            ));
+        }
+    } else {
+        dependencies.push(resolve_prompt_rel_path_for_vendor(
+            workspace_root,
+            &vendor,
+            rel_path,
+        ));
+    }
+
+    dependencies.sort();
+    dependencies.dedup();
+    let mut digest = Sha256::new();
+    digest.update(b"prompt-template-revision-v1\0");
+    for dependency in dependencies {
+        digest.update(dependency.as_bytes());
+        digest.update(b"\0");
+        match std::fs::metadata(workspace_root.join(&dependency)) {
+            Ok(metadata) => {
+                digest.update(b"present\0");
+                digest.update(metadata.len().to_le_bytes());
+                if let Ok(modified) = metadata.modified() {
+                    if let Ok(elapsed) = modified.duration_since(UNIX_EPOCH) {
+                        digest.update(elapsed.as_secs().to_le_bytes());
+                        digest.update(elapsed.subsec_nanos().to_le_bytes());
+                    }
+                }
+            }
+            Err(_) => digest.update(b"missing\0"),
+        }
+    }
+    format!("{:x}", digest.finalize())
 }
 
 /// §3.5a 加载入口（带元数据）。返回模板正文 + 解析路径 + 可选版本号。

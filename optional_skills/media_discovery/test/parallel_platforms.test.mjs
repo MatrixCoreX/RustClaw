@@ -6,7 +6,7 @@ import test from "node:test";
 import { handleRequest, normalizedConfig } from "../src/main.mjs";
 import { beginRun, configurePlatforms, readState, readRecords, heartbeat, requestStop,
   finishRun, commitPageRecords, beginBackgroundWorker, finishBackgroundWorker } from "../src/storage.mjs";
-import { parallelPlatformLimit } from "../src/run_leases.mjs";
+import { grantedBrowserParallelLimit, parallelPlatformLimit } from "../src/run_leases.mjs";
 
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "media-discovery-parallel-"));
@@ -234,6 +234,14 @@ test("memory limits respect both host and process constraints", t => {
     hostGiB = size;
     assert.equal(parallelPlatformLimit(), expected);
   }
+});
+
+test("host browser grant bounds platform concurrency without skill-name routing", () => {
+  assert.equal(grantedBrowserParallelLimit({ resource_grant: { grant: { browser_slots: 1 } } }), 1);
+  assert.equal(grantedBrowserParallelLimit({ resource_grant: { grant: { browser_slots: 2 } } }), 2);
+  assert.equal(grantedBrowserParallelLimit({ resource_grant: { grant: { browser_slots: 99 } } }), 3);
+  assert.equal(grantedBrowserParallelLimit({ resource_grant: { grant: { browser_slots: 0 } } }), undefined);
+  assert.equal(grantedBrowserParallelLimit({}), undefined);
 });
 
 test("one-shot queues every platform when memory capacity is one", async t => {

@@ -1669,6 +1669,110 @@ async fn missing_target_failure_publishes_bounded_replan_progress() {
 }
 
 #[tokio::test]
+async fn retryable_resource_admission_failure_does_not_poison_action_fingerprint() {
+    let state = test_state();
+    let task = test_task();
+    let mut loop_state = LoopState::new();
+    loop_state.round_no = 1;
+    loop_state.last_actions_fingerprint = Some("resource-blocked-action".to_string());
+    let err = crate::skills::structured_skill_error_from_parts(
+        "fs_basic",
+        "resource_admission_unavailable",
+        "resource_admission_unavailable",
+        None,
+        Some(serde_json::json!({
+            "message_key": "clawd.execution.resource_admission_unavailable",
+            "retryable": true,
+            "failure_phase": "pre_dispatch",
+            "side_effect_applied": false,
+            "wait_reason": "memory_unavailable"
+        })),
+    );
+    let step = failed_step("step_1", "fs_basic", &err);
+    let actions = vec![crate::AgentAction::CallCapability {
+        capability: "filesystem.list_entries".to_string(),
+        args: serde_json::json!({"path":"."}),
+    }];
+
+    let stop = handle_skill_step_failure(
+        &state,
+        &task,
+        &step,
+        &actions,
+        &["skill(fs_basic)".to_string()],
+        &mut loop_state,
+        0,
+        1,
+        1,
+        "List the workspace.",
+        "List the workspace.",
+        &test_policy(),
+        "fs_basic",
+        actions.first().map(|action| match action {
+            crate::AgentAction::CallCapability { args, .. } => args,
+            _ => unreachable!(),
+        }),
+        &err,
+        "skill",
+    )
+    .await
+    .expect("resource admission failure should remain recoverable");
+
+    assert_eq!(stop.as_deref(), Some("resource_admission_wait"));
+    assert!(loop_state.failed_action_fingerprints.is_empty());
+    let replay = loop_state
+        .resource_wait_replay_action
+        .as_ref()
+        .expect("resource wait replay action");
+    assert_eq!(replay.tool_or_skill, "fs_basic");
+    assert_eq!(replay.action_ref, "filesystem.list_entries");
+    assert_eq!(replay.args["path"], ".");
+    assert_eq!(loop_state.attempt_ledger_entries.len(), 1);
+    assert_eq!(
+        loop_state.attempt_ledger_entries[0].error_code.as_deref(),
+        Some("resource_admission_unavailable")
+    );
+    assert!(loop_state.attempt_ledger_entries[0].retryable);
+    assert_eq!(loop_state.resource_wait_attempts, 1);
+
+    loop_state.round_no = 2;
+    let repeated_step = failed_step("step_2", "fs_basic", &err);
+    let repeated_stop = handle_skill_step_failure(
+        &state,
+        &task,
+        &repeated_step,
+        &actions,
+        &["skill(fs_basic)".to_string()],
+        &mut loop_state,
+        0,
+        2,
+        1,
+        "List the workspace.",
+        "List the workspace.",
+        &test_policy(),
+        "fs_basic",
+        actions.first().map(|action| match action {
+            crate::AgentAction::CallCapability { args, .. } => args,
+            _ => unreachable!(),
+        }),
+        &err,
+        "skill",
+    )
+    .await
+    .expect("repeated resource wait should remain recoverable");
+
+    assert_eq!(repeated_stop.as_deref(), Some("resource_admission_wait"));
+    assert_eq!(loop_state.attempt_ledger_entries.len(), 1);
+    assert_eq!(loop_state.executed_step_results.len(), 1);
+    assert_eq!(loop_state.executed_step_results[0].step_id, "step_2");
+    assert_eq!(loop_state.resource_wait_attempts, 2);
+    assert!(loop_state
+        .history_compact
+        .iter()
+        .all(|entry| !entry.contains("resource_grant")));
+}
+
+#[tokio::test]
 async fn patch_context_mismatch_publishes_bounded_replan_progress() {
     let state = test_state();
     let task = test_task();

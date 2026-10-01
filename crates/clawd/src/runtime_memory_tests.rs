@@ -63,6 +63,47 @@ fn malformed_pool_size_keeps_existing_two_connection_floor() {
     }
 }
 
+#[test]
+fn sqlite_profile_boundaries_follow_effective_host_memory() {
+    for memory in [Some(1), Some(1024), Some(2048)] {
+        assert_eq!(
+            sqlite_resource_profile_for_host(memory),
+            SqliteResourceProfile::Constrained
+        );
+    }
+    for memory in [None, Some(0), Some(2049), Some(8192)] {
+        assert_eq!(
+            sqlite_resource_profile_for_host(memory),
+            SqliteResourceProfile::Standard
+        );
+    }
+}
+
+#[test]
+fn constrained_sqlite_profile_bounds_connection_memory_without_changing_durability() {
+    let connection = rusqlite::Connection::open_in_memory().unwrap();
+    connection
+        .pragma_update(None, "synchronous", "NORMAL")
+        .unwrap();
+    apply_sqlite_resource_profile(&connection, SqliteResourceProfile::Constrained).unwrap();
+    let cache_size: i64 = connection
+        .query_row("PRAGMA cache_size", [], |row| row.get(0))
+        .unwrap();
+    let mmap_size: i64 = connection
+        .query_row("PRAGMA mmap_size", [], |row| row.get(0))
+        .unwrap_or(0);
+    let temp_store: i64 = connection
+        .query_row("PRAGMA temp_store", [], |row| row.get(0))
+        .unwrap();
+    let synchronous: i64 = connection
+        .query_row("PRAGMA synchronous", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(cache_size, -1024);
+    assert_eq!(mmap_size, 0);
+    assert_eq!(temp_store, 1);
+    assert_eq!(synchronous, 1);
+}
+
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
 #[test]
 fn reclaiming_fragmented_pages_preserves_live_buffers_and_database() {

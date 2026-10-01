@@ -6,7 +6,14 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 
-from print_llm_raw_trace import raw_response_metadata, print_row
+from print_llm_raw_trace import (
+    main,
+    print_row,
+    read_state,
+    raw_response_metadata,
+    row_fingerprint,
+    write_state,
+)
 
 
 class RawResponseMetadataTests(unittest.TestCase):
@@ -52,6 +59,63 @@ class RawResponseMetadataTests(unittest.TestCase):
         for raw in [None, {}, "stop: tool_calls", '{"text":"finish_reason=stop"}']:
             with self.subTest(raw=raw):
                 self.assertEqual(raw_response_metadata(raw), (None, None))
+
+    def test_state_retains_bounded_row_fingerprints_across_log_rotation(self):
+        import tempfile
+
+        raw_line = json.dumps({"task_id": "task-a", "logical_call_index": 1})
+        fingerprint = row_fingerprint(raw_line)
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            state_path = Path(raw_tmp) / "trace-state.json"
+            write_state(state_path, 120, 2, "task-a", [fingerprint])
+            state = read_state(state_path)
+
+        self.assertEqual(state["offset"], 120)
+        self.assertEqual(state["next_index"], 2)
+        self.assertEqual(state["active_task_id"], "task-a")
+        self.assertEqual(state["seen_row_hashes"], [fingerprint])
+
+    def test_rotated_log_skips_copied_row_and_prints_new_row_once(self):
+        import tempfile
+
+        first = json.dumps({
+            "task_id": "task-a",
+            "logical_call_index": 1,
+            "clean_response": "first",
+        })
+        second = json.dumps({
+            "task_id": "task-a",
+            "logical_call_index": 2,
+            "clean_response": "second",
+        })
+        unrelated_padding = json.dumps({"task_id": "other", "data": "x" * 4096})
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            root = Path(raw_tmp)
+            log_path = root / "model_io.log"
+            state_path = root / "trace-state.json"
+            log_path.write_text(first + "\n" + unrelated_padding + "\n", encoding="utf-8")
+
+            first_output = io.StringIO()
+            with redirect_stdout(first_output):
+                self.assertEqual(main([
+                    "--log", str(log_path),
+                    "--task-id", "task-a",
+                    "--state-file", str(state_path),
+                ]), 0)
+
+            log_path.write_text(first + "\n" + second + "\n", encoding="utf-8")
+            rotated_output = io.StringIO()
+            with redirect_stdout(rotated_output):
+                self.assertEqual(main([
+                    "--log", str(log_path),
+                    "--task-id", "task-a",
+                    "--state-file", str(state_path),
+                ]), 0)
+
+        self.assertIn("[LLM#1]", first_output.getvalue())
+        self.assertNotIn("[LLM#1]", rotated_output.getvalue())
+        self.assertEqual(rotated_output.getvalue().count("[LLM#2]"), 1)
+        self.assertIn("response_text=second", rotated_output.getvalue())
 
 
 if __name__ == "__main__":

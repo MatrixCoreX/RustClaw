@@ -115,7 +115,7 @@ fn task_activity_page_projects_current_and_archived_skill_tasks_without_secrets(
         "ui",
         "succeeded",
         "media_download",
-        "media_download.transcribe",
+        "local_asr.transcribe",
         true,
     );
     insert_task_activity(
@@ -306,7 +306,7 @@ fn task_activity_hidden_ids_leave_source_tasks_and_other_skills_untouched() {
         "ui",
         "succeeded",
         "media_download",
-        "media_download.transcribe",
+        "local_asr.transcribe",
         false,
     );
     insert_task_activity(
@@ -698,6 +698,16 @@ fn preview_resolution_stays_inside_skill_exports() {
     let (path, media_type) = resolve_aipp_preview(&root, 2).expect("image preview");
     assert!(path.ends_with("images/note.webp"));
     assert_eq!(media_type, "image/webp");
+
+    fs::write(
+        root.join("records/000000000003.json"),
+        vec![b'x'; AIPP_MEDIA_RECORD_MAX_BYTES as usize + 1],
+    )
+    .expect("oversized preview record");
+    assert_eq!(
+        resolve_aipp_preview(&root, 3).expect_err("oversized record rejected before allocation"),
+        "aipp_preview_record_invalid"
+    );
 
     write_record(
         &root,

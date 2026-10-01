@@ -1,4 +1,4 @@
-import { Activity, CircleAlert, Clock3, Loader2, MessageCircle, Pause, Play, RefreshCw, UserRound, X } from "lucide-react";
+import { Activity, ChevronLeft, ChevronRight, CircleAlert, Clock3, Loader2, MessageCircle, Pause, Play, RefreshCw, UserRound, X } from "lucide-react";
 
 import { channelLabel } from "../lib/channel-display";
 import { formatDuration } from "../lib/display-format";
@@ -26,6 +26,9 @@ export interface ActiveTasksPanelProps {
   activeTasksLoading: boolean;
   activeTasksError: string | null;
   activeTasksLastUpdated: number | null;
+  activeTasksTotal: number;
+  activeTasksOffset: number;
+  activeTasksLimit: number;
   resumeTaskError: string | null;
   resumeTaskMessage: string | null;
   cancelTaskError: string | null;
@@ -38,7 +41,7 @@ export interface ActiveTasksPanelProps {
   resumeDrafts: Record<string, string>;
   resumeSubmittingTaskId: string | null;
   toLocalTime: (value: number | null | undefined) => string;
-  onFetchActiveTasks: () => unknown | Promise<unknown>;
+  onFetchActiveTasks: (silent?: boolean, offset?: number) => unknown | Promise<unknown>;
   onViewTask: (taskId: string) => unknown | Promise<unknown>;
   onCancelTask: (task: ActiveTaskItem) => unknown | Promise<unknown>;
   onControlTask: (
@@ -57,6 +60,9 @@ export function ActiveTasksPanel({
   activeTasksLoading,
   activeTasksError,
   activeTasksLastUpdated,
+  activeTasksTotal,
+  activeTasksOffset,
+  activeTasksLimit,
   resumeTaskError,
   resumeTaskMessage,
   cancelTaskError,
@@ -84,8 +90,8 @@ export function ActiveTasksPanel({
           <p className="theme-kicker text-[10px] uppercase tracking-[0.3em]">{t("任务 inbox", "Task inbox")}</p>
           <h3 className="mt-2 text-lg font-semibold">{t("正在处理的任务", "Active tasks")}</h3>
           <p className="mt-1 text-sm text-white/55">
-            {activeTasks.length > 0
-              ? t(`当前有 ${activeTasks.length} 个任务还在排队或执行。`, `${activeTasks.length} task(s) are queued or running.`)
+            {activeTasksTotal > 0
+              ? t(`当前有 ${activeTasksTotal} 个任务还在排队或执行。`, `${activeTasksTotal} task(s) are queued or running.`)
               : t("当前没有排队或执行中的任务。", "No queued or running tasks right now.")}
           </p>
         </div>
@@ -95,7 +101,7 @@ export function ActiveTasksPanel({
           ) : null}
           <button
             type="button"
-            onClick={() => void onFetchActiveTasks()}
+            onClick={() => void onFetchActiveTasks(false, activeTasksOffset)}
             disabled={activeTasksLoading || !canUseInteractionContext}
             className="theme-topbar-btn px-3 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -402,6 +408,36 @@ export function ActiveTasksPanel({
           })
         )}
       </div>
+      {activeTasksTotal > activeTasksLimit ? (
+        <div className="mt-4 flex items-center justify-between gap-3 border-t border-white/10 pt-4">
+          <span className="text-xs text-white/50">
+            {t(
+              `显示第 ${activeTasksOffset + 1}-${Math.min(activeTasksOffset + activeTasks.length, activeTasksTotal)} 项，共 ${activeTasksTotal} 项`,
+              `Showing ${activeTasksOffset + 1}-${Math.min(activeTasksOffset + activeTasks.length, activeTasksTotal)} of ${activeTasksTotal}`,
+            )}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void onFetchActiveTasks(false, Math.max(0, activeTasksOffset - activeTasksLimit))}
+              disabled={activeTasksLoading || activeTasksOffset === 0}
+              className="theme-secondary-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+              {t("上一页", "Previous")}
+            </button>
+            <button
+              type="button"
+              onClick={() => void onFetchActiveTasks(false, activeTasksOffset + activeTasksLimit)}
+              disabled={activeTasksLoading || activeTasksOffset + activeTasks.length >= activeTasksTotal}
+              className="theme-secondary-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {t("下一页", "Next")}
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

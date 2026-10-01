@@ -12,6 +12,7 @@ use crate::{now_ts, now_ts_u64, repo, schedule_service, AppState, ScheduledJobDu
 const CHANNEL_TERMINAL_DELIVERY_LEASE_SECONDS: u64 = 300;
 const CHANNEL_TERMINAL_DELIVERY_MAX_ATTEMPTS: u32 = 96;
 const CHANNEL_TERMINAL_DELIVERY_MAX_RETRY_DELAY_SECONDS: u64 = 300;
+const MAINTENANCE_DELETE_BATCH_SIZE: i64 = 512;
 
 fn channel_terminal_delivery_retry_delay(base_seconds: u64, attempt_count: u32) -> u64 {
     let exponent = attempt_count.saturating_sub(1).min(6);
@@ -87,6 +88,22 @@ pub(crate) fn spawn_cleanup_worker(state: AppState) {
             ))
             .await;
 
+            if state
+                .skill_rt
+                .skill_concurrency_gates
+                .resource_broker()
+                .pressure_state()
+                == claw_core::host_resources::ResourcePressureState::Critical
+            {
+                let removed = state.clear_prompt_template_cache();
+                if removed > 0 {
+                    tracing::info!(
+                        removed,
+                        "resource pressure critical: released reconstructable prompt cache"
+                    );
+                }
+                continue;
+            }
             if let Err(err) = cleanup_once(&state) {
                 error!("Cleanup task failed: {}", err);
             }
@@ -618,10 +635,14 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
 
     let task_cutoff = now - (state.policy.maintenance.tasks_retention_days as i64 * 86400);
     db.execute(
-        "DELETE FROM tasks
-         WHERE kind != 'ask'
-           AND CAST(created_at AS INTEGER) < ?1",
-        rusqlite::params![task_cutoff],
+        "DELETE FROM tasks WHERE task_id IN (
+             SELECT task_id FROM tasks
+             WHERE kind != 'ask'
+               AND CAST(created_at AS INTEGER) < ?1
+             ORDER BY CAST(created_at AS INTEGER) ASC, task_id ASC
+             LIMIT ?2
+         )",
+        rusqlite::params![task_cutoff, MAINTENANCE_DELETE_BATCH_SIZE],
     )?;
 
     db.execute(
@@ -629,27 +650,39 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
              SELECT task_id FROM tasks
              WHERE kind != 'ask'
              ORDER BY CAST(created_at AS INTEGER) DESC
-             LIMIT -1 OFFSET ?1
+             LIMIT ?2 OFFSET ?1
          )",
-        rusqlite::params![state.policy.maintenance.tasks_max_rows as i64],
+        rusqlite::params![
+            state.policy.maintenance.tasks_max_rows as i64,
+            MAINTENANCE_DELETE_BATCH_SIZE
+        ],
     )?;
     db.execute(
-        "DELETE FROM task_mutation_ledger
-         WHERE NOT EXISTS (
-             SELECT 1 FROM tasks
-             WHERE tasks.task_id = task_mutation_ledger.task_id
+        "DELETE FROM task_mutation_ledger WHERE rowid IN (
+             SELECT task_mutation_ledger.rowid FROM task_mutation_ledger
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM tasks
+                 WHERE tasks.task_id = task_mutation_ledger.task_id
+             )
+             LIMIT ?1
          )",
-        [],
+        [MAINTENANCE_DELETE_BATCH_SIZE],
     )?;
     db.execute(
-        "DELETE FROM llm_cost_ledger
-         WHERE NOT EXISTS (
-             SELECT 1 FROM tasks
-             WHERE tasks.task_id = llm_cost_ledger.task_id
+        "DELETE FROM llm_cost_ledger WHERE rowid IN (
+             SELECT llm_cost_ledger.rowid FROM llm_cost_ledger
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM tasks
+                 WHERE tasks.task_id = llm_cost_ledger.task_id
+             )
+             LIMIT ?1
          )",
-        [],
+        [MAINTENANCE_DELETE_BATCH_SIZE],
     )?;
-    crate::task_event_archive::delete_orphaned_records(&db)?;
+    crate::task_event_archive::delete_orphaned_records(
+        &db,
+        MAINTENANCE_DELETE_BATCH_SIZE as usize,
+    )?;
     if let Err(error) = crate::task_artifacts::cleanup_orphaned_delivery_artifacts(
         &state.skill_rt.workspace_root,
         &db,
@@ -667,17 +700,25 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
             .map_err(|e| anyhow!("audit db pool: {e}"))?;
         let audit_cutoff = now - (state.policy.maintenance.audit_retention_days as i64 * 86400);
         audit_db.execute(
-            "DELETE FROM audit_logs WHERE CAST(ts AS INTEGER) < ?1",
-            rusqlite::params![audit_cutoff],
+            "DELETE FROM audit_logs WHERE id IN (
+                 SELECT id FROM audit_logs
+                 WHERE CAST(ts AS INTEGER) < ?1
+                 ORDER BY id ASC
+                 LIMIT ?2
+             )",
+            rusqlite::params![audit_cutoff, MAINTENANCE_DELETE_BATCH_SIZE],
         )?;
 
         audit_db.execute(
             "DELETE FROM audit_logs WHERE id IN (
                  SELECT id FROM audit_logs
                  ORDER BY id DESC
-                 LIMIT -1 OFFSET ?1
+                 LIMIT ?2 OFFSET ?1
              )",
-            rusqlite::params![state.policy.maintenance.audit_max_rows as i64],
+            rusqlite::params![
+                state.policy.maintenance.audit_max_rows as i64,
+                MAINTENANCE_DELETE_BATCH_SIZE
+            ],
         )?;
     }
 

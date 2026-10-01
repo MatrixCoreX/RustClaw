@@ -23,6 +23,7 @@ fn key(generation: u64) -> WarmRunnerKey {
         overlay_generation_digest: None,
         sandbox_backend: "test".to_string(),
         timeout_seconds: 30,
+        memory_reservation_mib: 128,
     }
 }
 
@@ -102,5 +103,55 @@ async fn checked_in_process_is_reused_and_generation_change_discards_it() {
     pool.checkin(key(1), checkout_epoch, process);
     assert_eq!(pool.idle_count(), 0);
     assert!(matches!(pool.checkout(&key(2)), WarmPoolCheckout::Spawn(_)));
+    assert_eq!(pool.idle_count(), 0);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn invalidating_pool_terminates_and_reaps_idle_processes() {
+    let pool = WarmRunnerPool::new(true, 1, 0, 60);
+    let mut command = tokio::process::Command::new("sh");
+    command.args(["-c", "while IFS= read -r line; do :; done"]);
+    let process = super::WarmRunnerProcess::spawn(command).expect("runner process");
+    let pid = process.id().expect("pid") as i32;
+    let epoch = match pool.checkout(&key(1)) {
+        WarmPoolCheckout::Spawn(epoch) => epoch,
+        _ => panic!("expected spawn"),
+    };
+    pool.checkin(key(1), epoch, process);
+    assert_eq!(pool.idle_count(), 1);
+
+    pool.invalidate_all();
+    assert_eq!(pool.idle_count(), 0);
+
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(1);
+    loop {
+        let alive_or_unreaped = unsafe { libc::kill(pid, 0) } == 0;
+        if !alive_or_unreaped {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "invalidated runner remained alive or unreaped"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn runner_larger_than_its_reservation_is_not_kept_warm() {
+    let pool = WarmRunnerPool::new(true, 1, 0, 60);
+    let mut command = tokio::process::Command::new("sh");
+    command.args(["-c", "while IFS= read -r line; do :; done"]);
+    let process = super::WarmRunnerProcess::spawn(command).expect("runner process");
+    assert!(process.resident_memory_mib().is_some_and(|rss| rss > 0));
+    let mut underreported = key(1);
+    underreported.memory_reservation_mib = 0;
+    let epoch = match pool.checkout(&underreported) {
+        WarmPoolCheckout::Spawn(epoch) => epoch,
+        _ => panic!("expected spawn"),
+    };
+    pool.checkin(underreported, epoch, process);
     assert_eq!(pool.idle_count(), 0);
 }

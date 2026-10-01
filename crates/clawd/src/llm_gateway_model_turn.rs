@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use claw_core::model_turn::{ModelTurnEvent, ModelTurnRequest, ModelTurnResponse};
 use serde_json::json;
@@ -13,6 +13,35 @@ use super::{
 use crate::providers::client::ProviderErrorKind;
 use crate::runtime::TaskProviderBlocker;
 use crate::{AppState, ClaimedTask};
+
+const MODEL_DELTA_ARCHIVE_SAMPLE_INTERVAL: u64 = 64;
+
+#[derive(Default)]
+struct ModelTurnEventArchiveProjection {
+    delta_count: u64,
+}
+
+impl ModelTurnEventArchiveProjection {
+    fn should_publish(&mut self, event: &ModelTurnEvent) -> bool {
+        match event {
+            ModelTurnEvent::Started { .. } => {
+                self.delta_count = 0;
+                true
+            }
+            ModelTurnEvent::TextDelta { .. } | ModelTurnEvent::ToolCallDelta { .. } => {
+                self.delta_count = self.delta_count.saturating_add(1);
+                self.delta_count == 1
+                    || self
+                        .delta_count
+                        .is_multiple_of(MODEL_DELTA_ARCHIVE_SAMPLE_INTERVAL)
+            }
+            ModelTurnEvent::ToolCall { .. }
+            | ModelTurnEvent::Usage { .. }
+            | ModelTurnEvent::Finished { .. }
+            | ModelTurnEvent::Interrupted { .. } => true,
+        }
+    }
+}
 
 pub(crate) async fn run_native_model_turn_with_fallback(
     state: &AppState,
@@ -30,6 +59,7 @@ pub(crate) async fn run_native_model_turn_with_fallback(
     }
     state.clear_task_provider_blocker(&task.task_id);
     state.clear_task_cost_blocker(&task.task_id);
+    let _resource_lease = super::acquire_llm_resource_lease(state, task)?;
     state.restore_task_llm_call_count_from_cost_ledger(&task.task_id);
     if !llm_cost_policy_allows(state, task, None, prompt_source) {
         return Err(TASK_LLM_COST_POLICY_BLOCKED_ERR.to_string());
@@ -106,6 +136,8 @@ pub(crate) async fn run_native_model_turn_with_fallback(
         let event_task = task.clone();
         let event_provider = provider_name.clone();
         let event_index = model_event_index.clone();
+        let event_archive_projection =
+            Arc::new(Mutex::new(ModelTurnEventArchiveProjection::default()));
         let presentation_observer = Arc::new(
             crate::assistant_presentation_stream::NativePresentationObserver::new(
                 state.clone(),
@@ -117,7 +149,19 @@ pub(crate) async fn run_native_model_turn_with_fallback(
         let event_sink: crate::providers::client::ModelTurnEventSink =
             Arc::new(move |event: ModelTurnEvent| {
                 let index = event_index.fetch_add(1, Ordering::Relaxed) + 1;
-                publish_model_turn_event(&event_state, &event_task, &event_provider, index, &event);
+                let archive_event = event_archive_projection
+                    .lock()
+                    .map(|mut projection| projection.should_publish(&event))
+                    .unwrap_or(true);
+                if archive_event {
+                    publish_model_turn_event(
+                        &event_state,
+                        &event_task,
+                        &event_provider,
+                        index,
+                        &event,
+                    );
+                }
                 presentation_observer.observe(&event);
             });
         let provider_turn = crate::providers::call_model_turn_with_retry(
@@ -192,6 +236,10 @@ pub(crate) async fn run_native_model_turn_with_fallback(
                     crate::maybe_sanitize_llm_text_output(vendor, &output.turn.text);
                 output.turn.text = cleaned_text;
                 let clean_response = model_turn_log_response(&output.turn);
+                // Every event has already reached the presentation observer and the
+                // bounded task-event projection. Keeping token deltas in the next
+                // planner state only duplicates provider data and amplifies memory.
+                output.turn.events.clear();
                 crate::append_model_io_log(
                     state,
                     task,

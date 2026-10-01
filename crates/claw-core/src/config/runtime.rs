@@ -44,6 +44,9 @@ impl AppConfig {
         app.auto_review
             .validate()
             .map_err(config::ConfigError::Message)?;
+        app.runtime_resources
+            .validate()
+            .map_err(config::ConfigError::Message)?;
 
         Ok(app)
     }

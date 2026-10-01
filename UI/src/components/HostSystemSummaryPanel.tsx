@@ -33,11 +33,13 @@ function ResourceProgress({
   label,
   capacity,
   icon,
+  detail,
 }: {
   t: Translate;
   label: string;
   capacity: HostCapacitySummary;
   icon: ReactNode;
+  detail?: string | null;
 }) {
   const usedPercent = hostCapacityUsedPercent(capacity);
   return (
@@ -71,6 +73,7 @@ function ResourceProgress({
       <p className="mt-1.5 text-[11px] text-white/42">
         {usedPercent == null ? t("数据暂不可用", "Data unavailable") : t(`已使用 ${usedPercent}%`, `${usedPercent}% used`)}
       </p>
+      {detail ? <p className="mt-1 text-[11px] text-white/45">{detail}</p> : null}
     </div>
   );
 }
@@ -103,6 +106,34 @@ export function HostSystemSummaryPanel({
         : summary?.deployment === "local_host"
           ? t("本地设备", "Local device")
           : null;
+  const resourceStateLabel = (() => {
+    switch (summary?.runtime_resources.pressure_state) {
+      case "normal":
+        return t("运行空间充足", "Resources available");
+      case "compact":
+        return t("正在节省内存", "Memory-saving mode");
+      case "constrained":
+        return t("可用内存较少", "Memory is limited");
+      case "critical":
+        return t("正在等待内存释放", "Waiting for memory");
+      default:
+        return null;
+    }
+  })();
+  const resourceDetail = [
+    resourceStateLabel,
+    summary?.runtime_resources.process_memory_warning
+      ? t("Agent 运行内存偏高", "Agent runtime memory is high")
+      : null,
+    summary?.runtime_resources.waiting_tasks
+      ? t(
+          `${summary.runtime_resources.waiting_tasks} 个任务正在等待`,
+          `${summary.runtime_resources.waiting_tasks} task(s) waiting`,
+        )
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <section className="theme-panel-soft px-4 py-4 sm:px-5">
@@ -166,6 +197,7 @@ export function HostSystemSummaryPanel({
             label={t("内存", "Memory")}
             capacity={summary.memory}
             icon={<MemoryStick className="h-4 w-4" />}
+            detail={resourceDetail}
           />
           <ResourceProgress
             t={t}

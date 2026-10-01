@@ -1,27 +1,8 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AuthKeysPage } from "./components/AuthKeysPage";
-import { AssetsPage } from "./components/AssetsPage";
-import { AippPage } from "./components/AippPage";
-import { BANCOR_CANDLE_AUTO_REFRESH_SECONDS, BancorPage } from "./components/BancorPage";
-import { ChatPage } from "./components/ChatPage";
-import { CommunicationSetupPage } from "./components/CommunicationSetupPage";
 import { ConsoleLayout } from "./components/ConsoleLayout";
-import {
-  DASHBOARD_SECTION_STORAGE_KEY,
-  DashboardPage,
-} from "./components/DashboardPage";
 import { FactoryResetModal } from "./components/FactoryResetModal";
-import { HookAdminSection } from "./components/HookAdminSection";
-import { LogsPage } from "./components/LogsPage";
-import { MemoryPage } from "./components/MemoryPage";
-import { McpConfigSection } from "./components/McpConfigSection";
-import { ModelConfigPage } from "./components/ModelConfigPage";
-import { NniAprPage } from "./components/NniAprPage";
-import { NniPage } from "./components/NniPage";
 import { SignInPage } from "./components/SignInPage";
-import { SkillsPage } from "./components/SkillsPage";
-import { SkillStorePage } from "./components/SkillStorePage";
-import { TasksPage } from "./components/TasksPage";
+import { BANCOR_CANDLE_AUTO_REFRESH_SECONDS } from "./lib/bancor-refresh";
 import {
   formatAuthenticationError,
   maskStoredKey,
@@ -29,7 +10,11 @@ import {
   responseIndicatesExpiredAuthentication,
 } from "./lib/auth-keys";
 import { conversationHistoryScope } from "./lib/chat-history";
-import { isNniNavigationPage, restoreNniNavigationVisible } from "./lib/dashboard-home";
+import {
+  DASHBOARD_SECTION_STORAGE_KEY,
+  isNniNavigationPage,
+  restoreNniNavigationVisible,
+} from "./lib/dashboard-home";
 import { formatDuration, toLocalTime } from "./lib/display-format";
 import { runCoalescedResponseRead } from "./lib/resilient-read";
 import { formatUiError } from "./lib/ui-error";
@@ -107,6 +92,23 @@ const AiLearningPage = lazy(() =>
     default: module.AiLearningPage,
   })),
 );
+const AippPage = lazy(() => import("./components/AippPage").then((module) => ({ default: module.AippPage })));
+const AssetsPage = lazy(() => import("./components/AssetsPage").then((module) => ({ default: module.AssetsPage })));
+const AuthKeysPage = lazy(() => import("./components/AuthKeysPage").then((module) => ({ default: module.AuthKeysPage })));
+const BancorPage = lazy(() => import("./components/BancorPage").then((module) => ({ default: module.BancorPage })));
+const ChatPage = lazy(() => import("./components/ChatPage").then((module) => ({ default: module.ChatPage })));
+const CommunicationSetupPage = lazy(() => import("./components/CommunicationSetupPage").then((module) => ({ default: module.CommunicationSetupPage })));
+const DashboardPage = lazy(() => import("./components/DashboardPage").then((module) => ({ default: module.DashboardPage })));
+const HookAdminSection = lazy(() => import("./components/HookAdminSection").then((module) => ({ default: module.HookAdminSection })));
+const LogsPage = lazy(() => import("./components/LogsPage").then((module) => ({ default: module.LogsPage })));
+const McpConfigSection = lazy(() => import("./components/McpConfigSection").then((module) => ({ default: module.McpConfigSection })));
+const MemoryPage = lazy(() => import("./components/MemoryPage").then((module) => ({ default: module.MemoryPage })));
+const ModelConfigPage = lazy(() => import("./components/ModelConfigPage").then((module) => ({ default: module.ModelConfigPage })));
+const NniAprPage = lazy(() => import("./components/NniAprPage").then((module) => ({ default: module.NniAprPage })));
+const NniPage = lazy(() => import("./components/NniPage").then((module) => ({ default: module.NniPage })));
+const SkillsPage = lazy(() => import("./components/SkillsPage").then((module) => ({ default: module.SkillsPage })));
+const SkillStorePage = lazy(() => import("./components/SkillStorePage").then((module) => ({ default: module.SkillStorePage })));
+const TasksPage = lazy(() => import("./components/TasksPage").then((module) => ({ default: module.TasksPage })));
 
 const CONSOLE_PAGES: ConsolePage[] = ["dashboard", "chat", "ai_learning", "nni", "nni_apr", "bancor", "assets", "services", "channels", "models", "skills", "aipps", "skill_store", "memory", "logs", "tasks"];
 const ADMIN_ONLY_UI_PAGES = new Set<ConsolePage>(["nni", "nni_apr", "bancor", "assets", "aipps"]);
@@ -460,6 +462,9 @@ export default function App() {
     selectedLogFile,
     setSelectedLogFile,
     logFiles,
+    logFilesTotal,
+    logFilesHasPrevious,
+    logFilesHasNext,
     logFilesLoading,
     logFilesError,
     logTailLines,
@@ -470,6 +475,8 @@ export default function App() {
     logLastUpdated,
     logFollowTail,
     setLogFollowTail,
+    openNextLogFilesPage,
+    openPreviousLogFilesPage,
     refreshLogs,
   } = useLogsRuntime({
     apiFetch,
@@ -739,6 +746,9 @@ export default function App() {
     activeTasksLoading,
     activeTasksError,
     activeTasksLastUpdated,
+    activeTasksTotal,
+    activeTasksOffset,
+    activeTasksLimit,
     taskHistory,
     taskHistoryLoading,
     taskHistoryLoaded,
@@ -1154,6 +1164,8 @@ export default function App() {
     hostDependenciesLoading,
     hostDependenciesErrorCode,
     dependencyInstallingId,
+    systemDiagnosticsExporting,
+    systemDiagnosticsExportError,
     piAppStatus,
     piAppRestarting,
     piAppRestartMessage,
@@ -1180,6 +1192,7 @@ export default function App() {
     fetchHostSystemSummary,
     fetchHostDependencies,
     installHostDependency,
+    exportSystemDiagnostics,
   } = useSystemRuntime({
     apiFetch,
     t,
@@ -1234,6 +1247,7 @@ export default function App() {
     apiBase,
     uiAuthReady,
     whatsappWebHealthy: health?.whatsapp_web_healthy === true,
+    statusPollingEnabled: currentPage === "dashboard" || currentPage === "services",
     setServiceActionMessage,
   });
   const {
@@ -1251,6 +1265,7 @@ export default function App() {
     uiAuthReady,
     enabled: wechatConfigData?.enabled === true,
     serviceHealthy: health?.wechatd_healthy === true,
+    statusPollingEnabled: currentPage === "dashboard" || currentPage === "services",
   });
 
   const enableAndStartWechat = async () => {
@@ -1524,11 +1539,17 @@ export default function App() {
 
   useEffect(() => {
     if (!uiAuthReady || pollingSeconds <= 0) return;
-    if (pollingSeconds <= 0) return;
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void fetchHealth({ silent: true });
+    };
     const timer = window.setInterval(() => {
-      void fetchHealth();
+      refreshWhenVisible();
     }, pollingSeconds * 1000);
-    return () => window.clearInterval(timer);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiBase, pollingSeconds, uiAuthReady]);
 
@@ -1576,10 +1597,15 @@ export default function App() {
         // A temporary network failure must not sign the user out.
       }
     };
-    const timer = window.setInterval(() => void verifyWebdSession(), 5_000);
+    const verifyWhenVisible = () => {
+      if (document.visibilityState === "visible") void verifyWebdSession();
+    };
+    const timer = window.setInterval(verifyWhenVisible, 5_000);
+    document.addEventListener("visibilitychange", verifyWhenVisible);
     return () => {
       stopped = true;
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", verifyWhenVisible);
     };
   }, [apiBase, authMode, uiAuthReady, t]);
 
@@ -1690,13 +1716,21 @@ export default function App() {
     void fetchNniNetworkStats();
     void fetchNniHeartbeatErrors(nniHeartbeatErrorsPage);
     void fetchNniHeartbeatRecords(nniHeartbeatRecordsPage);
-    const timer = window.setInterval(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState !== "visible") return;
       void fetchNniConfig(true);
       void fetchNniNetworkStats(true);
       void fetchNniHeartbeatErrors(nniHeartbeatErrorsPage, true);
       void fetchNniHeartbeatRecords(nniHeartbeatRecordsPage, true);
+    };
+    const timer = window.setInterval(() => {
+      refreshWhenVisible();
     }, 60_000);
-    return () => window.clearInterval(timer);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage, apiBase, uiAuthReady, isAdminIdentity, nniHeartbeatErrorsPage, nniHeartbeatRecordsPage]);
 
@@ -1726,10 +1760,17 @@ export default function App() {
       ...(nniJoined ? [fetchNniRewards(1, silent)] : []),
     ]);
     void refreshAprInputs(false);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void refreshAprInputs(true);
+    };
     const timer = window.setInterval(() => {
-      void refreshAprInputs(true);
+      refreshWhenVisible();
     }, NNI_APR_AUTO_REFRESH_SECONDS * 1_000);
-    return () => window.clearInterval(timer);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage, apiBase, uiAuthReady, isAdminIdentity, nniJoined]);
 
@@ -1892,6 +1933,13 @@ export default function App() {
       onLogout={logout}
       onOpenFactoryReset={openFactoryResetDialog}
     >
+      <Suspense
+        fallback={
+          <div className="flex min-h-48 items-center justify-center text-sm text-white/65">
+            {t("正在打开页面...", "Opening page...")}
+          </div>
+        }
+      >
           {currentPage === "dashboard" ? (
             <DashboardPage
               t={t}
@@ -1905,6 +1953,8 @@ export default function App() {
               hostDependenciesLoading={hostDependenciesLoading}
               hostDependenciesErrorCode={hostDependenciesErrorCode}
               dependencyInstallingId={dependencyInstallingId}
+              systemDiagnosticsExporting={systemDiagnosticsExporting}
+              systemDiagnosticsExportError={systemDiagnosticsExportError}
               isAdminIdentity={isAdminIdentity}
               nniNavigationVisible={nniNavigationVisible}
               workspaceUpdateLoading={workspaceUpdateLoading}
@@ -1960,6 +2010,7 @@ export default function App() {
               onFetchHostSystemSummary={fetchHostSystemSummary}
               onFetchHostDependencies={() => fetchHostDependencies(false)}
               onInstallHostDependency={installHostDependency}
+              onExportSystemDiagnostics={exportSystemDiagnostics}
               onSetNniNavigationVisible={updateNniNavigationVisible}
               onFetchAgentConfig={fetchAgentConfig}
               onSaveAgentPersona={saveAgentPersona}
@@ -2042,15 +2093,7 @@ export default function App() {
           ) : null}
 
           {currentPage === "ai_learning" ? (
-            <Suspense
-              fallback={
-                <div className="flex min-h-48 items-center justify-center text-sm text-white/65">
-                  {t("正在打开学习内容...", "Opening learning content...")}
-                </div>
-              }
-            >
-              <AiLearningPage lang={lang} t={t} />
-            </Suspense>
+            <AiLearningPage lang={lang} t={t} />
           ) : null}
 
           {isAdminIdentity && currentPage === "nni" ? (
@@ -2491,6 +2534,7 @@ export default function App() {
               message={skillStoreMessage}
               actionName={skillStoreActionName}
               onRefresh={() => fetchSkillStore(true)}
+              onBrowse={(page, query) => fetchSkillStore(true, page, query)}
               onCheckDependencies={fetchSkillStoreDependencies}
               onInstall={installSkillFromStore}
               onRemove={removeSkillFromStore}
@@ -2571,6 +2615,9 @@ export default function App() {
               t={t}
               tSlash={tSlash}
               logFiles={logFiles}
+              logFilesTotal={logFilesTotal}
+              logFilesHasPrevious={logFilesHasPrevious}
+              logFilesHasNext={logFilesHasNext}
               logFilesLoading={logFilesLoading}
               logFilesError={logFilesError}
               selectedLogFile={selectedLogFile}
@@ -2585,6 +2632,8 @@ export default function App() {
               onSelectedLogFileChange={setSelectedLogFile}
               onLogTailLinesChange={setLogTailLines}
               onLogFollowTailChange={setLogFollowTail}
+              onPreviousLogFilesPage={openPreviousLogFilesPage}
+              onNextLogFilesPage={openNextLogFilesPage}
               onRefreshLogs={refreshLogs}
             />
           ) : null}
@@ -2598,6 +2647,9 @@ export default function App() {
               activeTasksLoading={activeTasksLoading}
               activeTasksError={activeTasksError}
               activeTasksLastUpdated={activeTasksLastUpdated}
+              activeTasksTotal={activeTasksTotal}
+              activeTasksOffset={activeTasksOffset}
+              activeTasksLimit={activeTasksLimit}
               taskHistory={taskHistory}
               taskHistoryLoading={taskHistoryLoading}
               taskHistoryLoaded={taskHistoryLoaded}
@@ -2674,6 +2726,7 @@ export default function App() {
               onQueryTaskLlmDebug={queryTaskLlmDebug}
             />
           ) : null}
+      </Suspense>
     </ConsoleLayout>
   );
 }

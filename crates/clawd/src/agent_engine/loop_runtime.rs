@@ -242,8 +242,10 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
                         break;
                     }
                     crate::task_budget_contract::BudgetDecision::Waiting => {
-                        if let Some(resume_reason) =
-                            recoverable_machine_blocker_resume_reason(&loop_state)
+                        if let Some(resume_reason) = round_machine_blocker_resume_reason(
+                            Some(&outcome),
+                            &loop_state,
+                        )
                         {
                             publish_agent_loop_checkpoint_progress(
                                 state,

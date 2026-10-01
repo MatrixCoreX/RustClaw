@@ -45,7 +45,7 @@
 - If images were produced by another capability in the same turn, pass those successful current-task artifact paths into `images`; do not ask the user to upload the same images again and do not substitute an older task's artifact unless the user explicitly refers to it.
 - Preserve every produced image in source order. Do not truncate or split the set merely because it contains more than six images; `image_vision` no longer has a host-side item-count ceiling.
 - On a structured provider/configuration/unsupported-input failure from `extract_text`, the planner may fall back to an available local OCR capability such as `media_download.ocr`. That fallback is a second-choice path only. When OCR extra reports `fallback_from=image_vision.extract_text`, the user-visible reply must say in the user's language that the image-understanding model was unavailable so local OCR produced the text.
-- Local OCR fallback accepts images only. If the downloaded artifact is video and the user requested text conversion, use `media_download.transcribe` to extract audio and recognize speech instead.
+- Local OCR fallback accepts images only. If the downloaded artifact is video and the user requested text conversion, use `local_asr.transcribe` to extract audio and recognize speech instead.
 - Do not use local OCR merely because the image originated from a media-download skill; capability selection follows the requested output, not the producing skill name.
 
 ## Config Entry Points

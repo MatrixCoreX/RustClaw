@@ -398,6 +398,9 @@ async fn handle_skill_step_success(
         ledger_error_kind,
         ledger_reason,
     );
+    if matches!(ledger_status, crate::executor::StepExecutionStatus::Ok) {
+        loop_state.resource_wait_attempts = 0;
+    }
     if let Some(entry) = loop_state.attempt_ledger_entries.last_mut() {
         entry.execution_step_id = Some(step_execution.step_id.clone());
         entry.async_job_id = ledger_job_id;
@@ -606,6 +609,82 @@ fn validation_observation_with_process_status(
     }
 }
 
+fn resource_wait_replay_action(
+    state: &AppState,
+    actions: &[crate::AgentAction],
+    idx: usize,
+    normalized_skill: &str,
+    recovery_args: Option<&Value>,
+) -> Option<super::ResourceWaitReplayAction> {
+    let action = actions.get(idx)?;
+    let (action_ref, args) = match action {
+        crate::AgentAction::CallCapability { capability, args } => {
+            (capability.trim().to_string(), args.clone())
+        }
+        crate::AgentAction::CallSkill { args, .. } | crate::AgentAction::CallTool { args, .. } => {
+            let args = recovery_args.unwrap_or(args);
+            let action_token = args
+                .get("action")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            let action_ref = state
+                .skill_manifest(normalized_skill)
+                .and_then(|manifest| {
+                    claw_core::skill_registry::select_planner_capability_mapping(
+                        &manifest.planner_capabilities,
+                        action_token,
+                    )
+                    .map(|mapping| mapping.name.trim().to_string())
+                })
+                .filter(|value| !value.is_empty())?;
+            (action_ref, args.clone())
+        }
+        _ => return None,
+    };
+    if action_ref.is_empty() || !args.is_object() {
+        return None;
+    }
+    Some(super::ResourceWaitReplayAction {
+        tool_or_skill: normalized_skill.to_string(),
+        action_ref,
+        args,
+        continuation_actions: actions.iter().skip(idx + 1).cloned().collect(),
+    })
+}
+
+fn compact_repeated_resource_admission_results(
+    loop_state: &mut LoopState,
+    current_step: &crate::executor::StepExecutionResult,
+) {
+    if let Some(latest_index) = loop_state.capability_results.len().checked_sub(1) {
+        let latest = &loop_state.capability_results[latest_index];
+        if latest.error.as_ref().map(|error| error.code.as_str())
+            == Some("resource_admission_unavailable")
+        {
+            let capability = latest.capability.clone();
+            let action = latest.action.clone();
+            let mut index = 0usize;
+            loop_state.capability_results.retain(|result| {
+                let is_same_wait = result.error.as_ref().map(|error| error.code.as_str())
+                    == Some("resource_admission_unavailable")
+                    && result.capability == capability
+                    && result.action == action;
+                let keep = !is_same_wait || index == latest_index;
+                index += 1;
+                keep
+            });
+        }
+    }
+    loop_state.executed_step_results.retain(|result| {
+        result.skill != current_step.skill
+            || !result
+                .error
+                .as_deref()
+                .is_some_and(crate::skills::is_retryable_resource_admission_error)
+    });
+}
+
 async fn handle_skill_step_failure(
     state: &AppState,
     task: &ClaimedTask,
@@ -626,6 +705,7 @@ async fn handle_skill_step_failure(
 ) -> Result<Option<String>, String> {
     let error_observation = skill_error_observation_or_raw(normalized_skill, err);
     let progress_error = skill_error_progress_token(normalized_skill, err);
+    let resource_admission_error = crate::skills::is_retryable_resource_admission_error(err);
     let ledger_args_summary = recovery_args
         .map(|args| {
             super::build_safe_skill_args_summary(args, super::PROGRESS_ARGS_SUMMARY_MAX_LEN)
@@ -640,11 +720,19 @@ async fn handle_skill_step_failure(
         None,
         &error_observation,
     );
-    if let Some(fingerprint) = loop_state.last_actions_fingerprint.as_deref() {
-        *loop_state
-            .failed_action_fingerprints
-            .entry(fingerprint.to_string())
-            .or_insert(0) += 1;
+    if resource_admission_error {
+        loop_state.resource_wait_attempts = loop_state.resource_wait_attempts.saturating_add(1);
+        super::attempt_ledger::compact_repeated_resource_admission_attempts(loop_state);
+        compact_repeated_resource_admission_results(loop_state, step_execution);
+        loop_state.resource_wait_replay_action =
+            resource_wait_replay_action(state, actions, idx, normalized_skill, recovery_args);
+    } else {
+        if let Some(fingerprint) = loop_state.last_actions_fingerprint.as_deref() {
+            *loop_state
+                .failed_action_fingerprints
+                .entry(fingerprint.to_string())
+                .or_insert(0) += 1;
+        }
     }
     let effect = recovery_args
         .map(|args| {
@@ -733,6 +821,13 @@ async fn handle_skill_step_failure(
         recovery_args,
         err,
     ) {
+        let stop_reason = if crate::skills::is_retryable_resource_admission_error(err)
+            && loop_state.resource_wait_replay_action.is_some()
+        {
+            "resource_admission_wait"
+        } else {
+            stop_reason
+        };
         register_failed_step_output(
             loop_state,
             global_step,
@@ -746,13 +841,20 @@ async fn handle_skill_step_failure(
             &format!("skill.{normalized_skill}"),
             err,
         );
-        loop_state.history_compact.push(format!(
-            "round={} step={} skill={} failed error={}",
-            loop_state.round_no,
-            step_in_round,
-            normalized_skill,
-            crate::truncate_for_agent_trace(&error_observation)
-        ));
+        if resource_admission_error {
+            loop_state.history_compact.push(format!(
+                "round={} step={} skill={} error_code=resource_admission_unavailable recovery=wait_background",
+                loop_state.round_no, step_in_round, normalized_skill
+            ));
+        } else {
+            loop_state.history_compact.push(format!(
+                "round={} step={} skill={} failed error={}",
+                loop_state.round_no,
+                step_in_round,
+                normalized_skill,
+                crate::truncate_for_agent_trace(&error_observation)
+            ));
+        }
         publish_failure_recovery_progress(
             state,
             task,

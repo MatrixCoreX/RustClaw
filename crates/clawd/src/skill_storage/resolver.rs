@@ -5,6 +5,7 @@ use std::path::{Component, Path, PathBuf};
 pub(crate) struct SkillStorageResolver {
     root: PathBuf,
     busy_timeout_ms: u64,
+    resource_profile: crate::runtime_memory::SqliteResourceProfile,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -14,6 +15,13 @@ pub(crate) struct SkillStorageDescriptor {
     pub(crate) storage_kind: &'static str,
     pub(crate) database_path: String,
     pub(crate) database_busy_timeout_ms: u64,
+    pub(crate) database_resource_profile: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) database_cache_size_kib: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) database_mmap_size_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) database_temp_store: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) directory_path: Option<String>,
 }
@@ -49,6 +57,7 @@ impl SkillStorageResolver {
         Ok(Self {
             root,
             busy_timeout_ms: busy_timeout_ms.max(1),
+            resource_profile: crate::runtime_memory::sqlite_resource_profile(),
         })
     }
 
@@ -62,6 +71,7 @@ impl SkillStorageResolver {
         Self {
             root,
             busy_timeout_ms: 5_000,
+            resource_profile: crate::runtime_memory::SqliteResourceProfile::Standard,
         }
     }
 
@@ -110,6 +120,10 @@ impl SkillStorageResolver {
             storage_kind: "sqlite",
             database_path: path.display().to_string(),
             database_busy_timeout_ms: self.busy_timeout_ms,
+            database_resource_profile: self.resource_profile.as_str(),
+            database_cache_size_kib: self.resource_profile.cache_size_kib(),
+            database_mmap_size_bytes: self.resource_profile.mmap_size_bytes(),
+            database_temp_store: self.resource_profile.temp_store(),
             directory_path: None,
         })
     }
@@ -126,6 +140,10 @@ impl SkillStorageResolver {
             storage_kind: "directory",
             database_path: String::new(),
             database_busy_timeout_ms: 0,
+            database_resource_profile: self.resource_profile.as_str(),
+            database_cache_size_kib: None,
+            database_mmap_size_bytes: None,
+            database_temp_store: None,
             directory_path: Some(path.display().to_string()),
         })
     }

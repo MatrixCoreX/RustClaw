@@ -3,9 +3,11 @@ use super::{
     action_observation_boundary, active_tool_event_payload, capture_round_progress_snapshot,
     check_repeat_action_guard, completed_terminal_termination_allows_replay,
     finalize_execute_round_outcome, prior_structured_observation_satisfies_read_only_action,
-    record_deferred_plan_tail, registry_allows_repeated_idempotent_action, safe_command_preview,
-    successful_structured_observation_satisfies_selector, terminal_poll_after_termination_is_fresh,
-    terminal_synthesis_can_skip_remaining_actions, waiting_task_allows_repeated_observation,
+    record_deferred_plan_tail, registry_allows_completed_result_reuse,
+    registry_allows_fresh_non_idempotent_repeat, registry_allows_repeated_idempotent_action,
+    safe_command_preview, successful_structured_observation_satisfies_selector,
+    terminal_poll_after_termination_is_fresh, terminal_synthesis_can_skip_remaining_actions,
+    waiting_task_allows_repeated_observation,
 };
 use crate::agent_engine::action_fingerprint_for_policy;
 use crate::agent_engine::support::{
@@ -229,6 +231,7 @@ enabled = true
 kind = "runner"
 planner_capabilities = [
   { name = "preview.inspect", action = "inspect", effect = "observe", idempotent = true },
+  { name = "preview.capture", action = "capture", effect = "observe", idempotent = false, once_per_task = false, dedup_scope = "args" },
   { name = "preview.apply", action = "apply", effect = "mutate", once_per_task = true, idempotent = false },
 ]
 "#
@@ -713,23 +716,23 @@ fn repeat_guard_allows_repeated_respond_delivery() {
 }
 
 #[test]
-fn repeat_guard_reuses_prior_capability_result_instead_of_losing_dependency() {
-    let state = crate::AppState::test_default_with_fixture_provider();
+fn repeat_guard_reuses_prior_idempotent_capability_result_instead_of_losing_dependency() {
+    let state = state_with_registry(structured_observation_registry_fixture(), &["preview_tool"]);
     let task = task_fixture("task-repeat-result");
     let mut loop_state = super::LoopState::new();
-    let action = crate::AgentAction::CallSkill {
-        skill: "media_download".to_string(),
-        args: serde_json::json!({"action": "download", "url": "https://example.invalid/item"}),
+    let action = crate::AgentAction::CallCapability {
+        capability: "preview.inspect".to_string(),
+        args: serde_json::json!({"action": "inspect"}),
     };
-    let policy = test_policy(false);
+    let policy = test_policy(true);
     let fingerprint = action_fingerprint_for_policy(&state, &policy, &action);
     loop_state
         .successful_action_fingerprints
         .insert(fingerprint.clone(), 1);
     let mut result = claw_core::capability_result::CapabilityResultEnvelope::ok(
-        "media_download.download",
-        Some("download".to_string()),
-        serde_json::json!({"output": {"status": "saved"}}),
+        "preview.inspect",
+        Some("inspect".to_string()),
+        serde_json::json!({"output": {"status": "observed"}}),
     );
     result.provenance = serde_json::json!({
         "task_id": task.task_id,
@@ -760,6 +763,103 @@ fn repeat_guard_reuses_prior_capability_result_instead_of_losing_dependency() {
             .and_then(serde_json::Value::as_str)
             == Some("completed_action_result_reused")
     }));
+}
+
+#[test]
+fn repeat_guard_executes_non_idempotent_non_once_action_again_instead_of_reusing_result() {
+    let state = state_with_registry(structured_observation_registry_fixture(), &["preview_tool"]);
+    let task = task_fixture("task-repeat-non-idempotent");
+    let mut loop_state = super::LoopState::new();
+    let action = crate::AgentAction::CallCapability {
+        capability: "preview.capture".to_string(),
+        args: serde_json::json!({"action": "capture"}),
+    };
+    let policy = test_policy(true);
+    let fingerprint = action_fingerprint_for_policy(&state, &policy, &action);
+    loop_state
+        .successful_action_fingerprints
+        .insert(fingerprint.clone(), 1);
+    let mut result = claw_core::capability_result::CapabilityResultEnvelope::ok(
+        "preview.capture",
+        Some("capture".to_string()),
+        serde_json::json!({"output": {"artifact": "first"}}),
+    );
+    result.provenance = serde_json::json!({
+        "task_id": task.task_id,
+        "action_fingerprint": fingerprint,
+    });
+    loop_state.capability_results.push(result);
+
+    assert!(registry_allows_fresh_non_idempotent_repeat(&state, &action));
+    assert!(!registry_allows_completed_result_reuse(&state, &action));
+    assert_eq!(
+        check_repeat_action_guard(
+            &state,
+            &task,
+            &mut loop_state,
+            &policy,
+            &action,
+            &fingerprint,
+            2,
+        ),
+        None
+    );
+    assert!(loop_state
+        .output_vars
+        .get("agent_loop.repeat_completed_result")
+        .is_none());
+    assert!(loop_state
+        .history_compact
+        .iter()
+        .any(|entry| { entry.contains("non_idempotent_action_requires_fresh_execution") }));
+}
+
+#[test]
+fn repeat_guard_does_not_reuse_non_idempotent_once_per_task_result() {
+    let state = state_with_registry(structured_observation_registry_fixture(), &["preview_tool"]);
+    let task = task_fixture("task-repeat-once-per-task");
+    let mut loop_state = super::LoopState::new();
+    let action = crate::AgentAction::CallCapability {
+        capability: "preview.apply".to_string(),
+        args: serde_json::json!({"action": "apply"}),
+    };
+    let policy = test_policy(true);
+    let fingerprint = action_fingerprint_for_policy(&state, &policy, &action);
+    loop_state
+        .successful_action_fingerprints
+        .insert(fingerprint.clone(), 1);
+    let mut result = claw_core::capability_result::CapabilityResultEnvelope::ok(
+        "preview.apply",
+        Some("apply".to_string()),
+        serde_json::json!({"output": {"status": "applied"}}),
+    );
+    result.provenance = serde_json::json!({
+        "task_id": task.task_id,
+        "action_fingerprint": fingerprint,
+    });
+    loop_state.capability_results.push(result);
+
+    assert!(!registry_allows_fresh_non_idempotent_repeat(
+        &state, &action
+    ));
+    assert!(!registry_allows_completed_result_reuse(&state, &action));
+    assert_eq!(
+        check_repeat_action_guard(
+            &state,
+            &task,
+            &mut loop_state,
+            &policy,
+            &action,
+            &fingerprint,
+            2,
+        )
+        .as_deref(),
+        Some("repeat_completed_action")
+    );
+    assert!(loop_state
+        .output_vars
+        .get("agent_loop.repeat_completed_result")
+        .is_none());
 }
 
 #[test]

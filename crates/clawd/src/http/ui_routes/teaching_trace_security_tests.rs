@@ -151,6 +151,44 @@ fn teaching_trace_reads_current_and_retained_dated_model_logs() {
 }
 
 #[test]
+fn teaching_trace_reads_only_the_requested_page_while_counting_all_calls() {
+    let root = std::env::temp_dir().join(format!(
+        "agent-runtime-teaching-page-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).expect("create logs dir");
+    let path = root.join("model_io.log");
+    let mut records = String::new();
+    for index in 0..25 {
+        let mut entry = debug_entry("verbose", Some(json!({"index": index})));
+        entry.task_id = Some("task-paged".to_string());
+        entry.call_id = Some(format!("call-{index:02}"));
+        entry.ts = Some(index as u64);
+        records.push_str(&serde_json::to_string(&entry).expect("encode trace entry"));
+        records.push('\n');
+    }
+    fs::write(&path, records).expect("write model log");
+
+    let task_ids = std::collections::HashSet::from(["task-paged".to_string()]);
+    let page = read_task_debug_entries_page_from_paths(&task_ids, &[path], 10, 10)
+        .expect("read teaching trace page");
+
+    assert_eq!(page.total, 25);
+    assert_eq!(page.limit, 10);
+    assert_eq!(page.offset, 10);
+    assert!(page.has_more);
+    assert_eq!(page.entries.len(), 10);
+    assert_eq!(page.entries[0].call_id.as_deref(), Some("call-10"));
+    assert_eq!(page.entries[9].call_id.as_deref(), Some("call-19"));
+
+    fs::remove_dir_all(root).expect("remove logs dir");
+}
+
+#[test]
 fn teaching_trace_availability_explains_pending_metadata_and_expired_states() {
     let pending = teaching_trace_availability(&[], Some("running"));
     assert_eq!(pending["status"], "pending");
@@ -214,6 +252,7 @@ async fn teaching_trace_endpoint_rejects_cross_user_shared_channel_access() {
         AxumPath("task-shared-channel".to_string()),
         Query(TeachingTraceQuery {
             teaching: Some(true),
+            ..Default::default()
         }),
     )
     .await;
@@ -252,7 +291,7 @@ async fn teaching_trace_endpoint_requires_query_opt_in() {
         State(state),
         headers,
         AxumPath("task-any".to_string()),
-        Query(TeachingTraceQuery { teaching: None }),
+        Query(TeachingTraceQuery::default()),
     )
     .await;
 
@@ -303,6 +342,7 @@ async fn teaching_trace_endpoint_allows_exact_owner_and_labels_trace_layers() {
         AxumPath("task-owned".to_string()),
         Query(TeachingTraceQuery {
             teaching: Some(true),
+            ..Default::default()
         }),
     )
     .await;

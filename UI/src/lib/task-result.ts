@@ -1089,11 +1089,11 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
           ? tLocal("正在下载媒体文件。", "Downloading the media file.")
           : detailKey === "media_download.download.completed"
             ? tLocal("媒体下载完成，正在准备后续处理。", "The media download is complete; preparing the next step.")
-            : detailKey === "media_download.transcribe.extracting_audio"
+            : detailKey === "local_asr.extracting_audio"
               ? tLocal("视频已下载，正在提取音频。", "The video is downloaded; extracting its audio.")
-              : detailKey === "media_download.transcribe.recognizing_speech"
+              : detailKey === "local_asr.recognizing_speech"
                 ? tLocal("音频提取完成，正在转写文字。", "Audio extraction is complete; transcribing speech.")
-                : detailKey === "media_download.transcribe.completed"
+                : detailKey === "local_asr.completed"
                   ? tLocal("文字转写完成，正在整理结果。", "Transcription is complete; preparing the result.")
         : detailKey === "browser_web.pages.starting"
           ? tLocal("正在打开并读取网页。", "Opening and reading web pages.")

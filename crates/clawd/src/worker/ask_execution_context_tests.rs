@@ -2,7 +2,7 @@ use rusqlite::params;
 use serde_json::json;
 
 #[tokio::test]
-async fn fifty_two_turn_context_compacts_at_real_pre_prompt_owner() {
+async fn fifty_two_turn_history_loads_only_the_budgeted_recent_window_before_compaction() {
     let mut state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let provider = std::sync::Arc::make_mut(
         state
@@ -163,20 +163,20 @@ async fn fifty_two_turn_context_compacts_at_real_pre_prompt_owner() {
         .contains("transcript_compaction_records="));
     assert_eq!(record["generation"], 1);
     assert_eq!(record["lifecycle"]["base_generation"], 0);
-    assert_eq!(record["source_task_ids"].as_array().unwrap().len(), 52);
-    assert_eq!(record["source_task_ids"][0], "context-history-0");
-    assert_eq!(record["source_task_ids"][51], "context-history-51");
+    assert_eq!(record["source_task_ids"].as_array().unwrap().len(), 2);
+    assert_eq!(record["source_task_ids"][0], "context-history-50");
+    assert_eq!(record["source_task_ids"][1], "context-history-51");
     assert_eq!(
         record["source_event_range"]["start"]["task_id"],
-        "context-history-0"
+        "context-history-50"
     );
-    assert_eq!(record["source_event_range"]["start"]["event_seq"], 2);
+    assert!(record["source_event_range"]["start"]["event_seq"].is_null());
     assert_eq!(
         record["source_event_range"]["end"]["task_id"],
         "context-history-51"
     );
     assert_eq!(record["source_event_range"]["end"]["event_seq"], 9);
-    assert_eq!(record["source_event_ranges"].as_array().unwrap().len(), 52);
+    assert_eq!(record["source_event_ranges"].as_array().unwrap().len(), 2);
     assert_ne!(
         record["model_status_code"],
         "context_compaction_model_completed"

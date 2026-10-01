@@ -281,7 +281,7 @@ fn decision_priority(decision: PolicyDecision) -> u8 {
     }
 }
 
-fn tool_action_ref(tool_or_skill: &str, args: &Value) -> String {
+pub(crate) fn tool_action_ref(tool_or_skill: &str, args: &Value) -> String {
     let base = normalize_machine_token(tool_or_skill);
     args.get("action")
         .and_then(Value::as_str)

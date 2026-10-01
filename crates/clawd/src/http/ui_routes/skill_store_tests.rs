@@ -20,6 +20,68 @@ use crate::{reload_skill_views, AppState};
 
 const STORE_TEST_KEY: &str = "skill-store-test-admin";
 
+#[tokio::test]
+async fn skill_store_catalog_paginates_and_filters_before_metadata_projection() {
+    let (state, workspace) = isolated_skill_store_state();
+    let router = axum::Router::new()
+        .nest("/v1", build_ui_router())
+        .with_state(state);
+
+    let (status, first_page) = call_skill_store_api(
+        router.clone(),
+        Method::GET,
+        "/v1/skills/store?page=1&page_size=2",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        first_page["data"]["items"].as_array().map(Vec::len),
+        Some(2)
+    );
+    assert_eq!(first_page["data"]["page"], 1);
+    assert_eq!(first_page["data"]["page_size"], 2);
+    assert!(first_page["data"]["total"]
+        .as_u64()
+        .is_some_and(|value| value > 2));
+    assert_eq!(first_page["data"]["has_more"], true);
+    let first_names = first_page["data"]["items"]
+        .as_array()
+        .expect("first page items")
+        .iter()
+        .filter_map(|item| item["name"].as_str())
+        .collect::<BTreeSet<_>>();
+
+    let (status, second_page) = call_skill_store_api(
+        router.clone(),
+        Method::GET,
+        "/v1/skills/store?page=2&page_size=2",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    for item in second_page["data"]["items"]
+        .as_array()
+        .expect("second page items")
+    {
+        assert!(!first_names.contains(item["name"].as_str().expect("skill name")));
+    }
+
+    let (status, filtered) = call_skill_store_api(
+        router,
+        Method::GET,
+        "/v1/skills/store?page=1&page_size=2&q=weather",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(filtered["data"]["total"], 1);
+    assert_eq!(filtered["data"]["items"][0]["name"], "weather");
+    assert_eq!(filtered["data"]["query"], "weather");
+
+    let _ = std::fs::remove_dir_all(workspace);
+}
+
 #[test]
 fn bundled_admission_refresh_detects_changed_or_missing_pinned_packages() {
     let binding = crate::skill_admission::AdmissionExecutionBinding {
@@ -294,21 +356,26 @@ async fn call_skill_store_api_raw(
 #[tokio::test]
 async fn dependency_status_checks_declared_items_without_creating_private_storage() {
     let (state, workspace) = isolated_skill_store_state();
-    let storage = state
+    let media_storage = state
         .core
         .skill_storage
         .resolved_directory_path("media_download")
         .expect("resolve media storage");
+    let asr_storage = state
+        .core
+        .skill_storage
+        .resolved_directory_path("local_asr")
+        .expect("resolve local ASR storage");
     assert!(
-        !storage.exists(),
+        !media_storage.exists() && !asr_storage.exists(),
         "status reads must not create private storage"
     );
     let router = axum::Router::new()
         .nest("/v1", build_ui_router())
         .with_state(state);
 
-    let (status, payload) = call_skill_store_api(
-        router,
+    let (status, media_payload) = call_skill_store_api(
+        router.clone(),
         Method::GET,
         "/v1/skills/store/media_download/dependencies",
         None,
@@ -316,17 +383,33 @@ async fn dependency_status_checks_declared_items_without_creating_private_storag
     .await;
 
     assert_eq!(status, StatusCode::OK);
-    let dependencies = payload["data"]["dependencies"]
+    let media_dependencies = media_payload["data"]["dependencies"]
         .as_array()
         .expect("dependency array");
-    assert_eq!(dependencies.len(), 7);
-    let git = dependencies
+    assert_eq!(media_dependencies.len(), 5);
+    let git = media_dependencies
         .iter()
         .find(|dependency| dependency["id"] == "git")
         .expect("git status");
     assert_eq!(git["kind"], "host");
     assert_eq!(git["installed"], true);
-    let model = dependencies
+    assert!(media_dependencies
+        .iter()
+        .all(|dependency| dependency["kind"] != "runtime_asset"));
+
+    let (status, asr_payload) = call_skill_store_api(
+        router,
+        Method::GET,
+        "/v1/skills/store/local_asr/dependencies",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let asr_dependencies = asr_payload["data"]["dependencies"]
+        .as_array()
+        .expect("local ASR dependency array");
+    assert_eq!(asr_dependencies.len(), 3);
+    let model = asr_dependencies
         .iter()
         .find(|dependency| dependency["id"] == "modelscope_sensevoice_small")
         .expect("model status");
@@ -334,7 +417,7 @@ async fn dependency_status_checks_declared_items_without_creating_private_storag
     assert_eq!(model["installed"], false);
     assert_eq!(model["status_code"], "missing");
     assert!(
-        !storage.exists(),
+        !media_storage.exists() && !asr_storage.exists(),
         "status reads must remain side-effect free"
     );
     let _ = std::fs::remove_dir_all(workspace);
@@ -866,6 +949,7 @@ async fn skill_store_http_api_removes_and_reinstalls_optional_skill() {
             "crypto",
             "git_forge",
             "invest_copy",
+            "local_asr",
             "map_merchant",
             "media_discovery",
             "media_download",
@@ -1427,19 +1511,32 @@ fn skill_store_rejects_install_when_registry_excludes_the_host_platform() {
     } else {
         "linux"
     };
-    let weather_header = "name = \"weather\"\nenabled = false\nkind = \"runner\"\nplanner_kind = \"skill\"\ngroup = \"news/web\"\nsupported_os = [\"linux\", \"macos\"]";
-    let unsupported_header = format!(
-        "name = \"weather\"\nenabled = false\nkind = \"runner\"\nplanner_kind = \"skill\"\ngroup = \"news/web\"\nsupported_os = [\"{unsupported_os}\"]"
-    );
+    let weather_name = "name = \"weather\"";
+    let name_offset = raw.find(weather_name).expect("weather registry entry");
+    let section_start = raw[..name_offset]
+        .rfind("[[skills]]")
+        .expect("weather registry section start");
+    let section_end = raw[name_offset..]
+        .find("\n[[skills]]")
+        .map(|offset| name_offset + offset)
+        .unwrap_or(raw.len());
+    let weather_section = &raw[section_start..section_end];
+    let supported_os_line = "supported_os = [\"linux\", \"macos\"]";
     assert!(
-        raw.contains(weather_header),
+        weather_section.contains(supported_os_line),
         "weather registry fixture changed"
     );
-    std::fs::write(
-        &registry_path,
-        raw.replacen(&weather_header, &unsupported_header, 1),
-    )
-    .expect("write unsupported weather registry");
+    let updated_weather_section = weather_section.replacen(
+        supported_os_line,
+        &format!("supported_os = [\"{unsupported_os}\"]"),
+        1,
+    );
+    let mut unsupported_registry = String::with_capacity(raw.len());
+    unsupported_registry.push_str(&raw[..section_start]);
+    unsupported_registry.push_str(&updated_weather_section);
+    unsupported_registry.push_str(&raw[section_end..]);
+    std::fs::write(&registry_path, unsupported_registry)
+        .expect("write unsupported weather registry");
     reload_skill_views(&state).expect("reload unsupported weather registry");
 
     let error = skill_store_install_spec(&state, "weather")

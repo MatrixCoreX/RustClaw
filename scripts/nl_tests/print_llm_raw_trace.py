@@ -10,6 +10,7 @@ dumping multi-megabyte prompts.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 import tempfile
@@ -18,6 +19,7 @@ from typing import Any
 
 
 DEFAULT_MAX_CHARS = 2400
+MAX_SEEN_ROW_HASHES = 256
 LONG_FIELD_NAMES = {
     "prompt",
     "response",
@@ -30,26 +32,63 @@ LONG_FIELD_NAMES = {
 
 def read_state(path: Path | None) -> dict[str, Any]:
     if path is None or not path.exists():
-        return {"offset": 0, "next_index": 1, "active_task_id": None}
+        return {
+            "offset": 0,
+            "next_index": 1,
+            "active_task_id": None,
+            "seen_row_hashes": [],
+        }
     raw = path.read_text(encoding="utf-8").strip()
     if not raw:
-        return {"offset": 0, "next_index": 1, "active_task_id": None}
+        return {
+            "offset": 0,
+            "next_index": 1,
+            "active_task_id": None,
+            "seen_row_hashes": [],
+        }
     try:
         value = json.loads(raw)
     except json.JSONDecodeError:
         try:
-            return {"offset": int(raw), "next_index": 1, "active_task_id": None}
+            return {
+                "offset": int(raw),
+                "next_index": 1,
+                "active_task_id": None,
+                "seen_row_hashes": [],
+            }
         except ValueError:
-            return {"offset": 0, "next_index": 1, "active_task_id": None}
+            return {
+                "offset": 0,
+                "next_index": 1,
+                "active_task_id": None,
+                "seen_row_hashes": [],
+            }
     if isinstance(value, dict):
+        seen_row_hashes = value.get("seen_row_hashes")
+        if not isinstance(seen_row_hashes, list):
+            seen_row_hashes = []
         return {
             "offset": max(0, int(value.get("offset") or 0)),
             "next_index": max(1, int(value.get("next_index") or 1)),
             "active_task_id": value.get("active_task_id"),
+            "seen_row_hashes": [
+                item for item in seen_row_hashes[-MAX_SEEN_ROW_HASHES:]
+                if isinstance(item, str)
+            ],
         }
     if isinstance(value, int):
-        return {"offset": max(0, value), "next_index": 1, "active_task_id": None}
-    return {"offset": 0, "next_index": 1, "active_task_id": None}
+        return {
+            "offset": max(0, value),
+            "next_index": 1,
+            "active_task_id": None,
+            "seen_row_hashes": [],
+        }
+    return {
+        "offset": 0,
+        "next_index": 1,
+        "active_task_id": None,
+        "seen_row_hashes": [],
+    }
 
 
 def write_state(
@@ -57,6 +96,7 @@ def write_state(
     offset: int,
     next_index: int,
     active_task_id: str | None = None,
+    seen_row_hashes: list[str] | None = None,
 ) -> None:
     if path is None:
         return
@@ -66,6 +106,7 @@ def write_state(
                 "active_task_id": active_task_id,
                 "offset": offset,
                 "next_index": next_index,
+                "seen_row_hashes": (seen_row_hashes or [])[-MAX_SEEN_ROW_HASHES:],
             },
             sort_keys=True,
         ),
@@ -159,6 +200,10 @@ def task_matches(row: dict[str, Any], task_id: str | None) -> bool:
     if not task_id:
         return True
     return str(row.get("task_id") or "") == task_id
+
+
+def row_fingerprint(raw_line: str) -> str:
+    return hashlib.sha256(raw_line.encode("utf-8")).hexdigest()
 
 
 def read_new_rows(log_path: Path, offset: int) -> tuple[list[tuple[int, str]], int]:
@@ -330,6 +375,7 @@ def run_self_test() -> int:
         assert 'parsed_json_fields=["action"]' in rendered, rendered
         assert read_state(state_path)["next_index"] == 2
         assert read_state(state_path)["active_task_id"] == "task-1"
+        assert read_state(state_path)["seen_row_hashes"] == []
         assert next_index_for_task(read_state(state_path), "task-1") == 2
         assert next_index_for_task(read_state(state_path), "task-2") == 1
         assert missing_logical_call_indexes([row], 1) == []
@@ -364,6 +410,8 @@ def main(argv: list[str]) -> int:
     state = read_state(args.state_file)
     rows, new_offset = read_new_rows(args.log, state["offset"])
     next_index = next_index_for_task(state, args.task_id)
+    seen_row_hashes = list(state.get("seen_row_hashes") or [])
+    seen_row_hash_set = set(seen_row_hashes)
     printed = 0
     task_rows: list[dict[str, Any]] = []
     for row_offset, raw_line in rows:
@@ -376,12 +424,26 @@ def main(argv: list[str]) -> int:
             continue
         if not isinstance(row, dict) or not task_matches(row, args.task_id):
             continue
+        fingerprint = row_fingerprint(raw_line)
+        if fingerprint in seen_row_hash_set:
+            continue
         print_row(row, next_index, args.log, row_offset, args.max_field_chars, args.indent)
         next_index += 1
         printed += 1
         task_rows.append(row)
+        seen_row_hashes.append(fingerprint)
+        seen_row_hash_set.add(fingerprint)
+        if len(seen_row_hashes) > MAX_SEEN_ROW_HASHES:
+            dropped = seen_row_hashes.pop(0)
+            seen_row_hash_set.discard(dropped)
     active_task_id = args.task_id or state.get("active_task_id")
-    write_state(args.state_file, new_offset, next_index, active_task_id)
+    write_state(
+        args.state_file,
+        new_offset,
+        next_index,
+        active_task_id,
+        seen_row_hashes,
+    )
     if printed:
         task_part = f" task_id={args.task_id}" if args.task_id else ""
         print(

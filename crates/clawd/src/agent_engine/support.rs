@@ -707,6 +707,8 @@ fn checkpoint_resume_message_key(resume_reason: &str) -> Option<&'static str> {
     match resume_reason {
         "task_budget_slice_exhausted" => Some("clawd.task.task_budget_slice_exhausted"),
         "user_pause_requested" => Some("clawd.task.pause_requested"),
+        "provider_blocker_wait_background" => Some("clawd.task.provider_waiting"),
+        "resource_admission_wait" => Some("clawd.task.resource_waiting"),
         _ => None,
     }
 }
@@ -839,6 +841,14 @@ pub(super) fn build_agent_loop_checkpoint_progress_payload_with_budget(
         .map(|step| step.step_id.clone())
         .collect::<Vec<_>>();
     let message_key = checkpoint_resume_message_key(resume_reason);
+    let replay_action = (resume_reason == "resource_admission_wait")
+        .then_some(loop_state.resource_wait_replay_action.as_ref())
+        .flatten();
+    let checkpoint_stage = if replay_action.is_some() {
+        super::checkpoint_resume_state::AgentCheckpointStage::ToolExecution
+    } else {
+        super::checkpoint_resume_state::AgentCheckpointStage::Planning
+    };
     let mut boundary_context = json!({
         "schema_version": 1,
         "source": "agent_loop_soft_budget",
@@ -851,7 +861,7 @@ pub(super) fn build_agent_loop_checkpoint_progress_payload_with_budget(
         "context_compaction_trigger": context_compaction_checkpoint_trigger_json(resume_reason),
         "agent_loop_resume_state": checkpoint_resume_state(
             loop_state,
-            super::checkpoint_resume_state::AgentCheckpointStage::Planning,
+            checkpoint_stage,
         ),
     });
     if let (Some(obj), Some(message_key)) = (boundary_context.as_object_mut(), message_key) {
@@ -864,7 +874,16 @@ pub(super) fn build_agent_loop_checkpoint_progress_payload_with_budget(
         last_successful_round: (loop_state.round_no > 0)
             .then_some(saturating_u32(loop_state.round_no)),
         last_successful_step,
-        pending_action: None,
+        pending_action: replay_action.map(|action| {
+            json!({
+                "schema_version": 1,
+                "kind": "resource_admission_retry",
+                "tool_or_skill": action.tool_or_skill,
+                "action_ref": action.action_ref,
+                "args_keys": action_args_keys(&action.args),
+                "resume_expected": "resource_admission_then_execute",
+            })
+        }),
         observations: checkpoint_step_observations(loop_state),
         capability_results: loop_state.capability_results.clone(),
         evidence_refs,
@@ -1138,7 +1157,12 @@ pub(super) fn publish_agent_loop_checkpoint_progress(
         state.task_llm_call_count(&task.task_id),
         state.task_llm_elapsed_ms(&task.task_id),
     );
-    let next_check_after = now_ts.saturating_add(60);
+    let retry_after_seconds = if resume_reason == "resource_admission_wait" {
+        resource_wait_retry_after_seconds(loop_state.resource_wait_attempts)
+    } else {
+        60
+    };
+    let next_check_after = now_ts.saturating_add(retry_after_seconds);
     let mut payload = build_agent_loop_checkpoint_progress_payload_with_budget(
         task,
         loop_state,
@@ -1147,6 +1171,23 @@ pub(super) fn publish_agent_loop_checkpoint_progress(
         next_check_after,
         budget,
     );
+    if resume_reason == "resource_admission_wait" {
+        if let Err(error) =
+            persist_resource_wait_checkpoint_action(state, task, loop_state, &payload)
+        {
+            warn!(
+                task_id = %task.task_id,
+                error = %error,
+                "resource wait action persistence failed; falling back to planner resume"
+            );
+            if let Some(checkpoint) = payload
+                .get_mut("task_checkpoint")
+                .and_then(Value::as_object_mut)
+            {
+                checkpoint.insert("pending_action".to_string(), Value::Null);
+            }
+        }
+    }
     persist_agent_loop_checkpoint_progress_payload(
         state,
         task,
@@ -1154,6 +1195,59 @@ pub(super) fn publish_agent_loop_checkpoint_progress(
         resume_reason,
         &mut payload,
     );
+}
+
+pub(super) fn resource_wait_retry_after_seconds(attempts: u32) -> i64 {
+    const BASE_SECONDS: i64 = 15;
+    const MAX_SHIFT: u32 = 3;
+    let shift = attempts.saturating_sub(1).min(MAX_SHIFT);
+    BASE_SECONDS.saturating_mul(1_i64 << shift)
+}
+
+fn persist_resource_wait_checkpoint_action(
+    state: &AppState,
+    task: &ClaimedTask,
+    loop_state: &super::LoopState,
+    payload: &Value,
+) -> Result<(), String> {
+    let Some(action) = loop_state.resource_wait_replay_action.as_ref() else {
+        return Ok(());
+    };
+    let checkpoint_id = payload
+        .pointer("/task_lifecycle/checkpoint_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "resource_wait_checkpoint_id_missing".to_string())?;
+    let output_contract = loop_state
+        .output_contract
+        .as_ref()
+        .map(serde_json::to_value)
+        .transpose()
+        .map_err(|_| "resource_wait_output_contract_serialize_failed".to_string())?;
+    let continuation_actions = if action.continuation_actions.is_empty() {
+        None
+    } else {
+        Some(
+            serde_json::to_value(&action.continuation_actions)
+                .map_err(|_| "resource_wait_continuation_serialize_failed".to_string())?,
+        )
+    };
+    let execution_binding =
+        crate::skills::checkpoint_skill_execution_binding(state, &action.tool_or_skill)?;
+    repo::replace_current_task_checkpoint_action(
+        &state.core.db,
+        &task.task_id,
+        checkpoint_id,
+        &action.tool_or_skill,
+        &action.action_ref,
+        &action.args,
+        output_contract.as_ref(),
+        continuation_actions.as_ref(),
+        Some(&execution_binding),
+        None,
+        loop_state.conversation_input_revision,
+        loop_state.conversation_execution_epoch,
+    )
+    .map_err(|_| "resource_wait_checkpoint_action_persist_failed".to_string())
 }
 
 pub(super) fn publish_agent_loop_pause_checkpoint(

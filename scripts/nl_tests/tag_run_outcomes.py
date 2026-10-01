@@ -85,6 +85,10 @@ def final_answer_text(result: dict, summary: dict) -> str:
         for item in reversed(messages):
             if isinstance(item, str) and item.strip():
                 return item.strip()
+            if isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str) and text.strip():
+                    return text.strip()
     return ""
 
 
@@ -118,6 +122,14 @@ def classify(obj: dict) -> tuple[str, str]:
     finalizer_summary = summary.get("finalizer_summary") or {}
     latest_terminal_output = latest_ok_terminal_output(steps)
     final_answer = final_answer_text(result, summary)
+    lifecycle = data.get("lifecycle") or result.get("task_lifecycle") or {}
+    lifecycle_state = str(lifecycle.get("state") or "").strip()
+
+    if status in {"running", "needs_user"} and lifecycle_state == "needs_user":
+        reply_id = str(lifecycle.get("reply_id") or "").strip()
+        if reply_id and final_answer:
+            return "pass", "durable needs_user clarification is visible"
+        return "runtime_bug", "needs_user task is missing its durable visible clarification"
 
     if (
         status == "succeeded"

@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -28,6 +29,11 @@ use tower_http::services::{ServeDir, ServeFile};
 use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::{error, info, warn};
 use uuid::Uuid;
+
+const STREAM_BODY_OK: u8 = 0;
+const STREAM_BODY_TOO_LARGE: u8 = 1;
+const STREAM_BODY_TIMEOUT: u8 = 2;
+const STREAM_BODY_READ_FAILED: u8 = 3;
 
 mod request_limits;
 mod session_store;
@@ -1497,27 +1503,40 @@ async fn proxy_inner(state: AppState, client_addr: SocketAddr, req: Request) -> 
     let body_in = req.into_body();
     let body_limit = state.request_limits.body_limit(request_class);
     let body_timeout = state.request_limits.body_read_timeout(request_class);
-    let bytes = match tokio::time::timeout(body_timeout, to_bytes(body_in, body_limit)).await {
-        Ok(Ok(bytes)) => bytes,
-        Ok(Err(error)) => {
-            error!(error = %error, "webd_request_body_read_failed");
-            return plain_error(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                "webd_request_body_too_large",
-                origin.as_ref(),
-            );
-        }
-        Err(_) => {
-            return plain_error(
-                StatusCode::REQUEST_TIMEOUT,
-                "webd_request_body_read_timeout",
-                origin.as_ref(),
-            );
-        }
+    let (buffered_body, streaming_body, stream_failure) = if request_class == RequestClass::Upload {
+        let (body, failure) = bounded_streaming_request_body(body_in, body_limit, body_timeout);
+        (None, Some(body), Some(failure))
+    } else {
+        let bytes = match tokio::time::timeout(body_timeout, to_bytes(body_in, body_limit)).await {
+            Ok(Ok(bytes)) => bytes,
+            Ok(Err(error)) => {
+                error!(error = %error, "webd_request_body_read_failed");
+                return plain_error(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    "webd_request_body_too_large",
+                    origin.as_ref(),
+                );
+            }
+            Err(_) => {
+                return plain_error(
+                    StatusCode::REQUEST_TIMEOUT,
+                    "webd_request_body_read_timeout",
+                    origin.as_ref(),
+                );
+            }
+        };
+        (Some(bytes), None, None)
     };
 
     if owner_path.starts_with(claw_core::owner_gateway_context::PREFIX) {
         if let Some(session) = &session {
+            let Some(bytes) = buffered_body.as_ref() else {
+                return webd_error_response(
+                    StatusCode::BAD_REQUEST,
+                    "asset_owner_context_invalid",
+                    origin.as_ref(),
+                );
+            };
             let assertion = claw_core::owner_gateway_context::sign(
                 &session.user_key,
                 &session.session_handle,
@@ -1546,9 +1565,42 @@ async fn proxy_inner(state: AppState, client_addr: SocketAddr, req: Request) -> 
     let rb = client
         .request(method.clone(), &full_url)
         .headers(out_headers);
-    let rb = if bytes.is_empty() { rb } else { rb.body(bytes) };
+    let rb = if let Some(body) = streaming_body {
+        rb.body(body)
+    } else if let Some(bytes) = buffered_body.filter(|body| !body.is_empty()) {
+        rb.body(bytes)
+    } else {
+        rb
+    };
 
-    let res = match rb.send().await {
+    let upstream_result = rb.send().await;
+    if let Some(failure) = stream_failure.as_ref() {
+        match failure.load(Ordering::Acquire) {
+            STREAM_BODY_TOO_LARGE => {
+                return plain_error(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    "webd_request_body_too_large",
+                    origin.as_ref(),
+                );
+            }
+            STREAM_BODY_TIMEOUT => {
+                return plain_error(
+                    StatusCode::REQUEST_TIMEOUT,
+                    "webd_request_body_read_timeout",
+                    origin.as_ref(),
+                );
+            }
+            STREAM_BODY_READ_FAILED => {
+                return plain_error(
+                    StatusCode::BAD_REQUEST,
+                    "webd_request_body_read_failed",
+                    origin.as_ref(),
+                );
+            }
+            _ => {}
+        }
+    }
+    let res = match upstream_result {
         Ok(r) => r,
         Err(e) => {
             error!("upstream request failed (url={}): {}", full_url, e);
@@ -1598,6 +1650,61 @@ async fn proxy_inner(state: AppState, client_addr: SocketAddr, req: Request) -> 
             )
         }
     }
+}
+
+fn bounded_streaming_request_body(
+    body: Body,
+    max_bytes: usize,
+    timeout: Duration,
+) -> (reqwest::Body, Arc<AtomicU8>) {
+    let failure = Arc::new(AtomicU8::new(STREAM_BODY_OK));
+    let failure_for_stream = Arc::clone(&failure);
+    let deadline = tokio::time::Instant::now() + timeout;
+    let source = Box::pin(body.into_data_stream());
+    let stream = futures_util::stream::unfold(
+        (source, 0usize, false),
+        move |(mut source, total, finished)| {
+            let failure = Arc::clone(&failure_for_stream);
+            async move {
+                if finished {
+                    return None;
+                }
+                let next = match tokio::time::timeout_at(deadline, source.next()).await {
+                    Ok(next) => next,
+                    Err(_) => {
+                        failure.store(STREAM_BODY_TIMEOUT, Ordering::Release);
+                        let error = std::io::Error::new(
+                            std::io::ErrorKind::TimedOut,
+                            "webd_request_body_read_timeout",
+                        );
+                        return Some((Err(error), (source, total, true)));
+                    }
+                };
+                match next {
+                    Some(Ok(chunk)) => {
+                        let next_total = total.saturating_add(chunk.len());
+                        if next_total > max_bytes {
+                            failure.store(STREAM_BODY_TOO_LARGE, Ordering::Release);
+                            let error = std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                "webd_request_body_too_large",
+                            );
+                            Some((Err(error), (source, total, true)))
+                        } else {
+                            Some((Ok(chunk), (source, next_total, false)))
+                        }
+                    }
+                    Some(Err(error)) => {
+                        failure.store(STREAM_BODY_READ_FAILED, Ordering::Release);
+                        let error = std::io::Error::other(error.to_string());
+                        Some((Err(error), (source, total, true)))
+                    }
+                    None => None,
+                }
+            }
+        },
+    );
+    (reqwest::Body::wrap_stream(stream), failure)
 }
 
 fn is_internal_upstream_path(path: &str) -> bool {
