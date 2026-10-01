@@ -37,6 +37,12 @@ grep -Fq "CapabilityBoundingSet=" "$OUTPUT"
 grep -Fq "AmbientCapabilities=" "$OUTPUT"
 grep -Fq "ProtectSystem=strict" "$OUTPUT"
 grep -Fq "ProtectHome=read-only" "$OUTPUT"
+grep -Fq "ProtectKernelTunables=no" "$OUTPUT"
+grep -Fq "ProtectKernelModules=yes" "$OUTPUT"
+grep -Fq "ProtectKernelLogs=no" "$OUTPUT"
+grep -Fq "ProtectControlGroups=yes" "$OUTPUT"
+grep -Fq "ProtectHostname=no" "$OUTPUT"
+grep -Fq "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK" "$OUTPUT"
 grep -Fq "ReadWritePaths=$WORKSPACE" "$OUTPUT"
 if grep -Fq "/home/example/old-product" "$OUTPUT"; then
   echo "Rendered unit contains the former hardcoded workspace path." >&2

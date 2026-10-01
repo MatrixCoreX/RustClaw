@@ -274,15 +274,21 @@ RestrictSUIDSGID=yes
 ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=yes
-ProtectKernelTunables=yes
+# These three systemd switches create locked /proc submounts that prevent the
+# per-skill bubblewrap sandbox from mounting its private /proc. The service is
+# still an unprivileged user with no capabilities and NoNewPrivileges enabled.
+ProtectKernelTunables=no
 ProtectKernelModules=yes
-ProtectKernelLogs=yes
+ProtectKernelLogs=no
 ProtectControlGroups=yes
 ProtectClock=yes
-ProtectHostname=yes
+ProtectHostname=no
 RestrictRealtime=yes
 SystemCallArchitectures=native
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# bubblewrap needs AF_NETLINK to initialize the loopback interface inside an
+# unshared network namespace. Network-disabled skills still run with
+# --unshare-net and cannot use the host network.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 ReadWritePaths=$workspace_path
 
 [Install]
