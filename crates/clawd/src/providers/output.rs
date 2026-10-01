@@ -48,14 +48,6 @@ fn strip_markdown_json_fence(raw: &str) -> String {
     body.trim().to_string()
 }
 
-fn sanitize_llm_text_output(raw: &str) -> String {
-    let stripped = strip_think_blocks(raw);
-    let without_think_tags = stripped.replace("<think>", "").replace("</think>", "");
-    strip_markdown_json_fence(&without_think_tags)
-        .trim()
-        .to_string()
-}
-
 fn sanitize_provider_raw_response(raw: &str) -> (String, bool) {
     if let Ok(mut value) = serde_json::from_str::<Value>(raw) {
         sanitize_provider_raw_value(&mut value);
@@ -138,12 +130,21 @@ fn sanitize_provider_raw_value(value: &mut Value) {
 }
 
 pub(crate) fn maybe_sanitize_llm_text_output(vendor: &str, raw: &str) -> (String, bool) {
-    if vendor.eq_ignore_ascii_case("minimax") {
-        let cleaned = sanitize_llm_text_output(raw);
-        let sanitized = cleaned != raw.trim();
-        return (cleaned, sanitized);
-    }
-    (raw.to_string(), false)
+    // Hidden-reasoning wrappers are a provider-protocol concern, not a vendor-name
+    // policy. Custom OpenAI-compatible endpoints may serve the same model under an
+    // operator-defined provider name, so sanitize every model response uniformly.
+    let hidden_reasoning_removed = strip_think_blocks(raw)
+        .replace("<think>", "")
+        .replace("</think>", "")
+        .trim()
+        .to_string();
+    let cleaned = if vendor.eq_ignore_ascii_case("minimax") {
+        strip_markdown_json_fence(&hidden_reasoning_removed)
+    } else {
+        hidden_reasoning_removed
+    };
+    let sanitized = cleaned != raw.trim();
+    (cleaned, sanitized)
 }
 
 pub(crate) fn append_model_io_log(

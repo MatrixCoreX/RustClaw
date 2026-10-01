@@ -7,7 +7,103 @@ use crate::{AgentAction, AppState, ClaimedTask};
 fn parse_plan_action_step(step: &Value, state: &AppState) -> Option<AgentAction> {
     let raw_step = serde_json::to_string(step).ok()?;
     let normalized = crate::parse_agent_action_json_with_repair(&raw_step, state).ok()?;
-    serde_json::from_value::<AgentAction>(normalized).ok()
+    let action = serde_json::from_value::<AgentAction>(normalized).ok()?;
+    Some(normalize_skill_action_capability(state, action))
+}
+
+fn normalize_skill_action_capability(state: &AppState, action: AgentAction) -> AgentAction {
+    let AgentAction::CallCapability {
+        capability,
+        mut args,
+    } = action
+    else {
+        return action;
+    };
+    let Some(requested_action) = args
+        .get("action")
+        .and_then(Value::as_str)
+        .map(normalize_machine_token)
+        .filter(|value| !value.is_empty())
+    else {
+        return AgentAction::CallCapability { capability, args };
+    };
+    let Some(registry) = state.get_skills_registry() else {
+        return AgentAction::CallCapability { capability, args };
+    };
+    let Some(skill) = registry.resolve_canonical(&capability) else {
+        return AgentAction::CallCapability { capability, args };
+    };
+    let exposed = registry.planner_exposed_capabilities(skill);
+    let normalized_capability = normalize_machine_token(&capability);
+    let current = exposed
+        .iter()
+        .copied()
+        .find(|mapping| normalize_machine_token(&mapping.name) == normalized_capability);
+
+    let selected = current
+        .filter(|mapping| capability_mapping_matches_action(mapping, &requested_action))
+        .or_else(|| {
+            unique_capability_mapping(exposed.iter().copied().filter(|mapping| {
+                mapping
+                    .action
+                    .as_deref()
+                    .map(normalize_machine_token)
+                    .as_deref()
+                    == Some(requested_action.as_str())
+            }))
+        })
+        .or_else(|| {
+            unique_capability_mapping(exposed.iter().copied().filter(|mapping| {
+                normalize_machine_token(
+                    mapping
+                        .name
+                        .rsplit_once('.')
+                        .map(|(_, suffix)| suffix)
+                        .unwrap_or(mapping.name.as_str()),
+                ) == requested_action
+            }))
+        });
+    let Some(selected) = selected else {
+        return AgentAction::CallCapability { capability, args };
+    };
+
+    let selected_name = selected.name.clone();
+    args.as_object_mut().map(|object| object.remove("action"));
+    info!(
+        "plan_result_skill_action_capability_normalized skill={} requested_capability={} requested_action={} canonical_capability={}",
+        skill, capability, requested_action, selected_name
+    );
+    AgentAction::CallCapability {
+        capability: selected_name,
+        args,
+    }
+}
+
+fn capability_mapping_matches_action(
+    mapping: &claw_core::skill_registry::PlannerCapabilityMapping,
+    requested_action: &str,
+) -> bool {
+    mapping
+        .action
+        .as_deref()
+        .map(normalize_machine_token)
+        .as_deref()
+        == Some(requested_action)
+}
+
+fn unique_capability_mapping<'a>(
+    mut candidates: impl Iterator<Item = &'a claw_core::skill_registry::PlannerCapabilityMapping>,
+) -> Option<&'a claw_core::skill_registry::PlannerCapabilityMapping> {
+    let first = candidates.next()?;
+    candidates.next().is_none().then_some(first)
+}
+
+fn normalize_machine_token(value: &str) -> String {
+    value
+        .trim()
+        .to_ascii_lowercase()
+        .replace("::", ".")
+        .replace('-', "_")
 }
 
 fn plan_actions_follow_machine_contract(state: &AppState, actions: &[AgentAction]) -> bool {

@@ -862,6 +862,23 @@ fn web_search_capability_resolves_through_registry_contract() {
 }
 
 #[test]
+fn capability_resolver_accepts_redundant_matching_backing_action() {
+    let state = state_with_workspace_registry();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "git.current_branch",
+        json!({"action": "current_branch"}),
+    );
+
+    assert!(matches!(
+        action,
+        Some(AgentAction::CallTool { ref tool, ref args })
+            if tool == "git_basic" && args["action"] == "current_branch"
+    ));
+    assert_eq!(record.outcome, "resolved");
+}
+
+#[test]
 fn planner_output_contract_is_preserved_without_registry_rewrite() {
     let mut output_contract = crate::IntentOutputContract {
         response_shape: crate::OutputResponseShape::Strict,
@@ -1361,7 +1378,7 @@ fn registry_rejects_bare_virtual_tool_even_with_registered_action_alias() {
 }
 
 #[test]
-fn selected_registry_capability_cannot_be_rewritten_by_args_action() {
+fn selected_registry_capability_rejects_conflicting_args_action() {
     let state = state_with_workspace_registry();
     let (action, record) = resolve_capability_action_with_record_for_state(
         &state,
@@ -1373,17 +1390,12 @@ fn selected_registry_capability_cannot_be_rewritten_by_args_action() {
         }),
     );
 
+    assert!(action.is_none());
+    assert_eq!(record.outcome, "blocked");
+    assert_eq!(record.reason_code, "capability_action_conflict");
     assert_eq!(
-        record.reason_code,
-        "capability_resolver_registry_mapping_resolved"
-    );
-    let Some(AgentAction::CallTool { tool, args }) = action else {
-        panic!("expected fs_basic tool action, got {action:?}");
-    };
-    assert_eq!(tool, "fs_basic");
-    assert_eq!(
-        args.get("action").and_then(Value::as_str),
-        Some("write_text")
+        record.canonical_capability_ref.as_deref(),
+        Some("filesystem.write_file")
     );
 }
 

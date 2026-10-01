@@ -209,6 +209,16 @@ fn resolve_registry_capability_action(
             .as_ref()
             .map(|manifest| manifest.planner_kind)
             .unwrap_or(PlannerCapabilityKind::Skill);
+        if capability_action_conflicts(mapping, &args) {
+            blocked.push(CapabilityResolutionRecord::blocked(
+                "capability_action_conflict",
+                normalized_capability.to_string(),
+                canonical_capability,
+                &skill,
+                planner_kind,
+            ));
+            continue;
+        }
         if let Some(reason_code) = skill_resolution_block_reason(state, &registry, &skill) {
             blocked.push(CapabilityResolutionRecord::blocked(
                 reason_code,
@@ -259,6 +269,20 @@ fn resolve_registry_capability_action(
         return RegistryCapabilityResolution::Blocked(record);
     }
     RegistryCapabilityResolution::None
+}
+
+fn capability_action_conflicts(mapping: &PlannerCapabilityMapping, args: &Value) -> bool {
+    let Some(expected) = mapping.action.as_deref() else {
+        return false;
+    };
+    let Some(supplied) = args
+        .get("action")
+        .and_then(Value::as_str)
+        .map(normalize_capability_name)
+    else {
+        return false;
+    };
+    supplied != normalize_capability_name(expected)
 }
 
 fn skill_resolution_block_reason(

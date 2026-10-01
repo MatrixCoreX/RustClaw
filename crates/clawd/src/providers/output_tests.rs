@@ -44,6 +44,38 @@ fn raw_response_sanitizer_handles_json_lines() {
 }
 
 #[test]
+fn model_text_sanitizer_is_independent_of_provider_alias() {
+    let raw = "<think>private reasoning</think>visible answer";
+
+    for provider in ["vendor-custom", "openai", "anthropic", "minimax"] {
+        let (clean, sanitized) = maybe_sanitize_llm_text_output(provider, raw);
+        assert_eq!(clean, "visible answer");
+        assert!(
+            sanitized,
+            "provider alias {provider} must not bypass cleanup"
+        );
+    }
+}
+
+#[test]
+fn model_text_sanitizer_preserves_plain_visible_text() {
+    let (clean, sanitized) =
+        maybe_sanitize_llm_text_output("vendor-custom", "plain visible answer");
+
+    assert_eq!(clean, "plain visible answer");
+    assert!(!sanitized);
+}
+
+#[test]
+fn non_minimax_model_text_keeps_visible_markdown_fences() {
+    let raw = "```json\n{\"visible\":true}\n```";
+    let (clean, sanitized) = maybe_sanitize_llm_text_output("vendor-custom", raw);
+
+    assert_eq!(clean, raw);
+    assert!(!sanitized);
+}
+
+#[test]
 fn model_io_rotation_does_not_drop_concurrent_appends() {
     let root = std::env::temp_dir().join(format!(
         "agent-runtime-model-io-{}-{}",

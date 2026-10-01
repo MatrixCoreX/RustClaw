@@ -86,6 +86,56 @@ fn planner_machine_contract_accepts_resolvable_capability() {
     assert!(plan_actions_follow_machine_contract(&state, &actions));
 }
 
+#[test]
+fn planner_normalizes_registry_skill_and_action_to_leaf_capability() {
+    let state = state_with_workspace_registry();
+    let cases = [
+        ("git_basic", "current_branch", "git.current_branch"),
+        (
+            "package_manager",
+            "detect_manager",
+            "package.detect_manager",
+        ),
+        ("task_control", "list", "task_control.list"),
+        ("service_control", "status", "service_control"),
+    ];
+
+    for (skill, requested_action, expected_capability) in cases {
+        let step = json!({
+            "type": "call_capability",
+            "capability": skill,
+            "args": {"action": requested_action}
+        });
+        let parsed = parse_plan_action_step(&step, &state).expect("action must parse");
+        let AgentAction::CallCapability { capability, args } = parsed else {
+            panic!("expected capability action");
+        };
+        assert_eq!(capability, expected_capability);
+        assert!(args.get("action").is_none());
+    }
+}
+
+#[test]
+fn planner_does_not_guess_when_skill_action_mapping_is_ambiguous() {
+    let state = state_with_workspace_registry();
+    let step = json!({
+        "type": "call_capability",
+        "capability": "git.current_branch",
+        "args": {"action": "status"}
+    });
+
+    let parsed = parse_plan_action_step(&step, &state).expect("action must parse");
+    let AgentAction::CallCapability { capability, args } = parsed else {
+        panic!("expected capability action");
+    };
+    assert_eq!(capability, "git.current_branch");
+    assert_eq!(args["action"], "status");
+    assert!(!plan_actions_follow_machine_contract(
+        &state,
+        &[AgentAction::CallCapability { capability, args }]
+    ));
+}
+
 #[tokio::test]
 async fn invalid_optional_output_contract_does_not_discard_valid_steps() {
     let state = state_with_workspace_registry();
