@@ -9,6 +9,7 @@
 - **Behavior**: Read-only first; high-risk (stop/restart) blocked for ambiguous targets; auto-verify after start/restart/reload; auto logs on failure.
 - **Status questions**: Runtime status must come from `status` / `verify` (or another real runtime check), not from binary-file existence.
 - For runtime daemon status, use `target: "clawd"` and `manager_type: "agent_runtime"` when checking the running agent API service. Do not replace that with a generic service/unit name unless the user explicitly asks for host service-manager state.
+- Runtime status observations execute with host-process visibility and local API access so the result reflects the host daemon instead of the isolated skill namespace. Status remains read-only and has no workspace-write, external-publish, provider-credential, package-install, or privilege-escalation grant.
 - **Security**: Target validation; no arbitrary shell; agent-service allowlist for the HTTP path; safe unit names for systemd/service/brew services/launchd.
 
 ## Actions

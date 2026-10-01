@@ -9,6 +9,7 @@
 - `system_health.os_family` explicitly distinguishes `linux` and `macos` so downstream logic can branch cleanly.
 - It is read-only and should not perform mutating operations.
 - For agent-runtime or `clawd` self-checks, prefer this capability as the first observation. It exposes `clawd_process_count` and `clawd_health_port_open` without requiring planners to infer daemon state from generic HTTP or process text.
+- The host grants this read-only action host-process visibility and local network access so process and loopback-port evidence describes the host runtime rather than an isolated skill namespace. The action still has no workspace-write, external-publish, credential, package-install, or privilege-escalation grant.
 - If an HTTP endpoint observation is also requested, the agent API health endpoint is `/v1/health` and may require `X-Agent-Key`; a plain `/health` response is not sufficient daemon health evidence by itself.
 - Combine this with `task_control.list` only when the user also asks for task queue or task history status.
 - Process/port probes return `null` when inaccessible, including sandbox denial;

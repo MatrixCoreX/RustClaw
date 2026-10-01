@@ -1529,18 +1529,18 @@ output_kind = "text"
 description = "Run baseline host and agent runtime health diagnostics with runtime-owned overall_status, clawd_visible, and db_available probes; prefer this before narrower inspection."
 description_zh = "执行宿主与 Agent 运行时的基础健康检查，汇总服务可见性、数据库可用性和整体状态。"
 semantic_tags = ["service_status", "runtime_health", "system_health", "agent_runtime", "agent_self_check", "clawd_health", "database_availability", "local_runtime_health"]
+capabilities = ["net", "exec"]
 preferred_over_run_cmd = true
 risk_level = "low"
 auto_invocable = true
-side_effect = false
 retryable = true
 supported_os = ["linux", "macos"]
 optional_bins = ["pgrep", "ps", "uname", "df", "brew", "sysctl", "vm_stat"]
 platform_notes = ["Linux reads /proc for uptime/load/memory; macOS uses sysctl/vm_stat where available."]
 planner_capability_aliases = { "system.health_check" = "health_check" }
 planner_capabilities = [
-  { name = "health_check", action = "check", description = "Return runtime-owned overall_status, clawd_visible, db_available, process/port diagnostics, and host health fields.", semantic_tags = ["runtime_health", "database_availability", "clawd_visibility"], effect = "observe", optional = ["log_dir"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
-  { name = "system.health_check", action = "check", description = "Return runtime-owned overall_status, clawd_visible, db_available, process/port diagnostics, and host health fields.", semantic_tags = ["runtime_health", "database_availability", "clawd_visibility"], effect = "observe", optional = ["log_dir"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "health_check", action = "check", description = "Return runtime-owned overall_status, clawd_visible, db_available, process/port diagnostics, and host health fields.", semantic_tags = ["runtime_health", "database_availability", "clawd_visibility"], effect = "observe", optional = ["log_dir"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "host_process", network_access = true, filesystem_write = false, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false },
+  { name = "system.health_check", action = "check", description = "Return runtime-owned overall_status, clawd_visible, db_available, process/port diagnostics, and host health fields.", semantic_tags = ["runtime_health", "database_availability", "clawd_visibility"], effect = "observe", optional = ["log_dir"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "host_process", network_access = true, filesystem_write = false, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false },
 ]
 input_schema = { type = "object", properties = { action = { type = "string", enum = ["check"] }, service = { type = "string" }, target = { type = "string" }, log_dir = { type = "string" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
@@ -1584,6 +1584,7 @@ argument_aliases = { target = ["unit", "name"], manager_type = ["manager"] }
 description = "Check, verify, diagnose, and control the agent runtime, systemd/service, Homebrew services, and launchd services with structured status evidence."
 description_zh = "检查、验证、诊断和控制 Agent 运行时及 systemd、Homebrew、launchd 服务。"
 semantic_tags = ["service_status", "service_logs", "service_start_stop", "runtime_health", "agent_service_status", "clawd_status", "agent_runtime_health"]
+capabilities = ["net", "exec"]
 preferred_over_run_cmd = true
 validation_actions = ["status", "verify", "logs"]
 timeout_seconds = 30
@@ -1594,9 +1595,9 @@ optional_bins = ["systemctl", "service", "journalctl", "brew", "launchctl", "log
 platform_notes = ["Linux supports systemd/service managers; macOS prefers Homebrew services and limited launchd inspection/lifecycle guidance."]
 planner_capability_aliases = { "service_control.status" = "service_control", "service.status" = "service_control", "service_control.start" = "service.start", "service_control.stop" = "service.stop", "service_control.restart" = "service.restart" }
 planner_capabilities = [
-  { name = "service_control", action = "status", effect = "observe", required = ["target"], optional = ["service", "manager_type"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
-  { name = "service_control.status", action = "status", effect = "observe", required = ["target"], optional = ["service", "manager_type"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
-  { name = "service.status", action = "status", effect = "observe", required = ["target"], optional = ["service", "manager_type"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "service_control", action = "status", effect = "observe", required = ["target"], optional = ["service", "manager_type"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "host_process", network_access = true, filesystem_write = false, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false },
+  { name = "service_control.status", action = "status", effect = "observe", required = ["target"], optional = ["service", "manager_type"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "host_process", network_access = true, filesystem_write = false, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false },
+  { name = "service.status", action = "status", effect = "observe", required = ["target"], optional = ["service", "manager_type"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "host_process", network_access = true, filesystem_write = false, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false },
   { name = "service.verify", action = "verify", effect = "validate", required = ["target"], optional = ["service", "manager_type"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "service.logs", action = "logs", effect = "observe", required = ["target"], optional = ["service", "manager_type", "lines"], risk_level = "medium", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "service.start", action = "start", effect = "mutate", required = ["target"], optional = ["service", "manager_type"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short", final_answer_shape = "lifecycle_result" },

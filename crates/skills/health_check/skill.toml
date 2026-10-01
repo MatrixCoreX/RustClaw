@@ -57,10 +57,10 @@ capabilities = [{ "name" = "health_check", "effect" = "observe", "execution_mode
 
 [capability_request.permissions]
 llm_gateway = false
-network = false
+network = true
 filesystem_read = false
 filesystem_write = false
-subprocess = false
+subprocess = true
 package_install = false
 privilege_escalation = false
 external_publish = false
