@@ -436,6 +436,38 @@ fn config_guard_ownership_leads_the_compact_registry_description() {
 }
 
 #[test]
+fn typed_observation_capabilities_advertise_complete_machine_evidence() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml");
+    let registry = SkillsRegistry::load_from_path(&path).expect("load workspace registry");
+
+    let description = |skill: &str, capability: &str| {
+        registry
+            .planner_capabilities(skill)
+            .iter()
+            .find(|mapping| mapping.name == capability)
+            .and_then(|mapping| mapping.description.as_deref())
+            .unwrap_or_else(|| panic!("missing {capability} description"))
+    };
+
+    let file_read = description("fs_basic", "filesystem.read_text_range");
+    for field in ["line_count", "size_bytes", "sha256", "field_selector=title"] {
+        assert!(file_read.contains(field), "file read omits {field}");
+    }
+
+    let system_info = description("system_basic", "system.info");
+    assert!(system_info.contains("health_check"));
+
+    let health = description("health_check", "health_check");
+    for field in [
+        "cpu_count",
+        "memory_available_bytes",
+        "disk_root_available_bytes",
+    ] {
+        assert!(health.contains(field), "health check omits {field}");
+    }
+}
+
+#[test]
 fn every_bundled_skill_has_simplified_chinese_display_copy() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml");
     let registry = SkillsRegistry::load_from_path(&path).expect("load bundled skill registry");

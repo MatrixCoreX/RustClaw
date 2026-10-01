@@ -11,6 +11,7 @@
 - `health_check` runs baseline diagnostics and status checks for environment/runtime health.
 - It returns agent-runtime fields, runtime-owned `overall_status` / `clawd_visible` / `db_available` probes, and a structured `system_health` host block; the skill never receives the main database path.
 - `system_health.os_family` explicitly distinguishes `linux` and `macos` so downstream logic can branch cleanly.
+- Use this typed read-only capability for host resource snapshots. Its `system_health` object exposes `cpu_count`, `memory_available_bytes`, and `disk_root_available_bytes`; `system.info` intentionally does not provide those capacity fields.
 - It is read-only and should not perform mutating operations.
 - For agent-runtime or `clawd` self-checks, prefer this capability as the first observation. It exposes `clawd_process_count` and `clawd_health_port_open` without requiring planners to infer daemon state from generic HTTP or process text.
 - The host grants this read-only action host-process visibility and local network access so process and loopback-port evidence describes the host runtime rather than an isolated skill namespace. The action still has no workspace-write, external-publish, credential, package-install, or privilege-escalation grant.

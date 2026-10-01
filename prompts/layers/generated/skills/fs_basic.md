@@ -6,7 +6,7 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 - Inspect explicit path facts.
 - List directories with filters and caps.
 - Count directory entries with filters.
-- Read bounded text ranges from explicit files.
+- Read bounded text ranges from explicit files. Each read also reports complete-snapshot `total_lines`/`line_count`, `size_bytes`, `sha256`, and `line_endings`; use `field_selector=title` for a document heading instead of invoking shell metadata commands.
 - Resume bounded byte ranges from runtime-owned output artifacts.
 - Find filesystem entries by name or extension.
 - Search text content under a bounded root.
