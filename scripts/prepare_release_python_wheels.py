@@ -19,6 +19,59 @@ import zipfile
 from skill_store_packages import arch_for_target, platform_for_target, runner_specs, supports_platform
 
 ROOT = Path(__file__).resolve().parents[1]
+PYPI_INDEX = "https://pypi.org/simple"
+PYTORCH_CPU_INDEX = "https://download.pytorch.org/whl/cpu"
+PYTORCH_CPU_PACKAGES = {"torch", "torchaudio"}
+
+
+def _logical_lock_blocks(contents: str) -> list[list[str]]:
+    blocks: list[list[str]] = []
+    block: list[str] = []
+    for line in contents.splitlines():
+        block.append(line)
+        if line.rstrip().endswith("\\"):
+            continue
+        blocks.append(block)
+        block = []
+    if block:
+        raise ValueError("release_dependency_lock_truncated")
+    return blocks
+
+
+def index_scoped_download_locks(lockfile: Path, directory: Path) -> list[Path]:
+    """Keep PyTorch's supplemental index from shadowing ordinary PyPI wheels."""
+    contents = lockfile.read_text()
+    if f"--extra-index-url {PYTORCH_CPU_INDEX}" not in contents:
+        return [lockfile]
+
+    scoped: dict[str, list[str]] = {
+        "pypi": [f"--index-url {PYPI_INDEX}"],
+        "pytorch-cpu": [f"--index-url {PYTORCH_CPU_INDEX}"],
+    }
+    requirement_counts = {name: 0 for name in scoped}
+    for block in _logical_lock_blocks(contents):
+        first = block[0].strip()
+        if not first or first.startswith("#") or first.startswith("--index-url") or first.startswith("--extra-index-url"):
+            continue
+        match = re.match(r"^([A-Za-z0-9_.-]+)==([^ ;\\]+)", first)
+        if not match:
+            raise ValueError(f"release_dependency_lock_entry_invalid: {first}")
+        normalized_name = re.sub(r"[-_.]+", "-", match[1]).lower()
+        version = match[2].lower()
+        scope = "pytorch-cpu" if normalized_name in PYTORCH_CPU_PACKAGES and "+cpu" in version else "pypi"
+        scoped[scope].extend(block)
+        requirement_counts[scope] += 1
+
+    if requirement_counts["pytorch-cpu"] == 0:
+        raise ValueError("release_pytorch_cpu_lock_entries_missing")
+    paths: list[Path] = []
+    for scope, lines in scoped.items():
+        if requirement_counts[scope] == 0:
+            continue
+        path = directory / f"requirements-{scope}.lock"
+        path.write_text("\n".join(lines) + "\n")
+        paths.append(path)
+    return paths
 
 
 def wheel_identity(path: Path, *, require_pure: bool = False) -> tuple[str, str]:
@@ -97,13 +150,19 @@ def prepare_wheels(lockfile: Path, target: str) -> None:
     destination.mkdir(exist_ok=True)
     prepared_names: set[str] = set()
     with tempfile.TemporaryDirectory(prefix="release-wheel-download-") as directory:
-        downloads = Path(directory)
-        command = [sys.executable, "-m", "pip", "download", "--require-hashes", "--no-deps",
-                   "--prefer-binary", "--python-version", python_version, "--implementation", "cp",
-                   "--abi", "cp" + python_version.replace(".", ""), "--dest", str(downloads), "-r", str(lockfile)]
-        for value in platforms:
-            command.extend(["--platform", value])
-        subprocess.run(command, check=True)
+        staging = Path(directory)
+        downloads = staging / "downloads"
+        lock_staging = staging / "locks"
+        downloads.mkdir()
+        lock_staging.mkdir()
+        for scoped_lock in index_scoped_download_locks(lockfile, lock_staging):
+            command = [sys.executable, "-m", "pip", "download", "--require-hashes", "--no-deps",
+                       "--prefer-binary", "--python-version", python_version, "--implementation", "cp",
+                       "--abi", "cp" + python_version.replace(".", ""), "--dest", str(downloads),
+                       "-r", str(scoped_lock)]
+            for value in platforms:
+                command.extend(["--platform", value])
+            subprocess.run(command, check=True)
         for dependency in sorted(downloads.iterdir()):
             if dependency.suffix == ".whl":
                 wheel_identity(dependency)

@@ -8,7 +8,15 @@ from unittest.mock import patch
 import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from prepare_release_python_wheels import add_wheel_hashes, import_wheels, verify_wheels, wheel_identity
+from prepare_release_python_wheels import (
+    PYPI_INDEX,
+    PYTORCH_CPU_INDEX,
+    add_wheel_hashes,
+    import_wheels,
+    index_scoped_download_locks,
+    verify_wheels,
+    wheel_identity,
+)
 
 
 class ReleaseWheelTests(unittest.TestCase):
@@ -64,6 +72,41 @@ class ReleaseWheelTests(unittest.TestCase):
                            "--only-binary=:all:", "--require-hashes", "--find-links"):
                 self.assertIn(option, command)
             self.assertEqual(lock.read_text(), "fixture-pkg==1.0 --hash=sha256:original\n")
+
+    def test_pytorch_cpu_index_cannot_shadow_pypi_dependencies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            lock = root / "requirements.lock"
+            lock.write_text(
+                f"--index-url {PYPI_INDEX}\n"
+                f"--extra-index-url {PYTORCH_CPU_INDEX}\n"
+                "markupsafe==3.0.3 \\\n"
+                "    --hash=sha256:pypi-only\n"
+                "torch==2.11.0+cpu ; sys_platform != 'darwin' \\\n"
+                "    --hash=sha256:pytorch-only\n"
+                "torchaudio==2.11.0+cpu ; sys_platform != 'darwin' \\\n"
+                "    --hash=sha256:pytorch-audio-only\n"
+            )
+            paths = index_scoped_download_locks(lock, root)
+            self.assertEqual([path.name for path in paths], ["requirements-pypi.lock", "requirements-pytorch-cpu.lock"])
+            pypi = paths[0].read_text()
+            pytorch = paths[1].read_text()
+            self.assertIn(f"--index-url {PYPI_INDEX}", pypi)
+            self.assertIn("markupsafe==3.0.3", pypi)
+            self.assertNotIn("torch==2.11.0+cpu", pypi)
+            self.assertNotIn(PYTORCH_CPU_INDEX, pypi)
+            self.assertIn(f"--index-url {PYTORCH_CPU_INDEX}", pytorch)
+            self.assertIn("torch==2.11.0+cpu", pytorch)
+            self.assertIn("torchaudio==2.11.0+cpu", pytorch)
+            self.assertNotIn("markupsafe==3.0.3", pytorch)
+            self.assertNotIn(PYPI_INDEX, pytorch)
+
+    def test_lock_without_supplemental_pytorch_index_is_not_rewritten(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            lock = root / "requirements.lock"
+            lock.write_text(f"--index-url {PYPI_INDEX}\nfixture==1.0 --hash=sha256:locked\n")
+            self.assertEqual(index_scoped_download_locks(lock, root), [lock])
 
     def test_incomplete_wheel_and_truncated_lock_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
