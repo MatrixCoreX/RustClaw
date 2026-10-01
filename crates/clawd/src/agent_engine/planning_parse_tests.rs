@@ -116,6 +116,55 @@ fn planner_normalizes_registry_skill_and_action_to_leaf_capability() {
 }
 
 #[test]
+fn planner_normalizes_registry_skill_dot_action_to_leaf_capability() {
+    let state = state_with_workspace_registry();
+    let cases = [
+        ("git_basic.current_branch", "git.current_branch"),
+        ("git_basic.changed_files", "git.changed_files"),
+        ("git_basic.log", "git.log"),
+        ("package_manager.detect_manager", "package.detect_manager"),
+    ];
+
+    for (requested_capability, expected_capability) in cases {
+        let step = json!({
+            "type": "call_capability",
+            "capability": requested_capability,
+            "args": {}
+        });
+        let parsed = parse_plan_action_step(&step, &state).expect("action must parse");
+        let AgentAction::CallCapability { capability, args } = parsed else {
+            panic!("expected capability action");
+        };
+        assert_eq!(capability, expected_capability);
+        assert!(args.as_object().is_some_and(|args| args.is_empty()));
+        assert!(plan_actions_follow_machine_contract(
+            &state,
+            &[AgentAction::CallCapability { capability, args }]
+        ));
+    }
+}
+
+#[test]
+fn planner_does_not_guess_undeclared_skill_dot_action() {
+    let state = state_with_workspace_registry();
+    let step = json!({
+        "type": "call_capability",
+        "capability": "git_basic.invent_history",
+        "args": {}
+    });
+
+    let parsed = parse_plan_action_step(&step, &state).expect("action must parse");
+    let AgentAction::CallCapability { capability, args } = parsed else {
+        panic!("expected capability action");
+    };
+    assert_eq!(capability, "git_basic.invent_history");
+    assert!(!plan_actions_follow_machine_contract(
+        &state,
+        &[AgentAction::CallCapability { capability, args }]
+    ));
+}
+
+#[test]
 fn planner_does_not_guess_when_skill_action_mapping_is_ambiguous() {
     let state = state_with_workspace_registry();
     let step = json!({

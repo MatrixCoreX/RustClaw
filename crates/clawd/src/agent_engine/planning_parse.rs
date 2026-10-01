@@ -19,20 +19,34 @@ fn normalize_skill_action_capability(state: &AppState, action: AgentAction) -> A
     else {
         return action;
     };
-    let Some(requested_action) = args
+    let requested_action = args
         .get("action")
         .and_then(Value::as_str)
         .map(normalize_machine_token)
-        .filter(|value| !value.is_empty())
-    else {
-        return AgentAction::CallCapability { capability, args };
-    };
+        .filter(|value| !value.is_empty());
     let Some(registry) = state.get_skills_registry() else {
         return AgentAction::CallCapability { capability, args };
     };
-    let Some(skill) = registry.resolve_canonical(&capability) else {
-        return AgentAction::CallCapability { capability, args };
-    };
+
+    let (skill, requested_action, action_from_args) =
+        if let Some(requested_action) = requested_action {
+            let Some(skill) = registry.resolve_canonical(&capability) else {
+                return AgentAction::CallCapability { capability, args };
+            };
+            (skill, requested_action, true)
+        } else {
+            let Some((skill_ref, action_ref)) = capability.rsplit_once('.') else {
+                return AgentAction::CallCapability { capability, args };
+            };
+            let Some(skill) = registry.resolve_canonical(skill_ref) else {
+                return AgentAction::CallCapability { capability, args };
+            };
+            let requested_action = normalize_machine_token(action_ref);
+            if requested_action.is_empty() {
+                return AgentAction::CallCapability { capability, args };
+            }
+            (skill, requested_action, false)
+        };
     let exposed = registry.planner_exposed_capabilities(skill);
     let normalized_capability = normalize_machine_token(&capability);
     let current = exposed
@@ -68,7 +82,9 @@ fn normalize_skill_action_capability(state: &AppState, action: AgentAction) -> A
     };
 
     let selected_name = selected.name.clone();
-    args.as_object_mut().map(|object| object.remove("action"));
+    if action_from_args {
+        args.as_object_mut().map(|object| object.remove("action"));
+    }
     info!(
         "plan_result_skill_action_capability_normalized skill={} requested_capability={} requested_action={} canonical_capability={}",
         skill, capability, requested_action, selected_name
