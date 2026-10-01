@@ -47,3 +47,11 @@ fn merge_preserves_each_isolated_read_delta_in_order() {
     );
     assert_eq!(target.successful_action_fingerprints.len(), 2);
 }
+
+#[test]
+fn read_batch_width_respects_runtime_skill_capacity() {
+    assert_eq!(bounded_parallel_read_width(4, 1), 1);
+    assert_eq!(bounded_parallel_read_width(4, 2), 2);
+    assert_eq!(bounded_parallel_read_width(2, 8), 2);
+    assert_eq!(bounded_parallel_read_width(3, 0), 1);
+}

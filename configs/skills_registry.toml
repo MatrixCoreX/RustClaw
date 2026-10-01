@@ -824,7 +824,7 @@ output_schema = { type = "object", required = ["text"], properties = { text = { 
 
 [[skills]]
 name = "git_basic"
-resource_request = { class = "disk_io", cpu_cores = 1, memory_mb = 256, disk_io_weight = 30 }
+resource_request = { class = "disk_io", cpu_cores = 1, memory_mb = 128, disk_io_weight = 30 }
 enabled = true
 fixed_on = true
 planner_eager_load = false
@@ -866,12 +866,12 @@ planner_capabilities = [
   { name = "git_basic", action = "status", effect = "observe", optional = ["repo", "cursor", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "git.status", action = "status", effect = "observe", optional = ["repo", "cursor", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "git.repository_state", action = "status", effect = "observe", optional = ["repo", "cursor", "limit"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
-  { name = "git.current_branch", action = "current_branch", effect = "observe", optional = ["repo"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "git.current_branch", action = "current_branch", effect = "observe", optional = ["repo"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", resource_request = { class = "disk_io", cpu_cores = 1, memory_mb = 64, disk_io_weight = 10 } },
   { name = "git.branch", action = "branch", effect = "observe", optional = ["repo", "cursor", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "git.remote", action = "remote", effect = "observe", optional = ["repo", "cursor", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "git.ahead_behind", action = "ahead_behind", effect = "observe", required = ["local_branch", "remote", "remote_branch"], optional = ["repo"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = true, package_install = false, privilege_escalation = false },
-  { name = "git.changed_files", action = "changed_files", effect = "observe", optional = ["path", "repo", "cursor", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
-  { name = "git.log", action = "log", effect = "observe", optional = ["repo", "cursor", "n", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "git.changed_files", action = "changed_files", effect = "observe", optional = ["path", "repo", "cursor", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", resource_request = { class = "disk_io", cpu_cores = 1, memory_mb = 64, disk_io_weight = 10 } },
+  { name = "git.log", action = "log", effect = "observe", optional = ["repo", "cursor", "n", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", resource_request = { class = "disk_io", cpu_cores = 1, memory_mb = 64, disk_io_weight = 10 } },
   { name = "git.diff", action = "diff", effect = "observe", optional = ["path", "repo"], risk_level = "medium", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "git.diff_cached", action = "diff_cached", effect = "observe", optional = ["path", "repo"], risk_level = "medium", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "git.rev_parse", action = "rev_parse", effect = "observe", optional = ["repo", "ref"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
@@ -1069,7 +1069,7 @@ platform_notes = ["macOS prefers Homebrew; Linux prefers native distro package m
 semantic_tags = ["package.detect_manager"]
 preferred_over_run_cmd = true
 planner_capabilities = [
-  { name = "package.detect_manager", action = "detect", effect = "observe", optional = ["manager", "path", "root", "project_path", "workspace"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "package.detect_manager", action = "detect", effect = "observe", optional = ["manager", "path", "root", "project_path", "workspace"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", resource_request = { class = "general", cpu_cores = 1, memory_mb = 64 } },
   { name = "package.install", action = "install", effect = "mutate", required = ["package|packages|module|modules"], optional = ["manager", "use_sudo", "dry_run"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", subprocess = true, package_install = true, privilege_escalation = true },
   { name = "package.smart_install_preview", action = "smart_install_preview", effect = "observe", required = ["package|packages|module|modules"], optional = ["manager", "use_sudo"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false, subprocess = false, package_install = false, privilege_escalation = false },
   { name = "package.smart_install", action = "smart_install", effect = "mutate", required = ["package|packages|module|modules"], optional = ["manager", "use_sudo", "dry_run"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", subprocess = true, package_install = true, privilege_escalation = true },

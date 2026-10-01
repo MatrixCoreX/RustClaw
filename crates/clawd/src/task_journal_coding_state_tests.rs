@@ -114,6 +114,47 @@ fn step_result_records_failed_verification_transition_observation() {
 }
 
 #[test]
+fn failed_git_observation_does_not_enter_coding_repair() {
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-git-observation-fail",
+        "ask",
+        "inspect repository state",
+    );
+    journal.push_step_result(&step_result(
+        "step_git",
+        "git_basic",
+        crate::executor::StepExecutionStatus::Error,
+        None,
+        Some(
+            json!({
+                "error_code": "not_git_repository",
+                "extra": {
+                    "schema_version": 1,
+                    "source_skill": "git_basic",
+                    "status": "error",
+                    "error_code": "not_git_repository",
+                    "message_key": "skill.git_basic.not_git_repository",
+                    "retryable": false
+                }
+            })
+            .to_string(),
+        ),
+    ));
+
+    let transition = observation(&journal, "coding_state_transition");
+    assert_eq!(transition["phase"], "inspect");
+    assert_eq!(transition["next_phase_hint"], "continue");
+    assert!(journal.task_observations.iter().all(|value| {
+        value.get("kind").and_then(serde_json::Value::as_str) != Some("coding_checkpoint")
+    }));
+
+    let workflow = journal.to_summary_json()["coding_workflow"].clone();
+    assert_eq!(workflow["current_phase_hint"], "idle");
+    assert_eq!(workflow["verification_status"], "not_applicable");
+    assert_eq!(workflow["validation_gate"]["requires_repair"], false);
+}
+
+#[test]
 fn python_unittest_pipeline_records_verification_transition() {
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-python-unittest",

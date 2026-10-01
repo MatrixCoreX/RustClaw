@@ -179,41 +179,49 @@ pub(super) async fn dispatch_independent_read_batch(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Result<ParallelReadBatchResult, String> {
     let baseline = loop_state.clone();
-    let futures = (0..batch_len).map(|idx| {
-        let mut child_state = baseline.clone();
-        let action = actions[idx].clone();
-        let fingerprint = fingerprints[idx].clone();
-        async move {
-            let mut executed_actions = 0;
-            let mut ended_with_user_visible_output = false;
-            let decision = dispatch_round_action(
-                state,
-                task,
-                goal,
-                user_text,
-                actions,
-                round_steps,
-                &mut child_state,
-                policy,
-                idx,
-                &action,
-                &fingerprint,
-                baseline.total_steps_executed + idx + 1,
-                idx + 1,
-                &mut executed_actions,
-                &mut ended_with_user_visible_output,
-                agent_run_context,
-            )
-            .await;
-            ChildReadResult {
-                state: child_state,
-                executed_actions,
-                ended_with_user_visible_output,
-                decision,
+    let parallel_width = bounded_parallel_read_width(
+        batch_len,
+        state.skill_rt.skill_semaphore.available_permits(),
+    );
+    let mut children = Vec::with_capacity(batch_len);
+    for chunk_start in (0..batch_len).step_by(parallel_width) {
+        let chunk_end = (chunk_start + parallel_width).min(batch_len);
+        let futures = (chunk_start..chunk_end).map(|idx| {
+            let mut child_state = baseline.clone();
+            let action = actions[idx].clone();
+            let fingerprint = fingerprints[idx].clone();
+            async move {
+                let mut executed_actions = 0;
+                let mut ended_with_user_visible_output = false;
+                let decision = dispatch_round_action(
+                    state,
+                    task,
+                    goal,
+                    user_text,
+                    actions,
+                    round_steps,
+                    &mut child_state,
+                    policy,
+                    idx,
+                    &action,
+                    &fingerprint,
+                    baseline.total_steps_executed + idx + 1,
+                    idx + 1,
+                    &mut executed_actions,
+                    &mut ended_with_user_visible_output,
+                    agent_run_context,
+                )
+                .await;
+                ChildReadResult {
+                    state: child_state,
+                    executed_actions,
+                    ended_with_user_visible_output,
+                    decision,
+                }
             }
-        }
-    });
-    let children = join_all(futures).await;
+        });
+        children.extend(join_all(futures).await);
+    }
     let mut executed_actions = 0;
     let mut ended_with_user_visible_output = false;
     let mut stop_signal = "independent_read_batch_observed".to_string();
@@ -238,6 +246,10 @@ pub(super) async fn dispatch_independent_read_batch(
         ended_with_user_visible_output,
         stop_signal,
     })
+}
+
+fn bounded_parallel_read_width(batch_len: usize, available_skill_permits: usize) -> usize {
+    batch_len.min(available_skill_permits.max(1)).max(1)
 }
 
 #[cfg(test)]

@@ -453,7 +453,20 @@ fn coding_phase(
     signals: &CodingTransitionSignals,
 ) -> &'static str {
     if step_result.status == crate::executor::StepExecutionStatus::Error {
-        return "repair";
+        return if signals.verification_command.is_some()
+            || !signals.changed_files.is_empty()
+            || !signals.diff_refs.is_empty()
+            || !signals.completed_side_effect_refs.is_empty()
+            || signals.checkpoint_kind.is_some()
+            || signals.checkpoint_ref.is_some()
+            || (step_result.skill == "run_cmd" && signals.command.is_some())
+        {
+            "repair"
+        } else if step_result.skill == "git_basic" || !signals.files_read.is_empty() {
+            "inspect"
+        } else {
+            "plan"
+        };
     }
     if signals.checkpoint_kind.is_some() || signals.checkpoint_ref.is_some() {
         "checkpoint"
@@ -476,7 +489,7 @@ fn coding_next_phase_hint(
     phase: &str,
     signals: &CodingTransitionSignals,
 ) -> &'static str {
-    if status == "error" {
+    if status == "error" && phase == "repair" {
         "repair"
     } else if phase == "edit" && signals.verification_command.is_none() {
         "verify"

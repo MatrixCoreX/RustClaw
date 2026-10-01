@@ -154,7 +154,12 @@ fn collect_transition(map: &Map<String, Value>, signals: &mut CodingWorkflowSign
     if map.get("phase").and_then(Value::as_str) == Some("repair") {
         collect_step_ref(map, &mut signals.repair_step_refs);
     }
-    if map.get("status").and_then(Value::as_str) == Some("error") {
+    if map.get("status").and_then(Value::as_str) == Some("error")
+        && matches!(
+            map.get("phase").and_then(Value::as_str),
+            Some("repair" | "verify")
+        )
+    {
         signals.failed_observed = true;
         collect_string_field(map.get("failure_kind"), &mut signals.failure_kinds);
     }
