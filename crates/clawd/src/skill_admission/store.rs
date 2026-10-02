@@ -342,6 +342,7 @@ impl SkillAdmissionService {
         self.commit_mutation(mutation)
     }
 
+    #[cfg(test)]
     pub(crate) fn admit_bundled_batch(
         &self,
         mutations: Vec<AdmissionMutation>,
@@ -359,6 +360,26 @@ impl SkillAdmissionService {
             return self.snapshot();
         }
         self.commit_mutations(mutations, false, &BTreeSet::new())
+    }
+
+    pub(crate) fn admit_bundled_batch_with_resource_skips(
+        &self,
+        mutations: Vec<AdmissionMutation>,
+        resource_skips: &BTreeSet<String>,
+    ) -> Result<OverlaySnapshot> {
+        if mutations
+            .iter()
+            .any(|mutation| mutation.metadata.source != SkillAdmissionSource::BundledBase)
+        {
+            return Err(error(
+                "skill_admission_source_invalid",
+                "bundled batch admission requires bundled_base sources",
+            ));
+        }
+        if mutations.is_empty() && resource_skips.is_empty() {
+            return self.snapshot();
+        }
+        self.commit_mutations(mutations, false, resource_skips)
     }
 
     pub(crate) fn set_state(
@@ -535,7 +556,7 @@ impl SkillAdmissionService {
         &self,
         mutations: Vec<AdmissionMutation>,
         require_complete_current_generation: bool,
-        retired_release_owned_bundled: &BTreeSet<String>,
+        removed_bundled_skills: &BTreeSet<String>,
     ) -> Result<OverlaySnapshot> {
         fs::create_dir_all(&self.root).map_err(io_error("skill_admission_root_create_failed"))?;
         secure_directory(&self.root)?;
@@ -550,7 +571,7 @@ impl SkillAdmissionService {
         let result = self.commit_mutations_locked(
             mutations,
             require_complete_current_generation,
-            retired_release_owned_bundled,
+            removed_bundled_skills,
         );
         let _ = FileExt::unlock(&lock);
         result
@@ -560,9 +581,9 @@ impl SkillAdmissionService {
         &self,
         mutations: Vec<AdmissionMutation>,
         require_complete_current_generation: bool,
-        retired_release_owned_bundled: &BTreeSet<String>,
+        removed_bundled_skills: &BTreeSet<String>,
     ) -> Result<OverlaySnapshot> {
-        if mutations.is_empty() && retired_release_owned_bundled.is_empty() {
+        if mutations.is_empty() && removed_bundled_skills.is_empty() {
             return Err(error(
                 "skill_admission_repair_empty",
                 "skill_admission_repair_empty",
@@ -571,6 +592,27 @@ impl SkillAdmissionService {
         let current = self.read_current_generation()?;
         let base = SkillsRegistry::load_from_path(&self.base_registry_path)
             .map_err(|detail| error("skill_registry_invalid", detail))?;
+        if !require_complete_current_generation && !removed_bundled_skills.is_empty() {
+            let resource_skip_scope_is_valid = removed_bundled_skills.iter().all(|name| {
+                skill_sdk::validate_safe_name(name, "resource_skip.skill_name").is_ok()
+                    && base
+                        .get(name)
+                        .is_some_and(|entry| entry.install_mode.as_deref() == Some("on_demand"))
+            });
+            let scopes_are_disjoint = mutations
+                .iter()
+                .all(|mutation| !removed_bundled_skills.contains(&mutation.metadata.name));
+            if !resource_skip_scope_is_valid || !scopes_are_disjoint {
+                return Err(error(
+                    "skill_admission_resource_skip_scope_mismatch",
+                    format!(
+                        "requested={} skipped={}",
+                        mutations.len(),
+                        removed_bundled_skills.len()
+                    ),
+                ));
+            }
+        }
         if require_complete_current_generation {
             let (_, current_record, _) = current.as_ref().ok_or_else(|| {
                 error(
@@ -591,7 +633,7 @@ impl SkillAdmissionService {
                 && requested
                     .iter()
                     .all(|(name, source)| expected.get(name) == Some(source));
-            let retired_scope_is_valid = retired_release_owned_bundled.iter().all(|name| {
+            let retired_scope_is_valid = removed_bundled_skills.iter().all(|name| {
                 expected.get(name) == Some(&SkillAdmissionSource::BundledBase)
                     && base
                         .get(name)
@@ -599,11 +641,11 @@ impl SkillAdmissionService {
             });
             let scopes_are_disjoint = requested
                 .keys()
-                .all(|name| !retired_release_owned_bundled.contains(name));
-            let complete_scope = expected.keys().all(|name| {
-                requested.contains_key(name) || retired_release_owned_bundled.contains(name)
-            }) && expected.len()
-                == requested.len() + retired_release_owned_bundled.len();
+                .all(|name| !removed_bundled_skills.contains(name));
+            let complete_scope = expected
+                .keys()
+                .all(|name| requested.contains_key(name) || removed_bundled_skills.contains(name))
+                && expected.len() == requested.len() + removed_bundled_skills.len();
             if !requested_scope_is_valid
                 || !retired_scope_is_valid
                 || !scopes_are_disjoint
@@ -615,7 +657,7 @@ impl SkillAdmissionService {
                         "expected={} requested={} retired={}",
                         expected.len(),
                         mutations.len(),
-                        retired_release_owned_bundled.len()
+                        removed_bundled_skills.len()
                     ),
                 ));
             }
@@ -697,7 +739,7 @@ impl SkillAdmissionService {
                 skills: BTreeMap::new(),
             }
         };
-        for name in retired_release_owned_bundled {
+        for name in removed_bundled_skills {
             remove_retired_skill_files(staging.path(), name)?;
             record.skills.remove(name);
         }

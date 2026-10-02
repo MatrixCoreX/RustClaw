@@ -88,6 +88,10 @@ case "$command_name" in
     [[ -f "$package_root/$skill_name/.verified" ]]
     ;;
   install-precompiled|install-local)
+    if [[ "${MOCK_SKILLCTL_RESOURCE_FAILURE:-0}" == "1" ]]; then
+      printf '%s\n' '{"error":{"code":"install_resource_insufficient","message_key":"skill_sdk.install_resource_insufficient","retryable":false},"ok":false}'
+      exit 1
+    fi
     package_root="$4"
     mkdir -p "$package_root/store_fixture"
     : > "$package_root/store_fixture/.verified"
@@ -244,6 +248,20 @@ OUTPUT="$(
 grep -Fq 'release_checksum=verified' <<< "$OUTPUT"
 grep -Fq 'release_update_status=deployed' <<< "$OUTPUT"
 grep -Fxq 'ubuntu-x86_64-newest' "$RUNTIME/.release-tag"
+
+rm -f "$RUNTIME/data/skill-packages/store_fixture/.verified"
+RESOURCE_SKIP_OUTPUT="$(
+  MOCK_SKILLCTL_RESOURCE_FAILURE=1 \
+  APP_RELEASES_JSON_FILE="$RELEASES_JSON" \
+    "$DEPLOY_SCRIPT" \
+      --root "$RUNTIME" \
+      --platform ubuntu-x86_64 \
+      --force \
+      --no-restart
+)"
+grep -Fq 'bundled_skill_install=skipped skill=store_fixture error_code=install_resource_insufficient' \
+  <<< "$RESOURCE_SKIP_OUTPUT"
+grep -Fq 'release_update_status=deployed' <<< "$RESOURCE_SKIP_OUTPUT"
 
 MOCK_SYSTEMD_BIN="$TMP_ROOT/mock-systemd-bin"
 MOCK_SYSTEMD_STATE="$TMP_ROOT/mock-systemd-active"

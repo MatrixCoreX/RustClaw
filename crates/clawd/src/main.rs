@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
@@ -530,6 +530,40 @@ fn resolve_offline_bundled_bootstrap() -> bool {
     resolve_offline_bundled_bootstrap_from(std::env::args().skip(1))
 }
 
+fn resolve_offline_bundled_resource_skips_from<I>(args: I) -> anyhow::Result<BTreeSet<String>>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut args = args.into_iter();
+    let mut skipped = BTreeSet::new();
+    while let Some(arg) = args.next() {
+        let value = if let Some(value) = arg.strip_prefix("--skip-bundled-skill=") {
+            Some(value.to_string())
+        } else if arg == "--skip-bundled-skill" {
+            Some(
+                args.next()
+                    .ok_or_else(|| anyhow::anyhow!("--skip-bundled-skill requires a skill name"))?,
+            )
+        } else {
+            None
+        };
+        let Some(value) = value else {
+            continue;
+        };
+        let value = value.trim();
+        skill_sdk::validate_safe_name(value, "skip_bundled_skill")
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        if !skipped.insert(value.to_string()) {
+            anyhow::bail!("--skip-bundled-skill cannot repeat skill={value}");
+        }
+    }
+    Ok(skipped)
+}
+
+fn resolve_offline_bundled_resource_skips() -> anyhow::Result<BTreeSet<String>> {
+    resolve_offline_bundled_resource_skips_from(std::env::args().skip(1))
+}
+
 fn resolve_offline_bundled_runtime_asset_prepare_from<I>(args: I) -> bool
 where
     I: IntoIterator<Item = String>,
@@ -628,7 +662,11 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
     info!("startup config_path={}", config_path);
     let repair_skill = resolve_offline_bundled_repair_skill()?;
     let bootstrap_bundled_skills = resolve_offline_bundled_bootstrap();
+    let bootstrap_resource_skips = resolve_offline_bundled_resource_skips()?;
     let prepare_bundled_runtime_assets = resolve_offline_bundled_runtime_asset_prepare();
+    if !bootstrap_resource_skips.is_empty() && !bootstrap_bundled_skills {
+        anyhow::bail!("--skip-bundled-skill requires --bootstrap-bundled-skills");
+    }
     let offline_mode_count = usize::from(repair_skill.is_some())
         + usize::from(bootstrap_bundled_skills)
         + usize::from(prepare_bundled_runtime_assets);
@@ -661,9 +699,12 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
         return Ok(());
     }
     if bootstrap_bundled_skills {
-        let snapshot =
-            http::ui_routes::bootstrap_bundled_skill_admissions_offline(&workspace_root, &config)
-                .map_err(anyhow::Error::msg)?;
+        let snapshot = http::ui_routes::bootstrap_bundled_skill_admissions_offline(
+            &workspace_root,
+            &config,
+            &bootstrap_resource_skips,
+        )
+        .map_err(anyhow::Error::msg)?;
         println!(
             "{}",
             json!({

@@ -246,9 +246,13 @@ PY
 download_file() {
   local url="$1"
   local output="$2"
-  python3 - "$url" "$output" <<'PY'
+  local python_error=""
+  if python_error="$(python3 - "$url" "$output" 2>&1 <<'PY'
 import os
+from pathlib import Path
 import sys
+import time
+import urllib.error
 import urllib.request
 
 url, output = sys.argv[1:]
@@ -256,16 +260,60 @@ headers = {"User-Agent": "Agent-System-release-deploy"}
 token = os.environ.get("GITHUB_TOKEN", "").strip()
 if token and url.startswith("https://api.github.com/"):
     headers["Authorization"] = f"Bearer {token}"
-request = urllib.request.Request(url, headers=headers)
-if url.startswith("https://api.github.com/") and "/releases/assets/" in url:
-    request.add_header("Accept", "application/octet-stream")
-with urllib.request.urlopen(request, timeout=300) as response, open(output, "wb") as stream:
-    while True:
-        chunk = response.read(1024 * 1024)
-        if not chunk:
-            break
-        stream.write(chunk)
+destination = Path(output)
+partial = destination.with_name(f".{destination.name}.partial")
+for attempt in range(1, 4):
+    request = urllib.request.Request(url, headers=headers)
+    if url.startswith("https://api.github.com/") and "/releases/assets/" in url:
+        request.add_header("Accept", "application/octet-stream")
+    try:
+        with urllib.request.urlopen(request, timeout=300) as response, partial.open("wb") as stream:
+            while chunk := response.read(1024 * 1024):
+                stream.write(chunk)
+        partial.replace(destination)
+        break
+    except (OSError, urllib.error.URLError):
+        partial.unlink(missing_ok=True)
+        if attempt == 3:
+            raise
+        time.sleep(min(2 ** attempt, 16))
 PY
+  )"; then
+    return 0
+  fi
+
+  command -v curl >/dev/null 2>&1 || {
+    printf '%s\n' "$python_error" >&2
+    return 1
+  }
+  local partial="${output}.curl-partial"
+  local -a curl_args=(
+    --fail
+    --location
+    --retry 5
+    --connect-timeout 30
+    --max-time 1800
+    --user-agent "Agent-System-release-deploy"
+    --output "$partial"
+  )
+  if curl --help all 2>/dev/null | grep -Fq -- '--retry-all-errors'; then
+    curl_args+=(--retry-all-errors)
+  fi
+  if curl --help all 2>/dev/null | grep -Fq -- '--doh-url'; then
+    curl_args+=(--doh-url "${APP_RELEASE_DOH_URL:-https://1.1.1.1/dns-query}")
+  fi
+  if [[ -n "${GITHUB_TOKEN:-}" && "$url" == https://api.github.com/* ]]; then
+    curl_args+=(--header "Authorization: Bearer ${GITHUB_TOKEN}")
+  fi
+  if [[ "$url" == https://api.github.com/*/releases/assets/* ]]; then
+    curl_args+=(--header 'Accept: application/octet-stream')
+  fi
+  if ! curl "${curl_args[@]}" "$url"; then
+    rm -f "$partial"
+    printf '%s\n' "$python_error" >&2
+    return 1
+  fi
+  mv "$partial" "$output"
 }
 
 runtime_pid_is_active() {
@@ -681,6 +729,42 @@ fi
 python3 "$SCRIPT_DIR/scripts/verify_release_binary.py" \
   "$PACKAGE_DIR/target/release/clawd" "$RUST_TARGET"
 
+skillctl_error_code() {
+  python3 -c '
+import json
+import sys
+
+for line in reversed(sys.stdin.read().splitlines()):
+    try:
+        value = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    error = value.get("error") if isinstance(value, dict) else None
+    code = error.get("code") if isinstance(error, dict) else None
+    if isinstance(code, str):
+        print(code)
+        break
+'
+}
+
+run_bundled_skill_install() {
+  local skill_name="$1"
+  shift
+  local install_output=""
+  local error_code=""
+  if install_output="$("$@" 2>&1)"; then
+    return 0
+  fi
+  error_code="$(printf '%s\n' "$install_output" | skillctl_error_code)"
+  if [[ "$error_code" == "install_resource_insufficient" ]]; then
+    printf 'bundled_skill_install=skipped skill=%s error_code=%s\n' \
+      "$skill_name" "$error_code"
+    return 20
+  fi
+  printf '%s\n' "$install_output" >&2
+  return 1
+}
+
 bootstrap_bundled_release_skills() {
   local runtime_root="$1"
   local package_root="$2"
@@ -694,15 +778,24 @@ bootstrap_bundled_release_skills() {
     die "bundled_skill_bootstrap_skillctl_missing"
   [[ -f "$runtime_root/configs/config.toml" ]] ||
     die "bundled_skill_bootstrap_config_missing"
+  local -a resource_skipped_skills=()
 
   while IFS=$'\t' read -r skill_name manifest_relative; do
     [[ -n "$skill_name" && -n "$manifest_relative" ]] || continue
     manifest_path="$runtime_root/$manifest_relative"
-    "$runtime_root/target/release/skillctl" install-precompiled \
-      "$manifest_path" \
-      "$runtime_root" \
-      "$runtime_root/data/skill-packages" \
-      "$runtime_root/prebuilt/skill-packages" >/dev/null
+    if run_bundled_skill_install "$skill_name" \
+      "$runtime_root/target/release/skillctl" install-precompiled \
+        "$manifest_path" \
+        "$runtime_root" \
+        "$runtime_root/data/skill-packages" \
+        "$runtime_root/prebuilt/skill-packages"; then
+      :
+    elif [[ "$?" -eq 20 ]]; then
+      resource_skipped_skills+=("$skill_name")
+      continue
+    else
+      return 1
+    fi
   done < <(
     python3 - "$marker" <<'PY'
 import json
@@ -736,10 +829,16 @@ PY
     --destination "$runtime_root/data/skills"
   (
     cd "$runtime_root"
+    local -a bootstrap_args=(
+      --config "$runtime_root/configs/config.toml"
+      --bootstrap-bundled-skills
+    )
+    for skill_name in "${resource_skipped_skills[@]}"; do
+      bootstrap_args+=(--skip-bundled-skill "$skill_name")
+    done
     APP_PRODUCT_IDENTITY_CONFIG="$runtime_root/configs/product_identity.toml" \
       "$runtime_root/target/release/clawd" \
-        --config "$runtime_root/configs/config.toml" \
-        --bootstrap-bundled-skills
+        "${bootstrap_args[@]}"
   )
   printf 'bundled_skill_bootstrap=completed\n'
 }
@@ -781,7 +880,7 @@ for manifest in sorted((root / "optional_skills").glob("*/skill.toml")):
     print(f"{skill}\t{version}\t{installed_version}\t{adapter}\t{relative}")
 PY
 
-  local skill_name release_version installed_version adapter manifest_relative manifest_path
+  local skill_name release_version installed_version adapter manifest_relative manifest_path install_status
   while IFS=$'\t' read -r skill_name release_version installed_version adapter manifest_relative; do
     [[ -n "$skill_name" ]] || continue
     if [[ "$installed_version" == "$release_version" ]] && \
@@ -791,28 +890,37 @@ PY
     manifest_path="$runtime_root/$manifest_relative"
     printf 'bundled_skill_repair=started skill=%s installed=%s release=%s adapter=%s\n' \
       "$skill_name" "$installed_version" "$release_version" "$adapter"
+    install_status=0
     case "$adapter" in
       cargo)
         [[ -d "$runtime_root/prebuilt/skill-packages/$skill_name" ]] || {
           rm -f "$inventory"
           die "bundled_skill_precompiled_package_missing:$skill_name"
         }
-        "$skillctl" install-precompiled \
-          "$manifest_path" "$runtime_root" "$package_root" \
-          "$runtime_root/prebuilt/skill-packages" >/dev/null
+        run_bundled_skill_install "$skill_name" \
+          "$skillctl" install-precompiled \
+            "$manifest_path" "$runtime_root" "$package_root" \
+            "$runtime_root/prebuilt/skill-packages" || install_status=$?
         ;;
       python|node|go|prebuilt|generic_process|http_json)
         # Release packages carry locked runner sources and offline/native
         # dependencies. --network acknowledges the manifest policy; adapters
         # still refuse lifecycle scripts and source-build fallback.
-        "$skillctl" install-local \
-          "$manifest_path" "$runtime_root" "$package_root" --network >/dev/null
+        run_bundled_skill_install "$skill_name" \
+          "$skillctl" install-local \
+            "$manifest_path" "$runtime_root" "$package_root" --network || install_status=$?
         ;;
       *)
         rm -f "$inventory"
         die "bundled_skill_adapter_unsupported:$skill_name:$adapter"
         ;;
     esac
+    if [[ "$install_status" -eq 20 ]]; then
+      continue
+    elif [[ "$install_status" -ne 0 ]]; then
+      rm -f "$inventory"
+      return "$install_status"
+    fi
     "$skillctl" receipt-verify "$package_root" "$skill_name" >/dev/null
     (
       cd "$runtime_root"

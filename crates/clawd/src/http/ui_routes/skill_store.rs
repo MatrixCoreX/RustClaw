@@ -543,6 +543,7 @@ pub(crate) fn repair_bundled_skill_admission_offline(
 pub(crate) fn bootstrap_bundled_skill_admissions_offline(
     workspace_root: &Path,
     config: &claw_core::config::AppConfig,
+    resource_skips: &BTreeSet<String>,
 ) -> Result<crate::skill_admission::OverlaySnapshot, String> {
     let registry_path = config
         .skills
@@ -561,8 +562,19 @@ pub(crate) fn bootstrap_bundled_skill_admissions_offline(
         .map_err(|error| error.to_string())?;
     let mut skill_names = registry.on_demand_names();
     skill_names.sort_unstable();
+    if let Some(skill_name) = resource_skips
+        .iter()
+        .find(|skill_name| !skill_names.contains(skill_name))
+    {
+        return Err(format!(
+            "bundled resource skip is not an on-demand skill: skill={skill_name}"
+        ));
+    }
     let mut mutations = Vec::with_capacity(skill_names.len());
     for skill_name in skill_names {
+        if resource_skips.contains(&skill_name) {
+            continue;
+        }
         let entry = registry
             .get(&skill_name)
             .ok_or_else(|| format!("bundled registry entry is missing: {skill_name}"))?;
@@ -592,7 +604,7 @@ pub(crate) fn bootstrap_bundled_skill_admissions_offline(
         });
     }
     service
-        .admit_bundled_batch(mutations)
+        .admit_bundled_batch_with_resource_skips(mutations, resource_skips)
         .map_err(|error| error.to_string())
 }
 

@@ -1,5 +1,6 @@
 use super::{
     resolve_offline_bundled_bootstrap_from, resolve_offline_bundled_repair_skill_from,
+    resolve_offline_bundled_resource_skips_from,
     resolve_offline_bundled_runtime_asset_prepare_from, resolve_startup_config_path_from,
     startup_isolation_cleanup_age_seconds, tokio_worker_stack_bytes,
     DEFAULT_TOKIO_WORKER_STACK_BYTES, MAX_TOKIO_WORKER_STACK_BYTES, MIN_TOKIO_WORKER_STACK_BYTES,
@@ -14,6 +15,41 @@ fn resolves_offline_bundled_bootstrap_flag() {
         "--config".to_string(),
         "/tmp/fixture.toml".to_string(),
     ]));
+}
+
+#[test]
+fn resolves_repeated_offline_bundled_resource_skips() {
+    let resolved = resolve_offline_bundled_resource_skips_from(vec![
+        "--bootstrap-bundled-skills".to_string(),
+        "--skip-bundled-skill".to_string(),
+        "local_asr".to_string(),
+        "--skip-bundled-skill=media_discovery".to_string(),
+    ])
+    .expect("resolve resource skips");
+    assert_eq!(
+        resolved,
+        ["local_asr".to_string(), "media_discovery".to_string()]
+            .into_iter()
+            .collect()
+    );
+}
+
+#[test]
+fn rejects_invalid_or_duplicate_offline_bundled_resource_skips() {
+    assert!(
+        resolve_offline_bundled_resource_skips_from(vec!["--skip-bundled-skill".to_string()])
+            .is_err()
+    );
+    assert!(resolve_offline_bundled_resource_skips_from(vec![
+        "--skip-bundled-skill=../unsafe".to_string()
+    ])
+    .is_err());
+    assert!(resolve_offline_bundled_resource_skips_from(vec![
+        "--skip-bundled-skill=local_asr".to_string(),
+        "--skip-bundled-skill".to_string(),
+        "local_asr".to_string(),
+    ])
+    .is_err());
 }
 
 #[test]

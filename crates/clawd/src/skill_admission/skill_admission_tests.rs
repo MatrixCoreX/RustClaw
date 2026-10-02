@@ -79,6 +79,70 @@ install_mode = "on_demand"
 }
 
 #[test]
+fn bundled_batch_resource_skip_removes_stale_on_demand_admission() {
+    let root = std::env::temp_dir().join(format!(
+        "bundled-resource-skip-{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let names = ["bundled_alpha", "bundled_beta"];
+    fs::create_dir_all(root.join("configs")).expect("create configs");
+    let registry = root.join("configs/skills_registry.toml");
+    let registry_text = names
+        .iter()
+        .map(|name| {
+            format!(
+                r#"[[skills]]
+name = "{name}"
+enabled = false
+kind = "runner"
+planner_kind = "skill"
+package_manifest = "sources/{name}/skill.toml"
+install_mode = "on_demand"
+"#
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(&registry, registry_text).expect("write registry");
+    let manifests = names
+        .iter()
+        .map(|name| (*name, install_fixture(&root, name)))
+        .collect::<BTreeMap<_, _>>();
+    let service = SkillAdmissionService::for_test(&root, &registry);
+    let mutation = |name: &str| AdmissionMutation {
+        metadata: ExternalSkillMetadata {
+            name: name.to_string(),
+            source: SkillAdmissionSource::BundledBase,
+            package_manifest_path: format!("sources/{name}/skill.toml"),
+            description: format!("{name} fixture"),
+            aliases: Vec::new(),
+            group: "extensions".to_string(),
+        },
+        prompt: format!("# {name}\n"),
+        state: AdmissionState::Enabled,
+        grant: Some(fixture_grant(
+            manifests.get(name).expect("fixture manifest"),
+            ApprovalSource::ReleaseBaseline,
+        )),
+    };
+    service
+        .admit_bundled_batch(names.iter().map(|name| mutation(name)).collect())
+        .expect("admit initial bundled batch");
+
+    let skipped = BTreeSet::from(["bundled_beta".to_string()]);
+    let snapshot = service
+        .admit_bundled_batch_with_resource_skips(vec![mutation("bundled_alpha")], &skipped)
+        .expect("remove resource-incompatible bundled admission");
+    assert_eq!(
+        snapshot.state("bundled_alpha"),
+        Some(AdmissionState::Enabled)
+    );
+    assert_eq!(snapshot.state("bundled_beta"), None);
+    assert!(!snapshot.execution_bindings.contains_key("bundled_beta"));
+    fs::remove_dir_all(root).expect("remove fixture root");
+}
+
+#[test]
 fn aipp_removal_is_independent_from_skill_admission_state() {
     let root = std::env::temp_dir().join(format!("aipp-state-{}", uuid::Uuid::new_v4()));
     let registry = root.join("configs/skills_registry.toml");
