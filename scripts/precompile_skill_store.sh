@@ -81,8 +81,12 @@ if [[ "$PRECOMPILE_ALL_BUNDLED" == "1" ]]; then
 		manifest="$(python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" \
 			--scope selected --skill "$skill_name" --target "$TARGET" --format manifests)"
 		echo "Preinstalling bundled Skill Store package: skill=$skill_name adapter=$adapter"
-		"$SDK_CLI" install-local \
-			"$manifest" "$SCRIPT_DIR" "$PACKAGE_ROOT" --network --target "$TARGET" >/dev/null
+		install_output=""
+		if ! install_output="$("$SDK_CLI" install-local \
+			"$manifest" "$SCRIPT_DIR" "$PACKAGE_ROOT" --network --target "$TARGET" 2>&1)"; then
+			printf '%s\n' "$install_output" >&2
+			exit 1
+		fi
 	done < <(
 		python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" \
 			--scope platform-on-demand --target "$TARGET" --format specs
