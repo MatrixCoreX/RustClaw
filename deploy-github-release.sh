@@ -5,7 +5,9 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$SCRIPT_DIR"
 # shellcheck source=/dev/null
-source "$SCRIPT_DIR/scripts/product_identity.sh"
+source "$SCRIPT_DIR/scripts/shell_compat.sh"
+configure_platform_command_path
+configure_python3_with_tomllib
 REPOSITORY="$APP_RELEASE_REPOSITORY"
 PLATFORM="auto"
 REQUESTED_TAG=""
@@ -268,8 +270,15 @@ for attempt in range(1, 4):
         request.add_header("Accept", "application/octet-stream")
     try:
         with urllib.request.urlopen(request, timeout=300) as response, partial.open("wb") as stream:
+            written = 0
             while chunk := response.read(1024 * 1024):
                 stream.write(chunk)
+                written += len(chunk)
+            expected = response.headers.get("Content-Length")
+            if expected is not None and written != int(expected):
+                raise OSError(
+                    f"incomplete response: expected={expected} received={written}"
+                )
         partial.replace(destination)
         break
     except (OSError, urllib.error.URLError):

@@ -124,6 +124,8 @@ printf '%s\n' '{"install_all_bundled_skills":true,"schema_version":1,"packages":
   > "$PACKAGE_DIR/prebuilt/bundled-skill-bootstrap-v1.json"
 cp "$ROOT_DIR/scripts/seed_bundled_skill_storage.py" \
   "$PACKAGE_DIR/scripts/seed_bundled_skill_storage.py"
+cp "$ROOT_DIR/scripts/shell_compat.sh" \
+  "$PACKAGE_DIR/scripts/shell_compat.sh"
 printf 'release bridge\n' > "$PACKAGE_DIR/services/wa-web-bridge/index.js"
 printf 'release media preflight\n' > "$PACKAGE_DIR/services/wa-web-bridge/media-preflight.js"
 printf '<!doctype html><title>release ui</title>\n' > "$PACKAGE_DIR/UI/dist/index.html"
