@@ -18,6 +18,15 @@ fn checkpoint_for_stage(stage: AgentCheckpointStage) -> crate::task_lifecycle::T
     source.last_publishable_synthesis_output = Some("synthesized-result".to_string());
     source.last_capability_synthesis_output = Some("capability-result".to_string());
     source.resource_wait_attempts = 4;
+    source.output_contract = Some(crate::IntentOutputContract {
+        response_shape: crate::OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        selection: crate::OutputSelectionContract {
+            structured_field_selector: Some("title,source,link".to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
     source
         .executed_step_results
         .push(crate::executor::StepExecutionResult {
@@ -177,6 +186,22 @@ fn restart_matrix_restores_all_agent_phase_machine_state() {
             Some("capability-result")
         );
         assert_eq!(restored.resource_wait_attempts, 4);
+        let output_contract = restored
+            .output_contract
+            .as_ref()
+            .expect("checkpoint output contract");
+        assert_eq!(
+            output_contract.response_shape,
+            crate::OutputResponseShape::Strict
+        );
+        assert!(output_contract.requires_content_evidence);
+        assert_eq!(
+            output_contract
+                .selection
+                .structured_field_selector
+                .as_deref(),
+            Some("title,source,link")
+        );
         assert_eq!(restored.executed_step_results.len(), 1);
         assert_eq!(restored.executed_step_results[0].step_id, "step_1");
         assert_eq!(restored.executed_step_results[0].skill, "office_workspace");
@@ -210,6 +235,35 @@ fn restart_matrix_restores_all_agent_phase_machine_state() {
             Some(&1)
         );
     }
+}
+
+#[test]
+fn invalid_checkpoint_output_contract_does_not_replace_existing_contract() {
+    let boundary = json!({
+        "agent_loop_resume_state": {
+            "schema_version": 1,
+            "stage": "planning",
+            "output_contract": {
+                "response_shape": "unsupported-shape"
+            }
+        }
+    });
+    let mut restored = LoopState::new();
+    restored.output_contract = Some(crate::IntentOutputContract {
+        response_shape: crate::OutputResponseShape::Scalar,
+        ..Default::default()
+    });
+
+    let stage = restore_checkpoint_resume_state(&mut restored, &boundary);
+
+    assert_eq!(stage, AgentCheckpointStage::Planning);
+    assert_eq!(
+        restored
+            .output_contract
+            .as_ref()
+            .map(|contract| contract.response_shape),
+        Some(crate::OutputResponseShape::Scalar)
+    );
 }
 
 #[test]

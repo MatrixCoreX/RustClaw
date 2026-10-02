@@ -74,6 +74,7 @@ pub(crate) fn build_checkpoint_resume_state(
             .cloned()
             .collect::<Vec<_>>(),
         "active_capability_scopes": loop_state.active_capability_scopes,
+        "output_contract": loop_state.output_contract,
         "last_output": loop_state.last_output,
         "history_compact": history_compact,
         "task_observations": task_observations,
@@ -132,6 +133,13 @@ pub(crate) fn restore_checkpoint_resume_state(
         string_array(resume_state, "loaded_capability_skills"),
         string_array(resume_state, "loaded_mcp_capabilities"),
     );
+    if let Some(output_contract) = resume_state
+        .get("output_contract")
+        .filter(|value| !value.is_null())
+        .and_then(|value| serde_json::from_value::<crate::IntentOutputContract>(value.clone()).ok())
+    {
+        loop_state.output_contract = Some(output_contract);
+    }
 
     if let Some(last_output) = string_field(resume_state, "last_output") {
         loop_state.last_output = Some(last_output.clone());
