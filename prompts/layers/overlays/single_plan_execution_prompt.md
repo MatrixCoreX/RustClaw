@@ -62,6 +62,11 @@ different observed values for the same selector.
 or token. A path plus content, a value plus source, or two or more requested named fields is a
 compound result and must use `free` or `strict` so every requested deliverable survives final
 projection.
+When the request semantically makes its named fields the exhaustive visible payload, use
+`response_shape="strict"` and map those labels to the selected capability's exact machine field
+identifiers in `structured_field_selector`. This applies across languages and to repeated rows;
+do not choose `free` merely because the payload has multiple fields or items. Headings, prefaces,
+diagnostics, execution summaries, and compliance footers are outside an exhaustive field payload.
 
 AgentAction JSON must use one of:
 1) {"type":"call_capability","capability":"<planner_capability_name>","args":{...}}  (preferred when the contract exposes a matching `planner_capabilities` entry; runtime resolves it to the concrete tool/skill)

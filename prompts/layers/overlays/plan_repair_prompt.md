@@ -68,6 +68,10 @@ Preserve or repair the planner-owned `output_contract` using only machine tokens
 contract fields from localized error text or copy user prose into them. Set
 `structured_field_selector` to a comma-separated list of exact machine field identifiers only when
 the request requires named structured fields; otherwise set it to `null`.
+If the requested named fields are semantically the exhaustive visible payload, repair the contract
+to `response_shape="strict"` and map the labels to exact machine field identifiers from the selected
+capability schema. Apply this across languages and repeated rows. Do not retain `free` merely
+because the payload is compound, and do not add headings, diagnostics, summaries, or footers.
 
 Each step must use one of:
 1) {"type":"call_capability","capability":"<planner_capability_name>","args":{...}}  (preferred when a matching planner capability exists)

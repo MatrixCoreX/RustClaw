@@ -161,11 +161,28 @@ fn answer_verifier_prompts_enforce_payload_only_without_runtime_phrase_matching(
         include_str!("../../../../prompts/layers/overlays/answer_verifier_retry_prompt.md");
     assert!(VERIFIER_PROMPT.contains("payload-only output"));
     assert!(VERIFIER_PROMPT.contains("Judge this constraint from meaning"));
+    assert!(VERIFIER_PROMPT.contains("Field presence is necessary but not sufficient"));
+    assert!(VERIFIER_PROMPT.contains("outside the requested fields"));
     assert!(VERIFIER_PROMPT.contains("without another tool call"));
     assert!(RETRY_PROMPT.contains("return exactly that payload"));
     assert!(RETRY_PROMPT.contains("remove every heading"));
     assert!(VERIFIER_PROMPT.contains("\"repair_kind\":\"exact_user_literal\""));
     assert!(VERIFIER_PROMPT.contains("Copy `required_exact_answer` verbatim"));
+}
+
+#[test]
+fn planner_prompts_make_exhaustive_named_fields_a_strict_machine_contract() {
+    const SINGLE: &str =
+        include_str!("../../../../prompts/layers/overlays/single_plan_execution_prompt.md");
+    const INCREMENTAL: &str =
+        include_str!("../../../../prompts/layers/overlays/loop_incremental_plan_prompt.md");
+    const REPAIR: &str = include_str!("../../../../prompts/layers/overlays/plan_repair_prompt.md");
+
+    for prompt in [SINGLE, INCREMENTAL, REPAIR] {
+        assert!(prompt.contains("exhaustive visible payload"));
+        assert!(prompt.contains("across languages"));
+        assert!(prompt.contains("response_shape=\"strict\""));
+    }
 }
 
 #[test]
