@@ -31,6 +31,99 @@ fn committed_output_contract_cannot_be_relaxed_by_a_later_round() {
 }
 
 #[test]
+fn later_round_can_monotonically_strengthen_an_unclassified_free_contract() {
+    let committed = crate::IntentOutputContract {
+        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+        locator_hint: "/workspace".to_string(),
+        requires_content_evidence: true,
+        ..Default::default()
+    };
+    let proposed = crate::IntentOutputContract {
+        response_shape: crate::OutputResponseShape::Strict,
+        selection: crate::pipeline_types::OutputSelectionContract {
+            structured_field_selector: Some("title,source,link".to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let effective = select_effective_output_contract(Some(&committed), Some(&proposed))
+        .expect("strengthened contract");
+
+    assert_eq!(effective.response_shape, crate::OutputResponseShape::Strict);
+    assert_eq!(
+        effective.selection.structured_field_selector.as_deref(),
+        Some("title,source,link")
+    );
+    assert!(effective.requires_content_evidence);
+    assert_eq!(
+        effective.locator_kind,
+        crate::OutputLocatorKind::CurrentWorkspace
+    );
+    assert_eq!(effective.locator_hint, "/workspace");
+}
+
+#[test]
+fn later_round_cannot_replace_existing_machine_selector_or_list_constraints() {
+    let committed = crate::IntentOutputContract {
+        response_shape: crate::OutputResponseShape::Strict,
+        selection: crate::pipeline_types::OutputSelectionContract {
+            structured_field_selector: Some("name,kind".to_string()),
+            list_selector: crate::pipeline_types::OutputListSelector {
+                target_kind: crate::OutputScalarCountTargetKind::File,
+                target_kind_specified: true,
+                limit: Some(5),
+                sort_by: Some("name".to_string()),
+                include_metadata: Some(false),
+                include_hidden: Some(false),
+            },
+        },
+        ..Default::default()
+    };
+    let proposed = crate::IntentOutputContract {
+        response_shape: crate::OutputResponseShape::Free,
+        selection: crate::pipeline_types::OutputSelectionContract {
+            structured_field_selector: Some("path,size_bytes".to_string()),
+            list_selector: crate::pipeline_types::OutputListSelector {
+                target_kind: crate::OutputScalarCountTargetKind::Dir,
+                target_kind_specified: true,
+                limit: Some(20),
+                sort_by: Some("modified".to_string()),
+                include_metadata: Some(true),
+                include_hidden: Some(true),
+            },
+        },
+        ..Default::default()
+    };
+
+    let effective = select_effective_output_contract(Some(&committed), Some(&proposed))
+        .expect("committed contract");
+
+    assert_eq!(effective.response_shape, crate::OutputResponseShape::Strict);
+    assert_eq!(
+        effective.selection.structured_field_selector.as_deref(),
+        Some("name,kind")
+    );
+    assert_eq!(
+        effective.selection.list_selector.target_kind,
+        crate::OutputScalarCountTargetKind::File
+    );
+    assert_eq!(effective.selection.list_selector.limit, Some(5));
+    assert_eq!(
+        effective.selection.list_selector.sort_by.as_deref(),
+        Some("name")
+    );
+    assert_eq!(
+        effective.selection.list_selector.include_metadata,
+        Some(false)
+    );
+    assert_eq!(
+        effective.selection.list_selector.include_hidden,
+        Some(false)
+    );
+}
+
+#[test]
 fn planner_can_establish_contract_when_turn_has_none() {
     let proposed = crate::IntentOutputContract {
         response_shape: crate::OutputResponseShape::Scalar,

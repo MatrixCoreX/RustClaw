@@ -42,7 +42,64 @@ fn select_effective_output_contract(
     committed: Option<&crate::IntentOutputContract>,
     proposed: Option<&crate::IntentOutputContract>,
 ) -> Option<crate::IntentOutputContract> {
-    committed.cloned().or_else(|| proposed.cloned())
+    match (committed, proposed) {
+        (None, None) => None,
+        (Some(contract), None) | (None, Some(contract)) => Some(contract.clone()),
+        (Some(committed), Some(proposed)) => {
+            let mut effective = committed.clone();
+            if effective.response_shape == crate::OutputResponseShape::Free
+                && proposed.response_shape != crate::OutputResponseShape::Free
+            {
+                effective.response_shape = proposed.response_shape;
+            }
+            if effective.exact_sentence_count.is_none() {
+                effective.exact_sentence_count = proposed.exact_sentence_count;
+            }
+            effective.requires_content_evidence |= proposed.requires_content_evidence;
+            effective.delivery_required |= proposed.delivery_required;
+            if effective.locator_kind == crate::OutputLocatorKind::None {
+                effective.locator_kind = proposed.locator_kind;
+            }
+            if effective.delivery_intent == crate::OutputDeliveryIntent::None {
+                effective.delivery_intent = proposed.delivery_intent;
+            }
+            if effective.locator_hint.trim().is_empty() {
+                effective.locator_hint = proposed.locator_hint.clone();
+            }
+            if effective
+                .selection
+                .structured_field_selector
+                .as_deref()
+                .is_none_or(|value| value.trim().is_empty())
+            {
+                effective.selection.structured_field_selector =
+                    proposed.selection.structured_field_selector.clone();
+            }
+            if !effective.selection.list_selector.target_kind_specified
+                && proposed.selection.list_selector.target_kind_specified
+            {
+                effective.selection.list_selector.target_kind =
+                    proposed.selection.list_selector.target_kind;
+                effective.selection.list_selector.target_kind_specified = true;
+            }
+            if effective.selection.list_selector.limit.is_none() {
+                effective.selection.list_selector.limit = proposed.selection.list_selector.limit;
+            }
+            if effective.selection.list_selector.sort_by.is_none() {
+                effective.selection.list_selector.sort_by =
+                    proposed.selection.list_selector.sort_by.clone();
+            }
+            if effective.selection.list_selector.include_metadata.is_none() {
+                effective.selection.list_selector.include_metadata =
+                    proposed.selection.list_selector.include_metadata;
+            }
+            if effective.selection.list_selector.include_hidden.is_none() {
+                effective.selection.list_selector.include_hidden =
+                    proposed.selection.list_selector.include_hidden;
+            }
+            Some(effective)
+        }
+    }
 }
 
 async fn build_verifier_gate_response(
