@@ -6,7 +6,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$SCRIPT_DIR"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/scripts/shell_compat.sh"
-configure_platform_command_path
 configure_python3_with_tomllib
 REPOSITORY="$APP_RELEASE_REPOSITORY"
 PLATFORM="auto"
