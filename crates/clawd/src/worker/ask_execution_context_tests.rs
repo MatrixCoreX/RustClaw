@@ -198,10 +198,21 @@ async fn coding_execution_context_injects_workspace_instructions_and_attribution
     let mut state = crate::AppState::test_default_with_fixture_provider()
         .with_seeded_db_schema()
         .with_prompt_layers_installed();
+    let instruction_filename = "TEST_WORKSPACE_INSTRUCTIONS.md";
+    let workspace = state.skill_rt.workspace_root.join("target").join(format!(
+        "workspace-instructions-test-{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    std::fs::create_dir_all(&workspace).expect("create isolated workspace child");
+    std::fs::write(
+        workspace.join(instruction_filename),
+        "# Test workspace instructions\nPreserve user data and verify requested changes.\n",
+    )
+    .expect("write workspace instruction fixture");
     state.reload_ctx.workspace_instructions = claw_core::config::WorkspaceInstructionsConfig {
         enabled_for_coding: true,
         enabled_for_non_coding: false,
-        filenames: vec!["AGENTS.md".to_string()],
+        filenames: vec![instruction_filename.to_string()],
         user_instruction_paths: Vec::new(),
         max_total_bytes: 4_096,
         max_file_bytes: 8_192,
@@ -214,7 +225,7 @@ async fn coding_execution_context_injects_workspace_instructions_and_attribution
         "execution_profile": "coding",
         "workspace_context": {
             "schema_version": 1,
-            "current_working_directory": state.skill_rt.workspace_root,
+            "current_working_directory": workspace,
         },
     });
     let task = crate::ClaimedTask {
@@ -252,9 +263,12 @@ async fn coding_execution_context_injects_workspace_instructions_and_attribution
     assert_eq!(attribution["working_directory_status"], "resolved");
     assert_eq!(attribution["instruction_authority"], "model_context_only");
     assert_eq!(attribution["permission_authority"], false);
-    assert_eq!(attribution["sources"][0]["logical_path"], "AGENTS.md");
+    assert!(attribution["sources"][0]["logical_path"]
+        .as_str()
+        .is_some_and(|path| path.ends_with(instruction_filename)));
     assert!(attribution["injected_bytes_total"].as_u64().unwrap() <= 4_096);
-    assert_eq!(attribution["sources"][0]["digest_scope"], "loaded_prefix");
+    assert_eq!(attribution["sources"][0]["digest_scope"], "full_source");
+    let _ = std::fs::remove_dir_all(workspace);
 }
 
 #[test]

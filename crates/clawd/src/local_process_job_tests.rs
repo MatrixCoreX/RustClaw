@@ -264,14 +264,23 @@ fn restart_recovery_escalates_a_nested_sandbox_process_group() {
 
     let root = TempDirGuard::new("nested_cancel_restart_recovery");
     let run_script = root.path().join("run.sh");
+    let nested_script = root.path().join("nested.py");
     let nested_pid_path = root.path().join("nested_pid");
     let nested_ready_path = root.path().join("nested_ready");
     std::fs::write(
+        &nested_script,
+        format!(
+            "import os\nimport pathlib\nimport signal\nimport time\n\nos.setpgrp()\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\npathlib.Path({pid:?}).write_text(str(os.getpid()))\npathlib.Path({ready:?}).touch()\nwhile True:\n    time.sleep(1)\n",
+            pid = nested_pid_path.to_string_lossy(),
+            ready = nested_ready_path.to_string_lossy(),
+        ),
+    )
+    .expect("write nested process-group helper");
+    std::fs::write(
         &run_script,
         format!(
-            "#!/usr/bin/env bash\nsetsid bash -c 'trap \"\" TERM; printf \"%s\" \"$$\" > {pid}; touch {ready}; while :; do sleep 1 || true; done' &\nwait\n",
-            pid = nested_pid_path.display(),
-            ready = nested_ready_path.display(),
+            "#!/usr/bin/env bash\npython3 \"{}\" &\nwait\n",
+            nested_script.display(),
         ),
     )
     .expect("write nested process-group script");

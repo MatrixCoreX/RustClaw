@@ -415,7 +415,12 @@ async fn dependency_status_checks_declared_items_without_creating_private_storag
         .expect("model status");
     assert_eq!(model["kind"], "runtime_asset");
     assert_eq!(model["installed"], false);
-    assert_eq!(model["status_code"], "missing");
+    let expected_status = if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        "not_applicable"
+    } else {
+        "missing"
+    };
+    assert_eq!(model["status_code"], expected_status);
     assert!(
         !media_storage.exists() && !asr_storage.exists(),
         "status reads must remain side-effect free"
