@@ -338,6 +338,27 @@ pub(crate) fn claim_or_bind_conversation_input_task(
     scope: &OwnedConversationInputScope,
     input_id: Uuid,
 ) -> Result<ConversationInputTaskClaimOutcome, ConversationInputStoreError> {
+    claim_conversation_input_task_with_policy(pool, scope, input_id, true)
+}
+
+/// Claim a task-creation lease without attaching the input to the conversation's
+/// currently focused task. Channel/UI client-task submissions use this path so
+/// every user message has one independently cancellable lifecycle. Explicit
+/// continuation still uses `expected_task_id` during admission.
+pub(crate) fn claim_independent_conversation_input_task(
+    pool: &DbPool,
+    scope: &OwnedConversationInputScope,
+    input_id: Uuid,
+) -> Result<ConversationInputTaskClaimOutcome, ConversationInputStoreError> {
+    claim_conversation_input_task_with_policy(pool, scope, input_id, false)
+}
+
+fn claim_conversation_input_task_with_policy(
+    pool: &DbPool,
+    scope: &OwnedConversationInputScope,
+    input_id: Uuid,
+    bind_active_task: bool,
+) -> Result<ConversationInputTaskClaimOutcome, ConversationInputStoreError> {
     if !scope.validate() {
         return Err(ConversationInputStoreError::InvalidRequest);
     }
@@ -369,42 +390,44 @@ pub(crate) fn claim_or_bind_conversation_input_task(
     }
 
     let current_focus = load_scope_counters(&tx, scope)?.2;
-    if let Some(task_id) = current_focus.as_deref() {
-        if task_is_active_and_owned(&tx, task_id, &scope.owner_principal_id)? {
-            let task_id = Uuid::parse_str(task_id).map_err(|error| {
-                ConversationInputStoreError::Database(anyhow::anyhow!(
-                    "conversation_input_focus_task_invalid:{error}"
-                ))
-            })?;
-            bind_conversation_input_to_task_in_tx(
-                &tx,
-                scope,
-                input_id,
-                task_id,
-                ConversationInputTaskBinding::ActiveTask,
-            )?;
-            let bound =
-                load_record_by_input_id(&tx, &scope.owner_principal_id, &input_id.to_string())?
-                    .ok_or(ConversationInputStoreError::NotFound)?;
-            tx.commit().map_err(database_error)?;
-            return Ok(ConversationInputTaskClaimOutcome::Bound(bound));
+    if bind_active_task {
+        if let Some(task_id) = current_focus.as_deref() {
+            if task_is_active_and_owned(&tx, task_id, &scope.owner_principal_id)? {
+                let task_id = Uuid::parse_str(task_id).map_err(|error| {
+                    ConversationInputStoreError::Database(anyhow::anyhow!(
+                        "conversation_input_focus_task_invalid:{error}"
+                    ))
+                })?;
+                bind_conversation_input_to_task_in_tx(
+                    &tx,
+                    scope,
+                    input_id,
+                    task_id,
+                    ConversationInputTaskBinding::ActiveTask,
+                )?;
+                let bound =
+                    load_record_by_input_id(&tx, &scope.owner_principal_id, &input_id.to_string())?
+                        .ok_or(ConversationInputStoreError::NotFound)?;
+                tx.commit().map_err(database_error)?;
+                return Ok(ConversationInputTaskClaimOutcome::Bound(bound));
+            }
+            tx.execute(
+                "UPDATE conversation_input_scopes
+                 SET focus_task_id = NULL, execution_epoch = execution_epoch + 1,
+                     updated_at_ts = ?6
+                 WHERE owner_principal_id = ?1 AND agent_id = ?2 AND channel = ?3
+                   AND channel_account_id = ?4 AND conversation_id = ?5",
+                params![
+                    scope.owner_principal_id,
+                    scope.conversation.agent_id,
+                    scope.conversation.channel,
+                    scope.conversation.channel_account_id,
+                    scope.conversation.conversation_id,
+                    to_i64(crate::now_ts_u64())?,
+                ],
+            )
+            .map_err(database_error)?;
         }
-        tx.execute(
-            "UPDATE conversation_input_scopes
-             SET focus_task_id = NULL, execution_epoch = execution_epoch + 1,
-                 updated_at_ts = ?6
-             WHERE owner_principal_id = ?1 AND agent_id = ?2 AND channel = ?3
-               AND channel_account_id = ?4 AND conversation_id = ?5",
-            params![
-                scope.owner_principal_id,
-                scope.conversation.agent_id,
-                scope.conversation.channel,
-                scope.conversation.channel_account_id,
-                scope.conversation.conversation_id,
-                to_i64(crate::now_ts_u64())?,
-            ],
-        )
-        .map_err(database_error)?;
     }
 
     let now_ts = crate::now_ts_u64();
@@ -432,8 +455,11 @@ pub(crate) fn claim_or_bind_conversation_input_task(
             return Ok(ConversationInputTaskClaimOutcome::Waiting);
         }
     }
-    let creator =
-        load_oldest_unbound_auto_input(&tx, scope)?.ok_or(ConversationInputStoreError::NotFound)?;
+    let creator = if bind_active_task {
+        load_oldest_unbound_auto_input(&tx, scope)?.ok_or(ConversationInputStoreError::NotFound)?
+    } else {
+        record
+    };
     let claim_token = Uuid::new_v4();
     tx.execute(
         "INSERT INTO conversation_input_task_claims(
@@ -471,6 +497,41 @@ pub(crate) fn complete_conversation_input_task_claim(
     input_id: Uuid,
     claim_token: Uuid,
     task_id: Uuid,
+) -> Result<ConversationInputRecord, ConversationInputStoreError> {
+    complete_conversation_input_task_claim_with_policy(
+        pool,
+        scope,
+        input_id,
+        claim_token,
+        task_id,
+        true,
+    )
+}
+
+pub(crate) fn complete_independent_conversation_input_task_claim(
+    pool: &DbPool,
+    scope: &OwnedConversationInputScope,
+    input_id: Uuid,
+    claim_token: Uuid,
+    task_id: Uuid,
+) -> Result<ConversationInputRecord, ConversationInputStoreError> {
+    complete_conversation_input_task_claim_with_policy(
+        pool,
+        scope,
+        input_id,
+        claim_token,
+        task_id,
+        false,
+    )
+}
+
+fn complete_conversation_input_task_claim_with_policy(
+    pool: &DbPool,
+    scope: &OwnedConversationInputScope,
+    input_id: Uuid,
+    claim_token: Uuid,
+    task_id: Uuid,
+    bind_waiting_inputs: bool,
 ) -> Result<ConversationInputRecord, ConversationInputStoreError> {
     if !scope.validate() {
         return Err(ConversationInputStoreError::InvalidRequest);
@@ -515,7 +576,7 @@ pub(crate) fn complete_conversation_input_task_claim(
         task_id,
         ConversationInputTaskBinding::InitialTaskPayload,
     )?;
-    let waiting_input_ids = {
+    let waiting_input_ids = if bind_waiting_inputs {
         let mut statement = tx
             .prepare(
                 "SELECT input_id FROM conversation_inputs
@@ -543,6 +604,8 @@ pub(crate) fn complete_conversation_input_task_claim(
             .collect::<Result<Vec<_>, _>>()
             .map_err(database_error)?;
         rows
+    } else {
+        Vec::new()
     };
     for waiting_input_id in waiting_input_ids {
         let waiting_input_id = Uuid::parse_str(&waiting_input_id).map_err(|error| {

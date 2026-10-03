@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use axum::body::Bytes;
 use axum::extract::State;
@@ -15,7 +16,7 @@ use tokio::net::TcpListener;
 
 use super::{
     download_decrypted_media_to_file, send_weixin_file_from_file, send_weixin_image_from_file,
-    send_weixin_image_from_file_with_client_id, send_weixin_video_from_file, B64,
+    send_weixin_image_from_file_with_client_id, send_weixin_video_from_file, UploadActivity, B64,
 };
 use crate::crypto::encrypt_aes_128_ecb;
 use crate::http::IlinkAuth;
@@ -116,6 +117,19 @@ async fn spawn_test_server() -> (SocketAddr, TestState) {
         axum::serve(listener, app).await.expect("serve test app");
     });
     (addr, state)
+}
+
+#[test]
+fn upload_timeout_tracks_inactivity_instead_of_total_elapsed_time() {
+    let started = Instant::now();
+    let stall_timeout = Duration::from_secs(180);
+    let mut activity = UploadActivity::new(started);
+
+    assert!(!activity.stalled(1, started + Duration::from_secs(170), stall_timeout));
+    assert!(!activity.stalled(2, started + Duration::from_secs(340), stall_timeout));
+    assert!(!activity.stalled(3, started + Duration::from_secs(510), stall_timeout));
+    assert!(!activity.stalled(3, started + Duration::from_secs(689), stall_timeout));
+    assert!(activity.stalled(3, started + Duration::from_secs(690), stall_timeout));
 }
 
 #[tokio::test]

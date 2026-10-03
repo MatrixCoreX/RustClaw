@@ -454,6 +454,7 @@ pub(crate) async fn maybe_notify_schedule_result(
             error_code: Some("channel.delivery.internal".to_string()),
             message_key: Some("channel.error.delivery_failed".to_string()),
             retryable: false,
+            failed_parts: Vec::new(),
         },
     };
     let accepted = result.accepted();

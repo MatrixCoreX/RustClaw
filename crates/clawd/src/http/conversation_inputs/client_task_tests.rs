@@ -13,7 +13,8 @@ use serde_json::json;
 use super::*;
 
 fn authenticated_state() -> (crate::AppState, HeaderMap, String) {
-    let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let mut state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    state.worker.queue_limit = 32;
     let key = crate::repo::auth::create_auth_key(&state, "admin").expect("create auth key");
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -248,7 +249,7 @@ pub(super) fn request(
 }
 
 #[tokio::test]
-async fn concurrent_messages_share_one_task_and_one_delivery_owner() {
+async fn consecutive_client_messages_create_independent_tasks() {
     let (state, headers, key) = authenticated_state();
     let (status, Json(first)) = accept_client_task(
         State(state.clone()),
@@ -262,7 +263,7 @@ async fn concurrent_messages_share_one_task_and_one_delivery_owner() {
         first.handoff_state,
         ConversationInputTaskHandoffState::TaskCreated
     );
-    let task_id = first.input.target_task_id.expect("first task binding");
+    let first_task_id = first.input.target_task_id.expect("first task binding");
 
     let (status, Json(second)) = accept_client_task(
         State(state.clone()),
@@ -274,15 +275,17 @@ async fn concurrent_messages_share_one_task_and_one_delivery_owner() {
         )),
     )
     .await;
-    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(status, StatusCode::ACCEPTED, "response={second:?}");
     let second = second.data.expect("second handoff");
     assert_eq!(
         second.handoff_state,
-        ConversationInputTaskHandoffState::BoundExistingTask
+        ConversationInputTaskHandoffState::TaskCreated,
+        "second={second:?}"
     );
-    assert_eq!(second.input.target_task_id, Some(task_id));
+    let second_task_id = second.input.target_task_id.expect("second task binding");
+    assert_ne!(second_task_id, first_task_id);
     assert!(
-        !crate::repo::conversation_inputs::conversation_input_owns_initial_task_delivery(
+        crate::repo::conversation_inputs::conversation_input_owns_initial_task_delivery(
             &state.core.db,
             &crate::require_auth_identity_for_api::<ConversationInputClientTaskReceipt>(
                 &state, &headers,
@@ -291,7 +294,7 @@ async fn concurrent_messages_share_one_task_and_one_delivery_owner() {
             .principal_id,
             second.input.input_id,
         )
-        .expect("non-owner binding")
+        .expect("second delivery owner")
     );
 
     let (status, Json(replayed)) = accept_client_task(
@@ -307,7 +310,46 @@ async fn concurrent_messages_share_one_task_and_one_delivery_owner() {
         ConversationInputTaskHandoffState::TaskCreated
     );
     assert!(replayed.input.replayed);
-    assert_eq!(replayed.input.target_task_id, Some(task_id));
+    assert_eq!(replayed.input.target_task_id, Some(first_task_id));
+
+    let task_count: i64 = state
+        .core
+        .db
+        .get()
+        .expect("db")
+        .query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get(0))
+        .expect("task count");
+    assert_eq!(task_count, 2);
+}
+
+#[tokio::test]
+async fn explicit_expected_task_id_still_steers_the_active_task() {
+    let (state, headers, key) = authenticated_state();
+    let (status, Json(first)) = accept_client_task(
+        State(state.clone()),
+        headers.clone(),
+        Json(request(&key, "message-explicit-1", "Create the report.")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let first = first.data.expect("first handoff");
+    let task_id = first.input.target_task_id.expect("first task binding");
+
+    let mut continuation = request(
+        &key,
+        "message-explicit-2",
+        "Keep the facts and change the format.",
+    );
+    continuation.input.expected_task_id = Some(task_id);
+    let (status, Json(second)) =
+        accept_client_task(State(state.clone()), headers, Json(continuation)).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let second = second.data.expect("continuation handoff");
+    assert_eq!(
+        second.handoff_state,
+        ConversationInputTaskHandoffState::BoundExistingTask
+    );
+    assert_eq!(second.input.target_task_id, Some(task_id));
 
     let task_count: i64 = state
         .core
@@ -404,16 +446,16 @@ async fn waiting_input_can_finish_after_the_original_creation_claim_is_released(
     let response = response.data.expect("handoff");
     assert_eq!(
         response.handoff_state,
-        ConversationInputTaskHandoffState::BoundExistingTask
+        ConversationInputTaskHandoffState::TaskCreated
     );
     assert!(response.input.target_task_id.is_some());
     assert!(
-        crate::repo::conversation_inputs::conversation_input_owns_initial_task_delivery(
+        !crate::repo::conversation_inputs::conversation_input_owns_initial_task_delivery(
             &state.core.db,
             &identity.principal_id,
             first_input_id,
         )
-        .expect("delivery owner")
+        .expect("stalled input remains independently recoverable")
     );
 }
 

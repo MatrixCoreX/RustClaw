@@ -87,6 +87,7 @@ pub(crate) fn accept_conversation_input_with_task_template(
                 input,
                 Some(template),
                 attachments,
+                false,
                 crate::now_ts_u64(),
             )?)
         },

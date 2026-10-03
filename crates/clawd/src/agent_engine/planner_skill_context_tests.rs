@@ -329,6 +329,31 @@ fn small_provider_window_uses_searchable_catalog_reference_without_data_loss() {
 }
 
 #[test]
+fn large_provider_window_keeps_the_complete_capability_catalog() {
+    let mut state = state_with_all_bundled_skills_enabled();
+    let provider = std::sync::Arc::make_mut(
+        state
+            .core
+            .llm_providers
+            .first_mut()
+            .expect("fixture provider"),
+    );
+    provider.config.context_window_tokens = Some(1_000_000);
+    provider.config.params.default_max_tokens = Some(32_768);
+    let loop_state = super::super::LoopState {
+        round_no: 1,
+        ..Default::default()
+    };
+    let context = build_planner_skill_context(&state, &task(), &loop_state);
+
+    assert_eq!(context.disclosure_mode, "compact_index");
+    assert!(context.quick_index_text.contains("complete=true"));
+    assert!(context
+        .quick_index_text
+        .contains("media_download.download(action=download"));
+}
+
+#[test]
 fn generated_prompt_summary_prefers_capability_content_over_role_boilerplate() {
     let prompt = r#"
 ## Role & Boundaries

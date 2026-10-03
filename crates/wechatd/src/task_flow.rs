@@ -828,8 +828,27 @@ async fn request_unified_terminal_delivery(
     } else {
         claw_core::channel_delivery::ChannelDeliverySource::ImmediateDaemon
     };
+    // The ordinary WeChat client intentionally has a short provider request
+    // deadline. A terminal result can include several large artifacts, so using
+    // that same client cancels clawd's delivery handler mid-upload and leaves the
+    // durable dispatch in `query_required`. Keep only a bounded local connect
+    // deadline here; provider requests retain their own operation timeouts and the
+    // delivery lease heartbeat remains authoritative for the overall lifetime.
+    let delivery_client = match reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            warn!(
+                "wechatd: terminal delivery client setup failed task_id={} error={}",
+                task_id, error
+            );
+            return;
+        }
+    };
     match claw_core::channel_delivery_client::request_task_delivery_until_settled(
-        &state.client,
+        &delivery_client,
         &state.config.clawd_base_url,
         task_id,
         user_key,

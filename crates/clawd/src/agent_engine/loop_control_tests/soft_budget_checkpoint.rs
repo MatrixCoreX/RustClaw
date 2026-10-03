@@ -124,6 +124,53 @@ fn replayable_resource_refusal_waits_without_another_planner_round() {
 }
 
 #[test]
+fn accepted_async_job_checkpoint_supersedes_historical_resource_wait() {
+    let mut loop_state = LoopState::new();
+    loop_state.resource_wait_replay_action = Some(ResourceWaitReplayAction {
+        tool_or_skill: "media_download".to_string(),
+        action_ref: "media.download".to_string(),
+        args: serde_json::json!({"action": "download", "url": "https://example.test/item"}),
+        continuation_actions: Vec::new(),
+    });
+    let resource_error = crate::skills::structured_skill_error_from_parts(
+        "media_download",
+        "resource_admission_unavailable",
+        "resource_admission_unavailable",
+        None,
+        Some(serde_json::json!({"retryable": true})),
+    );
+    for attempt in 0..2 {
+        crate::agent_engine::attempt_ledger::record_attempt(
+            &mut loop_state,
+            "media_download",
+            &format!("attempt={attempt}"),
+            crate::executor::StepExecutionStatus::Error,
+            "",
+            None,
+            &resource_error,
+        );
+    }
+    loop_state.task_checkpoint = Some(serde_json::json!({
+        "pending_async_job": {
+            "job_id": "local_process:test-job",
+            "status": "accepted"
+        }
+    }));
+    let outcome = RoundOutcome {
+        executed_actions: 1,
+        had_error: false,
+        stop_signal: Some("async_job_checkpoint_waiting".to_string()),
+        next_goal_hint: None,
+        no_progress: false,
+    };
+
+    assert_eq!(
+        round_machine_blocker_resume_reason(Some(&outcome), &loop_state),
+        None
+    );
+}
+
+#[test]
 fn checkpoint_handoff_requires_matching_nonterminal_machine_state() {
     let mut loop_state = LoopState::new();
     loop_state.task_lifecycle = Some(serde_json::json!({

@@ -1,10 +1,13 @@
 //! Weixin CDN download/upload (`cdn-url.ts`, `cdn-upload.ts`, `upload.ts`, `send.ts`).
 
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
+use futures_util::StreamExt;
 use md5::{Digest, Md5};
 use rand::Rng;
 use reqwest::Client;
@@ -26,6 +29,8 @@ use crate::http::{post_ilink_json, BaseInfo, IlinkAuth};
 
 const DEFAULT_API_TIMEOUT_MS: u64 = 15_000;
 const CDN_UPLOAD_MAX_RETRIES: u32 = 3;
+const CDN_UPLOAD_STALL_TIMEOUT: Duration = Duration::from_secs(180);
+const CDN_UPLOAD_ACTIVITY_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 const REMOTE_MEDIA_DOWNLOAD_SAFETY_MAX_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const PROVIDER_ERROR_BODY_MAX_BYTES: usize = 64 * 1024;
 
@@ -617,22 +622,20 @@ async fn upload_cdn_ciphertext_file(
 ) -> Result<Option<String>, String> {
     let mut last_err = String::new();
     for attempt in 1..=CDN_UPLOAD_MAX_RETRIES {
-        let file = tokio::fs::File::open(ciphertext_path)
-            .await
-            .map_err(|error| format!("{label}: open encrypted body {error}"))?;
-        let body = reqwest::Body::wrap_stream(ReaderStream::new(file));
-        let res = match client
-            .post(cdn_url)
-            .header("Content-Type", "application/octet-stream")
-            .header(reqwest::header::CONTENT_LENGTH, ciphertext_size)
-            .timeout(Duration::from_secs(120))
-            .body(body)
-            .send()
-            .await
+        let res = match upload_cdn_ciphertext_file_attempt(
+            client,
+            cdn_url,
+            ciphertext_path,
+            ciphertext_size,
+            label,
+            CDN_UPLOAD_STALL_TIMEOUT,
+            CDN_UPLOAD_ACTIVITY_CHECK_INTERVAL,
+        )
+        .await
         {
             Ok(response) => response,
             Err(error) => {
-                last_err = format!("{label} attempt {attempt}: {error}");
+                last_err = error;
                 warn!("wechat-ilink: {}", last_err);
                 continue;
             }
@@ -683,6 +686,107 @@ async fn upload_cdn_ciphertext_file(
         return Ok(download_param);
     }
     Err(last_err)
+}
+
+#[derive(Debug)]
+struct UploadActivity {
+    observed_bytes: u64,
+    last_progress_at: Instant,
+}
+
+impl UploadActivity {
+    fn new(now: Instant) -> Self {
+        Self {
+            observed_bytes: 0,
+            last_progress_at: now,
+        }
+    }
+
+    fn stalled(&mut self, uploaded_bytes: u64, now: Instant, timeout: Duration) -> bool {
+        if uploaded_bytes != self.observed_bytes {
+            self.observed_bytes = uploaded_bytes;
+            self.last_progress_at = now;
+            return false;
+        }
+        now.duration_since(self.last_progress_at) >= timeout
+    }
+}
+
+async fn upload_cdn_ciphertext_file_attempt(
+    client: &Client,
+    cdn_url: &str,
+    ciphertext_path: &Path,
+    ciphertext_size: u64,
+    label: &str,
+    stall_timeout: Duration,
+    activity_check_interval: Duration,
+) -> Result<reqwest::Response, String> {
+    let file = tokio::fs::File::open(ciphertext_path)
+        .await
+        .map_err(|error| format!("{label}: open encrypted body {error}"))?;
+    let uploaded_bytes = Arc::new(AtomicU64::new(0));
+    let progress = Arc::clone(&uploaded_bytes);
+    let stream = ReaderStream::new(file).map(move |chunk| {
+        if let Ok(bytes) = &chunk {
+            progress.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+        }
+        chunk
+    });
+    let body = reqwest::Body::wrap_stream(stream);
+    let request = client
+        .post(cdn_url)
+        .header("Content-Type", "application/octet-stream")
+        .header(reqwest::header::CONTENT_LENGTH, ciphertext_size)
+        // No wall-clock request deadline: a large upload may legitimately take a
+        // long time. The activity monitor below stops only a stalled transfer.
+        .body(body)
+        .send();
+    tokio::pin!(request);
+    let started = Instant::now();
+    let mut activity = UploadActivity::new(started);
+    let mut monitor = tokio::time::interval_at(
+        tokio::time::Instant::now() + activity_check_interval,
+        activity_check_interval,
+    );
+    monitor.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            result = &mut request => {
+                return result.map_err(|error| {
+                    let kind = if error.is_timeout() {
+                        claw_core::channel_provider_error::ChannelProviderTransportKind::Timeout
+                    } else if error.is_connect() {
+                        claw_core::channel_provider_error::ChannelProviderTransportKind::Connect
+                    } else if error.is_body() {
+                        claw_core::channel_provider_error::ChannelProviderTransportKind::Body
+                    } else {
+                        claw_core::channel_provider_error::ChannelProviderTransportKind::Request
+                    };
+                    claw_core::channel_provider_error::ChannelProviderError::from_transport(
+                        "wechat_ilink",
+                        "upload_media",
+                        kind,
+                        &error.to_string(),
+                    )
+                    .to_string()
+                });
+            }
+            _ = monitor.tick() => {
+                let transferred = uploaded_bytes.load(Ordering::Relaxed);
+                if activity.stalled(transferred, Instant::now(), stall_timeout) {
+                    return Err(
+                        claw_core::channel_provider_error::ChannelProviderError::from_transport(
+                            "wechat_ilink",
+                            "upload_media",
+                            claw_core::channel_provider_error::ChannelProviderTransportKind::Timeout,
+                            &format!("{label}:upload_stalled:{transferred}:{ciphertext_size}"),
+                        )
+                        .to_string(),
+                    );
+                }
+            }
+        }
+    }
 }
 
 pub fn media_aes_key_b64_from_hex(aeskey_hex: &str) -> Result<String, String> {

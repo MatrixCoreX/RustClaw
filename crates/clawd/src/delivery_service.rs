@@ -42,6 +42,7 @@ pub(crate) struct ChannelDeliveryServiceResult {
     pub(crate) error_code: Option<String>,
     pub(crate) message_key: Option<String>,
     pub(crate) retryable: bool,
+    pub(crate) failed_parts: Vec<crate::channel_send::ChannelSendPartFailure>,
 }
 
 impl ChannelDeliveryServiceResult {
@@ -342,6 +343,7 @@ async fn deliver_task_envelope_once(
                 error_code: None,
                 message_key: None,
                 retryable: false,
+                failed_parts: Vec::new(),
             });
         }
         ClaimChannelDeliveryDispatchOutcome::QueryRequired => {
@@ -351,6 +353,7 @@ async fn deliver_task_envelope_once(
                 error_code: None,
                 message_key: None,
                 retryable: false,
+                failed_parts: Vec::new(),
             });
         }
     };
@@ -361,7 +364,7 @@ async fn deliver_task_envelope_once(
         .map(|segment| segment.text.as_str())
         .collect::<Vec<_>>()
         .join("\n");
-    let (send_result, observed_provider_message_ids) =
+    let (send_result, observed_progress) =
         crate::channel_send::capture_channel_send_progress(send_with_dispatch_lease(
             state,
             &envelope.idempotency_key,
@@ -377,6 +380,8 @@ async fn deliver_task_envelope_once(
             ),
         ))
         .await;
+    let observed_provider_message_ids = observed_progress.provider_message_ids;
+    let failed_parts = observed_progress.part_failures;
     let now = crate::now_ts_u64();
     let receipt = match send_result {
         Ok(mut outcome) => {
@@ -413,13 +418,23 @@ async fn deliver_task_envelope_once(
                     },
                 )
                 .collect::<Vec<_>>();
-            if partial {
+            if failed_parts.is_empty() {
                 parts.push(ChannelDeliveryPartReceipt {
                     part_index: parts.len() as u32,
                     status: ChannelDeliveryStatus::Failed,
                     provider_message_id: None,
                     error_code: Some(error_code.clone()),
                 });
+            } else {
+                let failed_base = parts.len() as u32;
+                parts.extend(failed_parts.iter().enumerate().map(|(offset, failure)| {
+                    ChannelDeliveryPartReceipt {
+                        part_index: failed_base.saturating_add(offset as u32),
+                        status: ChannelDeliveryStatus::Failed,
+                        provider_message_id: None,
+                        error_code: Some(failure.error_code.clone()),
+                    }
+                }));
             }
             ChannelDeliveryReceipt {
                 schema_version: CHANNEL_DELIVERY_RECEIPT_SCHEMA_VERSION,
@@ -463,6 +478,7 @@ async fn deliver_task_envelope_once(
         message_key: receipt.message_key.clone(),
         retryable: receipt.retryable,
         receipt: Some(receipt),
+        failed_parts,
     })
 }
 
@@ -586,6 +602,7 @@ fn result_from_existing_receipt(receipt: ChannelDeliveryReceipt) -> ChannelDeliv
         message_key: receipt.message_key.clone(),
         retryable: receipt.retryable,
         receipt: Some(receipt),
+        failed_parts: Vec::new(),
     }
 }
 

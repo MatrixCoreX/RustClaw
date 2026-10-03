@@ -108,6 +108,46 @@ fn notice_uses_verified_paths_and_cannot_resend_attachments() {
     }
 }
 
+#[test]
+fn notice_targets_only_the_failed_file_when_other_parts_succeeded() {
+    let root = TempFiles::new();
+    let transcript = root.file("transcript.txt").canonicalize().unwrap();
+    let video = root.file("clip.mp4").canonicalize().unwrap();
+    let state = AppState::test_default_with_fixture_provider();
+    let (task, payload) = task();
+    let envelope = super::super::build_scheduled_delivery_envelope(
+        &state,
+        &task,
+        &payload,
+        &format!(
+            "FILE:{}\nVIDEO_FILE:{}",
+            transcript.display(),
+            video.display()
+        ),
+    )
+    .unwrap();
+    let failures = vec![crate::channel_send::ChannelSendPartFailure {
+        part_kind: "video".to_string(),
+        part_index: 1,
+        local_path: Some(video.clone()),
+        error_code: "channel_media_too_large".to_string(),
+        message_key: "channel.media.preflight.too_large".to_string(),
+        actual_bytes: Some(127_140_539),
+        max_bytes: Some(104_857_600),
+    }];
+
+    let files = failed_file_locations(&envelope, &root.0, &failures);
+
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].path, video.to_string_lossy());
+    assert_eq!(
+        files[0].error_code.as_deref(),
+        Some("channel_media_too_large")
+    );
+    assert_eq!(files[0].actual_bytes, Some(127_140_539));
+    assert_eq!(files[0].max_bytes, Some(104_857_600));
+}
+
 #[derive(Clone, Default)]
 struct MockState {
     prompts: Arc<Mutex<Vec<String>>>,

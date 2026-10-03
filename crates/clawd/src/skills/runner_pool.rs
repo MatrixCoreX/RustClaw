@@ -265,6 +265,35 @@ fn schedule_runner_reap(mut process: WarmRunnerProcess) {
 }
 
 #[cfg(target_os = "linux")]
+fn linux_process_resident_and_swap_kib(pid: u32) -> Option<u64> {
+    if let Ok(rollup) = std::fs::read_to_string(format!("/proc/{pid}/smaps_rollup")) {
+        let mut pss_kib = None;
+        let mut swap_pss_kib = 0_u64;
+        for line in rollup.lines() {
+            let value = |prefix: &str| {
+                line.strip_prefix(prefix)
+                    .and_then(|raw| raw.split_whitespace().next())
+                    .and_then(|raw| raw.parse::<u64>().ok())
+            };
+            if let Some(value) = value("Pss:") {
+                pss_kib = Some(value);
+            } else if let Some(value) = value("SwapPss:") {
+                swap_pss_kib = value;
+            }
+        }
+        if let Some(pss_kib) = pss_kib {
+            return Some(pss_kib.saturating_add(swap_pss_kib));
+        }
+    }
+    let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+    status.lines().find_map(|line| {
+        line.strip_prefix("VmRSS:")
+            .and_then(|value| value.split_whitespace().next())
+            .and_then(|value| value.parse::<u64>().ok())
+    })
+}
+
+#[cfg(target_os = "linux")]
 pub(crate) fn process_tree_resident_memory_mib(pid: u32) -> Option<u64> {
     let mut pending = vec![pid];
     let mut visited = std::collections::HashSet::new();
@@ -274,15 +303,9 @@ pub(crate) fn process_tree_resident_memory_mib(pid: u32) -> Option<u64> {
         if !visited.insert(current) {
             continue;
         }
-        if let Ok(status) = std::fs::read_to_string(format!("/proc/{current}/status")) {
-            if let Some(kib) = status.lines().find_map(|line| {
-                line.strip_prefix("VmRSS:")
-                    .and_then(|value| value.split_whitespace().next())
-                    .and_then(|value| value.parse::<u64>().ok())
-            }) {
-                total_kib = total_kib.saturating_add(kib);
-                observed = true;
-            }
+        if let Some(kib) = linux_process_resident_and_swap_kib(current) {
+            total_kib = total_kib.saturating_add(kib);
+            observed = true;
         }
         if let Ok(children) =
             std::fs::read_to_string(format!("/proc/{current}/task/{current}/children"))

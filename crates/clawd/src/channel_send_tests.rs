@@ -34,13 +34,68 @@ fn wechat_part_failure_is_retained_without_suppressing_later_parts() {
         .into_iter()
         .enumerate()
     {
-        if record_wechat_part_result(&mut first_error, result, "fixture", index) {
+        if record_wechat_part_result(&mut first_error, result, "fixture", index, None) {
             accepted.push(index);
         }
     }
 
     assert_eq!(accepted, vec![0, 2]);
     assert_eq!(first_error.as_deref(), Some("video rejected"));
+}
+
+#[test]
+fn wechat_delivers_small_files_before_slow_media_without_reordering_images() {
+    let root = std::env::temp_dir().join(format!(
+        "agent-runtime-wechat-media-priority-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&root).expect("create media priority fixture");
+    let video = root.join("clip.mp4");
+    let audio = root.join("audio.wav");
+    let transcript = root.join("transcript.txt");
+    let image_one = root.join("01.jpg");
+    let image_two = root.join("02.jpg");
+    std::fs::write(&video, vec![0_u8; 4_096]).expect("write video fixture");
+    std::fs::write(&audio, vec![0_u8; 2_048]).expect("write audio fixture");
+    std::fs::write(&transcript, b"reviewed transcript").expect("write transcript fixture");
+    std::fs::write(&image_one, vec![0_u8; 300]).expect("write image fixture");
+    std::fs::write(&image_two, vec![0_u8; 100]).expect("write image fixture");
+
+    let mut media = vec![
+        WechatOutboundMedia {
+            kind: WechatOutboundKind::Video,
+            source: WechatOutboundSource::LocalPath(video.clone()),
+        },
+        // A derived audio artifact may arrive through a generic FILE token.
+        WechatOutboundMedia {
+            kind: WechatOutboundKind::File,
+            source: WechatOutboundSource::LocalPath(audio.clone()),
+        },
+        WechatOutboundMedia {
+            kind: WechatOutboundKind::Image,
+            source: WechatOutboundSource::LocalPath(image_one.clone()),
+        },
+        WechatOutboundMedia {
+            kind: WechatOutboundKind::Image,
+            source: WechatOutboundSource::LocalPath(image_two.clone()),
+        },
+        WechatOutboundMedia {
+            kind: WechatOutboundKind::File,
+            source: WechatOutboundSource::LocalPath(transcript.clone()),
+        },
+    ];
+
+    prioritize_wechat_outbound_media(&mut media);
+
+    let paths = media
+        .iter()
+        .map(|item| match &item.source {
+            WechatOutboundSource::LocalPath(path) => path.clone(),
+            WechatOutboundSource::RemoteUrl(_) => panic!("unexpected remote fixture"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(paths, vec![transcript, audio, image_one, image_two, video]);
+    std::fs::remove_dir_all(root).expect("remove media priority fixture");
 }
 
 #[test]
@@ -77,14 +132,28 @@ text_chunk_chars = 1200
 
 #[tokio::test]
 async fn channel_send_progress_survives_a_later_part_failure() {
-    let (result, provider_message_ids) = capture_channel_send_progress(async {
+    let (result, progress) = capture_channel_send_progress(async {
         record_provider_message_id("provider-part-1");
+        record_channel_send_part_failure(
+            "video",
+            1,
+            Some(Path::new("/tmp/fixture-video.mp4")),
+            "channel_media_preflight_failed:channel_media_too_large:127140539:104857600",
+        );
         Result::<(), String>::Err("later part failed".to_string())
     })
     .await;
 
     assert_eq!(result, Err("later part failed".to_string()));
-    assert_eq!(provider_message_ids, vec!["provider-part-1"]);
+    assert_eq!(progress.provider_message_ids, vec!["provider-part-1"]);
+    assert_eq!(progress.part_failures.len(), 1);
+    let failure = &progress.part_failures[0];
+    assert_eq!(failure.part_kind, "video");
+    assert_eq!(failure.part_index, 1);
+    assert_eq!(failure.error_code, "channel_media_too_large");
+    assert_eq!(failure.message_key, "channel.media.preflight.too_large");
+    assert_eq!(failure.actual_bytes, Some(127_140_539));
+    assert_eq!(failure.max_bytes, Some(104_857_600));
 }
 use axum::body::Bytes;
 use axum::extract::State;

@@ -2,7 +2,7 @@ schema_version = 2
 
 [package]
 name = "media_download"
-version = "0.3.44"
+version = "0.3.45"
 description = "Download public media and image articles, including background audio attached to image posts. Text results are delivered as complete inline text plus a UTF-8 artifact. Explicit image OCR uses Tesseract followed by skill-owned model review for sentence boundaries, layout, punctuation, and highly certain recognition errors, with raw-text fallback. Local speech recognition is isolated in the optional local_asr package."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]

@@ -1,6 +1,8 @@
 import importlib.util
 from pathlib import Path
+import socket
 import sys
+import tempfile
 import unittest
 
 
@@ -197,6 +199,32 @@ class XiaohongshuAccessTest(unittest.TestCase):
             ["--ozone-platform=wayland"],
         )
         self.assertEqual(self.access.visible_chrome_args({"DISPLAY": ":0"}, "linux"), [])
+
+    def test_discovers_current_user_wayland_session_for_system_service(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            runtime = Path(root)
+            wayland_path = runtime / "wayland-7"
+            authority_path = runtime / ".mutter-Xwaylandauth.fixture"
+            authority_path.write_text("fixture", encoding="utf-8")
+            listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                listener.bind(str(wayland_path))
+                environment = self.access.desktop_session_environment(
+                    {},
+                    "linux",
+                    runtime,
+                )
+            finally:
+                listener.close()
+
+            self.assertEqual(environment["XDG_RUNTIME_DIR"], str(runtime))
+            self.assertEqual(environment["WAYLAND_DISPLAY"], "wayland-7")
+            self.assertEqual(environment["XAUTHORITY"], str(authority_path))
+            self.assertTrue(self.access.desktop_display_available(environment, "linux"))
+            self.assertEqual(
+                self.access.visible_chrome_args(environment, "linux"),
+                ["--ozone-platform=wayland"],
+            )
 
     def test_manifest_forwards_host_display_variables(self) -> None:
         manifest = (Path(__file__).parents[1] / "skill.toml").read_text(encoding="utf-8")

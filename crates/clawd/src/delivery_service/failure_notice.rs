@@ -62,6 +62,14 @@ struct FileLocation {
     directory: String,
     size_bytes: Option<u64>,
     exists: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    actual_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_bytes: Option<u64>,
 }
 
 fn file_locations(envelope: &ChannelDeliveryEnvelope, workspace: &Path) -> Vec<FileLocation> {
@@ -92,7 +100,39 @@ fn file_locations(envelope: &ChannelDeliveryEnvelope, workspace: &Path) -> Vec<F
                 path: path.to_string_lossy().into_owned(),
                 size_bytes: metadata.as_ref().map(|metadata| metadata.len()),
                 exists: metadata.is_some(),
+                error_code: None,
+                message_key: None,
+                actual_bytes: None,
+                max_bytes: None,
             })
+        })
+        .collect()
+}
+
+fn failed_file_locations(
+    envelope: &ChannelDeliveryEnvelope,
+    workspace: &Path,
+    failures: &[crate::channel_send::ChannelSendPartFailure],
+) -> Vec<FileLocation> {
+    let all_files = file_locations(envelope, workspace);
+    let path_failures = failures
+        .iter()
+        .filter_map(|failure| failure.local_path.as_ref().map(|path| (path, failure)))
+        .collect::<Vec<_>>();
+    if path_failures.is_empty() {
+        return all_files;
+    }
+    all_files
+        .into_iter()
+        .filter_map(|mut file| {
+            let failure = path_failures.iter().find_map(|(path, failure)| {
+                (path.to_string_lossy() == file.path).then_some(*failure)
+            })?;
+            file.error_code = Some(failure.error_code.clone());
+            file.message_key = Some(failure.message_key.clone());
+            file.actual_bytes = failure.actual_bytes;
+            file.max_bytes = failure.max_bytes;
+            Some(file)
         })
         .collect()
 }
@@ -142,7 +182,11 @@ pub(super) async fn deliver(
     if !should_notify(original, result) {
         return Ok(());
     }
-    let files = file_locations(original, &state.skill_rt.workspace_root);
+    let files = failed_file_locations(
+        original,
+        &state.skill_rt.workspace_root,
+        &result.failed_parts,
+    );
     if files.is_empty() {
         return Ok(());
     }
@@ -181,7 +225,11 @@ pub(super) async fn deliver(
         "message_key": receipt.message_key,
         "provider_error_code": receipt.provider_error_code,
         "accepted_part_count": receipt.provider_message_ids.len(),
-        "individual_file_delivery_status": "not_individually_confirmed",
+        "individual_file_delivery_status": if result.failed_parts.is_empty() {
+            "not_individually_confirmed"
+        } else {
+            "failed_files_exact"
+        },
         "files": files,
     });
     let (template, source) =

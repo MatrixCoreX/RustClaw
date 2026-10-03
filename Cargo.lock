@@ -5666,6 +5666,7 @@ dependencies = [
  "base64 0.22.1",
  "cipher",
  "claw-core",
+ "futures-util",
  "hex",
  "md-5",
  "rand 0.8.5",

@@ -324,7 +324,7 @@ def desktop_display_available(
     platform: str | None = None,
 ) -> bool:
     host = platform or sys.platform
-    env = os.environ if environment is None else environment
+    env = desktop_session_environment(environment, host)
     if host == "darwin":
         return True
     if host.startswith("linux"):
@@ -337,10 +337,75 @@ def visible_chrome_args(
     platform: str | None = None,
 ) -> list[str]:
     host = platform or sys.platform
-    env = os.environ if environment is None else environment
+    env = desktop_session_environment(environment, host)
     if host.startswith("linux") and env.get("WAYLAND_DISPLAY"):
         return ["--ozone-platform=wayland"]
     return []
+
+
+def desktop_session_environment(
+    environment: dict[str, str] | None = None,
+    platform: str | None = None,
+    runtime_dir: str | Path | None = None,
+) -> dict[str, str]:
+    """Resolve the current user's graphical session without importing credentials.
+
+    System services commonly start without the display variables that a login
+    shell receives even though the same Unix user owns an active desktop. Only
+    discover sockets and Xwayland authority files inside that user's runtime
+    directory; explicit environments remain unchanged unless a runtime directory
+    is supplied for deterministic tests.
+    """
+    host = platform or sys.platform
+    env = dict(os.environ if environment is None else environment)
+    discover = environment is None or runtime_dir is not None
+    if not host.startswith("linux") or not discover:
+        return env
+
+    resolved_runtime = Path(runtime_dir) if runtime_dir is not None else None
+    if resolved_runtime is None:
+        configured_runtime = env.get("XDG_RUNTIME_DIR", "").strip()
+        resolved_runtime = (
+            Path(configured_runtime)
+            if configured_runtime
+            else Path("/run/user") / str(os.geteuid())
+        )
+    if not resolved_runtime.is_dir():
+        return env
+    env.setdefault("XDG_RUNTIME_DIR", str(resolved_runtime))
+
+    if not env.get("WAYLAND_DISPLAY"):
+        for candidate in sorted(resolved_runtime.glob("wayland-*")):
+            try:
+                if candidate.is_socket():
+                    env["WAYLAND_DISPLAY"] = candidate.name
+                    break
+            except OSError:
+                continue
+
+    if not env.get("DISPLAY"):
+        x11_socket_root = Path("/tmp/.X11-unix")
+        try:
+            x11_sockets = sorted(x11_socket_root.glob("X*"))
+        except OSError:
+            x11_sockets = []
+        for candidate in x11_sockets:
+            try:
+                if candidate.is_socket() and candidate.name[1:].isdigit():
+                    env["DISPLAY"] = f":{candidate.name[1:]}"
+                    break
+            except OSError:
+                continue
+
+    if not env.get("XAUTHORITY"):
+        for candidate in sorted(resolved_runtime.glob(".mutter-Xwaylandauth.*")):
+            try:
+                if candidate.is_file():
+                    env["XAUTHORITY"] = str(candidate)
+                    break
+            except OSError:
+                continue
+    return env
 
 
 def note_access_ready(snapshot: dict[str, Any], note_id: str | None) -> bool:
@@ -427,12 +492,13 @@ def wait_for_skill_owned_access(
     on_tick: Callable[[], None] | None = None,
 ) -> SkillOwnedAccessResult:
     """Open the private profile and return only after the requested media is readable."""
-    if not desktop_display_available():
+    desktop_environment = desktop_session_environment()
+    if not desktop_display_available(desktop_environment):
         return SkillOwnedAccessResult(DISPLAY_UNAVAILABLE)
     port, debug_args = _devtools_port()
     command = [
         chrome,
-        *visible_chrome_args(),
+        *visible_chrome_args(desktop_environment),
         "--disable-gpu",
         "--no-sandbox",
         "--disable-dev-shm-usage",
@@ -446,6 +512,7 @@ def wait_for_skill_owned_access(
     ]
     process = subprocess.Popen(
         command,
+        env=desktop_environment,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=os.name == "posix",

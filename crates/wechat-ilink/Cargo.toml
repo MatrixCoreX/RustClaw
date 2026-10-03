@@ -12,6 +12,7 @@ aes = "0.8"
 base64.workspace = true
 claw-core = { path = "../claw-core" }
 cipher = "0.4"
+futures-util = "0.3"
 hex = "0.4"
 md-5 = "0.10"
 rand = "0.8"

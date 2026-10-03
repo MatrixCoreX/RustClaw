@@ -14,7 +14,10 @@ const LOW_MEMORY_HOST_MAX_MIB: u64 = 2 * 1024;
 const CONSTRAINED_MEMORY_HOST_MAX_MIB: u64 = 4 * 1024;
 const DEFAULT_SKILL_MEMORY_MIB: u64 = 128;
 const BROWSER_SLOT_MEMORY_FLOOR_MIB: u64 = 384;
-const RESOURCE_ESTIMATE_CACHE_SCHEMA_VERSION: u32 = 1;
+// Version 2 records proportional-set-size plus swapped proportional pages on
+// Linux. Version 1 summed VmRSS across a process tree and therefore counted
+// shared browser/model pages repeatedly, inflating later admission requests.
+const RESOURCE_ESTIMATE_CACHE_SCHEMA_VERSION: u32 = 2;
 const RESOURCE_ESTIMATE_MIN_SAMPLES: u64 = 3;
 const RESOURCE_ESTIMATE_MAX_ENTRIES: usize = 512;
 const RESOURCE_ESTIMATE_MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;

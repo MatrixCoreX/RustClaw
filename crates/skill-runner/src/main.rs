@@ -736,6 +736,42 @@ struct DurableSlotLeases {
     _global: File,
 }
 
+struct DurableQueueTicket {
+    _file: Option<File>,
+    path: PathBuf,
+    active: bool,
+}
+
+impl DurableQueueTicket {
+    fn finish(mut self) -> Result<(), String> {
+        self.active = false;
+        if let Some(file) = self._file.take() {
+            fs2::FileExt::unlock(&file)
+                .map_err(|error| format!("durable_skill_queue_ticket_unlock_failed: {error}"))?;
+            drop(file);
+        }
+        std::fs::remove_file(&self.path).map_err(|error| {
+            format!(
+                "durable_skill_queue_ticket_remove_failed: path={} error={error}",
+                self.path.display()
+            )
+        })?;
+        Ok(())
+    }
+}
+
+impl Drop for DurableQueueTicket {
+    fn drop(&mut self) {
+        if self.active {
+            if let Some(file) = self._file.take() {
+                let _ = fs2::FileExt::unlock(&file);
+                drop(file);
+            }
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
 async fn acquire_durable_slots(
     durable: Option<&DurableJobRuntime>,
 ) -> Result<Option<DurableSlotLeases>, String> {
@@ -769,9 +805,12 @@ async fn acquire_durable_slots_from_roots(
     std::fs::create_dir_all(&skill_root)
         .map_err(|error| format!("durable_skill_slot_root_create_failed: {error}"))?;
     durable.mark_queue_waiting()?;
+    let queue_ticket = create_durable_queue_ticket(durable, skill_root)?;
     // Wait for the skill-specific lane before occupying a global worker slot.
     // A burst for one serialized skill must not starve unrelated skills.
-    let (skill_slot, skill_lease) = acquire_durable_slot(&skill_root, skill_limit).await?;
+    let (skill_slot, skill_lease) =
+        acquire_durable_slot_in_queue(skill_root, skill_limit, &queue_ticket).await?;
+    queue_ticket.finish()?;
     let (global_slot, global_lease) = acquire_durable_slot(&global_root, global_limit).await?;
     durable.mark_slots_acquired(global_slot, skill_slot)?;
     Ok(DurableSlotLeases {
@@ -795,23 +834,170 @@ fn durable_slot_limit(env_name: &str) -> Result<usize, String> {
         .ok_or_else(|| format!("durable_slot_limit_invalid: env={env_name}"))
 }
 
+fn create_durable_queue_ticket(
+    durable: &DurableJobRuntime,
+    skill_root: &Path,
+) -> Result<DurableQueueTicket, String> {
+    let waiters = skill_root.join("waiters");
+    std::fs::create_dir_all(&waiters)
+        .map_err(|error| format!("durable_skill_queue_directory_create_failed: {error}"))?;
+    let sequence_lock = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(waiters.join("sequence.lock"))
+        .map_err(|error| format!("durable_skill_queue_sequence_open_failed: {error}"))?;
+    sequence_lock
+        .lock_exclusive()
+        .map_err(|error| format!("durable_skill_queue_sequence_lock_failed: {error}"))?;
+    let sequence = next_durable_queue_sequence(&waiters)?;
+    let job_component = durable
+        .directory
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("job");
+    let ticket_name = format!("ticket-{sequence:020}-{job_component}");
+    let ticket_path = waiters.join(&ticket_name);
+    let ticket_file = OpenOptions::new()
+        .create_new(true)
+        .read(true)
+        .write(true)
+        .open(&ticket_path)
+        .map_err(|error| format!("durable_skill_queue_ticket_create_failed: {error}"))?;
+    if let Err(error) = ticket_file.lock_exclusive() {
+        let _ = std::fs::remove_file(&ticket_path);
+        return Err(format!("durable_skill_queue_ticket_lock_failed: {error}"));
+    }
+    fs2::FileExt::unlock(&sequence_lock)
+        .map_err(|error| format!("durable_skill_queue_sequence_unlock_failed: {error}"))?;
+    durable.write_marker("queue_ticket", &ticket_name)?;
+    Ok(DurableQueueTicket {
+        _file: Some(ticket_file),
+        path: ticket_path,
+        active: true,
+    })
+}
+
+fn next_durable_queue_sequence(waiters: &Path) -> Result<u64, String> {
+    let mut next = 0_u64;
+    let entries = std::fs::read_dir(waiters)
+        .map_err(|error| format!("durable_skill_queue_directory_read_failed: {error}"))?;
+    for entry in entries {
+        let entry =
+            entry.map_err(|error| format!("durable_skill_queue_entry_read_failed: {error}"))?;
+        let Some(name) = entry.file_name().to_str().map(ToString::to_string) else {
+            continue;
+        };
+        let Some(sequence) = name
+            .strip_prefix("ticket-")
+            .and_then(|value| value.split('-').next())
+            .and_then(|value| value.parse::<u64>().ok())
+        else {
+            continue;
+        };
+        next = next.max(sequence.saturating_add(1));
+    }
+    Ok(next)
+}
+
+async fn acquire_durable_slot_in_queue(
+    slot_root: &Path,
+    limit: usize,
+    ticket: &DurableQueueTicket,
+) -> Result<(usize, File), String> {
+    let waiters = ticket
+        .path
+        .parent()
+        .ok_or_else(|| "durable_skill_queue_ticket_parent_missing".to_string())?;
+    loop {
+        let live_tickets = live_durable_queue_tickets(waiters, &ticket.path)?;
+        let position = live_tickets
+            .iter()
+            .position(|path| path == &ticket.path)
+            .ok_or_else(|| "durable_skill_queue_ticket_missing".to_string())?;
+        if position < limit {
+            if let Some(slot) = try_acquire_durable_slot(slot_root, limit)? {
+                return Ok(slot);
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+fn live_durable_queue_tickets(
+    waiters: &Path,
+    current_ticket: &Path,
+) -> Result<Vec<PathBuf>, String> {
+    let sequence_lock = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(waiters.join("sequence.lock"))
+        .map_err(|error| format!("durable_skill_queue_sequence_open_failed: {error}"))?;
+    sequence_lock
+        .lock_exclusive()
+        .map_err(|error| format!("durable_skill_queue_sequence_lock_failed: {error}"))?;
+    let mut tickets = std::fs::read_dir(waiters)
+        .map_err(|error| format!("durable_skill_queue_directory_read_failed: {error}"))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|value| value.to_str())
+                .is_some_and(|name| name.starts_with("ticket-"))
+        })
+        .collect::<Vec<_>>();
+    tickets.sort();
+    tickets.retain(|path| {
+        if path == current_ticket {
+            return true;
+        }
+        let Ok(file) = OpenOptions::new().read(true).write(true).open(path) else {
+            return false;
+        };
+        match file.try_lock_exclusive() {
+            Ok(()) => {
+                let _ = fs2::FileExt::unlock(&file);
+                drop(file);
+                let _ = std::fs::remove_file(path);
+                false
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => true,
+            Err(_) => true,
+        }
+    });
+    fs2::FileExt::unlock(&sequence_lock)
+        .map_err(|error| format!("durable_skill_queue_sequence_unlock_failed: {error}"))?;
+    Ok(tickets)
+}
+
+fn try_acquire_durable_slot(
+    slot_root: &Path,
+    limit: usize,
+) -> Result<Option<(usize, File)>, String> {
+    for slot in 0..limit {
+        let path = slot_root.join(format!("slot-{slot}.lock"));
+        let file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(&path)
+            .map_err(|error| format!("durable_skill_slot_open_failed: {error}"))?;
+        match file.try_lock_exclusive() {
+            Ok(()) => return Ok(Some((slot, file))),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(error) => {
+                return Err(format!("durable_skill_slot_lock_failed: {error}"));
+            }
+        }
+    }
+    Ok(None)
+}
+
 async fn acquire_durable_slot(slot_root: &Path, limit: usize) -> Result<(usize, File), String> {
     loop {
-        for slot in 0..limit {
-            let path = slot_root.join(format!("slot-{slot}.lock"));
-            let file = OpenOptions::new()
-                .create(true)
-                .read(true)
-                .write(true)
-                .open(&path)
-                .map_err(|error| format!("durable_skill_slot_open_failed: {error}"))?;
-            match file.try_lock_exclusive() {
-                Ok(()) => return Ok((slot, file)),
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
-                Err(error) => {
-                    return Err(format!("durable_skill_slot_lock_failed: {error}"));
-                }
-            }
+        if let Some(slot) = try_acquire_durable_slot(slot_root, limit)? {
+            return Ok(slot);
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }

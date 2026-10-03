@@ -44,7 +44,7 @@ pub(super) async fn recover_task_creations_once(state: &AppState) -> anyhow::Res
     let mut settled = 0;
     for candidate in candidates {
         let input_id = candidate.record.receipt.input_id;
-        let claim = crate::repo::conversation_inputs::claim_or_bind_conversation_input_task(
+        let claim = crate::repo::conversation_inputs::claim_independent_conversation_input_task(
             &state.core.db,
             &candidate.scope,
             input_id,
@@ -93,7 +93,7 @@ pub(super) async fn recover_task_creations_once(state: &AppState) -> anyhow::Res
         .await
         {
             Ok(task_id) => {
-                match crate::repo::conversation_inputs::complete_conversation_input_task_claim(
+                match crate::repo::conversation_inputs::complete_independent_conversation_input_task_claim(
                     &state.core.db,
                     &candidate.scope,
                     input_id,

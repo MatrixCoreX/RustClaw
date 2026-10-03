@@ -941,6 +941,19 @@ fn round_machine_blocker_resume_reason(
     outcome: Option<&RoundOutcome>,
     loop_state: &LoopState,
 ) -> Option<&'static str> {
+    // A newly accepted async job is the current machine state. Historical
+    // provider/resource refusals must not overwrite its poll checkpoint, or
+    // the replay path can start the same external action a second time.
+    if outcome.and_then(|round| round.stop_signal.as_deref())
+        == Some("async_job_checkpoint_waiting")
+        || loop_state
+            .task_checkpoint
+            .as_ref()
+            .and_then(|checkpoint| checkpoint.get("pending_async_job"))
+            .is_some_and(Value::is_object)
+    {
+        return None;
+    }
     if outcome.and_then(|round| round.stop_signal.as_deref()) == Some("resource_admission_wait")
         && loop_state.resource_wait_replay_action.is_some()
     {

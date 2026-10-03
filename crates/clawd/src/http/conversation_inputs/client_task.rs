@@ -113,6 +113,22 @@ pub(crate) async fn accept_client_task(
             Ok(accepted) => accepted.record,
             Err(error) => return store_error(error),
         };
+    let adopt_expected_task = accepted.receipt.target_task_id.is_none()
+        && request.input.delivery_mode == ConversationInputDeliveryMode::Auto
+        && request.input.expected_task_id.is_some();
+    if adopt_expected_task {
+        let expected_task_id = request.input.expected_task_id.expect("checked above");
+        accepted = match crate::repo::conversation_inputs::bind_conversation_input_to_task(
+            &state.core.db,
+            &scope,
+            accepted.receipt.input_id,
+            expected_task_id,
+            crate::repo::conversation_inputs::ConversationInputTaskBinding::ExistingActiveTask,
+        ) {
+            Ok(record) => record,
+            Err(error) => return store_error(error),
+        };
+    }
     crate::conversation_input_event_transport::notify(&state);
     if request.input.delivery_mode == ConversationInputDeliveryMode::Defer {
         return handoff_response(
@@ -123,11 +139,17 @@ pub(crate) async fn accept_client_task(
     if accepted.receipt.target_task_id.is_some() {
         interrupt_bound_model_turn(&state, &accepted.receipt);
         crate::conversation_input_event_transport::notify(&state);
+        if request.input.expected_task_id.is_some() {
+            return handoff_response(
+                accepted.receipt,
+                ConversationInputTaskHandoffState::BoundExistingTask,
+            );
+        }
         return existing_handoff_response(&state, &identity, accepted);
     }
 
     let (creator, claim_token) =
-        match crate::repo::conversation_inputs::claim_or_bind_conversation_input_task(
+        match crate::repo::conversation_inputs::claim_independent_conversation_input_task(
             &state.core.db,
             &scope,
             accepted.receipt.input_id,
@@ -190,13 +212,15 @@ pub(crate) async fn accept_client_task(
                 .unwrap_or_else(|| "conversation_input_task_submit_failed".to_string()),
         );
     };
-    if let Err(error) = crate::repo::conversation_inputs::complete_conversation_input_task_claim(
-        &state.core.db,
-        &scope,
-        creator.receipt.input_id,
-        claim_token,
-        task.task_id,
-    ) {
+    if let Err(error) =
+        crate::repo::conversation_inputs::complete_independent_conversation_input_task_claim(
+            &state.core.db,
+            &scope,
+            creator.receipt.input_id,
+            claim_token,
+            task.task_id,
+        )
+    {
         let _ = crate::repo::conversation_inputs::release_conversation_input_task_claim(
             &state.core.db,
             &scope,
@@ -383,7 +407,7 @@ async fn wait_for_binding_or_creation_claim(
     const ATTEMPTS: usize = 200;
     for _ in 0..ATTEMPTS {
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-        match crate::repo::conversation_inputs::claim_or_bind_conversation_input_task(
+        match crate::repo::conversation_inputs::claim_independent_conversation_input_task(
             &state.core.db,
             scope,
             input_id,

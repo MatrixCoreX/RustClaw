@@ -204,7 +204,7 @@ fn accept_conversation_input_in_db(
     input: &AcceptConversationInput,
     now_ts: u64,
 ) -> Result<AcceptConversationInputOutcome, ConversationInputStoreError> {
-    accept_conversation_input_in_db_with_resources(db, input, None, &[], now_ts)
+    accept_conversation_input_in_db_with_resources(db, input, None, &[], true, now_ts)
 }
 
 fn accept_conversation_input_in_db_with_resources(
@@ -212,6 +212,7 @@ fn accept_conversation_input_in_db_with_resources(
     input: &AcceptConversationInput,
     template: Option<&ConversationInputTaskTemplate>,
     attachments: &[ConversationInputAttachmentBinding],
+    bind_focused_task: bool,
     now_ts: u64,
 ) -> Result<AcceptConversationInputOutcome, ConversationInputStoreError> {
     let request_digest = request_digest(&input.submission)?;
@@ -312,6 +313,11 @@ fn accept_conversation_input_in_db_with_resources(
         instruction_revision,
         expected_unfocused_task_is_owned,
     )?;
+    let target_task_id = if bind_focused_task {
+        focus_task_id.clone()
+    } else {
+        None
+    };
 
     let input_id = Uuid::new_v4();
     let content_json = serde_json::to_string(&input.submission.content).map_err(json_error)?;
@@ -360,7 +366,7 @@ fn accept_conversation_input_in_db_with_resources(
                 .expected_instruction_revision
                 .map(to_i64)
                 .transpose()?,
-            focus_task_id,
+            target_task_id,
             source_json,
             instruction_revision_i64,
             execution_epoch_i64,
@@ -391,7 +397,8 @@ fn accept_conversation_input_in_db_with_resources(
         )?;
     }
     if let Some(template) = template.filter(|_| {
-        focus_task_id.is_none() && input.submission.delivery_mode == ConversationInputDeliveryMode::Auto
+        target_task_id.is_none()
+            && input.submission.delivery_mode == ConversationInputDeliveryMode::Auto
     }) {
         insert_conversation_input_task_template(
             &tx,
@@ -407,7 +414,7 @@ fn accept_conversation_input_in_db_with_resources(
         "input_seq": input_seq,
         "preparation_state": input.preparation_state,
         "disposition": disposition,
-        "target_task_id": focus_task_id,
+        "target_task_id": target_task_id,
     });
     tx.execute(
         "INSERT INTO conversation_input_events(
@@ -456,7 +463,7 @@ fn accept_conversation_input_in_db_with_resources(
                 scope: input.submission.scope.clone(),
                 preparation_state: input.preparation_state,
                 disposition,
-                target_task_id: focus_task_id.and_then(|value| Uuid::parse_str(&value).ok()),
+                target_task_id: target_task_id.and_then(|value| Uuid::parse_str(&value).ok()),
                 decision_ref: None,
                 instruction_revision,
                 execution_epoch,

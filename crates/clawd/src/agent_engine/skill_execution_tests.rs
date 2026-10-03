@@ -12,10 +12,11 @@ use super::{
     normalize_subagent_stop_signal, preflight_failure_metadata, preflight_permission_decision,
     record_latest_validation_result, record_subagent_step_execution,
     skill_extra_requests_user_input, structured_extra_evidence_output,
-    structured_observation_path_argument_error, take_checkpoint_runner_execution_binding,
-    try_auto_sudo_retry_after_permission_denied, unresolved_runtime_template_argument_error,
-    validate_skill_output_contract, validation_failure_requires_workspace_repair,
-    validation_observation_with_process_status, AgentLoopGuardPolicy, LoopState,
+    structured_observation_path_argument_error, successful_action_resolves_resource_wait,
+    take_checkpoint_runner_execution_binding, try_auto_sudo_retry_after_permission_denied,
+    unresolved_runtime_template_argument_error, validate_skill_output_contract,
+    validation_failure_requires_workspace_repair, validation_observation_with_process_status,
+    AgentLoopGuardPolicy, LoopState,
 };
 use crate::agent_engine::support::{
     AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope,
@@ -32,6 +33,33 @@ mod scope_tests;
 
 #[path = "skill_execution_validation_tests.rs"]
 mod validation_tests;
+
+#[test]
+fn resource_wait_is_cleared_only_by_the_matching_successful_action() {
+    let mut loop_state = LoopState::new();
+    loop_state.resource_wait_replay_action = Some(crate::agent_engine::ResourceWaitReplayAction {
+        tool_or_skill: "media_download".to_string(),
+        action_ref: "media.download".to_string(),
+        args: serde_json::json!({"action": "download", "url": "https://example.test/one"}),
+        continuation_actions: Vec::new(),
+    });
+
+    assert!(!successful_action_resolves_resource_wait(
+        &loop_state,
+        "task_plan",
+        &serde_json::json!({"action": "inspect"}),
+    ));
+    assert!(!successful_action_resolves_resource_wait(
+        &loop_state,
+        "media_download",
+        &serde_json::json!({"action": "download", "url": "https://example.test/two"}),
+    ));
+    assert!(successful_action_resolves_resource_wait(
+        &loop_state,
+        "media_download",
+        &serde_json::json!({"action": "download", "url": "https://example.test/one"}),
+    ));
+}
 
 #[test]
 fn checkpoint_runner_binding_is_consumed_only_by_the_exact_action_version() {

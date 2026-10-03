@@ -84,6 +84,118 @@ async fn failed_durable_job_releases_slots_for_the_next_queued_job() {
     drop(next);
 }
 
+#[tokio::test]
+async fn durable_skill_waiters_acquire_the_lane_in_fifo_order() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let skill_root = root.path().join("skill-slots");
+    let global_root = root.path().join("global-slots");
+    let first_job_root = root.path().join("job-first");
+    let second_job_root = root.path().join("job-second");
+    for path in [&skill_root, &global_root, &first_job_root, &second_job_root] {
+        std::fs::create_dir_all(path).expect("create test directory");
+    }
+    let occupied_skill_slot = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(skill_root.join("slot-0.lock"))
+        .expect("open occupied skill slot");
+    occupied_skill_slot
+        .try_lock_exclusive()
+        .expect("occupy skill slot");
+
+    let (order_tx, mut order_rx) = tokio::sync::mpsc::unbounded_channel();
+    let first = tokio::spawn({
+        let skill_root = skill_root.clone();
+        let global_root = global_root.clone();
+        let order_tx = order_tx.clone();
+        async move {
+            let durable = DurableJobRuntime {
+                directory: first_job_root,
+            };
+            let leases =
+                acquire_durable_slots_from_roots(&durable, &skill_root, 1, &global_root, 2)
+                    .await
+                    .expect("first waiter acquires");
+            order_tx.send(1).expect("record first acquisition");
+            drop(leases);
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !root.path().join("job-first/queue_ticket").is_file() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("first queue ticket");
+
+    let second = tokio::spawn({
+        let skill_root = skill_root.clone();
+        let global_root = global_root.clone();
+        let order_tx = order_tx.clone();
+        async move {
+            let durable = DurableJobRuntime {
+                directory: second_job_root,
+            };
+            let leases =
+                acquire_durable_slots_from_roots(&durable, &skill_root, 1, &global_root, 2)
+                    .await
+                    .expect("second waiter acquires");
+            order_tx.send(2).expect("record second acquisition");
+            drop(leases);
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !root.path().join("job-second/queue_ticket").is_file() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("second queue ticket");
+
+    drop(occupied_skill_slot);
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(2), order_rx.recv())
+            .await
+            .expect("first acquisition deadline"),
+        Some(1)
+    );
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(2), order_rx.recv())
+            .await
+            .expect("second acquisition deadline"),
+        Some(2)
+    );
+    first.await.expect("join first waiter");
+    second.await.expect("join second waiter");
+}
+
+#[tokio::test]
+async fn stale_durable_queue_ticket_does_not_block_the_next_job() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let job_root = root.path().join("job");
+    let skill_root = root.path().join("skill-slots");
+    let global_root = root.path().join("global-slots");
+    let waiters = skill_root.join("waiters");
+    for path in [&job_root, &waiters, &global_root] {
+        std::fs::create_dir_all(path).expect("create test directory");
+    }
+    std::fs::write(waiters.join("ticket-00000000000000000000-stale"), "stale\n")
+        .expect("write stale ticket");
+    let durable = DurableJobRuntime {
+        directory: job_root,
+    };
+    let leases = tokio::time::timeout(
+        Duration::from_secs(2),
+        acquire_durable_slots_from_roots(&durable, &skill_root, 1, &global_root, 1),
+    )
+    .await
+    .expect("stale ticket must not block")
+    .expect("next job acquires slots");
+    assert!(!waiters.join("ticket-00000000000000000000-stale").exists());
+    drop(leases);
+}
+
 #[test]
 fn missing_runtime_timeout_limit_uses_manifest_timeout() {
     let configured = parse_configured_timeout_limit(None).expect("missing limit");

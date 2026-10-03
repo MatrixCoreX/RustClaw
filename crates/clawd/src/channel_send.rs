@@ -112,20 +112,36 @@ pub(crate) struct ChannelSendOutcome {
     pub(crate) provider_message_ids: Vec<String>,
 }
 
-tokio::task_local! {
-    static CHANNEL_SEND_PROVIDER_MESSAGE_IDS: RefCell<Vec<String>>;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ChannelSendPartFailure {
+    pub(crate) part_kind: String,
+    pub(crate) part_index: usize,
+    pub(crate) local_path: Option<PathBuf>,
+    pub(crate) error_code: String,
+    pub(crate) message_key: String,
+    pub(crate) actual_bytes: Option<u64>,
+    pub(crate) max_bytes: Option<u64>,
 }
 
-pub(crate) async fn capture_channel_send_progress<F, T>(future: F) -> (T, Vec<String>)
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ChannelSendProgress {
+    pub(crate) provider_message_ids: Vec<String>,
+    pub(crate) part_failures: Vec<ChannelSendPartFailure>,
+}
+
+tokio::task_local! {
+    static CHANNEL_SEND_PROGRESS: RefCell<ChannelSendProgress>;
+}
+
+pub(crate) async fn capture_channel_send_progress<F, T>(future: F) -> (T, ChannelSendProgress)
 where
     F: Future<Output = T>,
 {
-    CHANNEL_SEND_PROVIDER_MESSAGE_IDS
-        .scope(RefCell::new(Vec::new()), async move {
+    CHANNEL_SEND_PROGRESS
+        .scope(RefCell::new(ChannelSendProgress::default()), async move {
             let result = future.await;
-            let provider_message_ids =
-                CHANNEL_SEND_PROVIDER_MESSAGE_IDS.with(|ids| ids.borrow().clone());
-            (result, provider_message_ids)
+            let progress = CHANNEL_SEND_PROGRESS.with(|state| state.borrow().clone());
+            (result, progress)
         })
         .await
 }
@@ -134,8 +150,11 @@ fn record_provider_message_id(provider_message_id: &str) {
     if provider_message_id.trim().is_empty() {
         return;
     }
-    let _ = CHANNEL_SEND_PROVIDER_MESSAGE_IDS.try_with(|ids| {
-        ids.borrow_mut().push(provider_message_id.to_string());
+    let _ = CHANNEL_SEND_PROGRESS.try_with(|state| {
+        state
+            .borrow_mut()
+            .provider_message_ids
+            .push(provider_message_id.to_string());
     });
 }
 
@@ -143,6 +162,74 @@ fn record_provider_message_ids(provider_message_ids: &[String]) {
     for provider_message_id in provider_message_ids {
         record_provider_message_id(provider_message_id);
     }
+}
+
+fn local_media_failure_fields(raw: &str) -> Option<(String, String, Option<u64>, Option<u64>)> {
+    let record = raw
+        .strip_prefix("channel_media_preflight_failed:")
+        .or_else(|| raw.strip_prefix("whatsapp_cloud_media_preflight_failed:"))?;
+    let mut fields = record.split(':');
+    let error_code = fields.next()?;
+    let message_key = match error_code {
+        "channel_media_too_large" => "channel.media.preflight.too_large",
+        "channel_media_empty" => "channel.media.preflight.empty",
+        "channel_media_unreadable" => "channel.media.preflight.unreadable",
+        "channel_media_not_regular_file" => "channel.media.preflight.not_regular_file",
+        _ => return None,
+    };
+    let actual_bytes = fields.next()?.parse::<u64>().ok();
+    let max_bytes = match fields.next()? {
+        "none" => None,
+        value => value.parse::<u64>().ok(),
+    };
+    fields.next().is_none().then(|| {
+        (
+            error_code.to_string(),
+            message_key.to_string(),
+            actual_bytes,
+            max_bytes,
+        )
+    })
+}
+
+fn record_channel_send_part_failure(
+    part_kind: &str,
+    part_index: usize,
+    local_path: Option<&Path>,
+    raw_error: &str,
+) {
+    let (error_code, message_key, actual_bytes, max_bytes) =
+        if let Some(fields) = local_media_failure_fields(raw_error) {
+            fields
+        } else if let Some(error) = ChannelProviderError::decode(raw_error) {
+            (
+                error
+                    .provider_error_code
+                    .clone()
+                    .unwrap_or(error.error_code),
+                error.message_key,
+                None,
+                None,
+            )
+        } else {
+            (
+                "channel.delivery.failed".to_string(),
+                "channel.error.delivery_failed".to_string(),
+                None,
+                None,
+            )
+        };
+    let local_path = local_path.map(|path| path.canonicalize().unwrap_or_else(|_| path.into()));
+    let failure = ChannelSendPartFailure {
+        part_kind: part_kind.to_string(),
+        part_index,
+        local_path,
+        error_code,
+        message_key,
+        actual_bytes,
+        max_bytes,
+    };
+    let _ = CHANNEL_SEND_PROGRESS.try_with(|state| state.borrow_mut().part_failures.push(failure));
 }
 
 fn provider_http_error(
@@ -974,6 +1061,7 @@ fn record_wechat_part_result<T>(
     result: Result<T, String>,
     part_kind: &str,
     part_index: usize,
+    local_path: Option<&Path>,
 ) -> bool {
     match result {
         Ok(_) => true,
@@ -986,11 +1074,35 @@ fn record_wechat_part_result<T>(
                 "wechat_delivery_part_failed_continuing"
             );
             if first_error.is_none() {
-                *first_error = Some(error);
+                *first_error = Some(error.clone());
             }
+            record_channel_send_part_failure(part_kind, part_index, local_path, &error);
             false
         }
     }
+}
+
+fn wechat_media_delivery_priority(media: &WechatOutboundMedia) -> (u8, u64) {
+    match (&media.kind, &media.source) {
+        // Deliver ordinary artifacts before heavier media. In particular, a small
+        // transcript must not sit behind a slow video upload in the same terminal
+        // delivery. Local files are ordered by size while preserving the original
+        // order for equally sized entries.
+        (WechatOutboundKind::File, WechatOutboundSource::LocalPath(path)) => (
+            0,
+            std::fs::metadata(path)
+                .map(|metadata| metadata.len())
+                .unwrap_or(u64::MAX),
+        ),
+        (WechatOutboundKind::File, WechatOutboundSource::RemoteUrl(_)) => (0, u64::MAX),
+        (WechatOutboundKind::Image, _) => (1, 0),
+        (WechatOutboundKind::Audio, _) => (2, 0),
+        (WechatOutboundKind::Video, _) => (3, 0),
+    }
+}
+
+fn prioritize_wechat_outbound_media(media: &mut [WechatOutboundMedia]) {
+    media.sort_by_key(wechat_media_delivery_priority);
 }
 
 pub(crate) async fn send_wechat_text_message(
@@ -1024,7 +1136,8 @@ pub(crate) async fn send_wechat_text_message(
         sk_route_tag: config.sk_route_tag.as_deref().unwrap_or(""),
         wechat_uin_base64: config.wechat_uin_base64.as_deref().unwrap_or(""),
     };
-    let media = extract_wechat_outbound_media(text, &state.skill_rt.workspace_root);
+    let mut media = extract_wechat_outbound_media(text, &state.skill_rt.workspace_root);
+    prioritize_wechat_outbound_media(&mut media);
     let stripped = strip_wechat_delivery_lines(text);
     let send_text = if stripped.trim().is_empty() && media.is_empty() && !text.trim().is_empty() {
         text
@@ -1066,7 +1179,7 @@ pub(crate) async fn send_wechat_text_message(
         }) {
             Ok(request) => request,
             Err(error) => {
-                record_wechat_part_result(&mut first_error, Err::<(), _>(error), "text", i);
+                record_wechat_part_result(&mut first_error, Err::<(), _>(error), "text", i, None);
                 continue;
             }
         };
@@ -1080,7 +1193,7 @@ pub(crate) async fn send_wechat_text_message(
             30_000,
         )
         .await;
-        if record_wechat_part_result(&mut first_error, result, "text", i) {
+        if record_wechat_part_result(&mut first_error, result, "text", i, None) {
             record_provider_message_id(&client_id);
         }
     }
@@ -1100,6 +1213,10 @@ pub(crate) async fn send_wechat_text_message(
                     Err::<(), _>(error),
                     part_kind,
                     media_index,
+                    match &media.source {
+                        WechatOutboundSource::LocalPath(path) => Some(path.as_path()),
+                        WechatOutboundSource::RemoteUrl(_) => None,
+                    },
                 );
                 continue;
             }
@@ -1163,7 +1280,13 @@ pub(crate) async fn send_wechat_text_message(
                 .await
             }
         };
-        if record_wechat_part_result(&mut first_error, result, part_kind, media_index) {
+        if record_wechat_part_result(
+            &mut first_error,
+            result,
+            part_kind,
+            media_index,
+            Some(&file_path),
+        ) {
             record_provider_message_id(&client_id);
         }
     }

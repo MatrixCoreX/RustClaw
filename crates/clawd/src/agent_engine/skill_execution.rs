@@ -176,6 +176,19 @@ fn capability_result_name_for_action<'a>(
     }
 }
 
+fn successful_action_resolves_resource_wait(
+    loop_state: &LoopState,
+    normalized_skill: &str,
+    action_args: &Value,
+) -> bool {
+    loop_state
+        .resource_wait_replay_action
+        .as_ref()
+        .is_some_and(|pending| {
+            pending.tool_or_skill == normalized_skill && pending.args == *action_args
+        })
+}
+
 async fn handle_skill_step_success(
     state: &AppState,
     task: &ClaimedTask,
@@ -398,8 +411,11 @@ async fn handle_skill_step_success(
         ledger_error_kind,
         ledger_reason,
     );
-    if matches!(ledger_status, crate::executor::StepExecutionStatus::Ok) {
+    if matches!(ledger_status, crate::executor::StepExecutionStatus::Ok)
+        && successful_action_resolves_resource_wait(loop_state, normalized_skill, action_args)
+    {
         loop_state.resource_wait_attempts = 0;
+        loop_state.resource_wait_replay_action = None;
     }
     if let Some(entry) = loop_state.attempt_ledger_entries.last_mut() {
         entry.execution_step_id = Some(step_execution.step_id.clone());
