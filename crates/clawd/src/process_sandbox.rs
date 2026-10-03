@@ -660,10 +660,11 @@ fn build_macos_seatbelt_profile(
         profile.push_str("(deny network*)\n");
     }
     if browser_subprocess {
-        // Chromium's multiprocess runtime needs Mach rendezvous and read-only
-        // display/graphics discovery even in headless mode. Keep this opt-in
-        // and retain the existing filesystem and network boundaries.
-        profile.push_str("(allow mach*)\n(allow iokit-open)\n");
+        // Chromium's multiprocess runtime needs Mach rendezvous, read-only
+        // display/graphics discovery, and permission to stop its own direct
+        // child during cleanup. Keep this opt-in and retain the existing
+        // filesystem and network boundaries.
+        profile.push_str("(allow mach*)\n(allow iokit-open)\n(allow signal (target children))\n");
     }
     for path in writable_paths {
         let literal = seatbelt_path_literal(path)?;

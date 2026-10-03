@@ -198,6 +198,7 @@ fn browser_subprocess_seatbelt_permissions_are_explicit_and_temp_scoped() {
     let ordinary = profile_for(false);
     assert!(!ordinary.contains("(allow mach*)"));
     assert!(!ordinary.contains("(allow iokit-open)"));
+    assert!(!ordinary.contains("(allow signal (target children))"));
     let temp = std::env::temp_dir()
         .canonicalize()
         .expect("canonical temporary directory");
@@ -206,7 +207,40 @@ fn browser_subprocess_seatbelt_permissions_are_explicit_and_temp_scoped() {
     let browser = profile_for(true);
     assert!(browser.contains("(allow mach*)"));
     assert!(browser.contains("(allow iokit-open)"));
+    assert!(browser.contains("(allow signal (target children))"));
     assert!(browser.contains(&format!("(subpath \"{}\")", temp.display())));
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn browser_subprocess_can_terminate_its_direct_child() {
+    let root = TestDir::new("browser_subprocess_signal");
+    let mut prepared = prepare_process_command(
+        "/bin/sh",
+        ProcessSandboxRequest {
+            mode: ToolSandboxMode::WorkspaceWrite,
+            backend: ToolSandboxBackend::Auto,
+            workspace_root: root.path(),
+            execution_root: root.path(),
+            network: ProcessNetworkPolicy::Deny,
+            additional_writable_paths: &[],
+            browser_subprocess: true,
+        },
+    )
+    .expect("seatbelt command");
+    prepared.command.arg("-c").arg(
+        "sleep 30 & child=$!; kill \"$child\" || exit $?; wait \"$child\"; status=$?; test \"$status\" -eq 143",
+    );
+    let output = tokio::time::timeout(std::time::Duration::from_secs(5), prepared.command.output())
+        .await
+        .expect("child termination must not hang")
+        .expect("run sandboxed shell");
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[cfg(target_os = "linux")]
