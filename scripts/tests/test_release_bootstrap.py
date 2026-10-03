@@ -22,9 +22,14 @@ class ReleaseBootstrapTests(unittest.TestCase):
         self.bin = self.root / "bin"
         self.bin.mkdir()
         self.fixture = self.root / "fixture"
-        for relative in ("scripts/product_identity.sh", "scripts/verify_release_binary.py",
-                         "scripts/security/release_manifest.py", "configs/product_identity.toml",
-                         "configs/release_allowed_signers"):
+        for relative in (
+            "scripts/shell_compat.sh",
+            "scripts/product_identity.sh",
+            "scripts/verify_release_binary.py",
+            "scripts/security/release_manifest.py",
+            "configs/product_identity.toml",
+            "configs/release_allowed_signers",
+        ):
             target = self.fixture / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / relative, target)

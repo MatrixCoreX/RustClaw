@@ -68,7 +68,8 @@ if not re.fullmatch(r"[0-9a-f]{40}", commit):
 print(commit)
 PY
 )"
-for relative in deploy-github-release.sh scripts/product_identity.sh \
+for relative in deploy-github-release.sh scripts/shell_compat.sh \
+  scripts/product_identity.sh \
   scripts/verify_release_binary.py scripts/security/release_manifest.py \
   configs/product_identity.toml configs/release_allowed_signers; do
   mkdir -p "$BOOTSTRAP/$(dirname "$relative")"
