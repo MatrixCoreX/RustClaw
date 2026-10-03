@@ -66,7 +66,8 @@ class YoutubeDownloadTest(unittest.TestCase):
             "node:/usr/bin/node",
         )
         browser_spec = retry_command[retry_command.index("--cookies-from-browser") + 1]
-        self.assertTrue(browser_spec.startswith("chromium+basictext:"))
+        keyring = "+basictext" if sys.platform.startswith("linux") else ""
+        self.assertEqual(browser_spec, f"chromium{keyring}:{profile_root / 'youtube' / 'Default'}")
         login.assert_called_once()
 
     def test_interactive_login_failure_returns_structured_token(self) -> None:
