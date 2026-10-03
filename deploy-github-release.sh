@@ -403,7 +403,8 @@ restart_runtime() {
     fi
     (
       cd "$ROOT_DIR"
-      "$ROOT_DIR/start-all-bin.sh" release
+      APP_PRODUCT_IDENTITY_CONFIG="$ROOT_DIR/configs/product_identity.toml" \
+        "$ROOT_DIR/start-all-bin.sh" release
     )
     printf 'runtime_restart=direct\n'
   else

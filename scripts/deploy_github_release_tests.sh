@@ -126,6 +126,14 @@ cp "$ROOT_DIR/scripts/seed_bundled_skill_storage.py" \
   "$PACKAGE_DIR/scripts/seed_bundled_skill_storage.py"
 cp "$ROOT_DIR/scripts/shell_compat.sh" \
   "$PACKAGE_DIR/scripts/shell_compat.sh"
+cp "$ROOT_DIR/configs/product_identity.toml" \
+  "$PACKAGE_DIR/configs/product_identity.toml"
+cat > "$PACKAGE_DIR/start-all-bin.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "${APP_PRODUCT_IDENTITY_CONFIG:-}" > "$MOCK_RESTART_IDENTITY_LOG"
+SH
+chmod +x "$PACKAGE_DIR/start-all-bin.sh"
 printf 'release bridge\n' > "$PACKAGE_DIR/services/wa-web-bridge/index.js"
 printf 'release media preflight\n' > "$PACKAGE_DIR/services/wa-web-bridge/media-preflight.js"
 printf '<!doctype html><title>release ui</title>\n' > "$PACKAGE_DIR/UI/dist/index.html"
@@ -264,6 +272,23 @@ RESOURCE_SKIP_OUTPUT="$(
 grep -Fq 'bundled_skill_install=skipped skill=store_fixture error_code=install_resource_insufficient' \
   <<< "$RESOURCE_SKIP_OUTPUT"
 grep -Fq 'release_update_status=deployed' <<< "$RESOURCE_SKIP_OUTPUT"
+
+BOOTSTRAP_IDENTITY="$TMP_ROOT/bootstrap/product_identity.toml"
+DIRECT_RESTART_IDENTITY_LOG="$TMP_ROOT/direct-restart-product-identity"
+mkdir -p "$(dirname "$BOOTSTRAP_IDENTITY")"
+cp "$ROOT_DIR/configs/product_identity.toml" "$BOOTSTRAP_IDENTITY"
+DIRECT_RESTART_OUTPUT="$(
+  APP_PRODUCT_IDENTITY_CONFIG="$BOOTSTRAP_IDENTITY" \
+  MOCK_RESTART_IDENTITY_LOG="$DIRECT_RESTART_IDENTITY_LOG" \
+  APP_RELEASES_JSON_FILE="$RELEASES_JSON" \
+    "$DEPLOY_SCRIPT" \
+      --root "$RUNTIME" \
+      --platform ubuntu-x86_64 \
+      --force \
+      --restart
+)"
+grep -Fq 'runtime_restart=direct' <<< "$DIRECT_RESTART_OUTPUT"
+grep -Fxq "$RUNTIME/configs/product_identity.toml" "$DIRECT_RESTART_IDENTITY_LOG"
 
 MOCK_SYSTEMD_BIN="$TMP_ROOT/mock-systemd-bin"
 MOCK_SYSTEMD_STATE="$TMP_ROOT/mock-systemd-active"
