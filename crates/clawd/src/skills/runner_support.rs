@@ -62,6 +62,14 @@ pub(super) fn action_scoped_runner_sandbox_mode(
     }
 }
 
+pub(super) fn action_requires_browser_subprocess(
+    mapping: Option<&PlannerCapabilityMapping>,
+) -> bool {
+    mapping
+        .and_then(|mapping| mapping.resource_request.as_ref())
+        .is_some_and(|request| request.browser_slots > 0)
+}
+
 pub(super) fn stateless_readonly_reuse_allowed(
     execution_profile: skill_sdk::ExecutionProfile,
     sandbox_profile: skill_sdk::SandboxProfile,

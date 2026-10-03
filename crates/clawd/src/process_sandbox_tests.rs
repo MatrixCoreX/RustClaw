@@ -80,6 +80,7 @@ async fn danger_full_uses_direct_backend() {
             execution_root: root.path(),
             network: ProcessNetworkPolicy::Inherit,
             additional_writable_paths: &[],
+            browser_subprocess: false,
         },
     )
     .expect("direct command");
@@ -120,6 +121,7 @@ fn remote_container_contract_is_explicit_and_fail_closed() {
             execution_root: root.path(),
             network: ProcessNetworkPolicy::Deny,
             additional_writable_paths: &[],
+            browser_subprocess: false,
         },
     );
     assert!(matches!(
@@ -165,6 +167,48 @@ fn auto_backend_reports_the_current_platform_without_direct_fallback() {
     assert!(diagnostics.fail_closed);
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn browser_subprocess_seatbelt_permissions_are_explicit_and_temp_scoped() {
+    let root = TestDir::new("browser_subprocess");
+    let profile_for = |browser_subprocess| {
+        let prepared = prepare_process_command(
+            "bash",
+            ProcessSandboxRequest {
+                mode: ToolSandboxMode::WorkspaceWrite,
+                backend: ToolSandboxBackend::Auto,
+                workspace_root: root.path(),
+                execution_root: root.path(),
+                network: ProcessNetworkPolicy::Inherit,
+                additional_writable_paths: &[],
+                browser_subprocess,
+            },
+        )
+        .expect("seatbelt command");
+        let args = prepared
+            .command
+            .as_std()
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(args.first().map(String::as_str), Some("-p"));
+        args.get(1).cloned().expect("seatbelt profile")
+    };
+
+    let ordinary = profile_for(false);
+    assert!(!ordinary.contains("(allow mach*)"));
+    assert!(!ordinary.contains("(allow iokit-open)"));
+    let temp = std::env::temp_dir()
+        .canonicalize()
+        .expect("canonical temporary directory");
+    assert!(!ordinary.contains(&format!("(subpath \"{}\")", temp.display())));
+
+    let browser = profile_for(true);
+    assert!(browser.contains("(allow mach*)"));
+    assert!(browser.contains("(allow iokit-open)"));
+    assert!(browser.contains(&format!("(subpath \"{}\")", temp.display())));
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn durable_sandbox_omits_parent_death_while_foreground_keeps_it() {
@@ -181,6 +225,7 @@ fn durable_sandbox_omits_parent_death_while_foreground_keeps_it() {
         execution_root: root.path(),
         network: ProcessNetworkPolicy::Deny,
         additional_writable_paths: &[],
+        browser_subprocess: false,
     };
     let foreground = prepare_process_command("bash", request()).expect("foreground command");
     let durable =
@@ -222,6 +267,7 @@ fn host_process_sandbox_keeps_host_pid_view_and_other_boundaries() {
             execution_root: root.path(),
             network: ProcessNetworkPolicy::Deny,
             additional_writable_paths: &[],
+            browser_subprocess: false,
         },
     )
     .expect("host process command");
@@ -257,6 +303,7 @@ fn host_process_sandbox_inherits_network_only_when_explicitly_requested() {
             execution_root: root.path(),
             network: ProcessNetworkPolicy::Inherit,
             additional_writable_paths: &[],
+            browser_subprocess: false,
         },
     )
     .expect("host process command");
@@ -292,6 +339,7 @@ async fn read_only_backend_rejects_workspace_mutation() {
             execution_root: root.path(),
             network: ProcessNetworkPolicy::Deny,
             additional_writable_paths: &[],
+            browser_subprocess: false,
         },
     )
     .expect("sandbox command");
@@ -325,6 +373,7 @@ async fn workspace_backend_writes_only_inside_bound_workspace() {
             execution_root: root.path(),
             network: ProcessNetworkPolicy::Deny,
             additional_writable_paths: &[],
+            browser_subprocess: false,
         },
     )
     .expect("sandbox command");
@@ -362,6 +411,7 @@ async fn read_only_backend_can_execute_inside_system_temp_workspace() {
             execution_root: root.path(),
             network: ProcessNetworkPolicy::Deny,
             additional_writable_paths: &[],
+            browser_subprocess: false,
         },
     )
     .expect("sandbox command");
@@ -394,6 +444,7 @@ async fn workspace_backend_can_write_inside_system_temp_workspace() {
             execution_root: root.path(),
             network: ProcessNetworkPolicy::Deny,
             additional_writable_paths: &[],
+            browser_subprocess: false,
         },
     )
     .expect("sandbox command");
@@ -432,6 +483,7 @@ async fn read_only_backend_limits_writes_to_explicit_internal_path() {
             execution_root: root.path(),
             network: ProcessNetworkPolicy::Deny,
             additional_writable_paths: &writable_paths,
+            browser_subprocess: false,
         },
     )
     .expect("sandbox command");
@@ -479,6 +531,7 @@ async fn explicit_writable_mount_preserves_system_resolver_configuration() {
             execution_root: root.path(),
             network: ProcessNetworkPolicy::Inherit,
             additional_writable_paths: &writable_paths,
+            browser_subprocess: false,
         },
     )
     .expect("sandbox command");

@@ -30,10 +30,10 @@ use super::{
     task_allows_path_outside_workspace, task_allows_sudo, terminate_subprocess_group,
 };
 use runner_support::{
-    action_allows_provider_credentials, action_scoped_runner_capabilities,
-    action_scoped_runner_sandbox_mode, add_runner_dispatch_metadata,
-    apply_parent_execution_backend, cancelled_capture_projection, has_planner_capability_prefix,
-    inherited_sandbox_backend, invocation_artifact_output_directory,
+    action_allows_provider_credentials, action_requires_browser_subprocess,
+    action_scoped_runner_capabilities, action_scoped_runner_sandbox_mode,
+    add_runner_dispatch_metadata, apply_parent_execution_backend, cancelled_capture_projection,
+    has_planner_capability_prefix, inherited_sandbox_backend, invocation_artifact_output_directory,
     local_clawd_base_url_from_internal_listen, runner_additional_writable_paths,
     selected_provider_api_key_env_names, stateless_readonly_reuse_allowed,
 };
@@ -1037,6 +1037,7 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
             execution_root: &state.skill_rt.workspace_root,
             network,
             additional_writable_paths: &additional_writable_paths,
+            browser_subprocess: action_requires_browser_subprocess(action_mapping.as_ref()),
         };
         sandbox::prepare_runner_command(
             &state.skill_rt.skill_runner_path,

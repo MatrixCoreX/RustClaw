@@ -34,6 +34,7 @@ mod linux {
             execution_root: root,
             network: ProcessNetworkPolicy::Deny,
             additional_writable_paths: &[],
+            browser_subprocess: false,
         }
     }
 

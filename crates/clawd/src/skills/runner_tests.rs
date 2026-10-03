@@ -620,6 +620,27 @@ fn granted_gateway_access_does_not_grant_provider_credentials() {
 }
 
 #[test]
+fn browser_sandbox_compatibility_follows_host_approved_resource_metadata() {
+    let registry = claw_core::skill_registry::SkillsRegistry::load_from_path(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml"),
+    )
+    .expect("workspace registry");
+    let mappings = registry.planner_capabilities("media_download");
+    let download = mappings
+        .iter()
+        .find(|mapping| mapping.name == "media_download.download")
+        .expect("download capability");
+    let ocr = mappings
+        .iter()
+        .find(|mapping| mapping.name == "media_download.ocr")
+        .expect("OCR capability");
+
+    assert!(action_requires_browser_subprocess(Some(download)));
+    assert!(!action_requires_browser_subprocess(Some(ocr)));
+    assert!(!action_requires_browser_subprocess(None));
+}
+
+#[test]
 fn gateway_access_requires_declared_llm_and_action_network_access() {
     assert_eq!(
         action_scoped_runner_capabilities(vec![Capability::Net], Some(&local_api_mapping())),

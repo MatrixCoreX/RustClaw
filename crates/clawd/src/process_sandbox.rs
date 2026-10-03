@@ -80,6 +80,11 @@ pub(crate) struct ProcessSandboxRequest<'a> {
     pub(crate) execution_root: &'a Path,
     pub(crate) network: ProcessNetworkPolicy,
     pub(crate) additional_writable_paths: &'a [PathBuf],
+    /// Allow only the extra macOS services required by an admitted local
+    /// browser subprocess. The caller derives this from the capability's
+    /// host-approved browser resource request, never from a skill name.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(crate) browser_subprocess: bool,
 }
 
 pub(crate) struct PreparedProcessCommand {
@@ -539,7 +544,15 @@ fn prepare_macos_seatbelt(
             }
         }
     }
-    let profile = build_macos_seatbelt_profile(request.network, &writable_paths)?;
+    if request.browser_subprocess {
+        if let Ok(temp) = canonical_directory(&std::env::temp_dir()) {
+            if !writable_paths.contains(&temp) {
+                writable_paths.push(temp);
+            }
+        }
+    }
+    let profile =
+        build_macos_seatbelt_profile(request.network, &writable_paths, request.browser_subprocess)?;
     let mut command = Command::new(backend);
     command.arg("-p").arg(profile).arg(program);
     Ok(PreparedProcessCommand {
@@ -635,6 +648,7 @@ fn seatbelt_path() -> Option<PathBuf> {
 fn build_macos_seatbelt_profile(
     network: ProcessNetworkPolicy,
     writable_paths: &[PathBuf],
+    browser_subprocess: bool,
 ) -> Result<String, &'static str> {
     let mut profile = String::from(
         "(version 1)\n(deny default)\n(import \"system.sb\")\n\
@@ -644,6 +658,12 @@ fn build_macos_seatbelt_profile(
         profile.push_str("(allow network*)\n");
     } else {
         profile.push_str("(deny network*)\n");
+    }
+    if browser_subprocess {
+        // Chromium's multiprocess runtime needs Mach rendezvous and read-only
+        // display/graphics discovery even in headless mode. Keep this opt-in
+        // and retain the existing filesystem and network boundaries.
+        profile.push_str("(allow mach*)\n(allow iokit-open)\n");
     }
     for path in writable_paths {
         let literal = seatbelt_path_literal(path)?;

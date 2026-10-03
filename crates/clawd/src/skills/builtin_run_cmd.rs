@@ -1075,6 +1075,7 @@ fn prepare_run_cmd_process_for_lifetime(
         execution_root: cwd,
         network: crate::process_sandbox::ProcessNetworkPolicy::Deny,
         additional_writable_paths: &[],
+        browser_subprocess: false,
     };
     let prepared = if durable_async {
         crate::process_sandbox::prepare_durable_process_command("bash", request)
