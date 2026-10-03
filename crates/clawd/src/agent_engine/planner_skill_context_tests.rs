@@ -297,8 +297,14 @@ fn first_round_media_capability_describes_app_and_web_share_default_download() {
         &task,
         &BTreeSet::new(),
     );
-    assert!(loadable.contains(&"media_discovery".to_string()));
-    assert!(loadable.contains(&"media_download".to_string()));
+    let available = state.planner_available_skills_for_task(&task);
+    for skill in ["media_discovery", "media_download"] {
+        assert_eq!(
+            loadable.iter().any(|candidate| candidate == skill),
+            available.iter().any(|candidate| candidate == skill),
+            "deferred capability disclosure must follow host dependency availability: skill={skill}"
+        );
+    }
 }
 
 #[test]
