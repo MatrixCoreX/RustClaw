@@ -7,7 +7,36 @@ use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, Connection};
 use tracing::debug;
 
+#[cfg(test)]
+use scheduled_thread_pool::ScheduledThreadPool;
+#[cfg(test)]
+use std::sync::{Arc, OnceLock};
+
 pub(crate) type DbPool = Pool<SqliteConnectionManager>;
+
+#[cfg(test)]
+fn shared_test_thread_pool() -> Arc<ScheduledThreadPool> {
+    static THREAD_POOL: OnceLock<Arc<ScheduledThreadPool>> = OnceLock::new();
+    Arc::clone(THREAD_POOL.get_or_init(|| {
+        Arc::new(
+            ScheduledThreadPool::builder()
+                .num_threads(3)
+                .thread_name_pattern("r2d2-test-worker-{}")
+                .build(),
+        )
+    }))
+}
+
+/// Test pools share one scheduler so a large suite does not briefly retain
+/// three background threads for every short-lived fixture pool. This matters
+/// on macOS, where the per-user thread/process ceiling is commonly much lower
+/// than on Linux.
+#[cfg(test)]
+pub(crate) fn test_pool_builder(max_size: u32) -> r2d2::Builder<SqliteConnectionManager> {
+    Pool::builder()
+        .max_size(max_size.max(1))
+        .thread_pool(shared_test_thread_pool())
+}
 
 /// Phase 2.2 Stage 2: audit_logs 走独立 SQLite 文件 + 独立连接池，
 /// 与任务/调度/记忆主库隔离，避免 audit append 抢主库的 WAL writer 锁。
@@ -30,8 +59,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_user_key_ts ON audit_logs(user_key, ts
 #[cfg(test)]
 pub(crate) fn test_pool() -> DbPool {
     let manager = SqliteConnectionManager::memory();
-    Pool::builder()
-        .max_size(1)
+    test_pool_builder(1)
         .build(manager)
         .expect("build test db pool")
 }
@@ -40,8 +68,7 @@ pub(crate) fn test_pool() -> DbPool {
 #[cfg(test)]
 pub(crate) fn test_audit_pool() -> DbPool {
     let manager = SqliteConnectionManager::memory();
-    let pool = Pool::builder()
-        .max_size(1)
+    let pool = test_pool_builder(1)
         .build(manager)
         .expect("build test audit pool");
     let conn = pool.get().expect("get audit conn");

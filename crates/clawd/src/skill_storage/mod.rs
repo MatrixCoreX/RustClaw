@@ -6,8 +6,6 @@ mod schema;
 
 use crate::db_init::DbPool;
 use claw_core::config::DatabaseConfig;
-#[cfg(test)]
-use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::Connection;
 use serde::Serialize;
@@ -278,8 +276,7 @@ fn open_pool(
 
 #[cfg(test)]
 fn memory_pool(ensure_schema: fn(&Connection) -> anyhow::Result<()>) -> DbPool {
-    let pool = Pool::builder()
-        .max_size(1)
+    let pool = crate::db_init::test_pool_builder(1)
         .build(SqliteConnectionManager::memory())
         .expect("build skill storage test pool");
     let db = pool.get().expect("get skill storage test connection");

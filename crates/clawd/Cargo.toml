@@ -49,4 +49,5 @@ syn.workspace = true
 zhhz = "0.8.2"
 
 [dev-dependencies]
+scheduled-thread-pool = "0.2"
 tower = { version = "0.5", features = ["util"] }
