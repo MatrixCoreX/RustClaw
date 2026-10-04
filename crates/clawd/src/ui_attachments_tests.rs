@@ -38,6 +38,49 @@ fn safe_upload_filename_adds_extension() {
 }
 
 #[test]
+fn video_attachments_keep_video_kind_and_extension() {
+    assert_eq!(normalize_kind("", "video/mp4"), "video");
+    assert_eq!(normalize_kind("file", "video/mp4"), "video");
+    assert_eq!(normalize_kind("video", "application/octet-stream"), "video");
+    assert_eq!(
+        default_name_for_attachment("video", "video/mp4"),
+        "video.mp4"
+    );
+    assert_eq!(
+        safe_upload_filename("clip", "video", "video/mp4"),
+        "clip.mp4"
+    );
+}
+
+#[test]
+fn rewritten_video_attachments_expose_singular_and_ordered_inputs() {
+    let mut payload = json!({"text": "转成文字"});
+    rewrite_payload_attachments(
+        &mut payload,
+        &[
+            MaterializedAttachment {
+                name: "first.mp4".to_string(),
+                mime_type: "video/mp4".to_string(),
+                kind: "video".to_string(),
+                rel_path: "data/ui/first.mp4".to_string(),
+                size: 10,
+            },
+            MaterializedAttachment {
+                name: "second.webm".to_string(),
+                mime_type: "video/webm".to_string(),
+                kind: "video".to_string(),
+                rel_path: "data/ui/second.webm".to_string(),
+                size: 20,
+            },
+        ],
+    );
+
+    assert_eq!(payload["video"]["path"], "data/ui/first.mp4");
+    assert_eq!(payload["videos"].as_array().map(Vec::len), Some(2));
+    assert_eq!(payload["attachments"][1]["kind"], "video");
+}
+
+#[test]
 fn office_mime_types_keep_machine_readable_extensions_without_a_name() {
     for (mime_type, expected) in [
         (

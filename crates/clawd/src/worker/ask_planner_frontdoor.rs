@@ -18,7 +18,9 @@ pub(super) async fn prepare_planner_owned_ask_routing(
     _source: &str,
 ) -> Result<PreparedAskRouting> {
     let audio_materialization =
-        crate::transcribe_attached_audio_for_ask(state, task, payload, prompt).await?;
+        crate::transcribe_attached_audio_for_ask(state, task, payload, "").await?;
+    let video_materialization =
+        crate::ask_flow::transcribe_attached_videos_for_ask(state, task, payload, prompt).await?;
     let attachment_count = payload
         .get("attachments")
         .and_then(Value::as_array)
@@ -26,13 +28,31 @@ pub(super) async fn prepare_planner_owned_ask_routing(
     let input_materialization = crate::turn_boundary_envelope::TurnInputMaterialization::classify(
         audio_materialization
             .as_ref()
-            .is_some_and(|materialization| materialization.transcript_available),
+            .is_some_and(|materialization| materialization.transcript_available)
+            || video_materialization
+                .as_ref()
+                .is_some_and(|materialization| materialization.transcript_available),
         !prompt.trim().is_empty(),
         attachment_count,
     );
-    let planner_user_request = audio_materialization
-        .map(|materialization| materialization.planner_text)
-        .unwrap_or_else(|| prompt.to_string());
+    let mut materialized_inputs = Vec::new();
+    if let Some(materialization) = audio_materialization {
+        materialized_inputs.push(materialization.planner_text);
+    }
+    if let Some(materialization) = video_materialization {
+        materialized_inputs.push(materialization.planner_text);
+    }
+    let planner_user_request = if materialized_inputs.is_empty() {
+        prompt.to_string()
+    } else {
+        let mut request = materialized_inputs.join("\n\n");
+        if !prompt.trim().is_empty() {
+            request.push_str("\n\n[AGENT_TYPED_TEXT]\n");
+            request.push_str(prompt.trim());
+            request.push_str("\n[/AGENT_TYPED_TEXT]");
+        }
+        request
+    };
     let planner_user_request =
         crate::ui_attachments::prompt_with_ui_attachment_context(&planner_user_request, payload);
     let turn_boundary_envelope =

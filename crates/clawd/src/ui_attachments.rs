@@ -223,6 +223,17 @@ fn collect_ui_attachment_inputs(payload: &Value) -> Vec<UiAttachmentInput> {
             out.push(input);
         }
     }
+    if let Some(items) = payload.get("videos").and_then(Value::as_array) {
+        for item in items {
+            if let Some(input) = attachment_input_from_value(item, Some("video")) {
+                out.push(input);
+            }
+        }
+    } else if let Some(video) = payload.get("video") {
+        if let Some(input) = attachment_input_from_value(video, Some("video")) {
+            out.push(input);
+        }
+    }
     out
 }
 
@@ -300,6 +311,7 @@ fn rewrite_payload_attachments(payload: &mut Value, attachments: &[MaterializedA
     let mut all = Vec::new();
     let mut images = Vec::new();
     let mut audios = Vec::new();
+    let mut videos = Vec::new();
     let mut files = Vec::new();
     for attachment in attachments {
         let entry = json!({
@@ -313,6 +325,7 @@ fn rewrite_payload_attachments(payload: &mut Value, attachments: &[MaterializedA
         match attachment.kind.as_str() {
             "image" => images.push(entry),
             "audio" => audios.push(entry),
+            "video" => videos.push(entry),
             _ => files.push(entry),
         }
     }
@@ -323,6 +336,10 @@ fn rewrite_payload_attachments(payload: &mut Value, attachments: &[MaterializedA
     if !audios.is_empty() {
         obj.insert("audio".to_string(), audios[0].clone());
         obj.insert("audios".to_string(), Value::Array(audios));
+    }
+    if !videos.is_empty() {
+        obj.insert("video".to_string(), videos[0].clone());
+        obj.insert("videos".to_string(), Value::Array(videos));
     }
     if !files.is_empty() {
         obj.insert("files".to_string(), Value::Array(files));
@@ -350,7 +367,7 @@ fn attachment_context_paths(payload: &Value) -> Vec<(String, String)> {
 
 fn normalize_kind(raw: &str, mime_type: &str) -> String {
     let raw = raw.trim().to_ascii_lowercase();
-    if matches!(raw.as_str(), "image" | "audio" | "file") {
+    if matches!(raw.as_str(), "image" | "audio" | "video") {
         return raw;
     }
     let mime = mime_type.trim().to_ascii_lowercase();
@@ -358,6 +375,8 @@ fn normalize_kind(raw: &str, mime_type: &str) -> String {
         "image".to_string()
     } else if mime.starts_with("audio/") {
         "audio".to_string()
+    } else if mime.starts_with("video/") {
+        "video".to_string()
     } else {
         "file".to_string()
     }
@@ -367,6 +386,7 @@ fn default_mime_for_kind(kind: &str) -> &'static str {
     match kind {
         "image" => "image/png",
         "audio" => "audio/webm",
+        "video" => "video/mp4",
         _ => "application/octet-stream",
     }
 }
@@ -375,6 +395,7 @@ fn default_name_for_kind(kind: &str) -> &'static str {
     match kind {
         "image" => "image.png",
         "audio" => "audio.webm",
+        "video" => "video.mp4",
         _ => "attachment.bin",
     }
 }
@@ -383,6 +404,7 @@ fn default_name_for_attachment(kind: &str, mime_type: &str) -> String {
     let base = match kind {
         "image" => "image",
         "audio" => "audio",
+        "video" => "video",
         _ => "attachment",
     };
     format!("{base}.{}", default_extension_for(kind, mime_type))
@@ -438,7 +460,13 @@ fn default_extension_for(kind: &str, mime_type: &str) -> &'static str {
         "wav"
     } else if mime.contains("mpeg") || mime.contains("mp3") {
         "mp3"
-    } else if mime.contains("mp4") || mime.contains("m4a") {
+    } else if mime.contains("mp4") {
+        if kind == "video" {
+            "mp4"
+        } else {
+            "m4a"
+        }
+    } else if mime.contains("m4a") {
         "m4a"
     } else if mime.contains("ogg") || mime.contains("opus") {
         "ogg"
@@ -454,6 +482,8 @@ fn default_extension_for(kind: &str, mime_type: &str) -> &'static str {
         "webm"
     } else if kind == "image" {
         "png"
+    } else if kind == "video" {
+        "mp4"
     } else {
         "bin"
     }

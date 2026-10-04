@@ -19,6 +19,7 @@ members = [
     "crates/skills/archive_basic",
     "crates/skills/audio_synthesize",
     "crates/skills/audio_transcribe",
+    "crates/skills/video_transcribe",
     "crates/skills/config_edit",
     "crates/skills/config_guard",
     "crates/skills/db_basic",

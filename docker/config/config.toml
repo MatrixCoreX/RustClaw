@@ -391,6 +391,7 @@ skills_list = [
     "image_generate",
     "image_edit",
     "audio_transcribe",
+    "video_transcribe",
     "audio_synthesize",
     "video_generate",
     "music_generate",

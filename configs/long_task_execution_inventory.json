@@ -1642,7 +1642,7 @@
       "adapter_kind": null,
       "capability": "health_check",
       "execution_mode": "sync_short",
-      "isolation_profile": null,
+      "isolation_profile": "host_process",
       "progress_contract": "not_long_tail",
       "skill": "health_check",
       "timeout_seconds": 30
@@ -1651,7 +1651,7 @@
       "adapter_kind": null,
       "capability": "system.health_check",
       "execution_mode": "sync_short",
-      "isolation_profile": null,
+      "isolation_profile": "host_process",
       "progress_contract": "not_long_tail",
       "skill": "health_check",
       "timeout_seconds": 30
@@ -3028,7 +3028,7 @@
       "adapter_kind": null,
       "capability": "service.status",
       "execution_mode": "sync_short",
-      "isolation_profile": null,
+      "isolation_profile": "host_process",
       "progress_contract": "not_long_tail",
       "skill": "service_control",
       "timeout_seconds": 30
@@ -3055,7 +3055,7 @@
       "adapter_kind": null,
       "capability": "service_control",
       "execution_mode": "sync_short",
-      "isolation_profile": null,
+      "isolation_profile": "host_process",
       "progress_contract": "not_long_tail",
       "skill": "service_control",
       "timeout_seconds": 30
@@ -3082,7 +3082,7 @@
       "adapter_kind": null,
       "capability": "service_control.status",
       "execution_mode": "sync_short",
-      "isolation_profile": null,
+      "isolation_profile": "host_process",
       "progress_contract": "not_long_tail",
       "skill": "service_control",
       "timeout_seconds": 30
@@ -3430,6 +3430,15 @@
       "timeout_seconds": 900
     },
     {
+      "adapter_kind": "media_job_poll",
+      "capability": "video.extract_audio",
+      "execution_mode": "async_preferred",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "poll_status",
+      "skill": "video_transcribe",
+      "timeout_seconds": 86400
+    },
+    {
       "adapter_kind": null,
       "capability": "weather.current",
       "execution_mode": "sync_short",
@@ -3572,16 +3581,16 @@
     "configs/agent_guard.toml"
   ],
   "summary": {
-    "capability_count": 396,
+    "capability_count": 397,
     "execution_modes": {
-      "async_preferred": 72,
+      "async_preferred": 73,
       "async_required": 9,
       "sync_short": 315
     },
     "progress_contracts": {
       "native_progress": 51,
       "not_long_tail": 284,
-      "poll_status": 61
+      "poll_status": 62
     },
     "remote_executor_capability_count": 0
   },

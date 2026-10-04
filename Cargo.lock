@@ -5398,6 +5398,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "video-transcribe-skill"
+version = "0.1.8"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "wait-timeout"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
