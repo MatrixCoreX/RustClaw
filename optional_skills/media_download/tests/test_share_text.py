@@ -170,10 +170,65 @@ class ShareTextTest(unittest.TestCase):
         for url, expected_id in cases:
             with self.subTest(url=url):
                 self.assert_share_text(url, url, "youtube")
-                self.assertEqual(
-                    self.downloader.extract_youtube_id(url),
-                    expected_id,
+                if expected_id is not None:
+                    self.assertEqual(
+                        self.downloader.extract_youtube_id(url),
+                        expected_id,
                     )
+
+    def test_wechat_channels_share_url(self) -> None:
+        url = "https://weixin.qq.com/sph/A88dF8Ju34"
+        self.assert_share_text(
+            f"这是一个微信视频号分享 {url} 请下载",
+            url,
+            "wechat_channels",
+        )
+        self.assertIsNone(
+            self.downloader.detect_platform("https://mp.weixin.qq.com/s/example")
+        )
+
+    def test_wechat_channels_candidates_preserve_video_and_article(self) -> None:
+        resolved = SimpleNamespace(
+            export_id="export-1",
+            video_urls=(("h264VideoInfo.videoUrl", "https://video.qq.com/item.mp4"),),
+            image_urls=(),
+            description="平台正文",
+            author="作者",
+            logs=("resolved",),
+        )
+        with (
+            mock.patch.object(
+                self.downloader.wechat_channels_access,
+                "resolve_share",
+                return_value=resolved,
+            ) as resolve_share,
+            mock.patch.object(
+                self.downloader,
+                "find_chrome_executable",
+                return_value="/usr/bin/chromium",
+            ),
+        ):
+            item_id, videos, images, article, logs = (
+                self.downloader.gather_wechat_channels_candidates(
+                    "https://weixin.qq.com/sph/A88dF8Ju34",
+                    timeout=20,
+                    browser_fallback=True,
+                    chrome_path=None,
+                    browser_profile_dir="/private/profile",
+                )
+            )
+
+        self.assertEqual(item_id, "export-1")
+        self.assertEqual(len(videos), 1)
+        self.assertEqual(videos[0].url, "https://video.qq.com/item.mp4")
+        self.assertEqual(images, [])
+        self.assertEqual(article.body, "平台正文")
+        self.assertEqual(article.author, "作者")
+        self.assertEqual(logs, ["resolved"])
+        self.assertEqual(
+            resolve_share.call_args.kwargs["browser_profile_root"],
+            "/private/profile",
+        )
 
     def test_douyin_netlog_pairs_each_adaptive_video_with_its_own_audio(self) -> None:
         video_a = (

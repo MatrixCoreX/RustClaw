@@ -189,7 +189,7 @@ fn first_round_uses_complete_compact_index_without_playbooks() {
 }
 
 #[test]
-fn first_round_media_capability_describes_app_and_web_share_default_download() {
+fn first_round_media_capability_eagerly_exposes_app_and_web_share_default_download() {
     let state = state_with_all_bundled_skills_enabled();
     let task = task();
     let loop_state = super::super::LoopState {
@@ -217,6 +217,10 @@ fn first_round_media_capability_describes_app_and_web_share_default_download() {
         "xiaohongshu_share",
         "tiktok_share",
         "youtube_share",
+        "wechat_channels_share",
+        "https://weixin.qq.com/sph/<short-code>",
+        "must use this dedicated media-delivery capability by default",
+        "do not use generic browser page extraction",
     ] {
         assert!(
             media_line.contains(expected),
@@ -225,6 +229,13 @@ fn first_round_media_capability_describes_app_and_web_share_default_download() {
     }
 
     let registry = state.get_skills_registry().expect("skills registry");
+    let download = registry
+        .get("media_download")
+        .expect("media download registry entry");
+    assert!(
+        download.planner_eager_load,
+        "single-share media delivery must be callable in the first round"
+    );
     let discovery = registry
         .get("media_discovery")
         .expect("media discovery registry entry");
@@ -292,19 +303,36 @@ fn first_round_media_capability_describes_app_and_web_share_default_download() {
             .all(|group| group.skill_name != "media_discovery"),
         "media discovery must not bypass semantic capability loading"
     );
+    let download_group = initial
+        .iter()
+        .find(|group| group.skill_name == "media_download")
+        .expect("media download must be exposed as a first-round native capability group");
+    assert!(
+        download_group
+            .capability_names
+            .iter()
+            .any(|name| name == "media_download.download"),
+        "first-round media group must expose media_download.download: {download_group:?}"
+    );
     let loadable = crate::capability_map::planner_loadable_capability_group_names_for_task(
         &state,
         &task,
         &BTreeSet::new(),
     );
     let available = state.planner_available_skills_for_task(&task);
-    for skill in ["media_discovery", "media_download"] {
+    for skill in ["media_discovery"] {
         assert_eq!(
             loadable.iter().any(|candidate| candidate == skill),
             available.iter().any(|candidate| candidate == skill),
             "deferred capability disclosure must follow host dependency availability: skill={skill}"
         );
     }
+    assert!(
+        !loadable
+            .iter()
+            .any(|candidate| candidate == "media_download"),
+        "eager media delivery must not also appear in the deferred capability list"
+    );
 }
 
 #[test]

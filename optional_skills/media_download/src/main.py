@@ -35,7 +35,15 @@ SUPPORTED_ACTIONS = (
     "ocr",
     "prepare_x",
 )
-SUPPORTED_PLATFORMS = ("auto", "douyin", "kuaishou", "xiaohongshu", "tiktok", "youtube")
+SUPPORTED_PLATFORMS = (
+    "auto",
+    "douyin",
+    "kuaishou",
+    "xiaohongshu",
+    "tiktok",
+    "youtube",
+    "wechat_channels",
+)
 MAX_DIAGNOSTIC_CHARS = 4_000
 IMAGE_ARCHIVE_THRESHOLD = 9
 SUBPROCESS_TIMEOUT_SLICE_SECONDS = 24 * 60 * 60
@@ -1417,7 +1425,11 @@ def _failure_from_process(
     elif "login_required" in lowered:
         error_code = "login_required"
         message_key = "media_download.error.login_required"
-    elif "no downloadable" in lowered or "no media" in lowered:
+    elif (
+        "no downloadable" in lowered
+        or "no media" in lowered
+        or "media_not_found" in lowered
+    ):
         error_code = "media_not_found"
         message_key = "media_download.error.media_not_found"
     else:
@@ -1775,8 +1787,13 @@ def _capabilities_extra() -> dict[str, Any]:
         "public_content_only": True,
         "system_browser_cookies": False,
         "skill_owned_browser_profile": True,
+        "interactive_login_platforms": [
+            "xiaohongshu",
+            "youtube",
+            "wechat_channels",
+        ],
         "image_article_posts": {
-            "platforms": ["douyin", "xiaohongshu"],
+            "platforms": ["douyin", "xiaohongshu", "wechat_channels"],
             "default_outputs": ["original_images", "article_text"],
             "delivery_policy": "best_effort_components",
             "text_delivery": "inline_and_artifact",

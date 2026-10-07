@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 import wave
 import zipfile
@@ -48,6 +49,15 @@ class AdapterTest(unittest.TestCase):
         self.assertEqual(response["extra"]["status"], "ok")
         self.assertFalse(response["extra"]["system_browser_cookies"])
         self.assertTrue(response["extra"]["skill_owned_browser_profile"])
+        self.assertIn("wechat_channels", response["extra"]["supported_platforms"])
+        self.assertIn(
+            "wechat_channels",
+            response["extra"]["interactive_login_platforms"],
+        )
+        self.assertIn(
+            "wechat_channels",
+            response["extra"]["image_article_posts"]["platforms"],
+        )
         self.assertIn("download", response["extra"]["actions"])
         self.assertEqual(
             response["extra"]["image_article_posts"]["default_outputs"],
@@ -70,6 +80,20 @@ class AdapterTest(unittest.TestCase):
             response["extra"]["speech_recognition_capability"],
             "local_asr.transcribe",
         )
+
+    def test_aipp_uses_the_generic_cross_channel_task_activity_contract(self) -> None:
+        manifest = tomllib.loads(
+            (SKILL_ROOT / "skill.toml").read_text(encoding="utf-8")
+        )
+
+        self.assertEqual(manifest["aipp"]["renderer"], "task_activity_v1")
+        self.assertEqual(
+            manifest["aipp"]["data_contract"],
+            "skill_task_activity_v1",
+        )
+        self.assertEqual(manifest["aipp"]["task_channel_scope"], "all")
+        self.assertIn("WeChat Channels", manifest["aipp"]["descriptions"]["en"])
+        self.assertIn("视频号", manifest["aipp"]["descriptions"]["zh"])
 
     def test_progress_reporter_emits_ordered_machine_frames(self) -> None:
         output = io.StringIO()
@@ -461,6 +485,21 @@ class AdapterTest(unittest.TestCase):
         )
         self.assertEqual(failure.details["failure_phase"], "execution_no_effect")
         self.assertFalse(failure.details["side_effect_applied"])
+
+    def test_provider_media_not_found_marker_maps_to_structured_failure(self) -> None:
+        failure = self.skill._failure_from_process(
+            "download",
+            1,
+            "wechat_channels_media_not_found",
+            [],
+            output_rollback_ok=True,
+        )
+
+        self.assertEqual(failure.error_code, "media_not_found")
+        self.assertEqual(
+            failure.message_key,
+            "media_download.error.media_not_found",
+        )
 
     def test_failed_download_maps_xiaohongshu_login_wall(self) -> None:
         failure = self.skill._failure_from_process(

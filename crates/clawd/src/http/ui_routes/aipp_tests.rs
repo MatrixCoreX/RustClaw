@@ -173,6 +173,59 @@ fn task_activity_page_projects_current_and_archived_skill_tasks_without_secrets(
 }
 
 #[test]
+fn generic_task_activity_projects_wechat_channels_media_and_login_failures() {
+    let success = task_activity_item(
+        1,
+        "wechat-channels-success",
+        "wechat",
+        "succeeded",
+        r#"{"text":"下载 https://weixin.qq.com/sph/A88dF8Ju34"}"#,
+        Some(
+            r#"{"text":"已提取视频和平台文案。","artifacts":[{"id":"video-1","filename":"channels.mp4","kind":"video","mime_type":"video/mp4","size_bytes":12428049,"download_url":"/v1/tasks/wechat-channels-success/artifacts/video-1/content","preview_url":"/v1/tasks/wechat-channels-success/artifacts/video-1/preview"},{"id":"article-1","filename":"channels_article.txt","kind":"file","mime_type":"text/plain","size_bytes":128,"download_url":"/v1/tasks/wechat-channels-success/artifacts/article-1/content"}]}"#,
+        ),
+        None,
+        "100",
+        "101",
+        1_000,
+        Some("media_download.download"),
+    );
+    assert_eq!(
+        success["source_urls"][0],
+        "https://weixin.qq.com/sph/A88dF8Ju34"
+    );
+    assert_eq!(success["artifacts"].as_array().map(Vec::len), Some(2));
+    assert_eq!(success["artifacts"][0]["kind"], "video");
+    assert_eq!(
+        success["artifacts"][0]["preview_url"],
+        "/v1/tasks/wechat-channels-success/artifacts/video-1/preview"
+    );
+    assert_eq!(success["artifacts"][1]["filename"], "channels_article.txt");
+
+    let login_failure = task_activity_item(
+        2,
+        "wechat-channels-login",
+        "ui",
+        "failed",
+        r#"{"text":"下载 https://weixin.qq.com/sph/LoginNeeded"}"#,
+        None,
+        Some("需要在打开的官方页面完成登录后重试。"),
+        "102",
+        "103",
+        1_001,
+        Some("media_download.download"),
+    );
+    assert_eq!(login_failure["status"], "failed");
+    assert_eq!(
+        login_failure["source_urls"][0],
+        "https://weixin.qq.com/sph/LoginNeeded"
+    );
+    assert_eq!(
+        login_failure["error_text"],
+        "需要在打开的官方页面完成登录后重试。"
+    );
+}
+
+#[test]
 fn task_activity_page_filters_channels_search_and_uses_stable_cursors() {
     let db = task_activity_db();
     for (task_id, channel) in [

@@ -369,20 +369,32 @@ test("renders cross-channel media task input, processed content, links, and safe
     channel: "wechat",
     status: "succeeded",
     actions: ["media_download.download", "local_asr.transcribe"],
-    input_text: "下载并转写 https://media.example.test/post/1",
-    result_text: "整理后的完整转写内容。",
+    input_text: "下载视频号 https://weixin.qq.com/sph/A88dF8Ju34",
+    result_text: "已提取视频和平台文案。",
     error_text: null,
-    source_urls: ["https://media.example.test/post/1"],
-    artifacts: [{
-      schema_version: 1,
-      id: "artifact-1",
-      filename: "transcript.txt",
-      kind: "file",
-      mime_type: "text/plain",
-      size_bytes: 2048,
-      download_url: "/v1/tasks/12345678-activity-task/artifacts/artifact-1/content",
-      preview_url: null,
-    }],
+    source_urls: ["https://weixin.qq.com/sph/A88dF8Ju34"],
+    artifacts: [
+      {
+        schema_version: 1,
+        id: "artifact-video",
+        filename: "channels.mp4",
+        kind: "video",
+        mime_type: "video/mp4",
+        size_bytes: 12_428_049,
+        download_url: "/v1/tasks/12345678-activity-task/artifacts/artifact-video/content",
+        preview_url: "/v1/tasks/12345678-activity-task/artifacts/artifact-video/preview",
+      },
+      {
+        schema_version: 1,
+        id: "artifact-article",
+        filename: "channels_article.txt",
+        kind: "file",
+        mime_type: "text/plain",
+        size_bytes: 2048,
+        download_url: "/v1/tasks/12345678-activity-task/artifacts/artifact-article/content",
+        preview_url: null,
+      },
+    ],
     created_at: "1788846460",
     updated_at: "1788846461",
     event_at_ms: 1788846461000,
@@ -398,9 +410,11 @@ test("renders cross-channel media task input, processed content, links, and safe
   assert.match(markup, /微信/);
   assert.match(markup, /原始请求/);
   assert.match(markup, /处理结果/);
-  assert.match(markup, /整理后的完整转写内容/);
+  assert.match(markup, /已提取视频和平台文案/);
   assert.match(markup, /媒体链接 1/);
-  assert.match(markup, /transcript\.txt/);
+  assert.match(markup, /channels\.mp4/);
+  assert.match(markup, /channels_article\.txt/);
+  assert.match(markup, /预览/);
   assert.match(markup, /2\.0 KB/);
   assert.match(markup, />download</);
   assert.match(markup, />transcribe</);

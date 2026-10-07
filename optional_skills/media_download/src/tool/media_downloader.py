@@ -38,6 +38,7 @@ from typing import Any, Callable, Iterable
 
 import image_ocr
 import media_audio
+import wechat_channels_access
 import xiaohongshu_access
 import youtube_access
 from browser_devtools import DevToolsConnection, DevToolsError
@@ -123,7 +124,15 @@ XIAOHONGSHU_DOMAINS = (
 )
 TIKTOK_DOMAINS = ("tiktok.com", "tiktokv.com", "tiktokcdn.com", "vm.tiktok.com", "vt.tiktok.com")
 YOUTUBE_DOMAINS = ("youtube.com", "youtu.be", "youtube-nocookie.com")
-PLATFORMS = ("auto", "douyin", "kuaishou", "xiaohongshu", "tiktok", "youtube")
+PLATFORMS = (
+    "auto",
+    "douyin",
+    "kuaishou",
+    "xiaohongshu",
+    "tiktok",
+    "youtube",
+    "wechat_channels",
+)
 PLATFORM_ALIASES = {"titok": "tiktok", "yt": "youtube"}
 PLATFORM_CHOICES = PLATFORMS + tuple(PLATFORM_ALIASES)
 DEFAULT_YOUTUBE_FORMAT = "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b"
@@ -422,6 +431,8 @@ def normalize_platform(platform: str) -> str:
 
 
 def detect_platform(text: str) -> str | None:
+    if wechat_channels_access.extract_share_url(text):
+        return "wechat_channels"
     lowered = text.lower()
     if any(domain in lowered for domain in YOUTUBE_DOMAINS):
         return "youtube"
@@ -4176,6 +4187,7 @@ def platform_referer(platform: str) -> str:
         "xiaohongshu": "https://www.xiaohongshu.com/",
         "tiktok": "https://www.tiktok.com/",
         "youtube": "https://www.youtube.com/",
+        "wechat_channels": "https://weixin.qq.com/",
     }.get(platform, "https://www.douyin.com/")
 
 
@@ -4209,6 +4221,60 @@ def gather_youtube_candidates(
         [],
         None,
         [f"youtube: using yt-dlp for {url}"],
+    )
+
+
+def gather_wechat_channels_candidates(
+    share_text: str,
+    *,
+    timeout: float,
+    browser_fallback: bool,
+    chrome_path: str | None,
+    browser_profile_dir: str | None,
+) -> tuple[str | None, list[Candidate], list[ImageCandidate], ArticleContent | None, list[str]]:
+    try:
+        resolved = wechat_channels_access.resolve_share(
+            share_text,
+            browser_profile_root=browser_profile_dir,
+            chrome=find_chrome_executable(chrome_path),
+            timeout=timeout,
+            browser_fallback=browser_fallback,
+            cancellation_check=raise_if_task_cancelled,
+        )
+    except wechat_channels_access.WechatChannelsAccessError as exc:
+        raise DouyinDownloadError(str(exc)) from exc
+
+    candidates = [
+        Candidate(
+            url,
+            f"wechat_channels.feed.{source}",
+            priority,
+            referer=platform_referer("wechat_channels"),
+        )
+        for priority, (source, url) in enumerate(resolved.video_urls, start=1)
+    ]
+    image_candidates = [
+        ImageCandidate(
+            url,
+            f"wechat_channels.feed.picInfo[{index}]",
+            index + 1,
+        )
+        for index, url in enumerate(resolved.image_urls)
+    ]
+    article = None
+    if resolved.description:
+        article = ArticleContent(
+            "",
+            resolved.description,
+            resolved.author,
+            "wechat_channels.feed.description",
+        )
+    return (
+        resolved.export_id,
+        candidates,
+        image_candidates,
+        article,
+        list(resolved.logs),
     )
 
 
@@ -4349,6 +4415,16 @@ def gather_candidates_for_request(
 
     if resolved_platform == "youtube":
         item_id, candidates, image_candidates, article, logs = gather_youtube_candidates(share_text)
+        return resolved_platform, item_id, candidates, image_candidates, article, logs
+
+    if resolved_platform == "wechat_channels":
+        item_id, candidates, image_candidates, article, logs = gather_wechat_channels_candidates(
+            share_text,
+            timeout=timeout,
+            browser_fallback=browser_fallback,
+            chrome_path=chrome_path,
+            browser_profile_dir=browser_profile_dir,
+        )
         return resolved_platform, item_id, candidates, image_candidates, article, logs
 
     if resolved_platform == "douyin":
@@ -5414,6 +5490,7 @@ def article_document(
     platform_name = {
         "douyin": "抖音",
         "xiaohongshu": "小红书",
+        "wechat_channels": "微信视频号",
     }.get(normalize_platform(platform), platform)
     source_urls = extract_urls(share_text)
     header = [f"平台：{platform_name}"]
@@ -5797,6 +5874,39 @@ def media_type_message(platform: str, candidates: list[Candidate], image_candida
     return f"detected_media: unknown (platform={platform})"
 
 
+def save_video_article_if_available(
+    article: ArticleContent | None,
+    *,
+    platform: str,
+    output_dir: Path,
+    output_name: str,
+    item_id: str | None,
+    share_text: str,
+    overwrite: bool,
+) -> Path | None:
+    if normalize_platform(platform) != "wechat_channels" or not article_has_platform_text(article):
+        return None
+    assert article is not None
+    try:
+        return save_article_content(
+            article,
+            output_dir,
+            output_name=output_name,
+            platform=platform,
+            item_id=item_id,
+            share_text=share_text,
+            overwrite=overwrite,
+        )
+    except OperationCancelled:
+        raise
+    except (DouyinDownloadError, OSError) as exc:
+        print(
+            f"component_unavailable: component=platform_article error={exc}",
+            file=sys.stderr,
+        )
+        return None
+
+
 def handle_downloaded_video(path: Path, args: argparse.Namespace) -> None:
     raise_if_task_cancelled()
     if args.show_info:
@@ -5821,7 +5931,7 @@ def image_post_article_is_missing(
 ) -> bool:
     return (
         not getattr(args, "print_url", False)
-        and normalize_platform(platform) in {"douyin", "xiaohongshu"}
+        and normalize_platform(platform) in {"douyin", "xiaohongshu", "wechat_channels"}
         and bool(image_candidates)
         and not article_has_platform_text(article)
     )
@@ -5921,7 +6031,8 @@ def nonnegative_float_argument(value: str) -> float:
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Download accessible Douyin, Kuaishou, Xiaohongshu, TikTok, or YouTube media "
+            "Download accessible Douyin, Kuaishou, Xiaohongshu, TikTok, YouTube, or "
+            "WeChat Channels media "
             "from copied share text."
         ),
     )
@@ -5970,7 +6081,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--no-system-browser-cookies",
         dest="system_browser_cookies",
         action="store_false",
-        help="Do not read Douyin/Xiaohongshu cookies from a local browser profile.",
+        help="Do not read cookies from any system browser profile.",
     )
     parser.add_argument(
         "--platform",
@@ -6034,7 +6145,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--browser-profile-dir",
         help=(
             "Host-provided private directory for this skill's persistent browser "
-            "profiles. Xiaohongshu and YouTube login state is stored only here and is never read "
+            "profiles. Xiaohongshu, YouTube, and WeChat Channels login state is stored only here "
+            "and is never read "
             "from the system browser or another skill."
         ),
     )
@@ -8136,6 +8248,7 @@ def handle_resolved_media(
         if article_has_platform_text(article) and normalize_platform(platform) in {
             "douyin",
             "xiaohongshu",
+            "wechat_channels",
         }:
             try:
                 saved_paths.append(
@@ -8371,6 +8484,17 @@ def handle_resolved_media(
                 logs,
             )
         emit_parent_result_metadata(selected_video_source_contract(platform, candidate))
+        saved_article = save_video_article_if_available(
+            article,
+            platform=platform,
+            output_dir=output_dir,
+            output_name=saved_path.name,
+            item_id=item_id,
+            share_text=share_text,
+            overwrite=args.overwrite,
+        )
+        if saved_article is not None:
+            print(saved_article)
         handle_downloaded_video(saved_path, args)
         return 0
 
@@ -8405,6 +8529,17 @@ def handle_resolved_media(
         emit_parent_result_metadata(
             selected_video_source_contract(platform, silent_fallback_candidate)
         )
+        saved_article = save_video_article_if_available(
+            article,
+            platform=platform,
+            output_dir=output_dir,
+            output_name=output_path.name,
+            item_id=item_id,
+            share_text=share_text,
+            overwrite=args.overwrite,
+        )
+        if saved_article is not None:
+            print(saved_article)
         handle_downloaded_video(output_path, args)
         return 0
 
