@@ -1,6 +1,6 @@
 # NNI 心跳拉取任务与受控命令执行启动计划
 
-状态：in_progress
+状态：complete
 
 日期：2026-10-07
 
@@ -220,10 +220,17 @@ lease token 和规范化结果；服务端重新计算结果摘要并把它绑�
 
 ## 8. 完成记录
 
-实施完成后填写：
+完成于 2026-10-07：
 
-- Agent Runtime 提交/测试：待完成
-- NNI 服务端提交/测试：待完成
-- 本机部署：待完成
-- Linux 实际命令闭环：待完成
-- macOS 合同测试：待完成
+- Agent Runtime：提交 `94545286d`；`cargo check -p clawd --all-targets`、4 项定向
+  work executor 测试、格式化和差异检查通过。
+- NNI 服务端：功能提交 `57f88fc`，部署容量修复 `b794934`，大账本启动等待修复
+  `662aa2c`；定向测试 22 项、完整测试 317 项、`npm run check` 和差异检查通过。
+- 本机部署：release `clawd 0.1.8` 已重启，显式启用 work pull，allowlist 仅为
+  `uname,printf`；Core 已部署 `662aa2c`，schema 26，API 与结算 worker 均为 active。
+- Linux 实际闭环：任务 `nni-work-f2c63b06a8a8b0ff6b54bdb43fe09c66` 在 20:11:16
+  随正常心跳领取，`printf` 独立执行成功并保持 `completed_pending_report`；执行后没有额外
+  心跳或报告请求，20:21:09 随下一次正常心跳签名回报，服务端终态为 `succeeded`、
+  attempt=1、stdout=`heartbeat-work-live-ok`，本地 pending 状态随后清除，心跳无失败。
+- macOS：平台/架构、错误目标、租约、摘要和报告合同已由服务端/运行端自动测试覆盖；按计划
+  不把本轮未进行的真实 macOS 命令执行伪报为实机验收。
