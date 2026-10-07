@@ -183,6 +183,28 @@ asynchronous lock. It stops future attempts without deleting history. Persisted 
 successful node host, and the next expected heartbeat time. Runtime decisions never derive these
 fields by parsing error prose.
 
+### Heartbeat-carried work bootstrap
+
+Distributed work is disabled by default. A deployment opts in with
+`APP_NNI_WORK_PULL_ENABLED=true` and a non-empty `APP_NNI_WORK_ALLOWED_PROGRAMS` basename list; the
+optional `APP_NNI_WORK_COMMAND_TIMEOUT_MAX_SECONDS` may only reduce the 300-second command ceiling.
+The runtime advertises its compiled platform/architecture and a stable worker instance ID only on a
+normally due heartbeat and only while no local task is active.
+
+A successful heartbeat may return one exact-device `command_v1` assignment. The runtime validates
+the device key, platform, architecture, lease, canonical payload digest, local program allowlist,
+argument bounds, and timeout before starting a separate Tokio task. It invokes the basename and
+argument vector directly with no shell, a cleared environment, a minimal PATH, null stdin, bounded
+stdout/stderr, and timeout cleanup. Command execution never holds the heartbeat lock.
+
+Completion is atomically persisted as `completed_pending_report`. It neither wakes the heartbeat
+worker nor creates a network request. The next normally scheduled heartbeat carries the result;
+the server binds its digest into that heartbeat's challenge and commits it only after the same
+hardware signature verifies. Work preparation, result acceptance, and leasing errors remain
+structured `work_*` fields and cannot turn an accepted heartbeat into a failure. This bootstrap is
+an execution-contract test bed: future inference and training use separate versioned task adapters,
+artifact transport, renewable leases, and resumable workers rather than the bounded command adapter.
+
 ## Process and Security Contract
 
 - The runner grants the internal NNI endpoint from registered `nni.*` capabilities, not from a

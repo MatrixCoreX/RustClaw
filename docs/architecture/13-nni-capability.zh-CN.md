@@ -144,6 +144,24 @@ NNI Core 在同一事务中完成付款方扣款、收款方入账、两条不�
 历史。持久状态分别记录 `last_attempt_at_ts`、`last_success_at_ts`、`last_error_code`、连续失败
 次数、最后成功节点 host 和下一次预期心跳时间。运行时不会解析错误文案来推导这些字段。
 
+### 心跳携带任务启动能力
+
+分布式任务默认关闭。部署时必须显式设置 `APP_NNI_WORK_PULL_ENABLED=true`，并提供非空的
+`APP_NNI_WORK_ALLOWED_PROGRAMS` 程序基名白名单；可选的
+`APP_NNI_WORK_COMMAND_TIMEOUT_MAX_SECONDS` 只能把 300 秒命令上限调低。运行时只在原定心跳
+到期、且本地没有在途任务时，上报编译目标的平台/架构和稳定 worker instance ID。
+
+一次成功心跳最多返回一个精确绑定硬件设备的 `command_v1` 任务。运行时在启动独立 Tokio
+任务前，再次校验设备公钥、平台、架构、lease、规范 payload 摘要、本地程序白名单、参数边界
+和超时。命令只使用程序基名和参数数组直接执行，不经过 shell；子进程清空环境，只保留最小
+PATH，stdin 为空，stdout/stderr 有界，并在超时后回收。命令执行不持有心跳锁。
+
+执行完成后只原子落盘为 `completed_pending_report`，既不唤醒心跳 worker，也不新增网络请求。
+下一次原定心跳携带结果；服务端把结果摘要绑定进该次 heartbeat challenge，并在同一个硬件签名
+验证通过后提交结果。任务准备、结果提交或领取失败只体现在结构化 `work_*` 字段中，不能把已经
+接受的心跳改成失败。这个阶段只用于验证执行合同；未来推理和训练使用独立版本化 adapter、
+artifact 传输、可续租 lease 和可恢复 worker，不沿用有界命令执行器。
+
 ## 进程与安全合同
 
 - runner 根据已经注册的 `nni.*` capability 授予内部 NNI 入口，不依赖技能名硬编码分发。

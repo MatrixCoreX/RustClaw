@@ -33,6 +33,7 @@ fn nni_heartbeat_worker_sleep_seconds(next_due_at_ts: Option<u64>, now: u64) -> 
 
 pub(crate) fn spawn_nni_heartbeat_worker(state: AppState) {
     tokio::spawn(async move {
+        nni_resume_work_worker(state.clone());
         loop {
             let force_immediate = nni_heartbeat_immediate_request_flag().swap(false, Ordering::AcqRel);
             if let Err(err) = nni_heartbeat_tick(&state, force_immediate).await {
@@ -210,6 +211,7 @@ async fn nni_recorded_heartbeat(
                     "node_url": data.get("node_url").and_then(Value::as_str).unwrap_or(""),
                 }),
             );
+            nni_handle_work_heartbeat_response(state, &data);
             Ok(data)
         }
         Err(err) => {
@@ -348,6 +350,8 @@ async fn run_nni_heartbeat_once_for_node(
     device_pubkey: &str,
 ) -> Result<Value, NniHeartbeatError> {
     let request_endpoint = nni_remote_api_endpoint(node_url, "heartbeat/request");
+    let worker_capabilities = nni_current_worker_capabilities(state);
+    let work_report = nni_pending_work_report_for_node(state, node_url, device_pubkey);
     let request_resp = state
         .core
         .public_http_client
@@ -356,6 +360,8 @@ async fn run_nni_heartbeat_once_for_node(
         .json(&NniRemoteHeartbeatRequest {
             device_pubkey: device_pubkey.to_string(),
             client_user_key: NNI_HEARTBEAT_USER_KEY.to_string(),
+            worker_capabilities,
+            work_report,
         })
         .send()
         .await

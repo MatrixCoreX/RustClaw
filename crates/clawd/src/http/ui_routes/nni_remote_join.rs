@@ -250,6 +250,10 @@ struct NniRemoteOwnerRecoveryVerifyRequest {
 struct NniRemoteHeartbeatRequest {
     device_pubkey: String,
     client_user_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    worker_capabilities: Option<NniWorkerCapabilities>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    work_report: Option<NniHeartbeatWorkReport>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1628,6 +1632,8 @@ fn normalize_nni_node_url(raw: &str) -> Result<String, &'static str> {
 }
 
 include!("nni_runtime_state.rs");
+
+include!("nni_distributed_work.rs");
 
 include!("nni_heartbeat_worker.rs");
 
