@@ -619,6 +619,21 @@ def _artifact(path: Path) -> dict[str, Any]:
     return artifact
 
 
+def _partition_download_artifacts(
+    artifacts: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    delivery_artifacts: list[dict[str, Any]] = []
+    diagnostic_files: list[dict[str, Any]] = []
+    for artifact in artifacts:
+        if artifact.get("artifact_role") != "metadata":
+            delivery_artifacts.append(artifact)
+            continue
+        diagnostic = dict(artifact)
+        diagnostic["visibility"] = "internal_processing"
+        diagnostic_files.append(diagnostic)
+    return delivery_artifacts, diagnostic_files
+
+
 def _available_archive_path(output_dir: Path) -> Path:
     candidate = output_dir / "image_bundle.zip"
     if not candidate.exists():
@@ -1941,6 +1956,9 @@ def respond(
         recognition_review = _review_local_ocr_artifact(artifacts)
     else:
         recognition_review = None
+    diagnostic_files: list[dict[str, Any]] = []
+    if action == "download":
+        artifacts, diagnostic_files = _partition_download_artifacts(artifacts)
     urls = _urls(stdout) if action == "resolve" else []
     if action == "resolve" and not urls:
         raise SkillFailure(
@@ -2032,6 +2050,8 @@ def respond(
         extra["delivery"] = delivery
     if saved_files is not None:
         extra["saved_files"] = saved_files
+    if diagnostic_files:
+        extra["diagnostic_files"] = diagnostic_files
     if action == "ocr":
         fallback_from = _string(args, "fallback_from", max_length=64)
         extra["recognition"] = {

@@ -95,6 +95,15 @@ class AdapterTest(unittest.TestCase):
         self.assertIn("WeChat Channels", manifest["aipp"]["descriptions"]["en"])
         self.assertIn("视频号", manifest["aipp"]["descriptions"]["zh"])
 
+        input_properties = manifest["capability_request"]["input_schema"]["properties"]
+        self.assertNotIn("save_meta", input_properties)
+        download = next(
+            item
+            for item in manifest["capability_request"]["capabilities"]
+            if item["name"] == "media_download.download"
+        )
+        self.assertNotIn("save_meta", download["optional"])
+
     def test_progress_reporter_emits_ordered_machine_frames(self) -> None:
         output = io.StringIO()
         reporter = self.skill.ProgressReporter("progress-1")
@@ -1010,6 +1019,62 @@ class AdapterTest(unittest.TestCase):
         command = runner.call_args.args[0]
         self.assertIn("--no-system-browser-cookies", command)
         self.assertNotIn("shell", runner.call_args.kwargs)
+
+    def test_download_metadata_stays_internal_and_is_not_delivered(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            artifacts = workspace / "artifacts"
+            workspace.mkdir()
+
+            def fake_run(command, **kwargs):
+                output_dir = Path(command[command.index("--output-dir") + 1])
+                output_dir.mkdir(parents=True, exist_ok=True)
+                (output_dir / "public-video.mp4").write_bytes(b"video")
+                (output_dir / "public-video.json").write_text(
+                    '{"platform":"wechat_channels"}',
+                    encoding="utf-8",
+                )
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            request = {
+                "request_id": "download-private-metadata-1",
+                "args": {
+                    "action": "download",
+                    "share": "https://weixin.qq.com/sph/example",
+                    "save_meta": True,
+                },
+                "context": {
+                    "artifact_output_directory": str(artifacts),
+                    "workspace_root": str(workspace),
+                    "permissions": {"allow_path_outside_workspace": False},
+                },
+                "user_id": 1,
+                "chat_id": 1,
+            }
+            with mock.patch.object(self.skill.subprocess, "run", side_effect=fake_run) as runner:
+                response = self.skill.respond(request)
+
+        self.assertIn("--save-meta", runner.call_args.args[0])
+        self.assertEqual(response["extra"]["count"], 1)
+        self.assertEqual(
+            [item["filename"] for item in response["extra"]["artifacts"]],
+            ["public-video.mp4"],
+        )
+        self.assertEqual(
+            response["extra"]["diagnostic_files"],
+            [
+                {
+                    "path": str(artifacts / "public-video.json"),
+                    "filename": "public-video.json",
+                    "mime_type": "application/json",
+                    "size_bytes": 30,
+                    "artifact_role": "metadata",
+                    "visibility": "internal_processing",
+                }
+            ],
+        )
+        self.assertEqual(response["extra"]["content_bundle"]["other_file_count"], 0)
 
     def test_video_text_conversion_exposes_first_frame_and_audio_steps(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
