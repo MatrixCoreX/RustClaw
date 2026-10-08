@@ -4,6 +4,15 @@ const NNI_WORK_RESULT_STREAM_BYTES: usize = 16 * 1024;
 const NNI_WORK_REPORT_JSON_BYTES: usize = 48 * 1024;
 const NNI_WORK_COMMAND_TIMEOUT_DEFAULT_SECONDS: u64 = 300;
 const NNI_WORK_COMMAND_TIMEOUT_MAX_SECONDS: u64 = 300;
+const NNI_WORK_CAPABILITY_ARGS_BYTES: usize = 32 * 1024;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct NniActiveWorkLease {
+    task_id: String,
+    attempt: u32,
+    lease_token_sha256: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -13,6 +22,8 @@ struct NniWorkerCapabilities {
     arch: String,
     supported_task_types: Vec<String>,
     worker_instance_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    active_lease: Option<NniActiveWorkLease>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,6 +52,19 @@ struct NniWorkCommandPayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct NniWorkCapabilityPayload {
+    capability: String,
+    args: Value,
+}
+
+#[derive(Debug, Clone)]
+enum NniWorkPayload {
+    Command(NniWorkCommandPayload),
+    Capability(NniWorkCapabilityPayload),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct NniWorkResult {
     status: String,
     exit_code: Option<i32>,
@@ -59,6 +83,10 @@ struct NniLocalWorkState {
     node_url: String,
     status: String,
     assignment: NniWorkAssignment,
+    #[serde(default)]
+    local_task_id: Option<String>,
+    #[serde(default)]
+    started_at_unix: Option<i64>,
     #[serde(default)]
     result: Option<NniWorkResult>,
 }
@@ -233,18 +261,34 @@ fn nni_work_sha256(value: &str) -> String {
 }
 
 fn nni_current_worker_capabilities(state: &AppState) -> Option<NniWorkerCapabilities> {
-    if !nni_work_pull_enabled() || nni_work_allowed_programs().is_empty() {
+    if !nni_work_pull_enabled() {
         return None;
     }
-    if read_nni_local_work_state(state).ok().flatten().is_some() {
+    let local = read_nni_local_work_state(state).ok().flatten();
+    if local
+        .as_ref()
+        .is_some_and(|value| value.status == "completed_pending_report")
+    {
         return None;
     }
+    let mut supported_task_types = vec!["capability_v1".to_string()];
+    if !nni_work_allowed_programs().is_empty() {
+        supported_task_types.insert(0, "command_v1".to_string());
+    }
+    let active_lease = local.as_ref().and_then(|value| {
+        matches!(value.status.as_str(), "assigned" | "running").then(|| NniActiveWorkLease {
+            task_id: value.assignment.task_id.clone(),
+            attempt: value.assignment.attempt,
+            lease_token_sha256: nni_work_sha256(&value.assignment.lease_token),
+        })
+    });
     Some(NniWorkerCapabilities {
         protocol_version: NNI_WORK_PROTOCOL_VERSION,
         platform: nni_work_platform()?.to_string(),
         arch: nni_work_arch()?.to_string(),
-        supported_task_types: vec!["command_v1".to_string()],
+        supported_task_types,
         worker_instance_id: nni_worker_instance_id(state).ok()?,
+        active_lease,
     })
 }
 
@@ -282,8 +326,10 @@ fn nni_pending_work_report_for_node(
 
 fn nni_validate_work_assignment(
     assignment: &NniWorkAssignment,
-) -> Result<NniWorkCommandPayload, &'static str> {
-    if assignment.schema_version != 1 || assignment.task_type != "command_v1" {
+) -> Result<NniWorkPayload, &'static str> {
+    if assignment.schema_version != 1
+        || !matches!(assignment.task_type.as_str(), "command_v1" | "capability_v1")
+    {
         return Err("unsupported_assignment");
     }
     if Some(assignment.target_platform.as_str()) != nni_work_platform()
@@ -306,18 +352,43 @@ fn nni_validate_work_assignment(
     if nni_work_sha256(&assignment.payload_canonical) != assignment.payload_sha256 {
         return Err("payload_digest_mismatch");
     }
-    let payload: NniWorkCommandPayload =
-        serde_json::from_str(&assignment.payload_canonical).map_err(|_| "payload_invalid")?;
-    if !nni_work_program_name_valid(&payload.program)
-        || payload.args.len() > 32
-        || payload.args.iter().any(|value| value.as_bytes().contains(&0) || value.len() > 512)
-        || payload.args.iter().map(|value| value.len()).sum::<usize>() > 4 * 1024
-        || payload.timeout_seconds == 0
-        || payload.timeout_seconds > NNI_WORK_COMMAND_TIMEOUT_MAX_SECONDS
-    {
-        return Err("payload_invalid");
+    match assignment.task_type.as_str() {
+        "command_v1" => {
+            let payload: NniWorkCommandPayload = serde_json::from_str(&assignment.payload_canonical)
+                .map_err(|_| "payload_invalid")?;
+            if !nni_work_program_name_valid(&payload.program)
+                || payload.args.len() > 32
+                || payload
+                    .args
+                    .iter()
+                    .any(|value| value.as_bytes().contains(&0) || value.len() > 512)
+                || payload.args.iter().map(|value| value.len()).sum::<usize>() > 4 * 1024
+                || payload.timeout_seconds == 0
+                || payload.timeout_seconds > NNI_WORK_COMMAND_TIMEOUT_MAX_SECONDS
+            {
+                return Err("payload_invalid");
+            }
+            Ok(NniWorkPayload::Command(payload))
+        }
+        "capability_v1" => {
+            let payload: NniWorkCapabilityPayload =
+                serde_json::from_str(&assignment.payload_canonical)
+                    .map_err(|_| "payload_invalid")?;
+            let direct = json!({
+                "entrypoint": "run_capability",
+                "capability": payload.capability,
+                "args": payload.args,
+            });
+            if serde_json::to_vec(&payload.args)
+                .map_or(true, |value| value.len() > NNI_WORK_CAPABILITY_ARGS_BYTES)
+                || crate::worker::run_capability::parse_direct_capability_request(&direct).is_err()
+            {
+                return Err("payload_invalid");
+            }
+            Ok(NniWorkPayload::Capability(payload))
+        }
+        _ => Err("unsupported_assignment"),
     }
-    Ok(payload)
 }
 
 fn nni_failed_work_result(error_code: &str, stderr: impl Into<String>) -> NniWorkResult {
@@ -498,6 +569,176 @@ async fn nni_execute_work_command(
     }
 }
 
+fn nni_local_admin_identity(state: &AppState) -> anyhow::Result<AuthIdentity> {
+    let user_key = {
+        let db = state
+            .core
+            .db
+            .get()
+            .map_err(|error| anyhow::anyhow!("db pool: {error}"))?;
+        db.query_row(
+            "SELECT user_key FROM auth_keys
+             WHERE role = 'admin' AND enabled = 1 AND principal_id IS NOT NULL
+             ORDER BY created_at ASC, rowid ASC LIMIT 1",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+    }
+    .ok_or_else(|| anyhow::anyhow!("local_admin_unavailable"))?;
+    resolve_auth_identity_by_key(state, &user_key)?
+        .filter(|identity| identity.role.eq_ignore_ascii_case("admin"))
+        .ok_or_else(|| anyhow::anyhow!("local_admin_unavailable"))
+}
+
+fn nni_capability_task_payload(
+    identity: &AuthIdentity,
+    payload: &NniWorkCapabilityPayload,
+) -> anyhow::Result<Value> {
+    let mut direct = json!({
+        "entrypoint": "run_capability",
+        "capability": payload.capability,
+        "args": payload.args,
+    });
+    crate::worker::run_capability::parse_direct_capability_request(&direct)?;
+    crate::task_execution_policy::stamp_authenticated_submission_policy(
+        &mut direct,
+        Some(identity),
+        Some("nni-control-plane"),
+        None,
+    )
+    .map_err(|error| anyhow::anyhow!(error.as_token()))?;
+    Ok(direct)
+}
+
+fn nni_enqueue_capability_task(
+    state: &AppState,
+    assignment: &NniWorkAssignment,
+    payload: &NniWorkCapabilityPayload,
+) -> anyhow::Result<String> {
+    let identity = nni_local_admin_identity(state)?;
+    let direct = nni_capability_task_payload(&identity, payload)?;
+    let task_id = uuid::Uuid::new_v4();
+    let idempotency_key = format!(
+        "nni-capability:{}:{}",
+        assignment.task_id, assignment.attempt
+    );
+    let (persisted_task_id, _) = crate::repo::insert_submitted_task(
+        state,
+        &task_id,
+        identity.user_id,
+        identity.chat_id,
+        Some(&identity.user_key),
+        claw_core::types::ChannelKind::Ui,
+        None,
+        None,
+        None,
+        Some(&idempotency_key),
+        "ask",
+        &direct.to_string(),
+    )?;
+    Ok(persisted_task_id.to_string())
+}
+
+fn nni_capability_result_text(result: Option<&Value>) -> String {
+    let Some(result) = result else {
+        return String::new();
+    };
+    let text = [
+        result.pointer("/text"),
+        result.pointer("/final_result_json/text"),
+        result.pointer("/task_journal/summary/final_answer"),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(|value| value.as_str().map(str::trim).filter(|value| !value.is_empty()));
+    let raw = text
+        .map(str::to_string)
+        .unwrap_or_else(|| serde_json::to_string(result).unwrap_or_default());
+    crate::visible_text::sanitize_user_visible_text(&raw)
+}
+
+fn nni_elapsed_work_ms(started_at_unix: Option<i64>) -> u64 {
+    let started = started_at_unix.unwrap_or_else(current_unix_ts);
+    u64::try_from(current_unix_ts().saturating_sub(started))
+        .unwrap_or_default()
+        .saturating_mul(1_000)
+}
+
+async fn nni_wait_for_capability_task(
+    state: &AppState,
+    local_task_id: &str,
+    started_at_unix: Option<i64>,
+) -> NniWorkResult {
+    let task_id = match uuid::Uuid::parse_str(local_task_id) {
+        Ok(value) => value,
+        Err(_) => {
+            return nni_failed_work_result("local_task_id_invalid", "local_task_id_invalid")
+        }
+    };
+    loop {
+        let task = match crate::repo::get_task_query_record(state, task_id) {
+            Ok(Some((task, _, _))) => task,
+            Ok(None) => {
+                return nni_failed_work_result("local_task_not_found", "local_task_not_found")
+            }
+            Err(error) => {
+                return nni_failed_work_result("local_task_read_failed", error.to_string())
+            }
+        };
+        match task.status {
+            claw_core::types::TaskStatus::Succeeded => {
+                return NniWorkResult {
+                    status: "success".to_string(),
+                    exit_code: None,
+                    duration_ms: nni_elapsed_work_ms(started_at_unix),
+                    stdout: nni_capability_result_text(task.result_json.as_ref()),
+                    stderr: String::new(),
+                    stdout_truncated: false,
+                    stderr_truncated: false,
+                    error_code: None,
+                };
+            }
+            claw_core::types::TaskStatus::Failed
+            | claw_core::types::TaskStatus::Timeout
+            | claw_core::types::TaskStatus::Canceled => {
+                let error_code = match task.status {
+                    claw_core::types::TaskStatus::Timeout => "local_task_timeout",
+                    claw_core::types::TaskStatus::Canceled => "local_task_cancelled",
+                    _ => "capability_execution_failed",
+                };
+                let detail = task
+                    .error_text
+                    .as_deref()
+                    .map(crate::visible_text::sanitize_user_visible_text)
+                    .filter(|value| !value.trim().is_empty())
+                    .unwrap_or_else(|| nni_capability_result_text(task.result_json.as_ref()));
+                let mut result = nni_failed_work_result(error_code, detail);
+                result.duration_ms = nni_elapsed_work_ms(started_at_unix);
+                return result;
+            }
+            claw_core::types::TaskStatus::Queued | claw_core::types::TaskStatus::Running => {
+                if matches!(
+                    task.execution_state,
+                    Some(
+                        claw_core::types::TaskExecutionState::NeedsConfirmation
+                            | claw_core::types::TaskExecutionState::Blocked
+                    )
+                ) {
+                    let _ = crate::repo::cancel_task_by_id(state, local_task_id);
+                    let mut result = nni_failed_work_result(
+                        "capability_confirmation_required",
+                        "capability_confirmation_required",
+                    );
+                    result.duration_ms = nni_elapsed_work_ms(started_at_unix);
+                    return result;
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
 fn nni_accept_work_assignment(state: &AppState, heartbeat_data: &Value) {
     let Some(raw_assignment) = heartbeat_data.get("work_assignment") else {
         return;
@@ -548,6 +789,8 @@ fn nni_accept_work_assignment(state: &AppState, heartbeat_data: &Value) {
         node_url: node_url.to_string(),
         status: "assigned".to_string(),
         assignment,
+        local_task_id: None,
+        started_at_unix: None,
         result: None,
     };
     if let Err(error) = write_nni_local_work_state(state, &local) {
@@ -578,7 +821,10 @@ async fn nni_process_work_state(state: &AppState, resume: bool) -> anyhow::Resul
     let Some(mut local) = read_nni_local_work_state(state)? else {
         return Ok(());
     };
-    if local.status == "running" && resume {
+    if local.status == "running"
+        && resume
+        && local.assignment.task_type == "command_v1"
+    {
         local.status = "completed_pending_report".to_string();
         local.result = Some(nni_failed_work_result("worker_restarted", "worker_restarted"));
         write_nni_local_work_state(state, &local)?;
@@ -586,9 +832,10 @@ async fn nni_process_work_state(state: &AppState, resume: bool) -> anyhow::Resul
     if local.status == "assigned" {
         let validation = nni_validate_work_assignment(&local.assignment);
         local.status = "running".to_string();
+        local.started_at_unix = Some(current_unix_ts());
         write_nni_local_work_state(state, &local)?;
         let result = match validation {
-            Ok(payload) => {
+            Ok(NniWorkPayload::Command(payload)) => {
                 nni_execute_work_command(
                     &payload,
                     &nni_work_allowed_programs(),
@@ -596,7 +843,35 @@ async fn nni_process_work_state(state: &AppState, resume: bool) -> anyhow::Resul
                 )
                 .await
             }
+            Ok(NniWorkPayload::Capability(payload)) => {
+                match nni_enqueue_capability_task(state, &local.assignment, &payload) {
+                    Ok(local_task_id) => {
+                        local.local_task_id = Some(local_task_id.clone());
+                        write_nni_local_work_state(state, &local)?;
+                        nni_wait_for_capability_task(
+                            state,
+                            &local_task_id,
+                            local.started_at_unix,
+                        )
+                        .await
+                    }
+                    Err(error) => nni_failed_work_result(
+                        "capability_task_enqueue_failed",
+                        error.to_string(),
+                    ),
+                }
+            }
             Err(error_code) => nni_failed_work_result(error_code, error_code),
+        };
+        local.status = "completed_pending_report".to_string();
+        local.result = Some(nni_bound_work_result_for_heartbeat(result));
+        write_nni_local_work_state(state, &local)?;
+    } else if local.status == "running" && local.assignment.task_type == "capability_v1" {
+        let result = match local.local_task_id.as_deref() {
+            Some(local_task_id) => {
+                nni_wait_for_capability_task(state, local_task_id, local.started_at_unix).await
+            }
+            None => nni_failed_work_result("local_task_id_missing", "local_task_id_missing"),
         };
         local.status = "completed_pending_report".to_string();
         local.result = Some(nni_bound_work_result_for_heartbeat(result));
@@ -718,6 +993,23 @@ fn nni_resume_work_worker(state: AppState) {
 mod nni_distributed_work_unit_tests {
     use super::*;
 
+    fn assignment(task_type: &str, payload: Value) -> NniWorkAssignment {
+        let payload_canonical = serde_json::to_string(&payload).unwrap();
+        NniWorkAssignment {
+            schema_version: 1,
+            task_id: "nni-work-0123456789abcdef0123456789abcdef".to_string(),
+            task_type: task_type.to_string(),
+            target_device_pubkey: "a".repeat(128),
+            target_platform: nni_work_platform().unwrap().to_string(),
+            target_arch: nni_work_arch().unwrap().to_string(),
+            attempt: 1,
+            lease_token: "b".repeat(64),
+            lease_expires_at_unix: u64::try_from(current_unix_ts()).unwrap() + 60,
+            payload_sha256: nni_work_sha256(&payload_canonical),
+            payload_canonical,
+        }
+    }
+
     #[test]
     fn program_validation_rejects_shells_and_paths() {
         assert!(nni_work_program_name_valid("uname"));
@@ -725,6 +1017,86 @@ mod nni_distributed_work_unit_tests {
         assert!(!nni_work_program_name_valid("sh"));
         assert!(!nni_work_program_name_valid("/usr/bin/uname"));
         assert!(!nni_work_program_name_valid("uname;id"));
+    }
+
+    #[test]
+    fn capability_assignment_uses_the_existing_direct_capability_contract() {
+        let parsed = nni_validate_work_assignment(&assignment(
+            "capability_v1",
+            json!({
+                "capability": "web.search",
+                "args": {"query": "distributed inference"},
+            }),
+        ))
+        .expect("valid capability assignment");
+        match parsed {
+            NniWorkPayload::Capability(payload) => {
+                assert_eq!(payload.capability, "web.search");
+                assert_eq!(payload.args["query"], "distributed inference");
+            }
+            NniWorkPayload::Command(_) => panic!("expected capability payload"),
+        }
+        assert!(nni_validate_work_assignment(&assignment(
+            "capability_v1",
+            json!({"capability": "Browser Web", "args": {}}),
+        ))
+        .is_err());
+    }
+
+    #[test]
+    fn capability_assignment_enters_the_authenticated_local_task_queue() {
+        let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+        state.seed_test_auth_identity("rk-nni-capability-admin", "admin");
+        let assignment = assignment(
+            "capability_v1",
+            json!({
+                "capability": "web.search",
+                "args": {"query": "distributed inference"},
+            }),
+        );
+        let payload = match nni_validate_work_assignment(&assignment)
+            .expect("valid capability assignment")
+        {
+            NniWorkPayload::Capability(payload) => payload,
+            NniWorkPayload::Command(_) => panic!("expected capability payload"),
+        };
+
+        let local_task_id = nni_enqueue_capability_task(&state, &assignment, &payload)
+            .expect("enqueue local capability task");
+        let (payload_json, status, user_key, principal_id): (String, String, String, String) = state
+            .core
+            .db
+            .get()
+            .expect("get test database")
+            .query_row(
+                "SELECT payload_json, status, user_key, principal_id FROM tasks WHERE task_id = ?1",
+                [&local_task_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("read queued local capability task");
+        let queued: Value = serde_json::from_str(&payload_json).expect("parse queued payload");
+
+        assert_eq!(status, "queued");
+        assert_eq!(user_key, "rk-nni-capability-admin");
+        assert!(!principal_id.is_empty());
+        assert_eq!(queued["entrypoint"], "run_capability");
+        assert_eq!(queued["capability"], "web.search");
+        assert_eq!(queued["args"]["query"], "distributed inference");
+        assert_eq!(queued["_agent_execution_policy"]["mode"], "yolo");
+        assert_eq!(
+            queued["_agent_execution_policy"]["authority"],
+            "authenticated_admin"
+        );
+    }
+
+    #[test]
+    fn capability_result_prefers_readable_text_and_redacts_secrets() {
+        let text = nni_capability_result_text(Some(&json!({
+            "text": "done api_key=secret-value",
+            "extra": {"internal": true},
+        })));
+        assert!(text.starts_with("done"));
+        assert!(!text.contains("secret-value"));
     }
 
     #[tokio::test]

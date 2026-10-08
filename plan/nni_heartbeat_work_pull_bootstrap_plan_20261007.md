@@ -234,3 +234,28 @@ lease token 和规范化结果；服务端重新计算结果摘要并把它绑�
   attempt=1、stdout=`heartbeat-work-live-ok`，本地 pending 状态随后清除，心跳无失败。
 - macOS：平台/架构、错误目标、租约、摘要和报告合同已由服务端/运行端自动测试覆盖；按计划
   不把本轮未进行的真实 macOS 命令执行伪报为实机验收。
+
+## 9. 2026-10-08 能力任务扩展
+
+在保留 `command_v1` 受限命令 adapter 的基础上，增加 `capability_v1`，使管理员可通过同一
+心跳链路调用设备当前 registry generation 中已经准入、启用并获得宿主授权的能力：
+
+- 内置工具和内置技能统一使用 `call_capability`，不得在心跳模块按工具名或技能名分支。
+- 外置技能只有完成 admission、启用、policy grant，并把 capability 投影到当前 generation
+  后才可调用；仅安装文件、仅构建成功或自行声明低风险均不构成运行授权。
+- 设备把任务转换为现有 `run_capability` 本地 ask 任务，继续经过
+  `CapabilityResolver`、`PlanVerifier`、当前管理员权限、sandbox、receipt、policy 和精确版本
+  检查，不从 NNI payload 直接启动技能进程或工具。
+- `args` 必须是有界 JSON object；任务结果只保留有界、清洗后的用户可见文本，不上报凭据、
+  原始内部结果或 lease token。
+- 长能力任务不使用 `command_v1` 的 300 秒超时。设备在正常心跳里携带 active lease 摘要续租；
+  本地任务 ID 持久化，进程重启后继续观察同一任务，心跳本身不等待能力执行完成。
+- 管理页面默认创建“工具或技能”任务，并保留显式确认；空设备选择表示首台匹配设备，空平台
+  默认为 Linux，空架构默认为树莓派常用的 `aarch64`。
+
+扩展验收要求：
+
+- 内置工具、内置技能及已准入的外置技能使用同一 resolver/verifier 链路。
+- 未安装、禁用、未授权、receipt/generation 不匹配或参数不符合合同的能力必须结构化失败。
+- 长任务执行期间 lease 可随正常心跳续期，且不阻塞心跳、奖励或其他 NNI 数据处理。
+- Core、管理网页和 Agent Runtime 的协议、迁移、权限、入队、续租、重启恢复和结果回报测试通过。
