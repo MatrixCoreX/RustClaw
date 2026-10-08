@@ -259,3 +259,27 @@ lease token 和规范化结果；服务端重新计算结果摘要并把它绑�
 - 未安装、禁用、未授权、receipt/generation 不匹配或参数不符合合同的能力必须结构化失败。
 - 长任务执行期间 lease 可随正常心跳续期，且不阻塞心跳、奖励或其他 NNI 数据处理。
 - Core、管理网页和 Agent Runtime 的协议、迁移、权限、入队、续租、重启恢复和结果回报测试通过。
+
+### 9.1 能力任务完成记录
+
+完成于 2026-10-08：
+
+- Agent Runtime 提交 `ea3651684`，架构文档提交 `d95b34b8c`；NNI 服务端提交
+  `425f190`；MatrixAI 管理页提交 `26837d1`，均已推送。
+- Core 已部署 `425f190`，API 与 settlement worker 为 active，结算健康检查为
+  `caught_up`、`pending_periods=0`、`lag_seconds=0`；管理网页已部署 `26837d1`。
+- 树莓派通过签名预编译 release `pi-aarch64-20261008` 更新，不在设备上编译；
+  `agent-runtime.service` 为 active，并且只开启 `capability_v1`，未开放任意系统命令 allowlist。
+- 真实内置技能闭环：Core 任务 `nni-work-120ded06c45438ba844eb52167179751`
+  随心跳在树莓派领取并调用 `web.search_results`，83 秒完成；下一次正常签名心跳回报后，
+  Core 终态为 `succeeded`、attempt=1，结果摘要已落库。
+- 真实内置工具执行：Core 任务 `nni-work-29c13f1a4b5a2b46911ad9f13e7d100a`
+  随心跳在树莓派领取并调用 `filesystem.find_entries`，成功找到
+  `configs/product_identity.toml`；下一次签名心跳回报后，Core 终态为 `succeeded`、
+  attempt=1，结果摘要已落库。执行使用与外置技能相同的本地管理员 task、
+  `CapabilityResolver` 和 `PlanVerifier` 链路。
+- 外置技能没有独立旁路或名称分支；只有 admission、enable、policy grant、receipt 与当前
+  generation 全部有效并投影出 capability 后，才能通过同一 `capability_v1` 合同运行。
+- 验证通过：Rust 定向测试 7 项、NNI 定向测试 12 项、NNI 完整测试 322/323（唯一一次
+  settlement worker 并发套件抖动单测随后独立通过）、管理后端/服务测试 16 项、管理组件
+  测试 1 项、前端 lint 与 production build、三仓库 `git diff --check`。
