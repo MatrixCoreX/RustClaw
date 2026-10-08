@@ -146,21 +146,26 @@ NNI Core 在同一事务中完成付款方扣款、收款方入账、两条不�
 
 ### 心跳携带任务启动能力
 
-分布式任务默认关闭。部署时必须显式设置 `APP_NNI_WORK_PULL_ENABLED=true`，并提供非空的
-`APP_NNI_WORK_ALLOWED_PROGRAMS` 程序基名白名单；可选的
-`APP_NNI_WORK_COMMAND_TIMEOUT_MAX_SECONDS` 只能把 300 秒命令上限调低。运行时只在原定心跳
-到期、且本地没有在途任务时，上报编译目标的平台/架构和稳定 worker instance ID。
+分布式任务默认关闭。部署时必须显式设置 `APP_NNI_WORK_PULL_ENABLED=true`。只有启用
+`command_v1` 时才额外要求非空的 `APP_NNI_WORK_ALLOWED_PROGRAMS` 程序基名白名单；可选的
+`APP_NNI_WORK_COMMAND_TIMEOUT_MAX_SECONDS` 只能把该 adapter 的 300 秒命令上限调低。运行时
+只在原定心跳到期时，上报编译目标的平台/架构、支持的 adapter 类型和稳定 worker instance ID。
 
-一次成功心跳最多返回一个精确绑定硬件设备的 `command_v1` 任务。运行时在启动独立 Tokio
-任务前，再次校验设备公钥、平台、架构、lease、规范 payload 摘要、本地程序白名单、参数边界
-和超时。命令只使用程序基名和参数数组直接执行，不经过 shell；子进程清空环境，只保留最小
-PATH，stdin 为空，stdout/stderr 有界，并在超时后回收。命令执行不持有心跳锁。
+一次成功心跳最多返回一个精确设备或首台匹配设备可领取的 `command_v1` / `capability_v1`
+任务。受限命令 adapter 仍校验本地程序白名单，并以程序基名和参数数组直接执行，不经过 shell、
+不继承 secret、不能提权。能力任务则转换为本机已认证管理员的 `run_capability` ask 任务，继续
+经过现有 `CapabilityResolver`、`PlanVerifier`、registry generation、receipt、policy grant、
+权限和 sandbox 检查。内置工具、内置技能和外置技能使用同一路径；外置技能只有完成准入、启用、
+宿主授权并把 capability 投影到当前 generation 后才可调用。心跳承载层自身不按工具名或技能名
+直接启动任何进程。
 
 执行完成后只原子落盘为 `completed_pending_report`，既不唤醒心跳 worker，也不新增网络请求。
 下一次原定心跳携带结果；服务端把结果摘要绑定进该次 heartbeat challenge，并在同一个硬件签名
 验证通过后提交结果。任务准备、结果提交或领取失败只体现在结构化 `work_*` 字段中，不能把已经
-接受的心跳改成失败。这个阶段只用于验证执行合同；未来推理和训练使用独立版本化 adapter、
-artifact 传输、可续租 lease 和可恢复 worker，不沿用有界命令执行器。
+接受的心跳改成失败。能力任务运行时，正常心跳只携带 lease token 摘要续租；本地任务 ID 会持久
+保存，运行时重启后继续观察同一个任务。能力任务没有设备 wrapper 的整任务硬超时，`command_v1`
+仍保留 300 秒上限。未来推理和训练使用独立版本化 adapter 与 artifact 传输，不把大模型数据塞进
+心跳 JSON。
 
 ## 进程与安全合同
 

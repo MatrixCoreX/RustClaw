@@ -186,24 +186,32 @@ fields by parsing error prose.
 ### Heartbeat-carried work bootstrap
 
 Distributed work is disabled by default. A deployment opts in with
-`APP_NNI_WORK_PULL_ENABLED=true` and a non-empty `APP_NNI_WORK_ALLOWED_PROGRAMS` basename list; the
-optional `APP_NNI_WORK_COMMAND_TIMEOUT_MAX_SECONDS` may only reduce the 300-second command ceiling.
-The runtime advertises its compiled platform/architecture and a stable worker instance ID only on a
-normally due heartbeat and only while no local task is active.
+`APP_NNI_WORK_PULL_ENABLED=true`. A non-empty `APP_NNI_WORK_ALLOWED_PROGRAMS` basename list is
+additionally required only when the deployment enables `command_v1`; the optional
+`APP_NNI_WORK_COMMAND_TIMEOUT_MAX_SECONDS` may only reduce that adapter's 300-second command ceiling.
+The runtime advertises its compiled platform/architecture, supported adapter types, and a stable
+worker instance ID only on a normally due heartbeat.
 
-A successful heartbeat may return one exact-device `command_v1` assignment. The runtime validates
-the device key, platform, architecture, lease, canonical payload digest, local program allowlist,
-argument bounds, and timeout before starting a separate Tokio task. It invokes the basename and
-argument vector directly with no shell, a cleared environment, a minimal PATH, null stdin, bounded
-stdout/stderr, and timeout cleanup. Command execution never holds the heartbeat lock.
+A successful heartbeat may return one `command_v1` or `capability_v1` assignment for the exact
+device or the first matching device. The bounded command adapter still validates its local program
+allowlist and invokes the basename plus argument vector directly with no shell, inherited secrets,
+or privilege escalation. A capability assignment instead becomes a local authenticated-admin
+`run_capability` ask task. It therefore follows the existing `CapabilityResolver`, `PlanVerifier`,
+registry-generation, receipt, policy-grant, permission, and sandbox checks. Built-in tools,
+built-in skills, and external skills share this path; an external skill is callable only after
+admission, enablement, host authorization, and capability projection into the current generation.
+The work carrier never starts a tool or skill by name on its own.
 
 Completion is atomically persisted as `completed_pending_report`. It neither wakes the heartbeat
 worker nor creates a network request. The next normally scheduled heartbeat carries the result;
 the server binds its digest into that heartbeat's challenge and commits it only after the same
 hardware signature verifies. Work preparation, result acceptance, and leasing errors remain
-structured `work_*` fields and cannot turn an accepted heartbeat into a failure. This bootstrap is
-an execution-contract test bed: future inference and training use separate versioned task adapters,
-artifact transport, renewable leases, and resumable workers rather than the bounded command adapter.
+structured `work_*` fields and cannot turn an accepted heartbeat into a failure. While a capability
+task is active, normal heartbeats carry only its lease-token digest and renew the lease; local task
+identity is persisted so a runtime restart resumes observing the same task. Capability work has no
+device-wrapper wall-clock deadline, while `command_v1` retains its hard 300-second maximum. Future
+inference and training use separate versioned task adapters and artifact transport rather than
+placing large model payloads inside heartbeat JSON.
 
 ## Process and Security Contract
 
