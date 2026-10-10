@@ -3,7 +3,7 @@ import { constants as fsConstants } from "node:fs";
 import path from "node:path";
 import { browserStageError, recordBrowserFailure } from "./browser_diagnostics.mjs";
 import { createManualConfirmation } from "./manual_handoff.mjs";
-import { desktopSessionEnvironment, launchPlatformBrowser } from "./browser_environment.mjs";
+import { closePlatformBrowser, desktopSessionEnvironment, launchPlatformBrowser } from "./browser_environment.mjs";
 import { capturePublication } from "./publication.mjs";
 import { assertNavigationResponse, boundedBrowserOperation, normalizeBrowserError, openKeywordSearch } from "./browser_search.mjs";
 import { assertBrowserFlow, observePlatformBackpressure, pacingDelayMs, stopsCollection } from "./browser_flow_control.mjs";
@@ -666,7 +666,8 @@ export async function waitForInteractiveLogin({
     return await waitForManualAccess({ page, context, platform, errorCode, timeoutMs,
       confirmation, shouldStop, targetUrl: loginTarget });
   } finally {
-    await context.close().catch(() => {});
+    await closePlatformBrowser({ context, root, platform,
+      reason: "media_discovery_manual_verification_complete" });
   }
 }
 
@@ -2246,6 +2247,6 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
     throw error;
   } finally {
     stopObserving();
-    await context.close().catch(() => {});
+    await closePlatformBrowser({ context, root, platform });
   }
 }

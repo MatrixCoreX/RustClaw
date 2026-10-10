@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { chromium } from "playwright";
 import { browserCapability, waitForInteractiveLogin } from "../src/browser.mjs";
-import { launchPlatformBrowser, nativeBrowserEnvironment } from "../src/browser_environment.mjs";
+import { closePlatformBrowser, launchPlatformBrowser, nativeBrowserEnvironment } from "../src/browser_environment.mjs";
 
 const enabled = process.env.MEDIA_DISCOVERY_BROWSER_TEST === "1";
 const source = "https://www.douyin.com/video/73100000";
@@ -50,8 +50,12 @@ test("real browser reuses locale, timezone, viewport and session across restart"
         assert.deepEqual(actual, original);
         assert.equal((await context.cookies()).find(cookie => cookie.name === "fixture_session")?.value, "retained");
       }
-    } finally { await context.close(); }
+    } finally { await closePlatformBrowser({ context, root, platform: "douyin" }); }
   }
+  const preferences = JSON.parse(await fs.readFile(
+    path.join(root, "browser-profile", "douyin", "Default", "Preferences"), "utf8"));
+  assert.equal(preferences.profile.exit_type, "Normal");
+  assert.equal(preferences.profile.exited_cleanly, true);
 });
 
 test("actual manual verification popup uses the same environment and still requires confirmation", { skip: !enabled }, async t => {
@@ -67,7 +71,7 @@ test("actual manual verification popup uses the same environment and still requi
     silent = await readEnvironment(context.pages()[0]);
     await context.addCookies([{ name: "sessionid", value: "fixture-only", url: source,
       expires: Math.floor(Date.now() / 1000) + 3600 }]);
-  } finally { await context.close(); }
+  } finally { await closePlatformBrowser({ context, root, platform: "douyin" }); }
   const saved = await fs.readFile(path.join(root, "browser-profile", "douyin", "browser-environment.json"), "utf8");
   const originalLaunch = chromium.launchPersistentContext.bind(chromium);
   let manual;

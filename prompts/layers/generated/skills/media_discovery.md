@@ -259,7 +259,7 @@ Examples of equivalent intent (documentation examples, not runtime matchers):
 
 ## Error Contract (from interface)
 Errors use `extra.{schema_version,source_skill,status,error_code,message_key,retryable}`.
-Stable examples include `display_unavailable`, `browser_missing`,
+Stable examples include `display_unavailable`, `browser_missing`, `browser_close_failed`,
 `login_required`, `challenge_required`, `interactive_verification_cancelled`, `interactive_verification_timeout`, `manual_verification_not_restored`, `network_access_restricted`, `rate_limited`, `selector_drift`,
 `no_items_collected`, `screenshot_obscured`, `media_not_ready`,
 `platform_unsupported`, `platform_allocation_too_small`, `source_scope_empty`, `run_already_active`,

@@ -38,6 +38,7 @@ const SKILL_NAME = "media_discovery";
 const ERROR_CODES = new Set([
   "action_unsupported",
   "browser_missing",
+  "browser_close_failed",
   "browser_timeout",
   "browser_mode_invalid",
   "browser_environment_invalid",

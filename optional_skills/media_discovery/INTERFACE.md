@@ -337,6 +337,11 @@ platform's display precision. Each metric snapshot carries `captured_at`.
   runs reuse that profile's cookies, local storage, and browser cache; clearing
   collected results preserves this login/session state. The skill does not read
   cookies from unrelated browser profiles or write them to logs/checkpoints.
+- Collection and manual-verification windows close through Playwright's graceful
+  `Browser.close` path and wait for browser disconnection before the managed
+  profile is marked clean. A browser-level close is attempted if context close
+  fails; a still-connected browser returns `browser_close_failed`. This prevents
+  false crash-restore prompts without clearing cookies, local storage or login state.
 - Capture uses screenshots of browser-rendered media elements. It does not
   issue additional requests for original images and does not present this as a
   mechanism for bypassing anti-automation controls.
@@ -368,7 +373,7 @@ platform's display precision. Each metric snapshot carries `captured_at`.
 ## Error Contract
 
 Errors use `extra.{schema_version,source_skill,status,error_code,message_key,retryable}`.
-Stable examples include `display_unavailable`, `browser_missing`,
+Stable examples include `display_unavailable`, `browser_missing`, `browser_close_failed`,
 `login_required`, `challenge_required`, `interactive_verification_cancelled`, `interactive_verification_timeout`, `manual_verification_not_restored`, `network_access_restricted`, `rate_limited`, `selector_drift`,
 `no_items_collected`, `screenshot_obscured`, `media_not_ready`,
 `platform_unsupported`, `platform_allocation_too_small`, `source_scope_empty`, `run_already_active`,

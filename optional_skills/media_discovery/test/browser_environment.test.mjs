@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   AUTOMATION_BLINK_FLAG,
   AUTOMATION_DEFAULT_ARG,
+  closePlatformBrowser,
   desktopSessionEnvironment,
   launchPlatformBrowser,
   nativeBrowserEnvironment,
@@ -70,6 +71,60 @@ test("system-service execution discovers the current user's Wayland session", as
   assert.equal(environment.WAYLAND_DISPLAY, "wayland-7");
   assert.equal(environment.XAUTHORITY, authorityPath);
   assert.equal(environment.DISPLAY, undefined);
+});
+
+test("managed profiles repair stale crash markers and record a clean graceful close", async t => {
+  const { root, options } = await fixture(t);
+  const preferencesFile = path.join(root, "browser-profile", "douyin", "Default", "Preferences");
+  await fs.mkdir(path.dirname(preferencesFile), { recursive: true });
+  await fs.writeFile(preferencesFile, JSON.stringify({ profile: { exit_type: "Crashed" }, retained: true }));
+  let closeReason = null;
+  const context = await launchPlatformBrowser({ ...options, chromium: {
+    launchPersistentContext: async () => ({
+      close: async ({ reason }) => { closeReason = reason; },
+      browser: () => ({ isConnected: () => false }),
+    }),
+  } });
+  const repaired = JSON.parse(await fs.readFile(preferencesFile, "utf8"));
+  assert.equal(repaired.profile.exit_type, "Normal");
+  assert.equal(repaired.profile.exited_cleanly, true);
+  assert.equal(repaired.retained, true);
+
+  repaired.profile.exit_type = "Crashed";
+  repaired.profile.exited_cleanly = false;
+  await fs.writeFile(preferencesFile, JSON.stringify(repaired));
+  await closePlatformBrowser({ context, root, platform: "douyin" });
+  const closed = JSON.parse(await fs.readFile(preferencesFile, "utf8"));
+  assert.equal(closeReason, "media_discovery_collection_complete");
+  assert.equal(closed.profile.exit_type, "Normal");
+  assert.equal(closed.profile.exited_cleanly, true);
+  assert.equal(closed.retained, true);
+});
+
+test("a connected browser close failure is machine-visible and never marked clean", async t => {
+  const { root } = await fixture(t);
+  const preferencesFile = path.join(root, "browser-profile", "douyin", "Default", "Preferences");
+  await fs.mkdir(path.dirname(preferencesFile), { recursive: true });
+  await fs.writeFile(preferencesFile, JSON.stringify({ profile: { exit_type: "Crashed" } }));
+  const browser = { isConnected: () => true, close: async () => { throw new Error("still_running"); } };
+  const context = { close: async () => { throw new Error("close_failed"); }, browser: () => browser };
+  await assert.rejects(closePlatformBrowser({ context, root, platform: "douyin" }),
+    { message: "browser_close_failed" });
+  const preferences = JSON.parse(await fs.readFile(preferencesFile, "utf8"));
+  assert.equal(preferences.profile.exit_type, "Crashed");
+});
+
+test("a rejected close is not mistaken for success after an unexpected disconnect", async t => {
+  const { root } = await fixture(t);
+  const preferencesFile = path.join(root, "browser-profile", "douyin", "Default", "Preferences");
+  await fs.mkdir(path.dirname(preferencesFile), { recursive: true });
+  await fs.writeFile(preferencesFile, JSON.stringify({ profile: { exit_type: "Crashed" } }));
+  const browser = { isConnected: () => false };
+  const context = { close: async () => { throw new Error("unexpected_disconnect"); }, browser: () => browser };
+  await assert.rejects(closePlatformBrowser({ context, root, platform: "douyin" }),
+    { message: "browser_close_failed" });
+  const preferences = JSON.parse(await fs.readFile(preferencesFile, "utf8"));
+  assert.equal(preferences.profile.exit_type, "Crashed");
 });
 
 test("native settings cover Linux/macOS architectures without fabricating browser identity", () => {
