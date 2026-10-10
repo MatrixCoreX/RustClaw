@@ -43,6 +43,8 @@ SUPPORTED_PLATFORMS = (
     "tiktok",
     "youtube",
     "wechat_channels",
+    "toutiao",
+    "weibo",
 )
 MAX_DIAGNOSTIC_CHARS = 4_000
 IMAGE_ARCHIVE_THRESHOLD = 9
@@ -1808,7 +1810,7 @@ def _capabilities_extra() -> dict[str, Any]:
             "wechat_channels",
         ],
         "image_article_posts": {
-            "platforms": ["douyin", "xiaohongshu", "wechat_channels"],
+            "platforms": ["douyin", "xiaohongshu", "wechat_channels", "toutiao", "weibo"],
             "default_outputs": ["original_images", "article_text"],
             "delivery_policy": "best_effort_components",
             "text_delivery": "inline_and_artifact",

@@ -1,6 +1,6 @@
 import { assertDocumentResponse, browserStageError } from "./browser_diagnostics.mjs";
 import { navigationAccessError } from "./browser_flow_control.mjs";
-import { matchesVerificationTarget, platformSpec, validatePlatformUrl } from "./platforms.mjs";
+import { canonicalCandidateUrls, matchesVerificationTarget, platformSpec, validatePlatformUrl } from "./platforms.mjs";
 
 const SEARCH_CONTROLS = Object.freeze({
   douyin: [
@@ -22,7 +22,22 @@ const RESULT_SELECTORS = Object.freeze({
   douyin: '[data-aweme-id]:visible, a[href*="/video/"]:visible, a[href*="/note/"]:visible, .search-result-card:visible',
   xiaohongshu: 'section.note-item:visible, a[href*="/explore/"]:visible, a[href*="/search_result/"]:visible',
   kuaishou: '.video-card:visible, .video-list .photo-card:visible, a[href*="/short-video/"]:visible',
+  toutiao: 'a[href*="/article/"]:visible, a[href*="/video/"]:visible, a[href*="/w/"]:visible, a[href*="/search/jump"]:visible',
 });
+
+async function searchResultCount(page, platform, timeoutMs, stage) {
+  if (!["toutiao", "weibo", "tiktok", "youtube"].includes(platform)) {
+    return boundedBrowserOperation(page.locator(RESULT_SELECTORS[platform]).count(), timeoutMs, stage);
+  }
+  const urls = await boundedBrowserOperation(page.locator("a[href]").evaluateAll(nodes =>
+    nodes.filter(node => {
+      const rect = node.getBoundingClientRect(), style = getComputedStyle(node);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden"
+        && style.display !== "none" && Number(style.opacity) !== 0;
+    }).map(node => node.href),
+  ), timeoutMs, stage);
+  return canonicalCandidateUrls(platform, urls).length;
+}
 
 export function normalizeBrowserError(error, stage) {
   if (error?.name === "TimeoutError") return browserStageError("browser_timeout", stage);
@@ -84,7 +99,28 @@ export async function openKeywordSearch(page, platform, source, {
   };
   try {
     await check(page);
-    await navigateDocument(page, platformSpec(platform).homeUrl, stage, timeoutMs);
+    const platformConfiguration = platformSpec(platform);
+    if (platformConfiguration.topicNavigation === "direct") {
+      stage = "search_results_ready";
+      const response = await navigateDocument(page, source.url, stage, timeoutMs);
+      assertNavigationResponse(response, stage);
+      await settle(page);
+      await check(page);
+      const resultDeadline = Date.now() + timeoutMs;
+      let count = 0;
+      while (Date.now() < resultDeadline && count === 0) {
+        await check(page);
+        count = await searchResultCount(page, platform, resultDeadline - Date.now(), stage);
+        if (count === 0) await page.waitForTimeout(200);
+      }
+      if (count === 0) throw browserStageError("search_results_unavailable", stage);
+      return {
+        page,
+        source: { ...source, url: validatePlatformUrl(platform, page.url()) },
+        method: "platform_search_url",
+      };
+    }
+    await navigateDocument(page, platformConfiguration.homeUrl, stage, timeoutMs);
     stage = "search_input_ready";
     const inputDeadline = Date.now() + timeoutMs;
     let controls;
@@ -145,9 +181,13 @@ export async function openKeywordSearch(page, platform, source, {
         await check(destination);
         if (onSearchTarget) {
           matched = true;
-          const count = await boundedBrowserOperation(destination.locator(RESULT_SELECTORS[platform]).count(),
+          const count = await searchResultCount(destination, platform,
             resultDeadline - Date.now(), stage);
-          if (count > 0) return { page: destination, source: { ...source, url: validatePlatformUrl(platform, destination.url()) } };
+          if (count > 0) return {
+            page: destination,
+            source: { ...source, url: validatePlatformUrl(platform, destination.url()) },
+            method: "platform_search_form",
+          };
         }
       } catch (error) {
         // During submit/navigation the DOM context can disappear between reads.

@@ -122,7 +122,11 @@ fn i18n_t_for_locale_with_default(
 fn i18n_locale_for_language_hint(language_hint: &str) -> String {
     let normalized = language_hint.trim().replace('_', "-");
     let lower = normalized.to_ascii_lowercase();
-    if lower.starts_with("zh") {
+    if matches!(lower.as_str(), "zh-tw" | "zh-hk" | "zh-mo" | "zh-hant")
+        || lower.starts_with("zh-hant-")
+    {
+        "zh-Hant".to_string()
+    } else if lower.starts_with("zh") {
         "zh-CN".to_string()
     } else if lower.starts_with("en") {
         "en-US".to_string()

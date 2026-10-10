@@ -129,3 +129,35 @@ test("extracts a Kuaishou author caption from a rendered feed card", {
   const caption = await capturePlatformCaption(page.locator("article"), "kuaishou");
   assert.equal(caption, "Una receta sencilla\n#cocina");
 });
+
+test("extracts the primary Weibo post copy from an already scoped article", {
+  skip: !RUN_BROWSER_TEST,
+}, async (t) => {
+  const page = await withPage(t, `
+    <article>
+      <div class="wbpro-feed-content">
+        <div class="wbpro-feed-ogText"><div class="_wbtext_dynamic_19">财经正文<br>#市场</div></div>
+        <div class="video-js">播放器控件</div>
+      </div>
+    </article>
+  `);
+
+  const caption = await capturePlatformCaption(page.locator("article"), "weibo");
+  assert.equal(caption, "财经正文\n#市场");
+});
+
+test("extracts TikTok and YouTube captions from their scoped detail surfaces", {
+  skip: !RUN_BROWSER_TEST,
+}, async (t) => {
+  const page = await withPage(t, `
+    <main id="tiktok"><div data-e2e="browse-video-desc">TikTok caption<br>#markets</div></main>
+    <ytd-watch-flexy id="youtube">
+      <div id="title"><h1><yt-formatted-string>YouTube title</yt-formatted-string></h1></div>
+      <ytd-text-inline-expander id="description-inline-expander"><div id="description">Long description</div></ytd-text-inline-expander>
+    </ytd-watch-flexy>
+  `);
+  assert.equal(await capturePlatformCaption(page.locator("#tiktok"), "tiktok"),
+    "TikTok caption\n#markets");
+  assert.equal(await capturePlatformCaption(page.locator("#youtube"), "youtube"),
+    "YouTube title\nLong description");
+});

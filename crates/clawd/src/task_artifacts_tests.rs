@@ -195,6 +195,70 @@ fn async_poll_completion_preserves_artifact_before_resume_projection() {
 }
 
 #[test]
+fn final_projection_restores_every_artifact_preserved_before_journal_compaction() {
+    let workspace = TempWorkspace::new();
+    let downloads = workspace.path().join("downloads");
+    fs::create_dir_all(&downloads).unwrap();
+    let first = downloads.join("01.jpg");
+    let second = downloads.join("02.jpg");
+    let article = downloads.join("article.txt");
+    fs::write(&first, b"first-image").unwrap();
+    fs::write(&second, b"second-image").unwrap();
+    fs::write(&article, b"article-body").unwrap();
+    let first_digest = sha256_file(&first).unwrap();
+    let skill_result = json!({
+        "status": "ok",
+        "extra": {
+            "delivery": {"deliver_to_user": true, "intent": "artifact"},
+            "artifacts": [
+                {"path": first.display().to_string(), "filename": "01.jpg", "mime_type": "image/jpeg"},
+                {"path": second.display().to_string(), "filename": "02.jpg", "mime_type": "image/jpeg"},
+                {"path": article.display().to_string(), "filename": "article.txt", "mime_type": "text/plain"}
+            ]
+        }
+    });
+    let payload = json!({
+        "executor_result_status": "async_poll_completed",
+        "final_result_json": skill_result
+    });
+    let task_id = "task-compacted-artifacts";
+    assert!(preserve_async_completion_artifacts(workspace.path(), task_id, &payload).unwrap());
+    fs::remove_file(&first).unwrap();
+    fs::remove_file(&second).unwrap();
+    fs::remove_file(&article).unwrap();
+
+    let compacted = json!({
+        "text": "done",
+        "task_journal": {"trace": {"capability_results": [{
+            "status": "ok",
+            "artifacts": [{
+                "id": "first-image",
+                "path": first.display().to_string(),
+                "filename": "01.jpg",
+                "media_type": "image/jpeg",
+                "sha256": first_digest,
+                "visibility": "user_delivery"
+            }],
+            "data": {}
+        }]}}
+    });
+    let materialized =
+        materialize_task_result_artifacts(workspace.path(), task_id, &compacted.to_string())
+            .unwrap();
+    let value: Value = serde_json::from_str(&materialized).unwrap();
+    let manifests = manifests_from_result(Some(&value));
+    let mut filenames = manifests
+        .iter()
+        .map(|manifest| manifest.filename.as_str())
+        .collect::<Vec<_>>();
+    filenames.sort_unstable();
+
+    assert_eq!(filenames, ["01.jpg", "02.jpg", "article.txt"]);
+    assert_eq!(value["artifact_delivery"]["candidate_count"], 3);
+    assert_eq!(value["artifact_delivery"]["delivered_count"], 3);
+}
+
+#[test]
 fn rematerializes_from_durable_task_copy_after_async_source_cleanup() {
     let workspace = TempWorkspace::new();
     let output = workspace.path().join("downloads").join("clip.mp4");

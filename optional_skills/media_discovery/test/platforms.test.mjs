@@ -3,6 +3,10 @@ import test from "node:test";
 
 import {
   canonicalCandidateUrls,
+  canonicalTikTokResultUrl,
+  canonicalToutiaoResultUrl,
+  canonicalWeiboResultUrl,
+  canonicalYouTubeResultUrl,
   douyinModalItemId,
   douyinSearchGridItemUrls,
   isDetailUrl,
@@ -21,10 +25,11 @@ import {
   renderedCardMediaKind,
   xiaohongshuFeedCardMediaKind,
 } from "../src/browser.mjs";
+import { searchResultLinkIndex } from "../src/browser_search_results.mjs";
 
 test("manual verification retains the selected keyword or blocked detail instead of the home feed", () => {
   const config = { source_mode: "topics", topics: ["财经"] };
-  for (const platform of ["douyin", "xiaohongshu", "kuaishou"]) {
+  for (const platform of ["douyin", "xiaohongshu", "kuaishou", "toutiao", "weibo", "tiktok", "youtube"]) {
     const target = sourceTargets(platform, config)[0].url;
     const home = sourceTargets(platform, { source_mode: "home_feed" })[0].url;
     assert.equal(manualVerificationTarget(platform, config), target);
@@ -101,6 +106,99 @@ test("candidate discovery uses URL contracts rather than page language", () => {
   assert.equal(isDetailUrl("douyin", "https://www.douyin.com/video/123"), true);
   assert.equal(isDetailUrl("kuaishou", "https://www.kuaishou.com/short-video/3xexample123"), true);
   assert.equal(isDetailUrl("kuaishou", "https://www.kuaishou.com/short-video/%E7%83%AD%E6%90%9C%E8%AF%8D"), false);
+  for (const kind of ["article", "video", "w"]) {
+    const url = `https://www.toutiao.com/${kind}/7694557030652084736/`;
+    assert.equal(isDetailUrl("toutiao", url), true);
+    assert.equal(platformItemId("toutiao", url), "toutiao:7694557030652084736");
+  }
+  assert.equal(isDetailUrl("toutiao", "https://www.toutiao.com/c/user/token/example/"), false);
+  assert.equal(isDetailUrl("weibo", "https://weibo.com/2286908003/RlQuA7sqn"), true);
+  assert.equal(platformItemId("weibo", "https://weibo.com/2286908003/RlQuA7sqn"), "weibo:5352066721777563");
+  assert.equal(platformItemId("weibo", "https://m.weibo.cn/status/5352066721777563"), "weibo:5352066721777563");
+  assert.equal(isDetailUrl("weibo", "https://weibo.com/u/2286908003"), false);
+  assert.equal(isDetailUrl("tiktok", "https://www.tiktok.com/@creator/video/7512345678901234567"), true);
+  assert.equal(platformItemId("tiktok", "https://www.tiktok.com/@creator/video/7512345678901234567"), "tiktok:7512345678901234567");
+  assert.equal(isDetailUrl("youtube", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"), true);
+  assert.equal(isDetailUrl("youtube", "https://www.youtube.com/shorts/dQw4w9WgXcQ"), true);
+  assert.equal(platformItemId("youtube", "https://youtu.be/dQw4w9WgXcQ?t=12"), "youtube:dQw4w9WgXcQ");
+});
+
+test("TikTok and YouTube result routes normalize to stable post identities", () => {
+  const tiktok = "https://www.tiktok.com/@creator/video/7512345678901234567?is_from_webapp=1";
+  assert.equal(canonicalTikTokResultUrl(tiktok),
+    "https://www.tiktok.com/@creator/video/7512345678901234567");
+  assert.deepEqual(canonicalCandidateUrls("tiktok", [tiktok, `${tiktok}&duplicate=1`]), [
+    "https://www.tiktok.com/@creator/video/7512345678901234567",
+  ]);
+  assert.equal(canonicalTikTokResultUrl("https://outside.example/@creator/video/7512345678901234567"), null);
+
+  for (const input of [
+    "https://www.youtube.com/watch?v=dQw4w9WgXcQ&feature=share",
+    "https://www.youtube.com/shorts/dQw4w9WgXcQ?si=fixture",
+    "https://youtu.be/dQw4w9WgXcQ?t=12",
+  ]) {
+    assert.equal(canonicalYouTubeResultUrl(input),
+      "https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+  }
+  assert.deepEqual(canonicalCandidateUrls("youtube", [
+    "https://www.youtube.com/shorts/dQw4w9WgXcQ",
+    "https://youtu.be/dQw4w9WgXcQ",
+  ]), ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"]);
+  assert.equal(searchResultLinkIndex("youtube", [
+    "https://www.youtube.com/@channel",
+    "https://www.youtube.com/shorts/dQw4w9WgXcQ",
+  ], "https://youtu.be/dQw4w9WgXcQ"), 1);
+});
+
+test("Weibo result URLs retain exact post identities across desktop and mobile routes", () => {
+  const desktop = "http://www.weibo.com/2286908003/RlQuA7sqn?refer_flag=1001030103_";
+  const mobile = "https://m.weibo.cn/detail/5352066721777563?jumpfrom=weibocom";
+  assert.equal(canonicalWeiboResultUrl(desktop), "https://weibo.com/2286908003/RlQuA7sqn");
+  assert.equal(canonicalWeiboResultUrl(mobile), "https://m.weibo.cn/status/5352066721777563");
+  assert.deepEqual(canonicalCandidateUrls("weibo", [desktop, mobile]), [
+    "https://weibo.com/2286908003/RlQuA7sqn",
+  ]);
+  assert.equal(canonicalWeiboResultUrl("https://outside.example/2286908003/RlQuA7sqn"), null);
+  assert.equal(searchResultLinkIndex("weibo", [
+    "https://weibo.com/u/2286908003",
+    desktop,
+  ], mobile), 1);
+});
+
+test("Toutiao search jump links resolve only exact first-party content identities", () => {
+  const article = "7694611241247015479";
+  const video = "7540277264643325991";
+  const microPost = "1878489458132992";
+  const articleJump = `https://so.toutiao.com/search/jump?url=${encodeURIComponent(
+    `https://article.zlink.toutiao.com/J4?alert=0&h5_url=${encodeURIComponent(
+      `https://toutiao.com/group/${article}/?source=news`,
+    )}`,
+  )}`;
+  const videoJump = `https://so.toutiao.com/search/jump?url=${encodeURIComponent(
+    `https://m.toutiaoimg.cn/group/${video}/?source=video`,
+  )}`;
+  const microPostJump = `https://so.toutiao.com/search/jump?url=${encodeURIComponent(
+    `https://weitoutiao.zjurl.cn/ugc/share/wap/thread/${microPost}/?source=weitoutiao`,
+  )}`;
+  assert.equal(canonicalToutiaoResultUrl(articleJump),
+    `https://www.toutiao.com/article/${article}/`);
+  assert.equal(canonicalToutiaoResultUrl(videoJump),
+    `https://www.toutiao.com/video/${video}/`);
+  assert.equal(canonicalToutiaoResultUrl(microPostJump),
+    `https://www.toutiao.com/w/${microPost}/`);
+  assert.deepEqual(canonicalCandidateUrls("toutiao", [articleJump, videoJump, microPostJump]), [
+    `https://www.toutiao.com/article/${article}/`,
+    `https://www.toutiao.com/video/${video}/`,
+    `https://www.toutiao.com/w/${microPost}/`,
+  ]);
+  assert.equal(canonicalToutiaoResultUrl(
+    "https://outside.example/search/jump?url=https%3A%2F%2Fwww.toutiao.com%2Farticle%2F7694611241247015479%2F",
+  ), null);
+  assert.equal(searchResultLinkIndex("toutiao", [
+    "https://so.toutiao.com/search/jump?url=https%3A%2F%2Foutside.example%2Fstory",
+    videoJump,
+    articleJump,
+  ], `https://www.toutiao.com/article/${article}/`), 2);
 });
 
 test("home feed and topic sources are explicit schema modes", () => {
@@ -114,6 +212,45 @@ test("home feed and topic sources are explicit schema modes", () => {
   assert.deepEqual(sourceUrls("kuaishou", { source_mode: "topics", topics: ["AI agent"] }), [
     "https://www.kuaishou.com/search/AI%20agent",
   ]);
+  assert.deepEqual(sourceUrls("toutiao", { source_mode: "home_feed" }), [
+    "https://www.toutiao.com/",
+  ]);
+  assert.deepEqual(sourceUrls("toutiao", { source_mode: "topics", topics: ["AI agent"] }), [
+    "https://so.toutiao.com/search?keyword=AI%20agent&pd=information&source=search_subtab_switch&from=information&aid=1455",
+  ]);
+  assert.deepEqual(sourceUrls("toutiao", { source_mode: "seed_urls", seed_urls: [
+    "https://www.toutiao.com/group/7694557030652084736/?source=news",
+    "https://m.toutiaoimg.cn/group/7689461431258858010/?source=video",
+    "https://weitoutiao.zjurl.cn/ugc/share/wap/thread/1878457723490307/",
+  ] }), [
+    "https://www.toutiao.com/article/7694557030652084736/",
+    "https://www.toutiao.com/video/7689461431258858010/",
+    "https://www.toutiao.com/w/1878457723490307/",
+  ]);
+  assert.deepEqual(sourceUrls("weibo", { source_mode: "home_feed" }), [
+    "https://weibo.com/hot/weibo/102803",
+  ]);
+  assert.deepEqual(sourceUrls("weibo", { source_mode: "topics", topics: ["AI agent"] }), [
+    "https://s.weibo.com/weibo?q=AI%20agent",
+  ]);
+  assert.deepEqual(sourceUrls("weibo", { source_mode: "seed_urls", seed_urls: [
+    "http://weibo.com/2286908003/RlQuA7sqn?refer_flag=1001030103_",
+  ] }), ["https://weibo.com/2286908003/RlQuA7sqn"]);
+  assert.deepEqual(sourceUrls("tiktok", { source_mode: "topics", topics: ["AI agent"] }), [
+    "https://www.tiktok.com/search?q=AI%20agent",
+  ]);
+  assert.deepEqual(sourceUrls("tiktok", { source_mode: "seed_urls", seed_urls: [
+    "https://www.tiktok.com/@creator/video/7512345678901234567?is_from_webapp=1",
+  ] }), ["https://www.tiktok.com/@creator/video/7512345678901234567"]);
+  assert.deepEqual(sourceUrls("youtube", { source_mode: "home_feed" }), [
+    "https://www.youtube.com/",
+  ]);
+  assert.deepEqual(sourceUrls("youtube", { source_mode: "topics", topics: ["AI agent"] }), [
+    "https://www.youtube.com/results?search_query=AI%20agent",
+  ]);
+  assert.deepEqual(sourceUrls("youtube", { source_mode: "seed_urls", seed_urls: [
+    "https://youtu.be/dQw4w9WgXcQ?t=12",
+  ] }), ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"]);
 });
 
 test("keyword search targets preserve structured keyword order and platform search provenance", () => {
@@ -189,7 +326,15 @@ test("platform access checks classify machine challenge surfaces without page-la
     ]),
     null,
   );
+  assert.equal(
+    platformAccessError("toutiao", "https://so.toutiao.com/search?keyword=AI", [
+      "https://rmc.bytedance.com/verifycenter/captcha/v2?from=iframe",
+    ]),
+    "challenge_required",
+  );
   assert.equal(platformAccessError("kuaishou", "https://www.kuaishou.com/brilliant"), null);
+  assert.equal(platformAccessError("weibo", "https://passport.weibo.com/sso/signin"), "login_required");
+  assert.equal(platformAccessError("weibo", "https://weibo.com/2286908003/RlQuA7sqn"), null);
 });
 
 test("network restrictions do not wait for a nonexistent manual captcha", async () => {

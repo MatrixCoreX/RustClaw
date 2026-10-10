@@ -9,6 +9,7 @@ import {
   backgroundRestDelayMs,
   handleRequest,
   normalizedConfig,
+  randomPlatformItemAllocation,
   requestedPlatforms,
 } from "../src/main.mjs";
 
@@ -26,7 +27,7 @@ async function requestContext(t) {
 test("schema normalization accepts singular platform without natural-language parsing", () => {
   assert.deepEqual(requestedPlatforms({ platform: "douyin" }), ["douyin"]);
   assert.equal(normalizedConfig({}).source_mode, "home_feed");
-  assert.equal(normalizedConfig({}).max_items_per_run, 5);
+  assert.equal(normalizedConfig({}).max_items_per_run, 10);
   assert.equal(normalizedConfig({}).max_images_per_post, 0);
   assert.equal(normalizedConfig({}).browser_mode, "silent");
   assert.equal(normalizedConfig({}).rest_min_seconds, 180);
@@ -42,6 +43,35 @@ test("schema normalization accepts singular platform without natural-language pa
   assert.throws(() => normalizedConfig({ rest_min_seconds: 30, rest_max_seconds: 20 }));
   assert.throws(() => normalizedConfig({ browser_mode: "hidden" }));
   assert.throws(() => requestedPlatforms({ platform: "unknown" }));
+});
+
+test("implicit all-platform allocation keeps every platform and exactly ten items", async (t) => {
+  const platforms = ["douyin", "xiaohongshu", "kuaishou", "toutiao", "weibo", "tiktok", "youtube"];
+  const samples = [0, 0.5, 0.999999];
+  const allocation = randomPlatformItemAllocation(platforms, 10, () => samples.shift());
+  assert.deepEqual(allocation, {
+    douyin: 2,
+    xiaohongshu: 1,
+    kuaishou: 1,
+    toutiao: 2,
+    weibo: 1,
+    tiktok: 1,
+    youtube: 2,
+  });
+  assert.equal(Object.values(allocation).reduce((sum, value) => sum + value, 0), 10);
+  assert.throws(() => randomPlatformItemAllocation(platforms, 6), /platform_allocation_too_small/);
+
+  const context = await requestContext(t);
+  const previewSamples = [0, 0.5, 0.999999];
+  const preview = await handleRequest({ args: { action: "preview_enable" }, context }, {
+    random: () => previewSamples.shift(),
+  });
+  assert.deepEqual(preview.extra.platforms, platforms);
+  assert.deepEqual(preview.extra.collection_plan.platform_item_limits, allocation);
+  assert.equal(preview.extra.collection_plan.total_item_limit, 10);
+  for (const platform of platforms) {
+    assert.equal(preview.extra.platform_configs[platform].max_items_per_run, allocation[platform]);
+  }
 });
 
 test("keyword search preview uses topics as the only structured search input", async (t) => {
@@ -200,7 +230,7 @@ test("one-shot challenge permits a manual popup and retries in a visible browser
   assert.equal(loginSessions, 1);
 });
 
-test("enable, status, disable, and disabled run_once form a durable control loop", async (t) => {
+test("enable, status, disable, and run_enabled_once form a durable control loop", async (t) => {
   const context = await requestContext(t);
   const enabled = await handleRequest({
     args: { action: "enable", platform: "douyin", confirm: true },
@@ -219,13 +249,6 @@ test("enable, status, disable, and disabled run_once form a durable control loop
   assert.equal(disabled.extra.platform_states.douyin.enabled, false);
   assert.equal(disabled.extra.lifecycle_state, "idle");
   assert.equal(disabled.extra.schedule_cleanup_required, undefined);
-
-  const run = await handleRequest({
-    args: { action: "run_once" },
-    context,
-  });
-  assert.equal(run.status, "ok");
-  assert.equal(run.extra.state, "disabled_or_paused");
 
   const enabledBatch = await handleRequest({ args: { action: "run_enabled_once" }, context });
   assert.equal(enabledBatch.status, "error");

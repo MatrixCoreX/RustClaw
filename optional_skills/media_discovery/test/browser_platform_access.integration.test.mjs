@@ -96,6 +96,23 @@ test("Xiaohongshu modal with text/number inputs is a login barrier, not a ready 
   assert.equal(await currentPlatformAccessError(page, "xiaohongshu"), null);
 });
 
+test("TikTok structural search error is a retryable network barrier", { skip: !enabled }, async t => {
+  const page = await browserPage(t,
+    '<main><div data-e2e="search-error-icon" style="width:40px;height:40px"></div></main>',
+    "https://www.tiktok.com/search?q=finance");
+  assert.equal(await currentPlatformAccessError(page, "tiktok"), "network_access_restricted");
+});
+
+test("YouTube playability sign-in barrier is classified without localized copy", {
+  skip: !enabled,
+}, async t => {
+  const page = await browserPage(t, `<yt-playability-error-supported-renderers id="error-screen"
+      style="display:block;width:640px;height:360px">
+    <a href="https://accounts.google.com/ServiceLogin?service=youtube">account</a>
+  </yt-playability-error-supported-renderers>`, "https://www.youtube.com/watch?v=MvUYORJpDSc");
+  assert.equal(await currentPlatformAccessError(page, "youtube"), "login_required");
+});
+
 for (const late of [false, true]) {
   test(`screenshot rejects a login modal ${late ? "during" : "before"} capture`, { skip: !enabled }, async t => {
     const page = await browserPage(t, `<div id="media" style="width:300px;height:300px;background:#126dad"></div>`,

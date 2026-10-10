@@ -35,17 +35,17 @@ test("parallel finite collection notifies once at start, final response preserve
   assert.equal("text" in frames[0], false);
 });
 
-test("time-only collection has no implicit five-post target", async t => {
+test("time-only collection keeps the default ten-post target when count is omitted", async t => {
   const { frames, request, runtime } = await fixture(t);
   const result = await handleRequest(request({ action: "run_once", platform: "douyin", max_run_minutes: 15 }),
     { ...runtime, collectPlatform: async ({ limit, onPage }) => {
-      assert.equal(limit, Infinity);
-      for (let n = 0; n < 7; n++) await onPage({ records: [{ kind: "video", platform: "douyin", dedup_key: String(n) }], temporaryPaths: [] });
-      return { stop_reason: "no_new_results" };
+      assert.equal(limit, 10);
+      for (let n = 0; n < 10; n++) await onPage({ records: [{ kind: "video", platform: "douyin", dedup_key: String(n) }], temporaryPaths: [] });
+      return { stop_reason: "target_reached" };
     } });
-  assert.equal(result.extra.run.counts.items, 7);
-  assert.equal(result.extra.run.collection_outcome.target_reached, false);
-  assert.equal(frames[0].params.requested_items, 0);
+  assert.equal(result.extra.run.counts.items, 10);
+  assert.equal(result.extra.run.collection_outcome.target_reached, true);
+  assert.equal(frames[0].params.requested_items, 10);
   assert.equal(frames[0].params.max_run_minutes, 15);
 });
 

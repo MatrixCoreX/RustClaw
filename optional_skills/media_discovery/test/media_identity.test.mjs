@@ -32,6 +32,10 @@ test("reviewed image object identity ignores CDN delivery variants, not distinct
   }
   assert.notEqual(imageSourceIdentity("douyin", source(objectA)), imageSourceIdentity("douyin", source(objectA, "second")));
   assert.equal(imageSourceIdentity("xiaohongshu", ""), null);
+  assert.equal(
+    imageSourceIdentity("weibo", "https://wx1.sinaimg.cn/orj480/object.jpg?Expires=1"),
+    imageSourceIdentity("weibo", "https://wx4.sinaimg.cn/large/object.jpg?Expires=2"),
+  );
 });
 
 test("candidate dedup keeps the first usable URL and order across detail routes and signatures", () => {

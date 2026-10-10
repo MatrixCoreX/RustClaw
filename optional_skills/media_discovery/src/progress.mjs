@@ -2,7 +2,7 @@ const BACKGROUND_REPORT_INTERVAL_MS = 15 * 60 * 1000;
 const BACKGROUND_REPORT_DETAIL_KEY = "media_discovery.background.status";
 
 export function createCollectionStartReporter({ requestId, writeFrame, continuous = false,
-  nextSequence = () => 1, platforms }) {
+  nextSequence = () => 1, platforms, requestedItems }) {
   let started = false;
   return run => {
     if (started || !requestId || typeof writeFrame !== "function") return false;
@@ -14,7 +14,7 @@ export function createCollectionStartReporter({ requestId, writeFrame, continuou
       params: {
         notification_delivery: "runtime", notification_renderer: "model", notification_event: "started",
         continuous, platforms: platforms || [...run.platforms],
-        requested_items: continuous ? 0 : config.max_items_per_run || 0,
+        requested_items: continuous ? 0 : requestedItems ?? config.max_items_per_run ?? 0,
         max_run_minutes: continuous ? 0 : config.max_run_minutes || 0,
         stop_capability: continuous ? "media_discovery.disable" : "media_discovery.stop_current",
         stop_after_current_item: true,

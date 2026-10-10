@@ -1,6 +1,7 @@
 locale = "ja"
 
 [dict]
+"common.audio_transcript_label" = "音声文字起こし"
 "common.safe_generic_error" = "リクエストを完了できませんでした。しばらくしてからもう一度お試しください。"
 "channel.error.delivery_failed" = "メッセージを配信できませんでした。しばらくしてからもう一度お試しください。"
 "channel.task.completed_without_text" = "タスクは完了しましたが、表示できるテキスト結果がありません。"

@@ -8,23 +8,15 @@
 - If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
 ## Capability Summary (from interface)
-Run explicitly requested batch, feed, keyword, or continuous background
-browser collection for Douyin, Xiaohongshu, and Kuaishou. A lone copied share payload or
-URL whose content should be downloaded and returned now belongs to
-`media_download.download`, even when it is used as a `seed_urls` input shape;
-this skill does not provide immediate single-post media delivery. All platforms
-default to `browser_mode=silent`. Pass `visible` only when the user explicitly
-asks to open a browser window. Collection prefers installed
-Chrome, drops Chromium's automation switch, and uses slower Xiaohongshu
-pacing/rest; it does not spoof UA/proxy or bypass challenges. Login/verification may open one
+Run explicitly requested batch, feed, keyword, or continuous background browser collection for Douyin, Xiaohongshu, Kuaishou, Toutiao, Weibo, TikTok, and YouTube. A lone copied share payload or URL whose content should be downloaded and returned now belongs to `media_download.download`, even when it is used as a `seed_urls` input shape; this skill does not provide immediate single-post media delivery. All platforms default to `browser_mode=silent`. Pass `visible` only when the user explicitly asks to open a browser window. Collection prefers installed Chrome, drops Chromium's automation switch, and uses slower Xiaohongshu pacing/rest; it does not spoof UA/proxy or bypass challenges. Login/verification may open one
 temporary browser; Douyin sliders are silent-only, and `/` or `/jingxuan` plus the
 local confirm tab resume that batch in a visible browser without solving the slider.
-Rendered media screenshots, author titles (`title`), and captions (`platform_text`,
-empty without a distinct caption) are stored in `videos.csv` / `images.csv`, without OCR, model review, original-image or video downloads.
+Rendered media screenshots, author titles (`title`), and captions (`platform_text`, empty without a distinct caption) are stored in `videos.csv` / `images.csv`, without OCR, model review, original-image or video downloads.
 Available views/likes/comments/favorites/shares retain platform display precision;
 plain integer counters also receive exact numeric values. Unavailable fields remain absent.
 Video covers use an unobscured rendered frame, platform poster, or a Douyin/Kuaishou search tile under `video_covers/`;
 blank overlay player shots are discarded. Whole-page and login-dialog screenshots never substitute for missing media.
+When no count is supplied, a bounded batch targets 10 posts. When no platform is supplied, all supported platforms are selected and those 10 posts are randomly split into positive per-platform limits; the exact allocation is returned in `extra.collection_plan`.
 
 Keyword discovery uses `source_mode=topics` with non-empty `topics[]` in input order.
 From the homepage, fill the visible search field and click the platform search control;
@@ -34,6 +26,10 @@ Xiaohongshu supports its visible textarea, search icon, and encoded `search_resu
 visible `/search_result/<id>` links retain the page's query parameters.
 Kuaishou supports new `.search-container` and older search controls and the `/search/` route.
 Its new result cards open an in-page player by clicking the visible cover or cover image.
+Toutiao keyword collection opens its first-party `so.toutiao.com/search?keyword=...` result page directly. It unwraps only trusted search-result jump links into exact `/article/<id>`, `/video/<id>`, or `/w/<id>` identities; external cards and unrelated numeric analytics fields are rejected. Homepage and `seed_urls` collection also normalize first-party `group/<id>`, mobile video-group, and micro-post thread shares to the same exact identities.
+Detail extraction is bound to the requested item ID in `RENDER_DATA`; unrelated recommendations are excluded, while article and micro-post rows preserve the complete body, ordered images, and an exact-content preview when no original image exists.
+Weibo home-feed collection uses its public hot feed, while topic collection uses the first-party search page. Desktop `/<uid>/<shortcode>`, mobile `/status/<mid>` or `/detail/<mid>`, and `/tv/show/<scope>:<mid>` routes share one stable item identity. When Weibo redirects search to its sign-in service, the skill reports `login_required` and, in visible mode, continues after the user signs in through the skill-owned browser profile; it does not request or export cookies. Public seed links remain collectable without login, and extraction is scoped to the primary post rather than sidebar recommendations.
+TikTok topic collection uses its first-party `/search?q=...` page and accepts only exact `@author/video/<id>` or `@author/photo/<id>` results. YouTube topic collection uses `/results?search_query=...`; `/watch?v=<id>`, `/shorts/<id>`, `/live/<id>`, and `youtu.be/<id>` are normalized to one stable video identity. Both platforms preserve the rendered author title/description and a media-only preview. Login or consent barriers are reported structurally; visible mode can hand the skill-owned persistent browser profile to the user, without importing or exporting cookies.
 Rendered covers must uniquely match public post IDs in the page's loaded state; capture is scoped to the active slide and returns to the same results. A blank player uses the rendered search tile as cover. Douyin jingxuan `.search-result-card` `.videoImage` tiles open `modal_id`
 overlays, not `/video/{id}` hrefs; title, cover, and `/video/{id}` source bind to that overlay, then close. A blank overlay player is not stored as the cover; the visible search tile is. QR-only login modals are barriers; a sidebar sign-in offer alone is not. A Kuaishou search load-more login control is a login barrier when no remaining identifiable cards exist; collection clicks it to open the QR modal, then waits or hands off to the silent manual window. Incidental JSON on the still-unmatched homepage is not the search document. Visible candidates retain DOM order; every committed record keeps its keyword and actual search URL.
 HTTP 404/410 and platform `/404` pages are unavailable posts, not CAPTCHAs. JSON in place of HTML on the matched search document is `unexpected_page_response`, not an empty result. Diagnostics have independent deadlines.
@@ -106,7 +102,8 @@ Finite and continuous starts emit one machine `media_discovery.collection.starte
   export. Do not select `run_once` for one copied share or URL that should be
   downloaded and returned to the user now; select `media_download.download`.
 - A user request to start continuous collection is a multi-capability workflow:
-  1. `media_discovery.enable` with requested platform(s), bounded settings, and
+  1. `media_discovery.enable` with requested platform(s), or no platform for all
+     supported platforms, bounded settings, and
      `confirm=true` after policy approval;
   2. no-argument `media_discovery.run_enabled_once` immediately (or
      `already_running` if a coordinator exists).
@@ -116,8 +113,9 @@ Finite and continuous starts emit one machine `media_discovery.collection.starte
 - A finite requested count (including 100 or 300) is one `run_once` with that
   `max_items_per_run` and ephemeral config. Do not enable a platform, start
   endless collection, invent a 100-item ceiling, or ask run_once vs continuous.
-  Omit time/scroll/image ceilings unless requested. Time-only uses
-  `max_items_per_run=0`. Inspect `run.collection_outcome.stop_reason` and actual
+  Omit time/scroll/image ceilings unless requested. An omitted count defaults to
+  10 even with a time limit; pass `max_items_per_run=0` only when the user explicitly
+  requests no count limit. Inspect `run.collection_outcome.stop_reason` and actual
   counts. Continuous batches replay visible results, skip saved posts, and rest
   after exhausted or stalled pages.
 - If the immediately previous assistant reply listed numbered mutually exclusive
@@ -215,8 +213,10 @@ Examples of equivalent intent (documentation examples, not runtime matchers):
 - `disable`: disable selected platforms, gracefully drain any matching active
   batch after its current post, and leave other platforms running. The background
   coordinator exits only when all platforms are disabled and their batches finish.
-- `run_once`: with explicit platform/source settings, run one ephemeral bounded
-  batch per platform without enabling continuous collection. A fresh lease for
+- `run_once`: run one ephemeral bounded batch per platform without enabling
+  continuous collection. Omitted platforms select every supported platform and
+  randomly split the total item limit; explicit platform selections retain
+  independent per-platform quotas. A fresh lease for
   the same platform rejects it with `run_already_active`.
 - `run_enabled_once`: no-argument durable companion used after `enable`; keep
   running bounded collection batches with randomized rests until `disable` or
@@ -241,11 +241,11 @@ Examples of equivalent intent (documentation examples, not runtime matchers):
 | Param | Required | Description |
 |---|---:|---|
 | `action` | yes | One action listed below. |
-| `platform` or `platforms` | enable/preview | `douyin`, `xiaohongshu`, and/or `kuaishou`. |
+| `platform` or `platforms` | no | `douyin`, `xiaohongshu`, `kuaishou`, `toutiao`, `weibo`, `tiktok`, and/or `youtube`; omission selects all supported platforms. |
 | `source_mode` | no | `home_feed` (default), `topics`, or `seed_urls`. |
 | `topics` | for topics | One or more exact search keywords, browsed in input order. |
 | `seed_urls` | for seed_urls | HTTPS URLs on the selected platform only. |
-| `max_items_per_run` | no | Nonnegative safe integer; 0 means no count limit. Default batch size 5, or 0 for a time-only request. No fixed business maximum; use the requested count directly. |
+| `max_items_per_run` | no | Nonnegative safe integer; 0 means no count limit. Default batch size is 10, including a time-bounded request that omits a count. When platform selection is omitted, this is a total randomly allocated across all supported platforms; a positive total must be at least the platform count so every platform receives work. No fixed business maximum; use the requested count directly. |
 | `max_images_per_post` | no | Optional user limit; omitted/0 captures the full gallery, stopping at its actual end or repeated unchanged slides. |
 | `max_run_minutes` | no | Optional user deadline in minutes; omitted/0 means no whole-batch deadline. |
 | `max_scrolls_per_source` | no | Optional user scroll limit; omitted/0 traverses until target, cancellation, access barrier, or three observations without new results. |
@@ -261,7 +261,7 @@ Errors use `extra.{schema_version,source_skill,status,error_code,message_key,ret
 Stable examples include `display_unavailable`, `browser_missing`,
 `login_required`, `challenge_required`, `interactive_verification_cancelled`, `interactive_verification_timeout`, `manual_verification_not_restored`, `network_access_restricted`, `rate_limited`, `selector_drift`,
 `no_items_collected`, `screenshot_obscured`, `media_not_ready`,
-`platform_unsupported`, `source_scope_empty`, `run_already_active`,
+`platform_unsupported`, `platform_allocation_too_small`, `source_scope_empty`, `run_already_active`,
 `collection_already_enabled`, `collection_capacity_busy`, `partial_collection_failed`,
 `run_lease_lost`, `worker_lease_lost`, `storage_upgrade_requires_idle`, and `storage_lock_timeout`.
 `error_text` is a human fallback and must never drive routing or retry logic.

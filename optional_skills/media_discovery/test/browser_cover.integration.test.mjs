@@ -6,7 +6,12 @@ import test from "node:test";
 
 import { chromium } from "playwright";
 
-import { renderedVideoCover, screenshotLooksBlank } from "../src/browser.mjs";
+import {
+  captureToutiaoPreview,
+  renderedVideoCover,
+  scopeHasVideo,
+  screenshotLooksBlank,
+} from "../src/browser.mjs";
 
 const RUN_BROWSER_TEST = process.env.MEDIA_DISCOVERY_BROWSER_TEST === "1";
 
@@ -100,6 +105,46 @@ test("platform poster controls provide the cover when no video frame is availabl
   assert.equal(cover?.source, "rendered_poster_image");
 });
 
+test("Weibo recognizes a loading video post and captures its scoped poster under player chrome", {
+  skip: !RUN_BROWSER_TEST,
+}, async (t) => {
+  const page = await withPage(t, `
+    <article style="position:relative;width:640px;height:420px">
+      <a href="https://video.weibo.com/show?fid=1034:5351513040814119">微博视频</a>
+      <div class="video-js" style="position:relative;width:640px;height:360px">
+        <picture class="vjs-poster"><img alt="" style="width:640px;height:360px"
+          src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='640' height='360'%3E%3Crect width='640' height='360' fill='navy'/%3E%3C/svg%3E"></picture>
+        <div class="vjs-control-bar" style="position:absolute;inset:0;z-index:2;background:transparent"></div>
+      </div>
+    </article>
+  `);
+  const article = page.locator("article");
+  assert.equal(await scopeHasVideo(article, "weibo"), true);
+  const cover = await renderedVideoCover(article, "weibo");
+  assert.equal(cover?.source, "rendered_poster_image");
+});
+
+test("TikTok and YouTube player chrome still allows a scoped video cover", {
+  skip: !RUN_BROWSER_TEST,
+}, async (t) => {
+  const page = await withPage(t, `
+    <main>
+      <section data-e2e="browse-video" style="position:relative;width:300px;height:500px">
+        <video style="width:300px;height:500px;background:#16324f"></video>
+        <div style="position:absolute;inset:0;z-index:2;background:transparent"></div>
+      </section>
+      <div id="movie_player" style="position:relative;width:640px;height:360px">
+        <video class="html5-main-video" style="width:640px;height:360px;background:#31572c"></video>
+        <div class="ytp-chrome-bottom" style="position:absolute;left:0;right:0;bottom:0;height:50px;z-index:2"></div>
+      </div>
+    </main>
+  `);
+  assert.equal((await renderedVideoCover(page.locator('[data-e2e="browse-video"]'), "tiktok"))?.source,
+    "rendered_video_frame");
+  assert.equal((await renderedVideoCover(page.locator("#movie_player"), "youtube"))?.source,
+    "rendered_video_frame");
+});
+
 test("Kuaishou player controls do not mask the frame but unrelated overlays still do", {
   skip: !RUN_BROWSER_TEST,
 }, async (t) => {
@@ -180,4 +225,33 @@ test("a uniform black player screenshot is rejected as a blank cover", {
   const target = path.join(root, "cover.png");
   await page.locator("main").screenshot({ path: target, type: "png" });
   assert.equal(await screenshotLooksBlank(target), true);
+});
+
+test("Toutiao text-only articles use the complete article surface as their preview", {
+  skip: !RUN_BROWSER_TEST,
+}, async (t) => {
+  const page = await withPage(t, `
+    <main>
+      <section class="article-content" style="width:640px;min-height:420px;padding:24px;background:white;color:#222">
+        <h1 style="height:48px">Article title</h1>
+        <p>First paragraph of the exact article body.</p>
+        <p>Second paragraph retained in the same preview.</p>
+      </section>
+    </main>
+  `);
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "discovery-toutiao-preview-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+
+  const preview = await captureToutiaoPreview(
+    page,
+    root,
+    "run-article-preview",
+    "toutiao:123456",
+    "",
+    1,
+  );
+
+  assert.match(preview.relativePath || "", /^images\//u);
+  const output = path.join(root, "exports", ...preview.relativePath.split("/"));
+  assert.equal(await screenshotLooksBlank(output), false);
 });

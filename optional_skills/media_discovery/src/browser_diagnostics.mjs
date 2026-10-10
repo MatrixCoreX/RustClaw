@@ -22,7 +22,7 @@ export async function recordBrowserFailure(page, { root, runId, platform, stage,
       ? (/^\d{1,12}$/u.test(new URL(location.href).searchParams.get("error_code") || "")
         ? new URL(location.href).searchParams.get("error_code") : null) : null,
     recommendation_cards: window.document.querySelectorAll({
-      douyin: "[data-aweme-id]", xiaohongshu: "section.note-item[data-note-id]", kuaishou: ".video-card",
+      douyin: "[data-aweme-id]", xiaohongshu: "section.note-item[data-note-id]", kuaishou: ".video-card", toutiao: 'a[href*="/article/"], a[href*="/video/"], a[href*="/w/"], a[href*="/search/jump"]',
     }[platform]).length,
     video_elements: window.document.querySelectorAll("video").length,
     visible_videos: Array.from(window.document.querySelectorAll("video")).filter((node) => {

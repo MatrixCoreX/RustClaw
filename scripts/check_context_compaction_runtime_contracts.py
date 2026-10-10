@@ -76,11 +76,14 @@ REQUIRED_FILE_TOKENS = {
     ),
     "crates/clawd/src/worker/resume_replay_executor.rs": (
         "run_agent_with_tools_seeded",
-        "&prepared_flow.initial_task_observations",
+        "let mut initial_task_observations = prepared_flow.initial_task_observations.clone();",
+        "&initial_task_observations",
     ),
     "crates/clawd/src/agent_engine/loop_control.rs": (
         "run_agent_with_loop_seeded",
         "initial_task_observations",
+    ),
+    "crates/clawd/src/agent_engine/loop_runtime.rs": (
         ".extend(initial_task_observations.iter().cloned())",
     ),
     "crates/clawd/src/answer_verifier_runtime.rs": (

@@ -11,6 +11,16 @@ export function imageSourceIdentity(platform, source) {
       const object = url.pathname.split("/").at(-1).split("!")[0];
       if (/^1040[a-zA-Z0-9]{20,124}$/.test(object)) return `xhscdn:${object}`;
     }
+    if (platform === "toutiao" && /^https?:$/.test(url.protocol)
+      && ["toutiaoimg.com", "byteimg.com", "pstatp.com"].some(domain =>
+        url.hostname === domain || url.hostname.endsWith(`.${domain}`))) {
+      return `toutiao-image:${url.pathname.split("~", 1)[0]}`;
+    }
+    if (platform === "weibo" && /^https?:$/.test(url.protocol)
+      && (url.hostname === "sinaimg.cn" || url.hostname.endsWith(".sinaimg.cn"))) {
+      const parts = url.pathname.split("/").filter(Boolean);
+      return parts.length > 1 ? `weibo-image:/${parts.slice(1).join("/")}` : url.href;
+    }
     return url.href;
   } catch {
     return source;

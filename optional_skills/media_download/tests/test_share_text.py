@@ -4,6 +4,8 @@ from contextlib import redirect_stderr
 from pathlib import Path
 import sys
 import tempfile
+import json
+import urllib.parse
 from types import SimpleNamespace
 import unittest
 from unittest import mock
@@ -186,6 +188,179 @@ class ShareTextTest(unittest.TestCase):
         self.assertIsNone(
             self.downloader.detect_platform("https://mp.weixin.qq.com/s/example")
         )
+
+    def test_toutiao_article_video_and_micro_post_urls(self) -> None:
+        for kind, item_id in (
+            ("article", "7694557030652084736"),
+            ("video", "7689461431258858010"),
+            ("w", "1878457723490307"),
+        ):
+            with self.subTest(kind=kind):
+                url = f"https://www.toutiao.com/{kind}/{item_id}/"
+                self.assert_share_text(url, url, "toutiao")
+                self.assertEqual(self.downloader.extract_toutiao_id(url), item_id)
+
+    def test_toutiao_group_short_and_micro_post_share_routes_are_normalized(self) -> None:
+        article_id = "7694611241247015479"
+        video_id = "7540277264643325991"
+        micro_post_id = "1878489458132992"
+        article = f"https://www.toutiao.com/group/{article_id}/?source=news"
+        video = f"https://m.toutiaoimg.cn/group/{video_id}/?source=video"
+        micro_post = (
+            "https://weitoutiao.zjurl.cn/ugc/share/wap/thread/"
+            f"{micro_post_id}/?source=weitoutiao"
+        )
+
+        for url, item_id, canonical in (
+            (article, article_id, f"https://www.toutiao.com/article/{article_id}/"),
+            (video, video_id, f"https://www.toutiao.com/video/{video_id}/"),
+            (micro_post, micro_post_id, f"https://www.toutiao.com/w/{micro_post_id}/"),
+        ):
+            with self.subTest(url=url):
+                self.assertEqual(self.downloader.detect_platform(url), "toutiao")
+                self.assertEqual(self.downloader.extract_toutiao_id(url), item_id)
+                self.assertEqual(self.downloader.canonical_toutiao_content_url(url), canonical)
+                routes = self.downloader.prioritize_browser_target_urls(
+                    "toutiao", item_id, [url]
+                )
+                self.assertEqual(routes[0], canonical)
+                self.assertIn(f"https://www.toutiao.com/article/{item_id}/", routes)
+                self.assertIn(f"https://www.toutiao.com/video/{item_id}/", routes)
+                self.assertIn(f"https://www.toutiao.com/w/{item_id}/", routes)
+
+    def test_weibo_desktop_mobile_and_video_routes_share_one_identity(self) -> None:
+        desktop = "https://weibo.com/2286908003/RlQuA7sqn?refer_flag=1001030103_"
+        mobile = "https://m.weibo.cn/status/5352066721777563"
+        video = "https://weibo.com/tv/show/1034:5352062008098821"
+        self.assert_share_text(desktop, desktop, "weibo")
+        self.assertEqual(self.downloader.extract_weibo_id(desktop), "5352066721777563")
+        self.assertEqual(self.downloader.extract_weibo_id(mobile), "5352066721777563")
+        self.assertEqual(self.downloader.extract_weibo_id(video), "5352062008098821")
+
+    def test_toutiao_nested_search_jump_preserves_exact_item_id_and_kind(self) -> None:
+        item_id = "7694192486624887334"
+        target = f"https://toutiao.com/group/{item_id}/?source=video"
+        wrapper = "https://so.toutiao.com/search/jump?url=" + urllib.parse.quote(
+            "https://article.zlink.toutiao.com/J4?alert=0&h5_url="
+            + urllib.parse.quote(target, safe=""),
+            safe="",
+        )
+        self.assertEqual(self.downloader.extract_toutiao_id(wrapper), item_id)
+        self.assertEqual(
+            self.downloader.canonical_toutiao_content_url(wrapper),
+            f"https://www.toutiao.com/video/{item_id}/",
+        )
+        self.assertIsNone(self.downloader.canonical_toutiao_content_url(
+            "https://outside.example/group/7694192486624887334/?source=video"
+        ))
+
+    def test_toutiao_render_data_extracts_exact_article_and_ordered_images(self) -> None:
+        item_id = "7694557030652084736"
+        payload = {
+            "data": {
+                "itemId": item_id,
+                "title": "测试文章",
+                "content": "<p>第一段</p><p>第二段 &amp; 内容</p>",
+                "mediaInfo": {"name": "测试作者"},
+                "imageList": [
+                    {"url": "https://p3-sign.toutiaoimg.com/tos-cn-i-a/first~tplv-test:1200:800.jpeg"},
+                    {"url": "https://p3-sign.toutiaoimg.com/tos-cn-i-a/second~tplv-test:1200:800.jpeg"},
+                ],
+                "detailFeedList": [{
+                    "itemId": "7999999999999999999",
+                    "title": "推荐内容不应混入",
+                }],
+            }
+        }
+        encoded = urllib.parse.quote(json.dumps(payload, ensure_ascii=False))
+        page = f'<script id="RENDER_DATA" type="application/json">{encoded}</script>'
+
+        exact = self.downloader.find_toutiao_item_payload_in_html(page, item_id)
+        self.assertIsNotNone(exact)
+        assert exact is not None
+        article = self.downloader.article_from_toutiao_payload(exact, source="test")
+        self.assertIsNotNone(article)
+        assert article is not None
+        self.assertEqual(article.title, "测试文章")
+        self.assertEqual(article.body, "第一段\n\n第二段 & 内容")
+        self.assertEqual(article.author, "测试作者")
+        images = self.downloader.extract_toutiao_item_image_candidates(exact, source="test")
+        self.assertEqual([self.downloader.toutiao_image_key(item.url) for item in images], [
+            "/tos-cn-i-a/first",
+            "/tos-cn-i-a/second",
+        ])
+
+    def test_toutiao_video_prefers_highest_stream_and_pairs_audio(self) -> None:
+        item_id = "7689461431258858010"
+        audio_url = (
+            "https://v9-web.toutiaovod.com/group/video/tos/cn/item/"
+            "media-audio-und-mp4a/?mime_type=video_mp4"
+        )
+        low_url = (
+            "https://v9-web.toutiaovod.com/group/video/tos/cn/low/"
+            "media-video-avc1/?mime_type=video_mp4"
+        )
+        high_url = (
+            "https://v9-web.toutiaovod.com/group/video/tos/cn/high/"
+            "media-video-avc1/?mime_type=video_mp4"
+        )
+        payload = {
+            "itemId": item_id,
+            "initialVideo": {
+                "itemId": item_id,
+                "title": "测试视频",
+                "videoPlayInfo": {
+                    "dynamic_video": {
+                        "dynamic_video_list": [
+                            {"main_url": low_url, "video_meta": {"vwidth": 640, "vheight": 360, "bitrate": 300000}},
+                            {"main_url": high_url, "video_meta": {"vwidth": 1920, "vheight": 1080, "bitrate": 2000000}},
+                        ],
+                        "dynamic_audio_list": [
+                            {"main_url": audio_url, "audio_meta": {"bitrate": 128000}},
+                        ],
+                    }
+                },
+            },
+        }
+
+        candidates = self.downloader.extract_toutiao_item_video_candidates(
+            payload,
+            source="test",
+        )
+        self.assertEqual(candidates[0].url, high_url)
+        self.assertEqual(candidates[0].separate_audio_url, audio_url)
+        self.assertEqual(candidates[1].url, low_url)
+
+    def test_weibo_rendered_post_excludes_avatar_and_video_poster_images(self) -> None:
+        page = """
+        <main><article>
+          <header><span title="测试作者">测试作者</span>
+            <img src="https://tvax3.sinaimg.cn/crop.0.0.100.100/avatar.jpg"></header>
+          <div class="wbpro-feed-ogText"><div class="random-wbtext-class">
+            第一段 <a href="https://example.test">链接标题</a><br>第二段
+          </div></div>
+          <div class="picture-list">
+            <img src="https://wx1.sinaimg.cn/orj360/first.jpg?Expires=1">
+            <img src="https://wx2.sinaimg.cn/mw2000/second.jpg?Expires=2">
+          </div>
+          <div class="vjs-poster"><img src="https://wx3.sinaimg.cn/orj480/poster.jpg"></div>
+          <div class="vjs-video"><video src="//f.video.weibocdn.com/o0/item.mp4?label=mp4_720p"></video></div>
+        </article><article><div class="wbpro-feed-ogText">推荐内容</div></article></main>
+        """
+        article, images, videos = self.downloader.parse_weibo_rendered_post(
+            page,
+            source="test",
+        )
+        self.assertIsNotNone(article)
+        assert article is not None
+        self.assertEqual(article.author, "测试作者")
+        self.assertEqual(article.body, "第一段 链接标题\n第二段")
+        self.assertEqual([item.url for item in images], [
+            "https://wx1.sinaimg.cn/large/first.jpg",
+            "https://wx2.sinaimg.cn/large/second.jpg",
+        ])
+        self.assertEqual(len(videos), 1)
+        self.assertTrue(videos[0].url.startswith("https://f.video.weibocdn.com/"))
 
     def test_wechat_channels_candidates_preserve_video_and_article(self) -> None:
         resolved = SimpleNamespace(

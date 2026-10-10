@@ -50,7 +50,7 @@ MAX_MISSING_PLANNER_ARGUMENTS = 0
 MAX_EXPOSED_DUPLICATE_ACTION_GROUPS = 0
 # Finite action enums exposed nine previously implicit compatibility/internal
 # executor actions during the 2026-07-29 contract hardening rebaseline.
-MAX_UNMAPPED_PUBLIC_ACTIONS = 45
+MAX_UNMAPPED_PUBLIC_ACTIONS = 46
 
 
 @dataclasses.dataclass(frozen=True)

@@ -516,12 +516,13 @@ async fn synthesize_reviewed_transcript(
         .capability_results
         .get_mut(contract.result_index)
         .ok_or_else(|| "transcript_revision_result_missing".to_string())?;
+    let transcript_label = audio_transcript_label(state, &target_language);
     let answer = attach_reviewed_transcript_artifact(
         result,
         artifact,
         &contract.text_filename,
         &reviewed_text,
-        &target_language,
+        &transcript_label,
     )?;
     if let Some(extra) = loop_state
         .capability_results
@@ -587,7 +588,7 @@ fn attach_reviewed_transcript_artifact(
     mut artifact: ArtifactRef,
     filename: &str,
     reviewed_text: &str,
-    target_language: &str,
+    transcript_label: &str,
 ) -> Result<String, String> {
     let path = artifact
         .path
@@ -621,39 +622,29 @@ fn attach_reviewed_transcript_artifact(
     delivery.insert("intent".to_string(), Value::String("artifact".to_string()));
     Ok(format_labeled_audio_transcript(
         reviewed_text,
-        target_language,
+        transcript_label,
         Some(&path),
     ))
 }
 
-fn audio_transcript_label(language: &str) -> &'static str {
-    let language = language.trim().replace('_', "-").to_ascii_lowercase();
-    if matches!(language.as_str(), "zh" | "zh-cn" | "zh-sg" | "zh-hans")
-        || language.starts_with("zh-hans-")
-    {
-        "音频转写"
-    } else if matches!(language.as_str(), "zh-tw" | "zh-hk" | "zh-mo" | "zh-hant")
-        || language.starts_with("zh-hant-")
-    {
-        "音訊轉寫"
-    } else if language == "ja" || language.starts_with("ja-") {
-        "音声文字起こし"
-    } else if language == "ko" || language.starts_with("ko-") {
-        "오디오 전사"
-    } else {
-        "Audio transcript"
-    }
+fn audio_transcript_label(state: &AppState, language: &str) -> String {
+    crate::i18n_t_for_language_hint_with_default_vars(
+        state,
+        language,
+        "common.audio_transcript_label",
+        "Audio transcript",
+        &[],
+    )
 }
 
 fn format_labeled_audio_transcript(
     text: &str,
-    target_language: &str,
+    transcript_label: &str,
     artifact_path: Option<&str>,
 ) -> String {
-    let label = audio_transcript_label(target_language);
     artifact_path.map_or_else(
-        || format!("{label}:\n{text}"),
-        |path| format!("{label}:\n{text}\nFILE:{path}"),
+        || format!("{transcript_label}:\n{text}"),
+        |path| format!("{transcript_label}:\n{text}\nFILE:{path}"),
     )
 }
 
@@ -867,6 +858,7 @@ fn synthesize_unreviewed_transcript_fallback(
         .as_ref()
         .and_then(|artifact| artifact.path.as_deref())
         .is_some_and(|path| !path.trim().is_empty());
+    let transcript_label = audio_transcript_label(state, target_language);
     let answer = loop_state
         .capability_results
         .get_mut(contract.result_index)
@@ -877,6 +869,7 @@ fn synthesize_unreviewed_transcript_fallback(
                 &contract.text_filename,
                 &normalized_text,
                 target_language,
+                &transcript_label,
                 &contract.source,
                 error_code,
             )
@@ -910,6 +903,7 @@ fn attach_unreviewed_transcript_fallback(
     filename: &str,
     raw_text: &str,
     target_language: &str,
+    transcript_label: &str,
     source: &str,
     error_code: &str,
 ) -> String {
@@ -1000,7 +994,7 @@ fn attach_unreviewed_transcript_fallback(
             );
         }
     }
-    format_labeled_audio_transcript(raw_text, target_language, artifact_path.as_deref())
+    format_labeled_audio_transcript(raw_text, transcript_label, artifact_path.as_deref())
 }
 
 fn normalized_transcript_language(requested: &str, fallback: &str) -> String {

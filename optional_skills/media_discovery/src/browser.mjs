@@ -8,7 +8,7 @@ import { capturePublication } from "./publication.mjs";
 import { assertNavigationResponse, boundedBrowserOperation, normalizeBrowserError, openKeywordSearch } from "./browser_search.mjs";
 import { assertBrowserFlow, observePlatformBackpressure, pacingDelayMs, stopsCollection } from "./browser_flow_control.mjs";
 export { pacingDelayMs } from "./browser_flow_control.mjs";
-import { withSearchResult } from "./browser_search_results.mjs";
+import { dismissTikTokConsent, dismissYouTubeConsent, withSearchResult } from "./browser_search_results.mjs";
 import {
   collectKuaishouSearchResults,
   kuaishouAccessError,
@@ -68,7 +68,17 @@ export async function awaitPaintedVideoFrame(locator, timeoutMs = 5_000) {
       const ctx = canvas.getContext("2d", { willReadFrequently: true });
       if (!ctx) return node.currentTime > 0;
       ctx.drawImage(node, 0, 0, 24, 24);
-      const pixels = ctx.getImageData(0, 0, 24, 24).data;
+      let pixels;
+      try {
+        pixels = ctx.getImageData(0, 0, 24, 24).data;
+      } catch (error) {
+        // MediaSource/blob players can render a real frame while Chromium
+        // still forbids canvas readback. The element screenshot is checked
+        // separately for blank output, so a progressing decoded frame is
+        // sufficient in that case.
+        if (error?.name === "SecurityError") return node.currentTime > 0;
+        throw error;
+      }
       let min = 255;
       let max = 0;
       for (let index = 0; index < pixels.length; index += 4) {
@@ -91,6 +101,10 @@ const PLATFORM_AUTH_COOKIE_NAMES = Object.freeze({
   douyin: new Set(["sessionid", "sessionid_ss", "sid_guard", "uid_tt", "uid_tt_ss"]),
   xiaohongshu: new Set(["web_session"]),
   kuaishou: new Set(["kuaishou.server.web_st", "kuaishou.server.webday7_st", "userId"]),
+  toutiao: new Set(["sessionid", "sid_guard", "passport_csrf_token", "ttwid"]),
+  weibo: new Set(["SUB", "SUBP", "SSOLoginState", "ALF"]),
+  tiktok: new Set(["sessionid", "sessionid_ss", "sid_tt", "uid_tt", "uid_tt_ss"]),
+  youtube: new Set(["SID", "HSID", "SSID", "APISID", "SAPISID", "__Secure-3PSID"]),
 });
 
 const ENGAGEMENT_SELECTORS = Object.freeze({
@@ -152,6 +166,17 @@ const ENGAGEMENT_SELECTORS = Object.freeze({
     shares: Object.freeze(['.interactive-item.share-item .item-count', '[data-testid="share-count"]']),
     views: Object.freeze(['.video-info-content:has(.play-icon) .info-text', '[data-testid="play-count"]']),
   }),
+  tiktok: Object.freeze({
+    likes: Object.freeze(['[data-e2e="like-count"]', '[data-e2e="browse-like-count"]']),
+    comments: Object.freeze(['[data-e2e="comment-count"]', '[data-e2e="browse-comment-count"]']),
+    favorites: Object.freeze(['[data-e2e="undefined-count"]', '[data-e2e="browse-bookmark-count"]']),
+    shares: Object.freeze(['[data-e2e="share-count"]', '[data-e2e="browse-share-count"]']),
+  }),
+  youtube: Object.freeze({
+    views: Object.freeze(['#info span.view-count', '#info-container #info', 'yt-formatted-string#info']),
+    likes: Object.freeze(['#segmented-like-button button', 'like-button-view-model button']),
+    comments: Object.freeze(['ytd-comments-header-renderer #count']),
+  }),
 });
 
 const PLATFORM_CAPTION_SELECTOR_GROUPS = Object.freeze({
@@ -181,6 +206,45 @@ const PLATFORM_CAPTION_SELECTOR_GROUPS = Object.freeze({
       '.short-video-info-container-detail .video-info-title',
       '.video-info-title',
       '.caption',
+    ]),
+  ]),
+  toutiao: Object.freeze([
+    Object.freeze([
+      ".article-content h1",
+      "h1",
+      "[class*=video-title]",
+    ]),
+    Object.freeze([
+      ".syl-page-article",
+      ".tt-article-content",
+      ".article-content article",
+      "[class*=article-content]",
+    ]),
+  ]),
+  weibo: Object.freeze([
+    Object.freeze([
+      ".wbpro-feed-ogText",
+      "[class*=wbtext]",
+      ".wbpro-feed-content",
+    ]),
+  ]),
+  tiktok: Object.freeze([
+    Object.freeze([
+      '[data-e2e="browse-video-desc"]',
+      '[data-e2e="video-desc"]',
+      '[data-e2e="search-card-desc"]',
+    ]),
+  ]),
+  youtube: Object.freeze([
+    Object.freeze([
+      "h1.ytd-watch-metadata yt-formatted-string",
+      "#title h1 yt-formatted-string",
+      "ytd-watch-metadata h1",
+    ]),
+    Object.freeze([
+      "#description-inline-expander #description",
+      "ytd-text-inline-expander#description-inline-expander",
+      "#description",
     ]),
   ]),
 });
@@ -393,7 +457,7 @@ export function platformAccessError(platform, currentUrl, captchaFrameUrls = [])
     return "challenge_required";
   }
   if (
-    platform === "douyin"
+    ["douyin", "toutiao"].includes(platform)
     && captchaFrameUrls.some((value) => {
       try {
         return new URL(value).pathname.includes("/verifycenter/captcha/");
@@ -404,14 +468,35 @@ export function platformAccessError(platform, currentUrl, captchaFrameUrls = [])
   ) {
     return "challenge_required";
   }
+  if (platform === "weibo" && (
+    current.hostname === "passport.weibo.com"
+    || current.hostname === "passport.weibo.cn"
+    || current.hostname === "visitor.passport.weibo.cn"
+  )) return "login_required";
+  if (platform === "tiktok" && /^\/(?:login|signup)(?:\/|$)/u.test(current.pathname)) {
+    return "login_required";
+  }
+  if (platform === "youtube" && current.hostname === "accounts.google.com") {
+    return "login_required";
+  }
   return null;
 }
 
 export async function currentPlatformAccessError(page, platform) {
   assertBrowserFlow(page, "access_check");
-  const captchaFrameUrls = await boundedBrowserOperation(page.locator("iframe[src]").evaluateAll((frames) =>
-    frames.map((frame) => frame.src || ""),
-  ), 10_000, "access_check");
+  let captchaFrameUrls;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      captchaFrameUrls = await boundedBrowserOperation(page.locator("iframe[src]").evaluateAll((frames) =>
+        frames.map((frame) => frame.src || ""),
+      ), 10_000, "access_check");
+      break;
+    } catch (error) {
+      if (!/Execution context was destroyed|navigation/iu.test(String(error?.message || ""))
+        || attempt === 7) throw error;
+      await page.waitForTimeout(150);
+    }
+  }
   const accessError = platformAccessError(platform, page.url(), captchaFrameUrls);
   if (accessError) return accessError;
   if (platform === "xiaohongshu"
@@ -421,6 +506,15 @@ export async function currentPlatformAccessError(page, platform) {
   if (platform === "kuaishou") {
     const kuaishouError = await kuaishouAccessError(page);
     if (kuaishouError) return kuaishouError;
+  }
+  if (platform === "tiktok"
+    && await page.locator('[data-e2e="search-error-icon"]:visible').count()) {
+    return "network_access_restricted";
+  }
+  if (platform === "youtube" && await page.locator(
+    'yt-playability-error-supported-renderers#error-screen:visible a[href*="accounts.google.com/ServiceLogin"]',
+  ).count()) {
+    return "login_required";
   }
   if (await page.locator('input[type="password"]:visible, input[type="tel"]:visible').count()) {
     return "login_required";
@@ -518,6 +612,10 @@ export async function waitForManualAccess({ page, context, platform, errorCode, 
         douyin: '[data-aweme-id], [data-e2e="video-detail"], video, a[href*="/video/"], a[href*="/note/"], .search-result-card',
         xiaohongshu: 'section.note-item[data-note-id], #detail-title, #detail-desc, a[href*="/explore/"]',
         kuaishou: '.video-card, .video-list .photo-card, .short-video-info-container-detail, video, a[href*="/short-video/"]',
+        toutiao: 'a[href*="/article/"], a[href*="/video/"], a[href*="/w/"], a[href*="/search/jump"], .article-content, script#RENDER_DATA',
+        weibo: 'article, a[href^="https://weibo.com/"][href*="/"], .card-wrap[action-type="feed_list_item"]',
+        tiktok: 'a[href*="/video/"], a[href*="/photo/"], video, [data-e2e="browse-video-desc"]',
+        youtube: 'a[href*="/watch?v="], a[href*="/shorts/"], ytd-watch-flexy, video.html5-main-video',
       }[platform];
       const visibleSelector = selector.split(",").map(part => `${part.trim()}:visible`).join(",");
       ready = action === "continue" && !accessError && await page.locator(visibleSelector).count() > 0
@@ -575,6 +673,10 @@ export async function discoverCandidates(page, platform, sourceUrl, maxScrolls, 
   const discovered = [];
   const progressing = pageProgress();
   if (isDetailUrl(platform, sourceUrl)) discovered.push(validatePlatformUrl(platform, sourceUrl));
+  if (platform === "toutiao" && new URL(sourceUrl).pathname === "/") {
+    await page.locator('a[href*="/article/"], a[href*="/video/"], a[href*="/w/"]')
+      .first().waitFor({ state: "visible", timeout: NAVIGATION_TIMEOUT_MS });
+  }
   for (let scroll = 0; scroll <= optionalLimit(maxScrolls) && discovered.length < limit; scroll += 1) {
     const links = await visibleDiscoveryCandidates(page, platform);
     if (!progressing(links)) break;
@@ -590,15 +692,24 @@ export async function discoverCandidates(page, platform, sourceUrl, maxScrolls, 
 
 async function visibleDiscoveryCandidates(page, platform) {
   const selector = platform === "douyin" ? "a[href], [data-aweme-id]" : "a[href]";
-  const links = await page.locator(selector).evaluateAll((nodes) => nodes.flatMap(node => {
-      const rect = node.getBoundingClientRect(), style = getComputedStyle(node);
-      if (rect.width <= 0 || rect.height <= 0 || style.visibility === "hidden"
-        || style.display === "none" || Number(style.opacity) === 0) return [];
-      const itemId = node.getAttribute("data-aweme-id");
-      return [node.href, /^\d+$/u.test(itemId || "") ? `https://www.douyin.com/video/${itemId}` : null]
-        .filter(value => typeof value === "string");
-  }));
-  return canonicalCandidateUrls(platform, links);
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      const links = await page.locator(selector).evaluateAll((nodes) => nodes.flatMap(node => {
+        const rect = node.getBoundingClientRect(), style = getComputedStyle(node);
+        if (rect.width <= 0 || rect.height <= 0 || style.visibility === "hidden"
+          || style.display === "none" || Number(style.opacity) === 0) return [];
+        const itemId = node.getAttribute("data-aweme-id");
+        return [node.href, /^\d+$/u.test(itemId || "") ? `https://www.douyin.com/video/${itemId}` : null]
+          .filter(value => typeof value === "string");
+      }));
+      return canonicalCandidateUrls(platform, links);
+    } catch (error) {
+      if (!/Execution context was destroyed|navigation/iu.test(String(error?.message || ""))
+        || attempt === 7) throw error;
+      await page.waitForTimeout(150);
+    }
+  }
+  return [];
 }
 
 export async function candidatesForDiscoverySource(
@@ -801,6 +912,13 @@ async function largeVisibleVideo(scope) {
   return false;
 }
 
+export async function scopeHasVideo(scope, platform) {
+  if (platform === "weibo" && await scope.locator(
+    'video, a[href^="https://video.weibo.com/show"], a[href^="//video.weibo.com/show"]',
+  ).count() > 0) return true;
+  return largeVisibleVideo(scope);
+}
+
 async function pageMetadata(page, platform, requestedUrl, scope = page) {
   const metadata = await page.evaluate(() => {
     const meta = (selector) => document.querySelector(selector)?.getAttribute("content")?.trim() || "";
@@ -825,21 +943,232 @@ async function pageMetadata(page, platform, requestedUrl, scope = page) {
   const copy = platform === "douyin"
     ? douyinRecordCopy({ authorTitle, listingTitle: metadata.title })
     : null;
+  const scopedTitle = copy ? ""
+    : await firstSelectorText(scope, PLATFORM_CAPTION_SELECTOR_GROUPS[platform]?.[0] || []);
   return {
     ...metadata,
     canonical: isDetailUrl(platform, canonicalUrl)
       && platformItemId(platform, canonicalUrl) === platformItemId(platform, requestedUrl) ? canonicalUrl : requestedUrl,
-    hasVideo: await largeVisibleVideo(scope),
-    title: copy ? copy.title : scope === page
-      ? metadata.title
-      : await firstSelectorText(scope, PLATFORM_CAPTION_SELECTOR_GROUPS[platform]?.[0] || []),
+    hasVideo: await scopeHasVideo(scope, platform),
+    title: copy ? copy.title : scopedTitle || metadata.title,
     platformText: copy ? copy.platform_text
-      : await capturePlatformCaption(scope, platform, scope === page ? metadata.description : ""),
+      : await capturePlatformCaption(scope, platform, metadata.description),
   };
 }
 
-async function visibleImageCandidates(page, maximum) {
-  const candidates = await page.locator("img").evaluateAll((images) =>
+export async function captureToutiaoPageData(page) {
+  const result = await page.evaluate(() => {
+    const renderNode = document.querySelector("script#RENDER_DATA");
+    if (!renderNode?.textContent) return null;
+    let payload;
+    try { payload = JSON.parse(decodeURIComponent(renderNode.textContent)); }
+    catch { return null; }
+    const data = payload?.data;
+    if (!data || typeof data !== "object") return null;
+    const initialVideo = data.initialVideo && typeof data.initialVideo === "object"
+      ? data.initialVideo : null;
+    const currentPath = location.pathname;
+    const currentId = currentPath.split("/").filter(Boolean).at(-1) || "";
+    const itemId = String(initialVideo?.itemId || initialVideo?.groupId || data.itemId || data.groupId || "");
+    if (!/^\d+$/u.test(itemId) || itemId !== currentId) return null;
+
+    const normalize = value => String(value || "")
+      .replaceAll("\r\n", "\n").replaceAll("\r", "\n").trim();
+    const htmlText = value => {
+      if (!value) return "";
+      const container = document.createElement("div");
+      container.innerHTML = String(value);
+      return normalize(container.innerText || container.textContent || "");
+    };
+    const title = normalize(initialVideo?.title || data.title);
+    const body = htmlText(data.content || data.richContent || data.abstract || "");
+    const author = normalize(initialVideo?.userInfo?.name || data.mediaInfo?.name || data.source);
+    const imageUrls = [];
+    const seen = new Set();
+    const addUrl = raw => {
+      if (typeof raw !== "string") return;
+      let value = raw.trim();
+      if (value.startsWith("//")) value = `https:${value}`;
+      try {
+        const parsed = new URL(value, location.href);
+        if (parsed.protocol !== "https:") return;
+        const host = parsed.hostname.toLowerCase();
+        if (!["toutiaoimg.com", "byteimg.com", "pstatp.com"].some(domain =>
+          host === domain || host.endsWith(`.${domain}`))) return;
+        if (!seen.has(parsed.href)) { seen.add(parsed.href); imageUrls.push(parsed.href); }
+      } catch { /* Ignore malformed page-owned media URLs. */ }
+    };
+    const addValue = value => {
+      if (typeof value === "string") { addUrl(value); return; }
+      if (Array.isArray(value)) { value.forEach(addValue); return; }
+      if (value && typeof value === "object") Object.values(value).forEach(addValue);
+    };
+    for (const key of ["imageList", "image_list", "ugcImages", "ugc_images", "images"]) {
+      addValue(data[key]);
+    }
+    if (data.itemCell && typeof data.itemCell === "object") {
+      addValue(data.itemCell.imageList);
+    }
+    if (typeof data.content === "string") {
+      const container = document.createElement("div");
+      container.innerHTML = data.content;
+      for (const image of container.querySelectorAll("img")) addUrl(image.getAttribute("src") || image.getAttribute("data-src"));
+    }
+    const meta = selector => document.querySelector(selector)?.getAttribute("content")?.trim() || "";
+    const coverUrl = normalize(initialVideo?.poster || initialVideo?.coverUrl || data.cover || meta('meta[property="og:image"]'));
+    // Toutiao includes an empty/default itemCell.videoInfo object on articles;
+    // the canonical detail route is the reliable content-kind contract.
+    const hasVideo = currentPath.startsWith("/video/");
+    if (!hasVideo && imageUrls.length === 0) addUrl(coverUrl);
+    return { itemId, title, body, author, imageUrls, coverUrl, hasVideo };
+  });
+  if (!result) throw new Error("source_unavailable");
+  return {
+    ...result,
+    title: normalizedPlatformText(result.title),
+    body: normalizedPlatformText(result.body),
+    author: normalizedPlatformText(result.author),
+  };
+}
+
+async function waitForToutiaoDetailReady(page) {
+  const deadline = Date.now() + NAVIGATION_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    try {
+      const remaining = Math.max(100, deadline - Date.now());
+      await page.locator("script#RENDER_DATA").waitFor({
+        state: "attached",
+        timeout: Math.min(1000, remaining),
+      });
+      const ready = await page.evaluate(() => {
+        const currentId = location.pathname.split("/").filter(Boolean).at(-1) || "";
+        const content = document.querySelector("script#RENDER_DATA")?.textContent || "";
+        return /^\d+$/u.test(currentId) && content.length > 2;
+      });
+      if (ready) return;
+    } catch {
+      // Toutiao may replace its initial shell document while adding `wid`.
+    }
+    await page.waitForTimeout(100);
+  }
+  throw new Error("source_unavailable");
+}
+
+export async function captureToutiaoPreview(page, root, runId, itemId, sourceUrl, position, kind = "image") {
+  const temporaryPath = path.join(root, "tmp", runId,
+    `${itemId.replaceAll(":", "_")}-${kind}-${String(position).padStart(3, "0")}.png`);
+  const sourcePath = (() => {
+    try { return new URL(sourceUrl).pathname.split("~", 1)[0]; } catch { return ""; }
+  })();
+  let locator = null;
+  if (sourcePath) {
+    const images = page.locator("img");
+    const matches = await images.evaluateAll((nodes, expectedPath) => nodes.map((node, index) => {
+      try {
+        const path = new URL(node.currentSrc || node.src, location.href).pathname.split("~", 1)[0];
+        return path === expectedPath ? index : -1;
+      } catch { return -1; }
+    }).filter(index => index >= 0), sourcePath).catch(() => []);
+    if (matches.length > 0) locator = images.nth(matches[0]);
+  }
+  if (!locator) {
+    for (const selector of [
+      ".syl-page-article:visible",
+      ".tt-article-content:visible",
+      ".article-content article:visible",
+      ".article-content:visible",
+      "[class*=article-content]:visible",
+      "article:visible",
+      "main:visible",
+      ".article-content h1:visible",
+      "h1:visible",
+    ]) {
+      const candidate = page.locator(selector).first();
+      if (await candidate.count()) { locator = candidate; break; }
+    }
+  }
+  if (!locator) return { relativePath: null, temporaryPaths: [] };
+  try {
+    await screenshotLocator(locator, temporaryPath, "toutiao", 10_000, {
+      // Text-only articles have no media element to validate as an unobscured
+      // cover. Capture the first-party article surface itself instead.
+      allowObscured: !sourcePath,
+    });
+    const relativePath = kind === "video"
+      ? await persistVideoCover(root, "toutiao", itemId, temporaryPath)
+      : await persistImageScreenshot(root, "toutiao", itemId,
+        identityDigest(imageSourceIdentity("toutiao", sourceUrl) || `${itemId}:${position}`), temporaryPath);
+    return { relativePath, temporaryPaths: [temporaryPath] };
+  } catch {
+    await fs.unlink(temporaryPath).catch(() => {});
+    return { relativePath: null, temporaryPaths: [] };
+  }
+}
+
+async function collectToutiaoOpenedPage(page, root, runId, itemUrl, config, discoverySource) {
+  const currentUrl = validatePlatformUrl("toutiao", page.url());
+  if (!isDetailUrl("toutiao", currentUrl)
+    || platformItemId("toutiao", currentUrl) !== platformItemId("toutiao", itemUrl)) {
+    throw new Error("source_unavailable");
+  }
+  const data = await captureToutiaoPageData(page);
+  const sourceUrl = validatePlatformUrl("toutiao", itemUrl);
+  const itemId = `toutiao:${data.itemId}`;
+  const discoveredAt = new Date().toISOString();
+  const engagement = await captureEngagementMetrics(page, "toutiao", discoveredAt);
+  const publication = await capturePublication(page, "toutiao", itemId);
+  const common = {
+    platform: "toutiao",
+    browser_mode: config.browser_mode || "silent",
+    source_mode: discoverySource.source_mode,
+    search_keyword: discoverySource.search_keyword || "",
+    discovery_source_url: discoverySource.url,
+    item_id: itemId,
+    title: data.title,
+    platform_text: data.body || data.title,
+    discovered_at: discoveredAt,
+    ...publication,
+    engagement,
+  };
+  if (data.hasVideo) {
+    const preview = await captureToutiaoPreview(page, root, runId, itemId, data.coverUrl, 1, "video");
+    return {
+      records: [{
+        kind: "video",
+        dedup_key: `${itemId}:video`,
+        ...common,
+        cover_screenshot_path: preview.relativePath,
+        cover_capture_source: preview.relativePath ? "rendered_poster_image" : null,
+        video_page_url: sourceUrl,
+      }],
+      temporaryPaths: preview.temporaryPaths,
+    };
+  }
+  const maximum = optionalLimit(config.max_images_per_post);
+  const sources = (data.imageUrls.length > 0 ? data.imageUrls : [""]).slice(0, maximum);
+  const records = [];
+  const temporaryPaths = [];
+  for (const [index, imageUrl] of sources.entries()) {
+    const preview = await captureToutiaoPreview(page, root, runId, itemId, imageUrl, index + 1);
+    temporaryPaths.push(...preview.temporaryPaths);
+    const sourceIdentity = imageSourceIdentity("toutiao", imageUrl) || `${itemId}:article-preview`;
+    records.push({
+      kind: "image",
+      dedup_key: `${itemId}:image:${identityDigest(sourceIdentity)}`,
+      ...common,
+      image_sequence: index + 1,
+      image_url: imageUrl || null,
+      image_screenshot_path: preview.relativePath,
+      cover_screenshot_path: preview.relativePath,
+      source_page_url: sourceUrl,
+      ...(index === sources.length - 1 && data.imageUrls.length > maximum ? { collection_truncated: true } : {}),
+    });
+  }
+  return { records, temporaryPaths };
+}
+
+async function visibleImageCandidates(page, maximum, minimumDimension = 180) {
+  const candidates = await page.locator("img").evaluateAll((images, minimumDimension) =>
     images.map((image, index) => {
       const rect = image.getBoundingClientRect();
       const style = window.getComputedStyle(image);
@@ -863,12 +1192,12 @@ async function visibleImageCandidates(page, maximum) {
           style.display !== "none" &&
           style.visibility !== "hidden" &&
           Number.parseFloat(style.opacity || "1") > 0.01 &&
-          rect.width >= 180 &&
-          rect.height >= 180 &&
-          right - left >= 180 && bottom - top >= 180,
+          rect.width >= minimumDimension &&
+          rect.height >= minimumDimension &&
+          right - left >= minimumDimension && bottom - top >= minimumDimension,
         source: image.currentSrc || image.src || "",
       };
-    }),
+    }), minimumDimension,
   );
   return candidates
     .filter((candidate) => candidate.visible)
@@ -935,7 +1264,8 @@ export async function collectRenderedImages({
   const observedSources = new Set();
   let unchangedTurns = 0;
   while (records.length < maximum) {
-    const candidates = await visibleImageCandidates(scope, maximum - records.length);
+    const minimumDimension = platform === "weibo" ? 120 : 180;
+    const candidates = await visibleImageCandidates(scope, maximum - records.length, minimumDimension);
     let added = 0;
     for (const candidate of candidates) {
       const identity = imageSourceIdentity(platform, candidate.source);
@@ -948,7 +1278,8 @@ export async function collectRenderedImages({
         runId,
         `${itemId.replaceAll(":", "_")}-image-${String(position).padStart(3, "0")}.png`,
       );
-      await screenshotLocator(scope.locator("img").nth(candidate.index), screenshotPath, platform);
+      await screenshotLocator(scope.locator("img").nth(candidate.index), screenshotPath, platform,
+        10_000, { allowObscured: platform === "weibo" });
       temporaryPaths.push(screenshotPath);
       const imageScreenshotPath = await persistImageScreenshot(
         root,
@@ -1088,7 +1419,40 @@ const VIDEO_COVER_SELECTORS = Object.freeze({
       '.poster .poster-img:visible',
     ]),
   }),
+  weibo: Object.freeze({
+    rendered_poster_image: Object.freeze([
+      "article .vjs-poster img:visible",
+      ".vjs-poster img:visible",
+      ".wbpro-feed-content picture img:visible",
+    ]),
+    rendered_video_frame: Object.freeze([
+      "article video:visible",
+      ".wbpro-feed-content video:visible",
+    ]),
+  }),
+  tiktok: Object.freeze({
+    rendered_video_frame: Object.freeze([
+      '[data-e2e="browse-video"] video:visible',
+      "video:visible",
+    ]),
+    rendered_poster_image: Object.freeze([
+      '[data-e2e="browse-video"] img:visible',
+      '[data-e2e="video-card"] img:visible',
+    ]),
+  }),
+  youtube: Object.freeze({
+    rendered_video_frame: Object.freeze([
+      "#movie_player video.html5-main-video:visible",
+      "ytd-player video:visible",
+      "video.html5-main-video:visible",
+    ]),
+  }),
 });
+
+async function locatorHasCaptureArea(locator, minimumWidth) {
+  const box = await locator.boundingBox().catch(() => null);
+  return Boolean(box && box.width >= minimumWidth && box.height >= 120);
+}
 
 async function locatorIsUsableCover(locator, minimumWidth = 180, platform = "") {
   return locator.evaluate((node, args) => {
@@ -1133,7 +1497,10 @@ export async function renderedVideoCover(scope, platform) {
       for (let index = 0; index < count; index += 1) {
         const locator = candidates.nth(index);
         const minimumWidth = platform === "kuaishou" ? 140 : 180;
-        if (await locatorIsUsableCover(locator, minimumWidth, platform)) return { locator, source };
+        const usable = ["weibo", "tiktok", "youtube"].includes(platform)
+          ? await locatorHasCaptureArea(locator, minimumWidth)
+          : await locatorIsUsableCover(locator, minimumWidth, platform);
+        if (usable) return { locator, source };
       }
     }
   }
@@ -1156,7 +1523,7 @@ async function capturePaintedCover({
     if (isVideo) await freezeVideoIfPresent(locator);
     try {
       await screenshotLocator(locator, screenshotPath, platform, 10_000, {
-        allowObscured: platform === "douyin",
+        allowObscured: ["douyin", "weibo", "tiktok", "youtube"].includes(platform),
       });
     } catch {
       return null;
@@ -1193,8 +1560,27 @@ async function collectPage(page, root, runId, platform, itemUrl, config, discove
   return collectOpenedPage(page, root, runId, platform, itemUrl, config, discoverySource);
 }
 
+async function waitForHydratedDetailCopy(page, platform) {
+  const selector = platform === "tiktok"
+    ? '[data-e2e="video-desc"]:visible, [data-e2e="browse-video-desc"]:visible'
+    : platform === "youtube"
+      ? "h1.ytd-watch-metadata yt-formatted-string:visible, #title h1 yt-formatted-string:visible"
+      : null;
+  if (!selector) return;
+  // Both sites commit a lightweight document before hydrating the author
+  // copy. Keep the wait bounded and let metadata remain an optional fallback.
+  await page.locator(selector).first().waitFor({ state: "visible", timeout: 8_000 }).catch(() => {});
+}
+
 async function collectOpenedPage(page, root, runId, platform, itemUrl, config, discoverySource, scopeOverride = null, coverOptions = {}) {
+  if (platform === "toutiao" && !scopeOverride) await waitForToutiaoDetailReady(page);
   await pacingWait(page, config, 1.25);
+  if (platform === "youtube" && !await dismissYouTubeConsent(page)) {
+    throw browserStageError("challenge_required", "detail_access");
+  }
+  if (platform === "tiktok" && !await dismissTikTokConsent(page)) {
+    throw browserStageError("challenge_required", "detail_access");
+  }
   const accessError = await currentPlatformAccessError(page, platform);
   if (accessError) throw browserStageError(accessError, "detail_access");
   let currentUrl = "";
@@ -1210,7 +1596,19 @@ async function collectOpenedPage(page, root, runId, platform, itemUrl, config, d
     (await page.locator('input[type="password"], input[type="tel"]').count()) > 0,
   );
   if (navigationError && !scopeOverride) throw new Error(navigationError);
-  const detail = scopeOverride || (platform === "xiaohongshu" ? page.locator(".note-container:visible").first() : null);
+  if (platform === "toutiao" && !scopeOverride) {
+    return collectToutiaoOpenedPage(page, root, runId, itemUrl, config, discoverySource);
+  }
+  if (!scopeOverride) await waitForHydratedDetailCopy(page, platform);
+  let detail = scopeOverride || (platform === "xiaohongshu"
+    ? page.locator(".note-container:visible").first()
+    : platform === "weibo" ? page.locator("article:visible").first()
+      : platform === "tiktok" ? page.locator(
+        '#main-content-video_detail:visible, article[data-e2e="recommend-list-item-container"]:visible',
+      ).first()
+        : platform === "youtube" ? page.locator("ytd-watch-flexy:visible, #primary:visible").first()
+          : null);
+  if (detail && await detail.count() === 0) detail = null;
   if (detail) await detail.waitFor({ state: "visible", timeout: NAVIGATION_TIMEOUT_MS });
   const scope = detail || page;
   const metadata = await pageMetadata(page, platform, itemUrl, scope);
@@ -1665,7 +2063,7 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
   let verificationTarget;
   try {
     for (let discoverySource of sourceTargets(platform, config)) {
-      const sourceUrl = discoverySource.url;
+      let sourceUrl = discoverySource.url;
       verificationTarget = sourceUrl;
       if (handled >= limit || (await shouldStop())) break;
       stage = "source_navigation";
@@ -1680,10 +2078,19 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
         verificationTarget = discoverySource.url;
         page.setDefaultTimeout(NAVIGATION_TIMEOUT_MS);
         await onSearch?.({ platform, keyword: discoverySource.search_keyword,
-          result_url: discoverySource.url, method: "platform_search_form", result_ready: true });
+          result_url: discoverySource.url, method: opened.method || "platform_search_form", result_ready: true });
       } else {
         const response = await page.goto(sourceUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT_MS });
         assertNavigationResponse(response, stage);
+        if (platform === "toutiao" && isDetailUrl("toutiao", page.url())) {
+          await waitForToutiaoDetailReady(page);
+          sourceUrl = validatePlatformUrl("toutiao", page.url());
+          discoverySource = { ...discoverySource, url: sourceUrl };
+          verificationTarget = sourceUrl;
+        }
+      }
+      if (platform === "tiktok" && !await dismissTikTokConsent(page)) {
+        throw browserStageError("challenge_required", "source_access");
       }
       await pacingWait(page, config, 1.25);
       stage = "source_access";

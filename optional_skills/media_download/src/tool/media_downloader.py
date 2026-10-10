@@ -103,6 +103,17 @@ YOUTUBE_ID_PATTERNS = (
     re.compile(r"[?&]v=([0-9A-Za-z_-]{11})"),
     re.compile(r'"(?:videoId|video_id)"\s*:\s*"([0-9A-Za-z_-]{11})"'),
 )
+TOUTIAO_ID_PATTERNS = (
+    re.compile(r"/(?:article|video|w)/(\d{10,})(?:[/?#]|$)"),
+    re.compile(r"/(?:group|thread)/(\d{10,})(?:[/?#]|$)"),
+    re.compile(r"/i(\d{10,})(?:[/?#]|$)"),
+    re.compile(r'"(?:itemId|item_id|groupId|group_id)"\s*:\s*"?(\d{10,})"?'),
+)
+WEIBO_ID_PATTERNS = (
+    re.compile(r"(?:www\.)?weibo\.com/\d+/([0-9A-Za-z]+)(?:[/?#]|$)"),
+    re.compile(r"m\.weibo\.cn/(?:status|detail)/([0-9A-Za-z]+)(?:[/?#]|$)"),
+    re.compile(r"weibo\.com/tv/show/\d+:(\d+)(?:[/?#]|$)"),
+)
 JS_STATE_MARKERS = (
     "__INITIAL_STATE__",
     "__APOLLO_STATE__",
@@ -124,6 +135,8 @@ XIAOHONGSHU_DOMAINS = (
 )
 TIKTOK_DOMAINS = ("tiktok.com", "tiktokv.com", "tiktokcdn.com", "vm.tiktok.com", "vt.tiktok.com")
 YOUTUBE_DOMAINS = ("youtube.com", "youtu.be", "youtube-nocookie.com")
+TOUTIAO_DOMAINS = ("toutiao.com", "toutiaoimg.cn", "weitoutiao.zjurl.cn")
+WEIBO_DOMAINS = ("weibo.com", "weibo.cn")
 PLATFORMS = (
     "auto",
     "douyin",
@@ -132,6 +145,8 @@ PLATFORMS = (
     "tiktok",
     "youtube",
     "wechat_channels",
+    "toutiao",
+    "weibo",
 )
 PLATFORM_ALIASES = {"titok": "tiktok", "yt": "youtube"}
 PLATFORM_CHOICES = PLATFORMS + tuple(PLATFORM_ALIASES)
@@ -426,6 +441,96 @@ def extract_youtube_id(*parts: str) -> str | None:
     return None
 
 
+def extract_toutiao_id(*parts: str) -> str | None:
+    for part in parts:
+        if not part:
+            continue
+        decoded = part
+        for _ in range(4):
+            decoded = urllib.parse.unquote(html.unescape(decoded))
+            for pattern in TOUTIAO_ID_PATTERNS:
+                match = pattern.search(decoded)
+                if match:
+                    return match.group(1)
+    return None
+
+
+def weibo_base62_to_mid(value: str) -> str:
+    if value.isdigit():
+        return value
+    alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    decoded: list[str] = []
+    end = len(value)
+    while end > 0:
+        start = max(0, end - 4)
+        chunk = value[start:end]
+        number = 0
+        for character in chunk:
+            digit = alphabet.find(character)
+            if digit < 0:
+                return value
+            number = number * 62 + digit
+        decoded.insert(0, str(number).zfill(7) if start > 0 else str(number))
+        end = start
+    return "".join(decoded)
+
+
+def extract_weibo_id(*parts: str) -> str | None:
+    for part in parts:
+        if not part:
+            continue
+        decoded = urllib.parse.unquote(html.unescape(part))
+        for pattern in WEIBO_ID_PATTERNS:
+            match = pattern.search(decoded)
+            if match:
+                return weibo_base62_to_mid(match.group(1))
+    return None
+
+
+def canonical_toutiao_content_url(*parts: str) -> str | None:
+    """Normalize trusted Toutiao share/search routes without accepting recommendations."""
+    for part in parts:
+        if not part:
+            continue
+        decoded = part
+        for _ in range(4):
+            decoded = urllib.parse.unquote(html.unescape(decoded))
+            direct = re.search(
+                r"https?://(?:[a-z0-9-]+\.)*toutiao\.com/(article|video|w)/(\d{10,})(?:[/?#]|$)",
+                decoded,
+                re.IGNORECASE,
+            )
+            if direct:
+                return f"https://www.toutiao.com/{direct.group(1)}/{direct.group(2)}/"
+            thread = re.search(
+                r"https?://weitoutiao\.zjurl\.cn/[^?#\s]*thread/(\d{10,})",
+                decoded,
+                re.IGNORECASE,
+            )
+            if thread:
+                return f"https://www.toutiao.com/w/{thread.group(1)}/"
+            group = re.search(
+                r"https?://(?:www\.|m\.)?toutiao(?:img)?\.(?:com|cn)/group/(\d{10,})",
+                decoded,
+                re.IGNORECASE,
+            )
+            if group:
+                lowered = decoded.lower()
+                kind = "video" if re.search(
+                    r"(?:source|from|search_subtab_name)(?:%3d|[\"'=:\s])+video",
+                    lowered,
+                ) else "article"
+                return f"https://www.toutiao.com/{kind}/{group.group(1)}/"
+            legacy = re.search(
+                r"https?://(?:m\.)?toutiao\.com/i(\d{10,})(?:[/?#]|$)",
+                decoded,
+                re.IGNORECASE,
+            )
+            if legacy:
+                return f"https://www.toutiao.com/article/{legacy.group(1)}/"
+    return None
+
+
 def normalize_platform(platform: str) -> str:
     return PLATFORM_ALIASES.get(platform, platform)
 
@@ -434,6 +539,10 @@ def detect_platform(text: str) -> str | None:
     if wechat_channels_access.extract_share_url(text):
         return "wechat_channels"
     lowered = text.lower()
+    if any(domain in lowered for domain in WEIBO_DOMAINS):
+        return "weibo"
+    if any(domain in lowered for domain in TOUTIAO_DOMAINS):
+        return "toutiao"
     if any(domain in lowered for domain in YOUTUBE_DOMAINS):
         return "youtube"
     if any(domain in lowered for domain in KUAISHOU_DOMAINS):
@@ -831,6 +940,50 @@ def looks_like_tiktok_video_url(url: str) -> bool:
     return ".mp4" in path or "mime_type=video" in query or "/video/tos/" in path
 
 
+def looks_like_toutiao_video_url(url: str) -> bool:
+    lowered = unwrap_url(url).lower()
+    if not lowered.startswith(("http://", "https://", "//")):
+        return False
+    parsed = urllib.parse.urlsplit(lowered)
+    host = parsed.netloc
+    path = parsed.path
+    query = parsed.query
+    if path.endswith((".ico", ".json", ".pdf", ".js", ".css", ".png", ".jpg", ".jpeg", ".webp", ".svg")):
+        return False
+    allowed_host = any(
+        token in host
+        for token in (
+            "toutiaovod.com",
+            "snssdk.com",
+            "bytecdn.cn",
+            "ibytedtos.com",
+            "bytevcloud",
+            "ixigua.com",
+        )
+    )
+    if not allowed_host:
+        return False
+    return any(token in path or token in query for token in (
+        "/video/", "video_mp4", "mime_type=video", "/fplay/", ".mp4",
+    ))
+
+
+def looks_like_weibo_video_url(url: str) -> bool:
+    normalized = unwrap_url(url, decode_percent=False)
+    if normalized.startswith("//"):
+        normalized = f"https:{normalized}"
+    parsed = urllib.parse.urlsplit(normalized.lower())
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    host = parsed.netloc.split(":", 1)[0]
+    if not any(
+        host == domain or host.endswith(f".{domain}")
+        for domain in ("weibocdn.com", "weibo.com", "sina.com.cn")
+    ):
+        return False
+    return parsed.path.endswith((".mp4", ".m3u8")) or "/video/" in parsed.path
+
+
 def looks_like_platform_video_url(url: str, platform: str) -> bool:
     platform = normalize_platform(platform)
     if platform == "kuaishou":
@@ -839,6 +992,10 @@ def looks_like_platform_video_url(url: str, platform: str) -> bool:
         return looks_like_xiaohongshu_video_url(url)
     if platform == "tiktok":
         return looks_like_tiktok_video_url(url)
+    if platform == "toutiao":
+        return looks_like_toutiao_video_url(url)
+    if platform == "weibo":
+        return looks_like_weibo_video_url(url)
     return looks_like_play_url(url) or looks_like_douyin_browser_video_url(url)
 
 
@@ -884,6 +1041,42 @@ def looks_like_xiaohongshu_image_url(url: str) -> bool:
     return True
 
 
+def looks_like_toutiao_image_url(url: str) -> bool:
+    normalized = unwrap_url(url, decode_percent=False)
+    if normalized.startswith("//"):
+        normalized = f"https:{normalized}"
+    lowered = normalized.lower()
+    if not lowered.startswith("https://"):
+        return False
+    parsed = urllib.parse.urlsplit(lowered)
+    if not any(
+        parsed.netloc == domain or parsed.netloc.endswith(f".{domain}")
+        for domain in ("toutiaoimg.com", "byteimg.com", "pstatp.com")
+    ):
+        return False
+    if not parsed.path or parsed.path == "/":
+        return False
+    if any(token in parsed.path for token in ("user-avatar", "/avatar/", "comment")):
+        return False
+    return not parsed.path.endswith((".ico", ".json", ".pdf", ".js", ".css", ".svg"))
+
+
+def looks_like_weibo_image_url(url: str) -> bool:
+    normalized = unwrap_url(url, decode_percent=False)
+    if normalized.startswith("//"):
+        normalized = f"https:{normalized}"
+    parsed = urllib.parse.urlsplit(normalized.lower())
+    host = parsed.netloc.split(":", 1)[0]
+    if parsed.scheme != "https" or not host.endswith(".sinaimg.cn"):
+        return False
+    if not re.fullmatch(r"(?:wx|ww)\d+\.sinaimg\.cn", host):
+        return False
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) < 2 or parts[0] in {"crop", "avatar"}:
+        return False
+    return not parsed.path.endswith((".ico", ".json", ".pdf", ".js", ".css", ".svg"))
+
+
 def douyin_image_key(url: str) -> str:
     parsed = urllib.parse.urlsplit(unwrap_url(url, decode_percent=False))
     return parsed.path.split("~", 1)[0]
@@ -922,6 +1115,37 @@ def xiaohongshu_image_quality_score(url: str) -> int:
     if "nd_prv" in lowered or "prv" in lowered:
         return 100
     return 50
+
+
+def toutiao_image_key(url: str) -> str:
+    parsed = urllib.parse.urlsplit(unwrap_url(url, decode_percent=False))
+    return parsed.path.split("~", 1)[0]
+
+
+def toutiao_image_quality_score(url: str) -> int:
+    path = urllib.parse.urlsplit(unwrap_url(url, decode_percent=False).lower()).path
+    transform = path.split("~", 1)[1] if "~" in path else ""
+    dimensions = [int(value) for value in re.findall(r"(?<!\d)(\d{2,5})(?!\d)", transform)]
+    area = dimensions[0] * dimensions[1] if len(dimensions) >= 2 else 0
+    # Lower priority wins; prefer an untransformed source, then the largest rendition.
+    return 0 if not transform else max(1, 1_000_000_000 - min(area, 999_999_999))
+
+
+def canonical_weibo_image_url(url: str) -> str:
+    normalized = unwrap_url(url, decode_percent=False)
+    if normalized.startswith("//"):
+        normalized = f"https:{normalized}"
+    parsed = urllib.parse.urlsplit(normalized)
+    parts = parsed.path.split("/")
+    if len(parts) > 2:
+        parts[1] = "large"
+    return urllib.parse.urlunsplit(("https", parsed.netloc, "/".join(parts), "", ""))
+
+
+def weibo_image_key(url: str) -> str:
+    parsed = urllib.parse.urlsplit(canonical_weibo_image_url(url))
+    parts = [part for part in parsed.path.split("/") if part]
+    return "/".join(parts[1:]) if len(parts) > 1 else parsed.path
 
 
 def add_image_candidate(
@@ -964,6 +1188,48 @@ def add_xiaohongshu_image_candidate(
             return
         order = existing_order
     candidates_by_key[key] = ImageCandidate(normalized, source, order * 1000 + quality)
+
+
+def add_toutiao_image_candidate(
+    candidates_by_key: dict[str, ImageCandidate],
+    url: str,
+    source: str,
+    order: int,
+) -> None:
+    normalized = unwrap_url(url, decode_percent=False)
+    if normalized.startswith("//"):
+        normalized = f"https:{normalized}"
+    if not looks_like_toutiao_image_url(normalized):
+        return
+    key = toutiao_image_key(normalized)
+    quality = toutiao_image_quality_score(normalized)
+    existing = candidates_by_key.get(key)
+    if existing:
+        existing_order = existing.priority // 1_000_000_000
+        existing_quality = existing.priority % 1_000_000_000
+        if quality >= existing_quality:
+            return
+        order = existing_order
+    candidates_by_key[key] = ImageCandidate(
+        normalized,
+        source,
+        order * 1_000_000_000 + quality,
+    )
+
+
+def add_weibo_image_candidate(
+    candidates_by_key: dict[str, ImageCandidate],
+    url: str,
+    source: str,
+    order: int,
+) -> None:
+    if not looks_like_weibo_image_url(url):
+        return
+    normalized = canonical_weibo_image_url(url)
+    key = weibo_image_key(normalized)
+    if key in candidates_by_key:
+        return
+    candidates_by_key[key] = ImageCandidate(normalized, source, order)
 
 
 def normalize_embedded_url_text(page_text: str) -> str:
@@ -1023,6 +1289,43 @@ def extract_xiaohongshu_item_image_candidates(
     for order, image_payload in enumerate(raw_images):
         for raw_url in iter_strings(image_payload):
             add_xiaohongshu_image_candidate(candidates_by_key, raw_url, source, order)
+    return sorted(candidates_by_key.values(), key=lambda candidate: candidate.priority)
+
+
+def extract_toutiao_item_image_candidates(
+    payload: dict[str, Any],
+    *,
+    source: str,
+) -> list[ImageCandidate]:
+    candidates_by_key: dict[str, ImageCandidate] = {}
+    order = 0
+
+    def add_value(value: Any) -> None:
+        nonlocal order
+        if isinstance(value, str):
+            if looks_like_toutiao_image_url(value):
+                add_toutiao_image_candidate(candidates_by_key, value, source, order)
+                order += 1
+            return
+        if isinstance(value, list):
+            for item in value:
+                add_value(item)
+            return
+        if isinstance(value, dict):
+            for item in value.values():
+                add_value(item)
+
+    for key in ("imageList", "image_list", "ugcImages", "ugc_images", "images"):
+        add_value(payload.get(key))
+    item_cell = payload.get("itemCell")
+    if isinstance(item_cell, dict):
+        add_value(item_cell.get("imageList"))
+    raw_content = payload.get("content") or payload.get("richContent")
+    if isinstance(raw_content, str):
+        for match in re.finditer(r'''(?:src|data-src)=["']([^"']+)["']''', html.unescape(raw_content), re.IGNORECASE):
+            add_value(match.group(1))
+    if not candidates_by_key:
+        add_value(payload.get("cover"))
     return sorted(candidates_by_key.values(), key=lambda candidate: candidate.priority)
 
 
@@ -1460,6 +1763,327 @@ def article_from_xiaohongshu_payload(
     )
 
 
+def toutiao_payload_id(payload: dict[str, Any]) -> str:
+    for key in ("itemId", "item_id", "groupId", "group_id"):
+        value = payload.get(key)
+        if isinstance(value, (str, int)) and str(value).isdigit():
+            return str(value)
+    return ""
+
+
+def find_toutiao_item_payload(value: Any, item_id: str | None) -> dict[str, Any] | None:
+    if not item_id:
+        return None
+    matches = [item for item in iter_dicts(value) if toutiao_payload_id(item) == item_id]
+    if not matches:
+        return None
+
+    def score(item: dict[str, Any]) -> tuple[int, int, int]:
+        value = 0
+        if any(key in item for key in ("content", "richContent", "abstract")):
+            value += 12
+        if any(key in item for key in ("imageList", "ugcImages", "images")):
+            value += 8
+        if isinstance(item.get("initialVideo"), dict):
+            value += 16
+        if any(key in item for key in ("videoPlayInfo", "videoInfo", "itemCell")):
+            value += 6
+        if item.get("title") or item.get("source") or item.get("mediaInfo"):
+            value += 4
+        return value, len(item), len(json.dumps(item, ensure_ascii=False, separators=(",", ":")))
+
+    return max(matches, key=score)
+
+
+def find_toutiao_item_payload_in_html(
+    page_text: str,
+    item_id: str | None,
+) -> dict[str, Any] | None:
+    matches = [
+        payload
+        for value in extract_json_from_html(page_text)
+        if (payload := find_toutiao_item_payload(value, item_id)) is not None
+    ]
+    if not matches:
+        return None
+    return max(matches, key=lambda item: len(json.dumps(item, ensure_ascii=False)))
+
+
+class ArticleHTMLTextParser(HTMLParser):
+    BLOCK_TAGS = {
+        "address", "article", "aside", "blockquote", "br", "div", "figcaption",
+        "figure", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "li", "main",
+        "ol", "p", "pre", "section", "table", "tr", "ul",
+    }
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() in self.BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() in self.BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        self.parts.append(data)
+
+
+def article_html_to_text(value: Any) -> str:
+    normalized = normalize_article_field(value)
+    if not normalized or "<" not in normalized:
+        return normalized
+    parser = ArticleHTMLTextParser()
+    try:
+        parser.feed(normalized)
+        parser.close()
+    except (AssertionError, ValueError):
+        return normalize_article_field(re.sub(r"<[^>]+>", "", normalized))
+    text = html.unescape("".join(parser.parts)).replace("\xa0", " ")
+    lines = [re.sub(r"[\t ]+", " ", line).strip() for line in text.splitlines()]
+    output: list[str] = []
+    for line in lines:
+        if line:
+            output.append(line)
+        elif output and output[-1] != "":
+            output.append("")
+    return "\n".join(output).strip()
+
+
+class WeiboRenderedPostParser(HTMLParser):
+    """Extract only the primary rendered post, excluding sidebars and recommendations."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.stack: list[str] = []
+        self.article_depth: int | None = None
+        self.article_seen = False
+        self.copy_depth: int | None = None
+        self.video_depths: list[int] = []
+        self.copy_parts: list[str] = []
+        self.author = ""
+        self.images: list[str] = []
+        self.videos: list[str] = []
+
+    @staticmethod
+    def _attributes(attrs: list[tuple[str, str | None]]) -> dict[str, str]:
+        return {name.lower(): value or "" for name, value in attrs}
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        depth = len(self.stack) + 1
+        attributes = self._attributes(attrs)
+        classes = set(attributes.get("class", "").split())
+        if tag == "article" and self.article_depth is None and not self.article_seen:
+            self.article_depth = depth
+            self.article_seen = True
+        if self.article_depth is None:
+            if tag not in {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}:
+                self.stack.append(tag)
+            return
+        if self.copy_depth is None and (
+            "wbpro-feed-ogText" in classes
+            or any("wbtext" in value.lower() for value in classes)
+        ):
+            self.copy_depth = depth
+        if any("vjs-" in value.lower() or "video" in value.lower() for value in classes):
+            self.video_depths.append(depth)
+        if tag == "span" and not self.author and self.copy_depth is None:
+            title = normalize_article_field(attributes.get("title"))
+            if title:
+                self.author = title
+        if tag == "video":
+            source = attributes.get("src", "")
+            if looks_like_weibo_video_url(source):
+                self.videos.append(unwrap_url(source, decode_percent=False))
+        if tag == "img" and not self.video_depths:
+            source = attributes.get("src") or attributes.get("data-src") or ""
+            if looks_like_weibo_image_url(source):
+                self.images.append(source)
+        if self.copy_depth is not None and tag in ArticleHTMLTextParser.BLOCK_TAGS:
+            self.copy_parts.append("\n")
+        if tag not in {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}:
+            self.stack.append(tag)
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        stack_depth = len(self.stack)
+        self.handle_starttag(tag, attrs)
+        while len(self.stack) > stack_depth:
+            self.stack.pop()
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        depth = len(self.stack)
+        if self.copy_depth is not None and tag in ArticleHTMLTextParser.BLOCK_TAGS:
+            self.copy_parts.append("\n")
+        if self.copy_depth == depth:
+            self.copy_depth = None
+        self.video_depths = [entry for entry in self.video_depths if entry != depth]
+        if self.article_depth == depth and tag == "article":
+            self.article_depth = None
+        if self.stack:
+            self.stack.pop()
+
+    def handle_data(self, data: str) -> None:
+        if self.article_depth is not None and self.copy_depth is not None:
+            self.copy_parts.append(data)
+
+
+def parse_weibo_rendered_post(
+    page_text: str,
+    *,
+    source: str,
+) -> tuple[ArticleContent | None, list[ImageCandidate], list[Candidate]]:
+    parser = WeiboRenderedPostParser()
+    try:
+        parser.feed(page_text)
+        parser.close()
+    except (AssertionError, ValueError):
+        return None, [], []
+    body = article_html_to_text("".join(parser.copy_parts))
+    article = ArticleContent("", body, parser.author, source) if body else None
+    image_map: dict[str, ImageCandidate] = {}
+    for index, url in enumerate(parser.images):
+        add_weibo_image_candidate(image_map, url, f"{source}.image", index)
+    videos: list[Candidate] = []
+    seen_videos: set[str] = set()
+    for index, url in enumerate(parser.videos):
+        add_platform_candidate(videos, seen_videos, url, f"{source}.video", index, "weibo")
+    return article, sorted(image_map.values(), key=lambda item: item.priority), videos
+
+
+def article_from_toutiao_payload(
+    payload: dict[str, Any],
+    *,
+    source: str,
+) -> ArticleContent | None:
+    initial_video = payload.get("initialVideo")
+    if not isinstance(initial_video, dict):
+        initial_video = {}
+    title = normalize_article_field(initial_video.get("title") or payload.get("title"))
+    body = article_html_to_text(
+        payload.get("content") or payload.get("richContent") or payload.get("abstract")
+    )
+    media_info = payload.get("mediaInfo") if isinstance(payload.get("mediaInfo"), dict) else {}
+    user_info = initial_video.get("userInfo") if isinstance(initial_video.get("userInfo"), dict) else {}
+    author = normalize_article_field(
+        user_info.get("name") or media_info.get("name") or payload.get("source")
+    )
+    if not title and not body:
+        return None
+    return ArticleContent(title, body, author, source)
+
+
+def toutiao_video_play_info(payload: dict[str, Any]) -> dict[str, Any] | None:
+    initial_video = payload.get("initialVideo")
+    item_cell = payload.get("itemCell")
+    video_info = item_cell.get("videoInfo") if isinstance(item_cell, dict) else None
+    values = [
+        initial_video.get("videoPlayInfo") if isinstance(initial_video, dict) else None,
+        video_info.get("videoPlayInfo") if isinstance(video_info, dict) else None,
+        payload.get("videoPlayInfo"),
+    ]
+    for value in values:
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            parsed = load_json_text(value)
+            if isinstance(parsed, dict):
+                return parsed
+    return None
+
+
+def extract_toutiao_item_video_candidates(
+    payload: dict[str, Any],
+    *,
+    source: str,
+) -> list[Candidate]:
+    play_info = toutiao_video_play_info(payload)
+    if not play_info:
+        return []
+    dynamic = play_info.get("dynamic_video")
+    dynamic_videos = dynamic.get("dynamic_video_list") if isinstance(dynamic, dict) else None
+    dynamic_audios = dynamic.get("dynamic_audio_list") if isinstance(dynamic, dict) else None
+    best_audio: str | None = None
+    best_audio_bitrate = -1
+    if isinstance(dynamic_audios, list):
+        for audio in dynamic_audios:
+            if not isinstance(audio, dict):
+                continue
+            raw_url = audio.get("main_url") or audio.get("backup_url")
+            if not isinstance(raw_url, str):
+                continue
+            try:
+                bitrate = int((audio.get("audio_meta") or {}).get("bitrate") or 0)
+            except (TypeError, ValueError):
+                bitrate = 0
+            if bitrate >= best_audio_bitrate:
+                best_audio = unwrap_url(raw_url)
+                best_audio_bitrate = bitrate
+
+    candidates: list[Candidate] = []
+    seen: set[str] = set()
+    if isinstance(dynamic_videos, list):
+        ranked: list[tuple[int, int, dict[str, Any]]] = []
+        for index, video in enumerate(dynamic_videos):
+            if not isinstance(video, dict):
+                continue
+            meta = video.get("video_meta") if isinstance(video.get("video_meta"), dict) else {}
+            try:
+                area = int(meta.get("vwidth") or 0) * int(meta.get("vheight") or 0)
+                bitrate = int(meta.get("bitrate") or 0)
+            except (TypeError, ValueError):
+                area = bitrate = 0
+            ranked.append((area, bitrate, video))
+        for rank, (_area, _bitrate, video) in enumerate(
+            sorted(ranked, key=lambda item: (item[0], item[1]), reverse=True)
+        ):
+            for url_key in ("main_url", "backup_url"):
+                raw_url = video.get(url_key)
+                if isinstance(raw_url, str):
+                    add_platform_candidate(
+                        candidates,
+                        seen,
+                        raw_url,
+                        f"{source}.dynamic_video.{url_key}",
+                        rank * 10 + (0 if url_key == "main_url" else 1),
+                        "toutiao",
+                        referer=platform_referer("toutiao"),
+                        separate_audio_url=best_audio,
+                    )
+    fallback = play_info.get("fallback_api")
+    if isinstance(fallback, dict):
+        fallback = fallback.get("fallback_api")
+    if isinstance(fallback, str):
+        add_platform_candidate(
+            candidates,
+            seen,
+            fallback,
+            f"{source}.fallback_api",
+            1_000_000,
+            "toutiao",
+            referer=platform_referer("toutiao"),
+        )
+    return sorted(candidates, key=lambda candidate: candidate.priority)
+
+
+def extract_toutiao_candidates_from_json(value: Any) -> list[Candidate]:
+    root = value.get("data") if isinstance(value, dict) and isinstance(value.get("data"), dict) else value
+    if not isinstance(root, dict):
+        return []
+    item_id = toutiao_payload_id(root)
+    if not item_id:
+        initial_video = root.get("initialVideo")
+        item_id = toutiao_payload_id(initial_video) if isinstance(initial_video, dict) else ""
+    payload = find_toutiao_item_payload(root, item_id) if item_id else None
+    if payload is None:
+        return []
+    return extract_toutiao_item_video_candidates(payload, source="toutiao.render-data")
+
+
 def richer_article(
     current: ArticleContent | None,
     candidate: ArticleContent | None,
@@ -1822,6 +2446,8 @@ def extract_platform_candidates_from_html(page_text: str, platform: str) -> list
         extractor = extract_xiaohongshu_candidates_from_json
     elif platform == "tiktok":
         extractor = extract_tiktok_candidates_from_json
+    elif platform == "toutiao":
+        extractor = extract_toutiao_candidates_from_json
     else:
         extractor = extract_candidates_from_json
 
@@ -2217,7 +2843,18 @@ def extract_browser_candidates_from_netlog_payload(
 def prioritize_browser_target_urls(platform: str, item_id: str | None, urls: Iterable[str]) -> list[str]:
     """Try canonical item and share URLs before platform-specific fallback routes."""
     unique_urls = list(dict.fromkeys(urls))
-    if normalize_platform(platform) != "douyin" or not item_id:
+    platform = normalize_platform(platform)
+    if platform == "toutiao" and item_id:
+        canonical = canonical_toutiao_content_url(*unique_urls)
+        routes = [
+            canonical,
+            *unique_urls,
+            f"https://www.toutiao.com/article/{urllib.parse.quote(item_id)}/",
+            f"https://www.toutiao.com/video/{urllib.parse.quote(item_id)}/",
+            f"https://www.toutiao.com/w/{urllib.parse.quote(item_id)}/",
+        ]
+        return list(dict.fromkeys(url for url in routes if url))
+    if platform != "douyin" or not item_id:
         return unique_urls
 
     canonical: list[str] = []
@@ -2553,6 +3190,146 @@ def gather_douyin_browser_item_candidates(
     return candidates, image_candidates, article, logs
 
 
+TOUTIAO_RENDER_DATA_SCRIPT = r"""
+(() => {
+  const node = document.querySelector('script#RENDER_DATA');
+  return node ? (node.textContent || '') : '';
+})()
+"""
+
+
+def parse_toutiao_browser_payload_text(body: str, *, item_id: str) -> dict[str, Any] | None:
+    decoded = urllib.parse.unquote(html.unescape(body))
+    payload = load_json_text(decoded)
+    return find_toutiao_item_payload(payload, item_id)
+
+
+def gather_toutiao_browser_item_candidates(
+    target_urls: Iterable[str],
+    *,
+    item_id: str,
+    timeout: float,
+    chrome_path: str,
+) -> tuple[list[Candidate], list[ImageCandidate], ArticleContent | None, list[str]]:
+    """Read only the requested Toutiao item's hydrated first-party payload."""
+    logs: list[str] = []
+    token = current_cancellation_token()
+    process: subprocess.Popen[Any] | None = None
+    client: DevToolsConnection | None = None
+    target_payload: dict[str, Any] | None = None
+
+    with tempfile.TemporaryDirectory(prefix="media_downloader_toutiao_", ignore_cleanup_errors=True) as tmpdir:
+        devtools_port, devtools_args = chrome_devtools_endpoint_args()
+        command = [
+            chrome_path,
+            "--headless=new",
+            "--disable-gpu",
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-blink-features=AutomationControlled",
+            "--mute-audio",
+            *devtools_args,
+            "--remote-allow-origins=*",
+            "--window-size=1280,2000",
+            f"--user-agent={DEFAULT_HEADERS['User-Agent']}",
+            f"--user-data-dir={tmpdir}",
+            "--profile-directory=Default",
+            "about:blank",
+        ]
+        try:
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=os.name == "posix",
+            )
+            if token is not None:
+                token.register_process(process)
+            websocket_url = wait_for_devtools_page_url(devtools_port, process, timeout=timeout)
+            client = DevToolsConnection(websocket_url, timeout=min(max(timeout, 1.0), 10.0))
+            client.send("Page.enable")
+            client.send("Runtime.enable")
+            logs.append("toutiao: exact-item browser collector is ready")
+
+            unique_targets = list(dict.fromkeys(target_urls))
+            route_timeout = max(5.0, timeout)
+            for route_index, target_url in enumerate(unique_targets, start=1):
+                raise_if_task_cancelled()
+                logs.append(
+                    f"toutiao: exact-item browser opening route {route_index}/{len(unique_targets)} "
+                    f"{urllib.parse.urlsplit(target_url).path or '/'}"
+                )
+                client.send("Page.navigate", {"url": target_url})
+                deadline = time.monotonic() + route_timeout
+                next_probe = time.monotonic() + 1.0
+                pending_probes: set[int] = set()
+                while time.monotonic() < deadline and target_payload is None:
+                    raise_if_task_cancelled()
+                    now = time.monotonic()
+                    if now >= next_probe:
+                        pending_probes.add(client.send(
+                            "Runtime.evaluate",
+                            {"expression": TOUTIAO_RENDER_DATA_SCRIPT, "returnByValue": True},
+                        ))
+                        next_probe = now + 0.75
+                    try:
+                        message = client.recv(timeout=min(0.4, max(0.05, deadline - now)))
+                    except TimeoutError:
+                        continue
+                    if message is None:
+                        break
+                    command_id = message.get("id")
+                    if not isinstance(command_id, int) or command_id not in pending_probes:
+                        continue
+                    pending_probes.discard(command_id)
+                    if message.get("error"):
+                        continue
+                    result = message.get("result") if isinstance(message.get("result"), dict) else {}
+                    remote_result = result.get("result") if isinstance(result.get("result"), dict) else {}
+                    raw_render_data = remote_result.get("value")
+                    if isinstance(raw_render_data, str) and raw_render_data:
+                        target_payload = parse_toutiao_browser_payload_text(
+                            raw_render_data,
+                            item_id=item_id,
+                        )
+                if target_payload is not None:
+                    break
+        except (DevToolsError, DouyinDownloadError, OSError, urllib.error.URLError) as exc:
+            logs.append(f"toutiao: exact-item browser collection failed: {exc}")
+        finally:
+            if client is not None:
+                client.close()
+            if process is not None:
+                if token is not None:
+                    token.unregister_process(process)
+                if process.poll() is None:
+                    terminate_process(process)
+                    try:
+                        process.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        terminate_process(process, force=True)
+                        process.wait()
+
+    if target_payload is None:
+        logs.append(f"toutiao: exact-item browser found no payload for {item_id}")
+        return [], [], None, logs
+    candidates = extract_toutiao_item_video_candidates(
+        target_payload,
+        source="toutiao.browser-item.video",
+    )
+    image_candidates = extract_toutiao_item_image_candidates(
+        target_payload,
+        source="toutiao.browser-item.image",
+    )
+    article = article_from_toutiao_payload(target_payload, source="toutiao.browser-item")
+    logs.append(
+        "toutiao: matched requested item "
+        f"{item_id}; videos={len(candidates)} images={len(image_candidates)} "
+        f"article={article_has_platform_text(article)}"
+    )
+    return candidates, image_candidates, article, logs
+
+
 def gather_browser_candidates(
     share_text: str,
     *,
@@ -2630,6 +3407,13 @@ def gather_browser_candidates(
                     )
                 if xhs_target.page_url not in target_urls:
                     target_urls.append(xhs_target.page_url)
+            elif platform == "toutiao":
+                payload = find_toutiao_item_payload_in_html(page_text, item_id)
+                if payload is not None:
+                    article = richer_article(
+                        article,
+                        article_from_toutiao_payload(payload, source="toutiao.browser-preresolve"),
+                    )
             if resolved.url not in target_urls:
                 target_urls.append(resolved.url)
         except DouyinDownloadError as exc:
@@ -2670,6 +3454,18 @@ def gather_browser_candidates(
                 seen_image_urls.add(candidate.url)
                 image_candidates.append(candidate)
         article = richer_article(article, exact_article)
+
+    if platform == "toutiao" and item_id:
+        exact_candidates, exact_images, exact_article, exact_logs = gather_toutiao_browser_item_candidates(
+            target_urls,
+            item_id=item_id,
+            timeout=timeout,
+            chrome_path=chrome,
+        )
+        logs.extend(exact_logs)
+        article = richer_article(article, exact_article)
+        if exact_candidates or exact_images or article_has_platform_text(article):
+            return item_id, exact_candidates, exact_images, article, logs
 
     xhs_profile = (
         xiaohongshu_access.persistent_profile_dir(browser_profile_dir)
@@ -2754,16 +3550,50 @@ def gather_browser_candidates(
                         article,
                         article_from_xiaohongshu_payload(payload, source="xiaohongshu.browser-dom"),
                     )
-            if platform in {"douyin", "xiaohongshu"}:
+            elif platform == "toutiao":
+                payload = find_toutiao_item_payload_in_html(completed.stdout, item_id)
+                if payload is not None:
+                    article = richer_article(
+                        article,
+                        article_from_toutiao_payload(payload, source="toutiao.browser-dom"),
+                    )
+                    for candidate in extract_toutiao_item_video_candidates(
+                        payload,
+                        source="toutiao.browser-dom-video",
+                    ):
+                        merge_platform_candidate(candidates, seen, candidate, "toutiao")
+            elif platform == "weibo":
+                rendered_article, rendered_images, rendered_videos = parse_weibo_rendered_post(
+                    completed.stdout,
+                    source="weibo.browser-dom",
+                )
+                article = richer_article(article, rendered_article)
+                for candidate in rendered_videos:
+                    merge_platform_candidate(candidates, seen, candidate, "weibo")
+                for candidate in rendered_images:
+                    if candidate.url in seen_image_urls:
+                        continue
+                    seen_image_urls.add(candidate.url)
+                    image_candidates.append(candidate)
+            if platform in {"douyin", "xiaohongshu", "toutiao"}:
                 image_extractor = (
                     extract_douyin_image_candidates_from_text
                     if platform == "douyin"
                     else extract_xiaohongshu_image_candidates_from_text
+                    if platform == "xiaohongshu"
+                    else None
                 )
-                dom_image_candidates = image_extractor(
-                    completed.stdout,
-                    f"{platform}.browser-dom-image",
-                )
+                if platform == "toutiao":
+                    dom_image_candidates = extract_toutiao_item_image_candidates(
+                        payload,
+                        source="toutiao.browser-dom-image",
+                    ) if payload is not None else []
+                else:
+                    assert image_extractor is not None
+                    dom_image_candidates = image_extractor(
+                        completed.stdout,
+                        f"{platform}.browser-dom-image",
+                    )
                 logs.append(f"{platform}: browser fallback found {len(dom_image_candidates)} image candidate(s)")
                 for candidate in dom_image_candidates:
                     if candidate.url in seen_image_urls:
@@ -2771,24 +3601,25 @@ def gather_browser_candidates(
                     seen_image_urls.add(candidate.url)
                     image_candidates.append(candidate)
 
-            for index, candidate in enumerate(extract_platform_candidates_from_html(completed.stdout, platform)):
-                item_match = browser_candidate_matches_item(candidate.url, item_id)
-                if require_item_match and not item_match:
-                    continue
-                if platform == "douyin":
-                    priority = browser_candidate_priority(candidate.url, platform, index)
-                else:
-                    priority = candidate.priority + 2_000_000
-                    if item_match:
-                        priority = max(0, priority - 4_000_000)
-                add_platform_candidate(
-                    candidates,
-                    seen,
-                    candidate.url,
-                    f"{candidate.source}:browser-dom",
-                    priority,
-                    platform,
-                )
+            if platform not in {"toutiao", "weibo"}:
+                for index, candidate in enumerate(extract_platform_candidates_from_html(completed.stdout, platform)):
+                    item_match = browser_candidate_matches_item(candidate.url, item_id)
+                    if require_item_match and not item_match:
+                        continue
+                    if platform == "douyin":
+                        priority = browser_candidate_priority(candidate.url, platform, index)
+                    else:
+                        priority = candidate.priority + 2_000_000
+                        if item_match:
+                            priority = max(0, priority - 4_000_000)
+                    add_platform_candidate(
+                        candidates,
+                        seen,
+                        candidate.url,
+                        f"{candidate.source}:browser-dom",
+                        priority,
+                        platform,
+                    )
 
             netlog_payload: Any = None
             if not netlog_path.exists():
@@ -2808,7 +3639,7 @@ def gather_browser_candidates(
                             f"scanning captured URLs directly ({exc})"
                         )
                         netlog_payload = netlog_text
-            if netlog_payload is not None:
+            if netlog_payload is not None and platform not in {"toutiao", "weibo"}:
                 netlog_candidates = extract_browser_candidates_from_netlog_payload(
                     netlog_payload,
                     platform,
@@ -4188,6 +5019,8 @@ def platform_referer(platform: str) -> str:
         "tiktok": "https://www.tiktok.com/",
         "youtube": "https://www.youtube.com/",
         "wechat_channels": "https://weixin.qq.com/",
+        "toutiao": "https://www.toutiao.com/",
+        "weibo": "https://weibo.com/",
     }.get(platform, "https://www.douyin.com/")
 
 
@@ -4201,6 +5034,10 @@ def extract_platform_id(platform: str, *parts: str) -> str | None:
         return extract_tiktok_id(*parts)
     if platform == "youtube":
         return extract_youtube_id(*parts)
+    if platform == "toutiao":
+        return extract_toutiao_id(*parts)
+    if platform == "weibo":
+        return extract_weibo_id(*parts)
     return extract_aweme_id(*parts)
 
 
@@ -4364,18 +5201,48 @@ def gather_web_platform_candidates(
                     exact_xiaohongshu_images_found = True
                     image_candidates = exact_images
                     seen_image_urls = {candidate.url for candidate in exact_images}
+        elif platform == "toutiao":
+            exact_payload = find_toutiao_item_payload_in_html(page_text, item_id)
+            if exact_payload is not None:
+                article = richer_article(
+                    article,
+                    article_from_toutiao_payload(
+                        exact_payload,
+                        source="toutiao.page-item",
+                    ),
+                )
+                exact_images = extract_toutiao_item_image_candidates(
+                    exact_payload,
+                    source="toutiao.page-item.image",
+                )
+                if exact_images:
+                    image_candidates = exact_images
+                    seen_image_urls = {candidate.url for candidate in exact_images}
+                for candidate in extract_toutiao_item_video_candidates(
+                    exact_payload,
+                    source="toutiao.page-item.video",
+                ):
+                    merge_platform_candidate(
+                        all_candidates,
+                        seen_candidates,
+                        candidate,
+                        "toutiao",
+                    )
 
-        for candidate in extract_platform_candidates_from_html(page_text, platform):
-            add_platform_candidate(
-                all_candidates,
-                seen_candidates,
-                candidate.url,
-                candidate.source,
-                candidate.priority,
-                platform,
-                cookie=session_cookie if platform == "tiktok" else candidate.cookie,
-                referer=resolved.url if platform == "tiktok" else candidate.referer,
-            )
+        # Toutiao and Weibo pages contain recommendation payloads beside the requested item.
+        # Their exact-item collectors are intentionally the only accepted sources.
+        if platform not in {"toutiao", "weibo"}:
+            for candidate in extract_platform_candidates_from_html(page_text, platform):
+                add_platform_candidate(
+                    all_candidates,
+                    seen_candidates,
+                    candidate.url,
+                    candidate.source,
+                    candidate.priority,
+                    platform,
+                    cookie=session_cookie if platform == "tiktok" else candidate.cookie,
+                    referer=resolved.url if platform == "tiktok" else candidate.referer,
+                )
         if platform == "xiaohongshu" and not exact_xiaohongshu_images_found:
             for image_candidate in extract_xiaohongshu_image_candidates_from_text(page_text):
                 if image_candidate.url in seen_image_urls:
@@ -4410,7 +5277,9 @@ def gather_candidates_for_request(
     if not resolved_platform:
         raise DouyinDownloadError(
             "Cannot detect platform from the share text. Pass --platform douyin, "
-            "--platform kuaishou, --platform xiaohongshu, --platform tiktok, or --platform youtube."
+            "--platform kuaishou, --platform xiaohongshu, --platform tiktok, "
+            "--platform youtube, --platform wechat_channels, --platform toutiao, "
+            "or --platform weibo."
         )
 
     if resolved_platform == "youtube":
@@ -4473,7 +5342,7 @@ def gather_candidates_for_request(
                 image_candidates = browser_image_candidates
         return resolved_platform, item_id, candidates, image_candidates, article, logs
 
-    if resolved_platform in {"kuaishou", "xiaohongshu", "tiktok"}:
+    if resolved_platform in {"kuaishou", "xiaohongshu", "tiktok", "toutiao", "weibo"}:
         item_id, candidates, image_candidates, article, platform_logs = gather_web_platform_candidates(
             share_text,
             platform=resolved_platform,
@@ -5866,11 +6735,18 @@ def read_share_text(args: argparse.Namespace) -> str:
     raise DouyinDownloadError("Pass share text as an argument, --input-file, or stdin.")
 
 
-def media_type_message(platform: str, candidates: list[Candidate], image_candidates: list[ImageCandidate]) -> str:
+def media_type_message(
+    platform: str,
+    candidates: list[Candidate],
+    image_candidates: list[ImageCandidate],
+    article: ArticleContent | None = None,
+) -> str:
     if candidates:
         return f"detected_media: video (platform={platform}, candidates={len(candidates)})"
     if image_candidates:
         return f"detected_media: images (platform={platform}, count={len(image_candidates)})"
+    if article_has_platform_text(article):
+        return f"detected_media: article (platform={platform})"
     return f"detected_media: unknown (platform={platform})"
 
 
@@ -5884,7 +6760,7 @@ def save_video_article_if_available(
     share_text: str,
     overwrite: bool,
 ) -> Path | None:
-    if normalize_platform(platform) != "wechat_channels" or not article_has_platform_text(article):
+    if normalize_platform(platform) not in {"wechat_channels", "toutiao", "weibo"} or not article_has_platform_text(article):
         return None
     assert article is not None
     try:
@@ -5931,7 +6807,7 @@ def image_post_article_is_missing(
 ) -> bool:
     return (
         not getattr(args, "print_url", False)
-        and normalize_platform(platform) in {"douyin", "xiaohongshu", "wechat_channels"}
+        and normalize_platform(platform) in {"douyin", "xiaohongshu", "wechat_channels", "toutiao", "weibo"}
         and bool(image_candidates)
         and not article_has_platform_text(article)
     )
@@ -5979,7 +6855,7 @@ def gather_candidates_for_request_with_retries(
             continue
 
         platform, _item_id, candidates, image_candidates, article, _logs = result
-        if candidates or image_candidates:
+        if candidates or image_candidates or article_has_platform_text(article):
             if image_post_article_is_missing(args, platform, image_candidates, article):
                 last_result = result
                 if attempt < max_attempts:
@@ -6031,8 +6907,8 @@ def nonnegative_float_argument(value: str) -> float:
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Download accessible Douyin, Kuaishou, Xiaohongshu, TikTok, YouTube, or "
-            "WeChat Channels media "
+            "Download accessible Douyin, Kuaishou, Xiaohongshu, TikTok, YouTube, "
+            "WeChat Channels, Toutiao, or Weibo media "
             "from copied share text."
         ),
     )
@@ -6460,7 +7336,9 @@ INTERACTIVE_COMMAND_OPTIONS = tuple(
 )
 INTERACTIVE_OPTION_NAMES = tuple(sorted(set(INTERACTIVE_BOOL_OPTIONS) | set(INTERACTIVE_VALUE_OPTIONS)))
 INTERACTIVE_BOOL_VALUES = ("on", "off", "toggle")
-INTERACTIVE_PLATFORM_VALUES = ("auto", "douyin", "kuaishou", "xiaohongshu", "tiktok", "youtube")
+INTERACTIVE_PLATFORM_VALUES = (
+    "auto", "douyin", "kuaishou", "xiaohongshu", "tiktok", "youtube", "wechat_channels", "toutiao", "weibo",
+)
 
 
 def interactive_option_key(name: str) -> str:
@@ -6683,7 +7561,8 @@ def set_interactive_option(
         value = normalize_platform(str(value))
         if value not in PLATFORMS:
             raise DouyinDownloadError(
-                "Invalid platform. Use auto, douyin, kuaishou, xiaohongshu, tiktok, or youtube."
+                "Invalid platform. Use auto, douyin, kuaishou, xiaohongshu, tiktok, "
+                "youtube, wechat_channels, toutiao, or weibo."
             )
     if normalized == "profile-interval" and float(value) < 0:
         raise DouyinDownloadError("profile-interval must be zero or greater.")
@@ -8167,6 +9046,26 @@ def handle_resolved_media(
             ):
                 print(line, file=sys.stderr)
 
+    if (
+        not candidates
+        and not image_candidates
+        and article_has_platform_text(article)
+        and not args.print_url
+    ):
+        output_dir = Path(args.output_dir).expanduser()
+        article_path = save_article_content(
+            article,
+            output_dir,
+            output_name=args.output_name or timestamp_output_stem(),
+            platform=platform,
+            item_id=item_id,
+            share_text=share_text,
+            overwrite=args.overwrite,
+        )
+        print(media_type_message(platform, candidates, image_candidates, article), file=sys.stderr)
+        print(article_path)
+        return 0
+
     if not candidates and not image_candidates:
         joined_logs = "\n".join(logs)
         if "xiaohongshu: display_unavailable" in joined_logs:
@@ -8189,7 +9088,7 @@ def handle_resolved_media(
         )
         raise DouyinDownloadError(message)
 
-    print(media_type_message(platform, candidates, image_candidates), file=sys.stderr)
+    print(media_type_message(platform, candidates, image_candidates, article), file=sys.stderr)
 
     if args.print_url:
         if platform == "youtube" and candidates:
@@ -8249,6 +9148,8 @@ def handle_resolved_media(
             "douyin",
             "xiaohongshu",
             "wechat_channels",
+            "toutiao",
+            "weibo",
         }:
             try:
                 saved_paths.append(

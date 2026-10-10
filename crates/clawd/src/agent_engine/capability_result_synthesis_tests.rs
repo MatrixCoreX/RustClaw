@@ -249,7 +249,7 @@ fn reviewed_transcript_text_and_artifact_override_save_only_for_explicit_deliver
         artifact,
         "transcript.txt",
         "完整校对文本。",
-        "zh-CN",
+        "音频转写",
     )
     .expect("attach reviewed transcript");
 
@@ -331,7 +331,7 @@ fn transcript_bundle_keeps_video_audio_and_transcript_delivery_tokens() {
         transcript,
         "transcript.txt",
         "完整校对文本。",
-        "zh-CN",
+        "音频转写",
     )
     .expect("attach reviewed transcript");
     let results = vec![download, transcribe];
@@ -397,7 +397,7 @@ fn image_audio_transcript_results() -> Vec<CapabilityResultEnvelope> {
         transcript,
         "transcript.txt",
         "完整校对文本。",
-        "zh-CN",
+        "音频转写",
     )
     .expect("attach reviewed transcript");
     vec![download, transcribe]
@@ -444,7 +444,7 @@ fn transcript_only_bundle_is_complete_without_video_companion() {
         transcript,
         "transcript.txt",
         "完整校对文本。",
-        "zh-CN",
+        "音频转写",
     )
     .expect("attach reviewed transcript");
     let results = vec![transcribe];
@@ -506,7 +506,7 @@ fn labeled_delivery_mentions_still_append_clean_companion_tokens() {
         transcript,
         "transcript.txt",
         "完整校对文本。",
-        "zh-CN",
+        "音频转写",
     )
     .expect("attach reviewed transcript");
     let results = vec![download, transcribe];
@@ -567,6 +567,7 @@ fn failed_transcript_review_delivers_raw_text_once_and_clears_required_state() {
         "transcript.txt",
         "未经审校的原始转写",
         "zh-CN",
+        "音频转写",
         "local_asr",
         "transcript_revision_provider_unavailable",
     );
@@ -595,10 +596,13 @@ fn failed_transcript_review_delivers_raw_text_once_and_clears_required_state() {
 
 #[test]
 fn audio_transcript_source_label_follows_response_language() {
-    assert_eq!(audio_transcript_label("zh-CN"), "音频转写");
-    assert_eq!(audio_transcript_label("zh-Hant"), "音訊轉寫");
-    assert_eq!(audio_transcript_label("ja-JP"), "音声文字起こし");
-    assert_eq!(audio_transcript_label("en-US"), "Audio transcript");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    assert_eq!(audio_transcript_label(&state, "zh-CN"), "音频转写");
+    assert_eq!(audio_transcript_label(&state, "zh-Hant"), "音訊轉寫");
+    assert_eq!(audio_transcript_label(&state, "ja-JP"), "音声文字起こし");
+    assert_eq!(audio_transcript_label(&state, "en-US"), "Audio transcript");
 }
 
 #[test]

@@ -65,6 +65,7 @@ const ERROR_CODES = new Set([
   "media_not_ready",
   "no_items_collected",
   "platform_required",
+  "platform_allocation_too_small",
   "platform_not_configured",
   "platform_unsupported",
   "rate_limited",
@@ -141,6 +142,7 @@ const RUN_CONFIG_FIELDS = Object.freeze([
   "pacing_min_delay_ms",
   "pacing_max_delay_ms",
 ]);
+const DEFAULT_BATCH_ITEM_COUNT = 10;
 
 function integer(value, fallback, minimum, maximum = Number.MAX_SAFE_INTEGER) {
   const parsed = Number(value ?? fallback);
@@ -172,7 +174,7 @@ export function normalizedConfig(args, platform = args.platform) {
     source_mode: sourceMode,
     topics: Array.isArray(args.topics) ? args.topics.map(String).map((value) => value.trim()).filter(Boolean) : [],
     seed_urls: Array.isArray(args.seed_urls) ? args.seed_urls.map(String) : [],
-    max_items_per_run: integer(args.max_items_per_run, Number(args.max_run_minutes) > 0 ? 0 : 5, 0),
+    max_items_per_run: integer(args.max_items_per_run, DEFAULT_BATCH_ITEM_COUNT, 0),
     max_images_per_post: integer(args.max_images_per_post, 0, 0),
     max_run_minutes: integer(args.max_run_minutes, 0, 0),
     max_scrolls_per_source: integer(args.max_scrolls_per_source, 0, 0),
@@ -186,6 +188,35 @@ export function normalizedConfig(args, platform = args.platform) {
   };
   if (config.rest_max_seconds < config.rest_min_seconds) throw new Error("invalid_args");
   return config;
+}
+
+export function randomPlatformItemAllocation(platforms, totalItems, random = Math.random) {
+  const values = [...new Set(platforms)];
+  const total = integer(totalItems, DEFAULT_BATCH_ITEM_COUNT, 0);
+  if (values.length === 0) throw new Error("platform_required");
+  if (total === 0) return Object.fromEntries(values.map(platform => [platform, 0]));
+  if (total < values.length) throw new Error("platform_allocation_too_small");
+  const allocation = Object.fromEntries(values.map(platform => [platform, 1]));
+  for (let remaining = total - values.length; remaining > 0; remaining -= 1) {
+    const sample = Math.min(0.999999, Math.max(0, Number(random()) || 0));
+    allocation[values[Math.floor(sample * values.length)]] += 1;
+  }
+  return allocation;
+}
+
+function collectionPlan(args, random = Math.random) {
+  const requested = requestedPlatforms(args, true);
+  if (requested.length > 0) return { platforms: requested, collection_plan: null };
+  const platforms = [...SUPPORTED_PLATFORMS];
+  const totalItemLimit = integer(args.max_items_per_run, DEFAULT_BATCH_ITEM_COUNT, 0);
+  return {
+    platforms,
+    collection_plan: {
+      platform_selection: "all_supported_random",
+      total_item_limit: totalItemLimit,
+      platform_item_limits: randomPlatformItemAllocation(platforms, totalItemLimit, random),
+    },
+  };
 }
 
 export function backgroundRestDelayMs(configs, random = Math.random) {
@@ -275,6 +306,7 @@ function errorResponse(action, error) {
     "storage_upgrade_requires_idle",
     "confirmation_required",
     "invalid_args",
+    "platform_allocation_too_small",
     "platform_required",
     "platform_not_configured",
     "platform_unsupported",
@@ -313,37 +345,41 @@ function backgroundStartSpec() {
   };
 }
 
-async function preview(args) {
-  const platforms = requestedPlatforms(args);
-  const configs = platformConfigs(args, platforms);
+async function preview(args, runtime = {}) {
+  const { platforms, collection_plan: collectionPlanResult } = collectionPlan(args, runtime.random);
+  const configs = platformConfigs(args, platforms, collectionPlanResult?.platform_item_limits);
   return success("preview_enable", {
     platforms,
     ...(platforms.length === 1 ? { config: configs[platforms[0]] } : {}),
     platform_configs: configs,
+    ...(collectionPlanResult ? { collection_plan: collectionPlanResult } : {}),
     browser: await browserCapability(),
     background_start_spec: backgroundStartSpec(),
     side_effect_applied: false,
   });
 }
 
-function platformConfigs(args, platforms) {
+function platformConfigs(args, platforms, platformItemLimits = null) {
   return Object.fromEntries(platforms.map(platform => {
-    const config = normalizedConfig(args, platform);
+    const config = normalizedConfig(platformItemLimits
+      ? { ...args, max_items_per_run: platformItemLimits[platform] }
+      : args, platform);
     sourceUrls(platform, config);
     return [platform, config];
   }));
 }
 
-async function enable(request, args) {
+async function enable(request, args, runtime = {}) {
   if (args.confirm !== true) throw new Error("confirmation_required");
   const root = storageRoot(request);
-  const platforms = requestedPlatforms(args);
-  const configs = platformConfigs(args, platforms);
+  const { platforms, collection_plan: collectionPlanResult } = collectionPlan(args, runtime.random);
+  const configs = platformConfigs(args, platforms, collectionPlanResult?.platform_item_limits);
   const state = await configurePlatforms(root, platforms, configs);
   const workerActive = backgroundWorkerIsFresh(state.background_worker);
   return success("enable", {
     platforms,
     platform_states: state.platforms,
+    ...(collectionPlanResult ? { collection_plan: collectionPlanResult } : {}),
     background_worker_active: workerActive,
     background_start_spec: backgroundStartSpec(),
     next_capability: "media_discovery.run_enabled_once",
@@ -371,16 +407,20 @@ async function control(request, args, action) {
 }
 
 async function runOnce(request, args, runtime = {}) {
-  const state = await readState(storageRoot(request));
-  const requested = requestedPlatforms(args, true);
-  const platforms = requested.length ? requested : Object.keys(state.platforms)
-    .filter(platform => state.platforms[platform]?.enabled && !state.platforms[platform]?.paused);
+  const { platforms, collection_plan: collectionPlanResult } = collectionPlan(args, runtime.random);
   runtime = { ...runtime, notifyStart: createCollectionStartReporter({
     requestId: request.request_id, writeFrame: runtime.writeProgress, platforms,
+    requestedItems: collectionPlanResult?.total_item_limit,
   }) };
   if (platforms.length <= 1 || runtime.backgroundPlatform) return runPlatformBatch(request, args, runtime);
   const results = await mapBounded(platforms, runtime.parallelLimit || parallelPlatformLimit(), platform => (
-    runPlatformBatch(request, { ...args, platforms: [platform] }, runtime)
+    runPlatformBatch(request, {
+      ...args,
+      platforms: [platform],
+      ...(collectionPlanResult
+        ? { max_items_per_run: collectionPlanResult.platform_item_limits[platform] }
+        : {}),
+    }, runtime)
   ));
   const counts = { items: 0, videos: 0, images: 0, duplicates: 0, failures: 0 };
   const runs = results.map((result, index) => {
@@ -390,7 +430,13 @@ async function runOnce(request, args, runtime = {}) {
     addCounts(counts, run.counts);
     return run;
   });
-  const extra = { platforms, runs, counts, side_effect_applied: counts.videos + counts.images > 0 };
+  const extra = {
+    platforms,
+    runs,
+    counts,
+    ...(collectionPlanResult ? { collection_plan: collectionPlanResult } : {}),
+    side_effect_applied: counts.videos + counts.images > 0,
+  };
   if (runs.some(run => run.error_code)) {
     throw Object.assign(new Error("partial_collection_failed"), { extra });
   }
@@ -847,8 +893,8 @@ export async function handleRequest(request, runtime = {}) {
         output_files: ["videos.csv", "images.csv"],
       });
     }
-    if (action === "preview_enable") return await preview(args);
-    if (action === "enable") return await enable(request, args);
+    if (action === "preview_enable") return await preview(args, runtime);
+    if (action === "enable") return await enable(request, args, runtime);
     if (["disable", "pause", "resume"].includes(action)) return await control(request, args, action);
     if (action === "run_once") return await runOnce(request, args, runtime);
     if (action === "run_enabled_once") {

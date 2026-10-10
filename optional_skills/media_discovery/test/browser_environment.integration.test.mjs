@@ -85,7 +85,12 @@ test("actual manual verification popup uses the same environment and still requi
     errorCode: "login_required", targetUrl: source, timeoutMs: 5000,
     onOpened: async () => {
       const page = manual.pages().find(candidate => candidate.url() === source);
-      assert.deepEqual(await readEnvironment(page), silent);
+      const visible = await readEnvironment(page);
+      assert.notEqual(silent.webdriver, true);
+      assert.notEqual(visible.webdriver, true);
+      const { webdriver: _silentWebdriver, ...silentEnvironment } = silent;
+      const { webdriver: _visibleWebdriver, ...visibleEnvironment } = visible;
+      assert.deepEqual(visibleEnvironment, silentEnvironment);
       const control = manual.pages().find(candidate => candidate !== page);
       // Test fixture only: production waits for a human to press this control.
       await control.locator('[data-action="continue"]').click();

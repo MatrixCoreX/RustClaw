@@ -59,6 +59,7 @@ pub(crate) fn materialize_task_result_artifacts(
     let mut sources = collect_artifact_sources(&result);
     collect_published_transcript_sources(&workspace, task_id, &mut sources);
     collect_published_image_text_sources(&workspace, task_id, &mut sources);
+    collect_preserved_task_delivery_sources(&workspace, task_id, &mut sources);
     if sources.is_empty() {
         return Ok(raw_result.to_string());
     }
@@ -161,6 +162,98 @@ pub(crate) fn materialize_task_result_artifacts(
         }),
     );
     Ok(serde_json::to_string(&result)?)
+}
+
+fn collect_preserved_task_delivery_sources(
+    workspace_root: &Path,
+    task_id: &str,
+    out: &mut Vec<ArtifactSource>,
+) {
+    let task_root = claw_core::workspace_state::workspace_artifacts_root(workspace_root)
+        .join("delivery")
+        .join(machine_path_component(task_id, "task"));
+    let Ok(canonical_task_root) = task_root.canonicalize() else {
+        return;
+    };
+    if !canonical_task_root.starts_with(workspace_root) {
+        return;
+    }
+
+    let mut known_digests = HashSet::new();
+    for source in out.iter() {
+        let Some(path) = validated_source_path(workspace_root, &source.path)
+            .or_else(|| validated_pre_materialized_source_path(workspace_root, task_id, source))
+            .or_else(|| find_invocation_file_by_digest(workspace_root, task_id, source))
+        else {
+            continue;
+        };
+        if let Ok(digest) = sha256_file(&path) {
+            known_digests.insert(digest);
+        }
+    }
+
+    let mut preserved = Vec::new();
+    let Ok(artifact_dirs) = fs::read_dir(&canonical_task_root) else {
+        return;
+    };
+    for artifact_dir in artifact_dirs.flatten() {
+        let Ok(file_type) = artifact_dir.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() || file_type.is_symlink() {
+            continue;
+        }
+        let Ok(files) = fs::read_dir(artifact_dir.path()) else {
+            continue;
+        };
+        for file in files.flatten() {
+            let Ok(file_type) = file.file_type() else {
+                continue;
+            };
+            if file_type.is_file() && !file_type.is_symlink() {
+                preserved.push(file.path());
+            }
+        }
+    }
+    preserved.sort();
+
+    for path in preserved.into_iter().take(MAX_TASK_ARTIFACTS) {
+        let Ok(canonical) = path.canonicalize() else {
+            continue;
+        };
+        if !canonical.starts_with(&canonical_task_root) {
+            continue;
+        }
+        let Ok(metadata) = canonical.metadata() else {
+            continue;
+        };
+        if !metadata.is_file() || metadata.len() > max_artifact_bytes() {
+            continue;
+        }
+        let Ok(sha256) = sha256_file(&canonical) else {
+            continue;
+        };
+        if !known_digests.insert(sha256.clone()) {
+            continue;
+        }
+        let filename = canonical
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_string);
+        let id = canonical
+            .parent()
+            .and_then(Path::file_name)
+            .and_then(|name| name.to_str())
+            .and_then(machine_id);
+        out.push(ArtifactSource {
+            id,
+            path: canonical.to_string_lossy().to_string(),
+            filename,
+            mime_type: None,
+            size_bytes: Some(metadata.len()),
+            sha256: Some(sha256),
+        });
+    }
 }
 
 pub(crate) fn preserve_async_completion_artifacts(

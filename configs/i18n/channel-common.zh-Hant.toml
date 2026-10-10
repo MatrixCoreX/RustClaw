@@ -1,0 +1,4 @@
+locale = "zh-Hant"
+
+[dict]
+"common.audio_transcript_label" = "音訊轉寫"

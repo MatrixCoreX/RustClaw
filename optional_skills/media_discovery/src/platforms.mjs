@@ -24,6 +24,39 @@ const PLATFORM_SPECS = Object.freeze({
     topicUrl: (topic) =>
       `https://www.kuaishou.com/search/${encodeURIComponent(topic)}`,
   },
+  toutiao: {
+    defaultBrowserMode: "silent",
+    homeUrl: "https://www.toutiao.com/",
+    hosts: ["toutiao.com", "toutiaoimg.cn", "weitoutiao.zjurl.cn"],
+    detailPath: /^\/(?:article|video|w)\/\d+(?:\/|$)/u,
+    topicNavigation: "direct",
+    topicUrl: (topic) =>
+      `https://so.toutiao.com/search?keyword=${encodeURIComponent(topic)}&pd=information&source=search_subtab_switch&from=information&aid=1455`,
+  },
+  weibo: {
+    defaultBrowserMode: "silent",
+    homeUrl: "https://weibo.com/hot/weibo/102803",
+    hosts: ["weibo.com", "weibo.cn"],
+    detailPath: /^\/(?:\d+\/[A-Za-z0-9]+|(?:status|detail)\/[A-Za-z0-9]+|tv\/show\/\d+:\d+)(?:\/|$)/u,
+    topicNavigation: "direct",
+    topicUrl: (topic) => `https://s.weibo.com/weibo?q=${encodeURIComponent(topic)}`,
+  },
+  tiktok: {
+    defaultBrowserMode: "silent",
+    homeUrl: "https://www.tiktok.com/",
+    hosts: ["tiktok.com"],
+    detailPath: /^\/@[^/]+\/(?:video|photo)\/\d+(?:\/|$)/u,
+    topicNavigation: "direct",
+    topicUrl: (topic) => `https://www.tiktok.com/search?q=${encodeURIComponent(topic)}`,
+  },
+  youtube: {
+    defaultBrowserMode: "silent",
+    homeUrl: "https://www.youtube.com/",
+    hosts: ["youtube.com", "youtu.be"],
+    detailPath: /^\/(?:watch\/?$|(?:shorts|live)\/[A-Za-z0-9_-]{11}(?:\/|$))/u,
+    topicNavigation: "direct",
+    topicUrl: (topic) => `https://www.youtube.com/results?search_query=${encodeURIComponent(topic)}`,
+  },
 });
 
 export const SUPPORTED_PLATFORMS = Object.freeze(Object.keys(PLATFORM_SPECS));
@@ -42,6 +75,138 @@ export function platformSpec(platform) {
 
 function hostAllowed(host, allowed) {
   return allowed.some((domain) => host === domain || host.endsWith(`.${domain}`));
+}
+
+function decodeUrlLayer(value) {
+  const unescaped = String(value || "")
+    .replaceAll("&amp;", "&")
+    .replaceAll("&#38;", "&")
+    .replaceAll("&#x26;", "&")
+    .replaceAll("&quot;", '"');
+  try { return decodeURIComponent(unescaped); } catch { return unescaped; }
+}
+
+function toutiaoContentKind(value) {
+  const normalized = String(value || "").toLowerCase();
+  if (/(?:^|[^a-z])(?:weitoutiao|thread)(?:[^a-z]|$)/u.test(normalized)) return "w";
+  if (/(?:^|[^a-z])video(?:[^a-z]|$)/u.test(normalized)) return "video";
+  return "article";
+}
+
+function canonicalToutiaoPath(kind, itemId) {
+  return `https://www.toutiao.com/${kind}/${itemId}/`;
+}
+
+function directToutiaoContentUrl(value, context = "") {
+  let parsed;
+  try { parsed = new URL(value, "https://so.toutiao.com/"); } catch { return null; }
+  const host = parsed.hostname.toLowerCase();
+  let match;
+  if (hostAllowed(host, ["toutiao.com"])
+    && (match = parsed.pathname.match(/^\/(article|video|w)\/(\d{10,})(?:\/|$)/u))) {
+    return canonicalToutiaoPath(match[1], match[2]);
+  }
+  if (hostAllowed(host, ["toutiao.com", "toutiaoimg.cn"])
+    && (match = parsed.pathname.match(/^\/group\/(\d{10,})(?:\/|$)/u))) {
+    return canonicalToutiaoPath(toutiaoContentKind(`${context} ${parsed.search}`), match[1]);
+  }
+  if (host === "weitoutiao.zjurl.cn"
+    && (match = parsed.pathname.match(/\/thread\/(\d{10,})(?:\/|$)/u))) {
+    return canonicalToutiaoPath("w", match[1]);
+  }
+  return null;
+}
+
+export function canonicalToutiaoResultUrl(rawUrl) {
+  const initial = String(rawUrl || "");
+  const queue = [{ value: initial, context: initial, trusted: false }];
+  const visited = new Set();
+  for (let cursor = 0; cursor < queue.length && cursor < 20; cursor += 1) {
+    const entry = queue[cursor];
+    const value = decodeUrlLayer(entry.value);
+    if (!value || visited.has(value)) continue;
+    visited.add(value);
+    let parsed;
+    try { parsed = new URL(value, "https://so.toutiao.com/"); } catch { continue; }
+    const host = parsed.hostname.toLowerCase();
+    const isSearchJump = ["so.toutiao.com", "sou.toutiao.com"].includes(host)
+      && parsed.pathname === "/search/jump";
+    const isTrustedTransit = host === "article.zlink.toutiao.com";
+    const trusted = entry.trusted || isSearchJump || isTrustedTransit;
+    const direct = directToutiaoContentUrl(value, entry.context);
+    if (direct && (trusted || hostAllowed(host, ["toutiao.com", "toutiaoimg.cn"])
+      || host === "weitoutiao.zjurl.cn")) {
+      return direct;
+    }
+    if (!trusted) continue;
+
+    for (const key of ["h5_url", "url", "target_url", "target"]) {
+      for (const nested of parsed.searchParams.getAll(key)) {
+        if (nested) queue.push({ value: nested, context: `${entry.context} ${value}`, trusted: true });
+      }
+    }
+    // Some result pages leave nested ampersands HTML-escaped or only partly
+    // percent-encoded. Scan the trusted wrapper for known first-party routes;
+    // never accept an arbitrary external URL or an unscoped numeric token.
+    const expanded = decodeUrlLayer(value);
+    const thread = expanded.match(/weitoutiao\.zjurl\.cn\/ugc\/share\/wap\/thread\/(\d{10,})/u);
+    if (thread) return canonicalToutiaoPath("w", thread[1]);
+    const group = expanded.match(/(?:^|\/)\/?(?:www\.)?toutiao\.com\/group\/(\d{10,})/u)
+      || expanded.match(/m\.toutiaoimg\.cn\/group\/(\d{10,})/u);
+    if (group) return canonicalToutiaoPath(toutiaoContentKind(expanded), group[1]);
+  }
+  return null;
+}
+
+export function canonicalWeiboResultUrl(rawUrl) {
+  let parsed;
+  try { parsed = new URL(String(rawUrl || ""), "https://weibo.com/"); } catch { return null; }
+  const host = parsed.hostname.toLowerCase();
+  if (!hostAllowed(host, ["weibo.com", "weibo.cn"])) return null;
+  let match = parsed.pathname.match(/^\/(\d+)\/([A-Za-z0-9]+)(?:\/|$)/u);
+  if (match) return `https://weibo.com/${match[1]}/${match[2]}`;
+  match = parsed.pathname.match(/^\/(?:status|detail)\/([A-Za-z0-9]+)(?:\/|$)/u);
+  if (match && (host === "m.weibo.cn" || host === "weibo.cn")) {
+    return `https://m.weibo.cn/status/${match[1]}`;
+  }
+  match = parsed.pathname.match(/^\/tv\/show\/(\d+:\d+)(?:\/|$)/u);
+  if (match && hostAllowed(host, ["weibo.com"])) return `https://weibo.com/tv/show/${match[1]}`;
+  return null;
+}
+
+export function canonicalTikTokResultUrl(rawUrl) {
+  let parsed;
+  try { parsed = new URL(String(rawUrl || ""), "https://www.tiktok.com/"); } catch { return null; }
+  if (!hostAllowed(parsed.hostname.toLowerCase(), ["tiktok.com"])) return null;
+  const match = parsed.pathname.match(/^(\/@[^/]+\/(?:video|photo)\/(\d+))(?:\/|$)/u);
+  return match ? `https://www.tiktok.com${match[1]}` : null;
+}
+
+function youtubeVideoId(rawUrl) {
+  let parsed;
+  try { parsed = new URL(String(rawUrl || ""), "https://www.youtube.com/"); } catch { return null; }
+  const host = parsed.hostname.toLowerCase();
+  if (!hostAllowed(host, ["youtube.com", "youtu.be"])) return null;
+  let value = hostAllowed(host, ["youtu.be"])
+    ? parsed.pathname.split("/").filter(Boolean)[0]
+    : parsed.pathname === "/watch"
+      ? parsed.searchParams.get("v")
+      : parsed.pathname.match(/^\/(?:shorts|live)\/([A-Za-z0-9_-]{11})(?:\/|$)/u)?.[1];
+  value = String(value || "");
+  return /^[A-Za-z0-9_-]{11}$/u.test(value) ? value : null;
+}
+
+export function canonicalYouTubeResultUrl(rawUrl) {
+  const videoId = youtubeVideoId(rawUrl);
+  return videoId ? `https://www.youtube.com/watch?v=${videoId}` : null;
+}
+
+export function canonicalPlatformResultUrl(platform, rawUrl) {
+  if (platform === "toutiao") return canonicalToutiaoResultUrl(rawUrl);
+  if (platform === "weibo") return canonicalWeiboResultUrl(rawUrl);
+  if (platform === "tiktok") return canonicalTikTokResultUrl(rawUrl);
+  if (platform === "youtube") return canonicalYouTubeResultUrl(rawUrl);
+  return rawUrl;
 }
 
 export function validatePlatformUrl(platform, rawUrl) {
@@ -82,11 +247,14 @@ export function sourceTargets(platform, config) {
   if (mode === "seed_urls") {
     const seeds = Array.isArray(config.seed_urls) ? config.seed_urls : [];
     if (seeds.length === 0) throw new Error("source_scope_empty");
-    return seeds.map((url) => ({
-      source_mode: mode,
-      search_keyword: null,
-      url: validatePlatformUrl(platform, url),
-    }));
+    return seeds.map((url) => {
+      const canonical = canonicalPlatformResultUrl(platform, url);
+      return {
+        source_mode: mode,
+        search_keyword: null,
+        url: canonical || validatePlatformUrl(platform, url),
+      };
+    });
   }
   throw new Error("source_mode_invalid");
 }
@@ -172,6 +340,7 @@ export function isDetailUrl(platform, rawUrl) {
   try {
     const normalized = validatePlatformUrl(platform, rawUrl);
     if (platform === "douyin" && douyinModalItemId(normalized)) return true;
+    if (platform === "youtube") return canonicalYouTubeResultUrl(normalized) !== null;
     return platformSpec(platform).detailPath.test(new URL(normalized).pathname);
   } catch {
     return false;
@@ -190,7 +359,9 @@ export function canonicalCandidateUrls(platform, rawUrls) {
   const result = [];
   for (const rawUrl of rawUrls) {
     try {
-      const normalized = validatePlatformUrl(platform, rawUrl);
+      const candidate = canonicalPlatformResultUrl(platform, rawUrl);
+      if (!candidate) continue;
+      const normalized = validatePlatformUrl(platform, candidate);
       if (!isDetailUrl(platform, normalized)) continue;
       const identity = platformItemId(platform, normalized);
       if (seen.has(identity)) continue;
@@ -209,6 +380,30 @@ export function platformItemId(platform, rawUrl) {
     const modal = douyinModalItemId(normalized);
     if (modal) return `douyin:${modal}`;
   }
+  if (platform === "youtube") {
+    const videoId = youtubeVideoId(normalized);
+    if (!videoId) throw new Error("source_url_invalid");
+    return `youtube:${videoId}`;
+  }
   const segments = new URL(normalized).pathname.split("/").filter(Boolean);
+  if (platform === "weibo") {
+    const value = segments.at(-1) || "";
+    if (/^\d+$/u.test(value)) return `weibo:${value}`;
+    if (segments.at(-2) !== "show" && /^[A-Za-z0-9]+$/u.test(value)) {
+      const alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+      const decoded = [];
+      for (let end = value.length; end > 0; end -= 4) {
+        const chunk = value.slice(Math.max(0, end - 4), end);
+        let number = 0n;
+        for (const character of chunk) {
+          const digit = alphabet.indexOf(character);
+          if (digit < 0) throw new Error("source_url_invalid");
+          number = number * 62n + BigInt(digit);
+        }
+        decoded.unshift(end > 4 ? number.toString().padStart(7, "0") : number.toString());
+      }
+      return `weibo:${decoded.join("")}`;
+    }
+  }
   return `${platform}:${segments.at(-1) || randomUUID()}`;
 }

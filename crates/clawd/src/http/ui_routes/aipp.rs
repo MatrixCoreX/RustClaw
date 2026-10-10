@@ -845,10 +845,37 @@ fn read_aipp_media_page(root: &Path, query: &AippMediaQuery) -> Result<Value, St
     read_aipp_media_page_with_hidden(root, query, &BTreeSet::new())
 }
 
+#[cfg(test)]
 fn read_aipp_media_page_with_hidden(
     root: &Path,
     query: &AippMediaQuery,
     hidden_sequences: &BTreeSet<u64>,
+) -> Result<Value, String> {
+    read_aipp_media_page_with_platforms(root, query, hidden_sequences, &BTreeSet::new())
+}
+
+fn declared_media_platforms(input_schema: &Value) -> BTreeSet<String> {
+    input_schema
+        .pointer("/properties/platform/enum")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter(|value| {
+            !value.is_empty()
+                && value.len() <= 64
+                && !value.chars().any(char::is_control)
+        })
+        .take(32)
+        .map(str::to_string)
+        .collect()
+}
+
+fn read_aipp_media_page_with_platforms(
+    root: &Path,
+    query: &AippMediaQuery,
+    hidden_sequences: &BTreeSet<u64>,
+    declared_platforms: &BTreeSet<String>,
 ) -> Result<Value, String> {
     let records_root = root.join("records");
     let entries = match fs::read_dir(&records_root) {
@@ -868,6 +895,7 @@ fn read_aipp_media_page_with_hidden(
     let mut matching_total = 0_usize;
     let mut visible_total = 0_usize;
     let mut scanned_records = 0_usize;
+    let mut observed_platforms = declared_platforms.clone();
     let cursor_sequence = query.cursor_sequence.or_else(|| {
         (sort_order == "newest")
             .then_some(query.before_sequence)
@@ -925,10 +953,21 @@ fn read_aipp_media_page_with_hidden(
             .get("global_sequence")
             .and_then(Value::as_u64)
             .unwrap_or_default();
-        if sequence == 0
-            || hidden_sequences.contains(&sequence)
-            || (has_filter && !record_matches_aipp_query(&record, query))
+        if sequence == 0 || hidden_sequences.contains(&sequence) {
+            continue;
+        }
+        if let Some(platform) = record
+            .get("platform")
+            .and_then(Value::as_str)
+            .filter(|value| {
+                !value.is_empty()
+                    && value.len() <= 64
+                    && !value.chars().any(char::is_control)
+            })
         {
+            observed_platforms.insert(platform.to_string());
+        }
+        if has_filter && !record_matches_aipp_query(&record, query) {
             continue;
         }
         if has_filter {
@@ -982,7 +1021,7 @@ fn read_aipp_media_page_with_hidden(
         .filter(|raw| raw.len() as u64 <= AIPP_MEDIA_STATE_MAX_BYTES)
         .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok())
         .unwrap_or_else(|| json!({}));
-    let platform_states = state
+    let mut platform_states = state
         .get("platforms")
         .and_then(Value::as_object)
         .map(|platforms| {
@@ -1004,6 +1043,15 @@ fn read_aipp_media_page_with_hidden(
                 .collect::<BTreeMap<_, _>>()
         })
         .unwrap_or_default();
+    for platform in observed_platforms {
+        platform_states.entry(platform).or_insert_with(|| {
+            json!({
+                "state": "unknown",
+                "enabled": false,
+                "paused": false,
+            })
+        });
+    }
     let active_run = state
         .get("active_run")
         .filter(|value| !value.is_null())
@@ -1158,8 +1206,19 @@ async fn get_aipp_items(
             );
         }
     };
+    let declared_platforms = active
+        .manifest
+        .capability_request
+        .as_ref()
+        .map(|request| declared_media_platforms(&request.input_schema))
+        .unwrap_or_default();
     let page = tokio::task::spawn_blocking(move || {
-        read_aipp_media_page_with_hidden(&root, &query, &hidden_sequences)
+        read_aipp_media_page_with_platforms(
+            &root,
+            &query,
+            &hidden_sequences,
+            &declared_platforms,
+        )
     })
     .await;
     match page {

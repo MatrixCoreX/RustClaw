@@ -136,8 +136,8 @@ locations = [
   "crates/clawd/src/agent_engine/execution_loop.rs::run_agent_round",
 ]
 migration_tests = [
-  "crates/clawd/src/agent_engine/planning_native_tests.rs::native_contract_repair_continues_past_four_when_evidence_changes",
-  "crates/clawd/src/agent_engine/planning_native_tests.rs::native_contract_repair_stops_only_after_equivalent_state_stagnates",
+  "crates/clawd/src/agent_engine/planning_native_contract_recovery_tests.rs::native_contract_repair_continues_past_four_when_evidence_changes",
+  "crates/clawd/src/agent_engine/planning_native_contract_recovery_tests.rs::native_contract_repair_stops_only_after_equivalent_state_stagnates",
   "crates/clawd/src/agent_engine/execution_loop_tests.rs::action_count_is_an_explicit_replan_boundary_not_a_terminal_drop",
 ]
 

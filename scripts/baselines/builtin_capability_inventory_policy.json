@@ -14,6 +14,7 @@
     {"skill": "service_control", "action": "diagnose_unhealthy_state", "disposition": "internal", "owner_wave": "1", "rationale": "Runtime-internal recovery action is finite but not planner-advertised."},
     {"skill": "service_control", "action": "reload", "disposition": "alias_existing", "target": "service.restart", "owner_wave": "1", "rationale": "Reload uses the existing lifecycle mutation contract and remains a direct compatibility action."},
     {"skill": "schedule", "action": "compile", "disposition": "internal", "owner_wave": "3", "rationale": "Internal typed schedule-intent preparation step."},
+    {"skill": "schedule", "action": "create", "disposition": "internal", "owner_wave": "3", "rationale": "Internal compatibility entry; ordinary creation uses preview followed by the exact observed intent_json through schedule.create_structured."},
     {"skill": "x", "action": "draft", "disposition": "alias_existing", "target": "x.draft_preview", "owner_wave": "4", "rationale": "Legacy action aliases preview."},
     {"skill": "x", "action": "post", "disposition": "alias_existing", "target": "x.publish", "owner_wave": "4", "rationale": "Legacy action aliases publish."},
     {"skill": "system_basic", "action": "compare_paths", "disposition": "alias_existing", "target": "filesystem.compare_paths", "owner_wave": "3", "rationale": "Prefer canonical filesystem capability."},

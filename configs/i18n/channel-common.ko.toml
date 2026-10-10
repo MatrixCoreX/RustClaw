@@ -1,6 +1,7 @@
 locale = "ko"
 
 [dict]
+"common.audio_transcript_label" = "오디오 전사"
 "common.safe_generic_error" = "요청을 완료할 수 없습니다. 잠시 후 다시 시도해 주세요."
 "channel.error.delivery_failed" = "메시지를 전달하지 못했습니다. 잠시 후 다시 시도해 주세요."
 "channel.task.completed_without_text" = "작업은 완료되었지만 표시할 텍스트 결과가 없습니다."

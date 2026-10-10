@@ -91,6 +91,29 @@ test("multi-platform one-shot uses independent quotas and awaits every partial r
   assert.equal(result.extra.side_effect_applied, true);
 });
 
+test("one-shot without a platform randomly divides the default ten-item total", async t => {
+  const { call } = await fixture(t);
+  const samples = [0, 0.5, 0.999999];
+  const observed = {};
+  const result = await call({ action: "run_once" }, {
+    random: () => samples.shift(),
+    parallelLimit: 3,
+    collectPlatform: async ({ platform, limit, onPage }) => {
+      observed[platform] = limit;
+      for (let index = 0; index < limit; index += 1) {
+        await onPage({ records: [record(platform, String(index))], temporaryPaths: [] });
+      }
+      return { handled: limit, stop_reason: "target_reached" };
+    },
+  });
+  assert.equal(result.status, "ok", JSON.stringify(result));
+  assert.deepEqual(observed, result.extra.collection_plan.platform_item_limits);
+  assert.equal(result.extra.collection_plan.total_item_limit, 10);
+  assert.equal(result.extra.counts.items, 10);
+  assert.equal(Object.keys(observed).length, 7);
+  assert.ok(Object.values(observed).every(value => value >= 1));
+});
+
 test("manual login waits on one platform while another completes", { timeout: 10000 }, async t => {
   const { call, root } = await fixture(t);
   await call({ action: "enable", platforms: ["douyin", "xiaohongshu"], max_items_per_run: 1, confirm: true });

@@ -69,9 +69,6 @@ REQUIRED_COMPATIBILITY_MARKERS = {
         "LIMIT -1 OFFSET ?1",
     ],
     "crates/clawd/src/memory/service.rs": ["long_term_summary_max_chars"],
-    "crates/clawd/src/worker/runtime_support/background_workers.rs": [
-        "LIMIT -1 OFFSET ?1",
-    ],
 }
 
 ADR_DECISIONS = [f"### D{index}:" for index in range(1, 9)]

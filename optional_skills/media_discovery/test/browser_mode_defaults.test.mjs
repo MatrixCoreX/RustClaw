@@ -6,7 +6,7 @@ import test from "node:test";
 import { handleRequest, normalizedConfig } from "../src/main.mjs";
 import { browserCapability } from "../src/browser.mjs";
 
-const defaults = { douyin: "silent", xiaohongshu: "silent", kuaishou: "silent" };
+const defaults = { douyin: "silent", xiaohongshu: "silent", kuaishou: "silent", toutiao: "silent", weibo: "silent", tiktok: "silent", youtube: "silent" };
 
 async function contextFor(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "discovery-mode-"));
@@ -67,7 +67,7 @@ for (const explicit of [undefined, "silent", "visible"]) {
     const expected = Object.fromEntries(Object.entries(defaults).map(([platform, mode]) => [platform, explicit || mode]));
     assert.equal(result.status, "ok");
     assert.deepEqual(seen, expected);
-    assert.equal(result.extra.runs.length, 3);
+    assert.equal(result.extra.runs.length, Object.keys(defaults).length);
     assert.deepEqual(Object.assign({}, ...result.extra.runs.map(run => run.browser_modes)), expected);
   });
 }

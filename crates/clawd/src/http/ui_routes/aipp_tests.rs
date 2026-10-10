@@ -561,6 +561,64 @@ fn media_page_keeps_bounded_state_when_no_records_exist() {
 }
 
 #[test]
+fn media_page_exposes_platforms_observed_in_one_shot_results() {
+    let root = fixture_root();
+    write_record(
+        &root,
+        1,
+        json!({
+            "global_sequence": 1,
+            "sequence": 1,
+            "kind": "image",
+            "platform": "new-platform",
+            "title": "one-shot result",
+        }),
+    );
+
+    let page = read_aipp_media_page(&root, &AippMediaQuery::default()).expect("media page");
+    assert_eq!(page["platform_states"]["new-platform"]["state"], "unknown");
+    assert_eq!(page["platform_states"]["new-platform"]["enabled"], false);
+    assert_eq!(page["platform_states"]["new-platform"]["paused"], false);
+    fs::remove_dir_all(root).expect("remove fixture");
+}
+
+#[test]
+fn media_page_exposes_every_platform_declared_by_the_skill() {
+    let root = fixture_root();
+    fs::remove_dir_all(root.join("records")).expect("remove records directory");
+    let declared = declared_media_platforms(&json!({
+        "type": "object",
+        "properties": {
+            "platform": {
+                "type": "string",
+                "enum": ["douyin", "xiaohongshu", "kuaishou", "toutiao", "weibo"]
+            }
+        }
+    }));
+
+    let page = read_aipp_media_page_with_platforms(
+        &root,
+        &AippMediaQuery::default(),
+        &BTreeSet::new(),
+        &declared,
+    )
+    .expect("media page");
+    assert_eq!(
+        page["platform_states"]
+            .as_object()
+            .map(|states| states.keys().cloned().collect::<Vec<_>>()),
+        Some(vec![
+            "douyin".to_string(),
+            "kuaishou".to_string(),
+            "toutiao".to_string(),
+            "weibo".to_string(),
+            "xiaohongshu".to_string(),
+        ])
+    );
+    fs::remove_dir_all(root).expect("remove fixture");
+}
+
+#[test]
 fn media_page_uses_stable_cursor_pagination() {
     let root = fixture_root();
     for sequence in 1..=3 {

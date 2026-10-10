@@ -13,6 +13,7 @@ import dataclasses
 import re
 import subprocess
 import sys
+import tempfile
 from collections import Counter
 from pathlib import Path
 
@@ -45,12 +46,16 @@ class Candidate:
 
     def stable_key(self) -> str:
         def encode_field(value: str) -> str:
-            return (
+            encoded = (
                 value.replace("\\", "\\\\")
                 .replace("\r", "\\r")
                 .replace("\n", "\\n")
                 .replace("\t", "\\t")
             )
+            trailing_spaces = len(encoded) - len(encoded.rstrip(" "))
+            if trailing_spaces:
+                encoded = encoded[:-trailing_spaces] + "\\x20" * trailing_spaces
+            return encoded
 
         # Path + literal is stable across rustfmt-only movement. Counter
         # multiplicity still catches an additional fixed reply in the same
@@ -312,9 +317,8 @@ def read_baseline(path: Path) -> Counter[str]:
     if not path.exists():
         raise FileNotFoundError(f"baseline not found: {path}")
     rows = Counter()
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
             continue
         fields = line.split("\t", 2)
         rows["\t".join(fields[:2])] += 1
@@ -381,6 +385,11 @@ diff --git a/crates/clawd/src/finalize/task_tests.rs b/crates/clawd/src/finalize
     assert len(candidates) == 1, candidates
     assert candidates[0].literal == "I cannot continue with this plan yet."
     assert candidates[0].stable_key().startswith("crates/clawd/src/finalize/task.rs\t")
+    with tempfile.TemporaryDirectory() as temporary:
+        baseline_path = Path(temporary) / "baseline.txt"
+        trailing_space = Candidate("crates/clawd/src/task.rs", 1, "ends with ", "")
+        write_baseline(baseline_path, [trailing_space])
+        assert read_baseline(baseline_path) == Counter([trailing_space.stable_key()])
     print("SELF_TEST_OK")
     return 0
 

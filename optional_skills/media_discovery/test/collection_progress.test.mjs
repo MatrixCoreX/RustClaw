@@ -40,7 +40,7 @@ test("large requested counts and optional budgets have no business ceiling; paci
   assert.equal(optionalLimit(0), Infinity);
   assert.equal(optionalLimit(undefined), Infinity);
   assert.equal(normalizedConfig({ ...config, max_items_per_run: 0 }).max_items_per_run, 0);
-  assert.equal(normalizedConfig({ ...config, max_run_minutes: 30 }).max_items_per_run, 0);
+  assert.equal(normalizedConfig({ ...config, max_run_minutes: 30 }).max_items_per_run, 10);
   for (const value of [-1, 1.2, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
     assert.throws(() => normalizedConfig({ ...config, max_items_per_run: value }), /invalid_args/);
   }

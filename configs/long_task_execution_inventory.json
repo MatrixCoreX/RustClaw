@@ -2149,7 +2149,7 @@
       "isolation_profile": "local_current_workspace",
       "progress_contract": "native_progress",
       "skill": "media_download",
-      "timeout_seconds": null
+      "timeout_seconds": 86400
     },
     {
       "adapter_kind": "local_process_poll",
@@ -2158,7 +2158,7 @@
       "isolation_profile": "local_current_workspace",
       "progress_contract": "native_progress",
       "skill": "media_download",
-      "timeout_seconds": null
+      "timeout_seconds": 86400
     },
     {
       "adapter_kind": "local_process_poll",
@@ -2167,7 +2167,7 @@
       "isolation_profile": "local_current_workspace",
       "progress_contract": "native_progress",
       "skill": "media_download",
-      "timeout_seconds": null
+      "timeout_seconds": 86400
     },
     {
       "adapter_kind": "local_process_poll",
@@ -2176,7 +2176,7 @@
       "isolation_profile": "local_current_workspace",
       "progress_contract": "native_progress",
       "skill": "media_download",
-      "timeout_seconds": null
+      "timeout_seconds": 86400
     },
     {
       "adapter_kind": null,
