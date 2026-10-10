@@ -1,9 +1,59 @@
+import fsNative from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { writeAtomic } from "./csv.mjs";
 import { SUPPORTED_PLATFORMS } from "./platforms.mjs";
 
 const ENVIRONMENT_FILE = "browser-environment.json";
+
+function isDirectory(value) {
+  try { return fsNative.statSync(value).isDirectory(); } catch { return false; }
+}
+
+function firstMatchingEntry(directory, pattern, predicate) {
+  try {
+    for (const name of fsNative.readdirSync(directory).sort()) {
+      if (!pattern.test(name)) continue;
+      const candidate = path.join(directory, name);
+      try {
+        if (predicate(fsNative.statSync(candidate))) return { name, path: candidate };
+      } catch {
+        // A desktop session can disappear while its runtime directory is read.
+      }
+    }
+  } catch {
+    // Missing or unreadable session directories mean no discovered display.
+  }
+  return null;
+}
+
+export function desktopSessionEnvironment(environment = process.env, {
+  hostPlatform = process.platform,
+  effectiveUid = typeof process.geteuid === "function" ? process.geteuid() : null,
+  runtimeDirectory,
+  x11SocketDirectory = "/tmp/.X11-unix",
+} = {}) {
+  const resolved = { ...environment };
+  if (hostPlatform !== "linux") return resolved;
+  const runtime = runtimeDirectory || resolved.XDG_RUNTIME_DIR
+    || (Number.isInteger(effectiveUid) ? `/run/user/${effectiveUid}` : "");
+  if (!runtime || !isDirectory(runtime)) return resolved;
+
+  resolved.XDG_RUNTIME_DIR ||= runtime;
+  if (!resolved.WAYLAND_DISPLAY) {
+    const wayland = firstMatchingEntry(runtime, /^wayland-\d+$/u, stat => stat.isSocket());
+    if (wayland) resolved.WAYLAND_DISPLAY = wayland.name;
+  }
+  if (!resolved.DISPLAY && isDirectory(x11SocketDirectory)) {
+    const x11 = firstMatchingEntry(x11SocketDirectory, /^X\d+$/u, stat => stat.isSocket());
+    if (x11) resolved.DISPLAY = `:${x11.name.slice(1)}`;
+  }
+  if (!resolved.XAUTHORITY) {
+    const authority = firstMatchingEntry(runtime, /^\.mutter-Xwaylandauth\..+$/u, stat => stat.isFile());
+    if (authority) resolved.XAUTHORITY = authority.path;
+  }
+  return resolved;
+}
 
 export function nativeBrowserEnvironment(host = {
   platform: process.platform,
@@ -67,7 +117,7 @@ export function persistentContextLaunchOptions({
   executablePath,
   headless,
   environment,
-  hostEnv = process.env,
+  hostEnv = desktopSessionEnvironment(),
   hostPlatform = process.platform,
 }) {
   const args = [AUTOMATION_BLINK_FLAG];
@@ -80,6 +130,7 @@ export function persistentContextLaunchOptions({
     locale: environment.locale,
     timezoneId: environment.timezone_id,
     viewport: environment.viewport,
+    env: hostEnv,
     // Drop Chromium's default automation switch. Stored profile data still cannot
     // add a user-agent, proxy, or extra flags.
     ignoreDefaultArgs: [AUTOMATION_DEFAULT_ARG],

@@ -2,14 +2,14 @@ import { randomUUID } from "node:crypto";
 
 const PLATFORM_SPECS = Object.freeze({
   douyin: {
-    defaultBrowserMode: "silent",
+    defaultBrowserMode: "visible",
     homeUrl: "https://www.douyin.com/",
     hosts: ["douyin.com"],
     detailPath: /^\/(?:video|note)\/[A-Za-z0-9_-]+(?:\/|$)/u,
     topicUrl: (topic) => `https://www.douyin.com/search/${encodeURIComponent(topic)}`,
   },
   xiaohongshu: {
-    defaultBrowserMode: "silent",
+    defaultBrowserMode: "visible",
     homeUrl: "https://www.xiaohongshu.com/explore",
     hosts: ["xiaohongshu.com"],
     detailPath: /^\/(?:explore|search_result|discovery\/item)\/[A-Za-z0-9_-]+(?:\/|$)/u,
@@ -17,7 +17,7 @@ const PLATFORM_SPECS = Object.freeze({
       `https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(topic)}`,
   },
   kuaishou: {
-    defaultBrowserMode: "silent",
+    defaultBrowserMode: "visible",
     homeUrl: "https://www.kuaishou.com/brilliant",
     hosts: ["kuaishou.com"],
     detailPath: /^\/short-video\/[A-Za-z0-9_-]{8,}(?:\/|$)/u,
@@ -25,7 +25,7 @@ const PLATFORM_SPECS = Object.freeze({
       `https://www.kuaishou.com/search/${encodeURIComponent(topic)}`,
   },
   toutiao: {
-    defaultBrowserMode: "silent",
+    defaultBrowserMode: "visible",
     homeUrl: "https://www.toutiao.com/",
     hosts: ["toutiao.com", "toutiaoimg.cn", "weitoutiao.zjurl.cn"],
     detailPath: /^\/(?:article|video|w)\/\d+(?:\/|$)/u,
@@ -34,7 +34,7 @@ const PLATFORM_SPECS = Object.freeze({
       `https://so.toutiao.com/search?keyword=${encodeURIComponent(topic)}&pd=information&source=search_subtab_switch&from=information&aid=1455`,
   },
   weibo: {
-    defaultBrowserMode: "silent",
+    defaultBrowserMode: "visible",
     homeUrl: "https://weibo.com/hot/weibo/102803",
     hosts: ["weibo.com", "weibo.cn"],
     detailPath: /^\/(?:\d+\/[A-Za-z0-9]+|(?:status|detail)\/[A-Za-z0-9]+|tv\/show\/\d+:\d+)(?:\/|$)/u,
@@ -42,7 +42,7 @@ const PLATFORM_SPECS = Object.freeze({
     topicUrl: (topic) => `https://s.weibo.com/weibo?q=${encodeURIComponent(topic)}`,
   },
   tiktok: {
-    defaultBrowserMode: "silent",
+    defaultBrowserMode: "visible",
     homeUrl: "https://www.tiktok.com/",
     hosts: ["tiktok.com"],
     detailPath: /^\/@[^/]+\/(?:video|photo)\/\d+(?:\/|$)/u,
@@ -50,7 +50,7 @@ const PLATFORM_SPECS = Object.freeze({
     topicUrl: (topic) => `https://www.tiktok.com/search?q=${encodeURIComponent(topic)}`,
   },
   youtube: {
-    defaultBrowserMode: "silent",
+    defaultBrowserMode: "visible",
     homeUrl: "https://www.youtube.com/",
     hosts: ["youtube.com", "youtu.be"],
     detailPath: /^\/(?:watch\/?$|(?:shorts|live)\/[A-Za-z0-9_-]{11}(?:\/|$))/u,
@@ -62,7 +62,7 @@ const PLATFORM_SPECS = Object.freeze({
 export const SUPPORTED_PLATFORMS = Object.freeze(Object.keys(PLATFORM_SPECS));
 
 export function resolveBrowserMode(platform, mode) {
-  const resolved = mode ?? (platform ? platformSpec(platform).defaultBrowserMode : "silent");
+  const resolved = mode ?? (platform ? platformSpec(platform).defaultBrowserMode : "visible");
   if (!["visible", "silent"].includes(resolved)) throw new Error("browser_mode_invalid");
   return resolved;
 }

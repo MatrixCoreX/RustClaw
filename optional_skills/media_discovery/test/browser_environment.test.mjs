@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
   AUTOMATION_BLINK_FLAG,
   AUTOMATION_DEFAULT_ARG,
+  desktopSessionEnvironment,
   launchPlatformBrowser,
   nativeBrowserEnvironment,
   persistentContextLaunchOptions,
@@ -41,8 +43,33 @@ test("launch options drop Chromium automation switch without spoofing identity",
   assert.deepEqual(headed.ignoreDefaultArgs, [AUTOMATION_DEFAULT_ARG]);
   assert.equal(headed.args.includes(AUTOMATION_BLINK_FLAG), true);
   assert.equal(headed.args.includes("--ozone-platform=wayland"), true);
+  assert.equal(headed.env.WAYLAND_DISPLAY, "wayland-0");
   assert.equal(headed.userAgent, undefined);
   assert.equal(headed.proxy, undefined);
+});
+
+test("system-service execution discovers the current user's Wayland session", async t => {
+  const runtime = await fs.mkdtemp(path.join(os.tmpdir(), "discovery-desktop-session-"));
+  const socketPath = path.join(runtime, "wayland-7");
+  const authorityPath = path.join(runtime, ".mutter-Xwaylandauth.fixture");
+  const server = net.createServer();
+  t.after(async () => {
+    await new Promise(resolve => server.close(resolve));
+    await fs.rm(runtime, { recursive: true, force: true });
+  });
+  await new Promise((resolve, reject) => server.listen(socketPath, resolve).once("error", reject));
+  await fs.writeFile(authorityPath, "fixture");
+
+  const environment = desktopSessionEnvironment({}, {
+    hostPlatform: "linux",
+    effectiveUid: null,
+    runtimeDirectory: runtime,
+    x11SocketDirectory: path.join(runtime, "missing-x11"),
+  });
+  assert.equal(environment.XDG_RUNTIME_DIR, runtime);
+  assert.equal(environment.WAYLAND_DISPLAY, "wayland-7");
+  assert.equal(environment.XAUTHORITY, authorityPath);
+  assert.equal(environment.DISPLAY, undefined);
 });
 
 test("native settings cover Linux/macOS architectures without fabricating browser identity", () => {

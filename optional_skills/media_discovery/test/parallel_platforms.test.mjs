@@ -116,7 +116,8 @@ test("one-shot without a platform randomly divides the default ten-item total", 
 
 test("manual login waits on one platform while another completes", { timeout: 10000 }, async t => {
   const { call, root } = await fixture(t);
-  await call({ action: "enable", platforms: ["douyin", "xiaohongshu"], max_items_per_run: 1, confirm: true });
+  await call({ action: "enable", platforms: ["douyin", "xiaohongshu"], max_items_per_run: 1,
+    browser_mode: "silent", confirm: true });
   const login = deferred();
   let waiting = false, peerFinished = false, attempts = 0;
   const job = call({ action: "run_enabled_once" }, {
@@ -230,7 +231,8 @@ test("fatal platform failure does not cancel another platform's current post", {
 test("manual login retry only consumes the remaining per-platform quota", async t => {
   const { call } = await fixture(t);
   const limits = [];
-  const result = await call({ action: "run_once", platform: "douyin", max_items_per_run: 2 }, {
+  const result = await call({ action: "run_once", platform: "douyin", max_items_per_run: 2,
+    browser_mode: "silent" }, {
     waitForInteractiveLogin: async () => ({ ready: true }),
     collectPlatform: async ({ platform, limit, onPage }) => {
       limits.push(limit);

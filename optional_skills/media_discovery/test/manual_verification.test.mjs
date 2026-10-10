@@ -85,7 +85,8 @@ test("a confirmed silent challenge retries in a visible browser", async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "media-discovery-visible-retry-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const modes = [];
-  const result = await handleRequest({ args: { action: "run_once", platform: "douyin", max_items_per_run: 1 },
+  const result = await handleRequest({ args: { action: "run_once", platform: "douyin",
+    max_items_per_run: 1, browser_mode: "silent" },
     context: { skill_storage: { storage_kind: "directory", directory_path: root } } }, {
     collectPlatform: async (request) => {
       modes.push(request.config.browser_mode);
@@ -115,7 +116,7 @@ test("the rejected collection URL reaches the manual browser unchanged", async t
   const targetUrl = "https://www.douyin.com/search/finance";
   let windows = 0;
   const result = await handleRequest({ args: { action: "run_once", platform: "douyin",
-    source_mode: "topics", topics: ["finance"] },
+    source_mode: "topics", topics: ["finance"], browser_mode: "silent" },
     context: { skill_storage: { storage_kind: "directory", directory_path: root } } }, {
     collectPlatform: async () => { throw Object.assign(new Error("challenge_required"), { discovery_target_url: targetUrl }); },
     waitForInteractiveLogin: async ({ targetUrl: actual }) => {
@@ -158,7 +159,8 @@ test("a second silent challenge pauses only the affected platform", async t => {
   const context = { skill_storage: { storage_kind: "directory", directory_path: root } };
   await handleRequest({ args: { action: "enable", platforms: ["douyin", "xiaohongshu"], confirm: true }, context });
   let attempts = 0, windows = 0;
-  const result = await handleRequest({ args: { action: "run_once", platform: "douyin" }, context }, {
+  const result = await handleRequest({ args: { action: "run_once", platform: "douyin",
+    browser_mode: "silent" }, context }, {
     collectPlatform: async () => { attempts += 1; throw new Error("challenge_required"); },
     waitForInteractiveLogin: async ({ onOpened }) => {
       windows += 1;
@@ -189,7 +191,8 @@ test("closing or timing out verification pauses its platform without repeated po
     const context = { skill_storage: { storage_kind: "directory", directory_path: root } };
     await handleRequest({ args: { action: "enable", platform: "douyin", confirm: true }, context });
     let popups = 0;
-    const result = await handleRequest({ args: { action: "run_once", platform: "douyin" }, context }, {
+    const result = await handleRequest({ args: { action: "run_once", platform: "douyin",
+      browser_mode: "silent" }, context }, {
       collectPlatform: async () => { throw new Error("login_required"); },
       waitForInteractiveLogin: async ({ errorCode, shouldStop, timeoutMs }) => {
         popups += 1;

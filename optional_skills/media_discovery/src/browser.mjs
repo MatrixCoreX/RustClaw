@@ -3,7 +3,7 @@ import { constants as fsConstants } from "node:fs";
 import path from "node:path";
 import { browserStageError, recordBrowserFailure } from "./browser_diagnostics.mjs";
 import { createManualConfirmation } from "./manual_handoff.mjs";
-import { launchPlatformBrowser } from "./browser_environment.mjs";
+import { desktopSessionEnvironment, launchPlatformBrowser } from "./browser_environment.mjs";
 import { capturePublication } from "./publication.mjs";
 import { assertNavigationResponse, boundedBrowserOperation, normalizeBrowserError, openKeywordSearch } from "./browser_search.mjs";
 import { assertBrowserFlow, observePlatformBackpressure, pacingDelayMs, stopsCollection } from "./browser_flow_control.mjs";
@@ -374,7 +374,8 @@ export async function captureEngagementMetrics(scope, platform, capturedAt) {
 export function guiAvailable(environment = process.env, platform = process.platform) {
   if (platform === "darwin") return true;
   if (platform !== "linux") return false;
-  return Boolean(environment.DISPLAY || environment.WAYLAND_DISPLAY);
+  const desktop = desktopSessionEnvironment(environment, { hostPlatform: platform });
+  return Boolean(desktop.DISPLAY || desktop.WAYLAND_DISPLAY);
 }
 
 async function existingExecutable() {
@@ -1119,7 +1120,7 @@ async function collectToutiaoOpenedPage(page, root, runId, itemUrl, config, disc
   const publication = await capturePublication(page, "toutiao", itemId);
   const common = {
     platform: "toutiao",
-    browser_mode: config.browser_mode || "silent",
+    browser_mode: config.browser_mode || "visible",
     source_mode: discoverySource.source_mode,
     search_keyword: discoverySource.search_keyword || "",
     discovery_source_url: discoverySource.url,
@@ -1293,7 +1294,7 @@ export async function collectRenderedImages({
         kind: "image",
         dedup_key: `${itemId}:image:${imageDigest}`,
         platform,
-        browser_mode: config.browser_mode || "silent",
+        browser_mode: config.browser_mode || "visible",
         source_mode: discoverySource?.source_mode || config.source_mode || "home_feed",
         search_keyword: discoverySource?.search_keyword || "",
         discovery_source_url: discoverySource?.url || sourcePageUrl,
@@ -1635,7 +1636,7 @@ async function collectOpenedPage(page, root, runId, platform, itemUrl, config, d
           kind: "video",
           dedup_key: `${itemId}:video`,
           platform,
-          browser_mode: config.browser_mode || "silent",
+          browser_mode: config.browser_mode || "visible",
           source_mode: discoverySource.source_mode,
           search_keyword: discoverySource.search_keyword || "",
           discovery_source_url: discoverySource.url,
@@ -1716,7 +1717,7 @@ async function collectDouyinFeedCard(page, root, runId, locator, itemId, config,
       kind: "video",
       dedup_key: `douyin:${itemId}:video`,
       platform: "douyin",
-      browser_mode: config.browser_mode || "silent",
+      browser_mode: config.browser_mode || "visible",
       source_mode: discoverySource.source_mode,
       search_keyword: discoverySource.search_keyword || "",
       discovery_source_url: discoverySource.url,
@@ -1824,7 +1825,7 @@ async function collectKuaishouFeedCard(
       kind: "video",
       dedup_key: `${itemId}:video`,
       platform: "kuaishou",
-      browser_mode: config.browser_mode || "silent",
+      browser_mode: config.browser_mode || "visible",
       source_mode: discoverySource.source_mode,
       search_keyword: discoverySource.search_keyword || "",
       discovery_source_url: discoverySource.url,
@@ -1900,7 +1901,7 @@ async function collectXiaohongshuFeedCard(
       kind: "video",
       dedup_key: `${canonicalItemId}:video`,
       platform: "xiaohongshu",
-      browser_mode: config.browser_mode || "silent",
+      browser_mode: config.browser_mode || "visible",
       source_mode: discoverySource.source_mode,
       search_keyword: discoverySource.search_keyword || "",
       discovery_source_url: discoverySource.url,

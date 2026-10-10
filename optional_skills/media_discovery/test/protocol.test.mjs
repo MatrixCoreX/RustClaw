@@ -29,7 +29,7 @@ test("schema normalization accepts singular platform without natural-language pa
   assert.equal(normalizedConfig({}).source_mode, "home_feed");
   assert.equal(normalizedConfig({}).max_items_per_run, 10);
   assert.equal(normalizedConfig({}).max_images_per_post, 0);
-  assert.equal(normalizedConfig({}).browser_mode, "silent");
+  assert.equal(normalizedConfig({}).browser_mode, "visible");
   assert.equal(normalizedConfig({}).rest_min_seconds, 180);
   assert.equal(normalizedConfig({}).rest_max_seconds, 420);
   assert.equal(normalizedConfig({}).pacing_min_delay_ms, 1000);

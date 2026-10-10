@@ -6,7 +6,7 @@ import test from "node:test";
 import { handleRequest, normalizedConfig } from "../src/main.mjs";
 import { browserCapability } from "../src/browser.mjs";
 
-const defaults = { douyin: "silent", xiaohongshu: "silent", kuaishou: "silent", toutiao: "silent", weibo: "silent", tiktok: "silent", youtube: "silent" };
+const defaults = { douyin: "visible", xiaohongshu: "visible", kuaishou: "visible", toutiao: "visible", weibo: "visible", tiktok: "visible", youtube: "visible" };
 
 async function contextFor(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "discovery-mode-"));
@@ -17,7 +17,7 @@ async function contextFor(t) {
 test("Xiaohongshu uses slower default pacing and rest than other platforms", () => {
   const xiaohongshu = normalizedConfig({ platform: "xiaohongshu" });
   const douyin = normalizedConfig({ platform: "douyin" });
-  assert.equal(xiaohongshu.browser_mode, "silent");
+  assert.equal(xiaohongshu.browser_mode, "visible");
   assert.equal(xiaohongshu.pacing_min_delay_ms, 2400);
   assert.equal(xiaohongshu.pacing_max_delay_ms, 5200);
   assert.equal(xiaohongshu.rest_min_seconds, 360);

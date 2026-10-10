@@ -8,9 +8,9 @@
 - If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
 ## Capability Summary (from interface)
-Run explicitly requested batch, feed, keyword, or continuous background browser collection for Douyin, Xiaohongshu, Kuaishou, Toutiao, Weibo, TikTok, and YouTube. A lone copied share payload or URL whose content should be downloaded and returned now belongs to `media_download.download`, even when it is used as a `seed_urls` input shape; this skill does not provide immediate single-post media delivery. All platforms default to `browser_mode=silent`. Pass `visible` only when the user explicitly asks to open a browser window. Collection prefers installed Chrome, drops Chromium's automation switch, and uses slower Xiaohongshu pacing/rest; it does not spoof UA/proxy or bypass challenges. Login/verification may open one
-temporary browser; Douyin sliders are silent-only, and `/` or `/jingxuan` plus the
-local confirm tab resume that batch in a visible browser without solving the slider.
+Run explicitly requested batch, feed, keyword, or continuous background browser collection for Douyin, Xiaohongshu, Kuaishou, Toutiao, Weibo, TikTok, and YouTube. A lone copied share payload or URL whose content should be downloaded and returned now belongs to `media_download.download`, even when it is used as a `seed_urls` input shape; this skill does not provide immediate single-post media delivery. All platforms default to `browser_mode=visible`; pass `silent` only when the user explicitly requests silent or windowless collection. Collection prefers installed Chrome, drops Chromium's automation switch, and uses slower Xiaohongshu pacing/rest; it does not spoof UA/proxy or bypass challenges. A visible run keeps the platform window available for login or human verification. An explicitly silent run may open one
+temporary manual-verification browser, and `/` or `/jingxuan` plus the local confirm
+tab resume that batch in a visible browser without solving the slider automatically.
 Rendered media screenshots, author titles (`title`), and captions (`platform_text`, empty without a distinct caption) are stored in `videos.csv` / `images.csv`, without OCR, model review, original-image or video downloads.
 Available views/likes/comments/favorites/shares retain platform display precision;
 plain integer counters also receive exact numeric values. Unavailable fields remain absent.
@@ -167,13 +167,14 @@ Finite and continuous starts emit one machine `media_discovery.collection.starte
 - When the user asks to search one or more keywords before collecting, pass
   `source_mode=topics` and place those exact search terms in `topics[]`. Do not
   invent a second keyword parameter or translate the terms unless requested.
-- Omit `browser_mode` when unspecified: every platform uses `silent`, including
-  mixed-platform requests. Pass `visible` only for an explicit user request to
-  open a browser window. Runtime consumes structured fields, not localized
-  words, to select a mode.
-- Both bounded and continuous silent runs may temporarily open one browser
-  for manual login or human verification. Do not change `browser_mode` to
-  visible for this exception. Closing, pausing, or waiting past 10 minutes
+- Omit `browser_mode` when unspecified: every platform uses `visible`, including
+  mixed-platform requests. Pass `silent` only when the user explicitly requests
+  silent, background-without-window, or headless collection. Runtime consumes
+  structured fields, not localized words, to select a mode.
+- Visible runs keep their platform browser available for manual login or human
+  verification. Explicitly silent bounded and continuous runs may temporarily
+  open one manual-verification browser without changing their saved mode. Closing,
+  pausing, or waiting past 10 minutes
   (or remaining `max_run_minutes`) pauses that platform. Bounded `run_once`
   returns `status=error` (`interactive_verification_cancelled`,
   `interactive_verification_timeout`, `manual_verification_not_restored`).
@@ -251,7 +252,7 @@ Examples of equivalent intent (documentation examples, not runtime matchers):
 | `max_scrolls_per_source` | no | Optional user scroll limit; omitted/0 traverses until target, cancellation, access barrier, or three observations without new results. |
 | `rest_min_seconds` | no | Minimum random rest between continuous batches, 5..3600, default 180, or 360 for Xiaohongshu. |
 | `rest_max_seconds` | no | Maximum random rest between continuous batches, 5..7200, default 420, or 720 for Xiaohongshu, and never below the minimum. |
-| `browser_mode` | no | Omission uses `silent` for every platform. Pass `visible` only when the user explicitly asks to open a browser. An explicit `visible` or `silent` overrides the default for all selected platforms. Preview returns `platform_configs`, plus `config` for a single platform. Resume retains the saved mode. |
+| `browser_mode` | no | Omission uses `visible` for every platform. Pass `silent` only when the user explicitly requests silent or windowless collection. An explicit `visible` or `silent` overrides the default for all selected platforms. Preview returns `platform_configs`, plus `config` for a single platform. Resume retains the saved mode. |
 | `pacing_min_delay_ms` | no | Lower interaction-delay bound, 200..5000, default 1000, or 2400 for Xiaohongshu. |
 | `pacing_max_delay_ms` | no | Upper interaction-delay bound, 200..8000, default 2800, or 5200 for Xiaohongshu, and never below the minimum. |
 | `confirm` | enable/clear_results | Must be true after runtime approval. |
