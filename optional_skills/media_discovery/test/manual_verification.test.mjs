@@ -60,6 +60,74 @@ test("a ready visible page never resumes without explicit user confirmation", as
   assert.equal(polls, 6);
 });
 
+test("forced TikTok login requires a persisted authentication cookie", async () => {
+  const page = manualPage();
+  page.url = () => "https://www.tiktok.com/foryou";
+  page.locator = selector => ({
+    evaluateAll: async () => [],
+    count: async () => selector.includes('input[type=') || selector.includes('search-error-icon') ? 0 : 1,
+  });
+  let authenticated = false;
+  const context = { cookies: async () => authenticated ? [{ name: "sessionid", value: "fixture" }] : [] };
+  let polls = 0;
+  const pending = await waitForManualAccess({ page, context, platform: "tiktok",
+    errorCode: "rate_limited", requireAuthentication: true, targetUrl: null,
+    timeoutMs: 3000, confirmation: confirmed, shouldStop: async () => ++polls > 4 });
+  assert.equal(pending.ready, false);
+  authenticated = true;
+  const ready = await waitForManualAccess({ page, context, platform: "tiktok",
+    errorCode: "rate_limited", requireAuthentication: true, targetUrl: null,
+    timeoutMs: 3000, confirmation: confirmed });
+  assert.equal(ready.ready, true);
+});
+
+test("TikTok rate limiting opens login once and retains cooldown without immediate replay", async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "media-discovery-tiktok-limit-login-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const retryAt = new Date(Date.now() + 10 * 60_000).toISOString();
+  let attempts = 0;
+  let windows = 0;
+  const result = await handleRequest({ args: { action: "run_once", platform: "tiktok",
+    source_mode: "topics", topics: ["finance"], browser_mode: "visible" },
+    context: { skill_storage: { storage_kind: "directory", directory_path: root } } }, {
+    collectPlatform: async () => {
+      attempts += 1;
+      throw Object.assign(new Error("rate_limited"), {
+        retry_after_at: retryAt,
+        discovery_target_url: "https://www.tiktok.com/search?q=finance",
+      });
+    },
+    waitForInteractiveLogin: async ({ errorCode, forceLogin, onOpened }) => {
+      windows += 1;
+      assert.equal(errorCode, "rate_limited");
+      assert.equal(forceLogin, true);
+      await onOpened();
+      return { ready: true, reason_code: "interactive_authentication_ready" };
+    },
+  });
+  assert.equal(attempts, 1);
+  assert.equal(windows, 1);
+  assert.equal(result.status, "ok");
+  assert.equal(result.extra.state, "rate_limited");
+  assert.equal(result.extra.run.error_code, "rate_limited");
+  assert.equal(result.extra.run.retry_after_at, retryAt);
+  assert.equal(result.extra.run.manual_verification.state, "login_completed_rate_limit_retained");
+});
+
+test("rate limits on other platforms do not open a login window", async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "media-discovery-other-limit-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  let windows = 0;
+  const result = await handleRequest({ args: { action: "run_once", platform: "douyin" },
+    context: { skill_storage: { storage_kind: "directory", directory_path: root } } }, {
+    collectPlatform: async () => { throw new Error("rate_limited"); },
+    waitForInteractiveLogin: async () => { windows += 1; },
+  });
+  assert.equal(windows, 0);
+  assert.equal(result.extra.state, "rate_limited");
+  assert.equal(result.extra.run.error_code, "rate_limited");
+});
+
 test("a confirmed douyin detail cannot satisfy a search-page verification", async () => {
   const page = manualPage();
   const targetUrl = "https://www.douyin.com/search/finance";

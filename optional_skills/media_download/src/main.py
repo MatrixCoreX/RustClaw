@@ -1805,6 +1805,7 @@ def _capabilities_extra() -> dict[str, Any]:
         "system_browser_cookies": False,
         "skill_owned_browser_profile": True,
         "interactive_login_platforms": [
+            "douyin",
             "xiaohongshu",
             "youtube",
             "wechat_channels",

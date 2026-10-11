@@ -35,6 +35,11 @@ import {
 } from "./storage.mjs";
 
 const SKILL_NAME = "media_discovery";
+const DEFAULT_BROWSER_PACING = Object.freeze({
+  default: Object.freeze({ interaction_min_ms: 1000, interaction_max_ms: 2800, rest_min_seconds: 180, rest_max_seconds: 420 }),
+  xiaohongshu: Object.freeze({ interaction_min_ms: 2400, interaction_max_ms: 5200, rest_min_seconds: 360, rest_max_seconds: 720 }),
+  tiktok: Object.freeze({ interaction_min_ms: 2200, interaction_max_ms: 5800, rest_min_seconds: 300, rest_max_seconds: 600 }),
+});
 const ERROR_CODES = new Set([
   "action_unsupported",
   "browser_missing",
@@ -167,9 +172,9 @@ export function normalizedConfig(args, platform = args.platform) {
   const sourceMode = String(args.source_mode || "home_feed");
   if (!new Set(["home_feed", "topics", "seed_urls"]).has(sourceMode)) throw new Error("source_mode_invalid");
   const browserMode = resolveBrowserMode(platform, args.browser_mode);
-  const xiaohongshu = platform === "xiaohongshu";
-  const pacingMinDelayMs = integer(args.pacing_min_delay_ms, xiaohongshu ? 2400 : 1000, 200, 5000);
-  const pacingMaxDelayMs = integer(args.pacing_max_delay_ms, xiaohongshu ? 5200 : 2800, 200, 8000);
+  const pacing = DEFAULT_BROWSER_PACING[platform] || DEFAULT_BROWSER_PACING.default;
+  const pacingMinDelayMs = integer(args.pacing_min_delay_ms, pacing.interaction_min_ms, 200, 5000);
+  const pacingMaxDelayMs = integer(args.pacing_max_delay_ms, pacing.interaction_max_ms, 200, 8000);
   if (pacingMaxDelayMs < pacingMinDelayMs) throw new Error("invalid_args");
   const config = {
     source_mode: sourceMode,
@@ -179,8 +184,8 @@ export function normalizedConfig(args, platform = args.platform) {
     max_images_per_post: integer(args.max_images_per_post, 0, 0),
     max_run_minutes: integer(args.max_run_minutes, 0, 0),
     max_scrolls_per_source: integer(args.max_scrolls_per_source, 0, 0),
-    rest_min_seconds: integer(args.rest_min_seconds, xiaohongshu ? 360 : 180, 5, 3600),
-    rest_max_seconds: integer(args.rest_max_seconds, xiaohongshu ? 720 : 420, 5, 7200),
+    rest_min_seconds: integer(args.rest_min_seconds, pacing.rest_min_seconds, 5, 3600),
+    rest_max_seconds: integer(args.rest_max_seconds, pacing.rest_max_seconds, 5, 7200),
     retain_diagnostics_hours: integer(args.retain_diagnostics_hours, 24, 1, 168),
     browser_mode: browserMode,
     pacing_min_delay_ms: pacingMinDelayMs,
@@ -528,29 +533,48 @@ async function runPlatformBatch(request, args, runtime = {}) {
         if (outcome?.stop_reason) run.collection_outcome = outcome;
       } catch (error) {
         const errorCode = String(error?.message || "execution_failed");
-        const interactiveLoginAllowed = config.browser_mode === "silent"
+        const rateLimitLogin = platform === "tiktok" && errorCode === "rate_limited";
+        const interactiveLoginAllowed = rateLimitLogin || config.browser_mode === "silent"
           && ["login_required", "challenge_required"].includes(errorCode);
         if (!interactiveLoginAllowed) throw error;
 
         await heartbeat(root, run.run_id, counts, waitingLifecycleState(errorCode));
         run.manual_verification = { error_code: errorCode, requested_at: new Date().toISOString(), state: "opening" };
-        const loginResult = await (runtime.waitForInteractiveLogin || waitForInteractiveLogin)({
-          root,
-          platform,
-          config,
-          errorCode,
-          targetUrl: error.discovery_target_url,
-          shouldStop: collectionRequest.shouldStop,
-          locale: request.context?.language_hint || request.context?.locale,
-          onOpened: async () => {
-            run.manual_verification.state = "awaiting_user_confirmation";
-            run.manual_verification.opened_at = new Date().toISOString();
-            await heartbeat(root, run.run_id, counts, "waiting_for_manual_verification", {
-              manual_verification: run.manual_verification,
-            });
-          },
-          timeoutMs: remainingManualVerificationTimeoutMs(deadline),
-        });
+        let loginResult;
+        try {
+          loginResult = await (runtime.waitForInteractiveLogin || waitForInteractiveLogin)({
+            root,
+            platform,
+            config,
+            errorCode,
+            targetUrl: error.discovery_target_url,
+            forceLogin: rateLimitLogin,
+            shouldStop: collectionRequest.shouldStop,
+            locale: request.context?.language_hint || request.context?.locale,
+            onOpened: async () => {
+              run.manual_verification.state = "awaiting_user_confirmation";
+              run.manual_verification.opened_at = new Date().toISOString();
+              await heartbeat(root, run.run_id, counts, "waiting_for_manual_verification", {
+                manual_verification: run.manual_verification,
+              });
+            },
+            timeoutMs: remainingManualVerificationTimeoutMs(deadline),
+          });
+        } catch (loginError) {
+          if (!rateLimitLogin) throw loginError;
+          loginResult = { ready: false, error_code: String(loginError?.message || "login_window_unavailable") };
+        }
+        if (rateLimitLogin) {
+          run.manual_verification.state = loginResult?.ready
+            ? "login_completed_rate_limit_retained"
+            : "login_incomplete_rate_limit_retained";
+          run.manual_verification.login_result_code = loginResult?.reason_code || loginResult?.error_code || null;
+          if (loginResult?.ready) run.manual_verification.confirmed_at = new Date().toISOString();
+          // Authentication may improve anonymous limits, but replaying the same
+          // request immediately defeats the server's cooldown. Preserve the
+          // original 429 receipt so continuous collection backs off normally.
+          throw error;
+        }
         if (!loginResult?.ready) {
           run.manual_verification.state = loginResult?.error_code || errorCode;
           throw new Error(loginResult?.error_code || errorCode);

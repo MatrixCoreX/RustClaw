@@ -14,14 +14,19 @@ async function contextFor(t) {
   return { skill_storage: { storage_kind: "directory", directory_path: root } };
 }
 
-test("Xiaohongshu uses slower default pacing and rest than other platforms", () => {
+test("Xiaohongshu and TikTok use conservative platform-specific pacing", () => {
   const xiaohongshu = normalizedConfig({ platform: "xiaohongshu" });
+  const tiktok = normalizedConfig({ platform: "tiktok" });
   const douyin = normalizedConfig({ platform: "douyin" });
   assert.equal(xiaohongshu.browser_mode, "visible");
   assert.equal(xiaohongshu.pacing_min_delay_ms, 2400);
   assert.equal(xiaohongshu.pacing_max_delay_ms, 5200);
   assert.equal(xiaohongshu.rest_min_seconds, 360);
   assert.equal(xiaohongshu.rest_max_seconds, 720);
+  assert.equal(tiktok.pacing_min_delay_ms, 2200);
+  assert.equal(tiktok.pacing_max_delay_ms, 5800);
+  assert.equal(tiktok.rest_min_seconds, 300);
+  assert.equal(tiktok.rest_max_seconds, 600);
   assert.equal(douyin.pacing_min_delay_ms, 1000);
   assert.equal(douyin.pacing_max_delay_ms, 2800);
   assert.equal(douyin.rest_min_seconds, 180);

@@ -70,6 +70,41 @@ test("TikTok search opens a validated canonical detail without clicking an obstr
   assert.equal(page.url(), searchUrl);
 });
 
+test("TikTok search hovers, settles, and clicks an actionable result", {
+  skip: !enabled,
+}, async t => {
+  const browser = await chromium.launch({ executablePath: (await browserCapability()).chromium_executable,
+    headless: true });
+  t.after(() => browser.close());
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  const searchUrl = "https://www.tiktok.com/search?q=markets";
+  const detailUrl = "https://www.tiktok.com/@fixture/video/7512345678901234568";
+  await context.route("**/*", route => route.fulfill({ contentType: "text/html", body:
+    route.request().url() === searchUrl
+      ? `<a href="${detailUrl}" target="_blank"
+          onmouseenter="document.body.dataset.hovered='true'"
+          onclick="document.body.dataset.clicked='true'">video</a>`
+      : '<main data-detail="true">opened</main>' }));
+  await page.goto(searchUrl);
+  let settled = false;
+  const result = await withSearchResult(page, "tiktok", detailUrl, { url: searchUrl }, async detail => {
+    assert.equal(detail.url(), detailUrl);
+    assert.equal(await detail.locator('[data-detail="true"]').count(), 1);
+    return 126;
+  }, {
+    timeoutMs: 3000,
+    settle: async candidate => {
+      settled = true;
+      assert.equal(await candidate.locator("body").getAttribute("data-hovered"), "true");
+    },
+  });
+  assert.equal(result, 126);
+  assert.equal(settled, true);
+  assert.equal(await page.locator("body").getAttribute("data-clicked"), "true");
+  assert.equal(page.url(), searchUrl);
+});
+
 test("a manual access barrier does not collect or navigate away from its prompt", { skip: !enabled }, async t => {
   const { page } = await fixture(t, { barrier: true });
   await assert.rejects(withSearchResult(page, "xiaohongshu", item, source,
@@ -100,7 +135,7 @@ test("YouTube consent selects the structural privacy-minimizing choice without l
   assert.equal(await page.locator("body").getAttribute("data-choice"), "reject");
 });
 
-test("TikTok consent prefers the explicit reject action without locale text", {
+test("TikTok consent accepts the OneTrust banner", {
   skip: !enabled,
 }, async t => {
   const browser = await chromium.launch({ executablePath: (await browserCapability()).chromium_executable,
@@ -117,7 +152,7 @@ test("TikTok consent prefers the explicit reject action without locale text", {
     });
   </script>`);
   assert.equal(await dismissTikTokConsent(page), true);
-  assert.equal(await page.locator("body").getAttribute("data-choice"), "reject");
+  assert.equal(await page.locator("body").getAttribute("data-choice"), "accept");
 });
 
 test("TikTok consent uses an explicit accept action when no reject action exists", {
@@ -133,4 +168,34 @@ test("TikTok consent uses an explicit accept action when no reject action exists
     document.querySelector('button').onclick=()=>document.querySelector('[data-e2e="cookie-banner"]').style.display='none';
   </script>`);
   assert.equal(await dismissTikTokConsent(page), true);
+});
+
+test("TikTok consent accepts the current custom-element banner", {
+  skip: !enabled,
+}, async t => {
+  const browser = await chromium.launch({ executablePath: (await browserCapability()).chromium_executable,
+    headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.setContent(`<tiktok-cookie-banner></tiktok-cookie-banner><script>
+    customElements.define('tiktok-cookie-banner', class extends HTMLElement {
+      connectedCallback() {
+        const root = this.attachShadow({mode:'open'});
+        root.innerHTML = \`<style>
+          :host { position:fixed; left:0; bottom:0; width:0; height:0 }
+          section { position:fixed; left:0; right:0; bottom:0; min-height:160px; background:#15a9ca }
+        </style><section><h2>Allow cookies from TikTok on this browser?</h2>
+          <button data-choice="decline">Decline optional cookies</button>
+          <button data-choice="accept">Allow all</button>
+        </section>\`;
+        root.querySelectorAll('button').forEach(button => button.onclick=()=>{
+          document.body.dataset.choice=button.dataset.choice;
+          this.remove();
+        });
+      }
+    });
+  </script>`);
+  assert.equal(await page.locator("tiktok-cookie-banner").isVisible(), false);
+  assert.equal(await dismissTikTokConsent(page), true);
+  assert.equal(await page.locator("body").getAttribute("data-choice"), "accept");
 });

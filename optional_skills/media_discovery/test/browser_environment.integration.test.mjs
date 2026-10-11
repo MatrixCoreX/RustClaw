@@ -105,3 +105,36 @@ test("actual manual verification popup uses the same environment and still requi
   assert.deepEqual(manual.pages(), []);
   assert.equal(await fs.readFile(path.join(root, "browser-profile", "douyin", "browser-environment.json"), "utf8"), saved);
 });
+
+test("forced TikTok rate-limit handoff opens login and verifies persisted authentication", {
+  skip: !enabled,
+}, async t => {
+  const capability = await browserCapability();
+  if (!capability.gui_available) return t.skip("display_unavailable");
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "discovery-tiktok-limit-login-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const originalLaunch = chromium.launchPersistentContext.bind(chromium);
+  let manual;
+  t.mock.method(chromium, "launchPersistentContext", async (profile, options) => {
+    manual = await originalLaunch(profile, options);
+    await manual.route("**/*", route => route.fulfill({ contentType: "text/html",
+      body: '<video width="400" height="300"></video>' }));
+    return manual;
+  });
+  const result = await waitForInteractiveLogin({ root, platform: "tiktok",
+    config: { source_mode: "topics", topics: ["finance"] }, errorCode: "rate_limited",
+    targetUrl: "https://www.tiktok.com/search?q=finance", forceLogin: true, timeoutMs: 5000,
+    onOpened: async () => {
+      const page = manual.pages().find(candidate => new URL(candidate.url()).pathname === "/login");
+      assert.ok(page);
+      await manual.addCookies([{ name: "sessionid", value: "fixture-only",
+        url: "https://www.tiktok.com", expires: Math.floor(Date.now() / 1000) + 3600 }]);
+      await page.goto("https://www.tiktok.com/foryou");
+      const control = manual.pages().find(candidate => candidate !== page);
+      await control.locator('[data-action="continue"]').click();
+    },
+  });
+  assert.equal(result.ready, true);
+  assert.equal(result.user_confirmed, true);
+  assert.deepEqual(manual.pages(), []);
+});

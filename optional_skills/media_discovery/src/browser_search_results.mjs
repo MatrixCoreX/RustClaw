@@ -37,17 +37,17 @@ export async function dismissTikTokConsent(page, timeoutMs = 5_000) {
     "#onetrust-banner-sdk:visible",
     '[data-e2e="cookie-banner"]:visible',
     '[data-testid="cookie-banner"]:visible',
+    // The current web component host has a zero-sized box while its open
+    // shadow tree paints the visible fixed banner.
+    "tiktok-cookie-banner",
   ].join(", ")).first();
   if (!await surface.count()) return true;
 
-  // Prefer the privacy-minimizing action when TikTok's consent manager exposes
-  // an explicit structural identifier. Fall back to the explicit accept action
-  // only when rejecting optional cookies is unavailable. Never choose by button
-  // order or localized prose.
+  // Accept TikTok's banner so the persisted platform profile records the
+  // choice and the fixed consent surface cannot cover captured media. Prefer
+  // stable structural identifiers; the exact accessible names cover the
+  // current web component, which does not expose the older data attributes.
   const selectors = [
-    "#onetrust-reject-all-handler:visible",
-    '[data-e2e="cookie-banner-reject"]:visible',
-    '[data-testid="cookie-banner-reject"]:visible',
     "#onetrust-accept-btn-handler:visible",
     '[data-e2e="cookie-banner-accept"]:visible',
     '[data-testid="cookie-banner-accept"]:visible',
@@ -60,9 +60,18 @@ export async function dismissTikTokConsent(page, timeoutMs = 5_000) {
       break;
     }
   }
+  if (!action) {
+    const namedAccept = surface.getByRole("button", {
+      name: /^(?:accept|allow)(?: all| all cookies| cookies)?$|^(?:全部接受|接受全部|全部同意|同意全部|允许全部)$/iu,
+    }).first();
+    if (await namedAccept.count() && await namedAccept.isVisible()) action = namedAccept;
+  }
   if (!action) return false;
-  await action.click({ timeout: timeoutMs });
-  return surface.waitFor({ state: "hidden", timeout: timeoutMs }).then(() => true, () => false);
+  // TikTok's consent handler starts follow-up network work that can keep
+  // Playwright's implicit navigation wait open even after the choice has been
+  // applied. The action disappearing is the reliable completion signal.
+  await action.click({ timeout: timeoutMs, noWaitAfter: true });
+  return action.waitFor({ state: "hidden", timeout: timeoutMs }).then(() => true, () => false);
 }
 
 export function searchResultLinkIndex(platform, hrefs, itemUrl) {
@@ -108,8 +117,25 @@ async function navigateStableDetail(page, platform, itemUrl, timeoutMs, stage) {
   );
 }
 
+async function clickSearchResult(link, page, settle, timeoutMs, allowObstructionFallback = false) {
+  const actionTimeoutMs = allowObstructionFallback ? Math.min(timeoutMs, 1_500) : timeoutMs;
+  try {
+    // Use the browser's normal input path. Scrolling the exact validated link
+    // into view, hovering it, and pausing before the click keeps navigation
+    // deliberate without synthesizing fingerprints or bypassing site gates.
+    await link.scrollIntoViewIfNeeded({ timeout: actionTimeoutMs });
+    await link.hover({ timeout: actionTimeoutMs });
+    await settle(page);
+    await link.click({ timeout: actionTimeoutMs, noWaitAfter: true });
+    return true;
+  } catch (error) {
+    if (allowObstructionFallback && error?.name === "TimeoutError") return false;
+    throw error;
+  }
+}
+
 export async function withSearchResult(page, platform, itemUrl, source, collect, {
-  shouldStop = async () => false, checkAccess = async () => null, timeoutMs = 45_000,
+  shouldStop = async () => false, checkAccess = async () => null, settle = async () => {}, timeoutMs = 45_000,
 } = {}) {
   const stage = "search_detail_open";
   if (platform === "youtube" && !await dismissYouTubeConsent(page)) {
@@ -139,13 +165,7 @@ export async function withSearchResult(page, platform, itemUrl, source, collect,
   let destination = page;
   let failure;
   try {
-    // TikTok search cards are often covered by transparent interaction layers:
-    // their anchors are structurally visible and have a stable canonical href,
-    // but Playwright's actionability check can wait until timeout. Once the
-    // exact same-origin detail identity has been validated above, navigate to
-    // that URL directly. This does not bypass an access barrier; the detail
-    // response and rendered page still pass the normal checks below.
-    if (platform === "toutiao" || platform === "tiktok") {
+    if (platform === "toutiao") {
       const response = await navigateStableDetail(page, platform, itemUrl, timeoutMs, stage);
       if (response) assertNavigationResponse(response, stage);
       const access = await checkAccess(page);
@@ -156,7 +176,24 @@ export async function withSearchResult(page, platform, itemUrl, source, collect,
       }
       return await collect(page);
     }
-    await links.nth(index).click({ timeout: timeoutMs, noWaitAfter: true });
+    const clicked = await clickSearchResult(
+      links.nth(index), page, settle, timeoutMs, platform === "tiktok",
+    );
+    // TikTok occasionally paints a transparent interaction layer over an
+    // otherwise valid result anchor. Prefer the real click above; only when the
+    // browser proves it is obstructed, open the already validated same-origin
+    // identity. Normal access/rate-limit checks still run on the detail page.
+    if (!clicked) {
+      const response = await navigateStableDetail(page, platform, itemUrl, timeoutMs, stage);
+      if (response) assertNavigationResponse(response, stage);
+      const access = await checkAccess(page);
+      if (access) throw browserStageError(access, stage);
+      if (!isDetailUrl(platform, page.url())
+        || platformItemId(platform, page.url()) !== platformItemId(platform, itemUrl)) {
+        throw browserStageError("search_detail_unavailable", stage);
+      }
+      return await collect(page);
+    }
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       if (await shouldStop()) throw browserStageError("collection_stopped", stage);

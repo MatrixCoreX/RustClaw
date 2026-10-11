@@ -38,6 +38,7 @@ from typing import Any, Callable, Iterable
 
 import image_ocr
 import media_audio
+import douyin_access
 import wechat_channels_access
 import xiaohongshu_access
 import youtube_access
@@ -2982,6 +2983,7 @@ def gather_douyin_browser_item_candidates(
     timeout: float,
     chrome_path: str,
     use_system_browser_cookies: bool = True,
+    browser_profile_dir: Path | None = None,
 ) -> tuple[list[Candidate], list[ImageCandidate], ArticleContent | None, list[str]]:
     """Read the exact requested Aweme payload from an authenticated browser page."""
     logs: list[str] = []
@@ -2991,10 +2993,15 @@ def gather_douyin_browser_item_candidates(
     target_payload: dict[str, Any] | None = None
 
     with tempfile.TemporaryDirectory(prefix="media_downloader_item_", ignore_cleanup_errors=True) as tmpdir:
-        profile_dir = Path(tmpdir)
+        profile_dir = browser_profile_dir or Path(tmpdir)
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        if browser_profile_dir is not None and douyin_access.remove_stale_chrome_singleton_artifacts(
+            profile_dir
+        ):
+            logs.append("douyin: removed stale private-profile browser lock")
         devtools_port, devtools_args = chrome_devtools_endpoint_args()
         system_cookie_import: SystemBrowserCookieImport | None = None
-        if not cookie and use_system_browser_cookies:
+        if not cookie and use_system_browser_cookies and browser_profile_dir is None:
             try:
                 system_cookie_import = import_system_douyin_cookies(profile_dir, chrome_path)
             except (OSError, sqlite3.Error) as exc:
@@ -3009,6 +3016,7 @@ def gather_douyin_browser_item_candidates(
         command = [
             chrome_path,
             "--headless=new",
+            *(["--password-store=basic"] if sys.platform.startswith("linux") else []),
             "--disable-gpu",
             "--no-sandbox",
             "--disable-dev-shm-usage",
@@ -3019,7 +3027,7 @@ def gather_douyin_browser_item_candidates(
             "--remote-allow-origins=*",
             "--window-size=1280,2000",
             f"--user-agent={DEFAULT_HEADERS['User-Agent']}",
-            f"--user-data-dir={tmpdir}",
+            f"--user-data-dir={profile_dir}",
             "--profile-directory=Default",
             "about:blank",
         ]
@@ -3164,6 +3172,8 @@ def gather_douyin_browser_item_candidates(
                     except subprocess.TimeoutExpired:
                         terminate_process(process, force=True)
                         process.wait()
+            if browser_profile_dir is not None:
+                douyin_access.remove_stale_chrome_singleton_artifacts(profile_dir)
 
     if target_payload is None:
         logs.append(f"douyin: exact-item browser found no payload for {item_id}")
@@ -3431,6 +3441,7 @@ def gather_browser_candidates(
     target_urls = prioritized_target_urls
 
     if platform == "douyin" and item_id:
+        douyin_profile = douyin_access.persistent_profile_dir(browser_profile_dir)
         exact_candidates, exact_images, exact_article, exact_logs = gather_douyin_browser_item_candidates(
             target_urls,
             item_id=item_id,
@@ -3438,8 +3449,45 @@ def gather_browser_candidates(
             timeout=timeout,
             chrome_path=chrome,
             use_system_browser_cookies=use_system_browser_cookies,
+            browser_profile_dir=douyin_profile,
         )
         logs.extend(exact_logs)
+        if (
+            exact_images
+            and douyin_profile is not None
+            and not use_system_browser_cookies
+            and not douyin_access.profile_has_authenticated_session(douyin_profile)
+        ):
+            logs.append("douyin: login_required_for_live_photo_verification")
+            print("douyin: login_required_for_live_photo_verification", file=sys.stderr)
+            login_status = douyin_access.wait_for_skill_owned_login(
+                chrome=chrome,
+                profile_dir=douyin_profile,
+                page_url=target_urls[0],
+                on_tick=raise_if_task_cancelled,
+            )
+            logs.append(f"douyin: interactive_login={login_status}")
+            print(f"douyin: interactive_login={login_status}", file=sys.stderr)
+            if login_status == "ok":
+                (
+                    authenticated_candidates,
+                    authenticated_images,
+                    authenticated_article,
+                    authenticated_logs,
+                ) = gather_douyin_browser_item_candidates(
+                    target_urls,
+                    item_id=item_id,
+                    cookie=cookie,
+                    timeout=timeout,
+                    chrome_path=chrome,
+                    use_system_browser_cookies=False,
+                    browser_profile_dir=douyin_profile,
+                )
+                logs.extend(authenticated_logs)
+                if authenticated_candidates or authenticated_images:
+                    exact_candidates = authenticated_candidates
+                    exact_images = authenticated_images
+                exact_article = richer_article(exact_article, authenticated_article)
         if douyin_exact_browser_result_is_complete(
             exact_candidates,
             exact_images,
@@ -5309,7 +5357,7 @@ def gather_candidates_for_request(
         needs_browser = (
             not candidates
             and not image_candidates
-        ) or bool(item_id and not exact_direct_match)
+        ) or bool(item_id and (image_candidates or not exact_direct_match))
         if browser_fallback and needs_browser:
             if candidates or image_candidates:
                 logs.append(

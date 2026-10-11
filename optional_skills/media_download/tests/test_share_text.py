@@ -594,6 +594,113 @@ class ShareTextTest(unittest.TestCase):
             )
         )
 
+    def test_douyin_private_login_replaces_static_preview_with_live_photo(self) -> None:
+        item_id = "7695099243883773099"
+        note_url = f"https://www.douyin.com/note/{item_id}"
+        static_image = self.downloader.ImageCandidate(
+            "https://p.test/static.webp",
+            "douyin.browser-item.image",
+            1,
+        )
+        live_photo = self.downloader.Candidate(
+            "https://v.test/live-photo.mp4",
+            "douyin.browser-item.live-photo[0]",
+            1,
+            live_photo_audio_url="https://a.test/live-photo.mp3",
+            live_photo_duration=8.0,
+        )
+        article = self.downloader.ArticleContent("", "平台正文", "作者", "test")
+
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            mock.patch.object(
+                self.downloader,
+                "find_chrome_executable",
+                return_value="/usr/bin/google-chrome",
+            ),
+            mock.patch.object(
+                self.downloader,
+                "http_get",
+                return_value=SimpleNamespace(url=note_url, content=b"{}", headers={}),
+            ),
+            mock.patch.object(
+                self.downloader,
+                "gather_douyin_browser_item_candidates",
+                side_effect=[
+                    ([], [static_image], article, ["anonymous static preview"]),
+                    ([live_photo], [], article, ["authenticated live photo"]),
+                ],
+            ) as gather_exact,
+            mock.patch.object(
+                self.downloader.douyin_access,
+                "profile_has_authenticated_session",
+                return_value=False,
+            ),
+            mock.patch.object(
+                self.downloader.douyin_access,
+                "wait_for_skill_owned_login",
+                return_value="ok",
+            ) as wait_for_login,
+        ):
+            resolved_id, videos, images, resolved_article, logs = (
+                self.downloader.gather_browser_candidates(
+                    note_url,
+                    platform="douyin",
+                    timeout=1.0,
+                    chrome_path=None,
+                    use_system_browser_cookies=False,
+                    browser_profile_dir=directory,
+                )
+            )
+
+        self.assertEqual(resolved_id, item_id)
+        self.assertEqual(videos, [live_photo])
+        self.assertEqual(images, [])
+        self.assertEqual(resolved_article, article)
+        self.assertIn("douyin: login_required_for_live_photo_verification", logs)
+        self.assertIn("authenticated live photo", logs)
+        wait_for_login.assert_called_once()
+        self.assertEqual(gather_exact.call_count, 2)
+        expected_profile = Path(directory) / "douyin"
+        self.assertTrue(
+            all(
+                call.kwargs["browser_profile_dir"] == expected_profile
+                for call in gather_exact.call_args_list
+            )
+        )
+
+    def test_douyin_exact_browser_uses_the_private_profile_directory(self) -> None:
+        process = mock.Mock()
+        process.poll.return_value = 1
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            mock.patch.object(
+                self.downloader.subprocess,
+                "Popen",
+                return_value=process,
+            ) as popen,
+            mock.patch.object(
+                self.downloader,
+                "wait_for_devtools_page_url",
+                side_effect=OSError("probe complete"),
+            ),
+        ):
+            private_profile = Path(directory) / "douyin"
+            self.downloader.gather_douyin_browser_item_candidates(
+                ["https://www.douyin.com/note/7695099243883773099"],
+                item_id="7695099243883773099",
+                cookie=None,
+                timeout=1.0,
+                chrome_path="/usr/bin/google-chrome",
+                use_system_browser_cookies=False,
+                browser_profile_dir=private_profile,
+            )
+
+        command = popen.call_args.args[0]
+        self.assertIn(f"--user-data-dir={private_profile}", command)
+        if sys.platform.startswith("linux"):
+            self.assertIn("--password-store=basic", command)
+
     def test_image_post_parser_retries_when_platform_article_is_missing(self) -> None:
         image = self.downloader.ImageCandidate("https://p.test/1.webp", "test", 1)
         article = self.downloader.ArticleContent("", "完整平台正文", "", "test")

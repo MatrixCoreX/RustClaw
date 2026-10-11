@@ -591,7 +591,7 @@ async function platformAuthenticationPresent(context, platform) {
 }
 
 export async function waitForManualAccess({ page, context, platform, errorCode, timeoutMs,
-  confirmation, targetUrl, shouldStop = async () => false }) {
+  confirmation, targetUrl, requireAuthentication = false, shouldStop = async () => false }) {
   if (!confirmation?.readAction) throw new Error("manual_confirmation_required");
   const deadline = Date.now() + Math.max(INTERACTIVE_LOGIN_POLL_MS, timeoutMs);
   let readyPolls = 0;
@@ -621,7 +621,8 @@ export async function waitForManualAccess({ page, context, platform, errorCode, 
       const visibleSelector = selector.split(",").map(part => `${part.trim()}:visible`).join(",");
       ready = action === "continue" && !accessError && await page.locator(visibleSelector).count() > 0
         && matchesManualAccessTarget(platform, targetUrl, page.url())
-        && (errorCode !== "login_required" || await platformAuthenticationPresent(context, platform));
+        && (!requireAuthentication && errorCode !== "login_required"
+          || await platformAuthenticationPresent(context, platform));
     } catch {
       // User navigation can be transient; only a verified platform document is ready.
     }
@@ -639,6 +640,7 @@ export async function waitForInteractiveLogin({
   timeoutMs = INTERACTIVE_LOGIN_TIMEOUT_MS,
   errorCode = "login_required",
   targetUrl,
+  forceLogin = false,
   shouldStop = async () => false,
   locale = process.env.LC_MESSAGES || process.env.LANG || "en",
   onOpened = async () => {},
@@ -653,7 +655,9 @@ export async function waitForInteractiveLogin({
   try {
     const page = context.pages()[0] || (await context.newPage());
     page.setDefaultTimeout(NAVIGATION_TIMEOUT_MS);
-    const loginTarget = manualVerificationTarget(platform, config, targetUrl);
+    const loginTarget = forceLogin
+      ? validatePlatformUrl(platform, platform === "tiktok" ? "https://www.tiktok.com/login" : targetUrl)
+      : manualVerificationTarget(platform, config, targetUrl);
     if (loginTarget) {
       await page.goto(loginTarget, {
         waitUntil: "domcontentloaded",
@@ -664,7 +668,8 @@ export async function waitForInteractiveLogin({
     const confirmation = await createManualConfirmation(context, page, { platform, locale });
     await onOpened();
     return await waitForManualAccess({ page, context, platform, errorCode, timeoutMs,
-      confirmation, shouldStop, targetUrl: loginTarget });
+      confirmation, shouldStop, targetUrl: forceLogin ? null : loginTarget,
+      requireAuthentication: forceLogin });
   } finally {
     await closePlatformBrowser({ context, root, platform,
       reason: "media_discovery_manual_verification_complete" });
@@ -2187,7 +2192,8 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
             await pacingWait(page, config, 0.5);
             const result = await withSearchResult(page, platform, candidate, discoverySource,
               opened => collectOpenedPage(opened, root, runId, platform, candidate, config, discoverySource),
-              { shouldStop, checkAccess: opened => currentPlatformAccessError(opened, platform) });
+              { shouldStop, checkAccess: opened => currentPlatformAccessError(opened, platform),
+                settle: opened => pacingWait(opened, config, 0.75) });
             await onPage(result);
           },
           scroll: () => pacedScroll(page, config),
@@ -2217,7 +2223,8 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
           const result = discoverySource.source_mode === "topics"
             ? await withSearchResult(page, platform, candidate, discoverySource,
               opened => collectOpenedPage(opened, root, runId, platform, candidate, config, discoverySource),
-              { shouldStop, checkAccess: opened => currentPlatformAccessError(opened, platform) })
+              { shouldStop, checkAccess: opened => currentPlatformAccessError(opened, platform),
+                settle: opened => pacingWait(opened, config, 0.75) })
             : await collectPage(page, root, runId, platform, candidate, config, discoverySource);
           await onPage(result);
           handled += 1;

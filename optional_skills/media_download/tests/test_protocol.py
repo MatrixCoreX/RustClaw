@@ -51,6 +51,10 @@ class AdapterTest(unittest.TestCase):
         self.assertTrue(response["extra"]["skill_owned_browser_profile"])
         self.assertIn("wechat_channels", response["extra"]["supported_platforms"])
         self.assertIn(
+            "douyin",
+            response["extra"]["interactive_login_platforms"],
+        )
+        self.assertIn(
             "wechat_channels",
             response["extra"]["interactive_login_platforms"],
         )
