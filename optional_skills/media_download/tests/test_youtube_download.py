@@ -1,8 +1,10 @@
 import importlib.util
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -69,6 +71,42 @@ class YoutubeDownloadTest(unittest.TestCase):
         keyring = "+basictext" if sys.platform.startswith("linux") else ""
         self.assertEqual(browser_spec, f"chromium{keyring}:{profile_root / 'youtube' / 'Default'}")
         login.assert_called_once()
+
+    def test_saved_youtube_login_requires_a_non_expired_auth_cookie(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            profile = Path(directory) / "youtube"
+            database = profile / "Default" / "Network" / "Cookies"
+            database.parent.mkdir(parents=True)
+            chrome_epoch = 11_644_473_600
+            expired = int((time.time() + chrome_epoch - 60) * 1_000_000)
+            future = int((time.time() + chrome_epoch + 3600) * 1_000_000)
+            connection = sqlite3.connect(database)
+            try:
+                connection.execute(
+                    "create table cookies(name text, host_key text, expires_utc integer, "
+                    "value text, encrypted_value blob)"
+                )
+                connection.executemany(
+                    "insert into cookies values (?, ?, ?, ?, ?)",
+                    [
+                        ("SID", ".google.com", expired, "expired", b""),
+                        ("SAPISID", ".youtube.com", future, "", b"encrypted"),
+                    ],
+                )
+                connection.commit()
+            finally:
+                connection.close()
+
+            self.assertTrue(self.tool.youtube_access.profile_has_cookies(profile))
+
+            connection = sqlite3.connect(database)
+            try:
+                connection.execute("delete from cookies where name = 'SAPISID'")
+                connection.commit()
+            finally:
+                connection.close()
+
+            self.assertFalse(self.tool.youtube_access.profile_has_cookies(profile))
 
     def test_interactive_login_failure_returns_structured_token(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

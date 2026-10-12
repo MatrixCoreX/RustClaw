@@ -67,6 +67,22 @@ test("renders user-scoped skill queue progress", () => {
   assert.equal(view.detail, "当前任务已进入队列，将按顺序处理。 进度 0/1（0%）。");
 });
 
+test("renders opened interactive login without exposing private progress params", () => {
+  const view = buildTaskTraceEventView({
+    event_type: "skill_progress",
+    payload: {
+      skill_name: "media_discovery",
+      frame: {
+        kind: "progress",
+        detail_key: "media_discovery.login.awaiting_user",
+        params: { platform: "douyin", private_path: "/private/profile" },
+      },
+    },
+  }, "zh");
+  assert.equal(view.detail, "登录窗口已打开，请在浏览器中完成登录。");
+  assert.equal(JSON.stringify(view).includes("/private/profile"), false);
+});
+
 test("renders browser page progress from machine counts", () => {
   const view = buildTaskTraceEventView({
     event_type: "skill_progress",

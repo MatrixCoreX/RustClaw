@@ -38,14 +38,15 @@ fn model_text_is_used_verbatim_without_a_canned_fallback() {
 fn bounded_and_continuous_start_require_explicit_model_opt_in() {
     for continuous in [false, true] {
         let frame = frame(continuous);
-        let evidence = start_evidence(&frame).unwrap();
-        assert_eq!(evidence["continuous"], continuous);
-        assert_eq!(evidence["stop_capability"], "collection.disable");
+        let notice = notice(&frame).unwrap();
+        assert_eq!(notice.evidence["continuous"], continuous);
+        assert_eq!(notice.evidence["stop_capability"], "collection.disable");
+        assert!(!notice.persist_in_ui);
         let parsed = super::super::runtime_progress_notice(&frame).unwrap();
         assert_eq!(parsed.interval, std::time::Duration::ZERO);
         assert!(matches!(
             parsed.content,
-            super::super::ProgressNoticeContent::ModelStart(_)
+            super::super::ProgressNoticeContent::Model(_)
         ));
     }
     for (field, invalid) in [
@@ -57,7 +58,7 @@ fn bounded_and_continuous_start_require_explicit_model_opt_in() {
     ] {
         let mut frame = frame(true);
         frame.params.insert(field.into(), invalid);
-        assert!(start_evidence(&frame).is_none());
+        assert!(notice(&frame).is_none());
     }
 }
 
@@ -70,7 +71,33 @@ fn progress_prose_and_private_fields_cannot_enter_model_evidence() {
     frame
         .params
         .insert("private_path".into(), json!("/private/secret"));
-    let evidence = start_evidence(&frame).unwrap();
-    assert!(evidence.get("text").is_none());
-    assert!(evidence.get("private_path").is_none());
+    let notice = notice(&frame).unwrap();
+    assert!(notice.evidence.get("text").is_none());
+    assert!(notice.evidence.get("private_path").is_none());
+}
+
+#[test]
+fn login_notice_accepts_only_bounded_machine_evidence_and_is_visible_in_ui() {
+    let mut login = frame(false);
+    login.detail_key = "media_discovery.login.awaiting_user".to_string();
+    login.params = std::collections::BTreeMap::from([
+        ("notification_delivery".into(), json!("runtime")),
+        ("notification_renderer".into(), json!("model")),
+        ("notification_event".into(), json!("login_required")),
+        ("platform".into(), json!("douyin")),
+        ("reason_code".into(), json!("login_required")),
+        ("interaction".into(), json!("browser_window")),
+        ("private_path".into(), json!("/do/not/project")),
+    ]);
+    let parsed = notice(&login).expect("login notice");
+    assert_eq!(parsed.evidence["event"], "login_required");
+    assert_eq!(parsed.evidence["platform"], "douyin");
+    assert!(parsed.evidence.get("private_path").is_none());
+    assert!(parsed.persist_in_ui);
+    assert_eq!(parsed.suffix, "progress-login-required-douyin");
+
+    login
+        .params
+        .insert("reason_code".into(), json!("rate_limited"));
+    assert!(notice(&login).is_none());
 }

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import sqlite3
 import subprocess
 import sys
 import time
@@ -68,7 +69,29 @@ def profile_cookie_database(profile_dir: Path) -> Path | None:
 
 
 def profile_has_cookies(profile_dir: Path) -> bool:
-    return profile_cookie_database(profile_dir) is not None
+    database = profile_cookie_database(profile_dir)
+    if database is None:
+        return False
+    connection: sqlite3.Connection | None = None
+    try:
+        connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=1.0)
+        rows = connection.execute(
+            "select name, expires_utc, length(value), length(encrypted_value) "
+            "from cookies where host_key like '%youtube.com' or host_key like '%google.com'"
+        ).fetchall()
+    except sqlite3.Error:
+        return False
+    finally:
+        if connection is not None:
+            connection.close()
+    chrome_now = int((time.time() + 11_644_473_600) * 1_000_000)
+    return any(
+        row
+        and str(row[0]) in _AUTH_COOKIE_NAMES
+        and (int(row[2] or 0) > 0 or int(row[3] or 0) > 0)
+        and (int(row[1] or 0) == 0 or int(row[1]) > chrome_now)
+        for row in rows
+    )
 
 
 def browser_name_for_executable(chrome: str) -> str:
@@ -237,6 +260,7 @@ def wait_for_skill_owned_login(
     page_url: str,
     timeout: float = LOGIN_WAIT_SECONDS,
     on_tick: Callable[[], None] | None = None,
+    on_opened: Callable[[], None] | None = None,
 ) -> str:
     """Open a visible private profile and wait for authenticated YouTube access."""
     if not desktop_display_available():
@@ -274,6 +298,8 @@ def wait_for_skill_owned_login(
         client = DevToolsConnection(websocket_url, timeout=min(max(timeout, 1.0), 10.0))
         client.send("Runtime.enable")
         client.send("Network.enable")
+        if on_opened is not None:
+            on_opened()
         deadline = time.monotonic() + max(5.0, timeout)
         while time.monotonic() < deadline:
             if on_tick is not None:

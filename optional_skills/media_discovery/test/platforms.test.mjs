@@ -352,6 +352,7 @@ test("only an explicitly visible run waits for a machine challenge to clear", as
   const captcha = "https://rmc.bytedance.com/verifycenter/captcha/v2?scene_level=p2";
   let scans = 0;
   let waits = 0;
+  const interactiveStates = [];
   const page = {
     isClosed: () => false,
     locator: () => ({
@@ -364,13 +365,19 @@ test("only an explicitly visible run waits for a machine challenge to clear", as
   assert.equal(await accessErrorAfterExplicitVisibleWait(page, "douyin", {
     browser_mode: "visible",
     max_run_minutes: 5,
+    on_interactive_login: event => interactiveStates.push(event),
   }), null);
   assert.equal(waits, 2);
+  assert.deepEqual(interactiveStates, [
+    { state: "awaiting_user", reasonCode: "challenge_required" },
+    { state: "completed", reasonCode: "challenge_required" },
+  ]);
 
   scans = 0;
   waits = 0;
   assert.equal(await accessErrorAfterExplicitVisibleWait(page, "douyin", {
     browser_mode: "silent",
+    on_interactive_login: () => { throw new Error("silent mode must not notify before a window opens"); },
   }), "challenge_required");
   assert.equal(waits, 0);
   scans = 0;

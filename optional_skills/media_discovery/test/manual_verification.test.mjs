@@ -81,7 +81,7 @@ test("forced TikTok login requires a persisted authentication cookie", async () 
   assert.equal(ready.ready, true);
 });
 
-test("TikTok rate limiting opens login once and retains cooldown without immediate replay", async t => {
+test("TikTok rate limiting retains cooldown without opening a login window", async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "media-discovery-tiktok-limit-login-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const retryAt = new Date(Date.now() + 10 * 60_000).toISOString();
@@ -97,21 +97,17 @@ test("TikTok rate limiting opens login once and retains cooldown without immedia
         discovery_target_url: "https://www.tiktok.com/search?q=finance",
       });
     },
-    waitForInteractiveLogin: async ({ errorCode, forceLogin, onOpened }) => {
+    waitForInteractiveLogin: async () => {
       windows += 1;
-      assert.equal(errorCode, "rate_limited");
-      assert.equal(forceLogin, true);
-      await onOpened();
-      return { ready: true, reason_code: "interactive_authentication_ready" };
     },
   });
   assert.equal(attempts, 1);
-  assert.equal(windows, 1);
+  assert.equal(windows, 0);
   assert.equal(result.status, "ok");
   assert.equal(result.extra.state, "rate_limited");
   assert.equal(result.extra.run.error_code, "rate_limited");
   assert.equal(result.extra.run.retry_after_at, retryAt);
-  assert.equal(result.extra.run.manual_verification.state, "login_completed_rate_limit_retained");
+  assert.equal(result.extra.run.manual_verification, undefined);
 });
 
 test("rate limits on other platforms do not open a login window", async t => {
@@ -227,7 +223,9 @@ test("a second silent challenge pauses only the affected platform", async t => {
   const context = { skill_storage: { storage_kind: "directory", directory_path: root } };
   await handleRequest({ args: { action: "enable", platforms: ["douyin", "xiaohongshu"], confirm: true }, context });
   let attempts = 0, windows = 0;
-  const result = await handleRequest({ args: { action: "run_once", platform: "douyin",
+  const frames = [];
+  const result = await handleRequest({ request_id: "login-progress-task",
+    args: { action: "run_once", platform: "douyin",
     browser_mode: "silent" }, context }, {
     collectPlatform: async () => { attempts += 1; throw new Error("challenge_required"); },
     waitForInteractiveLogin: async ({ onOpened }) => {
@@ -238,6 +236,7 @@ test("a second silent challenge pauses only the affected platform", async t => {
       assert.equal(status.extra.active_run.manual_verification.state, "awaiting_user_confirmation");
       return { ready: true, user_confirmed: true };
     },
+    writeProgress: frame => frames.push(frame),
   });
   assert.equal(attempts, 2);
   assert.equal(windows, 1);
@@ -247,6 +246,13 @@ test("a second silent challenge pauses only the affected platform", async t => {
   assert.equal(result.extra.state, "waiting_for_manual_verification");
   assert.equal(result.extra.run.error_code, "manual_verification_not_restored");
   assert.equal(result.extra.run.manual_verification.retry_error_code, "challenge_required");
+  assert.deepEqual(frames.map(frame => frame.sequence), [1, 2, 3]);
+  assert.deepEqual(frames.map(frame => frame.detail_key), [
+    "media_discovery.collection.started",
+    "media_discovery.login.awaiting_user",
+    "media_discovery.login.completed",
+  ]);
+  assert.equal(frames[1].params.notification_event, "login_required");
   const status = await handleRequest({ args: { action: "status" }, context });
   assert.equal(status.extra.platforms.douyin.paused, true);
   assert.equal(status.extra.platforms.xiaohongshu.paused, false);

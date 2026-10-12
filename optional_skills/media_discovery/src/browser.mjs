@@ -551,23 +551,44 @@ export async function accessErrorAfterExplicitVisibleWait(page, platform, config
   let accessError = await currentPlatformAccessError(page, platform);
   const interactive = code => ["challenge_required", "login_required"].includes(code);
   if (!interactive(accessError) || config.browser_mode !== "visible") return accessError;
+  const interactiveReasonCode = accessError;
+  const notifyInteractiveState = async state => {
+    if (typeof config.on_interactive_login !== "function") return;
+    try {
+      await config.on_interactive_login({ state, reasonCode: interactiveReasonCode });
+    } catch {
+      // Notification failure must never change browser access or collection behavior.
+    }
+  };
+  await notifyInteractiveState("awaiting_user");
   const configuredMinutes = Math.max(1, Number(config.max_run_minutes) || 10);
   const deadline = Date.now() + Math.min(INTERACTIVE_LOGIN_TIMEOUT_MS, configuredMinutes * 60 * 1000);
   let readyPolls = 0;
   while (Date.now() < deadline && !page.isClosed()) {
-    if (await shouldStop()) throw browserStageError("collection_stopped", "manual_verification");
+    if (await shouldStop()) {
+      await notifyInteractiveState("cancelled");
+      throw browserStageError("collection_stopped", "manual_verification");
+    }
     await page.waitForTimeout(INTERACTIVE_CHALLENGE_POLL_MS).catch(() => {});
     if (page.isClosed()) break;
     accessError = await currentPlatformAccessError(page, platform);
     if (!accessError) {
       readyPolls += 1;
-      if (readyPolls >= 2) return null;
+      if (readyPolls >= 2) {
+        await notifyInteractiveState("completed");
+        return null;
+      }
       continue;
     }
     readyPolls = 0;
-    if (!interactive(accessError)) return accessError;
+    if (!interactive(accessError)) {
+      await notifyInteractiveState("cancelled");
+      return accessError;
+    }
   }
-  return page.isClosed() ? "interactive_verification_cancelled" : "interactive_verification_timeout";
+  const closed = page.isClosed();
+  await notifyInteractiveState(closed ? "cancelled" : "timeout");
+  return closed ? "interactive_verification_cancelled" : "interactive_verification_timeout";
 }
 
 async function withVisibleAccess(page, platform, config, shouldStop, operation) {
@@ -587,7 +608,9 @@ async function platformAuthenticationPresent(context, platform) {
   const expected = PLATFORM_AUTH_COOKIE_NAMES[platform];
   if (!expected) return false;
   const cookies = await context.cookies().catch(() => []);
-  return cookies.some((cookie) => expected.has(cookie.name) && Boolean(cookie.value));
+  const now = Date.now() / 1000;
+  return cookies.some((cookie) => expected.has(cookie.name) && Boolean(cookie.value)
+    && (!Number.isFinite(cookie.expires) || cookie.expires <= 0 || cookie.expires > now));
 }
 
 export async function waitForManualAccess({ page, context, platform, errorCode, timeoutMs,
@@ -2051,9 +2074,10 @@ async function collectKuaishouHomeFeed(
 }
 
 export async function collectPlatform({ root, runId, platform, config, limit, shouldStop, onPage, onFailure, onSearch,
+  onInteractiveLogin,
   completedPosts = new Set() }) {
   const browserMode = resolveBrowserMode(platform, config.browser_mode);
-  config = { ...config, browser_mode: browserMode };
+  config = { ...config, browser_mode: browserMode, on_interactive_login: onInteractiveLogin };
   if (browserMode === "visible" && !guiAvailable()) throw new Error("display_unavailable");
   const executablePath = await existingExecutable();
   if (!executablePath) throw new Error("browser_missing");

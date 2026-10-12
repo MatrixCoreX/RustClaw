@@ -13,7 +13,7 @@ mod model_notice;
 #[derive(Debug, Clone)]
 pub(crate) enum ProgressNoticeContent {
     Template(ChannelNotice),
-    ModelStart(Value),
+    Model(model_notice::ModelProgressNotice),
 }
 
 #[derive(Debug, Clone)]
@@ -41,11 +41,11 @@ fn public_param(value: &Value) -> Option<String> {
 pub(crate) fn runtime_progress_notice(
     frame: &skill_sdk::SkillProgressFrame,
 ) -> Option<RuntimeProgressNotice> {
-    if let Some(evidence) = model_notice::start_evidence(frame) {
+    if let Some(notice) = model_notice::notice(frame) {
         return Some(RuntimeProgressNotice {
             interval: Duration::ZERO,
             sequence: frame.sequence,
-            content: ProgressNoticeContent::ModelStart(evidence),
+            content: ProgressNoticeContent::Model(notice),
         });
     }
     if !matches!(frame.kind, skill_sdk::SkillProgressKind::Heartbeat)
@@ -130,11 +130,16 @@ pub(crate) async fn deliver_runtime_progress_notice(
     task: &crate::ClaimedTask,
     progress: &RuntimeProgressNotice,
 ) -> Result<(), String> {
-    if task.channel.trim().eq_ignore_ascii_case("ui") {
+    if task.channel.trim().eq_ignore_ascii_case("ui")
+        && !matches!(
+            &progress.content,
+            ProgressNoticeContent::Model(notice) if notice.persist_in_ui
+        )
+    {
         return Ok(());
     }
-    if let ProgressNoticeContent::ModelStart(evidence) = &progress.content {
-        return model_notice::deliver(state, task, &delivery_payload(task), evidence).await;
+    if let ProgressNoticeContent::Model(notice) = &progress.content {
+        return model_notice::deliver(state, task, &delivery_payload(task), notice).await;
     }
     let ProgressNoticeContent::Template(notice) = &progress.content else {
         return Ok(());

@@ -24,6 +24,36 @@ export function createCollectionStartReporter({ requestId, writeFrame, continuou
   };
 }
 
+const LOGIN_PROGRESS_DETAILS = Object.freeze({
+  awaiting_user: "media_discovery.login.awaiting_user",
+  completed: "media_discovery.login.completed",
+  cancelled: "media_discovery.login.cancelled",
+  timeout: "media_discovery.login.timeout",
+});
+
+export function interactiveLoginProgressFrame({ requestId, platform, reasonCode, state }) {
+  const detailKey = LOGIN_PROGRESS_DETAILS[state];
+  if (!requestId || !detailKey || !platform) return null;
+  const params = { platform, reason_code: reasonCode, interaction: "browser_window",
+    step_id: "interactive_login", step_status: state };
+  if (state === "awaiting_user") Object.assign(params, {
+    notification_delivery: "runtime", notification_renderer: "model",
+    notification_event: "login_required",
+  });
+  return {
+    schema_version: 1, record_type: "skill_progress", request_id: requestId,
+    sequence: 1, kind: "progress", detail_key: detailKey, params,
+  };
+}
+
+export function emitInteractiveLoginProgress(runtime, requestId, platform, reasonCode, state) {
+  if (typeof runtime?.writeProgress !== "function") return false;
+  const frame = interactiveLoginProgressFrame({ requestId, platform, reasonCode, state });
+  if (!frame) return false;
+  runtime.writeProgress(frame);
+  return true;
+}
+
 function nonNegativeInteger(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 0;

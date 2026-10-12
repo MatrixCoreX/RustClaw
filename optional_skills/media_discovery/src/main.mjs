@@ -10,7 +10,11 @@ import {
   waitForInteractiveLogin,
 } from "./browser.mjs";
 import { resolveBrowserMode, sourceUrls, SUPPORTED_PLATFORMS } from "./platforms.mjs";
-import { createBackgroundProgressReporter, createCollectionStartReporter } from "./progress.mjs";
+import {
+  createBackgroundProgressReporter,
+  createCollectionStartReporter,
+  emitInteractiveLoginProgress,
+} from "./progress.mjs";
 import { activeRuns, grantedBrowserParallelLimit, mapBounded, parallelPlatformLimit } from "./run_leases.mjs";
 import { completedDiscoveryPosts, optionalLimit, rememberCompletedPost } from "./collection_progress.mjs";
 import {
@@ -526,6 +530,11 @@ async function runPlatformBatch(request, args, runtime = {}) {
           });
           progressReporter.emitIfDue();
         },
+        onInteractiveLogin: async ({ state, reasonCode }) => {
+          emitInteractiveLoginProgress(
+            runtime, request.request_id, platform, reasonCode, state,
+          );
+        },
       };
       const collect = runtime.collectPlatform || collectPlatform;
       try {
@@ -533,14 +542,14 @@ async function runPlatformBatch(request, args, runtime = {}) {
         if (outcome?.stop_reason) run.collection_outcome = outcome;
       } catch (error) {
         const errorCode = String(error?.message || "execution_failed");
-        const rateLimitLogin = platform === "tiktok" && errorCode === "rate_limited";
-        const interactiveLoginAllowed = rateLimitLogin || config.browser_mode === "silent"
+        const interactiveLoginAllowed = config.browser_mode === "silent"
           && ["login_required", "challenge_required"].includes(errorCode);
         if (!interactiveLoginAllowed) throw error;
 
         await heartbeat(root, run.run_id, counts, waitingLifecycleState(errorCode));
         run.manual_verification = { error_code: errorCode, requested_at: new Date().toISOString(), state: "opening" };
         let loginResult;
+        let loginWindowOpened = false;
         try {
           loginResult = await (runtime.waitForInteractiveLogin || waitForInteractiveLogin)({
             root,
@@ -548,36 +557,42 @@ async function runPlatformBatch(request, args, runtime = {}) {
             config,
             errorCode,
             targetUrl: error.discovery_target_url,
-            forceLogin: rateLimitLogin,
             shouldStop: collectionRequest.shouldStop,
             locale: request.context?.language_hint || request.context?.locale,
             onOpened: async () => {
+              loginWindowOpened = true;
               run.manual_verification.state = "awaiting_user_confirmation";
               run.manual_verification.opened_at = new Date().toISOString();
               await heartbeat(root, run.run_id, counts, "waiting_for_manual_verification", {
                 manual_verification: run.manual_verification,
               });
+              emitInteractiveLoginProgress(
+                runtime, request.request_id, platform, errorCode, "awaiting_user",
+              );
             },
             timeoutMs: remainingManualVerificationTimeoutMs(deadline),
           });
         } catch (loginError) {
-          if (!rateLimitLogin) throw loginError;
-          loginResult = { ready: false, error_code: String(loginError?.message || "login_window_unavailable") };
-        }
-        if (rateLimitLogin) {
-          run.manual_verification.state = loginResult?.ready
-            ? "login_completed_rate_limit_retained"
-            : "login_incomplete_rate_limit_retained";
-          run.manual_verification.login_result_code = loginResult?.reason_code || loginResult?.error_code || null;
-          if (loginResult?.ready) run.manual_verification.confirmed_at = new Date().toISOString();
-          // Authentication may improve anonymous limits, but replaying the same
-          // request immediately defeats the server's cooldown. Preserve the
-          // original 429 receipt so continuous collection backs off normally.
-          throw error;
+          if (loginWindowOpened) {
+            const state = String(loginError?.message || "").includes("timeout")
+              ? "timeout" : "cancelled";
+            emitInteractiveLoginProgress(runtime, request.request_id, platform, errorCode, state);
+          }
+          throw loginError;
         }
         if (!loginResult?.ready) {
           run.manual_verification.state = loginResult?.error_code || errorCode;
+          if (loginWindowOpened) {
+            const state = loginResult?.error_code === "interactive_verification_timeout"
+              ? "timeout" : "cancelled";
+            emitInteractiveLoginProgress(runtime, request.request_id, platform, errorCode, state);
+          }
           throw new Error(loginResult?.error_code || errorCode);
+        }
+        if (loginWindowOpened) {
+          emitInteractiveLoginProgress(
+            runtime, request.request_id, platform, errorCode, "completed",
+          );
         }
         run.manual_verification.state = "retrying_visible";
         run.manual_verification.confirmed_at = new Date().toISOString();
@@ -742,7 +757,7 @@ async function runContinuous(request, runtime = {}) {
     try {
       const result = await runPlatformBatch(request, { action: "run_once" }, {
         ...runtime, backgroundPlatform: platform, workerId: worker.worker_id,
-        shouldShutdown: () => shutdown, writeProgress: undefined,
+        shouldShutdown: () => shutdown,
       });
       addCounts(counts, result.extra?.run?.counts);
       addCounts(outcome.counts, result.extra?.run?.counts);
@@ -902,6 +917,15 @@ async function clearResults(request, args) {
 }
 
 export async function handleRequest(request, runtime = {}) {
+  if (typeof runtime.writeProgress === "function" && !runtime.progressSequenceOwned) {
+    const downstream = runtime.writeProgress;
+    let sequence = 0;
+    runtime = {
+      ...runtime,
+      progressSequenceOwned: true,
+      writeProgress: frame => downstream({ ...frame, sequence: ++sequence }),
+    };
+  }
   runtime = {
     ...runtime,
     parallelLimit: runtime.parallelLimit ?? grantedBrowserParallelLimit(request?.context),

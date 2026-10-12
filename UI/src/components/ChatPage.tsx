@@ -1307,6 +1307,18 @@ function ChatWorkingIndicator({
         return t("正在下载媒体文件", "Downloading the media file");
       case "media_download.download.completed":
         return t("媒体下载完成，正在准备后续处理", "The media download is complete; preparing the next step");
+      case "media_download.login.awaiting_user":
+      case "media_discovery.login.awaiting_user":
+        return t("登录窗口已打开，请在浏览器中完成登录", "A login window is open; finish signing in there");
+      case "media_download.login.completed":
+      case "media_discovery.login.completed":
+        return t("登录已完成，正在继续任务", "Login is complete; continuing the task");
+      case "media_download.login.cancelled":
+      case "media_discovery.login.cancelled":
+        return t("登录窗口已关闭，正在整理结果", "The login window was closed; preparing the result");
+      case "media_download.login.timeout":
+      case "media_discovery.login.timeout":
+        return t("等待登录已超时，正在整理结果", "Login waiting timed out; preparing the result");
       case "local_asr.extracting_audio":
         return t("视频已下载，正在提取音频", "The video is downloaded; extracting its audio");
       case "local_asr.recognizing_speech":

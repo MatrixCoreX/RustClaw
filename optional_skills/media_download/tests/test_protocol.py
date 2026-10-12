@@ -142,7 +142,7 @@ class AdapterTest(unittest.TestCase):
 
         consumed = self.skill._child_progress(
             line,
-            lambda key, current, total: forwarded.append((key, current, total)),
+            lambda key, current, total, params=None: forwarded.append((key, current, total)),
         )
 
         self.assertTrue(consumed)
@@ -158,13 +158,41 @@ class AdapterTest(unittest.TestCase):
         self.assertTrue(
             self.skill._child_progress(
                 download_line,
-                lambda key, current, total: forwarded.append((key, current, total)),
+                lambda key, current, total, params=None: forwarded.append((key, current, total)),
             )
         )
         self.assertEqual(
             forwarded[-1],
             ("media_download.download.progress", 524288, 1048576),
         )
+
+    def test_opened_login_progress_is_forwarded_as_model_owned_machine_evidence(self) -> None:
+        forwarded = []
+        line = self.skill.CHILD_PROGRESS_PREFIX + json.dumps(
+            {
+                "detail_key": "media_download.login.awaiting_user",
+                "current": 0,
+                "total": 1,
+                "platform": "douyin",
+                "reason_code": "login_required",
+            },
+            separators=(",", ":"),
+        )
+
+        consumed = self.skill._child_progress(
+            line,
+            lambda key, current, total, params=None: forwarded.append(
+                (key, current, total, params)
+            ),
+        )
+
+        self.assertTrue(consumed)
+        self.assertEqual(forwarded[0][0], "media_download.login.awaiting_user")
+        self.assertEqual(forwarded[0][1:3], (0, 1))
+        self.assertEqual(forwarded[0][3]["notification_delivery"], "runtime")
+        self.assertEqual(forwarded[0][3]["notification_renderer"], "model")
+        self.assertEqual(forwarded[0][3]["notification_event"], "login_required")
+        self.assertEqual(forwarded[0][3]["interaction"], "browser_window")
 
     def test_child_result_metadata_is_structured_and_hidden_from_diagnostics(self) -> None:
         line = self.skill.CHILD_RESULT_PREFIX + json.dumps(

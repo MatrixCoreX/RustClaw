@@ -627,8 +627,8 @@ class ShareTextTest(unittest.TestCase):
                 self.downloader,
                 "gather_douyin_browser_item_candidates",
                 side_effect=[
-                    ([], [static_image], article, ["anonymous static preview"]),
-                    ([live_photo], [], article, ["authenticated live photo"]),
+                    ([], [static_image], article, True, ["anonymous static preview"]),
+                    ([live_photo], [], article, True, ["authenticated live photo"]),
                 ],
             ) as gather_exact,
             mock.patch.object(
@@ -668,6 +668,61 @@ class ShareTextTest(unittest.TestCase):
                 for call in gather_exact.call_args_list
             )
         )
+
+    def test_douyin_ordinary_image_post_does_not_request_login(self) -> None:
+        item_id = "7695099243883773099"
+        note_url = f"https://www.douyin.com/note/{item_id}"
+        image = self.downloader.ImageCandidate(
+            "https://p.test/ordinary.webp",
+            "douyin.browser-item.image",
+            1,
+        )
+        article = self.downloader.ArticleContent("", "普通图文", "作者", "test")
+
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            mock.patch.object(
+                self.downloader,
+                "find_chrome_executable",
+                return_value="/usr/bin/google-chrome",
+            ),
+            mock.patch.object(
+                self.downloader,
+                "http_get",
+                return_value=SimpleNamespace(url=note_url, content=b"{}", headers={}),
+            ),
+            mock.patch.object(
+                self.downloader,
+                "gather_douyin_browser_item_candidates",
+                return_value=([], [image], article, False, ["ordinary image post"]),
+            ),
+            mock.patch.object(
+                self.downloader.douyin_access,
+                "profile_has_authenticated_session",
+                return_value=False,
+            ),
+            mock.patch.object(
+                self.downloader.douyin_access,
+                "wait_for_skill_owned_login",
+            ) as wait_for_login,
+        ):
+            resolved_id, videos, images, resolved_article, logs = (
+                self.downloader.gather_browser_candidates(
+                    note_url,
+                    platform="douyin",
+                    timeout=1.0,
+                    chrome_path=None,
+                    use_system_browser_cookies=False,
+                    browser_profile_dir=directory,
+                )
+            )
+
+        self.assertEqual(resolved_id, item_id)
+        self.assertEqual(videos, [])
+        self.assertEqual(images, [image])
+        self.assertEqual(resolved_article, article)
+        self.assertIn("ordinary image post", logs)
+        wait_for_login.assert_not_called()
 
     def test_douyin_exact_browser_uses_the_private_profile_directory(self) -> None:
         process = mock.Mock()

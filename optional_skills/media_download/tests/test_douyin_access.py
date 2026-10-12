@@ -5,6 +5,7 @@ import socket
 import sqlite3
 import sys
 import tempfile
+import time
 import unittest
 
 
@@ -44,10 +45,13 @@ class DouyinAccessTest(unittest.TestCase):
             database.parent.mkdir(parents=True)
             connection = sqlite3.connect(database)
             try:
-                connection.execute("create table cookies(name text, host_key text)")
                 connection.execute(
-                    "insert into cookies values (?, ?)",
-                    ("ttwid", ".douyin.com"),
+                    "create table cookies(name text, host_key text, expires_utc integer, "
+                    "value text, encrypted_value blob)"
+                )
+                connection.execute(
+                    "insert into cookies values (?, ?, ?, ?, ?)",
+                    ("ttwid", ".douyin.com", 0, "fixture", b""),
                 )
                 connection.commit()
             finally:
@@ -58,8 +62,47 @@ class DouyinAccessTest(unittest.TestCase):
             connection = sqlite3.connect(database)
             try:
                 connection.execute(
-                    "insert into cookies values (?, ?)",
-                    ("sessionid", ".douyin.com"),
+                    "insert into cookies values (?, ?, ?, ?, ?)",
+                    ("sessionid", ".douyin.com", 0, "fixture", b""),
+                )
+                connection.commit()
+            finally:
+                connection.close()
+
+            self.assertTrue(self.access.profile_has_authenticated_session(profile))
+
+    def test_expired_or_empty_login_cookie_is_not_authenticated(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            profile = Path(directory) / "douyin"
+            database = profile / "Default" / "Network" / "Cookies"
+            database.parent.mkdir(parents=True)
+            chrome_epoch = 11_644_473_600
+            expired = int((time.time() + chrome_epoch - 60) * 1_000_000)
+            future = int((time.time() + chrome_epoch + 3600) * 1_000_000)
+            connection = sqlite3.connect(database)
+            try:
+                connection.execute(
+                    "create table cookies(name text, host_key text, expires_utc integer, "
+                    "value text, encrypted_value blob)"
+                )
+                connection.executemany(
+                    "insert into cookies values (?, ?, ?, ?, ?)",
+                    [
+                        ("sessionid", ".douyin.com", expired, "expired", b""),
+                        ("sessionid_ss", ".douyin.com", future, "", b""),
+                    ],
+                )
+                connection.commit()
+            finally:
+                connection.close()
+
+            self.assertFalse(self.access.profile_has_authenticated_session(profile))
+
+            connection = sqlite3.connect(database)
+            try:
+                connection.execute(
+                    "update cookies set encrypted_value = ? where name = ?",
+                    (b"encrypted", "sessionid_ss"),
                 )
                 connection.commit()
             finally:

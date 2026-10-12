@@ -1089,6 +1089,14 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
           ? tLocal("正在下载媒体文件。", "Downloading the media file.")
           : detailKey === "media_download.download.completed"
             ? tLocal("媒体下载完成，正在准备后续处理。", "The media download is complete; preparing the next step.")
+            : ["media_download.login.awaiting_user", "media_discovery.login.awaiting_user"].includes(detailKey)
+              ? tLocal("登录窗口已打开，请在浏览器中完成登录。", "A login window is open; finish signing in there.")
+              : ["media_download.login.completed", "media_discovery.login.completed"].includes(detailKey)
+                ? tLocal("登录已完成，任务正在继续。", "Login is complete; the task is continuing.")
+                : ["media_download.login.cancelled", "media_discovery.login.cancelled"].includes(detailKey)
+                  ? tLocal("登录窗口已关闭。", "The login window was closed.")
+                  : ["media_download.login.timeout", "media_discovery.login.timeout"].includes(detailKey)
+                    ? tLocal("等待登录已超时。", "Login waiting timed out.")
             : detailKey === "local_asr.extracting_audio"
               ? tLocal("视频已下载，正在提取音频。", "The video is downloaded; extracting its audio.")
               : detailKey === "local_asr.recognizing_speech"

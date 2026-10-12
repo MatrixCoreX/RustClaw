@@ -5,6 +5,7 @@ import {
   backgroundProgressFrame,
   backgroundReportIntervalMs,
   createBackgroundProgressReporter,
+  interactiveLoginProgressFrame,
 } from "../src/progress.mjs";
 
 test("background collection emits one structured report per fifteen-minute boundary", (t) => {
@@ -56,4 +57,19 @@ test("background report payload contains only bounded machine fields", () => {
   assert.equal(frame.params.message_key, "channel.notice.media_discovery_background_progress");
   assert.equal("text" in frame, false);
   assert.equal("error_text" in frame, false);
+});
+
+test("interactive login progress delegates only the opened-window notice to the runtime model", () => {
+  const waiting = interactiveLoginProgressFrame({ requestId: "request-1", platform: "douyin",
+    reasonCode: "login_required", state: "awaiting_user" });
+  assert.equal(waiting.detail_key, "media_discovery.login.awaiting_user");
+  assert.equal(waiting.params.notification_delivery, "runtime");
+  assert.equal(waiting.params.notification_renderer, "model");
+  assert.equal(waiting.params.notification_event, "login_required");
+  assert.equal(waiting.params.interaction, "browser_window");
+
+  const completed = interactiveLoginProgressFrame({ requestId: "request-1", platform: "douyin",
+    reasonCode: "login_required", state: "completed" });
+  assert.equal(completed.detail_key, "media_discovery.login.completed");
+  assert.equal(completed.params.notification_delivery, undefined);
 });

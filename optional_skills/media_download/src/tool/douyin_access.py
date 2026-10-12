@@ -69,14 +69,22 @@ def profile_has_authenticated_session(profile_dir: Path) -> bool:
     try:
         connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=1.0)
         rows = connection.execute(
-            "select distinct name from cookies where host_key like '%douyin.com'"
+            "select name, expires_utc, length(value), length(encrypted_value) "
+            "from cookies where host_key like '%douyin.com'"
         ).fetchall()
     except sqlite3.Error:
         return False
     finally:
         if connection is not None:
             connection.close()
-    return bool(_AUTH_COOKIE_NAMES.intersection(str(row[0]) for row in rows if row))
+    chrome_now = int((time.time() + 11_644_473_600) * 1_000_000)
+    return any(
+        row
+        and str(row[0]) in _AUTH_COOKIE_NAMES
+        and (int(row[2] or 0) > 0 or int(row[3] or 0) > 0)
+        and (int(row[1] or 0) == 0 or int(row[1]) > chrome_now)
+        for row in rows
+    )
 
 
 def remove_stale_chrome_singleton_artifacts(profile_dir: Path) -> bool:
@@ -191,6 +199,7 @@ def wait_for_skill_owned_login(
     page_url: str,
     timeout: float = LOGIN_WAIT_SECONDS,
     on_tick: Callable[[], None] | None = None,
+    on_opened: Callable[[], None] | None = None,
 ) -> str:
     """Open Douyin visibly and retain only the private profile after login."""
     desktop_environment = xiaohongshu_access.desktop_session_environment()
@@ -231,6 +240,8 @@ def wait_for_skill_owned_login(
         )
         client = DevToolsConnection(websocket_url, timeout=min(max(timeout, 1.0), 10.0))
         client.send("Network.enable")
+        if on_opened is not None:
+            on_opened()
         deadline = time.monotonic() + max(5.0, timeout)
         while time.monotonic() < deadline:
             if on_tick is not None:

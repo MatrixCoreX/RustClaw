@@ -490,6 +490,7 @@ def wait_for_skill_owned_access(
     note_id: str | None,
     timeout: float = LOGIN_WAIT_SECONDS,
     on_tick: Callable[[], None] | None = None,
+    on_opened: Callable[[], None] | None = None,
 ) -> SkillOwnedAccessResult:
     """Open the private profile and return only after the requested media is readable."""
     desktop_environment = desktop_session_environment()
@@ -528,6 +529,8 @@ def wait_for_skill_owned_access(
         )
         client = DevToolsConnection(websocket_url, timeout=min(max(timeout, 1.0), 10.0))
         client.send("Runtime.enable")
+        if on_opened is not None:
+            on_opened()
         deadline = time.monotonic() + max(5.0, timeout)
         while time.monotonic() < deadline:
             if on_tick is not None:
@@ -584,6 +587,7 @@ def wait_for_skill_owned_login(
     note_id: str | None,
     timeout: float = LOGIN_WAIT_SECONDS,
     on_tick: Callable[[], None] | None = None,
+    on_opened: Callable[[], None] | None = None,
 ) -> str:
     """Compatibility wrapper for callers that only need the structured status token."""
     return wait_for_skill_owned_access(
@@ -593,6 +597,7 @@ def wait_for_skill_owned_login(
         note_id=note_id,
         timeout=timeout,
         on_tick=on_tick,
+        on_opened=on_opened,
     ).status
 
 

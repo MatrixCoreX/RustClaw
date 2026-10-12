@@ -150,12 +150,24 @@ class ProgressReporter:
         )
         sys.stdout.flush()
 
-    def forward_child(self, detail_key: str, current: int, total: int) -> None:
-        self.emit(detail_key, current=current, total=total)
+    def forward_child(
+        self,
+        detail_key: str,
+        current: int,
+        total: int,
+        params: dict[str, Any] | None = None,
+    ) -> None:
+        self.emit(detail_key, params=params, current=current, total=total)
 
 
 def _progress_metadata(detail_key: str) -> dict[str, str]:
     step_name = ""
+    if detail_key.startswith("media_download.login."):
+        state = detail_key.rsplit(".", 1)[-1]
+        return {
+            "step_id": "interactive_login",
+            "step_status": state,
+        }
     if detail_key == "media_download.precheck.starting":
         step_name = "precheck"
     else:
@@ -1534,7 +1546,7 @@ def _run_tool(
     output_dir: Path,
     timeout_seconds: int | None,
     storage_directory: Path | None = None,
-    progress_callback: Callable[[str, int, int], None] | None = None,
+    progress_callback: Callable[[str, int, int, dict[str, Any] | None], None] | None = None,
 ) -> tuple[str, str, list[dict[str, Any]]]:
     before = _snapshot(output_dir)
     checkpoint_before = _profile_checkpoint_pointers(storage_directory)
@@ -1606,7 +1618,7 @@ def _run_process(
     environment: dict[str, str],
     timeout_seconds: int | None,
     *,
-    progress_callback: Callable[[str, int, int], None] | None = None,
+    progress_callback: Callable[[str, int, int, dict[str, Any] | None], None] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     if progress_callback is None and (
         timeout_seconds is None or timeout_seconds <= SUBPROCESS_TIMEOUT_SLICE_SECONDS
@@ -1665,7 +1677,7 @@ def _run_process(
 
 def _child_progress(
     line: str,
-    progress_callback: Callable[[str, int, int], None],
+    progress_callback: Callable[[str, int, int, dict[str, Any] | None], None],
 ) -> bool:
     stripped = line.strip()
     if not stripped.startswith(CHILD_PROGRESS_PREFIX):
@@ -1691,7 +1703,32 @@ def _child_progress(
         or current > total
     ):
         return False
-    progress_callback(detail_key, current, total)
+    params = None
+    if detail_key.startswith("media_download.login."):
+        platform = payload.get("platform")
+        reason_code = payload.get("reason_code")
+        state = detail_key.rsplit(".", 1)[-1]
+        if (
+            platform not in SUPPORTED_PLATFORMS
+            or platform == "auto"
+            or reason_code not in {"login_required", "challenge_required"}
+            or state not in {"awaiting_user", "completed", "cancelled", "timeout"}
+        ):
+            return False
+        params = {
+            "platform": platform,
+            "reason_code": reason_code,
+            "interaction": "browser_window",
+        }
+        if state == "awaiting_user":
+            params.update(
+                {
+                    "notification_delivery": "runtime",
+                    "notification_renderer": "model",
+                    "notification_event": "login_required",
+                }
+            )
+    progress_callback(detail_key, current, total, params)
     return True
 
 
@@ -1699,7 +1736,7 @@ def _run_process_with_progress(
     command: list[str],
     environment: dict[str, str],
     timeout_seconds: int | None,
-    progress_callback: Callable[[str, int, int], None],
+    progress_callback: Callable[[str, int, int, dict[str, Any] | None], None],
 ) -> subprocess.CompletedProcess[str]:
     process = subprocess.Popen(
         command,

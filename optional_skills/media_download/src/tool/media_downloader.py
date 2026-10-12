@@ -2984,7 +2984,7 @@ def gather_douyin_browser_item_candidates(
     chrome_path: str,
     use_system_browser_cookies: bool = True,
     browser_profile_dir: Path | None = None,
-) -> tuple[list[Candidate], list[ImageCandidate], ArticleContent | None, list[str]]:
+) -> tuple[list[Candidate], list[ImageCandidate], ArticleContent | None, bool, list[str]]:
     """Read the exact requested Aweme payload from an authenticated browser page."""
     logs: list[str] = []
     token = current_cancellation_token()
@@ -3177,17 +3177,18 @@ def gather_douyin_browser_item_candidates(
 
     if target_payload is None:
         logs.append(f"douyin: exact-item browser found no payload for {item_id}")
-        return [], [], None, logs
+        return [], [], None, False, logs
 
     candidates, image_candidates = extract_douyin_item_media_candidates(
         target_payload,
         source="douyin.browser-item",
     )
+    live_photo_hint = douyin_payload_is_live_photo(target_payload)
     media_type = (
         "images"
         if image_candidates
         else "live-photo-video"
-        if candidates and douyin_payload_is_live_photo(target_payload)
+        if candidates and live_photo_hint
         else "video"
         if candidates
         else "unknown"
@@ -3197,7 +3198,7 @@ def gather_douyin_browser_item_candidates(
         f"douyin: exact requested item media type={media_type} count={count} aweme_id={item_id}"
     )
     article = article_from_douyin_payload(target_payload, source="douyin.browser-item")
-    return candidates, image_candidates, article, logs
+    return candidates, image_candidates, article, live_photo_hint, logs
 
 
 TOUTIAO_RENDER_DATA_SCRIPT = r"""
@@ -3442,7 +3443,13 @@ def gather_browser_candidates(
 
     if platform == "douyin" and item_id:
         douyin_profile = douyin_access.persistent_profile_dir(browser_profile_dir)
-        exact_candidates, exact_images, exact_article, exact_logs = gather_douyin_browser_item_candidates(
+        (
+            exact_candidates,
+            exact_images,
+            exact_article,
+            exact_live_photo_hint,
+            exact_logs,
+        ) = gather_douyin_browser_item_candidates(
             target_urls,
             item_id=item_id,
             cookie=cookie,
@@ -3454,18 +3461,22 @@ def gather_browser_candidates(
         logs.extend(exact_logs)
         if (
             exact_images
+            and exact_live_photo_hint
             and douyin_profile is not None
             and not use_system_browser_cookies
             and not douyin_access.profile_has_authenticated_session(douyin_profile)
         ):
             logs.append("douyin: login_required_for_live_photo_verification")
             print("douyin: login_required_for_live_photo_verification", file=sys.stderr)
+            login_opened, login_finished = parent_login_progress_session("douyin")
             login_status = douyin_access.wait_for_skill_owned_login(
                 chrome=chrome,
                 profile_dir=douyin_profile,
                 page_url=target_urls[0],
                 on_tick=raise_if_task_cancelled,
+                on_opened=login_opened,
             )
+            login_finished(login_status)
             logs.append(f"douyin: interactive_login={login_status}")
             print(f"douyin: interactive_login={login_status}", file=sys.stderr)
             if login_status == "ok":
@@ -3473,6 +3484,7 @@ def gather_browser_candidates(
                     authenticated_candidates,
                     authenticated_images,
                     authenticated_article,
+                    authenticated_live_photo_hint,
                     authenticated_logs,
                 ) = gather_douyin_browser_item_candidates(
                     target_urls,
@@ -3487,6 +3499,7 @@ def gather_browser_candidates(
                 if authenticated_candidates or authenticated_images:
                     exact_candidates = authenticated_candidates
                     exact_images = authenticated_images
+                    exact_live_photo_hint = authenticated_live_photo_hint
                 exact_article = richer_article(exact_article, authenticated_article)
         if douyin_exact_browser_result_is_complete(
             exact_candidates,
@@ -3745,14 +3758,17 @@ def gather_browser_candidates(
             login_retry_used = True
             logs.append("xiaohongshu: login_required")
             print("xiaohongshu: login_required", file=sys.stderr)
+            login_opened, login_finished = parent_login_progress_session("xiaohongshu")
             access_result = xiaohongshu_access.wait_for_skill_owned_access(
                 chrome=chrome,
                 profile_dir=xhs_profile,
                 page_url=target_url,
                 note_id=item_id,
                 on_tick=raise_if_task_cancelled,
+                on_opened=login_opened,
             )
             status = access_result.status
+            login_finished(status)
             logs.append(f"xiaohongshu: interactive_login={status}")
             print(f"xiaohongshu: interactive_login={status}", file=sys.stderr)
             if status == "ok":
@@ -5468,6 +5484,56 @@ def emit_parent_download_progress(current: int, total: int) -> None:
     )
 
 
+def emit_parent_login_progress(
+    platform: str,
+    state: str,
+    *,
+    reason_code: str = "login_required",
+) -> None:
+    if platform not in PLATFORMS or platform == "auto":
+        return
+    if state not in {"awaiting_user", "completed", "cancelled", "timeout"}:
+        return
+    payload = {
+        "detail_key": f"media_download.login.{state}",
+        "current": 0 if state == "awaiting_user" else 1,
+        "total": 1,
+        "platform": platform,
+        "reason_code": reason_code,
+    }
+    print(
+        PARENT_PROGRESS_PREFIX + json.dumps(payload, separators=(",", ":")),
+        file=sys.stderr,
+        flush=True,
+    )
+
+
+def parent_login_progress_session(
+    platform: str,
+    *,
+    reason_code: str = "login_required",
+) -> tuple[Callable[[], None], Callable[[str], None]]:
+    opened = False
+
+    def on_opened() -> None:
+        nonlocal opened
+        opened = True
+        emit_parent_login_progress(platform, "awaiting_user", reason_code=reason_code)
+
+    def on_finished(status: str) -> None:
+        if not opened:
+            return
+        if status == "ok":
+            state = "completed"
+        elif status == "interactive_verification_timeout":
+            state = "timeout"
+        else:
+            state = "cancelled"
+        emit_parent_login_progress(platform, state, reason_code=reason_code)
+
+    return on_opened, on_finished
+
+
 def selected_video_source_contract(platform: str, candidate: Candidate) -> dict[str, Any]:
     normalized_platform = normalize_platform(platform)
     contract: dict[str, Any] = {
@@ -6176,12 +6242,15 @@ def download_youtube_video(
             and profile is not None
         ):
             print("youtube: login_required", file=sys.stderr, flush=True)
+            login_opened, login_finished = parent_login_progress_session("youtube")
             login_status = youtube_access.wait_for_skill_owned_login(
                 chrome=chrome,
                 profile_dir=profile,
                 page_url=candidate.url,
                 on_tick=raise_if_task_cancelled,
+                on_opened=login_opened,
             )
+            login_finished(login_status)
             print(f"youtube: interactive_login={login_status}", file=sys.stderr, flush=True)
             if login_status != "ok":
                 raise DouyinDownloadError(login_status)
