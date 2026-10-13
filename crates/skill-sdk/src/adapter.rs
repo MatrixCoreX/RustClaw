@@ -470,6 +470,7 @@ fn prepare_go(context: &AdapterContext<'_>) -> SkillSdkResult<PreparedPackage> {
     let mut build = sandbox_command(context, &go, &source_root, &writable)?;
     build
         .arg("build")
+        .arg("-buildvcs=false")
         .arg("-mod=readonly")
         .arg("-o")
         .arg(&destination)
