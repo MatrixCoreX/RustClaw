@@ -221,6 +221,44 @@ fn planner_prompts_do_not_treat_historical_delivery_as_current_execution() {
 }
 
 #[test]
+fn planner_prompts_do_not_inherit_expanding_modifiers_across_independent_tasks() {
+    let overlays = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts/layers/overlays");
+    for relative_path in [
+        "native_action_protocol.md",
+        "single_plan_execution_prompt.md",
+        "loop_incremental_plan_prompt.md",
+    ] {
+        let prompt =
+            std::fs::read_to_string(overlays.join(relative_path)).expect("read planner overlay");
+        let normalized = prompt.split_whitespace().collect::<Vec<_>>().join(" ");
+
+        assert!(
+            normalized.contains(
+                "Optional arguments that expand an operation into additional analysis, conversion, extraction, transformation"
+            ),
+            "{relative_path} must bind operation-expanding modifiers to the current request"
+        );
+        assert!(
+            normalized.contains(
+                "A standalone new locator or share request inherits no prior transformation"
+            ),
+            "{relative_path} must not inherit transformations across independent tasks"
+        );
+        assert!(
+            normalized.contains("semantically continues or revises that same operation"),
+            "{relative_path} must preserve genuine continuations"
+        );
+        assert!(
+            normalized.contains("_runtime_argument_evidence")
+                && normalized.contains("exact verbatim quote from the current user request")
+                && normalized
+                    .contains("runtime verifies and removes this envelope before dispatch"),
+            "{relative_path} must explain runtime-verifiable current-request evidence"
+        );
+    }
+}
+
+#[test]
 fn planner_common_rules_do_not_probe_workspace_for_capability_credentials() {
     let prompt_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts/layers");
     let common = std::fs::read_to_string(prompt_root.join("base/execution/common_rules.md"))

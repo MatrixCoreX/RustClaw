@@ -73,6 +73,11 @@ pub struct CapabilityActionRequest {
     pub required: Vec<String>,
     #[serde(default)]
     pub optional: Vec<String>,
+    /// Optional arguments whose use must be grounded by a verbatim quote from
+    /// the current user request. This is a narrowing provenance constraint, not
+    /// a permission grant.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub current_request_evidence: Vec<String>,
     #[serde(default)]
     pub input_roles: BTreeMap<String, InputSemanticRole>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -195,6 +200,27 @@ impl CapabilityRequestSet {
             }
             validate_argument_requirements(&capability.required, "required")?;
             validate_argument_requirements(&capability.optional, "optional")?;
+            validate_argument_requirements(
+                &capability.current_request_evidence,
+                "current_request_evidence",
+            )?;
+            let declared_arguments = capability
+                .required
+                .iter()
+                .chain(capability.optional.iter())
+                .flat_map(|requirement| requirement.split(['|', '+']))
+                .map(str::trim)
+                .collect::<BTreeSet<_>>();
+            if let Some(field) = capability
+                .current_request_evidence
+                .iter()
+                .find(|field| !declared_arguments.contains(field.trim()))
+            {
+                return Err(SkillSdkError::new(
+                    "capability_request_current_request_evidence_invalid",
+                    format!("name={} field={field}", capability.name),
+                ));
+            }
             for field in capability.input_roles.keys() {
                 validate_argument_field(field, "input_roles")?;
             }

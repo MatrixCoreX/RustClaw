@@ -400,7 +400,10 @@ def _safe_output_name(args: dict[str, Any]) -> str | None:
 
 def _safe_text_output_name(args: dict[str, Any], default: str) -> str:
     value = _safe_output_name(args) or default
-    if Path(value).suffix.lower() != ".txt":
+    suffix = Path(value).suffix.lower()
+    if not suffix:
+        return f"{value}.txt"
+    if suffix != ".txt":
         raise SkillFailure(
             "output_name for image text recognition must end with .txt",
             error_code="invalid_args",

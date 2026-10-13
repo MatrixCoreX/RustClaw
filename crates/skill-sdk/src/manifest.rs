@@ -1124,6 +1124,7 @@ impl PackageManifest {
                 execution_mode: RequestedExecutionMode::SyncShort,
                 required: Vec::new(),
                 optional: Vec::new(),
+                current_request_evidence: Vec::new(),
                 input_roles: BTreeMap::new(),
                 timeout_seconds: Some(self.run.timeout_seconds),
             }],

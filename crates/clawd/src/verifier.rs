@@ -304,6 +304,76 @@ fn planner_mapping_required_args(
     })
 }
 
+fn planner_mapping_current_request_evidence(
+    state: &AppState,
+    normalized_skill: &str,
+    args: &serde_json::Value,
+) -> Vec<String> {
+    let action = args
+        .as_object()
+        .and_then(|obj| obj.get("action"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    state
+        .skill_manifest(normalized_skill)
+        .and_then(|manifest| {
+            claw_core::skill_registry::select_planner_capability_mapping(
+                &manifest.planner_capabilities,
+                action,
+            )
+            .map(|mapping| mapping.current_request_evidence.clone())
+        })
+        .unwrap_or_default()
+}
+
+fn verify_and_strip_current_request_evidence(
+    state: &AppState,
+    step: &mut PlanStep,
+    normalized_skill: &str,
+    request_text: Option<&str>,
+    issues: &mut Vec<VerifyIssue>,
+) {
+    let evidence_fields =
+        planner_mapping_current_request_evidence(state, normalized_skill, &step.args);
+    let Some(args) = step.args.as_object_mut() else {
+        return;
+    };
+    let evidence = args.remove(claw_core::skill_registry::RUNTIME_ARGUMENT_EVIDENCE_FIELD);
+    if evidence_fields.is_empty() {
+        return;
+    }
+    let evidence = evidence.as_ref().and_then(Value::as_object);
+    let current_request = request_text.unwrap_or_default();
+    for field in evidence_fields {
+        if !args.get(&field).is_some_and(|value| !value.is_null()) {
+            continue;
+        }
+        let quote = evidence
+            .and_then(|values| values.get(&field))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let quote_is_current = quote.is_some_and(|quote| current_request.contains(quote));
+        if quote_is_current {
+            continue;
+        }
+        let reason = if quote.is_some() {
+            "quote_not_found_in_current_request"
+        } else {
+            "verbatim_quote_missing"
+        };
+        issues.push(VerifyIssue {
+            step_id: step.step_id.clone(),
+            kind: VerifyIssueKind::InvalidArgumentValue,
+            detail: format!(
+                "error_code=current_request_evidence_required field={field} source=current_request reason={reason}"
+            ),
+            missing_fields: Vec::new(),
+        });
+    }
+}
+
 fn planner_step_has_structured_policy(
     state: &AppState,
     normalized_skill: &str,
@@ -976,6 +1046,19 @@ pub(crate) fn verify_plan(
     let mut effective_plan_result = input.plan_result.clone();
     let capability_resolutions = resolve_capability_plan_steps(state, &mut effective_plan_result);
     let mut issues = Vec::new();
+    for step in &mut effective_plan_result.steps {
+        if !matches!(step.action_type.as_str(), "call_skill" | "call_tool") {
+            continue;
+        }
+        let normalized_skill = state.resolve_canonical_skill_name(&step.skill);
+        verify_and_strip_current_request_evidence(
+            state,
+            step,
+            &normalized_skill,
+            input.request_text,
+            &mut issues,
+        );
+    }
     apply_default_creation_targets(state, task, &mut effective_plan_result, &mut issues);
     let visible_skills: HashSet<String> = state
         .planner_available_skills_for_task(task)

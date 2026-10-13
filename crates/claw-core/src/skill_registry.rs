@@ -171,6 +171,12 @@ pub struct PlannerCapabilityMapping {
     pub required: Vec<String>,
     #[serde(default)]
     pub optional: Vec<String>,
+    /// Capability arguments that may be set only when the planner supplies a
+    /// verbatim quote from the current user request. The runtime verifies and
+    /// removes the evidence envelope before dispatch, so history cannot silently
+    /// authorize an optional modifier for a new request.
+    #[serde(default)]
+    pub current_request_evidence: Vec<String>,
     #[serde(default)]
     pub risk_level: Option<SkillRiskLevel>,
     #[serde(default)]
@@ -313,6 +319,16 @@ pub fn planner_capability_argument_schema(
         ));
     }
 
+    let evidence_fields = normalize_schema_tokens(&mapping.current_request_evidence);
+    for field in &evidence_fields {
+        if !declared_fields.contains(field) {
+            return Err(format!(
+                "planner capability `{}` current-request evidence field `{field}` is not a declared argument",
+                mapping.name
+            ));
+        }
+    }
+
     let mut properties = serde_json::Map::new();
     for field in declared_fields {
         let field_schema = source_properties
@@ -325,6 +341,30 @@ pub fn planner_capability_argument_schema(
                 )
             })?;
         properties.insert(field, field_schema);
+    }
+    if !evidence_fields.is_empty() {
+        let evidence_properties = evidence_fields
+            .iter()
+            .map(|field| {
+                (
+                    field.clone(),
+                    serde_json::json!({
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Copy an exact, verbatim quote from the current user request that authorizes this argument. Conversation history is not valid evidence."
+                    }),
+                )
+            })
+            .collect::<serde_json::Map<_, _>>();
+        properties.insert(
+            RUNTIME_ARGUMENT_EVIDENCE_FIELD.to_string(),
+            serde_json::json!({
+                "type": "object",
+                "description": "Runtime-only provenance for arguments that require explicit authorization in the current user request. Include the matching field whenever such an argument is supplied.",
+                "properties": evidence_properties,
+                "additionalProperties": false
+            }),
+        );
     }
 
     let mut required = std::collections::BTreeSet::new();
@@ -367,6 +407,8 @@ pub fn planner_capability_argument_schema(
     schema.insert("additionalProperties".to_string(), JsonValue::Bool(false));
     Ok(JsonValue::Object(schema))
 }
+
+pub const RUNTIME_ARGUMENT_EVIDENCE_FIELD: &str = "_runtime_argument_evidence";
 
 /// Selects an exact action policy, or the preferred/unique policy for an
 /// actionless direct invocation. An explicit unknown action never falls back.
@@ -983,6 +1025,7 @@ fn normalize_planner_capabilities(
             effect: mapping.effect,
             required: normalize_schema_tokens(&mapping.required),
             optional: normalize_schema_tokens(&mapping.optional),
+            current_request_evidence: normalize_schema_tokens(&mapping.current_request_evidence),
             risk_level: mapping.risk_level,
             auto_invocable: mapping.auto_invocable,
             requires_confirmation: mapping.requires_confirmation,

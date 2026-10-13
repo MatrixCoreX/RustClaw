@@ -71,6 +71,12 @@ fn planner_capability_hint(mapping: &PlannerCapabilityMapping) -> String {
     if !mapping.optional.is_empty() {
         parts.push(format!("optional={}", mapping.optional.join("|")));
     }
+    if !mapping.current_request_evidence.is_empty() {
+        parts.push(format!(
+            "current_request_evidence={}",
+            mapping.current_request_evidence.join("|")
+        ));
+    }
     if let Some(risk_level) = mapping.risk_level {
         parts.push(format!("risk={}", risk_level_token(risk_level)));
     }
@@ -171,6 +177,12 @@ fn planner_capability_leaf_description(skill: &str, mapping: &PlannerCapabilityM
     }
     if let Some(effect) = mapping.effect {
         parts.push(format!("effect={}", effect.as_token()));
+    }
+    if !mapping.current_request_evidence.is_empty() {
+        parts.push(format!(
+            "current_request_evidence={}",
+            mapping.current_request_evidence.join("|")
+        ));
     }
     if mapping.preferred {
         parts.push("preferred=true".to_string());

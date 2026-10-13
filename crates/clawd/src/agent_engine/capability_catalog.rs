@@ -52,6 +52,7 @@ pub(super) fn catalog_entries_for_task(
                 "effect": capability.effect.map(|effect| effect.as_token()),
                 "required": capability.required,
                 "optional": capability.optional,
+                "current_request_evidence": capability.current_request_evidence,
                 "risk": capability.risk_level.or(manifest.risk_level).map(risk_token),
                 "argument_schema": argument_schema,
                 "output_schema": manifest.output_schema,

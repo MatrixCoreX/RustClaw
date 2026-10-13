@@ -115,6 +115,7 @@ fn planner_capability_hint_includes_structured_contract() {
         effect: Some(PlannerCapabilityEffect::Observe),
         required: vec!["path".to_string()],
         optional: vec!["names_only".to_string()],
+        current_request_evidence: Vec::new(),
         risk_level: Some(SkillRiskLevel::Low),
         auto_invocable: None,
         requires_confirmation: None,

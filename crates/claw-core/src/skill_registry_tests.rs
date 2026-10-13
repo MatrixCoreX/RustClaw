@@ -1209,6 +1209,59 @@ fn office_create_capability_exposes_structured_operation_fields() {
 }
 
 #[test]
+fn planner_schema_exposes_runtime_evidence_only_for_declared_current_request_evidence_fields() {
+    let registry = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "evidence_fixture"
+enabled = true
+input_schema = { type = "object", properties = { query = { type = "string" }, mode = { type = "string" } } }
+planner_capabilities = [
+  { name = "fixture.search", action = "search", required = ["query"], optional = ["mode"], current_request_evidence = ["mode"] },
+]
+"#,
+    )
+    .expect("load current-request evidence fixture");
+    let manifest = registry
+        .manifest("evidence_fixture")
+        .expect("fixture manifest");
+    let mapping = registry
+        .planner_capabilities("evidence_fixture")
+        .first()
+        .expect("fixture mapping");
+    let schema = planner_capability_argument_schema(manifest.input_schema.as_ref(), mapping)
+        .expect("planner argument schema");
+
+    assert_eq!(mapping.current_request_evidence, vec!["mode"]);
+    assert_eq!(
+        schema["properties"][RUNTIME_ARGUMENT_EVIDENCE_FIELD]["properties"]["mode"]["type"],
+        "string"
+    );
+    assert_eq!(
+        schema["properties"][RUNTIME_ARGUMENT_EVIDENCE_FIELD]["additionalProperties"],
+        false
+    );
+}
+
+#[test]
+fn planner_schema_rejects_current_request_evidence_for_undeclared_argument() {
+    let error = SkillsRegistry::load_from_str(
+        r#"
+[[skills]]
+name = "evidence_fixture"
+enabled = true
+input_schema = { type = "object", properties = { query = { type = "string" }, mode = { type = "string" } } }
+planner_capabilities = [
+  { name = "fixture.search", action = "search", required = ["query"], current_request_evidence = ["mode"] },
+]
+"#,
+    )
+    .expect_err("undeclared evidence field rejected during registry admission");
+
+    assert!(error.contains("is not a declared argument"));
+}
+
+#[test]
 fn schedule_planner_requires_preview_then_structured_create() {
     let registry_path =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml");

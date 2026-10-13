@@ -65,6 +65,21 @@ deliverable in the same task. Use `control_active_turn` with `stop` only when
 the effective request ends the active work without asking for a replacement
 deliverable.
 
+Optional arguments that expand an operation into additional analysis,
+conversion, extraction, transformation, delivery formatting, or follow-up work
+must be grounded in the current effective request. Do not carry those modifiers
+from an earlier independent task, prior assistant reply, memory, or historical
+execution merely because the locator or content type is similar. A standalone
+new locator or share request inherits no prior transformation. Reuse an earlier
+modifier only when the current request semantically continues or revises that
+same operation.
+When a capability schema exposes `_runtime_argument_evidence`, every protected
+argument you supply must have a same-key value containing an exact verbatim
+quote from the current user request. If the current request has no authorizing
+quote, omit the protected argument. Never quote conversation history as current
+request evidence; the runtime verifies and removes this envelope before
+dispatch.
+
 Before applying a revision that refers to an earlier target indirectly,
 enumerate the distinct active targets that are equally compatible with that
 reference. If more than one target remains and no structured focus binding or

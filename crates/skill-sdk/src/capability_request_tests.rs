@@ -33,10 +33,44 @@ fn request() -> CapabilityRequestSet {
             execution_mode: RequestedExecutionMode::SyncShort,
             required: vec!["location".to_string()],
             optional: Vec::new(),
+            current_request_evidence: Vec::new(),
             input_roles: BTreeMap::new(),
             timeout_seconds: Some(30),
         }],
     }
+}
+
+#[test]
+fn current_request_evidence_must_reference_a_declared_argument() {
+    let mut valid = request();
+    valid.capabilities[0].current_request_evidence = vec!["location".to_string()];
+    valid.validate().expect("declared evidence field accepted");
+
+    let mut invalid = request();
+    invalid.capabilities[0].current_request_evidence = vec!["undeclared".to_string()];
+    assert_eq!(
+        invalid
+            .validate()
+            .expect_err("undeclared evidence field rejected")
+            .code,
+        "capability_request_current_request_evidence_invalid"
+    );
+}
+
+#[test]
+fn empty_current_request_evidence_preserves_legacy_manifest_digest_surface() {
+    let legacy_shape = serde_json::to_value(request()).expect("serialize request");
+    assert!(legacy_shape["capabilities"][0]
+        .get("current_request_evidence")
+        .is_none());
+
+    let mut protected = request();
+    protected.capabilities[0].current_request_evidence = vec!["location".to_string()];
+    let protected_shape = serde_json::to_value(protected).expect("serialize protected request");
+    assert_eq!(
+        protected_shape["capabilities"][0]["current_request_evidence"],
+        serde_json::json!(["location"])
+    );
 }
 
 #[test]

@@ -60,6 +60,8 @@ struct RegistryCapability {
     effect: &'static str,
     required: Vec<String>,
     optional: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    current_request_evidence: Vec<String>,
     risk_level: &'static str,
     preferred: bool,
     once_per_task: bool,
@@ -182,6 +184,7 @@ fn render_capability(
         effect: effect_token(request.effect),
         required: request.required.clone(),
         optional: request.optional.clone(),
+        current_request_evidence: request.current_request_evidence.clone(),
         risk_level: risk_token(grant.risk_level),
         preferred: true,
         once_per_task: matches!(

@@ -174,6 +174,8 @@ def capability_request_projection(
             capability["action"] = str(mapping["action"])
         if mapping.get("description"):
             capability["description"] = str(mapping["description"])
+        if mapping.get("current_request_evidence"):
+            capability["current_request_evidence"] = mapping["current_request_evidence"]
         capabilities.append(capability)
     if not capabilities:
         capabilities.append(

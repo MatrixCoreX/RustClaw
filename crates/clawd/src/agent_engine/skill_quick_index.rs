@@ -177,6 +177,12 @@ fn planner_capability_tokens(manifest: &SkillManifest) -> Vec<String> {
             if !capability.optional.is_empty() {
                 attrs.push(format!("optional={}", capability.optional.join("|")));
             }
+            if !capability.current_request_evidence.is_empty() {
+                attrs.push(format!(
+                    "current_request_evidence={}",
+                    capability.current_request_evidence.join("|")
+                ));
+            }
             if let Some(risk_level) = capability.risk_level.or(manifest.risk_level) {
                 attrs.push(format!("risk={}", skill_risk_level_token(risk_level)));
             }
@@ -291,6 +297,12 @@ pub(super) fn planner_capability_candidates(manifest: &SkillManifest) -> String 
                 attrs.push(format!(
                     "optional={}",
                     compact_declared_fields(&capability.optional)
+                ));
+            }
+            if !capability.current_request_evidence.is_empty() {
+                attrs.push(format!(
+                    "current_request_evidence={}",
+                    capability.current_request_evidence.join("|")
                 ));
             }
             attrs.extend(capability_enum_constraints(

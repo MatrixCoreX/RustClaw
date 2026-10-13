@@ -697,6 +697,28 @@ class AdapterTest(unittest.TestCase):
         self.assertEqual(command[command.index("--language") + 1], "auto")
         self.assertEqual(command[command.index("--min-line-confidence") + 1], "10")
 
+    def test_ocr_normalizes_extensionless_output_name(self) -> None:
+        self.assertEqual(
+            self.skill._safe_text_output_name(
+                {"output_name": "image_text_ocr"},
+                "default.txt",
+            ),
+            "image_text_ocr.txt",
+        )
+
+    def test_ocr_rejects_output_name_with_non_text_extension(self) -> None:
+        with self.assertRaises(self.skill.SkillFailure) as raised:
+            self.skill._safe_text_output_name(
+                {"output_name": "image_text_ocr.json"},
+                "default.txt",
+            )
+
+        self.assertEqual(raised.exception.error_code, "invalid_args")
+        self.assertEqual(
+            raised.exception.message_key,
+            "media_download.error.invalid_output_name",
+        )
+
     def test_ocr_fallback_from_vision_marks_recognition_notice(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
