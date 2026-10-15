@@ -9,7 +9,7 @@
 
 ## Capability Summary (from interface)
 - Run local speech recognition in an isolated, on-demand process package.
-- Support a host-provided `whisper.cpp` binary/model and a package-owned FunASR/ModelScope/Torch backend.
+- Support a release-bundled `whisper.cpp` binary/model and a package-owned FunASR/ModelScope/Torch backend. Development installs may instead select an operator-provided Whisper binary/model.
 - Load the selected model for one invocation only; the model never remains resident in `clawd`.
 - Split long or large inputs into bounded 16 kHz mono segments, recognize them in source order, and merge every non-empty part without truncation.
 - Return raw transcript evidence for the shared model finalizer, which performs language-preserving correction and user delivery.

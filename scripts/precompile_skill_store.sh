@@ -102,9 +102,15 @@ if [[ "$PRECOMPILE_ALL_BUNDLED" == "1" ]]; then
 			manifest="$PRECOMPILE_WORKSPACE/$manifest_relative"
 		fi
 		echo "Preinstalling bundled Skill Store package: skill=$skill_name adapter=$adapter"
+		install_args=("$manifest" "$PRECOMPILE_WORKSPACE" "$PACKAGE_ROOT" --target "$TARGET")
+		if [[ "$adapter" == "python" && -n "$PREPARED_PYTHON_WHEELS" ]]; then
+			install_args+=(--no-source-build)
+		else
+			install_args+=(--network)
+		fi
 		install_output=""
 		if ! install_output="$("$SDK_CLI" install-local \
-			"$manifest" "$PRECOMPILE_WORKSPACE" "$PACKAGE_ROOT" --network --target "$TARGET" 2>&1)"; then
+			"${install_args[@]}" 2>&1)"; then
 			printf '%s\n' "$install_output" >&2
 			exit 1
 		fi

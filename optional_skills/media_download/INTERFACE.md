@@ -129,9 +129,9 @@ Check or transcode `input_path` for X compatibility. Directories are scanned rec
 
 ## Dependencies and Configuration
 
-- Skill Store installation requires a supported x86_64/aarch64 Linux or macOS host and Python 3.13+. With network approval, the host installs the compact locked Python environment and approved system tools before enabling it.
+- Skill Store installation requires a supported x86_64/aarch64 Linux or macOS host and Python 3.13+. The full macOS release already carries the locked Python environment and approved shared tools; source/development installs may prepare them with explicit network approval.
 - Installation creates a private, hash-locked Python environment containing downloader, TLS, and text-normalization dependencies only. FunASR, ModelScope, Torch, Torchaudio, and local ASR model assets belong exclusively to `local_asr`.
-- The same installation transaction verifies or installs host-owned `ffmpeg`/`ffprobe`, Tesseract with Simplified Chinese data, and Chromium/Chrome through the detected Linux or macOS package manager. These shared tools remain installed after this skill is removed.
+- The full macOS release supplies host-owned `git`, `ffmpeg`/`ffprobe`, Tesseract with English and Simplified Chinese data, and Chromium from its verified release bundle. They remain release-managed and are not removed with this skill. Source/development installs verify or install equivalent tools through the detected package manager.
 - Runtime requests accept no raw cookies, cookie files, API tokens, credential environment variables, or package-install actions; dependency installation is an admin-only Skill Store operation.
 
 ## Success Contract

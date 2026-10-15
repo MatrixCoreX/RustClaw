@@ -142,6 +142,8 @@ jobs:
           python3 scripts/check_polyglot_skill_contracts.py --require-all
           python3 scripts/check_on_demand_skill_builds.py
           python3 scripts/check_cross_platform_contracts.py
+          python3 scripts/check_rag_contracts.py --self-test
+          python3 scripts/check_rag_contracts.py
 
       - name: Prepare locked browser skill runtime assets
         run: npm ci --ignore-scripts --prefix crates/skills/browser_web
@@ -168,6 +170,47 @@ jobs:
         run: |
           set -euo pipefail
           ./scripts/precompile_skill_store.sh "${RUST_TARGET}"
+
+      - name: Bundle macOS skill software dependencies
+        shell: bash
+        env:
+          CHI_SIM_SHA256: a5fcb6f0db1e1d6d8522f39db4e848f05984669172e584e8d76b6b3141e1f730
+          WHISPER_MODEL_SHA256: 60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe
+        run: |
+          set -euo pipefail
+          export HOMEBREW_NO_AUTO_UPDATE=1
+          brew install ffmpeg tesseract git whisper.cpp
+
+          npm ci --ignore-scripts --prefix optional_skills/media_discovery
+          playwright_root="${RUNNER_TEMP}/playwright-browsers"
+          PLAYWRIGHT_BROWSERS_PATH="${playwright_root}" \
+            optional_skills/media_discovery/node_modules/.bin/playwright install chromium
+          chromium_executable="$(PLAYWRIGHT_BROWSERS_PATH="${playwright_root}" node -e \
+            'const { chromium } = require("./optional_skills/media_discovery/node_modules/playwright"); process.stdout.write(chromium.executablePath())')"
+          [[ -x "${chromium_executable}" ]]
+
+          dependency_downloads="${RUNNER_TEMP}/skill-dependency-downloads"
+          mkdir -p "${dependency_downloads}"
+          curl --fail --location --retry 3 \
+            --output "${dependency_downloads}/chi_sim.traineddata" \
+            https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/4.1.0/chi_sim.traineddata
+          echo "${CHI_SIM_SHA256}  ${dependency_downloads}/chi_sim.traineddata" | shasum -a 256 -c -
+          curl --fail --location --retry 3 \
+            --output "${dependency_downloads}/ggml-base.bin" \
+            https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
+          echo "${WHISPER_MODEL_SHA256}  ${dependency_downloads}/ggml-base.bin" | shasum -a 256 -c -
+
+          python3 scripts/bundle_macos_skill_dependencies.py \
+            --destination "target/release-host-tools/${RUST_TARGET}" \
+            --git-prefix "$(brew --prefix git)" \
+            --ffmpeg "$(brew --prefix ffmpeg)/bin/ffmpeg" \
+            --ffprobe "$(brew --prefix ffmpeg)/bin/ffprobe" \
+            --tesseract "$(brew --prefix tesseract)/bin/tesseract" \
+            --tessdata "$(brew --prefix tesseract)/share/tessdata" \
+            --chi-sim "${dependency_downloads}/chi_sim.traineddata" \
+            --chromium "${chromium_executable}" \
+            --whisper-cli "$(brew --prefix whisper.cpp)/bin/whisper-cli" \
+            --whisper-model "${dependency_downloads}/ggml-base.bin"
 
       - name: Verify native skill receipts
         shell: bash
@@ -206,6 +249,7 @@ jobs:
             APP_RELEASE_PYTHON_WHEELS_ROOT="$PWD/release-wheel-bundles" \
             APP_RELEASE_PYTHON_RUNTIME_ROOT="${python_runtime_root}" \
             APP_RELEASE_NODE_RUNTIME_ROOT="${node_runtime_root}" \
+            APP_RELEASE_HOST_TOOLS_ROOT="$PWD/target/release-host-tools/${RUST_TARGET}" \
             APP_PACKAGE_TARGET="${RUST_TARGET}" \
             APP_RELEASE_COMMIT="${RELEASE_COMMIT}" \
             APP_RELEASE_INSTALL_ALL_BUNDLED_SKILLS=1 \
@@ -350,6 +394,28 @@ jobs:
           [[ -x "${runtime_root}/target/release/skillctl" ]]
           [[ -x "${runtime_root}/prebuilt/toolchains/python/bin/python3" ]]
           [[ -x "${runtime_root}/prebuilt/toolchains/node/bin/node" ]]
+          host_tools="${runtime_root}/prebuilt/toolchains/host"
+          for tool in git ffmpeg ffprobe tesseract chromium whisper-cli; do
+            [[ -x "${host_tools}/bin/${tool}" ]]
+          done
+          [[ -f "${host_tools}/share/tessdata/chi_sim.traineddata" ]]
+          [[ -f "${host_tools}/models/whisper/ggml-base.bin" ]]
+          "${host_tools}/bin/git" --version
+          "${host_tools}/bin/ffmpeg" -version >/dev/null
+          "${host_tools}/bin/ffprobe" -version >/dev/null
+          "${host_tools}/bin/tesseract" --list-langs | grep -qx 'chi_sim'
+          "${host_tools}/bin/chromium" --version
+          media_fixture="${RUNNER_TEMP}/bundled-media-smoke.wav"
+          "${host_tools}/bin/ffmpeg" -hide_banner -loglevel error -f lavfi \
+            -i anullsrc=r=16000:cl=mono -t 0.5 -y "${media_fixture}"
+          "${host_tools}/bin/ffprobe" -v error -select_streams a:0 \
+            -show_entries stream=codec_name -of default=nw=1 "${media_fixture}" | grep -q 'codec_name=pcm_s16le'
+          "${host_tools}/bin/whisper-cli" \
+            -m "${host_tools}/models/whisper/ggml-base.bin" \
+            -f "${media_fixture}" -nt >/dev/null
+          if [[ "${PACKAGE_ARCH}" == "aarch64" ]]; then
+            find "${runtime_root}/data/skills/local_asr" -type f -name model.pt -print -quit | grep -q .
+          fi
 
           expected_count=0
           while IFS= read -r skill_name; do
@@ -402,6 +468,16 @@ jobs:
             dist-release/agent-desktop_*.dmg.sha256
             dist-release/agent-desktop_*.app.zip
             dist-release/agent-desktop_*.app.zip.sha256
+            dist-release/${{ steps.meta.outputs.installer_name }}
+            dist-release/${{ steps.meta.outputs.installer_name }}.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload verified PKG only
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: agent-runtime-macos-installer-${{ inputs.architecture }}-${{ inputs.release_version }}
+          path: |
             dist-release/${{ steps.meta.outputs.installer_name }}
             dist-release/${{ steps.meta.outputs.installer_name }}.sha256
           if-no-files-found: error

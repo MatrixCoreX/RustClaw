@@ -61,6 +61,7 @@ APP_PACKAGE_TARGET="${APP_PACKAGE_TARGET:-$HOST_RUST_TARGET}"
 INSTALL_ALL_BUNDLED_SKILLS="${APP_RELEASE_INSTALL_ALL_BUNDLED_SKILLS:-0}"
 RELEASE_PYTHON_RUNTIME_ROOT="${APP_RELEASE_PYTHON_RUNTIME_ROOT:-}"
 RELEASE_NODE_RUNTIME_ROOT="${APP_RELEASE_NODE_RUNTIME_ROOT:-}"
+RELEASE_HOST_TOOLS_ROOT="${APP_RELEASE_HOST_TOOLS_ROOT:-}"
 if [[ "$INSTALL_ALL_BUNDLED_SKILLS" == "1" ]]; then
   [[ "$APP_PACKAGE_TARGET" == "$HOST_RUST_TARGET" ]] || {
     echo "A full bundled-skill Release must be packaged on its native target: host=$HOST_RUST_TARGET target=$APP_PACKAGE_TARGET" >&2
@@ -81,6 +82,12 @@ if [[ "$INSTALL_ALL_BUNDLED_SKILLS" == "1" ]]; then
     echo "Full bundled-skill Release requires APP_RELEASE_NODE_RUNTIME_ROOT." >&2
     exit 1
   }
+  if [[ "$APP_PACKAGE_TARGET" == *-apple-darwin ]]; then
+    [[ -n "$RELEASE_HOST_TOOLS_ROOT" ]] || {
+      echo "Full macOS bundled-skill Release requires APP_RELEASE_HOST_TOOLS_ROOT." >&2
+      exit 1
+    }
+  fi
 fi
 BUILD_EXCLUDED_PACKAGES="$(
   python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" \
@@ -287,6 +294,17 @@ if [[ "$INSTALL_ALL_BUNDLED_SKILLS" == "1" ]]; then
     'import json, tomllib; print(json.dumps({"runtime":"python"}))' >/dev/null
   "$STAGE_PROJECT_DIR/prebuilt/toolchains/node/bin/node" \
     -e 'JSON.stringify({runtime:"node"})'
+  if [[ -n "$RELEASE_HOST_TOOLS_ROOT" ]]; then
+    copy_bundled_runtime "$RELEASE_HOST_TOOLS_ROOT" host "bin/ffmpeg"
+    for tool in git ffmpeg ffprobe tesseract chromium whisper-cli; do
+      [[ -x "$STAGE_PROJECT_DIR/prebuilt/toolchains/host/bin/$tool" ]] || {
+        echo "Bundled macOS skill dependency is incomplete: $tool" >&2
+        exit 1
+      }
+    done
+    [[ -f "$STAGE_PROJECT_DIR/prebuilt/toolchains/host/share/tessdata/chi_sim.traineddata" ]]
+    [[ -f "$STAGE_PROJECT_DIR/prebuilt/toolchains/host/models/whisper/ggml-base.bin" ]]
+  fi
 fi
 while IFS= read -r manifest_path; do
   [[ -n "$manifest_path" ]] || continue

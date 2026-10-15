@@ -381,6 +381,7 @@ export function guiAvailable(environment = process.env, platform = process.platf
 async function existingExecutable() {
   const candidates = process.platform === "darwin"
     ? [
+        process.env.APP_BUNDLED_CHROMIUM_PATH,
         "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
         "/Applications/Chromium.app/Contents/MacOS/Chromium",
         "/opt/homebrew/bin/chromium",
@@ -395,6 +396,7 @@ async function existingExecutable() {
         "/snap/bin/chromium",
       ];
   for (const candidate of candidates) {
+    if (!candidate) continue;
     if (await fs.access(candidate).then(() => true).catch(() => false)) return candidate;
   }
   return null;

@@ -4,9 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import csv
 from email.parser import BytesParser
 import hashlib
+import io
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -22,6 +26,88 @@ ROOT = Path(__file__).resolve().parents[1]
 PYPI_INDEX = "https://pypi.org/simple"
 PYTORCH_CPU_INDEX = "https://download.pytorch.org/whl/cpu"
 PYTORCH_CPU_PACKAGES = {"torch", "torchaudio"}
+
+
+def _record_digest(contents: bytes) -> str:
+    encoded = base64.urlsafe_b64encode(hashlib.sha256(contents).digest()).rstrip(b"=")
+    return "sha256=" + encoded.decode("ascii")
+
+
+def _retag_wheel(path: Path, platform_tag: str) -> Path:
+    """Rewrite a wheel platform tag and its RECORD without changing its payload."""
+    base, python_tag, abi_tag, _old_platform = path.stem.rsplit("-", 3)
+    target = path.with_name(f"{base}-{python_tag}-{abi_tag}-{platform_tag}.whl")
+    with zipfile.ZipFile(path) as source:
+        infos = source.infolist()
+        files = {info.filename: source.read(info.filename) for info in infos}
+    wheel_paths = [name for name in files if name.count("/") == 1 and name.endswith(".dist-info/WHEEL")]
+    record_paths = [name for name in files if name.count("/") == 1 and name.endswith(".dist-info/RECORD")]
+    if len(wheel_paths) != 1 or len(record_paths) != 1:
+        raise ValueError(f"release_wheel_record_invalid: {path.name}")
+    wheel_path, record_path = wheel_paths[0], record_paths[0]
+    tag = f"{python_tag}-{abi_tag}-{platform_tag}"
+    wheel_lines = files[wheel_path].decode("utf-8").splitlines()
+    replaced = False
+    for index, line in enumerate(wheel_lines):
+        if line.startswith("Tag:"):
+            wheel_lines[index] = f"Tag: {tag}"
+            replaced = True
+    if not replaced:
+        raise ValueError(f"release_wheel_tag_missing: {path.name}")
+    files[wheel_path] = ("\n".join(wheel_lines) + "\n").encode()
+
+    rows = list(csv.reader(io.StringIO(files[record_path].decode("utf-8"))))
+    seen_wheel = False
+    for row in rows:
+        if row and row[0] == wheel_path:
+            row[:] = [wheel_path, _record_digest(files[wheel_path]), str(len(files[wheel_path]))]
+            seen_wheel = True
+        elif row and row[0] == record_path:
+            row[:] = [record_path, "", ""]
+    if not seen_wheel:
+        raise ValueError(f"release_wheel_record_entry_missing: {path.name}")
+    output = io.StringIO(newline="")
+    csv.writer(output, lineterminator="\n").writerows(rows)
+    files[record_path] = output.getvalue().encode("utf-8")
+
+    temporary = target.with_suffix(".whl.tmp")
+    with zipfile.ZipFile(temporary, "w") as destination:
+        for info in infos:
+            destination.writestr(info, files[info.filename])
+    os.replace(temporary, target)
+    if target != path:
+        path.unlink()
+    return target
+
+
+def normalize_macos_wheel_tag(path: Path, deployment_target: str) -> Path:
+    """Tag a genuinely universal wheel as universal2 for setup-python runtimes."""
+    if sys.platform != "darwin":
+        return path
+    with zipfile.ZipFile(path) as wheel:
+        native_members = [
+            member for member in wheel.namelist() if member.endswith((".so", ".dylib"))
+        ]
+        if not native_members:
+            return path
+        with tempfile.TemporaryDirectory(prefix="release-wheel-native-") as directory:
+            extracted = Path(directory)
+            architecture_sets = []
+            for member in native_members:
+                wheel.extract(member, extracted)
+                completed = subprocess.run(
+                    ["lipo", "-archs", str(extracted / member)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                architecture_sets.append(set(completed.stdout.split()))
+    if any(architectures != {"arm64", "x86_64"} for architectures in architecture_sets):
+        return path
+    version = deployment_target.split(".")
+    major = int(version[0])
+    minor = int(version[1]) if len(version) > 1 else 0
+    return _retag_wheel(path, f"macosx_{major}_{minor}_universal2")
 
 
 def _logical_lock_blocks(contents: str) -> list[list[str]]:
@@ -144,6 +230,7 @@ def prepare_wheels(lockfile: Path, target: str) -> None:
         platforms += [f"manylinux2014_{arch}", f"linux_{arch}"]
     elif os_name == "macos":
         platforms = [f"macosx_13_0_{'arm64' if arch == 'aarch64' else arch}"]
+        deployment_target = os.environ.get("MACOSX_DEPLOYMENT_TARGET", "13.0")
     else:
         raise ValueError("release_wheel_platform_unsupported")
     destination = lockfile.parent / "release-wheels"
@@ -176,6 +263,8 @@ def prepare_wheels(lockfile: Path, target: str) -> None:
             subprocess.run([sys.executable, "-m", "pip", "wheel", "--no-deps",
                             "--wheel-dir", str(built), str(dependency)], check=True)
             for wheel in built.glob("*.whl"):
+                if os_name == "macos":
+                    wheel = normalize_macos_wheel_tag(wheel, deployment_target)
                 wheel_identity(wheel)
                 shutil.copy2(wheel, destination / wheel.name)
                 prepared_names.add(wheel.name)

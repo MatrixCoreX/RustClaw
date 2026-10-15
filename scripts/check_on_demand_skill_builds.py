@@ -49,8 +49,10 @@ REQUIRED_SNIPPETS = {
         "bundled-skill-bootstrap-v1.json",
         "APP_RELEASE_PYTHON_RUNTIME_ROOT",
         "APP_RELEASE_NODE_RUNTIME_ROOT",
+        "APP_RELEASE_HOST_TOOLS_ROOT",
         "prebuilt/toolchains/python",
         "prebuilt/toolchains/node",
+        "prebuilt/toolchains/host",
     ),
     "crates/clawd/src/http/ui_routes/skill_store_installation.rs": (
         "skill_store_requires_precompiled(spec.adapter)",
@@ -130,8 +132,10 @@ REQUIRED_SNIPPETS = {
         "APP_RELEASE_INSTALL_ALL_BUNDLED_SKILLS=1",
         "APP_RELEASE_PYTHON_RUNTIME_ROOT",
         "APP_RELEASE_NODE_RUNTIME_ROOT",
+        "APP_RELEASE_HOST_TOOLS_ROOT",
         "APP_DESKTOP_BOOTSTRAP_PYTHON_ROOT",
         "APP_DESKTOP_RUNTIME_BUNDLE_DIR",
+        "bundle_macos_skill_dependencies.py",
         "embedded-runtime/bundle.json",
         "APP_RELEASE_PYTHON_WHEELS_ROOT",
     ),
@@ -144,6 +148,7 @@ REQUIRED_SNIPPETS = {
     "start-all-bin.sh": (
         "prebuilt/toolchains/python/bin/python3",
         "prebuilt/toolchains/node/bin",
+        "prebuilt/toolchains/host/bin",
     ),
     ".github/workflows/pi-aarch64-release.yml": (
         "--precompile-skill-store",

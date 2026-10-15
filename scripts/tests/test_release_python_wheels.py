@@ -11,9 +11,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from prepare_release_python_wheels import (
     PYPI_INDEX,
     PYTORCH_CPU_INDEX,
+    _retag_wheel,
     add_wheel_hashes,
     import_wheels,
     index_scoped_download_locks,
+    normalize_macos_wheel_tag,
     verify_wheels,
     wheel_identity,
 )
@@ -58,6 +60,69 @@ class ReleaseWheelTests(unittest.TestCase):
                 archive.writestr("fixture/_vendor/nested.dist-info/METADATA", "Name: nested\nVersion: 9\n")
                 archive.writestr("fixture/_vendor/nested.dist-info/WHEEL", "Root-Is-Purelib: true\n")
             self.assertEqual(wheel_identity(wheel), ("fixture-pkg", "1.0"))
+
+    def test_retag_updates_wheel_metadata_and_record(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            wheel = root / "fixture_pkg-1.0-cp313-cp313-macosx_14_0_arm64.whl"
+            wheel_path = "fixture_pkg-1.0.dist-info/WHEEL"
+            record_path = "fixture_pkg-1.0.dist-info/RECORD"
+            with zipfile.ZipFile(wheel, "w") as archive:
+                archive.writestr(
+                    "fixture_pkg-1.0.dist-info/METADATA",
+                    "Name: fixture-pkg\nVersion: 1.0\n",
+                )
+                archive.writestr(
+                    wheel_path,
+                    "Wheel-Version: 1.0\nRoot-Is-Purelib: false\n"
+                    "Tag: cp313-cp313-macosx_14_0_arm64\n",
+                )
+                archive.writestr(
+                    record_path,
+                    f"{wheel_path},sha256=old,1\n{record_path},,\n",
+                )
+            retagged = _retag_wheel(wheel, "macosx_13_0_universal2")
+            self.assertFalse(wheel.exists())
+            self.assertEqual(
+                retagged.name,
+                "fixture_pkg-1.0-cp313-cp313-macosx_13_0_universal2.whl",
+            )
+            with zipfile.ZipFile(retagged) as archive:
+                metadata = archive.read(wheel_path).decode()
+                record = archive.read(record_path).decode()
+            self.assertIn("Tag: cp313-cp313-macosx_13_0_universal2", metadata)
+            self.assertNotIn("sha256=old", record)
+            self.assertIn(f"{record_path},,", record)
+
+    @patch("prepare_release_python_wheels.sys.platform", "darwin")
+    def test_macos_universal_binary_is_tagged_universal2(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            wheel = root / "fixture_pkg-1.0-cp313-cp313-macosx_14_0_arm64.whl"
+            with zipfile.ZipFile(wheel, "w") as archive:
+                archive.writestr("fixture_pkg/native.so", b"binary")
+                archive.writestr(
+                    "fixture_pkg-1.0.dist-info/METADATA",
+                    "Name: fixture-pkg\nVersion: 1.0\n",
+                )
+                archive.writestr(
+                    "fixture_pkg-1.0.dist-info/WHEEL",
+                    "Root-Is-Purelib: false\n"
+                    "Tag: cp313-cp313-macosx_14_0_arm64\n",
+                )
+                archive.writestr(
+                    "fixture_pkg-1.0.dist-info/RECORD",
+                    "fixture_pkg-1.0.dist-info/WHEEL,sha256=old,1\n"
+                    "fixture_pkg-1.0.dist-info/RECORD,,\n",
+                )
+            completed = type("Completed", (), {"stdout": "x86_64 arm64\n"})()
+            with patch(
+                "prepare_release_python_wheels.subprocess.run",
+                return_value=completed,
+            ) as run:
+                retagged = normalize_macos_wheel_tag(wheel, "13.0")
+            self.assertTrue(retagged.name.endswith("macosx_13_0_universal2.whl"))
+            self.assertEqual(run.call_args.args[0][0:2], ["lipo", "-archs"])
 
     def test_install_verification_cannot_use_index_source_or_system_installation(self):
         with tempfile.TemporaryDirectory() as directory:
