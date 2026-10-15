@@ -31,6 +31,9 @@ class BundleMacosSkillDependenciesTests(unittest.TestCase):
             'suffix = "/chromium/Chromium.app/Contents/MacOS/Chromium";', source
         )
         self.assertIn("execv(target, child_argv)", source)
+        self.assertIn('fprintf(stderr, "bundled_tool_launcher_path_unavailable\\n");', source)
+        self.assertIn("*name_separator = '\\0';", source)
+        self.assertNotIn("\x00", source)
         self.assertNotIn("#!/bin/bash", source)
 
     def test_chromium_launcher_is_relocated_but_app_payload_is_not(self):

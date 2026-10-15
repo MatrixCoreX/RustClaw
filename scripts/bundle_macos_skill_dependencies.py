@@ -132,7 +132,7 @@ def adhoc_sign_macho_files(root: Path) -> None:
 
 def tool_launcher_source(chromium_relative: str) -> str:
     chromium_suffix = json.dumps("/" + chromium_relative)
-    return f"""#include <errno.h>
+    return rf"""#include <errno.h>
 #include <limits.h>
 #include <mach-o/dyld.h>
 #include <stdio.h>
