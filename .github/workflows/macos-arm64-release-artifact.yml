@@ -188,7 +188,7 @@ jobs:
           echo "${WHISPER_MODEL_SHA256}  ${dependency_downloads}/ggml-base.bin" | shasum -a 256 -c -
 
           python3 scripts/bundle_macos_skill_dependencies.py \
-            --destination "target/release-host-tools/${RUST_TARGET}" \
+            --destination "${RUNNER_TEMP}/release host tools/${RUST_TARGET}" \
             --git-prefix "$(brew --prefix git)" \
             --ffmpeg "$(brew --prefix ffmpeg)/bin/ffmpeg" \
             --ffprobe "$(brew --prefix ffmpeg)/bin/ffprobe" \
@@ -256,7 +256,7 @@ jobs:
             APP_RELEASE_PYTHON_WHEELS_ROOT="$PWD/release-wheel-bundles" \
             APP_RELEASE_PYTHON_RUNTIME_ROOT="${python_runtime_root}" \
             APP_RELEASE_NODE_RUNTIME_ROOT="${node_runtime_root}" \
-            APP_RELEASE_HOST_TOOLS_ROOT="$PWD/target/release-host-tools/${RUST_TARGET}" \
+            APP_RELEASE_HOST_TOOLS_ROOT="${RUNNER_TEMP}/release host tools/${RUST_TARGET}" \
             APP_PACKAGE_TARGET="${RUST_TARGET}" \
             APP_RELEASE_COMMIT="${RELEASE_COMMIT}" \
             APP_RELEASE_INSTALL_ALL_BUNDLED_SKILLS=1 \
@@ -404,22 +404,27 @@ jobs:
           [[ -x "${runtime_root}/prebuilt/toolchains/python/bin/python3" ]]
           [[ -x "${runtime_root}/prebuilt/toolchains/node/bin/node" ]]
           host_tools="${runtime_root}/prebuilt/toolchains/host"
-          for tool in git ffmpeg ffprobe tesseract chromium whisper-cli; do
+          for tool in ffmpeg ffprobe tesseract whisper-cli; do
             [[ -x "${host_tools}/bin/${tool}" ]]
           done
+          [[ -x "${host_tools}/git/bin/git" ]]
           [[ -f "${host_tools}/share/tessdata/chi_sim.traineddata" ]]
           [[ -f "${host_tools}/models/whisper/ggml-base.bin" ]]
-          "${host_tools}/bin/git" --version
-          "${host_tools}/bin/ffmpeg" -version >/dev/null
-          "${host_tools}/bin/ffprobe" -version >/dev/null
-          "${host_tools}/bin/tesseract" --list-langs | grep -qx 'chi_sim'
-          "${host_tools}/bin/chromium" --version
+          # Exercise the same inherited environment used by admitted skills.
+          # The installed runtime path contains spaces on macOS.
+          source "${runtime_root}/scripts/shell_compat.sh"
+          configure_bundled_host_tools "${runtime_root}"
+          git --version
+          ffmpeg -version >/dev/null
+          ffprobe -version >/dev/null
+          tesseract --list-langs | grep -qx 'chi_sim'
+          "${APP_BUNDLED_CHROMIUM_PATH}" --version
           media_fixture="${RUNNER_TEMP}/bundled-media-smoke.wav"
-          "${host_tools}/bin/ffmpeg" -hide_banner -loglevel error -f lavfi \
+          ffmpeg -hide_banner -loglevel error -f lavfi \
             -i anullsrc=r=16000:cl=mono -t 0.5 -y "${media_fixture}"
-          "${host_tools}/bin/ffprobe" -v error -select_streams a:0 \
+          ffprobe -v error -select_streams a:0 \
             -show_entries stream=codec_name -of default=nw=1 "${media_fixture}" | grep -q 'codec_name=pcm_s16le'
-          "${host_tools}/bin/whisper-cli" \
+          whisper-cli \
             -m "${host_tools}/models/whisper/ggml-base.bin" \
             -f "${media_fixture}" -nt >/dev/null
           if [[ "${PACKAGE_ARCH}" == "aarch64" ]]; then

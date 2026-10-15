@@ -17,35 +17,32 @@ spec.loader.exec_module(bundle)
 
 
 class BundleMacosSkillDependenciesTests(unittest.TestCase):
-    def test_tool_launcher_is_native_and_uses_relocatable_paths(self):
-        source = bundle.tool_launcher_source(
-            "chromium/Chromium.app/Contents/MacOS/Chromium"
-        )
-        self.assertIn("_NSGetExecutablePath", source)
-        self.assertIn('suffix = "/git/bin/git";', source)
-        self.assertIn('setenv("GIT_EXEC_PATH"', source)
-        self.assertIn('setenv("GIT_TEMPLATE_DIR"', source)
-        self.assertIn('suffix = "/bin/tesseract.real";', source)
-        self.assertIn('setenv("TESSDATA_PREFIX"', source)
-        self.assertIn(
-            'suffix = "/chromium/Chromium.app/Contents/MacOS/Chromium";', source
-        )
-        self.assertIn("execv(target, child_argv)", source)
-        self.assertIn('fprintf(stderr, "bundled_tool_launcher_path_unavailable\\n");', source)
-        self.assertIn("*name_separator = '\\0';", source)
-        self.assertNotIn("\x00", source)
-        self.assertNotIn("#!/bin/bash", source)
+    def test_tool_check_environment_preserves_host_and_adds_bundle_values(self):
+        with mock.patch.object(bundle.subprocess, "run") as run:
+            run.return_value.stdout = "git version fixture\n"
+            run.return_value.stderr = ""
+            output = bundle.run_with_environment(
+                ("/tmp/runtime with spaces/git/bin/git", "--version"),
+                {"GIT_EXEC_PATH": "/tmp/runtime with spaces/git/libexec/git-core"},
+            )
 
-    def test_chromium_launcher_is_relocated_but_app_payload_is_not(self):
+        self.assertEqual(output, "git version fixture\n")
+        self.assertEqual(
+            run.call_args.kwargs["env"]["GIT_EXEC_PATH"],
+            "/tmp/runtime with spaces/git/libexec/git-core",
+        )
+        self.assertIn("PATH", run.call_args.kwargs["env"])
+
+    def test_direct_tool_is_relocated_but_chromium_app_payload_is_not(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            launcher = root / "bin/chromium"
+            direct_tool = root / "bin/tesseract"
             chromium_binary = root / "chromium/Chromium.app/Contents/MacOS/Chromium"
-            launcher.parent.mkdir(parents=True)
+            direct_tool.parent.mkdir(parents=True)
             chromium_binary.parent.mkdir(parents=True)
-            launcher.write_bytes(b"launcher")
+            direct_tool.write_bytes(b"tesseract")
             chromium_binary.write_bytes(b"chromium")
-            macho_paths = {launcher, chromium_binary}
+            macho_paths = {direct_tool, chromium_binary}
 
             with (
                 mock.patch.object(
@@ -57,7 +54,7 @@ class BundleMacosSkillDependenciesTests(unittest.TestCase):
                 bundle.copy_external_libraries(root, {})
 
             self.assertEqual(run.call_count, 1)
-            self.assertEqual(run.call_args.args[0][-1], str(launcher))
+            self.assertEqual(run.call_args.args[0][-1], str(direct_tool))
 
     def test_materialized_chromium_verifies_each_macho_directly(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -296,12 +296,10 @@ if [[ "$INSTALL_ALL_BUNDLED_SKILLS" == "1" ]]; then
     -e 'JSON.stringify({runtime:"node"})'
   if [[ -n "$RELEASE_HOST_TOOLS_ROOT" ]]; then
     copy_bundled_runtime "$RELEASE_HOST_TOOLS_ROOT" host "bin/ffmpeg"
-    for tool in git ffmpeg ffprobe tesseract chromium whisper-cli; do
-      [[ -x "$STAGE_PROJECT_DIR/prebuilt/toolchains/host/bin/$tool" ]] || {
-        echo "Bundled macOS skill dependency is incomplete: $tool" >&2
-        exit 1
-      }
-    done
+    configure_bundled_host_tools "$STAGE_PROJECT_DIR" || {
+      echo "Bundled macOS skill dependencies are incomplete." >&2
+      exit 1
+    }
     [[ -f "$STAGE_PROJECT_DIR/prebuilt/toolchains/host/share/tessdata/chi_sim.traineddata" ]]
     [[ -f "$STAGE_PROJECT_DIR/prebuilt/toolchains/host/models/whisper/ggml-base.bin" ]]
   fi

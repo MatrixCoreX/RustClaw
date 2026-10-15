@@ -96,6 +96,50 @@ PATH="$SAVED_PATH"
 export PATH
 rmdir "$USER_CARGO_BIN" "$EXPLICIT_CARGO_BIN" "$TEST_ROOT/cargo-cache"
 
+HOST_TEST_ROOT="$TEST_ROOT/runtime with spaces"
+HOST_TEST_TOOLS="$HOST_TEST_ROOT/prebuilt/toolchains/host"
+HOST_TEST_CHROMIUM_RELATIVE="chromium/Chromium.app/Contents/MacOS/Chromium"
+mkdir -p \
+  "$HOST_TEST_TOOLS/bin" \
+  "$HOST_TEST_TOOLS/git/bin" \
+  "$HOST_TEST_TOOLS/git/libexec/git-core" \
+  "$HOST_TEST_TOOLS/git/share/git-core/templates" \
+  "$HOST_TEST_TOOLS/share/tessdata" \
+  "$(dirname "$HOST_TEST_TOOLS/$HOST_TEST_CHROMIUM_RELATIVE")"
+touch \
+  "$HOST_TEST_TOOLS/bin/ffmpeg" \
+  "$HOST_TEST_TOOLS/bin/ffprobe" \
+  "$HOST_TEST_TOOLS/bin/tesseract" \
+  "$HOST_TEST_TOOLS/bin/whisper-cli" \
+  "$HOST_TEST_TOOLS/git/bin/git" \
+  "$HOST_TEST_TOOLS/$HOST_TEST_CHROMIUM_RELATIVE"
+chmod +x \
+  "$HOST_TEST_TOOLS/bin/ffmpeg" \
+  "$HOST_TEST_TOOLS/bin/ffprobe" \
+  "$HOST_TEST_TOOLS/bin/tesseract" \
+  "$HOST_TEST_TOOLS/bin/whisper-cli" \
+  "$HOST_TEST_TOOLS/git/bin/git" \
+  "$HOST_TEST_TOOLS/$HOST_TEST_CHROMIUM_RELATIVE"
+printf '%s\n' "$HOST_TEST_CHROMIUM_RELATIVE" \
+  >"$HOST_TEST_TOOLS/chromium-executable-relative"
+PATH="/usr/bin:/bin"
+export PATH
+configure_bundled_host_tools "$HOST_TEST_ROOT"
+[[ "$(command -v git)" == "$HOST_TEST_TOOLS/git/bin/git" ]]
+[[ "$(command -v ffmpeg)" == "$HOST_TEST_TOOLS/bin/ffmpeg" ]]
+[[ "$GIT_EXEC_PATH" == "$HOST_TEST_TOOLS/git/libexec/git-core" ]]
+[[ "$GIT_TEMPLATE_DIR" == "$HOST_TEST_TOOLS/git/share/git-core/templates" ]]
+[[ "$TESSDATA_PREFIX" == "$HOST_TEST_TOOLS/share/tessdata" ]]
+[[ "$APP_BUNDLED_CHROMIUM_PATH" == "$HOST_TEST_TOOLS/$HOST_TEST_CHROMIUM_RELATIVE" ]]
+printf '%s\n' 'chromium/Chromium.app/Contents/MacOS/../Chromium' \
+  >"$HOST_TEST_TOOLS/chromium-executable-relative"
+if configure_bundled_host_tools "$HOST_TEST_ROOT" >/dev/null 2>&1; then
+  echo "unsafe bundled Chromium descriptor unexpectedly accepted" >&2
+  exit 1
+fi
+PATH="$SAVED_PATH"
+export PATH
+
 WHISPER_TEST_ROOT="$TEST_ROOT/whisper-runtime"
 mkdir -p "$WHISPER_TEST_ROOT/configs" "$WHISPER_TEST_ROOT/data/models/whisper.cpp"
 touch "$WHISPER_TEST_ROOT/data/models/whisper.cpp/ggml-small.bin"

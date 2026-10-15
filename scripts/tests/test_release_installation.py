@@ -165,14 +165,12 @@ class ReleaseInstallationTests(unittest.TestCase):
         dependency_bundler = (
             ROOT / "scripts/bundle_macos_skill_dependencies.py"
         ).read_text()
-        self.assertIn("compile_tool_launchers(root, chromium_relative)", dependency_bundler)
-        self.assertIn('run("xcrun", "--find", "clang")', dependency_bundler)
-        self.assertIn(
-            'run("xcrun", "--sdk", "macosx", "--show-sdk-path")',
-            dependency_bundler,
-        )
-        self.assertIn('"-isysroot",', dependency_bundler)
-        self.assertNotIn('path.write_text("#!/bin/bash', dependency_bundler)
+        self.assertIn('"git": "git/bin/git"', dependency_bundler)
+        self.assertIn('(tesseract, "tesseract")', dependency_bundler)
+        self.assertIn('root / "chromium-executable-relative"', dependency_bundler)
+        self.assertNotIn("compile_tool_launchers", dependency_bundler)
+        self.assertNotIn("tool_launcher_source", dependency_bundler)
+        self.assertIn('release host tools/${RUST_TARGET}', workflow)
         self.assertIn("APP_DESKTOP_BOOTSTRAP_PYTHON_ROOT", workflow)
         self.assertIn("APP_DESKTOP_RUNTIME_BUNDLE_DIR", workflow)
         self.assertIn("embedded-runtime/bundle.json", workflow)
@@ -194,7 +192,12 @@ class ReleaseInstallationTests(unittest.TestCase):
         launcher = (ROOT / "start-all-bin.sh").read_text()
         self.assertIn("prebuilt/toolchains/python/bin/python3", launcher)
         self.assertIn("prebuilt/toolchains/node/bin", launcher)
-        self.assertIn("prebuilt/toolchains/host/bin", launcher)
+        self.assertIn('configure_bundled_host_tools "$SCRIPT_DIR"', launcher)
+        shell_compat = (ROOT / "scripts/shell_compat.sh").read_text()
+        self.assertIn("configure_bundled_host_tools()", shell_compat)
+        self.assertIn("chromium-executable-relative", shell_compat)
+        self.assertIn('GIT_EXEC_PATH="$host_root/git/libexec/git-core"', shell_compat)
+        self.assertIn('TESSDATA_PREFIX="$host_root/share/tessdata"', shell_compat)
         self.assertIn('$("$SKILL_RECEIPT_CLI" receipt-verify', launcher)
         self.assertNotIn('$($SKILL_RECEIPT_CLI receipt-verify', launcher)
         source_launcher = (ROOT / "start-all.sh").read_text()

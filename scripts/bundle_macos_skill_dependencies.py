@@ -24,6 +24,19 @@ def run(*command: str) -> str:
     return completed.stdout if completed.stdout.strip() else completed.stderr
 
 
+def run_with_environment(command: tuple[str, ...], additions: dict[str, str]) -> str:
+    environment = os.environ.copy()
+    environment.update(additions)
+    completed = subprocess.run(
+        command,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    return completed.stdout if completed.stdout.strip() else completed.stderr
+
+
 def first_output_line(*command: str) -> str:
     output = run(*command).strip()
     return output.splitlines()[0] if output else Path(command[0]).name
@@ -128,122 +141,6 @@ def adhoc_sign_macho_files(root: Path) -> None:
                 check=True,
             )
             shutil.copy2(staged, binary)
-
-
-def tool_launcher_source(chromium_relative: str) -> str:
-    chromium_suffix = json.dumps("/" + chromium_relative)
-    return rf"""#include <errno.h>
-#include <limits.h>
-#include <mach-o/dyld.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-
-static int join_path(char *output, size_t output_size, const char *root, const char *suffix) {{
-    int written = snprintf(output, output_size, "%s%s", root, suffix);
-    return written >= 0 && (size_t)written < output_size;
-}}
-
-int main(int argc, char **argv) {{
-    char executable[PATH_MAX];
-    uint32_t executable_size = sizeof(executable);
-    if (argc < 1 || _NSGetExecutablePath(executable, &executable_size) != 0) {{
-        fprintf(stderr, "bundled_tool_launcher_path_unavailable\n");
-        return 127;
-    }}
-    char resolved[PATH_MAX];
-    if (realpath(executable, resolved) == NULL) {{
-        fprintf(stderr, "bundled_tool_launcher_realpath:%s\n", strerror(errno));
-        return 127;
-    }}
-    char tool_name[64];
-    char *name_separator = strrchr(resolved, '/');
-    if (name_separator == NULL || snprintf(tool_name, sizeof(tool_name), "%s", name_separator + 1) >= (int)sizeof(tool_name)) {{
-        fprintf(stderr, "bundled_tool_launcher_name_invalid\n");
-        return 127;
-    }}
-    *name_separator = '\0';
-    char *bin_separator = strrchr(resolved, '/');
-    if (bin_separator == NULL || strcmp(bin_separator + 1, "bin") != 0) {{
-        fprintf(stderr, "bundled_tool_launcher_layout_invalid\n");
-        return 127;
-    }}
-    *bin_separator = '\0';
-
-    const char *suffix = NULL;
-    char git_exec_path[PATH_MAX];
-    char git_template_dir[PATH_MAX];
-    char tessdata_prefix[PATH_MAX];
-    if (strcmp(tool_name, "git") == 0) {{
-        suffix = "/git/bin/git";
-        if (!join_path(git_exec_path, sizeof(git_exec_path), resolved, "/git/libexec/git-core") ||
-            !join_path(git_template_dir, sizeof(git_template_dir), resolved, "/git/share/git-core/templates")) {{
-            fprintf(stderr, "bundled_git_path_too_long\n");
-            return 127;
-        }}
-        setenv("GIT_EXEC_PATH", git_exec_path, 1);
-        setenv("GIT_TEMPLATE_DIR", git_template_dir, 1);
-    }} else if (strcmp(tool_name, "tesseract") == 0) {{
-        suffix = "/bin/tesseract.real";
-        if (!join_path(tessdata_prefix, sizeof(tessdata_prefix), resolved, "/share/tessdata")) {{
-            fprintf(stderr, "bundled_tessdata_path_too_long\n");
-            return 127;
-        }}
-        setenv("TESSDATA_PREFIX", tessdata_prefix, 1);
-    }} else if (strcmp(tool_name, "chromium") == 0) {{
-        suffix = {chromium_suffix};
-    }} else {{
-        fprintf(stderr, "bundled_tool_launcher_unknown:%s\n", tool_name);
-        return 127;
-    }}
-
-    char target[PATH_MAX];
-    if (!join_path(target, sizeof(target), resolved, suffix)) {{
-        fprintf(stderr, "bundled_tool_target_path_too_long\n");
-        return 127;
-    }}
-    char **child_argv = calloc((size_t)argc + 1, sizeof(char *));
-    if (child_argv == NULL) {{
-        fprintf(stderr, "bundled_tool_launcher_allocation_failed\n");
-        return 127;
-    }}
-    child_argv[0] = target;
-    for (int index = 1; index < argc; ++index) {{
-        child_argv[index] = argv[index];
-    }}
-    execv(target, child_argv);
-    fprintf(stderr, "bundled_tool_exec_failed:%s:%s\n", target, strerror(errno));
-    return 127;
-}}
-"""
-
-
-def compile_tool_launchers(root: Path, chromium_relative: str) -> None:
-    source = root / ".bundled-tool-launcher.c"
-    launcher = root / ".bundled-tool-launcher"
-    source.write_text(tool_launcher_source(chromium_relative), encoding="utf-8")
-    compiler = run("xcrun", "--find", "clang").strip()
-    sdk_root = run("xcrun", "--sdk", "macosx", "--show-sdk-path").strip()
-    deployment_target = os.environ.get("MACOSX_DEPLOYMENT_TARGET", "13.0")
-    subprocess.run(
-        [
-            compiler,
-            "-Os",
-            "-isysroot",
-            sdk_root,
-            f"-mmacosx-version-min={deployment_target}",
-            str(source),
-            "-o",
-            str(launcher),
-        ],
-        check=True,
-    )
-    launcher.chmod(launcher.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-    for name in ("git", "tesseract", "chromium"):
-        shutil.copy2(launcher, root / "bin" / name)
-    source.unlink()
-    launcher.unlink()
 
 
 def copy_external_libraries(root: Path, origins: dict[Path, Path]) -> None:
@@ -355,7 +252,7 @@ def main() -> None:
         for source, name in (
             (ffmpeg, "ffmpeg"),
             (ffprobe, "ffprobe"),
-            (tesseract, "tesseract.real"),
+            (tesseract, "tesseract"),
             (whisper_cli, "whisper-cli"),
         ):
             output = root / "bin" / name
@@ -385,23 +282,44 @@ def main() -> None:
         adhoc_sign_macho_files(chromium_target)
 
         chromium_relative = chromium_target_executable.relative_to(root).as_posix()
-        compile_tool_launchers(root, chromium_relative)
+        (root / "chromium-executable-relative").write_text(
+            chromium_relative + "\n", encoding="utf-8"
+        )
         copy_external_libraries(root, origins)
 
+        git_environment = {
+            "GIT_EXEC_PATH": str(root / "git/libexec/git-core"),
+            "GIT_TEMPLATE_DIR": str(root / "git/share/git-core/templates"),
+        }
+        tesseract_environment = {"TESSDATA_PREFIX": str(root / "share/tessdata")}
         checks = {
-            "git": run(str(root / "bin/git"), "--version").strip(),
+            "git": run_with_environment(
+                (str(root / "git/bin/git"), "--version"), git_environment
+            ).strip(),
             "ffmpeg": first_output_line(str(root / "bin/ffmpeg"), "-version"),
             "ffprobe": first_output_line(str(root / "bin/ffprobe"), "-version"),
-            "tesseract": first_output_line(str(root / "bin/tesseract"), "--version"),
-            "chromium": run(str(root / "bin/chromium"), "--version").strip(),
+            "tesseract": run_with_environment(
+                (str(root / "bin/tesseract"), "--version"), tesseract_environment
+            ).strip().splitlines()[0],
+            "chromium": run(str(chromium_target_executable), "--version").strip(),
             "whisper_cli": first_output_line(str(root / "bin/whisper-cli"), "--help"),
         }
-        languages = run(str(root / "bin/tesseract"), "--list-langs")
+        languages = run_with_environment(
+            (str(root / "bin/tesseract"), "--list-langs"), tesseract_environment
+        )
         if not {"eng", "chi_sim"}.issubset(set(languages.split())):
             raise ValueError("macos_tesseract_languages_missing")
         checks["tesseract_languages"] = ["chi_sim", "eng"]
         inventory = {
             "schema_version": 1,
+            "tool_paths": {
+                "chromium": chromium_relative,
+                "ffmpeg": "bin/ffmpeg",
+                "ffprobe": "bin/ffprobe",
+                "git": "git/bin/git",
+                "tesseract": "bin/tesseract",
+                "whisper_cli": "bin/whisper-cli",
+            },
             "tools": checks,
             "whisper_model_sha256": hashlib.sha256(
                 (model_root / "ggml-base.bin").read_bytes()

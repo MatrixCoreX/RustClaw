@@ -132,6 +132,78 @@ prepend_existing_command_path() {
   export PATH
 }
 
+configure_bundled_host_tools() {
+  local root_dir="${1:-}"
+  local host_root=""
+  local chromium_descriptor=""
+  local chromium_relative=""
+  local chromium_executable=""
+  local required_file=""
+  local required_directory=""
+
+  [[ -n "$root_dir" ]] || {
+    echo "configure_bundled_host_tools requires a runtime root." >&2
+    return 2
+  }
+  root_dir="$(cd "$root_dir" && pwd -P)"
+  host_root="$root_dir/prebuilt/toolchains/host"
+  [[ -d "$host_root" ]] || return 0
+
+  for required_file in \
+    "$host_root/git/bin/git" \
+    "$host_root/bin/ffmpeg" \
+    "$host_root/bin/ffprobe" \
+    "$host_root/bin/tesseract" \
+    "$host_root/bin/whisper-cli"; do
+    [[ -x "$required_file" ]] || {
+      echo "Bundled host tool is missing or not executable: $required_file" >&2
+      return 1
+    }
+  done
+  for required_directory in \
+    "$host_root/git/libexec/git-core" \
+    "$host_root/git/share/git-core/templates" \
+    "$host_root/share/tessdata"; do
+    [[ -d "$required_directory" ]] || {
+      echo "Bundled host tool data is missing: $required_directory" >&2
+      return 1
+    }
+  done
+
+  chromium_descriptor="$host_root/chromium-executable-relative"
+  [[ -f "$chromium_descriptor" ]] || {
+    echo "Bundled Chromium descriptor is missing: $chromium_descriptor" >&2
+    return 1
+  }
+  IFS= read -r chromium_relative <"$chromium_descriptor" || true
+  case "$chromium_relative" in
+    chromium/Chromium.app/Contents/MacOS/*) ;;
+    *)
+      echo "Bundled Chromium descriptor is invalid." >&2
+      return 1
+      ;;
+  esac
+  case "/$chromium_relative/" in
+    */../*|*/./*)
+      echo "Bundled Chromium descriptor contains an unsafe path." >&2
+      return 1
+      ;;
+  esac
+  chromium_executable="$host_root/$chromium_relative"
+  [[ -x "$chromium_executable" ]] || {
+    echo "Bundled Chromium executable is missing: $chromium_executable" >&2
+    return 1
+  }
+
+  prepend_existing_command_path "$host_root/bin"
+  prepend_existing_command_path "$host_root/git/bin"
+  GIT_EXEC_PATH="$host_root/git/libexec/git-core"
+  GIT_TEMPLATE_DIR="$host_root/git/share/git-core/templates"
+  TESSDATA_PREFIX="$host_root/share/tessdata"
+  APP_BUNDLED_CHROMIUM_PATH="$chromium_executable"
+  export GIT_EXEC_PATH GIT_TEMPLATE_DIR TESSDATA_PREFIX APP_BUNDLED_CHROMIUM_PATH
+}
+
 configure_user_toolchain_command_path() {
   local default_cargo_home=""
   if [[ -n "${HOME:-}" ]]; then

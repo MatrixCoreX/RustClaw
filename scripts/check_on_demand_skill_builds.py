@@ -148,7 +148,7 @@ REQUIRED_SNIPPETS = {
     "start-all-bin.sh": (
         "prebuilt/toolchains/python/bin/python3",
         "prebuilt/toolchains/node/bin",
-        "prebuilt/toolchains/host/bin",
+        'configure_bundled_host_tools "$SCRIPT_DIR"',
     ),
     ".github/workflows/pi-aarch64-release.yml": (
         "--precompile-skill-store",
@@ -173,6 +173,8 @@ REQUIRED_SNIPPETS = {
         '"$available_kb" -ge 8388608',
         '"$cpu_count" -ge 4',
         "configure_cargo_build_environment",
+        "configure_bundled_host_tools",
+        "chromium-executable-relative",
         "CARGO_INCREMENTAL=1",
     ),
 }

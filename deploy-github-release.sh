@@ -863,7 +863,7 @@ configure_bundled_toolchains() {
   local runtime_root="$1"
   local python_bin="$runtime_root/prebuilt/toolchains/python/bin/python3"
   local node_bin_dir="$runtime_root/prebuilt/toolchains/node/bin"
-  local host_bin_dir="$runtime_root/prebuilt/toolchains/host/bin"
+  local host_root="$runtime_root/prebuilt/toolchains/host"
   if [[ ! -x "$python_bin" && ! -x "$node_bin_dir/node" ]]; then
     return 0
   fi
@@ -872,14 +872,10 @@ configure_bundled_toolchains() {
   APP_PYTHON_BIN="$python_bin"
   export APP_PYTHON_BIN
   configure_python3_with_tomllib || die "bundled_python_runtime_invalid"
-  if [[ -d "$host_bin_dir" ]]; then
-    for tool in git ffmpeg ffprobe tesseract chromium whisper-cli; do
-      [[ -x "$host_bin_dir/$tool" ]] || die "bundled_host_tool_missing:$tool"
-    done
-    PATH="$host_bin_dir${PATH:+:$PATH}"
-    APP_BUNDLED_CHROMIUM_PATH="$host_bin_dir/chromium"
-    export PATH APP_BUNDLED_CHROMIUM_PATH
+  if [[ "$(uname -s 2>/dev/null || true)" == "Darwin" ]]; then
+    [[ -d "$host_root" ]] || die "bundled_host_tools_missing"
   fi
+  configure_bundled_host_tools "$runtime_root" || die "bundled_host_tools_invalid"
   PATH="$node_bin_dir${PATH:+:$PATH}"
   export PATH
 }
