@@ -268,6 +268,7 @@ fn prepare_python(context: &AdapterContext<'_>) -> SkillSdkResult<PreparedPackag
         install.arg("--no-index");
     }
     configure_clean_environment(&mut install, &build_home)?;
+    configure_native_python_build_arch(&mut install, context.platform);
     install.env("PIP_CACHE_DIR", &pip_cache);
     install.env("PYTHONNOUSERSITE", "1");
     require_success(
@@ -1160,6 +1161,18 @@ fn configure_clean_environment(command: &mut Command, home: &Path) -> SkillSdkRe
     command.env("LANG", "C.UTF-8");
     command.env("LC_ALL", "C.UTF-8");
     Ok(())
+}
+
+fn configure_native_python_build_arch(command: &mut Command, platform: &HostPlatform) {
+    if platform.os != "macos" {
+        return;
+    }
+    let arch = match platform.arch.as_str() {
+        "aarch64" => "arm64",
+        "x86_64" => "x86_64",
+        _ => return,
+    };
+    command.env("ARCHFLAGS", format!("-arch {arch}"));
 }
 
 fn default_rustup_home() -> Option<std::ffi::OsString> {

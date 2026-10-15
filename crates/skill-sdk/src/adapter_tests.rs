@@ -55,6 +55,39 @@ fn user_python_installation_accepts_wheels_only_and_uses_packaged_wheelhouse() {
     );
 }
 
+#[test]
+fn macos_python_source_builds_use_only_the_native_architecture() {
+    for (arch, expected) in [("aarch64", "-arch arm64"), ("x86_64", "-arch x86_64")] {
+        let mut command = Command::new("python");
+        configure_native_python_build_arch(
+            &mut command,
+            &HostPlatform {
+                os: "macos".to_string(),
+                arch: arch.to_string(),
+                target: None,
+            },
+        );
+        assert_eq!(
+            command
+                .get_envs()
+                .find_map(|(key, value)| (key == "ARCHFLAGS").then_some(value))
+                .flatten(),
+            Some(OsStr::new(expected))
+        );
+    }
+
+    let mut command = Command::new("python");
+    configure_native_python_build_arch(
+        &mut command,
+        &HostPlatform {
+            os: "linux".to_string(),
+            arch: "aarch64".to_string(),
+            target: None,
+        },
+    );
+    assert!(!command.get_envs().any(|(key, _)| key == "ARCHFLAGS"));
+}
+
 fn artifact(os: &str, arch: &str, contents: &[u8]) -> PlatformArtifact {
     PlatformArtifact {
         os: os.to_string(),
