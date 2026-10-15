@@ -151,6 +151,13 @@ jobs:
           python3 -m unittest discover -s scripts/tests -p 'test_release*.py'
           python3 -m unittest scripts.tests.test_bundle_macos_skill_dependencies
 
+      - name: Test desktop shared UI contracts
+        run: |
+          npm ci --prefix desktop
+          npm test --prefix desktop
+          npm run lint --prefix desktop
+          npm run build:ui --prefix desktop
+
       - name: Bundle macOS skill software dependencies
         shell: bash
         env:
