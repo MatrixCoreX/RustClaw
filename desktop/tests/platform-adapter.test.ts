@@ -16,6 +16,9 @@ test('shared UI adaptation is active for native and Vite-normalized Windows path
     assert.ok(output?.includes('desktopFetch as fetch'));
     assert.ok(output?.includes('desktopLogout(); return;'));
     assert.ok(!output?.includes('window.localStorage'));
+    assert.ok(output?.includes('frontend/wallet/pages.tsx'));
+    assert.ok(!output?.includes('import("./components/AssetsPage")'));
+    assert.ok(!output?.includes('import("./components/BancorPage")'));
   }
 });
 

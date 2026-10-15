@@ -1,9 +1,6 @@
 import { useCallback, useState, type ComponentProps } from "react";
 import { AssetsPage as SharedAssetsPage } from "../../../UI/src/components/AssetsPage";
-import {
-  BancorPage as SharedBancorPage,
-  BANCOR_CANDLE_AUTO_REFRESH_SECONDS,
-} from "../../../UI/src/components/BancorPage";
+import { BancorPage as SharedBancorPage } from "../../../UI/src/components/BancorPage";
 import { parseBancorSlippagePercent } from "../../../UI/src/hooks/useBancorRuntime";
 import { validateNniOwnerPublicKey } from "../../../UI/src/lib/nni-owner-public-key";
 import type { NniBancorAccountResponse } from "../../../UI/src/types/api";
@@ -14,7 +11,6 @@ import { useAssetAccount } from "./useAssetAccount";
 import type { ReadResult, WalletAccount } from "./types";
 import { PendingOperations } from "./PendingOperations";
 import "./wallet.css";
-export { BANCOR_CANDLE_AUTO_REFRESH_SECONDS };
 type AssetProps = ComponentProps<typeof SharedAssetsPage> & {
   onRefreshMarket?: () => Promise<unknown>;
   fullHistory?: boolean;
