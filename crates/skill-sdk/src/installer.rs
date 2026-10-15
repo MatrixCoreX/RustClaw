@@ -541,7 +541,7 @@ impl SkillInstaller {
             }
         }
         fs::create_dir_all(staging.join(&receipt.launch.working_directory))?;
-        rebind_precompiled_trusted_runtime(&manifest, &mut receipt)?;
+        rebind_precompiled_runtime(&manifest, &staging, &mut receipt)?;
         emit_phase(request.control.as_ref(), "precompiled_copy")?;
         let manifest_digest = manifest.digest()?;
         let source_digest = receipt.source_digest.clone();
@@ -563,10 +563,17 @@ impl SkillInstaller {
     }
 }
 
-fn rebind_precompiled_trusted_runtime(
+fn rebind_precompiled_runtime(
     manifest: &PackageManifest,
+    staging: &Path,
     receipt: &mut InstallReceipt,
 ) -> SkillSdkResult<()> {
+    if receipt.adapter == BuildAdapter::Python
+        && receipt.launch.launcher == LauncherKind::Python
+        && receipt.launch.program_scope == LaunchProgramScope::Package
+    {
+        return rebind_precompiled_python(staging, receipt);
+    }
     if receipt.launch.program_scope != LaunchProgramScope::TrustedRuntime {
         return Ok(());
     }
@@ -599,6 +606,122 @@ fn rebind_precompiled_trusted_runtime(
     receipt.launch.program = runtime.to_string_lossy().into_owned();
     receipt.launch.trusted_runtime_sha256 = Some(digest_file(&runtime)?);
     receipt.launch.trusted_runtime_version = Some(actual_version);
+    Ok(())
+}
+
+fn rebind_precompiled_python(staging: &Path, receipt: &mut InstallReceipt) -> SkillSdkResult<()> {
+    let runtime = std::env::var_os("APP_PYTHON_BIN")
+        .map(PathBuf::from)
+        .filter(|path| is_executable_file(path))
+        .and_then(|path| fs::canonicalize(path).ok())
+        .or_else(|| find_on_path("python3"))
+        .ok_or_else(|| {
+            SkillSdkError::new("precompiled_runtime_unavailable", "program=python3")
+                .phase("precompiled_verify")
+        })?;
+    let actual_version = trusted_runtime_version(&runtime)?;
+    if actual_version != receipt.adapter_version {
+        return Err(SkillSdkError::new(
+            "precompiled_runtime_version_unsupported",
+            format!(
+                "program=python3 source={} actual={actual_version}",
+                receipt.adapter_version
+            ),
+        )
+        .phase("precompiled_verify"));
+    }
+    let canonical_staging = fs::canonicalize(staging)?;
+    let program = staging.join(&receipt.launch.program);
+    let program_parent = program.parent().ok_or_else(|| {
+        SkillSdkError::new("precompiled_python_venv_invalid", "python parent missing")
+            .phase("precompiled_verify")
+    })?;
+    let venv = program_parent.parent().ok_or_else(|| {
+        SkillSdkError::new("precompiled_python_venv_invalid", "venv root missing")
+            .phase("precompiled_verify")
+    })?;
+    let canonical_venv = fs::canonicalize(venv)?;
+    if !canonical_venv.starts_with(&canonical_staging) {
+        return Err(SkillSdkError::new(
+            "precompiled_python_venv_invalid",
+            format!("path={}", venv.display()),
+        )
+        .phase("precompiled_verify"));
+    }
+    fs::copy(&runtime, &program)?;
+    #[cfg(unix)]
+    set_executable(&program)?;
+    let version = actual_version
+        .strip_prefix("Python ")
+        .unwrap_or(actual_version.as_str());
+    let runtime_home = runtime.parent().ok_or_else(|| {
+        SkillSdkError::new(
+            "precompiled_python_runtime_invalid",
+            runtime.display().to_string(),
+        )
+        .phase("precompiled_verify")
+    })?;
+    let configuration = format!(
+        "home = {}\ninclude-system-site-packages = false\nversion = {version}\nexecutable = {}\n",
+        runtime_home.display(),
+        runtime.display()
+    );
+    let configuration_path = venv.join("pyvenv.cfg");
+    fs::write(&configuration_path, configuration)?;
+    let program_relative = receipt.launch.program.clone();
+    refresh_precompiled_artifact(staging, receipt, &program_relative)?;
+    let configuration_relative = configuration_path
+        .strip_prefix(staging)
+        .map_err(|_| {
+            SkillSdkError::new(
+                "precompiled_python_venv_invalid",
+                configuration_path.display().to_string(),
+            )
+            .phase("precompiled_verify")
+        })?
+        .to_string_lossy()
+        .replace('\\', "/");
+    refresh_precompiled_artifact(staging, receipt, &configuration_relative)?;
+    let status = Command::new(&program)
+        .arg("-I")
+        .arg("-c")
+        .arg("import json,sys; assert sys.prefix != sys.base_prefix")
+        .env_clear()
+        .status()
+        .map_err(|error| {
+            SkillSdkError::new(
+                "precompiled_python_runtime_invalid",
+                format!("program={} error={error}", program.display()),
+            )
+            .phase("precompiled_verify")
+        })?;
+    if !status.success() {
+        return Err(SkillSdkError::new(
+            "precompiled_python_runtime_invalid",
+            format!("program={} status={status}", program.display()),
+        )
+        .phase("precompiled_verify"));
+    }
+    Ok(())
+}
+
+fn refresh_precompiled_artifact(
+    staging: &Path,
+    receipt: &mut InstallReceipt,
+    relative: &str,
+) -> SkillSdkResult<()> {
+    let artifact = receipt
+        .artifacts
+        .iter_mut()
+        .find(|artifact| artifact.path == relative)
+        .ok_or_else(|| {
+            SkillSdkError::new("precompiled_artifact_missing", format!("path={relative}"))
+                .phase("precompiled_verify")
+        })?;
+    let path = staging.join(relative);
+    let metadata = fs::metadata(&path)?;
+    artifact.size_bytes = metadata.len();
+    artifact.sha256 = digest_file(&path)?;
     Ok(())
 }
 

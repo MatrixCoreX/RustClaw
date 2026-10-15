@@ -26,13 +26,37 @@ const infoPlist = path.join(root, '.build/Info.plist');
 const plist = fs.readFileSync(path.join(root, 'platforms/macos/Info.plist'), 'utf8')
   .replace('<!-- PRODUCT_DISPLAY_NAME -->', `<key>CFBundleDisplayName</key><string>${escapeXml(name)}</string>`);
 fs.writeFileSync(infoPlist, plist);
-fs.writeFileSync(configPath, JSON.stringify({productName: 'agent-desktop', bundle:{
+const config = {productName: 'agent-desktop', bundle:{
   linux:{deb:{desktopTemplate}}, macOS:{infoPlist},
-}}));
+}};
+const runtimeReleaseDir = process.env.APP_DESKTOP_RUNTIME_BUNDLE_DIR?.trim();
+if (runtimeReleaseDir) {
+  if (process.platform !== 'darwin') {
+    console.error('embedded_runtime_bundle_requires_macos_builder');
+    process.exit(1);
+  }
+  const targetIndex = process.argv.indexOf('--target');
+  const target = process.env.DESKTOP_NATIVE_TARGET || (targetIndex >= 0 ? process.argv[targetIndex + 1] : '');
+  const releaseTag = process.env.APP_DESKTOP_RUNTIME_RELEASE_TAG?.trim() || '';
+  const pythonRuntime = process.env.APP_DESKTOP_BOOTSTRAP_PYTHON_ROOT?.trim() || '';
+  if (!target || !releaseTag || !pythonRuntime) {
+    console.error('embedded_runtime_target_release_tag_and_python_required');
+    process.exit(1);
+  }
+  const embedded = path.resolve(root, '.build/embedded-runtime');
+  const prepared = spawnSync('python3', [path.resolve(root, 'scripts/prepare-macos-runtime-bundle.py'),
+    '--source-root', path.resolve(root, '..'), '--release-dir', path.resolve(runtimeReleaseDir),
+    '--output', embedded, '--target', target, '--release-tag', releaseTag,
+    '--python-runtime-root', path.resolve(pythonRuntime)], {
+    cwd: path.resolve(root, '..'), stdio: 'inherit', env: process.env,
+  });
+  if (prepared.status !== 0) process.exit(prepared.status ?? 1);
+  config.bundle.resources = {[embedded]: 'embedded-runtime'};
+}
+fs.writeFileSync(configPath, JSON.stringify(config));
 if (process.argv.includes('--prepare-only')) process.exit(0);
 const dev = process.argv.includes('--dev');
 if(process.platform==='win32') {
-  const config=JSON.parse(fs.readFileSync(configPath,'utf8'));
   config.bundle.externalBin=buildWindowsWorker(root,process.argv.slice(2));
   fs.writeFileSync(configPath,JSON.stringify(config));
 }

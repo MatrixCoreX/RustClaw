@@ -83,9 +83,13 @@ jobs:
             exit 1
           fi
           package_name="${APP_RELEASE_ARTIFACT_ID}-macos-${PACKAGE_ARCH}-${RELEASE_VERSION}.tar.gz"
+          installer_name="${APP_RELEASE_ARTIFACT_ID}-macos-${PACKAGE_ARCH}-${RELEASE_VERSION}-installer.pkg"
+          release_tag="macos-${PACKAGE_ARCH}-${RELEASE_VERSION}"
           {
             echo "commit=${resolved_commit}"
             echo "package_name=${package_name}"
+            echo "installer_name=${installer_name}"
+            echo "release_tag=${release_tag}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Setup Node.js
@@ -153,6 +157,8 @@ jobs:
 
       - name: Precompile platform Skill Store packages
         shell: bash
+        env:
+          APP_PRECOMPILE_ALL_BUNDLED_SKILLS: "1"
         run: |
           set -euo pipefail
           ./scripts/precompile_skill_store.sh "${RUST_TARGET}"
@@ -190,11 +196,18 @@ jobs:
           signing_key="${RUNNER_TEMP}/release-signing-key"
           printf '%s\n' "${RELEASE_SIGNING_KEY}" > "${signing_key}"
           chmod 600 "${signing_key}"
+          python_runtime_root="${pythonLocation:?setup-python did not expose pythonLocation}"
+          node_runtime_root="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve().parent.parent)' "$(command -v node)")"
+          [[ -x "${python_runtime_root}/bin/python3" ]]
+          [[ -x "${node_runtime_root}/bin/node" ]]
           mkdir -p dist-release
           APP_RELEASE_BIN_DIR="$PWD/target/release" \
             APP_RELEASE_PYTHON_WHEELS_ROOT="$PWD/release-wheel-bundles" \
+            APP_RELEASE_PYTHON_RUNTIME_ROOT="${python_runtime_root}" \
+            APP_RELEASE_NODE_RUNTIME_ROOT="${node_runtime_root}" \
             APP_PACKAGE_TARGET="${RUST_TARGET}" \
             APP_RELEASE_COMMIT="${RELEASE_COMMIT}" \
+            APP_RELEASE_INSTALL_ALL_BUNDLED_SKILLS=1 \
             APP_RELEASE_SIGNING_KEY="${signing_key}" \
             APP_BUNDLE_DIR="$PWD/dist-release" \
             APP_PACKAGE_BASENAME="${{ steps.meta.outputs.package_name }}" \
@@ -205,6 +218,169 @@ jobs:
             shasum -a 256 "${{ steps.meta.outputs.package_name }}" \
               > "${{ steps.meta.outputs.package_name }}.sha256"
           )
+
+      - name: Build all-in-one macOS desktop installer
+        shell: bash
+        env:
+          APP_DESKTOP_RUNTIME_BUNDLE_DIR: ${{ github.workspace }}/dist-release
+          APP_DESKTOP_RUNTIME_RELEASE_TAG: ${{ steps.meta.outputs.release_tag }}
+          DESKTOP_NATIVE_TARGET: ${{ env.RUST_TARGET }}
+        run: |
+          set -euo pipefail
+          export APP_DESKTOP_BOOTSTRAP_PYTHON_ROOT="${pythonLocation:?setup-python did not expose pythonLocation}"
+          npm ci --prefix desktop
+          npm run build --prefix desktop -- --target "${RUST_TARGET}"
+          app="desktop/target/${RUST_TARGET}/release/bundle/macos/agent-desktop.app"
+          [[ -d "${app}" ]]
+          [[ -f "${app}/Contents/Resources/embedded-runtime/bundle.json" ]]
+          [[ -f "${app}/Contents/Resources/embedded-runtime/release/${{ steps.meta.outputs.package_name }}" ]]
+          [[ -f "${app}/Contents/Resources/embedded-runtime/bootstrap/deploy-github-release.sh" ]]
+          [[ -x "${app}/Contents/Resources/embedded-runtime/bootstrap/toolchains/python/bin/python3" ]]
+          codesign --verify --deep --strict "${app}"
+          desktop_version="$(node -p "require('./desktop/package.json').version")"
+          ditto -c -k --sequesterRsrc --keepParent "${app}" \
+            "dist-release/agent-desktop_${desktop_version}_macos-${PACKAGE_ARCH}.app.zip"
+          dmg=(desktop/target/${RUST_TARGET}/release/bundle/dmg/agent-desktop_*.dmg)
+          [[ "${#dmg[@]}" -eq 1 ]]
+          cp "${dmg[0]}" dist-release/
+          ./desktop/scripts/build-macos-pkg.sh \
+            "${app}" \
+            "dist-release/${{ steps.meta.outputs.installer_name }}"
+          (
+            cd dist-release
+            for asset in agent-desktop_*.dmg agent-desktop_*.app.zip; do
+              shasum -a 256 "${asset}" > "${asset}.sha256"
+            done
+          )
+
+      - name: Install-test PKG, bundled skills, and overwrite upgrade
+        shell: bash
+        env:
+          INSTALLER_PKG: ${{ github.workspace }}/dist-release/${{ steps.meta.outputs.installer_name }}
+        run: |
+          set -euo pipefail
+          installed_app="/Applications/agent-desktop.app"
+          [[ ! -e "${installed_app}" ]] || {
+            echo "macOS runner unexpectedly contains ${installed_app}" >&2
+            exit 1
+          }
+          app_identifier="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          print(json.loads(Path("desktop/tauri.conf.json").read_text())["identifier"])
+          PY
+          )"
+          app_data="${HOME}/Library/Application Support/${app_identifier}"
+          state_file="${app_data}/bundled-runtime-install-v1.json"
+          launch_log="${RUNNER_TEMP}/installed-desktop.log"
+
+          cleanup() {
+            if [[ -n "${desktop_pid:-}" ]]; then
+              kill "${desktop_pid}" >/dev/null 2>&1 || true
+              wait "${desktop_pid}" >/dev/null 2>&1 || true
+            fi
+            if [[ -n "${runtime_root:-}" && -x "${runtime_root}/stop-agent.sh" ]]; then
+              "${runtime_root}/stop-agent.sh" >/dev/null 2>&1 || true
+            fi
+            sudo rm -rf "${installed_app}"
+            rm -rf "${app_data}"
+          }
+          trap cleanup EXIT
+
+          current_executable_fingerprint() {
+            python3 - "${installed_app}/Contents/MacOS/agent-desktop" <<'PY'
+          import os
+          import sys
+          value = os.stat(sys.argv[1])
+          print(f"{value.st_dev}:{value.st_ino}:{value.st_size}:{int(value.st_mtime)}:{value.st_mtime_ns % 1_000_000_000}")
+          PY
+          }
+
+          state_executable_fingerprint() {
+            python3 - "${state_file}" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          try:
+              print(json.loads(Path(sys.argv[1]).read_text())["executable_fingerprint"])
+          except (OSError, KeyError, json.JSONDecodeError):
+              pass
+          PY
+          }
+
+          wait_for_runtime_install() {
+            for _ in $(seq 1 180); do
+              if [[ -f "${state_file}" ]] && \
+                [[ "$(state_executable_fingerprint)" == "$(current_executable_fingerprint)" ]]; then
+                return 0
+              fi
+              if ! kill -0 "${desktop_pid}" >/dev/null 2>&1; then
+                cat "${launch_log}" >&2 || true
+                echo "Installed desktop exited before bundled setup completed." >&2
+                return 1
+              fi
+              sleep 5
+            done
+            cat "${launch_log}" >&2 || true
+            cat "${app_data}/bundled-runtime-install.log" >&2 || true
+            echo "Bundled runtime setup did not finish within 15 minutes." >&2
+            return 1
+          }
+
+          sudo installer -pkg "${INSTALLER_PKG}" -target /
+          [[ -x "${installed_app}/Contents/MacOS/agent-desktop" ]]
+          descriptor="${installed_app}/Contents/Resources/embedded-runtime/bundle.json"
+          [[ -f "${descriptor}" ]]
+          descriptor_digest="$(shasum -a 256 "${descriptor}" | awk '{print $1}')"
+
+          APP_BUNDLED_RUNTIME_NONINTERACTIVE=1 \
+            "${installed_app}/Contents/MacOS/agent-desktop" \
+            >"${launch_log}" 2>&1 &
+          desktop_pid=$!
+          wait_for_runtime_install
+          runtime_root="$(python3 - "${state_file}" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          print(json.loads(Path(sys.argv[1]).read_text())["runtime_root"])
+          PY
+          )"
+          [[ -f "${runtime_root}/.release-tag" ]]
+          [[ -x "${runtime_root}/target/release/skillctl" ]]
+          [[ -x "${runtime_root}/prebuilt/toolchains/python/bin/python3" ]]
+          [[ -x "${runtime_root}/prebuilt/toolchains/node/bin/node" ]]
+
+          expected_count=0
+          while IFS= read -r skill_name; do
+            [[ -n "${skill_name}" ]] || continue
+            expected_count=$((expected_count + 1))
+            "${runtime_root}/target/release/skillctl" receipt-verify \
+              "${runtime_root}/data/skill-packages" "${skill_name}" >/dev/null
+          done < <(
+            python3 scripts/skill_store_packages.py \
+              --scope platform-on-demand --target "${RUST_TARGET}" --format skills
+          )
+          [[ "${expected_count}" -gt 0 ]]
+
+          kill "${desktop_pid}" >/dev/null 2>&1 || true
+          wait "${desktop_pid}" >/dev/null 2>&1 || true
+          desktop_pid=""
+          data_sentinel="${runtime_root}/data/pkg-overwrite-smoke.keep"
+          printf '%s\n' "preserve-user-data" > "${data_sentinel}"
+          printf '%s\n' "corrupted-managed-app-file" | sudo tee "${descriptor}" >/dev/null
+
+          sudo installer -pkg "${INSTALLER_PKG}" -target /
+          [[ "$(shasum -a 256 "${descriptor}" | awk '{print $1}')" == "${descriptor_digest}" ]]
+          [[ "$(cat "${data_sentinel}")" == "preserve-user-data" ]]
+
+          APP_BUNDLED_RUNTIME_NONINTERACTIVE=1 \
+            "${installed_app}/Contents/MacOS/agent-desktop" \
+            >>"${launch_log}" 2>&1 &
+          desktop_pid=$!
+          wait_for_runtime_install
+          [[ "$(cat "${data_sentinel}")" == "preserve-user-data" ]]
+          printf 'macos_pkg_smoke=passed skills=%s runtime=%s\n' \
+            "${expected_count}" "${runtime_root}"
 
       - name: Attest release provenance
         uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
@@ -221,5 +397,11 @@ jobs:
             dist-release/${{ steps.meta.outputs.package_name }}.spdx.json
             dist-release/${{ steps.meta.outputs.package_name }}.manifest.json
             dist-release/${{ steps.meta.outputs.package_name }}.manifest.json.sig
+            dist-release/agent-desktop_*.dmg
+            dist-release/agent-desktop_*.dmg.sha256
+            dist-release/agent-desktop_*.app.zip
+            dist-release/agent-desktop_*.app.zip.sha256
+            dist-release/${{ steps.meta.outputs.installer_name }}
+            dist-release/${{ steps.meta.outputs.installer_name }}.sha256
           if-no-files-found: error
           retention-days: 7

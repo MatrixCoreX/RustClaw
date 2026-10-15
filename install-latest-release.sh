@@ -94,7 +94,7 @@ fi
 restart_option=--no-restart
 [[ "$START" -eq 0 ]] || restart_option=--restart
 APP_SKIP_AUTOSTART_REGISTRATION=1 \
-  bash "$BOOTSTRAP/deploy-github-release.sh" --root "$ROOT_DIR" "$restart_option"
+  bash "$BOOTSTRAP/deploy-github-release.sh" --root "$ROOT_DIR" --force "$restart_option"
 export APP_PRODUCT_IDENTITY_CONFIG="$ROOT_DIR/configs/product_identity.toml"
 bash "$ROOT_DIR/install-agent-cmd.sh" --user --no-deploy-ui
 if [[ "$START" -eq 1 && -x "$ROOT_DIR/scripts/configure-autostart.sh" ]]; then

@@ -503,6 +503,20 @@ fn python_adapter_uses_a_private_virtual_environment() {
     assert_eq!(imported.adapter, crate::BuildAdapter::Python);
     assert_eq!(imported.origin, InstallOrigin::PlatformPrecompiled);
     assert!(imported.install_root.join("runtime/venv").is_dir());
+    let runtime = fs::canonicalize(find_on_path("python3").unwrap()).unwrap();
+    let configuration = fs::read_to_string(imported.install_root.join("runtime/venv/pyvenv.cfg"))
+        .expect("rebound Python environment");
+    assert!(configuration.contains(&format!("home = {}", runtime.parent().unwrap().display())));
+    let launch = SkillRuntimeResolver::new(temp.path().join("imported"))
+        .resolve("python_fixture")
+        .expect("resolve rebound Python adapter");
+    #[cfg(windows)]
+    let installed_python = imported
+        .install_root
+        .join("runtime/venv/Scripts/python.exe");
+    #[cfg(not(windows))]
+    let installed_python = imported.install_root.join("runtime/venv/bin/python");
+    assert_eq!(launch.program, fs::canonicalize(installed_python).unwrap());
 }
 
 #[test]
