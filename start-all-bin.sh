@@ -117,14 +117,16 @@ telegram_credentials_available() {
   if [[ -n "${TELEGRAM_BOT_TOKEN:-}" && "${TELEGRAM_BOT_TOKEN}" != "REPLACE_ME" ]]; then
     return 0
   fi
-  python3 - "$SCRIPT_DIR/configs/channels/telegram.toml" <<'PY'
+  local configured=""
+  configured="$(python3 - "$SCRIPT_DIR/configs/channels/telegram.toml" <<'PY'
 from pathlib import Path
 import sys
 import tomllib
 
 path = Path(sys.argv[1])
 if not path.is_file():
-    raise SystemExit(1)
+    print("0")
+    raise SystemExit(0)
 value = tomllib.loads(path.read_text(encoding="utf-8"))
 tokens = []
 for section_name in ("telegram", "telegram_bot"):
@@ -140,8 +142,13 @@ configured = any(
     isinstance(token, str) and token.strip() not in ("", "REPLACE_ME")
     for token in tokens
 )
-raise SystemExit(0 if configured else 1)
+print("1" if configured else "0")
 PY
+)" || return 1
+  if [[ "$configured" == "1" ]]; then
+    return 0
+  fi
+  return 1
 }
 
 require_binary() {
@@ -433,6 +440,8 @@ start_clawd
 start_optional_component "webd" start_webd
 if [[ "${APP_SKIP_TELEGRAMD:-0}" == "1" ]]; then
   echo "APP_SKIP_TELEGRAMD=1, skipping telegramd startup."
+elif [[ "$TELEGRAM_ENABLED" != "1" ]]; then
+  echo "telegram_bot.enabled=false, skipping telegramd startup."
 elif ! telegram_credentials_available; then
   echo "Telegram is not configured yet; skipping telegramd startup."
 else
