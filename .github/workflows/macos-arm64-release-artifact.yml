@@ -147,27 +147,9 @@ jobs:
         run: npm ci --ignore-scripts --prefix crates/skills/browser_web
 
       - name: Test Release installation boundaries
-        run: python3 -m unittest discover -s scripts/tests -p 'test_release*.py'
-
-      - name: Build native runtime and proactive skill receipts
-        shell: bash
         run: |
-          set -euo pipefail
-          ./build-all.sh no-ui --target host
-
-      - name: Download verified native dependency bundles
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh run download "$GITHUB_RUN_ID" --pattern "release-wheels-${RUST_TARGET}-*" --dir release-wheel-bundles
-
-      - name: Precompile platform Skill Store packages
-        shell: bash
-        env:
-          APP_PRECOMPILE_ALL_BUNDLED_SKILLS: "1"
-          APP_RELEASE_PYTHON_WHEELS_ROOT: ${{ github.workspace }}/release-wheel-bundles
-        run: |
-          set -euo pipefail
-          ./scripts/precompile_skill_store.sh "${RUST_TARGET}"
+          python3 -m unittest discover -s scripts/tests -p 'test_release*.py'
+          python3 -m unittest scripts.tests.test_bundle_macos_skill_dependencies
 
       - name: Bundle macOS skill software dependencies
         shell: bash
@@ -209,6 +191,26 @@ jobs:
             --chromium "${chromium_executable}" \
             --whisper-cli "$(brew --prefix whisper-cpp)/bin/whisper-cli" \
             --whisper-model "${dependency_downloads}/ggml-base.bin"
+
+      - name: Build native runtime and proactive skill receipts
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./build-all.sh no-ui --target host
+
+      - name: Download verified native dependency bundles
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "$GITHUB_RUN_ID" --pattern "release-wheels-${RUST_TARGET}-*" --dir release-wheel-bundles
+
+      - name: Precompile platform Skill Store packages
+        shell: bash
+        env:
+          APP_PRECOMPILE_ALL_BUNDLED_SKILLS: "1"
+          APP_RELEASE_PYTHON_WHEELS_ROOT: ${{ github.workspace }}/release-wheel-bundles
+        run: |
+          set -euo pipefail
+          ./scripts/precompile_skill_store.sh "${RUST_TARGET}"
 
       - name: Verify native skill receipts
         shell: bash

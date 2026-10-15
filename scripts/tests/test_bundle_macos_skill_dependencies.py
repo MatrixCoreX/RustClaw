@@ -29,19 +29,25 @@ class BundleMacosSkillDependenciesTests(unittest.TestCase):
             (root / "Contents/Info.plist").write_text("not a Mach-O")
 
             with mock.patch.object(bundle.subprocess, "run") as run:
-                bundle.verify_macho_signatures(root)
+                bundle.adhoc_sign_macho_files(root)
 
-            self.assertEqual(run.call_count, 2)
-            verified = {Path(call.args[0][-1]) for call in run.call_args_list}
+            self.assertEqual(run.call_count, 4)
+            signed = run.call_args_list[::2]
+            verified_calls = run.call_args_list[1::2]
+            verified = {Path(call.args[0][-1]) for call in verified_calls}
             self.assertEqual(verified, {executable, framework})
-            for call in run.call_args_list:
+            for call in signed:
+                self.assertEqual(call.args[0][0:4], ["codesign", "--force", "--sign", "-"])
+                self.assertIn("--preserve-metadata=identifier,entitlements,flags,runtime", call.args[0])
+                self.assertTrue(call.kwargs["check"])
+            for call in verified_calls:
                 self.assertEqual(call.args[0][0:3], ["codesign", "--verify", "--strict"])
                 self.assertTrue(call.kwargs["check"])
 
     def test_empty_macho_bundle_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(ValueError, "macos_macho_bundle_empty"):
-                bundle.verify_macho_signatures(Path(directory))
+                bundle.adhoc_sign_macho_files(Path(directory))
 
 
 if __name__ == "__main__":

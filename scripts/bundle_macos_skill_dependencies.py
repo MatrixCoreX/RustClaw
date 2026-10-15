@@ -101,11 +101,24 @@ def copy_tree_without_links(source: Path, destination: Path) -> None:
         raise ValueError(f"macos_tool_bundle_symlink:{links[0]}")
 
 
-def verify_macho_signatures(root: Path) -> None:
+def adhoc_sign_macho_files(root: Path) -> None:
     binaries = sorted(path for path in root.rglob("*") if is_macho(path))
     if not binaries:
         raise ValueError(f"macos_macho_bundle_empty:{root}")
     for binary in binaries:
+        binary.chmod(binary.stat().st_mode | stat.S_IWUSR)
+        subprocess.run(
+            [
+                "codesign",
+                "--force",
+                "--sign",
+                "-",
+                "--timestamp=none",
+                "--preserve-metadata=identifier,entitlements,flags,runtime",
+                str(binary),
+            ],
+            check=True,
+        )
         subprocess.run(
             ["codesign", "--verify", "--strict", str(binary)],
             check=True,
@@ -242,12 +255,12 @@ def main() -> None:
         relative_chromium = chromium.relative_to(chromium_source)
         chromium_target_executable = chromium_target / relative_chromium
         # Release archives reject symlinks, so copytree intentionally
-        # materializes Chromium's framework links. The copied Mach-O bytes keep
-        # their upstream signatures, but the resulting outer .app is no longer
-        # a canonical framework bundle and must not be passed to codesign
-        # --deep. Verify every executable/library directly; the functional
-        # version probe below then exercises the materialized layout.
-        verify_macho_signatures(chromium_target)
+        # materializes Chromium's framework links. The resulting outer .app is
+        # no longer a canonical framework bundle and must not be passed to
+        # codesign --deep. Re-sign every executable/library directly while
+        # preserving its identifier, entitlements, and hardened-runtime flags;
+        # the functional version probe below exercises the materialized layout.
+        adhoc_sign_macho_files(chromium_target)
 
         copy_external_libraries(root, origins)
         write_wrapper(
