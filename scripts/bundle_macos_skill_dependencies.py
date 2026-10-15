@@ -101,6 +101,17 @@ def copy_tree_without_links(source: Path, destination: Path) -> None:
         raise ValueError(f"macos_tool_bundle_symlink:{links[0]}")
 
 
+def verify_macho_signatures(root: Path) -> None:
+    binaries = sorted(path for path in root.rglob("*") if is_macho(path))
+    if not binaries:
+        raise ValueError(f"macos_macho_bundle_empty:{root}")
+    for binary in binaries:
+        subprocess.run(
+            ["codesign", "--verify", "--strict", str(binary)],
+            check=True,
+        )
+
+
 def write_wrapper(path: Path, body: str) -> None:
     path.write_text("#!/bin/bash\nset -euo pipefail\n" + body, encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
@@ -230,14 +241,13 @@ def main() -> None:
         copy_tree_without_links(chromium_source, chromium_target)
         relative_chromium = chromium.relative_to(chromium_source)
         chromium_target_executable = chromium_target / relative_chromium
-        subprocess.run(
-            ["codesign", "--force", "--deep", "--sign", "-", str(chromium_target)],
-            check=True,
-        )
-        subprocess.run(
-            ["codesign", "--verify", "--deep", "--strict", str(chromium_target)],
-            check=True,
-        )
+        # Release archives reject symlinks, so copytree intentionally
+        # materializes Chromium's framework links. The copied Mach-O bytes keep
+        # their upstream signatures, but the resulting outer .app is no longer
+        # a canonical framework bundle and must not be passed to codesign
+        # --deep. Verify every executable/library directly; the functional
+        # version probe below then exercises the materialized layout.
+        verify_macho_signatures(chromium_target)
 
         copy_external_libraries(root, origins)
         write_wrapper(
