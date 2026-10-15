@@ -60,6 +60,15 @@ class ReleaseInstallationTests(unittest.TestCase):
         self.assertIn('rm -rf "$WORK_DIR"', deploy_source)
         self.assertIn('rm -rf "$PACKAGE_STAGE_DIR"', deploy_source)
 
+    def test_bundled_skill_bootstrap_is_safe_on_macos_bash_3(self):
+        deploy_source = (ROOT / "deploy-github-release.sh").read_text()
+        bootstrap_start = deploy_source.index("bootstrap_bundled_release_skills()")
+        bootstrap_end = deploy_source.index("converge_installed_bundled_skills()")
+        bootstrap = deploy_source[bootstrap_start:bootstrap_end]
+        self.assertIn("local -a bootstrap_args=(", bootstrap)
+        self.assertIn("bootstrap_args+=(--skip-bundled-skill", bootstrap)
+        self.assertNotIn("resource_skipped_skills", bootstrap)
+
     def test_release_package_contains_runtime_assets_without_build_caches(self):
         package_source = (ROOT / "package-release.sh").read_text()
         self.assertIn('cp -R "$SCRIPT_DIR/UI/dist" "$STAGE_PROJECT_DIR/UI/dist"', package_source)

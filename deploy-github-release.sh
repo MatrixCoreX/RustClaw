@@ -898,7 +898,12 @@ bootstrap_bundled_release_skills() {
   [[ -f "$runtime_root/configs/config.toml" ]] ||
     die "bundled_skill_bootstrap_config_missing"
   configure_bundled_toolchains "$runtime_root"
-  local -a resource_skipped_skills=()
+  # Keep this array non-empty. macOS still ships Bash 3.2, where expanding an
+  # empty array under `set -u` fails with "unbound variable".
+  local -a bootstrap_args=(
+    --config "$runtime_root/configs/config.toml"
+    --bootstrap-bundled-skills
+  )
 
   while IFS=$'\t' read -r skill_name manifest_relative; do
     [[ -n "$skill_name" && -n "$manifest_relative" ]] || continue
@@ -911,7 +916,7 @@ bootstrap_bundled_release_skills() {
         "$runtime_root/prebuilt/skill-packages"; then
       :
     elif [[ "$?" -eq 20 ]]; then
-      resource_skipped_skills+=("$skill_name")
+      bootstrap_args+=(--skip-bundled-skill "$skill_name")
       continue
     else
       return 1
@@ -949,13 +954,6 @@ PY
     --destination "$runtime_root/data/skills"
   (
     cd "$runtime_root"
-    local -a bootstrap_args=(
-      --config "$runtime_root/configs/config.toml"
-      --bootstrap-bundled-skills
-    )
-    for skill_name in "${resource_skipped_skills[@]}"; do
-      bootstrap_args+=(--skip-bundled-skill "$skill_name")
-    done
     APP_PRODUCT_IDENTITY_CONFIG="$runtime_root/configs/product_identity.toml" \
       "$runtime_root/target/release/clawd" \
         "${bootstrap_args[@]}"
