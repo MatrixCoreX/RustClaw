@@ -198,6 +198,36 @@ def app_root(executable: Path) -> Path:
     raise ValueError("macos_chromium_app_missing")
 
 
+def write_chromium_command_shim(root: Path) -> Path:
+    shim = root / "bin/chromium"
+    shim.parent.mkdir(parents=True, exist_ok=True)
+    shim.write_text(
+        """#!/bin/sh
+set -eu
+launcher_path=$0
+case "$launcher_path" in
+  /*) ;;
+  *) launcher_path=$PWD/$launcher_path ;;
+esac
+launcher_dir=${launcher_path%/*}
+launcher_dir=$(CDPATH= cd "$launcher_dir" && pwd -P)
+descriptor="$launcher_dir/../chromium-executable-relative"
+IFS= read -r chromium_relative < "$descriptor"
+case "$chromium_relative" in
+  chromium/Chromium.app/Contents/MacOS/*) ;;
+  *) echo "bundled_chromium_descriptor_invalid" >&2; exit 127 ;;
+esac
+case "/$chromium_relative/" in
+  */../*|*/./*) echo "bundled_chromium_descriptor_unsafe" >&2; exit 127 ;;
+esac
+exec "$launcher_dir/../$chromium_relative" "$@"
+""",
+        encoding="utf-8",
+    )
+    shim.chmod(0o755)
+    return shim
+
+
 def require_file(path: Path, label: str, executable: bool = False) -> Path:
     resolved = path.expanduser().resolve(strict=True)
     if not resolved.is_file() or resolved.is_symlink():
@@ -285,6 +315,7 @@ def main() -> None:
         (root / "chromium-executable-relative").write_text(
             chromium_relative + "\n", encoding="utf-8"
         )
+        write_chromium_command_shim(root)
         copy_external_libraries(root, origins)
 
         git_environment = {
@@ -314,6 +345,7 @@ def main() -> None:
             "schema_version": 1,
             "tool_paths": {
                 "chromium": chromium_relative,
+                "chromium_command": "bin/chromium",
                 "ffmpeg": "bin/ffmpeg",
                 "ffprobe": "bin/ffprobe",
                 "git": "git/bin/git",

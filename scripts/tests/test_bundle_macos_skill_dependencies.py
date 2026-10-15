@@ -95,6 +95,28 @@ class BundleMacosSkillDependenciesTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "macos_macho_bundle_empty"):
                 bundle.adhoc_sign_macho_files(Path(directory))
 
+    def test_chromium_command_shim_resolves_bundle_with_spaces(self):
+        with tempfile.TemporaryDirectory(prefix="macos host tools ") as directory:
+            root = Path(directory)
+            executable = root / "chromium/Chromium.app/Contents/MacOS/Chromium"
+            executable.parent.mkdir(parents=True)
+            executable.write_text("#!/bin/sh\nprintf '%s\\n' \"$*\"\n")
+            executable.chmod(0o755)
+            (root / "chromium-executable-relative").write_text(
+                "chromium/Chromium.app/Contents/MacOS/Chromium\n"
+            )
+
+            shim = bundle.write_chromium_command_shim(root)
+            completed = bundle.subprocess.run(
+                [str(shim), "--version", "fixture value"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(completed.stdout, "--version fixture value\n")
+            self.assertEqual(shim.stat().st_mode & 0o777, 0o755)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -404,7 +404,7 @@ jobs:
           [[ -x "${runtime_root}/prebuilt/toolchains/python/bin/python3" ]]
           [[ -x "${runtime_root}/prebuilt/toolchains/node/bin/node" ]]
           host_tools="${runtime_root}/prebuilt/toolchains/host"
-          for tool in ffmpeg ffprobe tesseract whisper-cli; do
+          for tool in chromium ffmpeg ffprobe tesseract whisper-cli; do
             [[ -x "${host_tools}/bin/${tool}" ]]
           done
           [[ -x "${host_tools}/git/bin/git" ]]
@@ -414,11 +414,29 @@ jobs:
           # The installed runtime path contains spaces on macOS.
           source "${runtime_root}/scripts/shell_compat.sh"
           configure_bundled_host_tools "${runtime_root}"
+          printf '%s\n' 'macos_pkg_probe=git'
           git --version
+          printf '%s\n' 'macos_pkg_probe=ffmpeg'
           ffmpeg -version >/dev/null
+          printf '%s\n' 'macos_pkg_probe=ffprobe'
           ffprobe -version >/dev/null
+          printf '%s\n' 'macos_pkg_probe=tesseract'
           tesseract --list-langs | grep -qx 'chi_sim'
-          "${APP_BUNDLED_CHROMIUM_PATH}" --version
+          printf '%s\n' 'macos_pkg_probe=chromium'
+          [[ "$(command -v chromium)" == "${host_tools}/bin/chromium" ]]
+          chromium_profile="$(mktemp -d "${RUNNER_TEMP}/bundled-chromium-profile.XXXXXX")"
+          chromium_output="${RUNNER_TEMP}/bundled-chromium-smoke.html"
+          chromium \
+            --headless=new \
+            --disable-gpu \
+            --no-first-run \
+            --no-default-browser-check \
+            --user-data-dir="${chromium_profile}" \
+            --dump-dom 'data:text/html,<title>bundled-browser-ready</title>' \
+            >"${chromium_output}"
+          grep -q 'bundled-browser-ready' "${chromium_output}"
+          rm -rf "${chromium_profile}"
+          printf '%s\n' 'macos_pkg_probe=media'
           media_fixture="${RUNNER_TEMP}/bundled-media-smoke.wav"
           ffmpeg -hide_banner -loglevel error -f lavfi \
             -i anullsrc=r=16000:cl=mono -t 0.5 -y "${media_fixture}"
@@ -427,6 +445,7 @@ jobs:
           whisper-cli \
             -m "${host_tools}/models/whisper/ggml-base.bin" \
             -f "${media_fixture}" -nt >/dev/null
+          printf '%s\n' 'macos_pkg_probe=skill_receipts'
           if [[ "${PACKAGE_ARCH}" == "aarch64" ]]; then
             find "${runtime_root}/data/skills/local_asr" -type f -name model.pt -print -quit | grep -q .
           fi

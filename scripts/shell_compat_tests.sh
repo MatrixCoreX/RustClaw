@@ -107,6 +107,7 @@ mkdir -p \
   "$HOST_TEST_TOOLS/share/tessdata" \
   "$(dirname "$HOST_TEST_TOOLS/$HOST_TEST_CHROMIUM_RELATIVE")"
 touch \
+  "$HOST_TEST_TOOLS/bin/chromium" \
   "$HOST_TEST_TOOLS/bin/ffmpeg" \
   "$HOST_TEST_TOOLS/bin/ffprobe" \
   "$HOST_TEST_TOOLS/bin/tesseract" \
@@ -114,6 +115,7 @@ touch \
   "$HOST_TEST_TOOLS/git/bin/git" \
   "$HOST_TEST_TOOLS/$HOST_TEST_CHROMIUM_RELATIVE"
 chmod +x \
+  "$HOST_TEST_TOOLS/bin/chromium" \
   "$HOST_TEST_TOOLS/bin/ffmpeg" \
   "$HOST_TEST_TOOLS/bin/ffprobe" \
   "$HOST_TEST_TOOLS/bin/tesseract" \
@@ -126,6 +128,7 @@ PATH="/usr/bin:/bin"
 export PATH
 configure_bundled_host_tools "$HOST_TEST_ROOT"
 [[ "$(command -v git)" == "$HOST_TEST_TOOLS/git/bin/git" ]]
+[[ "$(command -v chromium)" == "$HOST_TEST_TOOLS/bin/chromium" ]]
 [[ "$(command -v ffmpeg)" == "$HOST_TEST_TOOLS/bin/ffmpeg" ]]
 [[ "$GIT_EXEC_PATH" == "$HOST_TEST_TOOLS/git/libexec/git-core" ]]
 [[ "$GIT_TEMPLATE_DIR" == "$HOST_TEST_TOOLS/git/share/git-core/templates" ]]

@@ -151,6 +151,7 @@ configure_bundled_host_tools() {
 
   for required_file in \
     "$host_root/git/bin/git" \
+    "$host_root/bin/chromium" \
     "$host_root/bin/ffmpeg" \
     "$host_root/bin/ffprobe" \
     "$host_root/bin/tesseract" \
