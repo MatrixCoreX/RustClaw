@@ -206,7 +206,7 @@ PY
 		while IFS=$'\t' read -r skill _package _runner install_mode _supported_os _adapter; do
 			[[ -n "$skill" && "$install_mode" != "on_demand" ]] || continue
 			local receipt_json=""
-			if ! receipt_json="$($receipt_cli receipt-verify "$SCRIPT_DIR/data/skill-packages" "$skill")"; then
+			if ! receipt_json="$("$receipt_cli" receipt-verify "$SCRIPT_DIR/data/skill-packages" "$skill")"; then
 				echo "Verified skill receipt is unavailable: $skill" >&2
 				exit 1
 			fi

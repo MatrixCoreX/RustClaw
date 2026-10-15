@@ -255,7 +255,7 @@ LINK_PATH="$INSTALL_DIR/agentctl"
 
 ensure_python_runtime() {
   if configure_python3_with_tomllib 2>/dev/null; then
-    echo "Python runtime ready: $APP_PYTHON_BIN ($($APP_PYTHON_BIN --version 2>&1))"
+    echo "Python runtime ready: $APP_PYTHON_BIN ($("$APP_PYTHON_BIN" --version 2>&1))"
     return 0
   fi
 
@@ -293,7 +293,7 @@ ensure_python_runtime() {
     echo "Python was installed, but the agent runtime still cannot find Python 3.11+ with tomllib." >&2
     exit 1
   fi
-  echo "Python runtime installed: $APP_PYTHON_BIN ($($APP_PYTHON_BIN --version 2>&1))"
+  echo "Python runtime installed: $APP_PYTHON_BIN ($("$APP_PYTHON_BIN" --version 2>&1))"
 }
 
 path_writable_or_creatable() {

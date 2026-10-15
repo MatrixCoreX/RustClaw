@@ -49,6 +49,8 @@ class ReleaseInstallationTests(unittest.TestCase):
             result = subprocess.run(["bash", str(ROOT / "install-agent-cmd.sh"), flag], capture_output=True, text=True)
             self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
             self.assertIn("Compilation is not an installation step", result.stdout)
+        self.assertIn('$("$APP_PYTHON_BIN" --version', source)
+        self.assertNotIn('$($APP_PYTHON_BIN --version', source)
 
     def test_release_deployment_is_prebuilt_and_keeps_one_rollback(self):
         deploy_source = (ROOT / "deploy-github-release.sh").read_text()
@@ -155,6 +157,11 @@ class ReleaseInstallationTests(unittest.TestCase):
         self.assertIn("prebuilt/toolchains/python/bin/python3", launcher)
         self.assertIn("prebuilt/toolchains/node/bin", launcher)
         self.assertIn("prebuilt/toolchains/host/bin", launcher)
+        self.assertIn('$("$SKILL_RECEIPT_CLI" receipt-verify', launcher)
+        self.assertNotIn('$($SKILL_RECEIPT_CLI receipt-verify', launcher)
+        source_launcher = (ROOT / "start-all.sh").read_text()
+        self.assertIn('$("$receipt_cli" receipt-verify', source_launcher)
+        self.assertNotIn('$($receipt_cli receipt-verify', source_launcher)
         desktop_runtime = (ROOT / "desktop/src/bundled_runtime.rs").read_text()
         self.assertIn("executable_fingerprint", desktop_runtime)
         self.assertIn('.arg("--force")', desktop_runtime)
