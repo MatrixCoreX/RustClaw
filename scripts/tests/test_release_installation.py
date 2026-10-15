@@ -162,6 +162,15 @@ class ReleaseInstallationTests(unittest.TestCase):
         self.assertIn("APP_DESKTOP_BOOTSTRAP_PYTHON_ROOT", workflow)
         self.assertIn("APP_DESKTOP_RUNTIME_BUNDLE_DIR", workflow)
         self.assertIn("embedded-runtime/bundle.json", workflow)
+        self.assertGreaterEqual(
+            workflow.count('cat "${app_data}/bundled-runtime-install.log" >&2 || true'),
+            2,
+        )
+        self.assertIn(
+            'local cleanup_runtime_root="${runtime_root:-${app_data}/runtime}"',
+            workflow,
+        )
+        self.assertIn('sudo rm -rf "${app_data}"', workflow)
         package = (ROOT / "package-release.sh").read_text()
         self.assertIn('*-linux-*|*-apple-darwin', package)
         self.assertNotIn("supported only by Linux Release packages", package)

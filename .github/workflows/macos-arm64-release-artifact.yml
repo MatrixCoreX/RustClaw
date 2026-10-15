@@ -327,15 +327,16 @@ jobs:
           launch_log="${RUNNER_TEMP}/installed-desktop.log"
 
           cleanup() {
+            local cleanup_runtime_root="${runtime_root:-${app_data}/runtime}"
             if [[ -n "${desktop_pid:-}" ]]; then
               kill "${desktop_pid}" >/dev/null 2>&1 || true
               wait "${desktop_pid}" >/dev/null 2>&1 || true
             fi
-            if [[ -n "${runtime_root:-}" && -x "${runtime_root}/stop-agent.sh" ]]; then
-              "${runtime_root}/stop-agent.sh" >/dev/null 2>&1 || true
+            if [[ -x "${cleanup_runtime_root}/stop-agent.sh" ]]; then
+              "${cleanup_runtime_root}/stop-agent.sh" >/dev/null 2>&1 || true
             fi
             sudo rm -rf "${installed_app}"
-            rm -rf "${app_data}"
+            sudo rm -rf "${app_data}"
           }
           trap cleanup EXIT
 
@@ -368,6 +369,7 @@ jobs:
               fi
               if ! kill -0 "${desktop_pid}" >/dev/null 2>&1; then
                 cat "${launch_log}" >&2 || true
+                cat "${app_data}/bundled-runtime-install.log" >&2 || true
                 echo "Installed desktop exited before bundled setup completed." >&2
                 return 1
               fi
