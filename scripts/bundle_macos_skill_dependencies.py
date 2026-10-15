@@ -105,24 +105,29 @@ def adhoc_sign_macho_files(root: Path) -> None:
     binaries = sorted(path for path in root.rglob("*") if is_macho(path))
     if not binaries:
         raise ValueError(f"macos_macho_bundle_empty:{root}")
-    for binary in binaries:
-        binary.chmod(binary.stat().st_mode | stat.S_IWUSR)
-        subprocess.run(
-            [
-                "codesign",
-                "--force",
-                "--sign",
-                "-",
-                "--timestamp=none",
-                "--preserve-metadata=identifier,entitlements,flags,runtime",
-                str(binary),
-            ],
-            check=True,
-        )
-        subprocess.run(
-            ["codesign", "--verify", "--strict", str(binary)],
-            check=True,
-        )
+    with tempfile.TemporaryDirectory(prefix="macos-macho-sign-") as temporary:
+        signing_root = Path(temporary)
+        for index, binary in enumerate(binaries):
+            binary.chmod(binary.stat().st_mode | stat.S_IWUSR)
+            staged = signing_root / f"{index}-{binary.name}"
+            shutil.copy2(binary, staged)
+            subprocess.run(
+                [
+                    "codesign",
+                    "--force",
+                    "--sign",
+                    "-",
+                    "--timestamp=none",
+                    "--preserve-metadata=identifier,entitlements,flags,runtime",
+                    str(staged),
+                ],
+                check=True,
+            )
+            subprocess.run(
+                ["codesign", "--verify", "--strict", str(staged)],
+                check=True,
+            )
+            shutil.copy2(staged, binary)
 
 
 def write_wrapper(path: Path, body: str) -> None:
@@ -257,9 +262,10 @@ def main() -> None:
         # Release archives reject symlinks, so copytree intentionally
         # materializes Chromium's framework links. The resulting outer .app is
         # no longer a canonical framework bundle and must not be passed to
-        # codesign --deep. Re-sign every executable/library directly while
-        # preserving its identifier, entitlements, and hardened-runtime flags;
-        # the functional version probe below exercises the materialized layout.
+        # codesign --deep. Re-sign every executable/library from a temporary
+        # path outside the ambiguous bundle while preserving its identifier,
+        # entitlements, and hardened-runtime flags; the functional version
+        # probe below exercises the materialized layout.
         adhoc_sign_macho_files(chromium_target)
 
         copy_external_libraries(root, origins)

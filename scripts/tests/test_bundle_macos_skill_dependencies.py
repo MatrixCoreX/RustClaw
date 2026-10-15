@@ -34,11 +34,18 @@ class BundleMacosSkillDependenciesTests(unittest.TestCase):
             self.assertEqual(run.call_count, 4)
             signed = run.call_args_list[::2]
             verified_calls = run.call_args_list[1::2]
-            verified = {Path(call.args[0][-1]) for call in verified_calls}
-            self.assertEqual(verified, {executable, framework})
+            staged = {Path(call.args[0][-1]) for call in verified_calls}
+            self.assertEqual(
+                {path.name.split("-", 1)[1] for path in staged},
+                {executable.name, framework.name},
+            )
+            self.assertTrue(all(not path.is_relative_to(root) for path in staged))
             for call in signed:
                 self.assertEqual(call.args[0][0:4], ["codesign", "--force", "--sign", "-"])
-                self.assertIn("--preserve-metadata=identifier,entitlements,flags,runtime", call.args[0])
+                self.assertIn(
+                    "--preserve-metadata=identifier,entitlements,flags,runtime",
+                    call.args[0],
+                )
                 self.assertTrue(call.kwargs["check"])
             for call in verified_calls:
                 self.assertEqual(call.args[0][0:3], ["codesign", "--verify", "--strict"])
