@@ -56,6 +56,33 @@ fn user_python_installation_accepts_wheels_only_and_uses_packaged_wheelhouse() {
 }
 
 #[test]
+fn packaged_python_wheelhouse_allows_a_strict_offline_install() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut manifest =
+        PackageManifest::from_toml_str(crate::tests::manifest_source()).expect("manifest");
+    manifest.build.adapter = BuildAdapter::Python;
+    manifest.build.source_root = ".".to_string();
+    let control = InstallControl::new(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+        false,
+    )))
+    .without_source_build();
+    let context = AdapterContext {
+        manifest: &manifest,
+        workspace_root: temp.path(),
+        manifest_dir: temp.path(),
+        staging_root: temp.path(),
+        cache_root: temp.path(),
+        platform: &HostPlatform::current(),
+        target: None,
+        allow_network: false,
+        control: Some(&control),
+    };
+    assert!(!offline_python_wheelhouse_available(&context));
+    fs::create_dir(temp.path().join("release-wheels")).expect("wheelhouse");
+    assert!(offline_python_wheelhouse_available(&context));
+}
+
+#[test]
 fn macos_python_source_builds_use_only_the_native_architecture() {
     for (arch, expected) in [("aarch64", "-arch arm64"), ("x86_64", "-arch x86_64")] {
         let mut command = Command::new("python");

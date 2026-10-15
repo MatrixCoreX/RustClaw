@@ -54,6 +54,7 @@ pub fn prepare_package(context: &AdapterContext<'_>) -> SkillSdkResult<PreparedP
     }
     if context.manifest.build.network == BuildNetworkPolicy::ApprovalRequired
         && !context.allow_network
+        && !offline_python_wheelhouse_available(context)
     {
         return Err(SkillSdkError::new(
             "build_network_approval_required",
@@ -85,6 +86,14 @@ fn source_build_disabled(context: &AdapterContext<'_>) -> bool {
     context
         .control
         .is_some_and(|control| !control.source_build_allowed())
+}
+
+fn offline_python_wheelhouse_available(context: &AdapterContext<'_>) -> bool {
+    matches!(context.manifest.build.adapter, BuildAdapter::Python)
+        && source_build_disabled(context)
+        && source_root(context)
+            .map(|root| root.join("release-wheels").is_dir())
+            .unwrap_or(false)
 }
 
 pub fn source_digest(root: &Path) -> SkillSdkResult<String> {
