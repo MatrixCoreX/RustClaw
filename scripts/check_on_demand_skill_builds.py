@@ -113,6 +113,9 @@ REQUIRED_SNIPPETS = {
         "target/prebuilt-skill-packages/$TARGET",
         "--prepare-bundled-runtime-assets",
         "target/prebuilt-skill-storage/$TARGET",
+        "stage_release_skill_sources.py",
+        "prepare_release_python_wheels.py",
+        "APP_RELEASE_PYTHON_WHEELS_ROOT",
     ),
     ".github/workflows/ubuntu-x86_64-release.yml": (
         './scripts/precompile_skill_store.sh "${RUST_TARGET}"',
@@ -130,6 +133,7 @@ REQUIRED_SNIPPETS = {
         "APP_DESKTOP_BOOTSTRAP_PYTHON_ROOT",
         "APP_DESKTOP_RUNTIME_BUNDLE_DIR",
         "embedded-runtime/bundle.json",
+        "APP_RELEASE_PYTHON_WHEELS_ROOT",
     ),
     "deploy-github-release.sh": (
         "seed_bundled_skill_storage.py",

@@ -155,10 +155,16 @@ jobs:
           set -euo pipefail
           ./build-all.sh no-ui --target host
 
+      - name: Download verified native dependency bundles
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "$GITHUB_RUN_ID" --pattern "release-wheels-${RUST_TARGET}-*" --dir release-wheel-bundles
+
       - name: Precompile platform Skill Store packages
         shell: bash
         env:
           APP_PRECOMPILE_ALL_BUNDLED_SKILLS: "1"
+          APP_RELEASE_PYTHON_WHEELS_ROOT: ${{ github.workspace }}/release-wheel-bundles
         run: |
           set -euo pipefail
           ./scripts/precompile_skill_store.sh "${RUST_TARGET}"
@@ -179,11 +185,6 @@ jobs:
             python3 scripts/skill_store_packages.py \
               --scope platform-precompiled --target "${RUST_TARGET}" --format skills
           )
-
-      - name: Download verified native dependency bundles
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh run download "$GITHUB_RUN_ID" --pattern "release-wheels-${RUST_TARGET}-*" --dir release-wheel-bundles
 
       - name: Package runtime
         shell: bash

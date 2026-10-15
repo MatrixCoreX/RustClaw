@@ -10,6 +10,7 @@ configure_python3_with_tomllib
 
 TARGET="${1:-host}"
 PRECOMPILE_ALL_BUNDLED="${APP_PRECOMPILE_ALL_BUNDLED_SKILLS:-0}"
+PREPARED_PYTHON_WHEELS="${APP_RELEASE_PYTHON_WHEELS_ROOT:-}"
 HOST_TARGET="$(rustc -vV | sed -n 's/^host: //p')"
 if [[ -z "$HOST_TARGET" ]]; then
 	echo "Unable to determine the host Rust target." >&2
@@ -76,14 +77,34 @@ done < <(
 )
 
 if [[ "$PRECOMPILE_ALL_BUNDLED" == "1" ]]; then
+	PRECOMPILE_WORKSPACE="$SCRIPT_DIR"
+	if [[ -n "$PREPARED_PYTHON_WHEELS" ]]; then
+		[[ -d "$PREPARED_PYTHON_WHEELS" ]] || {
+			echo "Prepared Python wheel root is unavailable: $PREPARED_PYTHON_WHEELS" >&2
+			exit 1
+		}
+		mkdir -p "$SCRIPT_DIR/target"
+		PRECOMPILE_WORKSPACE="$(mktemp -d "$SCRIPT_DIR/target/precompile-skill-sources.XXXXXX")"
+		trap 'rm -rf "$PRECOMPILE_WORKSPACE"' EXIT
+		python3 "$SCRIPT_DIR/scripts/stage_release_skill_sources.py" \
+			--target "$TARGET" --destination "$PRECOMPILE_WORKSPACE"
+		python3 "$SCRIPT_DIR/scripts/prepare_release_python_wheels.py" \
+			--target "$TARGET" --destination "$PRECOMPILE_WORKSPACE" \
+			--prepared-root "$PREPARED_PYTHON_WHEELS"
+	fi
 	while IFS=$'\t' read -r skill_name _package _runner _install_mode _supported_os adapter; do
 		[[ -n "$skill_name" && "$adapter" != "cargo" ]] || continue
 		manifest="$(python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" \
 			--scope selected --skill "$skill_name" --target "$TARGET" --format manifests)"
+		if [[ "$PRECOMPILE_WORKSPACE" != "$SCRIPT_DIR" ]]; then
+			manifest_relative="${manifest#"$SCRIPT_DIR"/}"
+			[[ "$manifest_relative" != "$manifest" ]]
+			manifest="$PRECOMPILE_WORKSPACE/$manifest_relative"
+		fi
 		echo "Preinstalling bundled Skill Store package: skill=$skill_name adapter=$adapter"
 		install_output=""
 		if ! install_output="$("$SDK_CLI" install-local \
-			"$manifest" "$SCRIPT_DIR" "$PACKAGE_ROOT" --network --target "$TARGET" 2>&1)"; then
+			"$manifest" "$PRECOMPILE_WORKSPACE" "$PACKAGE_ROOT" --network --target "$TARGET" 2>&1)"; then
 			printf '%s\n' "$install_output" >&2
 			exit 1
 		fi
