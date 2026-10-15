@@ -83,6 +83,7 @@ COMPONENT_PKG="${WORK_DIR}/desktop-component.pkg"
 UNSIGNED_PKG="${WORK_DIR}/installer-unsigned.pkg"
 PAYLOAD_ROOT="${WORK_DIR}/payload"
 SCRIPTS_DIR="${WORK_DIR}/scripts"
+COMPONENT_PLIST="${WORK_DIR}/components.plist"
 
 codesign --verify --deep --strict "${APP_BUNDLE}"
 
@@ -107,9 +108,36 @@ esac
 EOF
 chmod 755 "${SCRIPTS_DIR}/preinstall"
 
+# A root payload alone does not pin an application bundle to that path. By
+# default, Installer treats discovered bundles as relocatable and can redirect
+# this payload to another copy with the same bundle identifier (including the
+# build-tree copy on a publisher). The all-in-one desktop application is a
+# managed /Applications install, so explicitly disable bundle relocation.
+cat > "${COMPONENT_PLIST}" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<array>
+  <dict>
+    <key>BundleHasStrictIdentifier</key>
+    <true/>
+    <key>BundleIsRelocatable</key>
+    <false/>
+    <key>BundleIsVersionChecked</key>
+    <true/>
+    <key>BundleOverwriteAction</key>
+    <string>upgrade</string>
+    <key>RootRelativeBundlePath</key>
+    <string>Applications/${APP_BUNDLE_NAME}</string>
+  </dict>
+</array>
+</plist>
+EOF
+
 pkgbuild \
   --root "${PAYLOAD_ROOT}" \
   --scripts "${SCRIPTS_DIR}" \
+  --component-plist "${COMPONENT_PLIST}" \
   --install-location / \
   --identifier "${DESKTOP_IDENTIFIER}.runtime" \
   --version "${DESKTOP_VERSION}" \
