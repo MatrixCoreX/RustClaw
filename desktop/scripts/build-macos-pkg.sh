@@ -41,7 +41,7 @@ OUTPUT_PKG="$2"
   exit 1
 }
 
-for command_name in pkgbuild productbuild pkgutil codesign python3; do
+for command_name in pkgbuild productbuild pkgutil codesign ditto python3; do
   command -v "${command_name}" >/dev/null 2>&1 || {
     echo "Required macOS packaging command is unavailable: ${command_name}" >&2
     exit 1
@@ -81,27 +81,50 @@ WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "${WORK_DIR}"' EXIT
 COMPONENT_PKG="${WORK_DIR}/desktop-component.pkg"
 UNSIGNED_PKG="${WORK_DIR}/installer-unsigned.pkg"
+PAYLOAD_ROOT="${WORK_DIR}/payload"
+SCRIPTS_DIR="${WORK_DIR}/scripts"
 
 codesign --verify --deep --strict "${APP_BUNDLE}"
 
+APP_BUNDLE_NAME="$(basename "${APP_BUNDLE}")"
+[[ "${APP_BUNDLE_NAME}" =~ ^[A-Za-z0-9._-]+\.app$ ]] || {
+  echo "Unsafe macOS app bundle name: ${APP_BUNDLE_NAME}" >&2
+  exit 1
+}
+mkdir -p "${PAYLOAD_ROOT}/Applications" "${SCRIPTS_DIR}"
+ditto --noqtn "${APP_BUNDLE}" "${PAYLOAD_ROOT}/Applications/${APP_BUNDLE_NAME}"
+codesign --verify --deep --strict "${PAYLOAD_ROOT}/Applications/${APP_BUNDLE_NAME}"
+cat > "${SCRIPTS_DIR}/preinstall" <<EOF
+#!/bin/bash
+set -euo pipefail
+target_volume="\${3:-/}"
+case "\${target_volume}" in
+  /) managed_app="/Applications/${APP_BUNDLE_NAME}" ;;
+  /Volumes/*) managed_app="\${target_volume%/}/Applications/${APP_BUNDLE_NAME}" ;;
+  *) echo "Unsupported macOS installer target volume: \${target_volume}" >&2; exit 1 ;;
+esac
+/bin/rm -rf "\${managed_app}"
+EOF
+chmod 755 "${SCRIPTS_DIR}/preinstall"
+
 pkgbuild \
-  --component "${APP_BUNDLE}" \
-  --install-location /Applications \
+  --root "${PAYLOAD_ROOT}" \
+  --scripts "${SCRIPTS_DIR}" \
+  --install-location / \
   --identifier "${DESKTOP_IDENTIFIER}.runtime" \
   --version "${DESKTOP_VERSION}" \
   --ownership recommended \
   "${COMPONENT_PKG}"
 
-APP_BUNDLE_NAME="$(basename "${APP_BUNDLE}")"
 pkgutil --payload-files "${COMPONENT_PKG}" > "${WORK_DIR}/payload-files.txt"
-grep -Fxq "./${APP_BUNDLE_NAME}" "${WORK_DIR}/payload-files.txt" || \
-  grep -Fxq "${APP_BUNDLE_NAME}" "${WORK_DIR}/payload-files.txt" || {
+grep -Fxq "./Applications/${APP_BUNDLE_NAME}" "${WORK_DIR}/payload-files.txt" || \
+  grep -Fxq "Applications/${APP_BUNDLE_NAME}" "${WORK_DIR}/payload-files.txt" || {
   echo "PKG payload is missing ${APP_BUNDLE_NAME}." >&2
   exit 1
 }
-grep -Fq "./${APP_BUNDLE_NAME}/Contents/Resources/embedded-runtime/bundle.json" \
+grep -Fq "./Applications/${APP_BUNDLE_NAME}/Contents/Resources/embedded-runtime/bundle.json" \
   "${WORK_DIR}/payload-files.txt" || \
-  grep -Fq "${APP_BUNDLE_NAME}/Contents/Resources/embedded-runtime/bundle.json" \
+  grep -Fq "Applications/${APP_BUNDLE_NAME}/Contents/Resources/embedded-runtime/bundle.json" \
     "${WORK_DIR}/payload-files.txt" || {
   echo "PKG payload is missing the embedded runtime descriptor." >&2
   exit 1

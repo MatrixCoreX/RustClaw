@@ -155,6 +155,14 @@ class ReleaseInstallationTests(unittest.TestCase):
         invocation = 'bash "$BOOTSTRAP/deploy-github-release.sh" --root "$ROOT_DIR" --force "$restart_option"'
         self.assertIn(invocation, source)
 
+    def test_macos_pkg_uses_a_fixed_overwrite_payload(self):
+        source = (ROOT / "desktop/scripts/build-macos-pkg.sh").read_text()
+        self.assertIn('--root "${PAYLOAD_ROOT}"', source)
+        self.assertIn('"${PAYLOAD_ROOT}/Applications/${APP_BUNDLE_NAME}"', source)
+        self.assertIn('/bin/rm -rf "\\${managed_app}"', source)
+        self.assertNotIn('--component "${APP_BUNDLE}"', source)
+        self.assertNotIn("Application Support", source)
+
     def test_package_includes_bridge_local_runtime_dependencies(self):
         package_source = (ROOT / "package-release.sh").read_text()
         bridge = ROOT / "services/wa-web-bridge"
