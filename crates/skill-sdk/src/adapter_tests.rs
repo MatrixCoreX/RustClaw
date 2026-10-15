@@ -88,6 +88,26 @@ fn macos_python_source_builds_use_only_the_native_architecture() {
     assert!(!command.get_envs().any(|(key, _)| key == "ARCHFLAGS"));
 }
 
+#[test]
+fn release_wheel_cache_is_not_copied_or_bound_as_package_source() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let source = temp.path().join("source");
+    let destination = temp.path().join("destination");
+    fs::create_dir_all(source.join("release-wheels")).expect("wheel cache");
+    fs::write(source.join("main.py"), b"print('source')\n").expect("source");
+    let before = source_digest(&source).expect("source digest");
+    fs::write(
+        source.join("release-wheels/fixture-1.0-py3-none-any.whl"),
+        b"verified dependency cache",
+    )
+    .expect("wheel");
+
+    assert_eq!(source_digest(&source).expect("source digest"), before);
+    copy_source_tree(&source, &destination).expect("copy source");
+    assert!(destination.join("main.py").is_file());
+    assert!(!destination.join("release-wheels").exists());
+}
+
 fn artifact(os: &str, arch: &str, contents: &[u8]) -> PlatformArtifact {
     PlatformArtifact {
         os: os.to_string(),

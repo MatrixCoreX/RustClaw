@@ -1458,7 +1458,7 @@ fn copy_tree_inner(root: &Path, current: &Path, destination: &Path) -> SkillSdkR
 fn ignored_source_name(name: &OsStr) -> bool {
     matches!(
         name.to_str(),
-        Some(".git" | "target" | "node_modules" | "__pycache__" | ".venv")
+        Some(".git" | "target" | "node_modules" | "__pycache__" | ".venv" | "release-wheels")
     )
 }
 
