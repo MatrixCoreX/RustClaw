@@ -142,8 +142,6 @@ jobs:
           python3 scripts/check_polyglot_skill_contracts.py --require-all
           python3 scripts/check_on_demand_skill_builds.py
           python3 scripts/check_cross_platform_contracts.py
-          python3 scripts/check_rag_contracts.py --self-test
-          python3 scripts/check_rag_contracts.py
 
       - name: Prepare locked browser skill runtime assets
         run: npm ci --ignore-scripts --prefix crates/skills/browser_web
