@@ -162,6 +162,12 @@ class ReleaseInstallationTests(unittest.TestCase):
         self.assertIn("APP_RELEASE_NODE_RUNTIME_ROOT", workflow)
         self.assertIn("APP_RELEASE_HOST_TOOLS_ROOT", workflow)
         self.assertIn("bundle_macos_skill_dependencies.py", workflow)
+        dependency_bundler = (
+            ROOT / "scripts/bundle_macos_skill_dependencies.py"
+        ).read_text()
+        self.assertIn("compile_tool_launchers(root, chromium_relative)", dependency_bundler)
+        self.assertIn('run("xcrun", "--find", "clang")', dependency_bundler)
+        self.assertNotIn('path.write_text("#!/bin/bash', dependency_bundler)
         self.assertIn("APP_DESKTOP_BOOTSTRAP_PYTHON_ROOT", workflow)
         self.assertIn("APP_DESKTOP_RUNTIME_BUNDLE_DIR", workflow)
         self.assertIn("embedded-runtime/bundle.json", workflow)

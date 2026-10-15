@@ -17,6 +17,45 @@ spec.loader.exec_module(bundle)
 
 
 class BundleMacosSkillDependenciesTests(unittest.TestCase):
+    def test_tool_launcher_is_native_and_uses_relocatable_paths(self):
+        source = bundle.tool_launcher_source(
+            "chromium/Chromium.app/Contents/MacOS/Chromium"
+        )
+        self.assertIn("_NSGetExecutablePath", source)
+        self.assertIn('suffix = "/git/bin/git";', source)
+        self.assertIn('setenv("GIT_EXEC_PATH"', source)
+        self.assertIn('setenv("GIT_TEMPLATE_DIR"', source)
+        self.assertIn('suffix = "/bin/tesseract.real";', source)
+        self.assertIn('setenv("TESSDATA_PREFIX"', source)
+        self.assertIn(
+            'suffix = "/chromium/Chromium.app/Contents/MacOS/Chromium";', source
+        )
+        self.assertIn("execv(target, child_argv)", source)
+        self.assertNotIn("#!/bin/bash", source)
+
+    def test_chromium_launcher_is_relocated_but_app_payload_is_not(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            launcher = root / "bin/chromium"
+            chromium_binary = root / "chromium/Chromium.app/Contents/MacOS/Chromium"
+            launcher.parent.mkdir(parents=True)
+            chromium_binary.parent.mkdir(parents=True)
+            launcher.write_bytes(b"launcher")
+            chromium_binary.write_bytes(b"chromium")
+            macho_paths = {launcher, chromium_binary}
+
+            with (
+                mock.patch.object(
+                    bundle, "is_macho", side_effect=lambda path: path in macho_paths
+                ),
+                mock.patch.object(bundle, "linked_libraries", return_value=[]),
+                mock.patch.object(bundle.subprocess, "run") as run,
+            ):
+                bundle.copy_external_libraries(root, {})
+
+            self.assertEqual(run.call_count, 1)
+            self.assertEqual(run.call_args.args[0][-1], str(launcher))
+
     def test_materialized_chromium_verifies_each_macho_directly(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "Chromium.app"
