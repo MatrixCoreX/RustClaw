@@ -224,11 +224,14 @@ def compile_tool_launchers(root: Path, chromium_relative: str) -> None:
     launcher = root / ".bundled-tool-launcher"
     source.write_text(tool_launcher_source(chromium_relative), encoding="utf-8")
     compiler = run("xcrun", "--find", "clang").strip()
+    sdk_root = run("xcrun", "--sdk", "macosx", "--show-sdk-path").strip()
     deployment_target = os.environ.get("MACOSX_DEPLOYMENT_TARGET", "13.0")
     subprocess.run(
         [
             compiler,
             "-Os",
+            "-isysroot",
+            sdk_root,
             f"-mmacosx-version-min={deployment_target}",
             str(source),
             "-o",

@@ -167,6 +167,11 @@ class ReleaseInstallationTests(unittest.TestCase):
         ).read_text()
         self.assertIn("compile_tool_launchers(root, chromium_relative)", dependency_bundler)
         self.assertIn('run("xcrun", "--find", "clang")', dependency_bundler)
+        self.assertIn(
+            'run("xcrun", "--sdk", "macosx", "--show-sdk-path")',
+            dependency_bundler,
+        )
+        self.assertIn('"-isysroot",', dependency_bundler)
         self.assertNotIn('path.write_text("#!/bin/bash', dependency_bundler)
         self.assertIn("APP_DESKTOP_BOOTSTRAP_PYTHON_ROOT", workflow)
         self.assertIn("APP_DESKTOP_RUNTIME_BUNDLE_DIR", workflow)
