@@ -62,6 +62,21 @@ class ReleaseInstallationTests(unittest.TestCase):
         self.assertIn('rm -rf "$WORK_DIR"', deploy_source)
         self.assertIn('rm -rf "$PACKAGE_STAGE_DIR"', deploy_source)
 
+    def test_fresh_install_skips_unconfigured_telegram(self):
+        import tomllib
+
+        telegram = tomllib.loads(
+            (ROOT / "configs/channels/telegram.toml").read_text(encoding="utf-8")
+        )
+        self.assertFalse(telegram["telegram_bot"]["enabled"])
+        launcher = (ROOT / "start-all-bin.sh").read_text()
+        self.assertIn("telegram_credentials_available()", launcher)
+        self.assertIn("elif ! telegram_credentials_available; then", launcher)
+        self.assertIn("Telegram is not configured yet; skipping telegramd startup.", launcher)
+        self.assertIn('STARTUP_FAILURES=""', launcher)
+        self.assertNotIn("STARTUP_FAILURES=()", launcher)
+        self.assertNotIn("${#STARTUP_FAILURES[@]}", launcher)
+
     def test_bundled_skill_bootstrap_is_safe_on_macos_bash_3(self):
         deploy_source = (ROOT / "deploy-github-release.sh").read_text()
         bootstrap_start = deploy_source.index("bootstrap_bundled_release_skills()")

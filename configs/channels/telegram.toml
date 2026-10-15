@@ -24,4 +24,4 @@ webhook_secret_env = "TELEGRAM_WEBHOOK_SECRET"
 [telegram.voice_reply_mode_by_chat]
 
 [telegram_bot]
-enabled = true
+enabled = false

@@ -113,6 +113,37 @@ print("1" if bool(enabled) else "0")
 PY
 }
 
+telegram_credentials_available() {
+  if [[ -n "${TELEGRAM_BOT_TOKEN:-}" && "${TELEGRAM_BOT_TOKEN}" != "REPLACE_ME" ]]; then
+    return 0
+  fi
+  python3 - "$SCRIPT_DIR/configs/channels/telegram.toml" <<'PY'
+from pathlib import Path
+import sys
+import tomllib
+
+path = Path(sys.argv[1])
+if not path.is_file():
+    raise SystemExit(1)
+value = tomllib.loads(path.read_text(encoding="utf-8"))
+tokens = []
+for section_name in ("telegram", "telegram_bot"):
+    section = value.get(section_name)
+    if isinstance(section, dict):
+        tokens.append(section.get("bot_token"))
+telegram = value.get("telegram")
+if isinstance(telegram, dict):
+    bots = telegram.get("bots")
+    if isinstance(bots, list):
+        tokens.extend(bot.get("bot_token") for bot in bots if isinstance(bot, dict))
+configured = any(
+    isinstance(token, str) and token.strip() not in ("", "REPLACE_ME")
+    for token in tokens
+)
+raise SystemExit(0 if configured else 1)
+PY
+}
+
 require_binary() {
   local binary_path="$1"
   local component="$2"
@@ -384,7 +415,7 @@ start_local_whisper() {
   "$SCRIPT_DIR/component_start/start-whisper-server.sh" "$PROFILE"
 }
 
-STARTUP_FAILURES=()
+STARTUP_FAILURES=""
 
 start_optional_component() {
   local component="$1"
@@ -392,7 +423,7 @@ start_optional_component() {
   if "$@"; then
     return 0
   fi
-  STARTUP_FAILURES+=("$component")
+  STARTUP_FAILURES="${STARTUP_FAILURES}${STARTUP_FAILURES:+ }${component}"
   echo "Component startup failed; continuing with remaining components: $component" >&2
   return 0
 }
@@ -402,6 +433,8 @@ start_clawd
 start_optional_component "webd" start_webd
 if [[ "${APP_SKIP_TELEGRAMD:-0}" == "1" ]]; then
   echo "APP_SKIP_TELEGRAMD=1, skipping telegramd startup."
+elif ! telegram_credentials_available; then
+  echo "Telegram is not configured yet; skipping telegramd startup."
 else
   start_optional_component "telegramd" start_telegramd
 fi
@@ -412,10 +445,8 @@ start_optional_component "wechatd" start_wechatd
 start_optional_component "feishud" start_feishud
 start_optional_component "larkd" start_larkd
 
-if [[ "${#STARTUP_FAILURES[@]}" -gt 0 ]]; then
-  printf 'Startup completed with failed components:' >&2
-  printf ' %s' "${STARTUP_FAILURES[@]}" >&2
-  printf '\n' >&2
+if [[ -n "$STARTUP_FAILURES" ]]; then
+  printf 'Startup completed with failed components: %s\n' "$STARTUP_FAILURES" >&2
   exit 1
 fi
 
