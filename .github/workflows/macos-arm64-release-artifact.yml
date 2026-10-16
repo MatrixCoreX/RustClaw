@@ -179,7 +179,7 @@ jobs:
         run: |
           set -euo pipefail
           export HOMEBREW_NO_AUTO_UPDATE=1
-          brew install ffmpeg tesseract git whisper.cpp
+          brew install ffmpeg tesseract git whisper-cpp
 
           npm ci --ignore-scripts --prefix optional_skills/media_discovery
           playwright_root="${RUNNER_TEMP}/playwright-browsers"
@@ -209,7 +209,7 @@ jobs:
             --tessdata "$(brew --prefix tesseract)/share/tessdata" \
             --chi-sim "${dependency_downloads}/chi_sim.traineddata" \
             --chromium "${chromium_executable}" \
-            --whisper-cli "$(brew --prefix whisper.cpp)/bin/whisper-cli" \
+            --whisper-cli "$(brew --prefix whisper-cpp)/bin/whisper-cli" \
             --whisper-model "${dependency_downloads}/ggml-base.bin"
 
       - name: Verify native skill receipts
