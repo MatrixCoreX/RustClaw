@@ -142,7 +142,7 @@ class BundleMacosSkillDependenciesTests(unittest.TestCase):
 
             self.assertEqual(
                 completed.stdout,
-                f"{root / 'share/tessdata'}|--list-langs\n",
+                f"{root.resolve() / 'share/tessdata'}|--list-langs\n",
             )
             self.assertEqual(shim.stat().st_mode & 0o777, 0o755)
 
