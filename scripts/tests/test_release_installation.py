@@ -16,9 +16,44 @@ ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("release_binary", ROOT / "scripts/verify_release_binary.py")
 binary = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(binary)
+bundle_spec = importlib.util.spec_from_file_location(
+    "bundle_macos_skill_dependencies", ROOT / "scripts/bundle_macos_skill_dependencies.py"
+)
+macos_bundle = importlib.util.module_from_spec(bundle_spec)
+bundle_spec.loader.exec_module(macos_bundle)
 
 
 class ReleaseInstallationTests(unittest.TestCase):
+    def test_macos_framework_flattening_removes_verified_version_copies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            framework = Path(directory) / "Browser.framework"
+            current = framework / "Versions/Current"
+            (current / "Resources").mkdir(parents=True)
+            (current / "Browser").write_bytes(b"binary")
+            (current / "Resources/manifest.json").write_text('{"ok":true}')
+            (framework / "Resources").mkdir(parents=True)
+            (framework / "Browser").write_bytes(b"binary")
+            (framework / "Resources/manifest.json").write_text('{"ok":true}')
+
+            macos_bundle.flatten_versioned_frameworks(framework.parent)
+
+            self.assertFalse((framework / "Versions").exists())
+            self.assertEqual((framework / "Browser").read_bytes(), b"binary")
+            self.assertEqual(
+                (framework / "Resources/manifest.json").read_text(), '{"ok":true}'
+            )
+
+    def test_macos_framework_flattening_rejects_mismatched_copies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            framework = Path(directory) / "Browser.framework"
+            current = framework / "Versions/Current"
+            current.mkdir(parents=True)
+            (current / "Browser").write_bytes(b"signed")
+            (framework / "Browser").write_bytes(b"changed")
+
+            with self.assertRaisesRegex(ValueError, "macos_framework_flatten_mismatch"):
+                macos_bundle.flatten_versioned_frameworks(framework.parent)
+
     def test_native_architectures_and_cross_target_rejection(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "program"
