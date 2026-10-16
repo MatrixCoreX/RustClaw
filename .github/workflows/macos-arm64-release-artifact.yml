@@ -421,8 +421,15 @@ jobs:
           printf '%s\n' 'macos_pkg_probe=ffprobe'
           ffprobe -version >/dev/null
           printf '%s\n' 'macos_pkg_probe=tesseract'
-          tesseract_languages="$(tesseract --list-langs)"
-          grep -qx 'chi_sim' <<<"${tesseract_languages}"
+          tesseract --list-langs
+          tesseract_fixture="${RUNNER_TEMP}/bundled-tesseract-smoke.pgm"
+          python3 - "${tesseract_fixture}" <<'PY'
+          from pathlib import Path
+          import sys
+
+          Path(sys.argv[1]).write_bytes(b"P5\n100 40\n255\n" + (b"\xff" * 4000))
+          PY
+          tesseract "${tesseract_fixture}" stdout -l chi_sim >/dev/null
           printf '%s\n' 'macos_pkg_probe=chromium'
           [[ "$(command -v chromium)" == "${host_tools}/bin/chromium" ]]
           chromium_profile="$(mktemp -d "${RUNNER_TEMP}/bundled-chromium-profile.XXXXXX")"
