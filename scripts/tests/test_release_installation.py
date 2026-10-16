@@ -151,6 +151,7 @@ class ReleaseInstallationTests(unittest.TestCase):
         self.assertIn("APP_DESKTOP_BOOTSTRAP_PYTHON_ROOT", workflow)
         self.assertIn("APP_DESKTOP_RUNTIME_BUNDLE_DIR", workflow)
         self.assertIn("embedded-runtime/bundle.json", workflow)
+        self.assertIn('-f "${media_fixture}" -nt --no-gpu', workflow)
         self.assertIn('--bundles app', workflow)
         self.assertIn('build-macos-dmg.sh "${app}" "${dmg}"', workflow)
         macos_dmg = (ROOT / "desktop/scripts/build-macos-dmg.sh").read_text()

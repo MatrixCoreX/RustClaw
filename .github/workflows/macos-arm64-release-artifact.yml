@@ -411,7 +411,7 @@ jobs:
             -show_entries stream=codec_name -of default=nw=1 "${media_fixture}" | grep -q 'codec_name=pcm_s16le'
           "${host_tools}/bin/whisper-cli" \
             -m "${host_tools}/models/whisper/ggml-base.bin" \
-            -f "${media_fixture}" -nt >/dev/null
+            -f "${media_fixture}" -nt --no-gpu >/dev/null
           if [[ "${PACKAGE_ARCH}" == "aarch64" ]]; then
             find "${runtime_root}/data/skills/local_asr" -type f -name model.pt -print -quit | grep -q .
           fi
