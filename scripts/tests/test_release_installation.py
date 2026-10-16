@@ -205,6 +205,9 @@ class ReleaseInstallationTests(unittest.TestCase):
         self.assertIn("APP_DESKTOP_BOOTSTRAP_PYTHON_ROOT", workflow)
         self.assertIn("APP_DESKTOP_RUNTIME_BUNDLE_DIR", workflow)
         self.assertIn("embedded-runtime/bundle.json", workflow)
+        self.assertIn('--target "${RUST_TARGET}" --bundles app', workflow)
+        self.assertNotIn("bundle/dmg/agent-desktop_", workflow)
+        self.assertNotIn("dist-release/agent-desktop_*.dmg", workflow)
         self.assertGreaterEqual(
             workflow.count('cat "${install_log}" >&2 || true'),
             2,

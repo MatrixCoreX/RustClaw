@@ -281,7 +281,7 @@ jobs:
           set -euo pipefail
           export APP_DESKTOP_BOOTSTRAP_PYTHON_ROOT="${pythonLocation:?setup-python did not expose pythonLocation}"
           npm ci --prefix desktop
-          npm run build --prefix desktop -- --target "${RUST_TARGET}"
+          npm run build --prefix desktop -- --target "${RUST_TARGET}" --bundles app
           app="desktop/target/${RUST_TARGET}/release/bundle/macos/agent-desktop.app"
           [[ -d "${app}" ]]
           [[ -f "${app}/Contents/Resources/embedded-runtime/bundle.json" ]]
@@ -292,17 +292,13 @@ jobs:
           desktop_version="$(node -p "require('./desktop/package.json').version")"
           ditto -c -k --sequesterRsrc --keepParent "${app}" \
             "dist-release/agent-desktop_${desktop_version}_macos-${PACKAGE_ARCH}.app.zip"
-          dmg=(desktop/target/${RUST_TARGET}/release/bundle/dmg/agent-desktop_*.dmg)
-          [[ "${#dmg[@]}" -eq 1 ]]
-          cp "${dmg[0]}" dist-release/
           ./desktop/scripts/build-macos-pkg.sh \
             "${app}" \
             "dist-release/${{ steps.meta.outputs.installer_name }}"
           (
             cd dist-release
-            for asset in agent-desktop_*.dmg agent-desktop_*.app.zip; do
-              shasum -a 256 "${asset}" > "${asset}.sha256"
-            done
+            shasum -a 256 agent-desktop_*.app.zip > \
+              "agent-desktop_${desktop_version}_macos-${PACKAGE_ARCH}.app.zip.sha256"
           )
 
       - name: Reclaim build space before install test
@@ -600,8 +596,6 @@ jobs:
             dist-release/${{ steps.meta.outputs.package_name }}.spdx.json
             dist-release/${{ steps.meta.outputs.package_name }}.manifest.json
             dist-release/${{ steps.meta.outputs.package_name }}.manifest.json.sig
-            dist-release/agent-desktop_*.dmg
-            dist-release/agent-desktop_*.dmg.sha256
             dist-release/agent-desktop_*.app.zip
             dist-release/agent-desktop_*.app.zip.sha256
             dist-release/${{ steps.meta.outputs.installer_name }}
