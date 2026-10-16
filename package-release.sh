@@ -548,9 +548,10 @@ cleanup_old_packages() {
   local keep_file="$2"
   local pattern="$dir/${APP_RELEASE_ARTIFACT_ID}-runtime-release-*.tar.gz"
   shopt -s nullglob
-  local files=( $pattern )
+  set -- $pattern
   shopt -u nullglob
-  for f in "${files[@]}"; do
+  local f
+  for f in "$@"; do
     if [[ "$f" != "$keep_file" ]]; then
       rm -f "$f" "$f.sha256" "$f.spdx.json" "$f.manifest.json" "$f.manifest.json.sig" "$f.manifest.json.sig.next"
       echo "Removed old package: $f"

@@ -146,6 +146,8 @@ class ReleaseInstallationTests(unittest.TestCase):
         package = (ROOT / "package-release.sh").read_text()
         self.assertIn('*-linux-*|*-apple-darwin', package)
         self.assertNotIn("supported only by Linux Release packages", package)
+        self.assertIn("set -- $pattern", package)
+        self.assertNotIn("local files=( $pattern )", package)
         self.assertIn("prebuilt/toolchains/python", package)
         self.assertIn("prebuilt/toolchains/node", package)
         self.assertIn("prebuilt/toolchains/host", package)

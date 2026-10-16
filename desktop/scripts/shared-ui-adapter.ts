@@ -32,10 +32,11 @@ export function sharedUiAdapter(root: string): Plugin {
     return saved === "en" ? "en" : "zh";
   });`.replace('window.localStorage', 'desktopStorage'), '  const { lang, setLang } = useLanguage();', id);
         const walletPages = normalizePath(path.resolve(root, 'frontend/wallet/pages.tsx'));
-        text = once(text, 'from "./components/AssetsPage"', `from ${JSON.stringify(walletPages)}`, id);
-        text = once(text, 'from "./components/BancorPage"', `from ${JSON.stringify(walletPages)}`, id);
+        text = once(text, 'const AssetsPage = lazy(() => import("./components/AssetsPage").then((module) => ({ default: module.AssetsPage })));', '', id);
+        text = once(text, 'const BancorPage = lazy(() => import("./components/BancorPage").then((module) => ({ default: module.BancorPage })));', '', id);
+        text = `import { AssetsPage, BancorPage } from ${JSON.stringify(walletPages)};\n` + text;
         text = once(text, 'onRefresh={() => Promise.allSettled([\n                assetOverviewRuntime.fetchMarket(),', 'onRefreshMarket={() => assetOverviewRuntime.fetchMarket()}\n              onRefresh={() => Promise.allSettled([\n                assetOverviewRuntime.fetchMarket(),', id);
-        if ((text.match(/\bfetch\(/g) ?? []).length !== 6) throw new Error('Shared UI fetch inventory changed');
+        if ((text.match(/\bfetch\(/g) ?? []).length !== 7) throw new Error('Shared UI fetch inventory changed');
         imports.add('desktopFetch as fetch'); imports.add('desktopOrigin'); imports.add('desktopIdentity'); imports.add('desktopLogout');
         text = once(text, 'preferredBrowserApiBaseUrl(saved, window.location)', 'desktopOrigin', id);
         text = once(text, 'preferredWebdBaseUrl(saved, window.location)', 'desktopOrigin', id);

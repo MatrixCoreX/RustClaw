@@ -1,10 +1,8 @@
 import { useCallback, useState, type ComponentProps } from "react";
 import { AssetsPage as SharedAssetsPage } from "../../../UI/src/components/AssetsPage";
-import {
-  BancorPage as SharedBancorPage,
-  BANCOR_CANDLE_AUTO_REFRESH_SECONDS,
-} from "../../../UI/src/components/BancorPage";
+import { BancorPage as SharedBancorPage } from "../../../UI/src/components/BancorPage";
 import { parseBancorSlippagePercent } from "../../../UI/src/hooks/useBancorRuntime";
+import { BANCOR_CANDLE_AUTO_REFRESH_SECONDS } from "../../../UI/src/lib/bancor-refresh";
 import { validateNniOwnerPublicKey } from "../../../UI/src/lib/nni-owner-public-key";
 import type { NniBancorAccountResponse } from "../../../UI/src/types/api";
 import { DesktopAssetAccountContext } from "./context";

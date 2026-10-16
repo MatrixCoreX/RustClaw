@@ -14,7 +14,11 @@ test('shared UI adaptation is active for native and Vite-normalized Windows path
   for (const id of [filename, filename.replaceAll('\\', '/')]) {
     const output = transform(source.replaceAll(/\r?\n/g, '\r\n'), id)?.code;
     assert.ok(output?.includes('desktopFetch as fetch'));
+    assert.equal((source.match(/\bfetch\(/g) ?? []).length, 7);
     assert.ok(output?.includes('desktopLogout(); return;'));
+    assert.ok(output?.includes('/frontend/wallet/pages.tsx'));
+    assert.ok(!output?.includes('import("./components/AssetsPage")'));
+    assert.ok(!output?.includes('import("./components/BancorPage")'));
     assert.ok(!output?.includes('window.localStorage'));
   }
 });
