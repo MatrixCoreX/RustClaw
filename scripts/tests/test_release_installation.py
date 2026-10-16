@@ -59,6 +59,14 @@ class ReleaseInstallationTests(unittest.TestCase):
         self.assertIn("KEEP_BACKUPS=1", deploy_source)
         self.assertIn('rm -rf "$WORK_DIR"', deploy_source)
         self.assertIn('rm -rf "$PACKAGE_STAGE_DIR"', deploy_source)
+        self.assertIn(
+            '${resource_skipped_skills[@]+"${resource_skipped_skills[@]}"}',
+            deploy_source,
+        )
+        self.assertNotIn(
+            'for skill_name in "${resource_skipped_skills[@]}"; do',
+            deploy_source,
+        )
 
     def test_release_package_contains_runtime_assets_without_build_caches(self):
         package_source = (ROOT / "package-release.sh").read_text()

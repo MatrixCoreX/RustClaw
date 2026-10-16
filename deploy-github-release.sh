@@ -953,7 +953,8 @@ PY
       --config "$runtime_root/configs/config.toml"
       --bootstrap-bundled-skills
     )
-    for skill_name in "${resource_skipped_skills[@]}"; do
+    # Bash 3.2 treats an empty array as unset under `set -u`.
+    for skill_name in ${resource_skipped_skills[@]+"${resource_skipped_skills[@]}"}; do
       bootstrap_args+=(--skip-bundled-skill "$skill_name")
     done
     APP_PRODUCT_IDENTITY_CONFIG="$runtime_root/configs/product_identity.toml" \
