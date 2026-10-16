@@ -206,6 +206,7 @@ configure_bundled_host_tools() {
 
   prepend_existing_command_path "$host_root/bin"
   prepend_existing_command_path "$host_root/git/bin"
+  hash -r 2>/dev/null || true
   export GIT_EXEC_PATH="$host_root/git/libexec/git-core"
   export GIT_TEMPLATE_DIR="$host_root/git/share/git-core/templates"
   export TESSDATA_PREFIX="$host_root/share/tessdata"

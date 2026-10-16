@@ -426,6 +426,7 @@ jobs:
           ffprobe -version >/dev/null
           printf '%s\n' 'macos_pkg_probe=tesseract'
           [[ "$(command -v tesseract)" == "${host_tools}/bin/tesseract" ]]
+          grep -q 'tesseract-real.*--tessdata-dir' "${host_tools}/bin/tesseract"
           [[ "${TESSDATA_PREFIX:-}" == "${host_tools}/share/tessdata" ]]
           TESSDATA_PREFIX="${RUNNER_TEMP}/deliberately-wrong-tessdata" tesseract --list-langs
           tesseract_fixture="${RUNNER_TEMP}/bundled-tesseract-smoke.pgm"

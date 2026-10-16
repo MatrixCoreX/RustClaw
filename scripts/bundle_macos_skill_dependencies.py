@@ -244,7 +244,7 @@ launcher_dir=$(CDPATH= cd "$launcher_dir" && pwd -P)
 tessdata_dir="$launcher_dir/../share/tessdata"
 TESSDATA_PREFIX=$(CDPATH= cd "$tessdata_dir" && pwd -P)
 export TESSDATA_PREFIX
-exec "$launcher_dir/tesseract-real" "$@"
+exec "$launcher_dir/tesseract-real" --tessdata-dir "$TESSDATA_PREFIX" "$@"
 """,
         encoding="utf-8",
     )

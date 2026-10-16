@@ -168,6 +168,7 @@ class ReleaseInstallationTests(unittest.TestCase):
         self.assertIn('"git": "git/bin/git"', dependency_bundler)
         self.assertIn('(tesseract, "tesseract-real")', dependency_bundler)
         self.assertIn("write_tesseract_command_shim(root)", dependency_bundler)
+        self.assertIn('--tessdata-dir "$TESSDATA_PREFIX"', dependency_bundler)
         self.assertIn('root / "chromium-executable-relative"', dependency_bundler)
         self.assertIn('root / "bin/chromium"', dependency_bundler)
         self.assertIn('"chromium_command": "bin/chromium"', dependency_bundler)
