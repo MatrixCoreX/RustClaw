@@ -65,9 +65,12 @@ _CHALLENGE_RECT_SCRIPT = r"""
     const ratio = rect.width / rect.height;
     if (ratio < 0.58 || ratio > 1.72) continue;
     const tokens = textFor(node);
+    const hasQrMarker = /qrcode|qr-code|qr_code|\bqr\b/.test(tokens);
+    const hasScanInstruction = /二维码|扫码|scan\s*(the|a)?\s*(code|qr)/.test(tokens);
+    if (!hasQrMarker && !hasScanInstruction) continue;
     let score = 0;
-    if (/qrcode|qr-code|qr_code|\bqr\b/.test(tokens)) score += 80;
-    if (/二维码|扫码|scan\s*(the|a)?\s*(code|qr)/.test(tokens)) score += 70;
+    if (hasQrMarker) score += 80;
+    if (hasScanInstruction) score += 70;
     if (node.tagName === 'CANVAS' || node.tagName === 'SVG') score += 12;
     score += Math.max(0, 20 - Math.abs(1 - ratio) * 20);
     score += Math.min(30, Math.sqrt(rect.width * rect.height) / 12);
@@ -241,6 +244,8 @@ def publish_login_challenge(
             {"expression": _CHALLENGE_RECT_SCRIPT, "returnByValue": True},
         )
         rect = _result_value(wait_result(command_id, 5.0))
+        if companion_browser_args() and not isinstance(rect, dict):
+            return False
         screenshot_params: dict[str, Any] = {
             "format": "png",
             "fromSurface": True,

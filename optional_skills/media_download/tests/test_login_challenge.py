@@ -174,6 +174,49 @@ class LoginChallengeTest(unittest.TestCase):
             self.assertEqual(resize_calls[0][2]["width"], 960)
             self.assertEqual(resize_calls[0][2]["height"], 720)
 
+    def test_companion_does_not_publish_an_unidentified_page_image(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime = root / "runtime"
+            state_dir = runtime / "agent-runtime"
+            state_dir.mkdir(parents=True)
+            (state_dir / "login-challenge-companion.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "status": "active",
+                        "device_class": "raspberry_pi",
+                        "updated_at_epoch": self.challenge.time.time(),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            profile = root / "storage" / "browser-profile" / "xiaohongshu"
+            profile.mkdir(parents=True)
+            client = FakeClient()
+
+            def wait_result(command_id, _timeout):
+                _, method, params = next(call for call in client.calls if call[0] == command_id)
+                if method == "Runtime.evaluate" and "window.innerWidth" in params["expression"]:
+                    return {"result": {"result": {"value": {"width": 960, "height": 720}}}}
+                if method == "Runtime.evaluate":
+                    return {"result": {"result": {"value": None}}}
+                self.fail("an unidentified page must not be captured for the Pi companion")
+
+            with mock.patch.dict(
+                self.challenge.os.environ,
+                {"XDG_RUNTIME_DIR": str(runtime)},
+                clear=False,
+            ):
+                self.assertFalse(
+                    self.challenge.publish_login_challenge(
+                        client, wait_result, profile, "xiaohongshu"
+                    )
+                )
+
+            state_path = root / "storage" / "login_challenge" / "current.json"
+            self.assertFalse(state_path.exists())
+
     def test_companion_scan_timeout_and_expired_prompt_are_pi_only(self):
         with tempfile.TemporaryDirectory() as directory:
             runtime = Path(directory)

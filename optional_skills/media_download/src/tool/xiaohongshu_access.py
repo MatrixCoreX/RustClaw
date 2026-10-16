@@ -415,6 +415,8 @@ def desktop_session_environment(
 def note_access_ready(snapshot: dict[str, Any], note_id: str | None) -> bool:
     if snapshot.get("login"):
         return False
+    if not note_id and snapshot.get("authenticated") is True:
+        return True
     ids = snapshot.get("media_note_ids")
     if not isinstance(ids, list):
         return False
@@ -465,6 +467,12 @@ NOTE_ACCESS_SCRIPT = """
 (() => {
   const path = location.pathname || "";
   const login = /\\/login/i.test(path);
+  const authenticated = !login && Array.from(
+    document.querySelectorAll('a[href*="/user/profile/"]')
+  ).some((node) => {
+    const label = (node.innerText || node.textContent || '').trim();
+    return label === '我' && node.getBoundingClientRect().width > 0;
+  });
   const map = (window.__INITIAL_STATE__ && window.__INITIAL_STATE__.note
     && window.__INITIAL_STATE__.note.noteDetailMap) || {};
   const ids = Object.keys(map);
@@ -477,7 +485,7 @@ NOTE_ACCESS_SCRIPT = """
     const hasVideo = Boolean(video && typeof video === 'object' && Object.keys(video).length > 0);
     return hasImages || hasVideo ? [id] : [];
   });
-  return { login, note_ids: ids, media_note_ids: mediaNoteIds };
+  return { login, authenticated, note_ids: ids, media_note_ids: mediaNoteIds };
 })()
 """
 

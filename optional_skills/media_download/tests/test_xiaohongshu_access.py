@@ -189,6 +189,12 @@ class XiaohongshuAccessTest(unittest.TestCase):
                 None,
             )
         )
+        self.assertTrue(
+            self.access.note_access_ready(
+                {"login": False, "authenticated": True, "media_note_ids": []},
+                None,
+            )
+        )
 
     def test_desktop_display_detection(self) -> None:
         self.assertTrue(self.access.desktop_display_available({"DISPLAY": ":0"}, "linux"))
