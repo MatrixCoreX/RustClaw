@@ -12,12 +12,27 @@ from pathlib import Path
 MAX_STATE_BYTES = 16 * 1024
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 COMPANION_REFRESH_SECONDS = 3.0
+RASPBERRY_PI_MODEL_PATH = Path("/proc/device-tree/model")
 _PLATFORM_RE = re.compile(r"^[a-z][a-z0-9_]{0,47}$")
 _IMAGE_RE = re.compile(r"^[a-zA-Z0-9_.-]{1,80}\.png$")
 
 
-def publish_login_companion_heartbeat(*, now=None, environment=None):
+def is_raspberry_pi_device(model_path=RASPBERRY_PI_MODEL_PATH):
+    try:
+        model = Path(model_path).read_bytes().replace(b"\x00", b"").decode(
+            "utf-8", errors="replace"
+        )
+    except OSError:
+        return False
+    return "raspberry pi" in model.lower()
+
+
+def publish_login_companion_heartbeat(*, now=None, environment=None, model_path=None):
     """Advertise the same-user companion screen through volatile runtime state."""
+    if not is_raspberry_pi_device(
+        RASPBERRY_PI_MODEL_PATH if model_path is None else model_path
+    ):
+        return False
     env = os.environ if environment is None else environment
     runtime_dir = str(env.get("XDG_RUNTIME_DIR") or "").strip()
     if not runtime_dir and os.name == "posix" and hasattr(os, "geteuid"):
@@ -31,6 +46,7 @@ def publish_login_companion_heartbeat(*, now=None, environment=None):
         {
             "schema_version": 1,
             "status": "active",
+            "device_class": "raspberry_pi",
             "updated_at_epoch": time.time() if now is None else float(now),
         },
         separators=(",", ":"),

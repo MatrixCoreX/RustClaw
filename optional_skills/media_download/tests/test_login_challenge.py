@@ -98,6 +98,7 @@ class LoginChallengeTest(unittest.TestCase):
                     {
                         "schema_version": 1,
                         "status": "active",
+                        "device_class": "raspberry_pi",
                         "updated_at_epoch": 100.0,
                     }
                 ),
@@ -126,6 +127,7 @@ class LoginChallengeTest(unittest.TestCase):
                     {
                         "schema_version": 1,
                         "status": "active",
+                        "device_class": "raspberry_pi",
                         "updated_at_epoch": self.challenge.time.time(),
                     }
                 ),
@@ -182,6 +184,7 @@ class LoginChallengeTest(unittest.TestCase):
                     {
                         "schema_version": 1,
                         "status": "active",
+                        "device_class": "raspberry_pi",
                         "updated_at_epoch": self.challenge.time.time(),
                     }
                 ),

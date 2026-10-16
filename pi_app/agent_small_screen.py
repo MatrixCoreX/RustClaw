@@ -59,6 +59,7 @@ from small_screen_config import (
 )
 from small_screen_login_challenge import (
     COMPANION_REFRESH_SECONDS,
+    is_raspberry_pi_device,
     load_login_challenge,
     publish_login_companion_heartbeat,
 )
@@ -1408,6 +1409,7 @@ class SmallScreenApp:
             else:
                 print(f"Tk 初始化失败: {e}", file=sys.stderr)
             sys.exit(1)
+        self._pin_to_foreground = is_raspberry_pi_device()
         self._lang = load_lang()
         self._theme = load_theme()
         self._show_messages_page = load_messages_page_visible()
@@ -1439,6 +1441,12 @@ class SmallScreenApp:
         self.root.geometry(f"{W}x{H}")
         self.root.resizable(False, False)
         self.root.configure(bg=self._c("bg"))
+        if self._pin_to_foreground:
+            try:
+                self.root.attributes("-topmost", True)
+                self.root.lift()
+            except tk.TclError:
+                pass
         self._start_ui_pump()
         self.health = None
         self.log_summary = []
@@ -2506,7 +2514,8 @@ class SmallScreenApp:
         if frame is not None:
             try:
                 frame.place_forget()
-                self.root.attributes("-topmost", False)
+                if not self._pin_to_foreground:
+                    self.root.attributes("-topmost", False)
             except tk.TclError:
                 pass
         self._login_challenge_photo = None
@@ -2565,6 +2574,8 @@ class SmallScreenApp:
             frame.lift()
             self.root.lift()
             self.root.attributes("-topmost", True)
+            if self._pin_to_foreground:
+                self.root.focus_force()
         except tk.TclError:
             pass
 
@@ -2581,7 +2592,8 @@ class SmallScreenApp:
             self._hide_login_challenge()
         else:
             self._render_login_challenge(challenge)
-        self._login_challenge_job = self.root.after(1000, self._poll_login_challenge)
+        poll_ms = 250 if self._pin_to_foreground else 1000
+        self._login_challenge_job = self.root.after(poll_ms, self._poll_login_challenge)
 
     def _t(self, key):
         return _render_product_copy(STRINGS.get(self._lang, STRINGS["CN"]).get(key, key))
@@ -6541,7 +6553,8 @@ class SmallScreenApp:
         try:
             self.root.lift()
             self.root.attributes("-topmost", True)
-            self._clear_topmost_job = self.root.after(400, self._clear_topmost)
+            if not self._pin_to_foreground:
+                self._clear_topmost_job = self.root.after(400, self._clear_topmost)
             self.root.focus_force()
         except tk.TclError:
             pass
@@ -6549,7 +6562,7 @@ class SmallScreenApp:
     def _clear_topmost(self):
         self._clear_topmost_job = None
         try:
-            if not getattr(self, "_closing", False):
+            if not getattr(self, "_closing", False) and not self._pin_to_foreground:
                 self.root.attributes("-topmost", False)
         except tk.TclError:
             pass

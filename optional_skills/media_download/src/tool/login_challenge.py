@@ -123,6 +123,7 @@ def companion_browser_args(
         not isinstance(state, dict)
         or state.get("schema_version") != 1
         or state.get("status") != "active"
+        or state.get("device_class") != "raspberry_pi"
         or isinstance(updated, bool)
         or not isinstance(updated, (int, float))
         or updated > current_time + 5
