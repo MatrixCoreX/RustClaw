@@ -101,40 +101,6 @@ def copy_tree_without_links(source: Path, destination: Path) -> None:
         raise ValueError(f"macos_tool_bundle_symlink:{links[0]}")
 
 
-def file_digest(path: Path) -> str:
-    with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
-
-
-def flatten_versioned_frameworks(root: Path) -> None:
-    """Remove copies made by dereferencing a framework's internal symlinks."""
-    frameworks = sorted(root.rglob("*.framework"), key=lambda path: len(path.parts), reverse=True)
-    for framework in frameworks:
-        versions = framework / "Versions"
-        if not versions.is_dir():
-            continue
-        current = versions / "Current"
-        if not current.is_dir() or current.is_symlink():
-            raise ValueError(f"macos_framework_current_missing:{framework}")
-        for source in current.rglob("*"):
-            relative = source.relative_to(current)
-            target = framework / relative
-            if source.is_dir():
-                if not target.is_dir() or target.is_symlink():
-                    raise ValueError(f"macos_framework_flatten_mismatch:{target}")
-                continue
-            if (
-                not source.is_file()
-                or source.is_symlink()
-                or not target.is_file()
-                or target.is_symlink()
-                or source.stat().st_size != target.stat().st_size
-                or file_digest(source) != file_digest(target)
-            ):
-                raise ValueError(f"macos_framework_flatten_mismatch:{target}")
-        shutil.rmtree(versions)
-
-
 def write_wrapper(path: Path, body: str) -> None:
     path.write_text("#!/bin/bash\nset -euo pipefail\n" + body, encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
@@ -262,17 +228,8 @@ def main() -> None:
         chromium_source = app_root(chromium)
         chromium_target = root / "chromium/Chromium.app"
         copy_tree_without_links(chromium_source, chromium_target)
-        flatten_versioned_frameworks(chromium_target)
         relative_chromium = chromium.relative_to(chromium_source)
         chromium_target_executable = chromium_target / relative_chromium
-        subprocess.run(
-            ["codesign", "--force", "--deep", "--sign", "-", str(chromium_target)],
-            check=True,
-        )
-        subprocess.run(
-            ["codesign", "--verify", "--deep", "--strict", str(chromium_target)],
-            check=True,
-        )
 
         copy_external_libraries(root, origins)
         write_wrapper(
