@@ -1309,6 +1309,13 @@ fi
 if [[ -d "$PACKAGE_DIR/prebuilt/skill-packages" ]]; then
   printf '%s\n' "prebuilt/skill-packages" >> "$MANAGED_PATHS_FILE"
 fi
+if [[ -d "$PACKAGE_DIR/prebuilt/toolchains" ]]; then
+  # Language runtimes and host tools are immutable release content. Install
+  # the directory transactionally so a fresh deployment never points into the
+  # temporary extracted package and an overwrite upgrade cannot retain stale
+  # Python, Node, browser, media, OCR, Git, or speech dependencies.
+  printf '%s\n' "prebuilt/toolchains" >> "$MANAGED_PATHS_FILE"
+fi
 printf '%s\n' ".release-tag" >> "$MANAGED_PATHS_FILE"
 printf '%s\n' ".release-rollback" >> "$MANAGED_PATHS_FILE"
 printf '%s\n' ".release-manifest-digest" >> "$MANAGED_PATHS_FILE"

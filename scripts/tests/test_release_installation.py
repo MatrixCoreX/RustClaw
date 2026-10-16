@@ -61,6 +61,10 @@ class ReleaseInstallationTests(unittest.TestCase):
         self.assertIn("KEEP_BACKUPS=1", deploy_source)
         self.assertIn('rm -rf "$WORK_DIR"', deploy_source)
         self.assertIn('rm -rf "$PACKAGE_STAGE_DIR"', deploy_source)
+        self.assertIn(
+            'printf \'%s\\n\' "prebuilt/toolchains" >> "$MANAGED_PATHS_FILE"',
+            deploy_source,
+        )
 
     def test_fresh_install_skips_unconfigured_telegram(self):
         import tomllib

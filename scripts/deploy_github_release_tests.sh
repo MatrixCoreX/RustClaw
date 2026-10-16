@@ -72,6 +72,7 @@ mkdir -p \
   "$PACKAGE_DIR/optional_skills/store_fixture" \
   "$PACKAGE_DIR/data/skill-packages/core_fixture" \
   "$PACKAGE_DIR/prebuilt/skill-packages/store_fixture" \
+  "$PACKAGE_DIR/prebuilt/toolchains/host/bin" \
   "$PACKAGE_DIR/prebuilt/skill-storage/store_fixture/modelscope/model" \
   "$PACKAGE_DIR/scripts" \
   "$PACKAGE_DIR/services/wa-web-bridge" \
@@ -119,6 +120,8 @@ TOML
 printf 'release runner source\n' > "$PACKAGE_DIR/optional_skills/store_fixture/runner.txt"
 printf 'release receipt\n' > "$PACKAGE_DIR/data/skill-packages/core_fixture/current.json"
 printf 'release prebuilt\n' > "$PACKAGE_DIR/prebuilt/skill-packages/store_fixture/current.json"
+printf 'release host tool\n' > "$PACKAGE_DIR/prebuilt/toolchains/host/bin/tesseract"
+chmod +x "$PACKAGE_DIR/prebuilt/toolchains/host/bin/tesseract"
 printf 'model fixture\n' > "$PACKAGE_DIR/prebuilt/skill-storage/store_fixture/modelscope/model/model.pt"
 printf '%s\n' '{"install_all_bundled_skills":true,"schema_version":1,"packages":[{"manifest_path":"optional_skills/store_fixture/skill.toml","skill_name":"store_fixture"}]}' \
   > "$PACKAGE_DIR/prebuilt/bundled-skill-bootstrap-v1.json"
@@ -208,6 +211,7 @@ mkdir -p \
   "$RUNTIME/data/skill-packages/store_fixture" \
   "$RUNTIME/data/skill-packages/local_optional" \
   "$RUNTIME/optional_skills/store_fixture" \
+  "$RUNTIME/prebuilt/toolchains/host/bin" \
   "$RUNTIME/services/wa-web-bridge" \
   "$RUNTIME/target/release"
 cp /bin/false "$RUNTIME/target/release/clawd"
@@ -218,6 +222,8 @@ printf 'keep local optional\n' > "$RUNTIME/data/skill-packages/local_optional/cu
 printf '%s\n' '{"version":"1.0.0"}' > "$RUNTIME/data/skill-packages/store_fixture/current.json"
 printf 'stale runner source\n' > "$RUNTIME/optional_skills/store_fixture/stale.txt"
 printf 'old bridge\n' > "$RUNTIME/services/wa-web-bridge/index.js"
+printf 'stale host tool\n' > "$RUNTIME/prebuilt/toolchains/host/bin/tesseract"
+chmod +x "$RUNTIME/prebuilt/toolchains/host/bin/tesseract"
 printf 'keep source test\n' > "$RUNTIME/services/wa-web-bridge/test.js"
 printf 'keep channel session\n' > "$RUNTIME/services/wa-web-bridge/session.json"
 printf 'ubuntu-x86_64-old\n' > "$RUNTIME/.release-tag"
@@ -368,6 +374,7 @@ grep -Fxq 'release runner source' "$RUNTIME/optional_skills/store_fixture/runner
 grep -Fxq 'release receipt' "$RUNTIME/data/skill-packages/core_fixture/current.json"
 grep -Fxq 'keep local optional' "$RUNTIME/data/skill-packages/local_optional/current.json"
 grep -Fxq 'release prebuilt' "$RUNTIME/prebuilt/skill-packages/store_fixture/current.json"
+grep -Fxq 'release host tool' "$RUNTIME/prebuilt/toolchains/host/bin/tesseract"
 [[ -f "$RUNTIME/data/skill-packages/store_fixture/.verified" ]]
 grep -Fxq 'model fixture' "$RUNTIME/data/skills/store_fixture/modelscope/model/model.pt"
 grep -Fxq 'release bridge' "$RUNTIME/services/wa-web-bridge/index.js"
