@@ -441,62 +441,75 @@ jobs:
             tesseract "${tesseract_fixture}" stdout -l chi_sim >/dev/null
           printf '%s\n' 'macos_pkg_probe=chromium'
           [[ "$(command -v chromium)" == "${host_tools}/bin/chromium" ]]
-          chromium_profile="$(mktemp -d "${RUNNER_TEMP}/bundled-chromium-profile.XXXXXX")"
-          chromium_output="${RUNNER_TEMP}/bundled-chromium-smoke.html"
+          playwright_module="$(find \
+            "${runtime_root}/data/skill-packages/media_discovery/versions" \
+            -type d -path '*/runtime/src/node_modules/playwright' -print -quit)"
+          [[ -n "${playwright_module}" && -d "${playwright_module}" ]]
+          chromium_output="${RUNNER_TEMP}/bundled-chromium-smoke.txt"
           chromium_log="${RUNNER_TEMP}/bundled-chromium-smoke.log"
-          python3 - "$(command -v chromium)" "${chromium_profile}" \
+          python3 - "${runtime_root}/prebuilt/toolchains/node/bin/node" \
+            "${playwright_module}" "${APP_BUNDLED_CHROMIUM_PATH}" \
             "${chromium_output}" "${chromium_log}" <<'PY'
           from pathlib import Path
           import os
           import signal
           import subprocess
           import sys
-          import time
 
-          executable, profile, output_name, log_name = sys.argv[1:]
+          node, playwright_module, executable, output_name, log_name = sys.argv[1:]
           output = Path(output_name)
           log = Path(log_name)
+          script = r"""
+          const [playwrightModule, executablePath] = process.argv.slice(1);
+          const { chromium } = require(playwrightModule);
+          (async () => {
+            const browser = await chromium.launch({ executablePath, headless: true });
+            try {
+              const page = await browser.newPage();
+              await page.setContent('<title>bundled-browser-ready</title>');
+              process.stdout.write(await page.title());
+            } finally {
+              await browser.close();
+            }
+          })().catch((error) => {
+            console.error(error && error.stack ? error.stack : String(error));
+            process.exitCode = 1;
+          });
+          """
           command = [
+              node,
+              "-e",
+              script,
+              playwright_module,
               executable,
-              "--headless=new",
-              "--disable-background-networking",
-              "--disable-gpu",
-              "--no-first-run",
-              "--no-default-browser-check",
-              f"--user-data-dir={profile}",
-              "--dump-dom",
-              "data:text/html,<title>bundled-browser-ready</title>",
           ]
-          matched = False
-          with output.open("wb") as stdout, log.open("wb") as stderr:
-              process = subprocess.Popen(
-                  command,
-                  stdout=stdout,
-                  stderr=stderr,
-                  start_new_session=True,
-              )
-              deadline = time.monotonic() + 60
+          process = subprocess.Popen(
+              command,
+              stdout=subprocess.PIPE,
+              stderr=subprocess.PIPE,
+              start_new_session=True,
+          )
+          timed_out = False
+          try:
+              stdout, stderr = process.communicate(timeout=60)
+          except subprocess.TimeoutExpired:
+              timed_out = True
+              os.killpg(process.pid, signal.SIGTERM)
               try:
-                  while time.monotonic() < deadline:
-                      if output.is_file() and b"bundled-browser-ready" in output.read_bytes():
-                          matched = True
-                          break
-                      if process.poll() is not None:
-                          break
-                      time.sleep(0.25)
-              finally:
-                  if process.poll() is None:
-                      os.killpg(process.pid, signal.SIGTERM)
-                      try:
-                          process.wait(timeout=5)
-                      except subprocess.TimeoutExpired:
-                          os.killpg(process.pid, signal.SIGKILL)
-                          process.wait(timeout=5)
+                  stdout, stderr = process.communicate(timeout=5)
+              except subprocess.TimeoutExpired:
+                  os.killpg(process.pid, signal.SIGKILL)
+                  stdout, stderr = process.communicate(timeout=5)
+          output.write_bytes(stdout)
+          log.write_bytes(stderr)
+          matched = b"bundled-browser-ready" in stdout
           if not matched:
               sys.stderr.write(log.read_text(encoding="utf-8", errors="replace"))
               raise SystemExit("bundled_chromium_smoke_timeout_or_failure")
+          if process.returncode != 0 and not timed_out:
+              sys.stderr.write(log.read_text(encoding="utf-8", errors="replace"))
+              raise SystemExit("bundled_chromium_smoke_process_failure")
           PY
-          rm -rf "${chromium_profile}"
           printf '%s\n' 'macos_pkg_probe=media'
           media_fixture="${RUNNER_TEMP}/bundled-media-smoke.wav"
           ffmpeg -hide_banner -loglevel error -f lavfi \
