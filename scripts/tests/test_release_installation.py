@@ -173,6 +173,8 @@ class ReleaseInstallationTests(unittest.TestCase):
         self.assertNotIn("compile_tool_launchers", dependency_bundler)
         self.assertNotIn("tool_launcher_source", dependency_bundler)
         self.assertIn('release host tools/${RUST_TARGET}', workflow)
+        self.assertIn('tesseract_languages="$(tesseract --list-langs)"', workflow)
+        self.assertNotIn("tesseract --list-langs | grep -q", workflow)
         self.assertIn("APP_DESKTOP_BOOTSTRAP_PYTHON_ROOT", workflow)
         self.assertIn("APP_DESKTOP_RUNTIME_BUNDLE_DIR", workflow)
         self.assertIn("embedded-runtime/bundle.json", workflow)
