@@ -74,7 +74,7 @@ def build_fixture(root: Path) -> Path:
     write(root / "configs/channels/webd.toml", "[webd]\nenabled = false\n")
     write(
         root / "configs/channels/telegram.toml",
-        "[telegram_bot]\nenabled = true\n",
+        '[telegram]\nbot_token = "fixture-token"\n[telegram_bot]\nenabled = true\n',
     )
     write(root / "configs/channels/whatsapp-cloud.toml", "[whatsapp]\nenabled = false\n")
     write(
@@ -135,7 +135,7 @@ def main() -> int:
         script = build_fixture(root)
         write(
             root / "configs/channels/telegram.toml",
-            "[telegram_bot]\nenabled = false\n",
+            "[telegram_bot]\nenabled = true\n",
         )
         write(
             root / "configs/channels/whatsapp-web.toml",
@@ -172,7 +172,7 @@ def main() -> int:
         script = build_fixture(root)
         write(
             root / "configs/channels/telegram.toml",
-            "[telegram_bot]\nenabled = false\n",
+            "[telegram_bot]\nenabled = true\n",
         )
         write(
             root / "target/release/clawd",

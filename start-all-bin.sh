@@ -113,6 +113,40 @@ print("1" if bool(enabled) else "0")
 PY
 }
 
+read_telegram_configured() {
+  local config_path="$1"
+  if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]]; then
+    printf '1\n'
+    return 0
+  fi
+  python3 - "$config_path" <<'PY'
+import sys
+from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+
+path = Path(sys.argv[1])
+if not path.is_file():
+    print("0")
+    raise SystemExit(0)
+
+with path.open("rb") as source:
+    config = tomllib.load(source)
+telegram = config.get("telegram", {})
+compat = config.get("telegram_bot", {})
+tokens = [telegram.get("bot_token"), compat.get("bot_token")]
+tokens.extend(
+    bot.get("bot_token")
+    for bot in telegram.get("bots", [])
+    if isinstance(bot, dict)
+)
+print("1" if any(isinstance(token, str) and token.strip() for token in tokens) else "0")
+PY
+}
+
 require_binary() {
   local binary_path="$1"
   local component="$2"
@@ -125,6 +159,7 @@ require_binary() {
 
 WEBD_ENABLED="$(read_enabled "$SCRIPT_DIR/configs/channels/webd.toml" "webd" "0")"
 TELEGRAM_ENABLED="$(read_enabled "$SCRIPT_DIR/configs/channels/telegram.toml" "telegram_bot" "1")"
+TELEGRAM_CONFIGURED="$(read_telegram_configured "$SCRIPT_DIR/configs/channels/telegram.toml")"
 WHATSAPP_ENABLED="$(read_enabled "$SCRIPT_DIR/configs/channels/whatsapp-cloud.toml" "whatsapp" "0")"
 WHATSAPP_WEB_ENABLED="$(read_enabled "$SCRIPT_DIR/configs/channels/whatsapp-web.toml" "whatsapp_web" "0")"
 WECHAT_ENABLED="$(read_enabled "$SCRIPT_DIR/configs/channels/wechat.toml" "wechat" "0")"
@@ -138,7 +173,7 @@ require_binary "$SKILL_RECEIPT_CLI" "skill receipt verifier" || preflight_failed
 if [[ "$WEBD_ENABLED" == "1" ]]; then
   require_binary "$WEBD_BIN" "webd" || preflight_failed=1
 fi
-if [[ "${APP_SKIP_TELEGRAMD:-0}" != "1" && "$TELEGRAM_ENABLED" == "1" ]]; then
+if [[ "${APP_SKIP_TELEGRAMD:-0}" != "1" && "$TELEGRAM_ENABLED" == "1" && "$TELEGRAM_CONFIGURED" == "1" ]]; then
   require_binary "$TELEGRAMD_BIN" "telegramd" || preflight_failed=1
 fi
 if [[ "$WHATSAPP_ENABLED" == "1" ]]; then
@@ -402,6 +437,8 @@ start_clawd
 start_optional_component "webd" start_webd
 if [[ "${APP_SKIP_TELEGRAMD:-0}" == "1" ]]; then
   echo "APP_SKIP_TELEGRAMD=1, skipping telegramd startup."
+elif [[ "$TELEGRAM_ENABLED" == "1" && "$TELEGRAM_CONFIGURED" != "1" ]]; then
+  echo "Telegram is enabled but not configured; skipping telegramd startup."
 else
   start_optional_component "telegramd" start_telegramd
 fi
