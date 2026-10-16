@@ -228,6 +228,30 @@ exec "$launcher_dir/../$chromium_relative" "$@"
     return shim
 
 
+def write_tesseract_command_shim(root: Path) -> Path:
+    shim = root / "bin/tesseract"
+    shim.parent.mkdir(parents=True, exist_ok=True)
+    shim.write_text(
+        """#!/bin/sh
+set -eu
+launcher_path=$0
+case "$launcher_path" in
+  /*) ;;
+  *) launcher_path=$PWD/$launcher_path ;;
+esac
+launcher_dir=${launcher_path%/*}
+launcher_dir=$(CDPATH= cd "$launcher_dir" && pwd -P)
+tessdata_dir="$launcher_dir/../share/tessdata"
+TESSDATA_PREFIX=$(CDPATH= cd "$tessdata_dir" && pwd -P)
+export TESSDATA_PREFIX
+exec "$launcher_dir/tesseract-real" "$@"
+""",
+        encoding="utf-8",
+    )
+    shim.chmod(0o755)
+    return shim
+
+
 def require_file(path: Path, label: str, executable: bool = False) -> Path:
     resolved = path.expanduser().resolve(strict=True)
     if not resolved.is_file() or resolved.is_symlink():
@@ -282,7 +306,7 @@ def main() -> None:
         for source, name in (
             (ffmpeg, "ffmpeg"),
             (ffprobe, "ffprobe"),
-            (tesseract, "tesseract"),
+            (tesseract, "tesseract-real"),
             (whisper_cli, "whisper-cli"),
         ):
             output = root / "bin" / name
@@ -316,28 +340,26 @@ def main() -> None:
             chromium_relative + "\n", encoding="utf-8"
         )
         write_chromium_command_shim(root)
+        write_tesseract_command_shim(root)
         copy_external_libraries(root, origins)
 
         git_environment = {
             "GIT_EXEC_PATH": str(root / "git/libexec/git-core"),
             "GIT_TEMPLATE_DIR": str(root / "git/share/git-core/templates"),
         }
-        tesseract_environment = {"TESSDATA_PREFIX": str(root / "share/tessdata")}
         checks = {
             "git": run_with_environment(
                 (str(root / "git/bin/git"), "--version"), git_environment
             ).strip(),
             "ffmpeg": first_output_line(str(root / "bin/ffmpeg"), "-version"),
             "ffprobe": first_output_line(str(root / "bin/ffprobe"), "-version"),
-            "tesseract": run_with_environment(
-                (str(root / "bin/tesseract"), "--version"), tesseract_environment
-            ).strip().splitlines()[0],
+            "tesseract": run(str(root / "bin/tesseract"), "--version")
+            .strip()
+            .splitlines()[0],
             "chromium": run(str(chromium_target_executable), "--version").strip(),
             "whisper_cli": first_output_line(str(root / "bin/whisper-cli"), "--help"),
         }
-        languages = run_with_environment(
-            (str(root / "bin/tesseract"), "--list-langs"), tesseract_environment
-        )
+        languages = run(str(root / "bin/tesseract"), "--list-langs")
         if not {"eng", "chi_sim"}.issubset(set(languages.split())):
             raise ValueError("macos_tesseract_languages_missing")
         checks["tesseract_languages"] = ["chi_sim", "eng"]

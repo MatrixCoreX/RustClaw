@@ -36,7 +36,7 @@ class BundleMacosSkillDependenciesTests(unittest.TestCase):
     def test_direct_tool_is_relocated_but_chromium_app_payload_is_not(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            direct_tool = root / "bin/tesseract"
+            direct_tool = root / "bin/tesseract-real"
             chromium_binary = root / "chromium/Chromium.app/Contents/MacOS/Chromium"
             direct_tool.parent.mkdir(parents=True)
             chromium_binary.parent.mkdir(parents=True)
@@ -115,6 +115,35 @@ class BundleMacosSkillDependenciesTests(unittest.TestCase):
             )
 
             self.assertEqual(completed.stdout, "--version fixture value\n")
+            self.assertEqual(shim.stat().st_mode & 0o777, 0o755)
+
+    def test_tesseract_command_shim_uses_bundle_data_with_spaces(self):
+        with tempfile.TemporaryDirectory(prefix="macos host tools ") as directory:
+            root = Path(directory)
+            executable = root / "bin/tesseract-real"
+            tessdata = root / "share/tessdata"
+            executable.parent.mkdir(parents=True)
+            tessdata.mkdir(parents=True)
+            executable.write_text(
+                "#!/bin/sh\nprintf '%s|%s\\n' \"$TESSDATA_PREFIX\" \"$*\"\n"
+            )
+            executable.chmod(0o755)
+
+            shim = bundle.write_tesseract_command_shim(root)
+            environment = bundle.os.environ.copy()
+            environment["TESSDATA_PREFIX"] = "/wrong/tessdata"
+            completed = bundle.subprocess.run(
+                [str(shim), "--list-langs"],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+
+            self.assertEqual(
+                completed.stdout,
+                f"{root / 'share/tessdata'}|--list-langs\n",
+            )
             self.assertEqual(shim.stat().st_mode & 0o777, 0o755)
 
 

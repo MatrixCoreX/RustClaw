@@ -206,11 +206,10 @@ configure_bundled_host_tools() {
 
   prepend_existing_command_path "$host_root/bin"
   prepend_existing_command_path "$host_root/git/bin"
-  GIT_EXEC_PATH="$host_root/git/libexec/git-core"
-  GIT_TEMPLATE_DIR="$host_root/git/share/git-core/templates"
-  TESSDATA_PREFIX="$host_root/share/tessdata"
-  APP_BUNDLED_CHROMIUM_PATH="$chromium_executable"
-  export GIT_EXEC_PATH GIT_TEMPLATE_DIR TESSDATA_PREFIX APP_BUNDLED_CHROMIUM_PATH
+  export GIT_EXEC_PATH="$host_root/git/libexec/git-core"
+  export GIT_TEMPLATE_DIR="$host_root/git/share/git-core/templates"
+  export TESSDATA_PREFIX="$host_root/share/tessdata"
+  export APP_BUNDLED_CHROMIUM_PATH="$chromium_executable"
 }
 
 configure_user_toolchain_command_path() {

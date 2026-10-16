@@ -166,7 +166,8 @@ class ReleaseInstallationTests(unittest.TestCase):
             ROOT / "scripts/bundle_macos_skill_dependencies.py"
         ).read_text()
         self.assertIn('"git": "git/bin/git"', dependency_bundler)
-        self.assertIn('(tesseract, "tesseract")', dependency_bundler)
+        self.assertIn('(tesseract, "tesseract-real")', dependency_bundler)
+        self.assertIn("write_tesseract_command_shim(root)", dependency_bundler)
         self.assertIn('root / "chromium-executable-relative"', dependency_bundler)
         self.assertIn('root / "bin/chromium"', dependency_bundler)
         self.assertIn('"chromium_command": "bin/chromium"', dependency_bundler)
@@ -181,6 +182,7 @@ class ReleaseInstallationTests(unittest.TestCase):
             '[[ "$(command -v tesseract)" == "${host_tools}/bin/tesseract" ]]',
             workflow,
         )
+        self.assertIn('[[ -x "${host_tools}/bin/tesseract-real" ]]', workflow)
         self.assertIn(
             '[[ "$(command -v whisper-cli)" == "${host_tools}/bin/whisper-cli" ]]',
             workflow,
