@@ -2501,6 +2501,7 @@ class SmallScreenApp:
         if frame is not None:
             try:
                 frame.place_forget()
+                self.root.attributes("-topmost", False)
             except tk.TclError:
                 pass
         self._login_challenge_photo = None
@@ -2555,6 +2556,8 @@ class SmallScreenApp:
         try:
             frame.place(x=0, y=0, width=W, height=H)
             frame.lift()
+            self.root.lift()
+            self.root.attributes("-topmost", True)
         except tk.TclError:
             pass
 
