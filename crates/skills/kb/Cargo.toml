@@ -11,6 +11,8 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 claw-core = { path = "../../claw-core" }
+doc-parse-skill = { path = "../doc_parse" }
+office-workspace-skill = { path = "../office_workspace" }
 regex.workspace = true
 rusqlite.workspace = true
 skill-sdk = { package = "agent-skill-sdk", path = "../../skill-sdk" }

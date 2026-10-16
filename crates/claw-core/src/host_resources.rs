@@ -1,4 +1,6 @@
+#[cfg(any(target_os = "linux", test))]
 use std::fs;
+#[cfg(any(target_os = "linux", test))]
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -8,6 +10,7 @@ use std::process::Command;
 use serde::{Deserialize, Serialize};
 
 const TEXT_LIMIT_BYTES: u64 = 64 * 1024;
+#[cfg(any(target_os = "linux", test))]
 const UNLIMITED_CGROUP_THRESHOLD_BYTES: u64 = 1_u64 << 60;
 const MIB: u64 = 1024 * 1024;
 
@@ -343,6 +346,7 @@ fn now_epoch_ms() -> u64 {
         .unwrap_or(u64::MAX)
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn minimum_known(left: Option<u64>, right: Option<u64>) -> Option<u64> {
     match (left, right) {
         (Some(left), Some(right)) => Some(left.min(right)),
@@ -351,6 +355,7 @@ fn minimum_known(left: Option<u64>, right: Option<u64>) -> Option<u64> {
     }
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn read_bounded_text(path: &Path) -> Option<String> {
     let metadata = fs::metadata(path).ok()?;
     if metadata.len() > TEXT_LIMIT_BYTES {
@@ -377,6 +382,7 @@ fn command_output(_program: &str, _args: &[&str]) -> Option<String> {
     None
 }
 
+#[cfg(any(target_os = "linux", test))]
 #[derive(Default)]
 struct LinuxMemoryInfo {
     physical_memory_bytes: Option<u64>,
@@ -384,6 +390,7 @@ struct LinuxMemoryInfo {
     swap_used_bytes: Option<u64>,
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn parse_linux_meminfo(text: &str) -> LinuxMemoryInfo {
     let mut total = None;
     let mut available = None;
@@ -410,6 +417,7 @@ fn parse_linux_meminfo(text: &str) -> LinuxMemoryInfo {
     }
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn parse_kib(value: &str) -> Option<u64> {
     value
         .split_whitespace()
@@ -419,6 +427,7 @@ fn parse_kib(value: &str) -> Option<u64> {
         .map(|value| value.saturating_mul(1024))
 }
 
+#[cfg(any(target_os = "linux", test))]
 #[derive(Default)]
 struct LinuxCgroupSnapshot {
     version: Option<u8>,
@@ -456,11 +465,7 @@ fn collect_linux_cgroup() -> LinuxCgroupSnapshot {
     LinuxCgroupSnapshot::default()
 }
 
-#[cfg(not(target_os = "linux"))]
-fn collect_linux_cgroup() -> LinuxCgroupSnapshot {
-    LinuxCgroupSnapshot::default()
-}
-
+#[cfg(any(target_os = "linux", test))]
 fn cgroup_directories(root: &Path, relative: &Path) -> Vec<PathBuf> {
     let joined = root.join(relative.strip_prefix("/").unwrap_or(relative));
     if joined == root {
@@ -470,6 +475,7 @@ fn cgroup_directories(root: &Path, relative: &Path) -> Vec<PathBuf> {
     }
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn parse_cgroup_v2_path(text: &str) -> Option<PathBuf> {
     text.lines().find_map(|line| {
         let mut fields = line.splitn(3, ':');
@@ -478,6 +484,7 @@ fn parse_cgroup_v2_path(text: &str) -> Option<PathBuf> {
     })
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn parse_cgroup_v1_memory_path(text: &str) -> Option<PathBuf> {
     text.lines().find_map(|line| {
         let mut fields = line.splitn(3, ':');
@@ -491,6 +498,7 @@ fn parse_cgroup_v1_memory_path(text: &str) -> Option<PathBuf> {
     })
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn collect_cgroup_v2_dir(directory: &Path) -> LinuxCgroupSnapshot {
     LinuxCgroupSnapshot {
         version: Some(2),
@@ -505,6 +513,7 @@ fn collect_cgroup_v2_dir(directory: &Path) -> LinuxCgroupSnapshot {
     }
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn collect_cgroup_v1_dir(directory: &Path) -> LinuxCgroupSnapshot {
     let memory_current_bytes = read_u64_file(&directory.join("memory.usage_in_bytes"));
     let memsw_current = read_u64_file(&directory.join("memory.memsw.usage_in_bytes"));
@@ -520,10 +529,12 @@ fn collect_cgroup_v1_dir(directory: &Path) -> LinuxCgroupSnapshot {
     }
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn read_u64_file(path: &Path) -> Option<u64> {
     read_bounded_text(path)?.trim().parse::<u64>().ok()
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn read_limit_file(path: &Path) -> Option<u64> {
     let value = read_bounded_text(path)?;
     let value = value.trim();
@@ -536,6 +547,7 @@ fn read_limit_file(path: &Path) -> Option<u64> {
         .filter(|value| *value > 0 && *value < UNLIMITED_CGROUP_THRESHOLD_BYTES)
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn parse_cgroup_events(text: &str) -> CgroupMemoryEvents {
     let mut events = CgroupMemoryEvents::default();
     for line in text.lines().take(32) {
@@ -559,6 +571,7 @@ fn parse_cgroup_events(text: &str) -> CgroupMemoryEvents {
     events
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn parse_linux_pressure(text: &str) -> MemoryPressureSample {
     let mut sample = MemoryPressureSample::default();
     for line in text.lines().take(4) {

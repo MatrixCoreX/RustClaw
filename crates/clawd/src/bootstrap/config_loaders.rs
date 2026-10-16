@@ -341,3 +341,38 @@ pub(crate) fn sanitize_command_before_execute(
 ) -> String {
     trim_command_text(command.trim().to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn memory_runtime_file_controls_startup_reindex_and_background_concurrency() {
+        let root = std::env::temp_dir().join(format!(
+            "agent-memory-runtime-config-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("create memory config test root");
+
+        let tracked_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/memory.toml");
+        let tracked = std::fs::read_to_string(tracked_path)
+            .expect("read tracked memory config")
+            .replace("reindex_on_startup = false", "reindex_on_startup = true")
+            .replace(
+                "background_job_concurrency = 2",
+                "background_job_concurrency = 3",
+            );
+        std::fs::write(root.join("memory.toml"), tracked).expect("write memory config fixture");
+
+        let source = MemoryConfig {
+            config_path: "memory.toml".to_string(),
+            ..MemoryConfig::default()
+        };
+        let loaded = load_memory_runtime_config(&root, &source);
+        assert!(loaded.reindex_on_startup);
+        assert_eq!(loaded.background_job_concurrency, 3);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+}

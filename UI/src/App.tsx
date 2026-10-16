@@ -2582,6 +2582,12 @@ export default function App() {
               memorySettings={memorySettings}
               memorySettingScope={memorySettingScope}
               activeConversationId={activeChatThreadId}
+              apiFetch={apiFetch}
+              kbIdentity={{
+                userKey: activeUserKey || undefined,
+                userId: activeIdentityIds.user_id,
+                chatId: activeIdentityIds.chat_id,
+              }}
               memoryPreferences={memoryPreferences}
               memoryFacts={memoryFacts}
               memoryRecent={memoryRecent}

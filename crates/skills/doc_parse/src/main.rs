@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Context, Result};
+use doc_parse::{extract_pdf_text, PdfExtractionLimits};
 use office_workspace::read_docx_for_legacy_parser;
 use regex::Regex;
 use serde::Serialize;
@@ -9,7 +10,6 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 #[derive(Clone, Copy, Debug)]
 enum DocType {
@@ -575,30 +575,28 @@ fn parse_html(path: &Path, table_mode: TableMode) -> Result<ParseResultInternal>
 }
 
 fn parse_pdf(path: &Path, page_range: &PageRange) -> Result<ParseResultInternal> {
-    let mut cmd = Command::new("pdftotext");
-    cmd.arg("-q");
-    if let Some(s) = page_range.start {
-        cmd.arg("-f").arg(s.to_string());
-    }
-    if let Some(e) = page_range.end {
-        cmd.arg("-l").arg(e.to_string());
-    }
-    cmd.arg(path.as_os_str()).arg("-");
-    let output = cmd
-        .output()
-        .with_context(|| "failed to run pdftotext; install poppler-utils")?;
-    if !output.status.success() {
-        return Err(anyhow!(
-            "pdftotext failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    let text = String::from_utf8_lossy(&output.stdout).to_string();
-    let pages = pdf_page_count(path).unwrap_or(1);
+    let extraction = extract_pdf_text(
+        path,
+        page_range.start,
+        page_range.end,
+        PdfExtractionLimits::default(),
+    )
+    .map_err(|error| anyhow!("{}: {}", error.code, error))?;
+    let text = extraction
+        .pages
+        .iter()
+        .map(|page| page.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\u{c}\n");
     Ok(ParseResultInternal {
         title: first_non_empty_line(&text).unwrap_or_else(|| file_stem(path)),
-        pages,
-        encoding: "utf-8".to_string(),
+        pages: extraction.total_pages,
+        encoding: if extraction.lossy_utf8 {
+            "utf-8-lossy"
+        } else {
+            "utf-8"
+        }
+        .to_string(),
         tables: vec![],
         sections: split_plain_sections(&text),
         text,
@@ -919,30 +917,14 @@ fn file_stem(path: &Path) -> String {
         .to_string()
 }
 
-fn pdf_page_count(path: &Path) -> Option<u32> {
-    let out = Command::new("pdfinfo")
-        .arg(path.as_os_str())
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let text = String::from_utf8_lossy(&out.stdout);
-    for line in text.lines() {
-        if let Some(rest) = line.strip_prefix("Pages:") {
-            if let Ok(n) = rest.trim().parse::<u32>() {
-                return Some(n);
-            }
-        }
-    }
-    None
-}
-
 fn classify_error(err: &anyhow::Error) -> String {
     let m = err.to_string().to_lowercase();
     if m.contains("file not found") {
         "NOT_FOUND".to_string()
-    } else if m.contains("pdftotext") || m.contains("pdfinfo") {
+    } else if m.contains("parser_dependency_unavailable")
+        || m.contains("pdftotext")
+        || m.contains("pdfinfo")
+    {
         "DEPENDENCY_MISSING".to_string()
     } else if m.contains("invalid docx") || m.contains("missing word/document.xml") {
         "UNSUPPORTED_FORMAT".to_string()

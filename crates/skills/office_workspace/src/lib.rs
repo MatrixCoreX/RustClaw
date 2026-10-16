@@ -21,12 +21,14 @@ mod xml;
 #[cfg(test)]
 mod test_support;
 
-pub use engine::execute;
+pub use engine::{execute, inspect_for_ingestion};
 pub use error::OfficeError;
-pub use model::{SkillRequest, SkillResponse};
+pub use model::{
+    DocumentBlock, OfficeArtifactEnvelope, OfficeFormat, OfficeTable, OfficeWarning,
+    PresentationEvidence, SkillRequest, SkillResponse, WorkbookEvidence,
+};
 
 use docx::read_docx;
-use model::OfficeFormat;
 use package::OfficePackage;
 use std::path::Path;
 

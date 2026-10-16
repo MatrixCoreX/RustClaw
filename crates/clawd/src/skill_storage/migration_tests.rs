@@ -2,6 +2,36 @@ use super::*;
 use crate::db_init;
 
 #[test]
+fn kb_support_schema_defaults_to_the_single_current_embedding_profile() {
+    let db = rusqlite::Connection::open_in_memory().expect("open memory db");
+    crate::skill_storage::schema::ensure_kb_schema(&db).expect("KB schema");
+    db.execute(
+        "INSERT INTO memory_retrieval_index (
+            source_kind, user_id, chat_id, memory_kind, search_text
+         ) VALUES ('kb_doc', 1, 1, 'knowledge_doc', 'schema default probe')",
+        [],
+    )
+    .expect("insert row using schema defaults");
+
+    let actual: (String, usize, String) = db
+        .query_row(
+            "SELECT embedding_model, embedding_dims, embedding_version
+             FROM memory_retrieval_index",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("embedding defaults");
+    assert_eq!(
+        actual,
+        (
+            claw_core::retrieval_embedding::LOCAL_HASH_MODEL_ID.to_string(),
+            claw_core::retrieval_embedding::LOCAL_HASH_DIMS,
+            claw_core::retrieval_embedding::LOCAL_HASH_VERSION.to_string(),
+        )
+    );
+}
+
+#[test]
 fn crypto_migration_is_verified_and_drops_the_legacy_table() {
     let main = db_init::test_pool();
     let crypto = db_init::test_pool();

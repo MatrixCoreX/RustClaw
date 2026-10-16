@@ -3,7 +3,7 @@
 ## Capability Summary
 
 - Run local speech recognition in an isolated, on-demand process package.
-- Support a host-provided `whisper.cpp` binary/model and a package-owned FunASR/ModelScope/Torch backend.
+- Support a release-bundled `whisper.cpp` binary/model and a package-owned FunASR/ModelScope/Torch backend. Development installs may instead select an operator-provided Whisper binary/model.
 - Load the selected model for one invocation only; the model never remains resident in `clawd`.
 - Split long or large inputs into bounded 16 kHz mono segments, recognize them in source order, and merge every non-empty part without truncation.
 - Return raw transcript evidence for the shared model finalizer, which performs language-preserving correction and user delivery.
@@ -19,7 +19,7 @@
 
 ## Dependencies and Storage
 
-- Host dependency: `ffmpeg`; Whisper also requires `whisper-cli` and a configured local model.
+- The full macOS release bundles `ffmpeg`, `ffprobe`, `whisper-cli`, and a multilingual Whisper model. Development/source installs may satisfy these host dependencies explicitly.
 - FunASR is installed only with this optional package. Its locked ModelScope, Torch, and Torchaudio dependencies are not part of ordinary media downloading.
 - Managed SenseVoice and FSMN VAD assets live in this skill's private directory storage.
 - Runtime network access is disabled. Missing assets fail with structured `dependency_unavailable` data rather than downloading at first use.

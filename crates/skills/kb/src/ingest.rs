@@ -1,9 +1,9 @@
-use super::ingest_extract::{extract_document, ExtractOutcome};
+use super::ingest_extract::{chunk_extraction, extract_document, ExtractOutcome};
 use super::ingest_scan::{build_scan_targets, collect_target_files, path_matches_any_scan_target};
 use super::{
     chunker_version, default_embedding_version, default_parser_version, document_is_current,
-    mtime_epoch, now_epoch, parse_chunker_setting, remove_doc_from_index, sha256_hex, split_chunks,
-    storage, storage_path_for, tokenize, Chunk, DocMeta, KbRuntime, NamespaceIndex,
+    mtime_epoch, now_epoch, parse_chunker_setting, remove_doc_from_index, sha256_hex, storage,
+    storage_path_for, Chunk, DocMeta, KbRuntime, NamespaceIndex,
 };
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -16,11 +16,19 @@ use std::path::Path;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 const DEFAULT_MAX_FILE_SIZE: u64 = 2 * 1024 * 1024;
-const DEFAULT_FILES_PER_RUN: usize = 1_000;
-const DEFAULT_BYTES_PER_RUN: u64 = 256 * 1024 * 1024;
-const DEFAULT_CHUNKS_PER_RUN: usize = 100_000;
+const MAX_FILE_SIZE: u64 = 64 * 1024 * 1024;
+const DEFAULT_FILES_PER_RUN: usize = 500;
+const MAX_FILES_PER_RUN: usize = 5_000;
+const DEFAULT_BYTES_PER_RUN: u64 = 64 * 1024 * 1024;
+const MAX_BYTES_PER_RUN: u64 = 256 * 1024 * 1024;
+const DEFAULT_CHUNKS_PER_RUN: usize = 10_000;
+const MAX_CHUNKS_PER_RUN: usize = 10_000;
 const DEFAULT_MAX_DEPTH: usize = 64;
 const DEFAULT_RUN_SECONDS: u64 = 20;
+const CONSTRAINED_DEFAULT_FILES_PER_RUN: usize = 64;
+const CONSTRAINED_DEFAULT_BYTES_PER_RUN: u64 = 16 * 1024 * 1024;
+const CONSTRAINED_DEFAULT_CHUNKS_PER_RUN: usize = 2_048;
+const CONSTRAINED_DEFAULT_RUN_SECONDS: u64 = 10;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct IngestArgs {
@@ -92,7 +100,12 @@ pub(super) fn do_ingest_with_progress(
     args: &Value,
     progress: Option<&mut super::KbProgressCallback<'_>>,
 ) -> Result<Value> {
-    start_ingest_job(runtime, parse_ingest_args(args)?, "ingest", progress)
+    start_ingest_job(
+        runtime,
+        parse_ingest_args_for_runtime(runtime, args)?,
+        "ingest",
+        progress,
+    )
 }
 
 #[cfg(test)]
@@ -106,10 +119,9 @@ pub(super) fn do_reindex_with_progress(
     progress: Option<&mut super::KbProgressCallback<'_>>,
 ) -> Result<Value> {
     let namespace = super::required_namespace(args, "reindex")?;
-    let index = storage::load_namespace(runtime, &namespace)
+    let index = storage::load_namespace_ingest_state(runtime, &namespace)
         .map_err(|_| anyhow!("namespace not found or unreadable: {namespace}"))?;
-    let mut paths = index.docs.keys().cloned().collect::<Vec<_>>();
-    paths.sort();
+    let paths = storage::list_document_paths(runtime, &namespace)?;
     if paths.is_empty() {
         return Err(anyhow!("namespace has no documents to reindex"));
     }
@@ -134,7 +146,12 @@ pub(super) fn do_reindex_with_progress(
             request[key] = value.clone();
         }
     }
-    let mut result = start_ingest_job(runtime, parse_ingest_args(&request)?, "reindex", progress)?;
+    let mut result = start_ingest_job(
+        runtime,
+        parse_ingest_args_for_runtime(runtime, &request)?,
+        "reindex",
+        progress,
+    )?;
     if let Some(object) = result.as_object_mut() {
         object.insert("reindexed_from_revision".to_string(), json!(index.revision));
     }
@@ -164,11 +181,20 @@ pub(super) fn do_resume_ingest_with_progress(
         return Err(CheckpointConflict { current: job }.into());
     }
     let index = if storage::namespace_exists(runtime, &job.namespace)? {
-        storage::load_namespace(runtime, &job.namespace)?
+        storage::load_namespace_ingest_state(runtime, &job.namespace)?
     } else {
         empty_namespace(runtime, &job.request)
     };
-    process_job(runtime, job, index, progress)
+    let job_id = job.job_id.clone();
+    match process_job(runtime, job, index, progress) {
+        Ok(result) => Ok(result),
+        Err(error) => {
+            if error.downcast_ref::<CheckpointConflict>().is_none() {
+                let _ = storage::mark_ingest_job_failed(runtime, &job_id);
+            }
+            Err(error)
+        }
+    }
 }
 
 pub(super) fn do_ingest_job_status(runtime: &KbRuntime, args: &Value) -> Result<Value> {
@@ -217,16 +243,25 @@ fn start_ingest_job(
         created_at_epoch: now,
         updated_at_epoch: now,
     };
-    storage::save_ingest_job(runtime, &job)?;
+    storage::create_ingest_job(runtime, &job)?;
     let index = if job.request.overwrite {
         empty_namespace(runtime, &job.request)
     } else if storage::namespace_exists(runtime, &job.namespace)? {
-        storage::load_namespace(runtime, &job.namespace)?
+        storage::load_namespace_ingest_state(runtime, &job.namespace)?
     } else {
         empty_namespace(runtime, &job.request)
     };
     job.status = "running".to_string();
-    process_job(runtime, job, index, progress)
+    let job_id = job.job_id.clone();
+    match process_job(runtime, job, index, progress) {
+        Ok(result) => Ok(result),
+        Err(error) => {
+            if error.downcast_ref::<CheckpointConflict>().is_none() {
+                let _ = storage::mark_ingest_job_failed(runtime, &job_id);
+            }
+            Err(error)
+        }
+    }
 }
 
 fn process_job(
@@ -239,6 +274,8 @@ fn process_job(
         return Err(anyhow!("ingest job owner mismatch"));
     }
     let expected_checkpoint = job.clone();
+    let reset_namespace = job.request.overwrite && expected_checkpoint.next_file_index == 0;
+    let mut removed_paths = HashSet::new();
     let scan_targets = build_scan_targets(runtime, &job.request.paths)?;
     let started = Instant::now();
     let mut run_files = 0usize;
@@ -275,6 +312,9 @@ fn process_job(
             .to_ascii_lowercase();
         let path_str = storage_path_for(&file, &runtime.workspace_root);
         let legacy_absolute_path = super::normalize_path_string(&file);
+        if run_files > 0 && run_bytes.saturating_add(size) > job.request.max_bytes_per_run {
+            break;
+        }
         run_files += 1;
         run_bytes = run_bytes.saturating_add(size);
         job.processed_files += 1;
@@ -287,6 +327,7 @@ fn process_job(
 
         if (!job.request.file_types.is_empty() && !job.request.file_types.contains(&file_type))
             || size > job.request.max_file_size
+            || size > job.request.max_bytes_per_run
         {
             run_skipped += 1;
             job.skipped_files += 1;
@@ -295,6 +336,11 @@ fn process_job(
                     "skip large file {path_str} ({size} bytes > max_file_size {})",
                     job.request.max_file_size
                 ));
+            } else if size > job.request.max_bytes_per_run {
+                job.warnings.push(format!(
+                    "skip file {path_str}: source bytes exceed max_bytes_per_run {}",
+                    job.request.max_bytes_per_run
+                ));
             }
             continue;
         }
@@ -302,7 +348,7 @@ fn process_job(
         let bytes =
             fs::read(&file).with_context(|| format!("failed to read {}", file.display()))?;
         let content_sha256 = sha256_hex(&bytes);
-        let extracted = match extract_document(&bytes, &file_type) {
+        let extracted = match extract_document(&file, &bytes, &file_type) {
             Ok(value) => value,
             Err(error) => {
                 run_skipped += 1;
@@ -312,43 +358,95 @@ fn process_job(
                 continue;
             }
         };
-        let (text, parser_version) = match extracted {
-            ExtractOutcome::Text {
-                text,
-                parser_version,
-            } => (text, parser_version),
-            ExtractOutcome::Skip { reason } => {
+        let extraction = match extracted {
+            ExtractOutcome::Extracted(extraction) => extraction,
+            ExtractOutcome::Skip {
+                error_code,
+                message_key,
+            } => {
                 run_skipped += 1;
                 job.skipped_files += 1;
-                job.warnings.push(format!("skip {path_str}: {reason}"));
+                job.warnings
+                    .push(format!("skip {path_str}: {error_code} ({message_key})"));
                 continue;
             }
         };
+        let parser_version = extraction.parser_version.clone();
         let chunker_version = chunker_version(job.request.chunk_size, job.request.chunk_overlap);
-        let unchanged = index
+        let stored_document = if job.request.overwrite {
+            None
+        } else if let Some(document) = index
             .docs
             .get(&path_str)
             .or_else(|| index.docs.get(&legacy_absolute_path))
+        {
+            Some(document.clone())
+        } else if let Some(document) =
+            storage::load_document_metadata(runtime, &job.namespace, &path_str)?
+        {
+            Some(document)
+        } else if legacy_absolute_path != path_str {
+            storage::load_document_metadata(runtime, &job.namespace, &legacy_absolute_path)?
+        } else {
+            None
+        };
+        let unchanged = stored_document
+            .as_ref()
             .map(|doc| document_is_current(doc, &content_sha256, &parser_version, &chunker_version))
             .unwrap_or(false);
         if unchanged && !job.request.overwrite {
             continue;
         }
 
-        let replaced =
-            index.docs.contains_key(&path_str) || index.docs.contains_key(&legacy_absolute_path);
+        let chunks = chunk_extraction(
+            &extraction,
+            job.request.chunk_size,
+            job.request.chunk_overlap,
+        );
+        let chunk_count = chunks.len();
+        if chunk_count > job.request.max_chunks_per_run {
+            run_skipped += 1;
+            job.skipped_files += 1;
+            job.warnings.push(format!(
+                "skip {path_str}: produced chunks exceed max_chunks_per_run {}",
+                job.request.max_chunks_per_run
+            ));
+            continue;
+        }
+        if run_chunks > 0 && run_chunks.saturating_add(chunk_count) > job.request.max_chunks_per_run
+        {
+            run_files = run_files.saturating_sub(1);
+            run_bytes = run_bytes.saturating_sub(size);
+            job.processed_files = job.processed_files.saturating_sub(1);
+            job.processed_bytes = job.processed_bytes.saturating_sub(size);
+            job.next_file_index = job.next_file_index.saturating_sub(1);
+            job.last_completed_path = job
+                .next_file_index
+                .checked_sub(1)
+                .and_then(|index| job.manifest.get(index))
+                .map(|path| storage_path_for(Path::new(path), &runtime.workspace_root));
+            break;
+        }
+        let replaced = stored_document.is_some()
+            || index.docs.contains_key(&path_str)
+            || index.docs.contains_key(&legacy_absolute_path);
         remove_doc_from_index(&mut index, &path_str);
         if legacy_absolute_path != path_str {
             remove_doc_from_index(&mut index, &legacy_absolute_path);
+        }
+        if let Some(document) = stored_document {
+            removed_paths.insert(document.path);
         }
         if replaced {
             run_removed += 1;
             job.removed_docs += 1;
         }
-
-        let chunks = split_chunks(&text, job.request.chunk_size, job.request.chunk_overlap);
-        let chunk_count = chunks.len();
-        for (offset, chunk_text) in chunks.into_iter().enumerate() {
+        for (offset, extracted_chunk) in chunks.into_iter().enumerate() {
+            let chunk_text = extracted_chunk.text;
+            let token_projection = claw_core::retrieval_embedding::project_retrieval_tokens(
+                &chunk_text,
+                claw_core::retrieval_embedding::DEFAULT_RETRIEVAL_TOKEN_BUDGET,
+            );
             let chunk_id = format!("{}-{}", job.namespace, index.next_chunk_seq);
             index.next_chunk_seq += 1;
             index.chunks.push(Chunk {
@@ -356,10 +454,12 @@ fn process_job(
                 path: path_str.clone(),
                 file_type: file_type.clone(),
                 offset,
-                len_tokens: tokenize(&chunk_text).len(),
+                len_tokens: token_projection.tokens.len(),
                 text_sha256: sha256_hex(chunk_text.as_bytes()),
                 text: chunk_text,
                 mtime_epoch: mtime_epoch(&meta),
+                content_kind: extracted_chunk.content_kind,
+                location: extracted_chunk.location,
             });
         }
         index.docs.insert(
@@ -388,17 +488,16 @@ fn process_job(
             .iter()
             .map(|path| storage_path_for(Path::new(path), &runtime.workspace_root))
             .collect::<HashSet<_>>();
-        let stale_paths = index
-            .docs
-            .keys()
+        let stale_paths = storage::list_document_paths(runtime, &job.namespace)?
+            .into_iter()
             .filter(|path| {
-                !current_paths.contains(*path)
+                !current_paths.contains(path)
                     && path_matches_any_scan_target(Path::new(path), &scan_targets)
             })
-            .cloned()
             .collect::<Vec<_>>();
         for path in stale_paths {
             remove_doc_from_index(&mut index, &path);
+            removed_paths.insert(path);
             run_removed += 1;
             job.removed_docs += 1;
         }
@@ -410,7 +509,14 @@ fn process_job(
     index.embedding_version = default_embedding_version();
     job.status = if complete { "completed" } else { "waiting" }.to_string();
     job.updated_at_epoch = now_epoch();
-    let persisted = storage::save_namespace_and_job(runtime, &index, &job, &expected_checkpoint)?;
+    let persisted = storage::save_ingest_delta_and_job(
+        runtime,
+        &index,
+        &removed_paths,
+        reset_namespace,
+        &job,
+        &expected_checkpoint,
+    )?;
     Ok(job_result_value(
         &job,
         persisted,
@@ -562,12 +668,17 @@ fn empty_namespace(runtime: &KbRuntime, request: &IngestArgs) -> NamespaceIndex 
 }
 
 fn required_job_id(args: &Value, action: &str) -> Result<String> {
-    args.get("job_id")
+    let job_id = args
+        .get("job_id")
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
-        .ok_or_else(|| anyhow!("{action} requires job_id"))
+        .ok_or_else(|| anyhow!("{action} requires job_id"))?;
+    if job_id.chars().count() > 128 || job_id.chars().any(char::is_control) {
+        return Err(anyhow!("{action} job_id exceeds its allowed boundary"));
+    }
+    Ok(job_id)
 }
 
 fn new_job_id(runtime: &KbRuntime, request: &IngestArgs) -> String {
@@ -596,33 +707,37 @@ pub(super) fn parse_ingest_args(args: &Value) -> Result<IngestArgs> {
         .ok_or_else(|| anyhow!("ingest requires namespace"))?
         .trim()
         .to_string();
-    if namespace.is_empty() {
-        return Err(anyhow!("ingest requires namespace"));
-    }
+    super::validate_namespace_value(&namespace)?;
     let paths = parse_ingest_paths(args)?;
-    let chunk_size = args
-        .get("chunk_size")
-        .and_then(Value::as_u64)
-        .map(|n| n as usize)
-        .unwrap_or(super::DEFAULT_CHUNK_SIZE)
-        .clamp(200, 8_000);
-    let chunk_overlap = args
-        .get("chunk_overlap")
-        .and_then(Value::as_u64)
-        .map(|n| n as usize)
-        .unwrap_or(super::DEFAULT_CHUNK_OVERLAP)
-        .min(chunk_size / 3)
-        .min(400);
-    let file_types = args
-        .get("file_types")
-        .and_then(Value::as_array)
-        .map(|arr| {
-            arr.iter()
-                .filter_map(Value::as_str)
-                .map(|value| value.trim_start_matches('.').to_ascii_lowercase())
-                .collect::<HashSet<_>>()
-        })
-        .unwrap_or_default();
+    let chunk_size = bounded_usize_arg(args, "chunk_size", super::DEFAULT_CHUNK_SIZE, 200, 8_000)?;
+    let chunk_overlap = if args.get("chunk_overlap").is_some() {
+        bounded_usize_arg(args, "chunk_overlap", 0, 0, 400)?
+    } else {
+        super::DEFAULT_CHUNK_OVERLAP.min(chunk_size / 3)
+    };
+    if chunk_overlap > chunk_size / 3 {
+        return Err(anyhow!(
+            "ingest chunk_overlap must not exceed one third of chunk_size"
+        ));
+    }
+    let file_types = match args.get("file_types") {
+        Some(Value::Array(values)) if values.len() <= 64 => values
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .map(|value| value.trim_start_matches('.').to_ascii_lowercase())
+                    .filter(|value| {
+                        !value.is_empty()
+                            && value.len() <= 32
+                            && !value.chars().any(char::is_control)
+                    })
+                    .ok_or_else(|| anyhow!("ingest file_types exceed their allowed boundary"))
+            })
+            .collect::<Result<HashSet<_>>>()?,
+        Some(_) => return Err(anyhow!("ingest file_types exceed their allowed boundary")),
+        None => HashSet::new(),
+    };
     Ok(IngestArgs {
         namespace,
         paths,
@@ -633,56 +748,105 @@ pub(super) fn parse_ingest_args(args: &Value) -> Result<IngestArgs> {
             .and_then(Value::as_bool)
             .unwrap_or(false),
         file_types,
-        max_file_size: args
-            .get("max_file_size")
-            .and_then(Value::as_u64)
-            .unwrap_or(DEFAULT_MAX_FILE_SIZE)
-            .max(1),
-        max_files_per_run: bounded_usize(
+        max_file_size: bounded_u64_arg(
+            args,
+            "max_file_size",
+            DEFAULT_MAX_FILE_SIZE,
+            1,
+            MAX_FILE_SIZE,
+        )?,
+        max_files_per_run: bounded_usize_arg(
             args,
             "max_files_per_run",
             DEFAULT_FILES_PER_RUN,
-            1_000_000,
-        ),
-        max_bytes_per_run: args
-            .get("max_bytes_per_run")
-            .and_then(Value::as_u64)
-            .unwrap_or(DEFAULT_BYTES_PER_RUN)
-            .clamp(1, 1024 * 1024 * 1024 * 1024),
-        max_chunks_per_run: bounded_usize(
+            1,
+            MAX_FILES_PER_RUN,
+        )?,
+        max_bytes_per_run: bounded_u64_arg(
+            args,
+            "max_bytes_per_run",
+            DEFAULT_BYTES_PER_RUN,
+            1,
+            MAX_BYTES_PER_RUN,
+        )?,
+        max_chunks_per_run: bounded_usize_arg(
             args,
             "max_chunks_per_run",
             DEFAULT_CHUNKS_PER_RUN,
-            10_000_000,
-        ),
-        max_depth: bounded_usize(args, "max_depth", DEFAULT_MAX_DEPTH, 256),
-        max_run_seconds: args
-            .get("max_run_seconds")
-            .and_then(Value::as_u64)
-            .unwrap_or(DEFAULT_RUN_SECONDS)
-            .clamp(1, 300),
+            1,
+            MAX_CHUNKS_PER_RUN,
+        )?,
+        max_depth: bounded_usize_arg(args, "max_depth", DEFAULT_MAX_DEPTH, 1, 256)?,
+        max_run_seconds: bounded_u64_arg(args, "max_run_seconds", DEFAULT_RUN_SECONDS, 1, 300)?,
     })
 }
 
-fn bounded_usize(args: &Value, key: &str, default: usize, maximum: usize) -> usize {
-    args.get(key)
-        .and_then(Value::as_u64)
-        .map(|value| value as usize)
-        .unwrap_or(default)
-        .clamp(1, maximum)
+pub(super) fn parse_ingest_args_for_runtime(
+    runtime: &KbRuntime,
+    args: &Value,
+) -> Result<IngestArgs> {
+    let mut parsed = parse_ingest_args(args)?;
+    if !runtime.constrained_storage() {
+        return Ok(parsed);
+    }
+    if args.get("max_files_per_run").is_none() {
+        parsed.max_files_per_run = CONSTRAINED_DEFAULT_FILES_PER_RUN;
+    }
+    if args.get("max_bytes_per_run").is_none() {
+        parsed.max_bytes_per_run = CONSTRAINED_DEFAULT_BYTES_PER_RUN;
+    }
+    if args.get("max_chunks_per_run").is_none() {
+        parsed.max_chunks_per_run = CONSTRAINED_DEFAULT_CHUNKS_PER_RUN;
+    }
+    if args.get("max_run_seconds").is_none() {
+        parsed.max_run_seconds = CONSTRAINED_DEFAULT_RUN_SECONDS;
+    }
+    Ok(parsed)
+}
+
+fn bounded_u64_arg(
+    args: &Value,
+    key: &str,
+    default: u64,
+    minimum: u64,
+    maximum: u64,
+) -> Result<u64> {
+    match args.get(key) {
+        Some(value) => value
+            .as_u64()
+            .filter(|value| (minimum..=maximum).contains(value))
+            .ok_or_else(|| anyhow!("ingest {key} exceeds its allowed boundary")),
+        None => Ok(default),
+    }
+}
+
+fn bounded_usize_arg(
+    args: &Value,
+    key: &str,
+    default: usize,
+    minimum: usize,
+    maximum: usize,
+) -> Result<usize> {
+    let value = bounded_u64_arg(args, key, default as u64, minimum as u64, maximum as u64)?;
+    usize::try_from(value).map_err(|_| anyhow!("ingest {key} exceeds its allowed boundary"))
 }
 
 pub(super) fn parse_ingest_paths(args: &Value) -> Result<Vec<String>> {
     let mut paths = match args.get("paths") {
         Some(Value::Array(values)) => values
             .iter()
-            .filter_map(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-            .collect::<Vec<_>>(),
+            .map(|value| {
+                value
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string)
+                    .ok_or_else(|| anyhow!("ingest paths must contain non-empty strings"))
+            })
+            .collect::<Result<Vec<_>>>()?,
         Some(Value::String(path)) if !path.trim().is_empty() => vec![path.trim().to_string()],
-        _ => Vec::new(),
+        Some(_) => return Err(anyhow!("ingest paths must be a string or string array")),
+        None => Vec::new(),
     };
     if paths.is_empty() {
         if let Some(path) = args
@@ -696,6 +860,13 @@ pub(super) fn parse_ingest_paths(args: &Value) -> Result<Vec<String>> {
     }
     if paths.is_empty() {
         return Err(anyhow!("ingest requires paths[]"));
+    }
+    if paths.len() > 256
+        || paths.iter().any(|path| {
+            path.chars().count() > super::MAX_PATH_CHARS || path.chars().any(char::is_control)
+        })
+    {
+        return Err(anyhow!("ingest paths exceed their allowed boundary"));
     }
     Ok(paths)
 }

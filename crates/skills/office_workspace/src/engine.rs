@@ -53,22 +53,7 @@ fn inspect_action(action: &str, object: &Map<String, Value>) -> OfficeResult<Val
     let path = required_string_any(object, &["path", "source_path"])?;
     let path = resolve_input_path(path)?;
     let expected_format = action_format(action);
-    let package = OfficePackage::open(&path, expected_format)?;
-    let mut envelope = base_envelope(&package);
-    match package.format {
-        OfficeFormat::Docx => {
-            let evidence = read_docx(&package)?;
-            envelope.document_blocks = evidence.blocks;
-            envelope.tables = evidence.tables;
-        }
-        OfficeFormat::Xlsx => {
-            envelope.workbook = Some(read_workbook(&package)?);
-        }
-        OfficeFormat::Pptx => {
-            envelope.presentation = Some(read_presentation(&package)?);
-        }
-    }
-    mark_untrusted_content_warnings(&mut envelope);
+    let mut envelope = inspect_for_ingestion_with_format(&path, expected_format)?;
 
     if action == "word.find" {
         select_word_matches(&mut envelope, object)?;
@@ -85,6 +70,38 @@ fn inspect_action(action: &str, object: &Map<String, Value>) -> OfficeResult<Val
             json!({}),
         )
     })?)
+}
+
+/// Parse an OOXML artifact without executing active content or loading external resources.
+///
+/// This typed adapter is shared by trusted built-in ingestion consumers. Callers remain
+/// responsible for applying their own bounded chunking and persistence policy.
+pub fn inspect_for_ingestion(path: &std::path::Path) -> OfficeResult<OfficeArtifactEnvelope> {
+    inspect_for_ingestion_with_format(path, None)
+}
+
+fn inspect_for_ingestion_with_format(
+    path: &std::path::Path,
+    expected_format: Option<OfficeFormat>,
+) -> OfficeResult<OfficeArtifactEnvelope> {
+    let package = OfficePackage::open(path, expected_format)?;
+    let mut envelope = base_envelope(&package);
+    match package.format {
+        OfficeFormat::Docx => {
+            let evidence = read_docx(&package)?;
+            envelope.document_blocks = evidence.blocks;
+            envelope.tables = evidence.tables;
+        }
+        OfficeFormat::Xlsx => {
+            envelope.workbook = Some(read_workbook(&package)?);
+        }
+        OfficeFormat::Pptx => {
+            envelope.presentation = Some(read_presentation(&package)?);
+        }
+    }
+    mark_untrusted_content_warnings(&mut envelope);
+    envelope.validation = validate_envelope(&envelope);
+    Ok(envelope)
 }
 
 fn mark_untrusted_content_warnings(envelope: &mut OfficeArtifactEnvelope) {

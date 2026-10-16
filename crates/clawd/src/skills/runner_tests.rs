@@ -923,7 +923,7 @@ fn registry_storage_schema_version_is_forwarded_to_the_skill() {
     let descriptor = storage_descriptor_for_skill(&state, "kb")
         .expect("valid KB storage declaration")
         .expect("KB storage descriptor");
-    assert_eq!(descriptor.schema_version, 3);
+    assert_eq!(descriptor.schema_version, 7);
     assert_eq!(descriptor.skill_name, "kb");
 }
 

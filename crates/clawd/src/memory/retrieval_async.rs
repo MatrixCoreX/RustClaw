@@ -1,6 +1,6 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -10,7 +10,9 @@ use super::vector_store::MemoryVectorIndex;
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct AsyncRecallTrace {
     pub(crate) schema_version: u32,
+    pub(crate) query_digest: String,
     pub(crate) profile_id: Option<String>,
+    pub(crate) profile_generation: Option<u64>,
     pub(crate) remote_outbound_count: u64,
     pub(crate) fallback_code: Option<String>,
     pub(crate) cache_hit: bool,
@@ -18,6 +20,20 @@ pub(crate) struct AsyncRecallTrace {
     pub(crate) query_cache_byte_limit: usize,
     pub(crate) query_cache_ttl_seconds: u64,
     pub(crate) candidate_count: usize,
+    pub(crate) candidate_count_by_source: BTreeMap<String, usize>,
+    pub(crate) selected_hits: Vec<AsyncRecallSelectedHit>,
+    pub(crate) selected_hit_count: usize,
+    pub(crate) no_answer: bool,
+    pub(crate) total_latency_ms: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct AsyncRecallSelectedHit {
+    pub(crate) evidence_id: String,
+    pub(crate) source_ref: String,
+    pub(crate) final_score: f32,
+    pub(crate) lexical_score: f32,
+    pub(crate) semantic_score: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -51,9 +67,12 @@ pub(crate) async fn retrieve_for_task(
     task: &crate::ClaimedTask,
     anchor_prompt: &str,
 ) -> anyhow::Result<AsyncRecallOutcome> {
+    let recall_started = Instant::now();
     let mut trace = AsyncRecallTrace {
         schema_version: 1,
+        query_digest: format!("{:x}", Sha256::digest(anchor_prompt.as_bytes())),
         profile_id: None,
+        profile_generation: None,
         remote_outbound_count: 0,
         fallback_code: None,
         cache_hit: false,
@@ -61,22 +80,29 @@ pub(crate) async fn retrieve_for_task(
         query_cache_byte_limit: state.policy.memory.embedding_query_cache_max_bytes,
         query_cache_ttl_seconds: state.policy.memory.embedding_query_cache_ttl_seconds,
         candidate_count: 0,
+        candidate_count_by_source: BTreeMap::new(),
+        selected_hits: Vec::new(),
+        selected_hit_count: 0,
+        no_answer: true,
+        total_latency_ms: 0.0,
     };
     let settings = match super::settings::resolve_task_memory_settings(state, task)? {
         Some(settings) if settings.use_memory => settings,
         Some(_) => {
             trace.fallback_code = Some("memory_use_disabled".to_string());
-            return Ok(AsyncRecallOutcome {
-                recall: super::retrieval::IndexedRecall::default(),
+            return Ok(finalize_recall_outcome(
+                super::retrieval::IndexedRecall::default(),
                 trace,
-            });
+                recall_started,
+            ));
         }
         None => {
             trace.fallback_code = Some("memory_settings_unavailable".to_string());
-            return Ok(AsyncRecallOutcome {
-                recall: super::retrieval::IndexedRecall::default(),
+            return Ok(finalize_recall_outcome(
+                super::retrieval::IndexedRecall::default(),
                 trace,
-            });
+                recall_started,
+            ));
         }
     };
     let conversation_id = crate::conversation_state::task_conversation_id(task);
@@ -90,19 +116,20 @@ pub(crate) async fn retrieve_for_task(
     )?;
     let profile = super::vector_store::configured_profile(&state.policy.memory)?;
     trace.profile_id = Some(profile.profile_id.clone());
+    trace.profile_generation = Some(profile.generation);
     if profile.provider_kind != "remote_http" {
         trace.fallback_code = Some("local_profile_selected".to_string());
-        return Ok(AsyncRecallOutcome { recall, trace });
+        return Ok(finalize_recall_outcome(recall, trace, recall_started));
     }
     if settings.external_context_policy != super::settings::ExternalContextPolicy::Allow {
         trace.fallback_code = Some("remote_embedding_consent_required".to_string());
-        return Ok(AsyncRecallOutcome { recall, trace });
+        return Ok(finalize_recall_outcome(recall, trace, recall_started));
     }
     let (safe_query, redacted) =
         crate::skill_output_artifact::sensitivity_aware_text_model_view(anchor_prompt);
     if redacted {
         trace.fallback_code = Some("remote_embedding_sensitive_query_blocked".to_string());
-        return Ok(AsyncRecallOutcome { recall, trace });
+        return Ok(finalize_recall_outcome(recall, trace, recall_started));
     }
     let db = state.core.db.get()?;
     super::vector_store::register_configured_profile(&db, &state.policy.memory)?;
@@ -136,7 +163,7 @@ pub(crate) async fn retrieve_for_task(
     )?;
     if eligible_rows == 0 {
         trace.fallback_code = Some("remote_embedding_profile_rows_unavailable".to_string());
-        return Ok(AsyncRecallOutcome { recall, trace });
+        return Ok(finalize_recall_outcome(recall, trace, recall_started));
     }
     let now = crate::now_ts_u64() as i64;
     if super::embedding_jobs::provider_circuit_open(
@@ -146,7 +173,7 @@ pub(crate) async fn retrieve_for_task(
         now,
     )? {
         trace.fallback_code = Some("memory_embedding_circuit_open".to_string());
-        return Ok(AsyncRecallOutcome { recall, trace });
+        return Ok(finalize_recall_outcome(recall, trace, recall_started));
     }
     drop(db);
 
@@ -165,12 +192,14 @@ pub(crate) async fn retrieve_for_task(
             Ok(provider) => provider,
             Err(error) => {
                 trace.fallback_code = Some(error.error_code.to_string());
-                return Ok(AsyncRecallOutcome { recall, trace });
+                return Ok(finalize_recall_outcome(recall, trace, recall_started));
             }
         };
         let request = [super::embedding::EmbeddingRequestItem {
             request_item_id: format!("memory_query:{}", short_digest(cache_key.as_bytes())),
             text: safe_query,
+            principal_id: settings.target_principal_id.clone(),
+            purpose: claw_core::retrieval_embedding::EmbeddingPurpose::Query,
         }];
         let provider_spec = provider.spec();
         if provider_spec.model_id != profile.model_name
@@ -179,7 +208,7 @@ pub(crate) async fn retrieve_for_task(
             || provider_spec.normalization != profile.normalization
         {
             trace.fallback_code = Some("memory_embedding_provider_profile_mismatch".to_string());
-            return Ok(AsyncRecallOutcome { recall, trace });
+            return Ok(finalize_recall_outcome(recall, trace, recall_started));
         }
         trace.remote_outbound_count = 1;
         let response = match tokio::time::timeout(
@@ -197,7 +226,7 @@ pub(crate) async fn retrieve_for_task(
                     &error,
                 );
                 trace.fallback_code = Some(error.error_code.to_string());
-                return Ok(AsyncRecallOutcome { recall, trace });
+                return Ok(finalize_recall_outcome(recall, trace, recall_started));
             }
             Err(_) => {
                 record_query_provider_failure(
@@ -212,12 +241,12 @@ pub(crate) async fn retrieve_for_task(
                     },
                 );
                 trace.fallback_code = Some("memory_embedding_query_timeout".to_string());
-                return Ok(AsyncRecallOutcome { recall, trace });
+                return Ok(finalize_recall_outcome(recall, trace, recall_started));
             }
         };
         let Some(vector) = response.into_iter().next().map(|item| item.vector) else {
             trace.fallback_code = Some("memory_embedding_query_response_empty".to_string());
-            return Ok(AsyncRecallOutcome { recall, trace });
+            return Ok(finalize_recall_outcome(recall, trace, recall_started));
         };
         if let Ok(db) = state.core.db.get() {
             let _ = super::embedding_jobs::reset_provider_circuit(
@@ -246,7 +275,7 @@ pub(crate) async fn retrieve_for_task(
         Ok(neighbors) => neighbors,
         Err(_) => {
             trace.fallback_code = Some("memory_vector_query_failed".to_string());
-            return Ok(AsyncRecallOutcome { recall, trace });
+            return Ok(finalize_recall_outcome(recall, trace, recall_started));
         }
     };
     trace.candidate_count = neighbors.len();
@@ -256,11 +285,53 @@ pub(crate) async fn retrieve_for_task(
         Ok(semantic) => semantic,
         Err(_) => {
             trace.fallback_code = Some("memory_vector_materialization_failed".to_string());
-            return Ok(AsyncRecallOutcome { recall, trace });
+            return Ok(finalize_recall_outcome(recall, trace, recall_started));
         }
     };
     merge_recall(&mut recall, semantic);
-    Ok(AsyncRecallOutcome { recall, trace })
+    Ok(finalize_recall_outcome(recall, trace, recall_started))
+}
+
+fn finalize_recall_outcome(
+    recall: super::retrieval::IndexedRecall,
+    mut trace: AsyncRecallTrace,
+    started: Instant,
+) -> AsyncRecallOutcome {
+    let sources = [
+        ("similar_trigger", recall.similar_triggers.as_slice()),
+        ("fact", recall.relevant_facts.as_slice()),
+        ("knowledge_doc", recall.knowledge_docs.as_slice()),
+        ("recent_event", recall.recent_related_events.as_slice()),
+        ("assistant_result", recall.assistant_results.as_slice()),
+        ("unfinished_goal", recall.unfinished_goals.as_slice()),
+    ];
+    for (source, items) in sources {
+        trace
+            .candidate_count_by_source
+            .insert(source.to_string(), items.len());
+        trace.selected_hits.extend(items.iter().filter_map(|item| {
+            item.retrieval_hit
+                .as_ref()
+                .map(|hit| AsyncRecallSelectedHit {
+                    evidence_id: hit.evidence_id.clone(),
+                    source_ref: hit.source_ref.clone(),
+                    final_score: hit.score.final_score,
+                    lexical_score: hit.score.lexical,
+                    semantic_score: hit.score.semantic,
+                })
+        }));
+    }
+    trace
+        .selected_hits
+        .sort_by(|left, right| left.evidence_id.cmp(&right.evidence_id));
+    trace
+        .selected_hits
+        .dedup_by(|left, right| left.evidence_id == right.evidence_id);
+    trace.selected_hit_count = trace.selected_hits.len();
+    trace.no_answer = trace.selected_hits.is_empty();
+    trace.total_latency_ms =
+        (started.elapsed().as_secs_f64() * 1_000.0 * 1_000.0).round() / 1_000.0;
+    AsyncRecallOutcome { recall, trace }
 }
 
 fn record_query_provider_failure(

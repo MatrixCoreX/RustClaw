@@ -16,7 +16,7 @@ PERSISTED_SKILLS = {
         "migration_owner": "archive_basic",
     },
     "crypto": {"kind": "sqlite", "schema_version": 1, "migration_owner": "crypto"},
-    "kb": {"kind": "sqlite", "schema_version": 3, "migration_owner": "kb"},
+    "kb": {"kind": "sqlite", "schema_version": 7, "migration_owner": "kb"},
     "rss_fetch": {
         "kind": "sqlite",
         "schema_version": 1,
@@ -205,7 +205,7 @@ def write_fixture(root: Path) -> None:
             '[[skills]]\nname = "crypto"\nstorage = { kind = "sqlite", '
             'schema_version = 1, migration_owner = "crypto" }\n'
             '[[skills]]\nname = "kb"\nstorage = { kind = "sqlite", '
-            'schema_version = 3, migration_owner = "kb" }\n'
+            'schema_version = 7, migration_owner = "kb" }\n'
             '[[skills]]\nname = "rss_fetch"\nstorage = { kind = "sqlite", '
             'schema_version = 1, migration_owner = "rss_fetch" }\n'
         ),
@@ -215,7 +215,7 @@ def write_fixture(root: Path) -> None:
             '[[skills]]\nname = "crypto"\nstorage = { kind = "sqlite", '
             'schema_version = 1, migration_owner = "crypto" }\n'
             '[[skills]]\nname = "kb"\nstorage = { kind = "sqlite", '
-            'schema_version = 3, migration_owner = "kb" }\n'
+            'schema_version = 7, migration_owner = "kb" }\n'
             '[[skills]]\nname = "rss_fetch"\nstorage = { kind = "sqlite", '
             'schema_version = 1, migration_owner = "rss_fetch" }\n'
         ),

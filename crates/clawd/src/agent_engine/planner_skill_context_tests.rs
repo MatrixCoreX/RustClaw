@@ -122,6 +122,17 @@ fn first_round_uses_complete_compact_index_without_playbooks() {
         "task_control_line={task_control_line:?}"
     );
     assert!(context.text.contains("coding_workflow.preview_repair"));
+    let kb_line = context
+        .text
+        .lines()
+        .find(|line| line.contains("kb.search(action=search"))
+        .expect("KB compact-index line");
+    assert!(
+        kb_line.contains("namespace is a logical KB identifier")
+            && kb_line.contains("semantic_tags=knowledge_base_search")
+            && kb_line.contains("do not substitute filesystem search"),
+        "kb_line={kb_line}"
+    );
     assert!(
         context.text.contains("schedule.create_structured"),
         "fixed-on eager schedule capabilities must remain visible in the first round"

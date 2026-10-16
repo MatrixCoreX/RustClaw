@@ -13,6 +13,7 @@ fn item(text: &str) -> RetrievedMemoryItem {
         text: text.to_string(),
         score: 0.9,
         source_label: None,
+        retrieval_hit: None,
     }
 }
 

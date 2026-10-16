@@ -1,5 +1,6 @@
 use anyhow::Result;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use tracing::{error, info};
 
 use crate::task_lifecycle::{
@@ -120,10 +121,83 @@ fn run_skill_trace_safe_json(value: &Value) -> Value {
     }
 }
 
-fn run_skill_trace_safe_args_summary(payload: &Value) -> String {
+fn knowledge_trace_private_field_name(field: &str) -> bool {
+    let normalized = field.trim().to_ascii_lowercase().replace('-', "_");
+    normalized.ends_with("_path")
+        || matches!(
+            normalized.as_str(),
+            "query"
+                | "text"
+                | "error_text"
+                | "content"
+                | "search_text"
+                | "namespace"
+                | "path"
+                | "path_prefix"
+                | "paths"
+                | "last_completed_path"
+                | "location"
+                | "source_ref"
+                | "warnings"
+                | "documents"
+        )
+}
+
+fn trace_redacted_digest(value: &Value) -> Value {
+    let serialized = serde_json::to_vec(value).unwrap_or_default();
+    json!({
+        "redacted": true,
+        "sha256": format!("{:x}", Sha256::digest(&serialized)),
+        "value_kind": match value {
+            Value::Null => "null",
+            Value::Bool(_) => "bool",
+            Value::Number(_) => "number",
+            Value::String(_) => "string",
+            Value::Array(_) => "array",
+            Value::Object(_) => "object",
+        },
+    })
+}
+
+fn run_skill_trace_safe_json_for_skill(skill_name: &str, value: &Value) -> Value {
+    if skill_name != "kb" {
+        return run_skill_trace_safe_json(value);
+    }
+    match value {
+        Value::Object(map) => {
+            let mut out = serde_json::Map::new();
+            for (key, child) in map {
+                let projected = if run_skill_sensitive_field_name(key)
+                    || knowledge_trace_private_field_name(key)
+                {
+                    trace_redacted_digest(child)
+                } else {
+                    run_skill_trace_safe_json_for_skill(skill_name, child)
+                };
+                out.insert(key.clone(), projected);
+            }
+            Value::Object(out)
+        }
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|item| run_skill_trace_safe_json_for_skill(skill_name, item))
+                .collect(),
+        ),
+        Value::String(text) => Value::String(crate::visible_text::sanitize_user_visible_text(text)),
+        Value::Null | Value::Bool(_) | Value::Number(_) => value.clone(),
+    }
+}
+
+fn run_skill_trace_safe_args_summary(
+    state: &AppState,
+    payload: &Value,
+    skill_name: &str,
+) -> String {
+    let canonical = state.resolve_canonical_skill_name(skill_name);
     let args = payload
         .get("args")
-        .map(run_skill_trace_safe_json)
+        .map(|value| run_skill_trace_safe_json_for_skill(&canonical, value))
         .unwrap_or(Value::Null);
     format!("args={}", crate::truncate_for_log(&args.to_string()))
 }
@@ -141,7 +215,7 @@ fn run_skill_capability_contract(state: &AppState, payload: &Value, skill_name: 
     let action = run_skill_action_from_payload(payload);
     let args = payload
         .get("args")
-        .map(run_skill_trace_safe_json)
+        .map(|value| run_skill_trace_safe_json_for_skill(&canonical, value))
         .unwrap_or(Value::Null);
     let registry = state.get_skills_registry();
     let manifest = registry
@@ -259,6 +333,11 @@ fn record_run_skill_task_observation(
     notify: Option<bool>,
     external_skill_admission: Option<&Value>,
 ) {
+    let canonical_skill_name = capability_contract
+        .get("canonical_skill_name")
+        .and_then(Value::as_str)
+        .unwrap_or(skill_name);
+    let private_knowledge_trace = canonical_skill_name == "kb";
     let execution_binding = extra.and_then(|value| value.get("execution_binding"));
     let mut payload = json!({
         "source": "run_skill",
@@ -288,16 +367,38 @@ fn record_run_skill_task_observation(
             obj.insert("retryable".to_string(), retryable.clone());
         }
         if let Some(text) = text {
-            obj.insert("text".to_string(), json!(text));
+            let value = Value::String(text.to_string());
+            obj.insert(
+                "text".to_string(),
+                if private_knowledge_trace {
+                    trace_redacted_digest(&value)
+                } else {
+                    run_skill_trace_safe_json(&value)
+                },
+            );
         }
         if let Some(error_text) = error_text {
-            obj.insert("error_text".to_string(), json!(error_text));
+            let value = Value::String(error_text.to_string());
+            obj.insert(
+                "error_text".to_string(),
+                if private_knowledge_trace {
+                    trace_redacted_digest(&value)
+                } else {
+                    run_skill_trace_safe_json(&value)
+                },
+            );
         }
         if let Some(validation) = validation {
-            obj.insert("validation".to_string(), validation.clone());
+            obj.insert(
+                "validation".to_string(),
+                run_skill_trace_safe_json_for_skill(canonical_skill_name, validation),
+            );
         }
         if let Some(extra) = extra {
-            obj.insert("extra".to_string(), extra.clone());
+            obj.insert(
+                "extra".to_string(),
+                run_skill_trace_safe_json_for_skill(canonical_skill_name, extra),
+            );
         }
         if let Some(notify) = notify {
             obj.insert("notify".to_string(), json!(notify));
@@ -544,7 +645,9 @@ async fn finalize_run_skill_success(
     journal.record_task_goal_spec_from_payload_json(&task.payload_json);
     journal.record_runtime_llm_metrics(state, &task.task_id);
     journal.record_used_evidence_ids_count(0);
-    journal.record_context_bundle_summary(run_skill_trace_safe_args_summary(payload));
+    journal.record_context_bundle_summary(run_skill_trace_safe_args_summary(
+        state, payload, skill_name,
+    ));
     record_direct_run_skill_verification(&mut journal, verification);
     journal.capability_results.push(capability_result);
     journal.push_step_result(&step_result);
@@ -710,7 +813,9 @@ async fn finalize_run_skill_failure(
     journal.record_task_goal_spec_from_payload_json(&task.payload_json);
     journal.record_runtime_llm_metrics(state, &task.task_id);
     journal.record_used_evidence_ids_count(0);
-    journal.record_context_bundle_summary(run_skill_trace_safe_args_summary(payload));
+    journal.record_context_bundle_summary(run_skill_trace_safe_args_summary(
+        state, payload, skill_name,
+    ));
     record_direct_run_skill_verification(&mut journal, verification);
     let step_result = build_run_skill_step_result(
         skill_name,
@@ -850,7 +955,9 @@ pub(super) async fn finalize_run_skill_confirmation_required(
     journal.record_task_goal_spec_from_payload_json(&task.payload_json);
     journal.record_runtime_llm_metrics(state, &task.task_id);
     journal.record_used_evidence_ids_count(0);
-    journal.record_context_bundle_summary(run_skill_trace_safe_args_summary(payload));
+    journal.record_context_bundle_summary(run_skill_trace_safe_args_summary(
+        state, payload, skill_name,
+    ));
     record_direct_run_skill_verification(&mut journal, verification);
     journal.record_delivery_consistent(crate::task_journal::delivery_payload_consistent(
         &user_error,

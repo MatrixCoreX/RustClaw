@@ -213,17 +213,17 @@ agent_memory_budget_chars = 2200
 # Memory budget in characters for route-trigger context.
 route_trigger_budget_chars = 900
 
-# 记忆索引使用的 embedding 模型标识；local-hash-v2 表示多语言本地哈希向量。
-# Embedding model identifier for memory indexing; local-hash-v2 means multilingual local hash vectors.
-embedding_model = "local-hash-v2"
+# 记忆索引使用的 embedding 模型标识；local-hash-v3 表示带 Unicode 归一化和有界 token 投影的本地哈希向量。
+# Embedding model identifier for memory indexing; local-hash-v3 is the local hash profile with Unicode normalization and bounded token projection.
+embedding_model = "local-hash-v3"
 
-# embedding 向量维度。local-hash-v2 固定为 24。
-# Embedding vector dimensions. local-hash-v2 is fixed at 24.
+# embedding 向量维度。local-hash-v3 固定为 24。
+# Embedding vector dimensions. local-hash-v3 is fixed at 24.
 embedding_dims = 24
 
 # embedding 索引版本；变更 provider 或维度时应同步变更并重建索引。
 # Embedding index version; change it with provider/dimension changes and rebuild the index.
-embedding_version = "local-hash-v2"
+embedding_version = "local-hash-v3"
 
 # embedding 批处理大小。
 # Batch size for embedding/indexing work.

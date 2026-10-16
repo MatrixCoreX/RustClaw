@@ -261,7 +261,9 @@ PY
 
   if [[ -z "$model_path" ]]; then
     model_path="$({
-      for candidate in "$root_dir"/data/models/whisper.cpp/ggml-*.bin; do
+      for candidate in \
+        "$root_dir"/data/models/whisper.cpp/ggml-*.bin \
+        "$root_dir"/prebuilt/toolchains/host/models/whisper/ggml-*.bin; do
         [[ -f "$candidate" ]] || continue
         [[ "$candidate" == *.en.bin ]] && continue
         printf '%s\n' "$candidate"

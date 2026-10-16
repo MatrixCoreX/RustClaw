@@ -5,7 +5,8 @@
 
 <!-- ai-learning-navigation:start -->
 Previous: [AiAPP development guide](15-aipp-development-guide.md) |
-[Architecture index](README.md)
+[Architecture index](README.md) |
+Next: [RAG knowledge retrieval](17-rag-knowledge-retrieval.md)
 <!-- ai-learning-navigation:end -->
 
 The runtime uses one host-owned resource policy for tools, process skills, browser sessions, local

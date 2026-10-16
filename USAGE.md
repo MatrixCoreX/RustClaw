@@ -182,10 +182,12 @@ bash scripts/configure-autostart.sh --disable
 
 使用 `install-latest-release.sh --no-start` 时，安装器既不启动运行时，也不注册自启动。
 
-Ubuntu x86_64 完整 Release 已携带并启用全部兼容的仓库维护 Skill Store 技能与
-AiAPP，包括本地 FunASR 所需的固定 SenseVoiceSmall/FSMN VAD 模型资产；安装时不在
-用户机器编译。Whisper.cpp 及其模型仍是独立可选能力。更新只初始化缺失的技能私有
-目录，不覆盖已有数据；第三方 external skill 仍需单独准入和授权。
+Ubuntu x86_64 和 macOS 完整 Release 已携带并启用全部兼容的仓库维护 Skill Store 技能与
+AiAPP，以及这些技能需要的发行版 Python/Node 运行时，包括本地 FunASR 所需的固定
+SenseVoiceSmall/FSMN VAD 模型资产；安装时不在用户机器安装开发工具或编译。Whisper.cpp
+及其模型仍是独立可选能力。更新只初始化缺失的技能私有
+目录，不覆盖已有数据；重复安装会覆盖发行管理的程序和 bundled 技能版本，但保留账号、
+会话、配置、凭据、external skill 与技能私有数据。第三方 external skill 仍需单独准入和授权。
 
 ### 7.1 在终端中连续使用 Agent
 

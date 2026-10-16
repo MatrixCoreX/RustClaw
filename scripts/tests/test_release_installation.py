@@ -125,6 +125,36 @@ class ReleaseInstallationTests(unittest.TestCase):
         self.assertIn("AGENT_TOOLSDIRECTORY: /opt/agent-python-toolcache", wheels)
         self.assertIn('git config --global --add safe.directory "$GITHUB_WORKSPACE"', wheels)
 
+    def test_macos_release_is_full_and_embedded_in_desktop_installer(self):
+        workflow = (ROOT / ".github/workflows/macos-arm64-release-artifact.yml").read_text()
+        self.assertIn('APP_PRECOMPILE_ALL_BUNDLED_SKILLS: "1"', workflow)
+        self.assertIn("APP_RELEASE_INSTALL_ALL_BUNDLED_SKILLS=1", workflow)
+        self.assertIn("APP_RELEASE_PYTHON_RUNTIME_ROOT", workflow)
+        self.assertIn("APP_RELEASE_NODE_RUNTIME_ROOT", workflow)
+        self.assertIn("APP_RELEASE_HOST_TOOLS_ROOT", workflow)
+        self.assertIn("bundle_macos_skill_dependencies.py", workflow)
+        self.assertIn("APP_DESKTOP_BOOTSTRAP_PYTHON_ROOT", workflow)
+        self.assertIn("APP_DESKTOP_RUNTIME_BUNDLE_DIR", workflow)
+        self.assertIn("embedded-runtime/bundle.json", workflow)
+        package = (ROOT / "package-release.sh").read_text()
+        self.assertIn('*-linux-*|*-apple-darwin', package)
+        self.assertNotIn("supported only by Linux Release packages", package)
+        self.assertIn("prebuilt/toolchains/python", package)
+        self.assertIn("prebuilt/toolchains/node", package)
+        self.assertIn("prebuilt/toolchains/host", package)
+        launcher = (ROOT / "start-all-bin.sh").read_text()
+        self.assertIn("prebuilt/toolchains/python/bin/python3", launcher)
+        self.assertIn("prebuilt/toolchains/node/bin", launcher)
+        self.assertIn("prebuilt/toolchains/host/bin", launcher)
+        desktop_runtime = (ROOT / "desktop/src/bundled_runtime.rs").read_text()
+        self.assertIn("executable_fingerprint", desktop_runtime)
+        self.assertIn('.arg("--force")', desktop_runtime)
+
+    def test_public_bootstrap_uses_overwrite_reconciliation(self):
+        source = (ROOT / "install-latest-release.sh").read_text()
+        invocation = 'bash "$BOOTSTRAP/deploy-github-release.sh" --root "$ROOT_DIR" --force "$restart_option"'
+        self.assertIn(invocation, source)
+
     def test_package_includes_bridge_local_runtime_dependencies(self):
         package_source = (ROOT / "package-release.sh").read_text()
         bridge = ROOT / "services/wa-web-bridge"

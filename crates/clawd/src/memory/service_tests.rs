@@ -83,6 +83,7 @@ fn retrieved_item(kind: &str, text: &str) -> RetrievedMemoryItem {
         text: text.to_string(),
         score: 0.87,
         source_label: Some(format!("{kind}_source")),
+        retrieval_hit: None,
     }
 }
 

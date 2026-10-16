@@ -65,6 +65,14 @@ async fn no_opt_in_means_zero_remote_query_outbound() {
         .await
         .unwrap();
     assert_eq!(outcome.trace.remote_outbound_count, 0);
+    assert_eq!(outcome.trace.query_digest.len(), 64);
+    assert_ne!(outcome.trace.query_digest, "ordinary query");
+    assert_eq!(outcome.trace.profile_generation, Some(1));
+    assert!(outcome.trace.total_latency_ms >= 0.0);
+    assert!(outcome
+        .trace
+        .candidate_count_by_source
+        .contains_key("knowledge_doc"));
     assert_eq!(
         outcome.trace.fallback_code.as_deref(),
         Some("remote_embedding_consent_required")
@@ -129,6 +137,8 @@ async fn sensitive_query_is_never_sent_even_with_remote_consent() {
         outcome.trace.fallback_code.as_deref(),
         Some("remote_embedding_sensitive_query_blocked")
     );
+    let trace = serde_json::to_string(&outcome.trace).unwrap();
+    assert!(!trace.contains("synthetic-secret-value"));
 }
 
 #[test]

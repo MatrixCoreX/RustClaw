@@ -370,7 +370,7 @@ Hybrid recall uses `memory_retrieval_index` plus optional FTS. Each indexed row 
 - `embedding_dims`
 - `embedding_version`
 
-The default provider is `local-hash-v1`, which runs offline. Unsupported or unavailable embedding providers fall back to local hash so the runtime keeps working. Retrieval only uses cosine scoring when the stored embedding metadata matches the current provider spec; mismatched rows fall back to lexical, salience, recency, and success-state scoring. Set `reindex_on_startup = true` in `configs/memory.toml`, or start with an empty index, to rebuild the runtime retrieval index from short-term records, preferences, and fact cards. KB document rows remain in the separate KB-owned database and are queried through its own pool.
+The default provider is `local-hash-v3`, which runs offline with Unicode-normalized, bounded token projection. Retrieval uses cosine scoring only when stored embedding metadata matches the active profile. A mismatched runtime-memory row remains available to non-vector scoring until the runtime index is rebuilt; a mismatched KB projection is reported as stale and rebuilt through a resumable shadow generation before an atomic activation. Set `reindex_on_startup = true` in `configs/memory.toml`, or start with an empty index, to rebuild the runtime retrieval index from short-term records, preferences, and fact cards. KB document rows and vector generations remain in the separate KB-owned database and are queried through its own pool.
 
 Retrieval combines several signals instead of trusting a single score: exact / lexical matches, vector similarity when compatible, salience, recency, source kind, success state, safety filter, and the current memory use policy. This makes the index useful for multilingual recall while keeping execution grounded in planner actions and output/evidence contracts.
 
@@ -378,8 +378,21 @@ Retrieval combines several signals instead of trusting a single score: exact / l
 
 The `kb` skill is the user-managed document knowledge-base path. It is selected like other ordinary capabilities: `ask` tasks let the agent loop plan `call_capability("kb.*")`, while direct API callers can use `kind=run_skill` with `skill_name=kb`. Runtime code does not special-case knowledge-base wording before the planner; it resolves and verifies registry capability metadata, then dispatches the same skill protocol as other runner skills.
 
+```mermaid
+flowchart LR
+    A[User files] --> B[Typed extraction<br/>text, HTML, PDF, Office]
+    B --> C[Structure-aware chunks<br/>page, section, sheet, slide]
+    C --> D[(KB-private canonical store)]
+    D --> E[FTS candidates]
+    D --> F[Active vector generation<br/>exact or bounded ANN]
+    E --> G[Filter before limit<br/>hybrid fusion + diversity]
+    F --> G
+    G --> H[RetrievalHitV2 evidence map<br/>instruction_authority = none]
+    H --> I[Model selects runtime evidence IDs]
+    I --> J[Runtime validates revision/digest<br/>and emits neutral citations]
+```
 
-Detailed flows: [Task state and context](docs/architecture/03-task-state-context.md) and [Skill-owned storage](docs/architecture/08-skill-owned-storage.md).
+Detailed flows: [RAG knowledge retrieval](docs/architecture/17-rag-knowledge-retrieval.md), [Task state and context](docs/architecture/03-task-state-context.md), and [Skill-owned storage](docs/architecture/08-skill-owned-storage.md).
 
 Key boundaries:
 
@@ -387,6 +400,14 @@ Key boundaries:
 - `kb.search`, `kb.list_namespaces`, and `kb.stats` are observe-mode capabilities. They return structured machine fields such as `namespace`, `hits`, `names`, `document_count`, and `chunk_count`.
 - Namespace snapshots and `kb_doc` retrieval rows live only in the KB-owned database under `[database].skill_data_root` (normally `data/skills/kb/state.db`). The runtime queries that pool during recall; it does not copy KB rows into the main runtime database.
 - KB rows are scoped by `user_key` and workspace files, not by one chat thread. They can be recalled later only through the same memory use-policy filters as other knowledge docs, and current user input remains the authority.
+- Ingestion supports UTF-8 text and Markdown, JSON/JSONL, CSV/TSV, visible HTML, PDF text layers, and DOCX/XLSX/PPTX structure. It never executes macros, scripts, embedded objects, or remote resources. Scanned PDFs require an explicitly selected OCR capability rather than being mislabeled as parsed text.
+- Typed chunks preserve line, section, page, sheet, or slide locations. Search applies owner, namespace, path, file type, and time filters before candidate limits, then combines lexical and current-generation vector evidence. No relevant evidence is a normal empty result.
+- The built-in offline profile is `local-hash-v3`. It is deterministic and supports Unicode token projection but does not claim general cross-language semantics. A profile/parser/chunker change builds a resumable shadow generation and switches the active pointer only after verification; search never mixes incompatible generations.
+- Every hit is an untrusted data envelope with `instruction_authority=none`. The model may select only evidence IDs issued by the runtime, and the runtime checks owner, revision, digest, and relative source location again before rendering a citation.
+
+Operational limits and recovery are deliberate. Standard ingestion defaults to 500 files, 64 MiB of source data, 10,000 produced chunks, and a 20-second cooperative slice; constrained hosts default to 64 files, 16 MiB, 2,048 chunks, and 10 seconds. Incomplete work returns a persisted continuation instead of blocking indefinitely. Search uses exact vector scoring only for bounded candidate sets and switches to a disposable ANN projection above that limit. Capacity, concurrent writes, path traversal, malformed packages, expansion ratios, and parser resource use are bounded with structured errors.
+
+To back up a knowledge base, stop writers or take a consistent SQLite backup of the complete skill-owned database, including its `-wal` state when applicable. Restore it under the same skill data root, run an integrity check, inspect namespace/job/generation status, and resume interrupted ingestion or vector reindex from its machine checkpoint. Deleting documents or a namespace removes its canonical chunks and projections transactionally; uninstalling or disabling the skill preserves private data unless the user explicitly requests data deletion.
 
 ### User Control
 
@@ -414,7 +435,7 @@ Recent records with safety flags are hidden by default in the UI. Fact-card deta
 
 ### Trace and Troubleshooting
 
-Task journal summaries and traces include `memory_trace`. This records the stage, use policy, recalled source refs, inclusion reason, and character budget without copying raw memory text. It is intended for debugging why a task used memory while reducing the chance of leaking sensitive stored content.
+Task journal summaries and traces include `memory_trace`. This records the stage, use policy, recalled source refs, inclusion reason, score, and character budget without copying query text or document bodies. Teaching mode shows these source-only rows in a collapsed Memory/KB section; lower-level machine fields remain in a second collapsed details view. It is intended for explaining why evidence was used without turning the teaching UI into another copy of private knowledge content.
 
 The browser teaching-mode trace, `clawcli llm-trace`, and `/v1/debug/tasks/{task_id}` also show a compact `flow_summary` above numbered LLM calls, with stage/module/retry/verifier/finalizer/provider-error machine counts, structured memory/KB policy, `model_catalog_trace`, `model_catalog_trace.readiness`, and `resume_trace` next to raw request/response details. Each browser chat turn keeps only a lightweight task/trace index; raw provider requests and responses are reloaded from the current server log or its retained seven-day dated archives and are never copied into browser storage. The trace response reports whether full detail is available, metadata-only, still pending, or unavailable because it was not recorded or has expired.
 
@@ -547,7 +568,7 @@ Users and deployment agents install only from a matching signed GitHub Release p
 
 A normal first Release installation starts the runtime and registers automatic startup. Linux and Raspberry Pi use systemd; macOS uses a per-user LaunchAgent. `--no-start` leaves both the runtime and automatic startup disabled. Use `scripts/configure-autostart.sh --status|--disable` to inspect or remove the registration.
 
-The Ubuntu x86_64 full Release also preinstalls every compatible repository-maintained bundled Skill Store package and AiAPP. Its local FunASR path includes pinned SenseVoiceSmall/FSMN VAD model assets; Whisper.cpp remains an optional host-provided engine. Existing private skill data is preserved, and third-party external submissions remain admission- and policy-gated.
+The Ubuntu x86_64 and macOS full Releases preinstall every compatible repository-maintained bundled Skill Store package and AiAPP together with their reviewed Python/Node runtimes. The local FunASR path includes pinned SenseVoiceSmall/FSMN VAD model assets; Whisper.cpp remains an optional host-provided engine. Existing private skill data is preserved, and third-party external submissions remain admission- and policy-gated.
 
 For automatic first installation, run `bash install-latest-release.sh --repo OWNER/REPO`.
 For existing installations, use `bash deploy-github-release.sh --restart`. Both use prebuilt packages.

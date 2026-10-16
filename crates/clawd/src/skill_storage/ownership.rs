@@ -58,6 +58,8 @@ struct ChunkRow {
     text_sha256: String,
     len_tokens: i64,
     mtime_epoch: i64,
+    content_kind: String,
+    location_json: String,
 }
 
 #[derive(Clone, Debug)]
@@ -313,8 +315,9 @@ pub(super) fn restore_user_data(
         tx.execute(
             "INSERT INTO kb_chunks (
                 owner_user_key, namespace, chunk_id, document_path, file_type,
-                ordinal, text, text_sha256, len_tokens, mtime_epoch
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                ordinal, text, text_sha256, len_tokens, mtime_epoch,
+                content_kind, location_json
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
              ON CONFLICT(owner_user_key, namespace, chunk_id) DO UPDATE SET
                 document_path = excluded.document_path,
                 file_type = excluded.file_type,
@@ -322,7 +325,9 @@ pub(super) fn restore_user_data(
                 text = excluded.text,
                 text_sha256 = excluded.text_sha256,
                 len_tokens = excluded.len_tokens,
-                mtime_epoch = excluded.mtime_epoch",
+                mtime_epoch = excluded.mtime_epoch,
+                content_kind = excluded.content_kind,
+                location_json = excluded.location_json",
             params![
                 row.owner_user_key,
                 row.namespace,
@@ -333,7 +338,9 @@ pub(super) fn restore_user_data(
                 row.text,
                 row.text_sha256,
                 row.len_tokens,
-                row.mtime_epoch
+                row.mtime_epoch,
+                row.content_kind,
+                row.location_json
             ],
         )?;
     }
@@ -595,13 +602,15 @@ fn select_chunks(
     let sql = match user_key {
         Some(_) => {
             "SELECT owner_user_key, namespace, chunk_id, document_path,
-                    file_type, ordinal, text, text_sha256, len_tokens, mtime_epoch
+                    file_type, ordinal, text, text_sha256, len_tokens, mtime_epoch,
+                    content_kind, location_json
              FROM kb_chunks WHERE owner_user_key = ?1
              ORDER BY namespace, document_path, ordinal, chunk_id"
         }
         None => {
             "SELECT owner_user_key, namespace, chunk_id, document_path,
-                    file_type, ordinal, text, text_sha256, len_tokens, mtime_epoch
+                    file_type, ordinal, text, text_sha256, len_tokens, mtime_epoch,
+                    content_kind, location_json
              FROM kb_chunks
              ORDER BY owner_user_key, namespace, document_path, ordinal, chunk_id"
         }
@@ -619,6 +628,8 @@ fn select_chunks(
             text_sha256: row.get(7)?,
             len_tokens: row.get(8)?,
             mtime_epoch: row.get(9)?,
+            content_kind: row.get(10)?,
+            location_json: row.get(11)?,
         })
     };
     let rows = match user_key {

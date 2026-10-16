@@ -49,15 +49,20 @@ Inspect or remove the generated startup registration with
 `bash scripts/configure-autostart.sh --status` or
 `bash scripts/configure-autostart.sh --disable`.
 
-The Ubuntu x86_64 full Release preinstalls and enables every platform-compatible
+The Ubuntu x86_64 and macOS full Releases preinstall and enable every platform-compatible
 bundled Skill Store package and companion AiAPP from the base registry without
-compiling on the user's host. The media package includes its pinned FunASR,
-CPU PyTorch, SenseVoiceSmall, and FSMN VAD assets. Deployment initializes only
+compiling on the user's host. The signed package also carries the reviewed Python
+and Node runtimes required by those skills, so users do not install Homebrew or
+developer toolchains. The media package includes its pinned FunASR, CPU PyTorch,
+SenseVoiceSmall, and FSMN VAD assets. Deployment initializes only
 missing private skill directories and never overwrites existing media data,
-browser sessions, or configuration. Whisper.cpp remains an independent optional
+browser sessions, or configuration. Reinstalling replaces release-managed programs
+and bundled skill versions while preserving accounts, sessions, configuration,
+credentials, external skills, and private skill data. Whisper.cpp remains an independent optional
 local engine and its binary/model are not included. Third-party external skills
 still require host admission and a policy grant. Raspberry Pi and macOS use their
-own platform packages and cannot reuse the x86_64 Python/FunASR runtime.
+own platform packages and cannot reuse another architecture or operating system's
+Python/FunASR runtime.
 
 1. Download the matching archive and its `.sha256`, `.spdx.json`,
    `.manifest.json`, and `.manifest.json.sig` assets from the same release.
@@ -111,8 +116,9 @@ permissions, so include it only in private backups, never in Git or Release
 packages. Runtime upgrades preserve it. Hosted relay credentials remain
 device-managed and do not require manual entry. Use HTTPS for remote key entry.
 Open webd on its configured port (normally `http://127.0.0.1:8788`). Local use
-does not need nginx. Configure channels and optional skills through the UI.
-Installation alone does not grant a skill permissions or enable it.
+does not need nginx. Configure channels and third-party skills through the UI.
+Bundled skills receive their release-reviewed grants during installation; external
+skills do not receive permissions or become enabled merely by being copied locally.
 
 On the first start with an empty database, the web login is `admin` with the
 initial password `654321`. Change it immediately in account management to a

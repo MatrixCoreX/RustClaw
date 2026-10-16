@@ -220,7 +220,7 @@ switch boundary; correctness must never be traded for a fixed first-N scan.
 
 ### D10: multilingual lexical and exact-identifier projection v2
 
-`local-hash-v2` and `memory_searchable_projection_v2` are rebuild boundaries. The tokenizer uses
+`local-hash-v3` and `memory_searchable_projection_v2` are rebuild boundaries. The tokenizer uses
 Unicode lowercase word tokens, complete adjacent bigrams for Han/Japanese/Hangul runs, semantic
 symbol tokens, and case-preserving digests for paths, URLs, hashes, and code-like identifiers. It
 does not retain the old first-10-CJK or first-8-FTS-keyword ceilings. Canonical text remains
@@ -240,6 +240,64 @@ therefore continue to use those existing append-only/versioned sources. Removing
 projections still leaves transcript/event recovery intact. WP7 may be reconsidered only if a future
 fixed fixture falls below the reference-retention threshold and the failure cannot be repaired in
 the existing typed sources.
+
+### D12: KB private index ownership and generation cutover
+
+The KB skill owns its canonical documents, chunks, lexical projection, vector projection, reindex
+jobs, and generation metadata in its `SkillStorageResolver` database. The runtime may request a
+search and consume typed evidence, but it does not copy KB business rows into `agent-runtime.db`,
+open a raw KB path on behalf of another skill, or expose an unrestricted database handle. AiPP and
+other readers use authenticated host contracts rather than direct files.
+
+`claw-core::retrieval_embedding` owns the versioned tokenizer, local embedding profile, evidence
+identity, and `EmbeddingBroker` contract. Memory and KB code consume that contract and may not
+declare another local model/version/dimension default. Remote implementations remain host-approved
+adapters with explicit consent, endpoint policy, bounded connect/read/request deadlines, structured
+errors, and circuit state. A provider failure can degrade to lexical/local evidence through a
+machine status; it cannot silently relabel vectors as another profile.
+
+Every KB vector rebuild writes a new immutable generation. A generation pins profile id, namespace
+revision, source digest, expected row count, cursor, projection digest, and state. Batches use a
+bounded transaction and a resumable cursor. The active pointer changes atomically only after row
+count, digest, dimensions, and source revision verification. Search reads exactly one active
+generation and never mixes old and new vectors in one ranking.
+
+Vector search uses exact cosine only below an explicit resource-profile threshold. Above that
+threshold, a versioned deterministic LSH projection (`lsh-hyperplane-v2`, eight 12-bit bands) selects a bounded coarse
+candidate set and exact cosine reranks only those candidates. Standard and constrained profiles use
+different limits, but neither may silently return to an unbounded vector scan. The ANN rows are a
+disposable projection keyed to the immutable vector generation, not a second canonical source. A
+missing, partial, or version-mismatched ANN projection produces the structured
+`ann_projection_stale` degradation and a reindex action; deleting and rebuilding it leaves canonical
+documents, chunks, and vectors unchanged.
+
+Rollback may point back to the immediately retired, fully verified generation while it still
+matches the canonical source revision. A source revision/digest mismatch marks the build stale and
+requires a new generation; it is not repaired in place. Retired projections are physically removed
+only after deterministic retrieval, tenant-isolation, restart/recovery, and release observation
+gates pass. The compatibility reader is not a permanent feature flag and no legacy profile may
+produce new rows after cutover.
+
+### D13: Typed extraction and chunk-location ownership
+
+Knowledge ingestion first produces a versioned `DocumentExtractionResult`; storage never infers
+page, sheet, slide, section, or content kind from rendered prose. The KB process consumes the
+typed `doc_parse` PDF adapter and the pure-parser `office_workspace` adapter. It does not read
+another skill's private database or execute macros, embedded scripts, external relationships, or
+embedded objects. Optional Poppler commands extract PDF text layers under explicit byte, page, and
+character limits; a missing parser, encrypted source, malformed source, or empty text layer is a
+stable machine status rather than fabricated content.
+
+KB schema v7 stores `content_kind` and serialized typed source location with each canonical chunk.
+Markdown/HTML headings, list items, table rows and code blocks, JSONL records, delimited rows,
+Office paragraphs/rows/slides, and PDF pages remain separate blocks. Oversized blocks prefer
+line/sentence boundaries before bounded character windows. `RetrievalHitV2` projects the same
+line/section/page/sheet/slide metadata and adjacent-hit merging cannot cross a structured location.
+
+Parser and chunker versions are part of document identity. A version boundary marks the active
+vector generation stale and clears the active pointer before changed chunks are committed. A new
+bounded, resumable generation must verify and atomically activate before semantic search resumes;
+vectors produced by two extraction contracts are never mixed in one ranking.
 
 ## Baseline and acceptance policy
 

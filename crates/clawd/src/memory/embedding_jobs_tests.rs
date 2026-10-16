@@ -140,6 +140,8 @@ async fn payload_413_is_split_without_losing_stable_item_order() {
         .map(|index| crate::memory::embedding::EmbeddingRequestItem {
             request_item_id: format!("item-{index}"),
             text: format!("fixture {index}"),
+            principal_id: "user:test".to_string(),
+            purpose: claw_core::retrieval_embedding::EmbeddingPurpose::Document,
         })
         .collect::<Vec<_>>();
     let response = super::embed_batch_with_payload_split(&provider, &requests, usize::MAX)

@@ -41,14 +41,16 @@ LaunchAgent。无需 Git 或 Rust，不编译源码，不主动配置 nginx。�
 可用 `bash scripts/configure-autostart.sh --status` 查看自启动状态，或用
 `bash scripts/configure-autostart.sh --disable` 关闭并移除自启动配置。
 
-Ubuntu x86_64 完整 Release 会预装并启用 base registry 中全部与该平台兼容的
+Ubuntu x86_64 和 macOS 完整 Release 会预装并启用 base registry 中全部与该平台兼容的
 bundled Skill Store 技能及其 AiAPP，不在用户设备上编译源码。媒体下载技能所需的
-FunASR、CPU PyTorch、SenseVoiceSmall 和 FSMN VAD 固定版本资产也随包提供；首次
+发行版 Python/Node 运行时，以及 FunASR、CPU PyTorch、SenseVoiceSmall 和 FSMN VAD
+固定版本资产也随包提供；普通用户无需安装 Homebrew、Python、Node 或开发工具。首次
 部署只初始化不存在的技能私有目录，不覆盖已有媒体数据、浏览器登录态或配置。
 Whisper.cpp 是独立的可选本地引擎，其可执行文件和模型不包含在该完整包内。
 第三方提交的 external skill 不会随 Release 自动获得权限或启用，仍必须通过宿主
-准入和 policy grant。树莓派和 macOS 继续使用各自平台包，不能复用 x86_64 的
-Python/FunASR 运行环境。
+准入和 policy grant。树莓派和 macOS 继续使用各自平台包，不能复用其他架构或系统的
+Python/FunASR 运行环境。重复运行安装器会覆盖发行管理的程序和 bundled 技能版本，
+同时保留账号、会话、配置、凭据、external skill 与技能私有数据。
 
 也可以手动验证安装：
 

@@ -268,6 +268,7 @@ fn prepare_python(context: &AdapterContext<'_>) -> SkillSdkResult<PreparedPackag
         install.arg("--no-index");
     }
     configure_clean_environment(&mut install, &build_home)?;
+    configure_native_python_build_arch(&mut install, context.platform);
     install.env("PIP_CACHE_DIR", &pip_cache);
     install.env("PYTHONNOUSERSITE", "1");
     require_success(
@@ -1162,6 +1163,18 @@ fn configure_clean_environment(command: &mut Command, home: &Path) -> SkillSdkRe
     Ok(())
 }
 
+fn configure_native_python_build_arch(command: &mut Command, platform: &HostPlatform) {
+    if platform.os != "macos" {
+        return;
+    }
+    let arch = match platform.arch.as_str() {
+        "aarch64" => "arm64",
+        "x86_64" => "x86_64",
+        _ => return,
+    };
+    command.env("ARCHFLAGS", format!("-arch {arch}"));
+}
+
 fn default_rustup_home() -> Option<std::ffi::OsString> {
     std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".rustup").into_os_string())
 }
@@ -1445,7 +1458,7 @@ fn copy_tree_inner(root: &Path, current: &Path, destination: &Path) -> SkillSdkR
 fn ignored_source_name(name: &OsStr) -> bool {
     matches!(
         name.to_str(),
-        Some(".git" | "target" | "node_modules" | "__pycache__" | ".venv")
+        Some(".git" | "target" | "node_modules" | "__pycache__" | ".venv" | "release-wheels")
     )
 }
 

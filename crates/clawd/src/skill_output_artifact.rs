@@ -301,11 +301,45 @@ pub(crate) fn publish_canonical_evidence_artifact(
     evidence_id: &str,
     bytes: &[u8],
 ) -> io::Result<PublishedArtifact> {
+    publish_evidence_artifact(
+        workspace_root,
+        task_id,
+        evidence_id,
+        bytes,
+        "canonical-evidence",
+        "canonical_capability_result",
+    )
+}
+
+pub(crate) fn publish_model_view_evidence_artifact(
+    workspace_root: &Path,
+    task_id: &str,
+    evidence_id: &str,
+    bytes: &[u8],
+) -> io::Result<PublishedArtifact> {
+    publish_evidence_artifact(
+        workspace_root,
+        task_id,
+        evidence_id,
+        bytes,
+        "model-evidence",
+        "filtered_capability_model_view",
+    )
+}
+
+fn publish_evidence_artifact(
+    workspace_root: &Path,
+    task_id: &str,
+    evidence_id: &str,
+    bytes: &[u8],
+    directory: &str,
+    provenance: &str,
+) -> io::Result<PublishedArtifact> {
     let sha256 = format!("{:x}", Sha256::digest(bytes));
     let task_key = machine_path_component(task_id, "task");
     let relative_path = PathBuf::from(claw_core::workspace_state::WORKSPACE_STATE_DIR_NAME)
         .join("artifacts")
-        .join("canonical-evidence")
+        .join(directory)
         .join(task_key)
         .join(format!("{sha256}.json"));
     let artifact_path = workspace_root.join(&relative_path);
@@ -322,7 +356,7 @@ pub(crate) fn publish_canonical_evidence_artifact(
         "metadata": {
             "size_bytes": bytes.len(),
             "task_id": task_id,
-            "provenance": "canonical_capability_result",
+            "provenance": provenance,
             "sensitivity": "task_owner_restricted",
             "retention": "task_retention_policy",
             "storage_protection": {

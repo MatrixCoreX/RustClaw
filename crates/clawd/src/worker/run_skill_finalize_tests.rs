@@ -254,6 +254,79 @@ fn direct_run_skill_observation_records_redacted_extra_evidence() {
     );
 }
 
+#[test]
+fn kb_task_trace_keeps_machine_metrics_without_query_document_or_path_content() {
+    let state = state_with_runtime_registry();
+    let query = "private quarterly acquisition plan";
+    let document_text = "confidential document body for the planned acquisition";
+    let private_path = "/home/private/board-plan.pdf";
+    let warning = "skip /home/private/broken.pdf: encrypted document";
+    let payload = json!({
+        "args": {
+            "action": "search",
+            "namespace": "private-board-documents",
+            "query": query,
+            "filters": {"path_prefix": private_path}
+        }
+    });
+    let capability_contract = super::run_skill_capability_contract(&state, &payload, "kb");
+    assert_eq!(capability_contract["args_shape"]["query"]["redacted"], true);
+    assert_eq!(
+        capability_contract["args_shape"]["filters"]["path_prefix"]["redacted"],
+        true
+    );
+    let extra = json!({
+        "retrieval_trace": {
+            "query_digest": "a".repeat(64),
+            "selected_hit_ids": ["evidence:sha256:1234"]
+        },
+        "hits": [{
+            "evidence_id": "evidence:sha256:1234",
+            "source_ref": "kb://private-board-documents/digest/chunk-1",
+            "location": {"path": private_path, "page": 7},
+            "text": document_text
+        }],
+        "warnings": [warning]
+    });
+    let projected = super::run_skill_trace_safe_json_for_skill("kb", &extra);
+    assert_eq!(projected["retrieval_trace"]["query_digest"], "a".repeat(64));
+    assert_eq!(
+        projected["retrieval_trace"]["selected_hit_ids"][0],
+        "evidence:sha256:1234"
+    );
+    assert_eq!(projected["hits"][0]["text"]["redacted"], true);
+    assert_eq!(projected["warnings"]["redacted"], true);
+
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-kb", "run_skill", "run_skill:kb");
+    super::record_run_skill_task_observation(
+        &mut journal,
+        "kb",
+        "ok",
+        &capability_contract,
+        &super::run_skill_success_machine_payload(),
+        Some(document_text),
+        None,
+        None,
+        Some(&extra),
+        None,
+        None,
+    );
+
+    let trace = journal.to_trace_json();
+    let serialized = trace.to_string();
+    for private in [
+        query,
+        document_text,
+        private_path,
+        warning,
+        "private-board-documents",
+    ] {
+        assert!(!serialized.contains(private), "trace leaked {private}");
+    }
+    assert!(serialized.contains("\"redacted\":true"));
+}
+
 #[tokio::test]
 async fn direct_run_skill_async_start_publishes_waiting_checkpoint() {
     let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();

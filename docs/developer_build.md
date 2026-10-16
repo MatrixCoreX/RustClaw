@@ -56,6 +56,11 @@ extensions are built there, never during UI installation. Download both workflow
 artifacts into one directory and provide it as
 `APP_RELEASE_PYTHON_WHEELS_ROOT` when invoking `package-release.sh` manually.
 Packaging verifies each bundle's target, source lock digest, and wheel hashes.
+Full bundled-skill packages also require the native, relocatable runtime roots
+selected by the release builder through `APP_RELEASE_PYTHON_RUNTIME_ROOT` and
+`APP_RELEASE_NODE_RUNTIME_ROOT`. The package script copies them into the signed
+archive, materializes symlinks, and executes the relocated runtimes before
+signing. They are release dependencies, not user-installed prerequisites.
 
 See the [Linux x86_64](ubuntu_x86_64_release.md) and
 [Pi aarch64](pi_aarch64_release.md) publishing guides. The macOS artifact workflow

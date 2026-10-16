@@ -6,13 +6,16 @@ mod precompiled_tests;
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 use serde_json::{json, Value};
 use skill_sdk::adapter::{copy_source_tree, source_digest};
 use skill_sdk::{
     scaffold_skill, validate_response_line, AdoptBuiltRequest, ImplementationLanguage,
-    InstallReceiptStore, InstallRequest, PackageManifest, PrecompiledInstallRequest,
-    ScaffoldRequest, SkillInstaller, SkillRuntimeResolver, SkillSdkError,
+    InstallControl, InstallReceiptStore, InstallRequest, PackageManifest,
+    PrecompiledInstallRequest, ScaffoldRequest, SkillInstaller, SkillRuntimeResolver,
+    SkillSdkError,
 };
 
 fn main() {
@@ -63,10 +66,10 @@ fn run(args: Vec<String>) -> Result<Value, SkillSdkError> {
             "commands": [
                 "init <rust|python|node|go|prebuilt|generic_process|http_json> <skill_name> <destination>",
                 "validate <skill.toml>",
-                "build <skill.toml> <workspace_root> <package_root> [--network] [--target <triple>]",
-                "protocol-test <skill.toml> <workspace_root> <package_root> [--network] [--target <triple>]",
+                "build <skill.toml> <workspace_root> <package_root> [--network] [--no-source-build] [--target <triple>]",
+                "protocol-test <skill.toml> <workspace_root> <package_root> [--network] [--no-source-build] [--target <triple>]",
                 "package <skill.toml> <output_dir>",
-                "install-local <skill.toml> <workspace_root> <package_root> [--network] [--target <triple>]",
+                "install-local <skill.toml> <workspace_root> <package_root> [--network] [--no-source-build] [--target <triple>]",
                 "adopt-built <skill.toml> <workspace_root> <package_root> <binary_path> [--target <triple>]",
                 "install-precompiled <skill.toml> <workspace_root> <package_root> <precompiled_root> [--target <triple>]",
                 "admit <source_dir> <clawd_url> <admin_key> [--disabled] [--network] [--timeout-seconds <seconds>]",
@@ -213,13 +216,17 @@ fn install_command(command: &str, args: &[String]) -> Result<Value, SkillSdkErro
     let package_root = PathBuf::from(required_arg(args, 3, "package_root")?);
     let allow_network = args.iter().any(|arg| arg == "--network");
     let target = optional_flag_value(args, "--target").map(ToString::to_string);
+    let control = args
+        .iter()
+        .any(|arg| arg == "--no-source-build")
+        .then(|| InstallControl::new(Arc::new(AtomicBool::new(false))).without_source_build());
     let outcome = SkillInstaller.install(&InstallRequest {
         manifest_path,
         workspace_root,
         package_root,
         target,
         allow_network,
-        control: None,
+        control,
     })?;
     Ok(json!({"ok": true, "command": command, "install": outcome}))
 }

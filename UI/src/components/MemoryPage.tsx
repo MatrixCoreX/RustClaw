@@ -18,6 +18,8 @@ import type {
   RemoteMemoryDisclosure,
 } from "../types/api";
 import type { MemoryListFilters } from "../hooks/useMemoryRuntime";
+import type { KbIdentity } from "../lib/kb-maintenance";
+import { KbMaintenancePanel } from "./KbMaintenancePanel";
 
 type UiLanguage = "zh" | "en";
 type ClearScope = "recent" | "all";
@@ -33,6 +35,8 @@ export interface MemoryPageProps {
   memorySettings: MemorySettingsResult | null;
   memorySettingScope: "principal" | "conversation";
   activeConversationId: string | null;
+  apiFetch: (path: string, init?: RequestInit) => Promise<Response>;
+  kbIdentity: KbIdentity;
   memoryPreferences: MemoryPreferenceItem[];
   memoryFacts: MemoryFactItem[];
   memoryRecent: MemoryRecentItem[];
@@ -79,6 +83,8 @@ export function MemoryPage({
   memorySettings,
   memorySettingScope,
   activeConversationId,
+  apiFetch,
+  kbIdentity,
   memoryPreferences,
   memoryFacts,
   memoryRecent,
@@ -177,6 +183,8 @@ export function MemoryPage({
           ))}
         </div>
       </div>
+
+      <KbMaintenancePanel t={t} apiFetch={apiFetch} identity={kbIdentity} />
 
       <div className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">

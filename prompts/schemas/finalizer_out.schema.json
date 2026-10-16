@@ -40,6 +40,18 @@
       "maximum": 1.0,
       "description": "Self-rated confidence in [0,1]. Below `OBSERVED_SELF_CLASSIFY_CONF_THRESHOLD` (= 0.55) the caller calls `semantic_judge::is_meta_respond_instruction` to double-check."
     },
+    "used_evidence_ids": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Runtime-provided evidence identifiers selected for this answer. Callers that provide a selectable evidence catalog validate this list as an exact subset.",
+      "default": []
+    },
+    "conflicting_evidence_ids": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Runtime-provided retrieval evidence identifiers that materially disagree. Every item must also be selected in used_evidence_ids; an identified conflict contains at least two unique IDs.",
+      "default": []
+    },
     "reason": {
       "type": "string",
       "description": "Short, concrete justification. Currently consumed only by audit log (renamed to `_reason` on the Rust side because the runtime body does not branch on it).",

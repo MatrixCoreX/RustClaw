@@ -135,7 +135,7 @@ fn sensitive_assignment(line: &str) -> bool {
 fn ignored_name(name: &OsStr) -> bool {
     matches!(
         name.to_str(),
-        Some(".git" | "target" | "node_modules" | "__pycache__" | ".venv")
+        Some(".git" | "target" | "node_modules" | "__pycache__" | ".venv" | "release-wheels")
     )
 }
 

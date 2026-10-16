@@ -1,4 +1,5 @@
 use claw_core::config::MemoryConfig;
+use claw_core::retrieval_embedding::{LOCAL_HASH_DIMS, LOCAL_HASH_MODEL_ID, LOCAL_HASH_VERSION};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::json;
 
@@ -17,7 +18,7 @@ use super::{
 use super::{MEMORY_SCOPE_PRINCIPAL, RETRIEVAL_SOURCE_KNOWLEDGE_FACT};
 
 pub(crate) fn ensure_retrieval_schema(db: &Connection) -> anyhow::Result<()> {
-    db.execute_batch(
+    db.execute_batch(&format!(
         "CREATE TABLE IF NOT EXISTS memory_retrieval_index (
             id                INTEGER PRIMARY KEY AUTOINCREMENT,
             source_kind       TEXT NOT NULL,
@@ -33,17 +34,17 @@ pub(crate) fn ensure_retrieval_schema(db: &Connection) -> anyhow::Result<()> {
             trigger_text      TEXT,
             topic_tags        TEXT NOT NULL DEFAULT '',
             vector_json       TEXT NOT NULL DEFAULT '[]',
-            embedding_model   TEXT NOT NULL DEFAULT 'local-hash-v1',
-            embedding_dims    INTEGER NOT NULL DEFAULT 24,
-            embedding_version TEXT NOT NULL DEFAULT 'local-hash-v1',
-            metadata_json     TEXT NOT NULL DEFAULT '{}',
+            embedding_model   TEXT NOT NULL DEFAULT '{LOCAL_HASH_MODEL_ID}',
+            embedding_dims    INTEGER NOT NULL DEFAULT {LOCAL_HASH_DIMS},
+            embedding_version TEXT NOT NULL DEFAULT '{LOCAL_HASH_VERSION}',
+            metadata_json     TEXT NOT NULL DEFAULT '{{}}',
             salience          REAL NOT NULL DEFAULT 0.5,
             success_state     TEXT NOT NULL DEFAULT 'neutral',
             tool_or_skill_name TEXT,
             created_at_ts     INTEGER NOT NULL DEFAULT 0,
             updated_at_ts     INTEGER NOT NULL DEFAULT 0
-        );",
-    )?;
+        );"
+    ))?;
     crate::ensure_column_exists(
         db,
         "memory_retrieval_index",
@@ -60,19 +61,25 @@ pub(crate) fn ensure_retrieval_schema(db: &Connection) -> anyhow::Result<()> {
         db,
         "memory_retrieval_index",
         "embedding_model",
-        "ALTER TABLE memory_retrieval_index ADD COLUMN embedding_model TEXT NOT NULL DEFAULT 'local-hash-v1'",
+        &format!(
+            "ALTER TABLE memory_retrieval_index ADD COLUMN embedding_model TEXT NOT NULL DEFAULT '{LOCAL_HASH_MODEL_ID}'"
+        ),
     )?;
     crate::ensure_column_exists(
         db,
         "memory_retrieval_index",
         "embedding_dims",
-        "ALTER TABLE memory_retrieval_index ADD COLUMN embedding_dims INTEGER NOT NULL DEFAULT 24",
+        &format!(
+            "ALTER TABLE memory_retrieval_index ADD COLUMN embedding_dims INTEGER NOT NULL DEFAULT {LOCAL_HASH_DIMS}"
+        ),
     )?;
     crate::ensure_column_exists(
         db,
         "memory_retrieval_index",
         "embedding_version",
-        "ALTER TABLE memory_retrieval_index ADD COLUMN embedding_version TEXT NOT NULL DEFAULT 'local-hash-v1'",
+        &format!(
+            "ALTER TABLE memory_retrieval_index ADD COLUMN embedding_version TEXT NOT NULL DEFAULT '{LOCAL_HASH_VERSION}'"
+        ),
     )?;
     db.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_memory_retrieval_scope_updated
@@ -134,20 +141,21 @@ pub(crate) fn cleanup_retrieval_index(
 pub(crate) fn rebuild_retrieval_index(db: &Connection, _cfg: &MemoryConfig) -> anyhow::Result<()> {
     ensure_retrieval_schema(db)?;
     super::vector_store::ensure_vector_pipeline_schema(db)?;
-    db.execute(
+    let tx = db.unchecked_transaction()?;
+    tx.execute(
         "UPDATE memory_embedding_jobs SET cancel_requested = 1, updated_at_ts = ?1
          WHERE status IN ('queued', 'retry_wait', 'running')",
         [crate::now_ts_u64() as i64],
     )?;
-    db.execute(
+    tx.execute(
         "UPDATE memory_vector_rows SET status = 'tombstone', updated_at_ts = ?1
          WHERE status = 'active'",
         [crate::now_ts_u64() as i64],
     )?;
-    db.execute("DELETE FROM memory_retrieval_index", [])?;
-    let _ = db.execute("DELETE FROM memory_retrieval_index_fts", []);
+    tx.execute("DELETE FROM memory_retrieval_index", [])?;
+    let _ = tx.execute("DELETE FROM memory_retrieval_index_fts", []);
 
-    let mut mem_stmt = db.prepare(
+    let mut mem_stmt = tx.prepare(
         "SELECT id, user_id, chat_id, COALESCE(user_key, ''), role, content, memory_type, salience,
                 is_instructional, created_at_ts
          FROM memories
@@ -181,7 +189,7 @@ pub(crate) fn rebuild_retrieval_index(db: &Connection, _cfg: &MemoryConfig) -> a
             ts,
         ) = row?;
         index_memory_row(
-            db,
+            &tx,
             user_id,
             chat_id,
             &user_key,
@@ -195,7 +203,7 @@ pub(crate) fn rebuild_retrieval_index(db: &Connection, _cfg: &MemoryConfig) -> a
         )?;
     }
 
-    let mut pref_stmt = db.prepare(
+    let mut pref_stmt = tx.prepare(
         "SELECT user_id, chat_id, COALESCE(user_key, ''), pref_key, pref_value, confidence, source, updated_at_ts
          FROM user_preferences
          ORDER BY id ASC",
@@ -215,9 +223,12 @@ pub(crate) fn rebuild_retrieval_index(db: &Connection, _cfg: &MemoryConfig) -> a
     for row in pref_rows {
         let (user_id, chat_id, user_key, pref_key, pref_value, confidence, source, ts) = row?;
         let pref = vec![(pref_key, pref_value, confidence, source)];
-        index_preference_entries(db, user_id, chat_id, &user_key, &pref, ts)?;
+        index_preference_entries(&tx, user_id, chat_id, &user_key, &pref, ts)?;
     }
-    rebuild_memory_fact_rows(db)?;
+    rebuild_memory_fact_rows(&tx)?;
+    drop(pref_stmt);
+    drop(mem_stmt);
+    tx.commit()?;
     Ok(())
 }
 
@@ -441,7 +452,15 @@ fn insert_index_row(
     let embedding_spec = super::embedding::local_hash_embedding_spec();
     let metadata_json = metadata_json.unwrap_or("{}");
     if retrieval_scope_contract_available(db)? {
-        let principal_id = crate::repo::auth::principal_id_for_user_key(db, user_key)?;
+        let Some(principal_id) = crate::repo::auth::principal_id_for_user_key(db, user_key)? else {
+            tracing::warn!(
+                source_kind,
+                source_memory_id,
+                source_pref_key,
+                "memory_retrieval_unowned_source_skipped"
+            );
+            return Ok(());
+        };
         let metadata = serde_json::from_str::<serde_json::Value>(metadata_json).unwrap_or_default();
         let requested_scope = metadata
             .get("scope_kind")
@@ -456,7 +475,7 @@ fn insert_index_row(
                     .and_then(serde_json::Value::as_str)
                     .map(ToString::to_string),
             ),
-            _ => ("principal", principal_id.clone()),
+            _ => ("principal", Some(principal_id.clone())),
         };
         anyhow::ensure!(scope_ref.is_some(), "memory_retrieval_scope_ref_required");
         db.execute(

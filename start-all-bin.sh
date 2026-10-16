@@ -4,6 +4,20 @@ umask 077
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+BUNDLED_PYTHON_BIN="$SCRIPT_DIR/prebuilt/toolchains/python/bin/python3"
+BUNDLED_NODE_BIN_DIR="$SCRIPT_DIR/prebuilt/toolchains/node/bin"
+BUNDLED_HOST_BIN_DIR="$SCRIPT_DIR/prebuilt/toolchains/host/bin"
+if [[ -z "${APP_PYTHON_BIN:-}" && -x "$BUNDLED_PYTHON_BIN" ]]; then
+  export APP_PYTHON_BIN="$BUNDLED_PYTHON_BIN"
+fi
+if [[ -x "$BUNDLED_HOST_BIN_DIR/ffmpeg" ]]; then
+  PATH="$BUNDLED_HOST_BIN_DIR${PATH:+:$PATH}"
+  export APP_BUNDLED_CHROMIUM_PATH="$BUNDLED_HOST_BIN_DIR/chromium"
+fi
+if [[ -x "$BUNDLED_NODE_BIN_DIR/node" ]]; then
+  PATH="$BUNDLED_NODE_BIN_DIR${PATH:+:$PATH}"
+  export PATH
+fi
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/scripts/version_info.sh"
 print_app_version "$SCRIPT_DIR"

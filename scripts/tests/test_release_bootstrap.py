@@ -89,6 +89,7 @@ cp "$FIXTURE/autostart" "$root/scripts/configure-autostart.sh"
                 result = self.run_bootstrap()
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertIn("--restart", (self.fixture / "deploy-args").read_text())
+                self.assertIn("--force", (self.fixture / "deploy-args").read_text())
                 self.assertEqual((self.fixture / "install-args").read_text().strip(), "--user --no-deploy-ui")
                 self.assertEqual((self.fixture / "deploy-autostart-skip").read_text().strip(), "1")
                 self.assertEqual(
@@ -112,6 +113,7 @@ cp "$FIXTURE/autostart" "$root/scripts/configure-autostart.sh"
         self.assertEqual((self.fixture / "signer").read_text().strip(), str(signer.resolve()))
         self.assertEqual(signer.read_text(), "existing trusted signer")
         self.assertIn("--no-restart", (self.fixture / "deploy-args").read_text())
+        self.assertIn("--force", (self.fixture / "deploy-args").read_text())
         self.assertFalse((self.fixture / "autostart-args").exists())
 
     def test_existing_trust_anchor_under_symlinked_parent(self):

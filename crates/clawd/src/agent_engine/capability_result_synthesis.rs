@@ -2,9 +2,11 @@ use claw_core::capability_result::{
     ArtifactRef, ArtifactVisibility, CapabilityDeliveryIntent, CapabilityResultEnvelope,
     CapabilityResultStatus,
 };
+use rusqlite::{params, OptionalExtension};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, HashSet};
 
 use super::{AgentRunContext, LoopState};
 use crate::{AppState, ClaimedTask};
@@ -31,6 +33,10 @@ struct CapabilitySynthesisOutput {
     publishable: bool,
     #[serde(default)]
     confidence: f64,
+    #[serde(default)]
+    used_evidence_ids: Vec<String>,
+    #[serde(default)]
+    conflicting_evidence_ids: Vec<String>,
     #[serde(default, rename = "reason")]
     _reason: String,
 }
@@ -335,7 +341,7 @@ async fn synthesize_model_capability_answer(
     )
     .map_err(|_| "capability_result_synthesis_schema_invalid".to_string())?
     .value;
-    let answer = parsed.answer.trim().to_string();
+    let mut answer = parsed.answer.trim().to_string();
     if answer.is_empty()
         || parsed.needs_clarify
         || parsed.is_meta_instruction
@@ -344,12 +350,21 @@ async fn synthesize_model_capability_answer(
     {
         return Ok(None);
     }
+    if !selected_evidence_ids_are_valid(&results, &parsed.used_evidence_ids) {
+        return Ok(None);
+    }
+    if !conflicting_evidence_ids_are_valid(
+        &results,
+        &parsed.used_evidence_ids,
+        &parsed.conflicting_evidence_ids,
+    ) {
+        return Ok(None);
+    }
+    answer = append_selected_retrieval_citations(answer, &results, &parsed.used_evidence_ids);
     Ok(Some(CapabilitySynthesis {
         answer,
         confidence: parsed.confidence.clamp(0.0, 1.0),
-        evidence_count: results["entries"]
-            .as_array()
-            .map_or(0, |entries| entries.len()),
+        evidence_count: parsed.used_evidence_ids.len(),
     }))
 }
 
@@ -1129,39 +1144,68 @@ fn synthesis_evidence_catalog(
     let mut complete_model_view = true;
     for (index, result) in results.iter().enumerate() {
         let identity = result.canonical_evidence_identity();
-        let serialized = serde_json::to_vec(result)
+        let canonical_value = serde_json::to_value(result)
             .map_err(|_| "capability_result_synthesis_input_serialize_failed".to_string())?;
-        let model_value = serde_json::to_value(result)
-            .map_err(|_| "capability_result_synthesis_input_serialize_failed".to_string())?;
+        let retrieval_verification =
+            verified_retrieval_evidence_entries(state, task, &canonical_value);
+        let retrieval_evidence = retrieval_verification.current;
+        let model_source = filter_retrieval_evidence_for_model(
+            &canonical_value,
+            &retrieval_evidence
+                .iter()
+                .filter_map(|entry| entry.get("evidence_id").and_then(Value::as_str))
+                .collect::<HashSet<_>>(),
+        )
+        .unwrap_or_else(|| json!({}));
         let (model_value, model_view_redacted) =
-            crate::skill_output_artifact::sensitivity_aware_json_model_view(&model_value);
+            crate::skill_output_artifact::sensitivity_aware_json_model_view(&model_source);
+        let model_serialized = serde_json::to_vec(&model_value)
+            .map_err(|_| "capability_result_synthesis_input_serialize_failed".to_string())?;
         let token_estimate = crate::token_estimator::estimate_generic_tokens(
-            std::str::from_utf8(&serialized).unwrap_or_default(),
+            std::str::from_utf8(&model_serialized).unwrap_or_default(),
         )
         .provider_tokens;
         let model_view = if token_estimate <= per_result_tokens {
             json!({
                 "complete": true,
-                "projection": "canonical_inline",
+                "projection": "filtered_inline",
                 "result": model_value,
                 "sensitivity": if model_view_redacted { "restricted_redacted" } else { "task_owner" },
             })
         } else {
             complete_model_view = false;
-            let published = crate::skill_output_artifact::publish_canonical_evidence_artifact(
+            let published = crate::skill_output_artifact::publish_model_view_evidence_artifact(
                 &state.skill_rt.workspace_root,
                 &task.task_id,
                 &identity.evidence_id,
-                &serialized,
+                &model_serialized,
             )
-            .map_err(|_| "canonical_evidence_artifact_write_failed".to_string())?;
+            .map_err(|_| "model_evidence_artifact_write_failed".to_string())?;
             provider_fitted_scalar_page(&model_value, per_result_tokens, published.range_handle)
         };
+        let mut selectable_evidence_ids = Vec::new();
+        if retrieval_verification.candidate_count == 0 || !retrieval_evidence.is_empty() {
+            selectable_evidence_ids.push(identity.evidence_id.clone());
+        }
+        selectable_evidence_ids.extend(retrieval_evidence.iter().filter_map(|entry| {
+            entry
+                .get("evidence_id")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        }));
+        selectable_evidence_ids.sort();
+        selectable_evidence_ids.dedup();
         entries.push(json!({
             "ordinal": index + 1,
+            "source_class": "capability_result",
             "evidence_id": identity.evidence_id,
+            "selectable_evidence_ids": selectable_evidence_ids,
+            "retrieval_evidence": retrieval_evidence,
+            "stale_retrieval_evidence_count": retrieval_verification.stale_count,
             "sha256": identity.sha256,
             "size_bytes": identity.size_bytes,
+            "model_projection_sha256": format!("{:x}", Sha256::digest(&model_serialized)),
+            "model_projection_size_bytes": model_serialized.len(),
             "capability": result.capability,
             "action": result.action,
             "status": result.status,
@@ -1170,15 +1214,342 @@ fn synthesis_evidence_catalog(
             "model_view": model_view,
         }));
     }
+    let mut selectable_evidence_ids = entries
+        .iter()
+        .filter_map(|entry| {
+            entry
+                .get("selectable_evidence_ids")
+                .and_then(Value::as_array)
+        })
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    selectable_evidence_ids.sort();
+    selectable_evidence_ids.dedup();
     Ok(json!({
         "schema_version": 1,
         "catalog_kind": "canonical_capability_evidence",
+        "source_layers": {
+            "current_user_input": "task_request_not_selectable_evidence",
+            "conversation_history": "runtime_context_only",
+            "knowledge_base": "selectable_retrieval_evidence",
+            "capability_result": "selectable_execution_evidence",
+            "model_general_knowledge": "not_evidence"
+        },
         "canonical_complete": true,
         "model_view_complete": complete_model_view,
         "result_count": entries.len(),
+        "selectable_evidence_ids": selectable_evidence_ids,
         "provider_model_view_budget_tokens": model_budget_tokens,
         "entries": entries,
     }))
+}
+
+#[derive(Debug, Default)]
+struct RetrievalEvidenceVerification {
+    current: Vec<Value>,
+    candidate_count: usize,
+    stale_count: usize,
+}
+
+fn verified_retrieval_evidence_entries(
+    state: &AppState,
+    task: &ClaimedTask,
+    value: &Value,
+) -> RetrievalEvidenceVerification {
+    fn visit(value: &Value, out: &mut BTreeMap<String, Value>) {
+        match value {
+            Value::Object(object) => {
+                let candidate = || -> Option<Value> {
+                    if object.get("instruction_authority").and_then(Value::as_str) != Some("none") {
+                        return None;
+                    }
+                    let evidence_id = object.get("evidence_id")?.as_str()?;
+                    let source_ref = object.get("source_ref")?.as_str()?;
+                    let document_digest = object.get("document_digest")?.as_str()?;
+                    let namespace_revision = object.get("namespace_revision")?.as_u64()?;
+                    let expected = claw_core::retrieval_embedding::retrieval_evidence_id(
+                        source_ref,
+                        document_digest,
+                        namespace_revision,
+                    );
+                    if evidence_id != expected {
+                        return None;
+                    }
+                    Some(json!({
+                        "evidence_id": evidence_id,
+                        "source_class": retrieval_source_class(source_ref),
+                        "data_only": true,
+                        "instruction_authority": "none",
+                        "source_ref": source_ref,
+                        "namespace": object.get("namespace"),
+                        "namespace_revision": namespace_revision,
+                        "document_id": object.get("document_id"),
+                        "document_digest": document_digest,
+                        "chunk_id": object.get("chunk_id"),
+                        "chunk_ids": object.get("chunk_ids"),
+                        "location": object.get("location"),
+                    }))
+                };
+                if let Some(candidate) = candidate() {
+                    if let Some(evidence_id) = candidate.get("evidence_id").and_then(Value::as_str)
+                    {
+                        out.insert(evidence_id.to_string(), candidate);
+                    }
+                }
+                for child in object.values() {
+                    visit(child, out);
+                }
+            }
+            Value::Array(items) => {
+                for child in items {
+                    visit(child, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut entries = BTreeMap::new();
+    visit(value, &mut entries);
+    let candidate_count = entries.len();
+    let current = entries
+        .into_values()
+        .filter(|entry| retrieval_evidence_is_current(state, task, entry))
+        .collect::<Vec<_>>();
+    RetrievalEvidenceVerification {
+        stale_count: candidate_count.saturating_sub(current.len()),
+        candidate_count,
+        current,
+    }
+}
+
+fn retrieval_source_class(source_ref: &str) -> &'static str {
+    if source_ref.starts_with("kb://") {
+        "knowledge_base_document"
+    } else if source_ref.starts_with("memory://") {
+        "conversation_or_durable_memory"
+    } else {
+        "retrieval_source"
+    }
+}
+
+fn retrieval_evidence_is_current(state: &AppState, task: &ClaimedTask, entry: &Value) -> bool {
+    let Some(user_key) = task.user_key.as_deref() else {
+        return false;
+    };
+    let Some(source_ref) = entry.get("source_ref").and_then(Value::as_str) else {
+        return false;
+    };
+    if !source_ref.starts_with("kb://") {
+        return false;
+    }
+    let Some(namespace) = entry.get("namespace").and_then(Value::as_str) else {
+        return false;
+    };
+    let Some(namespace_revision) = entry.get("namespace_revision").and_then(Value::as_u64) else {
+        return false;
+    };
+    let Some(document_digest) = entry.get("document_digest").and_then(Value::as_str) else {
+        return false;
+    };
+    let Some(path) = entry.pointer("/location/path").and_then(Value::as_str) else {
+        return false;
+    };
+    if !retrieval_location_path_is_public(path) {
+        return false;
+    }
+    let Ok(pool) = state.core.skill_storage.pool_for("kb") else {
+        return false;
+    };
+    let Ok(db) = pool.get() else {
+        return false;
+    };
+    db.query_row(
+        "SELECT 1
+         FROM kb_namespaces n
+         JOIN kb_documents d
+           ON d.owner_user_key = n.owner_user_key AND d.namespace = n.namespace
+         WHERE n.owner_user_key = ?1 AND n.namespace = ?2 AND n.revision = ?3
+           AND d.path = ?4 AND d.content_sha256 = ?5
+         LIMIT 1",
+        params![
+            user_key,
+            namespace,
+            namespace_revision as i64,
+            path,
+            document_digest,
+        ],
+        |_| Ok(()),
+    )
+    .optional()
+    .ok()
+    .flatten()
+    .is_some()
+}
+
+fn retrieval_location_path_is_public(path: &str) -> bool {
+    let path = path.trim();
+    if path.is_empty()
+        || path.starts_with('/')
+        || path.starts_with('\\')
+        || path.contains('\\')
+        || path.as_bytes().get(1) == Some(&b':')
+    {
+        return false;
+    }
+    !std::path::Path::new(path).components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::ParentDir
+                | std::path::Component::RootDir
+                | std::path::Component::Prefix(_)
+        )
+    })
+}
+
+fn retrieval_evidence_shape(value: &Value) -> Option<&str> {
+    let object = value.as_object()?;
+    if object.get("instruction_authority").and_then(Value::as_str) != Some("none")
+        || object
+            .get("document_digest")
+            .and_then(Value::as_str)
+            .is_none()
+        || object
+            .get("namespace_revision")
+            .and_then(Value::as_u64)
+            .is_none()
+    {
+        return None;
+    }
+    object.get("evidence_id")?.as_str()
+}
+
+fn filter_retrieval_evidence_for_model(
+    value: &Value,
+    current_evidence_ids: &HashSet<&str>,
+) -> Option<Value> {
+    if let Some(evidence_id) = retrieval_evidence_shape(value) {
+        return current_evidence_ids
+            .contains(evidence_id)
+            .then(|| value.clone());
+    }
+    match value {
+        Value::Array(items) => Some(Value::Array(
+            items
+                .iter()
+                .filter_map(|item| filter_retrieval_evidence_for_model(item, current_evidence_ids))
+                .collect(),
+        )),
+        Value::Object(object) => Some(Value::Object(
+            object
+                .iter()
+                .filter_map(|(key, child)| {
+                    filter_retrieval_evidence_for_model(child, current_evidence_ids)
+                        .map(|filtered| (key.clone(), filtered))
+                })
+                .collect(),
+        )),
+        _ => Some(value.clone()),
+    }
+}
+
+fn selected_evidence_ids_are_valid(catalog: &Value, selected: &[String]) -> bool {
+    if selected.is_empty() {
+        return false;
+    }
+    let allowed = catalog
+        .get("selectable_evidence_ids")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect::<HashSet<_>>();
+    if selected
+        .iter()
+        .any(|evidence_id| !allowed.contains(evidence_id.as_str()))
+    {
+        return false;
+    }
+    let retrieval_ids = retrieval_citation_map(catalog)
+        .into_keys()
+        .collect::<HashSet<_>>();
+    retrieval_ids.is_empty()
+        || selected
+            .iter()
+            .any(|evidence_id| retrieval_ids.contains(evidence_id.as_str()))
+}
+
+fn conflicting_evidence_ids_are_valid(
+    catalog: &Value,
+    selected: &[String],
+    conflicting: &[String],
+) -> bool {
+    if conflicting.is_empty() {
+        return true;
+    }
+    if conflicting.len() < 2 {
+        return false;
+    }
+    let selected = selected.iter().map(String::as_str).collect::<HashSet<_>>();
+    let retrieval = retrieval_citation_map(catalog)
+        .into_keys()
+        .collect::<HashSet<_>>();
+    let mut unique = HashSet::new();
+    conflicting.iter().all(|evidence_id| {
+        selected.contains(evidence_id.as_str())
+            && retrieval.contains(evidence_id.as_str())
+            && unique.insert(evidence_id.as_str())
+    })
+}
+
+fn append_selected_retrieval_citations(
+    mut answer: String,
+    catalog: &Value,
+    selected: &[String],
+) -> String {
+    let citations = retrieval_citation_map(catalog);
+    let mut source_refs = selected
+        .iter()
+        .filter_map(|evidence_id| citations.get(evidence_id.as_str()))
+        .filter(|source_ref| !answer.contains(source_ref.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    source_refs.sort();
+    source_refs.dedup();
+    if source_refs.is_empty() {
+        return answer;
+    }
+    answer.push_str("\n\n");
+    answer.push_str(
+        &source_refs
+            .iter()
+            .map(|source_ref| format!("[{source_ref}]"))
+            .collect::<Vec<_>>()
+            .join(" "),
+    );
+    answer
+}
+
+fn retrieval_citation_map(catalog: &Value) -> BTreeMap<&str, String> {
+    let mut citations = BTreeMap::new();
+    for evidence in catalog
+        .get("entries")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.get("retrieval_evidence").and_then(Value::as_array))
+        .flatten()
+    {
+        if let (Some(evidence_id), Some(source_ref)) = (
+            evidence.get("evidence_id").and_then(Value::as_str),
+            evidence.get("source_ref").and_then(Value::as_str),
+        ) {
+            citations.insert(evidence_id, source_ref.to_string());
+        }
+    }
+    citations
 }
 
 fn synthesis_model_view_budget_tokens(state: &AppState) -> usize {

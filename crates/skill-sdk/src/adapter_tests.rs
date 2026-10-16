@@ -55,6 +55,59 @@ fn user_python_installation_accepts_wheels_only_and_uses_packaged_wheelhouse() {
     );
 }
 
+#[test]
+fn macos_python_source_builds_use_only_the_native_architecture() {
+    for (arch, expected) in [("aarch64", "-arch arm64"), ("x86_64", "-arch x86_64")] {
+        let mut command = Command::new("python");
+        configure_native_python_build_arch(
+            &mut command,
+            &HostPlatform {
+                os: "macos".to_string(),
+                arch: arch.to_string(),
+                target: None,
+            },
+        );
+        assert_eq!(
+            command
+                .get_envs()
+                .find_map(|(key, value)| (key == "ARCHFLAGS").then_some(value))
+                .flatten(),
+            Some(OsStr::new(expected))
+        );
+    }
+
+    let mut command = Command::new("python");
+    configure_native_python_build_arch(
+        &mut command,
+        &HostPlatform {
+            os: "linux".to_string(),
+            arch: "aarch64".to_string(),
+            target: None,
+        },
+    );
+    assert!(!command.get_envs().any(|(key, _)| key == "ARCHFLAGS"));
+}
+
+#[test]
+fn release_wheel_cache_is_not_copied_or_bound_as_package_source() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let source = temp.path().join("source");
+    let destination = temp.path().join("destination");
+    fs::create_dir_all(source.join("release-wheels")).expect("wheel cache");
+    fs::write(source.join("main.py"), b"print('source')\n").expect("source");
+    let before = source_digest(&source).expect("source digest");
+    fs::write(
+        source.join("release-wheels/fixture-1.0-py3-none-any.whl"),
+        b"verified dependency cache",
+    )
+    .expect("wheel");
+
+    assert_eq!(source_digest(&source).expect("source digest"), before);
+    copy_source_tree(&source, &destination).expect("copy source");
+    assert!(destination.join("main.py").is_file());
+    assert!(!destination.join("release-wheels").exists());
+}
+
 fn artifact(os: &str, arch: &str, contents: &[u8]) -> PlatformArtifact {
     PlatformArtifact {
         os: os.to_string(),

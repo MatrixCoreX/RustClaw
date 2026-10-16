@@ -2,6 +2,21 @@ use super::*;
 use crate::test_support::{temp_path, xlsx_fixture};
 
 #[test]
+fn typed_ingestion_adapter_preserves_pure_parser_boundary() {
+    let path = temp_path("xlsx");
+    xlsx_fixture(&path);
+
+    let envelope = crate::inspect_for_ingestion(&path).expect("typed ingestion evidence");
+
+    assert_eq!(envelope.schema_version, 1);
+    assert_eq!(envelope.format.as_str(), "xlsx");
+    assert_eq!(envelope.metadata["active_content_executed"], false);
+    assert_eq!(envelope.metadata["pure_parser"], true);
+    assert!(envelope.workbook.is_some());
+    assert!(envelope.validation.valid);
+}
+
+#[test]
 fn reads_a_bounded_spreadsheet_range() {
     let path = temp_path("xlsx");
     xlsx_fixture(&path);

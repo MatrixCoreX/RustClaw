@@ -111,6 +111,7 @@ toml = "0.8"
 toml_edit = "0.22"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+unicode-normalization = "0.1"
 uuid = { version = "1", features = ["v4", "serde"] }
 url = "2"
 wait-timeout = "0.2"

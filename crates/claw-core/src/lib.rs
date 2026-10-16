@@ -30,6 +30,7 @@ pub mod owner_gateway_context;
 pub mod product_identity;
 pub mod prompt_layers;
 pub mod provider_failure_policy;
+pub mod retrieval_embedding;
 pub mod secrets;
 pub mod skill_registry;
 pub mod task_delivery_artifacts;

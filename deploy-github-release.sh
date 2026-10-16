@@ -6,6 +6,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$SCRIPT_DIR"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/scripts/shell_compat.sh"
+if [[ -z "${APP_PYTHON_BIN:-}" && -x "$SCRIPT_DIR/prebuilt/toolchains/python/bin/python3" ]]; then
+  export APP_PYTHON_BIN="$SCRIPT_DIR/prebuilt/toolchains/python/bin/python3"
+fi
 configure_python3_with_tomllib
 REPOSITORY="$APP_RELEASE_REPOSITORY"
 PLATFORM="auto"
@@ -14,6 +17,7 @@ RESTART_MODE="auto"
 CHECK_ONLY=0
 FORCE=0
 PACKAGE_MODE=0
+LOCAL_RELEASE_DIR=""
 KEEP_BACKUPS=1
 SYSTEMD_UNIT="${APP_SERVICE_NAME}.service"
 
@@ -59,6 +63,9 @@ Options:
   --package-mode
       Atomically replace a source checkout with the verified Release package.
       Persistent runtime state is preserved and the source tree is backed up.
+  --local-release-dir DIR
+      Install from one signed Release bundle already present in DIR. This is
+      used by the macOS desktop package and performs no Release download.
   --keep-backups N
       Number of successful deployment backups to retain. Default: 1.
   -h, --help
@@ -141,6 +148,15 @@ while [[ $# -gt 0 ]]; do
       FORCE=1
       shift
       ;;
+    --local-release-dir)
+      require_value "$1" "${2:-}"
+      LOCAL_RELEASE_DIR="$2"
+      shift 2
+      ;;
+    --local-release-dir=*)
+      LOCAL_RELEASE_DIR="${1#*=}"
+      shift
+      ;;
     --keep-backups)
       require_value "$1" "${2:-}"
       KEEP_BACKUPS="$2"
@@ -175,6 +191,18 @@ import sys
 print(Path(sys.argv[1]).expanduser().resolve())
 PY
 )"
+if [[ -n "$LOCAL_RELEASE_DIR" ]]; then
+  LOCAL_RELEASE_DIR="$(python3 - "$LOCAL_RELEASE_DIR" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1]).expanduser().resolve(strict=True)
+if not path.is_dir() or path.is_symlink():
+    raise SystemExit("local release directory must be a real directory")
+print(path)
+PY
+  )"
+fi
 mkdir -p "$ROOT_DIR"
 ROOT_PARENT="$(dirname "$ROOT_DIR")"
 ROOT_NAME="$(basename "$ROOT_DIR")"
@@ -476,23 +504,70 @@ trap cleanup EXIT
 printf 'release_repo=%s\n' "$REPOSITORY"
 printf 'release_platform=%s\n' "$PLATFORM"
 
-RELEASES_JSON="$WORK_DIR/releases.json"
-RELEASES_JSON_OVERRIDE="${APP_RELEASES_JSON_FILE:-}"
-if [[ -n "$RELEASES_JSON_OVERRIDE" ]]; then
-  cp "$RELEASES_JSON_OVERRIDE" "$RELEASES_JSON"
-else
-  download_file \
-    "https://api.github.com/repos/${REPOSITORY}/releases?per_page=50" \
-    "$RELEASES_JSON"
-fi
-
 RELEASE_META="$WORK_DIR/release-meta.json"
-python3 - \
-  "$RELEASES_JSON" \
-  "$RELEASE_PREFIX" \
-  "$ASSET_PREFIX" \
-  "$REQUESTED_TAG" \
-  "$APP_RELEASE_ARTIFACT_ID" > "$RELEASE_META" <<'PY'
+if [[ -n "$LOCAL_RELEASE_DIR" ]]; then
+  python3 - \
+    "$LOCAL_RELEASE_DIR" \
+    "$RELEASE_PREFIX" \
+    "$ASSET_PREFIX" \
+    "$REQUESTED_TAG" \
+    "$APP_RELEASE_ARTIFACT_ID" > "$RELEASE_META" <<'PY'
+import json
+from pathlib import Path
+import re
+import sys
+
+source, release_prefix, asset_prefix, requested_tag, app_id = sys.argv[1:]
+root = Path(source).resolve(strict=True)
+archives = sorted(
+    path for path in root.iterdir()
+    if path.is_file()
+    and not path.is_symlink()
+    and path.name.startswith(asset_prefix)
+    and path.name.endswith(".tar.gz")
+)
+if len(archives) != 1:
+    raise SystemExit(f"local release directory must contain one {asset_prefix}*.tar.gz archive")
+archive = archives[0]
+derived_tag = archive.name[len(app_id) + 1 : -len(".tar.gz")]
+if requested_tag and requested_tag != derived_tag:
+    raise SystemExit("requested local release tag does not match the archive")
+tag = requested_tag or derived_tag
+if not re.fullmatch(r"[A-Za-z0-9._-]+", tag) or not tag.startswith(release_prefix):
+    raise SystemExit("local release tag is invalid or does not match this platform")
+paths = {
+    "archive_path": archive,
+    "checksum_path": Path(f"{archive}.sha256"),
+    "manifest_path": Path(f"{archive}.manifest.json"),
+    "signature_path": Path(f"{archive}.manifest.json.sig"),
+    "sbom_path": Path(f"{archive}.spdx.json"),
+}
+for label, path in paths.items():
+    if not path.is_file() or path.is_symlink() or path.parent.resolve() != root:
+        raise SystemExit(f"local release companion is missing or unsafe: {label}")
+print(json.dumps({
+    "tag": tag,
+    "archive_name": archive.name,
+    **{key: str(path.resolve()) for key, path in paths.items()},
+}))
+PY
+else
+  RELEASES_JSON="$WORK_DIR/releases.json"
+  RELEASES_JSON_OVERRIDE="${APP_RELEASES_JSON_FILE:-}"
+  if [[ -n "$RELEASES_JSON_OVERRIDE" ]]; then
+    cp "$RELEASES_JSON_OVERRIDE" "$RELEASES_JSON"
+  else
+    download_file \
+      "https://api.github.com/repos/${REPOSITORY}/releases?per_page=50" \
+      "$RELEASES_JSON"
+  fi
+
+  python3 - \
+    "$RELEASES_JSON" \
+    "$RELEASE_PREFIX" \
+    "$ASSET_PREFIX" \
+    "$REQUESTED_TAG" \
+    "$APP_RELEASE_ARTIFACT_ID" > "$RELEASE_META" <<'PY'
 import json
 from pathlib import Path
 import sys
@@ -594,6 +669,7 @@ else:
     suffix = f":{requested_tag}" if requested_tag else ""
     raise SystemExit(f"compatible release with checksum not found{suffix}")
 PY
+fi
 
 eval "$(
   python3 - "$RELEASE_META" <<'PY'
@@ -628,16 +704,25 @@ if [[ "$INSTALLED_TAG" == "$TAG" && "$FORCE" -eq 0 ]]; then
   exit 0
 fi
 
-ARCHIVE_PATH="$WORK_DIR/$ARCHIVE_NAME"
-CHECKSUM_PATH="$WORK_DIR/$CHECKSUM_NAME"
-MANIFEST_PATH="$WORK_DIR/$MANIFEST_NAME"
-SIGNATURE_PATH="$WORK_DIR/$SIGNATURE_NAME"
-SBOM_PATH="$WORK_DIR/$SBOM_NAME"
-download_file "$ARCHIVE_URL" "$ARCHIVE_PATH"
-download_file "$CHECKSUM_URL" "$CHECKSUM_PATH"
-download_file "$MANIFEST_URL" "$MANIFEST_PATH"
-download_file "$SIGNATURE_URL" "$SIGNATURE_PATH"
-download_file "$SBOM_URL" "$SBOM_PATH"
+if [[ -n "$LOCAL_RELEASE_DIR" ]]; then
+  : "${ARCHIVE_PATH:?local archive path missing}"
+  : "${CHECKSUM_PATH:?local checksum path missing}"
+  : "${MANIFEST_PATH:?local manifest path missing}"
+  : "${SIGNATURE_PATH:?local signature path missing}"
+  : "${SBOM_PATH:?local SBOM path missing}"
+  printf 'release_source=local_signed_bundle\n'
+else
+  ARCHIVE_PATH="$WORK_DIR/$ARCHIVE_NAME"
+  CHECKSUM_PATH="$WORK_DIR/$CHECKSUM_NAME"
+  MANIFEST_PATH="$WORK_DIR/$MANIFEST_NAME"
+  SIGNATURE_PATH="$WORK_DIR/$SIGNATURE_NAME"
+  SBOM_PATH="$WORK_DIR/$SBOM_NAME"
+  download_file "$ARCHIVE_URL" "$ARCHIVE_PATH"
+  download_file "$CHECKSUM_URL" "$CHECKSUM_PATH"
+  download_file "$MANIFEST_URL" "$MANIFEST_PATH"
+  download_file "$SIGNATURE_URL" "$SIGNATURE_PATH"
+  download_file "$SBOM_URL" "$SBOM_PATH"
+fi
 
 RELEASE_ALLOWED_SIGNERS="${APP_RELEASE_ALLOWED_SIGNERS_FILE:-$ROOT_DIR/configs/release_allowed_signers}"
 RELEASE_MANIFEST_TOOL="${APP_RELEASE_MANIFEST_TOOL:-$ROOT_DIR/scripts/security/release_manifest.py}"
@@ -774,6 +859,31 @@ run_bundled_skill_install() {
   return 1
 }
 
+configure_bundled_toolchains() {
+  local runtime_root="$1"
+  local python_bin="$runtime_root/prebuilt/toolchains/python/bin/python3"
+  local node_bin_dir="$runtime_root/prebuilt/toolchains/node/bin"
+  local host_bin_dir="$runtime_root/prebuilt/toolchains/host/bin"
+  if [[ ! -x "$python_bin" && ! -x "$node_bin_dir/node" ]]; then
+    return 0
+  fi
+  [[ -x "$python_bin" ]] || die "bundled_python_runtime_missing"
+  [[ -x "$node_bin_dir/node" ]] || die "bundled_node_runtime_missing"
+  APP_PYTHON_BIN="$python_bin"
+  export APP_PYTHON_BIN
+  configure_python3_with_tomllib || die "bundled_python_runtime_invalid"
+  if [[ -d "$host_bin_dir" ]]; then
+    for tool in git ffmpeg ffprobe tesseract chromium whisper-cli; do
+      [[ -x "$host_bin_dir/$tool" ]] || die "bundled_host_tool_missing:$tool"
+    done
+    PATH="$host_bin_dir${PATH:+:$PATH}"
+    APP_BUNDLED_CHROMIUM_PATH="$host_bin_dir/chromium"
+    export PATH APP_BUNDLED_CHROMIUM_PATH
+  fi
+  PATH="$node_bin_dir${PATH:+:$PATH}"
+  export PATH
+}
+
 bootstrap_bundled_release_skills() {
   local runtime_root="$1"
   local package_root="$2"
@@ -787,6 +897,7 @@ bootstrap_bundled_release_skills() {
     die "bundled_skill_bootstrap_skillctl_missing"
   [[ -f "$runtime_root/configs/config.toml" ]] ||
     die "bundled_skill_bootstrap_config_missing"
+  configure_bundled_toolchains "$runtime_root"
   local -a resource_skipped_skills=()
 
   while IFS=$'\t' read -r skill_name manifest_relative; do
@@ -861,6 +972,7 @@ converge_installed_bundled_skills() {
   local inventory
 
   [[ -x "$skillctl" && -x "$clawd" && -f "$config" ]] || return 0
+  configure_bundled_toolchains "$runtime_root"
   inventory="$(mktemp "${TMPDIR:-/tmp}/agent-bundled-skills.XXXXXX")"
   python3 - "$runtime_root" "$package_root" > "$inventory" <<'PY'
 from pathlib import Path
@@ -1064,6 +1176,7 @@ PY
     PACKAGE_MODE_ORIGINAL_MOVED=0
     die "release_package_activation_failed"
   fi
+  configure_bundled_toolchains "$ROOT_DIR"
 
   if [[ -x "$ROOT_DIR/build-ui-nginx.sh" && -f "$ROOT_DIR/UI/dist/index.html" ]]; then
     "$ROOT_DIR/build-ui-nginx.sh" --copy-if-configured

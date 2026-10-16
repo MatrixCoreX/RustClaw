@@ -73,10 +73,18 @@ mkdir -p \
   "$PACKAGE_DIR/data/skill-packages/core_fixture" \
   "$PACKAGE_DIR/prebuilt/skill-packages/store_fixture" \
   "$PACKAGE_DIR/prebuilt/skill-storage/store_fixture/modelscope/model" \
+  "$PACKAGE_DIR/prebuilt/toolchains/python/bin" \
+  "$PACKAGE_DIR/prebuilt/toolchains/node/bin" \
   "$PACKAGE_DIR/scripts" \
   "$PACKAGE_DIR/services/wa-web-bridge" \
   "$PACKAGE_DIR/UI/dist"
 cp /bin/true "$PACKAGE_DIR/target/release/clawd"
+cp "$(command -v python3)" "$PACKAGE_DIR/prebuilt/toolchains/python/bin/python3"
+cat > "$PACKAGE_DIR/prebuilt/toolchains/node/bin/node" <<'SH'
+#!/usr/bin/env bash
+printf 'v22.0.0\n'
+SH
+chmod +x "$PACKAGE_DIR/prebuilt/toolchains/node/bin/node"
 cat > "$PACKAGE_DIR/target/release/skillctl" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -258,6 +266,38 @@ OUTPUT="$(
 grep -Fq 'release_checksum=verified' <<< "$OUTPUT"
 grep -Fq 'release_update_status=deployed' <<< "$OUTPUT"
 grep -Fxq 'ubuntu-x86_64-newest' "$RUNTIME/.release-tag"
+
+LOCAL_RUNTIME="$TMP_ROOT/local-runtime"
+mkdir -p "$LOCAL_RUNTIME/configs"
+printf 'local-secret = "preserve-local"\n' > "$LOCAL_RUNTIME/configs/config.toml"
+LOCAL_OUTPUT="$(
+  "$DEPLOY_SCRIPT" \
+    --root "$LOCAL_RUNTIME" \
+    --platform ubuntu-x86_64 \
+    --tag ubuntu-x86_64-test \
+    --local-release-dir "$TMP_ROOT" \
+    --force \
+    --no-restart
+)"
+grep -Fq 'release_source=local_signed_bundle' <<< "$LOCAL_OUTPUT"
+grep -Fq 'release_signature=verified' <<< "$LOCAL_OUTPUT"
+grep -Fxq 'ubuntu-x86_64-test' "$LOCAL_RUNTIME/.release-tag"
+grep -Fxq 'local-secret = "preserve-local"' "$LOCAL_RUNTIME/configs/config.toml"
+cmp /bin/true "$LOCAL_RUNTIME/target/release/clawd"
+
+printf 'locally damaged\n' > "$LOCAL_RUNTIME/README.md"
+LOCAL_REINSTALL_OUTPUT="$(
+  "$DEPLOY_SCRIPT" \
+    --root "$LOCAL_RUNTIME" \
+    --platform ubuntu-x86_64 \
+    --tag ubuntu-x86_64-test \
+    --local-release-dir "$TMP_ROOT" \
+    --force \
+    --no-restart
+)"
+grep -Fq 'release_update_status=deployed' <<< "$LOCAL_REINSTALL_OUTPUT"
+grep -Fxq 'new release readme' "$LOCAL_RUNTIME/README.md"
+grep -Fxq 'local-secret = "preserve-local"' "$LOCAL_RUNTIME/configs/config.toml"
 
 rm -f "$RUNTIME/data/skill-packages/store_fixture/.verified"
 RESOURCE_SKIP_OUTPUT="$(

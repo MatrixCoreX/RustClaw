@@ -47,6 +47,30 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             });
         })
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            if let Err(error) = crate::bundled_runtime::reconcile(app.handle(), || {
+                if std::env::var_os("APP_BUNDLED_RUNTIME_NONINTERACTIVE").is_none() {
+                    rfd::MessageDialog::new()
+                        .set_level(rfd::MessageLevel::Info)
+                        .set_title(env!("DESKTOP_DISPLAY_NAME"))
+                        .set_description(
+                            "即将完成本机服务和技能安装。点击“好”后请保持应用打开，通常需要几分钟；完成后控制台会自动出现。\n\nThe local service and skills are ready to install. Keep the app open after clicking OK; the console will appear automatically when setup finishes.",
+                        )
+                        .show();
+                }
+            }) {
+                eprintln!("desktop_bundled_runtime_error {error}");
+                if std::env::var_os("APP_BUNDLED_RUNTIME_NONINTERACTIVE").is_none() {
+                    rfd::MessageDialog::new()
+                        .set_level(rfd::MessageLevel::Error)
+                        .set_title(env!("DESKTOP_DISPLAY_NAME"))
+                        .set_description(
+                            "本机服务安装或更新未完成。请确认安装包完整、磁盘空间充足，然后重新打开应用。\n\nThe local service could not be installed or updated. Check the package and free disk space, then reopen the app.",
+                        )
+                        .show();
+                }
+                return Err(std::io::Error::other(error).into());
+            }
             app.manage(discovery::DiscoveryState::default());
             let directory = app.path().app_data_dir()?;
             app.manage(

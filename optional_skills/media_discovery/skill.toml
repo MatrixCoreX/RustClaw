@@ -2,7 +2,7 @@ schema_version = 2
 
 [package]
 name = "media_discovery"
-version = "0.1.97"
+version = "0.1.98"
 description = "Run bounded one-shot or continuous durable visible-browser discovery for Douyin, Xiaohongshu, Kuaishou, Toutiao, Weibo, TikTok, and YouTube, with explicit silent-mode overrides, conservative platform-specific pacing, and preference for installed Chrome; preserve author captions and rendered previews without OCR, capture engagement metrics, and export ordered source-traceable results without downloading media originals."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
@@ -43,7 +43,7 @@ launcher = "node"
 entrypoint = "runtime/src/src/main.mjs"
 working_directory = "."
 timeout_seconds = 10800
-environment_allowlist = ["DISPLAY", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "PATH", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "WAYLAND_DISPLAY", "WORKSPACE_ROOT", "XAUTHORITY", "XDG_RUNTIME_DIR"]
+environment_allowlist = ["APP_BUNDLED_CHROMIUM_PATH", "DISPLAY", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "PATH", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "WAYLAND_DISPLAY", "WORKSPACE_ROOT", "XAUTHORITY", "XDG_RUNTIME_DIR"]
 smoke_args = { action = "capabilities" }
 progress_frames = true
 

@@ -1,5 +1,21 @@
 use super::*;
 
+#[tokio::test]
+async fn aipp_catalog_rejects_non_admin_users_before_reading_skill_storage() {
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    state.seed_test_auth_identity("ordinary-aipp-user", "user");
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "x-agent-key",
+        axum::http::HeaderValue::from_static("ordinary-aipp-user"),
+    );
+
+    let (status, Json(response)) = get_aipp_catalog(State(state), headers).await;
+
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(response.error.as_deref(), Some("admin_required"));
+}
+
 fn fixture_root() -> PathBuf {
     let root = std::env::temp_dir().join(format!("aipp-test-{}", uuid::Uuid::new_v4()));
     fs::create_dir_all(root.join("records")).expect("records directory");

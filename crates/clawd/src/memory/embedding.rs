@@ -1,16 +1,14 @@
 use std::future::Future;
-use std::hash::{Hash, Hasher};
 use std::pin::Pin;
 use std::time::Duration;
 
 use claw_core::config::MemoryConfig;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sha2::{Digest, Sha256};
 
-pub(crate) const LOCAL_HASH_MODEL_ID: &str = "local-hash-v2";
-pub(crate) const LOCAL_HASH_DIMS: usize = 24;
-pub(crate) const LOCAL_HASH_VERSION: &str = "local-hash-v2";
+pub(crate) const LOCAL_HASH_MODEL_ID: &str = claw_core::retrieval_embedding::LOCAL_HASH_MODEL_ID;
+pub(crate) const LOCAL_HASH_DIMS: usize = claw_core::retrieval_embedding::LOCAL_HASH_DIMS;
+pub(crate) const LOCAL_HASH_VERSION: &str = claw_core::retrieval_embedding::LOCAL_HASH_VERSION;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct MemoryEmbeddingSpec {
@@ -25,6 +23,8 @@ pub(crate) struct MemoryEmbeddingSpec {
 pub(crate) struct EmbeddingRequestItem {
     pub(crate) request_item_id: String,
     pub(crate) text: String,
+    pub(crate) principal_id: String,
+    pub(crate) purpose: claw_core::retrieval_embedding::EmbeddingPurpose,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -83,13 +83,22 @@ impl MemoryEmbeddingProvider for LocalHashEmbeddingProvider {
         >,
     > {
         Box::pin(async move {
-            Ok(items
+            items
                 .iter()
-                .map(|item| EmbeddingResponseItem {
-                    request_item_id: item.request_item_id.clone(),
-                    vector: embed_text_locally(&item.text),
+                .map(|item| {
+                    let vector = claw_core::retrieval_embedding::embed_local_hash_with_context(
+                        &item.text,
+                        item.purpose,
+                        &item.principal_id,
+                    )
+                    .map_err(|error| provider_error(error.error_code, error.retryable, None, None))?
+                    .vector;
+                    Ok(EmbeddingResponseItem {
+                        request_item_id: item.request_item_id.clone(),
+                        vector,
+                    })
                 })
-                .collect())
+                .collect()
         })
     }
 }
@@ -366,12 +375,13 @@ pub(crate) fn embedding_spec_for_config(cfg: &MemoryConfig) -> MemoryEmbeddingSp
 }
 
 pub(crate) fn local_hash_embedding_spec() -> MemoryEmbeddingSpec {
+    let profile = claw_core::retrieval_embedding::local_hash_profile();
     MemoryEmbeddingSpec {
-        model_id: LOCAL_HASH_MODEL_ID.to_string(),
-        dims: LOCAL_HASH_DIMS,
-        version: LOCAL_HASH_VERSION.to_string(),
-        normalization: "unit_length".to_string(),
-        provider_kind: "local".to_string(),
+        model_id: profile.model_id,
+        dims: profile.dimensions,
+        version: profile.version,
+        normalization: profile.normalization,
+        provider_kind: profile.provider_kind,
     }
 }
 
@@ -383,12 +393,34 @@ pub(crate) fn embed_one_with_config(cfg: &MemoryConfig, text: &str) -> anyhow::R
 }
 
 pub(crate) fn embed_text_locally(text: &str) -> Vec<f32> {
-    embed_text_with_spec(text, &local_hash_embedding_spec())
+    embed_text_locally_for_principal(text, "memory:local")
+        .unwrap_or_else(|_| claw_core::retrieval_embedding::embed_local_hash(text))
+}
+
+pub(crate) fn embed_text_locally_for_principal(
+    text: &str,
+    principal_id: &str,
+) -> Result<Vec<f32>, EmbeddingProviderError> {
+    claw_core::retrieval_embedding::embed_local_hash_with_context(
+        text,
+        claw_core::retrieval_embedding::EmbeddingPurpose::Query,
+        principal_id,
+    )
+    .map(|output| output.vector)
+    .map_err(|error| provider_error(error.error_code, error.retryable, None, None))
 }
 
 fn embed_text_with_spec(text: &str, spec: &MemoryEmbeddingSpec) -> Vec<f32> {
+    if spec.model_id == LOCAL_HASH_MODEL_ID
+        && spec.version == LOCAL_HASH_VERSION
+        && spec.dims == LOCAL_HASH_DIMS
+        && spec.normalization == claw_core::retrieval_embedding::LOCAL_HASH_NORMALIZATION
+    {
+        return claw_core::retrieval_embedding::embed_local_hash(text);
+    }
     let mut vector = vec![0.0_f32; spec.dims];
     for token in tokenize_text(text) {
+        use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         token.hash(&mut hasher);
         let hash = hasher.finish() as usize;
@@ -402,104 +434,7 @@ fn embed_text_with_spec(text: &str, spec: &MemoryEmbeddingSpec) -> Vec<f32> {
 }
 
 pub(crate) fn tokenize_text(text: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut word = String::new();
-    let mut script_run = Vec::new();
-
-    for character in text.chars() {
-        if character.is_alphanumeric() || character == '_' {
-            for lowered in character.to_lowercase() {
-                word.push(lowered);
-            }
-        } else {
-            push_word_token(&mut out, &mut word);
-        }
-
-        if is_multilingual_bigram_character(character) {
-            script_run.push(character);
-        } else {
-            push_script_bigrams(&mut out, &mut script_run);
-        }
-
-        if is_semantic_symbol(character) {
-            out.push(format!("symbol_{:x}", character as u32));
-        }
-    }
-    push_word_token(&mut out, &mut word);
-    push_script_bigrams(&mut out, &mut script_run);
-    push_exact_identifier_tokens(&mut out, text);
-    out.sort();
-    out.dedup();
-    out
-}
-
-fn push_word_token(out: &mut Vec<String>, word: &mut String) {
-    if word.chars().count() >= 2 {
-        out.push(std::mem::take(word));
-    } else {
-        word.clear();
-    }
-}
-
-fn push_script_bigrams(out: &mut Vec<String>, script_run: &mut Vec<char>) {
-    for window in script_run.windows(2) {
-        out.push(window.iter().collect());
-    }
-    script_run.clear();
-}
-
-fn is_multilingual_bigram_character(character: char) -> bool {
-    matches!(
-        character as u32,
-        0x3400..=0x4DBF
-            | 0x4E00..=0x9FFF
-            | 0xF900..=0xFAFF
-            | 0x20000..=0x2FA1F
-            | 0x3040..=0x309F
-            | 0x30A0..=0x30FF
-            | 0x31F0..=0x31FF
-            | 0xFF65..=0xFF9F
-            | 0x1100..=0x11FF
-            | 0x3130..=0x318F
-            | 0xAC00..=0xD7AF
-    )
-}
-
-fn is_semantic_symbol(character: char) -> bool {
-    let codepoint = character as u32;
-    matches!(
-        codepoint,
-        0x1F000..=0x1FAFF | 0x2600..=0x27BF | 0x2300..=0x23FF
-    )
-}
-
-fn push_exact_identifier_tokens(out: &mut Vec<String>, text: &str) {
-    for candidate in text.split_whitespace() {
-        let candidate = candidate.trim_matches(|character: char| {
-            matches!(
-                character,
-                ',' | ';' | '!' | '?' | '(' | ')' | '[' | ']' | '{' | '}'
-            )
-        });
-        let looks_exact = candidate.chars().count() >= 3
-            && (candidate
-                .chars()
-                .any(|character| matches!(character, '/' | '\\' | ':' | '.' | '#' | '@' | '_'))
-                || has_mixed_case(candidate)
-                || looks_like_digest(candidate));
-        if looks_exact {
-            let digest = Sha256::digest(candidate.as_bytes());
-            out.push(format!("exact_{}", hex::encode(&digest[..12])));
-        }
-    }
-}
-
-fn has_mixed_case(candidate: &str) -> bool {
-    candidate.chars().any(char::is_uppercase) && candidate.chars().any(char::is_lowercase)
-}
-
-fn looks_like_digest(candidate: &str) -> bool {
-    candidate.len() >= 12 && candidate.bytes().all(|byte| byte.is_ascii_hexdigit())
+    claw_core::retrieval_embedding::tokenize_retrieval_text(text)
 }
 
 fn normalize_vector(vector: &mut [f32]) {

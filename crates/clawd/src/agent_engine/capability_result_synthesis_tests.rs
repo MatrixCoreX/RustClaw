@@ -4,15 +4,17 @@ use claw_core::capability_result::{
     StructuredError,
 };
 use serde_json::json;
+use sha2::Digest;
 
 use super::{
-    append_user_delivery_artifact_tokens, attach_reviewed_transcript_artifact,
-    attach_unreviewed_transcript_fallback, audio_transcript_label, bounded_result,
+    append_selected_retrieval_citations, append_user_delivery_artifact_tokens,
+    attach_reviewed_transcript_artifact, attach_unreviewed_transcript_fallback,
+    audio_transcript_label, bounded_result, conflicting_evidence_ids_are_valid,
     eligible_for_capability_result_synthesis, has_companion_user_delivery_artifacts,
     normalize_transcript_script_for_language, normalized_transcript_language,
     pending_transcript_review, safe_transcript_filename, scheduled_terminal_step_is_synthesizable,
-    split_transcript_chunks, synthesis_evidence_catalog, transcript_review_contract,
-    FALLBACK_TRANSCRIPT_REVISION_CHUNK_CHARS, MAX_RESULT_JSON_CHARS,
+    selected_evidence_ids_are_valid, split_transcript_chunks, synthesis_evidence_catalog,
+    transcript_review_contract, FALLBACK_TRANSCRIPT_REVISION_CHUNK_CHARS, MAX_RESULT_JSON_CHARS,
 };
 use crate::agent_engine::{AgentRunContext, LoopState};
 
@@ -1433,6 +1435,13 @@ fn result_nine_and_large_result_remain_content_addressed_and_recoverable() {
     let artifact = root.join(relative);
     assert!(artifact.is_file());
     assert_eq!(
+        large["model_projection_sha256"],
+        format!(
+            "{:x}",
+            sha2::Sha256::digest(std::fs::read(&artifact).unwrap())
+        )
+    );
+    assert_eq!(
         large["sha256"],
         results[9].canonical_evidence_identity().sha256
     );
@@ -1445,4 +1454,291 @@ fn result_nine_and_large_result_remain_content_addressed_and_recoverable() {
         );
     }
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn retrieval_evidence_catalog_rejects_forged_ids_and_appends_runtime_citations() {
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    let root = std::env::temp_dir().join(format!(
+        "agent-runtime-retrieval-evidence-catalog-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    state.skill_rt.workspace_root = root.clone();
+    let task = crate::ClaimedTask {
+        claim_attempt: 0,
+        task_id: uuid::Uuid::new_v4().to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: Some("rk-evidence-owner".to_string()),
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let source_ref = "kb://docs/document/chunk-1";
+    let document_digest = "abcdef0123456789abcdef0123456789";
+    {
+        let db = state
+            .core
+            .skill_storage
+            .pool_for("kb")
+            .unwrap()
+            .get()
+            .unwrap();
+        db.execute(
+            "INSERT INTO kb_namespaces (
+                owner_user_key, namespace, updated_at_epoch, next_chunk_seq,
+                revision, parser_version, chunker_version, embedding_version
+             ) VALUES (?1, 'docs', 1, 2, 4, 'fixture', 'fixture', 'local-hash-v3')",
+            ["rk-evidence-owner"],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO kb_documents (
+                owner_user_key, namespace, path, file_type, mtime_epoch,
+                size_bytes, chunk_count, content_sha256, parser_version, chunker_version
+             ) VALUES (?1, 'docs', 'guide.md', 'md', 1, 12, 1, ?2, 'fixture', 'fixture')",
+            rusqlite::params!["rk-evidence-owner", document_digest],
+        )
+        .unwrap();
+    }
+    let evidence_id =
+        claw_core::retrieval_embedding::retrieval_evidence_id(source_ref, document_digest, 4);
+    let result = CapabilityResultEnvelope::ok(
+        "kb.search",
+        Some("search".to_string()),
+        json!({
+            "hits": [{
+                "schema_version": 2,
+                "evidence_id": evidence_id,
+                "source_ref": source_ref,
+                "namespace": "docs",
+                "namespace_revision": 4,
+                "document_id": "document",
+                "document_digest": document_digest,
+                "chunk_id": "chunk-1",
+                "chunk_ids": ["chunk-1"],
+                "location": {
+                    "path":"guide.md",
+                    "offset":0,
+                    "page":4,
+                    "section_path":["Install", "Linux"]
+                },
+                "instruction_authority": "none",
+                "text": "grounded fact"
+            }]
+        }),
+    );
+    let catalog = synthesis_evidence_catalog(&state, &task, std::slice::from_ref(&result)).unwrap();
+    assert_eq!(
+        catalog["entries"][0]["retrieval_evidence"][0]["evidence_id"],
+        evidence_id
+    );
+    assert_eq!(
+        catalog["entries"][0]["retrieval_evidence"][0]["source_class"],
+        "knowledge_base_document"
+    );
+    assert_eq!(
+        catalog["source_layers"]["model_general_knowledge"],
+        "not_evidence"
+    );
+    assert_eq!(
+        catalog["entries"][0]["retrieval_evidence"][0]["location"]["page"],
+        4
+    );
+    assert_eq!(
+        catalog["entries"][0]["retrieval_evidence"][0]["location"]["section_path"],
+        json!(["Install", "Linux"])
+    );
+    assert!(selected_evidence_ids_are_valid(
+        &catalog,
+        std::slice::from_ref(&evidence_id)
+    ));
+    assert!(!selected_evidence_ids_are_valid(
+        &catalog,
+        &["evidence:sha256:forged".to_string()]
+    ));
+    assert!(!selected_evidence_ids_are_valid(&catalog, &[]));
+    assert!(!selected_evidence_ids_are_valid(
+        &catalog,
+        &[result.canonical_evidence_identity().evidence_id]
+    ));
+    let cited = append_selected_retrieval_citations(
+        "Grounded answer.".to_string(),
+        &catalog,
+        std::slice::from_ref(&evidence_id),
+    );
+    assert!(cited.ends_with("[kb://docs/document/chunk-1]"));
+
+    {
+        let db = state
+            .core
+            .skill_storage
+            .pool_for("kb")
+            .unwrap()
+            .get()
+            .unwrap();
+        db.execute(
+            "UPDATE kb_namespaces SET revision = 5
+             WHERE owner_user_key = 'rk-evidence-owner' AND namespace = 'docs'",
+            [],
+        )
+        .unwrap();
+    }
+    let stale_catalog =
+        synthesis_evidence_catalog(&state, &task, std::slice::from_ref(&result)).unwrap();
+    assert_eq!(
+        stale_catalog["entries"][0]["stale_retrieval_evidence_count"],
+        1
+    );
+    assert!(stale_catalog["entries"][0]["retrieval_evidence"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(stale_catalog["selectable_evidence_ids"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(stale_catalog["entries"][0]["model_view"]
+        .pointer("/result/data/hits")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(Vec::is_empty));
+
+    let oversized_stale_result = CapabilityResultEnvelope::ok(
+        "kb.search",
+        Some("search".to_string()),
+        json!({
+            "hits": [{
+                "schema_version": 2,
+                "evidence_id": evidence_id,
+                "source_ref": source_ref,
+                "namespace": "docs",
+                "namespace_revision": 4,
+                "document_id": "document",
+                "document_digest": document_digest,
+                "chunk_id": "chunk-1",
+                "chunk_ids": ["chunk-1"],
+                "location": {"path":"guide.md","offset":0},
+                "instruction_authority": "none",
+                "text": "grounded fact"
+            }],
+            "unrelated_large_result": "x".repeat(256_000)
+        }),
+    );
+    let oversized_stale_catalog =
+        synthesis_evidence_catalog(&state, &task, std::slice::from_ref(&oversized_stale_result))
+            .unwrap();
+    let model_view = &oversized_stale_catalog["entries"][0]["model_view"];
+    assert_eq!(model_view["complete"], false);
+    let relative = model_view["continuation"]["range_handle"]["path"]
+        .as_str()
+        .unwrap();
+    let projected_artifact = std::fs::read_to_string(root.join(relative)).unwrap();
+    assert!(!projected_artifact.contains(source_ref));
+    assert!(!projected_artifact.contains("grounded fact"));
+
+    {
+        let db = state
+            .core
+            .skill_storage
+            .pool_for("kb")
+            .unwrap()
+            .get()
+            .unwrap();
+        db.execute(
+            "UPDATE kb_namespaces SET revision = 4
+             WHERE owner_user_key = 'rk-evidence-owner' AND namespace = 'docs'",
+            [],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO kb_documents (
+                owner_user_key, namespace, path, file_type, mtime_epoch,
+                size_bytes, chunk_count, content_sha256, parser_version, chunker_version
+             ) VALUES (?1, 'docs', '/private/owner/secret.md', 'md', 1, 12, 1, ?2, 'fixture', 'fixture')",
+            rusqlite::params!["rk-evidence-owner", document_digest],
+        )
+        .unwrap();
+    }
+    let absolute_source_ref = "kb://docs/document/chunk-absolute";
+    let absolute_evidence_id = claw_core::retrieval_embedding::retrieval_evidence_id(
+        absolute_source_ref,
+        document_digest,
+        4,
+    );
+    let absolute_path_result = CapabilityResultEnvelope::ok(
+        "kb.search",
+        Some("search".to_string()),
+        json!({"hits": [{
+            "schema_version": 2,
+            "evidence_id": absolute_evidence_id,
+            "source_ref": absolute_source_ref,
+            "namespace": "docs",
+            "namespace_revision": 4,
+            "document_id": "document",
+            "document_digest": document_digest,
+            "chunk_id": "chunk-absolute",
+            "chunk_ids": ["chunk-absolute"],
+            "location": {"path":"/private/owner/secret.md","offset":0},
+            "instruction_authority": "none",
+            "text": "private path fact"
+        }]}),
+    );
+    let absolute_path_catalog =
+        synthesis_evidence_catalog(&state, &task, std::slice::from_ref(&absolute_path_result))
+            .unwrap();
+    assert!(absolute_path_catalog["selectable_evidence_ids"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(!absolute_path_catalog.to_string().contains("/private/owner"));
+
+    let mut other_tenant_task = task.clone();
+    other_tenant_task.user_key = Some("rk-other-owner".to_string());
+    let cross_tenant_catalog =
+        synthesis_evidence_catalog(&state, &other_tenant_task, std::slice::from_ref(&result))
+            .unwrap();
+    assert_eq!(
+        cross_tenant_catalog["entries"][0]["stale_retrieval_evidence_count"],
+        1
+    );
+    assert!(cross_tenant_catalog["selectable_evidence_ids"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn conflict_evidence_requires_two_unique_selected_retrieval_sources() {
+    let catalog = json!({
+        "entries": [{
+            "retrieval_evidence": [
+                {"evidence_id":"evidence:a","source_ref":"kb://docs/a/1"},
+                {"evidence_id":"evidence:b","source_ref":"kb://docs/b/1"}
+            ]
+        }]
+    });
+    let selected = vec!["evidence:a".to_string(), "evidence:b".to_string()];
+
+    assert!(conflicting_evidence_ids_are_valid(
+        &catalog, &selected, &selected
+    ));
+    assert!(!conflicting_evidence_ids_are_valid(
+        &catalog,
+        &selected,
+        &["evidence:a".to_string()]
+    ));
+    assert!(!conflicting_evidence_ids_are_valid(
+        &catalog,
+        &selected,
+        &["evidence:a".to_string(), "evidence:a".to_string()]
+    ));
+    assert!(!conflicting_evidence_ids_are_valid(
+        &catalog,
+        &["evidence:a".to_string()],
+        &selected
+    ));
 }

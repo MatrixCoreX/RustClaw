@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 
 pub(super) const CRYPTO_SCHEMA_VERSION: i64 = 1;
-pub(super) const KB_SCHEMA_VERSION: i64 = 3;
+pub(super) const KB_SCHEMA_VERSION: i64 = 7;
 
 pub(super) fn ensure_crypto_schema(db: &Connection) -> anyhow::Result<()> {
     ensure_common_schema(db, "crypto", CRYPTO_SCHEMA_VERSION)?;
@@ -48,6 +48,7 @@ pub(super) fn ensure_kb_schema(db: &Connection) -> anyhow::Result<()> {
             parser_version  TEXT NOT NULL,
             chunker_version TEXT NOT NULL,
             embedding_version TEXT NOT NULL,
+            active_vector_generation INTEGER,
             PRIMARY KEY(owner_user_key, namespace)
         );
         CREATE INDEX IF NOT EXISTS idx_kb_namespaces_owner_updated
@@ -81,6 +82,8 @@ pub(super) fn ensure_kb_schema(db: &Connection) -> anyhow::Result<()> {
             text_sha256 TEXT NOT NULL,
             len_tokens INTEGER NOT NULL,
             mtime_epoch INTEGER NOT NULL,
+            content_kind TEXT NOT NULL DEFAULT 'plain_text',
+            location_json TEXT NOT NULL DEFAULT '{}',
             PRIMARY KEY(owner_user_key, namespace, chunk_id),
             FOREIGN KEY(owner_user_key, namespace, document_path)
                 REFERENCES kb_documents(owner_user_key, namespace, path)
@@ -102,13 +105,97 @@ pub(super) fn ensure_kb_schema(db: &Connection) -> anyhow::Result<()> {
             PRIMARY KEY(owner_user_key, job_id)
         );
         CREATE INDEX IF NOT EXISTS idx_kb_ingest_jobs_owner_status_updated
-        ON kb_ingest_jobs(owner_user_key, status, updated_at_epoch DESC);",
+        ON kb_ingest_jobs(owner_user_key, status, updated_at_epoch DESC);
+        CREATE TABLE IF NOT EXISTS kb_embedding_profiles (
+            profile_id TEXT PRIMARY KEY,
+            provider_kind TEXT NOT NULL,
+            model_id TEXT NOT NULL,
+            dimensions INTEGER NOT NULL,
+            normalization TEXT NOT NULL,
+            profile_version TEXT NOT NULL,
+            cross_language_semantic INTEGER NOT NULL,
+            config_digest TEXT NOT NULL,
+            created_at_epoch INTEGER NOT NULL,
+            updated_at_epoch INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS kb_vector_generations (
+            owner_user_key TEXT NOT NULL,
+            namespace TEXT NOT NULL,
+            generation INTEGER NOT NULL,
+            profile_id TEXT NOT NULL,
+            namespace_revision INTEGER NOT NULL,
+            state TEXT NOT NULL,
+            cursor_chunk_id TEXT,
+            expected_rows INTEGER NOT NULL,
+            indexed_rows INTEGER NOT NULL,
+            source_digest TEXT NOT NULL,
+            projection_digest TEXT NOT NULL,
+            created_at_epoch INTEGER NOT NULL,
+            updated_at_epoch INTEGER NOT NULL,
+            activated_at_epoch INTEGER,
+            PRIMARY KEY(owner_user_key, namespace, generation)
+        );
+        CREATE TABLE IF NOT EXISTS kb_vector_projection (
+            owner_user_key TEXT NOT NULL,
+            namespace TEXT NOT NULL,
+            generation INTEGER NOT NULL,
+            chunk_id TEXT NOT NULL,
+            profile_id TEXT NOT NULL,
+            dimensions INTEGER NOT NULL,
+            content_digest TEXT NOT NULL,
+            vector_json TEXT NOT NULL,
+            updated_at_epoch INTEGER NOT NULL,
+            PRIMARY KEY(owner_user_key, namespace, generation, chunk_id)
+        );
+        CREATE TABLE IF NOT EXISTS kb_vector_ann_projection (
+            owner_user_key TEXT NOT NULL,
+            namespace TEXT NOT NULL,
+            generation INTEGER NOT NULL,
+            chunk_id TEXT NOT NULL,
+            profile_id TEXT NOT NULL,
+            projection_version TEXT NOT NULL,
+            band INTEGER NOT NULL,
+            bucket INTEGER NOT NULL,
+            PRIMARY KEY(owner_user_key, namespace, generation, chunk_id, band)
+        );
+        CREATE INDEX IF NOT EXISTS idx_kb_vector_ann_bucket
+        ON kb_vector_ann_projection(
+            owner_user_key, namespace, generation, profile_id,
+            projection_version, band, bucket, chunk_id
+        );
+        CREATE INDEX IF NOT EXISTS idx_kb_vector_ann_owner_bucket
+        ON kb_vector_ann_projection(
+            owner_user_key, profile_id, projection_version, band, bucket,
+            namespace, generation, chunk_id
+        );",
     )?;
+    if !table_has_column(db, "kb_namespaces", "active_vector_generation")? {
+        db.execute(
+            "ALTER TABLE kb_namespaces ADD COLUMN active_vector_generation INTEGER",
+            [],
+        )?;
+    }
+    if !table_has_column(db, "kb_chunks", "content_kind")? {
+        db.execute(
+            "ALTER TABLE kb_chunks ADD COLUMN content_kind TEXT NOT NULL DEFAULT 'plain_text'",
+            [],
+        )?;
+    }
+    if !table_has_column(db, "kb_chunks", "location_json")? {
+        db.execute(
+            "ALTER TABLE kb_chunks ADD COLUMN location_json TEXT NOT NULL DEFAULT '{}'",
+            [],
+        )?;
+    }
     integrity_check(db, "kb")
 }
 
 fn ensure_kb_retrieval_schema(db: &Connection) -> anyhow::Result<()> {
-    db.execute_batch(
+    use claw_core::retrieval_embedding::{
+        LOCAL_HASH_DIMS, LOCAL_HASH_MODEL_ID, LOCAL_HASH_VERSION,
+    };
+
+    db.execute_batch(&format!(
         "CREATE TABLE IF NOT EXISTS memory_retrieval_index (
             id                INTEGER PRIMARY KEY AUTOINCREMENT,
             source_kind       TEXT NOT NULL,
@@ -124,10 +211,10 @@ fn ensure_kb_retrieval_schema(db: &Connection) -> anyhow::Result<()> {
             trigger_text      TEXT,
             topic_tags        TEXT NOT NULL DEFAULT '',
             vector_json       TEXT NOT NULL DEFAULT '[]',
-            embedding_model   TEXT NOT NULL DEFAULT 'local-hash-v1',
-            embedding_dims    INTEGER NOT NULL DEFAULT 24,
-            embedding_version TEXT NOT NULL DEFAULT 'local-hash-v1',
-            metadata_json     TEXT NOT NULL DEFAULT '{}',
+            embedding_model   TEXT NOT NULL DEFAULT '{LOCAL_HASH_MODEL_ID}',
+            embedding_dims    INTEGER NOT NULL DEFAULT {LOCAL_HASH_DIMS},
+            embedding_version TEXT NOT NULL DEFAULT '{LOCAL_HASH_VERSION}',
+            metadata_json     TEXT NOT NULL DEFAULT '{{}}',
             salience          REAL NOT NULL DEFAULT 0.5,
             success_state     TEXT NOT NULL DEFAULT 'neutral',
             tool_or_skill_name TEXT,
@@ -137,8 +224,8 @@ fn ensure_kb_retrieval_schema(db: &Connection) -> anyhow::Result<()> {
         CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_retrieval_source_identity
         ON memory_retrieval_index(user_key, source_ref);
         CREATE INDEX IF NOT EXISTS idx_kb_retrieval_scope_updated
-        ON memory_retrieval_index(user_key, updated_at_ts DESC);",
-    )?;
+        ON memory_retrieval_index(user_key, updated_at_ts DESC);"
+    ))?;
     let _ = db.execute_batch(
         "CREATE VIRTUAL TABLE IF NOT EXISTS memory_retrieval_index_fts
          USING fts5(search_text, topic_tags);",
@@ -180,7 +267,7 @@ fn ensure_common_schema(
         "INSERT INTO skill_storage_metadata (skill_name, schema_version)
          VALUES (?1, ?2)
          ON CONFLICT(skill_name) DO UPDATE SET
-             schema_version = excluded.schema_version,
+             schema_version = MAX(skill_storage_metadata.schema_version, excluded.schema_version),
              updated_at = CURRENT_TIMESTAMP",
         rusqlite::params![skill_name, schema_version],
     )?;

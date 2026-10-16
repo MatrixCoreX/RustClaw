@@ -64,10 +64,14 @@ async fn mock_http_success_is_deterministic_and_index_aligned() {
         EmbeddingRequestItem {
             request_item_id: "first".to_string(),
             text: "alpha".to_string(),
+            principal_id: "user:test".to_string(),
+            purpose: claw_core::retrieval_embedding::EmbeddingPurpose::Document,
         },
         EmbeddingRequestItem {
             request_item_id: "second".to_string(),
             text: "beta".to_string(),
+            principal_id: "user:test".to_string(),
+            purpose: claw_core::retrieval_embedding::EmbeddingPurpose::Document,
         },
     ];
     let response = provider.embed_batch(&request).await.unwrap();
@@ -112,6 +116,8 @@ async fn mock_http_rate_limit_server_error_redirect_and_timeout_are_structured()
             .embed_batch(&[EmbeddingRequestItem {
                 request_item_id: "fixture".to_string(),
                 text: "fixture".to_string(),
+                principal_id: "user:test".to_string(),
+                purpose: claw_core::retrieval_embedding::EmbeddingPurpose::Query,
             }])
             .await
             .unwrap_err();
@@ -127,6 +133,8 @@ async fn local_hash_embedding_provider_is_stable() {
     let items = vec![EmbeddingRequestItem {
         request_item_id: "item-1".to_string(),
         text: "以后默认用中文回复".to_string(),
+        principal_id: "user:test".to_string(),
+        purpose: claw_core::retrieval_embedding::EmbeddingPurpose::Document,
     }];
     let first = provider.embed_batch(&items).await.expect("first embed");
     let second = provider.embed_batch(&items).await.expect("second embed");
@@ -138,7 +146,7 @@ async fn local_hash_embedding_provider_is_stable() {
 }
 
 #[test]
-fn tokenizer_v2_covers_long_multilingual_text_symbols_and_exact_identifiers() {
+fn tokenizer_v3_covers_long_multilingual_text_symbols_and_exact_identifiers() {
     let tokens = tokenize_text("天地玄黄宇宙洪荒日月盈昃辰宿列张寒来暑往秋收冬藏");
     assert!(tokens.contains(&"天地".to_string()));
     assert!(tokens.contains(&"冬藏".to_string()));
@@ -192,6 +200,8 @@ async fn mock_provider_obeys_the_configured_profile_contract() {
         .embed_batch(&[EmbeddingRequestItem {
             request_item_id: "fixture".to_string(),
             text: "多语言 fixture 🧠".to_string(),
+            principal_id: "user:test".to_string(),
+            purpose: claw_core::retrieval_embedding::EmbeddingPurpose::Document,
         }])
         .await
         .expect("mock embedding");
@@ -230,6 +240,8 @@ fn remote_response_validation_rejects_count_dimension_and_non_finite_values() {
     let requests = vec![EmbeddingRequestItem {
         request_item_id: "stable-item".to_string(),
         text: "fixture".to_string(),
+        principal_id: "user:test".to_string(),
+        purpose: claw_core::retrieval_embedding::EmbeddingPurpose::Query,
     }];
     let spec = super::MemoryEmbeddingSpec {
         model_id: "fixture-model".to_string(),

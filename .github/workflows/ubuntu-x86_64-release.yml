@@ -136,6 +136,8 @@ jobs:
           python3 scripts/check_polyglot_skill_contracts.py --self-test
           python3 scripts/check_polyglot_skill_contracts.py --require-all
           python3 scripts/check_on_demand_skill_builds.py
+          python3 scripts/check_rag_contracts.py --self-test
+          python3 scripts/check_rag_contracts.py
 
       - name: Prepare locked browser skill runtime assets
         run: npm ci --ignore-scripts --prefix crates/skills/browser_web
@@ -167,8 +169,14 @@ jobs:
           signing_key="${RUNNER_TEMP}/release-signing-key"
           printf '%s\n' "${RELEASE_SIGNING_KEY}" > "${signing_key}"
           chmod 600 "${signing_key}"
+          python_runtime_root="${pythonLocation:?setup-python did not expose pythonLocation}"
+          node_runtime_root="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve().parent.parent)' "$(command -v node)")"
+          [[ -x "${python_runtime_root}/bin/python3" ]]
+          [[ -x "${node_runtime_root}/bin/node" ]]
           mkdir -p dist-release
           APP_RELEASE_BIN_DIR="$PWD/target/release" \
+            APP_RELEASE_PYTHON_RUNTIME_ROOT="${python_runtime_root}" \
+            APP_RELEASE_NODE_RUNTIME_ROOT="${node_runtime_root}" \
             APP_PACKAGE_TARGET="x86_64-unknown-linux-gnu" \
             APP_RELEASE_COMMIT="${GITHUB_SHA}" \
             APP_RELEASE_INSTALL_ALL_BUNDLED_SKILLS=1 \

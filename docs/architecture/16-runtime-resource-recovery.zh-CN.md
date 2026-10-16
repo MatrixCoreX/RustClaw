@@ -5,7 +5,8 @@
 
 <!-- ai-learning-navigation:start -->
 上一页：[AiAPP 开发手册](15-aipp-development-guide.zh-CN.md) |
-[架构索引](README.md)
+[架构索引](README.md) |
+下一页：[RAG 知识检索](17-rag-knowledge-retrieval.zh-CN.md)
 <!-- ai-learning-navigation:end -->
 
 运行时使用一套宿主拥有的资源策略，统一约束工具、进程型技能、浏览器、本地模型、持久任务和

@@ -334,11 +334,15 @@ async fn execute_embedding_batch(
             requests.push(EmbeddingRequestItem {
                 request_item_id: job.request_item_id.clone(),
                 text: safe,
+                principal_id: job.principal_id.clone(),
+                purpose: claw_core::retrieval_embedding::EmbeddingPurpose::Document,
             });
         } else {
             requests.push(EmbeddingRequestItem {
                 request_item_id: job.request_item_id.clone(),
                 text,
+                principal_id: job.principal_id.clone(),
+                purpose: claw_core::retrieval_embedding::EmbeddingPurpose::Document,
             });
         }
     }

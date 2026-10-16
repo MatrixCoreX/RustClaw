@@ -25,6 +25,8 @@ pub const CHUNK_BYTES: usize = 64 * 1024;
 pub mod application;
 #[cfg(target_os = "android")]
 pub mod android;
+#[cfg(all(feature = "gui", unix))]
+pub mod bundled_runtime;
 #[cfg(all(target_os = "android", feature = "gui"))]
 #[tauri::mobile_entry_point]
 fn run() {

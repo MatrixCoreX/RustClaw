@@ -6,9 +6,49 @@ import {
   agentFlowTimelineRows,
   flowStageMachineTokens,
   flowSummaryMachineTokens,
+  memoryTraceEvidenceRows,
   modelCatalogTraceMachineTokens,
   resumeTraceMachineTokens,
 } from "./task-llm-trace";
+
+test("projects memory trace into source-only teaching rows", () => {
+  const rows = memoryTraceEvidenceRows({
+    recalled: [
+      {
+        source_kind: "knowledge_doc",
+        source_ref: "kb://manual/document/chunk",
+        score: 0.91,
+        included: true,
+        reason: "hybrid_retrieval",
+        text: "private document body must not be projected",
+      },
+      {
+        source_kind: "fact",
+        source_ref: "fact:ignored",
+        score: 0.4,
+        included: false,
+      },
+    ],
+  });
+
+  assert.deepEqual(rows, [
+    {
+      sourceKind: "knowledge_doc",
+      sourceRef: "kb://manual/document/chunk",
+      score: 0.91,
+      reason: "hybrid_retrieval",
+    },
+  ]);
+  assert.equal(JSON.stringify(rows).includes("private document body"), false);
+});
+
+test("rejects malformed memory trace teaching rows", () => {
+  assert.deepEqual(memoryTraceEvidenceRows(null), []);
+  assert.deepEqual(
+    memoryTraceEvidenceRows({ recalled: [{ included: true, source_kind: "knowledge_doc" }] }),
+    [],
+  );
+});
 
 test("builds task flow summary machine tokens", () => {
   const tokens = flowSummaryMachineTokens({

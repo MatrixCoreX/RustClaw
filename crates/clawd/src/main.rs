@@ -625,13 +625,14 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
     let config_path = resolve_startup_config_path()?;
     let config = AppConfig::load(&config_path)?;
     providers::error_rules::initialize(&config_path)?;
+    let workspace_root = std::env::current_dir()?;
+    let memory_runtime = load_memory_runtime_config(&workspace_root, &config.memory);
     let runtime_concurrency = resource_scheduler::runtime_concurrency_plan(
         config.worker.concurrency,
         config.skills.skill_max_concurrency,
-        config.memory.background_job_concurrency,
+        memory_runtime.background_job_concurrency,
         config.skills.runner_warm_pool_enabled,
     );
-    let workspace_root = std::env::current_dir()?;
     let resource_estimate_store = claw_core::workspace_state::workspace_state_root(&workspace_root)
         .join("resource-estimates-v1.json");
     let resource_broker = crate::resource_scheduler::ResourceBroker::new(
@@ -644,7 +645,7 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
         effective_workers = runtime_concurrency.worker_concurrency,
         configured_skill_concurrency = config.skills.skill_max_concurrency,
         effective_skill_concurrency = runtime_concurrency.skill_concurrency,
-        configured_memory_background = config.memory.background_job_concurrency,
+        configured_memory_background = memory_runtime.background_job_concurrency,
         effective_memory_background = runtime_concurrency.memory_background_concurrency,
         configured_runner_warm_pool = config.skills.runner_warm_pool_enabled,
         effective_runner_warm_pool = runtime_concurrency.runner_warm_pool_enabled,
@@ -782,13 +783,13 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
         memory::scope::ensure_memory_scope_schema(&db)?;
         memory::jobs::ensure_memory_job_schema(&db)?;
         memory::ux::ensure_memory_ux_schema(&db)?;
-        memory::embedding_jobs::initialize_embedding_runtime(&db, &config.memory)?;
+        memory::embedding_jobs::initialize_embedding_runtime(&db, &memory_runtime)?;
         task_context_builder::context_compaction_lifecycle::ensure_context_compaction_lifecycle_schema(&db)?;
-        if config.memory.hybrid_recall_enabled
-            && (config.memory.reindex_on_startup
+        if memory_runtime.hybrid_recall_enabled
+            && (memory_runtime.reindex_on_startup
                 || memory::indexing::retrieval_index_is_empty(&db).unwrap_or(true))
         {
-            memory::indexing::rebuild_retrieval_index(&db, &config.memory)?;
+            memory::indexing::rebuild_retrieval_index(&db, &memory_runtime)?;
         }
     }
     let bootstrap_admin = {
@@ -926,7 +927,6 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
         );
     }
 
-    let memory_runtime = load_memory_runtime_config(&workspace_root, &config.memory);
     let command_intent = load_command_intent_runtime(&config.command_intent);
     let schedule = load_schedule_runtime(
         &workspace_root,

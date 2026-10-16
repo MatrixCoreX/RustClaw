@@ -59,15 +59,35 @@ if [[ -z "$HOST_RUST_TARGET" ]]; then
 fi
 APP_PACKAGE_TARGET="${APP_PACKAGE_TARGET:-$HOST_RUST_TARGET}"
 INSTALL_ALL_BUNDLED_SKILLS="${APP_RELEASE_INSTALL_ALL_BUNDLED_SKILLS:-0}"
+RELEASE_PYTHON_RUNTIME_ROOT="${APP_RELEASE_PYTHON_RUNTIME_ROOT:-}"
+RELEASE_NODE_RUNTIME_ROOT="${APP_RELEASE_NODE_RUNTIME_ROOT:-}"
+RELEASE_HOST_TOOLS_ROOT="${APP_RELEASE_HOST_TOOLS_ROOT:-}"
 if [[ "$INSTALL_ALL_BUNDLED_SKILLS" == "1" ]]; then
   [[ "$APP_PACKAGE_TARGET" == "$HOST_RUST_TARGET" ]] || {
     echo "A full bundled-skill Release must be packaged on its native target: host=$HOST_RUST_TARGET target=$APP_PACKAGE_TARGET" >&2
     exit 1
   }
-  [[ "$APP_PACKAGE_TARGET" == *-linux-* ]] || {
-    echo "Full bundled-skill installation is currently supported only by Linux Release packages." >&2
+  case "$APP_PACKAGE_TARGET" in
+    *-linux-*|*-apple-darwin) ;;
+    *)
+      echo "Full bundled-skill installation is supported only by native Linux and macOS Release packages." >&2
+      exit 1
+      ;;
+  esac
+  [[ -n "$RELEASE_PYTHON_RUNTIME_ROOT" ]] || {
+    echo "Full bundled-skill Release requires APP_RELEASE_PYTHON_RUNTIME_ROOT." >&2
     exit 1
   }
+  [[ -n "$RELEASE_NODE_RUNTIME_ROOT" ]] || {
+    echo "Full bundled-skill Release requires APP_RELEASE_NODE_RUNTIME_ROOT." >&2
+    exit 1
+  }
+  if [[ "$APP_PACKAGE_TARGET" == *-apple-darwin ]]; then
+    [[ -n "$RELEASE_HOST_TOOLS_ROOT" ]] || {
+      echo "Full macOS bundled-skill Release requires APP_RELEASE_HOST_TOOLS_ROOT." >&2
+      exit 1
+    }
+  fi
 fi
 BUILD_EXCLUDED_PACKAGES="$(
   python3 "$SCRIPT_DIR/scripts/skill_store_packages.py" \
@@ -146,6 +166,44 @@ copy_if_exists() {
   else
     echo "Warning: skip missing path: $rel"
   fi
+}
+
+copy_bundled_runtime() {
+  local source="$1"
+  local name="$2"
+  local required_relative="$3"
+  local resolved=""
+  resolved="$(python3 - "$source" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1]).expanduser().resolve(strict=True)
+if not path.is_dir():
+    raise SystemExit("bundled runtime root is not a directory")
+print(path)
+PY
+  )"
+  [[ -x "$resolved/$required_relative" ]] || {
+    echo "Bundled $name runtime is incomplete: $resolved/$required_relative" >&2
+    exit 1
+  }
+  local destination="$STAGE_PROJECT_DIR/prebuilt/toolchains/$name"
+  python3 - "$resolved" "$destination" <<'PY'
+from pathlib import Path
+import shutil
+import sys
+
+source = Path(sys.argv[1])
+destination = Path(sys.argv[2])
+shutil.copytree(source, destination, symlinks=False, dirs_exist_ok=True)
+links = [path for path in destination.rglob("*") if path.is_symlink()]
+if links:
+    raise SystemExit(f"bundled runtime still contains symlinks: {links[0]}")
+PY
+  [[ -x "$destination/$required_relative" ]] || {
+    echo "Bundled $name runtime was not copied correctly." >&2
+    exit 1
+  }
 }
 
 prune_staged_receipt_versions() {
@@ -229,6 +287,25 @@ copy_if_exists "stop-agent.sh"
 copy_if_exists "install-agent-cmd.sh"
 copy_if_exists "deploy-github-release.sh"
 copy_if_exists "install-latest-release.sh"
+if [[ "$INSTALL_ALL_BUNDLED_SKILLS" == "1" ]]; then
+  copy_bundled_runtime "$RELEASE_PYTHON_RUNTIME_ROOT" python "bin/python3"
+  copy_bundled_runtime "$RELEASE_NODE_RUNTIME_ROOT" node "bin/node"
+  "$STAGE_PROJECT_DIR/prebuilt/toolchains/python/bin/python3" -I -c \
+    'import json, tomllib; print(json.dumps({"runtime":"python"}))' >/dev/null
+  "$STAGE_PROJECT_DIR/prebuilt/toolchains/node/bin/node" \
+    -e 'JSON.stringify({runtime:"node"})'
+  if [[ -n "$RELEASE_HOST_TOOLS_ROOT" ]]; then
+    copy_bundled_runtime "$RELEASE_HOST_TOOLS_ROOT" host "bin/ffmpeg"
+    for tool in git ffmpeg ffprobe tesseract chromium whisper-cli; do
+      [[ -x "$STAGE_PROJECT_DIR/prebuilt/toolchains/host/bin/$tool" ]] || {
+        echo "Bundled macOS skill dependency is incomplete: $tool" >&2
+        exit 1
+      }
+    done
+    [[ -f "$STAGE_PROJECT_DIR/prebuilt/toolchains/host/share/tessdata/chi_sim.traineddata" ]]
+    [[ -f "$STAGE_PROJECT_DIR/prebuilt/toolchains/host/models/whisper/ggml-base.bin" ]]
+  fi
+fi
 while IFS= read -r manifest_path; do
   [[ -n "$manifest_path" ]] || continue
   case "$manifest_path" in

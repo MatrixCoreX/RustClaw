@@ -19,6 +19,13 @@ export interface AgentFlowTimelineRow {
   providerErrorCount: number;
 }
 
+export interface MemoryTraceEvidenceRow {
+  sourceKind: string;
+  sourceRef: string;
+  score: number | null;
+  reason: string | null;
+}
+
 function compactValue(value: string | number | boolean | null | undefined): string | null {
   if (value == null) return null;
   const text = String(value).trim();
@@ -29,6 +36,33 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+export function memoryTraceEvidenceRows(trace: unknown): MemoryTraceEvidenceRow[] {
+  const record = asRecord(trace);
+  const recalled = record && Array.isArray(record.recalled) ? record.recalled : [];
+  return recalled.flatMap((item) => {
+    const evidence = asRecord(item);
+    if (!evidence || evidence.included !== true) return [];
+    const sourceKind = compactValue(
+      evidence.source_kind as string | number | boolean | null | undefined,
+    );
+    const sourceRef = compactValue(
+      evidence.source_ref as string | number | boolean | null | undefined,
+    );
+    if (!sourceKind || !sourceRef) return [];
+    const score = typeof evidence.score === "number" && Number.isFinite(evidence.score)
+      ? evidence.score
+      : null;
+    return [{
+      sourceKind,
+      sourceRef,
+      score,
+      reason: compactValue(
+        evidence.reason as string | number | boolean | null | undefined,
+      ),
+    }];
+  });
 }
 
 function traceToken(record: Record<string, unknown>, key: string): string | null {

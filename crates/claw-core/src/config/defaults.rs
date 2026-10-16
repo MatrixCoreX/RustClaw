@@ -283,7 +283,7 @@ pub(super) fn default_memory_route_trigger_budget_chars() -> usize {
 }
 
 pub(super) fn default_memory_embedding_model() -> String {
-    "local-hash-v2".to_string()
+    crate::retrieval_embedding::LOCAL_HASH_MODEL_ID.to_string()
 }
 
 pub(super) fn default_memory_embedding_dims() -> usize {
@@ -291,7 +291,7 @@ pub(super) fn default_memory_embedding_dims() -> usize {
 }
 
 pub(super) fn default_memory_embedding_version() -> String {
-    "local-hash-v2".to_string()
+    crate::retrieval_embedding::LOCAL_HASH_VERSION.to_string()
 }
 
 pub(super) fn default_memory_embedding_batch_size() -> usize {
