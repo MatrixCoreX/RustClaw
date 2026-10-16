@@ -52,11 +52,36 @@ mkdir -p "$STAGING_DIR" "$(dirname "$OUTPUT_DMG")"
 ditto "$APP_BUNDLE" "$STAGING_DIR/$APP_BUNDLE_NAME"
 ln -s /Applications "$STAGING_DIR/Applications"
 rm -f "$OUTPUT_DMG"
-hdiutil create \
-  -volname "$APP_DISPLAY_NAME" \
-  -srcfolder "$STAGING_DIR" \
-  -ov \
-  -format UDZO \
-  "$OUTPUT_DMG"
+DMG_CREATE_ATTEMPTS="${APP_DMG_CREATE_ATTEMPTS:-4}"
+case "$DMG_CREATE_ATTEMPTS" in
+  ''|*[!0-9]*|0)
+    echo "APP_DMG_CREATE_ATTEMPTS must be a positive integer." >&2
+    exit 2
+    ;;
+esac
+
+dmg_created=0
+for ((attempt = 1; attempt <= DMG_CREATE_ATTEMPTS; attempt++)); do
+  rm -f "$OUTPUT_DMG" "$OUTPUT_DMG".*
+  sync
+  if hdiutil create \
+    -volname "$APP_DISPLAY_NAME" \
+    -srcfolder "$STAGING_DIR" \
+    -ov \
+    -format UDZO \
+    "$OUTPUT_DMG"; then
+    dmg_created=1
+    break
+  fi
+  if ((attempt < DMG_CREATE_ATTEMPTS)); then
+    delay=$((attempt * 5))
+    echo "DMG creation attempt ${attempt}/${DMG_CREATE_ATTEMPTS} failed; retrying in ${delay}s." >&2
+    sleep "$delay"
+  fi
+done
+[[ "$dmg_created" -eq 1 ]] || {
+  echo "DMG creation failed after ${DMG_CREATE_ATTEMPTS} attempts." >&2
+  exit 1
+}
 hdiutil verify "$OUTPUT_DMG"
 printf '%s\n' "$OUTPUT_DMG"
