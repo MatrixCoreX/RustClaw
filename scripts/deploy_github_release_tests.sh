@@ -216,9 +216,14 @@ mkdir -p \
   "$RUNTIME/data/skill-packages/store_fixture" \
   "$RUNTIME/data/skill-packages/local_optional" \
   "$RUNTIME/optional_skills/store_fixture" \
+  "$RUNTIME/prebuilt/toolchains/python/bin" \
+  "$RUNTIME/prebuilt/toolchains/node/bin" \
   "$RUNTIME/services/wa-web-bridge" \
   "$RUNTIME/target/release"
 cp /bin/false "$RUNTIME/target/release/clawd"
+cp /bin/false "$RUNTIME/prebuilt/toolchains/python/bin/python3"
+cp /bin/false "$RUNTIME/prebuilt/toolchains/node/bin/node"
+printf 'stale toolchain file\n' > "$RUNTIME/prebuilt/toolchains/stale.txt"
 printf 'local-secret = "preserve"\n' > "$RUNTIME/configs/config.toml"
 printf 'registry-version = "stale"\n' > "$RUNTIME/configs/skills_registry.toml"
 printf 'old readme\n' > "$RUNTIME/README.md"
@@ -415,6 +420,11 @@ grep -Fxq 'release media preflight' "$RUNTIME/services/wa-web-bridge/media-prefl
 grep -Fxq 'keep source test' "$RUNTIME/services/wa-web-bridge/test.js"
 grep -Fxq 'keep channel session' "$RUNTIME/services/wa-web-bridge/session.json"
 cmp /bin/true "$RUNTIME/target/release/clawd"
+cmp "$PACKAGE_DIR/prebuilt/toolchains/python/bin/python3" \
+  "$RUNTIME/prebuilt/toolchains/python/bin/python3"
+cmp "$PACKAGE_DIR/prebuilt/toolchains/node/bin/node" \
+  "$RUNTIME/prebuilt/toolchains/node/bin/node"
+[[ ! -e "$RUNTIME/prebuilt/toolchains/stale.txt" ]]
 find "$RUNTIME/.release-backups" -name files.tar.gz -type f | grep -q .
 ROLLBACK_MARKER_BEFORE="$(cat "$RUNTIME/.release-rollback")"
 

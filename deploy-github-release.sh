@@ -1236,6 +1236,7 @@ for relative in \
   scripts \
   component_start \
   pi_app \
+  prebuilt/toolchains \
   UI/dist; do
   [[ -e "$PACKAGE_DIR/$relative" ]] || continue
   printf '%s\n' "$relative" >> "$MANAGED_PATHS_FILE"
