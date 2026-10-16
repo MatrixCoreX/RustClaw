@@ -289,6 +289,20 @@ def _load_sqlite_path_from_config():
         raise RuntimeError(f"Unable to read runtime database path: {_config_path()}") from exc
 
 
+def _load_skill_data_root_from_config():
+    if tomllib is None:
+        raise RuntimeError("Python 3.11 or newer is required to read runtime configuration")
+    try:
+        with open(_config_path(), "rb") as f:
+            cfg = tomllib.load(f)
+        configured = str(((cfg or {}).get("database") or {}).get("skill_data_root") or "").strip()
+        if not configured:
+            raise RuntimeError("database.skill_data_root is missing")
+        return configured if os.path.isabs(configured) else os.path.join(_root_dir(), configured)
+    except (OSError, ValueError, TypeError) as exc:
+        raise RuntimeError(f"Unable to read runtime skill data root: {_config_path()}") from exc
+
+
 def _generate_user_key():
     return "rk-" + secrets.token_urlsafe(18)
 

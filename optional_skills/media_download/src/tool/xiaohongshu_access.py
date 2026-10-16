@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from browser_devtools import DevToolsConnection, DevToolsError
+import login_challenge
 
 
 NOTE_PATH_RE = re.compile(r"/(?:explore|discovery/item)/([0-9a-zA-Z]+)")
@@ -338,9 +339,12 @@ def visible_chrome_args(
 ) -> list[str]:
     host = platform or sys.platform
     env = desktop_session_environment(environment, host)
-    if host.startswith("linux") and env.get("WAYLAND_DISPLAY"):
-        return ["--ozone-platform=wayland"]
-    return []
+    args: list[str] = []
+    if host.startswith("linux"):
+        args.append("--password-store=basic")
+        if env.get("WAYLAND_DISPLAY"):
+            args.append("--ozone-platform=wayland")
+    return args
 
 
 def desktop_session_environment(
@@ -519,6 +523,7 @@ def wait_for_skill_owned_access(
         start_new_session=os.name == "posix",
     )
     ready_polls = 0
+    last_challenge_at = 0.0
     client: DevToolsConnection | None = None
     try:
         websocket_url = _wait_for_devtools(
@@ -537,6 +542,15 @@ def wait_for_skill_owned_access(
                 on_tick()
             if process.poll() is not None:
                 return SkillOwnedAccessResult(INTERACTIVE_CANCELLED)
+            now = time.monotonic()
+            if now - last_challenge_at >= login_challenge.REFRESH_SECONDS:
+                login_challenge.publish_login_challenge(
+                    client,
+                    lambda command_id, wait: _wait_devtools_result(client, command_id, wait),
+                    profile_dir,
+                    "xiaohongshu",
+                )
+                last_challenge_at = now
             command_id = client.send(
                 "Runtime.evaluate",
                 {"expression": NOTE_ACCESS_SCRIPT, "returnByValue": True},
@@ -568,6 +582,7 @@ def wait_for_skill_owned_access(
     except DevToolsError:
         return SkillOwnedAccessResult(INTERACTIVE_CANCELLED)
     finally:
+        login_challenge.clear_login_challenge(profile_dir, "xiaohongshu")
         if client is not None:
             client.close()
         if process.poll() is None:

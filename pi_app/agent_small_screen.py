@@ -30,6 +30,7 @@ from small_screen_config import (
     _config_path,
     _default_lang_from_system,
     _load_sqlite_path_from_config,
+    _load_skill_data_root_from_config,
     _pi_app_dir,
     _root_dir,
     _writable_pi_app_dir,
@@ -56,6 +57,7 @@ from small_screen_config import (
     save_us_stock_page_visible,
     save_weather_page_visible,
 )
+from small_screen_login_challenge import load_login_challenge
 from small_screen_bancor import build_bancor_market_view
 from small_screen_cryptoauth_service import (
     read_slot0_pubkey_via_helper,
@@ -1422,6 +1424,11 @@ class SmallScreenApp:
         self._clear_topmost_job = None
         self._raise_window_job = None
         self._settings_restart_job = None
+        self._login_challenge_job = None
+        self._login_challenge_frame = None
+        self._login_challenge_photo = None
+        self._login_challenge_signature = None
+        self._skill_data_root = _load_skill_data_root_from_config()
         self._i18n = []  # [(widget, key), ...] 用于切换语言时更新
         self.root.title(_render_product_copy(STRINGS.get(self._lang, STRINGS["CN"])["app_title"]))
         self.root.geometry(f"{W}x{H}")
@@ -1621,7 +1628,7 @@ class SmallScreenApp:
         self._stop_market_jobs()
         self._cancel_log_append_job()
         self._cancel_llm_clear_job()
-        for attr in ("_blink_job", "_gif_job", "_time_job", "_after_splash_job", "_clear_topmost_job", "_raise_window_job", "_settings_restart_job", "_weather_refresh_job", "_weather_manual_refresh_job", "_overview_scroll_job", "_bancor_refresh_job"):
+        for attr in ("_blink_job", "_gif_job", "_time_job", "_after_splash_job", "_clear_topmost_job", "_raise_window_job", "_settings_restart_job", "_weather_refresh_job", "_weather_manual_refresh_job", "_overview_scroll_job", "_bancor_refresh_job", "_login_challenge_job"):
             self._cancel_job(attr)
 
     def _drain_ui_queue(self):
@@ -2448,6 +2455,119 @@ class SmallScreenApp:
         self._wifi_hint_label.pack(fill=tk.X, pady=(0, 4))
         self._refresh_topbar()
         self._render_wifi_view()
+        self._build_login_challenge_overlay()
+        self._poll_login_challenge()
+
+    def _build_login_challenge_overlay(self):
+        frame = tk.Frame(
+            self.root,
+            bg=self._c("bg"),
+            highlightbackground=self._c("accent"),
+            highlightcolor=self._c("accent"),
+            highlightthickness=2,
+        )
+        self._login_challenge_frame = frame
+        self._login_challenge_title_var = tk.StringVar(value="")
+        self._login_challenge_hint_var = tk.StringVar(value="")
+        tk.Label(
+            frame,
+            textvariable=self._login_challenge_title_var,
+            font=("", 17, "bold"),
+            bg=self._c("bg"),
+            fg=self._c("fg"),
+        ).pack(pady=(5, 2))
+        image_box = tk.Frame(frame, bg="#ffffff", width=250, height=230)
+        image_box.pack()
+        image_box.pack_propagate(False)
+        self._login_challenge_image_label = tk.Label(
+            image_box,
+            bg="#ffffff",
+            bd=0,
+            highlightthickness=0,
+        )
+        self._login_challenge_image_label.pack(fill=tk.BOTH, expand=True)
+        tk.Label(
+            frame,
+            textvariable=self._login_challenge_hint_var,
+            font=("", 10),
+            bg=self._c("bg"),
+            fg=self._c("fg_dim"),
+            wraplength=455,
+            justify=tk.CENTER,
+        ).pack(fill=tk.X, padx=10, pady=(3, 4))
+
+    def _hide_login_challenge(self):
+        frame = getattr(self, "_login_challenge_frame", None)
+        if frame is not None:
+            try:
+                frame.place_forget()
+            except tk.TclError:
+                pass
+        self._login_challenge_photo = None
+        self._login_challenge_signature = None
+
+    def _render_login_challenge(self, challenge):
+        frame = getattr(self, "_login_challenge_frame", None)
+        if frame is None:
+            return
+        platform = str(challenge.get("platform") or "")
+        platform_key = f"login_platform_{platform}"
+        platform_name = self._t(platform_key)
+        if platform_name == platform_key:
+            platform_name = platform.replace("_", " ").title()
+        self._login_challenge_title_var.set(
+            self._t("login_challenge_title").format(platform=platform_name)
+        )
+        self._login_challenge_hint_var.set(self._t("login_challenge_hint"))
+        signature = (
+            platform,
+            challenge.get("updated_at_epoch"),
+            challenge.get("image_path"),
+        )
+        if signature != self._login_challenge_signature:
+            photo = None
+            try:
+                from PIL import Image, ImageTk
+
+                with Image.open(challenge["image_path"]) as source:
+                    image = source.convert("RGB")
+                    resampling = (
+                        Image.Resampling.NEAREST
+                        if challenge.get("cropped")
+                        else Image.Resampling.LANCZOS
+                    )
+                    image.thumbnail((250, 230), resampling)
+                    canvas = Image.new("RGB", (250, 230), "white")
+                    canvas.paste(
+                        image,
+                        ((250 - image.width) // 2, (230 - image.height) // 2),
+                    )
+                    photo = ImageTk.PhotoImage(canvas)
+            except Exception:
+                try:
+                    photo = tk.PhotoImage(file=challenge["image_path"])
+                except tk.TclError:
+                    photo = None
+            if photo is not None:
+                self._login_challenge_photo = photo
+                self._login_challenge_image_label.configure(image=photo, text="")
+                self._login_challenge_signature = signature
+        try:
+            frame.place(x=0, y=0, width=W, height=H)
+            frame.lift()
+        except tk.TclError:
+            pass
+
+    def _poll_login_challenge(self):
+        self._login_challenge_job = None
+        if getattr(self, "_closing", False):
+            return
+        challenge = load_login_challenge(self._skill_data_root)
+        if challenge is None:
+            self._hide_login_challenge()
+        else:
+            self._render_login_challenge(challenge)
+        self._login_challenge_job = self.root.after(1000, self._poll_login_challenge)
 
     def _t(self, key):
         return _render_product_copy(STRINGS.get(self._lang, STRINGS["CN"]).get(key, key))
@@ -6452,6 +6572,9 @@ class SmallScreenApp:
 
     def _on_swipe_end(self, event):
         if getattr(self, "_closing", False):
+            return
+        challenge_frame = getattr(self, "_login_challenge_frame", None)
+        if challenge_frame is not None and challenge_frame.winfo_ismapped():
             return
         dx = event.x - getattr(self, "_swipe_start_x", event.x)
         dy = event.y - getattr(self, "_swipe_start_y", event.y)

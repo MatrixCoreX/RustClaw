@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from browser_devtools import DevToolsConnection, DevToolsError
+import login_challenge
 
 
 LOGIN_WAIT_SECONDS = 600.0
@@ -288,6 +289,7 @@ def wait_for_skill_owned_login(
     )
     client: DevToolsConnection | None = None
     ready_polls = 0
+    last_challenge_at = 0.0
     try:
         websocket_url = _wait_for_devtools(
             port,
@@ -306,6 +308,15 @@ def wait_for_skill_owned_login(
                 on_tick()
             if process.poll() is not None:
                 return INTERACTIVE_CANCELLED
+            now = time.monotonic()
+            if now - last_challenge_at >= login_challenge.REFRESH_SECONDS:
+                login_challenge.publish_login_challenge(
+                    client,
+                    lambda command_id, wait: _wait_devtools_result(client, command_id, wait),
+                    profile_dir,
+                    "youtube",
+                )
+                last_challenge_at = now
             state, cookies = _read_login_observation(client, timeout=5.0)
             youtube_page_ready = str(state.get("host", "")).endswith("youtube.com") and bool(
                 state.get("has_player")
@@ -325,6 +336,7 @@ def wait_for_skill_owned_login(
             return INTERACTIVE_TIMEOUT
         return INTERACTIVE_CANCELLED
     finally:
+        login_challenge.clear_login_challenge(profile_dir, "youtube")
         if client is not None:
             client.close()
         if process.poll() is None:

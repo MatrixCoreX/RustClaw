@@ -196,9 +196,12 @@ class XiaohongshuAccessTest(unittest.TestCase):
         self.assertTrue(self.access.desktop_display_available({}, "darwin"))
         self.assertEqual(
             self.access.visible_chrome_args({"WAYLAND_DISPLAY": "wayland-0"}, "linux"),
-            ["--ozone-platform=wayland"],
+            ["--password-store=basic", "--ozone-platform=wayland"],
         )
-        self.assertEqual(self.access.visible_chrome_args({"DISPLAY": ":0"}, "linux"), [])
+        self.assertEqual(
+            self.access.visible_chrome_args({"DISPLAY": ":0"}, "linux"),
+            ["--password-store=basic"],
+        )
 
     def test_discovers_current_user_wayland_session_for_system_service(self) -> None:
         with tempfile.TemporaryDirectory() as root:
@@ -223,7 +226,7 @@ class XiaohongshuAccessTest(unittest.TestCase):
             self.assertTrue(self.access.desktop_display_available(environment, "linux"))
             self.assertEqual(
                 self.access.visible_chrome_args(environment, "linux"),
-                ["--ozone-platform=wayland"],
+                ["--password-store=basic", "--ozone-platform=wayland"],
             )
 
     def test_manifest_forwards_host_display_variables(self) -> None:

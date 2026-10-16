@@ -27,6 +27,7 @@ from typing import Any, Callable, Iterator
 
 import xiaohongshu_access
 from browser_devtools import DevToolsConnection, DevToolsError
+import login_challenge
 
 
 YUANBAO_HOME = "https://yuanbao.tencent.com/"
@@ -332,6 +333,7 @@ def parse_share_with_browser(
         env=environment,
     )
     client: DevToolsConnection | None = None
+    last_challenge_at = 0.0
     try:
         websocket_url = _wait_for_page(
             port,
@@ -352,6 +354,17 @@ def parse_share_with_browser(
                 cancellation_check()
             if process.poll() is not None:
                 raise WechatChannelsAccessError(INTERACTIVE_CANCELLED)
+            now = time.monotonic()
+            if visible and now - last_challenge_at >= login_challenge.REFRESH_SECONDS:
+                login_challenge.publish_login_challenge(
+                    client,
+                    lambda command_id, wait: _wait_result(
+                        client, command_id, wait, cancellation_check
+                    ),
+                    profile_dir,
+                    "wechat_channels",
+                )
+                last_challenge_at = now
             try:
                 state, data = _classify_parse_result(
                     _parse_share_in_page(
@@ -385,6 +398,8 @@ def parse_share_with_browser(
             raise WechatChannelsAccessError(INTERACTIVE_TIMEOUT)
         raise WechatChannelsAccessError(LOGIN_REQUIRED)
     finally:
+        if visible:
+            login_challenge.clear_login_challenge(profile_dir, "wechat_channels")
         if client is not None:
             client.close()
         _stop_browser(process)

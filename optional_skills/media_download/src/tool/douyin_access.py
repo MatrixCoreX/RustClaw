@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from browser_devtools import DevToolsConnection, DevToolsError
+import login_challenge
 import xiaohongshu_access
 
 
@@ -231,6 +232,7 @@ def wait_for_skill_owned_login(
     )
     client: DevToolsConnection | None = None
     ready_polls = 0
+    last_challenge_at = 0.0
     try:
         websocket_url = _wait_for_devtools(
             port,
@@ -248,6 +250,15 @@ def wait_for_skill_owned_login(
                 on_tick()
             if process.poll() is not None:
                 return INTERACTIVE_CANCELLED
+            now = time.monotonic()
+            if now - last_challenge_at >= login_challenge.REFRESH_SECONDS:
+                login_challenge.publish_login_challenge(
+                    client,
+                    lambda command_id, wait: _wait_devtools_result(client, command_id, wait),
+                    profile_dir,
+                    "douyin",
+                )
+                last_challenge_at = now
             command_id = client.send("Network.getAllCookies")
             names = _cookie_names(_wait_devtools_result(client, command_id, timeout=5.0))
             if _AUTH_COOKIE_NAMES.intersection(names):
@@ -261,6 +272,7 @@ def wait_for_skill_owned_login(
     except (DevToolsError, RuntimeError):
         return INTERACTIVE_CANCELLED
     finally:
+        login_challenge.clear_login_challenge(profile_dir, "douyin")
         if client is not None:
             client.close()
         if process.poll() is None:
