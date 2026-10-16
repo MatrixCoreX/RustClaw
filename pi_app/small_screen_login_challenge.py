@@ -47,7 +47,8 @@ def load_login_challenge(skill_data_root, *, now=None, max_age_seconds=15):
     try:
         if image_path.is_symlink():
             return None
-        size = image_path.stat().st_size
+        image_stat = image_path.stat()
+        size = image_stat.st_size
         if size <= 8 or size > MAX_IMAGE_BYTES:
             return None
         with image_path.open("rb") as source:
@@ -60,4 +61,6 @@ def load_login_challenge(skill_data_root, *, now=None, max_age_seconds=15):
         "image_path": os.fspath(image_path),
         "updated_at_epoch": float(updated),
         "cropped": bool(state.get("cropped")),
+        "image_mtime_ns": image_stat.st_mtime_ns,
+        "image_size_bytes": size,
     }

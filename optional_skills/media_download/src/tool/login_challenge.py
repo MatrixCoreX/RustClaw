@@ -164,7 +164,7 @@ def publish_login_challenge(
             "platform": platform,
             "image_file": image_name,
             "cropped": cropped,
-            "updated_at_epoch": int(time.time()),
+            "updated_at_epoch": time.time(),
         }
         _atomic_write(
             destination / "current.json",

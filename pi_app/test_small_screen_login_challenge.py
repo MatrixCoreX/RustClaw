@@ -30,6 +30,8 @@ class SmallScreenLoginChallengeTest(unittest.TestCase):
             self.assertIsNotNone(loaded)
             self.assertEqual(loaded["platform"], "xiaohongshu")
             self.assertTrue(loaded["cropped"])
+            self.assertGreater(loaded["image_mtime_ns"], 0)
+            self.assertEqual(loaded["image_size_bytes"], 15)
 
     def test_rejects_stale_or_traversing_state(self):
         with tempfile.TemporaryDirectory() as directory:

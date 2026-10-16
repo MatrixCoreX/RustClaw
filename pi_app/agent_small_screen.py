@@ -2524,6 +2524,8 @@ class SmallScreenApp:
             platform,
             challenge.get("updated_at_epoch"),
             challenge.get("image_path"),
+            challenge.get("image_mtime_ns"),
+            challenge.get("image_size_bytes"),
         )
         if signature != self._login_challenge_signature:
             photo = None
