@@ -526,6 +526,7 @@ def wait_for_skill_owned_access(
     ready_polls = 0
     last_challenge_at = 0.0
     client: DevToolsConnection | None = None
+    scan_timeout = login_challenge.effective_scan_timeout(timeout, desktop_environment)
     try:
         websocket_url = _wait_for_devtools(
             port,
@@ -537,13 +538,19 @@ def wait_for_skill_owned_access(
         client.send("Runtime.enable")
         if on_opened is not None:
             on_opened()
-        deadline = time.monotonic() + max(5.0, timeout)
+        deadline = time.monotonic() + scan_timeout
         while time.monotonic() < deadline:
             if on_tick is not None:
                 on_tick()
             if process.poll() is not None:
                 return SkillOwnedAccessResult(INTERACTIVE_CANCELLED)
             now = time.monotonic()
+            if login_challenge.challenge_has_expired(
+                client,
+                lambda command_id, wait: _wait_devtools_result(client, command_id, wait),
+                desktop_environment,
+            ):
+                return SkillOwnedAccessResult(INTERACTIVE_TIMEOUT)
             if now - last_challenge_at >= login_challenge.REFRESH_SECONDS:
                 login_challenge.publish_login_challenge(
                     client,

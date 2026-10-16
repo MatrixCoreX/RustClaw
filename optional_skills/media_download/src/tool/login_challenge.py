@@ -21,12 +21,21 @@ REFRESH_SECONDS = 2.0
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 MAX_COMPANION_STATE_BYTES = 4096
 COMPANION_MAX_AGE_SECONDS = 10.0
+COMPANION_SCAN_TIMEOUT_SECONDS = 180.0
 CAPTURE_VIEWPORT_WIDTH = 960
 CAPTURE_VIEWPORT_HEIGHT = 720
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 _PLATFORM_RE = re.compile(r"^[a-z][a-z0-9_]{0,47}$")
 
 _VIEWPORT_SIZE_SCRIPT = "({width: window.innerWidth || 0, height: window.innerHeight || 0})"
+_CHALLENGE_EXPIRED_SCRIPT = r"""
+(() => {
+  const text = (document.body?.innerText || '').replace(/\s+/g, ' ').toLowerCase();
+  return /二维码(?:已)?(?:过期|失效)|扫码(?:已)?(?:过期|失效)/.test(text)
+    || /(?:qr|scan)\s*(?:code)?\s*(?:has\s*)?expired/.test(text)
+    || /refresh\s+(?:the\s+)?qr\s*(?:code)?/.test(text);
+})()
+"""
 
 _CHALLENGE_RECT_SCRIPT = r"""
 (() => {
@@ -125,6 +134,34 @@ def companion_browser_args(
         "--disable-backgrounding-occluded-windows",
         "--disable-renderer-backgrounding",
     ]
+
+
+def effective_scan_timeout(
+    requested_timeout: float,
+    environment: dict[str, str] | None = None,
+) -> float:
+    timeout = max(5.0, float(requested_timeout))
+    if companion_browser_args(environment):
+        return min(timeout, COMPANION_SCAN_TIMEOUT_SECONDS)
+    return timeout
+
+
+def challenge_has_expired(
+    client: Any,
+    wait_result: Callable[[int, float], dict[str, Any]],
+    environment: dict[str, str] | None = None,
+) -> bool:
+    """Detect an expired QR prompt only while the Pi companion flow is active."""
+    if not companion_browser_args(environment):
+        return False
+    try:
+        command_id = client.send(
+            "Runtime.evaluate",
+            {"expression": _CHALLENGE_EXPIRED_SCRIPT, "returnByValue": True},
+        )
+        return _result_value(wait_result(command_id, 5.0)) is True
+    except (OSError, TypeError, ValueError, RuntimeError):
+        return False
 
 
 def _atomic_write(path: Path, content: bytes) -> None:

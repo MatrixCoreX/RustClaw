@@ -232,6 +232,7 @@ def wait_for_skill_owned_login(
         start_new_session=os.name == "posix",
     )
     client: DevToolsConnection | None = None
+    scan_timeout = login_challenge.effective_scan_timeout(timeout, desktop_environment)
     ready_polls = 0
     last_challenge_at = 0.0
     try:
@@ -245,13 +246,19 @@ def wait_for_skill_owned_login(
         client.send("Network.enable")
         if on_opened is not None:
             on_opened()
-        deadline = time.monotonic() + max(5.0, timeout)
+        deadline = time.monotonic() + scan_timeout
         while time.monotonic() < deadline:
             if on_tick is not None:
                 on_tick()
             if process.poll() is not None:
                 return INTERACTIVE_CANCELLED
             now = time.monotonic()
+            if login_challenge.challenge_has_expired(
+                client,
+                lambda command_id, wait: _wait_devtools_result(client, command_id, wait),
+                desktop_environment,
+            ):
+                return INTERACTIVE_TIMEOUT
             if now - last_challenge_at >= login_challenge.REFRESH_SECONDS:
                 login_challenge.publish_login_challenge(
                     client,

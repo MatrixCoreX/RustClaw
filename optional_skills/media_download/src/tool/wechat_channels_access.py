@@ -334,6 +334,7 @@ def parse_share_with_browser(
         env=environment,
     )
     client: DevToolsConnection | None = None
+    scan_timeout = login_challenge.effective_scan_timeout(login_timeout, environment)
     last_challenge_at = 0.0
     try:
         websocket_url = _wait_for_page(
@@ -348,7 +349,7 @@ def parse_share_with_browser(
         )
         client.send("Runtime.enable")
         client.send("Network.enable")
-        deadline = time.monotonic() + (login_timeout if visible else max(5.0, request_timeout))
+        deadline = time.monotonic() + (scan_timeout if visible else max(5.0, request_timeout))
         ready_polls = 0
         while time.monotonic() < deadline:
             if cancellation_check is not None:
@@ -356,6 +357,14 @@ def parse_share_with_browser(
             if process.poll() is not None:
                 raise WechatChannelsAccessError(INTERACTIVE_CANCELLED)
             now = time.monotonic()
+            if visible and login_challenge.challenge_has_expired(
+                client,
+                lambda command_id, wait: _wait_result(
+                    client, command_id, wait, cancellation_check
+                ),
+                environment,
+            ):
+                raise WechatChannelsAccessError(INTERACTIVE_TIMEOUT)
             if visible and now - last_challenge_at >= login_challenge.REFRESH_SECONDS:
                 login_challenge.publish_login_challenge(
                     client,

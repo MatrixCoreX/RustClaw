@@ -172,6 +172,49 @@ class LoginChallengeTest(unittest.TestCase):
             self.assertEqual(resize_calls[0][2]["width"], 960)
             self.assertEqual(resize_calls[0][2]["height"], 720)
 
+    def test_companion_scan_timeout_and_expired_prompt_are_pi_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            state_dir = runtime / "agent-runtime"
+            state_dir.mkdir()
+            (state_dir / "login-challenge-companion.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "status": "active",
+                        "updated_at_epoch": self.challenge.time.time(),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            environment = {"XDG_RUNTIME_DIR": str(runtime)}
+            client = FakeClient()
+
+            def expired_result(_command_id, _timeout):
+                return {"result": {"result": {"value": True}}}
+
+            self.assertEqual(
+                self.challenge.effective_scan_timeout(600, environment),
+                self.challenge.COMPANION_SCAN_TIMEOUT_SECONDS,
+            )
+            self.assertTrue(
+                self.challenge.challenge_has_expired(client, expired_result, environment)
+            )
+            self.assertEqual(
+                self.challenge.effective_scan_timeout(
+                    600,
+                    {"XDG_RUNTIME_DIR": str(runtime / "absent")},
+                ),
+                600,
+            )
+            self.assertFalse(
+                self.challenge.challenge_has_expired(
+                    client,
+                    expired_result,
+                    {"XDG_RUNTIME_DIR": str(runtime / "absent")},
+                )
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
