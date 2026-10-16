@@ -202,6 +202,24 @@ class ReleaseInstallationTests(unittest.TestCase):
             '[[ "$(command -v whisper-cli)" == "${host_tools}/bin/whisper-cli" ]]',
             workflow,
         )
+        self.assertIn("WHISPER_CPP_SHA256:", workflow)
+        self.assertIn("whisper.cpp/archive/refs/tags/v1.8.2.tar.gz", workflow)
+        self.assertIn("-DBUILD_SHARED_LIBS=OFF", workflow)
+        self.assertIn("-DGGML_BACKEND_DL=OFF", workflow)
+        self.assertIn("-DGGML_NATIVE=OFF", workflow)
+        self.assertIn("-DGGML_OPENMP=OFF", workflow)
+        self.assertIn('--whisper-cli "${whisper_cli}"', workflow)
+        self.assertIn("bundled-whisper-smoke.log", workflow)
+        self.assertIn("/opt/homebrew/|/usr/local/Cellar/", workflow)
+        self.assertIn(
+            "Bundled whisper loaded a non-relocatable Homebrew dependency.",
+            workflow,
+        )
+        self.assertNotIn("brew --prefix whisper-cpp", workflow)
+        self.assertNotIn("brew install ffmpeg tesseract git whisper-cpp", workflow)
+        self.assertIn("assert_whisper_is_self_contained", dependency_bundler)
+        self.assertIn("macos_whisper_dynamic_dependency", dependency_bundler)
+        self.assertIn("macos_whisper_non_relocatable_path", dependency_bundler)
         self.assertIn("APP_DESKTOP_BOOTSTRAP_PYTHON_ROOT", workflow)
         self.assertIn("APP_DESKTOP_RUNTIME_BUNDLE_DIR", workflow)
         self.assertIn("embedded-runtime/bundle.json", workflow)

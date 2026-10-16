@@ -17,6 +17,46 @@ spec.loader.exec_module(bundle)
 
 
 class BundleMacosSkillDependenciesTests(unittest.TestCase):
+    def test_whisper_binary_accepts_only_system_dynamic_dependencies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / "whisper-cli"
+            executable.write_bytes(b"self-contained-whisper")
+            with mock.patch.object(
+                bundle,
+                "linked_libraries",
+                return_value=[
+                    "/usr/lib/libc++.1.dylib",
+                    "/System/Library/Frameworks/Accelerate.framework/Versions/A/Accelerate",
+                ],
+            ):
+                bundle.assert_whisper_is_self_contained(executable)
+
+    def test_whisper_binary_rejects_non_system_dynamic_dependencies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / "whisper-cli"
+            executable.write_bytes(b"whisper")
+            with mock.patch.object(
+                bundle,
+                "linked_libraries",
+                return_value=["@rpath/libggml.0.dylib"],
+            ):
+                with self.assertRaisesRegex(
+                    ValueError, "macos_whisper_dynamic_dependency"
+                ):
+                    bundle.assert_whisper_is_self_contained(executable)
+
+    def test_whisper_binary_rejects_embedded_homebrew_cellar_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / "whisper-cli"
+            executable.write_bytes(
+                b"backend=/usr/local/Cellar/ggml/0.21.0/libexec"
+            )
+            with mock.patch.object(bundle, "linked_libraries", return_value=[]):
+                with self.assertRaisesRegex(
+                    ValueError, "macos_whisper_non_relocatable_path"
+                ):
+                    bundle.assert_whisper_is_self_contained(executable)
+
     def test_tool_check_environment_preserves_host_and_adds_bundle_values(self):
         with mock.patch.object(bundle.subprocess, "run") as run:
             run.return_value.stdout = "git version fixture\n"

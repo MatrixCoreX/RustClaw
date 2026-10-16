@@ -162,11 +162,12 @@ jobs:
         shell: bash
         env:
           CHI_SIM_SHA256: a5fcb6f0db1e1d6d8522f39db4e848f05984669172e584e8d76b6b3141e1f730
+          WHISPER_CPP_SHA256: bcee25589bb8052d9e155369f6759a05729a2022d2a8085c1aa4345108523077
           WHISPER_MODEL_SHA256: 60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe
         run: |
           set -euo pipefail
           export HOMEBREW_NO_AUTO_UPDATE=1
-          brew install ffmpeg tesseract git whisper-cpp
+          brew install cmake ffmpeg tesseract git
 
           npm ci --ignore-scripts --prefix optional_skills/media_discovery
           playwright_root="${RUNNER_TEMP}/playwright-browsers"
@@ -187,6 +188,40 @@ jobs:
             https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
           echo "${WHISPER_MODEL_SHA256}  ${dependency_downloads}/ggml-base.bin" | shasum -a 256 -c -
 
+          curl --fail --location --retry 3 \
+            --output "${dependency_downloads}/whisper.cpp-v1.8.2.tar.gz" \
+            https://github.com/ggml-org/whisper.cpp/archive/refs/tags/v1.8.2.tar.gz
+          echo "${WHISPER_CPP_SHA256}  ${dependency_downloads}/whisper.cpp-v1.8.2.tar.gz" | shasum -a 256 -c -
+          whisper_source="${RUNNER_TEMP}/whisper.cpp-source"
+          whisper_build="${RUNNER_TEMP}/whisper.cpp-build"
+          mkdir -p "${whisper_source}"
+          tar -xzf "${dependency_downloads}/whisper.cpp-v1.8.2.tar.gz" \
+            -C "${whisper_source}" --strip-components=1
+          whisper_metal=OFF
+          if [[ "${PACKAGE_ARCH}" == "aarch64" ]]; then
+            whisper_metal=ON
+          fi
+          cmake -S "${whisper_source}" -B "${whisper_build}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET}" \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DWHISPER_BUILD_EXAMPLES=ON \
+            -DWHISPER_BUILD_TESTS=OFF \
+            -DWHISPER_BUILD_SERVER=OFF \
+            -DWHISPER_SDL2=OFF \
+            -DGGML_BACKEND_DL=OFF \
+            -DGGML_NATIVE=OFF \
+            -DGGML_OPENMP=OFF \
+            -DGGML_BLAS=ON \
+            -DGGML_BLAS_VENDOR=Apple \
+            -DGGML_ACCELERATE=ON \
+            -DGGML_METAL="${whisper_metal}" \
+            -DGGML_METAL_EMBED_LIBRARY="${whisper_metal}"
+          cmake --build "${whisper_build}" --config Release \
+            --target whisper-cli --parallel 4
+          whisper_cli="${whisper_build}/bin/whisper-cli"
+          [[ -x "${whisper_cli}" ]]
+
           python3 scripts/bundle_macos_skill_dependencies.py \
             --destination "${RUNNER_TEMP}/release host tools/${RUST_TARGET}" \
             --git-prefix "$(brew --prefix git)" \
@@ -196,7 +231,7 @@ jobs:
             --tessdata "$(brew --prefix tesseract)/share/tessdata" \
             --chi-sim "${dependency_downloads}/chi_sim.traineddata" \
             --chromium "${chromium_executable}" \
-            --whisper-cli "$(brew --prefix whisper-cpp)/bin/whisper-cli" \
+            --whisper-cli "${whisper_cli}" \
             --whisper-model "${dependency_downloads}/ggml-base.bin"
 
       - name: Build native runtime and proactive skill receipts
@@ -536,9 +571,18 @@ jobs:
           ffprobe -v error -select_streams a:0 \
             -show_entries stream=codec_name -of default=nw=1 "${media_fixture}" | grep -q 'codec_name=pcm_s16le'
           [[ "$(command -v whisper-cli)" == "${host_tools}/bin/whisper-cli" ]]
-          whisper-cli \
+          whisper_log="${RUNNER_TEMP}/bundled-whisper-smoke.log"
+          if ! whisper-cli \
             -m "${host_tools}/models/whisper/ggml-base.bin" \
-            -f "${media_fixture}" -nt >/dev/null
+            -f "${media_fixture}" -nt > /dev/null 2>"${whisper_log}"; then
+            cat "${whisper_log}" >&2
+            exit 1
+          fi
+          cat "${whisper_log}"
+          if grep -Eq '/opt/homebrew/|/usr/local/Cellar/' "${whisper_log}"; then
+            echo "Bundled whisper loaded a non-relocatable Homebrew dependency." >&2
+            exit 1
+          fi
           printf '%s\n' 'macos_pkg_probe=skill_receipts'
           if [[ "${PACKAGE_ARCH}" == "aarch64" ]]; then
             find "${runtime_root}/data/skills/local_asr" -type f -name model.pt -print -quit | grep -q .

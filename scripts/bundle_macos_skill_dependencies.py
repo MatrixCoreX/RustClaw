@@ -17,6 +17,7 @@ import tempfile
 
 
 SYSTEM_PREFIXES = ("/System/Library/", "/usr/lib/")
+NON_RELOCATABLE_PREFIXES = (b"/opt/homebrew/", b"/usr/local/Cellar/")
 
 
 def run(*command: str) -> str:
@@ -191,6 +192,25 @@ def copy_external_libraries(root: Path, origins: dict[Path, Path]) -> None:
         subprocess.run(["codesign", "--force", "--sign", "-", str(path)], check=True)
 
 
+def assert_whisper_is_self_contained(executable: Path) -> None:
+    unexpected = [
+        dependency
+        for dependency in linked_libraries(executable)
+        if not dependency.startswith(SYSTEM_PREFIXES)
+    ]
+    if unexpected:
+        raise ValueError(
+            f"macos_whisper_dynamic_dependency:{executable}:{unexpected[0]}"
+        )
+    contents = executable.read_bytes()
+    for prefix in NON_RELOCATABLE_PREFIXES:
+        if prefix in contents:
+            raise ValueError(
+                f"macos_whisper_non_relocatable_path:{executable}:"
+                f"{prefix.decode('utf-8')}"
+            )
+
+
 def app_root(executable: Path) -> Path:
     for parent in (executable, *executable.parents):
         if parent.suffix == ".app":
@@ -342,6 +362,7 @@ def main() -> None:
         write_chromium_command_shim(root)
         write_tesseract_command_shim(root)
         copy_external_libraries(root, origins)
+        assert_whisper_is_self_contained(root / "bin/whisper-cli")
 
         git_environment = {
             "GIT_EXEC_PATH": str(root / "git/libexec/git-core"),
