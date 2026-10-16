@@ -124,11 +124,19 @@ append_existing_command_path() {
 
 prepend_existing_command_path() {
   local candidate="$1"
+  local current_path=""
+  local path_entry=""
+  local -a path_entries=()
+  local -a reordered_entries=()
   [[ -d "$candidate" ]] || return 0
-  case ":${PATH:-}:" in
-    *":${candidate}:"*) ;;
-    *) PATH="${candidate}${PATH:+:${PATH}}" ;;
-  esac
+  current_path="${PATH:-}"
+  IFS=':' read -r -a path_entries <<<"$current_path"
+  reordered_entries=("$candidate")
+  for path_entry in "${path_entries[@]}"; do
+    [[ "$path_entry" == "$candidate" ]] && continue
+    reordered_entries+=("$path_entry")
+  done
+  PATH="$(IFS=':'; printf '%s' "${reordered_entries[*]}")"
   export PATH
 }
 

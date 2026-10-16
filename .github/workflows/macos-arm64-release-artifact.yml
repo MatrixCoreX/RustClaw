@@ -415,12 +415,17 @@ jobs:
           source "${runtime_root}/scripts/shell_compat.sh"
           configure_bundled_host_tools "${runtime_root}"
           printf '%s\n' 'macos_pkg_probe=git'
+          [[ "$(command -v git)" == "${host_tools}/git/bin/git" ]]
           git --version
           printf '%s\n' 'macos_pkg_probe=ffmpeg'
+          [[ "$(command -v ffmpeg)" == "${host_tools}/bin/ffmpeg" ]]
           ffmpeg -version >/dev/null
           printf '%s\n' 'macos_pkg_probe=ffprobe'
+          [[ "$(command -v ffprobe)" == "${host_tools}/bin/ffprobe" ]]
           ffprobe -version >/dev/null
           printf '%s\n' 'macos_pkg_probe=tesseract'
+          [[ "$(command -v tesseract)" == "${host_tools}/bin/tesseract" ]]
+          [[ "${TESSDATA_PREFIX}" == "${host_tools}/share/tessdata" ]]
           tesseract --list-langs
           tesseract_fixture="${RUNNER_TEMP}/bundled-tesseract-smoke.pgm"
           python3 - "${tesseract_fixture}" <<'PY'
@@ -450,6 +455,7 @@ jobs:
             -i anullsrc=r=16000:cl=mono -t 0.5 -y "${media_fixture}"
           ffprobe -v error -select_streams a:0 \
             -show_entries stream=codec_name -of default=nw=1 "${media_fixture}" | grep -q 'codec_name=pcm_s16le'
+          [[ "$(command -v whisper-cli)" == "${host_tools}/bin/whisper-cli" ]]
           whisper-cli \
             -m "${host_tools}/models/whisper/ggml-base.bin" \
             -f "${media_fixture}" -nt >/dev/null

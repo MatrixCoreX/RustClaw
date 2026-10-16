@@ -124,12 +124,25 @@ chmod +x \
   "$HOST_TEST_TOOLS/$HOST_TEST_CHROMIUM_RELATIVE"
 printf '%s\n' "$HOST_TEST_CHROMIUM_RELATIVE" \
   >"$HOST_TEST_TOOLS/chromium-executable-relative"
-PATH="/usr/bin:/bin"
+HOST_TEST_SYSTEM_BIN="$TEST_ROOT/system-bin"
+mkdir -p "$HOST_TEST_SYSTEM_BIN"
+for tool in git chromium ffmpeg ffprobe tesseract whisper-cli; do
+  touch "$HOST_TEST_SYSTEM_BIN/$tool"
+  chmod +x "$HOST_TEST_SYSTEM_BIN/$tool"
+done
+# A desktop launch may already have appended the bundled paths after system
+# paths. Reconfiguration must move them to the front instead of treating mere
+# presence as sufficient.
+PATH="$HOST_TEST_SYSTEM_BIN:$HOST_TEST_TOOLS/bin:$HOST_TEST_TOOLS/git/bin:/usr/bin:/bin"
 export PATH
 configure_bundled_host_tools "$HOST_TEST_ROOT"
+[[ "$PATH" == "$HOST_TEST_TOOLS/git/bin:$HOST_TEST_TOOLS/bin:$HOST_TEST_SYSTEM_BIN:/usr/bin:/bin" ]]
 [[ "$(command -v git)" == "$HOST_TEST_TOOLS/git/bin/git" ]]
 [[ "$(command -v chromium)" == "$HOST_TEST_TOOLS/bin/chromium" ]]
 [[ "$(command -v ffmpeg)" == "$HOST_TEST_TOOLS/bin/ffmpeg" ]]
+[[ "$(command -v ffprobe)" == "$HOST_TEST_TOOLS/bin/ffprobe" ]]
+[[ "$(command -v tesseract)" == "$HOST_TEST_TOOLS/bin/tesseract" ]]
+[[ "$(command -v whisper-cli)" == "$HOST_TEST_TOOLS/bin/whisper-cli" ]]
 [[ "$GIT_EXEC_PATH" == "$HOST_TEST_TOOLS/git/libexec/git-core" ]]
 [[ "$GIT_TEMPLATE_DIR" == "$HOST_TEST_TOOLS/git/share/git-core/templates" ]]
 [[ "$TESSDATA_PREFIX" == "$HOST_TEST_TOOLS/share/tessdata" ]]

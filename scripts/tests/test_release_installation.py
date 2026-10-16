@@ -176,6 +176,15 @@ class ReleaseInstallationTests(unittest.TestCase):
         self.assertIn('tesseract "${tesseract_fixture}" stdout -l chi_sim', workflow)
         self.assertIn('Path(sys.argv[1]).write_bytes(b"P5\\n100 40\\n255\\n"', workflow)
         self.assertNotIn("tesseract --list-langs | grep -q", workflow)
+        self.assertIn('[[ "$(command -v git)" == "${host_tools}/git/bin/git" ]]', workflow)
+        self.assertIn(
+            '[[ "$(command -v tesseract)" == "${host_tools}/bin/tesseract" ]]',
+            workflow,
+        )
+        self.assertIn(
+            '[[ "$(command -v whisper-cli)" == "${host_tools}/bin/whisper-cli" ]]',
+            workflow,
+        )
         self.assertIn("APP_DESKTOP_BOOTSTRAP_PYTHON_ROOT", workflow)
         self.assertIn("APP_DESKTOP_RUNTIME_BUNDLE_DIR", workflow)
         self.assertIn("embedded-runtime/bundle.json", workflow)
