@@ -52,9 +52,7 @@ pub fn prepare_package(context: &AdapterContext<'_>) -> SkillSdkResult<PreparedP
         )
         .phase("preflight"));
     }
-    if context.manifest.build.network == BuildNetworkPolicy::ApprovalRequired
-        && !context.allow_network
-    {
+    if requires_network_approval(context) {
         return Err(SkillSdkError::new(
             "build_network_approval_required",
             format!("skill={}", context.manifest.package.name),
@@ -85,6 +83,19 @@ fn source_build_disabled(context: &AdapterContext<'_>) -> bool {
     context
         .control
         .is_some_and(|control| !control.source_build_allowed())
+}
+
+fn requires_network_approval(context: &AdapterContext<'_>) -> bool {
+    if context.manifest.build.network != BuildNetworkPolicy::ApprovalRequired
+        || context.allow_network
+    {
+        return false;
+    }
+
+    // Release publishers may install a Python package from a verified wheelhouse
+    // with both source builds and package-index access disabled. That path does
+    // not consume the manifest's optional build-network permission.
+    !(context.manifest.build.adapter == BuildAdapter::Python && source_build_disabled(context))
 }
 
 pub fn source_digest(root: &Path) -> SkillSdkResult<String> {

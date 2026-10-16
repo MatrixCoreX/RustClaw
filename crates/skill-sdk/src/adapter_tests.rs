@@ -56,6 +56,38 @@ fn user_python_installation_accepts_wheels_only_and_uses_packaged_wheelhouse() {
 }
 
 #[test]
+fn verified_python_wheelhouse_does_not_require_network_approval() {
+    let manifest = PackageManifest::from_toml_str(include_str!(
+        "../../../optional_skills/local_asr/skill.toml"
+    ))
+    .expect("local ASR manifest");
+    let temp = tempfile::tempdir().expect("tempdir");
+    let platform = HostPlatform::current();
+    let offline = InstallControl::new(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+        false,
+    )))
+    .without_source_build();
+    let context = AdapterContext {
+        manifest: &manifest,
+        workspace_root: temp.path(),
+        manifest_dir: temp.path(),
+        staging_root: temp.path(),
+        cache_root: temp.path(),
+        platform: &platform,
+        target: None,
+        allow_network: false,
+        control: Some(&offline),
+    };
+    assert!(!requires_network_approval(&context));
+
+    let ordinary_install = AdapterContext {
+        control: None,
+        ..context
+    };
+    assert!(requires_network_approval(&ordinary_install));
+}
+
+#[test]
 fn macos_python_source_builds_use_only_the_native_architecture() {
     for (arch, expected) in [("aarch64", "-arch arm64"), ("x86_64", "-arch x86_64")] {
         let mut command = Command::new("python");
