@@ -41,7 +41,7 @@ OUTPUT_PKG="$2"
   exit 1
 }
 
-for command_name in pkgbuild productbuild pkgutil codesign ditto python3; do
+for command_name in pkgbuild productbuild pkgutil codesign ditto python3 shasum; do
   command -v "${command_name}" >/dev/null 2>&1 || {
     echo "Required macOS packaging command is unavailable: ${command_name}" >&2
     exit 1
@@ -80,35 +80,45 @@ mkdir -p "$(dirname "${OUTPUT_PKG}")"
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "${WORK_DIR}"' EXIT
 PAYLOAD_ROOT="${WORK_DIR}/payload-root"
+PAYLOAD_DIR="${PAYLOAD_ROOT}/Library/Application Support/agent-runtime-installer"
+SCRIPTS_DIR="${WORK_DIR}/scripts"
 COMPONENT_PKG="${WORK_DIR}/desktop-component.pkg"
 UNSIGNED_PKG="${WORK_DIR}/installer-unsigned.pkg"
 APP_BUNDLE_NAME="$(basename "${APP_BUNDLE}")"
+APP_ARCHIVE="${PAYLOAD_DIR}/agent-desktop.app.zip"
+
+[[ "${APP_BUNDLE_NAME}" == "agent-desktop.app" ]] || {
+  echo "Unexpected canonical macOS app bundle name: ${APP_BUNDLE_NAME}" >&2
+  exit 1
+}
 
 codesign --verify --deep --strict "${APP_BUNDLE}"
-mkdir -p "${PAYLOAD_ROOT}"
-ditto "${APP_BUNDLE}" "${PAYLOAD_ROOT}/${APP_BUNDLE_NAME}"
-codesign --verify --deep --strict "${PAYLOAD_ROOT}/${APP_BUNDLE_NAME}"
-[[ -f "${PAYLOAD_ROOT}/${APP_BUNDLE_NAME}/Contents/Resources/embedded-runtime/bundle.json" ]]
+mkdir -p "${PAYLOAD_DIR}" "${SCRIPTS_DIR}"
+ditto -c -k --sequesterRsrc --keepParent "${APP_BUNDLE}" "${APP_ARCHIVE}"
+(
+  cd "${PAYLOAD_DIR}"
+  shasum -a 256 "$(basename "${APP_ARCHIVE}")" > "$(basename "${APP_ARCHIVE}").sha256"
+)
+cp "${SCRIPT_DIR}/macos-pkg-postinstall.sh" "${SCRIPTS_DIR}/postinstall"
+chmod 0755 "${SCRIPTS_DIR}/postinstall"
 
 pkgbuild \
   --root "${PAYLOAD_ROOT}" \
-  --install-location /Applications \
+  --install-location / \
+  --scripts "${SCRIPTS_DIR}" \
   --identifier "${DESKTOP_IDENTIFIER}.runtime" \
   --version "${DESKTOP_VERSION}" \
   --ownership recommended \
   "${COMPONENT_PKG}"
 
 pkgutil --payload-files "${COMPONENT_PKG}" > "${WORK_DIR}/payload-files.txt"
-grep -Fxq "./${APP_BUNDLE_NAME}" "${WORK_DIR}/payload-files.txt" || \
-  grep -Fxq "${APP_BUNDLE_NAME}" "${WORK_DIR}/payload-files.txt" || {
-  echo "PKG payload is missing ${APP_BUNDLE_NAME}." >&2
+grep -Fq "agent-runtime-installer/agent-desktop.app.zip" "${WORK_DIR}/payload-files.txt" || {
+  echo "PKG payload is missing the macOS app archive." >&2
   exit 1
 }
-grep -Fq "./${APP_BUNDLE_NAME}/Contents/Resources/embedded-runtime/bundle.json" \
-  "${WORK_DIR}/payload-files.txt" || \
-  grep -Fq "${APP_BUNDLE_NAME}/Contents/Resources/embedded-runtime/bundle.json" \
-    "${WORK_DIR}/payload-files.txt" || {
-  echo "PKG payload is missing the embedded runtime descriptor." >&2
+grep -Fq "agent-runtime-installer/agent-desktop.app.zip.sha256" \
+  "${WORK_DIR}/payload-files.txt" || {
+  echo "PKG payload is missing the macOS app archive checksum." >&2
   exit 1
 }
 
