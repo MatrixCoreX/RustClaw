@@ -5,6 +5,37 @@ const NNI_WORK_REPORT_JSON_BYTES: usize = 48 * 1024;
 const NNI_WORK_COMMAND_TIMEOUT_DEFAULT_SECONDS: u64 = 300;
 const NNI_WORK_COMMAND_TIMEOUT_MAX_SECONDS: u64 = 300;
 const NNI_WORK_CAPABILITY_ARGS_BYTES: usize = 32 * 1024;
+const NNI_WORK_SIGNED_PAYLOAD_BYTES: usize = 256 * 1024;
+const NNI_WORK_ASSIGNMENT_SCHEMA_VERSION: u32 = 2;
+const NNI_WORK_ASSIGNMENT_SIGNATURE_ALGORITHM: &str = "secp256k1-sha256";
+const NNI_WORK_ASSIGNMENT_SIGNATURE_DOMAIN: &str = "nni-distributed-work-assignment-v2\n";
+const NNI_WORK_CONTROL_SIGNATURE_DOMAIN: &str = "nni-distributed-work-control-v2\n";
+const NNI_WORK_HEARTBEAT_CHALLENGE_DOMAIN: &str = "nni-heartbeat-work-v2\0";
+const NNI_WORK_ASSIGNMENT_VERIFY_KEYS_ENV: &str = "APP_NNI_WORK_ASSIGNMENT_VERIFY_KEYS";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NniWorkAssignmentEnvelope {
+    schema_version: u32,
+    algorithm: String,
+    signing_key_id: String,
+    payload_canonical: String,
+    signature: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NniWorkControl {
+    schema_version: u32,
+    heartbeat_task_id: String,
+    device_pubkey: String,
+    work_report_status: String,
+    work_report_error_code: Option<String>,
+    work_poll_status: String,
+    work_poll_error_code: Option<String>,
+    work_assignment: Option<NniWorkAssignmentEnvelope>,
+    issued_at_unix: u64,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -30,6 +61,7 @@ struct NniWorkerCapabilities {
 #[serde(deny_unknown_fields)]
 struct NniWorkAssignment {
     schema_version: u32,
+    heartbeat_task_id: String,
     task_id: String,
     task_type: String,
     target_device_pubkey: String,
@@ -40,6 +72,7 @@ struct NniWorkAssignment {
     lease_expires_at_unix: u64,
     payload_canonical: String,
     payload_sha256: String,
+    issued_at_unix: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -109,6 +142,36 @@ fn nni_work_pull_enabled() -> bool {
     std::env::var("APP_NNI_WORK_PULL_ENABLED")
         .ok()
         .is_some_and(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+}
+
+fn nni_work_assignment_verifying_keys(
+) -> Result<BTreeMap<String, k256::ecdsa::VerifyingKey>, &'static str> {
+    let raw = std::env::var(NNI_WORK_ASSIGNMENT_VERIFY_KEYS_ENV).unwrap_or_default();
+    nni_parse_work_assignment_verifying_keys(&raw)
+}
+
+fn nni_parse_work_assignment_verifying_keys(
+    raw: &str,
+) -> Result<BTreeMap<String, k256::ecdsa::VerifyingKey>, &'static str> {
+    use sha2::{Digest, Sha256};
+
+    let mut keys = BTreeMap::new();
+    for encoded in raw.split(',').map(str::trim).filter(|value| !value.is_empty()) {
+        if encoded.len() != 66 || !encoded.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err("assignment_verify_key_invalid");
+        }
+        let bytes = hex::decode(encoded).map_err(|_| "assignment_verify_key_invalid")?;
+        let key = k256::ecdsa::VerifyingKey::from_sec1_bytes(&bytes)
+            .map_err(|_| "assignment_verify_key_invalid")?;
+        let key_id = hex::encode(Sha256::digest(&bytes));
+        if keys.insert(key_id, key).is_some() {
+            return Err("assignment_verify_key_duplicate");
+        }
+    }
+    if keys.is_empty() {
+        return Err("assignment_verify_key_required");
+    }
+    Ok(keys)
 }
 
 fn nni_work_allowed_programs() -> BTreeSet<String> {
@@ -260,8 +323,50 @@ fn nni_work_sha256(value: &str) -> String {
     hex::encode(Sha256::digest(value.as_bytes()))
 }
 
+fn nni_verify_heartbeat_work_challenge(
+    challenge: &str,
+    nonce: Option<&str>,
+    capabilities: Option<&NniWorkerCapabilities>,
+    report: Option<&NniHeartbeatWorkReport>,
+) -> Result<(), &'static str> {
+    use sha2::{Digest, Sha256};
+
+    if capabilities.is_none() && report.is_none() {
+        return Ok(());
+    }
+    let nonce = nonce.ok_or("heartbeat_work_challenge_nonce_missing")?;
+    if nonce.len() != 64 || !nonce.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("heartbeat_work_challenge_nonce_invalid");
+    }
+    let capabilities_json = capabilities
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|_| "heartbeat_work_capabilities_encode_failed")?
+        .unwrap_or_else(|| "null".to_string());
+    let report_json = report
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|_| "heartbeat_work_report_encode_failed")?
+        .unwrap_or_else(|| "null".to_string());
+    let capabilities_sha256 = hex::encode(Sha256::digest(capabilities_json.as_bytes()));
+    let report_sha256 = hex::encode(Sha256::digest(report_json.as_bytes()));
+    let expected = hex::encode(Sha256::digest(
+        format!(
+            "{NNI_WORK_HEARTBEAT_CHALLENGE_DOMAIN}{}\0{}\0{}",
+            nonce.to_ascii_lowercase(),
+            capabilities_sha256,
+            report_sha256,
+        )
+        .as_bytes(),
+    ));
+    if challenge != expected {
+        return Err("heartbeat_work_challenge_binding_invalid");
+    }
+    Ok(())
+}
+
 fn nni_current_worker_capabilities(state: &AppState) -> Option<NniWorkerCapabilities> {
-    if !nni_work_pull_enabled() {
+    if !nni_work_pull_enabled() || nni_work_assignment_verifying_keys().is_err() {
         return None;
     }
     let local = read_nni_local_work_state(state).ok().flatten();
@@ -290,6 +395,101 @@ fn nni_current_worker_capabilities(state: &AppState) -> Option<NniWorkerCapabili
         worker_instance_id: nni_worker_instance_id(state).ok()?,
         active_lease,
     })
+}
+
+fn nni_verify_work_assignment_envelope(
+    envelope: &NniWorkAssignmentEnvelope,
+    expected_heartbeat_task_id: &str,
+    keys: &BTreeMap<String, k256::ecdsa::VerifyingKey>,
+) -> Result<NniWorkAssignment, &'static str> {
+    nni_verify_work_signed_envelope(envelope, NNI_WORK_ASSIGNMENT_SIGNATURE_DOMAIN, keys)?;
+    let assignment: NniWorkAssignment = serde_json::from_str(&envelope.payload_canonical)
+        .map_err(|_| "assignment_payload_invalid")?;
+    let now = u64::try_from(current_unix_ts()).unwrap_or_default();
+    if assignment.schema_version != NNI_WORK_ASSIGNMENT_SCHEMA_VERSION
+        || assignment.heartbeat_task_id != expected_heartbeat_task_id
+        || assignment.issued_at_unix > now.saturating_add(60)
+        || assignment.issued_at_unix > assignment.lease_expires_at_unix
+    {
+        return Err("assignment_binding_invalid");
+    }
+    Ok(assignment)
+}
+
+fn nni_verify_work_signed_envelope(
+    envelope: &NniWorkAssignmentEnvelope,
+    domain: &str,
+    keys: &BTreeMap<String, k256::ecdsa::VerifyingKey>,
+) -> Result<(), &'static str> {
+    use k256::ecdsa::signature::Verifier;
+
+    if envelope.schema_version != NNI_WORK_ASSIGNMENT_SCHEMA_VERSION
+        || envelope.algorithm != NNI_WORK_ASSIGNMENT_SIGNATURE_ALGORITHM
+        || envelope.signing_key_id.len() != 64
+        || !envelope
+            .signing_key_id
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
+        || envelope.signature.len() != 128
+        || !envelope.signature.bytes().all(|byte| byte.is_ascii_hexdigit())
+        || envelope.payload_canonical.len() > NNI_WORK_SIGNED_PAYLOAD_BYTES
+    {
+        return Err("assignment_envelope_invalid");
+    }
+    let key = keys
+        .get(&envelope.signing_key_id.to_ascii_lowercase())
+        .ok_or("assignment_signing_key_unknown")?;
+    let signature_bytes = hex::decode(&envelope.signature)
+        .map_err(|_| "assignment_signature_invalid")?;
+    let signature = k256::ecdsa::Signature::from_slice(&signature_bytes)
+        .map_err(|_| "assignment_signature_invalid")?;
+    let signed = format!("{}{}", domain, envelope.payload_canonical);
+    key.verify(signed.as_bytes(), &signature)
+        .map_err(|_| "assignment_signature_invalid")
+}
+
+fn nni_work_control_error_code_valid(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+}
+
+fn nni_verify_work_control_envelope(
+    envelope: &NniWorkAssignmentEnvelope,
+    expected_heartbeat_task_id: &str,
+    expected_device_pubkey: &str,
+    keys: &BTreeMap<String, k256::ecdsa::VerifyingKey>,
+) -> Result<NniWorkControl, &'static str> {
+    nni_verify_work_signed_envelope(envelope, NNI_WORK_CONTROL_SIGNATURE_DOMAIN, keys)?;
+    let control: NniWorkControl = serde_json::from_str(&envelope.payload_canonical)
+        .map_err(|_| "work_control_payload_invalid")?;
+    let now = u64::try_from(current_unix_ts()).unwrap_or_default();
+    if control.schema_version != NNI_WORK_ASSIGNMENT_SCHEMA_VERSION
+        || control.heartbeat_task_id != expected_heartbeat_task_id
+        || control.device_pubkey != expected_device_pubkey
+        || !matches!(
+            control.work_report_status.as_str(),
+            "none" | "accepted" | "already_reported" | "error"
+        )
+        || !matches!(
+            control.work_poll_status.as_str(),
+            "disabled" | "idle" | "leased" | "error"
+        )
+        || control
+            .work_report_error_code
+            .as_deref()
+            .is_some_and(|value| !nni_work_control_error_code_valid(value))
+        || control
+            .work_poll_error_code
+            .as_deref()
+            .is_some_and(|value| !nni_work_control_error_code_valid(value))
+        || control.issued_at_unix > now.saturating_add(60)
+    {
+        return Err("work_control_binding_invalid");
+    }
+    Ok(control)
 }
 
 fn nni_pending_work_report_for_node(
@@ -327,7 +527,7 @@ fn nni_pending_work_report_for_node(
 fn nni_validate_work_assignment(
     assignment: &NniWorkAssignment,
 ) -> Result<NniWorkPayload, &'static str> {
-    if assignment.schema_version != 1
+    if assignment.schema_version != NNI_WORK_ASSIGNMENT_SCHEMA_VERSION
         || !matches!(assignment.task_type.as_str(), "command_v1" | "capability_v1")
     {
         return Err("unsupported_assignment");
@@ -746,13 +946,43 @@ fn nni_accept_work_assignment(state: &AppState, heartbeat_data: &Value) {
     if raw_assignment.is_null() {
         return;
     }
-    let assignment: NniWorkAssignment = match serde_json::from_value(raw_assignment.clone()) {
+    let envelope: NniWorkAssignmentEnvelope = match serde_json::from_value(raw_assignment.clone()) {
         Ok(value) => value,
         Err(error) => {
             append_nni_log_event_best_effort(
                 state,
                 "distributed_work_assignment_invalid",
                 json!({"error_code": "assignment_decode_failed", "error": error.to_string()}),
+            );
+            return;
+        }
+    };
+    let heartbeat_task_id = heartbeat_data
+        .get("task_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let keys = match nni_work_assignment_verifying_keys() {
+        Ok(value) => value,
+        Err(error_code) => {
+            append_nni_log_event_best_effort(
+                state,
+                "distributed_work_assignment_invalid",
+                json!({"error_code": error_code}),
+            );
+            return;
+        }
+    };
+    let assignment = match nni_verify_work_assignment_envelope(
+        &envelope,
+        heartbeat_task_id,
+        &keys,
+    ) {
+        Ok(value) => value,
+        Err(error_code) => {
+            append_nni_log_event_best_effort(
+                state,
+                "distributed_work_assignment_invalid",
+                json!({"error_code": error_code}),
             );
             return;
         }
@@ -920,17 +1150,68 @@ fn nni_handle_work_heartbeat_response(state: &AppState, heartbeat_data: &Value) 
             return;
         }
     };
+    let expected_heartbeat_task_id = heartbeat_data
+        .get("task_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let expected_device_pubkey = heartbeat_data
+        .get("local_device_pubkey")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let Some(raw_control) = heartbeat_data.get("work_control") else {
+        if local.is_some() || nni_work_pull_enabled() {
+            append_nni_log_event_best_effort(
+                state,
+                "distributed_work_control_invalid",
+                json!({"error_code": "work_control_missing"}),
+            );
+        }
+        return;
+    };
+    let envelope: NniWorkAssignmentEnvelope = match serde_json::from_value(raw_control.clone()) {
+        Ok(value) => value,
+        Err(error) => {
+            append_nni_log_event_best_effort(
+                state,
+                "distributed_work_control_invalid",
+                json!({"error_code": "work_control_decode_failed", "error": error.to_string()}),
+            );
+            return;
+        }
+    };
+    let keys = match nni_work_assignment_verifying_keys() {
+        Ok(value) => value,
+        Err(error_code) => {
+            append_nni_log_event_best_effort(
+                state,
+                "distributed_work_control_invalid",
+                json!({"error_code": error_code}),
+            );
+            return;
+        }
+    };
+    let control = match nni_verify_work_control_envelope(
+        &envelope,
+        expected_heartbeat_task_id,
+        expected_device_pubkey,
+        &keys,
+    ) {
+        Ok(value) => value,
+        Err(error_code) => {
+            append_nni_log_event_best_effort(
+                state,
+                "distributed_work_control_invalid",
+                json!({"error_code": error_code}),
+            );
+            return;
+        }
+    };
     if let Some(local) = local {
         if local.status == "completed_pending_report"
             && local.node_url.trim_end_matches('/') == node_url.trim_end_matches('/')
         {
-            let report_status = heartbeat_data
-                .get("work_report_status")
-                .and_then(Value::as_str)
-                .unwrap_or("none");
-            let report_error_code = heartbeat_data
-                .get("work_report_error_code")
-                .and_then(Value::as_str);
+            let report_status = control.work_report_status.as_str();
+            let report_error_code = control.work_report_error_code.as_deref();
             let accepted = matches!(report_status, "accepted" | "already_reported");
             let terminal_rejection = report_status == "error"
                 && report_error_code.is_some_and(nni_work_report_error_is_terminal);
@@ -972,7 +1253,13 @@ fn nni_handle_work_heartbeat_response(state: &AppState, heartbeat_data: &Value) 
             }
         }
     }
-    nni_accept_work_assignment(state, heartbeat_data);
+    let trusted = json!({
+        "task_id": control.heartbeat_task_id,
+        "node_url": node_url,
+        "local_device_pubkey": control.device_pubkey,
+        "work_assignment": control.work_assignment,
+    });
+    nni_accept_work_assignment(state, &trusted);
 }
 
 fn nni_resume_work_worker(state: AppState) {
@@ -992,11 +1279,15 @@ fn nni_resume_work_worker(state: AppState) {
 #[cfg(test)]
 mod nni_distributed_work_unit_tests {
     use super::*;
+    use k256::ecdsa::{signature::Signer, Signature, SigningKey};
+    use k256::elliptic_curve::rand_core::OsRng;
 
     fn assignment(task_type: &str, payload: Value) -> NniWorkAssignment {
         let payload_canonical = serde_json::to_string(&payload).unwrap();
+        let now = u64::try_from(current_unix_ts()).unwrap();
         NniWorkAssignment {
-            schema_version: 1,
+            schema_version: NNI_WORK_ASSIGNMENT_SCHEMA_VERSION,
+            heartbeat_task_id: "nni-heartbeat-0123456789abcdef0123456789abcdef".to_string(),
             task_id: "nni-work-0123456789abcdef0123456789abcdef".to_string(),
             task_type: task_type.to_string(),
             target_device_pubkey: "a".repeat(128),
@@ -1004,9 +1295,10 @@ mod nni_distributed_work_unit_tests {
             target_arch: nni_work_arch().unwrap().to_string(),
             attempt: 1,
             lease_token: "b".repeat(64),
-            lease_expires_at_unix: u64::try_from(current_unix_ts()).unwrap() + 60,
+            lease_expires_at_unix: now + 60,
             payload_sha256: nni_work_sha256(&payload_canonical),
             payload_canonical,
+            issued_at_unix: now,
         }
     }
 
@@ -1017,6 +1309,219 @@ mod nni_distributed_work_unit_tests {
         assert!(!nni_work_program_name_valid("sh"));
         assert!(!nni_work_program_name_valid("/usr/bin/uname"));
         assert!(!nni_work_program_name_valid("uname;id"));
+    }
+
+    #[test]
+    fn heartbeat_work_challenge_binds_the_exact_outbound_metadata() {
+        use sha2::{Digest, Sha256};
+
+        let capabilities = NniWorkerCapabilities {
+            protocol_version: 1,
+            platform: "linux".to_string(),
+            arch: "x86_64".to_string(),
+            supported_task_types: vec!["capability_v1".to_string()],
+            worker_instance_id: "11111111-2222-4333-8444-555555555555".to_string(),
+            active_lease: None,
+        };
+        let report = NniHeartbeatWorkReport {
+            task_id: "nni-work-0123456789abcdef0123456789abcdef".to_string(),
+            attempt: 1,
+            lease_token: "b".repeat(64),
+            result: NniWorkResult {
+                status: "success".to_string(),
+                exit_code: Some(0),
+                duration_ms: 42,
+                stdout: "ok".to_string(),
+                stderr: String::new(),
+                stdout_truncated: false,
+                stderr_truncated: false,
+                error_code: None,
+            },
+        };
+        let nonce = "a".repeat(64);
+        let capabilities_json = serde_json::to_string(&capabilities).unwrap();
+        let report_json = serde_json::to_string(&report).unwrap();
+        let challenge = hex::encode(Sha256::digest(
+            format!(
+                "{NNI_WORK_HEARTBEAT_CHALLENGE_DOMAIN}{nonce}\0{}\0{}",
+                hex::encode(Sha256::digest(capabilities_json.as_bytes())),
+                hex::encode(Sha256::digest(report_json.as_bytes())),
+            )
+            .as_bytes(),
+        ));
+        assert_eq!(
+            challenge,
+            "885c3bea19854a75640ebb51781bd81ff67d9f9ea874129d37227f7bd75698ba"
+        );
+
+        assert_eq!(
+            nni_verify_heartbeat_work_challenge(
+                &challenge,
+                Some(&nonce),
+                Some(&capabilities),
+                Some(&report),
+            ),
+            Ok(())
+        );
+        let mut changed = report.clone();
+        changed.result.stdout = "forged".to_string();
+        assert_eq!(
+            nni_verify_heartbeat_work_challenge(
+                &challenge,
+                Some(&nonce),
+                Some(&capabilities),
+                Some(&changed),
+            ),
+            Err("heartbeat_work_challenge_binding_invalid")
+        );
+        assert_eq!(
+            nni_verify_heartbeat_work_challenge(
+                &challenge,
+                None,
+                Some(&capabilities),
+                Some(&report),
+            ),
+            Err("heartbeat_work_challenge_nonce_missing")
+        );
+    }
+
+    #[test]
+    fn signed_assignment_rejects_tampering_unknown_keys_and_heartbeat_replay() {
+        use sha2::{Digest, Sha256};
+
+        let signing_key = SigningKey::random(&mut OsRng);
+        let public_key = signing_key.verifying_key().to_encoded_point(true);
+        let public_key_hex = hex::encode(public_key.as_bytes());
+        let keys = nni_parse_work_assignment_verifying_keys(&public_key_hex)
+            .expect("parse verifying key");
+        let key_id = hex::encode(Sha256::digest(public_key.as_bytes()));
+        let expected_heartbeat = "nni-heartbeat-0123456789abcdef0123456789abcdef";
+        let work = assignment("command_v1", json!({
+            "program": "uname",
+            "args": ["-a"],
+            "timeout_seconds": 30,
+        }));
+        let payload_canonical = serde_json::to_string(&work).expect("serialize assignment");
+        let signed = format!(
+            "{}{}",
+            NNI_WORK_ASSIGNMENT_SIGNATURE_DOMAIN, payload_canonical
+        );
+        let signature: Signature = signing_key.sign(signed.as_bytes());
+        let envelope = NniWorkAssignmentEnvelope {
+            schema_version: NNI_WORK_ASSIGNMENT_SCHEMA_VERSION,
+            algorithm: NNI_WORK_ASSIGNMENT_SIGNATURE_ALGORITHM.to_string(),
+            signing_key_id: key_id,
+            payload_canonical,
+            signature: hex::encode(signature.to_bytes()),
+        };
+
+        let verified = nni_verify_work_assignment_envelope(
+            &envelope,
+            expected_heartbeat,
+            &keys,
+        )
+        .expect("verify signed assignment");
+        assert_eq!(verified.task_id, work.task_id);
+
+        let mut tampered = envelope.clone();
+        tampered.payload_canonical = tampered.payload_canonical.replace("uname", "false");
+        assert_eq!(
+            nni_verify_work_assignment_envelope(&tampered, expected_heartbeat, &keys)
+                .expect_err("tampering must fail"),
+            "assignment_signature_invalid"
+        );
+        assert_eq!(
+            nni_verify_work_assignment_envelope(
+                &envelope,
+                "nni-heartbeat-ffffffffffffffffffffffffffffffff",
+                &keys,
+            )
+            .expect_err("heartbeat replay must fail"),
+            "assignment_binding_invalid"
+        );
+
+        let other_key = SigningKey::random(&mut OsRng);
+        let other_hex = hex::encode(other_key.verifying_key().to_encoded_point(true).as_bytes());
+        let other_keys = nni_parse_work_assignment_verifying_keys(&other_hex)
+            .expect("parse other verifying key");
+        assert_eq!(
+            nni_verify_work_assignment_envelope(&envelope, expected_heartbeat, &other_keys)
+                .expect_err("unknown key must fail"),
+            "assignment_signing_key_unknown"
+        );
+
+        let control_payload = serde_json::to_string(&NniWorkControl {
+            schema_version: NNI_WORK_ASSIGNMENT_SCHEMA_VERSION,
+            heartbeat_task_id: expected_heartbeat.to_string(),
+            device_pubkey: "a".repeat(128),
+            work_report_status: "accepted".to_string(),
+            work_report_error_code: None,
+            work_poll_status: "leased".to_string(),
+            work_poll_error_code: None,
+            work_assignment: Some(envelope.clone()),
+            issued_at_unix: u64::try_from(current_unix_ts()).unwrap(),
+        })
+        .expect("serialize work control");
+        let control_signature: Signature = signing_key.sign(
+            format!("{}{}", NNI_WORK_CONTROL_SIGNATURE_DOMAIN, control_payload).as_bytes(),
+        );
+        let control_envelope = NniWorkAssignmentEnvelope {
+            schema_version: NNI_WORK_ASSIGNMENT_SCHEMA_VERSION,
+            algorithm: NNI_WORK_ASSIGNMENT_SIGNATURE_ALGORITHM.to_string(),
+            signing_key_id: envelope.signing_key_id.clone(),
+            payload_canonical: control_payload,
+            signature: hex::encode(control_signature.to_bytes()),
+        };
+        let control = nni_verify_work_control_envelope(
+            &control_envelope,
+            expected_heartbeat,
+            &"a".repeat(128),
+            &keys,
+        )
+        .expect("verify signed work control");
+        assert_eq!(control.work_report_status, "accepted");
+        assert!(nni_verify_work_assignment_envelope(
+            &control_envelope,
+            expected_heartbeat,
+            &keys,
+        )
+        .is_err());
+        assert_eq!(
+            nni_verify_work_control_envelope(
+                &control_envelope,
+                "nni-heartbeat-ffffffffffffffffffffffffffffffff",
+                &"a".repeat(128),
+                &keys,
+            )
+            .expect_err("work-control replay must fail"),
+            "work_control_binding_invalid"
+        );
+    }
+
+    #[test]
+    fn verifies_node_crypto_assignment_signature_fixture() {
+        let keys = nni_parse_work_assignment_verifying_keys(
+            "0216451a0615c57cdb9caddc0b90a2acf727340d6ddced7e305331627c0d10cc46",
+        )
+        .expect("parse Node.js fixture key");
+        let envelope = NniWorkAssignmentEnvelope {
+            schema_version: 2,
+            algorithm: "secp256k1-sha256".to_string(),
+            signing_key_id:
+                "fa7f8c2e1ed9da5d4b2ce637e54d87a5e6a78f60c1c6912875c272a8d0eac341"
+                    .to_string(),
+            payload_canonical: r#"{"schema_version":2,"heartbeat_task_id":"nni-heartbeat-11111111111111111111111111111111","task_id":"nni-work-22222222222222222222222222222222","task_type":"command_v1","target_device_pubkey":"33333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333","target_platform":"linux","target_arch":"aarch64","attempt":1,"lease_token":"4444444444444444444444444444444444444444444444444444444444444444","lease_expires_at_unix":4102444800,"payload_canonical":"{\"program\":\"uname\",\"args\":[\"-a\"],\"timeout_seconds\":30}","payload_sha256":"5555555555555555555555555555555555555555555555555555555555555555","issued_at_unix":1}"#.to_string(),
+            signature:
+                "aafacd24156612e1e738b8510667261d4b65a31d2cd2f68b5872d4a5852386115ebe590153788c744818c37895e744f5678b454df53fa963c864e9157f793538"
+                    .to_string(),
+        };
+        let verified = nni_verify_work_assignment_envelope(
+            &envelope,
+            "nni-heartbeat-11111111111111111111111111111111",
+            &keys,
+        )
+        .expect("verify Node.js signature in Rust");
+        assert_eq!(verified.task_id, "nni-work-22222222222222222222222222222222");
     }
 
     #[test]

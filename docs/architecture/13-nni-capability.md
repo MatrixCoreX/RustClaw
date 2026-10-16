@@ -189,6 +189,10 @@ Distributed work is disabled by default. A deployment opts in with
 `APP_NNI_WORK_PULL_ENABLED=true`. A non-empty `APP_NNI_WORK_ALLOWED_PROGRAMS` basename list is
 additionally required only when the deployment enables `command_v1`; the optional
 `APP_NNI_WORK_COMMAND_TIMEOUT_MAX_SECONDS` may only reduce that adapter's 300-second command ceiling.
+An opted-in deployment must also pin at least one compressed secp256k1 Core public key in
+`APP_NNI_WORK_ASSIGNMENT_VERIFY_KEYS`; comma-separated keys support a controlled rotation overlap.
+If the key list is absent or invalid, the runtime does not advertise work capability and cannot be
+leased a task.
 The runtime advertises its compiled platform/architecture, supported adapter types, and a stable
 worker instance ID only on a normally due heartbeat.
 
@@ -201,6 +205,22 @@ registry-generation, receipt, policy-grant, permission, and sandbox checks. Buil
 built-in skills, and external skills share this path; an external skill is callable only after
 admission, enablement, host authorization, and capability projection into the current generation.
 The work carrier never starts a tool or skill by name on its own.
+
+The assignment is accepted only as a schema-v2 `secp256k1-sha256` envelope signed by Core. Its
+signature binds the current heartbeat task ID, target device, platform/architecture, exact payload,
+lease token, attempt, issuance time, and expiry. Unsigned legacy data, unknown keys, mutation, and
+replay on another heartbeat are rejected before anything is persisted or executed; TLS to an Edge
+is transport protection, not the assignment's authority boundary.
+
+The report acknowledgement, poll status, and optional assignment arrive inside a separate signed
+work-control envelope bound to the same heartbeat and device. The runtime removes a pending local
+result only after that envelope verifies; an Edge can drop traffic but cannot forge acceptance and
+make the runtime discard an uncommitted result.
+
+For any heartbeat carrying worker capabilities or a pending result, the runtime also recomputes the
+Core challenge from the returned nonce and the exact outbound metadata before asking the hardware
+to sign. A public Edge therefore cannot alter a result or capability declaration and use the device
+as a blind signing oracle.
 
 Completion is atomically persisted as `completed_pending_report`. It neither wakes the heartbeat
 worker nor creates a network request. The next normally scheduled heartbeat carries the result;

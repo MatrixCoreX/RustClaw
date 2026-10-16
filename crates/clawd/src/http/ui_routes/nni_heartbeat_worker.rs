@@ -352,17 +352,18 @@ async fn run_nni_heartbeat_once_for_node(
     let request_endpoint = nni_remote_api_endpoint(node_url, "heartbeat/request");
     let worker_capabilities = nni_current_worker_capabilities(state);
     let work_report = nni_pending_work_report_for_node(state, node_url, device_pubkey);
+    let heartbeat_request = NniRemoteHeartbeatRequest {
+        device_pubkey: device_pubkey.to_string(),
+        client_user_key: NNI_HEARTBEAT_USER_KEY.to_string(),
+        worker_capabilities,
+        work_report,
+    };
     let request_resp = state
         .core
         .public_http_client
         .post(&request_endpoint)
         .timeout(nni_remote_api_timeout())
-        .json(&NniRemoteHeartbeatRequest {
-            device_pubkey: device_pubkey.to_string(),
-            client_user_key: NNI_HEARTBEAT_USER_KEY.to_string(),
-            worker_capabilities,
-            work_report,
-        })
+        .json(&heartbeat_request)
         .send()
         .await
         .map_err(|err| {
@@ -401,6 +402,7 @@ async fn run_nni_heartbeat_once_for_node(
                 "heartbeat_task_id_missing",
             )
         })?;
+    let expected_task_id = task_id.clone();
     let challenge = request_data
         .get("challenge")
         .and_then(|value| value.as_str())
@@ -411,6 +413,15 @@ async fn run_nni_heartbeat_once_for_node(
                 "heartbeat_challenge_missing",
             )
         })?;
+    nni_verify_heartbeat_work_challenge(
+        &challenge,
+        request_data
+            .get("work_challenge_nonce")
+            .and_then(Value::as_str),
+        heartbeat_request.worker_capabilities.as_ref(),
+        heartbeat_request.work_report.as_ref(),
+    )
+    .map_err(|error_code| NniHeartbeatError::non_network(error_code, error_code))?;
 
     let sign_output = run_nni_signature_helper(state, &[String::from("sign_challenge"), challenge])
         .await
@@ -466,12 +477,19 @@ async fn run_nni_heartbeat_once_for_node(
             format!("status={} data={:?}", verify_status, verify_body.data),
         ));
     }
-    verify_body
+    let data = verify_body
         .data
         .ok_or_else(|| {
             NniHeartbeatError::non_network(
                 "heartbeat_verify_missing_data",
                 "heartbeat_verify_missing_data",
             )
-        })
+        })?;
+    if data.get("task_id").and_then(Value::as_str) != Some(expected_task_id.as_str()) {
+        return Err(NniHeartbeatError::non_network(
+            "heartbeat_verify_task_id_mismatch",
+            "heartbeat_verify_task_id_mismatch",
+        ));
+    }
+    Ok(data)
 }
