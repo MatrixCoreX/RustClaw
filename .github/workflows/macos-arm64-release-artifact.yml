@@ -306,6 +306,7 @@ jobs:
           )
 
       - name: Install-test PKG, bundled skills, and overwrite upgrade
+        timeout-minutes: 45
         shell: bash
         env:
           INSTALLER_PKG: ${{ github.workspace }}/dist-release/${{ steps.meta.outputs.installer_name }}
@@ -442,15 +443,59 @@ jobs:
           [[ "$(command -v chromium)" == "${host_tools}/bin/chromium" ]]
           chromium_profile="$(mktemp -d "${RUNNER_TEMP}/bundled-chromium-profile.XXXXXX")"
           chromium_output="${RUNNER_TEMP}/bundled-chromium-smoke.html"
-          chromium \
-            --headless=new \
-            --disable-gpu \
-            --no-first-run \
-            --no-default-browser-check \
-            --user-data-dir="${chromium_profile}" \
-            --dump-dom 'data:text/html,<title>bundled-browser-ready</title>' \
-            >"${chromium_output}"
-          grep -q 'bundled-browser-ready' "${chromium_output}"
+          chromium_log="${RUNNER_TEMP}/bundled-chromium-smoke.log"
+          python3 - "$(command -v chromium)" "${chromium_profile}" \
+            "${chromium_output}" "${chromium_log}" <<'PY'
+          from pathlib import Path
+          import os
+          import signal
+          import subprocess
+          import sys
+          import time
+
+          executable, profile, output_name, log_name = sys.argv[1:]
+          output = Path(output_name)
+          log = Path(log_name)
+          command = [
+              executable,
+              "--headless=new",
+              "--disable-background-networking",
+              "--disable-gpu",
+              "--no-first-run",
+              "--no-default-browser-check",
+              f"--user-data-dir={profile}",
+              "--dump-dom",
+              "data:text/html,<title>bundled-browser-ready</title>",
+          ]
+          matched = False
+          with output.open("wb") as stdout, log.open("wb") as stderr:
+              process = subprocess.Popen(
+                  command,
+                  stdout=stdout,
+                  stderr=stderr,
+                  start_new_session=True,
+              )
+              deadline = time.monotonic() + 60
+              try:
+                  while time.monotonic() < deadline:
+                      if output.is_file() and b"bundled-browser-ready" in output.read_bytes():
+                          matched = True
+                          break
+                      if process.poll() is not None:
+                          break
+                      time.sleep(0.25)
+              finally:
+                  if process.poll() is None:
+                      os.killpg(process.pid, signal.SIGTERM)
+                      try:
+                          process.wait(timeout=5)
+                      except subprocess.TimeoutExpired:
+                          os.killpg(process.pid, signal.SIGKILL)
+                          process.wait(timeout=5)
+          if not matched:
+              sys.stderr.write(log.read_text(encoding="utf-8", errors="replace"))
+              raise SystemExit("bundled_chromium_smoke_timeout_or_failure")
+          PY
           rm -rf "${chromium_profile}"
           printf '%s\n' 'macos_pkg_probe=media'
           media_fixture="${RUNNER_TEMP}/bundled-media-smoke.wav"

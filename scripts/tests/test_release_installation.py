@@ -188,6 +188,9 @@ class ReleaseInstallationTests(unittest.TestCase):
             workflow,
         )
         self.assertIn('[[ -x "${host_tools}/bin/tesseract-real" ]]', workflow)
+        self.assertIn("timeout-minutes: 45", workflow)
+        self.assertIn("bundled_chromium_smoke_timeout_or_failure", workflow)
+        self.assertIn("os.killpg(process.pid, signal.SIGTERM)", workflow)
         self.assertIn(
             '[[ "$(command -v whisper-cli)" == "${host_tools}/bin/whisper-cli" ]]',
             workflow,
