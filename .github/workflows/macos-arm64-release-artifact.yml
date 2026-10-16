@@ -305,6 +305,22 @@ jobs:
             done
           )
 
+      - name: Reclaim build space before install test
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf \
+            target \
+            desktop/target \
+            UI/node_modules \
+            desktop/node_modules \
+            crates/skills/browser_web/node_modules \
+            optional_skills/media_discovery/node_modules \
+            release-wheel-bundles \
+            "${RUNNER_TEMP}/playwright-browsers" \
+            "${RUNNER_TEMP}/release host tools"
+          df -h /
+
       - name: Install-test PKG, bundled skills, and overwrite upgrade
         timeout-minutes: 45
         shell: bash
@@ -326,6 +342,7 @@ jobs:
           app_data="${HOME}/Library/Application Support/${app_identifier}"
           state_file="${app_data}/bundled-runtime-install-v1.json"
           launch_log="${RUNNER_TEMP}/installed-desktop.log"
+          install_log="${app_data}/bundled-runtime-install.log"
 
           cleanup() {
             local cleanup_runtime_root="${runtime_root:-${app_data}/runtime}"
@@ -370,14 +387,14 @@ jobs:
               fi
               if ! kill -0 "${desktop_pid}" >/dev/null 2>&1; then
                 cat "${launch_log}" >&2 || true
-                cat "${app_data}/bundled-runtime-install.log" >&2 || true
+                cat "${install_log}" >&2 || true
                 echo "Installed desktop exited before bundled setup completed." >&2
                 return 1
               fi
               sleep 5
             done
             cat "${launch_log}" >&2 || true
-            cat "${app_data}/bundled-runtime-install.log" >&2 || true
+            cat "${install_log}" >&2 || true
             echo "Bundled runtime setup did not finish within 15 minutes." >&2
             return 1
           }
@@ -393,6 +410,11 @@ jobs:
             >"${launch_log}" 2>&1 &
           desktop_pid=$!
           wait_for_runtime_install
+          cat "${install_log}"
+          if grep -q '^bundled_skill_install=skipped ' "${install_log}"; then
+            echo "A bundled skill was skipped during one-click installation." >&2
+            exit 1
+          fi
           runtime_root="$(python3 - "${state_file}" <<'PY'
           import json
           from pathlib import Path
@@ -441,6 +463,7 @@ jobs:
             tesseract "${tesseract_fixture}" stdout -l chi_sim >/dev/null
           printf '%s\n' 'macos_pkg_probe=chromium'
           [[ "$(command -v chromium)" == "${host_tools}/bin/chromium" ]]
+          [[ -d "${runtime_root}/data/skill-packages/media_discovery/versions" ]]
           playwright_module="$(find \
             "${runtime_root}/data/skill-packages/media_discovery/versions" \
             -type d -path '*/runtime/src/node_modules/playwright' -print -quit)"
@@ -553,6 +576,11 @@ jobs:
             >>"${launch_log}" 2>&1 &
           desktop_pid=$!
           wait_for_runtime_install
+          cat "${install_log}"
+          if grep -q '^bundled_skill_install=skipped ' "${install_log}"; then
+            echo "A bundled skill was skipped during overwrite installation." >&2
+            exit 1
+          fi
           [[ "$(cat "${data_sentinel}")" == "preserve-user-data" ]]
           printf 'macos_pkg_smoke=passed skills=%s runtime=%s\n' \
             "${expected_count}" "${runtime_root}"

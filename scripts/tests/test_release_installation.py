@@ -189,6 +189,10 @@ class ReleaseInstallationTests(unittest.TestCase):
         )
         self.assertIn('[[ -x "${host_tools}/bin/tesseract-real" ]]', workflow)
         self.assertIn("timeout-minutes: 45", workflow)
+        self.assertIn("Reclaim build space before install test", workflow)
+        self.assertIn("optional_skills/media_discovery/node_modules", workflow)
+        self.assertIn("bundled_skill_install=skipped ", workflow)
+        self.assertIn("A bundled skill was skipped during one-click installation.", workflow)
         self.assertIn("bundled_chromium_smoke_timeout_or_failure", workflow)
         self.assertIn('data/skill-packages/media_discovery/versions', workflow)
         self.assertIn("const { chromium } = require(playwrightModule);", workflow)
@@ -202,7 +206,7 @@ class ReleaseInstallationTests(unittest.TestCase):
         self.assertIn("APP_DESKTOP_RUNTIME_BUNDLE_DIR", workflow)
         self.assertIn("embedded-runtime/bundle.json", workflow)
         self.assertGreaterEqual(
-            workflow.count('cat "${app_data}/bundled-runtime-install.log" >&2 || true'),
+            workflow.count('cat "${install_log}" >&2 || true'),
             2,
         )
         self.assertIn(
