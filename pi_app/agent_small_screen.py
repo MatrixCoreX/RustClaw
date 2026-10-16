@@ -57,7 +57,11 @@ from small_screen_config import (
     save_us_stock_page_visible,
     save_weather_page_visible,
 )
-from small_screen_login_challenge import load_login_challenge
+from small_screen_login_challenge import (
+    COMPANION_REFRESH_SECONDS,
+    load_login_challenge,
+    publish_login_companion_heartbeat,
+)
 from small_screen_bancor import build_bancor_market_view
 from small_screen_cryptoauth_service import (
     read_slot0_pubkey_via_helper,
@@ -1428,6 +1432,7 @@ class SmallScreenApp:
         self._login_challenge_frame = None
         self._login_challenge_photo = None
         self._login_challenge_signature = None
+        self._login_companion_heartbeat_at = 0.0
         self._skill_data_root = _load_skill_data_root_from_config()
         self._i18n = []  # [(widget, key), ...] 用于切换语言时更新
         self.root.title(_render_product_copy(STRINGS.get(self._lang, STRINGS["CN"])["app_title"]))
@@ -2567,6 +2572,10 @@ class SmallScreenApp:
         self._login_challenge_job = None
         if getattr(self, "_closing", False):
             return
+        now = time.time()
+        if now - self._login_companion_heartbeat_at >= COMPANION_REFRESH_SECONDS:
+            if publish_login_companion_heartbeat(now=now):
+                self._login_companion_heartbeat_at = now
         challenge = load_login_challenge(self._skill_data_root)
         if challenge is None:
             self._hide_login_challenge()

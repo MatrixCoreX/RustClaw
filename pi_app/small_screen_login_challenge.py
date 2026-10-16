@@ -11,8 +11,43 @@ from pathlib import Path
 
 MAX_STATE_BYTES = 16 * 1024
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
+COMPANION_REFRESH_SECONDS = 3.0
 _PLATFORM_RE = re.compile(r"^[a-z][a-z0-9_]{0,47}$")
 _IMAGE_RE = re.compile(r"^[a-zA-Z0-9_.-]{1,80}\.png$")
+
+
+def publish_login_companion_heartbeat(*, now=None, environment=None):
+    """Advertise the same-user companion screen through volatile runtime state."""
+    env = os.environ if environment is None else environment
+    runtime_dir = str(env.get("XDG_RUNTIME_DIR") or "").strip()
+    if not runtime_dir and os.name == "posix" and hasattr(os, "geteuid"):
+        runtime_dir = f"/run/user/{os.geteuid()}"
+    if not runtime_dir:
+        return False
+    directory = Path(runtime_dir) / "agent-runtime"
+    state_path = directory / "login-challenge-companion.json"
+    temporary = directory / f".login-challenge-companion.{os.getpid()}.tmp"
+    payload = json.dumps(
+        {
+            "schema_version": 1,
+            "status": "active",
+            "updated_at_epoch": time.time() if now is None else float(now),
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    try:
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        descriptor = os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(payload)
+        os.replace(temporary, state_path)
+        return True
+    except OSError:
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
+        return False
 
 
 def load_login_challenge(skill_data_root, *, now=None, max_age_seconds=15):

@@ -270,6 +270,7 @@ def wait_for_skill_owned_login(
     command = [
         chrome,
         *visible_chrome_args(),
+        *login_challenge.companion_browser_args(),
         "--disable-gpu",
         "--no-sandbox",
         "--disable-dev-shm-usage",

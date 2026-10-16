@@ -3,10 +3,28 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from small_screen_login_challenge import load_login_challenge
+from small_screen_login_challenge import (
+    load_login_challenge,
+    publish_login_companion_heartbeat,
+)
 
 
 class SmallScreenLoginChallengeTest(unittest.TestCase):
+    def test_publishes_companion_heartbeat_in_volatile_runtime_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertTrue(
+                publish_login_companion_heartbeat(
+                    now=123.5,
+                    environment={"XDG_RUNTIME_DIR": directory},
+                )
+            )
+            state_path = Path(directory) / "agent-runtime" / "login-challenge-companion.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(state["schema_version"], 1)
+            self.assertEqual(state["status"], "active")
+            self.assertEqual(state["updated_at_epoch"], 123.5)
+            self.assertEqual(state_path.stat().st_mode & 0o777, 0o600)
+
     def test_loads_fresh_private_challenge(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

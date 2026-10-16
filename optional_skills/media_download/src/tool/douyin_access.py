@@ -212,6 +212,7 @@ def wait_for_skill_owned_login(
     command = [
         chrome,
         *xiaohongshu_access.visible_chrome_args(desktop_environment),
+        *login_challenge.companion_browser_args(desktop_environment),
         "--disable-gpu",
         "--no-sandbox",
         "--disable-dev-shm-usage",

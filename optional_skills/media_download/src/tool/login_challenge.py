@@ -11,6 +11,7 @@ import base64
 import json
 import os
 import re
+import sys
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -18,8 +19,14 @@ from typing import Any, Callable
 
 REFRESH_SECONDS = 2.0
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
+MAX_COMPANION_STATE_BYTES = 4096
+COMPANION_MAX_AGE_SECONDS = 10.0
+CAPTURE_VIEWPORT_WIDTH = 960
+CAPTURE_VIEWPORT_HEIGHT = 720
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 _PLATFORM_RE = re.compile(r"^[a-z][a-z0-9_]{0,47}$")
+
+_VIEWPORT_SIZE_SCRIPT = "({width: window.innerWidth || 0, height: window.innerHeight || 0})"
 
 _CHALLENGE_RECT_SCRIPT = r"""
 (() => {
@@ -73,6 +80,53 @@ def _challenge_dir(profile_dir: Path) -> Path | None:
     return profile.parent.parent / "login_challenge"
 
 
+def _companion_state_path(environment: dict[str, str] | None = None) -> Path | None:
+    env = os.environ if environment is None else environment
+    runtime_dir = str(env.get("XDG_RUNTIME_DIR") or "").strip()
+    if not runtime_dir and sys.platform.startswith("linux"):
+        runtime_dir = f"/run/user/{os.geteuid()}"
+    if not runtime_dir:
+        return None
+    return Path(runtime_dir) / "agent-runtime" / "login-challenge-companion.json"
+
+
+def companion_browser_args(
+    environment: dict[str, str] | None = None,
+    platform: str | None = None,
+    now: float | None = None,
+) -> list[str]:
+    """Keep login Chromium behind a live same-user companion screen on Linux."""
+    host = platform or sys.platform
+    if not host.startswith("linux"):
+        return []
+    state_path = _companion_state_path(environment)
+    if state_path is None:
+        return []
+    try:
+        if state_path.is_symlink() or state_path.stat().st_size > MAX_COMPANION_STATE_BYTES:
+            return []
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    updated = state.get("updated_at_epoch") if isinstance(state, dict) else None
+    current_time = time.time() if now is None else float(now)
+    if (
+        not isinstance(state, dict)
+        or state.get("schema_version") != 1
+        or state.get("status") != "active"
+        or isinstance(updated, bool)
+        or not isinstance(updated, (int, float))
+        or updated > current_time + 5
+        or current_time - float(updated) > COMPANION_MAX_AGE_SECONDS
+    ):
+        return []
+    return [
+        "--start-minimized",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-renderer-backgrounding",
+    ]
+
+
 def _atomic_write(path: Path, content: bytes) -> None:
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     descriptor = os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
@@ -122,6 +176,28 @@ def publish_login_challenge(
     if destination is None:
         return False
     try:
+        if companion_browser_args():
+            viewport_command_id = client.send(
+                "Runtime.evaluate",
+                {"expression": _VIEWPORT_SIZE_SCRIPT, "returnByValue": True},
+            )
+            viewport = _result_value(wait_result(viewport_command_id, 5.0))
+            if isinstance(viewport, dict):
+                viewport_width = float(viewport.get("width") or 0)
+                viewport_height = float(viewport.get("height") or 0)
+                if viewport_width < 720 or viewport_height < 600:
+                    resize_command_id = client.send(
+                        "Emulation.setDeviceMetricsOverride",
+                        {
+                            "width": CAPTURE_VIEWPORT_WIDTH,
+                            "height": CAPTURE_VIEWPORT_HEIGHT,
+                            "deviceScaleFactor": 1,
+                            "mobile": False,
+                            "screenWidth": CAPTURE_VIEWPORT_WIDTH,
+                            "screenHeight": CAPTURE_VIEWPORT_HEIGHT,
+                        },
+                    )
+                    wait_result(resize_command_id, 5.0)
         command_id = client.send(
             "Runtime.evaluate",
             {"expression": _CHALLENGE_RECT_SCRIPT, "returnByValue": True},

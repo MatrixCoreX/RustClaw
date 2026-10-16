@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 TOOL_DIR = Path(__file__).parents[1] / "src" / "tool"
@@ -86,6 +87,90 @@ class LoginChallengeTest(unittest.TestCase):
                     FakeClient(), lambda _id, _timeout: {}, profile, "xiaohongshu"
                 )
             )
+
+    def test_live_companion_minimizes_only_linux_login_browser(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            state_dir = runtime / "agent-runtime"
+            state_dir.mkdir()
+            (state_dir / "login-challenge-companion.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "status": "active",
+                        "updated_at_epoch": 100.0,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            environment = {"XDG_RUNTIME_DIR": str(runtime)}
+            args = self.challenge.companion_browser_args(environment, "linux", now=105.0)
+            self.assertIn("--start-minimized", args)
+            self.assertEqual(
+                self.challenge.companion_browser_args(environment, "linux", now=120.0),
+                [],
+            )
+            self.assertEqual(
+                self.challenge.companion_browser_args(environment, "darwin", now=105.0),
+                [],
+            )
+
+    def test_companion_capture_expands_small_virtual_viewport(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime = root / "runtime"
+            state_dir = runtime / "agent-runtime"
+            state_dir.mkdir(parents=True)
+            (state_dir / "login-challenge-companion.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "status": "active",
+                        "updated_at_epoch": self.challenge.time.time(),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            storage = root / "storage"
+            profile = storage / "browser-profile" / "xiaohongshu"
+            profile.mkdir(parents=True)
+            client = FakeClient()
+
+            def wait_result(command_id, timeout):
+                self.assertGreater(timeout, 0)
+                _, method, params = next(call for call in client.calls if call[0] == command_id)
+                if method == "Runtime.evaluate" and "window.innerWidth" in params["expression"]:
+                    return {
+                        "result": {"result": {"value": {"width": 480, "height": 320}}}
+                    }
+                if method == "Runtime.evaluate":
+                    return {
+                        "result": {
+                            "result": {
+                                "value": {"x": 50, "y": 60, "width": 180, "height": 180}
+                            }
+                        }
+                    }
+                if method == "Page.captureScreenshot":
+                    return {"result": {"data": base64.b64encode(PNG).decode("ascii")}}
+                return {"result": {}}
+
+            with mock.patch.dict(
+                self.challenge.os.environ,
+                {"XDG_RUNTIME_DIR": str(runtime)},
+                clear=False,
+            ):
+                self.assertTrue(
+                    self.challenge.publish_login_challenge(
+                        client, wait_result, profile, "xiaohongshu"
+                    )
+                )
+            resize_calls = [
+                call for call in client.calls if call[1] == "Emulation.setDeviceMetricsOverride"
+            ]
+            self.assertEqual(len(resize_calls), 1)
+            self.assertEqual(resize_calls[0][2]["width"], 960)
+            self.assertEqual(resize_calls[0][2]["height"], 720)
 
 
 if __name__ == "__main__":

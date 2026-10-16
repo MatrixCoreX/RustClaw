@@ -315,6 +315,7 @@ def parse_share_with_browser(
         chrome,
         *([] if visible else ["--headless=new"]),
         *(xiaohongshu_access.visible_chrome_args(environment) if visible else []),
+        *(login_challenge.companion_browser_args(environment) if visible else []),
         "--disable-gpu",
         "--no-sandbox",
         "--disable-dev-shm-usage",
