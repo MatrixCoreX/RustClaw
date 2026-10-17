@@ -7,6 +7,7 @@ import {
   createLoginCompanionHandoff,
   loginCompanionActive,
   loginCompanionBrowserArgs,
+  raspberryPiDisplaySize,
 } from "../src/login_companion.mjs";
 
 const PNG = Buffer.concat([
@@ -32,6 +33,7 @@ async function runtimeFixture(t) {
 
 function browserPage() {
   const commands = [];
+  const viewportChanges = [];
   let broughtToFront = 0;
   const session = {
     send: async (method, params) => {
@@ -51,9 +53,23 @@ function browserPage() {
     screenshot: async () => PNG,
     context: () => ({ newCDPSession: async () => session }),
     bringToFront: async () => { broughtToFront += 1; },
+    viewportSize: () => ({ width: 1280, height: 900 }),
+    setViewportSize: async viewport => { viewportChanges.push(viewport); },
   };
-  return { page, commands, broughtToFront: () => broughtToFront };
+  return { page, commands, viewportChanges, broughtToFront: () => broughtToFront };
 }
+
+test("Raspberry Pi framebuffer size is validated before compact verification use", async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "media-discovery-display-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const file = path.join(directory, "virtual_size");
+  await fs.writeFile(file, "480,320\n");
+  assert.deepEqual(raspberryPiDisplaySize({ framebufferFile: file }), { width: 480, height: 320 });
+  await fs.writeFile(file, "128,64\n");
+  assert.equal(raspberryPiDisplaySize({ framebufferFile: file }), null);
+  await fs.writeFile(file, "not-a-size\n");
+  assert.equal(raspberryPiDisplaySize({ framebufferFile: file }), null);
+});
 
 test("fresh Raspberry Pi companion heartbeat enables a minimized browser handoff", async t => {
   const fixture = await runtimeFixture(t);
@@ -77,6 +93,7 @@ test("challenge screenshot stays private and a matching Pi action reveals Chromi
     platform: "douyin",
     reasonCode: "challenge_required",
     environment: fixture.environment,
+    compactDisplay: { width: 480, height: 320 },
   });
   assert.ok(handoff);
 
@@ -103,13 +120,25 @@ test("challenge screenshot stays private and a matching Pi action reveals Chromi
   }));
   assert.equal(await handoff.revealIfRequested(), true);
   assert.equal(browser.broughtToFront(), 1);
+  assert.deepEqual(browser.viewportChanges, [{ width: 480, height: 320 }]);
   assert.deepEqual(browser.commands.map(({ method }) => method), [
     "Browser.getWindowForTarget",
     "Browser.setWindowBounds",
   ]);
+  assert.deepEqual(browser.commands[1].params.bounds, { windowState: "fullscreen" });
   await assert.rejects(fs.stat(actionPath), { code: "ENOENT" });
 
   await handoff.clear();
+  assert.deepEqual(browser.viewportChanges, [
+    { width: 480, height: 320 },
+    { width: 1280, height: 900 },
+  ]);
+  assert.deepEqual(browser.commands.slice(2).map(({ method }) => method), [
+    "Browser.getWindowForTarget",
+    "Browser.setWindowBounds",
+    "Browser.setWindowBounds",
+  ]);
+  assert.deepEqual(browser.commands.at(-1).params.bounds, { windowState: "minimized" });
   await assert.rejects(fs.stat(statePath), { code: "ENOENT" });
   await assert.rejects(fs.stat(path.join(fixture.root, "login_challenge", state.image_file)),
     { code: "ENOENT" });

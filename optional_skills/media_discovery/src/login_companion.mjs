@@ -11,6 +11,7 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const PLATFORM_RE = /^[a-z][a-z0-9_]{0,47}$/u;
 const HANDOFF_RE = /^[a-f0-9-]{16,64}$/u;
+const FRAMEBUFFER_SIZE_FILE = "/sys/class/graphics/fb0/virtual_size";
 
 function runtimeDirectory(environment = process.env, explicitDirectory) {
   if (explicitDirectory) return explicitDirectory;
@@ -69,6 +70,23 @@ export function loginCompanionBrowserArgs(options = {}) {
   ];
 }
 
+export function raspberryPiDisplaySize({
+  framebufferFile = FRAMEBUFFER_SIZE_FILE,
+} = {}) {
+  try {
+    const match = fsNative.readFileSync(framebufferFile, "utf8").trim().match(/^(\d+),(\d+)$/u);
+    if (!match) return null;
+    const width = Number(match[1]);
+    const height = Number(match[2]);
+    if (![width, height].every(value => Number.isInteger(value) && value >= 240 && value <= 8192)) {
+      return null;
+    }
+    return { width, height };
+  } catch {
+    return null;
+  }
+}
+
 async function atomicWrite(file, content) {
   await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   await fs.chmod(path.dirname(file), 0o700).catch(() => {});
@@ -120,23 +138,52 @@ async function elementScreenshot(page) {
   return null;
 }
 
-export async function showBrowserWindow(page) {
+async function browserWindowSession(page) {
   let session;
   try {
     session = await page.context().newCDPSession(page);
     const window = await session.send("Browser.getWindowForTarget");
-    if (Number.isInteger(window?.windowId)) {
-      await session.send("Browser.setWindowBounds", {
-        windowId: window.windowId,
-        bounds: { windowState: "normal" },
-      });
-    }
+    return { session, windowId: window?.windowId };
   } catch {
     // Some Chromium builds/window managers do not expose window bounds.
+    await session?.detach?.().catch(() => {});
+    return { session: null, windowId: null };
+  }
+}
+
+export async function showBrowserWindow(page, { compactDisplay = null } = {}) {
+  if (compactDisplay && typeof page?.setViewportSize === "function") {
+    await page.setViewportSize(compactDisplay).catch(() => {});
+  }
+  const { session, windowId } = await browserWindowSession(page);
+  try {
+    if (Number.isInteger(windowId)) {
+      await session.send("Browser.setWindowBounds", {
+        windowId,
+        bounds: { windowState: compactDisplay ? "fullscreen" : "normal" },
+      });
+    }
   } finally {
     await session?.detach?.().catch(() => {});
   }
   if (typeof page?.bringToFront === "function") await page.bringToFront().catch(() => {});
+}
+
+async function minimizeBrowserWindow(page) {
+  const { session, windowId } = await browserWindowSession(page);
+  try {
+    if (!Number.isInteger(windowId)) return;
+    await session.send("Browser.setWindowBounds", {
+      windowId,
+      bounds: { windowState: "normal" },
+    }).catch(() => {});
+    await session.send("Browser.setWindowBounds", {
+      windowId,
+      bounds: { windowState: "minimized" },
+    }).catch(() => {});
+  } finally {
+    await session?.detach?.().catch(() => {});
+  }
 }
 
 async function readBrowserAction(file, handoffId, options = {}) {
@@ -163,6 +210,7 @@ export async function createLoginCompanionHandoff({
   reasonCode,
   environment = process.env,
   runtimeDirectory: explicitDirectory,
+  compactDisplay = raspberryPiDisplaySize(),
   now = () => Date.now(),
 } = {}) {
   const companionOptions = { environment, runtimeDirectory: explicitDirectory };
@@ -177,10 +225,18 @@ export async function createLoginCompanionHandoff({
   const statePath = path.join(challengeDirectory, "current.json");
   let lastRefresh = 0;
   let active = true;
+  let browserRevealed = false;
+  const originalViewport = typeof page.viewportSize === "function" ? page.viewportSize() : null;
 
   const clear = async () => {
     if (!active) return;
     active = false;
+    if (browserRevealed) {
+      await minimizeBrowserWindow(page);
+      if (originalViewport && typeof page?.setViewportSize === "function") {
+        await page.setViewportSize(originalViewport).catch(() => {});
+      }
+    }
     const state = boundedJson(statePath, MAX_STATE_BYTES);
     if (state?.handoff_id === handoffId) await fs.unlink(statePath).catch(() => {});
     await fs.unlink(imagePath).catch(() => {});
@@ -225,7 +281,8 @@ export async function createLoginCompanionHandoff({
     clear,
     revealIfRequested: async () => {
       if (!active || !await readBrowserAction(actionPath, handoffId, companionOptions)) return false;
-      await showBrowserWindow(page);
+      browserRevealed = true;
+      await showBrowserWindow(page, { compactDisplay });
       return true;
     },
   };
