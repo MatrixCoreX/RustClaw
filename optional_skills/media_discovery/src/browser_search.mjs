@@ -76,6 +76,7 @@ export async function navigateDocument(page, url, stage, timeoutMs = 45_000) {
 export async function openKeywordSearch(page, platform, source, {
   shouldStop = async () => false, checkAccess = async () => null, timeoutMs = 45_000,
   settle = candidate => candidate.waitForTimeout(750),
+  prepareHome = null,
 } = {}) {
   let stage = "search_home_navigation";
   let destination = page;
@@ -121,6 +122,10 @@ export async function openKeywordSearch(page, platform, source, {
       };
     }
     await navigateDocument(page, platformConfiguration.homeUrl, stage, timeoutMs);
+    if (prepareHome) {
+      await prepareHome(page);
+      await check(page);
+    }
     stage = "search_input_ready";
     const inputDeadline = Date.now() + timeoutMs;
     let controls;

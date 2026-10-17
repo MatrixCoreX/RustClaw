@@ -13,6 +13,7 @@ import {
   collectKuaishouSearchResults,
   kuaishouAccessError,
   kuaishouLoadMoreLoginVisible,
+  kuaishouToolbarLoginVisible,
   revealKuaishouLoginSurface,
 } from "./browser_kuaishou_search.mjs";
 import { collectDouyinSearchResults } from "./browser_douyin_search.mjs";
@@ -28,6 +29,7 @@ import {
   resolveBrowserMode,
   SUPPORTED_PLATFORMS,
   platformItemId,
+  platformSpec,
   sourceTargets,
   validatePlatformUrl,
 } from "./platforms.mjs";
@@ -598,6 +600,7 @@ export async function accessErrorAfterExplicitVisibleWait(page, platform, config
         await notifyInteractiveState("cancelled");
         return accessError;
       }
+
     }
   } finally {
     await companion?.clear();
@@ -605,6 +608,15 @@ export async function accessErrorAfterExplicitVisibleWait(page, platform, config
   const closed = page.isClosed();
   await notifyInteractiveState(closed ? "cancelled" : "timeout");
   return closed ? "interactive_verification_cancelled" : "interactive_verification_timeout";
+}
+
+async function requireKuaishouAuthentication(page, config, shouldStop, stage) {
+  if (!await kuaishouToolbarLoginVisible(page)) return;
+  await revealKuaishouLoginSurface(page);
+  const accessError = await accessErrorAfterExplicitVisibleWait(
+    page, "kuaishou", config, shouldStop,
+  );
+  if (accessError) throw browserStageError(accessError, stage);
 }
 
 export async function waitForDouyinDetailReadiness(
@@ -2177,6 +2189,10 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
           shouldStop,
           checkAccess: candidate => accessErrorAfterExplicitVisibleWait(candidate, platform, config, shouldStop),
           settle: candidate => pacingWait(candidate, config),
+          prepareHome: platform === "kuaishou"
+            ? candidate => requireKuaishouAuthentication(
+              candidate, config, shouldStop, "search_home_access",
+            ) : undefined,
         });
         page = opened.page;
         discoverySource = opened.source;
@@ -2185,6 +2201,17 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
         await onSearch?.({ platform, keyword: discoverySource.search_keyword,
           result_url: discoverySource.url, method: opened.method || "platform_search_form", result_ready: true });
       } else {
+        if (platform === "kuaishou" && isDetailUrl("kuaishou", sourceUrl)) {
+          const response = await page.goto(platformSpec("kuaishou").homeUrl, {
+            waitUntil: "domcontentloaded",
+            timeout: NAVIGATION_TIMEOUT_MS,
+          });
+          assertNavigationResponse(response, "source_authentication");
+          await pacingWait(page, config, 0.5);
+          await requireKuaishouAuthentication(
+            page, config, shouldStop, "source_authentication",
+          );
+        }
         const response = await page.goto(sourceUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT_MS });
         assertNavigationResponse(response, stage);
         if (platform === "toutiao" && isDetailUrl("toutiao", page.url())) {

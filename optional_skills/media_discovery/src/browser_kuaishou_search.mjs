@@ -4,8 +4,13 @@ import { boundedBrowserOperation } from "./browser_search.mjs";
 import { collectOrderedPages } from "./collection_progress.mjs";
 import { isDetailUrl } from "./platforms.mjs";
 
-export const KUAISHOU_LOGIN_MODAL = ".login-popup .login-modal:visible, .login-modal.login-modal-v2:visible";
+export const KUAISHOU_LOGIN_MODAL = [
+  ".login-popup .login-modal:visible",
+  ".login-modal.login-modal-v2:visible",
+  ".login-modal-v2 .modal:visible",
+].join(", ");
 export const KUAISHOU_LOAD_MORE_LOGIN = ".video-list .loading-more .login-link:visible";
+export const KUAISHOU_TOOLBAR_LOGIN = ".toolbar .user-info-item .user-default:visible";
 export const KUAISHOU_CARD_CLICK_SELECTORS = Object.freeze([".cover:visible", "img.cover-img:visible"]);
 
 export async function kuaishouLoginModalVisible(page) {
@@ -14,6 +19,10 @@ export async function kuaishouLoginModalVisible(page) {
 
 export async function kuaishouLoadMoreLoginVisible(page) {
   return await page.locator(KUAISHOU_LOAD_MORE_LOGIN).count() > 0;
+}
+
+export async function kuaishouToolbarLoginVisible(page) {
+  return await page.locator(KUAISHOU_TOOLBAR_LOGIN).count() > 0;
 }
 
 export async function kuaishouAccessError(page) {
@@ -27,7 +36,9 @@ export async function kuaishouAccessError(page) {
 
 export async function revealKuaishouLoginSurface(page) {
   if (await kuaishouLoginModalVisible(page)) return true;
-  const login = page.locator(KUAISHOU_LOAD_MORE_LOGIN).first();
+  const loadMoreLogin = page.locator(KUAISHOU_LOAD_MORE_LOGIN).first();
+  const login = await loadMoreLogin.isVisible().catch(() => false)
+    ? loadMoreLogin : page.locator(KUAISHOU_TOOLBAR_LOGIN).first();
   if (!await login.isVisible().catch(() => false)) return false;
   await login.click({ timeout: 5000 }).catch(() => {});
   const deadline = Date.now() + 4000;

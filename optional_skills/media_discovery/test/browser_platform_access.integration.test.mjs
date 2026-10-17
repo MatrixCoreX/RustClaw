@@ -86,6 +86,20 @@ test("Kuaishou load-more login without cards is a barrier; leftover cards are st
   assert.equal(await currentPlatformAccessError(page, "kuaishou"), null);
 });
 
+test("Kuaishou recognizes and opens its current toolbar login modal", { skip: !enabled }, async t => {
+  const { kuaishouAccessError, kuaishouToolbarLoginVisible, revealKuaishouLoginSurface } =
+    await import("../src/browser_kuaishou_search.mjs");
+  const page = await browserPage(t, `<ul class="toolbar"><li class="user-info-item">
+    <div class="user"><p class="user-default" style="display:block;width:60px;height:24px">login</p></div>
+    </li></ul><div class="login-modal-v2"><div class="modal" style="display:none;width:300px;height:300px"></div></div>
+    <script>document.querySelector('.user-default').onclick=()=>{
+      document.querySelector('.login-modal-v2 .modal').style.display='block';
+    }</script>`, "https://www.kuaishou.com/brilliant");
+  assert.equal(await kuaishouToolbarLoginVisible(page), true);
+  assert.equal(await revealKuaishouLoginSurface(page), true);
+  assert.equal(await kuaishouAccessError(page), "login_required");
+});
+
 test("Xiaohongshu modal with text/number inputs is a login barrier, not a ready feed", { skip: !enabled }, async t => {
   const page = await browserPage(t, `<section class="note-item" data-note-id="fixture"></section>
     <div class="reds-modal reds-modal-open login-modal"><div class="login-container">

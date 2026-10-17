@@ -51,6 +51,20 @@ test("new Kuaishou search uses its visible full-size input and search text contr
   assert.equal(result.page.url(), f.target);
 });
 
+test("keyword search prepares authenticated access before submitting", { skip: !enabled }, async t => {
+  const f = await pageFixture(t, "kuaishou");
+  const steps = [];
+  const result = await openKeywordSearch(f.page, "kuaishou", f.source, {
+    timeoutMs: 4000,
+    prepareHome: async () => { steps.push("prepare"); },
+    checkAccess: async () => { steps.push("check"); return null; },
+  });
+  assert.equal(result.page.url(), f.target);
+  assert.equal(steps[0], "check");
+  assert.deepEqual(steps.slice(1, 3), ["prepare", "check"]);
+  assert.deepEqual(f.submitted, [keyword]);
+});
+
 for (const platform of Object.keys(controls)) {
   test(`${platform} types the keyword and clicks search before consuming results`, { skip: !enabled }, async t => {
     const f = await pageFixture(t, platform, { popup: platform === "kuaishou", delay: 300 });

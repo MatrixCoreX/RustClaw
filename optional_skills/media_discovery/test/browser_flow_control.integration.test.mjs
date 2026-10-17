@@ -7,6 +7,7 @@ import { chromium } from "playwright";
 import { browserCapability, collectPlatform, currentPlatformAccessError } from "../src/browser.mjs";
 import { observePlatformBackpressure } from "../src/browser_flow_control.mjs";
 import { handleRequest } from "../src/main.mjs";
+import { platformSpec } from "../src/platforms.mjs";
 import { readRecords } from "../src/storage.mjs";
 
 const enabled = process.env.MEDIA_DISCOVERY_BROWSER_TEST === "1";
@@ -47,7 +48,7 @@ for (const [platform, source] of platforms) {
       }), error => error.message === "rate_limited" && error.status_code === 429
         && Date.parse(error.retry_after_at) >= started + 86_400_000);
       assert.equal(captures, 0);
-      assert.deepEqual(navigations, [source]);
+      assert.deepEqual(navigations, [platform === "kuaishou" ? platformSpec(platform).homeUrl : source]);
       assert.equal(context.listenerCount("response"), 0);
       assert.deepEqual(context.pages(), []);
     });
