@@ -96,7 +96,11 @@ def _challenge_state_paths(skill_data_root):
 def _load_challenge_state(state_path, current_time, max_age_seconds):
     challenge_dir = state_path.parent
     try:
-        if state_path.is_symlink() or state_path.stat().st_size > MAX_STATE_BYTES:
+        if (
+            challenge_dir.is_symlink()
+            or state_path.is_symlink()
+            or state_path.stat().st_size > MAX_STATE_BYTES
+        ):
             return None
         state = json.loads(state_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -150,6 +154,11 @@ def _load_challenge_state(state_path, current_time, max_age_seconds):
         "reason_code": str(state.get("reason_code") or ""),
         "handoff_id": handoff_id if interaction == "browser_window" else None,
         "browser_action": interaction == "browser_window",
+        "action_path": (
+            os.fspath(challenge_dir / f"action-{handoff_id}.json")
+            if interaction == "browser_window"
+            else None
+        ),
     }
 
 
@@ -171,18 +180,27 @@ def load_login_challenge(skill_data_root, *, now=None, max_age_seconds=15):
     return max(challenges, key=lambda item: item["updated_at_epoch"])
 
 
-def request_login_challenge_browser(challenge, *, now=None, environment=None):
+def request_login_challenge_browser(challenge, *, now=None):
     """Request that the owning skill reveal its existing verification browser."""
     if not isinstance(challenge, dict) or not challenge.get("browser_action"):
         return False
     handoff_id = challenge.get("handoff_id")
     if not isinstance(handoff_id, str) or not _HANDOFF_RE.fullmatch(handoff_id):
         return False
-    directory = _runtime_agent_directory(environment)
-    if directory is None:
+    action_path_value = challenge.get("action_path")
+    if not isinstance(action_path_value, str):
         return False
-    action_path = directory / "login-challenge-action.json"
-    temporary = directory / f".login-challenge-action.{os.getpid()}.tmp"
+    action_path = Path(action_path_value)
+    directory = action_path.parent
+    expected_name = f"action-{handoff_id}.json"
+    if (
+        not action_path.is_absolute()
+        or action_path.name != expected_name
+        or directory.name != "login_challenge"
+        or directory.is_symlink()
+    ):
+        return False
+    temporary = directory / f".{expected_name}.{os.getpid()}.tmp"
     payload = json.dumps(
         {
             "schema_version": 1,
@@ -193,7 +211,8 @@ def request_login_challenge_browser(challenge, *, now=None, environment=None):
         separators=(",", ":"),
     ).encode("utf-8")
     try:
-        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if not directory.is_dir():
+            return False
         descriptor = os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
         with os.fdopen(descriptor, "wb") as output:
             output.write(payload)

@@ -90,7 +90,12 @@ test("challenge screenshot stays private and a matching Pi action reveals Chromi
   assert.equal(JSON.stringify(state).includes("https://"), false);
   assert.equal((await fs.stat(statePath)).mode & 0o777, 0o600);
 
-  await fs.writeFile(path.join(fixture.directory, "login-challenge-action.json"), JSON.stringify({
+  const actionPath = path.join(
+    fixture.root,
+    "login_challenge",
+    `action-${handoff.handoffId}.json`,
+  );
+  await fs.writeFile(actionPath, JSON.stringify({
     schema_version: 1,
     action: "show_browser",
     handoff_id: handoff.handoffId,
@@ -102,8 +107,7 @@ test("challenge screenshot stays private and a matching Pi action reveals Chromi
     "Browser.getWindowForTarget",
     "Browser.setWindowBounds",
   ]);
-  await assert.rejects(fs.stat(path.join(fixture.directory, "login-challenge-action.json")),
-    { code: "ENOENT" });
+  await assert.rejects(fs.stat(actionPath), { code: "ENOENT" });
 
   await handoff.clear();
   await assert.rejects(fs.stat(statePath), { code: "ENOENT" });
@@ -121,7 +125,12 @@ test("a mismatched browser action cannot reveal a verification window", async t 
     environment: fixture.environment,
   });
   assert.ok(handoff);
-  await fs.writeFile(path.join(fixture.directory, "login-challenge-action.json"), JSON.stringify({
+  const actionPath = path.join(
+    fixture.root,
+    "login_challenge",
+    `action-${handoff.handoffId}.json`,
+  );
+  await fs.writeFile(actionPath, JSON.stringify({
     schema_version: 1,
     action: "show_browser",
     handoff_id: "00000000-0000-0000-0000-000000000000",

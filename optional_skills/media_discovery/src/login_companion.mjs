@@ -139,9 +139,7 @@ export async function showBrowserWindow(page) {
   if (typeof page?.bringToFront === "function") await page.bringToFront().catch(() => {});
 }
 
-async function readBrowserAction(handoffId, options = {}) {
-  const file = companionFile("login-challenge-action.json", options);
-  if (!file) return false;
+async function readBrowserAction(file, handoffId, options = {}) {
   const action = boundedJson(file, 4 * 1024);
   const requestedAt = action?.requested_at_epoch;
   const now = options.now ?? Date.now() / 1000;
@@ -175,6 +173,7 @@ export async function createLoginCompanionHandoff({
   const challengeDirectory = path.join(root, "login_challenge");
   const imageFile = `challenge-${handoffId}.png`;
   const imagePath = path.join(challengeDirectory, imageFile);
+  const actionPath = path.join(challengeDirectory, `action-${handoffId}.json`);
   const statePath = path.join(challengeDirectory, "current.json");
   let lastRefresh = 0;
   let active = true;
@@ -185,6 +184,7 @@ export async function createLoginCompanionHandoff({
     const state = boundedJson(statePath, MAX_STATE_BYTES);
     if (state?.handoff_id === handoffId) await fs.unlink(statePath).catch(() => {});
     await fs.unlink(imagePath).catch(() => {});
+    await fs.unlink(actionPath).catch(() => {});
   };
 
   const refresh = async ({ force = false } = {}) => {
@@ -224,7 +224,7 @@ export async function createLoginCompanionHandoff({
     refresh,
     clear,
     revealIfRequested: async () => {
-      if (!active || !await readBrowserAction(handoffId, companionOptions)) return false;
+      if (!active || !await readBrowserAction(actionPath, handoffId, companionOptions)) return false;
       await showBrowserWindow(page);
       return true;
     },

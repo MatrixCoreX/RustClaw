@@ -130,22 +130,27 @@ class SmallScreenLoginChallengeTest(unittest.TestCase):
             self.assertEqual(loaded["source_skill"], "media_discovery")
             self.assertEqual(loaded["reason_code"], "challenge_required")
             self.assertTrue(loaded["browser_action"])
+            self.assertEqual(
+                Path(loaded["action_path"]).name,
+                f"action-{loaded['handoff_id']}.json",
+            )
 
     def test_browser_handoff_action_is_private_and_bound_to_current_challenge(self):
         with tempfile.TemporaryDirectory() as directory:
+            challenge_dir = Path(directory) / "media_discovery" / "login_challenge"
+            challenge_dir.mkdir(parents=True)
+            handoff_id = "12345678-1234-1234-1234-123456789abc"
+            action_path = challenge_dir / f"action-{handoff_id}.json"
             challenge = {
                 "browser_action": True,
-                "handoff_id": "12345678-1234-1234-1234-123456789abc",
+                "handoff_id": handoff_id,
+                "action_path": str(action_path),
             }
             self.assertTrue(
                 request_login_challenge_browser(
                     challenge,
                     now=123.5,
-                    environment={"XDG_RUNTIME_DIR": directory},
                 )
-            )
-            action_path = (
-                Path(directory) / "agent-runtime" / "login-challenge-action.json"
             )
             action = json.loads(action_path.read_text(encoding="utf-8"))
             self.assertEqual(action["schema_version"], 1)
@@ -155,8 +160,11 @@ class SmallScreenLoginChallengeTest(unittest.TestCase):
             self.assertEqual(action_path.stat().st_mode & 0o777, 0o600)
             self.assertFalse(
                 request_login_challenge_browser(
-                    {"browser_action": True, "handoff_id": "../unsafe"},
-                    environment={"XDG_RUNTIME_DIR": directory},
+                    {
+                        "browser_action": True,
+                        "handoff_id": "../unsafe",
+                        "action_path": str(action_path),
+                    },
                 )
             )
 
