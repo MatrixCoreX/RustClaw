@@ -297,6 +297,13 @@ jobs:
             done
           )
 
+      - name: Free transient build space before install smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf target desktop/target release-wheel-bundles
+          df -h .
+
       - name: Install-test PKG, bundled skills, and overwrite upgrade
         shell: bash
         env:
@@ -326,37 +333,29 @@ jobs:
             if [[ -n "${runtime_root:-}" && -x "${runtime_root}/stop-agent.sh" ]]; then
               "${runtime_root}/stop-agent.sh" >/dev/null 2>&1 || true
             fi
-            sudo rm -rf "${installed_app}"
-            rm -rf "${app_data}"
+            sudo rm -rf "${installed_app}" "${app_data}"
           }
           trap cleanup EXIT
 
           current_executable_fingerprint() {
-            python3 - "${installed_app}/Contents/MacOS/agent-desktop" <<'PY'
-          import os
-          import sys
-          value = os.stat(sys.argv[1])
-          print(f"{value.st_dev}:{value.st_ino}:{value.st_size}:{int(value.st_mtime)}:{value.st_mtime_ns % 1_000_000_000}")
-          PY
+            python3 -c 'import os, sys; value = os.stat(sys.argv[1]); print(f"{value.st_dev}:{value.st_ino}:{value.st_size}:{int(value.st_mtime)}:{value.st_mtime_ns % 1_000_000_000}")' \
+              "${installed_app}/Contents/MacOS/agent-desktop"
           }
 
           state_executable_fingerprint() {
-            python3 - "${state_file}" <<'PY'
-          import json
-          from pathlib import Path
-          import sys
-          try:
-              print(json.loads(Path(sys.argv[1]).read_text())["executable_fingerprint"])
-          except (OSError, KeyError, json.JSONDecodeError):
-              pass
-          PY
+            python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["executable_fingerprint"])' \
+              "${state_file}" 2>/dev/null
           }
 
           wait_for_runtime_install() {
             for _ in $(seq 1 180); do
-              if [[ -f "${state_file}" ]] && \
-                [[ "$(state_executable_fingerprint)" == "$(current_executable_fingerprint)" ]]; then
-                return 0
+              if [[ -f "${state_file}" ]]; then
+                state_fingerprint="$(state_executable_fingerprint || true)"
+                current_fingerprint="$(current_executable_fingerprint || true)"
+                if [[ -n "${state_fingerprint}" && \
+                  "${state_fingerprint}" == "${current_fingerprint}" ]]; then
+                  return 0
+                fi
               fi
               if ! kill -0 "${desktop_pid}" >/dev/null 2>&1; then
                 cat "${launch_log}" >&2 || true
@@ -382,13 +381,8 @@ jobs:
             >"${launch_log}" 2>&1 &
           desktop_pid=$!
           wait_for_runtime_install
-          runtime_root="$(python3 - "${state_file}" <<'PY'
-          import json
-          from pathlib import Path
-          import sys
-          print(json.loads(Path(sys.argv[1]).read_text())["runtime_root"])
-          PY
-          )"
+          runtime_root="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["runtime_root"])' \
+            "${state_file}")"
           [[ -f "${runtime_root}/.release-tag" ]]
           [[ -x "${runtime_root}/target/release/skillctl" ]]
           [[ -x "${runtime_root}/prebuilt/toolchains/python/bin/python3" ]]
