@@ -398,9 +398,13 @@ jobs:
           "${host_tools}/bin/ffprobe" -version >/dev/null
           "${host_tools}/bin/tesseract" --list-langs | grep -qx 'chi_sim'
           "${host_tools}/bin/chromium" --version
+          speech_fixture="${RUNNER_TEMP}/bundled-media-smoke.aiff"
           media_fixture="${RUNNER_TEMP}/bundled-media-smoke.wav"
-          "${host_tools}/bin/ffmpeg" -hide_banner -loglevel error -f lavfi \
-            -i anullsrc=r=16000:cl=mono -t 0.5 -y "${media_fixture}"
+          /usr/bin/say -o "${speech_fixture}" \
+            "Release package transcription smoke test."
+          [[ -s "${speech_fixture}" ]]
+          "${host_tools}/bin/ffmpeg" -hide_banner -loglevel error \
+            -i "${speech_fixture}" -ar 16000 -ac 1 -c:a pcm_s16le -y "${media_fixture}"
           "${host_tools}/bin/ffprobe" -v error -select_streams a:0 \
             -show_entries stream=codec_name -of default=nw=1 "${media_fixture}" | grep -q 'codec_name=pcm_s16le'
           "${host_tools}/bin/whisper-cli" \
