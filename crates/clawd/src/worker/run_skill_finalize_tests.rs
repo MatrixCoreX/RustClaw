@@ -647,7 +647,7 @@ fn direct_run_skill_failure_records_error_observation() {
 }
 
 #[test]
-fn resource_admission_failure_remains_retryable_and_uses_bounded_backoff() {
+fn resource_admission_failure_remains_retryable() {
     let error = crate::skills::structured_skill_error_from_parts(
         "media_discovery",
         "resource_admission_unavailable",
@@ -666,14 +666,6 @@ fn resource_admission_failure_remains_retryable_and_uses_bounded_backoff() {
     assert_eq!(
         machine_payload["error_code"],
         "resource_admission_unavailable"
-    );
-    assert_eq!(super::direct_run_skill_resource_retry_after_seconds(1), 15);
-    assert_eq!(super::direct_run_skill_resource_retry_after_seconds(2), 30);
-    assert_eq!(super::direct_run_skill_resource_retry_after_seconds(3), 60);
-    assert_eq!(super::direct_run_skill_resource_retry_after_seconds(4), 120);
-    assert_eq!(
-        super::direct_run_skill_resource_retry_after_seconds(i64::MAX),
-        120
     );
 }
 

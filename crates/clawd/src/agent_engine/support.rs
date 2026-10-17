@@ -1197,9 +1197,9 @@ pub(super) fn publish_agent_loop_checkpoint_progress(
     );
 }
 
-pub(super) fn resource_wait_retry_after_seconds(attempts: u32) -> i64 {
+pub(crate) fn resource_wait_retry_after_seconds(attempts: u32) -> i64 {
     const BASE_SECONDS: i64 = 15;
-    const MAX_SHIFT: u32 = 3;
+    const MAX_SHIFT: u32 = 1;
     let shift = attempts.saturating_sub(1).min(MAX_SHIFT);
     BASE_SECONDS.saturating_mul(1_i64 << shift)
 }

@@ -327,15 +327,6 @@ fn run_skill_failure_machine_payload(err_text: &str) -> Value {
     })
 }
 
-fn direct_run_skill_resource_retry_after_seconds(claim_attempt: i64) -> i64 {
-    match claim_attempt.max(1) {
-        1 => 15,
-        2 => 30,
-        3 => 60,
-        _ => 120,
-    }
-}
-
 fn record_run_skill_task_observation(
     journal: &mut crate::task_journal::TaskJournal,
     skill_name: &str,
@@ -867,7 +858,9 @@ async fn finalize_run_skill_failure(
     );
     if crate::skills::is_retryable_resource_admission_error(err_text) {
         let now_ts = crate::now_ts_u64() as i64;
-        let retry_after_seconds = direct_run_skill_resource_retry_after_seconds(task.claim_attempt);
+        let retry_after_seconds = crate::agent_engine::resource_wait_retry_after_seconds(
+            u32::try_from(task.claim_attempt.max(0)).unwrap_or(u32::MAX),
+        );
         let next_check_after = now_ts.saturating_add(retry_after_seconds);
         let structured = crate::skills::parse_structured_skill_error(err_text);
         let wait_reason = structured

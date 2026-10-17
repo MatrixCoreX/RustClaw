@@ -121,6 +121,7 @@ use self::support::{
 };
 pub(crate) use self::support::{
     append_delivery_message, publish_agent_loop_user_input_checkpoint_progress,
+    resource_wait_retry_after_seconds,
 };
 pub(crate) use self::user_output_path::CLAWD_USER_NAMED_OUTPUT_PATH_ARG;
 

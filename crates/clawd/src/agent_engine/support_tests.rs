@@ -586,9 +586,9 @@ fn resource_wait_retry_backoff_is_bounded_and_monotonic() {
     assert_eq!(resource_wait_retry_after_seconds(0), 15);
     assert_eq!(resource_wait_retry_after_seconds(1), 15);
     assert_eq!(resource_wait_retry_after_seconds(2), 30);
-    assert_eq!(resource_wait_retry_after_seconds(3), 60);
-    assert_eq!(resource_wait_retry_after_seconds(4), 120);
-    assert_eq!(resource_wait_retry_after_seconds(u32::MAX), 120);
+    assert_eq!(resource_wait_retry_after_seconds(3), 30);
+    assert_eq!(resource_wait_retry_after_seconds(4), 30);
+    assert_eq!(resource_wait_retry_after_seconds(u32::MAX), 30);
 }
 
 #[test]
