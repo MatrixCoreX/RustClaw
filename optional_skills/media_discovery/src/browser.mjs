@@ -16,6 +16,7 @@ import {
   revealKuaishouLoginSurface,
 } from "./browser_kuaishou_search.mjs";
 import { collectDouyinSearchResults } from "./browser_douyin_search.mjs";
+import { createLoginCompanionHandoff, showBrowserWindow } from "./login_companion.mjs";
 import { imageSourceIdentity, identityDigest } from "./media_identity.mjs";
 import { collectOrderedPages, optionalLimit, pageProgress } from "./collection_progress.mjs";
 
@@ -563,34 +564,73 @@ export async function accessErrorAfterExplicitVisibleWait(page, platform, config
     }
   };
   await notifyInteractiveState("awaiting_user");
+  const companion = await createLoginCompanionHandoff({
+    root: config.companion_root,
+    page,
+    platform,
+    reasonCode: interactiveReasonCode,
+  });
+  if (!companion) await showBrowserWindow(page);
   const configuredMinutes = Math.max(1, Number(config.max_run_minutes) || 10);
   const deadline = Date.now() + Math.min(INTERACTIVE_LOGIN_TIMEOUT_MS, configuredMinutes * 60 * 1000);
   let readyPolls = 0;
-  while (Date.now() < deadline && !page.isClosed()) {
-    if (await shouldStop()) {
-      await notifyInteractiveState("cancelled");
-      throw browserStageError("collection_stopped", "manual_verification");
-    }
-    await page.waitForTimeout(INTERACTIVE_CHALLENGE_POLL_MS).catch(() => {});
-    if (page.isClosed()) break;
-    accessError = await currentPlatformAccessError(page, platform);
-    if (!accessError) {
-      readyPolls += 1;
-      if (readyPolls >= 2) {
-        await notifyInteractiveState("completed");
-        return null;
+  try {
+    while (Date.now() < deadline && !page.isClosed()) {
+      if (await shouldStop()) {
+        await notifyInteractiveState("cancelled");
+        throw browserStageError("collection_stopped", "manual_verification");
       }
-      continue;
+      await page.waitForTimeout(INTERACTIVE_CHALLENGE_POLL_MS).catch(() => {});
+      if (page.isClosed()) break;
+      await companion?.refresh();
+      await companion?.revealIfRequested();
+      accessError = await currentPlatformAccessError(page, platform);
+      if (!accessError) {
+        readyPolls += 1;
+        if (readyPolls >= 2) {
+          await notifyInteractiveState("completed");
+          return null;
+        }
+        continue;
+      }
+      readyPolls = 0;
+      if (!interactive(accessError)) {
+        await notifyInteractiveState("cancelled");
+        return accessError;
+      }
     }
-    readyPolls = 0;
-    if (!interactive(accessError)) {
-      await notifyInteractiveState("cancelled");
-      return accessError;
-    }
+  } finally {
+    await companion?.clear();
   }
   const closed = page.isClosed();
   await notifyInteractiveState(closed ? "cancelled" : "timeout");
   return closed ? "interactive_verification_cancelled" : "interactive_verification_timeout";
+}
+
+export async function waitForDouyinDetailReadiness(
+  page,
+  config = {},
+  shouldStop = async () => false,
+  timeoutMs = 10_000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline && !page.isClosed()) {
+    if (await shouldStop()) throw browserStageError("collection_stopped", "detail_media_ready");
+    const accessError = await currentPlatformAccessError(page, "douyin");
+    if (accessError) {
+      const unresolved = await accessErrorAfterExplicitVisibleWait(
+        page,
+        "douyin",
+        config,
+        shouldStop,
+      );
+      if (unresolved) throw browserStageError(unresolved, "detail_access");
+      continue;
+    }
+    if (await page.locator("video:visible, canvas:visible").count() > 0) return true;
+    await page.waitForTimeout(200).catch(() => {});
+  }
+  return false;
 }
 
 async function withVisibleAccess(page, platform, config, shouldStop, operation) {
@@ -690,11 +730,23 @@ export async function waitForInteractiveLogin({
       }).catch(() => {});
     }
     if (platform === "kuaishou") await revealKuaishouLoginSurface(page).catch(() => {});
-    const confirmation = await createManualConfirmation(context, page, { platform, locale });
-    await onOpened();
-    return await waitForManualAccess({ page, context, platform, errorCode, timeoutMs,
-      confirmation, shouldStop, targetUrl: forceLogin ? null : loginTarget,
-      requireAuthentication: forceLogin });
+    const companion = await createLoginCompanionHandoff({ root, page, platform, reasonCode: errorCode });
+    let confirmation;
+    try {
+      confirmation = companion
+        ? { readAction: async () => {
+          await companion.refresh();
+          await companion.revealIfRequested();
+          return "continue";
+        } }
+        : await createManualConfirmation(context, page, { platform, locale });
+      await onOpened();
+      return await waitForManualAccess({ page, context, platform, errorCode, timeoutMs,
+        confirmation, shouldStop, targetUrl: forceLogin ? null : loginTarget,
+        requireAuthentication: forceLogin });
+    } finally {
+      await companion?.clear();
+    }
   } finally {
     await closePlatformBrowser({ context, root, platform,
       reason: "media_discovery_manual_verification_complete" });
@@ -1583,13 +1635,13 @@ async function capturePaintedCover({
   return captured;
 }
 
-async function collectPage(page, root, runId, platform, itemUrl, config, discoverySource) {
+async function collectPage(page, root, runId, platform, itemUrl, config, discoverySource, shouldStop) {
   const response = await page.goto(itemUrl, {
     waitUntil: "domcontentloaded",
     timeout: NAVIGATION_TIMEOUT_MS,
   });
   assertNavigationResponse(response, "detail_navigation");
-  return collectOpenedPage(page, root, runId, platform, itemUrl, config, discoverySource);
+  return collectOpenedPage(page, root, runId, platform, itemUrl, config, discoverySource, null, {}, shouldStop);
 }
 
 async function waitForHydratedDetailCopy(page, platform) {
@@ -1604,7 +1656,18 @@ async function waitForHydratedDetailCopy(page, platform) {
   await page.locator(selector).first().waitFor({ state: "visible", timeout: 8_000 }).catch(() => {});
 }
 
-async function collectOpenedPage(page, root, runId, platform, itemUrl, config, discoverySource, scopeOverride = null, coverOptions = {}) {
+async function collectOpenedPage(
+  page,
+  root,
+  runId,
+  platform,
+  itemUrl,
+  config,
+  discoverySource,
+  scopeOverride = null,
+  coverOptions = {},
+  shouldStop = async () => false,
+) {
   if (platform === "toutiao" && !scopeOverride) await waitForToutiaoDetailReady(page);
   await pacingWait(page, config, 1.25);
   if (platform === "youtube" && !await dismissYouTubeConsent(page)) {
@@ -1613,7 +1676,15 @@ async function collectOpenedPage(page, root, runId, platform, itemUrl, config, d
   if (platform === "tiktok" && !await dismissTikTokConsent(page)) {
     throw browserStageError("challenge_required", "detail_access");
   }
-  const accessError = await currentPlatformAccessError(page, platform);
+  if (platform === "douyin" && !scopeOverride) {
+    await waitForDouyinDetailReadiness(page, config, shouldStop);
+  }
+  const accessError = await accessErrorAfterExplicitVisibleWait(
+    page,
+    platform,
+    config,
+    shouldStop,
+  );
   if (accessError) throw browserStageError(accessError, "detail_access");
   let currentUrl = "";
   try {
@@ -2079,7 +2150,8 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
   onInteractiveLogin,
   completedPosts = new Set() }) {
   const browserMode = resolveBrowserMode(platform, config.browser_mode);
-  config = { ...config, browser_mode: browserMode, on_interactive_login: onInteractiveLogin };
+  config = { ...config, browser_mode: browserMode, on_interactive_login: onInteractiveLogin,
+    companion_root: root };
   if (browserMode === "visible" && !guiAvailable()) throw new Error("display_unavailable");
   const executablePath = await existingExecutable();
   if (!executablePath) throw new Error("browser_missing");
@@ -2138,7 +2210,9 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
           checkAccess: candidate => accessErrorAfterExplicitVisibleWait(candidate, platform, config, shouldStop),
           settle: candidate => pacingWait(candidate, config),
           scrollPage: candidate => pacedScroll(candidate, config),
-          collect: (opened, url, scope, coverOptions) => collectOpenedPage(opened, root, runId, platform, url, config, discoverySource, scope, coverOptions),
+          collect: (opened, url, scope, coverOptions) => collectOpenedPage(
+            opened, root, runId, platform, url, config, discoverySource, scope, coverOptions, shouldStop,
+          ),
         });
         outcomes.push(outcome);
         handled += outcome.handled;
@@ -2153,7 +2227,9 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
           checkAccess: candidate => accessErrorAfterExplicitVisibleWait(candidate, platform, config, shouldStop),
           settle: candidate => pacingWait(candidate, config),
           scrollPage: candidate => pacedScroll(candidate, config),
-          collect: (opened, url, scope, coverOptions) => collectOpenedPage(opened, root, runId, platform, url, config, discoverySource, scope, coverOptions),
+          collect: (opened, url, scope, coverOptions) => collectOpenedPage(
+            opened, root, runId, platform, url, config, discoverySource, scope, coverOptions, shouldStop,
+          ),
         });
         outcomes.push(outcome);
         handled += outcome.handled;
@@ -2217,7 +2293,9 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
             verificationTarget = candidate;
             await pacingWait(page, config, 0.5);
             const result = await withSearchResult(page, platform, candidate, discoverySource,
-              opened => collectOpenedPage(opened, root, runId, platform, candidate, config, discoverySource),
+              opened => collectOpenedPage(
+                opened, root, runId, platform, candidate, config, discoverySource, null, {}, shouldStop,
+              ),
               { shouldStop, checkAccess: opened => currentPlatformAccessError(opened, platform),
                 settle: opened => pacingWait(opened, config, 0.75) });
             await onPage(result);
@@ -2248,10 +2326,14 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
           await pacingWait(page, config, 0.5);
           const result = discoverySource.source_mode === "topics"
             ? await withSearchResult(page, platform, candidate, discoverySource,
-              opened => collectOpenedPage(opened, root, runId, platform, candidate, config, discoverySource),
+              opened => collectOpenedPage(
+                opened, root, runId, platform, candidate, config, discoverySource, null, {}, shouldStop,
+              ),
               { shouldStop, checkAccess: opened => currentPlatformAccessError(opened, platform),
                 settle: opened => pacingWait(opened, config, 0.75) })
-            : await collectPage(page, root, runId, platform, candidate, config, discoverySource);
+            : await collectPage(
+              page, root, runId, platform, candidate, config, discoverySource, shouldStop,
+            );
           await onPage(result);
           handled += 1;
         } catch (error) {

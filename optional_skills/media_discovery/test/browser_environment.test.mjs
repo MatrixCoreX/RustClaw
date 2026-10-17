@@ -9,6 +9,7 @@ import {
   AUTOMATION_DEFAULT_ARG,
   closePlatformBrowser,
   desktopSessionEnvironment,
+  isRaspberryPiHost,
   launchPlatformBrowser,
   nativeBrowserEnvironment,
   persistentContextLaunchOptions,
@@ -71,6 +72,88 @@ test("system-service execution discovers the current user's Wayland session", as
   assert.equal(environment.WAYLAND_DISPLAY, "wayland-7");
   assert.equal(environment.XAUTHORITY, authorityPath);
   assert.equal(environment.DISPLAY, undefined);
+});
+
+test("system-service X11 discovery falls back to the user's standard authority file", async t => {
+  const runtime = await fs.mkdtemp(path.join(os.tmpdir(), "discovery-x11-runtime-"));
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "discovery-x11-home-"));
+  const x11 = path.join(runtime, "x11");
+  await fs.mkdir(x11);
+  const server = net.createServer();
+  await new Promise((resolve, reject) => server.listen(path.join(x11, "X0"), resolve).once("error", reject));
+  await fs.writeFile(path.join(home, ".Xauthority"), "fixture");
+  t.after(async () => {
+    await new Promise(resolve => server.close(resolve));
+    await fs.rm(runtime, { recursive: true, force: true });
+    await fs.rm(home, { recursive: true, force: true });
+  });
+  const environment = desktopSessionEnvironment({ HOME: home }, {
+    hostPlatform: "linux",
+    effectiveUid: null,
+    runtimeDirectory: runtime,
+    x11SocketDirectory: x11,
+    homeDirectory: home,
+  });
+  assert.equal(environment.DISPLAY, ":0");
+  assert.equal(environment.XAUTHORITY, path.join(home, ".Xauthority"));
+});
+
+test("system-service X11 discovery supports sockets inside the user runtime directory", async t => {
+  const runtime = await fs.mkdtemp(path.join(os.tmpdir(), "discovery-runtime-x11-"));
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "discovery-runtime-x11-home-"));
+  const x11 = path.join(runtime, ".X11-unix");
+  await fs.mkdir(x11);
+  const server = net.createServer();
+  await new Promise((resolve, reject) => server.listen(path.join(x11, "X0"), resolve).once("error", reject));
+  await fs.writeFile(path.join(home, ".Xauthority"), "fixture");
+  t.after(async () => {
+    await new Promise(resolve => server.close(resolve));
+    await fs.rm(runtime, { recursive: true, force: true });
+    await fs.rm(home, { recursive: true, force: true });
+  });
+  const environment = desktopSessionEnvironment({ HOME: home }, {
+    hostPlatform: "linux",
+    effectiveUid: null,
+    runtimeDirectory: runtime,
+    x11SocketDirectory: path.join(runtime, "missing-global-x11"),
+    homeDirectory: home,
+  });
+  assert.equal(environment.XDG_RUNTIME_DIR, runtime);
+  assert.equal(environment.DISPLAY, ":0");
+  assert.equal(environment.XAUTHORITY, path.join(home, ".Xauthority"));
+});
+
+test("Raspberry Pi browser tuning is explicit and does not affect other hosts", () => {
+  assert.equal(isRaspberryPiHost({ hostPlatform: "linux", modelText: "Raspberry Pi 5 Model B" }), true);
+  assert.equal(isRaspberryPiHost({ hostPlatform: "linux", modelText: "Generic ARM64" }), false);
+  assert.equal(isRaspberryPiHost({ hostPlatform: "darwin", modelText: "Raspberry Pi" }), false);
+  const environment = nativeBrowserEnvironment(host);
+  const generic = persistentContextLaunchOptions({ executablePath: "/fixture/chrome", headless: true,
+    environment, hostEnv: {}, hostPlatform: "linux" });
+  const pi = persistentContextLaunchOptions({ executablePath: "/fixture/chrome", headless: true,
+    environment, hostEnv: {}, hostPlatform: "linux", raspberryPi: true });
+  assert.equal(generic.args.includes("--renderer-process-limit=1"), false);
+  assert.equal(generic.args.includes("--disable-gpu"), false);
+  assert.equal(pi.args.includes("--renderer-process-limit=1"), true);
+  assert.equal(pi.args.includes("--disable-gpu"), true);
+});
+
+test("Pi companion launch flags are opt-in and never affect ordinary browsers", async t => {
+  const runtime = await fs.mkdtemp(path.join(os.tmpdir(), "discovery-pi-companion-"));
+  t.after(() => fs.rm(runtime, { recursive: true, force: true }));
+  await fs.mkdir(path.join(runtime, "agent-runtime"), { recursive: true });
+  await fs.writeFile(path.join(runtime, "agent-runtime", "login-challenge-companion.json"),
+    JSON.stringify({ schema_version: 1, status: "active", device_class: "raspberry_pi",
+      updated_at_epoch: Date.now() / 1000 }));
+  const environment = nativeBrowserEnvironment(host);
+  const ordinary = persistentContextLaunchOptions({ executablePath: "/fixture/chrome", headless: false,
+    environment, hostEnv: { XDG_RUNTIME_DIR: runtime }, hostPlatform: "linux", raspberryPi: true });
+  const companion = persistentContextLaunchOptions({ executablePath: "/fixture/chrome", headless: false,
+    environment, hostEnv: { XDG_RUNTIME_DIR: runtime }, hostPlatform: "linux", raspberryPi: true,
+    companionActive: true });
+  assert.equal(ordinary.args.includes("--start-minimized"), false);
+  assert.equal(companion.args.includes("--start-minimized"), true);
+  assert.equal(companion.args.includes("--disable-renderer-backgrounding"), true);
 });
 
 test("managed profiles repair stale crash markers and record a clean graceful close", async t => {

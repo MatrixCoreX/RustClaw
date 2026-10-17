@@ -2,6 +2,7 @@ import fsNative from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { writeAtomic } from "./csv.mjs";
+import { loginCompanionBrowserArgs } from "./login_companion.mjs";
 import { SUPPORTED_PLATFORMS } from "./platforms.mjs";
 
 const ENVIRONMENT_FILE = "browser-environment.json";
@@ -69,6 +70,7 @@ export function desktopSessionEnvironment(environment = process.env, {
   effectiveUid = typeof process.geteuid === "function" ? process.geteuid() : null,
   runtimeDirectory,
   x11SocketDirectory = "/tmp/.X11-unix",
+  homeDirectory,
 } = {}) {
   const resolved = { ...environment };
   if (hostPlatform !== "linux") return resolved;
@@ -81,15 +83,48 @@ export function desktopSessionEnvironment(environment = process.env, {
     const wayland = firstMatchingEntry(runtime, /^wayland-\d+$/u, stat => stat.isSocket());
     if (wayland) resolved.WAYLAND_DISPLAY = wayland.name;
   }
-  if (!resolved.DISPLAY && isDirectory(x11SocketDirectory)) {
-    const x11 = firstMatchingEntry(x11SocketDirectory, /^X\d+$/u, stat => stat.isSocket());
-    if (x11) resolved.DISPLAY = `:${x11.name.slice(1)}`;
+  if (!resolved.DISPLAY) {
+    // Raspberry Pi OS can expose the X11 socket under the user's runtime
+    // directory instead of the traditional global /tmp location.
+    const x11Directories = [...new Set([
+      x11SocketDirectory,
+      path.join(runtime, ".X11-unix"),
+    ].filter(Boolean))];
+    for (const directory of x11Directories) {
+      if (!isDirectory(directory)) continue;
+      const x11 = firstMatchingEntry(directory, /^X\d+$/u, stat => stat.isSocket());
+      if (!x11) continue;
+      resolved.DISPLAY = `:${x11.name.slice(1)}`;
+      break;
+    }
   }
   if (!resolved.XAUTHORITY) {
     const authority = firstMatchingEntry(runtime, /^\.mutter-Xwaylandauth\..+$/u, stat => stat.isFile());
-    if (authority) resolved.XAUTHORITY = authority.path;
+    if (authority) {
+      resolved.XAUTHORITY = authority.path;
+    } else {
+      const home = homeDirectory || resolved.HOME;
+      const xauthority = home ? path.join(home, ".Xauthority") : "";
+      if (xauthority && fsNative.existsSync(xauthority)) resolved.XAUTHORITY = xauthority;
+    }
   }
   return resolved;
+}
+
+export function isRaspberryPiHost({
+  hostPlatform = process.platform,
+  modelText,
+} = {}) {
+  if (hostPlatform !== "linux") return false;
+  let evidence = modelText;
+  if (evidence === undefined) {
+    evidence = ["/proc/device-tree/model", "/sys/firmware/devicetree/base/model", "/proc/cpuinfo"]
+      .map(file => {
+        try { return fsNative.readFileSync(file, "utf8"); } catch { return ""; }
+      })
+      .join("\n");
+  }
+  return String(evidence || "").toLowerCase().includes("raspberry pi");
 }
 
 export function nativeBrowserEnvironment(host = {
@@ -156,8 +191,21 @@ export function persistentContextLaunchOptions({
   environment,
   hostEnv = desktopSessionEnvironment(),
   hostPlatform = process.platform,
+  raspberryPi = false,
+  companionActive = false,
 }) {
   const args = [AUTOMATION_BLINK_FLAG];
+  if (raspberryPi) args.push(
+    "--disable-gpu",
+    "--disable-background-networking",
+    "--renderer-process-limit=1",
+    "--disk-cache-size=16777216",
+    "--media-cache-size=8388608",
+  );
+  if (companionActive) args.push(...loginCompanionBrowserArgs({
+    environment: hostEnv,
+    hostPlatform,
+  }));
   if (!headless && hostPlatform === "linux" && hostEnv.WAYLAND_DISPLAY) {
     args.unshift("--ozone-platform=wayland");
   }
@@ -198,6 +246,8 @@ export async function launchPlatformBrowser({ chromium, root, platform, executab
     executablePath,
     headless,
     environment,
+    raspberryPi: isRaspberryPiHost(),
+    companionActive: !headless && isRaspberryPiHost(),
   }));
   try {
     await concealAutomationMarkers(context);

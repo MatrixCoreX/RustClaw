@@ -14,7 +14,17 @@ MAX_IMAGE_BYTES = 5 * 1024 * 1024
 COMPANION_REFRESH_SECONDS = 3.0
 RASPBERRY_PI_MODEL_PATH = Path("/proc/device-tree/model")
 _PLATFORM_RE = re.compile(r"^[a-z][a-z0-9_]{0,47}$")
+_SKILL_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _IMAGE_RE = re.compile(r"^[a-zA-Z0-9_.-]{1,80}\.png$")
+_HANDOFF_RE = re.compile(r"^[a-f0-9-]{16,64}$")
+
+
+def _runtime_agent_directory(environment=None):
+    env = os.environ if environment is None else environment
+    runtime_dir = str(env.get("XDG_RUNTIME_DIR") or "").strip()
+    if not runtime_dir and os.name == "posix" and hasattr(os, "geteuid"):
+        runtime_dir = f"/run/user/{os.geteuid()}"
+    return Path(runtime_dir) / "agent-runtime" if runtime_dir else None
 
 
 def is_raspberry_pi_device(model_path=RASPBERRY_PI_MODEL_PATH):
@@ -33,13 +43,9 @@ def publish_login_companion_heartbeat(*, now=None, environment=None, model_path=
         RASPBERRY_PI_MODEL_PATH if model_path is None else model_path
     ):
         return False
-    env = os.environ if environment is None else environment
-    runtime_dir = str(env.get("XDG_RUNTIME_DIR") or "").strip()
-    if not runtime_dir and os.name == "posix" and hasattr(os, "geteuid"):
-        runtime_dir = f"/run/user/{os.geteuid()}"
-    if not runtime_dir:
+    directory = _runtime_agent_directory(environment)
+    if directory is None:
         return False
-    directory = Path(runtime_dir) / "agent-runtime"
     state_path = directory / "login-challenge-companion.json"
     temporary = directory / f".login-challenge-companion.{os.getpid()}.tmp"
     payload = json.dumps(
@@ -66,11 +72,29 @@ def publish_login_companion_heartbeat(*, now=None, environment=None, model_path=
         return False
 
 
-def load_login_challenge(skill_data_root, *, now=None, max_age_seconds=15):
-    """Return validated challenge metadata, or ``None`` when it is stale/unsafe."""
-    current_time = time.time() if now is None else float(now)
-    challenge_dir = Path(skill_data_root) / "media_download" / "login_challenge"
-    state_path = challenge_dir / "current.json"
+def _challenge_state_paths(skill_data_root):
+    root = Path(skill_data_root)
+    try:
+        skill_directories = list(root.iterdir())
+    except OSError:
+        return []
+    paths = []
+    for skill_directory in skill_directories:
+        try:
+            if (
+                skill_directory.is_symlink()
+                or not skill_directory.is_dir()
+                or not _SKILL_RE.fullmatch(skill_directory.name)
+            ):
+                continue
+        except OSError:
+            continue
+        paths.append(skill_directory / "login_challenge" / "current.json")
+    return paths
+
+
+def _load_challenge_state(state_path, current_time, max_age_seconds):
+    challenge_dir = state_path.parent
     try:
         if state_path.is_symlink() or state_path.stat().st_size > MAX_STATE_BYTES:
             return None
@@ -82,6 +106,8 @@ def load_login_challenge(skill_data_root, *, now=None, max_age_seconds=15):
     platform = state.get("platform")
     image_file = state.get("image_file")
     updated = state.get("updated_at_epoch")
+    handoff_id = state.get("handoff_id")
+    interaction = state.get("interaction")
     if (
         state.get("status") != "awaiting_user"
         or not isinstance(platform, str)
@@ -92,6 +118,12 @@ def load_login_challenge(skill_data_root, *, now=None, max_age_seconds=15):
         or not isinstance(updated, (int, float))
         or updated > current_time + 5
         or current_time - updated > max(1, int(max_age_seconds))
+    ):
+        return None
+    if interaction is not None and interaction != "browser_window":
+        return None
+    if interaction == "browser_window" and (
+        not isinstance(handoff_id, str) or not _HANDOFF_RE.fullmatch(handoff_id)
     ):
         return None
     image_path = challenge_dir / image_file
@@ -108,10 +140,68 @@ def load_login_challenge(skill_data_root, *, now=None, max_age_seconds=15):
     except OSError:
         return None
     return {
+        "source_skill": state_path.parent.parent.name,
         "platform": platform,
         "image_path": os.fspath(image_path),
         "updated_at_epoch": float(updated),
         "cropped": bool(state.get("cropped")),
         "image_mtime_ns": image_stat.st_mtime_ns,
         "image_size_bytes": size,
+        "reason_code": str(state.get("reason_code") or ""),
+        "handoff_id": handoff_id if interaction == "browser_window" else None,
+        "browser_action": interaction == "browser_window",
     }
+
+
+def load_login_challenge(skill_data_root, *, now=None, max_age_seconds=15):
+    """Return the newest validated challenge from a skill-private state directory."""
+    current_time = time.time() if now is None else float(now)
+    challenges = [
+        challenge
+        for state_path in _challenge_state_paths(skill_data_root)
+        if (
+            challenge := _load_challenge_state(
+                state_path, current_time, max_age_seconds
+            )
+        )
+        is not None
+    ]
+    if not challenges:
+        return None
+    return max(challenges, key=lambda item: item["updated_at_epoch"])
+
+
+def request_login_challenge_browser(challenge, *, now=None, environment=None):
+    """Request that the owning skill reveal its existing verification browser."""
+    if not isinstance(challenge, dict) or not challenge.get("browser_action"):
+        return False
+    handoff_id = challenge.get("handoff_id")
+    if not isinstance(handoff_id, str) or not _HANDOFF_RE.fullmatch(handoff_id):
+        return False
+    directory = _runtime_agent_directory(environment)
+    if directory is None:
+        return False
+    action_path = directory / "login-challenge-action.json"
+    temporary = directory / f".login-challenge-action.{os.getpid()}.tmp"
+    payload = json.dumps(
+        {
+            "schema_version": 1,
+            "action": "show_browser",
+            "handoff_id": handoff_id,
+            "requested_at_epoch": time.time() if now is None else float(now),
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    try:
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        descriptor = os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(payload)
+        os.replace(temporary, action_path)
+        return True
+    except OSError:
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
+        return False

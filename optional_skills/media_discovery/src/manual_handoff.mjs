@@ -1,3 +1,5 @@
+import { showBrowserWindow } from "./login_companion.mjs";
+
 // These are local browser controls, not skill result text or routing phrases.
 const LABELS = {
   en: {
@@ -20,7 +22,7 @@ export async function createManualConfirmation(context, verificationPage, { plat
   let action = "waiting";
   await page.exposeBinding("manualCollectionAction", async (source, requested) => {
     if (source.page !== page || source.frame !== page.mainFrame() || page.url() !== "about:blank") return;
-    if (requested === "open") await verificationPage.bringToFront().catch(() => {});
+    if (requested === "open") await showBrowserWindow(verificationPage);
     else if (["continue", "pause"].includes(requested)) action = requested;
   });
   await page.setContent(`<!doctype html><html><head><meta charset="utf-8">
@@ -58,7 +60,7 @@ export async function createManualConfirmation(context, verificationPage, { plat
       });
     }
   }, { labels, platform });
-  await page.bringToFront();
+  await showBrowserWindow(page);
   return {
     page,
     readAction: async () => page.isClosed() || page.url() !== "about:blank" ? "pause" : action,

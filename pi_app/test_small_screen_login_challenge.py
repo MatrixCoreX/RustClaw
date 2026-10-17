@@ -7,6 +7,7 @@ from small_screen_login_challenge import (
     is_raspberry_pi_device,
     load_login_challenge,
     publish_login_companion_heartbeat,
+    request_login_challenge_browser,
 )
 
 
@@ -97,6 +98,67 @@ class SmallScreenLoginChallengeTest(unittest.TestCase):
             state["image_file"] = "../challenge.png"
             state_path.write_text(json.dumps(state), encoding="utf-8")
             self.assertIsNone(load_login_challenge(root / "data" / "skills", now=200))
+
+    def test_newest_skill_private_challenge_supports_browser_handoff(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "data" / "skills"
+            for skill, updated in (("media_download", 100), ("media_discovery", 105)):
+                challenge = root / skill / "login_challenge"
+                challenge.mkdir(parents=True)
+                (challenge / "challenge.png").write_bytes(
+                    b"\x89PNG\r\n\x1a\nfixture"
+                )
+                state = {
+                    "schema_version": 1,
+                    "status": "awaiting_user",
+                    "platform": "douyin",
+                    "image_file": "challenge.png",
+                    "updated_at_epoch": updated,
+                }
+                if skill == "media_discovery":
+                    state.update(
+                        {
+                            "handoff_id": "12345678-1234-1234-1234-123456789abc",
+                            "interaction": "browser_window",
+                            "reason_code": "challenge_required",
+                        }
+                    )
+                (challenge / "current.json").write_text(
+                    json.dumps(state), encoding="utf-8"
+                )
+            loaded = load_login_challenge(root, now=108)
+            self.assertEqual(loaded["source_skill"], "media_discovery")
+            self.assertEqual(loaded["reason_code"], "challenge_required")
+            self.assertTrue(loaded["browser_action"])
+
+    def test_browser_handoff_action_is_private_and_bound_to_current_challenge(self):
+        with tempfile.TemporaryDirectory() as directory:
+            challenge = {
+                "browser_action": True,
+                "handoff_id": "12345678-1234-1234-1234-123456789abc",
+            }
+            self.assertTrue(
+                request_login_challenge_browser(
+                    challenge,
+                    now=123.5,
+                    environment={"XDG_RUNTIME_DIR": directory},
+                )
+            )
+            action_path = (
+                Path(directory) / "agent-runtime" / "login-challenge-action.json"
+            )
+            action = json.loads(action_path.read_text(encoding="utf-8"))
+            self.assertEqual(action["schema_version"], 1)
+            self.assertEqual(action["action"], "show_browser")
+            self.assertEqual(action["handoff_id"], challenge["handoff_id"])
+            self.assertEqual(action["requested_at_epoch"], 123.5)
+            self.assertEqual(action_path.stat().st_mode & 0o777, 0o600)
+            self.assertFalse(
+                request_login_challenge_browser(
+                    {"browser_action": True, "handoff_id": "../unsafe"},
+                    environment={"XDG_RUNTIME_DIR": directory},
+                )
+            )
 
 
 if __name__ == "__main__":

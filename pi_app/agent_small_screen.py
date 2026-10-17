@@ -62,6 +62,7 @@ from small_screen_login_challenge import (
     is_raspberry_pi_device,
     load_login_challenge,
     publish_login_companion_heartbeat,
+    request_login_challenge_browser,
 )
 from small_screen_bancor import build_bancor_market_view
 from small_screen_cryptoauth_service import (
@@ -1434,6 +1435,8 @@ class SmallScreenApp:
         self._login_challenge_frame = None
         self._login_challenge_photo = None
         self._login_challenge_signature = None
+        self._login_challenge_active = None
+        self._login_challenge_browser_opened = False
         self._login_companion_heartbeat_at = 0.0
         self._skill_data_root = _load_skill_data_root_from_config()
         self._i18n = []  # [(widget, key), ...] 用于切换语言时更新
@@ -2492,6 +2495,7 @@ class SmallScreenApp:
         image_box = tk.Frame(frame, bg="#ffffff", width=250, height=230)
         image_box.pack()
         image_box.pack_propagate(False)
+        self._login_challenge_image_box = image_box
         self._login_challenge_image_label = tk.Label(
             image_box,
             bg="#ffffff",
@@ -2507,9 +2511,38 @@ class SmallScreenApp:
             fg=self._c("fg_dim"),
             wraplength=455,
             justify=tk.CENTER,
-        ).pack(fill=tk.X, padx=10, pady=(3, 4))
+        ).pack(fill=tk.X, padx=10, pady=(3, 2))
+        self._login_challenge_open_button = tk.Button(
+            frame,
+            text=self._t("login_challenge_open_browser"),
+            font=("", 10, "bold"),
+            bg=self._c("accent"),
+            fg=self._c("bg"),
+            activebackground=self._c("accent"),
+            activeforeground=self._c("bg"),
+            relief=tk.FLAT,
+            bd=0,
+            padx=14,
+            pady=5,
+            command=self._open_login_challenge_browser,
+        )
+
+    def _open_login_challenge_browser(self):
+        challenge = self._login_challenge_active
+        if not request_login_challenge_browser(challenge):
+            self._login_challenge_hint_var.set(
+                self._t("login_challenge_open_failed")
+            )
+            return
+        self._login_challenge_browser_opened = True
+        try:
+            self.root.attributes("-topmost", False)
+            self.root.iconify()
+        except tk.TclError:
+            pass
 
     def _hide_login_challenge(self):
+        restore_from_browser = self._login_challenge_browser_opened
         frame = getattr(self, "_login_challenge_frame", None)
         if frame is not None:
             try:
@@ -2520,6 +2553,17 @@ class SmallScreenApp:
                 pass
         self._login_challenge_photo = None
         self._login_challenge_signature = None
+        self._login_challenge_active = None
+        self._login_challenge_browser_opened = False
+        if restore_from_browser:
+            try:
+                self.root.deiconify()
+                self.root.lift()
+                self.root.attributes("-topmost", self._pin_to_foreground)
+                if self._pin_to_foreground:
+                    self.root.focus_force()
+            except tk.TclError:
+                pass
 
     def _render_login_challenge(self, challenge):
         frame = getattr(self, "_login_challenge_frame", None)
@@ -2530,10 +2574,30 @@ class SmallScreenApp:
         platform_name = self._t(platform_key)
         if platform_name == platform_key:
             platform_name = platform.replace("_", " ").title()
-        self._login_challenge_title_var.set(
-            self._t("login_challenge_title").format(platform=platform_name)
+        title_key = (
+            "login_verification_title"
+            if challenge.get("reason_code") == "challenge_required"
+            else "login_challenge_title"
         )
-        self._login_challenge_hint_var.set(self._t("login_challenge_hint"))
+        self._login_challenge_title_var.set(
+            self._t(title_key).format(platform=platform_name)
+        )
+        browser_action = bool(challenge.get("browser_action"))
+        self._login_challenge_hint_var.set(
+            self._t(
+                "login_challenge_browser_hint"
+                if browser_action
+                else "login_challenge_hint"
+            )
+        )
+        self._login_challenge_active = challenge
+        image_height = 172 if browser_action else 230
+        self._login_challenge_image_box.configure(height=image_height)
+        if browser_action:
+            if not self._login_challenge_open_button.winfo_manager():
+                self._login_challenge_open_button.pack(pady=(0, 4))
+        else:
+            self._login_challenge_open_button.pack_forget()
         signature = (
             platform,
             challenge.get("updated_at_epoch"),
@@ -2553,11 +2617,11 @@ class SmallScreenApp:
                         if challenge.get("cropped")
                         else Image.Resampling.LANCZOS
                     )
-                    image.thumbnail((250, 230), resampling)
-                    canvas = Image.new("RGB", (250, 230), "white")
+                    image.thumbnail((250, image_height), resampling)
+                    canvas = Image.new("RGB", (250, image_height), "white")
                     canvas.paste(
                         image,
-                        ((250 - image.width) // 2, (230 - image.height) // 2),
+                        ((250 - image.width) // 2, (image_height - image.height) // 2),
                     )
                     photo = ImageTk.PhotoImage(canvas)
             except Exception:
@@ -2569,6 +2633,8 @@ class SmallScreenApp:
                 self._login_challenge_photo = photo
                 self._login_challenge_image_label.configure(image=photo, text="")
                 self._login_challenge_signature = signature
+        if self._login_challenge_browser_opened:
+            return
         try:
             frame.place(x=0, y=0, width=W, height=H)
             frame.lift()

@@ -10,6 +10,7 @@ import {
   activeDouyinFeedEntry,
   advanceDouyinDetailFeed,
   openDouyinRecommendationDetail,
+  waitForDouyinDetailReadiness,
 } from "../src/browser.mjs";
 import { browserStageError, recordBrowserFailure } from "../src/browser_diagnostics.mjs";
 
@@ -131,6 +132,44 @@ test("a late verification page is classified during feed wait and stop cancels t
     error => error.message === "challenge_required" && error.discovery_stage === "feed_ready");
   await assert.rejects(openDouyinRecommendationDetail(page, { browser_mode: "visible" }, async () => true),
     error => error.message === "collection_stopped");
+});
+
+test("a verification frame that appears after detail navigation is not misreported as missing media", {
+  skip: !RUN_BROWSER_TEST,
+}, async (t) => {
+  const browser = await chromium.launch({ executablePath: await browserExecutable(), headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.setContent(`<!doctype html><body>
+    <video style="display:none"></video>
+    <script>setTimeout(() => {
+      const frame = document.createElement("iframe");
+      frame.src = "https://rmc.bytedance.com/verifycenter/captcha/v2";
+      document.body.append(frame);
+    }, 250)</script>
+  </body>`);
+  await assert.rejects(
+    waitForDouyinDetailReadiness(page, { browser_mode: "silent" }, async () => false, 2_000),
+    error => error.message === "challenge_required" && error.discovery_stage === "detail_access",
+  );
+});
+
+test("a detail video that becomes visible after hydration is accepted", {
+  skip: !RUN_BROWSER_TEST,
+}, async (t) => {
+  const browser = await chromium.launch({ executablePath: await browserExecutable(), headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.setContent(`<!doctype html><body>
+    <video style="display:none"></video>
+    <script>setTimeout(() => {
+      document.querySelector("video").style.cssText = "display:block;width:640px;height:360px";
+    }, 250)</script>
+  </body>`);
+  assert.equal(
+    await waitForDouyinDetailReadiness(page, { browser_mode: "silent" }, async () => false, 2_000),
+    true,
+  );
 });
 
 test("failure diagnostics retain the stage and structural counts without page text or URL secrets", {
