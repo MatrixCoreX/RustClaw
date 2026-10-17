@@ -2,7 +2,7 @@ schema_version = 2
 
 [package]
 name = "media_download"
-version = "0.3.62"
+version = "0.3.63"
 description = "Download public media and articles, including Douyin live photos through a user-authorized skill-owned browser session, Toutiao and Weibo article/image/video links, and WeChat Channels through a user-authorized skill-owned Yuanbao browser session. Text results are delivered as complete inline text plus a UTF-8 artifact. Explicit image OCR uses Tesseract followed by skill-owned model review for sentence boundaries, layout, punctuation, and highly certain recognition errors, with raw-text fallback. Local speech recognition is isolated in the optional local_asr package."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]

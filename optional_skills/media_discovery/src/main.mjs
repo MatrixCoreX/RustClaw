@@ -627,6 +627,8 @@ async function runPlatformBatch(request, args, runtime = {}) {
       "manual_verification_not_restored"].includes(error?.message)) {
       await setPlatformControl(root, run.platforms, "pause");
     }
+    const requestedDeadlineReached = String(error?.message) === "collection_stopped"
+      && Date.now() >= deadline;
     const waitingStates = {
       collection_stopped: "stopped_after_current_item",
       display_unavailable: "waiting_for_display",
@@ -638,8 +640,15 @@ async function runPlatformBatch(request, args, runtime = {}) {
       rate_limited: "rate_limited",
       challenge_required: "waiting_for_challenge_resolution",
     };
-    status = waitingStates[String(error?.message)] || "failed";
-    errorCode = status === "stopped_after_current_item" ? null : String(error?.message || "execution_failed");
+    status = requestedDeadlineReached
+      ? "completed_batch"
+      : waitingStates[String(error?.message)] || "failed";
+    if (requestedDeadlineReached) {
+      run.collection_outcome = { stop_reason: "requested_time_limit" };
+    }
+    errorCode = requestedDeadlineReached || status === "stopped_after_current_item"
+      ? null
+      : String(error?.message || "execution_failed");
     if (errorCode === "rate_limited" && Number.isFinite(Date.parse(error.retry_after_at))) {
       run.retry_after_at = new Date(Date.parse(error.retry_after_at)).toISOString();
     }

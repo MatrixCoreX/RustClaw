@@ -100,6 +100,19 @@ class ShareTextTest(unittest.TestCase):
         self.assert_share_text(url, url, "kuaishou")
         self.assertEqual(self.downloader.extract_kuaishou_id(url), "3xexample")
 
+    def test_kuaishou_static_assets_are_not_video_candidates(self) -> None:
+        page = """
+        <link href="https://p2-plat.wskwai.com/pc-vision/css/short-video.14cdddf0.css">
+        <script src="https://p2-plat.wskwai.com/pc-vision/js/short-video.a77771ca.js"></script>
+        """
+        self.assertEqual(
+            self.downloader.extract_platform_candidates_from_html(page, "kuaishou"),
+            [],
+        )
+        self.assertTrue(self.downloader.looks_like_kuaishou_video_url(
+            "https://ali2.a.yximgs.com/upic/example_B.mp4",
+        ))
+
     def test_xiaohongshu_app_share_text_with_cn_short_link(self) -> None:
         url = "http://xhslink.cn/o/5H9ovWUGFUd"
         self.assert_share_text(

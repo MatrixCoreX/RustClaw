@@ -275,6 +275,40 @@ test("manual verification stop is a graceful result and diagnostics survive a fa
   assert.equal(state.active_run, null);
 });
 
+test("a requested time limit with zero captured items is not reported as a successful stop", async (t) => {
+  const context = await requestContext(t);
+  const realNow = Date.now;
+  let advanced = false;
+  t.after(() => { Date.now = realNow; });
+
+  const result = await handleRequest({
+    args: {
+      action: "run_once",
+      platform: "xiaohongshu",
+      source_mode: "seed_urls",
+      seed_urls: ["https://www.xiaohongshu.com/explore/test-note"],
+      max_items_per_run: 1,
+      max_run_minutes: 1,
+    },
+    context,
+  }, {
+    collectPlatform: async ({ shouldStop }) => {
+      Date.now = () => realNow() + 61_000;
+      advanced = true;
+      assert.equal(await shouldStop(), true);
+      throw new Error("collection_stopped");
+    },
+  });
+
+  assert.equal(advanced, true);
+  assert.equal(result.status, "error");
+  assert.equal(result.extra.error_code, "no_items_collected");
+  assert.equal(result.extra.state, "failed");
+  assert.equal(result.extra.run.status, "failed");
+  assert.equal(result.extra.run.collection_outcome.stop_reason, "requested_time_limit");
+  assert.equal(result.extra.run.counts.items, 0);
+});
+
 test("continuous background collection stops gracefully through disable", async (t) => {
   const context = await requestContext(t);
   await handleRequest({

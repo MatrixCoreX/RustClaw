@@ -907,9 +907,21 @@ def looks_like_kuaishou_video_url(url: str) -> bool:
     lowered = unwrap_url(url).lower()
     if not lowered.startswith(("http://", "https://", "//")):
         return False
-    if not any(token in lowered for token in ("kuaishou", "gifshow", "kwai", "kwimg", "ksyuncdn")):
+    parsed = urllib.parse.urlsplit(lowered if not lowered.startswith("//") else f"https:{lowered}")
+    if parsed.path.endswith((
+        ".css", ".js", ".json", ".ico", ".pdf", ".png", ".jpg", ".jpeg", ".webp", ".svg",
+    )):
         return False
-    return any(token in lowered for token in (".mp4", "video", "clientcachekey", "mvurl"))
+    if not any(
+        token in parsed.netloc
+        for token in ("kuaishou", "gifshow", "kwai", "kwimg", "ksyuncdn", "yximgs")
+    ):
+        return False
+    return (
+        parsed.path.endswith((".mp4", ".m3u8"))
+        or "/video/" in parsed.path
+        or any(token in parsed.query for token in ("clientcachekey", "mvurl"))
+    )
 
 
 def looks_like_xiaohongshu_video_url(url: str) -> bool:
