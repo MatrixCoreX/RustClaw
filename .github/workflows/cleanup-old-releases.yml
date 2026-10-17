@@ -34,3 +34,5 @@ jobs:
 
           ./scripts/cleanup-platform-releases.sh "ubuntu-x86_64-"
           ./scripts/cleanup-platform-releases.sh "pi-aarch64-"
+          ./scripts/cleanup-platform-releases.sh "macos-aarch64-"
+          ./scripts/cleanup-platform-releases.sh "macos-x86_64-"

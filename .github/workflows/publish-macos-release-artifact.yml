@@ -1,0 +1,136 @@
+name: Publish verified macOS Release
+
+"on":
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: "Successful macOS artifact workflow run ID."
+        required: true
+        type: string
+      source_ref:
+        description: "Exact source commit packaged by the artifact workflow."
+        required: true
+        type: string
+      release_version:
+        description: "Release version used by the artifact workflow."
+        required: true
+        type: string
+      architecture:
+        description: "Native Mac architecture to publish."
+        required: true
+        type: choice
+        options:
+          - aarch64
+          - x86_64
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    name: Publish verified macOS ${{ inputs.architecture }} release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout packaged source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.source_ref }}
+
+      - name: Verify source workflow and release metadata
+        id: meta
+        shell: bash
+        env:
+          ARCHITECTURE: ${{ inputs.architecture }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.release_version }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${SOURCE_RUN_ID}" =~ ^[0-9]+$ ]]; then
+            echo "source_run_id must be numeric" >&2
+            exit 64
+          fi
+          if [[ ! "${RELEASE_VERSION}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "release_version contains unsupported characters" >&2
+            exit 64
+          fi
+          case "${ARCHITECTURE}" in
+            aarch64|x86_64) ;;
+            *) echo "unsupported architecture: ${ARCHITECTURE}" >&2; exit 64 ;;
+          esac
+
+          source_sha="$(git rev-parse HEAD)"
+          run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}")"
+          run_conclusion="$(jq -r '.conclusion // ""' <<<"${run_json}")"
+          run_head_sha="$(jq -r '.head_sha // ""' <<<"${run_json}")"
+          run_path="$(jq -r '.path // ""' <<<"${run_json}")"
+          if [[ "${run_conclusion}" != "success" ]]; then
+            echo "source workflow is not successful: ${run_conclusion}" >&2
+            exit 1
+          fi
+          if [[ "${run_head_sha}" != "${source_sha}" ]]; then
+            echo "source workflow commit does not match checked-out source" >&2
+            exit 1
+          fi
+          if [[ "${run_path}" != ".github/workflows/macos-arm64-release-artifact.yml" ]]; then
+            echo "source run is not the verified macOS artifact workflow: ${run_path}" >&2
+            exit 1
+          fi
+
+          artifact_name="agent-runtime-macos-${ARCHITECTURE}-${RELEASE_VERSION}"
+          release_tag="macos-${ARCHITECTURE}-${RELEASE_VERSION}"
+          {
+            echo "artifact_name=${artifact_name}"
+            echo "release_tag=${release_tag}"
+            echo "source_sha=${source_sha}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Download verified artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ steps.meta.outputs.artifact_name }}
+          path: dist-release
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.source_run_id }}
+
+      - name: Verify downloaded assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          archives=(dist-release/*.tar.gz)
+          packages=(dist-release/*.pkg)
+          disk_images=(dist-release/*.dmg)
+          app_archives=(dist-release/*.app.zip)
+          [[ "${#archives[@]}" -eq 1 ]]
+          [[ "${#packages[@]}" -eq 1 ]]
+          [[ "${#disk_images[@]}" -eq 1 ]]
+          [[ "${#app_archives[@]}" -eq 1 ]]
+          for suffix in .sha256 .spdx.json .manifest.json .manifest.json.sig; do
+            [[ -s "${archives[0]}${suffix}" ]]
+          done
+          checksums=(dist-release/*.sha256)
+          [[ "${#checksums[@]}" -ge 4 ]]
+          for checksum in "${checksums[@]}"; do
+            (cd dist-release && sha256sum -c "$(basename "${checksum}")")
+          done
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.meta.outputs.release_tag }}
+          SOURCE_SHA: ${{ steps.meta.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          mapfile -d '' assets < <(find dist-release -maxdepth 1 -type f -print0 | sort -z)
+          [[ "${#assets[@]}" -gt 0 ]]
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release upload "${RELEASE_TAG}" "${assets[@]}" --clobber
+          else
+            gh release create "${RELEASE_TAG}" "${assets[@]}" \
+              --title "Agent runtime macOS ${{ inputs.architecture }} ${RELEASE_TAG}" \
+              --target "${SOURCE_SHA}" \
+              --notes "Verified full macOS package with the desktop installer, bundled Skill Store packages, AiAPP assets, and local multimedia dependencies."
+          fi

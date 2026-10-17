@@ -199,6 +199,26 @@ class ReleaseInstallationTests(unittest.TestCase):
         self.assertIn("executable_fingerprint", desktop_runtime)
         self.assertIn('.arg("--force")', desktop_runtime)
 
+    def test_verified_macos_artifacts_publish_without_local_download(self):
+        workflow = (ROOT / ".github/workflows/publish-macos-release-artifact.yml").read_text()
+        self.assertIn("source_run_id:", workflow)
+        self.assertIn("source_ref:", workflow)
+        self.assertIn("release_version:", workflow)
+        self.assertIn("actions: read", workflow)
+        self.assertIn("contents: write", workflow)
+        self.assertIn("run_conclusion", workflow)
+        self.assertIn("run_head_sha", workflow)
+        self.assertIn("macos-arm64-release-artifact.yml", workflow)
+        self.assertIn("actions/download-artifact@", workflow)
+        self.assertIn("run-id: ${{ inputs.source_run_id }}", workflow)
+        self.assertIn("sha256sum -c", workflow)
+        self.assertIn('gh release create "${RELEASE_TAG}"', workflow)
+        self.assertIn('gh release upload "${RELEASE_TAG}"', workflow)
+
+        cleanup = (ROOT / ".github/workflows/cleanup-old-releases.yml").read_text()
+        self.assertIn('cleanup-platform-releases.sh "macos-aarch64-"', cleanup)
+        self.assertIn('cleanup-platform-releases.sh "macos-x86_64-"', cleanup)
+
     def test_public_bootstrap_uses_overwrite_reconciliation(self):
         source = (ROOT / "install-latest-release.sh").read_text()
         invocation = 'bash "$BOOTSTRAP/deploy-github-release.sh" --root "$ROOT_DIR" --force "$restart_option"'
